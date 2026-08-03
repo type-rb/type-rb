@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -100,6 +101,7 @@ func (s *scope) assign(name string, value Value) bool {
 type Evaluator struct {
 	stdout      io.Writer
 	mode        string
+	context     context.Context
 	global      *scope
 	definitions map[string]any
 	moduleValue map[string]Value
@@ -109,6 +111,7 @@ func NewEvaluator(stdout io.Writer, mode string) *Evaluator {
 	return &Evaluator{
 		stdout:      stdout,
 		mode:        mode,
+		context:     context.Background(),
 		global:      &scope{values: map[string]Value{}},
 		definitions: map[string]any{},
 		moduleValue: map[string]Value{},
@@ -205,8 +208,24 @@ func (e *Evaluator) linkSuperclasses() {
 }
 
 func (e *Evaluator) Evaluate(statements []ir.Statement, module string) (Result, error) {
+	return e.EvaluateContext(context.Background(), statements, module)
+}
+
+func (e *Evaluator) EvaluateContext(ctx context.Context, statements []ir.Statement, module string) (Result, error) {
+	previous := e.context
+	e.context = ctx
+	defer func() { e.context = previous }()
 	result, err := e.evaluate(statements, module, e.global)
 	return result.Result, err
+}
+
+func (e *Evaluator) checkContext() error {
+	select {
+	case <-e.context.Done():
+		return e.context.Err()
+	default:
+		return nil
+	}
 }
 
 type flowResult struct {
@@ -217,6 +236,9 @@ type flowResult struct {
 func (e *Evaluator) evaluate(statements []ir.Statement, module string, sc *scope) (flowResult, error) {
 	last := flowResult{}
 	for _, statement := range statements {
+		if err := e.checkContext(); err != nil {
+			return flowResult{}, err
+		}
 		result, err := e.statement(statement, module, sc)
 		if err != nil {
 			return flowResult{}, err
@@ -232,6 +254,9 @@ func (e *Evaluator) evaluate(statements []ir.Statement, module string, sc *scope
 }
 
 func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) (flowResult, error) {
+	if err := e.checkContext(); err != nil {
+		return flowResult{}, err
+	}
 	switch node := statement.(type) {
 	case *ir.Comment, *ir.Import, *ir.Class, *ir.Record, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
 		return flowResult{}, nil
@@ -319,6 +344,9 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 }
 
 func (e *Evaluator) expression(expression ir.Expression, module string, sc *scope) (Value, error) {
+	if err := e.checkContext(); err != nil {
+		return Value{}, err
+	}
 	if expression == nil {
 		return Value{Type: types.FromName("Void")}, nil
 	}

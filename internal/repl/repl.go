@@ -4,10 +4,12 @@
 package repl
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/compiler"
@@ -94,7 +96,11 @@ func Run(options Options) error {
 					continue
 				}
 				nextEvaluator.LoadDefinitions(nextCompilation.Session.IR)
-				if _, err := nextEvaluator.Evaluate(nextCompilation.Session.IR.Statements, nextCompilation.Session.IR.ModulePath); err != nil {
+				if _, err := evaluateInterruptibly(nextEvaluator, nextCompilation.Session.IR.Statements, nextCompilation.Session.IR.ModulePath); err != nil {
+					if errors.Is(err, context.Canceled) {
+						printEvaluationInterrupted(options.Stdout, options.Interactive)
+						continue
+					}
 					printReplError(options.Stderr, options.Interactive, err.Error())
 					continue
 				}
@@ -118,8 +124,12 @@ func Run(options Options) error {
 		}
 
 		evaluator.LoadDefinitions(next.Session.IR)
-		result, runtimeErr := evaluator.Evaluate(next.Session.IR.Statements[statementCount:], next.Session.IR.ModulePath)
+		result, runtimeErr := evaluateInterruptibly(evaluator, next.Session.IR.Statements[statementCount:], next.Session.IR.ModulePath)
 		if runtimeErr != nil {
+			if errors.Is(runtimeErr, context.Canceled) {
+				printEvaluationInterrupted(options.Stdout, options.Interactive)
+				continue
+			}
 			printReplError(options.Stderr, options.Interactive, runtimeErr.Error())
 			continue
 		}
@@ -131,6 +141,16 @@ func Run(options Options) error {
 		}
 	}
 	return nil
+}
+
+func evaluateInterruptibly(evaluator *Evaluator, statements []ir.Statement, module string) (Result, error) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return evaluator.EvaluateContext(ctx, statements, module)
+}
+
+func printEvaluationInterrupted(output io.Writer, colored bool) {
+	fmt.Fprintln(output, colorize(colored, colorMuted, "interrupted"))
 }
 
 func handleCommand(command, source string, options Options) (bool, string, *Compilation) {
@@ -146,7 +166,7 @@ func handleCommand(command, source string, options Options) (bool, string, *Comp
 		if options.Interactive {
 			fmt.Fprintln(options.Stdout, "keys: Left/Right or Ctrl-B/F move; Ctrl-A/E line; Alt-B/F word")
 			fmt.Fprintln(options.Stdout, "      Up/Down or Ctrl-P/N line/history; Ctrl-R search; Tab complete")
-			fmt.Fprintln(options.Stdout, "      Ctrl-K/U/W edit; Ctrl-L clear; Ctrl-C cancel; Ctrl-D exit")
+			fmt.Fprintln(options.Stdout, "      Ctrl-K/U/W edit; Ctrl-L clear; Ctrl-C interrupt; Ctrl-D exit")
 		}
 	case ":type":
 		if strings.TrimSpace(argument) == "" {

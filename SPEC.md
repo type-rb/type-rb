@@ -343,4 +343,6 @@ On an interactive terminal, the REPL provides multiline cursor editing,
 persistent per-project history, reverse history search, completion, and colored
 prompts/results/diagnostics. Cursor editing includes the common Readline/Emacs
 Ctrl-B/F, Ctrl-A/E, Ctrl-P/N, and Alt-B/F navigation bindings. Piped input
-remains deterministic and free of terminal control sequences.
+remains deterministic and free of terminal control sequences. Ctrl-C interrupts
+the current input or IR evaluation and returns to the prompt; it does not leave
+the REPL.

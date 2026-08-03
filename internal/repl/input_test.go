@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/nao1215/prompt"
+	"github.com/reeflective/readline/inputrc"
 )
 
 func TestCompleteTracksBlocksAndDelimiters(t *testing.T) {
@@ -55,34 +55,33 @@ func TestCompleteInputSuggestsCommandsAndLanguageKeywords(t *testing.T) {
 		{input: "put", want: "puts"},
 	}
 	for _, test := range tests {
-		document := prompt.Document{Text: test.input, CursorPosition: len(test.input)}
-		suggestions := completeInput(document)
+		suggestions := completionSuggestions(test.input)
 		if len(suggestions) == 0 || suggestions[0].Text != test.want {
-			t.Errorf("completeInput(%q)=%v, want first suggestion %q", test.input, suggestions, test.want)
+			t.Errorf("completionSuggestions(%q)=%v, want first suggestion %q", test.input, suggestions, test.want)
 		}
 	}
 }
 
-func TestTypeRBKeyMapAddsReadlineNavigation(t *testing.T) {
-	keyMap := typeRBKeyMap()
-	bindings := []struct {
-		key    rune
-		action prompt.KeyAction
-	}{
-		{key: '\x02', action: prompt.ActionMoveLeft},
-		{key: '\x06', action: prompt.ActionMoveRight},
-		{key: '\x10', action: prompt.ActionMoveUp},
-		{key: '\x0e', action: prompt.ActionMoveDown},
+func TestTerminalReaderUsesMultilineAwareHistoryNavigation(t *testing.T) {
+	terminal, err := newTerminalReader(Options{Mode: "go"}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, binding := range bindings {
-		if got := keyMap.GetAction(binding.key); got != binding.action {
-			t.Errorf("key %U action=%v, want %v", binding.key, got, binding.action)
+	if terminal.AcceptMultiline([]rune("def greet()")) {
+		t.Fatal("incomplete definition should continue on a secondary line")
+	}
+	if !terminal.AcceptMultiline([]rune("def greet()\nend")) {
+		t.Fatal("closed definition should be accepted")
+	}
+	for _, test := range []struct{ sequence, action string }{
+		{sequence: `\C-p`, action: "up-line-or-history"},
+		{sequence: `\M-[A`, action: "up-line-or-history"},
+		{sequence: `\C-n`, action: "down-line-or-history"},
+		{sequence: `\M-[B`, action: "down-line-or-history"},
+	} {
+		binding := terminal.Config.Binds["emacs"][inputrc.Unescape(test.sequence)]
+		if binding.Action != test.action {
+			t.Errorf("binding %q=%q, want %q", test.sequence, binding.Action, test.action)
 		}
-	}
-	if got := keyMap.GetSequenceAction("b"); got != prompt.ActionMoveWordLeft {
-		t.Errorf("Alt-B action=%v, want %v", got, prompt.ActionMoveWordLeft)
-	}
-	if got := keyMap.GetSequenceAction("f"); got != prompt.ActionMoveWordRight {
-		t.Errorf("Alt-F action=%v, want %v", got, prompt.ActionMoveWordRight)
 	}
 }

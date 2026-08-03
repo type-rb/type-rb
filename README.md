@@ -114,7 +114,7 @@ completion, cursor editing, Up/Down history, and Ctrl-R reverse search. Common
 Readline/Emacs navigation is available: Ctrl-B/F moves by character, Ctrl-A/E
 by line, Alt-B/F by word, and Ctrl-P/N moves vertically or through history.
 History is retained per project in `.trb/repl_history`; Ctrl-C cancels the
-current input and Ctrl-D exits.
+current input or running evaluation without leaving the REPL, and Ctrl-D exits.
 
 `trb build` compiles every input before writing any generated file. When a
 directory is built, non-`.trb` files are copied by default, producing a runnable

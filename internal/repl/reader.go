@@ -10,7 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/nao1215/prompt"
+	"github.com/reeflective/readline"
+	"github.com/reeflective/readline/inputrc"
 )
 
 var (
@@ -34,41 +35,51 @@ func newSubmissionReader(options Options) (submissionReader, error) {
 			return nil, err
 		}
 	}
-	terminal, err := newTerminalPrompt(options)
-	if err != nil {
-		return nil, err
-	}
 	history, err := loadHistory(options.HistoryFile)
 	if err != nil {
-		_ = terminal.Close()
 		return nil, err
 	}
-	terminal.SetHistory(slices.DeleteFunc(history, isQuitCommand))
-	return &terminalSubmissionReader{prompt: terminal, options: options}, nil
+	terminal, err := newTerminalReader(options, slices.DeleteFunc(history, isQuitCommand))
+	if err != nil {
+		return nil, err
+	}
+	return &terminalSubmissionReader{terminal: terminal, options: options}, nil
 }
 
-func newTerminalPrompt(options Options) (*prompt.Prompt, error) {
-	return prompt.New(
-		"trb:"+options.Mode+"> ",
-		prompt.WithMultiline(true),
-		prompt.WithIsComplete(Complete),
-		prompt.WithContinuationPrefix("trb:"+options.Mode+"*  "),
-		prompt.WithMemoryHistory(1000),
-		prompt.WithCompleter(completeInput),
-		prompt.WithColorScheme(prompt.ThemeNightOwl),
-		prompt.WithKeyMap(typeRBKeyMap()),
-	)
-}
-
-func typeRBKeyMap() *prompt.KeyMap {
-	keyMap := prompt.NewDefaultKeyMap()
-	keyMap.Bind('\x02', prompt.ActionMoveLeft)           // Ctrl-B
-	keyMap.Bind('\x06', prompt.ActionMoveRight)          // Ctrl-F
-	keyMap.Bind('\x10', prompt.ActionMoveUp)             // Ctrl-P
-	keyMap.Bind('\x0e', prompt.ActionMoveDown)           // Ctrl-N
-	keyMap.BindSequence("b", prompt.ActionMoveWordLeft)  // Alt-B
-	keyMap.BindSequence("f", prompt.ActionMoveWordRight) // Alt-F
-	return keyMap
+func newTerminalReader(options Options, history []string) (*readline.Shell, error) {
+	terminal := readline.NewShell(inputrc.WithApp("trb"))
+	terminal.Prompt.Primary(func() string {
+		return colorTitle + "trb:" + options.Mode + "> " + colorReset
+	})
+	terminal.Prompt.Secondary(func() string {
+		return colorTitle + "trb:" + options.Mode + "*  " + colorReset
+	})
+	terminal.AcceptMultiline = func(line []rune) bool { return Complete(string(line)) }
+	terminal.SyntaxHighlighter = func(line []rune) string {
+		return colorInput + string(line) + colorReset
+	}
+	terminal.Completer = completeInput
+	if err := terminal.Config.Set("enable-bracketed-paste", true); err != nil {
+		return nil, err
+	}
+	for _, keymap := range []string{"emacs", "emacs-standard"} {
+		for _, binding := range []struct{ sequence, action string }{
+			{sequence: `\C-p`, action: "up-line-or-history"},
+			{sequence: `\M-[A`, action: "up-line-or-history"},
+			{sequence: `\C-n`, action: "down-line-or-history"},
+			{sequence: `\M-[B`, action: "down-line-or-history"},
+		} {
+			if err := terminal.Config.Bind(keymap, inputrc.Unescape(binding.sequence), binding.action, false); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, entry := range history {
+		if _, err := terminal.History.Current().Write(entry); err != nil {
+			return nil, err
+		}
+	}
+	return terminal, nil
 }
 
 func isQuitCommand(input string) bool {
@@ -107,54 +118,36 @@ func (r *scannerSubmissionReader) Read() (string, error) {
 func (*scannerSubmissionReader) Close() error { return nil }
 
 type terminalSubmissionReader struct {
-	prompt  *prompt.Prompt
-	options Options
+	terminal *readline.Shell
+	options  Options
 }
 
 func (r *terminalSubmissionReader) Read() (string, error) {
-	input, err := r.prompt.Run()
-	if err == nil && isQuitCommand(input) {
-		r.prompt.SetHistory(slices.DeleteFunc(r.prompt.GetHistory(), isQuitCommand))
-	}
-	// prompt keeps its previous rendered-line count between Run calls. After a
-	// multiline submit, its next render therefore clears the continuation lines
-	// that should remain in terminal scrollback. Recreate only the terminal
-	// renderer while retaining history; the compiled REPL session is unaffected.
-	if err == nil && strings.Contains(input, "\n") {
-		if err := r.resetPrompt(); err != nil {
-			return "", err
-		}
-	}
+	input, err := r.terminal.Readline()
 	switch {
-	case errors.Is(err, prompt.ErrEOF), errors.Is(err, io.EOF):
+	case errors.Is(err, io.EOF):
 		return "", io.EOF
-	case errors.Is(err, prompt.ErrInterrupted):
-		if resetErr := r.resetPrompt(); resetErr != nil {
-			return "", resetErr
-		}
+	case errors.Is(err, readline.ErrInterrupt):
 		return "", errInputInterrupted
 	default:
 		return input, err
 	}
 }
 
-func (r *terminalSubmissionReader) resetPrompt() error {
-	history := slices.DeleteFunc(r.prompt.GetHistory(), isQuitCommand)
-	if err := r.prompt.Close(); err != nil {
-		return err
-	}
-	terminal, err := newTerminalPrompt(r.options)
-	if err != nil {
-		return err
-	}
-	terminal.SetHistory(history)
-	r.prompt = terminal
-	return nil
-}
-
 func (r *terminalSubmissionReader) Close() error {
-	history := slices.DeleteFunc(r.prompt.GetHistory(), isQuitCommand)
-	return errors.Join(saveHistory(r.options.HistoryFile, history), r.prompt.Close())
+	history := make([]string, 0, r.terminal.History.Current().Len())
+	for index := range r.terminal.History.Current().Len() {
+		entry, err := r.terminal.History.Current().GetLine(index)
+		if err != nil {
+			return err
+		}
+		history = append(history, entry)
+	}
+	history = slices.DeleteFunc(history, isQuitCommand)
+	if len(history) > 1000 {
+		history = history[len(history)-1000:]
+	}
+	return saveHistory(r.options.HistoryFile, history)
 }
 
 func loadHistory(filename string) ([]string, error) {
@@ -196,7 +189,12 @@ func saveHistory(filename string, history []string) error {
 	return os.Chmod(filename, 0o600)
 }
 
-var completionItems = []prompt.Suggestion{
+type completionItem struct {
+	Text        string
+	Description string
+}
+
+var completionItems = []completionItem{
 	{Text: ":help", Description: "show REPL commands"},
 	{Text: ":type", Description: "show an expression's checked type"},
 	{Text: ":load", Description: "load a .trb file"},
@@ -220,16 +218,31 @@ var completionItems = []prompt.Suggestion{
 	{Text: "puts", Description: "write a value to standard output"},
 }
 
-func completeInput(document prompt.Document) []prompt.Suggestion {
-	word := document.GetWordBeforeCursor()
+func completionSuggestions(input string) []completionItem {
+	word := input
+	if separator := strings.LastIndexAny(word, " \t\r\n([{,"); separator >= 0 {
+		word = word[separator+1:]
+	}
 	if word == "" {
 		return nil
 	}
-	var suggestions []prompt.Suggestion
+	var suggestions []completionItem
 	for _, item := range completionItems {
 		if strings.HasPrefix(item.Text, word) {
 			suggestions = append(suggestions, item)
 		}
 	}
 	return suggestions
+}
+
+func completeInput(line []rune, cursor int) readline.Completions {
+	if cursor < 0 || cursor > len(line) {
+		return readline.Completions{}
+	}
+	suggestions := completionSuggestions(string(line[:cursor]))
+	values := make([]string, 0, len(suggestions)*2)
+	for _, item := range suggestions {
+		values = append(values, item.Text, item.Description)
+	}
+	return readline.CompleteValuesDescribed(values...).NoSpace()
 }

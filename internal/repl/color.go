@@ -3,6 +3,7 @@ package repl
 const (
 	colorReset   = "\x1b[0m"
 	colorTitle   = "\x1b[1;38;2;130;170;255m"
+	colorInput   = "\x1b[1;38;2;214;222;235m"
 	colorMuted   = "\x1b[38;2;98;114;164m"
 	colorName    = "\x1b[38;2;197;228;120m"
 	colorValue   = "\x1b[38;2;197;228;120m"

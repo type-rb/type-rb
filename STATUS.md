@@ -16,7 +16,8 @@ Implemented:
 - Project-aware `trb repl`, with config-selected mode, persistent typed state,
   multiline cursor editing, per-project command history, reverse search,
   Readline/Emacs navigation, completion, colored output, project imports,
-  portable IR evaluation, and `:type`, `:load`, and `:reload` commands.
+  interruptible portable IR evaluation, and `:type`, `:load`, and `:reload`
+  commands.
 - `trb init`, `sync`, `add`, `remove`, and `install`, with generated Gemfile,
   go.mod, or package.json ownership based on project mode.
 - `packageManagement: "external"` for embedding generated source in an
