@@ -32,8 +32,8 @@ class TodoRepository
 
   def lists(): Array<TodoList>
     entities := gorm.find_all(@db, TodoListEntity)
-    result: Array<TodoList> := []
-    index := 0
+    mut result: Array<TodoList> := []
+    mut index := 0
     while index < arrays.length(entities)
       entity := entities[index]
       arrays.push(result, TodoList.new(id: entity.id, name: entity.name, items: items_for(entity.id)))
@@ -44,8 +44,8 @@ class TodoRepository
 
   def tags(): Array<Tag>
     entities := gorm.find_all(@db, TagEntity)
-    result: Array<Tag> := []
-    index := 0
+    mut result: Array<Tag> := []
+    mut index := 0
     while index < arrays.length(entities)
       entity := entities[index]
       arrays.push(result, Tag.new(id: entity.id, name: entity.name))
@@ -57,7 +57,7 @@ class TodoRepository
   def create_item(todo_list_id: Integer, input: CreateTodoRequest): TodoItem
     entity := TodoItemEntity.new(id: 0, todo_list_id: todo_list_id, title: input.title, completed: false)
     created := gorm.create(@db, entity)
-    index := 0
+    mut index := 0
     while index < arrays.length(input.tag_ids)
       gorm.exec(
         @db,
@@ -71,7 +71,7 @@ class TodoRepository
   end
 
   def update_item(id: Integer, completed: Boolean): TodoItem
-    entity := gorm.first(@db, TodoItemEntity, "id = ?", id)
+    mut entity := gorm.first(@db, TodoItemEntity, "id = ?", id)
     entity.completed = completed
     saved := gorm.save(@db, entity)
     return item_from(saved)
@@ -79,8 +79,8 @@ class TodoRepository
 
   def items_for(todo_list_id: Integer): Array<TodoItem>
     entities := gorm.where(@db, TodoItemEntity, "todo_list_id = ?", todo_list_id)
-    result: Array<TodoItem> := []
-    index := 0
+    mut result: Array<TodoItem> := []
+    mut index := 0
     while index < arrays.length(entities)
       arrays.push(result, item_from(entities[index]))
       index += 1
@@ -105,8 +105,8 @@ class TodoRepository
       "SELECT tags.* FROM tag_entities AS tags INNER JOIN todo_item_tag_entities AS links ON links.tag_id = tags.id WHERE links.todo_item_id = ? ORDER BY tags.id",
       todo_item_id,
     )
-    result: Array<Tag> := []
-    index := 0
+    mut result: Array<Tag> := []
+    mut index := 0
     while index < arrays.length(entities)
       entity := entities[index]
       arrays.push(result, Tag.new(id: entity.id, name: entity.name))

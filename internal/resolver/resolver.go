@@ -523,6 +523,10 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 						if public(name) {
 							exported.Members[name] = Member{Name: name, Kind: ValueExport, Type: typeRef(item.Type)}
 						}
+					case *ast.VariableStatement:
+						if item.Constant && public(item.Name) {
+							exported.Members[item.Name] = Member{Name: item.Name, Kind: ValueExport, Type: variableType(item), Class: true}
+						}
 					}
 				}
 				result[node.Name] = exported
@@ -543,7 +547,13 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 			}
 		case *ast.ModuleStatement:
 			if public(node.Name) {
-				result[node.Name] = Export{Name: node.Name, Kind: ModuleExport, Type: types.FromName(node.Name), Span: node.Span()}
+				exported := Export{Name: node.Name, Kind: ModuleExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Span: node.Span()}
+				for _, statement := range node.Body {
+					if value, ok := statement.(*ast.VariableStatement); ok && value.Constant && public(value.Name) {
+						exported.Members[value.Name] = Member{Name: value.Name, Kind: ValueExport, Type: variableType(value), Class: true}
+					}
+				}
+				result[node.Name] = exported
 			}
 		case *ast.InterfaceStatement:
 			if public(node.Name) {
@@ -561,11 +571,60 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 			}
 		case *ast.VariableStatement:
 			if node.Constant && public(node.Name) {
-				result[node.Name] = Export{Name: node.Name, Kind: ValueExport, Type: typeRef(node.Type), Span: node.Span()}
+				result[node.Name] = Export{Name: node.Name, Kind: ValueExport, Type: variableType(node), Span: node.Span()}
 			}
 		}
 	}
 	return result
+}
+
+func variableType(node *ast.VariableStatement) types.Type {
+	if node == nil {
+		return types.FromName("Any")
+	}
+	if !node.Type.Empty() {
+		return typeRef(node.Type)
+	}
+	switch value := node.Value.(type) {
+	case *ast.Literal:
+		switch value.Kind {
+		case ast.StringLiteral:
+			return types.FromName("String")
+		case ast.IntegerLiteral:
+			return types.FromName("Integer")
+		case ast.FloatLiteral:
+			return types.FromName("Float")
+		case ast.BooleanLiteral:
+			return types.FromName("Boolean")
+		case ast.NilLiteral:
+			return types.FromName("Nil")
+		}
+	case *ast.ArrayLiteral:
+		element := types.FromName("Any")
+		if len(value.Elements) > 0 {
+			element = expressionLiteralType(value.Elements[0])
+			for _, expression := range value.Elements[1:] {
+				current := expressionLiteralType(expression)
+				if !types.Assignable(element, current) || !types.Assignable(current, element) {
+					element = types.FromName("Any")
+					break
+				}
+			}
+		}
+		return types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{element}}
+	case *ast.HashLiteral:
+		return types.FromName("Hash")
+	case *ast.RangeExpression:
+		return types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}
+	case *ast.InterpolatedString, *ast.SymbolLiteral:
+		return types.FromName("String")
+	}
+	return types.FromName("Any")
+}
+
+func expressionLiteralType(expression ast.Expression) types.Type {
+	node := &ast.VariableStatement{Value: expression}
+	return variableType(node)
 }
 
 func parameters(nodes []ast.Parameter) ([]types.Type, int, bool) {

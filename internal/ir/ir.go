@@ -136,6 +136,7 @@ type Variable struct {
 	Value    Expression
 	Mutable  bool
 	Constant bool
+	Owner    string
 }
 
 func (*Variable) irStatement() {}
@@ -227,6 +228,7 @@ func (e ExprBase) ExprType() types.Type { return e.Type }
 type Identifier struct {
 	ExprBase
 	Name      string
+	Owner     string
 	Reference *Reference
 }
 

@@ -181,7 +181,11 @@ func (g *generator) statement(statement ir.Statement) {
 		g.topLevelMethod(n)
 	case *ir.Variable:
 		if g.functionDepth == 0 {
-			g.line("var " + goIdentifier(n.Name, n.Constant) + " " + g.goType(n.Type) + " = " + g.expr(n.Value))
+			name := goIdentifier(n.Name, n.Constant)
+			if n.Constant {
+				name = goConstantIdentifier(n.Owner, n.Name)
+			}
+			g.line("var " + name + " " + g.goType(n.Type) + " = " + g.expr(n.Value))
 		} else {
 			g.line(goIdentifier(n.Name, false) + " := " + g.exprExpected(n.Value, n.Type))
 		}
@@ -346,6 +350,8 @@ func (g *generator) class(class *ir.Class) {
 			fields = append(fields, n)
 		case *ir.Method:
 			methods = append(methods, n)
+		case *ir.Variable:
+			g.statement(n)
 		}
 	}
 	previousMethods := g.methods
@@ -469,6 +475,9 @@ func (g *generator) expr(expression ir.Expression) string {
 				return alias + "." + goImportedName(n.Name, n.Reference.ExportKind)
 			}
 		}
+		if n.Owner != "" {
+			return goConstantIdentifier(n.Owner, n.Name)
+		}
 		return goIdentifier(n.Name, isUpper(n.Name))
 	case *ir.Literal:
 		if n.Kind == "nil" {
@@ -531,6 +540,13 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return "func() []int { start, end := " + g.expr(n.Start) + ", " + g.expr(n.End) + "; values := []int{}; for value := start; value < end; value++ { values = append(values, value) }" + inclusiveEnd + "; return values }()"
 	case *ir.Member:
+		if n.Namespace && isUpper(n.Name) {
+			name := goConstantIdentifier(irExpressionName(n.Receiver), n.Name)
+			if alias := g.referenceAlias(n.Reference); alias != "" {
+				return alias + "." + name
+			}
+			return name
+		}
 		return g.expr(n.Receiver) + "." + goMethodName(n.Name)
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
@@ -540,6 +556,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		args := strings.Join(parts, ", ")
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
 			return g.intrinsic(reference.Intrinsic, n, parts)
+		}
+		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "push" && member.Receiver.ExprType().Kind == types.Array && len(parts) == 1 {
+			receiver := g.expr(member.Receiver)
+			return receiver + " = append(" + receiver + ", " + parts[0] + ")"
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok {
@@ -739,6 +759,9 @@ func goImportedName(name, kind string) string {
 	if kind == "function" {
 		return goMethodName(name)
 	}
+	if kind == "value" && isUpper(name) {
+		return goConstantIdentifier("", name)
+	}
 	return goIdentifier(name, true)
 }
 
@@ -839,6 +862,32 @@ func goIdentifier(name string, exported bool) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+func goConstantIdentifier(owner, name string) string {
+	var result strings.Builder
+	if owner != "" {
+		for _, part := range strings.Split(owner, "::") {
+			result.WriteString(goIdentifier(part, true))
+		}
+	}
+	result.WriteString(goIdentifier(strings.ToLower(name), true))
+	return result.String()
+}
+
+func irExpressionName(expression ir.Expression) string {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		return node.Name
+	case *ir.Member:
+		prefix := irExpressionName(node.Receiver)
+		if prefix == "" {
+			return node.Name
+		}
+		return prefix + "::" + node.Name
+	default:
+		return ""
+	}
 }
 
 func upperFirst(s string) string {

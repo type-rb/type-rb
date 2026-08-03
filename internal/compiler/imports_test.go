@@ -274,6 +274,64 @@ end
 	}
 }
 
+func TestProjectCompilerExportsTopModuleAndClassConstants(t *testing.T) {
+	constants := SourceUnit{
+		Filename:   "/project/config/constants.trb",
+		ModulePath: "config/constants",
+		Package:    "config",
+		Source: []byte(`APP_NAME := "TypeRB"
+
+module Limits
+  MAX_ITEMS := 10
+end
+
+class Config
+  DEFAULT_LIMIT := 5
+end
+`),
+	}
+	main := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { APP_NAME, Config, Limits } from config/constants
+
+def app_name(): String
+  return APP_NAME
+end
+
+def max_items(): Integer
+  return Limits::MAX_ITEMS
+end
+
+def default_limit(): Integer
+  return Config::DEFAULT_LIMIT
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{constants, main}, Options{Mode: "go", GoModule: "example.com/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, artifact := range artifacts {
+		output := string(artifact.Output)
+		if artifact.Filename == constants.Filename {
+			for _, expected := range []string{"var AppName string", "var LimitsMaxItems int", "var ConfigDefaultLimit int"} {
+				if !strings.Contains(output, expected) {
+					t.Fatalf("constant module is missing %q:\n%s", expected, output)
+				}
+			}
+		}
+		if artifact.Filename == main.Filename {
+			for _, expected := range []string{"config.AppName", "config.LimitsMaxItems", "config.ConfigDefaultLimit"} {
+				if !strings.Contains(output, expected) {
+					t.Fatalf("constant consumer is missing %q:\n%s", expected, output)
+				}
+			}
+		}
+	}
+}
+
 func TestProjectCompilerRejectsImportCycles(t *testing.T) {
 	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("import b\n\nclass A\nend\n")}
 	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("import a\n\nclass B\nend\n")}

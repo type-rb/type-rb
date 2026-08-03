@@ -220,7 +220,10 @@ v0.1 portable syntax includes:
   and source paths
 - classes, inheritance, interfaces, and modules
 - typed fields, `readonly`, methods, parameters, and return types
-- local inference with `:=` and reassignment with `=`/compound assignment
+- immutable local inference with `:=`; use `mut value := ...` when the binding
+  will be reassigned or destructively updated
+- uppercase runtime constants declared with `:=` at top level or directly in a
+  module/class
 - literals, arrays, hashes, calls, members, indexes, unary/binary expressions
 - `if`/`elsif`/`else`, `while`, `return`, integer ranges, and Ruby-shaped
   `each`/`each_slice`/`each.with_index` iteration
@@ -228,6 +231,22 @@ v0.1 portable syntax includes:
 
 Types are written as `name: Type`. Generics, arrays, and nullable types use
 `Array<String>`, `String[]`, and `String?`.
+
+Collection updates follow the same explicit rule:
+
+```trb
+values := [1, 2]       # immutable
+mut output := [1, 2]   # mutable
+output.push(3)
+```
+
+`values.push(3)`, `arrays.push(values, 3)`, or later assignment to `values`
+is rejected. Constants are uppercase immutable bindings and may use runtime
+initializers:
+
+```trb
+API_NAME := strings.uppercase("typerb")
+```
 
 A function that returns no value omits the return annotation, as in
 `def save()`. Writing `def save(): Void` is an error; `Void` exists only as the

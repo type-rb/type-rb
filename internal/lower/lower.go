@@ -96,7 +96,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return method
 	case *ast.VariableStatement:
 		typ := l.checked.Variables[n]
-		return &ir.Variable{Base: base(n.Base), Name: n.Name, Type: typ, Value: l.expression(n.Value), Mutable: n.Mutable, Constant: n.Constant}
+		return &ir.Variable{Base: base(n.Base), Name: n.Name, Type: typ, Value: l.expression(n.Value), Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]}
 	case *ast.AssignmentStatement:
 		return &ir.Assignment{Base: base(n.Base), Target: l.expression(n.Target), Operator: n.Operator, Value: l.expression(n.Value)}
 	case *ast.ReturnStatement:
@@ -148,7 +148,7 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 	base := ir.NewExprBase(node.Span(), typ)
 	switch n := node.(type) {
 	case *ast.Identifier:
-		return &ir.Identifier{ExprBase: base, Name: n.Name, Reference: l.reference(n)}
+		return &ir.Identifier{ExprBase: base, Name: n.Name, Owner: l.checked.Constants[n], Reference: l.reference(n)}
 	case *ast.Literal:
 		return &ir.Literal{ExprBase: base, Kind: string(n.Kind), Raw: n.Raw}
 	case *ast.InterpolatedString:

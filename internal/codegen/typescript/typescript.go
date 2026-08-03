@@ -10,15 +10,16 @@ import (
 )
 
 type generator struct {
-	b            strings.Builder
-	indent       int
-	inClass      int
-	methods      map[string]bool
-	modulePath   string
-	entryPoint   string
-	topFunctions map[string]bool
-	records      map[string]bool
-	temporary    int
+	b             strings.Builder
+	indent        int
+	inClass       int
+	functionDepth int
+	methods       map[string]bool
+	modulePath    string
+	entryPoint    string
+	topFunctions  map[string]bool
+	records       map[string]bool
+	temporary     int
 }
 
 func Generate(program *ir.Program) string {
@@ -146,6 +147,10 @@ func (g *generator) statement(statement ir.Statement) {
 			g.function(n)
 		}
 	case *ir.Variable:
+		if g.inClass > 0 && g.functionDepth == 0 && n.Constant {
+			g.line("static readonly " + n.Name + ": " + tsType(n.Type) + " = " + g.expr(n.Value) + ";")
+			break
+		}
 		keyword := "const"
 		if n.Mutable {
 			keyword = "let"
@@ -153,7 +158,11 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.Constant {
 			keyword = "const"
 		}
-		g.line(keyword + " " + n.Name + ": " + tsType(n.Type) + " = " + g.expr(n.Value) + ";")
+		prefix := ""
+		if g.functionDepth == 0 && n.Constant {
+			prefix = "export "
+		}
+		g.line(prefix + keyword + " " + n.Name + ": " + tsType(n.Type) + " = " + g.expr(n.Value) + ";")
 	case *ir.Assignment:
 		g.line(g.expr(n.Target) + " " + n.Operator + " " + g.expr(n.Value) + ";")
 	case *ir.Return:
@@ -254,7 +263,9 @@ func (g *generator) method(method *ir.Method) {
 		g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + " {")
 	}
 	g.indent++
+	g.functionDepth++
 	g.statements(method.Body)
+	g.functionDepth--
 	g.indent--
 	g.line("}")
 }
@@ -267,7 +278,9 @@ func (g *generator) function(method *ir.Method) {
 	}
 	g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + " {")
 	g.indent++
+	g.functionDepth++
 	g.statements(method.Body)
+	g.functionDepth--
 	g.indent--
 	g.line("}")
 }
@@ -305,6 +318,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if g.inClass > 0 && g.methods[n.Name] {
 			return "this." + strings.TrimPrefix(n.Name, "_") + ".bind(this)"
+		}
+		if n.Owner != "" {
+			return strings.ReplaceAll(n.Owner, "::", ".") + "." + n.Name
 		}
 		return n.Name
 	case *ir.Literal:

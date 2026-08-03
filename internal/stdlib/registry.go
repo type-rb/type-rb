@@ -21,6 +21,7 @@ type Parameter struct {
 	Name     string
 	Type     types.Type
 	Optional bool
+	Mutable  bool
 }
 
 type Symbol struct {
@@ -96,7 +97,7 @@ var registry = map[string]*Package{
 			"length": unary("length", "trb.std.arrays.length", types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Any")}}, integerType),
 			"push": {
 				Name: "push", Intrinsic: "trb.std.arrays.push",
-				Parameters: []Parameter{{Name: "values", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Any")}}}, {Name: "value", Type: types.FromName("Any")}},
+				Parameters: []Parameter{{Name: "values", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Any")}}, Mutable: true}, {Name: "value", Type: types.FromName("Any")}},
 				Return:     voidType,
 			},
 		},

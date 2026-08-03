@@ -70,14 +70,14 @@ class TodoApp < ReactComponent
   end
 
   def _item_view(item: TodoItem): ReactNode
-    tag_nodes: Array<ReactNode> := []
-    tag_index := 0
+    mut tag_nodes: Array<ReactNode> := []
+    mut tag_index := 0
     while tag_index < arrays.length(item.tags)
       arrays.push(tag_nodes, _tag_view(item.tags[tag_index]))
       tag_index += 1
     end
 
-    button_label := "Complete"
+    mut button_label := "Complete"
     if item.completed
       button_label = "Reopen"
     end
@@ -95,8 +95,8 @@ class TodoApp < ReactComponent
   end
 
   def _list_view(list: TodoList): ReactNode
-    item_nodes: Array<ReactNode> := []
-    item_index := 0
+    mut item_nodes: Array<ReactNode> := []
+    mut item_index := 0
     while item_index < arrays.length(list.items)
       arrays.push(item_nodes, _item_view(list.items[item_index]))
       item_index += 1
@@ -111,8 +111,8 @@ class TodoApp < ReactComponent
   end
 
   def _tag_options(): Array<ReactNode>
-    options: Array<ReactNode> := []
-    index := 0
+    mut options: Array<ReactNode> := []
+    mut index := 0
     while index < arrays.length(@board.tags)
       tag := @board.tags[index]
       arrays.push(options, react.element("option", { value: tag.id }, [tag.name]))
@@ -122,8 +122,8 @@ class TodoApp < ReactComponent
   end
 
   def render(): ReactNode
-    list_nodes: Array<ReactNode> := []
-    index := 0
+    mut list_nodes: Array<ReactNode> := []
+    mut index := 0
     while index < arrays.length(@board.lists)
       arrays.push(list_nodes, _list_view(@board.lists[index]))
       index += 1

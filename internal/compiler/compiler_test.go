@@ -462,7 +462,7 @@ class Box implements Counter
 end
 
 def main()
-  count := 0
+  mut count := 0
   while count < 2
     count += 1
   end
@@ -544,6 +544,129 @@ func TestVoidReturnTypeMustBeOmitted(t *testing.T) {
 	for _, source := range tests {
 		if _, err := Compile("invalid.trb", []byte(source), "go"); err == nil || !strings.Contains(err.Error(), "Void return type must be omitted") {
 			t.Fatalf("expected explicit Void return type diagnostic, got %v", err)
+		}
+	}
+}
+
+func TestImmutableBindingsRequireMutForReassignmentAndArrayUpdates(t *testing.T) {
+	invalid := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "reassignment",
+			source: "def example()\n  value := 1\n  value = 2\n  return\nend\n",
+			want:   "value is immutable; declare it with mut to use assignment",
+		},
+		{
+			name:   "portable push",
+			source: "import trb/std/arrays\n\ndef example()\n  values := [1]\n  arrays.push(values, 2)\n  return\nend\n",
+			want:   "values is immutable; declare it with mut to use push()",
+		},
+		{
+			name:   "member push",
+			source: "def example()\n  values := [1]\n  values.push(2)\n  return\nend\n",
+			want:   "values is immutable; declare it with mut to use push()",
+		},
+		{
+			name:   "readonly alias",
+			source: "def example()\n  values := [1]\n  mut alias := values\n  return\nend\n",
+			want:   "cannot initialize mutable alias from an immutable value",
+		},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := Compile("immutable.trb", []byte(test.source), "go"); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q diagnostic, got %v", test.want, err)
+			}
+		})
+	}
+
+	source := []byte(`def build(): Array<Integer>
+  mut values := [1]
+  values.push(2)
+  mut index := 0
+  index += 1
+  return values
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("mutable.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		if mode == "go" && !strings.Contains(output, "values = append(values, 2)") {
+			t.Fatalf("Go member push was not lowered portably:\n%s", output)
+		}
+	}
+}
+
+func TestConstantsAreRuntimeInitializedImmutableScopedBindings(t *testing.T) {
+	invalid := []struct {
+		source string
+		want   string
+	}{
+		{"def bad()\n  INNER := 1\n  return\nend\n", "constant INNER may only be declared at top level or directly inside a module or class"},
+		{"mut MAX_ITEMS := 1\n", "constant MAX_ITEMS cannot be declared with mut"},
+		{"MAX_ITEMS := 1\nMAX_ITEMS = 2\n", "MAX_ITEMS is immutable"},
+		{"DEFAULT_TAGS := [\"work\"]\nDEFAULT_TAGS.push(\"home\")\n", "DEFAULT_TAGS is immutable"},
+	}
+	for _, test := range invalid {
+		if _, err := Compile("constant.trb", []byte(test.source), "go"); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("expected %q diagnostic, got %v", test.want, err)
+		}
+	}
+
+	source := []byte(`import trb/std/strings
+
+APP_NAME := strings.uppercase("typerb")
+
+module Limits
+  MAX_ITEMS := 10
+
+  def self.current(): Integer
+    return MAX_ITEMS
+  end
+end
+
+class Config
+  DEFAULT_NAME := "TypeRB"
+
+  def name(): String
+    return DEFAULT_NAME
+  end
+end
+`)
+
+	goArtifact, err := Compile("constants.trb", source, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"var AppName string", "var LimitsMaxItems int", "return LimitsMaxItems", "var ConfigDefaultName string", "return ConfigDefaultName"} {
+		if !strings.Contains(string(goArtifact.Output), expected) {
+			t.Fatalf("generated Go is missing %q:\n%s", expected, goArtifact.Output)
+		}
+	}
+
+	tsArtifact, err := Compile("constants.trb", source, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"export const APP_NAME: string", "export const MAX_ITEMS: number", "return Limits.MAX_ITEMS", "static readonly DEFAULT_NAME: string", "return Config.DEFAULT_NAME"} {
+		if !strings.Contains(string(tsArtifact.Output), expected) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", expected, tsArtifact.Output)
+		}
+	}
+
+	rubyArtifact, err := Compile("constants.trb", source, "ruby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"APP_NAME =", "MAX_ITEMS = 10", "DEFAULT_NAME = \"TypeRB\""} {
+		if !strings.Contains(string(rubyArtifact.Output), expected) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", expected, rubyArtifact.Output)
 		}
 	}
 }

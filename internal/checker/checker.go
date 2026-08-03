@@ -17,24 +17,30 @@ import (
 )
 
 type Result struct {
-	Program     *ast.Program
-	Expressions map[ast.Expression]types.Type
-	Variables   map[*ast.VariableStatement]types.Type
-	Iterations  map[*ast.IterationExpression]types.Type
-	Resolution  resolver.Result
-	References  map[ast.Expression]resolver.Binding
+	Program        *ast.Program
+	Expressions    map[ast.Expression]types.Type
+	Variables      map[*ast.VariableStatement]types.Type
+	Iterations     map[*ast.IterationExpression]types.Type
+	Constants      map[ast.Expression]string
+	ConstantOwners map[*ast.VariableStatement]string
+	Resolution     resolver.Result
+	References     map[ast.Expression]resolver.Binding
 }
 
 type symbol struct {
 	typ      types.Type
 	mutable  bool
+	constant bool
+	owner    string
 	span     token.Span
 	variable *ast.VariableStatement
 }
 
 type scope struct {
-	parent *scope
-	values map[string]symbol
+	parent           *scope
+	values           map[string]symbol
+	constantsAllowed bool
+	constantOwner    string
 }
 
 func (s *scope) lookup(name string) (symbol, bool) {
@@ -61,29 +67,32 @@ type recordInfo struct {
 }
 
 type Checker struct {
-	mode       string
-	result     Result
-	diags      []diagnostic.Diagnostic
-	classes    map[string]*classInfo
-	records    map[string]*recordInfo
-	interfaces map[string]*ast.InterfaceStatement
-	functions  map[string]*ast.MethodStatement
-	current    *classInfo
-	returns    []types.Type
-	resolution resolver.Result
-	external   map[ast.Expression]declaration.Member
+	mode         string
+	result       Result
+	diags        []diagnostic.Diagnostic
+	classes      map[string]*classInfo
+	records      map[string]*recordInfo
+	interfaces   map[string]*ast.InterfaceStatement
+	functions    map[string]*ast.MethodStatement
+	current      *classInfo
+	initializing int
+	returns      []types.Type
+	resolution   resolver.Result
+	external     map[ast.Expression]declaration.Member
 }
 
 func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnostic.Diagnostic) {
 	c := &Checker{
 		mode: program.Mode,
 		result: Result{
-			Program:     program,
-			Expressions: map[ast.Expression]types.Type{},
-			Variables:   map[*ast.VariableStatement]types.Type{},
-			Iterations:  map[*ast.IterationExpression]types.Type{},
-			Resolution:  resolution,
-			References:  map[ast.Expression]resolver.Binding{},
+			Program:        program,
+			Expressions:    map[ast.Expression]types.Type{},
+			Variables:      map[*ast.VariableStatement]types.Type{},
+			Iterations:     map[*ast.IterationExpression]types.Type{},
+			Constants:      map[ast.Expression]string{},
+			ConstantOwners: map[*ast.VariableStatement]string{},
+			Resolution:     resolution,
+			References:     map[ast.Expression]resolver.Binding{},
 		},
 		classes:    map[string]*classInfo{},
 		records:    map[string]*recordInfo{},
@@ -98,7 +107,7 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 		}
 	}
 	c.collect(program.Statements)
-	c.checkStatements(program.Statements, &scope{values: map[string]symbol{}})
+	c.checkStatements(program.Statements, &scope{values: map[string]symbol{}, constantsAllowed: true})
 	return c.result, c.diags
 }
 
@@ -176,7 +185,11 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 				c.current = &classInfo{name: n.Name, superclass: expressionTypeName(n.Superclass), fields: map[string]*ast.FieldStatement{}, methods: map[string]*ast.MethodStatement{}}
 			}
 			c.checkSuperclass(n)
-			classScope := &scope{parent: sc, values: map[string]symbol{"self": {typ: types.FromName(n.Name)}}}
+			owner := n.Name
+			if sc.constantOwner != "" {
+				owner = sc.constantOwner + "::" + n.Name
+			}
+			classScope := &scope{parent: sc, values: map[string]symbol{"self": {typ: types.FromName(n.Name)}}, constantsAllowed: true, constantOwner: owner}
 			for name, field := range c.current.fields {
 				classScope.values[name] = symbol{typ: fromTypeRef(field.Type), mutable: !field.ReadOnly, span: field.Span()}
 			}
@@ -205,7 +218,11 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 		case *ast.RecordFieldStatement:
 			// Checked as part of its enclosing record.
 		case *ast.ModuleStatement:
-			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}})
+			owner := n.Name
+			if sc.constantOwner != "" {
+				owner = sc.constantOwner + "::" + n.Name
+			}
+			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner})
 		case *ast.InterfaceStatement:
 			for _, method := range n.Methods {
 				c.checkMethod(method, sc)
@@ -223,36 +240,53 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 		case *ast.VariableStatement:
 			valueType := c.checkExpression(n.Value, sc)
 			variableType := valueType
+			if n.Constant {
+				if n.Mutable {
+					c.error(n.Span(), fmt.Sprintf("constant %s cannot be declared with mut", n.Name))
+				}
+				if !sc.constantsAllowed {
+					c.error(n.Span(), fmt.Sprintf("constant %s may only be declared at top level or directly inside a module or class", n.Name))
+				}
+			}
 			if !n.Type.Empty() {
 				variableType = fromTypeRef(n.Type)
 				if !types.Assignable(variableType, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", valueType, variableType))
 				}
 			}
+			if n.Mutable && valueType.Readonly && isReferenceType(variableType) {
+				c.error(n.Value.Span(), fmt.Sprintf("cannot initialize mutable %s from an immutable value", n.Name))
+			}
+			if !n.Mutable && isReferenceType(variableType) {
+				variableType.Readonly = true
+			}
 			if previous, exists := sc.values[n.Name]; exists {
 				c.error(n.Span(), fmt.Sprintf("%s was already declared at %s; use = to reassign", n.Name, previous.span.Start))
 			} else {
-				sc.values[n.Name] = symbol{typ: variableType, mutable: n.Mutable, span: n.Span(), variable: n}
+				if n.Constant {
+					variableType.Readonly = true
+				}
+				sc.values[n.Name] = symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n}
+			}
+			if n.Constant {
+				c.result.ConstantOwners[n] = sc.constantOwner
 			}
 			c.result.Variables[n] = variableType
 		case *ast.AssignmentStatement:
 			leftType := c.checkExpression(n.Target, sc)
 			rightType := c.checkExpression(n.Value, sc)
 			if identifier, ok := n.Target.(*ast.Identifier); ok && !strings.HasPrefix(identifier.Name, "@") {
-				if value, exists := sc.lookup(identifier.Name); !exists {
+				if _, exists := sc.lookup(identifier.Name); !exists {
 					// Ruby constants and framework-provided setters remain legal.
-					if c.mode != "ruby" && !isConstant(identifier.Name) {
+					if c.mode != "ruby" {
 						c.error(identifier.Span(), fmt.Sprintf("%s is not declared", identifier.Name))
 					}
 					if c.mode == "ruby" {
 						leftType = types.Type{Kind: types.Any, Name: "Any"}
 					}
-				} else if value.variable != nil {
-					// := declares; any later assignment requires a mutable binding in
-					// targets such as TypeScript. Record that fact in the checked AST.
-					value.variable.Mutable = true
 				}
 			}
+			c.requireMutable(n.Target, sc, "assignment")
 			if leftType.Kind != types.Any && !types.Assignable(leftType, rightType) {
 				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", rightType, leftType))
 			}
@@ -320,7 +354,13 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		returnType = types.Type{Kind: types.Void, Name: "Void"}
 	}
 	c.returns = append(c.returns, returnType)
+	if method.Name == "initialize" && c.current != nil {
+		c.initializing++
+	}
 	c.checkStatements(method.Body, methodScope)
+	if method.Name == "initialize" && c.current != nil {
+		c.initializing--
+	}
 	c.returns = c.returns[:len(c.returns)-1]
 }
 
@@ -574,6 +614,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.Identifier:
 		if value, ok := sc.lookup(n.Name); ok {
 			typ = value.typ
+			if value.constant {
+				c.result.Constants[n] = value.owner
+			}
 		} else if binding, ok := c.resolution.Symbols[n.Name]; ok {
 			typ = binding.Type()
 			c.result.References[n] = binding
@@ -707,6 +750,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = types.Type{Kind: types.Void, Name: "Void"}
 	case *ast.MemberExpression:
 		receiverType := c.checkExpression(n.Receiver, sc)
+		if receiverType.Kind == types.Array && n.Name == "push" {
+			typ = types.Type{Kind: types.Void, Name: "Void"}
+			break
+		}
 		if identifier, ok := n.Receiver.(*ast.Identifier); ok {
 			if imported := c.resolution.Packages[identifier.Name]; imported != nil {
 				if binding, exists := c.resolution.Member(identifier.Name, n.Name); exists {
@@ -750,7 +797,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = calleeType
 		if binding, ok := c.result.References[n.Callee]; ok {
 			typ = binding.Type()
-			c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes)
+			c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
 			if binding.Library != nil {
 				typ = inferLibraryReturn(*binding.Library, argumentTypes)
 			}
@@ -765,7 +812,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					if binding.Export.Kind == resolver.RecordExport {
 						c.checkImportedRecordArguments(n, binding.Export)
 					} else {
-						c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes)
+						c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
 					}
 				} else if record := c.records[identifier.Name]; record != nil {
 					c.checkLocalRecordArguments(n, record)
@@ -775,7 +822,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		} else if member, ok := n.Callee.(*ast.MemberExpression); ok {
 			receiverType := c.checkExpression(member.Receiver, sc)
-			if _, method, found := c.localMember(receiverType.Name, member.Name, map[string]bool{}); found && method != nil {
+			if receiverType.Kind == types.Array && member.Name == "push" {
+				c.checkArrayPush(n, member, receiverType, argumentTypes, sc)
+				typ = types.Type{Kind: types.Void, Name: "Void"}
+			} else if _, method, found := c.localMember(receiverType.Name, member.Name, map[string]bool{}); found && method != nil {
 				typ = methodReturnType(method)
 				c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
 			}
@@ -877,7 +927,7 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 	}
 }
 
-func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Binding, arguments []ast.CallArgument, actual []types.Type) {
+func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Binding, arguments []ast.CallArgument, actual []types.Type, sc *scope) {
 	var parameters []types.Type
 	required := 0
 	variadic := false
@@ -919,6 +969,65 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		if !types.Assignable(expected, actualType) {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, name, actualType, expected))
 		}
+		if binding.Library != nil && parameterIndex < len(binding.Library.Parameters) && binding.Library.Parameters[parameterIndex].Mutable {
+			c.requireMutable(arguments[i].Value, sc, name+"()")
+		}
+	}
+}
+
+func (c *Checker) checkArrayPush(call *ast.CallExpression, member *ast.MemberExpression, receiverType types.Type, arguments []types.Type, sc *scope) {
+	c.requireMutable(member.Receiver, sc, "push()")
+	if len(arguments) != 1 {
+		c.error(call.Span(), fmt.Sprintf("push() expects 1 argument, got %d", len(arguments)))
+		return
+	}
+	if len(receiverType.Args) > 0 && !types.Assignable(receiverType.Args[0], arguments[0]) {
+		c.error(call.Arguments[0].Value.Span(), fmt.Sprintf("argument 1 to push() has type %s, expected %s", arguments[0], receiverType.Args[0]))
+	}
+}
+
+func (c *Checker) requireMutable(expression ast.Expression, sc *scope, action string) {
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		value, exists := sc.lookup(node.Name)
+		if exists {
+			if strings.HasPrefix(node.Name, "@") && c.initializing > 0 {
+				return
+			}
+			if !value.mutable || value.typ.Readonly {
+				c.error(node.Span(), fmt.Sprintf("%s is immutable; declare it with mut to use %s", node.Name, action))
+			}
+			return
+		}
+		if binding, imported := c.result.References[node]; imported && binding.Export != nil {
+			c.error(node.Span(), fmt.Sprintf("imported value %s is immutable", node.Name))
+			return
+		}
+		// Ruby's native compatibility surface includes framework setters and
+		// legacy `NAME = value` constant declarations which have no TypeRB
+		// binding to inspect.
+		if c.mode == "ruby" && (c.resolution.NativeSyntax || isConstant(node.Name)) {
+			return
+		}
+	case *ast.MemberExpression:
+		if node.Namespace && isConstant(node.Name) {
+			c.error(node.Span(), fmt.Sprintf("constant %s is immutable", node.Name))
+			return
+		}
+		c.requireMutable(node.Receiver, sc, action)
+	case *ast.IndexExpression:
+		c.requireMutable(node.Receiver, sc, action)
+	default:
+		c.error(expression.Span(), fmt.Sprintf("%s requires a mutable binding", action))
+	}
+}
+
+func isReferenceType(typ types.Type) bool {
+	switch typ.Kind {
+	case types.Array, types.Hash, types.Named:
+		return true
+	default:
+		return false
 	}
 }
 

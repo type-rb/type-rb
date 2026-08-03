@@ -58,11 +58,31 @@ integration:
 
 ### 3.5 Assignment Rules
 
-- `:=` is for local variable first definition.
-- `=` is for reassignment/update.
+- `:=` introduces an immutable local binding. It cannot be rebound or used as
+  the receiver of a destructive collection operation.
+- `mut x := expr` introduces a mutable local binding. `mut` is required for
+  later `=`/compound assignment and destructive operations such as
+  `values.push(item)` or `arrays.push(values, item)`.
+- A readonly reference cannot be made mutable merely by assigning it to a new
+  `mut` binding.
+- Method parameters and iterator block parameters are mutable bindings in
+  v0.1. Class fields use their existing `readonly` modifier instead of `mut`.
 - `@ivar := expr` is disallowed; instance variables use declared fields and `=` updates.
 
-### 3.6 Imports and Formatting
+### 3.6 Constants
+
+- An identifier beginning with an uppercase letter is a constant; no `const`
+  or `let` keyword is added.
+- Constants use declaration syntax such as `MAX_ITEMS := 100`.
+- Constants may be declared only at top level or directly inside a `module` or
+  `class`, never inside a method or control-flow block.
+- Constant initializers are ordinary runtime expressions; a constant is not
+  restricted to a target language's compile-time constant subset.
+- Constants are always immutable and cannot be declared with `mut`, rebound,
+  or passed to destructive APIs. For example,
+  `DEFAULT_TAGS.push("work")` is a compile-time error.
+
+### 3.7 Imports and Formatting
 
 - Imports are explicit in every mode and are resolved before type checking.
 - Project module identities come from paths below `sourceDir`; source files do

@@ -26,6 +26,7 @@ type Type struct {
 	Name     string
 	Args     []Type
 	Nullable bool
+	Readonly bool
 }
 
 func (t Type) String() string {
