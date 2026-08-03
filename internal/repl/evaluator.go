@@ -160,8 +160,34 @@ func (e *Evaluator) loadProjectValues(statements []ir.Statement, module string) 
 			if _, err := e.statement(node, module, projectScope); err != nil {
 				return err
 			}
+		case *ir.Class:
+			if err := e.evaluateOwnedConstants(node.Body, module, projectScope); err != nil {
+				return err
+			}
 		case *ir.Module:
 			if err := e.loadProjectValues(node.Body, module); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (e *Evaluator) evaluateOwnedConstants(statements []ir.Statement, module string, sc *scope) error {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Variable:
+			if node.Constant {
+				if _, err := e.statement(node, module, sc); err != nil {
+					return err
+				}
+			}
+		case *ir.Class:
+			if err := e.evaluateOwnedConstants(node.Body, module, sc); err != nil {
+				return err
+			}
+		case *ir.Module:
+			if err := e.evaluateOwnedConstants(node.Body, module, sc); err != nil {
 				return err
 			}
 		}
@@ -292,7 +318,12 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		return flowResult{}, err
 	}
 	switch node := statement.(type) {
-	case *ir.Comment, *ir.Import, *ir.Class, *ir.Record, *ir.Enum, *ir.EnumMember, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
+	case *ir.Comment, *ir.Import, *ir.Record, *ir.Enum, *ir.EnumMember, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
+		return flowResult{}, nil
+	case *ir.Class:
+		if err := e.evaluateOwnedConstants(node.Body, module, sc); err != nil {
+			return flowResult{}, err
+		}
 		return flowResult{}, nil
 	case *ir.Module:
 		return e.evaluate(node.Body, module, sc)
@@ -303,7 +334,7 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		}
 		value.Type = node.Type
 		sc.values[node.Name] = value
-		e.moduleValue[symbolKey(module, node.Name)] = value
+		e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))] = value
 		return flowResult{Result: Result{Value: value, Display: true}}, nil
 	case *ir.Assignment:
 		value, err := e.expression(node.Value, module, sc)
@@ -466,6 +497,11 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		}
 		if value, ok := sc.get(node.Name); ok {
 			return value, nil
+		}
+		if node.Owner != "" {
+			if value, ok := e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))]; ok {
+				return value, nil
+			}
 		}
 		if node.Reference != nil {
 			if node.Reference.Intrinsic != "" {
@@ -956,7 +992,7 @@ func (e *Evaluator) assign(target ir.Expression, value Value, module string, sc 
 		if !sc.assign(node.Name, value) {
 			sc.values[node.Name] = value
 		}
-		e.moduleValue[symbolKey(module, node.Name)] = value
+		e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))] = value
 		return nil
 	case *ir.Member:
 		receiver, err := e.expression(node.Receiver, module, sc)
@@ -1304,6 +1340,13 @@ func expressionName(expression ir.Expression) string {
 }
 
 func symbolKey(module, name string) string { return module + "\x00" + name }
+
+func ownedName(owner, name string) string {
+	if owner == "" {
+		return name
+	}
+	return owner + "::" + name
+}
 
 func Inspect(value Value) string {
 	switch item := value.Data.(type) {

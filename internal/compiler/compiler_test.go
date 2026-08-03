@@ -176,6 +176,91 @@ end
 	}
 }
 
+func TestClassAndInstanceMembersAreCheckedAcrossModes(t *testing.T) {
+	valid := []byte(`class Probe
+	readonly @id: Integer
+
+	def initialize(id: Integer)
+		@id = id
+		return
+	end
+
+	def value(): Integer
+		return @id
+	end
+
+	def self.kind(): String
+		return "probe"
+	end
+end
+
+def inspect_probe(): String
+	probe := Probe.new(1)
+	probe.value()
+	return Probe.kind()
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("class_members.trb", valid, mode); err != nil {
+			t.Fatalf("%s rejected valid class/instance access: %v", mode, err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "class method through instance",
+			body: "mut probe := Probe.new(1)\n\tprobe.kind()",
+			want: "class Probe has no instance member kind; kind is a class member",
+		},
+		{
+			name: "instance method through class",
+			body: "Probe.value()",
+			want: "class Probe has no class member value; value is an instance member",
+		},
+		{
+			name: "readonly field assignment",
+			body: "mut probe := Probe.new(1)\n\tprobe.id = 2",
+			want: "field id is readonly",
+		},
+		{
+			name: "constructor through instance",
+			body: "probe := Probe.new(1)\n\tprobe.new(2)",
+			want: "class Probe has no instance member new; new is a class member",
+		},
+	}
+	declaration := `class Probe
+	readonly @id: Integer
+
+	def initialize(id: Integer)
+		@id = id
+		return
+	end
+
+	def value(): Integer
+		return @id
+	end
+
+	def self.kind(): String
+		return "probe"
+	end
+end
+`
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := []byte(declaration + "\ndef invalid()\n\t" + test.body + "\n\treturn\nend\n")
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_class_member.trb", source, mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestPortableIterationAndRangesLowerAcrossBackends(t *testing.T) {
 	source := []byte(`def total(): Integer
   mut result := 0

@@ -452,6 +452,54 @@ func TestProjectCatalogLinksImportedInheritance(t *testing.T) {
 	}
 }
 
+func TestProjectCompilerPreservesImportedClassMemberKindsAndReadonlyFields(t *testing.T) {
+	model := SourceUnit{
+		Filename:   "/project/models/probe.trb",
+		ModulePath: "models/probe",
+		Source: []byte(`class Probe
+	readonly @id: Integer
+
+	def initialize(id: Integer)
+		@id = id
+		return
+	end
+
+	def value(): Integer
+		return @id
+	end
+
+	def self.kind(): String
+		return "probe"
+	end
+end
+`),
+	}
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"class method through instance", "mut probe := Probe.new(1)\n\tprobe.kind()", "class Probe has no instance member kind; kind is a class member"},
+		{"instance method through class", "Probe.value()", "class Probe has no class member value; value is an instance member"},
+		{"readonly assignment", "mut probe := Probe.new(1)\n\tprobe.id = 2", "field id is readonly"},
+		{"constructor through instance", "probe := Probe.new(1)\n\tprobe.new(2)", "class Probe has no instance member new; new is a class member"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			consumer := SourceUnit{
+				Filename:   "/project/main.trb",
+				ModulePath: "main",
+				Source:     []byte("import models/probe\n\ndef invalid()\n\t" + test.body + "\n\treturn\nend\n"),
+			}
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := CompileProject([]SourceUnit{model, consumer}, Options{Mode: mode, GoModule: "example.com/project"}); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestProjectCatalogRejectsDuplicateExportedTypes(t *testing.T) {
 	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("class User\nend\n")}
 	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("class User\nend\n")}

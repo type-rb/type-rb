@@ -221,6 +221,34 @@ def label(state: State): String
 end
 ```
 
+### 3.14 Class member model and deferred design
+
+- Instance fields and instance methods are accessed through an instance. A
+  method declared with `def self.name()` is a class member and is accessed
+  through the class. Using either member kind through the wrong receiver is a
+  compile-time error, including for imported and inherited classes.
+- A `readonly` field may be assigned while its declaring object is being
+  initialized, but external assignment is a compile-time error. This rule is
+  retained across project imports.
+- Class constants are runtime-initialized immutable bindings and are available
+  to both instance and class methods.
+
+The following class semantics remain deliberately unsettled rather than being
+inferred from Ruby, Go, or TypeScript:
+
+- portable `super(...)`, superclass constructor chaining, field initialization
+  order, and the Go representation of an initialized superclass;
+- method mutation effects and whether calling a mutating method requires a
+  mutable receiver binding;
+- generic classes and variance, which belong to the user-defined generics
+  phase;
+- override compatibility and whether an explicit `override` marker is useful;
+- whether a field and method may share one source-level member name. Until a
+  common backend-safe rule is chosen, portable code should use a private
+  backing field such as `@_name` for a public `name()` accessor;
+- whether abstract, final, or protected class members add enough value to
+  justify new syntax. They are not part of v0.1.
+
 ## 4. Open Point: Initial Generic Inference Scope
 
 Current decision:

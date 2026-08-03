@@ -66,6 +66,7 @@ type Member struct {
 	Required   int
 	Variadic   bool
 	Class      bool
+	Readonly   bool
 }
 
 type Import struct {
@@ -542,7 +543,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 					case *ast.FieldStatement:
 						name := strings.TrimPrefix(item.Name, "@")
 						if public(name) {
-							exported.Members[name] = Member{Name: name, Kind: ValueExport, Type: typeRef(item.Type)}
+							exported.Members[name] = Member{Name: name, Kind: ValueExport, Type: typeRef(item.Type), Readonly: item.ReadOnly}
 						}
 					case *ast.VariableStatement:
 						if item.Constant && public(item.Name) {

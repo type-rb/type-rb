@@ -61,6 +61,12 @@ type classInfo struct {
 	methods    map[string]*ast.MethodStatement
 }
 
+type classMember struct {
+	typ    types.Type
+	method *ast.MethodStatement
+	field  *ast.FieldStatement
+}
+
 type recordInfo struct {
 	name   string
 	fields []*ast.RecordFieldStatement
@@ -88,6 +94,7 @@ type Checker struct {
 	interfaces    map[string]*ast.InterfaceStatement
 	functions     map[string]*ast.MethodStatement
 	current       *classInfo
+	classMethod   bool
 	initializing  int
 	loopDepth     int
 	returns       []types.Type
@@ -428,7 +435,11 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 					}
 				}
 			}
-			c.requireMutable(n.Target, sc, "assignment")
+			if member, ok := n.Target.(*ast.MemberExpression); ok && c.readonlyClassField(member, sc) {
+				c.error(member.Span(), fmt.Sprintf("field %s is readonly", member.Name))
+			} else {
+				c.requireMutable(n.Target, sc, "assignment")
+			}
 			assignedType := rightType
 			if n.Operator != "=" {
 				if index, ok := n.Target.(*ast.IndexExpression); ok && c.result.Expressions[index.Receiver].Kind == types.Hash {
@@ -728,6 +739,8 @@ func invalidType() types.Type {
 }
 
 func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
+	previousClassMethod := c.classMethod
+	c.classMethod = method.Class
 	methodScope := &scope{parent: parent, values: map[string]symbol{}}
 	for _, parameter := range method.Parameters {
 		typ := fromTypeRef(parameter.Type)
@@ -762,6 +775,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	}
 	c.loopDepth = previousLoopDepth
 	c.returns = c.returns[:len(c.returns)-1]
+	c.classMethod = previousClassMethod
 }
 
 func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
@@ -831,14 +845,14 @@ func (c *Checker) classMethodSignature(className, memberName string, seen map[st
 	}
 	seen[className] = true
 	if info := c.classes[className]; info != nil {
-		if method := info.methods[memberName]; method != nil {
+		if method := info.methods[memberName]; method != nil && !method.Class {
 			return signatureFromMethod(method), true
 		}
 		if signature, ok := c.classMethodSignature(info.superclass, memberName, seen); ok {
 			return signature, true
 		}
 	}
-	if binding, ok := c.resolution.TypeMember(className, memberName); ok && binding.Member != nil && binding.Member.Kind == resolver.FunctionExport {
+	if binding, ok := c.resolution.TypeMember(className, memberName); ok && binding.Member != nil && binding.Member.Kind == resolver.FunctionExport && !binding.Member.Class {
 		return signatureFromResolvedMember(*binding.Member), true
 	}
 	return methodSignature{}, false
@@ -875,40 +889,91 @@ func sameSignature(left, right methodSignature) bool {
 	return true
 }
 
-func (c *Checker) localMember(className, memberName string, seen map[string]bool) (types.Type, *ast.MethodStatement, bool) {
+func (c *Checker) localMember(className, memberName string, class bool, seen map[string]bool) (classMember, bool) {
 	if className == "" || seen[className] {
-		return types.Type{}, nil, false
+		return classMember{}, false
 	}
 	seen[className] = true
 	if info := c.classes[className]; info != nil {
-		if method := info.methods[memberName]; method != nil {
-			return methodReturnType(method), method, true
+		if method := info.methods[memberName]; method != nil && method.Class == class {
+			return classMember{typ: methodReturnType(method), method: method}, true
 		}
-		if field := info.fields["@"+memberName]; field != nil {
-			return fromTypeRef(field.Type), nil, true
+		if !class {
+			if field := info.fields["@"+memberName]; field != nil {
+				return classMember{typ: fromTypeRef(field.Type), field: field}, true
+			}
+			if field := info.fields["@_"+strings.TrimPrefix(memberName, "_")]; field != nil {
+				return classMember{typ: fromTypeRef(field.Type), field: field}, true
+			}
 		}
-		if field := info.fields["@_"+strings.TrimPrefix(memberName, "_")]; field != nil {
-			return fromTypeRef(field.Type), nil, true
-		}
-		if typ, method, ok := c.localMember(info.superclass, memberName, seen); ok {
-			return typ, method, true
+		if member, ok := c.localMember(info.superclass, memberName, class, seen); ok {
+			return member, true
 		}
 	}
-	return types.Type{}, nil, false
+	return classMember{}, false
 }
 
-func (c *Checker) importedAncestorMember(className, memberName string, seen map[string]bool) (resolver.Binding, bool) {
+func (c *Checker) importedAncestorMember(className, memberName string, class bool, seen map[string]bool) (resolver.Binding, bool) {
 	if className == "" || seen[className] {
 		return resolver.Binding{}, false
 	}
 	seen[className] = true
-	if binding, ok := c.resolution.TypeMember(className, memberName); ok {
+	if binding, ok := c.resolution.TypeMember(className, memberName); ok && binding.Member != nil && binding.Member.Class == class {
 		return binding, true
 	}
 	if info := c.classes[className]; info != nil {
-		return c.importedAncestorMember(info.superclass, memberName, seen)
+		return c.importedAncestorMember(info.superclass, memberName, class, seen)
 	}
 	return resolver.Binding{}, false
+}
+
+func (c *Checker) readonlyClassField(member *ast.MemberExpression, sc *scope) bool {
+	receiverType := c.result.Expressions[member.Receiver]
+	if receiverType.Kind == types.Invalid || receiverType.Name == "" {
+		receiverType = c.checkExpression(member.Receiver, sc)
+	}
+	if local, ok := c.localMember(receiverType.Name, member.Name, false, map[string]bool{}); ok && local.field != nil {
+		return local.field.ReadOnly
+	}
+	if binding, ok := c.importedAncestorMember(receiverType.Name, member.Name, false, map[string]bool{}); ok && binding.Member != nil {
+		return binding.Member.Readonly
+	}
+	return false
+}
+
+func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		if node.Name == "self" {
+			return c.current != nil && c.classMethod
+		}
+		if _, exists := sc.lookup(node.Name); exists {
+			return false
+		}
+		if declared, exists := c.declaredTypes[node.Name]; exists {
+			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module"
+		}
+		if _, exists := c.declarations().Type(node.Name); exists {
+			return true
+		}
+		if binding, exists := c.result.References[node]; exists && binding.Export != nil {
+			switch binding.Export.Kind {
+			case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport:
+				return true
+			}
+		}
+	case *ast.MemberExpression:
+		return node.Namespace
+	}
+	return false
+}
+
+func (c *Checker) memberKindMismatch(span token.Span, className, memberName string, class bool) {
+	if class {
+		c.error(span, fmt.Sprintf("class %s has no class member %s; %s is an instance member", className, memberName, memberName))
+		return
+	}
+	c.error(span, fmt.Sprintf("class %s has no instance member %s; %s is a class member", className, memberName, memberName))
 }
 
 func (c *Checker) declarations() *declaration.Catalog {
@@ -1166,6 +1231,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = types.Type{Kind: types.Void, Name: "Void"}
 	case *ast.MemberExpression:
 		receiverType := c.checkExpression(n.Receiver, sc)
+		classAccess := c.classMemberAccess(n.Receiver, sc)
 		if receiverType.Kind == types.Array && n.Name == "push" {
 			typ = types.Type{Kind: types.Void, Name: "Void"}
 			break
@@ -1198,6 +1264,16 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.error(n.Span(), fmt.Sprintf("enum %s has no member %s", receiverType.Name, n.Name))
 			break
 		}
+		if n.Name == "new" && !classAccess {
+			constructorType := c.classes[receiverType.Name] != nil || c.records[receiverType.Name] != nil
+			if imported, exists := c.resolution.ImportedType(receiverType.Name); exists && imported.Export != nil {
+				constructorType = constructorType || imported.Export.Kind == resolver.ClassExport || imported.Export.Kind == resolver.RecordExport
+			}
+			if constructorType {
+				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, false)
+				break
+			}
+		}
 		if strings.HasPrefix(n.Name, "_") {
 			self, ok := n.Receiver.(*ast.Identifier)
 			if !ok || (self.Name != "self" && !strings.HasPrefix(self.Name, "@")) {
@@ -1206,16 +1282,28 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if record := c.records[receiverType.Name]; record != nil && record.byName[n.Name] != nil {
 			typ = fromTypeRef(record.byName[n.Name].Type)
-		} else if memberType, _, found := c.localMember(receiverType.Name, n.Name, map[string]bool{}); found {
-			typ = memberType
-		} else if binding, exists := c.importedAncestorMember(receiverType.Name, n.Name, map[string]bool{}); exists {
+		} else if member, found := c.localMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); found {
+			typ = member.typ
+		} else if binding, exists := c.importedAncestorMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = binding.Type()
 			c.result.References[n] = binding
-		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, declarationClassAccess(n.Receiver), map[string]bool{}); exists {
+		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = member.Return
 			c.external[n] = member
 		} else if n.Name != "new" {
-			if imported, exists := c.resolution.ImportedType(receiverType.Name); exists {
+			if _, exists := c.localMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
+				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
+			} else if _, exists := c.importedAncestorMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
+				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
+			} else if _, exists := c.declarationMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
+				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
+			} else if c.classes[receiverType.Name] != nil {
+				kind := "instance"
+				if classAccess {
+					kind = "class"
+				}
+				c.error(n.Span(), fmt.Sprintf("class %s has no %s member %s", receiverType.Name, kind, n.Name))
+			} else if imported, exists := c.resolution.ImportedType(receiverType.Name); exists {
 				c.error(n.Span(), fmt.Sprintf("type %s imported from %s has no member %s", receiverType.Name, imported.Import.Path, n.Name))
 			} else if declared, exists := c.declarations().Type(receiverType.Name); exists {
 				c.error(n.Span(), fmt.Sprintf("type %s provided by Rails has no member %s", declared.Name, n.Name))
@@ -1255,12 +1343,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		} else if member, ok := n.Callee.(*ast.MemberExpression); ok {
 			receiverType := c.checkExpression(member.Receiver, sc)
+			classAccess := c.classMemberAccess(member.Receiver, sc)
 			if receiverType.Kind == types.Array && member.Name == "push" {
 				c.checkArrayPush(n, member, receiverType, argumentTypes, sc)
 				typ = types.Type{Kind: types.Void, Name: "Void"}
-			} else if _, method, found := c.localMember(receiverType.Name, member.Name, map[string]bool{}); found && method != nil {
-				typ = methodReturnType(method)
-				c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
+			} else if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
+				typ = methodReturnType(local.method)
+				c.checkArguments(n.Span(), local.method, n.Arguments, argumentTypes)
 			}
 		}
 		if identifier, ok := n.Callee.(*ast.Identifier); ok {
@@ -1270,8 +1359,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				// The library-provider signature was checked above.
 			} else if c.current != nil && c.current.methods[identifier.Name] != nil {
 				method := c.current.methods[identifier.Name]
-				typ = methodReturnType(method)
-				c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
+				if method.Class != c.classMethod {
+					c.memberKindMismatch(identifier.Span(), c.current.name, identifier.Name, c.classMethod)
+				} else {
+					typ = methodReturnType(method)
+					c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
+				}
 			} else if method := c.functions[identifier.Name]; method != nil {
 				typ = methodReturnType(method)
 				c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
@@ -1615,17 +1708,6 @@ func includedModule(text string) string {
 		return ""
 	}
 	return strings.TrimSuffix(fields[1], ",")
-}
-
-func declarationClassAccess(expression ast.Expression) bool {
-	switch node := expression.(type) {
-	case *ast.Identifier:
-		return isConstant(node.Name)
-	case *ast.MemberExpression:
-		return node.Namespace && declarationClassAccess(node.Receiver)
-	default:
-		return false
-	}
 }
 
 func integerLiteral(raw string) (int, bool) {

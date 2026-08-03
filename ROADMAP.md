@@ -17,6 +17,9 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
   nullable/optional semantics.
 - Define mutation effects for methods and parameters so immutable values remain
   safe across calls, not only assignments and known collection operations.
+- Complete the portable class model with explicit superclass construction and
+  `super` semantics, initialization order, override rules, generic classes, and
+  a backend-safe decision for field/method name collisions.
 - Specify module visibility, initialization order, constant evaluation, and
   cross-file semantics completely.
 - Expand the self-host tree until the lexer, parser, checker, and formatter can
@@ -87,6 +90,20 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
   migration guide for every breaking release.
 - Add performance benchmarks, crash reporting guidance, security policy, and a
   predictable release cadence.
+
+## Exploratory: native TypeRB runtime
+
+A future `mode: trb` may execute checked TypeRB through typed IR or cached
+bytecode without emitting Ruby, Go, or TypeScript source. The existing REPL
+evaluator is an early implementation seed, not a production runtime.
+
+This is intentionally only a possibility, not a committed target or release
+item. Promoting it to a public mode would require a runtime object model,
+module loading, source-mapped failures, portable filesystem/process/network
+adapters, dependency and distribution rules, and a clear story for code that
+currently imports another mode's platform packages. Internal evaluator work
+for REPL, tests, self-hosting, and backend conformance may proceed without
+committing TypeRB to shipping this mode.
 
 ## Practical-readiness gates
 

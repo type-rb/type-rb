@@ -32,6 +32,8 @@ Implemented:
 - Independent syntax AST and typed IR.
 - Resolver/type checker with local inference, assignment/return checks, field
   initialization checks, duplicate detection, and private-member checks.
+- Checked separation of class and instance members, imported/inherited
+  `readonly` field enforcement, and REPL evaluation of class constants.
 - Immutable `:=` bindings, explicit `mut` for reassignment and destructive
   Array updates, and runtime-initialized uppercase constants scoped to the top
   level, modules, or classes.
