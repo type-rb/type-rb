@@ -44,12 +44,13 @@ type recordDefinition struct {
 type enumDefinition struct {
 	Module  string
 	Node    *ir.Enum
-	Members map[string]bool
+	Members map[string]*ir.EnumMember
 }
 
 type enumValue struct {
 	Definition *enumDefinition
 	Name       string
+	Payload    map[string]Value
 }
 
 type classDefinition struct {
@@ -212,10 +213,10 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
 			}
 			e.definitions[symbolKey(module, node.Name)] = definition
 		case *ir.Enum:
-			definition := &enumDefinition{Module: module, Node: node, Members: map[string]bool{}}
+			definition := &enumDefinition{Module: module, Node: node, Members: map[string]*ir.EnumMember{}}
 			for _, statement := range node.Body {
 				if member, ok := statement.(*ir.EnumMember); ok {
-					definition.Members[member.Name] = true
+					definition.Members[member.Name] = member
 				}
 			}
 			e.definitions[symbolKey(module, node.Name)] = definition
@@ -393,6 +394,17 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 			return flowResult{}, err
 		}
 		for _, branch := range node.Branches {
+			if branch.PayloadEnum {
+				variant, ok := value.Data.(*enumValue)
+				if !ok || variant.Name != branch.Member {
+					continue
+				}
+				branchScope := &scope{parent: sc, values: map[string]Value{}}
+				for _, binding := range branch.Bindings {
+					branchScope.values[binding.Name] = variant.Payload[binding.Field]
+				}
+				return e.evaluate(branch.Body, module, branchScope)
+			}
 			candidate, err := e.expression(branch.Value, module, sc)
 			if err != nil {
 				return flowResult{}, err
@@ -623,6 +635,32 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return e.intrinsic(function.Intrinsic, arguments, node.ExprType())
 		}
 		return e.call(function, arguments)
+	case *ir.EnumConstruct:
+		definitionModule := module
+		if node.Reference != nil && node.Reference.Package != "" {
+			definitionModule = node.Reference.Package
+		}
+		symbol, ok := e.symbol(definitionModule, node.EnumName)
+		if !ok {
+			return Value{}, fmt.Errorf("enum %s is not available in the REPL environment", node.EnumName)
+		}
+		typeDefinition, ok := symbol.Data.(*typeValue)
+		if !ok || typeDefinition.Enum == nil {
+			return Value{}, fmt.Errorf("%s is not an enum", node.EnumName)
+		}
+		member := typeDefinition.Enum.Members[node.Member]
+		if member == nil {
+			return Value{}, fmt.Errorf("enum %s has no member %s", node.EnumName, node.Member)
+		}
+		payload := map[string]Value{}
+		for index, field := range member.Fields {
+			value, err := e.expression(node.Arguments[index], module, sc)
+			if err != nil {
+				return Value{}, err
+			}
+			payload[field.Name] = value
+		}
+		return Value{Type: node.ExprType(), Data: &enumValue{Definition: typeDefinition.Enum, Name: node.Member, Payload: payload}}, nil
 	case *ir.Index:
 		receiver, err := e.expression(node.Receiver, module, sc)
 		if err != nil {
@@ -814,8 +852,10 @@ func (e *Evaluator) member(receiver Value, name, module string) (Value, error) {
 				return Value{Type: method.ReturnType, Data: &callable{Method: method, Receiver: receiver, Module: value.Class.Module}}, nil
 			}
 		}
-		if value.Enum != nil && value.Enum.Members[name] {
-			return Value{Type: types.FromName(value.Enum.Node.Name), Data: &enumValue{Definition: value.Enum, Name: name}}, nil
+		if value.Enum != nil {
+			if member := value.Enum.Members[name]; member != nil && len(member.Fields) == 0 {
+				return Value{Type: types.FromName(value.Enum.Node.Name), Data: &enumValue{Definition: value.Enum, Name: name, Payload: map[string]Value{}}}, nil
+			}
 		}
 	}
 	return Value{}, fmt.Errorf("%s has no member %s", receiver.Type, name)
@@ -1406,7 +1446,15 @@ func Inspect(value Value) string {
 			return item.Enum.Node.Name
 		}
 	case *enumValue:
-		return item.Definition.Node.Name + "::" + item.Name
+		if len(item.Payload) == 0 {
+			return item.Definition.Node.Name + "::" + item.Name
+		}
+		member := item.Definition.Members[item.Name]
+		parts := make([]string, 0, len(member.Fields))
+		for _, field := range member.Fields {
+			parts = append(parts, field.Name+": "+Inspect(item.Payload[field.Name]))
+		}
+		return item.Definition.Node.Name + "::" + item.Name + "(" + strings.Join(parts, ", ") + ")"
 	case map[string]string:
 		return "#<" + value.Type.String() + ">"
 	}

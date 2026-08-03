@@ -133,8 +133,9 @@ mode by itself does not enable them.
   and `**` accept matching numeric types. `%` accepts two `Integer` values.
 - `<`, `<=`, `>`, and `>=` compare matching numeric types. Portable `==` and
   `!=` compare matching non-nullable scalar types (`Boolean`, `Integer`,
-  `Float`, and `String`), two values of the same enum type, or a nullable value
-  with `nil`.
+  `Float`, and `String`), two values of the same payloadless enum type, or a
+  nullable value with `nil`. Equality for payload-bearing enums is reserved
+  until one structural rule can be implemented identically by every backend.
 - `&&`, `||`, `and`, and `or` accept two non-nullable `Boolean` values and
   return `Boolean`. Compound assignments apply the corresponding binary rule
   before checking that the result remains assignable to the mutable target.
@@ -189,34 +190,45 @@ the type of each array-like position and a `record` retains the type of each
 named field. `Array<Integer | String>[0]` therefore remains
 `Integer | String`; exact constant-index inference belongs to Tuple.
 
-### 3.13 Enums and exhaustive case
+### 3.13 Enums, payloads, and exhaustive case
 
-- A payloadless enum is a closed nominal type declared with `enum Name`, one
-  uppercase member per line, and `end`. Enum declarations are allowed at top
-  level or directly inside a module.
+- An enum is a closed nominal type declared with `enum Name`, uppercase
+  members, and `end`. Enum declarations are allowed at top level or directly
+  inside a module.
+- A payloadless member is written `Ready`. A payload-bearing member is written
+  `Value(value: String)` using one or more required, positional, typed fields.
+  Default, keyword, rest, and untyped payload fields are rejected.
 - Members are explicitly qualified with `EnumName::Member`. They infer the
   enum's nominal type and cannot be mixed with members of another enum even
   when the member names match.
-- Portable `case` initially dispatches on enum values. Each `when` accepts
-  exactly one member of the selected enum; duplicate branches are errors.
+- A payload value is constructed with `EnumName::Member(value, ...)`.
+  Payloadless members are values and are not callable.
+- Portable `case` dispatches on enum variants. A payload pattern such as
+  `when Token::Text(value)` introduces immutable bindings whose types come from
+  the variant declaration. v0.1 patterns bind every payload field positionally;
+  partial patterns, guards, nested patterns, and wildcard syntax are reserved.
+  Duplicate branches and duplicate bindings are errors.
 - Without `else`, a case must list every member. With `else`, omitted members
   are handled by that branch. The selector is evaluated exactly once in every
   backend and the REPL.
-- Payload-bearing variants may extend `enum` later. TypeRB does not introduce a
-  separate `sum` declaration in v0.1.
+- A separate `sum` declaration is not introduced: payload-bearing enum members
+  provide the closed sum-type model.
 
 ```trb
-enum State
-	Open
-	Closed
+enum Token
+	Text(value: String)
+	Integer(value: Integer)
+	EOF
 end
 
-def label(state: State): String
-	case state
-	when State::Open
-		return "open"
-	when State::Closed
-		return "closed"
+def describe(token: Token): String
+	case token
+	when Token::Text(value)
+		return value
+	when Token::Integer(value)
+		return value.to_s()
+	when Token::EOF
+		return "eof"
 	end
 end
 ```

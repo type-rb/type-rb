@@ -92,7 +92,8 @@ func (*Enum) irStatement() {}
 
 type EnumMember struct {
 	Base
-	Name string
+	Name   string
+	Fields []Parameter
 }
 
 func (*EnumMember) irStatement() {}
@@ -202,8 +203,18 @@ func (*If) irStatement() {}
 
 type CaseBranch struct {
 	Base
-	Value Expression
-	Body  []Statement
+	Value       Expression
+	EnumName    string
+	Member      string
+	Bindings    []CaseBinding
+	PayloadEnum bool
+	Body        []Statement
+}
+
+type CaseBinding struct {
+	Name  string
+	Field string
+	Type  types.Type
 }
 
 type Case struct {
@@ -359,6 +370,19 @@ type Call struct {
 }
 
 func (*Call) irExpression() {}
+
+// EnumConstruct preserves nominal variant construction through lowering. It
+// must not become an ordinary call because every backend uses a different
+// runtime representation for payload enums.
+type EnumConstruct struct {
+	ExprBase
+	EnumName  string
+	Member    string
+	Arguments []Expression
+	Reference *Reference
+}
+
+func (*EnumConstruct) irExpression() {}
 
 type Member struct {
 	ExprBase

@@ -71,7 +71,11 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 	case *ast.EnumStatement:
 		return &ir.Enum{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
 	case *ast.EnumMemberStatement:
-		return &ir.EnumMember{Base: base(n.Base), Name: n.Name}
+		member := &ir.EnumMember{Base: base(n.Base), Name: n.Name}
+		for _, field := range n.Parameters {
+			member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: lowerType(field.Type)})
+		}
+		return member
 	case *ast.ModuleStatement:
 		return &ir.Module{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
 	case *ast.InterfaceStatement:
@@ -145,11 +149,20 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			HasElse: n.HasElse,
 		}
 		for _, branch := range n.Branches {
-			result.Branches = append(result.Branches, ir.CaseBranch{
+			lowered := ir.CaseBranch{
 				Base:  base(branch.Base),
 				Value: l.expression(branch.Value),
 				Body:  l.statements(branch.Body),
-			})
+			}
+			if pattern, ok := l.checked.CasePatterns[branch.Value]; ok {
+				lowered.EnumName = pattern.Variant.EnumName
+				lowered.Member = pattern.Variant.Name
+				lowered.PayloadEnum = pattern.PayloadEnum
+				for _, binding := range pattern.Bindings {
+					lowered.Bindings = append(lowered.Bindings, ir.CaseBinding{Name: binding.Name, Field: binding.Field.Name, Type: binding.Field.Type})
+				}
+			}
+			result.Branches = append(result.Branches, lowered)
 		}
 		return result
 	case *ast.WhileStatement:
@@ -201,6 +214,13 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 	case *ast.RangeExpression:
 		return &ir.Range{ExprBase: base, Start: l.expression(n.Start), End: l.expression(n.End), Exclusive: n.Exclusive}
 	case *ast.CallExpression:
+		if variant, ok := l.checked.EnumConstructors[n]; ok {
+			result := &ir.EnumConstruct{ExprBase: base, EnumName: variant.EnumName, Member: variant.Name, Reference: l.reference(n.Callee)}
+			for _, argument := range n.Arguments {
+				result.Arguments = append(result.Arguments, l.expression(argument.Value))
+			}
+			return result
+		}
 		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee)}
 		for _, argument := range n.Arguments {
 			result.Arguments = append(result.Arguments, ir.CallArgument{Name: argument.Name, Value: l.expression(argument.Value), Splat: argument.Splat})

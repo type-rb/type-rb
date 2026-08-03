@@ -238,8 +238,16 @@ func (g *generator) statement(statement ir.Statement) {
 			if index > 0 {
 				header = "} else if "
 			}
-			g.line(header + value + " == " + g.expr(branch.Value) + " {" + goTrailingComment(branch.TrailingComment))
+			condition := value + " == " + g.expr(branch.Value)
+			if branch.PayloadEnum {
+				condition = value + ".Kind == " + g.enumTag(branch)
+			}
+			g.line(header + condition + " {" + goTrailingComment(branch.TrailingComment))
 			g.indent++
+			for _, binding := range branch.Bindings {
+				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
+				g.line(goIdentifier(binding.Name, false) + " := " + value + "." + field)
+			}
 			g.statements(branch.Body)
 			g.indent--
 		}
@@ -375,6 +383,10 @@ func (g *generator) record(record *ir.Record) {
 
 func (g *generator) enum(enum *ir.Enum) {
 	name := goIdentifier(enum.Name, true)
+	if enumHasPayload(enum) {
+		g.payloadEnum(enum, name)
+		return
+	}
 	g.line("type " + name + " int" + goTrailingComment(enum.TrailingComment))
 	g.b.WriteByte('\n')
 	g.line("const (")
@@ -396,6 +408,91 @@ func (g *generator) enum(enum *ir.Enum) {
 	g.indent--
 	g.line(")")
 	g.b.WriteByte('\n')
+}
+
+func (g *generator) payloadEnum(enum *ir.Enum, name string) {
+	tagType := name + "Tag"
+	g.line("type " + tagType + " int" + goTrailingComment(enum.TrailingComment))
+	g.b.WriteByte('\n')
+	g.line("const (")
+	g.indent++
+	first := true
+	for _, statement := range enum.Body {
+		switch member := statement.(type) {
+		case *ir.Comment:
+			g.statement(member)
+		case *ir.EnumMember:
+			line := goConstantIdentifier(enum.Name, member.Name) + "Tag"
+			if first {
+				line += " " + tagType + " = iota"
+				first = false
+			}
+			g.line(line + goTrailingComment(member.TrailingComment))
+		}
+	}
+	g.indent--
+	g.line(")")
+	g.b.WriteByte('\n')
+
+	g.line("type " + name + " struct {")
+	g.indent++
+	g.line("Kind " + tagType)
+	for _, statement := range enum.Body {
+		member, ok := statement.(*ir.EnumMember)
+		if !ok {
+			continue
+		}
+		for _, field := range member.Fields {
+			fieldName := goIdentifier(member.Name, true) + goIdentifier(field.Name, true)
+			g.line(fieldName + " " + g.goType(field.Type))
+		}
+	}
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+
+	for _, statement := range enum.Body {
+		member, ok := statement.(*ir.EnumMember)
+		if !ok {
+			continue
+		}
+		constant := goConstantIdentifier(enum.Name, member.Name)
+		if len(member.Fields) == 0 {
+			g.line("var " + constant + " = " + name + "{Kind: " + constant + "Tag}")
+			continue
+		}
+		constructor := "New" + goIdentifier(enum.Name, true) + goIdentifier(member.Name, true)
+		g.line("func " + constructor + "(" + g.parameters(member.Fields) + ") " + name + " {")
+		g.indent++
+		fields := []string{"Kind: " + constant + "Tag"}
+		for _, field := range member.Fields {
+			fieldName := goIdentifier(member.Name, true) + goIdentifier(field.Name, true)
+			fields = append(fields, fieldName+": "+goIdentifier(field.Name, false))
+		}
+		g.line("return " + name + "{" + strings.Join(fields, ", ") + "}")
+		g.indent--
+		g.line("}")
+	}
+	g.b.WriteByte('\n')
+}
+
+func enumHasPayload(enum *ir.Enum) bool {
+	for _, statement := range enum.Body {
+		if member, ok := statement.(*ir.EnumMember); ok && len(member.Fields) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *generator) enumTag(branch ir.CaseBranch) string {
+	name := goConstantIdentifier(branch.EnumName, branch.Member) + "Tag"
+	if member, ok := branch.Value.(*ir.Member); ok {
+		if alias := g.referenceAlias(member.Reference); alias != "" {
+			return alias + "." + name
+		}
+	}
+	return name
 }
 
 func (g *generator) statements(statements []ir.Statement) {
@@ -667,6 +764,16 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 		}
 		return g.expr(n.Callee) + "(" + args + ")"
+	case *ir.EnumConstruct:
+		parts := make([]string, len(n.Arguments))
+		for index, argument := range n.Arguments {
+			parts[index] = g.expr(argument)
+		}
+		name := "New" + goIdentifier(n.EnumName, true) + goIdentifier(n.Member, true)
+		if alias := g.referenceAlias(n.Reference); alias != "" {
+			name = alias + "." + name
+		}
+		return name + "(" + strings.Join(parts, ", ") + ")"
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()

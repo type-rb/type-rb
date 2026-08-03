@@ -24,6 +24,8 @@ func TestCompleteTracksBlocksAndDelimiters(t *testing.T) {
 		{"enum State\n\tOpen", false},
 		{"enum State\n\tOpen\nend", true},
 		{"enum State; Open; Closed; end", true},
+		{"enum Token\n\tText(value: String)", false},
+		{"enum Token\n\tText(value: String)\n\tEOF\nend", true},
 		{"case State::Open\nwhen State::Open\n\t1", false},
 		{"case State::Open\nwhen State::Open\n\t1\nend", true},
 		{"case State::Open; when State::Open; 1; end", true},

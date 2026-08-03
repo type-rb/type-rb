@@ -322,6 +322,34 @@ func TestReplEvaluatesSemicolonSeparatedDeclarations(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPayloadEnumPatternBindings(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-payload-enum-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "enum Token; Text(value: String); EOF; end\n" +
+		"def render(token: Token): String; case token; when Token::Text(value); return value; when Token::EOF; return \"eof\"; end; end\n" +
+		"render(Token::Text(\"Ada\"))\n" +
+		"Token::Text(\"Ada\")\n" +
+		":quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "\"Ada\" : String\nToken::Text(value: \"Ada\") : Token\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplRequiresProjectConfiguration(t *testing.T) {
 	root := t.TempDir()
 	previous, err := os.Getwd()

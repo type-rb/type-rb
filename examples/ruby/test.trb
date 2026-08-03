@@ -10,8 +10,23 @@ class Greeter
 	end
 end
 
+enum Recipient
+	Named(name: String)
+	Anonymous
+end
+
+def recipient_name(recipient: Recipient): String
+	case recipient
+	when Recipient::Named(name)
+		return name
+	when Recipient::Anonymous
+		return "friend"
+	end
+end
+
 def main()
 	greeter := Greeter.new()
-	io.puts(strings.uppercase(greeter.greet("TypeRB"))) # trb fmt keeps this comment.
+	recipient := Recipient::Named("TypeRB")
+	io.puts(strings.uppercase(greeter.greet(recipient_name(recipient)))) # trb fmt keeps this comment.
 	return
 end

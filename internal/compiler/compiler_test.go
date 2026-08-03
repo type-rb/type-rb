@@ -1078,6 +1078,125 @@ end
 	}
 }
 
+func TestPayloadEnumAndPatternBindingAcrossModes(t *testing.T) {
+	source := []byte(`enum Token
+	Text(value: String)
+	Pair(left: Integer, right: Integer)
+	EOF
+end
+
+def render(token: Token): String
+	case token
+	when Token::Text(value)
+		return value
+	when Token::Pair(left, right)
+		return "#{left}:#{right}"
+	when Token::EOF
+		return "eof"
+	end
+end
+
+def main()
+	puts(render(Token::Text("hello")))
+	return
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("payload_enum.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected payload enum: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	for _, want := range []string{
+		"type TokenTag int",
+		"type Token struct",
+		"func NewTokenText(value string) Token",
+		"NewTokenText(\"hello\")",
+		"__trbCase1.Kind == TokenTextTag",
+		"value := __trbCase1.TextValue",
+	} {
+		if !strings.Contains(goOutput, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "payload_enum.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, goOutput)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated payload enum Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	rubyOutput := string(artifacts["ruby"].Output)
+	for _, want := range []string{
+		"module Token",
+		"Text = Data.define(:value)",
+		"EOF = Data.define().new",
+		"Token::Text.new(\"hello\")",
+		"value = __trb_case1.value",
+	} {
+		if !strings.Contains(rubyOutput, want) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
+		}
+	}
+
+	typescriptOutput := string(artifacts["typescript"].Output)
+	for _, want := range []string{
+		`export type Token = { readonly kind: "Text"; readonly value: string }`,
+		`Text: (value: string): Token => ({ kind: "Text", value })`,
+		`Token.Text("hello")`,
+		`__trbCase1.kind === "Text"`,
+		`const value = __trbCase1.value;`,
+	} {
+		if !strings.Contains(typescriptOutput, want) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
+		}
+	}
+
+	enum := artifacts["go"].AST.Statements[0].(*ast.EnumStatement)
+	member := enum.Body[0].(*ast.EnumMemberStatement)
+	if len(member.Parameters) != 1 || member.Parameters[0].Name != "value" {
+		t.Fatalf("payload declaration was not retained in AST: %#v", member.Parameters)
+	}
+	method := artifacts["go"].IR.Statements[1].(*ir.Method)
+	caseStatement := method.Body[0].(*ir.Case)
+	if len(caseStatement.Branches[0].Bindings) != 1 || caseStatement.Branches[0].Bindings[0].Type.String() != "String" {
+		t.Fatalf("typed pattern binding was not retained in IR: %#v", caseStatement.Branches[0])
+	}
+}
+
+func TestPayloadEnumDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"missing payload type", "enum Token\n\tText(value)\nend\n", "enum payload value requires a name and type"},
+		{"constructor type", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text(1)\nend\n", "enum payload argument 1 has type Integer, expected String"},
+		{"constructor arity", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text()\nend\n", "expects 1 payload argument(s), got 0"},
+		{"payload member value", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text\nend\n", "requires 1 payload argument(s)"},
+		{"payloadless call", "enum Token\n\tEOF\nend\ndef bad(): Token\n\treturn Token::EOF()\nend\n", "has no payload and is not callable"},
+		{"pattern arity", "enum Token\n\tText(value: String)\nend\ndef bad(token: Token): String\n\tcase token\n\twhen Token::Text\n\t\treturn \"bad\"\n\tend\nend\n", "expects 1 binding(s), got 0"},
+		{"payload equality", "enum Token\n\tText(value: String)\nend\ndef bad(left: Token, right: Token): Boolean\n\treturn left == right\nend\n", "operator == does not support Token and Token"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_payload_enum.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestSemicolonSeparatesPortableStatementsAcrossModes(t *testing.T) {
 	source := []byte(`class Empty; end
 enum State; Open; Closed; end

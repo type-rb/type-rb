@@ -17,14 +17,39 @@ import (
 )
 
 type Result struct {
-	Program        *ast.Program
-	Expressions    map[ast.Expression]types.Type
-	Variables      map[*ast.VariableStatement]types.Type
-	Iterations     map[*ast.IterationExpression]types.Type
-	Constants      map[ast.Expression]string
-	ConstantOwners map[*ast.VariableStatement]string
-	Resolution     resolver.Result
-	References     map[ast.Expression]resolver.Binding
+	Program          *ast.Program
+	Expressions      map[ast.Expression]types.Type
+	Variables        map[*ast.VariableStatement]types.Type
+	Iterations       map[*ast.IterationExpression]types.Type
+	Constants        map[ast.Expression]string
+	ConstantOwners   map[*ast.VariableStatement]string
+	Resolution       resolver.Result
+	References       map[ast.Expression]resolver.Binding
+	EnumConstructors map[*ast.CallExpression]EnumVariant
+	CasePatterns     map[ast.Expression]CasePattern
+}
+
+type EnumField struct {
+	Name string
+	Type types.Type
+}
+
+type EnumVariant struct {
+	EnumName  string
+	Name      string
+	Fields    []EnumField
+	Reference *resolver.Binding
+}
+
+type CaseBinding struct {
+	Name  string
+	Field EnumField
+}
+
+type CasePattern struct {
+	Variant     EnumVariant
+	Bindings    []CaseBinding
+	PayloadEnum bool
 }
 
 type symbol struct {
@@ -101,20 +126,24 @@ type Checker struct {
 	resolution    resolver.Result
 	external      map[ast.Expression]declaration.Member
 	declaredTypes map[string]typeDeclaration
+	enumCallee    int
+	enumPattern   int
 }
 
 func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnostic.Diagnostic) {
 	c := &Checker{
 		mode: program.Mode,
 		result: Result{
-			Program:        program,
-			Expressions:    map[ast.Expression]types.Type{},
-			Variables:      map[*ast.VariableStatement]types.Type{},
-			Iterations:     map[*ast.IterationExpression]types.Type{},
-			Constants:      map[ast.Expression]string{},
-			ConstantOwners: map[*ast.VariableStatement]string{},
-			Resolution:     resolution,
-			References:     map[ast.Expression]resolver.Binding{},
+			Program:          program,
+			Expressions:      map[ast.Expression]types.Type{},
+			Variables:        map[*ast.VariableStatement]types.Type{},
+			Iterations:       map[*ast.IterationExpression]types.Type{},
+			Constants:        map[ast.Expression]string{},
+			ConstantOwners:   map[*ast.VariableStatement]string{},
+			Resolution:       resolution,
+			References:       map[ast.Expression]resolver.Binding{},
+			EnumConstructors: map[*ast.CallExpression]EnumVariant{},
+			CasePatterns:     map[ast.Expression]CasePattern{},
 		},
 		classes:       map[string]*classInfo{},
 		records:       map[string]*recordInfo{},
@@ -145,6 +174,10 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement) {
 			c.validateTypeReferences(node.Body)
 		case *ast.EnumStatement:
 			c.validateTypeReferences(node.Body)
+		case *ast.EnumMemberStatement:
+			for _, parameter := range node.Parameters {
+				c.validateTypeReference(parameter.Type)
+			}
 		case *ast.RecordFieldStatement:
 			c.validateTypeReference(node.Type)
 		case *ast.ModuleStatement:
@@ -353,8 +386,25 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 				c.error(n.Span(), fmt.Sprintf("enum %s must declare at least one member", n.Name))
 			}
 			for _, statement := range n.Body {
-				if member, ok := statement.(*ast.EnumMemberStatement); ok && !isConstant(member.Name) {
+				member, ok := statement.(*ast.EnumMemberStatement)
+				if !ok {
+					continue
+				}
+				if !isConstant(member.Name) {
 					c.error(member.Span(), "enum member must begin with an uppercase letter")
+				}
+				seenFields := map[string]bool{}
+				for _, parameter := range member.Parameters {
+					if parameter.Name == "" || parameter.Type.Empty() {
+						c.error(parameter.Span(), fmt.Sprintf("enum payload %s requires a name and type", parameter.Name))
+					}
+					if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest {
+						c.error(parameter.Span(), "enum payload fields must be required positional values")
+					}
+					if seenFields[parameter.Name] {
+						c.error(parameter.Span(), fmt.Sprintf("enum payload field %s is duplicated", parameter.Name))
+					}
+					seenFields[parameter.Name] = true
 				}
 			}
 		case *ast.EnumMemberStatement:
@@ -522,7 +572,7 @@ func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, co
 
 func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 	selectorType := c.checkExpression(node.Value, sc)
-	members, enum := c.enumMembers(selectorType)
+	variants, enum := c.enumVariants(selectorType)
 	if !enum && selectorType.Kind != types.Invalid {
 		c.error(node.Value.Span(), fmt.Sprintf("case value must be an enum, got %s", selectorType))
 	}
@@ -535,18 +585,45 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 
 	seen := map[string]bool{}
 	for _, branch := range node.Branches {
+		c.enumPattern++
 		branchType := c.checkExpression(branch.Value, sc)
-		memberName, member := c.caseEnumMember(branch.Value, selectorType)
+		c.enumPattern--
+		variant, member := c.caseEnumVariant(branch.Value, selectorType)
 		if !member || !types.Equivalent(selectorType, branchType) {
 			if selectorType.Kind != types.Invalid {
 				c.error(branch.Value.Span(), fmt.Sprintf("when value must be a member of %s", selectorType))
 			}
-		} else if seen[memberName] {
-			c.error(branch.Value.Span(), fmt.Sprintf("enum member %s is handled more than once", memberName))
+		} else if seen[variant.Name] {
+			c.error(branch.Value.Span(), fmt.Sprintf("enum member %s is handled more than once", variant.Name))
 		} else {
-			seen[memberName] = true
+			seen[variant.Name] = true
 		}
-		c.checkStatements(branch.Body, &scope{parent: sc, values: map[string]symbol{}})
+
+		branchScope := &scope{parent: sc, values: map[string]symbol{}}
+		if member {
+			if len(branch.Bindings) != len(variant.Fields) {
+				c.error(branch.Value.Span(), fmt.Sprintf("enum pattern %s::%s expects %d binding(s), got %d", variant.EnumName, variant.Name, len(variant.Fields), len(branch.Bindings)))
+			}
+			bindings := make([]CaseBinding, 0, len(branch.Bindings))
+			for index, binding := range branch.Bindings {
+				if index >= len(variant.Fields) {
+					break
+				}
+				if _, duplicate := branchScope.values[binding.Name]; duplicate {
+					c.error(binding.Span(), fmt.Sprintf("enum pattern binding %s is duplicated", binding.Name))
+					continue
+				}
+				field := variant.Fields[index]
+				branchScope.values[binding.Name] = symbol{typ: field.Type, span: binding.Span()}
+				bindings = append(bindings, CaseBinding{Name: binding.Name, Field: field})
+			}
+			c.result.CasePatterns[branch.Value] = CasePattern{
+				Variant:     variant,
+				Bindings:    bindings,
+				PayloadEnum: enumHasPayload(variants),
+			}
+		}
+		c.checkStatements(branch.Body, branchScope)
 	}
 	if node.HasElse {
 		c.checkStatements(node.Else, &scope{parent: sc, values: map[string]symbol{}})
@@ -555,10 +632,10 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 	if !enum {
 		return
 	}
-	missing := make([]string, 0, len(members))
-	for _, member := range members {
-		if !seen[member] {
-			missing = append(missing, member)
+	missing := make([]string, 0, len(variants))
+	for _, variant := range variants {
+		if !seen[variant.Name] {
+			missing = append(missing, variant.Name)
 		}
 	}
 	if len(missing) > 0 {
@@ -566,38 +643,127 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 	}
 }
 
-func (c *Checker) enumMembers(typ types.Type) ([]string, bool) {
+func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 	if typ.Nullable {
 		return nil, false
 	}
 	if info := c.enums[typ.Name]; info != nil {
-		return append([]string(nil), info.members...), true
+		variants := make([]EnumVariant, 0, len(info.members))
+		for _, name := range info.members {
+			member := info.byName[name]
+			variant := EnumVariant{EnumName: typ.Name, Name: name}
+			for _, parameter := range member.Parameters {
+				variant.Fields = append(variant.Fields, EnumField{Name: parameter.Name, Type: fromTypeRef(parameter.Type)})
+			}
+			variants = append(variants, variant)
+		}
+		return variants, true
 	}
 	if binding, ok := c.resolution.ImportedType(typ.Name); ok && binding.Export.Kind == resolver.EnumExport {
-		return append([]string(nil), binding.Export.EnumMembers...), true
+		variants := make([]EnumVariant, 0, len(binding.Export.EnumVariants))
+		for _, imported := range binding.Export.EnumVariants {
+			variant := EnumVariant{EnumName: typ.Name, Name: imported.Name}
+			for _, field := range imported.Fields {
+				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: field.Type})
+			}
+			if reference, exists := c.resolution.TypeMember(typ.Name, imported.Name); exists {
+				variant.Reference = &reference
+			}
+			variants = append(variants, variant)
+		}
+		// Catalogs produced before payload metadata still expose member names.
+		if len(variants) == 0 {
+			for _, name := range binding.Export.EnumMembers {
+				variants = append(variants, EnumVariant{EnumName: typ.Name, Name: name})
+			}
+		}
+		return variants, true
 	}
 	return nil, false
 }
 
-func (c *Checker) caseEnumMember(expression ast.Expression, selectorType types.Type) (string, bool) {
+func (c *Checker) enumMembers(typ types.Type) ([]string, bool) {
+	variants, ok := c.enumVariants(typ)
+	if !ok {
+		return nil, false
+	}
+	members := make([]string, len(variants))
+	for index, variant := range variants {
+		members[index] = variant.Name
+	}
+	return members, true
+}
+
+func (c *Checker) caseEnumVariant(expression ast.Expression, selectorType types.Type) (EnumVariant, bool) {
 	member, ok := expression.(*ast.MemberExpression)
 	if !ok || !member.Namespace {
-		return "", false
+		return EnumVariant{}, false
 	}
 	receiverType := c.result.Expressions[member.Receiver]
 	if !types.Equivalent(receiverType, selectorType) {
-		return "", false
+		return EnumVariant{}, false
 	}
-	members, ok := c.enumMembers(selectorType)
+	variants, ok := c.enumVariants(selectorType)
 	if !ok {
-		return "", false
+		return EnumVariant{}, false
 	}
-	for _, name := range members {
-		if name == member.Name {
-			return name, true
+	for _, variant := range variants {
+		if variant.Name == member.Name {
+			return variant, true
 		}
 	}
-	return "", false
+	return EnumVariant{}, false
+}
+
+func enumHasPayload(variants []EnumVariant) bool {
+	for _, variant := range variants {
+		if len(variant.Fields) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func enumVariantNamed(variants []EnumVariant, name string) (EnumVariant, bool) {
+	for _, variant := range variants {
+		if variant.Name == name {
+			return variant, true
+		}
+	}
+	return EnumVariant{}, false
+}
+
+func (c *Checker) enumVariantForMember(member *ast.MemberExpression) (EnumVariant, bool) {
+	if member == nil || !member.Namespace {
+		return EnumVariant{}, false
+	}
+	receiverType := c.result.Expressions[member.Receiver]
+	variants, enum := c.enumVariants(receiverType)
+	if !enum {
+		return EnumVariant{}, false
+	}
+	return enumVariantNamed(variants, member.Name)
+}
+
+func (c *Checker) checkEnumConstructor(call *ast.CallExpression, variant EnumVariant, arguments []types.Type) {
+	if len(variant.Fields) == 0 {
+		c.error(call.Span(), fmt.Sprintf("enum member %s::%s has no payload and is not callable", variant.EnumName, variant.Name))
+		return
+	}
+	if len(call.Arguments) != len(variant.Fields) {
+		c.error(call.Span(), fmt.Sprintf("enum member %s::%s expects %d payload argument(s), got %d", variant.EnumName, variant.Name, len(variant.Fields), len(call.Arguments)))
+	}
+	for index, argument := range call.Arguments {
+		if index >= len(variant.Fields) {
+			break
+		}
+		if argument.Name != "" || argument.Splat != "" {
+			c.error(argument.Value.Span(), "enum payload arguments must be positional values")
+		}
+		if !types.Assignable(variant.Fields[index].Type, arguments[index]) {
+			c.error(argument.Value.Span(), fmt.Sprintf("enum payload argument %d has type %s, expected %s", index+1, arguments[index], variant.Fields[index].Type))
+		}
+	}
 }
 
 func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand types.Type) types.Type {
@@ -728,9 +894,9 @@ func (c *Checker) portableEqualityOperands(left, right types.Type) bool {
 	case types.Bool, types.Int, types.Float, types.String:
 		return true
 	default:
-		_, leftEnum := c.enumMembers(left)
-		_, rightEnum := c.enumMembers(right)
-		return leftEnum && rightEnum && types.Equivalent(left, right)
+		leftVariants, leftEnum := c.enumVariants(left)
+		rightVariants, rightEnum := c.enumVariants(right)
+		return leftEnum && rightEnum && !enumHasPayload(leftVariants) && !enumHasPayload(rightVariants) && types.Equivalent(left, right)
 	}
 }
 
@@ -1247,21 +1413,23 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				break
 			}
 		}
-		if _, enum := c.enumMembers(receiverType); enum {
+		if variants, enum := c.enumVariants(receiverType); enum {
 			if !n.Namespace {
 				c.error(n.Span(), fmt.Sprintf("enum member %s must be accessed with ::", n.Name))
 				break
 			}
-			if local := c.enums[receiverType.Name]; local != nil && local.byName[n.Name] != nil {
-				typ = receiverType
+			variant, found := enumVariantNamed(variants, n.Name)
+			if !found {
+				c.error(n.Span(), fmt.Sprintf("enum %s has no member %s", receiverType.Name, n.Name))
 				break
 			}
 			if binding, exists := c.resolution.TypeMember(receiverType.Name, n.Name); exists {
-				typ = binding.Type()
 				c.result.References[n] = binding
-				break
 			}
-			c.error(n.Span(), fmt.Sprintf("enum %s has no member %s", receiverType.Name, n.Name))
+			typ = receiverType
+			if len(variant.Fields) > 0 && c.enumCallee == 0 && c.enumPattern == 0 {
+				c.error(n.Span(), fmt.Sprintf("enum member %s::%s requires %d payload argument(s)", receiverType.Name, n.Name, len(variant.Fields)))
+			}
 			break
 		}
 		if n.Name == "new" && !classAccess {
@@ -1310,12 +1478,28 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 	case *ast.CallExpression:
+		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
+			c.enumCallee++
+		}
 		calleeType := c.checkExpression(n.Callee, sc)
+		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
+			c.enumCallee--
+		}
 		argumentTypes := make([]types.Type, 0, len(n.Arguments))
 		for _, arg := range n.Arguments {
 			argumentTypes = append(argumentTypes, c.checkExpression(arg.Value, sc))
 		}
 		typ = calleeType
+		if member, ok := n.Callee.(*ast.MemberExpression); ok {
+			if variant, enum := c.enumVariantForMember(member); enum {
+				typ = calleeType
+				c.checkEnumConstructor(n, variant, argumentTypes)
+				if len(variant.Fields) > 0 {
+					c.result.EnumConstructors[n] = variant
+				}
+				break
+			}
+		}
 		if binding, ok := c.result.References[n.Callee]; ok {
 			typ = binding.Type()
 			c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)

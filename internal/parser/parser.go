@@ -378,19 +378,39 @@ func (p *Parser) parseEnum() ast.Statement {
 		}
 		s, e, nx, trailing := p.logicalLine(p.pos)
 		parts := p.codeTokens(s, e)
-		if len(parts) != 1 || parts[0].Kind != token.Identifier {
-			p.errorAt(spanOf(parts), "enum body may only contain member names")
+		member := p.parseEnumMember(parts, trailing)
+		if member == nil {
+			p.errorAt(spanOf(parts), "enum body may only contain members such as Ready or Value(value: String)")
 		} else {
-			node.Body = append(node.Body, &ast.EnumMemberStatement{
-				Base: ast.Base{SourceSpan: spanOf(parts), TrailingComment: trailing},
-				Name: parts[0].Lexeme,
-			})
+			node.Body = append(node.Body, member)
 		}
 		p.pos = nx
 	}
 	_, closeSpan := p.consumeTerminator("end")
 	node.SourceSpan.End = closeSpan.End
 	return node
+}
+
+func (p *Parser) parseEnumMember(parts []token.Token, trailing string) *ast.EnumMemberStatement {
+	if len(parts) == 0 || parts[0].Kind != token.Identifier {
+		return nil
+	}
+	member := &ast.EnumMemberStatement{
+		Base: ast.Base{SourceSpan: spanOf(parts), TrailingComment: trailing},
+		Name: parts[0].Lexeme,
+	}
+	if len(parts) == 1 {
+		return member
+	}
+	if parts[1].Lexeme != "(" {
+		return nil
+	}
+	close := matchingIndex(parts, 1, "(", ")")
+	if close != len(parts)-1 {
+		return nil
+	}
+	member.Parameters = p.parseParameters(parts[2:close])
+	return member
 }
 
 func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.RecordFieldStatement {
@@ -786,6 +806,28 @@ func (p *Parser) parseCase() ast.Statement {
 		branch.Value, _ = parseExpressionTokens(parts[1:])
 		if branch.Value == nil {
 			p.errorAt(spanOf(parts), "when requires exactly one enum member")
+		} else if call, ok := branch.Value.(*ast.CallExpression); ok {
+			member, namespace := call.Callee.(*ast.MemberExpression)
+			if !namespace || !member.Namespace || call.Block != nil {
+				p.errorAt(call.Span(), "payload enum pattern must be Variant(name, ...)")
+			} else {
+				valid := true
+				for _, argument := range call.Arguments {
+					identifier, identifierOK := argument.Value.(*ast.Identifier)
+					if !identifierOK || argument.Name != "" || argument.Splat != "" {
+						p.errorAt(argument.Value.Span(), "payload enum pattern bindings must be identifiers")
+						valid = false
+						continue
+					}
+					branch.Bindings = append(branch.Bindings, ast.PatternBinding{
+						Base: ast.Base{SourceSpan: identifier.Span()},
+						Name: identifier.Name,
+					})
+				}
+				if valid {
+					branch.Value = call.Callee
+				}
+			}
 		}
 		p.pos = nx
 		branch.Body = p.parseStatements(map[string]bool{"when": true, "else": true, "end": true})

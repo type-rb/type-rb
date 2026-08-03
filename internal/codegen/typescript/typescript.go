@@ -110,6 +110,10 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("}")
 	case *ir.Enum:
+		if enumHasPayload(n) {
+			g.payloadEnum(n)
+			break
+		}
 		brand := "__trb" + n.Name + "Brand"
 		g.line("declare const " + brand + ": unique symbol;")
 		g.line("export type " + n.Name + " = string & { readonly [" + brand + "]: true };")
@@ -227,8 +231,15 @@ func (g *generator) statement(statement ir.Statement) {
 			if index > 0 {
 				header = "} else if ("
 			}
-			g.line(header + value + " === " + g.expr(branch.Value) + ") {" + tsTrailingComment(branch.TrailingComment))
+			condition := value + " === " + g.expr(branch.Value)
+			if branch.PayloadEnum {
+				condition = value + ".kind === " + strconv.Quote(branch.Member)
+			}
+			g.line(header + condition + ") {" + tsTrailingComment(branch.TrailingComment))
 			g.indent++
+			for _, binding := range branch.Bindings {
+				g.line("const " + binding.Name + " = " + value + "." + binding.Field + ";")
+			}
 			g.statements(branch.Body)
 			g.indent--
 		}
@@ -299,6 +310,52 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	g.statements(iteration.Body)
 	g.indent--
 	g.line("}")
+}
+
+func enumHasPayload(enum *ir.Enum) bool {
+	for _, statement := range enum.Body {
+		if member, ok := statement.(*ir.EnumMember); ok && len(member.Fields) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *generator) payloadEnum(enum *ir.Enum) {
+	variants := []string{}
+	for _, statement := range enum.Body {
+		member, ok := statement.(*ir.EnumMember)
+		if !ok {
+			continue
+		}
+		fields := []string{"readonly kind: " + strconv.Quote(member.Name)}
+		for _, field := range member.Fields {
+			fields = append(fields, "readonly "+field.Name+": "+tsType(field.Type))
+		}
+		variants = append(variants, "{ "+strings.Join(fields, "; ")+" }")
+	}
+	g.line("export type " + enum.Name + " = " + strings.Join(variants, " | ") + ";")
+	g.line("export const " + enum.Name + " = Object.freeze({" + tsTrailingComment(enum.TrailingComment))
+	g.indent++
+	for _, statement := range enum.Body {
+		switch member := statement.(type) {
+		case *ir.Comment:
+			g.statement(member)
+		case *ir.EnumMember:
+			if len(member.Fields) == 0 {
+				g.line(member.Name + ": { kind: " + strconv.Quote(member.Name) + " } as " + enum.Name + "," + tsTrailingComment(member.TrailingComment))
+				continue
+			}
+			parameters := g.parameters(member.Fields)
+			fields := []string{"kind: " + strconv.Quote(member.Name)}
+			for _, field := range member.Fields {
+				fields = append(fields, field.Name)
+			}
+			g.line(member.Name + ": (" + parameters + "): " + enum.Name + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
+		}
+	}
+	g.indent--
+	g.line("});")
 }
 
 func (g *generator) method(method *ir.Method) {
@@ -478,6 +535,12 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "this." + strings.TrimPrefix(identifier.Name, "_") + "(" + args + ")"
 		}
 		return g.expr(n.Callee) + "(" + args + ")"
+	case *ir.EnumConstruct:
+		parts := make([]string, len(n.Arguments))
+		for index, argument := range n.Arguments {
+			parts[index] = g.expr(argument)
+		}
+		return n.EnumName + "." + n.Member + "(" + strings.Join(parts, ", ") + ")"
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()

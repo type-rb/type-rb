@@ -16,6 +16,7 @@ type generator struct {
 	modulePath   string
 	topFunctions map[string]bool
 	nativeSyntax bool
+	temporary    int
 }
 
 func Generate(program *ir.Program) string {
@@ -105,6 +106,10 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line(n.Name+" = Data.define("+strings.Join(fields, ", ")+")", n.TrailingComment)
 	case *ir.Enum:
+		if enumHasPayload(n) {
+			g.payloadEnum(n)
+			break
+		}
 		g.line(n.Name+" = Data.define(:name)", n.TrailingComment)
 		for _, statement := range n.Body {
 			switch member := statement.(type) {
@@ -175,10 +180,21 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("end", "")
 	case *ir.Case:
 		g.statements(n.Leading)
-		g.line("case "+g.expr(n.Value), n.TrailingComment)
+		caseValue := g.expr(n.Value)
+		payload := caseHasPayload(n)
+		value := ""
+		if payload {
+			g.temporary++
+			value = "__trb_case" + strconv.Itoa(g.temporary)
+			caseValue = "(" + value + " = " + caseValue + ")"
+		}
+		g.line("case "+caseValue, n.TrailingComment)
 		for _, branch := range n.Branches {
 			g.line("when "+g.expr(branch.Value), branch.TrailingComment)
 			g.indent++
+			for _, binding := range branch.Bindings {
+				g.line(binding.Name+" = "+value+"."+binding.Field, "")
+			}
 			g.statements(branch.Body)
 			g.indent--
 		}
@@ -234,6 +250,47 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line(closer, "")
 	}
+}
+
+func enumHasPayload(enum *ir.Enum) bool {
+	for _, statement := range enum.Body {
+		if member, ok := statement.(*ir.EnumMember); ok && len(member.Fields) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func caseHasPayload(value *ir.Case) bool {
+	for _, branch := range value.Branches {
+		if branch.PayloadEnum {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *generator) payloadEnum(enum *ir.Enum) {
+	g.line("module "+enum.Name, enum.TrailingComment)
+	g.indent++
+	for _, statement := range enum.Body {
+		switch member := statement.(type) {
+		case *ir.Comment:
+			g.statement(member)
+		case *ir.EnumMember:
+			fields := make([]string, len(member.Fields))
+			for index, field := range member.Fields {
+				fields[index] = ":" + field.Name
+			}
+			definition := "Data.define(" + strings.Join(fields, ", ") + ")"
+			if len(fields) == 0 {
+				definition += ".new"
+			}
+			g.line(member.Name+" = "+definition, member.TrailingComment)
+		}
+	}
+	g.indent--
+	g.line("end", "")
 }
 
 func (g *generator) method(method *ir.Method, fields []*ir.Field) {
@@ -361,6 +418,12 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.intrinsic(reference.Intrinsic, parts)
 		}
 		return g.expr(n.Callee) + "(" + strings.Join(parts, ", ") + ")"
+	case *ir.EnumConstruct:
+		parts := make([]string, len(n.Arguments))
+		for index, argument := range n.Arguments {
+			parts[index] = g.expr(argument)
+		}
+		return n.EnumName + "::" + n.Member + ".new(" + strings.Join(parts, ", ") + ")"
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			return g.expr(n.Receiver) + ".fetch(" + g.expr(n.Index) + ")"

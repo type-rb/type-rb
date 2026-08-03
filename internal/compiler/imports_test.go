@@ -393,6 +393,65 @@ end
 	}
 }
 
+func TestProjectCompilerExportsPayloadEnumSignatures(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/contracts/token.trb",
+		ModulePath: "contracts/token",
+		Package:    "contracts",
+		Source: []byte(`enum Token
+	Text(value: String)
+	Number(value: Integer)
+	EOF
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import contracts/token
+
+def render(value: Token): String
+	case value
+	when Token::Text(text)
+		return text
+	when Token::Number(number)
+		return number.to_s()
+	when Token::EOF
+		return "eof"
+	end
+end
+
+def sample(): String
+	return render(Token::Text("hello"))
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{consumer, contract}, Options{Mode: mode, GoModule: "example.com/project"})
+		if err != nil {
+			t.Fatalf("%s rejected imported payload enum: %v", mode, err)
+		}
+		for _, artifact := range artifacts {
+			if artifact.Filename != consumer.Filename {
+				continue
+			}
+			output := string(artifact.Output)
+			wants := map[string][]string{
+				"go":         {"contracts.NewTokenText(\"hello\")", "__trbCase1.Kind == contracts.TokenTextTag", "text := __trbCase1.TextValue"},
+				"ruby":       {"Token::Text.new(\"hello\")", "text = __trb_case1.value"},
+				"typescript": {"Token.Text(\"hello\")", `__trbCase1.kind === "Text"`, "const text = __trbCase1.value;"},
+			}[mode]
+			for _, want := range wants {
+				if !strings.Contains(output, want) {
+					t.Fatalf("generated %s payload enum consumer is missing %q:\n%s", mode, want, output)
+				}
+			}
+		}
+	}
+}
+
 func TestProjectCompilerRejectsImportCycles(t *testing.T) {
 	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("import b\n\nclass A\nend\n")}
 	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("import a\n\nclass B\nend\n")}

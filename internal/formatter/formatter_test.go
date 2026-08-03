@@ -103,6 +103,22 @@ func TestFormatEnumCaseUsesTabsAndPreservesComments(t *testing.T) {
 	}
 }
 
+func TestFormatPayloadEnumAndPatternBindings(t *testing.T) {
+	source := []byte("enum  Token # token\nText(value:String) # text\nPair(left:Integer,right:Integer)\nEOF\nend\ndef render(value:Token):String\ncase value\nwhen Token::Text(text) # bind\nreturn text\nwhen Token::Pair(left,right)\nreturn \"pair\"\nwhen Token::EOF\nreturn \"eof\"\nend\nend\n")
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "enum Token # token\n\tText(value: String) # text\n\tPair(left: Integer, right: Integer)\n\tEOF\nend\ndef render(value: Token): String\n\tcase value\n\twhen Token::Text(text) # bind\n\t\treturn text\n\twhen Token::Pair(left, right)\n\t\treturn \"pair\"\n\twhen Token::EOF\n\t\treturn \"eof\"\n\tend\nend\n"
+	if string(formatted) != want {
+		t.Fatalf("unexpected payload enum formatting:\n%s", formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("payload enum formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatExpandsStatementSeparatorsAndPreservesNestedSemicolons(t *testing.T) {
 	source := []byte("enum State; Open; Closed; end # enum\n" +
 		"def label(value:State):String; case value; when State::Open; return \"a;b\"; when State::Closed; return \"closed\"; end; end\n" +

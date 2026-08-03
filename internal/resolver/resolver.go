@@ -40,22 +40,28 @@ const (
 )
 
 type Export struct {
-	Name        string
-	Kind        ExportKind
-	Type        types.Type
-	Parameters  []types.Type
-	Required    int
-	Variadic    bool
-	Members     map[string]Member
-	Fields      []RecordField
-	EnumMembers []string
-	Superclass  string
-	Span        token.Span
+	Name         string
+	Kind         ExportKind
+	Type         types.Type
+	Parameters   []types.Type
+	Required     int
+	Variadic     bool
+	Members      map[string]Member
+	Fields       []RecordField
+	EnumMembers  []string
+	EnumVariants []EnumVariant
+	Superclass   string
+	Span         token.Span
 }
 
 type RecordField struct {
 	Name string
 	Type types.Type
+}
+
+type EnumVariant struct {
+	Name   string
+	Fields []RecordField
 }
 
 type Member struct {
@@ -575,7 +581,19 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 					member, ok := statement.(*ast.EnumMemberStatement)
 					if ok && public(member.Name) {
 						exported.EnumMembers = append(exported.EnumMembers, member.Name)
-						exported.Members[member.Name] = Member{Name: member.Name, Kind: ValueExport, Type: typ, Class: true}
+						variant := EnumVariant{Name: member.Name}
+						parameterTypes := make([]types.Type, 0, len(member.Parameters))
+						for _, parameter := range member.Parameters {
+							fieldType := typeRef(parameter.Type)
+							variant.Fields = append(variant.Fields, RecordField{Name: parameter.Name, Type: fieldType})
+							parameterTypes = append(parameterTypes, fieldType)
+						}
+						exported.EnumVariants = append(exported.EnumVariants, variant)
+						kind := ValueExport
+						if len(parameterTypes) > 0 {
+							kind = FunctionExport
+						}
+						exported.Members[member.Name] = Member{Name: member.Name, Kind: kind, Type: typ, Parameters: parameterTypes, Required: len(parameterTypes), Class: true}
 					}
 				}
 				result[node.Name] = exported

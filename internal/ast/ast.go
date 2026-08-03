@@ -109,7 +109,8 @@ func (*EnumStatement) statementNode() {}
 
 type EnumMemberStatement struct {
 	Base
-	Name string
+	Name       string
+	Parameters []Parameter
 }
 
 func (*EnumMemberStatement) statementNode() {}
@@ -220,8 +221,16 @@ func (*IfStatement) statementNode() {}
 
 type CaseBranch struct {
 	Base
-	Value Expression
-	Body  []Statement
+	Value    Expression
+	Bindings []PatternBinding
+	Body     []Statement
+}
+
+// PatternBinding is a name introduced by a payload enum pattern. The payload
+// type comes from the matched enum member and is attached in typed IR.
+type PatternBinding struct {
+	Base
+	Name string
 }
 
 type CaseStatement struct {
