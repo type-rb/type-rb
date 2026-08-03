@@ -10,23 +10,27 @@ class Greeter
 	end
 end
 
-enum Recipient
-	Named(name: String)
-	Anonymous
+enum GreetingResult<T, E>
+	Ok(value: T)
+	Err(error: E)
 end
 
-def recipient_name(recipient: Recipient): String
-	case recipient
-	when Recipient::Named(name)
-		return name
-	when Recipient::Anonymous
-		return "friend"
+def identity<T>(value: T): T
+	return value
+end
+
+def recipient_name(result: GreetingResult<String, String>): String
+	case result
+	when GreetingResult::Ok(value)
+		return value
+	when GreetingResult::Err(error)
+		return error
 	end
 end
 
 def main()
 	greeter := Greeter.new()
-	recipient := Recipient::Named("TypeRB")
+	recipient := GreetingResult<String, String>::Ok(identity<String>("TypeRB"))
 	io.puts(strings.uppercase(greeter.greet(recipient_name(recipient)))) # trb fmt keeps this comment.
 	return
 end

@@ -48,6 +48,12 @@ func (p *exprParser) parse(min int) ast.Expression {
 	}
 	for p.pos < len(p.tokens) {
 		tok := p.tokens[p.pos]
+		if tok.Lexeme == "<" {
+			if applied := p.parseGenericApplication(left); applied != nil {
+				left = applied
+				continue
+			}
+		}
 		if tok.Lexeme == "(" {
 			left = p.parseCall(left)
 			continue
@@ -91,6 +97,55 @@ func (p *exprParser) parse(min int) ast.Expression {
 		}
 	}
 	return left
+}
+
+func (p *exprParser) parseGenericApplication(receiver ast.Expression) ast.Expression {
+	// Keep comparison parsing unambiguous: explicit type arguments are only
+	// recognized immediately before a call or namespace access.
+	original := p.tokens
+	prefix := append([]token.Token(nil), p.tokens[:p.pos]...)
+	expanded := expandGenericClosers(p.tokens[p.pos:])
+	p.tokens = append(prefix, expanded...)
+	depth := 0
+	close := -1
+	for index := p.pos; index < len(p.tokens); index++ {
+		switch p.tokens[index].Lexeme {
+		case "<":
+			depth++
+		case ">":
+			depth--
+			if depth == 0 {
+				close = index
+			}
+		}
+		if close >= 0 {
+			break
+		}
+	}
+	if close < 0 || close+1 >= len(p.tokens) || p.tokens[close+1].Lexeme != "(" && p.tokens[close+1].Lexeme != "::" {
+		p.tokens = original
+		return nil
+	}
+	parts := splitTopLevel(p.tokens[p.pos+1:close], ",")
+	arguments := make([]ast.TypeRef, 0, len(parts))
+	for _, part := range parts {
+		argument := parseType(part)
+		if argument.Empty() {
+			p.tokens = original
+			return nil
+		}
+		arguments = append(arguments, argument)
+	}
+	if len(arguments) == 0 {
+		p.tokens = original
+		return nil
+	}
+	p.pos = close + 1
+	return &ast.GenericExpression{
+		Base:      ast.Base{SourceSpan: token.Span{Start: receiver.Span().Start, End: p.tokens[close].Span.End}},
+		Receiver:  receiver,
+		Arguments: arguments,
+	}
 }
 
 func (p *exprParser) parsePrefix() ast.Expression {

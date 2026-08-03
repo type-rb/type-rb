@@ -1197,6 +1197,120 @@ func TestPayloadEnumDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestExplicitUserGenericsAndTypeSubstitutionAcrossModes(t *testing.T) {
+	source := []byte(`enum Result<T, E>
+	Ok(value: T)
+	Err(error: E)
+end
+
+def identity<T>(value: T): T
+	return value
+end
+
+def render(result: Result<Integer, String>): String
+	case result
+	when Result::Ok(value)
+		return identity<String>("#{value}")
+	when Result::Err(error)
+		return error
+	end
+end
+
+def main()
+	puts(render(Result<Integer, String>::Ok(42)))
+	names := identity<Array<String>>(["Ada"])
+	puts(names[0])
+	return
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("generics.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected explicit user generics: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	for _, want := range []string{
+		"type Result[T any, E any] struct",
+		"func NewResultOk[T any, E any](value T) Result[T, E]",
+		"func Identity[T any](value T) T",
+		"NewResultOk[int, string](42)",
+		"Identity[string]",
+		`Identity[[]string]([]string{"Ada"})`,
+		"value := __trbCase1.OkValue",
+	} {
+		if !strings.Contains(goOutput, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "generics.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated generic Go: %v\n%s", err, goOutput)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated generic Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	rubyOutput := string(artifacts["ruby"].Output)
+	for _, want := range []string{"module Result", "Ok = Data.define(:value)", "def identity(value)", "Result::Ok.new(42)", "identity(\"#{value}\")"} {
+		if !strings.Contains(rubyOutput, want) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
+		}
+	}
+
+	typescriptOutput := string(artifacts["typescript"].Output)
+	for _, want := range []string{
+		`export type Result<T, E> = { readonly kind: "Ok"; readonly value: T }`,
+		`Ok: <T, E>(value: T): Result<T, E>`,
+		`export function identity<T>(value: T): T`,
+		`Result.Ok<number, string>(42)`,
+		`identity<string>`,
+		`identity<Array<string>>(["Ada"])`,
+	} {
+		if !strings.Contains(typescriptOutput, want) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
+		}
+	}
+
+	method := artifacts["go"].IR.Statements[2].(*ir.Method)
+	caseStatement := method.Body[0].(*ir.Case)
+	if got := caseStatement.Branches[0].Bindings[0].Type.String(); got != "Integer" {
+		t.Fatalf("generic pattern binding was not substituted: %s", got)
+	}
+}
+
+func TestInitialUserGenericDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"function needs explicit arguments", "def identity<T>(value: T): T\n\treturn value\nend\ndef bad(): String\n\treturn identity(\"x\")\nend\n", "generic function identity requires explicit type arguments"},
+		{"substituted function argument", "def identity<T>(value: T): T\n\treturn value\nend\ndef bad(): Integer\n\treturn identity<Integer>(\"x\")\nend\n", "argument 1 to identity() has type String, expected Integer"},
+		{"function type arity", "def identity<T>(value: T): T\n\treturn value\nend\ndef bad(): String\n\treturn identity<String, Integer>(\"x\")\nend\n", "identity expects 1 type argument(s), got 2"},
+		{"enum type arity in annotation", "enum Result<T, E>\n\tOk(value: T)\n\tErr(error: E)\nend\ndef bad(value: Result<Integer>)\n\treturn\nend\n", "Result expects 2 type argument(s), got 1"},
+		{"enum construction needs all type arguments", "enum Result<T, E>\n\tOk(value: T)\n\tErr(error: E)\nend\ndef bad(): Result<Integer, String>\n\treturn Result::Ok(1)\nend\n", "Result expects 2 type argument(s), got 0"},
+		{"payloadless generic variant", "enum Option<T>\n\tSome(value: T)\n\tNone\nend\n", "payloadless members of generic enums are reserved"},
+		{"generic class method deferred", "class Box\n\tdef value<T>(item: T): T\n\t\treturn item\n\tend\nend\n", "only non-main top-level functions may be generic"},
+		{"duplicate type parameter", "def identity<T, T>(value: T): T\n\treturn value\nend\n", "type parameter T is duplicated"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_generics.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestSemicolonSeparatesPortableStatementsAcrossModes(t *testing.T) {
 	source := []byte(`class Empty; end
 enum State; Open; Closed; end

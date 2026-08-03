@@ -17,16 +17,17 @@ import (
 )
 
 type Result struct {
-	Program          *ast.Program
-	Expressions      map[ast.Expression]types.Type
-	Variables        map[*ast.VariableStatement]types.Type
-	Iterations       map[*ast.IterationExpression]types.Type
-	Constants        map[ast.Expression]string
-	ConstantOwners   map[*ast.VariableStatement]string
-	Resolution       resolver.Result
-	References       map[ast.Expression]resolver.Binding
-	EnumConstructors map[*ast.CallExpression]EnumVariant
-	CasePatterns     map[ast.Expression]CasePattern
+	Program             *ast.Program
+	Expressions         map[ast.Expression]types.Type
+	Variables           map[*ast.VariableStatement]types.Type
+	Iterations          map[*ast.IterationExpression]types.Type
+	Constants           map[ast.Expression]string
+	ConstantOwners      map[*ast.VariableStatement]string
+	Resolution          resolver.Result
+	References          map[ast.Expression]resolver.Binding
+	EnumConstructors    map[*ast.CallExpression]EnumVariant
+	CasePatterns        map[ast.Expression]CasePattern
+	GenericApplications map[*ast.GenericExpression]GenericApplication
 }
 
 type EnumField struct {
@@ -35,10 +36,22 @@ type EnumField struct {
 }
 
 type EnumVariant struct {
-	EnumName  string
-	Name      string
-	Fields    []EnumField
-	Reference *resolver.Binding
+	EnumName      string
+	Name          string
+	Fields        []EnumField
+	TypeArguments []types.Type
+	Reference     *resolver.Binding
+}
+
+type GenericApplication struct {
+	Name           string
+	Kind           string
+	TypeParameters []string
+	TypeArguments  []types.Type
+	Parameters     []types.Type
+	ReturnType     types.Type
+	Required       int
+	Variadic       bool
 }
 
 type CaseBinding struct {
@@ -99,51 +112,56 @@ type recordInfo struct {
 }
 
 type enumInfo struct {
-	name    string
-	members []string
-	byName  map[string]*ast.EnumMemberStatement
+	name           string
+	typeParameters []string
+	members        []string
+	byName         map[string]*ast.EnumMemberStatement
 }
 
 type typeDeclaration struct {
-	kind string
-	span token.Span
+	kind           string
+	span           token.Span
+	typeParameters []string
 }
 
 type Checker struct {
-	mode          string
-	result        Result
-	diags         []diagnostic.Diagnostic
-	classes       map[string]*classInfo
-	records       map[string]*recordInfo
-	enums         map[string]*enumInfo
-	interfaces    map[string]*ast.InterfaceStatement
-	functions     map[string]*ast.MethodStatement
-	current       *classInfo
-	classMethod   bool
-	initializing  int
-	loopDepth     int
-	returns       []types.Type
-	resolution    resolver.Result
-	external      map[ast.Expression]declaration.Member
-	declaredTypes map[string]typeDeclaration
-	enumCallee    int
-	enumPattern   int
+	mode            string
+	result          Result
+	diags           []diagnostic.Diagnostic
+	classes         map[string]*classInfo
+	records         map[string]*recordInfo
+	enums           map[string]*enumInfo
+	interfaces      map[string]*ast.InterfaceStatement
+	functions       map[string]*ast.MethodStatement
+	current         *classInfo
+	classMethod     bool
+	initializing    int
+	loopDepth       int
+	moduleDepth     int
+	returns         []types.Type
+	resolution      resolver.Result
+	external        map[ast.Expression]declaration.Member
+	declaredTypes   map[string]typeDeclaration
+	enumCallee      int
+	enumPattern     int
+	enumPatternType types.Type
 }
 
 func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnostic.Diagnostic) {
 	c := &Checker{
 		mode: program.Mode,
 		result: Result{
-			Program:          program,
-			Expressions:      map[ast.Expression]types.Type{},
-			Variables:        map[*ast.VariableStatement]types.Type{},
-			Iterations:       map[*ast.IterationExpression]types.Type{},
-			Constants:        map[ast.Expression]string{},
-			ConstantOwners:   map[*ast.VariableStatement]string{},
-			Resolution:       resolution,
-			References:       map[ast.Expression]resolver.Binding{},
-			EnumConstructors: map[*ast.CallExpression]EnumVariant{},
-			CasePatterns:     map[ast.Expression]CasePattern{},
+			Program:             program,
+			Expressions:         map[ast.Expression]types.Type{},
+			Variables:           map[*ast.VariableStatement]types.Type{},
+			Iterations:          map[*ast.IterationExpression]types.Type{},
+			Constants:           map[ast.Expression]string{},
+			ConstantOwners:      map[*ast.VariableStatement]string{},
+			Resolution:          resolution,
+			References:          map[ast.Expression]resolver.Binding{},
+			EnumConstructors:    map[*ast.CallExpression]EnumVariant{},
+			CasePatterns:        map[ast.Expression]CasePattern{},
+			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 		},
 		classes:       map[string]*classInfo{},
 		records:       map[string]*recordInfo{},
@@ -231,6 +249,15 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 	for _, argument := range ref.Arguments {
 		c.validateTypeReference(argument)
 	}
+	if expected, generic := c.genericTypeArity(ref.Name); generic {
+		if len(ref.Arguments) != expected {
+			c.error(ref.Span(), fmt.Sprintf("%s expects %d type argument(s), got %d", ref.Name, expected, len(ref.Arguments)))
+		}
+	} else if declaration, declared := c.declaredTypes[ref.Name]; declared && len(ref.Arguments) > 0 {
+		c.error(ref.Span(), fmt.Sprintf("%s is not generic", declaration.kind+" "+ref.Name))
+	} else if binding, imported := c.resolution.ImportedType(ref.Name); imported && len(binding.Export.TypeParameters) == 0 && len(ref.Arguments) > 0 {
+		c.error(ref.Span(), fmt.Sprintf("%s is not generic", ref.Name))
+	}
 	if types.FromName(ref.Name).Kind != types.Hash {
 		return
 	}
@@ -245,6 +272,16 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 	if !portableHashKey(key) {
 		c.error(ref.Arguments[0].Span(), fmt.Sprintf("Hash key type must be String or Integer, got %s", key))
 	}
+}
+
+func (c *Checker) genericTypeArity(name string) (int, bool) {
+	if declaration, ok := c.declaredTypes[name]; ok && len(declaration.typeParameters) > 0 {
+		return len(declaration.typeParameters), true
+	}
+	if binding, ok := c.resolution.ImportedType(name); ok && len(binding.Export.TypeParameters) > 0 {
+		return len(binding.Export.TypeParameters), true
+	}
+	return 0, false
 }
 
 func (c *Checker) collect(statements []ast.Statement) {
@@ -300,6 +337,12 @@ func (c *Checker) collect(statements []ast.Statement) {
 				continue
 			}
 			info := &enumInfo{name: n.Name, byName: map[string]*ast.EnumMemberStatement{}}
+			for _, parameter := range n.TypeParameters {
+				info.typeParameters = append(info.typeParameters, parameter.Name)
+			}
+			declaration := c.declaredTypes[n.Name]
+			declaration.typeParameters = append([]string(nil), info.typeParameters...)
+			c.declaredTypes[n.Name] = declaration
 			for _, statement := range n.Body {
 				member, ok := statement.(*ast.EnumMemberStatement)
 				if !ok {
@@ -381,6 +424,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			if !isConstant(n.Name) {
 				c.error(n.Span(), "enum name must begin with an uppercase letter")
 			}
+			c.checkTypeParameters(n.TypeParameters)
 			info := c.enums[n.Name]
 			if info != nil && len(info.members) == 0 {
 				c.error(n.Span(), fmt.Sprintf("enum %s must declare at least one member", n.Name))
@@ -392,6 +436,9 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 				}
 				if !isConstant(member.Name) {
 					c.error(member.Span(), "enum member must begin with an uppercase letter")
+				}
+				if len(n.TypeParameters) > 0 && len(member.Parameters) == 0 {
+					c.error(member.Span(), "payloadless members of generic enums are reserved until typed singleton construction is defined")
 				}
 				seenFields := map[string]bool{}
 				for _, parameter := range member.Parameters {
@@ -416,7 +463,9 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			if sc.constantOwner != "" {
 				owner = sc.constantOwner + "::" + n.Name
 			}
+			c.moduleDepth++
 			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner, enumsAllowed: true})
+			c.moduleDepth--
 		case *ast.InterfaceStatement:
 			for _, method := range n.Methods {
 				c.checkMethod(method, sc)
@@ -585,9 +634,12 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 
 	seen := map[string]bool{}
 	for _, branch := range node.Branches {
+		previousPatternType := c.enumPatternType
+		c.enumPatternType = selectorType
 		c.enumPattern++
 		branchType := c.checkExpression(branch.Value, sc)
 		c.enumPattern--
+		c.enumPatternType = previousPatternType
 		variant, member := c.caseEnumVariant(branch.Value, selectorType)
 		if !member || !types.Equivalent(selectorType, branchType) {
 			if selectorType.Kind != types.Invalid {
@@ -648,23 +700,25 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 		return nil, false
 	}
 	if info := c.enums[typ.Name]; info != nil {
+		substitutions := typeSubstitutions(info.typeParameters, typ.Args)
 		variants := make([]EnumVariant, 0, len(info.members))
 		for _, name := range info.members {
 			member := info.byName[name]
-			variant := EnumVariant{EnumName: typ.Name, Name: name}
+			variant := EnumVariant{EnumName: typ.Name, Name: name, TypeArguments: append([]types.Type(nil), typ.Args...)}
 			for _, parameter := range member.Parameters {
-				variant.Fields = append(variant.Fields, EnumField{Name: parameter.Name, Type: fromTypeRef(parameter.Type)})
+				variant.Fields = append(variant.Fields, EnumField{Name: parameter.Name, Type: substituteType(fromTypeRef(parameter.Type), substitutions)})
 			}
 			variants = append(variants, variant)
 		}
 		return variants, true
 	}
 	if binding, ok := c.resolution.ImportedType(typ.Name); ok && binding.Export.Kind == resolver.EnumExport {
+		substitutions := typeSubstitutions(binding.Export.TypeParameters, typ.Args)
 		variants := make([]EnumVariant, 0, len(binding.Export.EnumVariants))
 		for _, imported := range binding.Export.EnumVariants {
-			variant := EnumVariant{EnumName: typ.Name, Name: imported.Name}
+			variant := EnumVariant{EnumName: typ.Name, Name: imported.Name, TypeArguments: append([]types.Type(nil), typ.Args...)}
 			for _, field := range imported.Fields {
-				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: field.Type})
+				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: substituteType(field.Type, substitutions)})
 			}
 			if reference, exists := c.resolution.TypeMember(typ.Name, imported.Name); exists {
 				variant.Reference = &reference
@@ -762,6 +816,114 @@ func (c *Checker) checkEnumConstructor(call *ast.CallExpression, variant EnumVar
 		}
 		if !types.Assignable(variant.Fields[index].Type, arguments[index]) {
 			c.error(argument.Value.Span(), fmt.Sprintf("enum payload argument %d has type %s, expected %s", index+1, arguments[index], variant.Fields[index].Type))
+		}
+	}
+}
+
+func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (GenericApplication, bool) {
+	name := ""
+	switch receiver := node.Receiver.(type) {
+	case *ast.Identifier:
+		name = receiver.Name
+	case *ast.MemberExpression:
+		name = receiver.Name
+	}
+	application := GenericApplication{Name: name}
+	for _, argument := range node.Arguments {
+		application.TypeArguments = append(application.TypeArguments, fromTypeRef(argument))
+	}
+
+	if info := c.enums[name]; info != nil {
+		application.Kind = "enum"
+		application.TypeParameters = append([]string(nil), info.typeParameters...)
+	} else if method := c.functions[name]; method != nil {
+		application.Kind = "function"
+		for _, parameter := range method.TypeParameters {
+			application.TypeParameters = append(application.TypeParameters, parameter.Name)
+		}
+		for _, parameter := range method.Parameters {
+			application.Parameters = append(application.Parameters, fromTypeRef(parameter.Type))
+			if parameter.Default == nil && !parameter.Rest && !parameter.KeywordRest {
+				application.Required++
+			}
+			application.Variadic = application.Variadic || parameter.Rest || parameter.KeywordRest
+		}
+		application.ReturnType = methodReturnType(method)
+	} else if binding, ok := c.result.References[node.Receiver]; ok && binding.Export != nil {
+		application.TypeParameters = append([]string(nil), binding.Export.TypeParameters...)
+		switch binding.Export.Kind {
+		case resolver.EnumExport:
+			application.Kind = "enum"
+		case resolver.FunctionExport:
+			application.Kind = "function"
+			application.Parameters = append([]types.Type(nil), binding.Export.Parameters...)
+			application.Required = binding.Export.Required
+			application.Variadic = binding.Export.Variadic
+			application.ReturnType = binding.Export.Type
+		}
+	}
+	if application.Kind == "" || len(application.TypeParameters) == 0 {
+		c.error(node.Span(), fmt.Sprintf("%s is not a generic declaration", name))
+		return application, false
+	}
+	if len(application.TypeArguments) != len(application.TypeParameters) {
+		c.error(node.Span(), fmt.Sprintf("%s expects %d type argument(s), got %d", name, len(application.TypeParameters), len(application.TypeArguments)))
+		application.ReturnType = invalidType()
+		return application, true
+	}
+	substitutions := typeSubstitutions(application.TypeParameters, application.TypeArguments)
+	if application.Kind == "enum" {
+		application.ReturnType = types.Type{Kind: types.Named, Name: name, Args: append([]types.Type(nil), application.TypeArguments...)}
+	} else {
+		for index := range application.Parameters {
+			application.Parameters[index] = substituteType(application.Parameters[index], substitutions)
+		}
+		application.ReturnType = substituteType(application.ReturnType, substitutions)
+	}
+	return application, true
+}
+
+func typeSubstitutions(parameters []string, arguments []types.Type) map[string]types.Type {
+	result := map[string]types.Type{}
+	for index, parameter := range parameters {
+		if index < len(arguments) {
+			result[parameter] = arguments[index]
+		}
+	}
+	return result
+}
+
+func substituteType(typ types.Type, substitutions map[string]types.Type) types.Type {
+	if replacement, ok := substitutions[typ.Name]; ok && typ.Kind == types.Named && len(typ.Args) == 0 {
+		replacement.Nullable = replacement.Nullable || typ.Nullable
+		replacement.Readonly = replacement.Readonly || typ.Readonly
+		return replacement
+	}
+	result := typ
+	result.Args = make([]types.Type, len(typ.Args))
+	for index, argument := range typ.Args {
+		result.Args[index] = substituteType(argument, substitutions)
+	}
+	return result
+}
+
+func (c *Checker) checkTypedArguments(span token.Span, name string, parameters []types.Type, required int, variadic bool, arguments []ast.CallArgument, actual []types.Type) {
+	if len(arguments) < required || !variadic && len(arguments) > len(parameters) {
+		c.error(span, fmt.Sprintf("%s() expects %d..%d arguments, got %d", name, required, len(parameters), len(arguments)))
+		return
+	}
+	for index, actualType := range actual {
+		parameterIndex := index
+		if parameterIndex >= len(parameters) {
+			parameterIndex = len(parameters) - 1
+		}
+		if parameterIndex < 0 {
+			continue
+		}
+		expected := parameters[parameterIndex]
+		actualType = c.contextualizeHashLiteral(arguments[index].Value, expected, actualType)
+		if !types.Assignable(expected, actualType) {
+			c.error(arguments[index].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", index+1, name, actualType, expected))
 		}
 	}
 }
@@ -905,6 +1067,10 @@ func invalidType() types.Type {
 }
 
 func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
+	c.checkTypeParameters(method.TypeParameters)
+	if len(method.TypeParameters) > 0 && (c.current != nil || c.moduleDepth > 0 || method.Name == "main") {
+		c.error(method.Span(), "only non-main top-level functions may be generic in the initial generics subset")
+	}
 	previousClassMethod := c.classMethod
 	c.classMethod = method.Class
 	methodScope := &scope{parent: parent, values: map[string]symbol{}}
@@ -942,6 +1108,19 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	c.loopDepth = previousLoopDepth
 	c.returns = c.returns[:len(c.returns)-1]
 	c.classMethod = previousClassMethod
+}
+
+func (c *Checker) checkTypeParameters(parameters []ast.TypeParameter) {
+	seen := map[string]bool{}
+	for _, parameter := range parameters {
+		if !isConstant(parameter.Name) {
+			c.error(parameter.Span(), "type parameter must begin with an uppercase letter")
+		}
+		if seen[parameter.Name] {
+			c.error(parameter.Span(), fmt.Sprintf("type parameter %s is duplicated", parameter.Name))
+		}
+		seen[parameter.Name] = true
+	}
 }
 
 func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
@@ -1395,8 +1574,21 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.result.Expressions[n.Block] = types.Type{Kind: types.Void, Name: "Void"}
 		}
 		typ = types.Type{Kind: types.Void, Name: "Void"}
+	case *ast.GenericExpression:
+		receiverType := c.checkExpression(n.Receiver, sc)
+		application, ok := c.resolveGenericApplication(n)
+		if !ok {
+			typ = receiverType
+			break
+		}
+		c.result.GenericApplications[n] = application
+		typ = application.ReturnType
 	case *ast.MemberExpression:
 		receiverType := c.checkExpression(n.Receiver, sc)
+		if c.enumPattern > 0 && receiverType.Name == c.enumPatternType.Name && len(receiverType.Args) == 0 {
+			receiverType = c.enumPatternType
+			c.result.Expressions[n.Receiver] = receiverType
+		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
 		if receiverType.Kind == types.Array && n.Name == "push" {
 			typ = types.Type{Kind: types.Void, Name: "Void"}
@@ -1416,6 +1608,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if variants, enum := c.enumVariants(receiverType); enum {
 			if !n.Namespace {
 				c.error(n.Span(), fmt.Sprintf("enum member %s must be accessed with ::", n.Name))
+				break
+			}
+			if expected, generic := c.genericTypeArity(receiverType.Name); generic && len(receiverType.Args) != expected {
+				c.error(n.Receiver.Span(), fmt.Sprintf("%s expects %d type argument(s), got %d", receiverType.Name, expected, len(receiverType.Args)))
 				break
 			}
 			variant, found := enumVariantNamed(variants, n.Name)
@@ -1490,6 +1686,16 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			argumentTypes = append(argumentTypes, c.checkExpression(arg.Value, sc))
 		}
 		typ = calleeType
+		if generic, ok := n.Callee.(*ast.GenericExpression); ok {
+			application := c.result.GenericApplications[generic]
+			if application.Kind != "function" {
+				c.error(n.Span(), fmt.Sprintf("generic %s %s is not callable", application.Kind, application.Name))
+				break
+			}
+			c.checkTypedArguments(n.Span(), application.Name, application.Parameters, application.Required, application.Variadic, n.Arguments, argumentTypes)
+			typ = application.ReturnType
+			break
+		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok {
 			if variant, enum := c.enumVariantForMember(member); enum {
 				typ = calleeType
@@ -1501,6 +1707,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if binding, ok := c.result.References[n.Callee]; ok {
+			if binding.Export != nil && len(binding.Export.TypeParameters) > 0 {
+				c.error(n.Callee.Span(), fmt.Sprintf("generic function %s requires explicit type arguments", binding.Name))
+				break
+			}
 			typ = binding.Type()
 			c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
 			if binding.Library != nil {
@@ -1550,8 +1760,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
 				}
 			} else if method := c.functions[identifier.Name]; method != nil {
-				typ = methodReturnType(method)
-				c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
+				if len(method.TypeParameters) > 0 {
+					c.error(identifier.Span(), fmt.Sprintf("generic function %s requires explicit type arguments", identifier.Name))
+				} else {
+					typ = methodReturnType(method)
+					c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
+				}
 			} else if c.mode != "ruby" {
 				c.error(identifier.Span(), fmt.Sprintf("function %s is not declared or imported", identifier.Name))
 			} else if !c.resolution.NativeSyntax {

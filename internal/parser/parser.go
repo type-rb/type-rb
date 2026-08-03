@@ -359,11 +359,7 @@ func (p *Parser) parseEnum() ast.Statement {
 	start, end, next, comment := p.logicalLine(p.pos)
 	line := p.codeTokens(start, end)
 	node := &ast.EnumStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
-	if len(line) != 2 || line[1].Kind != token.Identifier {
-		p.errorAt(spanOf(line), "enum declaration must be: enum Name")
-	} else {
-		node.Name = line[1].Lexeme
-	}
+	node.Name, node.TypeParameters = p.parseGenericDeclaration(line, "enum")
 	p.pos = next
 	for !p.atEOF() {
 		p.skipSeparators()
@@ -389,6 +385,38 @@ func (p *Parser) parseEnum() ast.Statement {
 	_, closeSpan := p.consumeTerminator("end")
 	node.SourceSpan.End = closeSpan.End
 	return node
+}
+
+func (p *Parser) parseGenericDeclaration(line []token.Token, kind string) (string, []ast.TypeParameter) {
+	if len(line) < 2 || line[1].Kind != token.Identifier {
+		p.errorAt(spanOf(line), kind+" declaration requires a name")
+		return "", nil
+	}
+	name := line[1].Lexeme
+	if len(line) == 2 {
+		return name, nil
+	}
+	if line[2].Lexeme != "<" {
+		p.errorAt(spanOf(line[2:]), kind+" declaration has unexpected tokens after its name")
+		return name, nil
+	}
+	close := matchingIndex(line, 2, "<", ">")
+	if close != len(line)-1 {
+		p.errorAt(spanOf(line[2:]), kind+" type parameter list must end the declaration")
+		return name, nil
+	}
+	parameters := []ast.TypeParameter{}
+	for _, part := range splitTopLevel(line[3:close], ",") {
+		if len(part) != 1 || part[0].Kind != token.Identifier {
+			p.errorAt(spanOf(part), "type parameter must be one identifier")
+			continue
+		}
+		parameters = append(parameters, ast.TypeParameter{Base: ast.Base{SourceSpan: part[0].Span}, Name: part[0].Lexeme})
+	}
+	if len(parameters) == 0 {
+		p.errorAt(spanOf(line[2:]), kind+" type parameter list must not be empty")
+	}
+	return name, parameters
 }
 
 func (p *Parser) parseEnumMember(parts []token.Token, trailing string) *ast.EnumMemberStatement {
@@ -640,6 +668,21 @@ func (p *Parser) parseMethod() ast.Statement {
 	if i < len(line) && line[i].Lexeme == "=" {
 		m.Name += "="
 		i++
+	}
+	if i < len(line) && line[i].Lexeme == "<" {
+		close := matchingIndex(line, i, "<", ">")
+		if close < 0 {
+			p.errorAt(line[i].Span, "unclosed type parameter list")
+		} else {
+			for _, part := range splitTopLevel(line[i+1:close], ",") {
+				if len(part) != 1 || part[0].Kind != token.Identifier {
+					p.errorAt(spanOf(part), "type parameter must be one identifier")
+					continue
+				}
+				m.TypeParameters = append(m.TypeParameters, ast.TypeParameter{Base: ast.Base{SourceSpan: part[0].Span}, Name: part[0].Lexeme})
+			}
+			i = close + 1
+		}
 	}
 	if i < len(line) && line[i].Lexeme == "(" {
 		close := matchingIndex(line, i, "(", ")")

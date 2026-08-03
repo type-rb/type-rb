@@ -261,17 +261,23 @@ inferred from Ruby, Go, or TypeScript:
 - whether abstract, final, or protected class members add enough value to
   justify new syntax. They are not part of v0.1.
 
-## 4. Open Point: Initial Generic Inference Scope
+## 4. Initial user-defined generics
 
-Current decision:
-
-- `x: T := expr` is allowed.
-- Inference from `:=` is enabled.
-
-Pending implementation-scope decision:
-
-- Whether to support full inference for function calls and generics in the earliest implementation stage.
-- If implementation cost is comparable, adopt support early; otherwise phase it in.
+- The first user-defined generic declarations are payload enums and top-level
+  functions: `enum Result<T, E>` and `def identity<T>(value: T): T`.
+- Calls use explicit type arguments in this phase. Examples are
+  `Result<Integer, String>::Ok(1)` and `identity<String>("value")`. The checker
+  substitutes the arguments through parameters, return types, enum payloads,
+  case bindings, and cross-file signatures before producing typed IR.
+- Generic enum patterns omit repeated type arguments because the selector
+  supplies them: a `case` over `Result<Integer, String>` uses
+  `when Result::Ok(value)` and binds `value` as `Integer`.
+- User-defined generic arguments are invariant. Missing, extra, and mismatched
+  arguments are compile-time errors in every mode.
+- Payloadless variants of generic enums are reserved until typed singleton
+  construction has a portable representation. Generic records, classes,
+  instance/class methods, constraints, variance declarations, and type-argument
+  inference are staged work rather than implicit target-language behavior.
 
 ## 5. Example (Current Direction)
 

@@ -101,8 +101,9 @@ func (*RecordFieldStatement) statementNode() {}
 // so their source spans and comments survive the syntax and formatting passes.
 type EnumStatement struct {
 	Base
-	Name string
-	Body []Statement
+	Name           string
+	TypeParameters []TypeParameter
+	Body           []Statement
 }
 
 func (*EnumStatement) statementNode() {}
@@ -151,13 +152,19 @@ type Parameter struct {
 	KeywordRest bool
 }
 
+type TypeParameter struct {
+	Base
+	Name string
+}
+
 type MethodStatement struct {
 	Base
-	Name       string
-	Parameters []Parameter
-	ReturnType TypeRef
-	Body       []Statement
-	Class      bool
+	Name           string
+	TypeParameters []TypeParameter
+	Parameters     []Parameter
+	ReturnType     TypeRef
+	Body           []Statement
+	Class          bool
 }
 
 func (*MethodStatement) statementNode() {}
@@ -425,6 +432,14 @@ type CallExpression struct {
 }
 
 func (*CallExpression) expressionNode() {}
+
+type GenericExpression struct {
+	Base
+	Receiver  Expression
+	Arguments []TypeRef
+}
+
+func (*GenericExpression) expressionNode() {}
 
 type MemberExpression struct {
 	Base

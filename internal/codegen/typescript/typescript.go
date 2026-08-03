@@ -322,6 +322,8 @@ func enumHasPayload(enum *ir.Enum) bool {
 }
 
 func (g *generator) payloadEnum(enum *ir.Enum) {
+	typeParameters := tsTypeParameterDeclarations(enum.TypeParameters)
+	typeArguments := tsTypeParameterArguments(enum.TypeParameters)
 	variants := []string{}
 	for _, statement := range enum.Body {
 		member, ok := statement.(*ir.EnumMember)
@@ -334,7 +336,7 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 		}
 		variants = append(variants, "{ "+strings.Join(fields, "; ")+" }")
 	}
-	g.line("export type " + enum.Name + " = " + strings.Join(variants, " | ") + ";")
+	g.line("export type " + enum.Name + typeParameters + " = " + strings.Join(variants, " | ") + ";")
 	g.line("export const " + enum.Name + " = Object.freeze({" + tsTrailingComment(enum.TrailingComment))
 	g.indent++
 	for _, statement := range enum.Body {
@@ -351,11 +353,22 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 			for _, field := range member.Fields {
 				fields = append(fields, field.Name)
 			}
-			g.line(member.Name + ": (" + parameters + "): " + enum.Name + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
+			g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
 		}
 	}
 	g.indent--
 	g.line("});")
+}
+
+func tsTypeParameterDeclarations(parameters []string) string {
+	if len(parameters) == 0 {
+		return ""
+	}
+	return "<" + strings.Join(parameters, ", ") + ">"
+}
+
+func tsTypeParameterArguments(parameters []string) string {
+	return tsTypeParameterDeclarations(parameters)
 }
 
 func (g *generator) method(method *ir.Method) {
@@ -390,7 +403,7 @@ func (g *generator) function(method *ir.Method) {
 	if name == "main" {
 		prefix = "function "
 	}
-	g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + " {")
+	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + " {")
 	g.indent++
 	g.functionDepth++
 	g.statements(method.Body)
@@ -540,7 +553,21 @@ func (g *generator) expr(expression ir.Expression) string {
 		for index, argument := range n.Arguments {
 			parts[index] = g.expr(argument)
 		}
-		return n.EnumName + "." + n.Member + "(" + strings.Join(parts, ", ") + ")"
+		name := n.EnumName + "." + n.Member
+		if len(n.TypeArguments) > 0 {
+			arguments := make([]string, len(n.TypeArguments))
+			for index, argument := range n.TypeArguments {
+				arguments[index] = tsType(argument)
+			}
+			name += "<" + strings.Join(arguments, ", ") + ">"
+		}
+		return name + "(" + strings.Join(parts, ", ") + ")"
+	case *ir.TypeApply:
+		arguments := make([]string, len(n.Arguments))
+		for index, argument := range n.Arguments {
+			arguments[index] = tsType(argument)
+		}
+		return g.expr(n.Receiver) + "<" + strings.Join(arguments, ", ") + ">"
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()
@@ -738,6 +765,13 @@ func tsType(t types.Type) string {
 		default:
 			result = t.Name
 		}
+	}
+	if t.Kind == types.Named && len(t.Args) > 0 {
+		arguments := make([]string, len(t.Args))
+		for index, argument := range t.Args {
+			arguments[index] = tsType(argument)
+		}
+		result += "<" + strings.Join(arguments, ", ") + ">"
 	}
 	if t.Nullable && result != "null" {
 		result += " | null"

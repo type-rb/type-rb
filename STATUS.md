@@ -52,6 +52,10 @@ Implemented:
   dispatch. Duplicate/wrong-member diagnostics, required exhaustiveness when
   `else` is omitted, cross-file signatures, three backend representations, and
   REPL execution are covered.
+- Explicit user-defined generics for payload enums and top-level functions,
+  with invariant type arguments, checker-owned substitution, imported generic
+  signatures, generic case narrowing, three backend outputs, formatter support,
+  and typed-IR REPL execution.
 - Go-like no-value return syntax: the return annotation is omitted and explicit
   `: Void` return types are rejected while typed IR retains an internal Void.
 - Explicit Ruby-native AST/IR nodes for open-ended Rails DSL.
@@ -110,9 +114,9 @@ semantic type model, and source maps are later work.
 
 The broader path to practical production use is tracked in `ROADMAP.md`.
 
-1. Add user-defined generics and type-argument substitution, then define
-   fallible results and filesystem/process APIs required to move the
-   lexer/parser into the stage-1 self-host tree.
+1. Define the standard `Result<T, E>` API and its concise propagation syntax,
+   then add filesystem/process APIs required to move the lexer/parser into the
+   stage-1 self-host tree.
 2. Generate runtime JSON decoders from record contracts and add wire-compatible
    optional/nullable semantics.
 3. Add a concise React view/component syntax above the current explicit element

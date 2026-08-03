@@ -69,7 +69,11 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		return &ir.RecordField{Base: base(n.Base), Name: n.Name, Type: lowerType(n.Type), Attributes: attributes}
 	case *ast.EnumStatement:
-		return &ir.Enum{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
+		result := &ir.Enum{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
+		for _, parameter := range n.TypeParameters {
+			result.TypeParameters = append(result.TypeParameters, parameter.Name)
+		}
+		return result
 	case *ast.EnumMemberStatement:
 		member := &ir.EnumMember{Base: base(n.Base), Name: n.Name}
 		for _, field := range n.Parameters {
@@ -90,6 +94,9 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return &ir.Field{Base: base(n.Base), Name: n.Name, Type: lowerType(n.Type), Value: l.expression(n.Value), ReadOnly: n.ReadOnly}
 	case *ast.MethodStatement:
 		method := &ir.Method{Base: base(n.Base), Name: n.Name, ReturnType: lowerType(n.ReturnType), Body: l.statements(n.Body), Class: n.Class}
+		for _, parameter := range n.TypeParameters {
+			method.TypeParameters = append(method.TypeParameters, parameter.Name)
+		}
 		if n.ReturnType.Empty() {
 			method.ReturnType = types.Type{Kind: types.Void, Name: "Void"}
 		}
@@ -215,7 +222,7 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 		return &ir.Range{ExprBase: base, Start: l.expression(n.Start), End: l.expression(n.End), Exclusive: n.Exclusive}
 	case *ast.CallExpression:
 		if variant, ok := l.checked.EnumConstructors[n]; ok {
-			result := &ir.EnumConstruct{ExprBase: base, EnumName: variant.EnumName, Member: variant.Name, Reference: l.reference(n.Callee)}
+			result := &ir.EnumConstruct{ExprBase: base, EnumName: variant.EnumName, Member: variant.Name, TypeArguments: append([]types.Type(nil), variant.TypeArguments...), Reference: l.reference(n.Callee)}
 			for _, argument := range n.Arguments {
 				result.Arguments = append(result.Arguments, l.expression(argument.Value))
 			}
@@ -231,6 +238,12 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 		return result
 	case *ast.MemberExpression:
 		return &ir.Member{ExprBase: base, Receiver: l.expression(n.Receiver), Name: n.Name, Safe: n.Safe, Namespace: n.Namespace, Reference: l.reference(n)}
+	case *ast.GenericExpression:
+		result := &ir.TypeApply{ExprBase: base, Receiver: l.expression(n.Receiver)}
+		for _, argument := range n.Arguments {
+			result.Arguments = append(result.Arguments, lowerType(argument))
+		}
+		return result
 	case *ast.IndexExpression:
 		return &ir.Index{ExprBase: base, Receiver: l.expression(n.Receiver), Index: l.expression(n.Index)}
 	case *ast.BlockExpression:

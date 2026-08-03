@@ -424,6 +424,8 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[index] = g.expr(argument)
 		}
 		return n.EnumName + "::" + n.Member + ".new(" + strings.Join(parts, ", ") + ")"
+	case *ir.TypeApply:
+		return g.expr(n.Receiver)
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			return g.expr(n.Receiver) + ".fetch(" + g.expr(n.Index) + ")"

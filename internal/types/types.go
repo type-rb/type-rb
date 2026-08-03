@@ -104,6 +104,16 @@ func Assignable(target, value Type) bool {
 	if target.Kind == Named && target.Name != value.Name {
 		return false
 	}
+	if target.Kind == Named && (len(target.Args) > 0 || len(value.Args) > 0) {
+		if len(target.Args) != len(value.Args) {
+			return false
+		}
+		for index := range target.Args {
+			if !Equivalent(target.Args[index], value.Args[index]) {
+				return false
+			}
+		}
+	}
 	return true
 }
 

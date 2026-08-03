@@ -39,3 +39,14 @@ func TestEquivalentComparesNestedGenericArguments(t *testing.T) {
 		t.Fatal("different nested generic arguments must not be equivalent")
 	}
 }
+
+func TestAssignableNamedGenericIsInvariant(t *testing.T) {
+	strings := Type{Kind: Named, Name: "Box", Args: []Type{FromName("String")}}
+	integers := Type{Kind: Named, Name: "Box", Args: []Type{FromName("Integer")}}
+	if !Assignable(strings, strings) {
+		t.Fatal("same generic instantiation should be assignable")
+	}
+	if Assignable(strings, integers) || Assignable(Type{Kind: Named, Name: "Box"}, strings) {
+		t.Fatal("different or missing named generic arguments must not be assignable")
+	}
+}

@@ -661,6 +661,8 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			payload[field.Name] = value
 		}
 		return Value{Type: node.ExprType(), Data: &enumValue{Definition: typeDefinition.Enum, Name: node.Member, Payload: payload}}, nil
+	case *ir.TypeApply:
+		return e.expression(node.Receiver, module, sc)
 	case *ir.Index:
 		receiver, err := e.expression(node.Receiver, module, sc)
 		if err != nil {

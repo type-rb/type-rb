@@ -40,18 +40,19 @@ const (
 )
 
 type Export struct {
-	Name         string
-	Kind         ExportKind
-	Type         types.Type
-	Parameters   []types.Type
-	Required     int
-	Variadic     bool
-	Members      map[string]Member
-	Fields       []RecordField
-	EnumMembers  []string
-	EnumVariants []EnumVariant
-	Superclass   string
-	Span         token.Span
+	Name           string
+	Kind           ExportKind
+	Type           types.Type
+	Parameters     []types.Type
+	Required       int
+	Variadic       bool
+	Members        map[string]Member
+	Fields         []RecordField
+	EnumMembers    []string
+	EnumVariants   []EnumVariant
+	TypeParameters []string
+	Superclass     string
+	Span           token.Span
 }
 
 type RecordField struct {
@@ -577,6 +578,9 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 			if public(node.Name) {
 				typ := types.FromName(node.Name)
 				exported := Export{Name: node.Name, Kind: EnumExport, Type: typ, Members: map[string]Member{}, Span: node.Span()}
+				for _, parameter := range node.TypeParameters {
+					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
+				}
 				for _, statement := range node.Body {
 					member, ok := statement.(*ast.EnumMemberStatement)
 					if ok && public(member.Name) {
@@ -620,7 +624,11 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		case *ast.MethodStatement:
 			if public(node.Name) {
 				parameterTypes, required, variadic := parameters(node.Parameters)
-				result[node.Name] = Export{Name: node.Name, Kind: FunctionExport, Type: returnTypeRef(node.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Span: node.Span()}
+				exported := Export{Name: node.Name, Kind: FunctionExport, Type: returnTypeRef(node.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Span: node.Span()}
+				for _, parameter := range node.TypeParameters {
+					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
+				}
+				result[node.Name] = exported
 			}
 		case *ast.VariableStatement:
 			if node.Constant && public(node.Name) {

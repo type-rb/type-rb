@@ -84,8 +84,9 @@ func (*RecordField) irStatement() {}
 
 type Enum struct {
 	Base
-	Name string
-	Body []Statement
+	Name           string
+	TypeParameters []string
+	Body           []Statement
 }
 
 func (*Enum) irStatement() {}
@@ -135,11 +136,12 @@ type Parameter struct {
 
 type Method struct {
 	Base
-	Name       string
-	Parameters []Parameter
-	ReturnType types.Type
-	Body       []Statement
-	Class      bool
+	Name           string
+	TypeParameters []string
+	Parameters     []Parameter
+	ReturnType     types.Type
+	Body           []Statement
+	Class          bool
 }
 
 func (*Method) irStatement() {}
@@ -376,13 +378,22 @@ func (*Call) irExpression() {}
 // runtime representation for payload enums.
 type EnumConstruct struct {
 	ExprBase
-	EnumName  string
-	Member    string
-	Arguments []Expression
-	Reference *Reference
+	EnumName      string
+	Member        string
+	TypeArguments []types.Type
+	Arguments     []Expression
+	Reference     *Reference
 }
 
 func (*EnumConstruct) irExpression() {}
+
+type TypeApply struct {
+	ExprBase
+	Receiver  Expression
+	Arguments []types.Type
+}
+
+func (*TypeApply) irExpression() {}
 
 type Member struct {
 	ExprBase

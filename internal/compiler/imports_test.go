@@ -452,6 +452,67 @@ end
 	}
 }
 
+func TestProjectCompilerExportsGenericSignatures(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/contracts/result.trb",
+		ModulePath: "contracts/result",
+		Package:    "contracts",
+		Source: []byte(`enum Result<T, E>
+	Ok(value: T)
+	Err(error: E)
+end
+
+def identity<T>(value: T): T
+	return value
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import contracts/result
+
+def sample(): Result<Integer, String>
+	value := identity<Integer>(1)
+	return Result<Integer, String>::Ok(value)
+end
+
+def unwrap(result: Result<Integer, String>): Integer
+	case result
+	when Result::Ok(value)
+		return value
+	when Result::Err(error)
+		return 0
+	end
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{consumer, contract}, Options{Mode: mode, GoModule: "example.com/project"})
+		if err != nil {
+			t.Fatalf("%s rejected imported generics: %v", mode, err)
+		}
+		for _, artifact := range artifacts {
+			if artifact.Filename != consumer.Filename {
+				continue
+			}
+			output := string(artifact.Output)
+			wants := map[string][]string{
+				"go":         {"func Sample() contracts.Result[int, string]", "contracts.Identity[int](1)", "contracts.NewResultOk[int, string](value)", "value := __trbCase1.OkValue"},
+				"ruby":       {"value = identity(1)", "Result::Ok.new(value)", "value = __trb_case1.value"},
+				"typescript": {"function sample(): Result<number, string>", "identity<number>(1)", "Result.Ok<number, string>(value)", "const value = __trbCase1.value;"},
+			}[mode]
+			for _, want := range wants {
+				if !strings.Contains(output, want) {
+					t.Fatalf("generated %s generic consumer is missing %q:\n%s", mode, want, output)
+				}
+			}
+		}
+	}
+}
+
 func TestProjectCompilerRejectsImportCycles(t *testing.T) {
 	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("import b\n\nclass A\nend\n")}
 	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("import a\n\nclass B\nend\n")}

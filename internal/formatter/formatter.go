@@ -176,7 +176,7 @@ func formatTokens(tokens []token.Token) string {
 			}
 		}
 		if previous != nil {
-			genericOpen := current.Lexeme == "<" && startsUpper(previous.Lexeme)
+			genericOpen := current.Lexeme == "<" && (startsUpper(previous.Lexeme) || genericApplicationOpen(tokens, i))
 			if genericOpen && lineKind == "class" && genericDepth == 0 && !classInheritance {
 				genericOpen = false
 				classInheritance = true
@@ -226,6 +226,34 @@ func formatTokens(tokens []token.Token) string {
 		previous = &current
 	}
 	return strings.TrimSpace(out.String())
+}
+
+func genericApplicationOpen(tokens []token.Token, open int) bool {
+	depth := 0
+	for index := open; index < len(tokens); index++ {
+		if tokens[index].Kind == token.Comment {
+			continue
+		}
+		switch tokens[index].Lexeme {
+		case "<":
+			depth++
+		case ">":
+			depth--
+		case ">>":
+			depth -= 2
+		}
+		if depth != 0 {
+			continue
+		}
+		for next := index + 1; next < len(tokens); next++ {
+			if tokens[next].Kind == token.Comment {
+				continue
+			}
+			return tokens[next].Lexeme == "(" || tokens[next].Lexeme == "::"
+		}
+		return false
+	}
+	return false
 }
 
 func needsSpace(beforePrevious *token.Token, previous, current token.Token, next *token.Token) bool {

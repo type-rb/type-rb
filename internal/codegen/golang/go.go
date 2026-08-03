@@ -434,7 +434,7 @@ func (g *generator) payloadEnum(enum *ir.Enum, name string) {
 	g.line(")")
 	g.b.WriteByte('\n')
 
-	g.line("type " + name + " struct {")
+	g.line("type " + name + goTypeParameterDeclarations(enum.TypeParameters) + " struct {")
 	g.indent++
 	g.line("Kind " + tagType)
 	for _, statement := range enum.Body {
@@ -462,14 +462,16 @@ func (g *generator) payloadEnum(enum *ir.Enum, name string) {
 			continue
 		}
 		constructor := "New" + goIdentifier(enum.Name, true) + goIdentifier(member.Name, true)
-		g.line("func " + constructor + "(" + g.parameters(member.Fields) + ") " + name + " {")
+		genericDeclarations := goTypeParameterDeclarations(enum.TypeParameters)
+		genericArguments := goTypeParameterArguments(enum.TypeParameters)
+		g.line("func " + constructor + genericDeclarations + "(" + g.parameters(member.Fields) + ") " + name + genericArguments + " {")
 		g.indent++
 		fields := []string{"Kind: " + constant + "Tag"}
 		for _, field := range member.Fields {
 			fieldName := goIdentifier(member.Name, true) + goIdentifier(field.Name, true)
 			fields = append(fields, fieldName+": "+goIdentifier(field.Name, false))
 		}
-		g.line("return " + name + "{" + strings.Join(fields, ", ") + "}")
+		g.line("return " + name + genericArguments + "{" + strings.Join(fields, ", ") + "}")
 		g.indent--
 		g.line("}")
 	}
@@ -483,6 +485,28 @@ func enumHasPayload(enum *ir.Enum) bool {
 		}
 	}
 	return false
+}
+
+func goTypeParameterDeclarations(parameters []string) string {
+	if len(parameters) == 0 {
+		return ""
+	}
+	parts := make([]string, len(parameters))
+	for index, parameter := range parameters {
+		parts[index] = goIdentifier(parameter, true) + " any"
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func goTypeParameterArguments(parameters []string) string {
+	if len(parameters) == 0 {
+		return ""
+	}
+	parts := make([]string, len(parameters))
+	for index, parameter := range parameters {
+		parts[index] = goIdentifier(parameter, true)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 func (g *generator) enumTag(branch ir.CaseBranch) string {
@@ -593,7 +617,7 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 	if method.Name == "main" {
 		name = "main"
 	}
-	g.line("func " + name + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
+	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
 	g.indent++
 	g.functionDepth++
 	g.statements(method.Body)
@@ -773,7 +797,24 @@ func (g *generator) expr(expression ir.Expression) string {
 		if alias := g.referenceAlias(n.Reference); alias != "" {
 			name = alias + "." + name
 		}
+		if len(n.TypeArguments) > 0 {
+			types := make([]string, len(n.TypeArguments))
+			for index, argument := range n.TypeArguments {
+				types[index] = g.goType(argument)
+			}
+			name += "[" + strings.Join(types, ", ") + "]"
+		}
 		return name + "(" + strings.Join(parts, ", ") + ")"
+	case *ir.TypeApply:
+		arguments := make([]string, len(n.Arguments))
+		for index, argument := range n.Arguments {
+			arguments[index] = g.goType(argument)
+		}
+		name := g.expr(n.Receiver)
+		if identifier, ok := n.Receiver.(*ir.Identifier); ok && g.topMethods[identifier.Name] {
+			name = goMethodName(identifier.Name)
+		}
+		return name + "[" + strings.Join(arguments, ", ") + "]"
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()
@@ -1046,6 +1087,13 @@ func (g *generator) goType(t types.Type) string {
 				result = "*" + result
 			}
 		}
+	}
+	if t.Kind == types.Named && len(t.Args) > 0 {
+		arguments := make([]string, len(t.Args))
+		for index, argument := range t.Args {
+			arguments[index] = g.goType(argument)
+		}
+		result += "[" + strings.Join(arguments, ", ") + "]"
 	}
 	if t.Nullable && result != "" && result != "any" && !strings.HasPrefix(result, "*") {
 		return "*" + result

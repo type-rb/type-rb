@@ -12,9 +12,10 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 
 - Finish essential collection and control-flow syntax: transformations,
   first-class blocks/lambdas, and structured error handling.
-- Add union types, position-typed Tuples, generics, and precise
-  nullable/optional semantics. Payload-bearing enums and exhaustive payload
-  pattern narrowing are implemented.
+- Add union types, position-typed Tuples, and precise nullable/optional
+  semantics. Payload-bearing enums, exhaustive payload pattern narrowing, and
+  explicit generics for payload enums/top-level functions are implemented;
+  inference and generic records/classes/methods remain.
 - Define mutation effects for methods and parameters so immutable values remain
   safe across calls, not only assignments and known collection operations.
 - Complete the portable class model with explicit superclass construction and

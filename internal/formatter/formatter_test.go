@@ -119,6 +119,22 @@ func TestFormatPayloadEnumAndPatternBindings(t *testing.T) {
 	}
 }
 
+func TestFormatExplicitUserGenerics(t *testing.T) {
+	source := []byte("enum Result<T,E>\nOk(value:T)\nErr(error:E)\nend\ndef identity<T>(value:T):T\nreturn value\nend\ndef use():Result<Integer,String>\nnames:=identity<Array<String>>([\"Ada\"])\nreturn Result<Integer,String>::Ok(identity<Integer>(1))\nend\n")
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "enum Result<T, E>\n\tOk(value: T)\n\tErr(error: E)\nend\ndef identity<T>(value: T): T\n\treturn value\nend\ndef use(): Result<Integer, String>\n\tnames := identity<Array<String>>([\"Ada\"])\n\treturn Result<Integer, String>::Ok(identity<Integer>(1))\nend\n"
+	if string(formatted) != want {
+		t.Fatalf("unexpected generic formatting:\n%s", formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("generic formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatExpandsStatementSeparatorsAndPreservesNestedSemicolons(t *testing.T) {
 	source := []byte("enum State; Open; Closed; end # enum\n" +
 		"def label(value:State):String; case value; when State::Open; return \"a;b\"; when State::Closed; return \"closed\"; end; end\n" +

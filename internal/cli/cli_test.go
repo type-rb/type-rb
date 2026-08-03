@@ -350,6 +350,35 @@ func TestReplEvaluatesPayloadEnumPatternBindings(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesExplicitUserGenerics(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-generics-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "enum Result<T, E>; Ok(value: T); Err(error: E); end\n" +
+		"def identity<T>(value: T): T; return value; end\n" +
+		"def unwrap(value: Result<Integer, String>): Integer; case value; when Result::Ok(number); return number; when Result::Err(error); return 0; end; end\n" +
+		"unwrap(Result<Integer, String>::Ok(identity<Integer>(7)))\n" +
+		"identity<String>(\"Ada\")\n" +
+		":quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "7 : Integer\n\"Ada\" : String\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected generic REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplRequiresProjectConfiguration(t *testing.T) {
 	root := t.TempDir()
 	previous, err := os.Getwd()
