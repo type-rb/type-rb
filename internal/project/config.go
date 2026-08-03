@@ -184,7 +184,7 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
-	data = append([]byte("// TypeRB project configuration. Comments and trailing commas are allowed.\n"), data...)
+	data = append([]byte("// TypeRB project configuration. Comments are allowed; trailing commas are not.\n"), data...)
 	data = append(data, '\n')
 	return atomicWrite(c.Path, data, 0o644)
 }
@@ -333,35 +333,6 @@ func stripJSONC(source []byte) []byte {
 				}
 				i++
 			}
-		}
-	}
-	// encoding/json does not accept JSONC trailing commas. Replacing them with
-	// spaces preserves line/column locations in diagnostics.
-	inString, escaped = false, false
-	for i := 0; i < len(result); i++ {
-		if inString {
-			if escaped {
-				escaped = false
-			} else if result[i] == '\\' {
-				escaped = true
-			} else if result[i] == '"' {
-				inString = false
-			}
-			continue
-		}
-		if result[i] == '"' {
-			inString = true
-			continue
-		}
-		if result[i] != ',' {
-			continue
-		}
-		j := i + 1
-		for j < len(result) && (result[j] == ' ' || result[j] == '\t' || result[j] == '\n' || result[j] == '\r') {
-			j++
-		}
-		if j < len(result) && (result[j] == '}' || result[j] == ']') {
-			result[i] = ' '
 		}
 	}
 	return result

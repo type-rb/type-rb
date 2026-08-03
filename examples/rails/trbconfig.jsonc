@@ -7,12 +7,12 @@
   "outDir": "build",
   "copyFiles": true,
   "ruby": {
-    "loader": "zeitwerk",
+    "loader": "zeitwerk"
   },
   "dependencies": {
-    "rails": "~> 8.0",
+    "rails": "~> 8.0"
   },
   "devDependencies": {
-    "rspec-rails": "~> 7.0",
-  },
+    "rspec-rails": "~> 7.0"
+  }
 }

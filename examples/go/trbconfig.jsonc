@@ -9,6 +9,6 @@
   "go": {
     "module": "example.com/type-rb/greeter",
     "version": "1.26",
-    "rootPackage": "main",
-  },
+    "rootPackage": "main"
+  }
 }

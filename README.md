@@ -137,7 +137,9 @@ Output names follow the project mode:
 
 ## Project configuration
 
-`trbconfig.jsonc` accepts line comments, block comments, and trailing commas.
+`trbconfig.jsonc` accepts line comments and block comments. Trailing commas are
+not allowed, so the configuration remains compatible with strict JSON parsers
+after comments are removed.
 Mode belongs here, not in individual source files:
 
 ```jsonc

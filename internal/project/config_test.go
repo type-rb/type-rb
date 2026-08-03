@@ -1,13 +1,14 @@
 package project
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestLoadJSONCWithCommentsAndTrailingCommas(t *testing.T) {
+func TestLoadJSONCWithComments(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, ConfigName)
 	source := `{
@@ -16,12 +17,12 @@ func TestLoadJSONCWithCommentsAndTrailingCommas(t *testing.T) {
   "mode": "ruby",
   "sourceDir": "app",
   "dependencies": {
-    "rails": "~> 8.0",
+    "rails": "~> 8.0"
   },
   "ruby": {
     /* URLs containing // are strings, not comments. */
-    "source": "https://rubygems.org",
-  },
+    "source": "https://rubygems.org"
+  }
 }
 `
 	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
@@ -37,6 +38,18 @@ func TestLoadJSONCWithCommentsAndTrailingCommas(t *testing.T) {
 	}
 	if config.Ruby == nil || config.Ruby.Source != "https://rubygems.org" {
 		t.Fatalf("unexpected Ruby config: %#v", config.Ruby)
+	}
+}
+
+func TestLoadJSONCRejectsTrailingCommas(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ConfigName)
+	source := "{\n  \"name\": \"web-app\",\n  \"mode\": \"ruby\",\n}\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("trailing comma must be rejected")
 	}
 }
 
@@ -57,6 +70,11 @@ func TestSaveAndFindConfig(t *testing.T) {
 	}
 	if strings.Contains(string(data), "entrypoint") {
 		t.Fatalf("main is conventional and must not be written to config:\n%s", data)
+	}
+	jsonDocument := data[strings.IndexByte(string(data), '\n')+1:]
+	var decoded map[string]any
+	if err := json.Unmarshal(jsonDocument, &decoded); err != nil {
+		t.Fatalf("saved config must remain strict JSON after its comment header: %v\n%s", err, data)
 	}
 
 	nested := filepath.Join(root, "src", "commands")

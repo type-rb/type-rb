@@ -6,11 +6,11 @@
   "outDir": "build",
   "copyFiles": true,
   "localPackages": {
-    "todo/contracts": "../../packages/contracts/src",
+    "todo/contracts": "../../packages/contracts/src"
   },
   "dependencies": {
     "gorm.io/driver/sqlite": "v1.6.0",
-    "gorm.io/gorm": "v1.31.1",
+    "gorm.io/gorm": "v1.31.1"
   },
   "go": {
     "module": "example.com/type-rb/todo-api",
@@ -20,13 +20,13 @@
       "github.com/jinzhu/inflection": "v1.0.0",
       "github.com/jinzhu/now": "v1.1.5",
       "github.com/mattn/go-sqlite3": "v1.14.22",
-      "golang.org/x/text": "v0.20.0",
+      "golang.org/x/text": "v0.20.0"
     },
     "sqldef": {
       "command": "go",
       "arguments": ["run", "github.com/sqldef/sqldef/v3/cmd/sqlite3def@v3.11.15"],
       "database": "todo.db",
-      "schema": "schema.sql",
-    },
-  },
+      "schema": "schema.sql"
+    }
+  }
 }

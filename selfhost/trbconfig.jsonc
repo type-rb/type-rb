@@ -11,6 +11,6 @@
   "go": {
     "module": "github.com/type-rb/type-rb",
     "version": "1.26",
-    "rootPackage": "selfhost",
-  },
+    "rootPackage": "selfhost"
+  }
 }

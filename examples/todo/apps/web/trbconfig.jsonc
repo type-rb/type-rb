@@ -6,25 +6,25 @@
   "outDir": "build",
   "copyFiles": true,
   "localPackages": {
-    "todo/contracts": "../../packages/contracts/src",
+    "todo/contracts": "../../packages/contracts/src"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "react": "latest",
-    "react-dom": "latest",
+    "react-dom": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "typescript": "latest",
+    "typescript": "latest"
   },
   "typescript": {
     "packageManager": "npm",
     "moduleType": "module",
     "scripts": {
       "dev": "trb build && vite ./build --host 0.0.0.0",
-      "build": "trb build && tsc -b build/tsconfig.json && vite build build",
-    },
-  },
+      "build": "trb build && tsc -b build/tsconfig.json && vite build build"
+    }
+  }
 }
