@@ -25,6 +25,144 @@ func TestVersionCommandUsesBuildVersion(t *testing.T) {
 	}
 }
 
+func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.EntryPoint = ""
+	config.Go.Module = "example.com/type-rb/repl-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	modelPath := filepath.Join(root, "src", "models", "user.trb")
+	if err := os.MkdirAll(filepath.Dir(modelPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modelPath, []byte("record User\n  name: String\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	input := strings.Join([]string{
+		"import trb/std/strings",
+		"import { User } from models/user",
+		`name := "Ada"`,
+		"strings.uppercase(name)",
+		"user := User.new(name: name)",
+		"user.name",
+		":type user",
+		"name = 1",
+		"name",
+		":quit",
+	}, "\n") + "\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := strings.Join([]string{
+		`"Ada" : String`,
+		`"ADA" : String`,
+		`User(name: "Ada") : User`,
+		`"Ada" : String`,
+		`User`,
+		`"Ada" : String`,
+		"",
+	}, "\n")
+	if stdout.String() != want {
+		t.Fatalf("unexpected REPL output\nwant:\n%s\ngot:\n%s", want, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "cannot assign Integer to String") {
+		t.Fatalf("REPL did not report and recover from the type error:\n%s", stderr.String())
+	}
+}
+
+func TestReplRejectsPlatformPackageForConfiguredModeAndContinues(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.EntryPoint = ""
+	config.Go.Module = "example.com/type-rb/repl-mode-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{
+		Stdin:  strings.NewReader("import trb/platform/typescript/node\n1 + 1\n:quit\n"),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if stdout.String() != "2 : Integer\n" {
+		t.Fatalf("unexpected output %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "does not support mode go") {
+		t.Fatalf("configured mode was not enforced:\n%s", stderr.String())
+	}
+}
+
+func TestReplEvaluatesMultilineClassThroughTypedIR(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.EntryPoint = ""
+	config.Go.Module = "example.com/type-rb/repl-class-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	input := "class Box\n" +
+		"  @value: Integer\n\n" +
+		"  def initialize(value: Integer)\n" +
+		"    @value = value\n" +
+		"    return\n" +
+		"  end\n\n" +
+		"  def value(): Integer\n" +
+		"    return @value\n" +
+		"  end\n" +
+		"end\n" +
+		"box := Box.new(4)\n" +
+		"box.value() + 1\n" +
+		":quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "#<Box value: 4> : Box\n5 : Integer\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected REPL result\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestReplRequiresProjectConfiguration(t *testing.T) {
+	root := t.TempDir()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(previous) }()
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(":quit\n"), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl"}); status != 1 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "repl requires a trbconfig.jsonc") {
+		t.Fatalf("unexpected error: %s", stderr.String())
+	}
+}
+
 func TestBuildCopiesRailsProjectAndTranspilesTRBTree(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "config"), 0o755); err != nil {

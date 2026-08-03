@@ -81,6 +81,11 @@ trb build --stdout app/models/post.trb
 trb run test.trb
 trb run test.trb -- first-argument
 
+# Start the project-aware typed IR REPL. The mode, imports, local packages, and
+# type providers come from trbconfig.jsonc.
+trb repl
+trb repl --config path/to/trbconfig.jsonc
+
 # Generate Gemfile, go.mod, or package.json from trbconfig.jsonc.
 trb sync
 
@@ -92,6 +97,18 @@ trb remove rspec-rails
 # Run bundle install, go mod download, or npm install.
 trb install
 ```
+
+`trb repl` requires a project configuration. Each submission is parsed,
+resolved, type checked, and lowered through the normal compiler pipeline before
+evaluation, so platform packages are accepted or rejected according to the
+configured mode. The initial evaluator supports portable expressions, state,
+conditionals, loops, functions, classes, records, project imports, and portable
+standard-library intrinsics. A mode-specific intrinsic without a REPL runtime
+adapter produces an explicit runtime diagnostic.
+
+REPL commands are `:type EXPRESSION`, `:load FILE`, `:reload`, `:help`, and
+`:quit`. Multiline declarations and delimiter-balanced calls use a continuation
+prompt automatically.
 
 `trb build` compiles every input before writing any generated file. When a
 directory is built, non-`.trb` files are copied by default, producing a runnable

@@ -316,3 +316,16 @@ target-language fragments.
 For Go projects, `go.sqldef` may declare a command, arguments, database, and
 schema. `trb run` applies the schema before starting the generated program and
 passes the selected database path explicitly.
+
+### 8.9 Project-aware REPL
+
+`trb repl` resolves `trbconfig.jsonc` in the same way as build and run. There is
+no mode-less REPL in v0.1: the configured mode determines available platform
+packages, type providers, project imports, and runtime adapters. Every accepted
+submission passes through the ordinary lexer, parser, resolver, checker, and
+typed IR lowering pipeline before evaluation.
+
+The REPL is a language evaluator rather than an application console. It loads
+project declarations and constants but does not invoke the configured
+entrypoint. A future `trb console` may load a running application's framework
+and resources.

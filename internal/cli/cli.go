@@ -17,8 +17,10 @@ import (
 	"github.com/type-rb/type-rb/internal/codegen"
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/formatter"
+	"github.com/type-rb/type-rb/internal/ir"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
 	"github.com/type-rb/type-rb/internal/project"
+	"github.com/type-rb/type-rb/internal/repl"
 )
 
 // Version is a variable so release builds can inject the tag with Go's -X
@@ -46,6 +48,8 @@ func (c *CLI) Run(args []string) int {
 		err = c.runBuild(args[1:])
 	case "run":
 		err = c.runProgram(args[1:])
+	case "repl":
+		err = c.runRepl(args[1:])
 	case "init":
 		err = c.runInit(args[1:])
 	case "sync":
@@ -392,6 +396,71 @@ func (c *CLI) runProgram(args []string) error {
 	return command.Run()
 }
 
+func (c *CLI) runRepl(args []string) error {
+	flags := flag.NewFlagSet("repl", flag.ContinueOnError)
+	flags.SetOutput(c.Stderr)
+	configPath := flags.String("config", "", "path to trbconfig.jsonc")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("repl does not accept source arguments; use :load FILE inside the REPL")
+	}
+	config, err := loadConfig(*configPath, ".")
+	if err != nil {
+		return fmt.Errorf("repl requires a trbconfig.jsonc: %w", err)
+	}
+	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+	if err != nil {
+		return err
+	}
+	sessionFilename := filepath.Join(config.SourcePath(), ".trb-repl.trb")
+	sessionModule := "__trb_repl__"
+	sessionPackage := ""
+	if config.Go != nil {
+		sessionPackage = config.Go.RootPackage
+	}
+	compile := func(source string) (*repl.Compilation, error) {
+		units, err := projectSourceUnits(config, files)
+		if err != nil {
+			return nil, err
+		}
+		units = append(units, compiler.SourceUnit{
+			Filename:   sessionFilename,
+			Source:     []byte(source),
+			ModulePath: sessionModule,
+			Package:    sessionPackage,
+		})
+		options := compilerOptions(config)
+		options.EntryPoint = ""
+		artifacts, err := compiler.CompileProject(units, options)
+		if err != nil {
+			return nil, err
+		}
+		compilation := &repl.Compilation{Programs: make([]*ir.Program, 0, len(artifacts))}
+		for _, artifact := range artifacts {
+			compilation.Programs = append(compilation.Programs, artifact.IR)
+			if artifact.IR.ModulePath == sessionModule {
+				compilation.Session = artifact
+			}
+		}
+		if compilation.Session == nil {
+			return nil, errors.New("compiler did not return the REPL session")
+		}
+		return compilation, nil
+	}
+	return repl.Run(repl.Options{
+		Mode:        config.Mode,
+		ProjectName: config.Name,
+		Version:     Version,
+		Stdin:       c.Stdin,
+		Stdout:      c.Stdout,
+		Stderr:      c.Stderr,
+		Interactive: interactiveReader(c.Stdin),
+		Compile:     compile,
+	})
+}
+
 func (c *CLI) applySqldef(config *project.Config) error {
 	definition := config.Go.Sqldef
 	schema, err := os.Open(filepath.Join(config.Root, definition.Schema))
@@ -558,6 +627,23 @@ func loadConfig(explicit, start string) (*project.Config, error) {
 }
 
 func compileProject(config *project.Config, files []string) (map[string]*compiler.Artifact, error) {
+	units, err := projectSourceUnits(config, files)
+	if err != nil {
+		return nil, err
+	}
+	artifacts, err := compiler.CompileProject(units, compilerOptions(config))
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]*compiler.Artifact, len(artifacts))
+	for _, artifact := range artifacts {
+		absolute, _ := filepath.Abs(artifact.Filename)
+		result[absolute] = artifact
+	}
+	return result, nil
+}
+
+func projectSourceUnits(config *project.Config, files []string) ([]compiler.SourceUnit, error) {
 	units := make([]compiler.SourceUnit, 0, len(files))
 	for _, filename := range files {
 		source, err := os.ReadFile(filename)
@@ -600,16 +686,7 @@ func compileProject(config *project.Config, files []string) (map[string]*compile
 			units = append(units, unit)
 		}
 	}
-	artifacts, err := compiler.CompileProject(units, compilerOptions(config))
-	if err != nil {
-		return nil, err
-	}
-	result := make(map[string]*compiler.Artifact, len(artifacts))
-	for _, artifact := range artifacts {
-		absolute, _ := filepath.Abs(artifact.Filename)
-		result[absolute] = artifact
-	}
-	return result, nil
+	return units, nil
 }
 
 func localSourceUnit(config *project.Config, packageName, packageRoot, filename string, source []byte) (compiler.SourceUnit, error) {
@@ -685,6 +762,15 @@ func firstOr(values []string, fallback string) string {
 		return fallback
 	}
 	return values[0]
+}
+
+func interactiveReader(reader io.Reader) bool {
+	file, ok := reader.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func dependencySpec(args []string) (string, string) {
@@ -799,6 +885,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb run FILE.trb [-- arguments...]")
+	fmt.Fprintln(c.Stdout, "  trb repl [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--dev] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb remove PACKAGE")

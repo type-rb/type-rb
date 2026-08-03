@@ -13,6 +13,9 @@ Implemented:
 - `trb build` with Ruby, TypeScript, and Go backends selected by the project
   `trbconfig.jsonc`.
 - `trb run` for compiling and immediately executing one `.trb` file.
+- Project-aware `trb repl`, with config-selected mode, persistent typed state,
+  multiline input, project imports, portable IR evaluation, and `:type`,
+  `:load`, and `:reload` commands.
 - `trb init`, `sync`, `add`, `remove`, and `install`, with generated Gemfile,
   go.mod, or package.json ownership based on project mode.
 - `packageManagement: "external"` for embedding generated source in an
