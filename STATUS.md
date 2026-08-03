@@ -33,6 +33,8 @@ Implemented:
 - Immutable `:=` bindings, explicit `mut` for reassignment and destructive
   Array updates, and runtime-initialized uppercase constants scoped to the top
   level, modules, or classes.
+- Non-nullable `Boolean` conditions for portable `if`, `elsif`, and `while`,
+  preventing target-specific truthiness differences.
 - Go-like no-value return syntax: the return annotation is omitted and explicit
   `: Void` return types are rejected while typed IR retains an internal Void.
 - Explicit Ruby-native AST/IR nodes for open-ended Rails DSL.

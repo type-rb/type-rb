@@ -304,15 +304,15 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 		case *ast.ExpressionStatement:
 			c.checkExpression(n.Expression, sc)
 		case *ast.IfStatement:
-			c.checkExpression(n.Condition, sc)
+			c.checkBooleanCondition(n.Condition, sc, "if")
 			c.checkStatements(n.Then, &scope{parent: sc, values: map[string]symbol{}})
 			for _, branch := range n.ElseIf {
-				c.checkExpression(branch.Condition, sc)
+				c.checkBooleanCondition(branch.Condition, sc, "elsif")
 				c.checkStatements(branch.Body, &scope{parent: sc, values: map[string]symbol{}})
 			}
 			c.checkStatements(n.Else, &scope{parent: sc, values: map[string]symbol{}})
 		case *ast.WhileStatement:
-			c.checkExpression(n.Condition, sc)
+			c.checkBooleanCondition(n.Condition, sc, "while")
 			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}})
 		case *ast.NativeStatement:
 			if c.mode != "ruby" {
@@ -329,6 +329,20 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}})
 		}
 	}
+}
+
+func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, construct string) {
+	typ := c.checkExpression(expression, sc)
+	if typ.Kind == types.Invalid || typ.Kind == types.Bool && !typ.Nullable {
+		return
+	}
+	if typ.Kind == types.Any && c.mode == "ruby" && c.resolution.NativeSyntax {
+		// Explicit Ruby-native projects may use values that their provider cannot
+		// yet refine beyond Any. Truthiness remains confined to that escape hatch;
+		// portable TypeRB conditions are always Boolean.
+		return
+	}
+	c.error(expression.Span(), fmt.Sprintf("%s condition must be Boolean, got %s", construct, typ))
 }
 
 func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {

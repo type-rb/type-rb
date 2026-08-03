@@ -240,6 +240,7 @@ v0.1 portable syntax includes:
 - literals, arrays, hashes, calls, members, indexes, unary/binary expressions
 - `if`/`elsif`/`else`, `while`, `return`, integer ranges, and Ruby-shaped
   `each`/`each_slice`/`each.with_index` iteration
+- non-nullable `Boolean` conditions without target-specific truthiness
 - `_private` methods and `@_private` fields
 
 Types are written as `name: Type`. Generics, arrays, and nullable types use

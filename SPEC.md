@@ -100,6 +100,16 @@ integration:
   `trb build` is not required.
 - Projects intended only as libraries may omit `main`.
 
+### 3.9 Boolean Conditions
+
+- Conditions in `if`, `elsif`, and `while` must have the non-nullable
+  `Boolean` type.
+- TypeRB does not apply Ruby, JavaScript, or target-specific truthiness to
+  portable conditions. Values such as `0`, `""`, `nil`, collections,
+  `Boolean?`, and `Any` are rejected as conditions.
+- An explicit Ruby-native project may use an `Any` condition as a compatibility
+  escape hatch while compiler-owned library providers are still incomplete.
+
 ## 4. Open Point: Initial Generic Inference Scope
 
 Current decision:
@@ -314,6 +324,9 @@ contents therefore survive repeated formatting.
 Dedicated AST and IR nodes exist for `if`/`elsif`/`else`, `while`, `return`,
 integer ranges, and structured collection iteration. Inclusive `start..end`
 and exclusive `start...end` ranges have type `Range<Integer>`.
+
+Portable `if`, `elsif`, and `while` conditions are checked as non-nullable
+`Boolean`; generated targets never choose their own truthiness semantics.
 
 Arrays and ranges support both iterator block delimiters. The delimiters have
 identical precedence and semantics in TypeRB:

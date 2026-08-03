@@ -489,6 +489,83 @@ end
 	}
 }
 
+func TestPortableConditionsRequireNonNullableBoolean(t *testing.T) {
+	valid := []byte(`def decide(flag: Boolean)
+  if flag
+    return
+  elsif false
+    return
+  else
+    while false
+      return
+    end
+  end
+  return
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("conditions.trb", valid, mode); err != nil {
+			t.Fatalf("%s rejected Boolean conditions: %v", mode, err)
+		}
+	}
+
+	invalid := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "if integer",
+			source: "def bad()\n  if 1\n    return\n  end\n  return\nend\n",
+			want:   "if condition must be Boolean, got Integer",
+		},
+		{
+			name:   "elsif string",
+			source: "def bad()\n  if true\n    return\n  elsif \"yes\"\n    return\n  end\n  return\nend\n",
+			want:   "elsif condition must be Boolean, got String",
+		},
+		{
+			name:   "while array",
+			source: "def bad()\n  while [true]\n    return\n  end\n  return\nend\n",
+			want:   "while condition must be Boolean, got Array<Boolean>",
+		},
+		{
+			name:   "nullable Boolean",
+			source: "def bad(value: Boolean?)\n  if value\n    return\n  end\n  return\nend\n",
+			want:   "if condition must be Boolean, got Boolean?",
+		},
+		{
+			name:   "portable Any",
+			source: "def bad(value: Any)\n  if value\n    return\n  end\n  return\nend\n",
+			want:   "if condition must be Boolean, got Any",
+		},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_condition.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestExplicitRubyNativeAnyRetainsTruthinessCompatibility(t *testing.T) {
+	source := []byte(`import trb/platform/ruby/native
+
+def dynamic(value: Any)
+  if value
+    return
+  end
+  return
+end
+`)
+	if _, err := Compile("dynamic.trb", source, "ruby"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInterpolatedStringIsTypedAndLoweredPerTarget(t *testing.T) {
 	goArtifact, err := CompileWithOptions("greet.trb", []byte(`import trb/std/io
 
