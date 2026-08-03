@@ -6,7 +6,6 @@
   "mode": "go",
   "sourceDir": "src",
   "outDir": "generated",
-  "entrypoint": "",
   "copyFiles": false,
   "packageManagement": "external",
   "go": {

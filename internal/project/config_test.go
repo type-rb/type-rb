@@ -55,6 +55,9 @@ func TestSaveAndFindConfig(t *testing.T) {
 	if !strings.HasPrefix(string(data), "// TypeRB project configuration") {
 		t.Fatalf("saved config is not JSONC:\n%s", data)
 	}
+	if strings.Contains(string(data), "entrypoint") {
+		t.Fatalf("main is conventional and must not be written to config:\n%s", data)
+	}
 
 	nested := filepath.Join(root, "src", "commands")
 	if err := os.MkdirAll(nested, 0o755); err != nil {

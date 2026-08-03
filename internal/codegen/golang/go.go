@@ -28,7 +28,6 @@ type generator struct {
 	imports       map[string]string
 	modulePath    string
 	goModule      string
-	entryPoint    string
 	temporary     int
 }
 
@@ -43,7 +42,6 @@ func Generate(program *ir.Program) string {
 		imports:       map[string]string{},
 		modulePath:    program.ModulePath,
 		goModule:      program.GoModule,
-		entryPoint:    program.EntryPoint,
 	}
 	for _, statement := range program.Statements {
 		switch n := statement.(type) {
@@ -74,14 +72,6 @@ func Generate(program *ir.Program) string {
 		}
 		g.statement(statement)
 	}
-	if g.entryPoint != "" && g.entryPoint != "main" && g.topMethods[g.entryPoint] {
-		g.line("func main() {")
-		g.indent++
-		g.line(goMethodName(g.entryPoint) + "()")
-		g.indent--
-		g.line("}")
-	}
-
 	packageName := program.Package
 	if packageName == "" {
 		packageName = "main"

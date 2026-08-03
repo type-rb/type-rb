@@ -91,6 +91,15 @@ integration:
   `trb/platform/<mode>/*` packages.
 - Official formatter command: `trb fmt`.
 
+### 3.8 Program Entry
+
+- A runnable project defines exactly one top-level `def main()`.
+- `main` is a language convention and is not configurable in
+  `trbconfig.jsonc`.
+- `trb run` compiles the project before every execution; a preceding
+  `trb build` is not required.
+- Projects intended only as libraries may omit `main`.
+
 ## 4. Open Point: Initial Generic Inference Scope
 
 Current decision:
@@ -349,7 +358,7 @@ and record-field nodes. Go lowers a record to a value struct with JSON tags,
 TypeScript lowers it to an interface, and Ruby lowers it to `Data`.
 
 Projects may map a portable source directory into the import graph with
-`localPackages`. An `index.trb` file is the package entrypoint, so two projects
+`localPackages`. An `index.trb` file is the package entry module, so two projects
 with different modes can import the same source without copying it:
 
 ```jsonc
@@ -380,8 +389,8 @@ submission passes through the ordinary lexer, parser, resolver, checker, and
 typed IR lowering pipeline before evaluation.
 
 The REPL is a language evaluator rather than an application console. It loads
-project declarations and constants but does not invoke the configured
-entrypoint. A future `trb console` may load a running application's framework
+project declarations and constants but does not invoke `main`. A future
+`trb console` may load a running application's framework
 and resources.
 
 On an interactive terminal, the REPL provides multiline cursor editing,

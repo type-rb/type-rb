@@ -12,7 +12,9 @@ Implemented:
   preservation.
 - `trb build` with Ruby, TypeScript, and Go backends selected by the project
   `trbconfig.jsonc`.
-- `trb run` for compiling and immediately executing one `.trb` file.
+- `trb run` for compiling a project in a temporary tree and executing its
+  conventional top-level `main()`; an explicit `.trb` file remains available
+  as a one-off override.
 - Project-aware `trb repl`, with config-selected mode, persistent typed state,
   multiline cursor editing, per-project command history, reverse search,
   Readline/Emacs navigation, completion, colored output, project imports,
@@ -40,7 +42,7 @@ Implemented:
   without application-maintained signature files.
 - Project-wide compilation which parses every source once, builds and validates
   a deterministic import graph, and rejects import/inheritance cycles,
-  duplicate exported types, and duplicate entrypoints.
+  duplicate exported types, and duplicate top-level `main` definitions.
 - Cross-file checking of imported constructors, fields, methods, inheritance,
   and interface conformance, with target-relative backend imports.
 - Portable `trb/std/io` and `trb/std/strings` packages lowered from resolved IR
@@ -85,6 +87,8 @@ targets. Full generics inference, a complete Ruby semantic type model, and
 source maps are later work.
 
 ## Next Work
+
+The broader path to practical production use is tracked in `ROADMAP.md`.
 
 1. Add portable enums/sum types, exhaustive type dispatch, fallible results,
    and filesystem/process APIs required to move the

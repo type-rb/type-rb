@@ -16,14 +16,13 @@ type generator struct {
 	functionDepth int
 	methods       map[string]bool
 	modulePath    string
-	entryPoint    string
 	topFunctions  map[string]bool
 	records       map[string]bool
 	temporary     int
 }
 
 func Generate(program *ir.Program) string {
-	g := &generator{modulePath: program.ModulePath, entryPoint: program.EntryPoint, topFunctions: map[string]bool{}, records: map[string]bool{}}
+	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, records: map[string]bool{}}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -38,11 +37,11 @@ func Generate(program *ir.Program) string {
 		}
 		g.statement(statement)
 	}
-	if g.entryPoint != "" && g.topFunctions[g.entryPoint] {
+	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
 		}
-		g.line(g.entryPoint + "();")
+		g.line("main();")
 	}
 	return strings.TrimRight(g.b.String(), "\n") + "\n"
 }

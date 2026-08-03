@@ -4,7 +4,6 @@
   "mode": "go",
   "sourceDir": "src",
   "outDir": "build",
-  "entrypoint": "main",
   "copyFiles": true,
   "localPackages": {
     "todo/contracts": "../../packages/contracts/src",

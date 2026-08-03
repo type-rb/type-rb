@@ -16,7 +16,6 @@ func Program(checked checker.Result) *ir.Program {
 	return &ir.Program{
 		Mode:       checked.Program.Mode,
 		Package:    checked.Program.Package,
-		EntryPoint: checked.Program.EntryPoint,
 		ModulePath: checked.Program.ModulePath,
 		GoModule:   checked.Program.GoModule,
 		RubyLoader: checked.Program.RubyLoader,

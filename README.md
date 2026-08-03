@@ -4,6 +4,10 @@ TypeRB is a class-based typed language implemented in Go. A `.trb` file is
 formatted by `trb fmt` and transpiled by `trb build` to Ruby, TypeScript, or Go.
 The target is selected once per project in `trbconfig.jsonc`.
 
+See [`STATUS.md`](STATUS.md) for implemented behavior and
+[`ROADMAP.md`](ROADMAP.md) for the path from the current alpha to practical
+production use.
+
 v0.1 includes a real compiler pipeline:
 
 ```text
@@ -35,10 +39,11 @@ go install github.com/type-rb/type-rb/cmd/trb@latest
 
 For a repository checkout, use the bootstrap launcher. It rebuilds the Go
 bootstrap compiler internally when compiler sources change, then delegates to
-the normal `trb` CLI:
+the normal `trb` CLI. The commands in this documentation assume that launcher
+or an installed binary is already on `PATH`:
 
 ```sh
-./trb version
+trb version
 ```
 
 The compiler targets the current Go toolchain (Go 1.26). The minimum version is
@@ -78,9 +83,12 @@ trb build --out-dir dist .
 # Compile one file to stdout.
 trb build --stdout app/models/post.trb
 
-# Compile and immediately run through Bundler, Go, or Node.
+# Compile the project in a temporary directory and run its top-level main().
+trb run
+trb run -- first-argument
+
+# Explicitly choose a source file for a one-off run.
 trb run test.trb
-trb run test.trb -- first-argument
 
 # Start the project-aware typed IR REPL. The mode, imports, local packages, and
 # type providers come from trbconfig.jsonc.
@@ -140,7 +148,6 @@ Mode belongs here, not in individual source files:
   "mode": "ruby",
   "sourceDir": ".",
   "outDir": "build",
-  "entrypoint": "main",
   "copyFiles": true,
   "dependencies": {
     "rails": "~> 8.0",
@@ -159,6 +166,12 @@ Ruby mode owns `Gemfile`, Go mode owns `go.mod`, and TypeScript mode owns
 `trbconfig.jsonc`; edit dependencies through the config or `trb add/remove`,
 then run `trb sync`.
 
+A runnable project defines exactly one top-level `def main()`. `main` is a
+language convention rather than a configurable entrypoint, so
+`trbconfig.jsonc` does not need an entrypoint field. `trb run` compiles the
+project in a temporary directory and invokes `main`; running `trb build` first
+is unnecessary. A library project may omit `main`, but cannot be run directly.
+
 When TypeRB is embedded in an existing application that already owns its
 Gemfile, go.mod, or package.json, set `"packageManagement": "external"`.
 `trb build` then generates source without reading or modifying the host
@@ -175,7 +188,7 @@ trb run test.trb
 From this repository checkout, the executable example is:
 
 ```sh
-./trb run examples/ruby/test.trb
+trb run examples/ruby/test.trb
 ```
 
 ## Core syntax
@@ -317,7 +330,8 @@ Imports are resolved before type checking and retained as resolved package and
 symbol identities in typed IR. A project compile parses every `.trb` file once,
 builds a deterministic import graph, and checks constructor, field, method,
 inheritance, and interface signatures across file boundaries. Import and
-inheritance cycles, duplicate exported types, and duplicate entrypoints are
+inheritance cycles, duplicate exported types, and duplicate top-level `main`
+definitions are
 compile errors. Project imports use source-root paths:
 
 ```trb

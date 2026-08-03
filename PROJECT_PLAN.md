@@ -4,7 +4,8 @@ This document defines how TypeRB work should be split, tracked, and delivered.
 The goal is to make a long-running compiler project manageable through small,
 loosely coupled, test-first increments.
 
-For current status and immediate next tasks, read `STATUS.md`.
+For current status and immediate next tasks, read `STATUS.md`. Product-level
+capability milestones are tracked separately in `ROADMAP.md`.
 
 ## 1. Work Management
 

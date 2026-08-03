@@ -40,13 +40,14 @@ type CompileError struct {
 type Options struct {
 	Mode        string
 	Package     string
-	EntryPoint  string
 	ModulePath  string
 	GoModule    string
 	RubyLoader  string
 	SourceRoot  string
 	ProjectRoot string
 }
+
+const MainFunction = "main"
 
 func (e *CompileError) Error() string {
 	if len(e.Diagnostics) == 0 {
@@ -156,16 +157,14 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		}
 	}
 
-	if options.EntryPoint != "" {
-		owner := ""
-		for _, source := range units {
-			if hasTopLevelMethod(programs[source.ModulePath], options.EntryPoint) {
-				if owner != "" {
-					item := diagnostic.Diagnostic{Severity: diagnostic.Error, Message: fmt.Sprintf("entrypoint %s is already declared in %s", options.EntryPoint, owner), Span: programs[source.ModulePath].Span()}
-					return nil, &CompileError{Filename: source.Filename, Diagnostics: []diagnostic.Diagnostic{item}}
-				}
-				owner = source.Filename
+	owner := ""
+	for _, source := range units {
+		if hasTopLevelMethod(programs[source.ModulePath], MainFunction) {
+			if owner != "" {
+				item := diagnostic.Diagnostic{Severity: diagnostic.Error, Message: fmt.Sprintf("main is already declared in %s", owner), Span: programs[source.ModulePath].Span()}
+				return nil, &CompileError{Filename: source.Filename, Diagnostics: []diagnostic.Diagnostic{item}}
 			}
+			owner = source.Filename
 		}
 	}
 
@@ -189,7 +188,6 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 func configureProgram(program *ast.Program, options Options, modulePath, packageName string) {
 	program.Mode = options.Mode
 	program.Package = packageName
-	program.EntryPoint = options.EntryPoint
 	program.ModulePath = modulePath
 	program.GoModule = options.GoModule
 	program.RubyLoader = options.RubyLoader

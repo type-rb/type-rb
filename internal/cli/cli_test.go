@@ -29,7 +29,6 @@ func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
 	config.SourceDir = "src"
-	config.EntryPoint = ""
 	config.Go.Module = "example.com/type-rb/repl-test"
 	if err := config.Save(); err != nil {
 		t.Fatal(err)
@@ -80,7 +79,6 @@ func TestReplSupportsPreludeAndNamespacedPutsForAnyValue(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
 	config.SourceDir = "src"
-	config.EntryPoint = ""
 	config.Go.Module = "example.com/type-rb/repl-puts-test"
 	if err := config.Save(); err != nil {
 		t.Fatal(err)
@@ -105,7 +103,6 @@ func TestReplRejectsPlatformPackageForConfiguredModeAndContinues(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
 	config.SourceDir = "src"
-	config.EntryPoint = ""
 	config.Go.Module = "example.com/type-rb/repl-mode-test"
 	if err := config.Save(); err != nil {
 		t.Fatal(err)
@@ -135,7 +132,6 @@ func TestReplEvaluatesMultilineClassThroughTypedIR(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
 	config.SourceDir = "src"
-	config.EntryPoint = ""
 	config.Go.Module = "example.com/type-rb/repl-class-test"
 	if err := config.Save(); err != nil {
 		t.Fatal(err)
@@ -265,17 +261,44 @@ func TestRunCompilesProjectImportClosure(t *testing.T) {
 	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
 	t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 
-	var stdout, stderr bytes.Buffer
-	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"run", mainPath}); status != 0 {
-		t.Fatalf("status=%d stderr=%s", status, stderr.String())
-	}
-	if stdout.String() != "Imported\n" {
-		t.Fatalf("unexpected program output %q", stdout.String())
+	for _, args := range [][]string{{"run"}, {"run", mainPath}} {
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run(args); status != 0 {
+			t.Fatalf("args=%v status=%d stderr=%s", args, status, stderr.String())
+		}
+		if stdout.String() != "Imported\n" {
+			t.Fatalf("args=%v unexpected program output %q", args, stdout.String())
+		}
 	}
 	matches, err := filepath.Glob(filepath.Join(root, "trb-run-*"))
 	if err != nil || len(matches) != 0 {
 		t.Fatalf("run directory leaked: matches=%v err=%v", matches, err)
+	}
+}
+
+func TestRunWithoutSourceRequiresMain(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/acme/no-main"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "library.trb"), []byte("def value(): Integer\n  return 1\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", "--config", config.Path}); status != 1 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "project has no top-level main()") {
+		t.Fatalf("unexpected diagnostic: %s", stderr.String())
 	}
 }
 
@@ -287,7 +310,6 @@ func TestBuildCanEmbedInExistingRailsProjectWithoutManagingGemfile(t *testing.T)
 	config.PackageManagement = project.ExternalPackages
 	copyFiles := false
 	config.CopyFiles = &copyFiles
-	config.EntryPoint = ""
 	config.Ruby.Loader = "zeitwerk"
 	if err := config.Save(); err != nil {
 		t.Fatal(err)

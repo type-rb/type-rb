@@ -25,7 +25,6 @@ type Config struct {
 	Mode              string            `json:"mode"`
 	SourceDir         string            `json:"sourceDir,omitempty"`
 	OutDir            string            `json:"outDir,omitempty"`
-	EntryPoint        string            `json:"entrypoint,omitempty"`
 	CopyFiles         *bool             `json:"copyFiles,omitempty"`
 	PackageManagement string            `json:"packageManagement,omitempty"`
 	Dependencies      map[string]string `json:"dependencies,omitempty"`
@@ -125,7 +124,6 @@ func New(root, mode string) *Config {
 		Dependencies:    map[string]string{},
 		DevDependencies: map[string]string{},
 		LocalPackages:   map[string]string{},
-		EntryPoint:      "main",
 		Root:            absolute,
 		Path:            filepath.Join(absolute, ConfigName),
 	}

@@ -26,7 +26,7 @@ end
 `
 
 func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
-	goArtifact, err := CompileWithOptions("main.trb", []byte(portableMain), Options{Mode: "go", Package: "main", EntryPoint: "main"})
+	goArtifact, err := CompileWithOptions("main.trb", []byte(portableMain), Options{Mode: "go", Package: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		t.Fatalf("generated Go does not type-check: %v\n%s", err, goOutput)
 	}
 
-	tsArtifact, err := CompileWithOptions("main.trb", []byte(portableMain), Options{Mode: "typescript", EntryPoint: "main"})
+	tsArtifact, err := CompileWithOptions("main.trb", []byte(portableMain), Options{Mode: "typescript"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		}
 	}
 
-	rubyArtifact, err := CompileWithOptions("main.trb", []byte(portableMain), Options{Mode: "ruby", EntryPoint: "main", RubyLoader: "require_relative"})
+	rubyArtifact, err := CompileWithOptions("main.trb", []byte(portableMain), Options{Mode: "ruby", RubyLoader: "require_relative"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestPutsPreludeLowersWithoutImportAcrossBackends(t *testing.T) {
 		{mode: "ruby", want: "$stdout.puts(1 + 2)"},
 	}
 	for _, test := range tests {
-		artifact, err := CompileWithOptions("main.trb", source, Options{Mode: test.mode, Package: "main", EntryPoint: "main", RubyLoader: "require_relative"})
+		artifact, err := CompileWithOptions("main.trb", source, Options{Mode: test.mode, Package: "main", RubyLoader: "require_relative"})
 		if err != nil {
 			t.Fatalf("%s: %v", test.mode, err)
 		}
@@ -340,11 +340,11 @@ func TestProjectCompilerRejectsImportCycles(t *testing.T) {
 	}
 }
 
-func TestProjectCompilerRejectsDuplicateEntrypoints(t *testing.T) {
+func TestProjectCompilerRejectsDuplicateMainDefinitions(t *testing.T) {
 	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("def main()\n  return\nend\n")}
 	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("def main()\n  return\nend\n")}
-	if _, err := CompileProject([]SourceUnit{a, b}, Options{Mode: "typescript", EntryPoint: "main"}); err == nil || !strings.Contains(err.Error(), "entrypoint main is already declared") {
-		t.Fatalf("expected duplicate entrypoint diagnostic, got %v", err)
+	if _, err := CompileProject([]SourceUnit{a, b}, Options{Mode: "typescript"}); err == nil || !strings.Contains(err.Error(), "main is already declared") {
+		t.Fatalf("expected duplicate main diagnostic, got %v", err)
 	}
 }
 

@@ -22,7 +22,6 @@ class Trb < Formula
         "mode": "go",
         "sourceDir": "src",
         "outDir": "build",
-        "entrypoint": "main",
         "packageManagement": "external",
         "go": {
           "module": "example.com/brew-smoke-test",

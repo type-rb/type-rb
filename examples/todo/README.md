@@ -19,19 +19,19 @@ JSON tags; TypeScript receives interfaces.
 
 ## Run
 
-From a repository checkout, the root `trb` launcher bootstraps the compiler
-internally on first use. The user-facing command remains TypeRB's CLI:
+The commands below assume the `trb` bootstrap launcher or an installed binary
+is already on `PATH`:
 
 ```sh
-./trb version
+trb version
 ```
 
 Start the API:
 
 ```sh
 cd examples/todo/apps/api
-../../../../trb install
-../../../../trb run src/main.trb
+trb install
+trb run
 ```
 
 `trb run` reads the explicit `go.sqldef` config, applies `schema.sql` to
@@ -42,8 +42,8 @@ In another terminal, start the client:
 
 ```sh
 cd examples/todo/apps/web
-../../../../trb install
-PATH="$(cd ../../../.. && pwd):$PATH" npm run dev
+trb install
+npm run dev
 ```
 
 Open `http://localhost:5173`. A Todo belongs to one list, and its tags are
@@ -54,9 +54,9 @@ Production checks are:
 
 ```sh
 cd examples/todo/apps/api
-../../../../trb build
+trb build
 cd build && go test ./...
 
 cd ../../web
-PATH="$(cd ../../../.. && pwd):$PATH" npm run build
+npm run build
 ```

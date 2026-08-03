@@ -24,7 +24,6 @@ type Program struct {
 	Base
 	Mode       string
 	Package    string
-	EntryPoint string
 	ModulePath string
 	GoModule   string
 	RubyLoader string

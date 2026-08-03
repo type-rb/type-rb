@@ -290,25 +290,34 @@ func (c *CLI) runProgram(args []string) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
-	if err := flags.Parse(args); err != nil {
+	flagArgs := args
+	var programArgs []string
+	for index, argument := range args {
+		if argument == "--" {
+			flagArgs = args[:index]
+			programArgs = append(programArgs, args[index+1:]...)
+			break
+		}
+	}
+	if err := flags.Parse(flagArgs); err != nil {
 		return err
 	}
 	remaining := flags.Args()
-	if len(remaining) == 0 {
-		return errors.New("usage: trb run FILE.trb [-- program arguments]")
+	filename := ""
+	configStart := "."
+	if len(remaining) > 0 {
+		if filepath.Ext(remaining[0]) != ".trb" {
+			return fmt.Errorf("%s is not a .trb file; pass program arguments after --", remaining[0])
+		}
+		var err error
+		filename, err = filepath.Abs(remaining[0])
+		if err != nil {
+			return err
+		}
+		configStart = filename
+		programArgs = append(remaining[1:], programArgs...)
 	}
-	filename, err := filepath.Abs(remaining[0])
-	if err != nil {
-		return err
-	}
-	if filepath.Ext(filename) != ".trb" {
-		return fmt.Errorf("%s is not a .trb file", remaining[0])
-	}
-	programArgs := remaining[1:]
-	if len(programArgs) > 0 && programArgs[0] == "--" {
-		programArgs = programArgs[1:]
-	}
-	config, err := loadConfig(*configPath, filename)
+	config, err := loadConfig(*configPath, configStart)
 	if err != nil {
 		return err
 	}
@@ -336,6 +345,18 @@ func (c *CLI) runProgram(args []string) error {
 		compiledNames = append(compiledNames, name)
 	}
 	sort.Strings(compiledNames)
+	entrySource := filename
+	if entrySource == "" {
+		for _, sourceName := range compiledNames {
+			if artifactHasMain(compiled[sourceName]) {
+				entrySource = sourceName
+				break
+			}
+		}
+		if entrySource == "" {
+			return errors.New("project has no top-level main(); define def main() or pass a .trb file explicitly")
+		}
+	}
 	for _, sourceName := range compiledNames {
 		artifact := compiled[sourceName]
 		relative, _ := generatedRelative(config, sourceName, artifact)
@@ -346,12 +367,12 @@ func (c *CLI) runProgram(args []string) error {
 		if err := os.WriteFile(generated, artifact.Output, 0o644); err != nil {
 			return err
 		}
-		if sourceName == filename {
+		if sourceName == entrySource {
 			target = generated
 		}
 	}
 	if target == "" {
-		return fmt.Errorf("%s is outside configured sourceDir %s", filename, config.SourceDir)
+		return fmt.Errorf("%s is outside configured sourceDir %s", entrySource, config.SourceDir)
 	}
 	if config.Mode == "go" {
 		for _, manifest := range []string{"go.mod", "go.sum"} {
@@ -378,7 +399,7 @@ func (c *CLI) runProgram(args []string) error {
 	case "ruby":
 		command = exec.Command("bundle", append([]string{"exec", "ruby", target}, programArgs...)...)
 	case "go":
-		command = exec.Command("go", append([]string{"run", target}, programArgs...)...)
+		command = exec.Command("go", append([]string{"run", "."}, programArgs...)...)
 		if config.Go.Sqldef != nil {
 			database := filepath.Join(config.Root, config.Go.Sqldef.Database)
 			command.Env = append(os.Environ(), "TRB_DATABASE="+database)
@@ -387,6 +408,9 @@ func (c *CLI) runProgram(args []string) error {
 		command = exec.Command("node", append([]string{"--experimental-strip-types", target}, programArgs...)...)
 	}
 	command.Dir = runRoot
+	if config.Mode == "go" {
+		command.Dir = filepath.Dir(target)
+	}
 	if config.Mode == "ruby" {
 		command.Dir = config.Root
 	}
@@ -431,9 +455,7 @@ func (c *CLI) runRepl(args []string) error {
 			ModulePath: sessionModule,
 			Package:    sessionPackage,
 		})
-		options := compilerOptions(config)
-		options.EntryPoint = ""
-		artifacts, err := compiler.CompileProject(units, options)
+		artifacts, err := compiler.CompileProject(units, compilerOptions(config))
 		if err != nil {
 			return nil, err
 		}
@@ -748,7 +770,7 @@ func sourceUnit(config *project.Config, filename string, source []byte) (compile
 }
 
 func compilerOptions(config *project.Config) compiler.Options {
-	options := compiler.Options{Mode: config.Mode, EntryPoint: config.EntryPoint, SourceRoot: config.SourcePath(), ProjectRoot: config.Root}
+	options := compiler.Options{Mode: config.Mode, SourceRoot: config.SourcePath(), ProjectRoot: config.Root}
 	if config.Ruby != nil {
 		options.RubyLoader = config.Ruby.Loader
 	}
@@ -756,6 +778,18 @@ func compilerOptions(config *project.Config) compiler.Options {
 		options.GoModule = config.Go.Module
 	}
 	return options
+}
+
+func artifactHasMain(artifact *compiler.Artifact) bool {
+	if artifact == nil || artifact.IR == nil {
+		return false
+	}
+	for _, statement := range artifact.IR.Statements {
+		if method, ok := statement.(*ir.Method); ok && method.Name == compiler.MainFunction {
+			return true
+		}
+	}
+	return false
 }
 
 func firstOr(values []string, fallback string) string {
@@ -889,7 +923,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [directory]")
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build [--check] [paths...]")
-	fmt.Fprintln(c.Stdout, "  trb run FILE.trb [-- arguments...]")
+	fmt.Fprintln(c.Stdout, "  trb run [FILE.trb] [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb repl [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--dev] PACKAGE [VERSION]")

@@ -5,7 +5,6 @@
   "mode": "ruby",
   "sourceDir": ".",
   "outDir": "build",
-  "entrypoint": "main",
   "copyFiles": true,
   "ruby": {
     "loader": "require_relative",

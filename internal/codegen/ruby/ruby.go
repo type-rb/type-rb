@@ -13,23 +13,22 @@ type generator struct {
 	indent       int
 	loader       string
 	modulePath   string
-	entryPoint   string
 	topFunctions map[string]bool
 }
 
 func Generate(program *ir.Program) string {
-	g := &generator{loader: program.RubyLoader, modulePath: program.ModulePath, entryPoint: program.EntryPoint, topFunctions: map[string]bool{}}
+	g := &generator{loader: program.RubyLoader, modulePath: program.ModulePath, topFunctions: map[string]bool{}}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
 		}
 	}
 	g.statements(program.Statements)
-	if g.entryPoint != "" && g.topFunctions[g.entryPoint] {
+	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
 		}
-		g.line(g.entryPoint+"()", "")
+		g.line("main()", "")
 	}
 	return strings.TrimRight(g.b.String(), "\n") + "\n"
 }
