@@ -20,6 +20,10 @@ func TestCompleteTracksBlocksAndDelimiters(t *testing.T) {
 		{"if true\n  1\nend", true},
 		{"call(\n  1,", false},
 		{"call(\n  1,\n)", true},
+		{"[1, 2, 3].each do |value|", false},
+		{"[1, 2, 3].each do |value|\n  puts(value)\nend", true},
+		{"[1, 2, 3].each { |value|", false},
+		{"[1, 2, 3].each { |value| puts(value) }", true},
 		{"# class does not open a block", true},
 		{"\"class\"", true},
 	}

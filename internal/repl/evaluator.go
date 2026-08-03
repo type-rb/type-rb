@@ -27,6 +27,11 @@ type Result struct {
 }
 
 type arrayValue struct{ Items []Value }
+type rangeValue struct {
+	Start     int64
+	End       int64
+	Exclusive bool
+}
 type hashEntry struct{ Key, Value Value }
 type hashValue struct{ Entries []hashEntry }
 
@@ -336,6 +341,8 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 				return last, err
 			}
 		}
+	case *ir.Iterate:
+		return e.iterate(node, module, sc)
 	case *ir.Native, *ir.NativeBlock:
 		return flowResult{}, fmt.Errorf("native %s syntax is not executable by the typed IR REPL", e.mode)
 	default:
@@ -458,6 +465,21 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		return e.binary(left, node.Operator, right, node.ExprType())
+	case *ir.Range:
+		start, err := e.expression(node.Start, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		end, err := e.expression(node.End, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		startValue, startOK := start.Data.(int64)
+		endValue, endOK := end.Data.(int64)
+		if !startOK || !endOK {
+			return Value{}, errors.New("range endpoints must be Integer")
+		}
+		return Value{Type: node.ExprType(), Data: &rangeValue{Start: startValue, End: endValue, Exclusive: node.Exclusive}}, nil
 	case *ir.Member:
 		if node.Reference != nil && node.Reference.Intrinsic != "" {
 			return Value{Type: node.ExprType(), Data: &callable{Intrinsic: node.Reference.Intrinsic, Module: module}}, nil
@@ -520,6 +542,79 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		return Value{}, fmt.Errorf("native %s expression is not executable by the typed IR REPL", e.mode)
 	default:
 		return Value{}, fmt.Errorf("unsupported REPL expression %T", expression)
+	}
+}
+
+func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowResult, error) {
+	source, err := e.expression(node.Source, module, sc)
+	if err != nil {
+		return flowResult{}, err
+	}
+	items, err := iterableValues(source)
+	if err != nil {
+		return flowResult{}, err
+	}
+	size := 1
+	if node.Operation == "each_slice" {
+		value, err := e.expression(node.SliceSize, module, sc)
+		if err != nil {
+			return flowResult{}, err
+		}
+		integer, ok := value.Data.(int64)
+		if !ok || integer <= 0 {
+			return flowResult{}, errors.New("each_slice size must be greater than zero")
+		}
+		size = int(integer)
+	}
+	iterationIndex := 0
+	for offset := 0; offset < len(items); offset += size {
+		if err := e.checkContext(); err != nil {
+			return flowResult{}, err
+		}
+		iterationScope := &scope{parent: sc, values: map[string]Value{}}
+		if node.Operation == "each_slice" {
+			end := offset + size
+			if end > len(items) {
+				end = len(items)
+			}
+			slice := append([]Value(nil), items[offset:end]...)
+			iterationScope.values[node.Item] = Value{Type: node.ItemType, Data: &arrayValue{Items: slice}}
+		} else {
+			iterationScope.values[node.Item] = items[offset]
+		}
+		if node.WithIndex {
+			iterationScope.values[node.Index] = Value{Type: types.FromName("Integer"), Data: int64(iterationIndex)}
+		}
+		result, err := e.evaluate(node.Body, module, iterationScope)
+		if err != nil || result.Returned {
+			return result, err
+		}
+		iterationIndex++
+	}
+	return flowResult{}, nil
+}
+
+func iterableValues(value Value) ([]Value, error) {
+	switch data := value.Data.(type) {
+	case *arrayValue:
+		return data.Items, nil
+	case *rangeValue:
+		items := []Value{}
+		for current := data.Start; current < data.End; current++ {
+			if len(items) >= 1_000_000 {
+				return nil, errors.New("range exceeded REPL iteration limit")
+			}
+			items = append(items, Value{Type: types.FromName("Integer"), Data: current})
+		}
+		if !data.Exclusive && data.Start <= data.End {
+			if len(items) >= 1_000_000 {
+				return nil, errors.New("range exceeded REPL iteration limit")
+			}
+			items = append(items, Value{Type: types.FromName("Integer"), Data: data.End})
+		}
+		return items, nil
+	default:
+		return nil, fmt.Errorf("%s is not iterable", value.Type)
 	}
 }
 
@@ -1149,6 +1244,12 @@ func Inspect(value Value) string {
 			parts[index] = Inspect(value)
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
+	case *rangeValue:
+		operator := ".."
+		if item.Exclusive {
+			operator = "..."
+		}
+		return strconv.FormatInt(item.Start, 10) + operator + strconv.FormatInt(item.End, 10)
 	case *hashValue:
 		parts := make([]string, len(item.Entries))
 		for index, entry := range item.Entries {

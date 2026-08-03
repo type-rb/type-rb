@@ -31,13 +31,14 @@ func parseExpressionTokens(tokens []token.Token) (ast.Expression, bool) {
 var precedences = map[string]int{
 	"or": 1, "||": 1,
 	"and": 2, "&&": 2,
-	"==": 3, "!=": 3, "=~": 3, "!~": 3,
-	"<": 4, "<=": 4, ">": 4, ">=": 4, "<=>": 4,
-	"|": 5, "^": 6, "&": 7,
-	"<<": 8, ">>": 8,
-	"+": 9, "-": 9,
-	"*": 10, "/": 10, "%": 10,
-	"**": 11,
+	"..": 3, "...": 3,
+	"==": 4, "!=": 4, "=~": 4, "!~": 4,
+	"<": 5, "<=": 5, ">": 5, ">=": 5, "<=>": 5,
+	"|": 6, "^": 7, "&": 8,
+	"<<": 9, ">>": 9,
+	"+": 10, "-": 10,
+	"*": 11, "/": 11, "%": 11,
+	"**": 12,
 }
 
 func (p *exprParser) parse(min int) ast.Expression {
@@ -83,7 +84,11 @@ func (p *exprParser) parse(min int) ast.Expression {
 		if right == nil {
 			return nil
 		}
-		left = &ast.BinaryExpression{Base: ast.Base{SourceSpan: token.Span{Start: left.Span().Start, End: right.Span().End}}, Left: left, Operator: tok.Lexeme, Right: right}
+		if tok.Lexeme == ".." || tok.Lexeme == "..." {
+			left = &ast.RangeExpression{Base: ast.Base{SourceSpan: token.Span{Start: left.Span().Start, End: right.Span().End}}, Start: left, End: right, Exclusive: tok.Lexeme == "..."}
+		} else {
+			left = &ast.BinaryExpression{Base: ast.Base{SourceSpan: token.Span{Start: left.Span().Start, End: right.Span().End}}, Left: left, Operator: tok.Lexeme, Right: right}
+		}
 	}
 	return left
 }
@@ -96,7 +101,7 @@ func (p *exprParser) parsePrefix() ast.Expression {
 	p.pos++
 	switch tok.Lexeme {
 	case "!", "not", "-", "+", "~":
-		operand := p.parse(10)
+		operand := p.parse(11)
 		if operand == nil {
 			return nil
 		}

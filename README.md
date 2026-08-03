@@ -222,7 +222,8 @@ v0.1 portable syntax includes:
 - typed fields, `readonly`, methods, parameters, and return types
 - local inference with `:=` and reassignment with `=`/compound assignment
 - literals, arrays, hashes, calls, members, indexes, unary/binary expressions
-- `if`/`elsif`/`else`, `while`, and `return`
+- `if`/`elsif`/`else`, `while`, `return`, integer ranges, and Ruby-shaped
+  `each`/`each_slice`/`each.with_index` iteration
 - `_private` methods and `@_private` fields
 
 Types are written as `name: Type`. Generics, arrays, and nullable types use

@@ -17,12 +17,14 @@ func Complete(source string) bool {
 	blocks := 0
 	delimiters := []string{}
 	lineStart := true
+	lineOpenedBlock := false
 	for _, item := range tokens {
 		switch item.Kind {
 		case token.Comment:
 			continue
 		case token.Newline:
 			lineStart = true
+			lineOpenedBlock = false
 			continue
 		case token.EOF:
 			continue
@@ -31,11 +33,16 @@ func Complete(source string) bool {
 			switch item.Lexeme {
 			case "class", "record", "module", "interface", "def", "if", "while":
 				blocks++
+				lineOpenedBlock = true
 			case "end":
 				if blocks > 0 {
 					blocks--
 				}
 			}
+		}
+		if item.Lexeme == "do" && len(delimiters) == 0 && !lineOpenedBlock {
+			blocks++
+			lineOpenedBlock = true
 		}
 		lineStart = false
 		switch item.Lexeme {

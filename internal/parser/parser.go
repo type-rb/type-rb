@@ -124,6 +124,9 @@ func (p *Parser) parseStatement() ast.Statement {
 		p.pos = next
 		return assignment
 	}
+	if iteration := p.tryIteration(line, next, base); iteration != nil {
+		return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
+	}
 	if p.opensNativeBlock(line) {
 		return p.parseNativeBlock()
 	}
@@ -134,6 +137,171 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	p.pos = next
 	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
+}
+
+func (p *Parser) tryIteration(line []token.Token, next int, base ast.Base) *ast.IterationExpression {
+	if doAt := topLevelIndex(line, "do"); doAt > 0 {
+		iteration, ok := p.iterationHeader(line[:doAt])
+		if !ok {
+			return nil
+		}
+		parameters, ok := p.blockParameters(line[doAt+1:])
+		if !ok {
+			p.errorAt(spanOf(line[doAt:]), "iteration block parameters must be written as |item| or |item, index|")
+		}
+		p.pos = next
+		block := &ast.BlockExpression{Base: ast.Base{SourceSpan: spanOf(line[doAt:])}, Parameters: parameters}
+		block.Body = p.parseStatements(map[string]bool{"end": true})
+		_, closeSpan := p.consumeTerminator("end")
+		block.SourceSpan.End = closeSpan.End
+		iteration.Base = base
+		iteration.SourceSpan.End = closeSpan.End
+		iteration.Block = block
+		return iteration
+	}
+
+	braceAt := topLevelIndex(line, "{")
+	if braceAt <= 0 {
+		return nil
+	}
+	iteration, ok := p.iterationHeader(line[:braceAt])
+	if !ok {
+		return nil
+	}
+	close := matchingIndex(line, braceAt, "{", "}")
+	if close < 0 {
+		p.errorAt(line[braceAt].Span, "unterminated iteration block; expected }")
+		p.pos = next
+		return iteration
+	}
+	parameterEnd := -1
+	for index := braceAt + 1; index < close; index++ {
+		if line[index].Lexeme == "|" {
+			parameterEnd = index
+			break
+		}
+	}
+	if parameterEnd != braceAt+1 {
+		p.errorAt(spanOf(line[braceAt:close+1]), "iteration block parameters must start with |")
+	}
+	secondPipe := -1
+	for index := parameterEnd + 1; parameterEnd >= 0 && index < close; index++ {
+		if line[index].Lexeme == "|" {
+			secondPipe = index
+			break
+		}
+	}
+	parameters := []string(nil)
+	if secondPipe < 0 {
+		p.errorAt(spanOf(line[braceAt:close+1]), "iteration block parameters must end with |")
+	} else if parsed, valid := p.blockParameters(line[parameterEnd : secondPipe+1]); valid {
+		parameters = parsed
+	} else {
+		p.errorAt(spanOf(line[parameterEnd:secondPipe+1]), "iteration block parameters must be identifiers")
+	}
+	block := &ast.BlockExpression{Base: ast.Base{SourceSpan: token.Span{Start: line[braceAt].Span.Start, End: line[close].Span.End}}, Parameters: parameters, Brace: true}
+	if secondPipe >= 0 {
+		for _, part := range splitTopLevel(line[secondPipe+1:close], ";") {
+			if len(part) == 0 {
+				continue
+			}
+			statement := p.inlineBlockStatement(part)
+			if statement == nil {
+				p.errorAt(spanOf(part), "unsupported statement in inline iteration block")
+				continue
+			}
+			block.Body = append(block.Body, statement)
+		}
+	}
+	iteration.Base = base
+	iteration.Block = block
+	p.pos = next
+	return iteration
+}
+
+func (p *Parser) inlineBlockStatement(line []token.Token) ast.Statement {
+	base := ast.Base{SourceSpan: spanOf(line)}
+	if line[0].Lexeme == "return" {
+		value, ok := parseExpressionTokens(line[1:])
+		if len(line) > 1 && !ok {
+			return nil
+		}
+		return &ast.ReturnStatement{Base: base, Value: value}
+	}
+	if variable := p.tryVariable(line, base); variable != nil {
+		return variable
+	}
+	if assignment := p.tryAssignment(line, base); assignment != nil {
+		return assignment
+	}
+	if expression, ok := parseExpressionTokens(line); ok {
+		return &ast.ExpressionStatement{Base: base, Expression: expression}
+	}
+	return nil
+}
+
+func (p *Parser) blockParameters(tokens []token.Token) ([]string, bool) {
+	if len(tokens) < 2 || tokens[0].Lexeme != "|" || tokens[len(tokens)-1].Lexeme != "|" {
+		return nil, false
+	}
+	parts := splitTopLevel(tokens[1:len(tokens)-1], ",")
+	parameters := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len(part) != 1 || part[0].Kind != token.Identifier {
+			return nil, false
+		}
+		parameters = append(parameters, part[0].Lexeme)
+	}
+	return parameters, len(parameters) > 0
+}
+
+func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression, bool) {
+	expression, ok := parseExpressionTokens(tokens)
+	if !ok {
+		return nil, false
+	}
+	withIndex := false
+	if member, ok := expression.(*ast.MemberExpression); ok && member.Name == "with_index" {
+		withIndex = true
+		expression = member.Receiver
+	} else if call, ok := expression.(*ast.CallExpression); ok {
+		if member, memberOK := call.Callee.(*ast.MemberExpression); memberOK && member.Name == "with_index" {
+			if len(call.Arguments) != 0 {
+				p.errorAt(call.Span(), "with_index does not take arguments in TypeRB v0.1")
+			}
+			withIndex = true
+			expression = member.Receiver
+		}
+	}
+
+	iteration := &ast.IterationExpression{WithIndex: withIndex}
+	switch node := expression.(type) {
+	case *ast.MemberExpression:
+		if node.Name != "each" {
+			return nil, false
+		}
+		iteration.Source = node.Receiver
+		iteration.Operation = "each"
+	case *ast.CallExpression:
+		member, memberOK := node.Callee.(*ast.MemberExpression)
+		if !memberOK || (member.Name != "each" && member.Name != "each_slice") {
+			return nil, false
+		}
+		iteration.Source = member.Receiver
+		iteration.Operation = member.Name
+		if member.Name == "each" {
+			if len(node.Arguments) != 0 {
+				p.errorAt(node.Span(), "each does not take arguments")
+			}
+		} else if len(node.Arguments) != 1 || node.Arguments[0].Name != "" || node.Arguments[0].Splat != "" {
+			p.errorAt(node.Span(), "each_slice expects exactly one positional size argument")
+		} else {
+			iteration.SliceSize = node.Arguments[0].Value
+		}
+	default:
+		return nil, false
+	}
+	return iteration, true
 }
 
 func (p *Parser) parseRecord() ast.Statement {

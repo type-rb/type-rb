@@ -176,6 +176,126 @@ end
 	}
 }
 
+func TestPortableIterationAndRangesLowerAcrossBackends(t *testing.T) {
+	source := []byte(`def total(): Integer
+  mut result := 0
+  [1, 2, 3].each { |value| result += value }
+  [1].each do |unused|
+    result += 1
+  end
+  (0...3).each.with_index do |value, index|
+    result += value + index
+  end
+  [1, 2, 3, 4, 5].each_slice(2).with_index do |slice, index|
+    result += slice[0] + index
+  end
+  [1, 2].each_slice(1) do |_|
+    result += 1
+  end
+  return result
+end
+
+def sum(values: Iterable<Integer>): Integer
+  mut result := 0
+  values.each do |value|
+    result += value
+  end
+  return result
+end
+
+def sum_range(): Integer
+  return sum(0...3)
+end
+`)
+
+	goArtifact, err := Compile("iteration.trb", source, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "iteration.go", goArtifact.Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, goArtifact.Output)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated Go does not type-check: %v\n%s", err, goArtifact.Output)
+	}
+	goOutput := string(goArtifact.Output)
+	for _, expected := range []string{"for _, value := range []int{1, 2, 3}", "for index, value := range func() []int", "__trbItems1 := []int{1, 2, 3, 4, 5}", "slice := __trbItems1[", "func Sum(values []int) int", "return Sum(func() []int"} {
+		if !strings.Contains(goOutput, expected) {
+			t.Fatalf("missing %q in generated Go:\n%s", expected, goOutput)
+		}
+	}
+
+	tsArtifact, err := Compile("iteration.trb", source, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsOutput := string(tsArtifact.Output)
+	for _, expected := range []string{"for (let value of [1, 2, 3])", ".entries()) {", "const __trbItems1 = [1, 2, 3, 4, 5];", "let slice = __trbItems1.slice(", "function sum(values: Array<number>): number", "return sum(((start: number"} {
+		if !strings.Contains(tsOutput, expected) {
+			t.Fatalf("missing %q in generated TypeScript:\n%s", expected, tsOutput)
+		}
+	}
+
+	rubyArtifact, err := Compile("iteration.trb", source, "ruby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rubyOutput := string(rubyArtifact.Output)
+	for _, expected := range []string{"[1, 2, 3].each do |value|", "(0...3).each.with_index do |value, index|", "[1, 2, 3, 4, 5].each_slice(2).with_index do |slice, index|"} {
+		if !strings.Contains(rubyOutput, expected) {
+			t.Fatalf("missing %q in generated Ruby:\n%s", expected, rubyOutput)
+		}
+	}
+
+	method := goArtifact.IR.Statements[0].(*ir.Method)
+	iteration, ok := method.Body[1].(*ir.Iterate)
+	if !ok || iteration.ItemType.Kind != types.Int {
+		t.Fatalf("iterator item type was not retained in IR: %#v", method.Body[1])
+	}
+	rangeIteration := method.Body[3].(*ir.Iterate)
+	if sourceRange, ok := rangeIteration.Source.(*ir.Range); !ok || !sourceRange.Exclusive {
+		t.Fatalf("exclusive range was not retained in IR: %#v", rangeIteration.Source)
+	}
+}
+
+func TestPortableIterationChecksSourceParametersAndSliceSize(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{"def bad()\n  1.each do |value|\n    puts(value)\n  end\n  return\nend\n", "Integer is not iterable"},
+		{"def bad()\n  [1].each do |value, index|\n    puts(value)\n  end\n  return\nend\n", "each block expects 1 parameter"},
+		{"def bad()\n  [1].each_slice(0) do |slice|\n    puts(slice)\n  end\n  return\nend\n", "each_slice size must be greater than zero"},
+		{"def bad()\n  (\"a\"..\"z\").each do |value|\n    puts(value)\n  end\n  return\nend\n", "range endpoints must be Integer"},
+	}
+	for _, test := range tests {
+		if _, err := Compile("bad.trb", []byte(test.source), "go"); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("expected %q diagnostic, got %v", test.want, err)
+		}
+	}
+}
+
+func TestRubyNativeEnumerableCanUsePortableIterationBlock(t *testing.T) {
+	source := []byte(`import trb/platform/ruby/native
+
+def print_all(values: Any)
+  values.each do |value|
+    puts(value)
+  end
+  return
+end
+`)
+	artifact, err := Compile("enumerable.trb", source, "ruby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output := string(artifact.Output); !strings.Contains(output, "values.each do |value|") {
+		t.Fatalf("Ruby Enumerable block was not lowered:\n%s", output)
+	}
+}
+
 func TestRecordIsAFirstClassASTAndIRNodeAcrossPortableBackends(t *testing.T) {
 	source := []byte(`record Todo
   id: Integer @gorm("primaryKey")

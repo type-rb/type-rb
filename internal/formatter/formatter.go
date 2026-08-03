@@ -175,6 +175,9 @@ func needsSpace(beforePrevious *token.Token, previous, current token.Token, next
 	if current.Lexeme == ":" {
 		return current.Span.Start.Offset > previous.Span.End.Offset
 	}
+	if current.Lexeme == ".." || current.Lexeme == "..." || previous.Lexeme == ".." || previous.Lexeme == "..." {
+		return false
+	}
 	if previous.Lexeme == "-" && current.Lexeme == ">" {
 		return false
 	}
@@ -269,7 +272,7 @@ func isSymbolColon(before *token.Token, colon token.Token, next string) bool {
 
 func isOperator(s string) bool {
 	switch s {
-	case ":=", "=", "+", "-", "*", "/", "%", "**", "==", "!=", "<", ">", "<=", ">=", "<=>", "=~", "!~", "&&", "||", "and", "or", "=>", "+=", "-=", "*=", "/=", "||=", "&&=", "|", "&", "^":
+	case ":=", "=", "+", "-", "*", "/", "%", "**", "==", "!=", "<", ">", "<=", ">=", "<=>", "=~", "!~", "&&", "||", "and", "or", "=>", "+=", "-=", "*=", "/=", "||=", "&&=", "|", "&", "^", "..", "...":
 		return true
 	}
 	return false

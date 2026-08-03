@@ -31,3 +31,19 @@ func TestLexUnicodeIdentifier(t *testing.T) {
 		t.Fatalf("tokens=%#v diagnostics=%v", tokens, diags)
 	}
 }
+
+func TestLexRangeOperatorsLongestFirst(t *testing.T) {
+	tokens, diagnostics := Lex([]byte("0..10\n0...10\n"))
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	operators := []string{}
+	for _, item := range tokens {
+		if item.Kind == token.Operator {
+			operators = append(operators, item.Lexeme)
+		}
+	}
+	if len(operators) != 2 || operators[0] != ".." || operators[1] != "..." {
+		t.Fatalf("range operators were not tokenized atomically: %#v", operators)
+	}
+}

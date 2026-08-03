@@ -29,6 +29,7 @@ type generator struct {
 	modulePath    string
 	goModule      string
 	entryPoint    string
+	temporary     int
 }
 
 func Generate(program *ir.Program) string {
@@ -221,7 +222,69 @@ func (g *generator) statement(statement ir.Statement) {
 		g.statements(n.Body)
 		g.indent--
 		g.line("}")
+	case *ir.Iterate:
+		g.iterate(n)
 	}
+}
+
+func (g *generator) iterate(iteration *ir.Iterate) {
+	item := goIdentifier(iteration.Item, false)
+	if iteration.Operation == "each_slice" {
+		g.temporary++
+		suffix := strconv.Itoa(g.temporary)
+		items := "__trbItems" + suffix
+		size := "__trbSize" + suffix
+		offset := "__trbOffset" + suffix
+		end := "__trbEnd" + suffix
+		g.line("{")
+		g.indent++
+		g.line(items + " := " + g.expr(iteration.Source))
+		g.line(size + " := " + g.expr(iteration.SliceSize))
+		g.line("if " + size + " <= 0 {")
+		g.indent++
+		g.line("panic(\"each_slice size must be greater than zero\")")
+		g.indent--
+		g.line("}")
+		g.line("for " + offset + " := 0; " + offset + " < len(" + items + "); " + offset + " += " + size + " {")
+		g.indent++
+		if iteration.Item != "_" {
+			g.line(end + " := min(" + offset + "+" + size + ", len(" + items + "))")
+			g.line(item + " := " + items + "[" + offset + ":" + end + "]")
+			g.line("_ = " + item)
+		}
+		if iteration.WithIndex {
+			if iteration.Index != "_" {
+				index := goIdentifier(iteration.Index, false)
+				g.line(index + " := " + offset + " / " + size)
+				g.line("_ = " + index)
+			}
+		}
+		g.statements(iteration.Body)
+		g.indent--
+		g.line("}")
+		g.indent--
+		g.line("}")
+		return
+	}
+	if iteration.WithIndex && iteration.Index != "_" && iteration.Item != "_" {
+		g.line("for " + goIdentifier(iteration.Index, false) + ", " + item + " := range " + g.expr(iteration.Source) + " {")
+	} else if iteration.WithIndex && iteration.Index != "_" {
+		g.line("for " + goIdentifier(iteration.Index, false) + " := range " + g.expr(iteration.Source) + " {")
+	} else if iteration.Item != "_" {
+		g.line("for _, " + item + " := range " + g.expr(iteration.Source) + " {")
+	} else {
+		g.line("for range " + g.expr(iteration.Source) + " {")
+	}
+	g.indent++
+	if iteration.Item != "_" {
+		g.line("_ = " + item)
+	}
+	if iteration.WithIndex && iteration.Index != "_" {
+		g.line("_ = " + goIdentifier(iteration.Index, false))
+	}
+	g.statements(iteration.Body)
+	g.indent--
+	g.line("}")
 }
 
 func (g *generator) exprExpected(expression ir.Expression, expected types.Type) string {
@@ -461,6 +524,12 @@ func (g *generator) expr(expression ir.Expression) string {
 			op = "||"
 		}
 		return g.expr(n.Left) + " " + op + " " + g.expr(n.Right)
+	case *ir.Range:
+		inclusiveEnd := ""
+		if !n.Exclusive {
+			inclusiveEnd = "; if start <= end { values = append(values, end) }"
+		}
+		return "func() []int { start, end := " + g.expr(n.Start) + ", " + g.expr(n.End) + "; values := []int{}; for value := start; value < end; value++ { values = append(values, value) }" + inclusiveEnd + "; return values }()"
 	case *ir.Member:
 		return g.expr(n.Receiver) + "." + goMethodName(n.Name)
 	case *ir.Call:
@@ -688,8 +757,14 @@ func (g *generator) goType(t types.Type) string {
 		result = "float64"
 	case types.String:
 		result = "string"
-	case types.Array:
+	case types.Array, types.Iterable:
 		element := "any"
+		if len(t.Args) > 0 {
+			element = g.goType(t.Args[0])
+		}
+		result = "[]" + element
+	case types.Range:
+		element := "int"
 		if len(t.Args) > 0 {
 			element = g.goType(t.Args[0])
 		}
@@ -850,6 +925,10 @@ func usesInterpolation(statements []ir.Statement) bool {
 			if expressionUsesInterpolation(n.Condition) || usesInterpolation(n.Body) {
 				return true
 			}
+		case *ir.Iterate:
+			if expressionUsesInterpolation(n.Source) || expressionUsesInterpolation(n.SliceSize) || usesInterpolation(n.Body) {
+				return true
+			}
 		}
 	}
 	return false
@@ -877,6 +956,8 @@ func expressionUsesInterpolation(expression ir.Expression) bool {
 		return expressionUsesInterpolation(n.Operand)
 	case *ir.Binary:
 		return expressionUsesInterpolation(n.Left) || expressionUsesInterpolation(n.Right)
+	case *ir.Range:
+		return expressionUsesInterpolation(n.Start) || expressionUsesInterpolation(n.End)
 	case *ir.Call:
 		if expressionUsesInterpolation(n.Callee) {
 			return true

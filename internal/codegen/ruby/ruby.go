@@ -156,6 +156,27 @@ func (g *generator) statement(statement ir.Statement) {
 		g.statements(n.Body)
 		g.indent--
 		g.line("end", "")
+	case *ir.Iterate:
+		source := g.expr(n.Source)
+		if _, rangeSource := n.Source.(*ir.Range); rangeSource {
+			source = "(" + source + ")"
+		}
+		header := source + "." + n.Operation
+		if n.Operation == "each_slice" {
+			header += "(" + g.expr(n.SliceSize) + ")"
+		}
+		if n.WithIndex {
+			header += ".with_index"
+		}
+		parameters := []string{n.Item}
+		if n.WithIndex {
+			parameters = append(parameters, n.Index)
+		}
+		g.line(header+" do |"+strings.Join(parameters, ", ")+"|", n.TrailingComment)
+		g.indent++
+		g.statements(n.Body)
+		g.indent--
+		g.line("end", "")
 	case *ir.Native:
 		g.nativeLines(n.Text, n.TrailingComment)
 	case *ir.NativeBlock:
@@ -242,6 +263,12 @@ func (g *generator) expr(expression ir.Expression) string {
 		return n.Operator + g.expr(n.Operand)
 	case *ir.Binary:
 		return g.expr(n.Left) + " " + n.Operator + " " + g.expr(n.Right)
+	case *ir.Range:
+		operator := ".."
+		if n.Exclusive {
+			operator = "..."
+		}
+		return g.expr(n.Start) + operator + g.expr(n.End)
 	case *ir.Member:
 		op := "."
 		if n.Namespace {

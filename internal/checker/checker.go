@@ -20,6 +20,7 @@ type Result struct {
 	Program     *ast.Program
 	Expressions map[ast.Expression]types.Type
 	Variables   map[*ast.VariableStatement]types.Type
+	Iterations  map[*ast.IterationExpression]types.Type
 	Resolution  resolver.Result
 	References  map[ast.Expression]resolver.Binding
 }
@@ -80,6 +81,7 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 			Program:     program,
 			Expressions: map[ast.Expression]types.Type{},
 			Variables:   map[*ast.VariableStatement]types.Type{},
+			Iterations:  map[*ast.IterationExpression]types.Type{},
 			Resolution:  resolution,
 			References:  map[ast.Expression]resolver.Binding{},
 		},
@@ -552,6 +554,10 @@ func walkAssignments(statements []ast.Statement, visit func(*ast.AssignmentState
 				walkAssignments(branch.Body, visit)
 			}
 			walkAssignments(n.Else, visit)
+		case *ast.ExpressionStatement:
+			if iteration, ok := n.Expression.(*ast.IterationExpression); ok && iteration.Block != nil {
+				walkAssignments(iteration.Block.Body, visit)
+			}
 		}
 	}
 }
@@ -636,6 +642,69 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		default:
 			typ = left
 		}
+	case *ast.RangeExpression:
+		start := c.checkExpression(n.Start, sc)
+		end := c.checkExpression(n.End, sc)
+		if start.Kind != types.Int || end.Kind != types.Int {
+			c.error(n.Span(), fmt.Sprintf("range endpoints must be Integer, got %s and %s", start, end))
+		}
+		typ = types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}
+	case *ast.IterationExpression:
+		sourceType := c.checkExpression(n.Source, sc)
+		elementType, iterable := iterableElementType(sourceType)
+		if !iterable && c.mode == "ruby" && c.resolution.NativeSyntax {
+			// Ruby platform objects such as ActiveRecord::Relation participate in
+			// native Enumerable even before a provider can expose their element
+			// type. Keep the block portable while conservatively binding Any.
+			elementType = types.Type{Kind: types.Any, Name: "Any"}
+			iterable = true
+		}
+		if !iterable {
+			c.error(n.Source.Span(), fmt.Sprintf("%s is not iterable", sourceType))
+			elementType = types.Type{Kind: types.Any, Name: "Any"}
+		}
+		itemType := elementType
+		if n.Operation == "each_slice" {
+			if n.SliceSize == nil {
+				c.error(n.Span(), "each_slice expects exactly one size argument")
+			} else {
+				sizeType := c.checkExpression(n.SliceSize, sc)
+				if sizeType.Kind != types.Int {
+					c.error(n.SliceSize.Span(), fmt.Sprintf("each_slice size must be Integer, got %s", sizeType))
+				}
+				if literal, ok := n.SliceSize.(*ast.Literal); ok {
+					if size, valid := integerLiteral(literal.Raw); valid && size <= 0 {
+						c.error(n.SliceSize.Span(), "each_slice size must be greater than zero")
+					}
+				}
+			}
+			itemType = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
+		}
+		c.result.Iterations[n] = itemType
+		if n.Block != nil {
+			expected := 1
+			if n.WithIndex {
+				expected = 2
+			}
+			if len(n.Block.Parameters) != expected {
+				c.error(n.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", n.Operation, expected, len(n.Block.Parameters)))
+			}
+			blockScope := &scope{parent: sc, values: map[string]symbol{}}
+			for index, name := range n.Block.Parameters {
+				parameterType := itemType
+				if index == 1 {
+					parameterType = types.FromName("Integer")
+				}
+				if _, duplicate := blockScope.values[name]; duplicate {
+					c.error(n.Block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
+					continue
+				}
+				blockScope.values[name] = symbol{typ: parameterType, mutable: true, span: n.Block.Span()}
+			}
+			c.checkStatements(n.Block.Body, blockScope)
+			c.result.Expressions[n.Block] = types.Type{Kind: types.Void, Name: "Void"}
+		}
+		typ = types.Type{Kind: types.Void, Name: "Void"}
 	case *ast.MemberExpression:
 		receiverType := c.checkExpression(n.Receiver, sc)
 		if identifier, ok := n.Receiver.(*ast.Identifier); ok {
@@ -754,6 +823,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	}
 	c.result.Expressions[expression] = typ
 	return typ
+}
+
+func iterableElementType(typ types.Type) (types.Type, bool) {
+	if (typ.Kind == types.Array || typ.Kind == types.Range || typ.Kind == types.Iterable) && len(typ.Args) == 1 {
+		return typ.Args[0], true
+	}
+	return types.Type{}, false
 }
 
 func (c *Checker) checkLocalRecordArguments(call *ast.CallExpression, record *recordInfo) {

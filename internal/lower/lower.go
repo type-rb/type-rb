@@ -102,6 +102,26 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 	case *ast.ReturnStatement:
 		return &ir.Return{Base: base(n.Base), Value: l.expression(n.Value)}
 	case *ast.ExpressionStatement:
+		if iteration, ok := n.Expression.(*ast.IterationExpression); ok {
+			result := &ir.Iterate{
+				Base:      base(n.Base),
+				Source:    l.expression(iteration.Source),
+				Operation: iteration.Operation,
+				SliceSize: l.expression(iteration.SliceSize),
+				WithIndex: iteration.WithIndex,
+				ItemType:  l.checked.Iterations[iteration],
+			}
+			if iteration.Block != nil {
+				if len(iteration.Block.Parameters) > 0 {
+					result.Item = iteration.Block.Parameters[0]
+				}
+				if len(iteration.Block.Parameters) > 1 {
+					result.Index = iteration.Block.Parameters[1]
+				}
+				result.Body = l.statements(iteration.Block.Body)
+			}
+			return result
+		}
 		return &ir.ExpressionStatement{Base: base(n.Base), Expression: l.expression(n.Expression)}
 	case *ast.IfStatement:
 		result := &ir.If{Base: base(n.Base), Condition: l.expression(n.Condition), Then: l.statements(n.Then), Else: l.statements(n.Else)}
@@ -155,6 +175,8 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 		return &ir.Unary{ExprBase: base, Operator: n.Operator, Operand: l.expression(n.Operand)}
 	case *ast.BinaryExpression:
 		return &ir.Binary{ExprBase: base, Left: l.expression(n.Left), Operator: n.Operator, Right: l.expression(n.Right)}
+	case *ast.RangeExpression:
+		return &ir.Range{ExprBase: base, Start: l.expression(n.Start), End: l.expression(n.End), Exclusive: n.Exclusive}
 	case *ast.CallExpression:
 		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee)}
 		for _, argument := range n.Arguments {

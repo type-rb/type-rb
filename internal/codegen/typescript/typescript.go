@@ -18,6 +18,7 @@ type generator struct {
 	entryPoint   string
 	topFunctions map[string]bool
 	records      map[string]bool
+	temporary    int
 }
 
 func Generate(program *ir.Program) string {
@@ -187,7 +188,51 @@ func (g *generator) statement(statement ir.Statement) {
 		g.statements(n.Body)
 		g.indent--
 		g.line("}")
+	case *ir.Iterate:
+		g.iterate(n)
 	}
+}
+
+func (g *generator) iterate(iteration *ir.Iterate) {
+	if iteration.Operation == "each_slice" {
+		g.temporary++
+		suffix := strconv.Itoa(g.temporary)
+		items := "__trbItems" + suffix
+		size := "__trbSize" + suffix
+		offset := "__trbOffset" + suffix
+		g.line("{")
+		g.indent++
+		g.line("const " + items + " = " + g.expr(iteration.Source) + ";")
+		g.line("const " + size + " = " + g.expr(iteration.SliceSize) + ";")
+		g.line("if (" + size + " <= 0) throw new Error(\"each_slice size must be greater than zero\");")
+		g.line("for (let " + offset + " = 0; " + offset + " < " + items + ".length; " + offset + " += " + size + ") {")
+		g.indent++
+		g.line("let " + iteration.Item + " = " + items + ".slice(" + offset + ", " + offset + " + " + size + ");")
+		g.line("void " + iteration.Item + ";")
+		if iteration.WithIndex {
+			g.line("let " + iteration.Index + " = Math.floor(" + offset + " / " + size + ");")
+			g.line("void " + iteration.Index + ";")
+		}
+		g.statements(iteration.Body)
+		g.indent--
+		g.line("}")
+		g.indent--
+		g.line("}")
+		return
+	}
+	if iteration.WithIndex {
+		g.line("for (let [" + iteration.Index + ", " + iteration.Item + "] of " + g.expr(iteration.Source) + ".entries()) {")
+	} else {
+		g.line("for (let " + iteration.Item + " of " + g.expr(iteration.Source) + ") {")
+	}
+	g.indent++
+	g.line("void " + iteration.Item + ";")
+	if iteration.WithIndex {
+		g.line("void " + iteration.Index + ";")
+	}
+	g.statements(iteration.Body)
+	g.indent--
+	g.line("}")
 }
 
 func (g *generator) method(method *ir.Method) {
@@ -309,6 +354,12 @@ func (g *generator) expr(expression ir.Expression) string {
 			op = "||"
 		}
 		return g.expr(n.Left) + " " + op + " " + g.expr(n.Right)
+	case *ir.Range:
+		extra := "1"
+		if n.Exclusive {
+			extra = "0"
+		}
+		return "((start: number, end: number) => Array.from({ length: Math.max(0, end - start + " + extra + ") }, (_, index) => start + index))(" + g.expr(n.Start) + ", " + g.expr(n.End) + ")"
 	case *ir.Member:
 		receiver := g.expr(n.Receiver)
 		name := n.Name
@@ -477,12 +528,14 @@ func tsType(t types.Type) string {
 		result = "number"
 	case types.String:
 		result = "string"
-	case types.Array:
+	case types.Array, types.Iterable:
 		element := "unknown"
 		if len(t.Args) > 0 {
 			element = tsType(t.Args[0])
 		}
 		result = "Array<" + element + ">"
+	case types.Range:
+		result = "Array<number>"
 	case types.Hash:
 		result = "Record<string, unknown>"
 	case types.Nil:

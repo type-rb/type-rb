@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-07-31
+Last updated: 2026-08-03
 
 ## 1. Language Goals
 
@@ -31,7 +31,8 @@ integration:
 - Class-based language.
 - Method declaration keyword: `def`.
 - Block terminator: `end`.
-- Parentheses are never omitted in calls.
+- Parentheses are never omitted in ordinary calls. Portable iterator blocks
+  use the Ruby-shaped `values.each do |value| ... end` syntax.
 - `return` is mandatory in method bodies.
 - No explicit `void` type notation (Go-like). Methods with no return value omit return type.
 
@@ -281,9 +282,33 @@ contents therefore survive repeated formatting.
 
 ### 8.6 v0.1 Portable Control Flow
 
-Dedicated AST and IR nodes exist for `if`/`elsif`/`else`, `while`, and `return`.
-Other Ruby control-flow/DSL blocks are native Ruby nodes until promoted into the
-portable grammar.
+Dedicated AST and IR nodes exist for `if`/`elsif`/`else`, `while`, `return`,
+integer ranges, and structured collection iteration. Inclusive `start..end`
+and exclusive `start...end` ranges have type `Range<Integer>`.
+
+Arrays and ranges support both iterator block delimiters. The delimiters have
+identical precedence and semantics in TypeRB:
+
+```trb
+values.each do |value|
+  puts(value)
+end
+
+values.each { |value| puts(value) }
+```
+
+`each_slice(size)` yields `Array<T>`. Appending `.with_index` adds a zero-based
+`Integer` block parameter:
+
+```trb
+values.each_slice(2).with_index do |slice, index|
+  puts(index)
+end
+```
+
+These forms lower to structured iteration IR, not target callbacks. A `return`
+inside the block therefore returns from the enclosing TypeRB method in every
+mode. `each_slice` sizes must be positive.
 
 ### 8.7 Records and cross-mode contracts
 

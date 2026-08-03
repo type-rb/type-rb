@@ -75,21 +75,23 @@ Verified locally:
 
 ## v0.1 Scope Boundary
 
-Portable v0.1 control flow includes conditionals and `while`. Ruby-only syntax
-is valid in Ruby projects through explicit native nodes and is rejected in the
-portable targets. Full generics inference, a complete Ruby semantic type model,
-and source maps are later work.
+Portable v0.1 control flow includes conditionals, `while`, integer ranges, and
+typed `each`/`each_slice`/`with_index` iteration. Ruby-only syntax is valid in
+Ruby projects through explicit native nodes and is rejected in the portable
+targets. Full generics inference, a complete Ruby semantic type model, and
+source maps are later work.
 
 ## Next Work
 
-1. Add portable enums/sum types, collection iteration, exhaustive type
-   dispatch, fallible results, and filesystem/process APIs required to move the
+1. Add portable enums/sum types, exhaustive type dispatch, fallible results,
+   and filesystem/process APIs required to move the
    lexer/parser into the stage-1 self-host tree.
 2. Generate runtime JSON decoders from record contracts and add wire-compatible
    optional/nullable semantics.
 3. Add a concise React view/component syntax above the current explicit element
    builder.
-4. Add portable block/lambda and iterator IR (`each`, `map`, range loops).
+4. Extend structured iterator IR with transformations such as `map`, `select`,
+   and lazy pipelines; add first-class block/lambda values separately.
 5. Add source maps from generated code back to `.trb` spans.
 6. Add incremental project compilation and a persistent build cache.
 7. Continue migrating small core endpoints and expand the Rails provider to

@@ -185,6 +185,22 @@ type While struct {
 
 func (*While) irStatement() {}
 
+// Iterate is a structured loop rather than a callback invocation. Backends
+// can therefore preserve TypeRB control-flow semantics inside an each block.
+type Iterate struct {
+	Base
+	Source    Expression
+	Operation string
+	SliceSize Expression
+	WithIndex bool
+	Item      string
+	Index     string
+	ItemType  types.Type
+	Body      []Statement
+}
+
+func (*Iterate) irStatement() {}
+
 type Native struct {
 	Base
 	Text string
@@ -279,6 +295,15 @@ type Binary struct {
 }
 
 func (*Binary) irExpression() {}
+
+type Range struct {
+	ExprBase
+	Start     Expression
+	End       Expression
+	Exclusive bool
+}
+
+func (*Range) irExpression() {}
 
 type CallArgument struct {
 	Name  string

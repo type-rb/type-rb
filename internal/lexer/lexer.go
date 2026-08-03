@@ -340,7 +340,7 @@ func (l *Lexer) scanIdentifier(start token.Position) {
 
 func (l *Lexer) scanOperator(start token.Position) {
 	begin := l.offset
-	operators := []string{"<=>", "...", "**=", "&&=", "||=", "&.", "::", ":=", "->", "==", "!=", "<=", ">=", "=>", "=~", "!~", "&&", "||", "**", "<<", ">>", "+=", "-=", "*=", "/=", "%="}
+	operators := []string{"<=>", "...", "**=", "&&=", "||=", "&.", "::", ":=", "->", "..", "==", "!=", "<=", ">=", "=>", "=~", "!~", "&&", "||", "**", "<<", ">>", "+=", "-=", "*=", "/=", "%="}
 	for _, op := range operators {
 		if bytes.HasPrefix(l.source[l.offset:], []byte(op)) {
 			for range len(op) {

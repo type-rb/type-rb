@@ -202,6 +202,21 @@ type WhileStatement struct {
 
 func (*WhileStatement) statementNode() {}
 
+// IterationExpression is the portable, Ruby-shaped collection iteration
+// syntax. It remains an expression in the syntax tree so the original block
+// delimiters can be retained, then lowers to structured iteration IR instead
+// of a target-language callback.
+type IterationExpression struct {
+	Base
+	Source    Expression
+	Operation string
+	SliceSize Expression
+	WithIndex bool
+	Block     *BlockExpression
+}
+
+func (*IterationExpression) expressionNode() {}
+
 // NativeStatement and NativeBlock are explicit Ruby interoperability nodes.
 // They are rejected by portable backends with a precise diagnostic.
 type NativeStatement struct {
@@ -336,6 +351,15 @@ type BinaryExpression struct {
 }
 
 func (*BinaryExpression) expressionNode() {}
+
+type RangeExpression struct {
+	Base
+	Start     Expression
+	End       Expression
+	Exclusive bool
+}
+
+func (*RangeExpression) expressionNode() {}
 
 type CallArgument struct {
 	Name  string

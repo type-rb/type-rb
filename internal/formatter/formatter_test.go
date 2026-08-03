@@ -70,3 +70,19 @@ func TestFormatKeepsExplicitImportPathsCompact(t *testing.T) {
 		t.Fatalf("unexpected import formatting:\n%s", formatted)
 	}
 }
+
+func TestFormatPortableIterationAndRanges(t *testing.T) {
+	source := []byte("def values()\n[1,2,3].each do |value,index| # header\nputs(value) # body\nend\n(0 .. 10).each{|value| puts(value)}\nreturn\nend\n")
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "def values()\n  [1, 2, 3].each do |value, index| # header\n    puts(value) # body\n  end\n  (0..10).each { |value| puts(value) }\n  return\nend\n"
+	if string(formatted) != want {
+		t.Fatalf("unexpected iteration formatting:\n%s", formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("iteration formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}

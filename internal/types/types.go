@@ -6,17 +6,19 @@ import "strings"
 type Kind string
 
 const (
-	Invalid Kind = "invalid"
-	Any     Kind = "any"
-	Void    Kind = "void"
-	Bool    Kind = "bool"
-	Int     Kind = "int"
-	Float   Kind = "float"
-	String  Kind = "string"
-	Array   Kind = "array"
-	Hash    Kind = "hash"
-	Named   Kind = "named"
-	Nil     Kind = "nil"
+	Invalid  Kind = "invalid"
+	Any      Kind = "any"
+	Void     Kind = "void"
+	Bool     Kind = "bool"
+	Int      Kind = "int"
+	Float    Kind = "float"
+	String   Kind = "string"
+	Array    Kind = "array"
+	Range    Kind = "range"
+	Iterable Kind = "iterable"
+	Hash     Kind = "hash"
+	Named    Kind = "named"
+	Nil      Kind = "nil"
 )
 
 type Type struct {
@@ -62,6 +64,10 @@ func FromName(name string) Type {
 		return Type{Kind: Nil, Name: "Nil"}
 	case "array":
 		return Type{Kind: Array, Name: "Array"}
+	case "range":
+		return Type{Kind: Range, Name: "Range"}
+	case "iterable":
+		return Type{Kind: Iterable, Name: "Iterable"}
 	case "hash", "map":
 		return Type{Kind: Hash, Name: "Hash"}
 	default:
@@ -78,6 +84,12 @@ func Assignable(target, value Type) bool {
 	}
 	if target.Kind == Float && value.Kind == Int {
 		return true
+	}
+	if target.Kind == Iterable && (value.Kind == Iterable || value.Kind == Array || value.Kind == Range) {
+		if len(target.Args) == 0 || len(value.Args) == 0 {
+			return true
+		}
+		return len(target.Args) == len(value.Args) && Assignable(target.Args[0], value.Args[0])
 	}
 	if target.Kind != value.Kind {
 		return false
