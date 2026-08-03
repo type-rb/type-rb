@@ -1,0 +1,12 @@
+/bin/
+/.trb/
+/build/
+/dist/
+**/build/
+**/dist/
+**/node_modules/
+**/todo.db
+*.test
+trb_run_*
+trb-run-*/
+/dist-release/

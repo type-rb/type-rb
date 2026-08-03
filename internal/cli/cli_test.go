@@ -1,0 +1,210 @@
+package cli
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/type-rb/type-rb/internal/project"
+)
+
+func TestVersionCommandUsesBuildVersion(t *testing.T) {
+	previous := Version
+	Version = "9.8.7-test"
+	t.Cleanup(func() { Version = previous })
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"version"}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if stdout.String() != "trb 9.8.7-test\n" {
+		t.Fatalf("unexpected version output %q", stdout.String())
+	}
+}
+
+func TestBuildCopiesRailsProjectAndTranspilesTRBTree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(root, "ruby")
+	config.Dependencies["rails"] = "~> 8.0"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	routes := "import trb/platform/ruby/rails\n\nRails.application.routes.draw do\n  resources :posts\nend\n"
+	if err := os.WriteFile(filepath.Join(root, "config", "routes.trb"), []byte(routes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(previous) }()
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build"}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "build", "Gemfile")); err != nil {
+		t.Fatalf("Gemfile was not copied: %v", err)
+	}
+	gemfile, err := os.ReadFile(filepath.Join(root, "Gemfile"))
+	if err != nil || !strings.Contains(string(gemfile), `gem "rails", "~> 8.0"`) {
+		t.Fatalf("Gemfile was not managed from config: err=%v\n%s", err, gemfile)
+	}
+	generated, err := os.ReadFile(filepath.Join(root, "build", "config", "routes.rb"))
+	if err != nil {
+		t.Fatalf("routes were not generated: %v", err)
+	}
+	if strings.Contains(string(generated), "mode: ruby") || !strings.Contains(string(generated), "resources :posts") {
+		t.Fatalf("unexpected generated routes:\n%s", generated)
+	}
+}
+
+func TestRunCompilesProjectImportClosure(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/acme/import-run"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	modelPath := filepath.Join(root, "src", "models", "user.trb")
+	if err := os.MkdirAll(filepath.Dir(modelPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	model := "class User\n  @name: String\n\n  def initialize(name: String)\n    @name = name\n    return\n  end\n\n  def name(): String\n    return @name\n  end\nend\n"
+	if err := os.WriteFile(modelPath, []byte(model), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "src", "main.trb")
+	main := "import trb/std/io\nimport models/user\n\ndef main()\n  user := User.new(\"Imported\")\n  io.println(user.name())\n  return\nend\n"
+	if err := os.WriteFile(mainPath, []byte(main), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(previous) }()
+	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+	t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", mainPath}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if stdout.String() != "Imported\n" {
+		t.Fatalf("unexpected program output %q", stdout.String())
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "trb-run-*"))
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("run directory leaked: matches=%v err=%v", matches, err)
+	}
+}
+
+func TestBuildCanEmbedInExistingRailsProjectWithoutManagingGemfile(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.SourceDir = "type_rb"
+	config.OutDir = "type_rb_build"
+	config.PackageManagement = project.ExternalPackages
+	copyFiles := false
+	config.CopyFiles = &copyFiles
+	config.EntryPoint = ""
+	config.Ruby.Loader = "zeitwerk"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	gemfile := filepath.Join(root, "Gemfile")
+	const originalGemfile = "source 'https://example.invalid'\n"
+	if err := os.WriteFile(gemfile, []byte(originalGemfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	controller := filepath.Join(root, "type_rb", "app", "controllers", "api", "v1", "internal", "insurers_controller.trb")
+	if err := os.MkdirAll(filepath.Dir(controller), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "import trb/platform/ruby/rails\n\nmodule Api\n  module V1\n    module Internal\n      class InsurersController < Api::ApplicationController\n        include PaginationHelper\n\n        def index()\n          page := paginate_with_headers(Insurer.all())\n          insurers := page[0]\n          render(json: insurers)\n          return\n        end\n\n        def show()\n          insurer := Insurer.find_by!(code: params[:code])\n          render(json: insurer.as_json())\n          return\n        end\n      end\n    end\n  end\nend\n"
+	if err := os.WriteFile(controller, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	actualGemfile, err := os.ReadFile(gemfile)
+	if err != nil || string(actualGemfile) != originalGemfile {
+		t.Fatalf("host Gemfile was modified: err=%v\n%s", err, actualGemfile)
+	}
+	generated := filepath.Join(root, "type_rb_build", "app", "controllers", "api", "v1", "internal", "insurers_controller.rb")
+	output, err := os.ReadFile(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(output), "Insurer.find_by!(code: params[:code])") {
+		t.Fatalf("unexpected generated controller:\n%s", output)
+	}
+	if !strings.Contains(string(output), "page = paginate_with_headers(Insurer.all())") {
+		t.Fatalf("generated controller omitted index pagination:\n%s", output)
+	}
+	if strings.Contains(stdout.String(), "packages ->") {
+		t.Fatalf("external build reported a managed manifest:\n%s", stdout.String())
+	}
+}
+
+func TestBuildCompilesLocalRecordPackageIntoGoTargetTree(t *testing.T) {
+	workspace := t.TempDir()
+	appRoot := filepath.Join(workspace, "api")
+	contractRoot := filepath.Join(workspace, "contracts")
+	if err := os.MkdirAll(filepath.Join(appRoot, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(contractRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(appRoot, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/local-package"
+	config.LocalPackages["acme/contracts"] = "../contracts"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(contractRoot, "index.trb"), []byte("record Message\n  text: String\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appRoot, "src", "main.trb")
+	main := "import { Message } from acme/contracts\n\ndef main()\n  message := Message.new(text: \"shared\")\n  return\nend\n"
+	if err := os.WriteFile(mainPath, []byte(main), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	contractOutput, err := os.ReadFile(filepath.Join(appRoot, "build", "acme", "contracts", "index.go"))
+	if err != nil || !strings.Contains(string(contractOutput), "type Message struct") {
+		t.Fatalf("local contract was not generated: err=%v\n%s", err, contractOutput)
+	}
+	mainOutput, err := os.ReadFile(filepath.Join(appRoot, "build", "main.go"))
+	if err != nil || !strings.Contains(string(mainOutput), `contracts.Message{Text: "shared"}`) {
+		t.Fatalf("application did not consume local record: err=%v\n%s", err, mainOutput)
+	}
+}

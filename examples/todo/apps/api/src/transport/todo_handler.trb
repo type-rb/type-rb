@@ -1,0 +1,39 @@
+import trb/std/numbers
+import trb/platform/go/http
+import { CreateTodoRequest, UpdateTodoRequest } from todo/contracts
+import { TodoRepository } from repositories/todo_repository
+
+class TodoHandler
+  readonly @repository: TodoRepository
+
+  def initialize(repository: TodoRepository)
+    @repository = repository
+    return
+  end
+
+  def board(response: HTTPResponse, request: HTTPRequest)
+    http.json(response, 200, @repository.board())
+    return
+  end
+
+  def create_item(response: HTTPResponse, request: HTTPRequest)
+    tag_ids: Array<Integer> := []
+    input := CreateTodoRequest.new(title: "", tag_ids: tag_ids)
+    if !http.decode(response, request, input)
+      return
+    end
+    todo_list_id := numbers.parse_integer(http.path(request, "list_id"))
+    http.json(response, 201, @repository.create_item(todo_list_id, input))
+    return
+  end
+
+  def update_item(response: HTTPResponse, request: HTTPRequest)
+    input := UpdateTodoRequest.new(completed: false)
+    if !http.decode(response, request, input)
+      return
+    end
+    id := numbers.parse_integer(http.path(request, "id"))
+    http.json(response, 200, @repository.update_item(id, input.completed))
+    return
+  end
+end

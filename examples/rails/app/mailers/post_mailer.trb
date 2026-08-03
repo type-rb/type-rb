@@ -1,0 +1,11 @@
+import trb/platform/ruby/rails
+
+class PostMailer < ApplicationMailer
+  default from: "notifications@example.com"
+
+  def published(post: Post)
+    @post = post
+    mail(to: post.author().email(), subject: "Your post is live")
+    return
+  end
+end

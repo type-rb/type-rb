@@ -1,0 +1,22 @@
+{
+  "name": "type-rb-todo-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm",
+  "scripts": {
+    "build": "trb build \u0026\u0026 tsc -b build/tsconfig.json \u0026\u0026 vite build build",
+    "dev": "trb build \u0026\u0026 vite ./build --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest"
+  }
+}

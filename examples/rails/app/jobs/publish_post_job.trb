@@ -1,0 +1,12 @@
+import trb/platform/ruby/rails
+
+class PublishPostJob < ApplicationJob
+  queue_as :default
+
+  retry_on Net::ReadTimeout, wait: :polynomially_longer, attempts: 5
+
+  def perform(post: Post)
+    post.publish!()
+    return
+  end
+end

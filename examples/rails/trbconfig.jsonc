@@ -1,0 +1,18 @@
+{
+  // Ruby target uses Bundler and generates Gemfile from these dependencies.
+  "name": "type-rb-rails-example",
+  "version": "0.1.0",
+  "mode": "ruby",
+  "sourceDir": ".",
+  "outDir": "build",
+  "copyFiles": true,
+  "ruby": {
+    "loader": "zeitwerk",
+  },
+  "dependencies": {
+    "rails": "~> 8.0",
+  },
+  "devDependencies": {
+    "rspec-rails": "~> 7.0",
+  },
+}

@@ -1,0 +1,117 @@
+import trb/std/arrays
+import trb/platform/go/gorm
+import { Tag, TodoBoard, TodoItem, TodoList, CreateTodoRequest } from todo/contracts
+import { TagEntity, TodoItemEntity, TodoListEntity } from domain/entities
+
+class TodoRepository
+  readonly @db: GormDB
+
+  def initialize(db: GormDB)
+    @db = db
+    return
+  end
+
+  def ensure_seed()
+    lists := gorm.find_all(@db, TodoListEntity)
+    if arrays.length(lists) == 0
+      gorm.create(@db, TodoListEntity.new(id: 0, name: "TypeRB v0.1"))
+    end
+
+    tags := gorm.find_all(@db, TagEntity)
+    if arrays.length(tags) == 0
+      gorm.create(@db, TagEntity.new(id: 0, name: "backend"))
+      gorm.create(@db, TagEntity.new(id: 0, name: "frontend"))
+      gorm.create(@db, TagEntity.new(id: 0, name: "compiler"))
+    end
+    return
+  end
+
+  def board(): TodoBoard
+    return TodoBoard.new(lists: lists(), tags: tags())
+  end
+
+  def lists(): Array<TodoList>
+    entities := gorm.find_all(@db, TodoListEntity)
+    result: Array<TodoList> := []
+    index := 0
+    while index < arrays.length(entities)
+      entity := entities[index]
+      arrays.push(result, TodoList.new(id: entity.id, name: entity.name, items: items_for(entity.id)))
+      index += 1
+    end
+    return result
+  end
+
+  def tags(): Array<Tag>
+    entities := gorm.find_all(@db, TagEntity)
+    result: Array<Tag> := []
+    index := 0
+    while index < arrays.length(entities)
+      entity := entities[index]
+      arrays.push(result, Tag.new(id: entity.id, name: entity.name))
+      index += 1
+    end
+    return result
+  end
+
+  def create_item(todo_list_id: Integer, input: CreateTodoRequest): TodoItem
+    entity := TodoItemEntity.new(id: 0, todo_list_id: todo_list_id, title: input.title, completed: false)
+    created := gorm.create(@db, entity)
+    index := 0
+    while index < arrays.length(input.tag_ids)
+      gorm.exec(
+        @db,
+        "INSERT INTO todo_item_tag_entities (todo_item_id, tag_id) VALUES (?, ?)",
+        created.id,
+        input.tag_ids[index],
+      )
+      index += 1
+    end
+    return item_from(created)
+  end
+
+  def update_item(id: Integer, completed: Boolean): TodoItem
+    entity := gorm.first(@db, TodoItemEntity, "id = ?", id)
+    entity.completed = completed
+    saved := gorm.save(@db, entity)
+    return item_from(saved)
+  end
+
+  def items_for(todo_list_id: Integer): Array<TodoItem>
+    entities := gorm.where(@db, TodoItemEntity, "todo_list_id = ?", todo_list_id)
+    result: Array<TodoItem> := []
+    index := 0
+    while index < arrays.length(entities)
+      arrays.push(result, item_from(entities[index]))
+      index += 1
+    end
+    return result
+  end
+
+  def item_from(entity: TodoItemEntity): TodoItem
+    return TodoItem.new(
+      id: entity.id,
+      todo_list_id: entity.todo_list_id,
+      title: entity.title,
+      completed: entity.completed,
+      tags: tags_for(entity.id),
+    )
+  end
+
+  def tags_for(todo_item_id: Integer): Array<Tag>
+    entities := gorm.raw(
+      @db,
+      TagEntity,
+      "SELECT tags.* FROM tag_entities AS tags INNER JOIN todo_item_tag_entities AS links ON links.tag_id = tags.id WHERE links.todo_item_id = ? ORDER BY tags.id",
+      todo_item_id,
+    )
+    result: Array<Tag> := []
+    index := 0
+    while index < arrays.length(entities)
+      entity := entities[index]
+      arrays.push(result, Tag.new(id: entity.id, name: entity.name))
+      index += 1
+    end
+    return result
+  end
+end

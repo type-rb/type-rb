@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bootstrap_dir="$repository_root/.trb/bootstrap"
+compiler="$bootstrap_dir/trb"
+temporary="$bootstrap_dir/trb.$$"
+
+needs_build=false
+if [ ! -x "$compiler" ]; then
+  needs_build=true
+elif [ "$repository_root/go.mod" -nt "$compiler" ]; then
+  needs_build=true
+elif find "$repository_root/cmd" "$repository_root/internal" -type f -name '*.go' -newer "$compiler" -print -quit | grep -q .; then
+  needs_build=true
+fi
+
+if [ "$needs_build" = true ]; then
+  if ! command -v go >/dev/null 2>&1; then
+    echo "trb: the source-checkout bootstrap requires Go; install a released trb binary instead" >&2
+    exit 1
+  fi
+  mkdir -p "$bootstrap_dir"
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  echo "trb: bootstrapping the compiler" >&2
+  (
+    cd "$repository_root"
+    go build -trimpath -o "$temporary" ./cmd/trb
+  )
+  mv "$temporary" "$compiler"
+  trap - EXIT HUP INT TERM
+fi
+
+exec "$compiler" "$@"

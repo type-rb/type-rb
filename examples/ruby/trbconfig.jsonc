@@ -1,0 +1,13 @@
+{
+  // Ruby mode transpiles every .trb file in this project to Ruby.
+  "name": "type-rb-ruby-example",
+  "version": "0.1.0",
+  "mode": "ruby",
+  "sourceDir": ".",
+  "outDir": "build",
+  "entrypoint": "main",
+  "copyFiles": true,
+  "ruby": {
+    "loader": "require_relative",
+  },
+}

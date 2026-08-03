@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify compiler and bootstrap boundary
+        run: |
+          go test ./...
+          ./scripts/check-self-host.sh
+
+      - name: Build deterministic source archive and Formula
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          archive="type-rb-${version}.tar.gz"
+          mkdir -p dist
+          git archive --format=tar --prefix="type-rb-${version}/" "$GITHUB_REF_NAME" | gzip -n > "dist/${archive}"
+          checksum=$(sha256sum "dist/${archive}" | cut -d ' ' -f 1)
+          ./scripts/render-homebrew-formula.sh "$version" "$checksum" dist/trb.rb
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          "dist/${{ steps.package.outputs.archive }}"
+          dist/trb.rb
+          --verify-tag
+          --generate-notes
+
+      - name: Check out Homebrew tap
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        uses: actions/checkout@v4
+        with:
+          repository: type-rb/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: dist/homebrew-tap
+
+      - name: Publish Formula to Homebrew tap
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/homebrew-tap/Formula
+          cp dist/trb.rb dist/homebrew-tap/Formula/trb.rb
+          cd dist/homebrew-tap
+          if [ -z "$(git status --porcelain -- Formula/trb.rb)" ]; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/trb.rb
+          git commit -m "trb ${{ steps.package.outputs.version }}"
+          git push

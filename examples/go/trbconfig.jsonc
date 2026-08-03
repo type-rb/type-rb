@@ -1,0 +1,15 @@
+{
+  // Go target owns go.mod.
+  "name": "type-rb-go-example",
+  "version": "0.1.0",
+  "mode": "go",
+  "sourceDir": "src",
+  "outDir": "build",
+  "entrypoint": "main",
+  "copyFiles": true,
+  "go": {
+    "module": "example.com/type-rb/greeter",
+    "version": "1.23",
+    "rootPackage": "main",
+  },
+}

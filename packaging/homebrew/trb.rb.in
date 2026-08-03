@@ -1,0 +1,49 @@
+class Trb < Formula
+  desc "Typed language that transpiles to Ruby, Go, and TypeScript"
+  homepage "https://github.com/type-rb/type-rb-codex"
+  url "https://github.com/type-rb/type-rb-codex/releases/download/v@VERSION@/type-rb-@VERSION@.tar.gz"
+  sha256 "@SHA256@"
+  head "https://github.com/type-rb/type-rb-codex.git", branch: "main"
+
+  depends_on "go" => :build
+
+  def install
+    ldflags = ["-X", "github.com/type-rb/type-rb/internal/cli.Version=#{version}"]
+    system "go", "build", *std_go_args(ldflags:), "./cmd/trb"
+  end
+
+  test do
+    assert_match "trb #{version}", shell_output("#{bin}/trb version")
+
+    (testpath/"trbconfig.jsonc").write <<~JSON
+      {
+        "name": "brew-smoke-test",
+        "version": "0.1.0",
+        "mode": "go",
+        "sourceDir": "src",
+        "outDir": "build",
+        "entrypoint": "main",
+        "packageManagement": "external",
+        "go": {
+          "module": "example.com/brew-smoke-test",
+          "version": "1.23",
+          "rootPackage": "main"
+        }
+      }
+    JSON
+    (testpath/"src").mkpath
+    (testpath/"src/main.trb").write <<~TRB
+      import trb/std/io
+
+      def main()
+        io.println("installed with Homebrew")
+        return
+      end
+    TRB
+
+    system bin/"trb", "fmt", "--check", testpath/"src/main.trb"
+    system bin/"trb", "build", "--config", testpath/"trbconfig.jsonc"
+    assert_path_exists testpath/"build/main.go"
+    assert_match "fmt.Println(\"installed with Homebrew\")", (testpath/"build/main.go").read
+  end
+end

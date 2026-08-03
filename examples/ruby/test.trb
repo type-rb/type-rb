@@ -1,0 +1,17 @@
+import trb/std/io
+import trb/std/strings
+
+# The same portable source runs in Ruby, Go, and TypeScript.
+class Greeter
+  readonly @message: String := "Hello"
+
+  def greet(name: String): String
+    return @message + ", " + name
+  end
+end
+
+def main()
+  greeter := Greeter.new()
+  io.println(strings.uppercase(greeter.greet("TypeRB"))) # trb fmt keeps this comment.
+  return
+end

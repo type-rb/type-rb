@@ -1,0 +1,7 @@
+# Generated from trbconfig.jsonc by trb.
+source "https://rubygems.org"
+gem "rails", "~> 8.0"
+
+group :development, :test do
+  gem "rspec-rails", "~> 7.0"
+end

@@ -1,0 +1,26 @@
+import trb/platform/typescript/web
+import { TodoBoard, TodoItem, CreateTodoRequest, UpdateTodoRequest } from todo/contracts
+
+class TodoAPI
+  readonly @base_url: String
+
+  def initialize(base_url: String)
+    @base_url = base_url
+    return
+  end
+
+  def board(callback: Callback<TodoBoard>)
+    web.get_json(@base_url + "/api/board", callback)
+    return
+  end
+
+  def create_item(todo_list_id: String, input: CreateTodoRequest, callback: Callback<TodoItem>)
+    web.post_json(@base_url + "/api/lists/" + todo_list_id + "/items", input, callback)
+    return
+  end
+
+  def update_item(id: String, input: UpdateTodoRequest, callback: Callback<TodoItem>)
+    web.patch_json(@base_url + "/api/items/" + id, input, callback)
+    return
+  end
+end

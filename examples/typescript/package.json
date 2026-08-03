@@ -1,0 +1,13 @@
+{
+  "name": "type-rb-typescript-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm",
+  "scripts": {
+    "start": "node --experimental-strip-types build/main.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

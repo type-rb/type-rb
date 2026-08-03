@@ -1,0 +1,31 @@
+{
+  "name": "type-rb-todo-web",
+  "version": "0.1.0",
+  "mode": "typescript",
+  "sourceDir": "src",
+  "outDir": "build",
+  "entrypoint": "main",
+  "copyFiles": true,
+  "localPackages": {
+    "todo/contracts": "../../packages/contracts/src",
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest",
+  },
+  "typescript": {
+    "packageManager": "npm",
+    "moduleType": "module",
+    "scripts": {
+      "dev": "trb build && vite ./build --host 0.0.0.0",
+      "build": "trb build && tsc -b build/tsconfig.json && vite build build",
+    },
+  },
+}

@@ -1,0 +1,7 @@
+import trb/platform/typescript/react
+import { TodoApp } from components/todo_app
+
+def main()
+  react.mount(TodoApp, "root")
+  return
+end
