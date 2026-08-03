@@ -29,6 +29,11 @@ func Complete(source string) bool {
 		case token.EOF:
 			continue
 		}
+		if item.Lexeme == ";" && len(delimiters) == 0 {
+			lineStart = true
+			lineOpenedBlock = false
+			continue
+		}
 		if lineStart && item.Kind == token.Identifier {
 			switch item.Lexeme {
 			case "class", "record", "enum", "module", "interface", "def", "if", "case", "while":

@@ -265,7 +265,7 @@ func (l *Lexer) canStartRegex() bool {
 			continue
 		}
 		switch previous.Lexeme {
-		case "(", "[", "{", ",", ":", "=", ":=", "=>", "return", "when", "if", "unless", "and", "or", "&&", "||", "!", "~":
+		case "(", "[", "{", ",", ";", ":", "=", ":=", "=>", "return", "when", "if", "unless", "and", "or", "&&", "||", "!", "~":
 			return true
 		}
 		return false

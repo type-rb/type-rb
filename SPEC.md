@@ -41,6 +41,12 @@ mode by itself does not enable them.
   use the Ruby-shaped `values.each do |value| ... end` syntax.
 - `return` is mandatory in method bodies.
 - No explicit `void` type notation (Go-like). Methods with no return value omit return type.
+- Outside `()`, `[]`, and `{}`, `;` is equivalent to a newline between
+  complete statements. This is common syntax in every mode, so compact input
+  such as `class Empty; end` has the same meaning as its multiline form.
+- `trb fmt` expands top-level `;` separators into canonical lines. Semicolons
+  inside opaque literals and the compact iterator form
+  `values.each { |value| puts(value); puts(value) }` remain intact.
 
 ### 3.2 Typing
 
@@ -424,6 +430,8 @@ and lossless token stream, preserves standalone/trailing comments, and treats
 heredoc and percent-literal contents as opaque. Comment positions and literal
 contents therefore survive repeated formatting. It emits one tab per nesting
 level while leaving indentation inside opaque literal bodies unchanged.
+Top-level semicolon statement separators are canonicalized to physical
+newlines; nested and literal semicolons are preserved.
 
 ### 8.6 v0.1 Portable Control Flow
 

@@ -47,3 +47,16 @@ func TestLexRangeOperatorsLongestFirst(t *testing.T) {
 		t.Fatalf("range operators were not tokenized atomically: %#v", operators)
 	}
 }
+
+func TestLexRegexMayStartAfterStatementSeparator(t *testing.T) {
+	tokens, diagnostics := Lex([]byte("value := 1; /a;b/ # comment; text\n"))
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	for _, item := range tokens {
+		if item.Kind == token.NativeLiteral && item.Lexeme == "/a;b/" {
+			return
+		}
+	}
+	t.Fatalf("regex after semicolon was not retained as one literal: %#v", tokens)
+}

@@ -103,6 +103,43 @@ func TestFormatEnumCaseUsesTabsAndPreservesComments(t *testing.T) {
 	}
 }
 
+func TestFormatExpandsStatementSeparatorsAndPreservesNestedSemicolons(t *testing.T) {
+	source := []byte("enum State; Open; Closed; end # enum\n" +
+		"def label(value:State):String; case value; when State::Open; return \"a;b\"; when State::Closed; return \"closed\"; end; end\n" +
+		"value:=1; next_value:=2 # second\n" +
+		"value; # following\n" +
+		"[1,2].each { |item| puts(item); puts(item+1) } # inline\n")
+	want := "enum State\n" +
+		"\tOpen\n" +
+		"\tClosed\n" +
+		"end # enum\n" +
+		"def label(value: State): String\n" +
+		"\tcase value\n" +
+		"\twhen State::Open\n" +
+		"\t\treturn \"a;b\"\n" +
+		"\twhen State::Closed\n" +
+		"\t\treturn \"closed\"\n" +
+		"\tend\n" +
+		"end\n" +
+		"value := 1\n" +
+		"next_value := 2 # second\n" +
+		"value\n" +
+		"# following\n" +
+		"[1, 2].each { |item| puts(item); puts(item + 1) } # inline\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected separator formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("separator formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatPreservesLoopControlAndComments(t *testing.T) {
 	source := []byte("def scan()\nwhile true\nnext # skip\nbreak # stop\nend\nreturn\nend\n")
 	want := "def scan()\n\twhile true\n\t\tnext # skip\n\t\tbreak # stop\n\tend\n\treturn\nend\n"

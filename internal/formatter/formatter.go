@@ -26,7 +26,8 @@ func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 	for lineIndex := 0; lineIndex < len(lines); lineIndex++ {
 		line := lines[lineIndex]
 		code := withoutNewline(line)
-		if len(code) == 0 {
+		statements := splitStatements(code, continuation)
+		if len(statements) == 0 {
 			if !blank && out.Len() > 0 {
 				out.WriteByte('\n')
 			}
@@ -34,31 +35,8 @@ func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 			continue
 		}
 		blank = false
-		first := firstCode(code)
-		dedent := isDedent(first)
-		if dedent && indent > 0 {
-			indent--
-		}
-		lineContinuation := continuation
-		if (first == "}" || first == ")" || first == "]") && lineContinuation > 0 {
-			lineContinuation--
-		}
-		lineIndent := indent + lineContinuation
-		if lineIndent < 0 {
-			lineIndent = 0
-		}
-		out.WriteString(strings.Repeat(indentation, lineIndent))
-		out.WriteString(formatTokens(code))
-		out.WriteByte('\n')
-
-		if dedent && isMidBlock(first) {
-			indent++
-		} else if opensEndBlock(code) {
-			indent++
-		}
-		continuation += delimiterDelta(code)
-		if continuation < 0 {
-			continuation = 0
+		for _, statement := range statements {
+			writeStatement(&out, statement, &indent, &continuation)
 		}
 		for _, item := range code {
 			if covered := item.Span.End.Line - 1; covered > lineIndex {
@@ -67,6 +45,69 @@ func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 		}
 	}
 	return []byte(strings.TrimRight(out.String(), "\n") + "\n"), nil
+}
+
+// splitStatements treats a top-level semicolon as a physical newline for
+// canonical formatting. Semicolons inside (), [], or {} remain part of the
+// expression; this preserves the compact brace form of iterator blocks.
+func splitStatements(tokens []token.Token, initialDepth int) [][]token.Token {
+	depth := initialDepth
+	start := 0
+	statements := [][]token.Token{}
+	appendStatement := func(end int) {
+		if end > start {
+			statements = append(statements, tokens[start:end])
+		}
+	}
+	for index, item := range tokens {
+		if item.Lexeme == ";" && depth == 0 {
+			appendStatement(index)
+			start = index + 1
+			continue
+		}
+		if strings.Contains(item.Lexeme, "\n") {
+			continue
+		}
+		switch item.Lexeme {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	appendStatement(len(tokens))
+	return statements
+}
+
+func writeStatement(out *strings.Builder, code []token.Token, indent, continuation *int) {
+	first := firstCode(code)
+	dedent := isDedent(first)
+	if dedent && *indent > 0 {
+		*indent--
+	}
+	lineContinuation := *continuation
+	if (first == "}" || first == ")" || first == "]") && lineContinuation > 0 {
+		lineContinuation--
+	}
+	lineIndent := *indent + lineContinuation
+	if lineIndent < 0 {
+		lineIndent = 0
+	}
+	out.WriteString(strings.Repeat(indentation, lineIndent))
+	out.WriteString(formatTokens(code))
+	out.WriteByte('\n')
+
+	if dedent && isMidBlock(first) {
+		*indent++
+	} else if opensEndBlock(code) {
+		*indent++
+	}
+	*continuation += delimiterDelta(code)
+	if *continuation < 0 {
+		*continuation = 0
+	}
 }
 
 func tokensByLine(tokens []token.Token) [][]token.Token {

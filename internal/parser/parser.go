@@ -49,11 +49,11 @@ func Parse(source []byte) (*ast.Program, []diagnostic.Diagnostic) {
 func (p *Parser) parseStatements(stop map[string]bool) []ast.Statement {
 	var statements []ast.Statement
 	for !p.atEOF() {
-		p.skipNewlines()
+		p.skipSeparators()
 		if p.atEOF() {
 			break
 		}
-		if stop != nil && stop[p.current().Lexeme] && p.atLineStart() {
+		if stop != nil && stop[p.current().Lexeme] && p.atStatementStart() {
 			break
 		}
 		stmt := p.parseStatement()
@@ -330,7 +330,7 @@ func (p *Parser) parseRecord() ast.Statement {
 	}
 	p.pos = next
 	for !p.atEOF() {
-		p.skipNewlines()
+		p.skipSeparators()
 		if p.current().Lexeme == "end" {
 			break
 		}
@@ -366,7 +366,7 @@ func (p *Parser) parseEnum() ast.Statement {
 	}
 	p.pos = next
 	for !p.atEOF() {
-		p.skipNewlines()
+		p.skipSeparators()
 		if p.atEOF() || p.current().Lexeme == "end" {
 			break
 		}
@@ -552,7 +552,7 @@ func (p *Parser) parseInterface() ast.Statement {
 	}
 	p.pos = next
 	for !p.atEOF() {
-		p.skipNewlines()
+		p.skipSeparators()
 		if p.current().Lexeme == "end" {
 			break
 		}
@@ -1037,10 +1037,13 @@ func (p *Parser) logicalLine(from int) (start, end, next int, comment string) {
 		if t.Kind == token.Newline && depth == 0 {
 			break
 		}
+		if t.Lexeme == ";" && depth == 0 {
+			break
+		}
 		end++
 	}
 	next = end
-	if next < len(p.tokens) && p.tokens[next].Kind == token.Newline {
+	if next < len(p.tokens) && (p.tokens[next].Kind == token.Newline || p.tokens[next].Lexeme == ";") {
 		next++
 	}
 	return
@@ -1056,14 +1059,14 @@ func (p *Parser) codeTokens(start, end int) []token.Token {
 	return out
 }
 
-func (p *Parser) skipNewlines() {
-	for p.current().Kind == token.Newline {
+func (p *Parser) skipSeparators() {
+	for p.current().Kind == token.Newline || p.current().Lexeme == ";" {
 		p.pos++
 	}
 }
 
-func (p *Parser) atLineStart() bool {
-	return p.pos == 0 || p.tokens[p.pos-1].Kind == token.Newline
+func (p *Parser) atStatementStart() bool {
+	return p.pos == 0 || p.tokens[p.pos-1].Kind == token.Newline || p.tokens[p.pos-1].Lexeme == ";"
 }
 
 func (p *Parser) current() token.Token {

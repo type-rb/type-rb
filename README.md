@@ -238,6 +238,8 @@ v0.1 portable syntax includes:
 - explicit imports shared by every target; Go packages are derived from config
   and source paths
 - classes, inheritance, interfaces, and modules
+- top-level `;` statement separators for compact input such as
+  `class Empty; end`; `trb fmt` expands them to canonical lines
 - closed nominal enums and exhaustive enum `case` dispatch
 - typed fields, `readonly`, methods, parameters, and return types
 - immutable local inference with `:=`; use `mut value := ...` when the binding

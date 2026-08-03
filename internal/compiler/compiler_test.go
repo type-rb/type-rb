@@ -993,6 +993,62 @@ end
 	}
 }
 
+func TestSemicolonSeparatesPortableStatementsAcrossModes(t *testing.T) {
+	source := []byte(`class Empty; end
+enum State; Open; Closed; end
+def label(state: State): String; case state; when State::Open; return "open"; when State::Closed; return "closed"; end; end
+def main(); left := 1; right := 2; puts(label(State::Open)); puts(left + right); return; end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("separator.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected portable statement separators: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+		if len(artifact.AST.Statements) != 4 {
+			t.Fatalf("%s parsed %d top-level statements, want 4", mode, len(artifact.AST.Statements))
+		}
+		if _, ok := artifact.AST.Statements[0].(*ast.ClassStatement); !ok {
+			t.Fatalf("%s did not retain class AST: %T", mode, artifact.AST.Statements[0])
+		}
+		if _, ok := artifact.AST.Statements[1].(*ast.EnumStatement); !ok {
+			t.Fatalf("%s did not retain enum AST: %T", mode, artifact.AST.Statements[1])
+		}
+		if _, ok := artifact.IR.Statements[2].(*ir.Method); !ok {
+			t.Fatalf("%s did not retain method IR: %T", mode, artifact.IR.Statements[2])
+		}
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	for _, want := range []string{"type Empty struct", "type State int", "func Label(state State) string", "left := 1", "right := 2"} {
+		if !strings.Contains(goOutput, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "separator.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, goOutput)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	for mode, wants := range map[string][]string{
+		"ruby":       {"class Empty", "State = Data.define(:name)", "def label(state)"},
+		"typescript": {"export class Empty", "export type State = string &", "export function label(state: State): string"},
+	} {
+		output := string(artifacts[mode].Output)
+		for _, want := range wants {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
 func TestEnumCaseDiagnosticsAreModeIndependent(t *testing.T) {
 	tests := []struct {
 		name   string

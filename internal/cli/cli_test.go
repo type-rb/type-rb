@@ -257,6 +257,32 @@ func TestReplEvaluatesMultilineClassThroughTypedIR(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesSemicolonSeparatedDeclarations(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-separator-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "enum State; Open; Closed; end\n" +
+		"def label(state: State): String; case state; when State::Open; return \"open\"; when State::Closed; return \"closed\"; end; end\n" +
+		"label(State::Closed)\n" +
+		":quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if want := "\"closed\" : String\n"; stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplRequiresProjectConfiguration(t *testing.T) {
 	root := t.TempDir()
 	previous, err := os.Getwd()

@@ -27,6 +27,8 @@ Implemented:
 - Project-tree builds which copy non-`.trb` files for runnable Rails output.
 - Lossless lexer with byte/line/column spans.
 - Handwritten recursive-descent and Pratt parser.
+- Mode-independent `;` statement separators, including compact declarations
+  such as `class Empty; end`, with canonical newline expansion by `trb fmt`.
 - Independent syntax AST and typed IR.
 - Resolver/type checker with local inference, assignment/return checks, field
   initialization checks, duplicate detection, and private-member checks.
