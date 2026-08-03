@@ -40,6 +40,9 @@ Implemented:
   precedence-preserving backend output.
 - Structured `break` and `next` statements for `while` and collection
   iteration, checked outside loops and executed by all backends and the REPL.
+- Generic `Hash<K, V>` values with String/Integer keys, contextual empty
+  literals, invariant mutable aliases, checked index updates, and required
+  missing-key lookup semantics shared by all backends and the REPL.
 - Go-like no-value return syntax: the return annotation is omitted and explicit
   `: Void` return types are rejected while typed IR retains an internal Void.
 - Explicit Ruby-native AST/IR nodes for open-ended Rails DSL.
@@ -88,10 +91,11 @@ Verified locally:
 ## v0.1 Scope Boundary
 
 Portable v0.1 control flow includes conditionals, `while`, integer ranges, and
-typed `each`/`each_slice`/`with_index` iteration. Ruby-only syntax is valid in
+typed `each`/`each_slice`/`with_index` iteration. Portable collections include
+typed Arrays and `Hash<K, V>` with strict lookup. Ruby-only syntax is valid in
 Ruby projects through explicit native nodes and is rejected in the portable
-targets. Full generics inference, a complete Ruby semantic type model, and
-source maps are later work.
+targets. Union/Tuple inference, full generics inference, a complete Ruby
+semantic type model, and source maps are later work.
 
 ## Next Work
 

@@ -98,3 +98,19 @@ func TestFormatPreservesLoopControlAndComments(t *testing.T) {
 		t.Fatalf("unexpected loop control formatting\nwant:\n%s\ngot:\n%s", want, formatted)
 	}
 }
+
+func TestFormatTypedHashAndNestedGenericsPreservesComments(t *testing.T) {
+	source := []byte("def configure()\nmut values:Hash<String,Hash<String,Integer>>:={primary:{}} # nested\nvalues[\"primary\"][\"count\"]=1 # update\nreturn\nend\n")
+	want := "def configure()\n  mut values: Hash<String, Hash<String, Integer>> := { primary: {} } # nested\n  values[\"primary\"][\"count\"] = 1 # update\n  return\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected Hash formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("Hash formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}

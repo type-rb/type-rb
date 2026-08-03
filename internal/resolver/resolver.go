@@ -613,7 +613,20 @@ func variableType(node *ast.VariableStatement) types.Type {
 		}
 		return types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{element}}
 	case *ast.HashLiteral:
-		return types.FromName("Hash")
+		if len(value.Entries) == 0 {
+			return types.FromName("Hash")
+		}
+		key := expressionLiteralType(value.Entries[0].Key)
+		item := expressionLiteralType(value.Entries[0].Value)
+		for _, entry := range value.Entries[1:] {
+			if current := expressionLiteralType(entry.Key); !types.Equivalent(key, current) {
+				key = types.FromName("Any")
+			}
+			if current := expressionLiteralType(entry.Value); !types.Equivalent(item, current) {
+				item = types.FromName("Any")
+			}
+		}
+		return types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{key, item}}
 	case *ast.RangeExpression:
 		return types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}
 	case *ast.InterpolatedString, *ast.SymbolLiteral:

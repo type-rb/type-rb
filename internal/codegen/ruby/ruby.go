@@ -15,6 +15,7 @@ type generator struct {
 	loader       string
 	modulePath   string
 	topFunctions map[string]bool
+	nativeSyntax bool
 }
 
 func Generate(program *ir.Program) string {
@@ -22,6 +23,9 @@ func Generate(program *ir.Program) string {
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
+		}
+		if imported, ok := statement.(*ir.Import); ok && (imported.Path == "trb/platform/ruby/native" || imported.Path == "trb/platform/ruby/rails") {
+			g.nativeSyntax = true
 		}
 	}
 	g.statements(program.Statements)
@@ -123,7 +127,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Variable:
 		g.line(n.Name+" = "+g.expr(n.Value), n.TrailingComment)
 	case *ir.Assignment:
-		target := g.expr(n.Target)
+		target := g.assignmentTarget(n.Target)
 		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
 			g.line(target+" = ("+target+").quo("+g.expr(n.Value)+").truncate", n.TrailingComment)
 		} else {
@@ -252,6 +256,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.InterpolatedString:
 		return n.Raw
 	case *ir.Symbol:
+		if !g.nativeSyntax {
+			return strconv.Quote(n.Name)
+		}
 		if n.Raw != "" {
 			return ":" + n.Raw
 		}
@@ -324,12 +331,22 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return g.expr(n.Callee) + "(" + strings.Join(parts, ", ") + ")"
 	case *ir.Index:
+		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
+			return g.expr(n.Receiver) + ".fetch(" + g.expr(n.Index) + ")"
+		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	case *ir.NativeExpression:
 		return n.Text
 	default:
 		return ""
 	}
+}
+
+func (g *generator) assignmentTarget(expression ir.Expression) string {
+	if index, ok := expression.(*ir.Index); ok {
+		return g.expr(index.Receiver) + "[" + g.expr(index.Index) + "]"
+	}
+	return g.expr(expression)
 }
 
 func (g *generator) binaryOperand(expression ir.Expression) string {

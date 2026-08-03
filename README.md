@@ -243,7 +243,8 @@ v0.1 portable syntax includes:
   will be reassigned or destructively updated
 - uppercase runtime constants declared with `:=` at top level or directly in a
   module/class
-- literals, arrays, hashes, calls, members, indexes, unary/binary expressions
+- literals, arrays, typed `Hash<K, V>` values, calls, members, indexes, and
+  unary/binary expressions
 - `if`/`elsif`/`else`, `while`, `return`, `break`, `next`, integer ranges, and
   Ruby-shaped `each`/`each_slice`/`each.with_index` iteration
 - non-nullable `Boolean` conditions without target-specific truthiness
@@ -269,6 +270,20 @@ initializers:
 ```trb
 API_NAME := strings.uppercase("typerb")
 ```
+
+Portable hashes use `String` or `Integer` keys and require both generic
+arguments. Lookup is strict: a missing key is a runtime error in every target.
+Use `mut` for entry insertion or replacement:
+
+```trb
+mut scores: Hash<String, Integer> := {alice: 1}
+scores["bob"] = 2
+puts(scores["alice"])
+```
+
+An empty `{}` is typed from its surrounding annotation or parameter. Hash
+entry compound assignment is reserved in v0.1; use
+`scores["alice"] = scores["alice"] + 1`.
 
 A function that returns no value omits the return annotation, as in
 `def save()`. Writing `def save(): Void` is an error; `Void` exists only as the

@@ -10,10 +10,10 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 
 ## 1. Complete the portable language core
 
-- Finish essential collection and control-flow syntax: maps/hashes,
-  transformations, first-class blocks/lambdas, and structured error handling.
-- Add enums and sum types, exhaustive matching, generics, and precise
-  nullable/optional semantics.
+- Finish essential collection and control-flow syntax: transformations,
+  first-class blocks/lambdas, and structured error handling.
+- Add union types, position-typed Tuples, enums and sum types, exhaustive
+  matching/narrowing, generics, and precise nullable/optional semantics.
 - Define mutation effects for methods and parameters so immutable values remain
   safe across calls, not only assignments and known collection operations.
 - Specify module visibility, initialization order, constant evaluation, and

@@ -147,6 +147,38 @@ mode by itself does not enable them.
 - `return` remains distinct: it exits the enclosing method, including when it
   appears inside an iteration block.
 
+### 3.12 Hashes
+
+- A portable hash type is written `Hash<K, V>` with exactly two type
+  arguments. Bare `Hash` is rejected outside the explicit Ruby-native
+  compatibility surface.
+- v0.1 portable keys are non-nullable `String` or `Integer` values. A literal
+  must use one homogeneous key type. The Ruby-shaped `name: value` literal
+  spelling has a `String` key in portable TypeRB; it becomes a Ruby `Symbol`
+  only under an explicit Ruby-native import.
+- Non-empty literals infer their key and value types. Heterogeneous values
+  currently widen to `Any`; a future union-type phase will infer types such as
+  `Integer | String` instead. An empty `{}` receives its type from a declared
+  variable, field, parameter, record field, assignment target, or return type.
+- A fresh literal may be contextually widened when every entry is assignable,
+  for example `Hash<String, Any> := {"count" => 1}`. Existing mutable Hash
+  values are invariant in both arguments, preventing an alias from inserting
+  a value that violates the original Hash type.
+- Updating an entry requires a `mut` receiver. `hash[key] = value` may insert
+  or replace an entry and checks both key and value types.
+- `hash[key]` is a required lookup and raises a runtime error when the key is
+  absent in every backend and the REPL. A future optional lookup API will
+  return a nullable/optional value explicitly.
+- Compound assignment to a Hash entry is reserved until its evaluate-once and
+  missing-key behavior is represented directly in typed IR. Write
+  `hash[key] = hash[key] + value` in v0.1.
+
+Arrays and Hashes describe homogeneous collections. Future union types retain
+the alternatives of heterogeneous collection values, while a Tuple retains
+the type of each array-like position and a `record` retains the type of each
+named field. `Array<Integer | String>[0]` therefore remains
+`Integer | String`; exact constant-index inference belongs to Tuple.
+
 ## 4. Open Point: Initial Generic Inference Scope
 
 Current decision:

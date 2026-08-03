@@ -111,6 +111,8 @@ func formatTokens(tokens []token.Token) string {
 	inBlockParameters := false
 	lineKind := firstCode(tokens)
 	importLine := lineKind == "import"
+	genericDepth := 0
+	classInheritance := false
 	for i := range tokens {
 		current := tokens[i]
 		if current.Kind == token.Comment {
@@ -131,6 +133,17 @@ func formatTokens(tokens []token.Token) string {
 			}
 		}
 		if previous != nil {
+			genericOpen := current.Lexeme == "<" && startsUpper(previous.Lexeme)
+			if genericOpen && lineKind == "class" && genericDepth == 0 && !classInheritance {
+				genericOpen = false
+				classInheritance = true
+			}
+			genericClosers := 0
+			if current.Lexeme == ">" && genericDepth > 0 {
+				genericClosers = 1
+			} else if current.Lexeme == ">>" && genericDepth >= 2 {
+				genericClosers = 2
+			}
 			openingPipe := current.Lexeme == "|" && (previous.Lexeme == "do" || previous.Lexeme == "{")
 			closingPipe := current.Lexeme == "|" && inBlockParameters && !openingPipe
 			space := needsSpace(beforePrevious, *previous, current, next)
@@ -149,6 +162,9 @@ func formatTokens(tokens []token.Token) string {
 			if closingPipe {
 				space = false
 			}
+			if genericOpen || genericClosers > 0 || (genericDepth > 0 && previous.Lexeme == "<") {
+				space = false
+			}
 			if space {
 				out.WriteByte(' ')
 			}
@@ -157,6 +173,10 @@ func formatTokens(tokens []token.Token) string {
 			} else if closingPipe {
 				inBlockParameters = false
 			}
+			if genericOpen {
+				genericDepth++
+			}
+			genericDepth -= genericClosers
 		}
 		out.WriteString(current.Lexeme)
 		beforePrevious = previous
@@ -222,7 +242,7 @@ func needsSpace(beforePrevious *token.Token, previous, current token.Token, next
 		return previous.Lexeme == "if" || previous.Lexeme == "while" || previous.Lexeme == "unless" || previous.Lexeme == "until"
 	}
 	if current.Lexeme == "{" {
-		return previous.Lexeme != "=" && previous.Lexeme != ":=" && previous.Lexeme != "(" && previous.Lexeme != "["
+		return previous.Lexeme != "(" && previous.Lexeme != "["
 	}
 	if previous.Lexeme == "{" {
 		return true

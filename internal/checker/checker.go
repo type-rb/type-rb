@@ -108,8 +108,79 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 		}
 	}
 	c.collect(program.Statements)
+	c.validateTypeReferences(program.Statements)
 	c.checkStatements(program.Statements, &scope{values: map[string]symbol{}, constantsAllowed: true})
 	return c.result, c.diags
+}
+
+func (c *Checker) validateTypeReferences(statements []ast.Statement) {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ast.ClassStatement:
+			c.validateTypeReferences(node.Body)
+		case *ast.RecordStatement:
+			c.validateTypeReferences(node.Body)
+		case *ast.RecordFieldStatement:
+			c.validateTypeReference(node.Type)
+		case *ast.ModuleStatement:
+			c.validateTypeReferences(node.Body)
+		case *ast.InterfaceStatement:
+			for _, method := range node.Methods {
+				c.validateMethodTypes(method)
+			}
+		case *ast.FieldStatement:
+			c.validateTypeReference(node.Type)
+		case *ast.MethodStatement:
+			c.validateMethodTypes(node)
+			c.validateTypeReferences(node.Body)
+		case *ast.VariableStatement:
+			c.validateTypeReference(node.Type)
+		case *ast.IfStatement:
+			c.validateTypeReferences(node.Then)
+			for _, branch := range node.ElseIf {
+				c.validateTypeReferences(branch.Body)
+			}
+			c.validateTypeReferences(node.Else)
+		case *ast.WhileStatement:
+			c.validateTypeReferences(node.Body)
+		case *ast.ExpressionStatement:
+			if iteration, ok := node.Expression.(*ast.IterationExpression); ok && iteration.Block != nil {
+				c.validateTypeReferences(iteration.Block.Body)
+			}
+		case *ast.NativeBlock:
+			c.validateTypeReferences(node.Body)
+		}
+	}
+}
+
+func (c *Checker) validateMethodTypes(method *ast.MethodStatement) {
+	c.validateTypeReference(method.ReturnType)
+	for _, parameter := range method.Parameters {
+		c.validateTypeReference(parameter.Type)
+	}
+}
+
+func (c *Checker) validateTypeReference(ref ast.TypeRef) {
+	if ref.Empty() {
+		return
+	}
+	for _, argument := range ref.Arguments {
+		c.validateTypeReference(argument)
+	}
+	if types.FromName(ref.Name).Kind != types.Hash {
+		return
+	}
+	if len(ref.Arguments) == 0 && c.rubyNativeSyntax() {
+		return
+	}
+	if len(ref.Arguments) != 2 {
+		c.error(ref.Span(), fmt.Sprintf("Hash expects two type arguments, got %d", len(ref.Arguments)))
+		return
+	}
+	key := fromTypeRef(ref.Arguments[0])
+	if !portableHashKey(key) {
+		c.error(ref.Arguments[0].Span(), fmt.Sprintf("Hash key type must be String or Integer, got %s", key))
+	}
 }
 
 func (c *Checker) collect(statements []ast.Statement) {
@@ -232,6 +303,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			if n.Value != nil {
 				valueType := c.checkExpression(n.Value, sc)
 				declared := fromTypeRef(n.Type)
+				valueType = c.contextualizeHashLiteral(n.Value, declared, valueType)
 				if !n.Type.Empty() && !types.Assignable(declared, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot initialize %s with %s", declared, valueType))
 				}
@@ -251,6 +323,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			}
 			if !n.Type.Empty() {
 				variableType = fromTypeRef(n.Type)
+				valueType = c.contextualizeHashLiteral(n.Value, variableType, valueType)
 				if !types.Assignable(variableType, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", valueType, variableType))
 				}
@@ -276,6 +349,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 		case *ast.AssignmentStatement:
 			leftType := c.checkExpression(n.Target, sc)
 			rightType := c.checkExpression(n.Value, sc)
+			rightType = c.contextualizeHashLiteral(n.Value, leftType, rightType)
 			if identifier, ok := n.Target.(*ast.Identifier); ok && !strings.HasPrefix(identifier.Name, "@") {
 				if _, exists := sc.lookup(identifier.Name); !exists {
 					_, imported := c.result.References[identifier]
@@ -292,7 +366,12 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			c.requireMutable(n.Target, sc, "assignment")
 			assignedType := rightType
 			if n.Operator != "=" {
-				assignedType = c.checkBinaryOperator(n.Span(), strings.TrimSuffix(n.Operator, "="), leftType, rightType)
+				if index, ok := n.Target.(*ast.IndexExpression); ok && c.result.Expressions[index.Receiver].Kind == types.Hash {
+					c.error(n.Span(), "Hash entry compound assignment is not supported; read and assign an explicit value")
+					assignedType = types.Type{Kind: types.Invalid, Name: "Invalid"}
+				} else {
+					assignedType = c.checkBinaryOperator(n.Span(), strings.TrimSuffix(n.Operator, "="), leftType, rightType)
+				}
 			}
 			if leftType.Kind != types.Any && !types.Assignable(leftType, assignedType) {
 				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", assignedType, leftType))
@@ -304,6 +383,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			}
 			if len(c.returns) > 0 {
 				expected := c.returns[len(c.returns)-1]
+				actual = c.contextualizeHashLiteral(n.Value, expected, actual)
 				if !types.Assignable(expected, actual) {
 					c.error(n.Span(), fmt.Sprintf("return type is %s, expected %s", actual, expected))
 				}
@@ -511,6 +591,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		methodScope.values[parameter.Name] = symbol{typ: typ, mutable: true, span: parameter.Span()}
 		if parameter.Default != nil {
 			actual := c.checkExpression(parameter.Default, methodScope)
+			actual = c.contextualizeHashLiteral(parameter.Default, typ, actual)
 			if !types.Assignable(typ, actual) {
 				c.error(parameter.Default.Span(), fmt.Sprintf("default value has type %s, expected %s", actual, typ))
 			}
@@ -834,11 +915,29 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{element}}
 	case *ast.HashLiteral:
-		for _, entry := range n.Entries {
-			c.checkExpression(entry.Key, sc)
-			c.checkExpression(entry.Value, sc)
+		if len(n.Entries) == 0 {
+			typ = types.Type{Kind: types.Hash, Name: "Hash"}
+			break
 		}
-		typ = types.Type{Kind: types.Hash, Name: "Hash"}
+		keyType := c.checkExpression(n.Entries[0].Key, sc)
+		valueType := c.checkExpression(n.Entries[0].Value, sc)
+		if !portableHashKey(keyType) && !c.rubyNativeSyntax() {
+			c.error(n.Entries[0].Key.Span(), fmt.Sprintf("Hash key must be String or Integer, got %s", keyType))
+		}
+		for _, entry := range n.Entries[1:] {
+			currentKey := c.checkExpression(entry.Key, sc)
+			currentValue := c.checkExpression(entry.Value, sc)
+			if !portableHashKey(currentKey) && !c.rubyNativeSyntax() {
+				c.error(entry.Key.Span(), fmt.Sprintf("Hash key must be String or Integer, got %s", currentKey))
+			}
+			if !types.Equivalent(keyType, currentKey) {
+				c.error(entry.Key.Span(), fmt.Sprintf("Hash literal key type is %s, expected %s", currentKey, keyType))
+			}
+			if !types.Equivalent(valueType, currentValue) {
+				valueType = types.FromName("Any")
+			}
+		}
+		typ = types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{keyType, valueType}}
 	case *ast.UnaryExpression:
 		operand := c.checkExpression(n.Operand, sc)
 		typ = c.checkUnaryOperator(n.Span(), n.Operator, operand)
@@ -1015,7 +1114,20 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		receiver := c.checkExpression(n.Receiver, sc)
 		indexType := c.checkExpression(n.Index, sc)
 		if receiver.Kind == types.Array && len(receiver.Args) > 0 {
+			if indexType.Kind != types.Int || indexType.Nullable {
+				c.error(n.Index.Span(), fmt.Sprintf("Array index must be Integer, got %s", indexType))
+			}
 			typ = receiver.Args[0]
+		} else if receiver.Kind == types.Hash {
+			if len(receiver.Args) != 2 {
+				c.error(n.Receiver.Span(), "cannot index an untyped Hash; add Hash<K, V> annotation")
+			} else {
+				expectedKey := receiver.Args[0]
+				if !types.Equivalent(expectedKey, indexType) {
+					c.error(n.Index.Span(), fmt.Sprintf("Hash index has type %s, expected %s", indexType, expectedKey))
+				}
+				typ = receiver.Args[1]
+			}
 		} else if receiver.Name == "Tuple" {
 			if literal, ok := n.Index.(*ast.Literal); ok && literal.Kind == ast.IntegerLiteral {
 				if index, ok := integerLiteral(literal.Raw); ok && index >= 0 && index < len(receiver.Args) {
@@ -1079,6 +1191,7 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 		}
 		used[argument.Name] = true
 		actual := c.result.Expressions[argument.Value]
+		actual = c.contextualizeHashLiteral(argument.Value, field.Type, actual)
 		if !types.Assignable(field.Type, actual) {
 			c.error(argument.Value.Span(), fmt.Sprintf("record field %s has type %s, expected %s", field.Name, actual, field.Type))
 		}
@@ -1129,6 +1242,8 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 			continue
 		}
 		expected := parameters[parameterIndex]
+		actualType = c.contextualizeHashLiteral(arguments[i].Value, expected, actualType)
+		actual[i] = actualType
 		if !types.Assignable(expected, actualType) {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, name, actualType, expected))
 		}
@@ -1194,6 +1309,34 @@ func isReferenceType(typ types.Type) bool {
 	}
 }
 
+func portableHashKey(typ types.Type) bool {
+	return !typ.Nullable && (typ.Kind == types.String || typ.Kind == types.Int)
+}
+
+func (c *Checker) contextualizeHashLiteral(expression ast.Expression, expected, actual types.Type) types.Type {
+	if expression == nil || expected.Kind != types.Hash || len(expected.Args) != 2 || actual.Kind != types.Hash {
+		return actual
+	}
+	literal, ok := expression.(*ast.HashLiteral)
+	if !ok {
+		return actual
+	}
+	if len(literal.Entries) > 0 {
+		if len(actual.Args) != 2 || !types.Equivalent(expected.Args[0], actual.Args[0]) {
+			return actual
+		}
+		for _, entry := range literal.Entries {
+			valueType := c.result.Expressions[entry.Value]
+			valueType = c.contextualizeHashLiteral(entry.Value, expected.Args[1], valueType)
+			if !types.Assignable(expected.Args[1], valueType) {
+				return actual
+			}
+		}
+	}
+	c.result.Expressions[expression] = expected
+	return expected
+}
+
 func inferLibraryReturn(symbol stdlib.Symbol, arguments []types.Type) types.Type {
 	argument := func(index int) types.Type {
 		if index < 0 || index >= len(arguments) {
@@ -1254,6 +1397,7 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 		}
 		bindDeclarationType(parameter.Type, actual[index], typeParameters, bindings)
 		expected := instantiateDeclarationType(parameter.Type, bindings)
+		actual[index] = c.contextualizeHashLiteral(argument.Value, expected, actual[index])
 		if !types.Assignable(expected, actual[index]) {
 			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", index+1, member.Name, actual[index], expected))
 		}
@@ -1355,6 +1499,8 @@ func (c *Checker) checkArguments(span token.Span, method *ast.MethodStatement, a
 		if method.Parameters[i].Type.Empty() || method.Parameters[i].Rest || method.Parameters[i].KeywordRest {
 			continue
 		}
+		argumentType = c.contextualizeHashLiteral(arguments[i].Value, expected, argumentType)
+		actual[i] = argumentType
 		if !types.Assignable(expected, argumentType) {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, method.Name, argumentType, expected))
 		}

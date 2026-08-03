@@ -1166,7 +1166,7 @@ func indexValue(receiver, index Value, typ types.Type) (Value, error) {
 				return result, nil
 			}
 		}
-		return Value{Type: typ, Data: nil}, nil
+		return Value{}, errors.New("Hash key is missing")
 	case string:
 		position, ok := index.Data.(int64)
 		runes := []rune(value)

@@ -180,7 +180,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line(goIdentifier(n.Name, false) + " := " + g.exprExpected(n.Value, n.Type))
 		}
 	case *ir.Assignment:
-		target := g.expr(n.Target)
+		target := g.assignmentTarget(n.Target)
 		switch n.Operator {
 		case "&&=":
 			g.line(target + " = " + target + " && " + g.expr(n.Value))
@@ -520,7 +520,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		for i, entry := range n.Entries {
 			parts[i] = g.expr(entry.Key) + ": " + g.expr(entry.Value)
 		}
-		return "map[any]any{" + strings.Join(parts, ", ") + "}"
+		return g.goType(n.ExprType()) + "{" + strings.Join(parts, ", ") + "}"
 	case *ir.Unary:
 		op := n.Operator
 		if op == "not" {
@@ -602,10 +602,23 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return g.expr(n.Callee) + "(" + args + ")"
 	case *ir.Index:
+		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
+			hashType := n.Receiver.ExprType()
+			keyType := g.goType(hashType.Args[0])
+			valueType := g.goType(hashType.Args[1])
+			return "func(values " + g.goType(hashType) + ", key " + keyType + ") " + valueType + " { value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; return value }(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
 		return ""
 	}
+}
+
+func (g *generator) assignmentTarget(expression ir.Expression) string {
+	if index, ok := expression.(*ir.Index); ok {
+		return g.expr(index.Receiver) + "[" + g.expr(index.Index) + "]"
+	}
+	return g.expr(expression)
 }
 
 func (g *generator) binaryOperand(expression ir.Expression) string {
@@ -824,7 +837,13 @@ func (g *generator) goType(t types.Type) string {
 		}
 		result = "[]" + element
 	case types.Hash:
-		result = "map[any]any"
+		key := "any"
+		value := "any"
+		if len(t.Args) == 2 {
+			key = g.goType(t.Args[0])
+			value = g.goType(t.Args[1])
+		}
+		result = "map[" + key + "]" + value
 	default:
 		if t.Name == "" {
 			result = "any"

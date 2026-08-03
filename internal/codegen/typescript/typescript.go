@@ -163,7 +163,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line(prefix + keyword + " " + n.Name + ": " + tsType(n.Type) + " = " + g.expr(n.Value) + ";")
 	case *ir.Assignment:
-		target := g.expr(n.Target)
+		target := g.assignmentTarget(n.Target)
 		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
 			g.line(target + " = Math.trunc(" + target + " / " + g.expr(n.Value) + ");")
 		} else {
@@ -430,10 +430,21 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return g.expr(n.Callee) + "(" + args + ")"
 	case *ir.Index:
+		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
+			hashType := n.Receiver.ExprType()
+			return "((values: " + tsType(hashType) + ", key: " + tsType(hashType.Args[0]) + "): " + tsType(hashType.Args[1]) + " => { if (!Object.prototype.hasOwnProperty.call(values, key)) { throw new Error(\"Hash key is missing\"); } return values[key]; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
 		return ""
 	}
+}
+
+func (g *generator) assignmentTarget(expression ir.Expression) string {
+	if index, ok := expression.(*ir.Index); ok {
+		return g.expr(index.Receiver) + "[" + g.expr(index.Index) + "]"
+	}
+	return g.expr(expression)
 }
 
 func (g *generator) binaryOperand(expression ir.Expression) string {
@@ -589,7 +600,13 @@ func tsType(t types.Type) string {
 	case types.Range:
 		result = "Array<number>"
 	case types.Hash:
-		result = "Record<string, unknown>"
+		key := "string"
+		value := "unknown"
+		if len(t.Args) == 2 {
+			key = tsType(t.Args[0])
+			value = tsType(t.Args[1])
+		}
+		result = "Record<" + key + ", " + value + ">"
 	case types.Nil:
 		result = "null"
 	default:

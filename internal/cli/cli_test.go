@@ -159,6 +159,40 @@ total
 	}
 }
 
+func TestReplEvaluatesTypedHashAndReportsMissingKeys(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-hash-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := `mut scores: Hash<String, Integer> := {"one" => 1}
+scores["one"]
+scores["two"] = 2
+scores["two"]
+scores["missing"]
+scores["one"]
+:quit
+`
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "{\"one\": 1} : Hash<String, Integer>\n1 : Integer\n2 : Integer\n2 : Integer\n1 : Integer\n"
+	if stdout.String() != want {
+		t.Fatalf("unexpected REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Hash key is missing") {
+		t.Fatalf("REPL did not report and recover from missing Hash key:\n%s", stderr.String())
+	}
+}
+
 func TestReplRejectsPlatformPackageForConfiguredModeAndContinues(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

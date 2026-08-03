@@ -333,6 +333,7 @@ func parseType(tokens []token.Token) ast.TypeRef {
 	if len(tokens) == 0 {
 		return ast.TypeRef{}
 	}
+	tokens = expandGenericClosers(tokens)
 	t := ast.TypeRef{Base: ast.Base{SourceSpan: spanOf(tokens)}}
 	end := len(tokens)
 	if tokens[end-1].Lexeme == "?" {
@@ -359,6 +360,29 @@ func parseType(tokens []token.Token) ast.TypeRef {
 		t.Name = joinLexemes(tokens[:end])
 	}
 	return t
+}
+
+// The lexer must retain >> as an expression operator. In a type reference,
+// however, the same bytes can close two nested generic argument lists.
+func expandGenericClosers(tokens []token.Token) []token.Token {
+	var expanded []token.Token
+	for _, item := range tokens {
+		if item.Lexeme != ">>" {
+			expanded = append(expanded, item)
+			continue
+		}
+		middle := item.Span.Start
+		middle.Offset++
+		middle.Column++
+		first := item
+		first.Lexeme = ">"
+		first.Span.End = middle
+		second := item
+		second.Lexeme = ">"
+		second.Span.Start = middle
+		expanded = append(expanded, first, second)
+	}
+	return expanded
 }
 
 func splitTopLevel(tokens []token.Token, separator string) [][]token.Token {

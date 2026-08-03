@@ -92,11 +92,31 @@ func Assignable(target, value Type) bool {
 		}
 		return len(target.Args) == len(value.Args) && Assignable(target.Args[0], value.Args[0])
 	}
+	if target.Kind == Hash && value.Kind == Hash {
+		if len(target.Args) == 0 || len(value.Args) == 0 {
+			return true
+		}
+		return len(target.Args) == 2 && len(value.Args) == 2 && Equivalent(target.Args[0], value.Args[0]) && Equivalent(target.Args[1], value.Args[1])
+	}
 	if target.Kind != value.Kind {
 		return false
 	}
 	if target.Kind == Named && target.Name != value.Name {
 		return false
+	}
+	return true
+}
+
+// Equivalent compares semantic types while ignoring binding-level readonly
+// state. Mutable generic containers use it to avoid unsound argument widening.
+func Equivalent(left, right Type) bool {
+	if left.Kind != right.Kind || left.Name != right.Name || left.Nullable != right.Nullable || len(left.Args) != len(right.Args) {
+		return false
+	}
+	for index := range left.Args {
+		if !Equivalent(left.Args[index], right.Args[index]) {
+			return false
+		}
 	}
 	return true
 }

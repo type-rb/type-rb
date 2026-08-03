@@ -812,6 +812,114 @@ func TestBreakAndNextDoNotAcceptValues(t *testing.T) {
 	}
 }
 
+func TestPortableHashTypesAndRequiredLookupLowerAcrossBackends(t *testing.T) {
+	source := []byte(`def accept(values: Hash<String, Integer>): Integer
+  return 0
+end
+
+def score(): Integer
+  mut scores: Hash<String, Integer> := {"alice" => 1, bonus: 2}
+  scores["alice"] = 3
+  mut labels: Hash<Integer, String> := {}
+  labels[1] = "one"
+  ignored := accept({})
+  mixed := {"number" => 1, "word" => "one"}
+  puts(mixed["word"])
+  mut widened: Hash<String, Any> := {"count" => 1}
+  widened["name"] = "one"
+  mut floats: Hash<String, Float> := {"one" => 1}
+  floats["two"] = 2.0
+  mut nested: Hash<String, Hash<String, Integer>> := {"empty" => {}}
+  nested["empty"]["one"] = 1
+  return scores["alice"] + scores["bonus"] + ignored
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("hash.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected portable Hash: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	for _, want := range []string{
+		"map[string]int{",
+		"map[int]string{}",
+		`panic("Hash key is missing")`,
+		`scores["alice"] = 3`,
+		"Accept(map[string]int{})",
+		"map[string]any{",
+	} {
+		if !strings.Contains(goOutput, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "hash.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, goOutput)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	rubyOutput := string(artifacts["ruby"].Output)
+	for _, want := range []string{`{"alice" => 1, "bonus" => 2}`, `scores.fetch("alice")`} {
+		if !strings.Contains(rubyOutput, want) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
+		}
+	}
+	if strings.Contains(rubyOutput, ":bonus") {
+		t.Fatalf("portable symbol-shaped key changed semantics in Ruby:\n%s", rubyOutput)
+	}
+
+	typescriptOutput := string(artifacts["typescript"].Output)
+	for _, want := range []string{"Record<string, number>", "Record<number, string>", "Object.prototype.hasOwnProperty.call(values, key)"} {
+		if !strings.Contains(typescriptOutput, want) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
+		}
+	}
+
+	method := artifacts["go"].IR.Statements[1].(*ir.Method)
+	variable := method.Body[0].(*ir.Variable)
+	if variable.Type.Kind != types.Hash || len(variable.Type.Args) != 2 || variable.Type.Args[0].Kind != types.String || variable.Type.Args[1].Kind != types.Int {
+		t.Fatalf("Hash key/value types were not retained in typed IR: %#v", variable.Type)
+	}
+}
+
+func TestPortableHashTypeErrorsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"bare Hash", "def bad(value: Hash)\n  return\nend\n", "Hash expects two type arguments, got 0"},
+		{"one argument", "def bad(value: Hash<String>)\n  return\nend\n", "Hash expects two type arguments, got 1"},
+		{"unsupported key type", "def bad(value: Hash<Boolean, Integer>)\n  return\nend\n", "Hash key type must be String or Integer, got Boolean"},
+		{"mixed key types", "def bad()\n  value := {\"one\" => 1, 2 => 2}\n  return\nend\n", "Hash literal key type is Integer, expected String"},
+		{"unsupported literal key", "def bad()\n  value := {true => 1}\n  return\nend\n", "Hash key must be String or Integer, got Boolean"},
+		{"wrong lookup key", "def bad(value: Hash<String, Integer>): Integer\n  return value[1]\nend\n", "Hash index has type Integer, expected String"},
+		{"wrong assigned value", "def bad()\n  mut value: Hash<String, Integer> := {}\n  value[\"one\"] = \"one\"\n  return\nend\n", "cannot assign String to Integer"},
+		{"immutable update", "def bad()\n  value := {\"one\" => 1}\n  value[\"one\"] = 2\n  return\nend\n", "value is immutable; declare it with mut to use assignment"},
+		{"untyped empty lookup", "def bad(): Any\n  value := {}\n  return value[\"one\"]\nend\n", "cannot index an untyped Hash; add Hash<K, V> annotation"},
+		{"compound entry assignment", "def bad()\n  mut value := {\"one\" => 1}\n  value[\"one\"] += 1\n  return\nend\n", "Hash entry compound assignment is not supported; read and assign an explicit value"},
+		{"mutable invariant alias", "def bad()\n  mut integers := {\"one\" => 1}\n  mut values: Hash<String, Any> := integers\n  return\nend\n", "cannot assign Hash<String, Integer> to Hash<String, Any>"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_hash.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestInterpolatedStringIsTypedAndLoweredPerTarget(t *testing.T) {
 	goArtifact, err := CompileWithOptions("greet.trb", []byte(`import trb/std/io
 
