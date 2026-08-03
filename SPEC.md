@@ -96,6 +96,9 @@ mode by itself does not enable them.
 - Portable packages use `trb/std/*`. Mode-specific APIs use mode-checked
   `trb/platform/<mode>/*` packages.
 - Official formatter command: `trb fmt`.
+- Canonical TypeRB indentation is one tab per nesting level. Formatter
+  configuration is not part of v0.1; a future configuration surface may
+  select a different indentation style without changing language semantics.
 
 ### 3.8 Program Entry
 
@@ -197,22 +200,22 @@ Pending implementation-scope decision:
 import app/user_repo
 
 class User
-  @name: String
-  @_token: String
+	@name: String
+	@_token: String
 
-  def initialize(name: String, token: String)
-    @name = name
-    @_token = token
-    return
-  end
+	def initialize(name: String, token: String)
+		@name = name
+		@_token = token
+		return
+	end
 
-  def name(): String
-    return @name
-  end
+	def name(): String
+		return @name
+	end
 
-  def _token(): String
-    return @_token
-  end
+	def _token(): String
+		return @_token
+	end
 end
 
 u := User.new("Alice", "secret")
@@ -386,7 +389,8 @@ The Ruby backend emits `def find(active: true)`.
 The v0.1 formatter is deterministic and idempotent. It uses the parsed program
 and lossless token stream, preserves standalone/trailing comments, and treats
 heredoc and percent-literal contents as opaque. Comment positions and literal
-contents therefore survive repeated formatting.
+contents therefore survive repeated formatting. It emits one tab per nesting
+level while leaving indentation inside opaque literal bodies unchanged.
 
 ### 8.6 v0.1 Portable Control Flow
 
@@ -402,7 +406,7 @@ identical precedence and semantics in TypeRB:
 
 ```trb
 values.each do |value|
-  puts(value)
+	puts(value)
 end
 
 values.each { |value| puts(value) }
@@ -413,7 +417,7 @@ values.each { |value| puts(value) }
 
 ```trb
 values.each_slice(2).with_index do |slice, index|
-  puts(index)
+	puts(index)
 end
 ```
 
@@ -427,10 +431,10 @@ mode. `each_slice` sizes must be positive.
 
 ```trb
 record TodoItem
-  id: Integer
-  title: String
-  completed: Boolean
-  tags: Array<Tag>
+	id: Integer
+	title: String
+	completed: Boolean
+	tags: Array<Tag>
 end
 ```
 

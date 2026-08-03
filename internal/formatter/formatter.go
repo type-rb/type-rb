@@ -11,6 +11,8 @@ import (
 	"github.com/type-rb/type-rb/internal/token"
 )
 
+const indentation = "\t"
+
 func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 	program, diagnostics := parser.Parse(source)
 	if hasErrors(diagnostics) {
@@ -45,7 +47,7 @@ func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 		if lineIndent < 0 {
 			lineIndent = 0
 		}
-		out.WriteString(strings.Repeat("  ", lineIndent))
+		out.WriteString(strings.Repeat(indentation, lineIndent))
 		out.WriteString(formatTokens(code))
 		out.WriteByte('\n')
 

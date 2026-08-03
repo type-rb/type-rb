@@ -1,15 +1,15 @@
 import trb/platform/ruby/rails
 
 module Searchable
-  extend ActiveSupport::Concern
+	extend ActiveSupport::Concern
 
-  included do
-    scope :matching, ->(term) { where("title LIKE ?", "%#{sanitize_sql_like(term)}%") }
-  end
+	included do
+		scope :matching, ->(term) { where("title LIKE ?", "%#{sanitize_sql_like(term)}%") }
+	end
 
-  class_methods do
-    def search(term: String): Any
-      return matching(term)
-    end
-  end
+	class_methods do
+		def search(term: String): Any
+			return matching(term)
+		end
+	end
 end

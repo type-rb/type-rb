@@ -8,8 +8,8 @@ TypeRB v0.1 is implemented as a Go compiler prototype.
 
 Implemented:
 
-- `trb fmt`, including comment, percent-literal, interpolation, and heredoc
-  preservation.
+- `trb fmt`, with canonical tab indentation plus comment, percent-literal,
+  interpolation, and heredoc preservation.
 - `trb build` with Ruby, TypeScript, and Go backends selected by the project
   `trbconfig.jsonc`.
 - `trb run` for compiling a project in a temporary tree and executing its

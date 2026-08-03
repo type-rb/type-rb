@@ -1,22 +1,22 @@
 # Persistence records are deliberately separate from the shared API records.
 record TodoListEntity
-  id: Integer @gorm("primaryKey;autoIncrement")
-  name: String @gorm("not null")
+	id: Integer @gorm("primaryKey;autoIncrement")
+	name: String @gorm("not null")
 end
 
 record TodoItemEntity
-  id: Integer @gorm("primaryKey;autoIncrement")
-  todo_list_id: Integer @gorm("not null;index")
-  title: String @gorm("not null")
-  completed: Boolean @gorm("not null")
+	id: Integer @gorm("primaryKey;autoIncrement")
+	todo_list_id: Integer @gorm("not null;index")
+	title: String @gorm("not null")
+	completed: Boolean @gorm("not null")
 end
 
 record TagEntity
-  id: Integer @gorm("primaryKey;autoIncrement")
-  name: String @gorm("not null;uniqueIndex")
+	id: Integer @gorm("primaryKey;autoIncrement")
+	name: String @gorm("not null;uniqueIndex")
 end
 
 record TodoItemTagEntity
-  todo_item_id: Integer @gorm("primaryKey")
-  tag_id: Integer @gorm("primaryKey")
+	todo_item_id: Integer @gorm("primaryKey")
+	tag_id: Integer @gorm("primaryKey")
 end

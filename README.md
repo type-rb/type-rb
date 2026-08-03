@@ -204,30 +204,30 @@ import trb/std/io
 import { Logger } from "./logger"
 
 interface Named
-  name(): String
+	name(): String
 end
 
 class User implements Named
-  readonly @id: Integer
-  @name: String
-  @_token: String?
+	readonly @id: Integer
+	@name: String
+	@_token: String?
 
-  def initialize(id: Integer, name: String)
-    @id = id
-    @name = name
-    @_token = nil
-    return
-  end
+	def initialize(id: Integer, name: String)
+		@id = id
+		@name = name
+		@_token = nil
+		return
+	end
 
-  def name(): String
-    return @name
-  end
+	def name(): String
+		return @name
+	end
 end
 
 def main()
-  user := User.new(1, "Alice")
-  io.puts(user.name())
-  return
+	user := User.new(1, "Alice")
+	io.puts(user.name())
+	return
 end
 
 main()
@@ -315,13 +315,13 @@ calls do not need to be rewritten:
 import trb/platform/ruby/rails
 
 class Post < ApplicationRecord
-  belongs_to :author
-  validates :title, presence: true
-  scope :published, -> { where.not(published_at: nil) }
+	belongs_to :author
+	validates :title, presence: true
+	scope :published, -> { where.not(published_at: nil) }
 
-  def summary(limit: Integer = 80): String
-    return body.to_s().truncate(limit)
-  end
+	def summary(limit: Integer = 80): String
+		return body.to_s().truncate(limit)
+	end
 end
 ```
 
@@ -401,7 +401,8 @@ the lossless lexer token stream to retain:
 - heredoc bodies and their internal whitespace;
 - Rails symbol/keyword syntax and block parameters.
 
-Indentation is two spaces and trailing whitespace is removed.
+Indentation is one tab per nesting level and trailing whitespace is removed.
+Indentation is not configurable in v0.1.
 
 ## Development
 

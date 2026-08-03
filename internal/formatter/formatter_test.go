@@ -77,7 +77,7 @@ func TestFormatPortableIterationAndRanges(t *testing.T) {
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
 	}
-	want := "def values()\n  [1, 2, 3].each do |value, index| # header\n    puts(value) # body\n  end\n  (0..10).each { |value| puts(value) }\n  return\nend\n"
+	want := "def values()\n\t[1, 2, 3].each do |value, index| # header\n\t\tputs(value) # body\n\tend\n\t(0..10).each { |value| puts(value) }\n\treturn\nend\n"
 	if string(formatted) != want {
 		t.Fatalf("unexpected iteration formatting:\n%s", formatted)
 	}
@@ -89,7 +89,7 @@ func TestFormatPortableIterationAndRanges(t *testing.T) {
 
 func TestFormatPreservesLoopControlAndComments(t *testing.T) {
 	source := []byte("def scan()\nwhile true\nnext # skip\nbreak # stop\nend\nreturn\nend\n")
-	want := "def scan()\n  while true\n    next # skip\n    break # stop\n  end\n  return\nend\n"
+	want := "def scan()\n\twhile true\n\t\tnext # skip\n\t\tbreak # stop\n\tend\n\treturn\nend\n"
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %v", diagnostics)
@@ -101,7 +101,7 @@ func TestFormatPreservesLoopControlAndComments(t *testing.T) {
 
 func TestFormatTypedHashAndNestedGenericsPreservesComments(t *testing.T) {
 	source := []byte("def configure()\nmut values:Hash<String,Hash<String,Integer>>:={primary:{}} # nested\nvalues[\"primary\"][\"count\"]=1 # update\nreturn\nend\n")
-	want := "def configure()\n  mut values: Hash<String, Hash<String, Integer>> := { primary: {} } # nested\n  values[\"primary\"][\"count\"] = 1 # update\n  return\nend\n"
+	want := "def configure()\n\tmut values: Hash<String, Hash<String, Integer>> := { primary: {} } # nested\n\tvalues[\"primary\"][\"count\"] = 1 # update\n\treturn\nend\n"
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %v", diagnostics)

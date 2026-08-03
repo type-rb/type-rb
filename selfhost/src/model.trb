@@ -1,31 +1,31 @@
 # Target-independent compiler values are the first self-hosted boundary.
 # They deliberately contain no Go-native syntax.
 record Position
-  offset: Integer
-  line: Integer
-  column: Integer
+	offset: Integer
+	line: Integer
+	column: Integer
 end
 
 record Span
-  start: Position
-  finish: Position
+	start: Position
+	finish: Position
 end
 
 record Token
-  kind: String
-  lexeme: String
-  span: Span
+	kind: String
+	lexeme: String
+	span: Span
 end
 
 record Diagnostic
-  severity: String
-  message: String
-  span: Span
+	severity: String
+	message: String
+	span: Span
 end
 
 record TypeRef
-  name: String
-  arguments: Array<TypeRef>
-  nullable: Boolean
-  array: Boolean
+	name: String
+	arguments: Array<TypeRef>
+	nullable: Boolean
+	array: Boolean
 end

@@ -1,33 +1,33 @@
 # This file is compiled into both applications from one Contract IR.
 record Tag
-  id: Integer
-  name: String
+	id: Integer
+	name: String
 end
 
 record TodoItem
-  id: Integer
-  todo_list_id: Integer
-  title: String
-  completed: Boolean
-  tags: Array<Tag>
+	id: Integer
+	todo_list_id: Integer
+	title: String
+	completed: Boolean
+	tags: Array<Tag>
 end
 
 record TodoList
-  id: Integer
-  name: String
-  items: Array<TodoItem>
+	id: Integer
+	name: String
+	items: Array<TodoItem>
 end
 
 record TodoBoard
-  lists: Array<TodoList>
-  tags: Array<Tag>
+	lists: Array<TodoList>
+	tags: Array<Tag>
 end
 
 record CreateTodoRequest
-  title: String
-  tag_ids: Array<Integer>
+	title: String
+	tag_ids: Array<Integer>
 end
 
 record UpdateTodoRequest
-  completed: Boolean
+	completed: Boolean
 end
