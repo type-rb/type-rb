@@ -16,7 +16,7 @@ def main()
   http.handle(router, "PATCH /api/items/{id}", handler.update_item)
 
   app := http.cors(router, "http://localhost:5173")
-  io.println("TypeRB Todo API: http://localhost:8080")
+  io.puts("TypeRB Todo API: http://localhost:8080")
   http.serve(":8080", app)
   return
 end

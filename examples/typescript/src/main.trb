@@ -12,6 +12,6 @@ end
 
 def main()
   greeter := Greeter.new()
-  io.println(strings.uppercase(greeter.greet("TypeRB"))) # trb fmt keeps this comment.
+  io.puts(strings.uppercase(greeter.greet("TypeRB"))) # trb fmt keeps this comment.
   return
 end

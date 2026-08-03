@@ -41,7 +41,8 @@ the normal `trb` CLI:
 ./trb version
 ```
 
-The compiler has no third-party Go dependencies.
+The compiler targets the current Go toolchain (Go 1.26). The minimum version is
+advanced as new stable Go releases become the development baseline.
 
 Maintainers publish a release by pushing a `v*` tag. The release workflow runs
 the test suite and self-host bootstrap check, creates a deterministic source
@@ -108,7 +109,12 @@ adapter produces an explicit runtime diagnostic.
 
 REPL commands are `:type EXPRESSION`, `:load FILE`, `:reload`, `:help`, and
 `:quit`. Multiline declarations and delimiter-balanced calls use a continuation
-prompt automatically.
+prompt automatically. Interactive terminals provide colored input/results, Tab
+completion, cursor editing, Up/Down history, and Ctrl-R reverse search. Common
+Readline/Emacs navigation is available: Ctrl-B/F moves by character, Ctrl-A/E
+by line, Alt-B/F by word, and Ctrl-P/N moves vertically or through history.
+History is retained per project in `.trb/repl_history`; Ctrl-C cancels the
+current input and Ctrl-D exits.
 
 `trb build` compiles every input before writing any generated file. When a
 directory is built, non-`.trb` files are copied by default, producing a runnable
@@ -201,7 +207,7 @@ end
 
 def main()
   user := User.new(1, "Alice")
-  io.println(user.name())
+  io.puts(user.name())
   return
 end
 
@@ -221,6 +227,10 @@ v0.1 portable syntax includes:
 
 Types are written as `name: Type`. Generics, arrays, and nullable types use
 `Array<String>`, `String[]`, and `String?`.
+
+A function that returns no value omits the return annotation, as in
+`def save()`. Writing `def save(): Void` is an error; `Void` exists only as the
+compiler's internal representation of no returned value.
 
 For Ruby method definitions, ordinary keyword arguments remain available:
 
@@ -295,13 +305,16 @@ import app/models/user
 import { UserRepo } from app/repos/user_repo
 ```
 
-Portable standard packages are explicit and compile to target APIs:
+Most portable standard packages are explicit and compile to target APIs. The
+small portable prelude includes Ruby-like `puts`, and the same function remains
+available through `trb/std/io` for namespaced code:
 
 ```trb
 import trb/std/io
 import trb/std/strings
 
-io.println(strings.uppercase("Hello"))
+puts(1 + 2)
+io.puts(strings.uppercase("Hello"))
 ```
 
 v0.1 includes `trb/std/io` and `trb/std/strings`. Platform APIs use mode-checked

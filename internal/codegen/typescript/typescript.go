@@ -366,7 +366,7 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 
 func (g *generator) intrinsic(name string, _ *ir.Call, arguments []string) string {
 	switch name {
-	case "trb.std.io.println":
+	case "trb.std.io.puts":
 		return "console.log(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.strings.length":
 		return "Array.from(" + arguments[0] + ").length"

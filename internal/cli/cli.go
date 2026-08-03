@@ -456,7 +456,8 @@ func (c *CLI) runRepl(args []string) error {
 		Stdin:       c.Stdin,
 		Stdout:      c.Stdout,
 		Stderr:      c.Stderr,
-		Interactive: interactiveReader(c.Stdin),
+		Interactive: interactiveTerminal(c.Stdin, c.Stdout),
+		HistoryFile: filepath.Join(config.Root, ".trb", "repl_history"),
 		Compile:     compile,
 	})
 }
@@ -764,8 +765,12 @@ func firstOr(values []string, fallback string) string {
 	return values[0]
 }
 
-func interactiveReader(reader io.Reader) bool {
-	file, ok := reader.(*os.File)
+func interactiveTerminal(reader io.Reader, writer io.Writer) bool {
+	return characterDevice(reader) && characterDevice(writer)
+}
+
+func characterDevice(stream any) bool {
+	file, ok := stream.(*os.File)
 	if !ok {
 		return false
 	}

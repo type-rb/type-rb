@@ -56,16 +56,17 @@ var stringType = types.FromName("String")
 var integerType = types.FromName("Integer")
 var booleanType = types.FromName("Boolean")
 var voidType = types.FromName("Void")
+var anyType = types.FromName("Any")
 
 var registry = map[string]*Package{
 	"trb/std/io": {
 		Path: "trb/std/io",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
-			"println": {
-				Name:       "println",
-				Intrinsic:  "trb.std.io.println",
-				Parameters: []Parameter{{Name: "value", Type: stringType}},
+			"puts": {
+				Name:       "puts",
+				Intrinsic:  "trb.std.io.puts",
+				Parameters: []Parameter{{Name: "value", Type: anyType}},
 				Return:     voidType,
 			},
 		},

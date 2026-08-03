@@ -4,7 +4,6 @@
 package repl
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 type Compilation struct {
@@ -30,6 +30,7 @@ type Options struct {
 	Stdout      io.Writer
 	Stderr      io.Writer
 	Interactive bool
+	HistoryFile string
 	Compile     CompileFunc
 }
 
@@ -47,19 +48,36 @@ func Run(options Options) error {
 	}
 
 	if options.Interactive {
-		fmt.Fprintf(options.Stdout, "TypeRB %s\nproject: %s\nmode: %s\n\n", options.Version, options.ProjectName, options.Mode)
+		fmt.Fprintf(options.Stdout, "%s %s\n%s %s\n%s %s\n\n",
+			colorize(true, colorTitle, "TypeRB"), colorize(true, colorMuted, options.Version),
+			colorize(true, colorMuted, "project:"), colorize(true, colorName, options.ProjectName),
+			colorize(true, colorMuted, "mode:"), colorize(true, colorType, options.Mode))
 	}
 
-	scanner := bufio.NewScanner(options.Stdin)
-	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	reader, err := newSubmissionReader(options)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
 	source := ""
 	statementCount := 0
 	for {
-		line, ok := readInput(scanner, options, "trb:"+options.Mode+"> ")
-		if !ok {
+		snippet, readErr := reader.Read()
+		if errors.Is(readErr, io.EOF) {
 			break
 		}
-		trimmed := strings.TrimSpace(line)
+		if errors.Is(readErr, errInputInterrupted) {
+			continue
+		}
+		if errors.Is(readErr, errIncompleteInput) {
+			printReplError(options.Stderr, options.Interactive, "incomplete input")
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+		trimmed := strings.TrimSpace(snippet)
 		if trimmed == "" {
 			continue
 		}
@@ -72,12 +90,12 @@ func Run(options Options) error {
 			if nextCompilation != nil {
 				nextEvaluator := NewEvaluator(options.Stdout, options.Mode)
 				if err := nextEvaluator.LoadProject(nextCompilation.Programs, nextCompilation.Session.IR.ModulePath); err != nil {
-					fmt.Fprintln(options.Stderr, "trb: repl:", err)
+					printReplError(options.Stderr, options.Interactive, err.Error())
 					continue
 				}
 				nextEvaluator.LoadDefinitions(nextCompilation.Session.IR)
 				if _, err := nextEvaluator.Evaluate(nextCompilation.Session.IR.Statements, nextCompilation.Session.IR.ModulePath); err != nil {
-					fmt.Fprintln(options.Stderr, "trb: repl:", err)
+					printReplError(options.Stderr, options.Interactive, err.Error())
 					continue
 				}
 				source = replacement
@@ -88,50 +106,31 @@ func Run(options Options) error {
 			continue
 		}
 
-		snippet := line
-		for !Complete(snippet) {
-			next, available := readInput(scanner, options, "trb:"+options.Mode+"*  ")
-			if !available {
-				fmt.Fprintln(options.Stderr, "trb: repl: incomplete input")
-				return nil
-			}
-			snippet += "\n" + next
-		}
 		candidate := appendSource(source, snippet)
 		next, compileErr := options.Compile(candidate)
 		if compileErr != nil {
-			printCompileError(options.Stderr, compileErr)
+			printCompileError(options.Stderr, compileErr, options.Interactive)
 			continue
 		}
 		if next.Session == nil || len(next.Session.IR.Statements) < statementCount {
-			fmt.Fprintln(options.Stderr, "trb: repl: compiler returned an invalid session")
+			printReplError(options.Stderr, options.Interactive, "compiler returned an invalid session")
 			continue
 		}
 
 		evaluator.LoadDefinitions(next.Session.IR)
 		result, runtimeErr := evaluator.Evaluate(next.Session.IR.Statements[statementCount:], next.Session.IR.ModulePath)
 		if runtimeErr != nil {
-			fmt.Fprintln(options.Stderr, "trb: repl:", runtimeErr)
+			printReplError(options.Stderr, options.Interactive, runtimeErr.Error())
 			continue
 		}
 		source = candidate
 		statementCount = len(next.Session.IR.Statements)
 		compilation = next
-		if result.Display {
-			fmt.Fprintln(options.Stdout, Inspect(result.Value)+" : "+result.Value.Type.String())
+		if result.Display && result.Value.Type.Kind != types.Void {
+			fmt.Fprintf(options.Stdout, "%s %s %s\n", colorize(options.Interactive, colorValue, Inspect(result.Value)), colorize(options.Interactive, colorMuted, ":"), colorize(options.Interactive, colorType, result.Value.Type.String()))
 		}
 	}
-	return scanner.Err()
-}
-
-func readInput(scanner *bufio.Scanner, options Options, prompt string) (string, bool) {
-	if options.Interactive {
-		fmt.Fprint(options.Stdout, prompt)
-	}
-	if !scanner.Scan() {
-		return "", false
-	}
-	return scanner.Text(), true
+	return nil
 }
 
 func handleCommand(command, source string, options Options) (bool, string, *Compilation) {
@@ -144,58 +143,63 @@ func handleCommand(command, source string, options Options) (bool, string, *Comp
 		fmt.Fprintln(options.Stdout, ":load FILE        compile and evaluate a TypeRB file")
 		fmt.Fprintln(options.Stdout, ":reload           reload the project and replay the session")
 		fmt.Fprintln(options.Stdout, ":quit             leave the REPL")
+		if options.Interactive {
+			fmt.Fprintln(options.Stdout, "keys: Left/Right or Ctrl-B/F move; Ctrl-A/E line; Alt-B/F word")
+			fmt.Fprintln(options.Stdout, "      Up/Down or Ctrl-P/N line/history; Ctrl-R search; Tab complete")
+			fmt.Fprintln(options.Stdout, "      Ctrl-K/U/W edit; Ctrl-L clear; Ctrl-C cancel; Ctrl-D exit")
+		}
 	case ":type":
 		if strings.TrimSpace(argument) == "" {
-			fmt.Fprintln(options.Stderr, "trb: repl: usage: :type EXPRESSION")
+			printReplError(options.Stderr, options.Interactive, "usage: :type EXPRESSION")
 			break
 		}
 		candidate := appendSource(source, argument)
 		compilation, err := options.Compile(candidate)
 		if err != nil {
-			printCompileError(options.Stderr, err)
+			printCompileError(options.Stderr, err, options.Interactive)
 			break
 		}
 		statements := compilation.Session.IR.Statements
 		if len(statements) == 0 {
-			fmt.Fprintln(options.Stderr, "trb: repl: expression has no type")
+			printReplError(options.Stderr, options.Interactive, "expression has no type")
 			break
 		}
 		switch statement := statements[len(statements)-1].(type) {
 		case *ir.ExpressionStatement:
-			fmt.Fprintln(options.Stdout, statement.Expression.ExprType().String())
+			fmt.Fprintln(options.Stdout, colorize(options.Interactive, colorType, statement.Expression.ExprType().String()))
 		case *ir.Variable:
-			fmt.Fprintln(options.Stdout, statement.Type.String())
+			fmt.Fprintln(options.Stdout, colorize(options.Interactive, colorType, statement.Type.String()))
 		default:
-			fmt.Fprintln(options.Stderr, "trb: repl: input is not an expression")
+			printReplError(options.Stderr, options.Interactive, "input is not an expression")
 		}
 	case ":load":
 		filename := strings.TrimSpace(argument)
 		if filename == "" {
-			fmt.Fprintln(options.Stderr, "trb: repl: usage: :load FILE")
+			printReplError(options.Stderr, options.Interactive, "usage: :load FILE")
 			break
 		}
 		data, err := os.ReadFile(filename)
 		if err != nil {
-			fmt.Fprintln(options.Stderr, "trb: repl:", err)
+			printReplError(options.Stderr, options.Interactive, err.Error())
 			break
 		}
 		candidate := appendSource(source, string(data))
 		compilation, err := options.Compile(candidate)
 		if err != nil {
-			printCompileError(options.Stderr, err)
+			printCompileError(options.Stderr, err, options.Interactive)
 			break
 		}
 		return false, candidate, compilation
 	case ":reload":
 		compilation, err := options.Compile(source)
 		if err != nil {
-			printCompileError(options.Stderr, err)
+			printCompileError(options.Stderr, err, options.Interactive)
 			break
 		}
-		fmt.Fprintln(options.Stdout, "reloaded")
+		fmt.Fprintln(options.Stdout, colorize(options.Interactive, colorSuccess, "reloaded"))
 		return false, source, compilation
 	default:
-		fmt.Fprintf(options.Stderr, "trb: repl: unknown command %s; use :help\n", name)
+		printReplError(options.Stderr, options.Interactive, fmt.Sprintf("unknown command %s; use :help", name))
 	}
 	return false, source, nil
 }
@@ -207,13 +211,21 @@ func appendSource(source, snippet string) string {
 	return strings.TrimRight(source, "\n") + "\n" + strings.TrimRight(snippet, "\n") + "\n"
 }
 
-func printCompileError(output io.Writer, err error) {
+func printCompileError(output io.Writer, err error, colored bool) {
 	var compilation *compiler.CompileError
 	if !errors.As(err, &compilation) {
-		fmt.Fprintln(output, "trb: repl:", err)
+		printReplError(output, colored, err.Error())
 		return
 	}
 	for _, item := range compilation.Diagnostics {
-		fmt.Fprintf(output, "%s:%d:%d: %s: %s\n", compilation.Filename, item.Span.Start.Line, item.Span.Start.Column, item.Severity, item.Message)
+		severity := string(item.Severity)
+		if colored {
+			severity = colorize(true, colorError, severity)
+		}
+		fmt.Fprintf(output, "%s:%d:%d: %s: %s\n", compilation.Filename, item.Span.Start.Line, item.Span.Start.Column, severity, item.Message)
 	}
+}
+
+func printReplError(output io.Writer, colored bool, message string) {
+	fmt.Fprintln(output, colorize(colored, colorError, "trb: repl:"), message)
 }

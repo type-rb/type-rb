@@ -1,5 +1,7 @@
 /bin/
+/.envrc
 /.trb/
+**/.trb/
 /build/
 /dist/
 **/build/

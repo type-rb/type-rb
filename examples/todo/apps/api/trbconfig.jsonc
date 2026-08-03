@@ -15,7 +15,7 @@
   },
   "go": {
     "module": "example.com/type-rb/todo-api",
-    "version": "1.23",
+    "version": "1.26",
     "rootPackage": "main",
     "indirectDependencies": {
       "github.com/jinzhu/inflection": "v1.0.0",

@@ -76,6 +76,31 @@ func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 	}
 }
 
+func TestReplSupportsPreludeAndNamespacedPutsForAnyValue(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.EntryPoint = ""
+	config.Go.Module = "example.com/type-rb/repl-puts-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "puts(1 + 2)\nimport trb/std/io\nio.puts([1, 2])\n:quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "3\n[1, 2]\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected REPL result\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
 func TestReplRejectsPlatformPackageForConfiguredModeAndContinues(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
@@ -224,7 +249,7 @@ func TestRunCompilesProjectImportClosure(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainPath := filepath.Join(root, "src", "main.trb")
-	main := "import trb/std/io\nimport models/user\n\ndef main()\n  user := User.new(\"Imported\")\n  io.println(user.name())\n  return\nend\n"
+	main := "import trb/std/io\nimport models/user\n\ndef main()\n  user := User.new(\"Imported\")\n  io.puts(user.name())\n  return\nend\n"
 	if err := os.WriteFile(mainPath, []byte(main), 0o644); err != nil {
 		t.Fatal(err)
 	}

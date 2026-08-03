@@ -26,7 +26,7 @@ class Trb < Formula
         "packageManagement": "external",
         "go": {
           "module": "example.com/brew-smoke-test",
-          "version": "1.23",
+          "version": "1.26",
           "rootPackage": "main"
         }
       }
@@ -36,7 +36,7 @@ class Trb < Formula
       import trb/std/io
 
       def main()
-        io.println("installed with Homebrew")
+        io.puts("installed with Homebrew")
         return
       end
     TRB

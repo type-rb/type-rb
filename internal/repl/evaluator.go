@@ -875,7 +875,7 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		return nil
 	}
 	switch name {
-	case "trb.std.io.println":
+	case "trb.std.io.puts":
 		if err := require(1); err != nil {
 			return Value{}, err
 		}

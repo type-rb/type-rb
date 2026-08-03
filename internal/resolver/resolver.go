@@ -253,7 +253,31 @@ func Resolve(program *ast.Program, options Options) (Result, []diagnostic.Diagno
 			}
 		}
 	}
+	addPrelude(&result)
 	return result, diagnostics
+}
+
+// addPrelude exposes the small set of Ruby-like, target-independent helpers
+// that TypeRB programs can use without an import. The binding still points at
+// a standard package so lowering produces the same intrinsic as io.puts().
+func addPrelude(result *Result) {
+	if _, exists := result.Symbols["puts"]; exists {
+		return
+	}
+	definition, ok := stdlib.Lookup("trb/std/io")
+	if !ok {
+		return
+	}
+	imported := &Import{
+		Kind:       StandardImport,
+		Path:       definition.Path,
+		Symbols:    []string{"puts"},
+		Definition: definition,
+		Exports:    map[string]Export{},
+	}
+	if binding, exists := bindingFor(imported, "puts"); exists {
+		result.Symbols["puts"] = binding
+	}
 }
 
 func (r Result) Member(alias, name string) (Binding, bool) {
@@ -492,7 +516,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 							continue
 						}
 						if public(item.Name) {
-							exported.Members[item.Name] = Member{Name: item.Name, Kind: FunctionExport, Type: typeRef(item.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
+							exported.Members[item.Name] = Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
 						}
 					case *ast.FieldStatement:
 						name := strings.TrimPrefix(item.Name, "@")
@@ -526,14 +550,14 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 				exported := Export{Name: node.Name, Kind: InterfaceExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Span: node.Span()}
 				for _, method := range node.Methods {
 					parameterTypes, required, variadic := parameters(method.Parameters)
-					exported.Members[method.Name] = Member{Name: method.Name, Kind: FunctionExport, Type: typeRef(method.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic}
+					exported.Members[method.Name] = Member{Name: method.Name, Kind: FunctionExport, Type: returnTypeRef(method.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic}
 				}
 				result[node.Name] = exported
 			}
 		case *ast.MethodStatement:
 			if public(node.Name) {
 				parameterTypes, required, variadic := parameters(node.Parameters)
-				result[node.Name] = Export{Name: node.Name, Kind: FunctionExport, Type: typeRef(node.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Span: node.Span()}
+				result[node.Name] = Export{Name: node.Name, Kind: FunctionExport, Type: returnTypeRef(node.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Span: node.Span()}
 			}
 		case *ast.VariableStatement:
 			if node.Constant && public(node.Name) {
@@ -586,6 +610,13 @@ func typeRef(ref ast.TypeRef) types.Type {
 		result = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{result}, Nullable: ref.Nullable}
 	}
 	return result
+}
+
+func returnTypeRef(ref ast.TypeRef) types.Type {
+	if ref.Empty() {
+		return types.FromName("Void")
+	}
+	return typeRef(ref)
 }
 
 func constantName(value string) string {

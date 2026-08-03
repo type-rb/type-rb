@@ -236,7 +236,7 @@ func (c *Config) applyDefaults() {
 			c.Go = &GoConfig{}
 		}
 		if c.Go.Version == "" {
-			c.Go.Version = "1.23"
+			c.Go.Version = "1.26"
 		}
 		if c.Go.RootPackage == "" {
 			c.Go.RootPackage = "main"

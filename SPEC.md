@@ -251,6 +251,14 @@ resolver validates project files and exports, rejects platform packages in the
 wrong mode, and records package/symbol identities for lowering. Standard calls
 therefore reach IR as resolved intrinsics rather than target-language text.
 
+The portable prelude contains `puts(value: Any)`, preserving Ruby-like source
+while lowering to the appropriate output primitive in each mode. An
+explicit `import trb/std/io` exposes the identical intrinsic as `io.puts`.
+
+Functions that return no value omit the return annotation: `def save()` is
+valid, while `def save(): Void` is a syntax error. `Void` remains an internal
+semantic/IR type, but is not a TypeRB return-type spelling.
+
 ### 8.4 Ruby Keyword Parameters
 
 The ordinary Ruby forms `name: default` and required `name:` remain keyword
@@ -307,7 +315,8 @@ with different modes can import the same source without copying it:
 
 ### 8.8 Explicit platform application APIs
 
-The first full v0.1 target uses `trb/platform/go/http` for Go 1.22+ ServeMux
+The first full v0.1 target uses `trb/platform/go/http` with the current Go 1.26
+toolchain and ServeMux
 patterns, `trb/platform/go/gorm` for typed GORM operations, and
 `trb/platform/typescript/react`/`web` for React and Fetch. These are resolved
 platform imports and typed intrinsics; application source does not contain raw
@@ -329,3 +338,9 @@ The REPL is a language evaluator rather than an application console. It loads
 project declarations and constants but does not invoke the configured
 entrypoint. A future `trb console` may load a running application's framework
 and resources.
+
+On an interactive terminal, the REPL provides multiline cursor editing,
+persistent per-project history, reverse history search, completion, and colored
+prompts/results/diagnostics. Cursor editing includes the common Readline/Emacs
+Ctrl-B/F, Ctrl-A/E, Ctrl-P/N, and Alt-B/F navigation bindings. Piped input
+remains deterministic and free of terminal control sequences.

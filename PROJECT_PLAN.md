@@ -140,7 +140,8 @@ private parser control flow or internal helper functions.
 ### Milestone 2: MVP Syntax
 
 - Project mode selection through `trbconfig.jsonc`.
-- explicit project, standard-library, and platform imports.
+- explicit project, standard-library, and platform imports, with a deliberately
+  small portable prelude for Ruby-like fundamentals such as `puts`.
 - class declarations.
 - field declarations.
 - method declarations.

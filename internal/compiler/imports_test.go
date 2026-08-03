@@ -19,7 +19,8 @@ import trb/std/strings
 
 def main()
   message := strings.uppercase("Hello, TypeRB")
-  io.println(message)
+  puts(1 + 2)
+  io.puts(message)
   return
 end
 `
@@ -30,7 +31,7 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		t.Fatal(err)
 	}
 	goOutput := string(goArtifact.Output)
-	for _, want := range []string{`import "fmt"`, `import "strings"`, `strings.ToUpper("Hello, TypeRB")`, `fmt.Println(message)`} {
+	for _, want := range []string{`import "fmt"`, `import "strings"`, `strings.ToUpper("Hello, TypeRB")`, `fmt.Println(1 + 2)`, `fmt.Println(message)`} {
 		if !strings.Contains(goOutput, want) {
 			t.Fatalf("generated Go does not contain %q:\n%s", want, goOutput)
 		}
@@ -49,7 +50,7 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		t.Fatal(err)
 	}
 	tsOutput := string(tsArtifact.Output)
-	for _, want := range []string{`"Hello, TypeRB".toUpperCase()`, `console.log(message);`, `main();`} {
+	for _, want := range []string{`"Hello, TypeRB".toUpperCase()`, `console.log(1 + 2);`, `console.log(message);`, `main();`} {
 		if !strings.Contains(tsOutput, want) {
 			t.Fatalf("generated TypeScript does not contain %q:\n%s", want, tsOutput)
 		}
@@ -60,7 +61,7 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		t.Fatal(err)
 	}
 	rubyOutput := string(rubyArtifact.Output)
-	for _, want := range []string{`"Hello, TypeRB".upcase`, `$stdout.puts(message)`, `main()`} {
+	for _, want := range []string{`"Hello, TypeRB".upcase`, `$stdout.puts(1 + 2)`, `$stdout.puts(message)`, `main()`} {
 		if !strings.Contains(rubyOutput, want) {
 			t.Fatalf("generated Ruby does not contain %q:\n%s", want, rubyOutput)
 		}
@@ -78,6 +79,27 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 	}
 	if resolved == nil || resolved.Package != "trb/std/strings" || resolved.Intrinsic != "trb.std.strings.uppercase" {
 		t.Fatalf("standard call was not retained as a resolved IR reference: %#v", resolved)
+	}
+}
+
+func TestPutsPreludeLowersWithoutImportAcrossBackends(t *testing.T) {
+	source := []byte("def main()\n  puts(1 + 2)\n  return\nend\n")
+	tests := []struct {
+		mode string
+		want string
+	}{
+		{mode: "go", want: "fmt.Println(1 + 2)"},
+		{mode: "typescript", want: "console.log(1 + 2);"},
+		{mode: "ruby", want: "$stdout.puts(1 + 2)"},
+	}
+	for _, test := range tests {
+		artifact, err := CompileWithOptions("main.trb", source, Options{Mode: test.mode, Package: "main", EntryPoint: "main", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s: %v", test.mode, err)
+		}
+		if output := string(artifact.Output); !strings.Contains(output, test.want) {
+			t.Fatalf("%s output does not contain %q:\n%s", test.mode, test.want, output)
+		}
 	}
 }
 
@@ -117,8 +139,12 @@ func TestPlatformPackageIsModeChecked(t *testing.T) {
 }
 
 func TestStandardPackageSignaturesAndReservedPathsAreChecked(t *testing.T) {
-	wrongType := []byte("import trb/std/io\n\ndef main()\n  io.println(1)\n  return\nend\n")
-	if _, err := Compile("main.trb", wrongType, "go"); err == nil || !strings.Contains(err.Error(), "expected String") {
+	anyType := []byte("import trb/std/io\n\ndef main()\n  io.puts(1)\n  io.puts([1, 2])\n  return\nend\n")
+	if _, err := Compile("main.trb", anyType, "go"); err != nil {
+		t.Fatalf("puts should accept any TypeRB value: %v", err)
+	}
+	wrongArity := []byte("import trb/std/io\n\ndef main()\n  io.puts()\n  return\nend\n")
+	if _, err := Compile("main.trb", wrongArity, "go"); err == nil || !strings.Contains(err.Error(), "expects 1..1 arguments") {
 		t.Fatalf("expected standard signature diagnostic, got %v", err)
 	}
 	if _, err := Compile("main.trb", []byte("import trb/std/missing\n"), "ruby"); err == nil || !strings.Contains(err.Error(), "unknown TypeRB package") {

@@ -368,7 +368,7 @@ func (p *Parser) parseMethodSignature(line []token.Token, comment string) *ast.M
 	}
 	m.Parameters = p.parseParameters(line[2:close])
 	if close+1 < len(line) && line[close+1].Lexeme == ":" {
-		m.ReturnType = parseType(line[close+2:])
+		m.ReturnType = p.parseReturnType(line[close+2:])
 	} else if close+1 != len(line) {
 		return nil
 	}
@@ -415,13 +415,21 @@ func (p *Parser) parseMethod() ast.Statement {
 		i = len(line)
 	}
 	if i < len(line) && line[i].Lexeme == ":" {
-		m.ReturnType = parseType(line[i+1:])
+		m.ReturnType = p.parseReturnType(line[i+1:])
 	}
 	p.pos = next
 	m.Body = p.parseStatements(map[string]bool{"end": true})
 	_, closeSpan := p.consumeTerminator("end")
 	m.SourceSpan.End = closeSpan.End
 	return m
+}
+
+func (p *Parser) parseReturnType(tokens []token.Token) ast.TypeRef {
+	result := parseType(tokens)
+	if strings.EqualFold(result.Name, "Void") {
+		p.errorAt(result.Span(), "Void return type must be omitted")
+	}
+	return result
 }
 
 func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {

@@ -86,7 +86,7 @@ end
 
 def main()
   user := User.new("Alice")
-  io.println(user.name())
+  io.puts(user.name())
   return
 end
 `)
@@ -154,7 +154,7 @@ end
 
 def main()
   greeter := Greeter.new()
-  io.println(greeter.greet("TypeRB"))
+  io.puts(greeter.greet("TypeRB"))
   return
 end
 `)
@@ -376,7 +376,7 @@ def greet(name: String): String
   return "Hello, #{name}!"
 end
 def main()
-  io.println(greet("World"))
+  io.puts(greet("World"))
   return
 end
 `), Options{Mode: "go", Package: "greet"})
@@ -408,5 +408,22 @@ end
 	}
 	if !strings.Contains(string(tsArtifact.Output), "return `Hello, ${name}!`;") {
 		t.Fatalf("unexpected TypeScript interpolation:\n%s", tsArtifact.Output)
+	}
+}
+
+func TestVoidReturnTypeMustBeOmitted(t *testing.T) {
+	valid := []byte("def save()\n  return\nend\n")
+	if _, err := Compile("valid.trb", valid, "go"); err != nil {
+		t.Fatalf("omitted no-value return annotation should compile: %v", err)
+	}
+
+	tests := []string{
+		"def save(): Void\n  return\nend\n",
+		"interface Saver\n  save(): Void\nend\n",
+	}
+	for _, source := range tests {
+		if _, err := Compile("invalid.trb", []byte(source), "go"); err == nil || !strings.Contains(err.Error(), "Void return type must be omitted") {
+			t.Fatalf("expected explicit Void return type diagnostic, got %v", err)
+		}
 	}
 }

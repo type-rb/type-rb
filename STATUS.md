@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-02
+Last updated: 2026-08-03
 
 ## Current State
 
@@ -14,8 +14,9 @@ Implemented:
   `trbconfig.jsonc`.
 - `trb run` for compiling and immediately executing one `.trb` file.
 - Project-aware `trb repl`, with config-selected mode, persistent typed state,
-  multiline input, project imports, portable IR evaluation, and `:type`,
-  `:load`, and `:reload` commands.
+  multiline cursor editing, per-project command history, reverse search,
+  Readline/Emacs navigation, completion, colored output, project imports,
+  portable IR evaluation, and `:type`, `:load`, and `:reload` commands.
 - `trb init`, `sync`, `add`, `remove`, and `install`, with generated Gemfile,
   go.mod, or package.json ownership based on project mode.
 - `packageManagement: "external"` for embedding generated source in an
@@ -26,6 +27,8 @@ Implemented:
 - Independent syntax AST and typed IR.
 - Resolver/type checker with local inference, assignment/return checks, field
   initialization checks, duplicate detection, and private-member checks.
+- Go-like no-value return syntax: the return annotation is omitted and explicit
+  `: Void` return types are rejected while typed IR retains an internal Void.
 - Explicit Ruby-native AST/IR nodes for open-ended Rails DSL.
 - Compiler-owned Declaration IR and platform type-provider registry; the Rails
   provider automatically parses `db/schema.rb` into a Schema AST and derives

@@ -9,7 +9,7 @@
   "copyFiles": true,
   "go": {
     "module": "example.com/type-rb/greeter",
-    "version": "1.23",
+    "version": "1.26",
     "rootPackage": "main",
   },
 }

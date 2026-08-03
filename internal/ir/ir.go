@@ -333,9 +333,10 @@ func NewExprBase(span token.Span, typ types.Type) ExprBase {
 	return ExprBase{Base: Base{Span: span}, Type: typ}
 }
 
-// Reference identifies a symbol resolved from an explicit import. Intrinsic is
-// non-empty for compiler-known standard/platform calls; project references use
-// Package, Alias, Symbol, and ExportKind for target-specific qualification.
+// Reference identifies a symbol resolved from an import or the portable
+// prelude. Intrinsic is non-empty for compiler-known standard/platform calls;
+// project references use Package, Alias, Symbol, and ExportKind for
+// target-specific qualification.
 type Reference struct {
 	Package    string
 	Alias      string

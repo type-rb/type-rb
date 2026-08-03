@@ -1,7 +1,7 @@
 // Generated from trbconfig.jsonc by trb.
 module example.com/type-rb/todo-api
 
-go 1.23
+go 1.26
 
 require (
 	gorm.io/driver/sqlite v1.6.0

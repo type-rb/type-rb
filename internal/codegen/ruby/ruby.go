@@ -277,7 +277,7 @@ func (g *generator) expr(expression ir.Expression) string {
 
 func (g *generator) intrinsic(name string, arguments []string) string {
 	switch name {
-	case "trb.std.io.println":
+	case "trb.std.io.puts":
 		return "$stdout.puts(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.strings.length":
 		return arguments[0] + ".each_codepoint.count"
