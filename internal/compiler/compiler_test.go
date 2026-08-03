@@ -920,6 +920,138 @@ func TestPortableHashTypeErrorsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableEnumAndExhaustiveCaseAcrossModes(t *testing.T) {
+	source := []byte(`enum TokenKind
+	Identifier
+	Integer
+	String
+	EOF
+end
+
+def describe(kind: TokenKind): String
+	case kind
+	when TokenKind::Identifier
+		return "identifier"
+	when TokenKind::Integer
+		return "integer"
+	when TokenKind::String
+		return "string"
+	when TokenKind::EOF
+		return "eof"
+	end
+end
+
+def same(left: TokenKind, right: TokenKind): Boolean
+	return left == right
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("enum.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected portable enum: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	for _, want := range []string{"type TokenKind int", "TokenKindIdentifier TokenKind = iota", "__trbCase1 == TokenKindIdentifier"} {
+		if !strings.Contains(goOutput, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "enum.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, goOutput)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	rubyOutput := string(artifacts["ruby"].Output)
+	for _, want := range []string{"TokenKind = Data.define(:name)", "TokenKind::Identifier = TokenKind.new(:Identifier)", "case kind"} {
+		if !strings.Contains(rubyOutput, want) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
+		}
+	}
+
+	typescriptOutput := string(artifacts["typescript"].Output)
+	for _, want := range []string{"export type TokenKind = string &", "export const TokenKind = Object.freeze", `Identifier: "Identifier" as TokenKind`, "__trbCase1 === TokenKind.Identifier"} {
+		if !strings.Contains(typescriptOutput, want) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
+		}
+	}
+
+	if _, ok := artifacts["go"].AST.Statements[0].(*ast.EnumStatement); !ok {
+		t.Fatalf("enum was not retained in AST: %T", artifacts["go"].AST.Statements[0])
+	}
+	method := artifacts["go"].IR.Statements[1].(*ir.Method)
+	if _, ok := method.Body[0].(*ir.Case); !ok {
+		t.Fatalf("case was not retained in typed IR: %T", method.Body[0])
+	}
+}
+
+func TestEnumCaseDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "non exhaustive",
+			source: "enum State\n\tOpen\n\tClosed\nend\ndef show(value: State)\n\tcase value\n\twhen State::Open\n\t\treturn\n\tend\nend\n",
+			want:   "case for State is not exhaustive; missing Closed",
+		},
+		{
+			name:   "duplicate branch",
+			source: "enum State\n\tOpen\nend\ndef show(value: State)\n\tcase value\n\twhen State::Open\n\t\treturn\n\twhen State::Open\n\t\treturn\n\tend\nend\n",
+			want:   "enum member Open is handled more than once",
+		},
+		{
+			name:   "unknown member",
+			source: "enum State\n\tOpen\nend\ndef show(value: State)\n\tcase value\n\twhen State::Closed\n\t\treturn\n\tend\nend\n",
+			want:   "enum State has no member Closed",
+		},
+		{
+			name:   "non enum selector",
+			source: "def show(value: Integer)\n\tcase value\n\twhen 1\n\t\treturn\n\telse\n\t\treturn\n\tend\nend\n",
+			want:   "case value must be an enum, got Integer",
+		},
+		{
+			name:   "empty enum",
+			source: "enum State\nend\n",
+			want:   "enum State must declare at least one member",
+		},
+		{
+			name:   "duplicate member",
+			source: "enum State\n\tOpen\n\tOpen\nend\n",
+			want:   "enum member Open was already declared",
+		},
+		{
+			name:   "different enum equality",
+			source: "enum State\n\tOpen\nend\nenum Other\n\tOpen\nend\ndef same(left: State, right: Other): Boolean\n\treturn left == right\nend\n",
+			want:   "operator == does not support State and Other",
+		},
+		{
+			name:   "type name collision",
+			source: "class State\nend\nenum State\n\tOpen\nend\n",
+			want:   "type State is already declared as class",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_enum.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestInterpolatedStringIsTypedAndLoweredPerTarget(t *testing.T) {
 	goArtifact, err := CompileWithOptions("greet.trb", []byte(`import trb/std/io
 

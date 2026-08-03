@@ -61,3 +61,38 @@ func TestEvaluatePortableRangeIteration(t *testing.T) {
 		t.Fatalf("unexpected range iteration result: %#v", result)
 	}
 }
+
+func TestEvaluateEnumAndCase(t *testing.T) {
+	enumType := types.FromName("State")
+	definition := &ir.Enum{Name: "State", Body: []ir.Statement{
+		&ir.EnumMember{Name: "Open"},
+		&ir.EnumMember{Name: "Closed"},
+	}}
+	state := func(member string) *ir.Member {
+		return &ir.Member{
+			ExprBase:  ir.NewExprBase(token.Span{}, enumType),
+			Receiver:  &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, enumType), Name: "State"},
+			Name:      member,
+			Namespace: true,
+		}
+	}
+	text := func(value string) *ir.Literal {
+		return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, types.FromName("String")), Kind: "string", Raw: `"` + value + `"`}
+	}
+
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	evaluator.LoadDefinitions(&ir.Program{ModulePath: "repl", Statements: []ir.Statement{definition}})
+	result, err := evaluator.Evaluate([]ir.Statement{&ir.Case{
+		Value: state("Closed"),
+		Branches: []ir.CaseBranch{
+			{Value: state("Open"), Body: []ir.Statement{&ir.ExpressionStatement{Expression: text("open")}}},
+			{Value: state("Closed"), Body: []ir.Statement{&ir.ExpressionStatement{Expression: text("closed")}}},
+		},
+	}}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Display || Inspect(result.Value) != `"closed"` || result.Value.Type.String() != "String" {
+		t.Fatalf("unexpected enum case result: %#v", result)
+	}
+}

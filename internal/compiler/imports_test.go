@@ -332,6 +332,67 @@ end
 	}
 }
 
+func TestProjectCompilerExportsEnumsForExhaustiveCase(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/contracts/state.trb",
+		ModulePath: "contracts/state",
+		Package:    "contracts",
+		Source: []byte(`enum State
+	Open
+	Closed
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import contracts/state
+
+def label(value: State): String
+	case value
+	when State::Open
+		return "open"
+	when State::Closed
+		return "closed"
+	end
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{consumer, contract}, Options{Mode: "go", GoModule: "example.com/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Filename == consumer.Filename {
+			output := string(artifact.Output)
+			for _, want := range []string{"contracts.State", "contracts.StateOpen", "contracts.StateClosed"} {
+				if !strings.Contains(output, want) {
+					t.Fatalf("enum consumer is missing %q:\n%s", want, output)
+				}
+			}
+		}
+	}
+
+	incomplete := consumer
+	incomplete.Source = []byte("import contracts/state\n\ndef label(value: State): String\n\tcase value\n\twhen State::Open\n\t\treturn \"open\"\n\tend\nend\n")
+	if _, err := CompileProject([]SourceUnit{incomplete, contract}, Options{Mode: "typescript"}); err == nil || !strings.Contains(err.Error(), "missing Closed") {
+		t.Fatalf("expected imported enum exhaustiveness diagnostic, got %v", err)
+	}
+
+	aliased := consumer
+	aliased.Source = []byte("import contracts/state as states\n\ndef label(): String\n\tvalue := states::State::Open\n\tcase value\n\twhen states::State::Open\n\t\treturn \"open\"\n\twhen states::State::Closed\n\t\treturn \"closed\"\n\tend\nend\n")
+	aliasedArtifacts, err := CompileProject([]SourceUnit{aliased, contract}, Options{Mode: "go", GoModule: "example.com/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, artifact := range aliasedArtifacts {
+		if artifact.Filename == aliased.Filename && !strings.Contains(string(artifact.Output), "states.StateOpen") {
+			t.Fatalf("aliased enum member was not qualified correctly:\n%s", artifact.Output)
+		}
+	}
+}
+
 func TestProjectCompilerRejectsImportCycles(t *testing.T) {
 	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("import b\n\nclass A\nend\n")}
 	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("import a\n\nclass B\nend\n")}

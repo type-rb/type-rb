@@ -32,6 +32,7 @@ type ExportKind string
 const (
 	ClassExport     ExportKind = "class"
 	RecordExport    ExportKind = "record"
+	EnumExport      ExportKind = "enum"
 	ModuleExport    ExportKind = "module"
 	InterfaceExport ExportKind = "interface"
 	FunctionExport  ExportKind = "function"
@@ -39,16 +40,17 @@ const (
 )
 
 type Export struct {
-	Name       string
-	Kind       ExportKind
-	Type       types.Type
-	Parameters []types.Type
-	Required   int
-	Variadic   bool
-	Members    map[string]Member
-	Fields     []RecordField
-	Superclass string
-	Span       token.Span
+	Name        string
+	Kind        ExportKind
+	Type        types.Type
+	Parameters  []types.Type
+	Required    int
+	Variadic    bool
+	Members     map[string]Member
+	Fields      []RecordField
+	EnumMembers []string
+	Superclass  string
+	Span        token.Span
 }
 
 type RecordField struct {
@@ -154,7 +156,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		module := catalog.Modules[modulePath]
 		for name := range module.Exports {
 			exported := module.Exports[name]
-			if exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != InterfaceExport {
+			if exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != InterfaceExport {
 				continue
 			}
 			if previous := typeOwners[name]; previous != nil {
@@ -300,13 +302,32 @@ func (r Result) TypeMember(typeName, name string) (Binding, bool) {
 		copy := member
 		return Binding{Import: binding.Import, Name: name, Member: &copy}, true
 	}
+	for _, imported := range r.Packages {
+		exported, exists := imported.Exports[typeName]
+		if !exists {
+			continue
+		}
+		member, exists := exported.Members[name]
+		if !exists {
+			return Binding{}, false
+		}
+		copy := member
+		return Binding{Import: imported, Name: name, Member: &copy}, true
+	}
 	return Binding{}, false
 }
 
 func (r Result) ImportedType(typeName string) (Binding, bool) {
 	for _, binding := range r.Symbols {
-		if binding.Export != nil && binding.Export.Name == typeName && (binding.Export.Kind == ClassExport || binding.Export.Kind == RecordExport || binding.Export.Kind == InterfaceExport) {
+		if binding.Export != nil && binding.Export.Name == typeName && (binding.Export.Kind == ClassExport || binding.Export.Kind == RecordExport || binding.Export.Kind == EnumExport || binding.Export.Kind == InterfaceExport) {
 			return binding, true
+		}
+	}
+	for _, imported := range r.Packages {
+		exported, exists := imported.Exports[typeName]
+		if exists && (exported.Kind == ClassExport || exported.Kind == RecordExport || exported.Kind == EnumExport || exported.Kind == InterfaceExport) {
+			copy := exported
+			return Binding{Import: imported, Name: typeName, Export: &copy}, true
 		}
 	}
 	return Binding{}, false
@@ -542,6 +563,19 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 					typ := typeRef(field.Type)
 					exported.Fields = append(exported.Fields, RecordField{Name: field.Name, Type: typ})
 					exported.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: typ}
+				}
+				result[node.Name] = exported
+			}
+		case *ast.EnumStatement:
+			if public(node.Name) {
+				typ := types.FromName(node.Name)
+				exported := Export{Name: node.Name, Kind: EnumExport, Type: typ, Members: map[string]Member{}, Span: node.Span()}
+				for _, statement := range node.Body {
+					member, ok := statement.(*ast.EnumMemberStatement)
+					if ok && public(member.Name) {
+						exported.EnumMembers = append(exported.EnumMembers, member.Name)
+						exported.Members[member.Name] = Member{Name: member.Name, Kind: ValueExport, Type: typ, Class: true}
+					}
 				}
 				result[node.Name] = exported
 			}

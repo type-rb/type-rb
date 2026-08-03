@@ -127,7 +127,8 @@ mode by itself does not enable them.
   and `**` accept matching numeric types. `%` accepts two `Integer` values.
 - `<`, `<=`, `>`, and `>=` compare matching numeric types. Portable `==` and
   `!=` compare matching non-nullable scalar types (`Boolean`, `Integer`,
-  `Float`, and `String`) or a nullable value with `nil`.
+  `Float`, and `String`), two values of the same enum type, or a nullable value
+  with `nil`.
 - `&&`, `||`, `and`, and `or` accept two non-nullable `Boolean` values and
   return `Boolean`. Compound assignments apply the corresponding binary rule
   before checking that the result remains assignable to the mutable target.
@@ -181,6 +182,38 @@ the alternatives of heterogeneous collection values, while a Tuple retains
 the type of each array-like position and a `record` retains the type of each
 named field. `Array<Integer | String>[0]` therefore remains
 `Integer | String`; exact constant-index inference belongs to Tuple.
+
+### 3.13 Enums and exhaustive case
+
+- A payloadless enum is a closed nominal type declared with `enum Name`, one
+  uppercase member per line, and `end`. Enum declarations are allowed at top
+  level or directly inside a module.
+- Members are explicitly qualified with `EnumName::Member`. They infer the
+  enum's nominal type and cannot be mixed with members of another enum even
+  when the member names match.
+- Portable `case` initially dispatches on enum values. Each `when` accepts
+  exactly one member of the selected enum; duplicate branches are errors.
+- Without `else`, a case must list every member. With `else`, omitted members
+  are handled by that branch. The selector is evaluated exactly once in every
+  backend and the REPL.
+- Payload-bearing variants may extend `enum` later. TypeRB does not introduce a
+  separate `sum` declaration in v0.1.
+
+```trb
+enum State
+	Open
+	Closed
+end
+
+def label(state: State): String
+	case state
+	when State::Open
+		return "open"
+	when State::Closed
+		return "closed"
+	end
+end
+```
 
 ## 4. Open Point: Initial Generic Inference Scope
 
@@ -394,8 +427,8 @@ level while leaving indentation inside opaque literal bodies unchanged.
 
 ### 8.6 v0.1 Portable Control Flow
 
-Dedicated AST and IR nodes exist for `if`/`elsif`/`else`, `while`, `return`,
-integer ranges, and structured collection iteration. Inclusive `start..end`
+Dedicated AST and IR nodes exist for `if`/`elsif`/`else`, exhaustive enum
+`case`, `while`, `return`, integer ranges, and structured collection iteration. Inclusive `start..end`
 and exclusive `start...end` ranges have type `Range<Integer>`.
 
 Portable `if`, `elsif`, and `while` conditions are checked as non-nullable

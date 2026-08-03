@@ -41,6 +41,17 @@ type recordDefinition struct {
 	Fields []*ir.RecordField
 }
 
+type enumDefinition struct {
+	Module  string
+	Node    *ir.Enum
+	Members map[string]bool
+}
+
+type enumValue struct {
+	Definition *enumDefinition
+	Name       string
+}
+
 type classDefinition struct {
 	Module     string
 	Node       *ir.Class
@@ -67,6 +78,7 @@ type objectInstance struct {
 type typeValue struct {
 	Record *recordDefinition
 	Class  *classDefinition
+	Enum   *enumDefinition
 }
 
 type callable struct {
@@ -173,6 +185,14 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
 				}
 			}
 			e.definitions[symbolKey(module, node.Name)] = definition
+		case *ir.Enum:
+			definition := &enumDefinition{Module: module, Node: node, Members: map[string]bool{}}
+			for _, statement := range node.Body {
+				if member, ok := statement.(*ir.EnumMember); ok {
+					definition.Members[member.Name] = true
+				}
+			}
+			e.definitions[symbolKey(module, node.Name)] = definition
 		case *ir.Class:
 			definition := &classDefinition{Module: module, Node: node, Methods: map[string]*ir.Method{}}
 			for _, member := range node.Body {
@@ -272,7 +292,7 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		return flowResult{}, err
 	}
 	switch node := statement.(type) {
-	case *ir.Comment, *ir.Import, *ir.Class, *ir.Record, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
+	case *ir.Comment, *ir.Import, *ir.Class, *ir.Record, *ir.Enum, *ir.EnumMember, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
 		return flowResult{}, nil
 	case *ir.Module:
 		return e.evaluate(node.Body, module, sc)
@@ -332,6 +352,21 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 				return flowResult{}, err
 			}
 			if truthy(condition) {
+				return e.evaluate(branch.Body, module, &scope{parent: sc, values: map[string]Value{}})
+			}
+		}
+		return e.evaluate(node.Else, module, &scope{parent: sc, values: map[string]Value{}})
+	case *ir.Case:
+		value, err := e.expression(node.Value, module, sc)
+		if err != nil {
+			return flowResult{}, err
+		}
+		for _, branch := range node.Branches {
+			candidate, err := e.expression(branch.Value, module, sc)
+			if err != nil {
+				return flowResult{}, err
+			}
+			if equal(value, candidate) {
 				return e.evaluate(branch.Body, module, &scope{parent: sc, values: map[string]Value{}})
 			}
 		}
@@ -505,6 +540,11 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		if node.Reference != nil && node.Reference.Intrinsic != "" {
 			return Value{Type: node.ExprType(), Data: &callable{Intrinsic: node.Reference.Intrinsic, Module: module}}, nil
 		}
+		if node.Reference != nil && node.Reference.Package != "" {
+			if value, ok := e.symbol(node.Reference.Package, node.Reference.Symbol); ok {
+				return value, nil
+			}
+		}
 		receiver, err := e.expression(node.Receiver, module, sc)
 		if err != nil {
 			return Value{}, err
@@ -654,7 +694,7 @@ func (e *Evaluator) callMember(receiver Value, name, module string) (Value, erro
 			return Value{Type: method.ReturnType, Data: &callable{Method: method, Receiver: receiver, Module: value.Definition.Module}}, nil
 		}
 	case *typeValue:
-		if name == "new" {
+		if name == "new" && (value.Record != nil || value.Class != nil) {
 			return Value{Type: receiver.Type, Data: &callable{Construct: value, Module: module}}, nil
 		}
 		if value.Class != nil {
@@ -684,6 +724,8 @@ func (e *Evaluator) symbol(module, name string) (Value, bool) {
 		return Value{Type: types.FromName("Class"), Data: &typeValue{Record: item}}, true
 	case *classDefinition:
 		return Value{Type: types.FromName("Class"), Data: &typeValue{Class: item}}, true
+	case *enumDefinition:
+		return Value{Type: types.FromName(item.Node.Name), Data: &typeValue{Enum: item}}, true
 	case *functionDefinition:
 		return Value{Type: item.Method.ReturnType, Data: &callable{Function: item, Module: item.Module}}, true
 	}
@@ -727,7 +769,7 @@ func (e *Evaluator) member(receiver Value, name, module string) (Value, error) {
 		}
 		return Value{Type: method.ReturnType, Data: &callable{Method: method, Receiver: receiver, Module: value.Definition.Module}}, nil
 	case *typeValue:
-		if name == "new" {
+		if name == "new" && (value.Record != nil || value.Class != nil) {
 			return Value{Type: receiver.Type, Data: &callable{Construct: value, Module: module}}, nil
 		}
 		if value.Class != nil {
@@ -735,6 +777,9 @@ func (e *Evaluator) member(receiver Value, name, module string) (Value, error) {
 			if method != nil {
 				return Value{Type: method.ReturnType, Data: &callable{Method: method, Receiver: receiver, Module: value.Class.Module}}, nil
 			}
+		}
+		if value.Enum != nil && value.Enum.Members[name] {
+			return Value{Type: types.FromName(value.Enum.Node.Name), Data: &enumValue{Definition: value.Enum, Name: name}}, nil
 		}
 	}
 	return Value{}, fmt.Errorf("%s has no member %s", receiver.Type, name)
@@ -1314,6 +1359,11 @@ func Inspect(value Value) string {
 		if item.Class != nil {
 			return item.Class.Node.Name
 		}
+		if item.Enum != nil {
+			return item.Enum.Node.Name
+		}
+	case *enumValue:
+		return item.Definition.Node.Name + "::" + item.Name
 	case map[string]string:
 		return "#<" + value.Type.String() + ">"
 	}

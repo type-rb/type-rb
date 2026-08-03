@@ -97,6 +97,23 @@ type RecordFieldStatement struct {
 
 func (*RecordFieldStatement) statementNode() {}
 
+// EnumStatement is a closed nominal set of values. Members remain statements
+// so their source spans and comments survive the syntax and formatting passes.
+type EnumStatement struct {
+	Base
+	Name string
+	Body []Statement
+}
+
+func (*EnumStatement) statementNode() {}
+
+type EnumMemberStatement struct {
+	Base
+	Name string
+}
+
+func (*EnumMemberStatement) statementNode() {}
+
 type ModuleStatement struct {
 	Base
 	Name string
@@ -200,6 +217,23 @@ type IfStatement struct {
 }
 
 func (*IfStatement) statementNode() {}
+
+type CaseBranch struct {
+	Base
+	Value Expression
+	Body  []Statement
+}
+
+type CaseStatement struct {
+	Base
+	Value    Expression
+	Leading  []Statement
+	Branches []CaseBranch
+	Else     []Statement
+	HasElse  bool
+}
+
+func (*CaseStatement) statementNode() {}
 
 type WhileStatement struct {
 	Base

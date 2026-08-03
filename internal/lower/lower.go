@@ -68,6 +68,10 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			attributes[index] = ir.Attribute{Name: attribute.Name, Arguments: arguments}
 		}
 		return &ir.RecordField{Base: base(n.Base), Name: n.Name, Type: lowerType(n.Type), Attributes: attributes}
+	case *ast.EnumStatement:
+		return &ir.Enum{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
+	case *ast.EnumMemberStatement:
+		return &ir.EnumMember{Base: base(n.Base), Name: n.Name}
 	case *ast.ModuleStatement:
 		return &ir.Module{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
 	case *ast.InterfaceStatement:
@@ -130,6 +134,22 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		result := &ir.If{Base: base(n.Base), Condition: l.expression(n.Condition), Then: l.statements(n.Then), Else: l.statements(n.Else)}
 		for _, branch := range n.ElseIf {
 			result.ElseIf = append(result.ElseIf, ir.IfBranch{Condition: l.expression(branch.Condition), Body: l.statements(branch.Body)})
+		}
+		return result
+	case *ast.CaseStatement:
+		result := &ir.Case{
+			Base:    base(n.Base),
+			Value:   l.expression(n.Value),
+			Leading: l.statements(n.Leading),
+			Else:    l.statements(n.Else),
+			HasElse: n.HasElse,
+		}
+		for _, branch := range n.Branches {
+			result.Branches = append(result.Branches, ir.CaseBranch{
+				Base:  base(branch.Base),
+				Value: l.expression(branch.Value),
+				Body:  l.statements(branch.Body),
+			})
 		}
 		return result
 	case *ast.WhileStatement:

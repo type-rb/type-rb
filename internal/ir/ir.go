@@ -82,6 +82,21 @@ type RecordField struct {
 
 func (*RecordField) irStatement() {}
 
+type Enum struct {
+	Base
+	Name string
+	Body []Statement
+}
+
+func (*Enum) irStatement() {}
+
+type EnumMember struct {
+	Base
+	Name string
+}
+
+func (*EnumMember) irStatement() {}
+
 type Module struct {
 	Base
 	Name string
@@ -184,6 +199,23 @@ type If struct {
 }
 
 func (*If) irStatement() {}
+
+type CaseBranch struct {
+	Base
+	Value Expression
+	Body  []Statement
+}
+
+type Case struct {
+	Base
+	Value    Expression
+	Leading  []Statement
+	Branches []CaseBranch
+	Else     []Statement
+	HasElse  bool
+}
+
+func (*Case) irStatement() {}
 
 type While struct {
 	Base

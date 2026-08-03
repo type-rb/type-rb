@@ -83,6 +83,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseClass()
 	case "record":
 		return p.parseRecord()
+	case "enum":
+		return p.parseEnum()
 	case "module":
 		return p.parseModule()
 	case "interface":
@@ -96,6 +98,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseMethod()
 	case "if":
 		return p.parseIf()
+	case "case":
+		return p.parseCase()
 	case "while":
 		return p.parseWhile()
 	case "return":
@@ -349,6 +353,44 @@ func (p *Parser) parseRecord() ast.Statement {
 	_, closeSpan := p.consumeTerminator("end")
 	record.SourceSpan.End = closeSpan.End
 	return record
+}
+
+func (p *Parser) parseEnum() ast.Statement {
+	start, end, next, comment := p.logicalLine(p.pos)
+	line := p.codeTokens(start, end)
+	node := &ast.EnumStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
+	if len(line) != 2 || line[1].Kind != token.Identifier {
+		p.errorAt(spanOf(line), "enum declaration must be: enum Name")
+	} else {
+		node.Name = line[1].Lexeme
+	}
+	p.pos = next
+	for !p.atEOF() {
+		p.skipNewlines()
+		if p.atEOF() || p.current().Lexeme == "end" {
+			break
+		}
+		if p.current().Kind == token.Comment {
+			t := p.current()
+			p.pos++
+			node.Body = append(node.Body, &ast.CommentStatement{Base: ast.Base{SourceSpan: t.Span}, Text: t.Lexeme})
+			continue
+		}
+		s, e, nx, trailing := p.logicalLine(p.pos)
+		parts := p.codeTokens(s, e)
+		if len(parts) != 1 || parts[0].Kind != token.Identifier {
+			p.errorAt(spanOf(parts), "enum body may only contain member names")
+		} else {
+			node.Body = append(node.Body, &ast.EnumMemberStatement{
+				Base: ast.Base{SourceSpan: spanOf(parts), TrailingComment: trailing},
+				Name: parts[0].Lexeme,
+			})
+		}
+		p.pos = nx
+	}
+	_, closeSpan := p.consumeTerminator("end")
+	node.SourceSpan.End = closeSpan.End
+	return node
 }
 
 func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.RecordFieldStatement {
@@ -725,6 +767,46 @@ func (p *Parser) parseIf() ast.Statement {
 	_, closeSpan := p.consumeTerminator("end")
 	n.SourceSpan.End = closeSpan.End
 	return n
+}
+
+func (p *Parser) parseCase() ast.Statement {
+	start, end, next, comment := p.logicalLine(p.pos)
+	line := p.codeTokens(start, end)
+	node := &ast.CaseStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
+	node.Value, _ = parseExpressionTokens(line[1:])
+	if node.Value == nil {
+		p.errorAt(spanOf(line), "case requires a value")
+	}
+	p.pos = next
+	node.Leading = p.parseStatements(map[string]bool{"when": true, "else": true, "end": true})
+	for !p.atEOF() && p.current().Lexeme == "when" {
+		s, e, nx, trailing := p.logicalLine(p.pos)
+		parts := p.codeTokens(s, e)
+		branch := ast.CaseBranch{Base: ast.Base{SourceSpan: spanOf(parts), TrailingComment: trailing}}
+		branch.Value, _ = parseExpressionTokens(parts[1:])
+		if branch.Value == nil {
+			p.errorAt(spanOf(parts), "when requires exactly one enum member")
+		}
+		p.pos = nx
+		branch.Body = p.parseStatements(map[string]bool{"when": true, "else": true, "end": true})
+		node.Branches = append(node.Branches, branch)
+	}
+	if !p.atEOF() && p.current().Lexeme == "else" {
+		s, e, nx, _ := p.logicalLine(p.pos)
+		parts := p.codeTokens(s, e)
+		if len(parts) != 1 {
+			p.errorAt(spanOf(parts), "else does not take a value")
+		}
+		node.HasElse = true
+		p.pos = nx
+		node.Else = p.parseStatements(map[string]bool{"end": true})
+	}
+	if len(node.Branches) == 0 {
+		p.errorAt(node.Span(), "case requires at least one when branch")
+	}
+	_, closeSpan := p.consumeTerminator("end")
+	node.SourceSpan.End = closeSpan.End
+	return node
 }
 
 func (p *Parser) parseWhile() ast.Statement {

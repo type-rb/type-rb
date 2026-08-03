@@ -52,7 +52,7 @@ func wantsSeparation(previous, current ir.Statement) bool {
 		return false
 	}
 	switch current.(type) {
-	case *ir.Class, *ir.Record, *ir.Module, *ir.Interface, *ir.Method:
+	case *ir.Class, *ir.Record, *ir.Enum, *ir.Module, *ir.Interface, *ir.Method:
 		return true
 	}
 	return false
@@ -104,6 +104,16 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 		}
 		g.line(n.Name+" = Data.define("+strings.Join(fields, ", ")+")", n.TrailingComment)
+	case *ir.Enum:
+		g.line(n.Name+" = Data.define(:name)", n.TrailingComment)
+		for _, statement := range n.Body {
+			switch member := statement.(type) {
+			case *ir.Comment:
+				g.statement(member)
+			case *ir.EnumMember:
+				g.line(n.Name+"::"+member.Name+" = "+n.Name+".new(:"+member.Name+")", member.TrailingComment)
+			}
+		}
 	case *ir.Module:
 		g.line("module "+n.Name, n.TrailingComment)
 		g.indent++
@@ -160,6 +170,27 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line("else", "")
 			g.indent++
 			g.statements(n.Else)
+			g.indent--
+		}
+		g.line("end", "")
+	case *ir.Case:
+		g.statements(n.Leading)
+		g.line("case "+g.expr(n.Value), n.TrailingComment)
+		for _, branch := range n.Branches {
+			g.line("when "+g.expr(branch.Value), branch.TrailingComment)
+			g.indent++
+			g.statements(branch.Body)
+			g.indent--
+		}
+		if n.HasElse {
+			g.line("else", "")
+			g.indent++
+			g.statements(n.Else)
+			g.indent--
+		} else {
+			g.line("else", "")
+			g.indent++
+			g.line(`raise "unreachable exhaustive case"`, "")
 			g.indent--
 		}
 		g.line("end", "")

@@ -326,7 +326,7 @@ func isMidBlock(first string) bool {
 func opensEndBlock(tokens []token.Token) bool {
 	first := firstCode(tokens)
 	switch first {
-	case "class", "record", "module", "interface", "def", "if", "unless", "case", "begin", "while", "until", "for":
+	case "class", "record", "enum", "module", "interface", "def", "if", "unless", "case", "begin", "while", "until", "for":
 		return true
 	}
 	depth := 0

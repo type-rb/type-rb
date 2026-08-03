@@ -87,6 +87,22 @@ func TestFormatPortableIterationAndRanges(t *testing.T) {
 	}
 }
 
+func TestFormatEnumCaseUsesTabsAndPreservesComments(t *testing.T) {
+	source := []byte("enum  State # enum\nOpen # open\nClosed\nend\ndef label(value:State):String\ncase value # select\nwhen State::Open # branch\nreturn \"open\" # result\nwhen State::Closed\nreturn \"closed\"\nend\nend\n")
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "enum State # enum\n\tOpen # open\n\tClosed\nend\ndef label(value: State): String\n\tcase value # select\n\twhen State::Open # branch\n\t\treturn \"open\" # result\n\twhen State::Closed\n\t\treturn \"closed\"\n\tend\nend\n"
+	if string(formatted) != want {
+		t.Fatalf("unexpected enum/case formatting:\n%s", formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("enum/case formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatPreservesLoopControlAndComments(t *testing.T) {
 	source := []byte("def scan()\nwhile true\nnext # skip\nbreak # stop\nend\nreturn\nend\n")
 	want := "def scan()\n\twhile true\n\t\tnext # skip\n\t\tbreak # stop\n\tend\n\treturn\nend\n"

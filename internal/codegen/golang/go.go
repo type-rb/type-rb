@@ -59,6 +59,8 @@ func Generate(program *ir.Program) string {
 			}
 		case *ir.Record:
 			g.records[n.Name] = true
+		case *ir.Enum:
+			g.typeKinds[n.Name] = "enum"
 		}
 	}
 	for _, statement := range program.Statements {
@@ -153,6 +155,8 @@ func (g *generator) statement(statement ir.Statement) {
 		g.class(n)
 	case *ir.Record:
 		g.record(n)
+	case *ir.Enum:
+		g.enum(n)
 	case *ir.Module:
 		g.line("// module " + n.Name)
 		for _, member := range n.Body {
@@ -221,6 +225,39 @@ func (g *generator) statement(statement ir.Statement) {
 			g.statements(n.Else)
 			g.indent--
 		}
+		g.line("}")
+	case *ir.Case:
+		g.statements(n.Leading)
+		g.temporary++
+		value := "__trbCase" + strconv.Itoa(g.temporary)
+		g.line("{")
+		g.indent++
+		g.line(value + " := " + g.expr(n.Value) + goTrailingComment(n.TrailingComment))
+		for index, branch := range n.Branches {
+			header := "if "
+			if index > 0 {
+				header = "} else if "
+			}
+			g.line(header + value + " == " + g.expr(branch.Value) + " {" + goTrailingComment(branch.TrailingComment))
+			g.indent++
+			g.statements(branch.Body)
+			g.indent--
+		}
+		if n.HasElse {
+			g.line("} else {")
+			g.indent++
+			g.statements(n.Else)
+			g.indent--
+		} else {
+			g.line("} else {")
+			g.indent++
+			g.line("panic(\"unreachable exhaustive case\")")
+			g.indent--
+		}
+		if len(n.Branches) > 0 {
+			g.line("}")
+		}
+		g.indent--
 		g.line("}")
 	case *ir.While:
 		g.line("for " + g.expr(n.Condition) + " {")
@@ -333,6 +370,31 @@ func (g *generator) record(record *ir.Record) {
 	}
 	g.indent--
 	g.line("}")
+	g.b.WriteByte('\n')
+}
+
+func (g *generator) enum(enum *ir.Enum) {
+	name := goIdentifier(enum.Name, true)
+	g.line("type " + name + " int" + goTrailingComment(enum.TrailingComment))
+	g.b.WriteByte('\n')
+	g.line("const (")
+	g.indent++
+	first := true
+	for _, statement := range enum.Body {
+		switch member := statement.(type) {
+		case *ir.Comment:
+			g.statement(member)
+		case *ir.EnumMember:
+			line := goConstantIdentifier(enum.Name, member.Name)
+			if first {
+				line += " " + name + " = iota"
+				first = false
+			}
+			g.line(line + goTrailingComment(member.TrailingComment))
+		}
+	}
+	g.indent--
+	g.line(")")
 	g.b.WriteByte('\n')
 }
 
@@ -552,7 +614,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		return "func() []int { start, end := " + g.expr(n.Start) + ", " + g.expr(n.End) + "; values := []int{}; for value := start; value < end; value++ { values = append(values, value) }" + inclusiveEnd + "; return values }()"
 	case *ir.Member:
 		if n.Namespace && isUpper(n.Name) {
-			name := goConstantIdentifier(irExpressionName(n.Receiver), n.Name)
+			owner := n.Receiver.ExprType().Name
+			if owner == "" {
+				owner = irExpressionName(n.Receiver)
+			}
+			name := goConstantIdentifier(owner, n.Name)
 			if alias := g.referenceAlias(n.Reference); alias != "" {
 				return alias + "." + name
 			}
@@ -925,6 +991,14 @@ func goConstantIdentifier(owner, name string) string {
 	return result.String()
 }
 
+func goTrailingComment(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return " //" + strings.TrimPrefix(value, "#")
+}
+
 func irExpressionName(expression ir.Expression) string {
 	switch node := expression.(type) {
 	case *ir.Identifier:
@@ -1017,6 +1091,15 @@ func usesInterpolation(statements []ir.Statement) bool {
 			}
 			for _, branch := range n.ElseIf {
 				if expressionUsesInterpolation(branch.Condition) || usesInterpolation(branch.Body) {
+					return true
+				}
+			}
+		case *ir.Case:
+			if expressionUsesInterpolation(n.Value) || usesInterpolation(n.Leading) || usesInterpolation(n.Else) {
+				return true
+			}
+			for _, branch := range n.Branches {
+				if expressionUsesInterpolation(branch.Value) || usesInterpolation(branch.Body) {
 					return true
 				}
 			}

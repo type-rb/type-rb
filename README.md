@@ -111,8 +111,8 @@ trb install
 resolved, type checked, and lowered through the normal compiler pipeline before
 evaluation, so platform packages are accepted or rejected according to the
 configured mode. The initial evaluator supports portable expressions, state,
-conditionals, loops, functions, classes, records, project imports, and portable
-standard-library intrinsics. A mode-specific intrinsic without a REPL runtime
+conditionals, loops, functions, classes, records, enums with exhaustive case,
+project imports, and portable standard-library intrinsics. A mode-specific intrinsic without a REPL runtime
 adapter produces an explicit runtime diagnostic.
 
 REPL commands are `:type EXPRESSION`, `:load FILE`, `:reload`, `:help`, and
@@ -238,6 +238,7 @@ v0.1 portable syntax includes:
 - explicit imports shared by every target; Go packages are derived from config
   and source paths
 - classes, inheritance, interfaces, and modules
+- closed nominal enums and exhaustive enum `case` dispatch
 - typed fields, `readonly`, methods, parameters, and return types
 - immutable local inference with `:=`; use `mut value := ...` when the binding
   will be reassigned or destructively updated
@@ -288,6 +289,23 @@ entry compound assignment is reserved in v0.1; use
 A function that returns no value omits the return annotation, as in
 `def save()`. Writing `def save(): Void` is an error; `Void` exists only as the
 compiler's internal representation of no returned value.
+
+Enum members are always explicit and `case` is exhaustive unless it has an
+`else` branch:
+
+```trb
+enum State
+	Open
+	Closed
+end
+
+case state
+when State::Open
+	puts("open")
+when State::Closed
+	puts("closed")
+end
+```
 
 For Ruby method definitions, ordinary keyword arguments remain available:
 

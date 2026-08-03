@@ -43,6 +43,9 @@ Implemented:
 - Generic `Hash<K, V>` values with String/Integer keys, contextual empty
   literals, invariant mutable aliases, checked index updates, and required
   missing-key lookup semantics shared by all backends and the REPL.
+- Closed nominal `enum` declarations and enum-only `case` dispatch, with
+  duplicate/wrong-member diagnostics, required exhaustiveness when `else` is
+  omitted, cross-file imports, three backend representations, and REPL support.
 - Go-like no-value return syntax: the return annotation is omitted and explicit
   `: Void` return types are rejected while typed IR retains an internal Void.
 - Explicit Ruby-native AST/IR nodes for open-ended Rails DSL.
@@ -101,9 +104,8 @@ semantic type model, and source maps are later work.
 
 The broader path to practical production use is tracked in `ROADMAP.md`.
 
-1. Add portable enums/sum types, exhaustive type dispatch, fallible results,
-   and filesystem/process APIs required to move the
-   lexer/parser into the stage-1 self-host tree.
+1. Add payload-bearing enum variants, fallible results, and filesystem/process
+   APIs required to move the lexer/parser into the stage-1 self-host tree.
 2. Generate runtime JSON decoders from record contracts and add wire-compatible
    optional/nullable semantics.
 3. Add a concise React view/component syntax above the current explicit element

@@ -41,6 +41,7 @@ type scope struct {
 	values           map[string]symbol
 	constantsAllowed bool
 	constantOwner    string
+	enumsAllowed     bool
 }
 
 func (s *scope) lookup(name string) (symbol, bool) {
@@ -66,20 +67,33 @@ type recordInfo struct {
 	byName map[string]*ast.RecordFieldStatement
 }
 
+type enumInfo struct {
+	name    string
+	members []string
+	byName  map[string]*ast.EnumMemberStatement
+}
+
+type typeDeclaration struct {
+	kind string
+	span token.Span
+}
+
 type Checker struct {
-	mode         string
-	result       Result
-	diags        []diagnostic.Diagnostic
-	classes      map[string]*classInfo
-	records      map[string]*recordInfo
-	interfaces   map[string]*ast.InterfaceStatement
-	functions    map[string]*ast.MethodStatement
-	current      *classInfo
-	initializing int
-	loopDepth    int
-	returns      []types.Type
-	resolution   resolver.Result
-	external     map[ast.Expression]declaration.Member
+	mode          string
+	result        Result
+	diags         []diagnostic.Diagnostic
+	classes       map[string]*classInfo
+	records       map[string]*recordInfo
+	enums         map[string]*enumInfo
+	interfaces    map[string]*ast.InterfaceStatement
+	functions     map[string]*ast.MethodStatement
+	current       *classInfo
+	initializing  int
+	loopDepth     int
+	returns       []types.Type
+	resolution    resolver.Result
+	external      map[ast.Expression]declaration.Member
+	declaredTypes map[string]typeDeclaration
 }
 
 func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnostic.Diagnostic) {
@@ -95,12 +109,14 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 			Resolution:     resolution,
 			References:     map[ast.Expression]resolver.Binding{},
 		},
-		classes:    map[string]*classInfo{},
-		records:    map[string]*recordInfo{},
-		interfaces: map[string]*ast.InterfaceStatement{},
-		functions:  map[string]*ast.MethodStatement{},
-		resolution: resolution,
-		external:   map[ast.Expression]declaration.Member{},
+		classes:       map[string]*classInfo{},
+		records:       map[string]*recordInfo{},
+		enums:         map[string]*enumInfo{},
+		interfaces:    map[string]*ast.InterfaceStatement{},
+		functions:     map[string]*ast.MethodStatement{},
+		resolution:    resolution,
+		external:      map[ast.Expression]declaration.Member{},
+		declaredTypes: map[string]typeDeclaration{},
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ast.MethodStatement); ok {
@@ -109,7 +125,7 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 	}
 	c.collect(program.Statements)
 	c.validateTypeReferences(program.Statements)
-	c.checkStatements(program.Statements, &scope{values: map[string]symbol{}, constantsAllowed: true})
+	c.checkStatements(program.Statements, &scope{values: map[string]symbol{}, constantsAllowed: true, enumsAllowed: true})
 	return c.result, c.diags
 }
 
@@ -119,6 +135,8 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement) {
 		case *ast.ClassStatement:
 			c.validateTypeReferences(node.Body)
 		case *ast.RecordStatement:
+			c.validateTypeReferences(node.Body)
+		case *ast.EnumStatement:
 			c.validateTypeReferences(node.Body)
 		case *ast.RecordFieldStatement:
 			c.validateTypeReference(node.Type)
@@ -138,6 +156,12 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement) {
 		case *ast.IfStatement:
 			c.validateTypeReferences(node.Then)
 			for _, branch := range node.ElseIf {
+				c.validateTypeReferences(branch.Body)
+			}
+			c.validateTypeReferences(node.Else)
+		case *ast.CaseStatement:
+			c.validateTypeReferences(node.Leading)
+			for _, branch := range node.Branches {
 				c.validateTypeReferences(branch.Body)
 			}
 			c.validateTypeReferences(node.Else)
@@ -187,8 +211,7 @@ func (c *Checker) collect(statements []ast.Statement) {
 	for _, statement := range statements {
 		switch n := statement.(type) {
 		case *ast.ClassStatement:
-			if _, exists := c.classes[n.Name]; exists {
-				c.error(n.Span(), fmt.Sprintf("class %s is already declared", n.Name))
+			if !c.declareType(n.Name, "class", n.Span()) {
 				continue
 			}
 			info := &classInfo{name: n.Name, superclass: expressionTypeName(n.Superclass), fields: map[string]*ast.FieldStatement{}, methods: map[string]*ast.MethodStatement{}}
@@ -215,8 +238,7 @@ func (c *Checker) collect(statements []ast.Statement) {
 			c.classes[n.Name] = info
 			c.collect(n.Body)
 		case *ast.RecordStatement:
-			if _, exists := c.records[n.Name]; exists {
-				c.error(n.Span(), fmt.Sprintf("record %s is already declared", n.Name))
+			if !c.declareType(n.Name, "record", n.Span()) {
 				continue
 			}
 			info := &recordInfo{name: n.Name, byName: map[string]*ast.RecordFieldStatement{}}
@@ -233,10 +255,26 @@ func (c *Checker) collect(statements []ast.Statement) {
 				info.byName[field.Name] = field
 			}
 			c.records[n.Name] = info
+		case *ast.EnumStatement:
+			if !c.declareType(n.Name, "enum", n.Span()) {
+				continue
+			}
+			info := &enumInfo{name: n.Name, byName: map[string]*ast.EnumMemberStatement{}}
+			for _, statement := range n.Body {
+				member, ok := statement.(*ast.EnumMemberStatement)
+				if !ok {
+					continue
+				}
+				if previous := info.byName[member.Name]; previous != nil {
+					c.error(member.Span(), fmt.Sprintf("enum member %s was already declared at %s", member.Name, previous.Span().Start))
+					continue
+				}
+				info.members = append(info.members, member.Name)
+				info.byName[member.Name] = member
+			}
+			c.enums[n.Name] = info
 		case *ast.InterfaceStatement:
-			if previous := c.interfaces[n.Name]; previous != nil {
-				c.error(n.Span(), fmt.Sprintf("interface %s was already declared at %s", n.Name, previous.Span().Start))
-			} else {
+			if c.declareType(n.Name, "interface", n.Span()) {
 				c.interfaces[n.Name] = n
 			}
 		case *ast.ModuleStatement:
@@ -245,6 +283,15 @@ func (c *Checker) collect(statements []ast.Statement) {
 			c.collect(n.Body)
 		}
 	}
+}
+
+func (c *Checker) declareType(name, kind string, span token.Span) bool {
+	if previous, exists := c.declaredTypes[name]; exists {
+		c.error(span, fmt.Sprintf("type %s is already declared as %s at %s", name, previous.kind, previous.span.Start))
+		return false
+	}
+	c.declaredTypes[name] = typeDeclaration{kind: kind, span: span}
+	return true
 }
 
 func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
@@ -287,6 +334,24 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 					}
 				}
 			}
+		case *ast.EnumStatement:
+			if !sc.enumsAllowed {
+				c.error(n.Span(), fmt.Sprintf("enum %s may only be declared at top level or directly inside a module", n.Name))
+			}
+			if !isConstant(n.Name) {
+				c.error(n.Span(), "enum name must begin with an uppercase letter")
+			}
+			info := c.enums[n.Name]
+			if info != nil && len(info.members) == 0 {
+				c.error(n.Span(), fmt.Sprintf("enum %s must declare at least one member", n.Name))
+			}
+			for _, statement := range n.Body {
+				if member, ok := statement.(*ast.EnumMemberStatement); ok && !isConstant(member.Name) {
+					c.error(member.Span(), "enum member must begin with an uppercase letter")
+				}
+			}
+		case *ast.EnumMemberStatement:
+			// Checked as part of its enclosing enum.
 		case *ast.RecordFieldStatement:
 			// Checked as part of its enclosing record.
 		case *ast.ModuleStatement:
@@ -294,7 +359,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			if sc.constantOwner != "" {
 				owner = sc.constantOwner + "::" + n.Name
 			}
-			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner})
+			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner, enumsAllowed: true})
 		case *ast.InterfaceStatement:
 			for _, method := range n.Methods {
 				c.checkMethod(method, sc)
@@ -406,6 +471,8 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 				c.checkStatements(branch.Body, &scope{parent: sc, values: map[string]symbol{}})
 			}
 			c.checkStatements(n.Else, &scope{parent: sc, values: map[string]symbol{}})
+		case *ast.CaseStatement:
+			c.checkCase(n, sc)
 		case *ast.WhileStatement:
 			c.checkBooleanCondition(n.Condition, sc, "while")
 			c.loopDepth++
@@ -440,6 +507,86 @@ func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, co
 		return
 	}
 	c.error(expression.Span(), fmt.Sprintf("%s condition must be Boolean, got %s", construct, typ))
+}
+
+func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
+	selectorType := c.checkExpression(node.Value, sc)
+	members, enum := c.enumMembers(selectorType)
+	if !enum && selectorType.Kind != types.Invalid {
+		c.error(node.Value.Span(), fmt.Sprintf("case value must be an enum, got %s", selectorType))
+	}
+	for _, statement := range node.Leading {
+		if _, comment := statement.(*ast.CommentStatement); !comment {
+			c.error(statement.Span(), "case statements must be inside a when or else branch")
+		}
+	}
+	c.checkStatements(node.Leading, &scope{parent: sc, values: map[string]symbol{}})
+
+	seen := map[string]bool{}
+	for _, branch := range node.Branches {
+		branchType := c.checkExpression(branch.Value, sc)
+		memberName, member := c.caseEnumMember(branch.Value, selectorType)
+		if !member || !types.Equivalent(selectorType, branchType) {
+			if selectorType.Kind != types.Invalid {
+				c.error(branch.Value.Span(), fmt.Sprintf("when value must be a member of %s", selectorType))
+			}
+		} else if seen[memberName] {
+			c.error(branch.Value.Span(), fmt.Sprintf("enum member %s is handled more than once", memberName))
+		} else {
+			seen[memberName] = true
+		}
+		c.checkStatements(branch.Body, &scope{parent: sc, values: map[string]symbol{}})
+	}
+	if node.HasElse {
+		c.checkStatements(node.Else, &scope{parent: sc, values: map[string]symbol{}})
+		return
+	}
+	if !enum {
+		return
+	}
+	missing := make([]string, 0, len(members))
+	for _, member := range members {
+		if !seen[member] {
+			missing = append(missing, member)
+		}
+	}
+	if len(missing) > 0 {
+		c.error(node.Span(), fmt.Sprintf("case for %s is not exhaustive; missing %s", selectorType, strings.Join(missing, ", ")))
+	}
+}
+
+func (c *Checker) enumMembers(typ types.Type) ([]string, bool) {
+	if typ.Nullable {
+		return nil, false
+	}
+	if info := c.enums[typ.Name]; info != nil {
+		return append([]string(nil), info.members...), true
+	}
+	if binding, ok := c.resolution.ImportedType(typ.Name); ok && binding.Export.Kind == resolver.EnumExport {
+		return append([]string(nil), binding.Export.EnumMembers...), true
+	}
+	return nil, false
+}
+
+func (c *Checker) caseEnumMember(expression ast.Expression, selectorType types.Type) (string, bool) {
+	member, ok := expression.(*ast.MemberExpression)
+	if !ok || !member.Namespace {
+		return "", false
+	}
+	receiverType := c.result.Expressions[member.Receiver]
+	if !types.Equivalent(receiverType, selectorType) {
+		return "", false
+	}
+	members, ok := c.enumMembers(selectorType)
+	if !ok {
+		return "", false
+	}
+	for _, name := range members {
+		if name == member.Name {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand types.Type) types.Type {
@@ -513,7 +660,7 @@ func (c *Checker) checkBinaryOperator(span token.Span, operator string, left, ri
 			return types.FromName("Boolean")
 		}
 	case "==", "!=":
-		if portableEqualityOperands(left, right) {
+		if c.portableEqualityOperands(left, right) {
 			return types.FromName("Boolean")
 		}
 	case "=~", "!~", "<=>", "|", "&", "^", "<<", ">>":
@@ -556,7 +703,7 @@ func plainNumberType(kind types.Kind) types.Type {
 	return types.FromName("Integer")
 }
 
-func portableEqualityOperands(left, right types.Type) bool {
+func (c *Checker) portableEqualityOperands(left, right types.Type) bool {
 	if left.Kind == types.Nil {
 		return right.Nullable
 	}
@@ -570,7 +717,9 @@ func portableEqualityOperands(left, right types.Type) bool {
 	case types.Bool, types.Int, types.Float, types.String:
 		return true
 	default:
-		return false
+		_, leftEnum := c.enumMembers(left)
+		_, rightEnum := c.enumMembers(right)
+		return leftEnum && rightEnum && types.Equivalent(left, right)
 	}
 }
 
@@ -845,6 +994,11 @@ func walkAssignments(statements []ast.Statement, visit func(*ast.AssignmentState
 				walkAssignments(branch.Body, visit)
 			}
 			walkAssignments(n.Else, visit)
+		case *ast.CaseStatement:
+			for _, branch := range n.Branches {
+				walkAssignments(branch.Body, visit)
+			}
+			walkAssignments(n.Else, visit)
 		case *ast.ExpressionStatement:
 			if iteration, ok := n.Expression.(*ast.IterationExpression); ok && iteration.Block != nil {
 				walkAssignments(iteration.Block.Body, visit)
@@ -1026,6 +1180,23 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 				break
 			}
+		}
+		if _, enum := c.enumMembers(receiverType); enum {
+			if !n.Namespace {
+				c.error(n.Span(), fmt.Sprintf("enum member %s must be accessed with ::", n.Name))
+				break
+			}
+			if local := c.enums[receiverType.Name]; local != nil && local.byName[n.Name] != nil {
+				typ = receiverType
+				break
+			}
+			if binding, exists := c.resolution.TypeMember(receiverType.Name, n.Name); exists {
+				typ = binding.Type()
+				c.result.References[n] = binding
+				break
+			}
+			c.error(n.Span(), fmt.Sprintf("enum %s has no member %s", receiverType.Name, n.Name))
+			break
 		}
 		if strings.HasPrefix(n.Name, "_") {
 			self, ok := n.Receiver.(*ast.Identifier)

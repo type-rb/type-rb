@@ -109,6 +109,22 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.indent--
 		g.line("}")
+	case *ir.Enum:
+		brand := "__trb" + n.Name + "Brand"
+		g.line("declare const " + brand + ": unique symbol;")
+		g.line("export type " + n.Name + " = string & { readonly [" + brand + "]: true };")
+		g.line("export const " + n.Name + " = Object.freeze({" + tsTrailingComment(n.TrailingComment))
+		g.indent++
+		for _, statement := range n.Body {
+			switch member := statement.(type) {
+			case *ir.Comment:
+				g.statement(member)
+			case *ir.EnumMember:
+				g.line(member.Name + ": " + strconv.Quote(member.Name) + " as " + n.Name + "," + tsTrailingComment(member.TrailingComment))
+			}
+		}
+		g.indent--
+		g.line("});")
 	case *ir.Module:
 		g.line("export namespace " + n.Name + " {")
 		g.indent++
@@ -198,6 +214,39 @@ func (g *generator) statement(statement ir.Statement) {
 			g.statements(n.Else)
 			g.indent--
 		}
+		g.line("}")
+	case *ir.Case:
+		g.statements(n.Leading)
+		g.temporary++
+		value := "__trbCase" + strconv.Itoa(g.temporary)
+		g.line("{")
+		g.indent++
+		g.line("const " + value + " = " + g.expr(n.Value) + ";" + tsTrailingComment(n.TrailingComment))
+		for index, branch := range n.Branches {
+			header := "if ("
+			if index > 0 {
+				header = "} else if ("
+			}
+			g.line(header + value + " === " + g.expr(branch.Value) + ") {" + tsTrailingComment(branch.TrailingComment))
+			g.indent++
+			g.statements(branch.Body)
+			g.indent--
+		}
+		if n.HasElse {
+			g.line("} else {")
+			g.indent++
+			g.statements(n.Else)
+			g.indent--
+		} else {
+			g.line("} else {")
+			g.indent++
+			g.line("throw new Error(\"unreachable exhaustive case\");")
+			g.indent--
+		}
+		if len(n.Branches) > 0 {
+			g.line("}")
+		}
+		g.indent--
 		g.line("}")
 	case *ir.While:
 		g.line("while (" + g.expr(n.Condition) + ") {")
@@ -635,6 +684,14 @@ func tsType(t types.Type) string {
 
 func comment(text string) string {
 	return "//" + strings.TrimPrefix(strings.TrimSpace(text), "#")
+}
+
+func tsTrailingComment(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return " //" + strings.TrimPrefix(value, "#")
 }
 
 func classMethods(statements []ir.Statement) map[string]bool {
