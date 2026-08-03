@@ -1,6 +1,7 @@
 /bin/
 /.envrc
 /.agents/skills/
+/.local-notes/
 /.trb/
 **/.trb/
 /build/
