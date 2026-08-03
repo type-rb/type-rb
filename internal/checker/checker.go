@@ -277,18 +277,24 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			rightType := c.checkExpression(n.Value, sc)
 			if identifier, ok := n.Target.(*ast.Identifier); ok && !strings.HasPrefix(identifier.Name, "@") {
 				if _, exists := sc.lookup(identifier.Name); !exists {
-					// Ruby constants and framework-provided setters remain legal.
-					if c.mode != "ruby" {
+					_, imported := c.result.References[identifier]
+					if !imported && !c.rubyNativeSyntax() {
 						c.error(identifier.Span(), fmt.Sprintf("%s is not declared", identifier.Name))
 					}
-					if c.mode == "ruby" {
+					if !imported && c.rubyNativeSyntax() {
+						// Explicit Ruby-native imports expose framework setters and
+						// legacy Ruby assignments that have no TypeRB declaration.
 						leftType = types.Type{Kind: types.Any, Name: "Any"}
 					}
 				}
 			}
 			c.requireMutable(n.Target, sc, "assignment")
-			if leftType.Kind != types.Any && !types.Assignable(leftType, rightType) {
-				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", rightType, leftType))
+			assignedType := rightType
+			if n.Operator != "=" {
+				assignedType = c.checkBinaryOperator(n.Span(), strings.TrimSuffix(n.Operator, "="), leftType, rightType)
+			}
+			if leftType.Kind != types.Any && !types.Assignable(leftType, assignedType) {
+				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", assignedType, leftType))
 			}
 		case *ast.ReturnStatement:
 			actual := types.Type{Kind: types.Void, Name: "Void"}
@@ -343,6 +349,142 @@ func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, co
 		return
 	}
 	c.error(expression.Span(), fmt.Sprintf("%s condition must be Boolean, got %s", construct, typ))
+}
+
+func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand types.Type) types.Type {
+	if operand.Kind == types.Invalid {
+		return invalidType()
+	}
+	if operand.Kind == types.Any && c.rubyNativeSyntax() {
+		if operator == "!" || operator == "not" {
+			return types.FromName("Boolean")
+		}
+		return types.FromName("Any")
+	}
+	switch operator {
+	case "!", "not":
+		if isNonNullable(operand, types.Bool) {
+			return types.FromName("Boolean")
+		}
+	case "+", "-":
+		if isNonNullableNumber(operand) {
+			return plainNumberType(operand.Kind)
+		}
+	case "~":
+		if c.rubyNativeSyntax() {
+			return types.FromName("Any")
+		}
+		c.error(span, "operator ~ is not part of portable TypeRB; use an explicit Ruby-native import")
+		return invalidType()
+	default:
+		c.error(span, fmt.Sprintf("unknown unary operator %s", operator))
+		return invalidType()
+	}
+	c.error(span, fmt.Sprintf("operator %s does not support %s", operator, operand))
+	return invalidType()
+}
+
+func (c *Checker) checkBinaryOperator(span token.Span, operator string, left, right types.Type) types.Type {
+	if left.Kind == types.Invalid || right.Kind == types.Invalid {
+		return invalidType()
+	}
+	if c.rubyNativeSyntax() && (left.Kind == types.Any || right.Kind == types.Any) {
+		switch operator {
+		case "==", "!=", "!~", "<", "<=", ">", ">=":
+			return types.FromName("Boolean")
+		default:
+			return types.FromName("Any")
+		}
+	}
+
+	switch operator {
+	case "&&", "||", "and", "or":
+		if isNonNullable(left, types.Bool) && isNonNullable(right, types.Bool) {
+			return types.FromName("Boolean")
+		}
+	case "+":
+		if isNonNullable(left, types.String) && isNonNullable(right, types.String) {
+			return types.FromName("String")
+		}
+		if sameNonNullableNumber(left, right) {
+			return plainNumberType(left.Kind)
+		}
+	case "-", "*", "/", "**":
+		if sameNonNullableNumber(left, right) {
+			return plainNumberType(left.Kind)
+		}
+	case "%":
+		if isNonNullable(left, types.Int) && isNonNullable(right, types.Int) {
+			return types.FromName("Integer")
+		}
+	case "<", "<=", ">", ">=":
+		if sameNonNullableNumber(left, right) {
+			return types.FromName("Boolean")
+		}
+	case "==", "!=":
+		if portableEqualityOperands(left, right) {
+			return types.FromName("Boolean")
+		}
+	case "=~", "!~", "<=>", "|", "&", "^", "<<", ">>":
+		if c.rubyNativeSyntax() {
+			if operator == "!~" {
+				return types.FromName("Boolean")
+			}
+			return types.FromName("Any")
+		}
+		c.error(span, fmt.Sprintf("operator %s is not part of portable TypeRB; use an explicit Ruby-native import", operator))
+		return invalidType()
+	default:
+		c.error(span, fmt.Sprintf("unknown binary operator %s", operator))
+		return invalidType()
+	}
+	c.error(span, fmt.Sprintf("operator %s does not support %s and %s", operator, left, right))
+	return invalidType()
+}
+
+func (c *Checker) rubyNativeSyntax() bool {
+	return c.mode == "ruby" && c.resolution.NativeSyntax
+}
+
+func isNonNullable(typ types.Type, kind types.Kind) bool {
+	return typ.Kind == kind && !typ.Nullable
+}
+
+func isNonNullableNumber(typ types.Type) bool {
+	return !typ.Nullable && (typ.Kind == types.Int || typ.Kind == types.Float)
+}
+
+func sameNonNullableNumber(left, right types.Type) bool {
+	return isNonNullableNumber(left) && isNonNullableNumber(right) && left.Kind == right.Kind
+}
+
+func plainNumberType(kind types.Kind) types.Type {
+	if kind == types.Float {
+		return types.FromName("Float")
+	}
+	return types.FromName("Integer")
+}
+
+func portableEqualityOperands(left, right types.Type) bool {
+	if left.Kind == types.Nil {
+		return right.Nullable
+	}
+	if right.Kind == types.Nil {
+		return left.Nullable
+	}
+	if left.Nullable || right.Nullable || left.Kind != right.Kind {
+		return false
+	}
+	switch left.Kind {
+	case types.Bool, types.Int, types.Float, types.String:
+		return true
+	default:
+		return false
+	}
+}
+
+func invalidType() types.Type {
+	return types.Type{Kind: types.Invalid, Name: "Invalid"}
 }
 
 func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
@@ -685,20 +827,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = types.Type{Kind: types.Hash, Name: "Hash"}
 	case *ast.UnaryExpression:
 		operand := c.checkExpression(n.Operand, sc)
-		if n.Operator == "!" || n.Operator == "not" {
-			typ = types.FromName("Boolean")
-		} else {
-			typ = operand
-		}
+		typ = c.checkUnaryOperator(n.Span(), n.Operator, operand)
 	case *ast.BinaryExpression:
 		left := c.checkExpression(n.Left, sc)
-		c.checkExpression(n.Right, sc)
-		switch n.Operator {
-		case "==", "!=", "<", "<=", ">", ">=", "=~", "!~", "&&", "||", "and", "or":
-			typ = types.FromName("Boolean")
-		default:
-			typ = left
-		}
+		right := c.checkExpression(n.Right, sc)
+		typ = c.checkBinaryOperator(n.Span(), n.Operator, left, right)
 	case *ast.RangeExpression:
 		start := c.checkExpression(n.Start, sc)
 		end := c.checkExpression(n.End, sc)
@@ -1020,7 +1153,7 @@ func (c *Checker) requireMutable(expression ast.Expression, sc *scope, action st
 		// Ruby's native compatibility surface includes framework setters and
 		// legacy `NAME = value` constant declarations which have no TypeRB
 		// binding to inspect.
-		if c.mode == "ruby" && (c.resolution.NativeSyntax || isConstant(node.Name)) {
+		if c.rubyNativeSyntax() {
 			return
 		}
 	case *ast.MemberExpression:

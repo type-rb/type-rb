@@ -99,6 +99,30 @@ func TestReplSupportsPreludeAndNamespacedPutsForAnyValue(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableArithmeticSemantics(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-operators-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "-5 / 2\n-5 % 2\n2 ** 3\n(1 + 2) * 3\n:quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "-2 : Integer\n-1 : Integer\n8 : Integer\n9 : Integer\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplRejectsPlatformPackageForConfiguredModeAndContinues(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

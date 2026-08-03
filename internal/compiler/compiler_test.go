@@ -566,6 +566,171 @@ end
 	}
 }
 
+func TestPortableOperatorRulesAndBackendSemantics(t *testing.T) {
+	source := []byte(`def calculate(): Boolean
+  grouped: Integer := (1 + 2) * 3
+  quotient: Integer := -5 / 2
+  remainder: Integer := -5 % 2
+  power: Integer := 2 ** 3
+  float_power: Float := 2.0 ** 3.0
+  ratio: Float := 8.0 / 2.0
+  message: String := "type" + "rb"
+  mut updated: Integer := 8
+  updated /= 3
+  mut enabled: Boolean := true
+  enabled &&= false
+  words: Boolean := true and false
+  return grouped == 9 && quotient == -2 && remainder == -1 && power == 8 && float_power == 8.0 && ratio >= 4.0 && message == "typerb" && updated == 2 && !enabled && !words
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("operators.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected valid operators: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	for _, want := range []string{`import "math"`, `(1 + 2) * 3`, `panic("negative Integer exponent")`, `math.Pow(2.0, 3.0)`} {
+		if !strings.Contains(goOutput, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "operators.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	rubyOutput := string(artifacts["ruby"].Output)
+	for _, want := range []string{".quo(2).truncate", ".remainder(2)", "updated = (updated).quo(3).truncate", "words = true && false"} {
+		if !strings.Contains(rubyOutput, want) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
+		}
+	}
+	typescriptOutput := string(artifacts["typescript"].Output)
+	for _, want := range []string{"Math.trunc((-5) / 2)", "updated = Math.trunc(updated / 3)"} {
+		if !strings.Contains(typescriptOutput, want) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
+		}
+	}
+}
+
+func TestInvalidPortableOperatorsAreRejectedAcrossModes(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "logical integer",
+			source: "def bad(): Boolean\n  return 1 && true\nend\n",
+			want:   "operator && does not support Integer and Boolean",
+		},
+		{
+			name:   "unary not integer",
+			source: "def bad(): Boolean\n  return !1\nend\n",
+			want:   "operator ! does not support Integer",
+		},
+		{
+			name:   "mixed numeric arithmetic",
+			source: "def bad(): Float\n  return 1 + 2.0\nend\n",
+			want:   "operator + does not support Integer and Float",
+		},
+		{
+			name:   "string ordering",
+			source: "def bad(): Boolean\n  return \"a\" < \"b\"\nend\n",
+			want:   "operator < does not support String and String",
+		},
+		{
+			name:   "array equality",
+			source: "def bad(): Boolean\n  return [1] == [1]\nend\n",
+			want:   "operator == does not support Array<Integer> and Array<Integer>",
+		},
+		{
+			name:   "float remainder",
+			source: "def bad(): Float\n  return 2.0 % 1.0\nend\n",
+			want:   "operator % does not support Float and Float",
+		},
+		{
+			name:   "native-only comparison",
+			source: "def bad(): Any\n  return 1 <=> 2\nend\n",
+			want:   "operator <=> is not part of portable TypeRB",
+		},
+		{
+			name:   "invalid compound assignment",
+			source: "def bad()\n  mut value := 1\n  value += \"x\"\n  return\nend\n",
+			want:   "operator + does not support Integer and String",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_operator.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestNullableEqualityAndRubyNativeOperatorsHaveExplicitBoundaries(t *testing.T) {
+	portable := []byte(`def missing(value: String?): Boolean
+  return value == nil
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("nullable_equality.trb", portable, mode); err != nil {
+			t.Fatalf("%s rejected nullable nil comparison: %v", mode, err)
+		}
+	}
+
+	native := []byte(`import trb/platform/ruby/native
+
+def compare(left: Any, right: Any): Any
+  return left <=> right
+end
+`)
+	artifact, err := Compile("native_operator.trb", native, "ruby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(artifact.Output), "left <=> right") {
+		t.Fatalf("Ruby-native operator was not preserved:\n%s", artifact.Output)
+	}
+}
+
+func TestModeAloneNeverRelaxesPortableLanguageRules(t *testing.T) {
+	source := []byte(`def legacy_assignment()
+  undeclared = 1
+  return
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("common_grammar.trb", source, mode); err == nil || !strings.Contains(err.Error(), "undeclared is not declared") {
+			t.Fatalf("%s mode unexpectedly relaxed assignment rules: %v", mode, err)
+		}
+	}
+
+	native := []byte(`import trb/platform/ruby/native
+
+def legacy_assignment()
+  undeclared = 1
+  return
+end
+`)
+	if _, err := Compile("native_assignment.trb", native, "ruby"); err != nil {
+		t.Fatalf("explicit Ruby-native import did not enable its compatibility surface: %v", err)
+	}
+}
+
 func TestInterpolatedStringIsTypedAndLoweredPerTarget(t *testing.T) {
 	goArtifact, err := CompileWithOptions("greet.trb", []byte(`import trb/std/io
 

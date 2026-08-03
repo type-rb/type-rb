@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 type generator struct {
@@ -122,7 +123,12 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Variable:
 		g.line(n.Name+" = "+g.expr(n.Value), n.TrailingComment)
 	case *ir.Assignment:
-		g.line(g.expr(n.Target)+" "+n.Operator+" "+g.expr(n.Value), n.TrailingComment)
+		target := g.expr(n.Target)
+		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
+			g.line(target+" = ("+target+").quo("+g.expr(n.Value)+").truncate", n.TrailingComment)
+		} else {
+			g.line(target+" "+n.Operator+" "+g.expr(n.Value), n.TrailingComment)
+		}
 	case *ir.Return:
 		text := "return"
 		if n.Value != nil {
@@ -259,9 +265,30 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return "{" + strings.Join(parts, ", ") + "}"
 	case *ir.Unary:
-		return n.Operator + g.expr(n.Operand)
+		op := n.Operator
+		if op == "not" {
+			op = "!"
+		}
+		return op + g.unaryOperand(n.Operand)
 	case *ir.Binary:
-		return g.expr(n.Left) + " " + n.Operator + " " + g.expr(n.Right)
+		left := g.binaryOperand(n.Left)
+		right := g.binaryOperand(n.Right)
+		op := n.Operator
+		if op == "and" {
+			op = "&&"
+		} else if op == "or" {
+			op = "||"
+		}
+		if op == "**" && n.ExprType().Kind == types.Int {
+			return "->(base, exponent) { raise RangeError, \"negative Integer exponent\" if exponent < 0; base ** exponent }.call(" + left + ", " + right + ")"
+		}
+		if op == "/" && n.ExprType().Kind == types.Int {
+			return "(" + left + ").quo(" + right + ").truncate"
+		}
+		if op == "%" && n.ExprType().Kind == types.Int {
+			return "(" + left + ").remainder(" + right + ")"
+		}
+		return left + " " + op + " " + right
 	case *ir.Range:
 		operator := ".."
 		if n.Exclusive {
@@ -298,6 +325,26 @@ func (g *generator) expr(expression ir.Expression) string {
 		return n.Text
 	default:
 		return ""
+	}
+}
+
+func (g *generator) binaryOperand(expression ir.Expression) string {
+	value := g.expr(expression)
+	switch expression.(type) {
+	case *ir.Binary, *ir.Range, *ir.Unary:
+		return "(" + value + ")"
+	default:
+		return value
+	}
+}
+
+func (g *generator) unaryOperand(expression ir.Expression) string {
+	value := g.expr(expression)
+	switch expression.(type) {
+	case *ir.Binary, *ir.Range:
+		return "(" + value + ")"
+	default:
+		return value
 	}
 }
 

@@ -1,5 +1,6 @@
 /bin/
 /.envrc
+/.agents/skills/
 /.trb/
 **/.trb/
 /build/

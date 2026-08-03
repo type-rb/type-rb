@@ -957,6 +957,11 @@ func (e *Evaluator) binary(left Value, operator string, right Value, typ types.T
 			return Value{}, errors.New("division by zero")
 		}
 		return numericValue(math.Mod(leftNumber, rightNumber), useFloat, typ), nil
+	case "**":
+		if typ.Kind == types.Int && rightNumber < 0 {
+			return Value{}, errors.New("negative Integer exponent")
+		}
+		return numericValue(math.Pow(leftNumber, rightNumber), useFloat, typ), nil
 	case "<":
 		return Value{Type: typ, Data: leftNumber < rightNumber}, nil
 	case "<=":

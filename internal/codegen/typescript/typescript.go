@@ -163,7 +163,12 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line(prefix + keyword + " " + n.Name + ": " + tsType(n.Type) + " = " + g.expr(n.Value) + ";")
 	case *ir.Assignment:
-		g.line(g.expr(n.Target) + " " + n.Operator + " " + g.expr(n.Value) + ";")
+		target := g.expr(n.Target)
+		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
+			g.line(target + " = Math.trunc(" + target + " / " + g.expr(n.Value) + ");")
+		} else {
+			g.line(target + " " + n.Operator + " " + g.expr(n.Value) + ";")
+		}
 	case *ir.Return:
 		if n.Value == nil {
 			g.line("return;")
@@ -360,7 +365,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if op == "not" {
 			op = "!"
 		}
-		return op + g.expr(n.Operand)
+		return op + g.unaryOperand(n.Operand)
 	case *ir.Binary:
 		op := n.Operator
 		if op == "and" {
@@ -368,7 +373,15 @@ func (g *generator) expr(expression ir.Expression) string {
 		} else if op == "or" {
 			op = "||"
 		}
-		return g.expr(n.Left) + " " + op + " " + g.expr(n.Right)
+		left := g.binaryOperand(n.Left)
+		right := g.binaryOperand(n.Right)
+		if op == "**" && n.ExprType().Kind == types.Int {
+			return "((base: number, exponent: number): number => { if (exponent < 0) { throw new RangeError(\"negative Integer exponent\"); } return Math.trunc(base ** exponent); })(" + left + ", " + right + ")"
+		}
+		if op == "/" && n.ExprType().Kind == types.Int {
+			return "Math.trunc(" + left + " / " + right + ")"
+		}
+		return left + " " + op + " " + right
 	case *ir.Range:
 		extra := "1"
 		if n.Exclusive {
@@ -416,6 +429,26 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
 		return ""
+	}
+}
+
+func (g *generator) binaryOperand(expression ir.Expression) string {
+	value := g.expr(expression)
+	switch expression.(type) {
+	case *ir.Binary, *ir.Range, *ir.Unary:
+		return "(" + value + ")"
+	default:
+		return value
+	}
+}
+
+func (g *generator) unaryOperand(expression ir.Expression) string {
+	value := g.expr(expression)
+	switch expression.(type) {
+	case *ir.Binary, *ir.Range:
+		return "(" + value + ")"
+	default:
+		return value
 	}
 }
 

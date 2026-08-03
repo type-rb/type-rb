@@ -166,6 +166,12 @@ Ruby mode owns `Gemfile`, Go mode owns `go.mod`, and TypeScript mode owns
 `trbconfig.jsonc`; edit dependencies through the config or `trb add/remove`,
 then run `trb sync`.
 
+`mode` selects only the backend, toolchain, and package ecosystem. It does not
+select a Ruby, Go, or TypeScript grammar variant and never loosens portable
+type checking. All TypeRB files use one common syntax and semantics;
+target-specific capabilities require an explicit `trb/platform/<mode>/*`
+import.
+
 A runnable project defines exactly one top-level `def main()`. `main` is a
 language convention rather than a configurable entrypoint, so
 `trbconfig.jsonc` does not need an entrypoint field. `trb run` compiles the
@@ -241,6 +247,8 @@ v0.1 portable syntax includes:
 - `if`/`elsif`/`else`, `while`, `return`, integer ranges, and Ruby-shaped
   `each`/`each_slice`/`each.with_index` iteration
 - non-nullable `Boolean` conditions without target-specific truthiness
+- checked numeric, string, equality, and Boolean operators with portable
+  Integer division, remainder, exponent, and expression precedence
 - `_private` methods and `@_private` fields
 
 Types are written as `name: Type`. Generics, arrays, and nullable types use

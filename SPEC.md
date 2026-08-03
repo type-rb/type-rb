@@ -24,6 +24,12 @@ integration:
 - Go mode generates `go.mod` and uses the Go module toolchain.
 - TypeScript mode generates `package.json` and uses npm in v0.1.
 
+Mode never changes TypeRB grammar or relaxes its portable type rules. The same
+source syntax has the same meaning in every mode. Target-specific APIs,
+framework integration, native escape syntax, and compatibility behavior are
+available only through an explicit `trb/platform/<mode>/*` import; selecting a
+mode by itself does not enable them.
+
 ## 3. Core Syntax and Semantics (Confirmed)
 
 ### 3.1 Declarations and Style
@@ -109,6 +115,27 @@ integration:
   `Boolean?`, and `Any` are rejected as conditions.
 - An explicit Ruby-native project may use an `Any` condition as a compatibility
   escape hatch while compiler-owned library providers are still incomplete.
+
+### 3.10 Operators
+
+- `!` and `not` accept non-nullable `Boolean`; unary `+` and `-` accept a
+  non-nullable `Integer` or `Float` and preserve that type.
+- `+` accepts matching numeric types or two `String` values. `-`, `*`, `/`,
+  and `**` accept matching numeric types. `%` accepts two `Integer` values.
+- `<`, `<=`, `>`, and `>=` compare matching numeric types. Portable `==` and
+  `!=` compare matching non-nullable scalar types (`Boolean`, `Integer`,
+  `Float`, and `String`) or a nullable value with `nil`.
+- `&&`, `||`, `and`, and `or` accept two non-nullable `Boolean` values and
+  return `Boolean`. Compound assignments apply the corresponding binary rule
+  before checking that the result remains assignable to the mutable target.
+- TypeRB does not implicitly mix `Integer` and `Float` operands.
+- Integer `/` truncates toward zero, `%` is its corresponding remainder, and a
+  negative exponent is invalid for Integer `**`. Backends and the REPL preserve
+  these semantics instead of inheriting different target-language behavior.
+- Parenthesized TypeRB expressions retain their AST precedence in generated
+  code. Ruby-specific matching, comparison, and bitwise operators (`=~`, `!~`,
+  `<=>`, `~`, `|`, `&`, `^`, `<<`, and `>>`) require an explicit Ruby-native
+  import until portable semantics are defined.
 
 ## 4. Open Point: Initial Generic Inference Scope
 
