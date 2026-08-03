@@ -137,6 +137,16 @@ mode by itself does not enable them.
   `<=>`, `~`, `|`, `&`, `^`, `<<`, and `>>`) require an explicit Ruby-native
   import until portable semantics are defined.
 
+### 3.11 Loop Control
+
+- `break` exits the innermost enclosing `while`, `each`, `each_slice`, or
+  `each.with_index` loop.
+- `next` skips the remainder of the current iteration of that innermost loop.
+- Both are statements with no value form. They are compile errors outside a
+  loop and have identical semantics in every mode.
+- `return` remains distinct: it exits the enclosing method, including when it
+  appears inside an iteration block.
+
 ## 4. Open Point: Initial Generic Inference Scope
 
 Current decision:

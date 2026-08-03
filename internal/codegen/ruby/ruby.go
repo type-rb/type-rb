@@ -135,6 +135,10 @@ func (g *generator) statement(statement ir.Statement) {
 			text += " " + g.expr(n.Value)
 		}
 		g.line(text, n.TrailingComment)
+	case *ir.Break:
+		g.line("break", n.TrailingComment)
+	case *ir.Next:
+		g.line("next", n.TrailingComment)
 	case *ir.ExpressionStatement:
 		g.line(g.expr(n.Expression), n.TrailingComment)
 	case *ir.If:

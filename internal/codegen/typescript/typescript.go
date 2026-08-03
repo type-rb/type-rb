@@ -175,6 +175,10 @@ func (g *generator) statement(statement ir.Statement) {
 		} else {
 			g.line("return " + g.expr(n.Value) + ";")
 		}
+	case *ir.Break:
+		g.line("break;")
+	case *ir.Next:
+		g.line("continue;")
 	case *ir.ExpressionStatement:
 		g.line(g.expr(n.Expression) + ";")
 	case *ir.If:

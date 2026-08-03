@@ -76,6 +76,7 @@ type Checker struct {
 	functions    map[string]*ast.MethodStatement
 	current      *classInfo
 	initializing int
+	loopDepth    int
 	returns      []types.Type
 	resolution   resolver.Result
 	external     map[ast.Expression]declaration.Member
@@ -307,6 +308,14 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 					c.error(n.Span(), fmt.Sprintf("return type is %s, expected %s", actual, expected))
 				}
 			}
+		case *ast.BreakStatement:
+			if c.loopDepth == 0 {
+				c.error(n.Span(), "break is only valid inside while or an iteration block")
+			}
+		case *ast.NextStatement:
+			if c.loopDepth == 0 {
+				c.error(n.Span(), "next is only valid inside while or an iteration block")
+			}
 		case *ast.ExpressionStatement:
 			c.checkExpression(n.Expression, sc)
 		case *ast.IfStatement:
@@ -319,7 +328,9 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			c.checkStatements(n.Else, &scope{parent: sc, values: map[string]symbol{}})
 		case *ast.WhileStatement:
 			c.checkBooleanCondition(n.Condition, sc, "while")
+			c.loopDepth++
 			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}})
+			c.loopDepth--
 		case *ast.NativeStatement:
 			if c.mode != "ruby" {
 				c.error(n.Span(), "Ruby-native statement is only available in mode: ruby")
@@ -510,6 +521,8 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		returnType = types.Type{Kind: types.Void, Name: "Void"}
 	}
 	c.returns = append(c.returns, returnType)
+	previousLoopDepth := c.loopDepth
+	c.loopDepth = 0
 	if method.Name == "initialize" && c.current != nil {
 		c.initializing++
 	}
@@ -517,6 +530,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	if method.Name == "initialize" && c.current != nil {
 		c.initializing--
 	}
+	c.loopDepth = previousLoopDepth
 	c.returns = c.returns[:len(c.returns)-1]
 }
 
@@ -891,7 +905,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 				blockScope.values[name] = symbol{typ: parameterType, mutable: true, span: n.Block.Span()}
 			}
+			c.loopDepth++
 			c.checkStatements(n.Block.Body, blockScope)
+			c.loopDepth--
 			c.result.Expressions[n.Block] = types.Type{Kind: types.Void, Name: "Void"}
 		}
 		typ = types.Type{Kind: types.Void, Name: "Void"}

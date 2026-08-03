@@ -100,6 +100,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseWhile()
 	case "return":
 		return p.parseReturn()
+	case "break", "next":
+		return p.parseLoopControl(word)
 	case "import":
 		return p.parseImport()
 	}
@@ -227,6 +229,15 @@ func (p *Parser) inlineBlockStatement(line []token.Token) ast.Statement {
 			return nil
 		}
 		return &ast.ReturnStatement{Base: base, Value: value}
+	}
+	if line[0].Lexeme == "break" || line[0].Lexeme == "next" {
+		if len(line) != 1 {
+			p.errorAt(spanOf(line), fmt.Sprintf("%s does not take a value", line[0].Lexeme))
+		}
+		if line[0].Lexeme == "break" {
+			return &ast.BreakStatement{Base: base}
+		}
+		return &ast.NextStatement{Base: base}
 	}
 	if variable := p.tryVariable(line, base); variable != nil {
 		return variable
@@ -747,6 +758,20 @@ func (p *Parser) parseReturn() ast.Statement {
 	}
 	p.pos = next
 	return r
+}
+
+func (p *Parser) parseLoopControl(keyword string) ast.Statement {
+	start, end, next, comment := p.logicalLine(p.pos)
+	line := p.codeTokens(start, end)
+	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
+	if len(line) != 1 {
+		p.errorAt(spanOf(line), fmt.Sprintf("%s does not take a value", keyword))
+	}
+	p.pos = next
+	if keyword == "break" {
+		return &ast.BreakStatement{Base: base}
+	}
+	return &ast.NextStatement{Base: base}
 }
 
 func (p *Parser) parseImport() ast.Statement {

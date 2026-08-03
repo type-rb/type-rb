@@ -731,6 +731,87 @@ end
 	}
 }
 
+func TestBreakAndNextLowerAcrossPortableLoops(t *testing.T) {
+	source := []byte(`def collect(): Integer
+  mut total: Integer := 0
+  mut index: Integer := 0
+  while index < 6
+    index += 1
+    if index == 2
+      next
+    end
+    if index == 5
+      break
+    end
+    total += index
+  end
+  [1, 2, 3].each do |value|
+    if value == 2
+      next
+    end
+    total += value
+  end
+  [1, 2, 3].each { |value| next }
+  return total
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("loop_control.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected portable loop control: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	if !strings.Contains(goOutput, "break") || strings.Count(goOutput, "continue") < 3 {
+		t.Fatalf("generated Go is missing loop control:\n%s", goOutput)
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "loop_control.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&gotypes.Config{}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	rubyOutput := string(artifacts["ruby"].Output)
+	if !strings.Contains(rubyOutput, "break") || strings.Count(rubyOutput, "next") < 3 {
+		t.Fatalf("generated Ruby is missing loop control:\n%s", rubyOutput)
+	}
+	typescriptOutput := string(artifacts["typescript"].Output)
+	if !strings.Contains(typescriptOutput, "break;") || strings.Count(typescriptOutput, "continue;") < 3 {
+		t.Fatalf("generated TypeScript is missing loop control:\n%s", typescriptOutput)
+	}
+}
+
+func TestBreakAndNextRequireAnEnclosingLoop(t *testing.T) {
+	for _, keyword := range []string{"break", "next"} {
+		source := []byte("def invalid()\n  " + keyword + "\n  return\nend\n")
+		want := keyword + " is only valid inside while or an iteration block"
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			if _, err := Compile("invalid_loop_control.trb", source, mode); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s %s: expected %q diagnostic, got %v", mode, keyword, want, err)
+			}
+		}
+	}
+}
+
+func TestBreakAndNextDoNotAcceptValues(t *testing.T) {
+	for _, keyword := range []string{"break", "next"} {
+		source := []byte("def invalid()\n  while true\n    " + keyword + " 1\n  end\n  return\nend\n")
+		want := keyword + " does not take a value"
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			if _, err := Compile("valued_loop_control.trb", source, mode); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s %s: expected %q diagnostic, got %v", mode, keyword, want, err)
+			}
+		}
+	}
+}
+
 func TestInterpolatedStringIsTypedAndLoweredPerTarget(t *testing.T) {
 	goArtifact, err := CompileWithOptions("greet.trb", []byte(`import trb/std/io
 

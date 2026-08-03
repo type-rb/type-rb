@@ -38,6 +38,8 @@ Implemented:
 - Checked unary, arithmetic, comparison, equality, logical, and compound
   operators, including target-independent Integer division/remainder and
   precedence-preserving backend output.
+- Structured `break` and `next` statements for `while` and collection
+  iteration, checked outside loops and executed by all backends and the REPL.
 - Go-like no-value return syntax: the return annotation is omitted and explicit
   `: Void` return types are rejected while typed IR retains an internal Void.
 - Explicit Ruby-native AST/IR nodes for open-ended Rails DSL.

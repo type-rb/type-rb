@@ -171,6 +171,14 @@ type ReturnStatement struct {
 
 func (*ReturnStatement) statementNode() {}
 
+type BreakStatement struct{ Base }
+
+func (*BreakStatement) statementNode() {}
+
+type NextStatement struct{ Base }
+
+func (*NextStatement) statementNode() {}
+
 type ExpressionStatement struct {
 	Base
 	Expression Expression

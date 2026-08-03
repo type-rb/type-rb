@@ -100,6 +100,10 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return &ir.Assignment{Base: base(n.Base), Target: l.expression(n.Target), Operator: n.Operator, Value: l.expression(n.Value)}
 	case *ast.ReturnStatement:
 		return &ir.Return{Base: base(n.Base), Value: l.expression(n.Value)}
+	case *ast.BreakStatement:
+		return &ir.Break{Base: base(n.Base)}
+	case *ast.NextStatement:
+		return &ir.Next{Base: base(n.Base)}
 	case *ast.ExpressionStatement:
 		if iteration, ok := n.Expression.(*ast.IterationExpression); ok {
 			result := &ir.Iterate{

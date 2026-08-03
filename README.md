@@ -244,8 +244,8 @@ v0.1 portable syntax includes:
 - uppercase runtime constants declared with `:=` at top level or directly in a
   module/class
 - literals, arrays, hashes, calls, members, indexes, unary/binary expressions
-- `if`/`elsif`/`else`, `while`, `return`, integer ranges, and Ruby-shaped
-  `each`/`each_slice`/`each.with_index` iteration
+- `if`/`elsif`/`else`, `while`, `return`, `break`, `next`, integer ranges, and
+  Ruby-shaped `each`/`each_slice`/`each.with_index` iteration
 - non-nullable `Boolean` conditions without target-specific truthiness
 - checked numeric, string, equality, and Boolean operators with portable
   Integer division, remainder, exponent, and expression precedence

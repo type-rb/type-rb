@@ -86,3 +86,15 @@ func TestFormatPortableIterationAndRanges(t *testing.T) {
 		t.Fatalf("iteration formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
 	}
 }
+
+func TestFormatPreservesLoopControlAndComments(t *testing.T) {
+	source := []byte("def scan()\nwhile true\nnext # skip\nbreak # stop\nend\nreturn\nend\n")
+	want := "def scan()\n  while true\n    next # skip\n    break # stop\n  end\n  return\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected loop control formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}

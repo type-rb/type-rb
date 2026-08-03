@@ -123,6 +123,42 @@ func TestReplEvaluatesPortableArithmeticSemantics(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesBreakAndNext(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-loop-control-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := `mut total := 0
+[1, 2, 3, 4].each do |value|
+  if value == 2
+    next
+  end
+  if value == 4
+    break
+  end
+  total += value
+end
+total
+:quit
+`
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "0 : Integer\n4 : Integer\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplRejectsPlatformPackageForConfiguredModeAndContinues(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

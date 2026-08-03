@@ -236,7 +236,16 @@ func (e *Evaluator) checkContext() error {
 type flowResult struct {
 	Result
 	Returned bool
+	Loop     loopFlow
 }
+
+type loopFlow uint8
+
+const (
+	loopNone loopFlow = iota
+	loopBreak
+	loopNext
+)
 
 func (e *Evaluator) evaluate(statements []ir.Statement, module string, sc *scope) (flowResult, error) {
 	last := flowResult{}
@@ -251,7 +260,7 @@ func (e *Evaluator) evaluate(statements []ir.Statement, module string, sc *scope
 		if result.Display || result.Returned {
 			last = result
 		}
-		if result.Returned {
+		if result.Returned || result.Loop != loopNone {
 			return result, nil
 		}
 	}
@@ -305,6 +314,10 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 			value, err = e.expression(node.Value, module, sc)
 		}
 		return flowResult{Result: Result{Value: value}, Returned: true}, err
+	case *ir.Break:
+		return flowResult{Loop: loopBreak}, nil
+	case *ir.Next:
+		return flowResult{Loop: loopNext}, nil
 	case *ir.If:
 		condition, err := e.expression(node.Condition, module, sc)
 		if err != nil {
@@ -336,10 +349,18 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 			if !truthy(condition) {
 				return last, nil
 			}
-			last, err = e.evaluate(node.Body, module, &scope{parent: sc, values: map[string]Value{}})
-			if err != nil || last.Returned {
-				return last, err
+			result, err := e.evaluate(node.Body, module, &scope{parent: sc, values: map[string]Value{}})
+			if err != nil || result.Returned {
+				return result, err
 			}
+			switch result.Loop {
+			case loopBreak:
+				result.Loop = loopNone
+				return result, nil
+			case loopNext:
+				continue
+			}
+			last = result
 		}
 	case *ir.Iterate:
 		return e.iterate(node, module, sc)
@@ -588,6 +609,14 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 		result, err := e.evaluate(node.Body, module, iterationScope)
 		if err != nil || result.Returned {
 			return result, err
+		}
+		switch result.Loop {
+		case loopBreak:
+			result.Loop = loopNone
+			return result, nil
+		case loopNext:
+			iterationIndex++
+			continue
 		}
 		iterationIndex++
 	}

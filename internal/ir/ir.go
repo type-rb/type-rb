@@ -156,6 +156,14 @@ type Return struct {
 
 func (*Return) irStatement() {}
 
+type Break struct{ Base }
+
+func (*Break) irStatement() {}
+
+type Next struct{ Base }
+
+func (*Next) irStatement() {}
+
 type ExpressionStatement struct {
 	Base
 	Expression Expression
