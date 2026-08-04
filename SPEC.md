@@ -510,6 +510,21 @@ immutable String snapshot, and `length`/`#size` counts Unicode code points.
 runtime error for negative values, surrogate code points, or values above
 U+10FFFF.
 
+`trb/std/unicode` owns portable Unicode scalar classification. Its
+`valid_scalar`, `letter`, `digit`, `uppercase`, `lowercase`, `whitespace`,
+`identifier_start`, and `identifier_part` functions accept an Integer code
+point; `from_codepoint` performs the checked reverse conversion and `version`
+reports the data version. v0.1 uses Unicode 15.0.0 tables pinned by the Go 1.26
+compiler toolchain. The compiler emits those range tables as compiler-owned
+TypeRB source and all three backends execute that same generated library;
+classification never delegates to independently versioned Ruby or JavaScript
+Unicode databases.
+
+The initial built-in receiver surface also includes `String#codepoints`,
+`#empty?`, `#include?`, `#upcase`, and `#downcase`, plus `Array#size`. As with
+the earlier conversion and size methods, each resolves to its corresponding
+portable package contract rather than a target-native method by name.
+
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal
 semantic/IR type, but is not a TypeRB return-type spelling.

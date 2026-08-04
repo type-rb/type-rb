@@ -433,10 +433,26 @@ message := builder.to_s()
 
 Destructive builder methods require `mut`; `to_s()` returns a String snapshot.
 
+Unicode scalar classification comes from one compiler-owned data set shared by
+all targets:
+
+```trb
+import trb/std/unicode
+
+hiragana_a := 12354
+is_letter := unicode.letter(hiragana_a)
+character := unicode.from_codepoint(hiragana_a)
+points := "A😀".codepoints()
+```
+
+`unicode.version()` reports the pinned data version (`15.0.0` in the Go 1.26
+toolchain). The same package also exposes digit, case, whitespace, and TypeRB
+identifier classification.
+
 v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/bytes`,
-`trb/std/string_builder`, `trb/std/arrays`, `trb/std/numbers`, and
-`trb/std/result`. Result is imported as a named portable type and handled
-through ordinary exhaustive enum matching:
+`trb/std/string_builder`, `trb/std/unicode`, `trb/std/arrays`,
+`trb/std/numbers`, and `trb/std/result`. Result is imported as a named portable
+type and handled through ordinary exhaustive enum matching:
 
 ```trb
 import { Result } from trb/std/result

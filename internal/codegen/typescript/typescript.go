@@ -65,7 +65,9 @@ func (g *generator) statement(statement ir.Statement) {
 			return
 		}
 		importPath := tsImportPath(g.modulePath, n.Path)
-		if len(n.Symbols) > 0 {
+		if n.Namespace && n.Alias != "" {
+			g.line("import * as " + n.Alias + " from " + strconv.Quote(importPath) + ";")
+		} else if len(n.Symbols) > 0 {
 			g.line("import { " + strings.Join(n.Symbols, ", ") + " } from " + strconv.Quote(importPath) + ";")
 		} else if n.Alias != "" {
 			g.line("import * as " + n.Alias + " from " + strconv.Quote(importPath) + ";")
@@ -618,18 +620,53 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 	return "({" + strings.Join(fields, ", ") + "} satisfies " + record.Name + ")"
 }
 
-func (g *generator) intrinsic(name string, _ *ir.Call, arguments []string) string {
+func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	unicodeAlias := "unicode"
+	reference := expressionReference(call.Callee)
+	if reference != nil && reference.Alias != "" {
+		unicodeAlias = reference.Alias
+	}
+	unicodeCall := func(symbol string) string {
+		if _, named := call.Callee.(*ir.Identifier); named {
+			return symbol
+		}
+		return unicodeAlias + ".Unicode." + symbol
+	}
 	switch name {
 	case "trb.std.io.puts":
 		return "console.log(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.strings.length":
 		return "Array.from(" + arguments[0] + ").length"
+	case "trb.std.strings.empty":
+		return arguments[0] + ".length === 0"
 	case "trb.std.strings.uppercase":
 		return arguments[0] + ".toUpperCase()"
 	case "trb.std.strings.lowercase":
 		return arguments[0] + ".toLowerCase()"
 	case "trb.std.strings.contains":
 		return arguments[0] + ".includes(" + arguments[1] + ")"
+	case "trb.std.strings.codepoints":
+		return "Array.from(" + arguments[0] + ", (value): number => value.codePointAt(0)!)"
+	case "trb.std.unicode.version":
+		return unicodeCall("version") + "()"
+	case "trb.std.unicode.valid_scalar":
+		return unicodeCall("valid_scalar") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.letter":
+		return unicodeCall("letter") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.digit":
+		return unicodeCall("digit") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.uppercase":
+		return unicodeCall("uppercase") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.lowercase":
+		return unicodeCall("lowercase") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.whitespace":
+		return unicodeCall("whitespace") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.identifier_start":
+		return unicodeCall("identifier_start") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.identifier_part":
+		return unicodeCall("identifier_part") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.from_codepoint":
+		return unicodeCall("from_codepoint") + "(" + arguments[0] + ")"
 	case "trb.std.bytes.from_string":
 		return "new TextEncoder().encode(" + arguments[0] + ")"
 	case "trb.std.bytes.to_string":

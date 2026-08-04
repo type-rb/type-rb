@@ -72,9 +72,9 @@ Implemented:
 - Cross-file checking of imported constructors, fields, methods, inheritance,
   and interface conformance, with target-relative backend imports.
 - Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`,
-  `trb/std/bytes`, `trb/std/string_builder`, `trb/std/numbers`, and
-  `trb/std/result` packages, plus mode-checked Ruby, Go, and TypeScript platform
-  packages.
+  `trb/std/bytes`, `trb/std/string_builder`, `trb/std/unicode`,
+  `trb/std/numbers`, and `trb/std/result` packages, plus mode-checked Ruby, Go,
+  and TypeScript platform packages.
 - Compiler-owned receiver-method contracts shared with portable package APIs,
   initially covering `Integer#to_s`, `String#to_i`, and Unicode-aware
   `String#size` across the checker, typed IR, all backends, and the REPL.
@@ -84,6 +84,11 @@ Implemented:
 - A portable mutable `StringBuilder` with checked `mut` receiver/package
   operations, Unicode scalar appends, String snapshots, code-point length,
   clear, three backend representations, and typed-IR REPL execution.
+- Compiler-owned Unicode 15.0.0 range tables emitted as TypeRB source, with
+  scalar/category and identifier classification, code-point construction,
+  default/named imports, three runnable backends, and REPL execution.
+- Expanded compiler-owned receiver methods for String code points, emptiness,
+  containment and case conversion, plus Array size.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.

@@ -46,6 +46,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			result.Path = resolved.RuntimePath()
 			result.Symbols = append([]string(nil), resolved.Symbols...)
 			result.Alias = resolved.Alias
+			result.Namespace = len(n.Symbols) == 0 && resolved.Alias != ""
 			result.Kind = string(resolved.Kind)
 			result.Standard = resolved.Definition != nil
 			result.Platform = resolved.Definition != nil && resolved.Definition.Kind == "platform"

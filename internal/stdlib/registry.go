@@ -105,8 +105,15 @@ end
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"length":    unary("length", "trb.std.strings.length", stringType, integerType),
+			"empty":     unary("empty", "trb.std.strings.empty", stringType, booleanType),
 			"uppercase": unary("uppercase", "trb.std.strings.uppercase", stringType, stringType),
 			"lowercase": unary("lowercase", "trb.std.strings.lowercase", stringType, stringType),
+			"codepoints": {
+				Name:       "codepoints",
+				Intrinsic:  "trb.std.strings.codepoints",
+				Parameters: []Parameter{{Name: "value", Type: stringType}},
+				Return:     types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{integerType}},
+			},
 			"contains": {
 				Name:      "contains",
 				Intrinsic: "trb.std.strings.contains",
@@ -116,6 +123,24 @@ end
 				},
 				Return: booleanType,
 			},
+		},
+	},
+	"trb/std/unicode": {
+		Path:       "trb/std/unicode",
+		ModulePath: "trb/std/unicode/index",
+		Source:     unicodeSource(),
+		Kind:       Portable,
+		Symbols: map[string]Symbol{
+			"version":          {Name: "version", Intrinsic: "trb.std.unicode.version", Return: stringType},
+			"valid_scalar":     unary("valid_scalar", "trb.std.unicode.valid_scalar", integerType, booleanType),
+			"letter":           unary("letter", "trb.std.unicode.letter", integerType, booleanType),
+			"digit":            unary("digit", "trb.std.unicode.digit", integerType, booleanType),
+			"uppercase":        unary("uppercase", "trb.std.unicode.uppercase", integerType, booleanType),
+			"lowercase":        unary("lowercase", "trb.std.unicode.lowercase", integerType, booleanType),
+			"whitespace":       unary("whitespace", "trb.std.unicode.whitespace", integerType, booleanType),
+			"identifier_start": unary("identifier_start", "trb.std.unicode.identifier_start", integerType, booleanType),
+			"identifier_part":  unary("identifier_part", "trb.std.unicode.identifier_part", integerType, booleanType),
+			"from_codepoint":   unary("from_codepoint", "trb.std.unicode.from_codepoint", integerType, stringType),
 		},
 	},
 	"trb/std/bytes": {
@@ -311,9 +336,14 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"to_s": {PackagePath: "trb/std/numbers", Symbol: "to_string"},
 	},
 	types.String: {
-		"to_i":     {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
-		"size":     {PackagePath: "trb/std/strings", Symbol: "length"},
-		"to_bytes": {PackagePath: "trb/std/bytes", Symbol: "from_string"},
+		"to_i":       {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
+		"size":       {PackagePath: "trb/std/strings", Symbol: "length"},
+		"empty?":     {PackagePath: "trb/std/strings", Symbol: "empty"},
+		"upcase":     {PackagePath: "trb/std/strings", Symbol: "uppercase"},
+		"downcase":   {PackagePath: "trb/std/strings", Symbol: "lowercase"},
+		"include?":   {PackagePath: "trb/std/strings", Symbol: "contains"},
+		"codepoints": {PackagePath: "trb/std/strings", Symbol: "codepoints"},
+		"to_bytes":   {PackagePath: "trb/std/bytes", Symbol: "from_string"},
 	},
 	types.Bytes: {
 		"to_s":       {PackagePath: "trb/std/bytes", Symbol: "to_string"},
@@ -328,6 +358,9 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"size":             {PackagePath: "trb/std/string_builder", Symbol: "length"},
 		"to_s":             {PackagePath: "trb/std/string_builder", Symbol: "to_string"},
 		"clear":            {PackagePath: "trb/std/string_builder", Symbol: "clear"},
+	},
+	types.Array: {
+		"size": {PackagePath: "trb/std/arrays", Symbol: "length"},
 	},
 }
 

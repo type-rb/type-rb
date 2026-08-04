@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/type-rb/type-rb/internal/ir"
@@ -1154,6 +1155,10 @@ func comparison(value int, operator string, typ types.Type) (Value, error) {
 	return Value{}, fmt.Errorf("unsupported string operator %s", operator)
 }
 
+func validUnicodeScalar(value int64) bool {
+	return value >= 0 && value <= utf8.MaxRune && (value < 0xd800 || value > 0xdfff)
+}
+
 func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ types.Type) (Value, error) {
 	values := func() []Value {
 		result := make([]Value, len(arguments))
@@ -1184,6 +1189,15 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("strings.length expects String")
 		}
 		return Value{Type: typ, Data: int64(utf8.RuneCountInString(value))}, nil
+	case "trb.std.strings.empty":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("strings.empty expects String")
+		}
+		return Value{Type: typ, Data: value == ""}, nil
 	case "trb.std.strings.uppercase", "trb.std.strings.lowercase":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1208,6 +1222,63 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("strings.contains expects String arguments")
 		}
 		return Value{Type: typ, Data: strings.Contains(left, right)}, nil
+	case "trb.std.strings.codepoints":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("strings.codepoints expects String")
+		}
+		items := make([]Value, 0, utf8.RuneCountInString(value))
+		for _, codepoint := range value {
+			items = append(items, Value{Type: types.FromName("Integer"), Data: int64(codepoint)})
+		}
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.unicode.version":
+		return Value{Type: typ, Data: unicode.Version}, nil
+	case "trb.std.unicode.valid_scalar":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(int64)
+		return Value{Type: typ, Data: ok && validUnicodeScalar(value)}, nil
+	case "trb.std.unicode.letter", "trb.std.unicode.digit", "trb.std.unicode.uppercase", "trb.std.unicode.lowercase", "trb.std.unicode.whitespace", "trb.std.unicode.identifier_start", "trb.std.unicode.identifier_part":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(int64)
+		if !ok || !validUnicodeScalar(value) {
+			return Value{Type: typ, Data: false}, nil
+		}
+		codepoint := rune(value)
+		result := false
+		switch name {
+		case "trb.std.unicode.letter":
+			result = unicode.Is(unicode.Letter, codepoint)
+		case "trb.std.unicode.digit":
+			result = unicode.Is(unicode.Digit, codepoint)
+		case "trb.std.unicode.uppercase":
+			result = unicode.Is(unicode.Upper, codepoint)
+		case "trb.std.unicode.lowercase":
+			result = unicode.Is(unicode.Lower, codepoint)
+		case "trb.std.unicode.whitespace":
+			result = unicode.Is(unicode.White_Space, codepoint)
+		case "trb.std.unicode.identifier_start":
+			result = value == 95 || value == 64 || unicode.Is(unicode.Letter, codepoint)
+		case "trb.std.unicode.identifier_part":
+			result = value == 95 || value == 64 || unicode.Is(unicode.Letter, codepoint) || unicode.Is(unicode.Digit, codepoint)
+		}
+		return Value{Type: typ, Data: result}, nil
+	case "trb.std.unicode.from_codepoint":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(int64)
+		if !ok || !validUnicodeScalar(value) {
+			return Value{}, errors.New("invalid Unicode code point")
+		}
+		return Value{Type: typ, Data: string(rune(value))}, nil
 	case "trb.std.bytes.from_string":
 		if err := require(1); err != nil {
 			return Value{}, err

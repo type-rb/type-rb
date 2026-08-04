@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -179,6 +180,34 @@ func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 		want := "StringBuilder(\"A\") : StringBuilder\nStringBuilder(\"A😀!\") : StringBuilder\n3 : Integer\n\"A😀!\" : String\n\"\" : String\n\"A😀!\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s StringBuilder REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestReplEvaluatesCompilerOwnedUnicodeAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-unicode-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "import trb/std/unicode\nunicode.version()\nunicode.letter(12354)\nunicode.digit(1632)\nunicode.identifier_start(64)\nunicode.valid_scalar(55296)\nunicode.from_codepoint(128512)\n\"A😀\".codepoints()\n\"\".empty?()\n\"TypeRB\".include?(\"RB\")\n:quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "\"15.0.0\" : String\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\nfalse : Boolean\n\"😀\" : String\n[65, 128512] : Array<Integer>\ntrue : Boolean\ntrue : Boolean\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s Unicode REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
 	}
 }
@@ -602,6 +631,51 @@ func TestRunCompilesProjectImportClosure(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join(root, "trb-run-*"))
 	if err != nil || len(matches) != 0 {
 		t.Fatalf("run directory leaked: matches=%v err=%v", matches, err)
+	}
+}
+
+func TestRunCompilerOwnedUnicodeAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby Unicode run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript Unicode run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-unicode-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := "import trb/std/unicode\n\ndef main()\n\tputs(unicode.version())\n\tputs(unicode.letter(12354))\n\tputs(unicode.from_codepoint(128512))\n\treturn\nend\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "15.0.0\ntrue\n😀\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s Unicode program output: want %q, got %q", mode, want, stdout.String())
+		}
 	}
 }
 

@@ -37,13 +37,14 @@ func (*Comment) irStatement() {}
 
 type Import struct {
 	Base
-	Path     string
-	Symbols  []string
-	Alias    string
-	Kind     string
-	Standard bool
-	Platform bool
-	Runtime  bool
+	Path      string
+	Symbols   []string
+	Alias     string
+	Namespace bool
+	Kind      string
+	Standard  bool
+	Platform  bool
+	Runtime   bool
 	// SymbolKinds distinguishes value records from reference classes in
 	// backends whose representation makes that distinction explicit.
 	SymbolKinds map[string]string

@@ -359,6 +359,133 @@ func TestPortableStringBuilderMutabilityAndTypesAreModeIndependent(t *testing.T)
 	}
 }
 
+func TestCompilerOwnedUnicodePackageLowersSameTablesAcrossBackends(t *testing.T) {
+	consumerSource := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import trb/std/unicode
+
+def classified(): Boolean
+	return unicode.letter(65) and unicode.letter(12354) and unicode.digit(1632) and unicode.uppercase(65) and unicode.lowercase(97) and unicode.whitespace(12288)
+end
+
+def identifiers(): Boolean
+	return unicode.identifier_start(64) and unicode.identifier_start(12354) and unicode.identifier_part(1632)
+end
+
+def scalar(): String
+	return unicode.from_codepoint(128512)
+end
+
+def string_methods(): Boolean
+	return "A😀".codepoints().size() == 2 and "".empty?() and "TypeRB".include?("RB") and "ada".upcase() == "ADA"
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{consumerSource}, Options{Mode: mode, GoModule: "example.com/unicode-app", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected compiler-owned Unicode package: %v", mode, err)
+		}
+		var consumer, runtime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/unicode/index":
+				runtime = artifact
+			}
+		}
+		if consumer == nil || runtime == nil {
+			t.Fatalf("%s did not emit consumer and Unicode runtime: %#v", mode, artifacts)
+		}
+		consumerWants := map[string][]string{
+			"go": {
+				`import "example.com/unicode-app/trb/std/unicode"`,
+				`unicode.UnicodeLetter(65)`,
+				`unicode.UnicodeFromCodepoint(128512)`,
+				`func(value string) []int`,
+			},
+			"ruby": {
+				`require_relative "./trb/std/unicode/index"`,
+				`Unicode.letter(65)`,
+				`Unicode.from_codepoint(128512)`,
+				`"A😀".codepoints`,
+			},
+			"typescript": {
+				`import * as unicode from "./trb/std/unicode/index.ts";`,
+				`unicode.Unicode.letter(65)`,
+				`unicode.Unicode.from_codepoint(128512)`,
+				`Array.from("A😀", (value): number => value.codePointAt(0)!)`,
+			},
+		}[mode]
+		for _, want := range consumerWants {
+			if output := string(consumer.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s Unicode consumer is missing %q:\n%s", mode, want, output)
+			}
+		}
+		runtimeWants := map[string][]string{
+			"go":         {`var UnicodeDataVersion string = "15.0.0"`, `func UnicodeLetter(value int) bool`, `func inRanges(value int, ranges [][]int) bool`},
+			"ruby":       {`class Unicode`, `UNICODE_DATA_VERSION = "15.0.0"`, `def self.letter(value)`, `def _in_ranges(value, ranges)`},
+			"typescript": {`export class Unicode`, `export const UNICODE_DATA_VERSION: string = "15.0.0";`, `static letter(value: number): boolean`, `export function _in_ranges(value: number, ranges: Array<Array<number>>): boolean`},
+		}[mode]
+		for _, want := range runtimeWants {
+			if output := string(runtime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s Unicode runtime is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestUnicodePackageDiagnosticsAreModeIndependent(t *testing.T) {
+	wrongType := []byte("import trb/std/unicode\ndef bad(): Boolean\n\treturn unicode.letter(\"A\")\nend\n")
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("bad.trb", wrongType, mode); err == nil || !strings.Contains(err.Error(), "argument 1 to letter() has type String, expected Integer") {
+			t.Fatalf("%s: expected Unicode argument diagnostic, got %v", mode, err)
+		}
+	}
+}
+
+func TestCompilerOwnedUnicodeSupportsNamedImportsAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/named.trb",
+		ModulePath: "named",
+		Package:    "named",
+		Source: []byte(`import { letter, from_codepoint } from trb/std/unicode
+
+def accepted(): Boolean
+	return letter(12354)
+end
+
+def character(): String
+	return from_codepoint(128512)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go":         {`import "example.com/unicode-named/trb/std/unicode"`, `return unicode.Letter(12354)`, `return unicode.FromCodepoint(128512)`},
+		"ruby":       {`require_relative "./trb/std/unicode/index"`, `return letter(12354)`, `return from_codepoint(128512)`},
+		"typescript": {`import { from_codepoint, letter } from "./trb/std/unicode/index.ts";`, `return letter(12354);`, `return from_codepoint(128512);`},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/unicode-named", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected named Unicode imports: %v", mode, err)
+		}
+		for _, artifact := range artifacts {
+			if artifact.IR.ModulePath != "named" {
+				continue
+			}
+			for _, want := range wants[mode] {
+				if output := string(artifact.Output); !strings.Contains(output, want) {
+					t.Fatalf("generated %s named Unicode consumer is missing %q:\n%s", mode, want, output)
+				}
+			}
+		}
+	}
+}
+
 func TestPortableResultPackageLowersAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

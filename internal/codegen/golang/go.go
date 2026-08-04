@@ -663,6 +663,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		if n.Owner != "" {
 			return goConstantIdentifier(n.Owner, n.Name)
 		}
+		if isUpper(n.Name) {
+			return goConstantIdentifier("", n.Name)
+		}
 		return goIdentifier(n.Name, isUpper(n.Name))
 	case *ir.Literal:
 		if n.Kind == "nil" {
@@ -876,6 +879,17 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 }
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	unicodeAlias := "unicode"
+	reference := expressionReference(call.Callee)
+	if reference != nil && reference.Alias != "" {
+		unicodeAlias = goImportAlias(reference.Alias)
+	}
+	unicodeCall := func(symbol string) string {
+		if _, named := call.Callee.(*ir.Identifier); named {
+			return unicodeAlias + "." + goMethodName(symbol)
+		}
+		return unicodeAlias + ".Unicode" + goMethodName(symbol)
+	}
 	switch name {
 	case "trb.std.io.puts":
 		g.requireImport("fmt", "")
@@ -883,6 +897,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"
+	case "trb.std.strings.empty":
+		return arguments[0] + " == \"\""
 	case "trb.std.strings.uppercase":
 		g.requireImport("strings", "")
 		return "strings.ToUpper(" + arguments[0] + ")"
@@ -892,6 +908,29 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.strings.contains":
 		g.requireImport("strings", "")
 		return "strings.Contains(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.strings.codepoints":
+		g.requireImport("unicode/utf8", "utf8")
+		return "func(value string) []int { result := make([]int, 0, utf8.RuneCountInString(value)); for _, codepoint := range value { result = append(result, int(codepoint)) }; return result }(" + arguments[0] + ")"
+	case "trb.std.unicode.version":
+		return unicodeCall("version") + "()"
+	case "trb.std.unicode.valid_scalar":
+		return unicodeCall("valid_scalar") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.letter":
+		return unicodeCall("letter") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.digit":
+		return unicodeCall("digit") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.uppercase":
+		return unicodeCall("uppercase") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.lowercase":
+		return unicodeCall("lowercase") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.whitespace":
+		return unicodeCall("whitespace") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.identifier_start":
+		return unicodeCall("identifier_start") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.identifier_part":
+		return unicodeCall("identifier_part") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.from_codepoint":
+		return unicodeCall("from_codepoint") + "(" + arguments[0] + ")"
 	case "trb.std.bytes.from_string":
 		return "[]byte(" + arguments[0] + ")"
 	case "trb.std.bytes.to_string":

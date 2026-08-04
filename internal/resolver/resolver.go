@@ -454,10 +454,15 @@ func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagn
 		if len(node.Symbols) > 0 {
 			resolved.Symbols = append([]string(nil), node.Symbols...)
 		} else {
+			seen := map[string]bool{}
 			for name := range definition.Symbols {
 				resolved.Symbols = append(resolved.Symbols, name)
+				seen[name] = true
 			}
 			for name := range resolved.Exports {
+				if seen[name] {
+					continue
+				}
 				resolved.Symbols = append(resolved.Symbols, name)
 			}
 		}
@@ -560,17 +565,15 @@ func finalizeProjectImport(resolved *Import) (*Import, []diagnostic.Diagnostic) 
 }
 
 func bindingFor(imported *Import, name string) (Binding, bool) {
+	if imported.Definition != nil {
+		if symbol, ok := imported.Definition.Symbols[name]; ok {
+			copy := symbol
+			return Binding{Import: imported, Name: name, Library: &copy}, true
+		}
+	}
 	if exported, ok := imported.Exports[name]; ok {
 		copy := exported
 		return Binding{Import: imported, Name: name, Export: &copy}, true
-	}
-	if imported.Definition != nil {
-		symbol, ok := imported.Definition.Symbols[name]
-		if !ok {
-			return Binding{}, false
-		}
-		copy := symbol
-		return Binding{Import: imported, Name: name, Library: &copy}, true
 	}
 	return Binding{}, false
 }

@@ -420,7 +420,7 @@ func (g *generator) expr(expression ir.Expression) string {
 					parts = append([]string{g.expr(member.Receiver)}, parts...)
 				}
 			}
-			return g.intrinsic(reference.Intrinsic, parts)
+			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
 		return g.expr(n.Callee) + "(" + strings.Join(parts, ", ") + ")"
 	case *ir.EnumConstruct:
@@ -470,18 +470,48 @@ func (g *generator) unaryOperand(expression ir.Expression) string {
 	}
 }
 
-func (g *generator) intrinsic(name string, arguments []string) string {
+func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	unicodeCall := func(symbol string) string {
+		if _, named := call.Callee.(*ir.Identifier); named {
+			return symbol
+		}
+		return "Unicode." + symbol
+	}
 	switch name {
 	case "trb.std.io.puts":
 		return "$stdout.puts(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.strings.length":
 		return arguments[0] + ".each_codepoint.count"
+	case "trb.std.strings.empty":
+		return arguments[0] + ".empty?"
 	case "trb.std.strings.uppercase":
 		return arguments[0] + ".upcase"
 	case "trb.std.strings.lowercase":
 		return arguments[0] + ".downcase"
 	case "trb.std.strings.contains":
 		return arguments[0] + ".include?(" + arguments[1] + ")"
+	case "trb.std.strings.codepoints":
+		return arguments[0] + ".codepoints"
+	case "trb.std.unicode.version":
+		return unicodeCall("version") + "()"
+	case "trb.std.unicode.valid_scalar":
+		return unicodeCall("valid_scalar") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.letter":
+		return unicodeCall("letter") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.digit":
+		return unicodeCall("digit") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.uppercase":
+		return unicodeCall("uppercase") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.lowercase":
+		return unicodeCall("lowercase") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.whitespace":
+		return unicodeCall("whitespace") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.identifier_start":
+		return unicodeCall("identifier_start") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.identifier_part":
+		return unicodeCall("identifier_part") + "(" + arguments[0] + ")"
+	case "trb.std.unicode.from_codepoint":
+		return unicodeCall("from_codepoint") + "(" + arguments[0] + ")"
 	case "trb.std.bytes.from_string":
 		return "(" + arguments[0] + ").encode(Encoding::UTF_8).b"
 	case "trb.std.bytes.to_string":
