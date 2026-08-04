@@ -891,6 +891,30 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	pathCall := func(symbol string) string {
 		return pathAlias + "." + goMethodName(symbol)
 	}
+	filesystemResultType := func() (string, string, string) {
+		result := call.ExprType()
+		if len(result.Args) != 2 {
+			return g.goType(result), "any", "any"
+		}
+		return g.goType(result), g.goType(result.Args[0]), g.goType(result.Args[1])
+	}
+	filesystemOK := func(value string) string {
+		_, successType, errorType := filesystemResultType()
+		alias := g.typeAliases["Result"]
+		if alias == "" {
+			alias = "__trb_result"
+		}
+		return alias + ".NewResultOk[" + successType + ", " + errorType + "](" + value + ")"
+	}
+	filesystemError := func(operation, path, message string) string {
+		_, successType, errorType := filesystemResultType()
+		alias := g.typeAliases["Result"]
+		if alias == "" {
+			alias = "__trb_result"
+		}
+		value := errorType + "{Operation: " + strconv.Quote(operation) + ", Path: " + path + ", Message: " + message + "}"
+		return alias + ".NewResultErr[" + successType + ", " + errorType + "](" + value + ")"
+	}
 	switch name {
 	case "trb.std.io.puts":
 		g.requireImport("fmt", "")
@@ -909,6 +933,37 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return pathCall("base") + "(" + arguments[0] + ")"
 	case "trb.std.path.directory":
 		return pathCall("directory") + "(" + arguments[0] + ")"
+	case "trb.internal.filesystem.exists":
+		g.requireImport("errors", "")
+		g.requireImport("os", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; _, err := os.Stat(path); if err == nil { return " + filesystemOK("true") + " }; if errors.Is(err, os.ErrNotExist) { return " + filesystemOK("false") + " }; return " + filesystemError("exists", "path", "err.Error()") + " }()"
+	case "trb.internal.filesystem.read_text":
+		g.requireImport("os", "")
+		g.requireImport("strings", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; data, err := os.ReadFile(path); if err != nil { return " + filesystemError("read_text", "path", "err.Error()") + " }; return " + filesystemOK("strings.ToValidUTF8(string(data), \"�\")") + " }()"
+	case "trb.internal.filesystem.read_bytes":
+		g.requireImport("os", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; data, err := os.ReadFile(path); if err != nil { return " + filesystemError("read_bytes", "path", "err.Error()") + " }; return " + filesystemOK("data") + " }()"
+	case "trb.internal.filesystem.write_text":
+		g.requireImport("os", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; err := os.WriteFile(path, []byte(" + arguments[1] + "), 0o644); if err != nil { return " + filesystemError("write_text", "path", "err.Error()") + " }; return " + filesystemOK("true") + " }()"
+	case "trb.internal.filesystem.write_bytes":
+		g.requireImport("os", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; err := os.WriteFile(path, " + arguments[1] + ", 0o644); if err != nil { return " + filesystemError("write_bytes", "path", "err.Error()") + " }; return " + filesystemOK("true") + " }()"
+	case "trb.internal.filesystem.create_directory":
+		g.requireImport("os", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; err := os.MkdirAll(path, 0o755); if err != nil { return " + filesystemError("create_directory", "path", "err.Error()") + " }; return " + filesystemOK("true") + " }()"
+	case "trb.internal.filesystem.list":
+		g.requireImport("os", "")
+		g.requireImport("slices", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; entries, err := os.ReadDir(path); if err != nil { return " + filesystemError("list", "path", "err.Error()") + " }; names := make([]string, 0, len(entries)); for _, entry := range entries { names = append(names, entry.Name()) }; slices.Sort(names); return " + filesystemOK("names") + " }()"
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"

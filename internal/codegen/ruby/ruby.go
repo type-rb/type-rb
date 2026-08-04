@@ -483,6 +483,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return "Path." + symbol
 	}
+	filesystemOK := func(value string) string {
+		return "Result::Ok.new(" + value + ")"
+	}
+	filesystemError := func(operation, path, message string) string {
+		value := "FileError.new(operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ")"
+		return "Result::Err.new(" + value + ")"
+	}
 	switch name {
 	case "trb.std.io.puts":
 		return "$stdout.puts(" + strings.Join(arguments, ", ") + ")"
@@ -500,6 +507,21 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return pathCall("base") + "(" + arguments[0] + ")"
 	case "trb.std.path.directory":
 		return pathCall("directory") + "(" + arguments[0] + ")"
+	case "trb.internal.filesystem.exists":
+		return "->(path) { begin; File.stat(path); " + filesystemOK("true") + "; rescue Errno::ENOENT; " + filesystemOK("false") + "; rescue StandardError => error; " + filesystemError("exists", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.internal.filesystem.read_text":
+		value := "File.binread(path).force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)"
+		return "->(path) { begin; " + filesystemOK(value) + "; rescue StandardError => error; " + filesystemError("read_text", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.internal.filesystem.read_bytes":
+		return "->(path) { begin; " + filesystemOK("File.binread(path).b") + "; rescue StandardError => error; " + filesystemError("read_bytes", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.internal.filesystem.write_text":
+		return "->(path, value) { begin; File.binwrite(path, value.encode(Encoding::UTF_8)); " + filesystemOK("true") + "; rescue StandardError => error; " + filesystemError("write_text", "path", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.internal.filesystem.write_bytes":
+		return "->(path, value) { begin; File.binwrite(path, value); " + filesystemOK("true") + "; rescue StandardError => error; " + filesystemError("write_bytes", "path", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.internal.filesystem.create_directory":
+		return "->(path) { begin; require \"fileutils\"; FileUtils.mkdir_p(path); " + filesystemOK("true") + "; rescue StandardError => error; " + filesystemError("create_directory", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.internal.filesystem.list":
+		return "->(path) { begin; " + filesystemOK("Dir.children(path).sort") + "; rescue StandardError => error; " + filesystemError("list", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
 	case "trb.std.strings.length":
 		return arguments[0] + ".each_codepoint.count"
 	case "trb.std.strings.empty":

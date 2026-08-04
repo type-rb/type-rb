@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -236,6 +237,60 @@ func TestReplEvaluatesPortablePathAcrossModes(t *testing.T) {
 		want := "\"/\" : String\n\"a/c\" : String\n\"/srv/app\" : String\n\"/srv/data\" : String\ntrue : Boolean\n[\"srv\", \"app\", \"main.trb\"] : Array<String>\n\"main.trb\" : String\n\"/srv/app\" : String\n\".\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s path REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-filesystem-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		directory := filepath.Join(root, "data")
+		textPath := filepath.Join(directory, "note.txt")
+		bytesPath := filepath.Join(directory, "value.bin")
+		missingPath := filepath.Join(directory, "missing.txt")
+		input := strings.Join([]string{
+			"import { FileError, create_directory, exists, list, read_bytes, read_text, write_bytes, write_text } from trb/std/filesystem",
+			"import { Result } from trb/std/result",
+			"def describe(value: Result<String, FileError>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end",
+			"create_directory(" + strconv.Quote(directory) + ")",
+			"write_text(" + strconv.Quote(textPath) + ", \"A😀\")",
+			"read_text(" + strconv.Quote(textPath) + ")",
+			"exists(" + strconv.Quote(textPath) + ")",
+			"exists(" + strconv.Quote(missingPath) + ")",
+			"list(" + strconv.Quote(directory) + ")",
+			"write_bytes(" + strconv.Quote(bytesPath) + ", \"B\".to_bytes())",
+			"read_bytes(" + strconv.Quote(bytesPath) + ")",
+			"describe(read_text(" + strconv.Quote(missingPath) + "))",
+			":quit",
+		}, "\n") + "\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "Result::Ok(value: true) : Result<Boolean, FileError>\n" +
+			"Result::Ok(value: true) : Result<Boolean, FileError>\n" +
+			"Result::Ok(value: \"A😀\") : Result<String, FileError>\n" +
+			"Result::Ok(value: true) : Result<Boolean, FileError>\n" +
+			"Result::Ok(value: false) : Result<Boolean, FileError>\n" +
+			"Result::Ok(value: [\"note.txt\"]) : Result<Array<String>, FileError>\n" +
+			"Result::Ok(value: true) : Result<Boolean, FileError>\n" +
+			"Result::Ok(value: Bytes[66]) : Result<Bytes, FileError>\n" +
+			"\"read_text\" : String\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s filesystem REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
 	}
 }
@@ -731,6 +786,71 @@ func TestRunCompilerOwnedUnicodeAcrossAvailableBackends(t *testing.T) {
 		}
 		if want := "15.0.0\ntrue\n😀\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s Unicode program output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby filesystem run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript filesystem run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-filesystem-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		directory := filepath.Join(root, "data")
+		textPath := filepath.Join(directory, "note.txt")
+		missingPath := filepath.Join(directory, "missing.txt")
+		bmpPath := filepath.Join(directory, "\uE000")
+		astralPath := filepath.Join(directory, "\U00010000")
+		source := "import { FileError, create_directory, exists, list, read_text, write_text } from trb/std/filesystem\n" +
+			"import { Result } from trb/std/result\n\n" +
+			"def text_or_operation(value: Result<String, FileError>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end\n" +
+			"def names_or_error(value: Result<Array<String>, FileError>): Array<String>; case value; when Result::Ok(names); return names; when Result::Err(error); return [error.operation]; end; end\n" +
+			"def boolean_or_false(value: Result<Boolean, FileError>): Boolean; case value; when Result::Ok(found); return found; when Result::Err(error); return error.operation.empty?(); end; end\n\n" +
+			"def main()\n" +
+			"\tcreate_directory(" + strconv.Quote(directory) + ")\n" +
+			"\twrite_text(" + strconv.Quote(textPath) + ", \"A😀\")\n" +
+			"\twrite_text(" + strconv.Quote(astralPath) + ", \"\")\n" +
+			"\twrite_text(" + strconv.Quote(bmpPath) + ", \"\")\n" +
+			"\tputs(text_or_operation(read_text(" + strconv.Quote(textPath) + ")))\n" +
+			"\tputs(text_or_operation(read_text(" + strconv.Quote(missingPath) + ")))\n" +
+			"\tputs(names_or_error(list(" + strconv.Quote(directory) + ")).join(\",\"))\n" +
+			"\tputs(boolean_or_false(exists(" + strconv.Quote(textPath) + ")))\n" +
+			"\treturn\n" +
+			"end\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "A😀\nread_text\nnote.txt,\uE000,\U00010000\ntrue\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s filesystem program output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

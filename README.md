@@ -463,6 +463,23 @@ parts := path.components("/srv/type-rb")
 
 Paths always use `/` and do not depend on the target OS or current directory.
 
+Host filesystem access is explicit and returns portable Result values:
+
+```trb
+import { FileError, read_text } from trb/std/filesystem
+import { Result } from trb/std/result
+
+def load_config(path: String): Result<String, FileError>
+	return read_text(path)
+end
+```
+
+`trb/std/filesystem` also provides existence checks, UTF-8 and byte writes,
+recursive directory creation, and sorted directory listing. It accepts host
+paths; use `trb/std/path` separately when target-independent lexical path
+manipulation is required. All failures carry `operation`, `path`, and `message`
+in `FileError` instead of leaking target exceptions.
+
 Unicode scalar classification comes from one compiler-owned data set shared by
 all targets:
 
@@ -481,8 +498,9 @@ identifier classification.
 
 v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/bytes`,
 `trb/std/string_builder`, `trb/std/unicode`, `trb/std/arrays`,
-`trb/std/numbers`, and `trb/std/result`. Result is imported as a named portable
-type and handled through ordinary exhaustive enum matching:
+`trb/std/hashes`, `trb/std/path`, `trb/std/filesystem`, `trb/std/numbers`, and
+`trb/std/result`. Result is imported as a named portable type and handled
+through ordinary exhaustive enum matching:
 
 ```trb
 import { Result } from trb/std/result

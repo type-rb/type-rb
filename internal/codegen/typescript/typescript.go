@@ -68,7 +68,22 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.Namespace && n.Alias != "" {
 			g.line("import * as " + n.Alias + " from " + strconv.Quote(importPath) + ";")
 		} else if len(n.Symbols) > 0 {
-			g.line("import { " + strings.Join(n.Symbols, ", ") + " } from " + strconv.Quote(importPath) + ";")
+			values := make([]string, 0, len(n.Symbols))
+			types := make([]string, 0, len(n.Symbols))
+			for _, symbol := range n.Symbols {
+				switch n.SymbolKinds[symbol] {
+				case "record", "interface":
+					types = append(types, symbol)
+				default:
+					values = append(values, symbol)
+				}
+			}
+			if len(values) > 0 {
+				g.line("import { " + strings.Join(values, ", ") + " } from " + strconv.Quote(importPath) + ";")
+			}
+			if len(types) > 0 {
+				g.line("import type { " + strings.Join(types, ", ") + " } from " + strconv.Quote(importPath) + ";")
+			}
 		} else if n.Alias != "" {
 			g.line("import * as " + n.Alias + " from " + strconv.Quote(importPath) + ";")
 		} else {
@@ -640,6 +655,24 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return pathAlias + "." + symbol
 	}
+	filesystemResultType := func() (string, string, string) {
+		result := call.ExprType()
+		if len(result.Args) != 2 {
+			return tsType(result), "unknown", "unknown"
+		}
+		return tsType(result), tsType(result.Args[0]), tsType(result.Args[1])
+	}
+	filesystemOK := func(value string) string {
+		_, successType, errorType := filesystemResultType()
+		return "Result.Ok<" + successType + ", " + errorType + ">(" + value + ")"
+	}
+	filesystemError := func(operation, path, message string) string {
+		_, successType, errorType := filesystemResultType()
+		value := "{ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + " } satisfies " + errorType
+		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
+	}
+	filesystemHandle := `const fs = (globalThis as any).process?.getBuiltinModule?.("fs"); if (fs === undefined) { throw new Error("filesystem is unavailable"); } `
+	filesystemMessage := `const message = error instanceof Error ? error.message : String(error); `
 	switch name {
 	case "trb.std.io.puts":
 		return "console.log(" + strings.Join(arguments, ", ") + ")"
@@ -657,6 +690,28 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return pathCall("base") + "(" + arguments[0] + ")"
 	case "trb.std.path.directory":
 		return pathCall("directory") + "(" + arguments[0] + ")"
+	case "trb.internal.filesystem.exists":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "fs.statSync(__trbPath); return " + filesystemOK("true") + "; } catch (error) { if ((error as any)?.code === \"ENOENT\") { return " + filesystemOK("false") + "; } " + filesystemMessage + "return " + filesystemError("exists", "__trbPath", "message") + "; } })()"
+	case "trb.internal.filesystem.read_text":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "const data: Uint8Array = fs.readFileSync(__trbPath); return " + filesystemOK("new TextDecoder(\"utf-8\").decode(data)") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("read_text", "__trbPath", "message") + "; } })()"
+	case "trb.internal.filesystem.read_bytes":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "return " + filesystemOK("new Uint8Array(fs.readFileSync(__trbPath))") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("read_bytes", "__trbPath", "message") + "; } })()"
+	case "trb.internal.filesystem.write_text":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "fs.writeFileSync(__trbPath, " + arguments[1] + ", { encoding: \"utf8\" }); return " + filesystemOK("true") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("write_text", "__trbPath", "message") + "; } })()"
+	case "trb.internal.filesystem.write_bytes":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "fs.writeFileSync(__trbPath, " + arguments[1] + "); return " + filesystemOK("true") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("write_bytes", "__trbPath", "message") + "; } })()"
+	case "trb.internal.filesystem.create_directory":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "fs.mkdirSync(__trbPath, { recursive: true }); return " + filesystemOK("true") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("create_directory", "__trbPath", "message") + "; } })()"
+	case "trb.internal.filesystem.list":
+		resultType, _, _ := filesystemResultType()
+		compare := "(left, right) => { const leftBytes = new TextEncoder().encode(left); const rightBytes = new TextEncoder().encode(right); const length = Math.min(leftBytes.length, rightBytes.length); for (let index = 0; index < length; index += 1) { if (leftBytes[index] !== rightBytes[index]) { return leftBytes[index]! - rightBytes[index]!; } } return leftBytes.length - rightBytes.length; }"
+		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "const names = (fs.readdirSync(__trbPath) as Array<string>).sort(" + compare + "); return " + filesystemOK("names") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("list", "__trbPath", "message") + "; } })()"
 	case "trb.std.strings.length":
 		return "Array.from(" + arguments[0] + ").length"
 	case "trb.std.strings.empty":

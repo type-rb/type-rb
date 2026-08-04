@@ -51,6 +51,7 @@ type Package struct {
 	RuntimeAlias string
 	Source       string
 	Kind         Kind
+	Internal     bool
 	Targets      map[string]bool
 	NativeSyntax bool
 	TypeProvider string
@@ -78,6 +79,7 @@ var anyType = types.FromName("Any")
 var typeT = types.FromName("T")
 var typeK = types.FromName("K")
 var typeV = types.FromName("V")
+var fileErrorType = types.FromName("FileError")
 
 var registry = map[string]*Package{
 	"trb/std/result": {
@@ -122,6 +124,32 @@ end
 			"components": unary("components", "trb.std.path.components", stringType, arrayOf(stringType)),
 			"base":       unary("base", "trb.std.path.base", stringType, stringType),
 			"directory":  unary("directory", "trb.std.path.directory", stringType, stringType),
+		},
+	},
+	"trb/std/filesystem": {
+		Path:       "trb/std/filesystem",
+		ModulePath: "trb/std/filesystem/index",
+		Source:     filesystemSource(),
+		Kind:       Portable,
+		Symbols:    map[string]Symbol{},
+	},
+	"trb/internal/filesystem": {
+		Path:     "trb/internal/filesystem",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"exists":      filesystemUnary("exists", booleanType),
+			"read_text":   filesystemUnary("read_text", stringType),
+			"read_bytes":  filesystemUnary("read_bytes", bytesType),
+			"write_text":  filesystemWrite("write_text", stringType),
+			"write_bytes": filesystemWrite("write_bytes", bytesType),
+			"create_directory": {
+				Name:       "create_directory",
+				Intrinsic:  "trb.internal.filesystem.create_directory",
+				Parameters: []Parameter{{Name: "path", Type: stringType}},
+				Return:     filesystemResult(booleanType),
+			},
+			"list": filesystemUnary("list", arrayOf(stringType)),
 		},
 	},
 	"trb/std/strings": {
@@ -510,6 +538,28 @@ func arrayOf(element types.Type) types.Type {
 
 func hashOf(key, value types.Type) types.Type {
 	return types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{key, value}}
+}
+
+func filesystemResult(value types.Type) types.Type {
+	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, fileErrorType}}
+}
+
+func filesystemUnary(name string, result types.Type) Symbol {
+	return Symbol{
+		Name:       name,
+		Intrinsic:  "trb.internal.filesystem." + name,
+		Parameters: []Parameter{{Name: "path", Type: stringType}},
+		Return:     filesystemResult(result),
+	}
+}
+
+func filesystemWrite(name string, value types.Type) Symbol {
+	return Symbol{
+		Name:       name,
+		Intrinsic:  "trb.internal.filesystem." + name,
+		Parameters: []Parameter{{Name: "path", Type: stringType}, {Name: "value", Type: value}},
+		Return:     filesystemResult(booleanType),
+	}
 }
 
 func Lookup(packagePath string) (*Package, bool) {

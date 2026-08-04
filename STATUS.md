@@ -73,8 +73,9 @@ Implemented:
   and interface conformance, with target-relative backend imports.
 - Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`, `trb/std/hashes`,
   `trb/std/bytes`, `trb/std/string_builder`, `trb/std/unicode`,
-  `trb/std/path`, `trb/std/numbers`, and `trb/std/result` packages, plus
-  mode-checked Ruby, Go, and TypeScript platform packages.
+  `trb/std/path`, `trb/std/filesystem`, `trb/std/numbers`, and
+  `trb/std/result` packages, plus mode-checked Ruby, Go, and TypeScript platform
+  packages.
 - Compiler-owned receiver-method contracts shared with portable package APIs,
   initially covering `Integer#to_s`, `String#to_i`, and Unicode-aware
   `String#size` across the checker, typed IR, all backends, and the REPL.
@@ -97,6 +98,10 @@ Implemented:
 - A `/`-based portable lexical path library written in compiler-owned TypeRB,
   with normalization, joining, inspection and decomposition shared by all
   generated targets and the REPL.
+- A compiler-owned portable filesystem facade with typed `FileError` values,
+  UTF-8 and raw-byte I/O, existence checks, recursive directory creation,
+  sorted listing, an inaccessible internal intrinsic boundary, runnable Go,
+  Ruby, and TypeScript output, and matching typed-IR REPL execution.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.
@@ -141,7 +146,7 @@ semantic type model, and source maps are later work.
 
 The broader path to practical production use is tracked in `ROADMAP.md`.
 
-1. Add filesystem/process APIs required to move the lexer/parser into the
+1. Add JSONC and process APIs required to move the lexer/parser into the
    stage-1 self-host tree. Revisit concise Result propagation syntax only after
    explicit Result handling has been exercised in real application code.
 2. Generate runtime JSON decoders from record contracts and add wire-compatible

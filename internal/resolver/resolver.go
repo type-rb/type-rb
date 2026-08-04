@@ -128,11 +128,12 @@ type Result struct {
 }
 
 type Options struct {
-	Mode         string
-	SourceRoot   string
-	Filename     string
-	Catalog      *Catalog
-	Declarations *declaration.Catalog
+	Mode          string
+	SourceRoot    string
+	Filename      string
+	CompilerOwned bool
+	Catalog       *Catalog
+	Declarations  *declaration.Catalog
 }
 
 type Module struct {
@@ -425,6 +426,9 @@ func ValidateImportGraph(catalog *Catalog, results map[string]Result) map[string
 
 func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagnostic.Diagnostic) {
 	if definition, ok := stdlib.Lookup(node.Path); ok {
+		if definition.Internal && !options.CompilerOwned {
+			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s is internal to the TypeRB standard library", node.Path))}
+		}
 		resolved := &Import{
 			Node:       node,
 			Kind:       StandardImport,

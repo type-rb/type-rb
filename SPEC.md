@@ -553,8 +553,27 @@ algorithm in every backend. `clean` removes repeated separators and `.`
 segments, resolves `..` without moving above an absolute root, and returns `.`
 for an empty relative result. This package does not inspect the process working
 directory, access the filesystem, recognize target-native drive letters or UNC
-paths, or silently select target OS path rules. Filesystem APIs may explicitly
-bridge these logical paths to the host in a later standard-library layer.
+paths, or silently select target OS path rules.
+
+`trb/std/filesystem` is the explicit host-filesystem bridge. It is
+compiler-owned TypeRB source and exports `FileError`, `exists`, `read_text`,
+`read_bytes`, `write_text`, `write_bytes`, `create_directory`, and `list`.
+Every operation returns `Result<T, FileError>`; filesystem failures are values,
+not target-specific exceptions. `FileError` records the portable `operation`,
+the requested `path`, and a human-readable target message. The compiler-owned
+implementation delegates only through `trb/internal/filesystem`, which cannot
+be imported by application code.
+
+Filesystem paths are host paths rather than `trb/std/path` logical paths.
+`exists` returns `Ok(false)` only for a missing path and returns `Err` for other
+inspection failures. Text is written as UTF-8 and invalid UTF-8 is replaced by
+U+FFFD when read. Byte operations preserve raw bytes. `create_directory` is
+recursive, writes do not implicitly create parent directories, and `list`
+returns immediate child names sorted by UTF-8 byte sequence rather than
+recursive or absolute paths. Successful mutating operations return `Ok(true)`
+in v0.1. The TypeScript backend uses the current Node host filesystem; a
+runtime without that host API returns `Err` rather than exposing
+browser-specific behavior.
 
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal

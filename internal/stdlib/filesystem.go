@@ -1,0 +1,41 @@
+package stdlib
+
+func filesystemSource() string {
+	return `import { Result } from trb/std/result
+import trb/internal/filesystem as native_fs
+
+record FileError
+	operation: String
+	path: String
+	message: String
+end
+
+def exists(path: String): Result<Boolean, FileError>
+	return native_fs.exists(path)
+end
+
+def read_text(path: String): Result<String, FileError>
+	return native_fs.read_text(path)
+end
+
+def read_bytes(path: String): Result<Bytes, FileError>
+	return native_fs.read_bytes(path)
+end
+
+def write_text(path: String, value: String): Result<Boolean, FileError>
+	return native_fs.write_text(path, value)
+end
+
+def write_bytes(path: String, value: Bytes): Result<Boolean, FileError>
+	return native_fs.write_bytes(path, value)
+end
+
+def create_directory(path: String): Result<Boolean, FileError>
+	return native_fs.create_directory(path)
+end
+
+def list(path: String): Result<Array<String>, FileError>
+	return native_fs.list(path)
+end
+`
+}

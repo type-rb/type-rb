@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	pathpkg "path"
 	"reflect"
 	"sort"
@@ -1243,6 +1244,100 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{Type: typ, Data: pathpkg.Base(cleaned)}, nil
 		}
 		return Value{Type: typ, Data: pathpkg.Dir(cleaned)}, nil
+	case "trb.internal.filesystem.exists":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		path, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("filesystem.exists expects String")
+		}
+		_, err := os.Stat(path)
+		if err == nil {
+			return e.filesystemOK(typ, Value{Type: types.FromName("Boolean"), Data: true})
+		}
+		if os.IsNotExist(err) {
+			return e.filesystemOK(typ, Value{Type: types.FromName("Boolean"), Data: false})
+		}
+		return e.filesystemErr(typ, "exists", path, err)
+	case "trb.internal.filesystem.read_text", "trb.internal.filesystem.read_bytes":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		path, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("filesystem read expects String")
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return e.filesystemErr(typ, strings.TrimPrefix(name, "trb.internal.filesystem."), path, err)
+		}
+		if name == "trb.internal.filesystem.read_text" {
+			return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: strings.ToValidUTF8(string(data), "�")})
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(append([]byte(nil), data...))})
+	case "trb.internal.filesystem.write_text", "trb.internal.filesystem.write_bytes":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		path, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("filesystem write path expects String")
+		}
+		var data []byte
+		if name == "trb.internal.filesystem.write_text" {
+			value, stringOK := values[1].Data.(string)
+			if !stringOK {
+				return Value{}, errors.New("filesystem.write_text expects String")
+			}
+			data = []byte(value)
+		} else {
+			value, bytesOK := values[1].Data.(bytesValue)
+			if !bytesOK {
+				return Value{}, errors.New("filesystem.write_bytes expects Bytes")
+			}
+			data = []byte(value)
+		}
+		operation := strings.TrimPrefix(name, "trb.internal.filesystem.")
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			return e.filesystemErr(typ, operation, path, err)
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("Boolean"), Data: true})
+	case "trb.internal.filesystem.create_directory":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		path, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("filesystem.create_directory expects String")
+		}
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return e.filesystemErr(typ, "create_directory", path, err)
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("Boolean"), Data: true})
+	case "trb.internal.filesystem.list":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		path, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("filesystem.list expects String")
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return e.filesystemErr(typ, "list", path, err)
+		}
+		names := make([]string, len(entries))
+		for index, entry := range entries {
+			names[index] = entry.Name()
+		}
+		sort.Strings(names)
+		items := make([]Value, len(names))
+		for index, item := range names {
+			items[index] = Value{Type: types.FromName("String"), Data: item}
+		}
+		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
+		return e.filesystemOK(typ, Value{Type: arrayType, Data: &arrayValue{Items: items}})
 	case "trb.std.strings.length":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1696,6 +1791,58 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 	default:
 		return Value{}, fmt.Errorf("intrinsic %s is type-checked for mode %s but has no REPL runtime adapter", name, e.mode)
 	}
+}
+
+func (e *Evaluator) filesystemOK(resultType types.Type, value Value) (Value, error) {
+	definition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("filesystem requires trb/std/result")
+	}
+	if len(resultType.Args) == 2 {
+		value.Type = resultType.Args[0]
+	}
+	return Value{
+		Type: resultType,
+		Data: &enumValue{
+			Definition: definition,
+			Name:       "Ok",
+			Payload:    map[string]Value{"value": value},
+		},
+	}, nil
+}
+
+func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string, cause error) (Value, error) {
+	resultDefinition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("filesystem requires trb/std/result")
+	}
+	fileErrorDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileError")].(*recordDefinition)
+	if !ok {
+		return Value{}, errors.New("filesystem runtime is not loaded")
+	}
+	errorType := types.FromName("FileError")
+	if len(resultType.Args) == 2 {
+		errorType = resultType.Args[1]
+	}
+	errorValue := Value{
+		Type: errorType,
+		Data: &recordInstance{
+			Definition: fileErrorDefinition,
+			Fields: map[string]Value{
+				"operation": {Type: types.FromName("String"), Data: operation},
+				"path":      {Type: types.FromName("String"), Data: path},
+				"message":   {Type: types.FromName("String"), Data: cause.Error()},
+			},
+		},
+	}
+	return Value{
+		Type: resultType,
+		Data: &enumValue{
+			Definition: resultDefinition,
+			Name:       "Err",
+			Payload:    map[string]Value{"error": errorValue},
+		},
+	}, nil
 }
 
 func literal(node *ir.Literal) (Value, error) {

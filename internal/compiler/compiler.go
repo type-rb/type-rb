@@ -120,15 +120,21 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		}
 		programs[source.ModulePath] = program
 	}
-	for _, source := range compilerOwnedSourceUnits(programs, options) {
-		program, diagnostics := parser.Parse(source.Source)
-		configureProgram(program, options, source.ModulePath, source.Package)
-		diagnostics = append(diagnostics, modeDiagnostics(program, options.Mode)...)
-		if hasErrors(diagnostics) {
-			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
+	for {
+		compilerOwned := compilerOwnedSourceUnits(programs, options)
+		if len(compilerOwned) == 0 {
+			break
 		}
-		units = append(units, source)
-		programs[source.ModulePath] = program
+		for _, source := range compilerOwned {
+			program, diagnostics := parser.Parse(source.Source)
+			configureProgram(program, options, source.ModulePath, source.Package)
+			diagnostics = append(diagnostics, modeDiagnostics(program, options.Mode)...)
+			if hasErrors(diagnostics) {
+				return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
+			}
+			units = append(units, source)
+			programs[source.ModulePath] = program
+		}
 	}
 	sort.Slice(units, func(i, j int) bool { return units[i].ModulePath < units[j].ModulePath })
 
@@ -154,11 +160,12 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	resolutions := make(map[string]resolver.Result, len(units))
 	for _, source := range units {
 		resolved, diagnostics := resolver.Resolve(programs[source.ModulePath], resolver.Options{
-			Mode:         options.Mode,
-			SourceRoot:   options.SourceRoot,
-			Filename:     source.Filename,
-			Catalog:      catalog,
-			Declarations: declarations,
+			Mode:          options.Mode,
+			SourceRoot:    options.SourceRoot,
+			Filename:      source.Filename,
+			CompilerOwned: source.CompilerOwned,
+			Catalog:       catalog,
+			Declarations:  declarations,
 		})
 		if hasErrors(diagnostics) {
 			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
@@ -210,6 +217,9 @@ func compilerOwnedSourceUnits(programs map[string]*ast.Program, options Options)
 			}
 			definition, exists := stdlib.Lookup(imported.Path)
 			if !exists || definition.Source == "" || definition.ModulePath == "" {
+				continue
+			}
+			if _, alreadyLoaded := programs[definition.ModulePath]; alreadyLoaded {
 				continue
 			}
 			definitions[definition.ModulePath] = definition

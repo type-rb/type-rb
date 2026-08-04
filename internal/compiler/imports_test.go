@@ -836,6 +836,107 @@ end
 	}
 }
 
+func TestPortableFilesystemPackageLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { FileError, read_text } from trb/std/filesystem
+import { Result } from trb/std/result
+
+def load(path: String): Result<String, FileError>
+	return read_text(path)
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/filesystem-app", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected the standard filesystem package: %v", mode, err)
+		}
+		var consumer, filesystemRuntime, resultRuntime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/filesystem/index":
+				filesystemRuntime = artifact
+			case "trb/std/result/index":
+				resultRuntime = artifact
+			}
+		}
+		if consumer == nil || filesystemRuntime == nil || resultRuntime == nil {
+			t.Fatalf("%s did not compile the consumer, filesystem runtime, and transitive Result runtime: %#v", mode, artifacts)
+		}
+		consumerWants := map[string][]string{
+			"go":         {`"example.com/filesystem-app/trb/std/filesystem"`, "filesystem.ReadText(path)"},
+			"ruby":       {`require_relative "./trb/std/filesystem/index"`, "read_text(path)"},
+			"typescript": {`import { read_text } from "./trb/std/filesystem/index.ts";`, `import type { FileError } from "./trb/std/filesystem/index.ts";`, "read_text(path)"},
+		}[mode]
+		for _, want := range consumerWants {
+			if output := string(consumer.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s filesystem consumer is missing %q:\n%s", mode, want, output)
+			}
+		}
+		runtimeWants := map[string][]string{
+			"go":         {"type FileError struct", "os.ReadFile(path)", "__trb_result.NewResultErr[string, FileError]", "slices.Sort(names)"},
+			"ruby":       {"FileError = Data.define(:operation, :path, :message)", "File.binread(path)", "Result::Err.new", "Dir.children(path).sort"},
+			"typescript": {"export interface FileError", `getBuiltinModule?.("fs")`, "Result.Err<string, FileError>", "fs.readdirSync(__trbPath)"},
+		}[mode]
+		for _, want := range runtimeWants {
+			if output := string(filesystemRuntime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s filesystem runtime is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableFilesystemPackageDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		modulePath string
+		want       string
+	}{
+		{
+			name:   "read path",
+			source: "import { read_text } from trb/std/filesystem\nvalue := read_text(1)\n",
+			want:   "argument 1 to read_text() has type Integer, expected String",
+		},
+		{
+			name:   "write bytes value",
+			source: "import { write_bytes } from trb/std/filesystem\nvalue := write_bytes(\"output.bin\", \"not bytes\")\n",
+			want:   "argument 2 to write_bytes() has type String, expected Bytes",
+		},
+		{
+			name:       "internal import",
+			source:     "import trb/internal/filesystem as native_fs\nvalue := native_fs.exists(\"input.txt\")\n",
+			modulePath: "trb/std/user_source_cannot_spoof_internal_access",
+			want:       "package trb/internal/filesystem is internal to the TypeRB standard library",
+		},
+	}
+	for _, test := range tests {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			t.Run(test.name+"/"+mode, func(t *testing.T) {
+				modulePath := test.modulePath
+				if modulePath == "" {
+					modulePath = "main"
+				}
+				_, err := CompileProject([]SourceUnit{{
+					Filename:   "/project/main.trb",
+					ModulePath: modulePath,
+					Package:    "main",
+					Source:     []byte(test.source),
+				}}, Options{Mode: mode, GoModule: "example.com/filesystem-diagnostics", RubyLoader: "require_relative"})
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("expected %s diagnostic %q, got %v", mode, test.want, err)
+				}
+			})
+		}
+	}
+}
+
 func TestPutsPreludeLowersWithoutImportAcrossBackends(t *testing.T) {
 	source := []byte("def main()\n  puts(1 + 2)\n  return\nend\n")
 	tests := []struct {
