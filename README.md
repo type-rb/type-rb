@@ -406,7 +406,21 @@ the same compiler-owned contracts as their package-function forms. They are
 therefore type checked and lowered consistently instead of exposing Ruby, Go,
 or TypeScript methods directly.
 
-v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/arrays`,
+Binary data uses the distinct portable `Bytes` type:
+
+```trb
+import trb/std/bytes
+
+payload := "A😀".to_bytes()
+byte_length := payload.size()
+first := payload.at(0)
+text := bytes.to_string(payload)
+```
+
+String size counts Unicode code points; Bytes size counts encoded bytes.
+Conversions use UTF-8, and byte concatenation is non-mutating.
+
+v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/bytes`, `trb/std/arrays`,
 `trb/std/numbers`, and `trb/std/result`. Result is imported as a named portable
 type and handled through ordinary exhaustive enum matching:
 

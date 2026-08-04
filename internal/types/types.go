@@ -13,6 +13,7 @@ const (
 	Int      Kind = "int"
 	Float    Kind = "float"
 	String   Kind = "string"
+	Bytes    Kind = "bytes"
 	Array    Kind = "array"
 	Range    Kind = "range"
 	Iterable Kind = "iterable"
@@ -61,6 +62,8 @@ func FromName(name string) Type {
 		return Type{Kind: Float, Name: "Float"}
 	case "string", "symbol":
 		return Type{Kind: String, Name: "String"}
+	case "bytes":
+		return Type{Kind: Bytes, Name: "Bytes"}
 	case "nil", "null":
 		return Type{Kind: Nil, Name: "Nil"}
 	case "array":

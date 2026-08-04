@@ -68,6 +68,7 @@ func (p *Package) DefaultAlias() string {
 }
 
 var stringType = types.FromName("String")
+var bytesType = types.FromName("Bytes")
 var integerType = types.FromName("Integer")
 var booleanType = types.FromName("Boolean")
 var voidType = types.FromName("Void")
@@ -114,6 +115,34 @@ end
 				},
 				Return: booleanType,
 			},
+		},
+	},
+	"trb/std/bytes": {
+		Path: "trb/std/bytes",
+		Kind: Portable,
+		Symbols: map[string]Symbol{
+			"from_string": unary("from_string", "trb.std.bytes.from_string", stringType, bytesType),
+			"to_string":   unary("to_string", "trb.std.bytes.to_string", bytesType, stringType),
+			"length":      unary("length", "trb.std.bytes.length", bytesType, integerType),
+			"at": {
+				Name:      "at",
+				Intrinsic: "trb.std.bytes.at",
+				Parameters: []Parameter{
+					{Name: "value", Type: bytesType},
+					{Name: "index", Type: integerType},
+				},
+				Return: integerType,
+			},
+			"concat": {
+				Name:      "concat",
+				Intrinsic: "trb.std.bytes.concat",
+				Parameters: []Parameter{
+					{Name: "left", Type: bytesType},
+					{Name: "right", Type: bytesType},
+				},
+				Return: bytesType,
+			},
+			"valid_utf8": unary("valid_utf8", "trb.std.bytes.valid_utf8", bytesType, booleanType),
 		},
 	},
 	"trb/std/arrays": {
@@ -243,8 +272,16 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"to_s": {PackagePath: "trb/std/numbers", Symbol: "to_string"},
 	},
 	types.String: {
-		"to_i": {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
-		"size": {PackagePath: "trb/std/strings", Symbol: "length"},
+		"to_i":     {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
+		"size":     {PackagePath: "trb/std/strings", Symbol: "length"},
+		"to_bytes": {PackagePath: "trb/std/bytes", Symbol: "from_string"},
+	},
+	types.Bytes: {
+		"to_s":       {PackagePath: "trb/std/bytes", Symbol: "to_string"},
+		"size":       {PackagePath: "trb/std/bytes", Symbol: "length"},
+		"at":         {PackagePath: "trb/std/bytes", Symbol: "at"},
+		"concat":     {PackagePath: "trb/std/bytes", Symbol: "concat"},
+		"valid_utf8": {PackagePath: "trb/std/bytes", Symbol: "valid_utf8"},
 	},
 }
 

@@ -482,6 +482,18 @@ func (g *generator) intrinsic(name string, arguments []string) string {
 		return arguments[0] + ".downcase"
 	case "trb.std.strings.contains":
 		return arguments[0] + ".include?(" + arguments[1] + ")"
+	case "trb.std.bytes.from_string":
+		return "(" + arguments[0] + ").encode(Encoding::UTF_8).b"
+	case "trb.std.bytes.to_string":
+		return "(" + arguments[0] + ").dup.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)"
+	case "trb.std.bytes.length":
+		return arguments[0] + ".bytesize"
+	case "trb.std.bytes.at":
+		return arguments[0] + ".bytes.fetch(" + arguments[1] + ")"
+	case "trb.std.bytes.concat":
+		return arguments[0] + " + " + arguments[1]
+	case "trb.std.bytes.valid_utf8":
+		return "(" + arguments[0] + ").dup.force_encoding(Encoding::UTF_8).valid_encoding?"
 	case "trb.std.arrays.length":
 		return arguments[0] + ".length"
 	case "trb.std.arrays.push":

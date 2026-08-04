@@ -127,6 +127,34 @@ func TestReplEvaluatesPortableReceiverMethodsAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableBytesAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-bytes-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "value := \"A😀\".to_bytes()\nvalue\nvalue.size()\nvalue.at(1)\nvalue.to_s()\nvalue.valid_utf8()\nvalue.concat(\"!\".to_bytes()).to_s()\n:quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "Bytes[65, 240, 159, 152, 128] : Bytes\nBytes[65, 240, 159, 152, 128] : Bytes\n5 : Integer\n240 : Integer\n\"A😀\" : String\ntrue : Boolean\n\"A😀!\" : String\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s Bytes REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableArithmeticSemantics(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

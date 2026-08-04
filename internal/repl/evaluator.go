@@ -21,6 +21,8 @@ type Value struct {
 	Data any
 }
 
+type bytesValue []byte
+
 type Result struct {
 	Value   Value
 	Display bool
@@ -1204,6 +1206,67 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("strings.contains expects String arguments")
 		}
 		return Value{Type: typ, Data: strings.Contains(left, right)}, nil
+	case "trb.std.bytes.from_string":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("bytes.from_string expects String")
+		}
+		return Value{Type: typ, Data: bytesValue([]byte(value))}, nil
+	case "trb.std.bytes.to_string":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("bytes.to_string expects Bytes")
+		}
+		return Value{Type: typ, Data: strings.ToValidUTF8(string(value), "�")}, nil
+	case "trb.std.bytes.length":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("bytes.length expects Bytes")
+		}
+		return Value{Type: typ, Data: int64(len(value))}, nil
+	case "trb.std.bytes.at":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		value, valueOK := values[0].Data.(bytesValue)
+		index, indexOK := values[1].Data.(int64)
+		if !valueOK || !indexOK {
+			return Value{}, errors.New("bytes.at expects Bytes and Integer")
+		}
+		if index < 0 || index >= int64(len(value)) {
+			return Value{}, errors.New("Bytes index is out of bounds")
+		}
+		return Value{Type: typ, Data: int64(value[index])}, nil
+	case "trb.std.bytes.concat":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		left, leftOK := values[0].Data.(bytesValue)
+		right, rightOK := values[1].Data.(bytesValue)
+		if !leftOK || !rightOK {
+			return Value{}, errors.New("bytes.concat expects Bytes arguments")
+		}
+		result := append(bytesValue(nil), left...)
+		result = append(result, right...)
+		return Value{Type: typ, Data: result}, nil
+	case "trb.std.bytes.valid_utf8":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("bytes.valid_utf8 expects Bytes")
+		}
+		return Value{Type: typ, Data: utf8.Valid(value)}, nil
 	case "trb.std.arrays.length":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1412,6 +1475,12 @@ func Inspect(value Value) string {
 		return strconv.FormatFloat(item, 'g', -1, 64)
 	case bool:
 		return strconv.FormatBool(item)
+	case bytesValue:
+		parts := make([]string, len(item))
+		for index, value := range item {
+			parts[index] = strconv.Itoa(int(value))
+		}
+		return "Bytes[" + strings.Join(parts, ", ") + "]"
 	case *arrayValue:
 		parts := make([]string, len(item.Items))
 		for index, value := range item.Items {

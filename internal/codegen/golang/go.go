@@ -892,6 +892,20 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.strings.contains":
 		g.requireImport("strings", "")
 		return "strings.Contains(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.bytes.from_string":
+		return "[]byte(" + arguments[0] + ")"
+	case "trb.std.bytes.to_string":
+		g.requireImport("strings", "")
+		return "strings.ToValidUTF8(string(" + arguments[0] + "), \"�\")"
+	case "trb.std.bytes.length":
+		return "len(" + arguments[0] + ")"
+	case "trb.std.bytes.at":
+		return "func(value []byte, index int) int { if index < 0 || index >= len(value) { panic(\"Bytes index is out of bounds\") }; return int(value[index]) }(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.bytes.concat":
+		return "append(append([]byte{}, " + arguments[0] + "...), " + arguments[1] + "...)"
+	case "trb.std.bytes.valid_utf8":
+		g.requireImport("unicode/utf8", "utf8")
+		return "utf8.Valid(" + arguments[0] + ")"
 	case "trb.std.arrays.length":
 		return "len(" + arguments[0] + ")"
 	case "trb.std.arrays.push":
@@ -1050,6 +1064,8 @@ func (g *generator) goType(t types.Type) string {
 		result = "float64"
 	case types.String:
 		result = "string"
+	case types.Bytes:
+		result = "[]byte"
 	case types.Array, types.Iterable:
 		element := "any"
 		if len(t.Args) > 0 {

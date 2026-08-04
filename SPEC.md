@@ -491,6 +491,16 @@ types, REPL semantics, and backend lowering. The initial surface includes
 corresponding to `trb/std/numbers` and `trb/std/strings` operations. Unknown
 members on portable built-in types are compile errors in every mode.
 
+`Bytes` is the portable immutable binary-sequence type; it is not an alias for
+`Array<Integer>` or `String`. `trb/std/bytes` provides UTF-8 `from_string` and
+`to_string`, byte `length` and zero-based `at`, non-mutating `concat`, and
+`valid_utf8`. `String#to_bytes`, plus `Bytes#to_s`, `#size`, `#at`, `#concat`,
+and `#valid_utf8`, resolve to those same contracts. Encoding a String always
+produces UTF-8. Decoding replaces invalid input with U+FFFD; `valid_utf8`
+allows callers to reject it first. An out-of-range `at` is a runtime error.
+Consequently `String#size` counts Unicode code points while `Bytes#size`
+counts encoded bytes.
+
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal
 semantic/IR type, but is not a TypeRB return-type spelling.

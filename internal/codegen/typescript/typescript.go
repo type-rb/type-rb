@@ -630,6 +630,18 @@ func (g *generator) intrinsic(name string, _ *ir.Call, arguments []string) strin
 		return arguments[0] + ".toLowerCase()"
 	case "trb.std.strings.contains":
 		return arguments[0] + ".includes(" + arguments[1] + ")"
+	case "trb.std.bytes.from_string":
+		return "new TextEncoder().encode(" + arguments[0] + ")"
+	case "trb.std.bytes.to_string":
+		return "new TextDecoder(\"utf-8\").decode(" + arguments[0] + ")"
+	case "trb.std.bytes.length":
+		return arguments[0] + ".byteLength"
+	case "trb.std.bytes.at":
+		return "((value: Uint8Array, index: number): number => { if (index < 0 || index >= value.byteLength) { throw new Error(\"Bytes index is out of bounds\"); } return value[index]!; })(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.bytes.concat":
+		return "((left: Uint8Array, right: Uint8Array): Uint8Array => { const value = new Uint8Array(left.byteLength + right.byteLength); value.set(left); value.set(right, left.byteLength); return value; })(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.bytes.valid_utf8":
+		return "((value: Uint8Array): boolean => { try { new TextDecoder(\"utf-8\", { fatal: true }).decode(value); return true; } catch { return false; } })(" + arguments[0] + ")"
 	case "trb.std.arrays.length":
 		return arguments[0] + ".length"
 	case "trb.std.arrays.push":
@@ -731,6 +743,8 @@ func tsType(t types.Type) string {
 		result = "number"
 	case types.String:
 		result = "string"
+	case types.Bytes:
+		result = "Uint8Array"
 	case types.Array, types.Iterable:
 		element := "unknown"
 		if len(t.Args) > 0 {

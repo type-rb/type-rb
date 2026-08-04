@@ -166,6 +166,95 @@ func TestPortableReceiverMethodDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableBytesPackageAndReceiverMethodsLowerAcrossBackends(t *testing.T) {
+	source := []byte(`import trb/std/bytes
+
+def joined(): Bytes
+	return bytes.concat(bytes.from_string("A"), "😀".to_bytes())
+end
+
+def byte_length(): Integer
+	return joined().concat("!".to_bytes()).size()
+end
+
+def byte_at(): Integer
+	return "A".to_bytes().at(0)
+end
+
+def decoded(): String
+	return joined().to_s()
+end
+
+def valid(): Boolean
+	return joined().valid_utf8()
+end
+`)
+	wants := map[string][]string{
+		"go": {
+			`append(append([]byte{}, []byte("A")...), []byte("😀")...)`,
+			`len(append(append([]byte{}, Joined()...), []byte("!")...))`,
+			`return int(value[index])`,
+			`strings.ToValidUTF8(string(Joined()), "�")`,
+			`utf8.Valid(Joined())`,
+		},
+		"ruby": {
+			`("A").encode(Encoding::UTF_8).b + ("😀").encode(Encoding::UTF_8).b`,
+			`.bytesize`,
+			`.bytes.fetch(0)`,
+			`.dup.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)`,
+			`.dup.force_encoding(Encoding::UTF_8).valid_encoding?`,
+		},
+		"typescript": {
+			`new TextEncoder().encode("A")`,
+			`new Uint8Array(left.byteLength + right.byteLength)`,
+			`.byteLength`,
+			`return value[index]!;`,
+			`new TextDecoder("utf-8").decode(joined())`,
+			`new TextDecoder("utf-8", { fatal: true })`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := CompileWithOptions("bytes.trb", source, Options{Mode: mode, Package: "bytesexample", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable Bytes: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s Bytes output is missing %q:\n%s", mode, want, output)
+			}
+		}
+		if mode == "go" {
+			fileSet := token.NewFileSet()
+			parsed, parseErr := parser.ParseFile(fileSet, "bytes.go", artifact.Output, parser.AllErrors)
+			if parseErr != nil {
+				t.Fatalf("generated Go Bytes output does not parse: %v\n%s", parseErr, output)
+			}
+			if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("bytesexample", fileSet, []*goast.File{parsed}, nil); checkErr != nil {
+				t.Fatalf("generated Go Bytes output does not type-check: %v\n%s", checkErr, output)
+			}
+		}
+	}
+}
+
+func TestPortableBytesDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: "import trb/std/bytes\ndef bad(): Integer\n\treturn bytes.at(bytes.from_string(\"A\"), \"0\")\nend\n", want: "argument 2 to at() has type String, expected Integer"},
+		{source: "def bad(): Bytes\n\treturn \"A\"\nend\n", want: "return type is String, expected Bytes"},
+		{source: "def bad(): Integer\n\treturn \"A\".to_bytes().missing()\nend\n", want: "type Bytes has no member missing"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("bad.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s: expected %q Bytes diagnostic, got %v", mode, test.want, err)
+			}
+		}
+	}
+}
+
 func TestPortableResultPackageLowersAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",
