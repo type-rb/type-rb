@@ -1212,6 +1212,37 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			value = strings.ToLower(value)
 		}
 		return Value{Type: typ, Data: value}, nil
+	case "trb.std.strings.starts_with", "trb.std.strings.ends_with":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		value, valueOK := values[0].Data.(string)
+		part, partOK := values[1].Data.(string)
+		if !valueOK || !partOK {
+			return Value{}, errors.New("strings.starts_with/ends_with expects String values")
+		}
+		if name == "trb.std.strings.starts_with" {
+			return Value{Type: typ, Data: strings.HasPrefix(value, part)}, nil
+		}
+		return Value{Type: typ, Data: strings.HasSuffix(value, part)}, nil
+	case "trb.std.strings.split":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		value, valueOK := values[0].Data.(string)
+		separator, separatorOK := values[1].Data.(string)
+		if !valueOK || !separatorOK {
+			return Value{}, errors.New("strings.split expects String values")
+		}
+		if separator == "" {
+			return Value{}, errors.New("String split separator is empty")
+		}
+		parts := strings.Split(value, separator)
+		items := make([]Value, len(parts))
+		for index, part := range parts {
+			items[index] = Value{Type: types.FromName("String"), Data: part}
+		}
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
 	case "trb.std.strings.contains":
 		if err := require(2); err != nil {
 			return Value{}, err
@@ -1464,6 +1495,40 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		items := append([]Value(nil), array.Items...)
 		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.arrays.join":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		separator, separatorOK := values[1].Data.(string)
+		if !ok || !separatorOK {
+			return Value{}, errors.New("arrays.join expects Array<String> and String")
+		}
+		parts := make([]string, len(array.Items))
+		for index, item := range array.Items {
+			part, partOK := item.Data.(string)
+			if !partOK {
+				return Value{}, errors.New("arrays.join expects Array<String>")
+			}
+			parts[index] = part
+		}
+		return Value{Type: typ, Data: strings.Join(parts, separator)}, nil
+	case "trb.std.arrays.pop":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.pop expects Array")
+		}
+		if len(array.Items) == 0 {
+			return Value{}, errors.New("Array is empty")
+		}
+		index := len(array.Items) - 1
+		result := array.Items[index]
+		array.Items = array.Items[:index]
+		result.Type = typ
+		return result, nil
 	case "trb.std.arrays.push":
 		if err := require(2); err != nil {
 			return Value{}, err

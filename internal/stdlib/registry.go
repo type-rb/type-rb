@@ -112,6 +112,24 @@ end
 			"empty":     unary("empty", "trb.std.strings.empty", stringType, booleanType),
 			"uppercase": unary("uppercase", "trb.std.strings.uppercase", stringType, stringType),
 			"lowercase": unary("lowercase", "trb.std.strings.lowercase", stringType, stringType),
+			"starts_with": {
+				Name:       "starts_with",
+				Intrinsic:  "trb.std.strings.starts_with",
+				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "prefix", Type: stringType}},
+				Return:     booleanType,
+			},
+			"ends_with": {
+				Name:       "ends_with",
+				Intrinsic:  "trb.std.strings.ends_with",
+				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "suffix", Type: stringType}},
+				Return:     booleanType,
+			},
+			"split": {
+				Name:       "split",
+				Intrinsic:  "trb.std.strings.split",
+				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "separator", Type: stringType}},
+				Return:     arrayOf(stringType),
+			},
 			"codepoints": {
 				Name:       "codepoints",
 				Intrinsic:  "trb.std.strings.codepoints",
@@ -232,6 +250,19 @@ end
 			"first": genericUnary("first", "trb.std.arrays.first", []string{"T"}, arrayOf(typeT), typeT),
 			"last":  genericUnary("last", "trb.std.arrays.last", []string{"T"}, arrayOf(typeT), typeT),
 			"copy":  genericUnary("copy", "trb.std.arrays.copy", []string{"T"}, arrayOf(typeT), arrayOf(typeT)),
+			"join": {
+				Name:       "join",
+				Intrinsic:  "trb.std.arrays.join",
+				Parameters: []Parameter{{Name: "values", Type: arrayOf(stringType)}, {Name: "separator", Type: stringType}},
+				Return:     stringType,
+			},
+			"pop": {
+				Name:           "pop",
+				Intrinsic:      "trb.std.arrays.pop",
+				TypeParameters: []string{"T"},
+				Parameters:     []Parameter{{Name: "values", Type: arrayOf(typeT), Mutable: true}},
+				Return:         typeT,
+			},
 			"push": {
 				Name:           "push",
 				Intrinsic:      "trb.std.arrays.push",
@@ -390,14 +421,17 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"to_s": {PackagePath: "trb/std/numbers", Symbol: "to_string"},
 	},
 	types.String: {
-		"to_i":       {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
-		"size":       {PackagePath: "trb/std/strings", Symbol: "length"},
-		"empty?":     {PackagePath: "trb/std/strings", Symbol: "empty"},
-		"upcase":     {PackagePath: "trb/std/strings", Symbol: "uppercase"},
-		"downcase":   {PackagePath: "trb/std/strings", Symbol: "lowercase"},
-		"include?":   {PackagePath: "trb/std/strings", Symbol: "contains"},
-		"codepoints": {PackagePath: "trb/std/strings", Symbol: "codepoints"},
-		"to_bytes":   {PackagePath: "trb/std/bytes", Symbol: "from_string"},
+		"to_i":        {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
+		"size":        {PackagePath: "trb/std/strings", Symbol: "length"},
+		"empty?":      {PackagePath: "trb/std/strings", Symbol: "empty"},
+		"upcase":      {PackagePath: "trb/std/strings", Symbol: "uppercase"},
+		"downcase":    {PackagePath: "trb/std/strings", Symbol: "lowercase"},
+		"include?":    {PackagePath: "trb/std/strings", Symbol: "contains"},
+		"start_with?": {PackagePath: "trb/std/strings", Symbol: "starts_with"},
+		"end_with?":   {PackagePath: "trb/std/strings", Symbol: "ends_with"},
+		"split":       {PackagePath: "trb/std/strings", Symbol: "split"},
+		"codepoints":  {PackagePath: "trb/std/strings", Symbol: "codepoints"},
+		"to_bytes":    {PackagePath: "trb/std/bytes", Symbol: "from_string"},
 	},
 	types.Bytes: {
 		"to_s":       {PackagePath: "trb/std/bytes", Symbol: "to_string"},
@@ -420,6 +454,8 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"first":  {PackagePath: "trb/std/arrays", Symbol: "first"},
 		"last":   {PackagePath: "trb/std/arrays", Symbol: "last"},
 		"dup":    {PackagePath: "trb/std/arrays", Symbol: "copy"},
+		"join":   {PackagePath: "trb/std/arrays", Symbol: "join"},
+		"pop":    {PackagePath: "trb/std/arrays", Symbol: "pop"},
 		"push":   {PackagePath: "trb/std/arrays", Symbol: "push"},
 	},
 	types.Hash: {
@@ -480,12 +516,55 @@ func LookupReceiverMethod(receiver types.Type, name string) (*Package, Symbol, b
 	if len(symbol.Parameters) == 0 {
 		return nil, Symbol{}, false
 	}
+	if !receiverMatches(symbol.Parameters[0].Type, receiver, symbol.TypeParameters) {
+		return nil, Symbol{}, false
+	}
 	symbol = Instantiate(symbol, []types.Type{receiver})
 	symbol.Name = name
 	symbol.Receiver = receiver
 	symbol.ReceiverMutable = symbol.Parameters[0].Mutable
 	symbol.Parameters = append([]Parameter(nil), symbol.Parameters[1:]...)
 	return definition, symbol, true
+}
+
+func receiverMatches(pattern, actual types.Type, typeParameterNames []string) bool {
+	typeParameters := map[string]bool{}
+	for _, name := range typeParameterNames {
+		typeParameters[name] = true
+	}
+	var matches func(types.Type, types.Type) bool
+	matches = func(expected, value types.Type) bool {
+		if typeParameters[expected.Name] && expected.Kind == types.Named && len(expected.Args) == 0 {
+			return true
+		}
+		if expected.Kind == types.Any {
+			return true
+		}
+		if expected.Kind != value.Kind || expected.Nullable != value.Nullable {
+			return false
+		}
+		if expected.Kind == types.Named && expected.Name != value.Name {
+			return false
+		}
+		if len(expected.Args) != len(value.Args) {
+			if len(value.Args) == 0 {
+				for _, argument := range expected.Args {
+					if !typeParameters[argument.Name] || argument.Kind != types.Named || len(argument.Args) != 0 {
+						return false
+					}
+				}
+				return true
+			}
+			return false
+		}
+		for index := range expected.Args {
+			if !matches(expected.Args[index], value.Args[index]) {
+				return false
+			}
+		}
+		return true
+	}
+	return matches(pattern, actual)
 }
 
 // Instantiate substitutes compiler-owned type parameters inferred from call

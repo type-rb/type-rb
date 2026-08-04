@@ -399,6 +399,16 @@ def hash_state(): Boolean
 	labels: Hash<Integer, String> := {1 => "one"}
 	return labels.size() == 1 and not labels.empty?() and labels.key?(1)
 end
+
+def string_state(): Boolean
+	return "TypeRB".start_with?("Type") and "TypeRB".end_with?("RB")
+end
+
+def string_parts(): String
+	mut parts := "root/leaf/".split("/")
+	tail := parts.pop()
+	return parts.join("|") + ":" + tail
+end
 `)
 	wants := map[string][]string{
 		"go": {
@@ -408,6 +418,9 @@ end
 			`maps.Keys(labels)`,
 			`maps.Values(maps.Clone(labels))`,
 			`panic("Hash key is missing")`,
+			`strings.HasPrefix("TypeRB", "Type")`,
+			`strings.Split(value, separator)`,
+			`strings.Join(parts, "|")`,
 		},
 		"ruby": {
 			`values.dup`,
@@ -416,6 +429,9 @@ end
 			`labels.keys`,
 			`labels.dup.values`,
 			`labels.fetch(1)`,
+			`"TypeRB".start_with?("Type")`,
+			`value.split(separator, -1)`,
+			`parts.join("|")`,
 		},
 		"typescript": {
 			`[...values]`,
@@ -424,6 +440,9 @@ end
 			`Object.keys(labels).map(Number)`,
 			`Object.values(({ ...labels }))`,
 			`throw new Error("Hash key is missing")`,
+			`"TypeRB".startsWith("Type")`,
+			`return value.split(separator);`,
+			`parts.join("|")`,
 		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -485,6 +504,21 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 			name:   "unresolved hash value type",
 			source: "def bad(): Array<String>\n\treturn {}.values()\nend\n",
 			want:   "cannot infer V for values()",
+		},
+		{
+			name:   "join receiver element type",
+			source: "def bad(): String\n\treturn [1, 2].join(\",\")\nend\n",
+			want:   "type Array<Integer> has no member join",
+		},
+		{
+			name:   "join package element type",
+			source: "import trb/std/arrays\ndef bad(): String\n\treturn arrays.join([1, 2], \",\")\nend\n",
+			want:   "argument 1 to join() has type Array<Integer>, expected Array<String>",
+		},
+		{
+			name:   "pop requires mut",
+			source: "def bad(): Integer\n\tvalues := [1]\n\treturn values.pop()\nend\n",
+			want:   "values is immutable; declare it with mut to use pop()",
 		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {

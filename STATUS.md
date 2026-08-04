@@ -92,7 +92,8 @@ Implemented:
   shallow copies, typed key/value extraction, checked Array mutation, all
   receiver forms, three backends, and typed-IR REPL execution.
 - Expanded compiler-owned receiver methods for String code points, emptiness,
-  containment and case conversion.
+  containment, prefix/suffix checks, exact splitting and case conversion, plus
+  constrained `Array<String>` joining and generic mutable Array pop.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.

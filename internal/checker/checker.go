@@ -1922,7 +1922,7 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		expected := parameters[parameterIndex]
 		actualType = c.contextualizeHashLiteral(arguments[i].Value, expected, actualType)
 		actual[i] = actualType
-		if !types.Assignable(expected, actualType) {
+		if !libraryAssignable(expected, actualType) {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, name, actualType, expected))
 		}
 		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Mutable {
@@ -1930,6 +1930,26 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		}
 	}
 	return library
+}
+
+func libraryAssignable(expected, actual types.Type) bool {
+	if expected.Kind == types.Any || actual.Kind == types.Any || expected.Kind == types.Invalid || actual.Kind == types.Invalid {
+		return true
+	}
+	if expected.Kind == types.Array && actual.Kind == types.Array {
+		if len(expected.Args) == 0 || len(actual.Args) == 0 {
+			return true
+		}
+		return len(expected.Args) == 1 && len(actual.Args) == 1 && libraryAssignable(expected.Args[0], actual.Args[0])
+	}
+	if expected.Kind == types.Hash && actual.Kind == types.Hash {
+		if len(expected.Args) == 0 || len(actual.Args) == 0 {
+			return true
+		}
+		return len(expected.Args) == 2 && len(actual.Args) == 2 &&
+			libraryAssignable(expected.Args[0], actual.Args[0]) && libraryAssignable(expected.Args[1], actual.Args[1])
+	}
+	return types.Assignable(expected, actual)
 }
 
 func (c *Checker) requireMutable(expression ast.Expression, sc *scope, action string) {

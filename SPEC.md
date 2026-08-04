@@ -520,10 +520,13 @@ TypeRB source and all three backends execute that same generated library;
 classification never delegates to independently versioned Ruby or JavaScript
 Unicode databases.
 
-The initial built-in receiver surface also includes `String#codepoints`,
-`#empty?`, `#include?`, `#upcase`, and `#downcase`, plus `Array#size`. As with
-the earlier conversion and size methods, each resolves to its corresponding
-portable package contract rather than a target-native method by name.
+The built-in receiver surface also includes `String#codepoints`, `#empty?`,
+`#include?`, `#start_with?`, `#end_with?`, `#split`, `#upcase`, and
+`#downcase`, plus collection operations described below. String splitting uses
+an exact String separator, preserves empty fields including a trailing field,
+and raises a runtime error for an empty separator. As with the earlier
+conversion and size methods, each resolves to its corresponding portable
+package contract rather than a target-native method by name.
 
 Compiler-owned package contracts may declare internal type parameters. They
 are inferred from call arguments and receivers; this is library-contract
@@ -537,6 +540,11 @@ receiver spellings are `size`, `empty?`, `fetch`, `key?`, `keys`, `values`,
 and `dup`. Missing fetch keys, out-of-range Array indexes, and first/last on an
 empty Array are runtime errors in every mode. Hash key/value enumeration order
 is unspecified.
+
+`Array<String>` additionally provides package/receiver `join`, and generic
+`Array<T>` provides mutable, strict `pop`. `pop` requires `mut` and raises on
+an empty Array. Receiver lookup checks the complete collection type, so a
+method constrained to `Array<String>` is not exposed on `Array<Integer>`.
 
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal

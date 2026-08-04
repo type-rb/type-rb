@@ -643,6 +643,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".toUpperCase()"
 	case "trb.std.strings.lowercase":
 		return arguments[0] + ".toLowerCase()"
+	case "trb.std.strings.starts_with":
+		return arguments[0] + ".startsWith(" + arguments[1] + ")"
+	case "trb.std.strings.ends_with":
+		return arguments[0] + ".endsWith(" + arguments[1] + ")"
+	case "trb.std.strings.split":
+		return "((value: string, separator: string): Array<string> => { if (separator === \"\") { throw new Error(\"String split separator is empty\"); } return value.split(separator); })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.strings.contains":
 		return arguments[0] + ".includes(" + arguments[1] + ")"
 	case "trb.std.strings.codepoints":
@@ -705,6 +711,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "((): " + tsType(call.ExprType()) + " => { const values = " + arguments[0] + "; if (values.length === 0) { throw new Error(\"Array is empty\"); } return values[values.length - 1]!; })()"
 	case "trb.std.arrays.copy":
 		return "[..." + arguments[0] + "]"
+	case "trb.std.arrays.join":
+		return arguments[0] + ".join(" + arguments[1] + ")"
+	case "trb.std.arrays.pop":
+		return "((): " + tsType(call.ExprType()) + " => { const value = " + arguments[0] + ".pop(); if (value === undefined) { throw new Error(\"Array is empty\"); } return value; })()"
 	case "trb.std.arrays.push":
 		return arguments[0] + ".push(" + arguments[1] + ")"
 	case "trb.std.hashes.length":

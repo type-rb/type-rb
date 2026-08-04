@@ -901,6 +901,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.strings.lowercase":
 		g.requireImport("strings", "")
 		return "strings.ToLower(" + arguments[0] + ")"
+	case "trb.std.strings.starts_with":
+		g.requireImport("strings", "")
+		return "strings.HasPrefix(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.strings.ends_with":
+		g.requireImport("strings", "")
+		return "strings.HasSuffix(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.strings.split":
+		g.requireImport("strings", "")
+		return "func() []string { value := " + arguments[0] + "; separator := " + arguments[1] + "; if separator == \"\" { panic(\"String split separator is empty\") }; return strings.Split(value, separator) }()"
 	case "trb.std.strings.contains":
 		g.requireImport("strings", "")
 		return "strings.Contains(" + arguments[0] + ", " + arguments[1] + ")"
@@ -971,6 +980,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.copy":
 		g.requireImport("slices", "")
 		return "slices.Clone(" + arguments[0] + ")"
+	case "trb.std.arrays.join":
+		g.requireImport("strings", "")
+		return "strings.Join(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.arrays.pop":
+		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; index := len(values) - 1; value := values[index]; " + arguments[0] + " = values[:index]; return value }()"
 	case "trb.std.arrays.push":
 		return arguments[0] + " = append(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.hashes.length":

@@ -57,3 +57,14 @@ func TestArrayPushReceiverUsesPackageMutabilityContract(t *testing.T) {
 		t.Fatalf("Array#push value parameter was not specialized: %#v", push.Parameters)
 	}
 }
+
+func TestReceiverContractsCanConstrainCollectionArguments(t *testing.T) {
+	stringsType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
+	if _, _, ok := LookupReceiverMethod(stringsType, "join"); !ok {
+		t.Fatal("Array<String>#join is missing")
+	}
+	integersType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
+	if _, _, ok := LookupReceiverMethod(integersType, "join"); ok {
+		t.Fatal("Array<Integer>#join incorrectly matched Array<String>")
+	}
+}

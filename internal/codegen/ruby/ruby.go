@@ -488,6 +488,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".upcase"
 	case "trb.std.strings.lowercase":
 		return arguments[0] + ".downcase"
+	case "trb.std.strings.starts_with":
+		return arguments[0] + ".start_with?(" + arguments[1] + ")"
+	case "trb.std.strings.ends_with":
+		return arguments[0] + ".end_with?(" + arguments[1] + ")"
+	case "trb.std.strings.split":
+		return "->(value, separator) { raise ArgumentError, \"String split separator is empty\" if separator.empty?; value.split(separator, -1) }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.strings.contains":
 		return arguments[0] + ".include?(" + arguments[1] + ")"
 	case "trb.std.strings.codepoints":
@@ -550,6 +556,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(values) { raise IndexError, \"Array is empty\" if values.empty?; values.fetch(values.length - 1) }.call(" + arguments[0] + ")"
 	case "trb.std.arrays.copy":
 		return arguments[0] + ".dup"
+	case "trb.std.arrays.join":
+		return arguments[0] + ".join(" + arguments[1] + ")"
+	case "trb.std.arrays.pop":
+		return "->(values) { raise IndexError, \"Array is empty\" if values.empty?; values.pop }.call(" + arguments[0] + ")"
 	case "trb.std.arrays.push":
 		return arguments[0] + " << " + arguments[1]
 	case "trb.std.hashes.length":
