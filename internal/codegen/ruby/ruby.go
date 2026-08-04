@@ -477,9 +477,29 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return "Unicode." + symbol
 	}
+	pathCall := func(symbol string) string {
+		if _, named := call.Callee.(*ir.Identifier); named {
+			return symbol
+		}
+		return "Path." + symbol
+	}
 	switch name {
 	case "trb.std.io.puts":
 		return "$stdout.puts(" + strings.Join(arguments, ", ") + ")"
+	case "trb.std.path.separator":
+		return pathCall("separator") + "()"
+	case "trb.std.path.clean":
+		return pathCall("clean") + "(" + arguments[0] + ")"
+	case "trb.std.path.join":
+		return pathCall("join") + "(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.path.absolute":
+		return pathCall("absolute") + "(" + arguments[0] + ")"
+	case "trb.std.path.components":
+		return pathCall("components") + "(" + arguments[0] + ")"
+	case "trb.std.path.base":
+		return pathCall("base") + "(" + arguments[0] + ")"
+	case "trb.std.path.directory":
+		return pathCall("directory") + "(" + arguments[0] + ")"
 	case "trb.std.strings.length":
 		return arguments[0] + ".each_codepoint.count"
 	case "trb.std.strings.empty":

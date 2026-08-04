@@ -546,6 +546,16 @@ is unspecified.
 an empty Array. Receiver lookup checks the complete collection type, so a
 method constrained to `Array<String>` is not exposed on `Array<Integer>`.
 
+`trb/std/path` defines portable logical paths as `/`-separated Strings. It is
+compiler-owned TypeRB source, so `clean`, two-part `join`, `absolute`,
+`components`, `base`, `directory`, and `separator` execute the same lexical
+algorithm in every backend. `clean` removes repeated separators and `.`
+segments, resolves `..` without moving above an absolute root, and returns `.`
+for an empty relative result. This package does not inspect the process working
+directory, access the filesystem, recognize target-native drive letters or UNC
+paths, or silently select target OS path rules. Filesystem APIs may explicitly
+bridge these logical paths to the host in a later standard-library layer.
+
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal
 semantic/IR type, but is not a TypeRB return-type spelling.

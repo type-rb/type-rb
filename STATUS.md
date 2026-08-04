@@ -73,8 +73,8 @@ Implemented:
   and interface conformance, with target-relative backend imports.
 - Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`, `trb/std/hashes`,
   `trb/std/bytes`, `trb/std/string_builder`, `trb/std/unicode`,
-  `trb/std/numbers`, and `trb/std/result` packages, plus mode-checked Ruby, Go,
-  and TypeScript platform packages.
+  `trb/std/path`, `trb/std/numbers`, and `trb/std/result` packages, plus
+  mode-checked Ruby, Go, and TypeScript platform packages.
 - Compiler-owned receiver-method contracts shared with portable package APIs,
   initially covering `Integer#to_s`, `String#to_i`, and Unicode-aware
   `String#size` across the checker, typed IR, all backends, and the REPL.
@@ -94,6 +94,9 @@ Implemented:
 - Expanded compiler-owned receiver methods for String code points, emptiness,
   containment, prefix/suffix checks, exact splitting and case conversion, plus
   constrained `Array<String>` joining and generic mutable Array pop.
+- A `/`-based portable lexical path library written in compiler-owned TypeRB,
+  with normalization, joining, inspection and decomposition shared by all
+  generated targets and the REPL.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	pathpkg "path"
 	"reflect"
 	"sort"
 	"strconv"
@@ -1180,6 +1181,68 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		fmt.Fprintln(e.stdout, plain(values[0]))
 		return Value{Type: typ}, nil
+	case "trb.std.path.separator":
+		return Value{Type: typ, Data: "/"}, nil
+	case "trb.std.path.clean":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("path.clean expects String")
+		}
+		return Value{Type: typ, Data: pathpkg.Clean(value)}, nil
+	case "trb.std.path.join":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		left, leftOK := values[0].Data.(string)
+		right, rightOK := values[1].Data.(string)
+		if !leftOK || !rightOK {
+			return Value{}, errors.New("path.join expects String values")
+		}
+		if left == "" {
+			return Value{Type: typ, Data: pathpkg.Clean(right)}, nil
+		}
+		if right == "" {
+			return Value{Type: typ, Data: pathpkg.Clean(left)}, nil
+		}
+		return Value{Type: typ, Data: pathpkg.Clean(left + "/" + right)}, nil
+	case "trb.std.path.absolute":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		return Value{Type: typ, Data: ok && strings.HasPrefix(value, "/")}, nil
+	case "trb.std.path.components":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("path.components expects String")
+		}
+		parts := strings.Split(pathpkg.Clean(value), "/")
+		items := make([]Value, 0, len(parts))
+		for _, part := range parts {
+			if part != "" && part != "." {
+				items = append(items, Value{Type: types.FromName("String"), Data: part})
+			}
+		}
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.path.base", "trb.std.path.directory":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("path.base/directory expects String")
+		}
+		cleaned := pathpkg.Clean(value)
+		if name == "trb.std.path.base" {
+			return Value{Type: typ, Data: pathpkg.Base(cleaned)}, nil
+		}
+		return Value{Type: typ, Data: pathpkg.Dir(cleaned)}, nil
 	case "trb.std.strings.length":
 		if err := require(1); err != nil {
 			return Value{}, err

@@ -104,6 +104,26 @@ end
 			},
 		},
 	},
+	"trb/std/path": {
+		Path:       "trb/std/path",
+		ModulePath: "trb/std/path/index",
+		Source:     pathSource(),
+		Kind:       Portable,
+		Symbols: map[string]Symbol{
+			"separator": {Name: "separator", Intrinsic: "trb.std.path.separator", Return: stringType},
+			"clean":     unary("clean", "trb.std.path.clean", stringType, stringType),
+			"join": {
+				Name:       "join",
+				Intrinsic:  "trb.std.path.join",
+				Parameters: []Parameter{{Name: "left", Type: stringType}, {Name: "right", Type: stringType}},
+				Return:     stringType,
+			},
+			"absolute":   unary("absolute", "trb.std.path.absolute", stringType, booleanType),
+			"components": unary("components", "trb.std.path.components", stringType, arrayOf(stringType)),
+			"base":       unary("base", "trb.std.path.base", stringType, stringType),
+			"directory":  unary("directory", "trb.std.path.directory", stringType, stringType),
+		},
+	},
 	"trb/std/strings": {
 		Path: "trb/std/strings",
 		Kind: Portable,

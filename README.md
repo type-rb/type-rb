@@ -451,6 +451,18 @@ keys := hashes.keys(labels)
 These contracts infer `T`, `K`, and `V` from the collection. `fetch`,
 `first`, and `last` are strict; `dup`/`copy` creates a shallow copy.
 
+Portable lexical paths are available as compiler-owned TypeRB code:
+
+```trb
+import trb/std/path
+
+config_path := path.join("config", "../trbconfig.jsonc")
+directory := path.directory("src/compiler/main.trb")
+parts := path.components("/srv/type-rb")
+```
+
+Paths always use `/` and do not depend on the target OS or current directory.
+
 Unicode scalar classification comes from one compiler-owned data set shared by
 all targets:
 

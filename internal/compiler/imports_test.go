@@ -530,6 +530,101 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestCompilerOwnedPortablePathPackageLowersAcrossBackends(t *testing.T) {
+	consumerSource := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import trb/std/path
+
+def normalized(): String
+	return path.clean("a/./b/../c")
+end
+
+def joined(): String
+	return path.join("/srv/app", "../data")
+end
+
+def inspected(): Boolean
+	return path.absolute("/srv/app") and path.base("/srv/app/main.trb") == "main.trb" and path.directory("/srv/app/main.trb") == "/srv/app"
+end
+
+def parts(): Array<String>
+	return path.components("/srv/app/main.trb")
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{consumerSource}, Options{Mode: mode, GoModule: "example.com/path-app", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected compiler-owned path package: %v", mode, err)
+		}
+		var consumer, runtime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/path/index":
+				runtime = artifact
+			}
+		}
+		if consumer == nil || runtime == nil {
+			t.Fatalf("%s did not emit consumer and path runtime: %#v", mode, artifacts)
+		}
+		consumerWants := map[string][]string{
+			"go": {
+				`import "example.com/path-app/trb/std/path"`,
+				`path.Clean("a/./b/../c")`,
+				`path.Components("/srv/app/main.trb")`,
+			},
+			"ruby": {
+				`require_relative "./trb/std/path/index"`,
+				`Path.clean("a/./b/../c")`,
+				`Path.components("/srv/app/main.trb")`,
+			},
+			"typescript": {
+				`import * as path from "./trb/std/path/index.ts";`,
+				`path.clean("a/./b/../c")`,
+				`path.components("/srv/app/main.trb")`,
+			},
+		}[mode]
+		for _, want := range consumerWants {
+			if output := string(consumer.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s path consumer is missing %q:\n%s", mode, want, output)
+			}
+		}
+		runtimeWants := map[string][]string{
+			"go":         {`func PathClean(value string) string`, `func Components(value string) []string`, `normalized = append(normalized, part)`},
+			"ruby":       {`class Path`, `def self.clean(value)`, `def components(value)`},
+			"typescript": {`export class Path`, `static clean(value: string): string`, `export function components(value: string): Array<string>`},
+		}[mode]
+		for _, want := range runtimeWants {
+			if output := string(runtime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s path runtime is missing %q:\n%s", mode, want, output)
+			}
+		}
+		if mode == "go" {
+			fileSet := token.NewFileSet()
+			parsed, parseErr := parser.ParseFile(fileSet, "path.go", runtime.Output, parser.AllErrors)
+			if parseErr != nil {
+				t.Fatalf("generated Go path runtime does not parse: %v\n%s", parseErr, runtime.Output)
+			}
+			if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("path", fileSet, []*goast.File{parsed}, nil); checkErr != nil {
+				t.Fatalf("generated Go path runtime does not type-check: %v\n%s", checkErr, runtime.Output)
+			}
+		}
+	}
+}
+
+func TestPortablePathDiagnosticsAreModeIndependent(t *testing.T) {
+	source := []byte("import trb/std/path\ndef bad(): String\n\treturn path.clean(1)\nend\n")
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("bad.trb", source, mode); err == nil || !strings.Contains(err.Error(), "argument 1 to clean() has type Integer, expected String") {
+			t.Fatalf("%s did not reject invalid path argument: %v", mode, err)
+		}
+	}
+}
+
 func TestCompilerOwnedUnicodePackageLowersSameTablesAcrossBackends(t *testing.T) {
 	consumerSource := SourceUnit{
 		Filename:   "/project/main.trb",

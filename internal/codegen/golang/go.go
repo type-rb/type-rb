@@ -876,9 +876,11 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
 	unicodeAlias := "unicode"
+	pathAlias := "path"
 	reference := expressionReference(call.Callee)
 	if reference != nil && reference.Alias != "" {
 		unicodeAlias = goImportAlias(reference.Alias)
+		pathAlias = goImportAlias(reference.Alias)
 	}
 	unicodeCall := func(symbol string) string {
 		if _, named := call.Callee.(*ir.Identifier); named {
@@ -886,10 +888,27 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return unicodeAlias + ".Unicode" + goMethodName(symbol)
 	}
+	pathCall := func(symbol string) string {
+		return pathAlias + "." + goMethodName(symbol)
+	}
 	switch name {
 	case "trb.std.io.puts":
 		g.requireImport("fmt", "")
 		return "fmt.Println(" + strings.Join(arguments, ", ") + ")"
+	case "trb.std.path.separator":
+		return pathCall("separator") + "()"
+	case "trb.std.path.clean":
+		return pathCall("clean") + "(" + arguments[0] + ")"
+	case "trb.std.path.join":
+		return pathCall("join") + "(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.path.absolute":
+		return pathCall("absolute") + "(" + arguments[0] + ")"
+	case "trb.std.path.components":
+		return pathCall("components") + "(" + arguments[0] + ")"
+	case "trb.std.path.base":
+		return pathCall("base") + "(" + arguments[0] + ")"
+	case "trb.std.path.directory":
+		return pathCall("directory") + "(" + arguments[0] + ")"
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"
