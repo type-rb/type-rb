@@ -23,6 +23,8 @@ type Value struct {
 
 type bytesValue []byte
 
+type stringBuilderValue struct{ value strings.Builder }
+
 type Result struct {
 	Value   Value
 	Display bool
@@ -1267,6 +1269,72 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("bytes.valid_utf8 expects Bytes")
 		}
 		return Value{Type: typ, Data: utf8.Valid(value)}, nil
+	case "trb.std.string_builder.new":
+		return Value{Type: typ, Data: &stringBuilderValue{}}, nil
+	case "trb.std.string_builder.from_string":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("string_builder.from_string expects String")
+		}
+		builder := &stringBuilderValue{}
+		builder.value.WriteString(value)
+		return Value{Type: typ, Data: builder}, nil
+	case "trb.std.string_builder.append":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		builder, builderOK := values[0].Data.(*stringBuilderValue)
+		value, valueOK := values[1].Data.(string)
+		if !builderOK || !valueOK {
+			return Value{}, errors.New("string_builder.append expects StringBuilder and String")
+		}
+		builder.value.WriteString(value)
+		return Value{Type: typ}, nil
+	case "trb.std.string_builder.append_codepoint":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		builder, builderOK := values[0].Data.(*stringBuilderValue)
+		value, valueOK := values[1].Data.(int64)
+		if !builderOK || !valueOK {
+			return Value{}, errors.New("string_builder.append_codepoint expects StringBuilder and Integer")
+		}
+		if value < 0 || value > utf8.MaxRune || value >= 0xd800 && value <= 0xdfff {
+			return Value{}, errors.New("invalid Unicode code point")
+		}
+		builder.value.WriteRune(rune(value))
+		return Value{Type: typ}, nil
+	case "trb.std.string_builder.length":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		builder, ok := values[0].Data.(*stringBuilderValue)
+		if !ok {
+			return Value{}, errors.New("string_builder.length expects StringBuilder")
+		}
+		return Value{Type: typ, Data: int64(utf8.RuneCountInString(builder.value.String()))}, nil
+	case "trb.std.string_builder.to_string":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		builder, ok := values[0].Data.(*stringBuilderValue)
+		if !ok {
+			return Value{}, errors.New("string_builder.to_string expects StringBuilder")
+		}
+		return Value{Type: typ, Data: builder.value.String()}, nil
+	case "trb.std.string_builder.clear":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		builder, ok := values[0].Data.(*stringBuilderValue)
+		if !ok {
+			return Value{}, errors.New("string_builder.clear expects StringBuilder")
+		}
+		builder.value.Reset()
+		return Value{Type: typ}, nil
 	case "trb.std.arrays.length":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1481,6 +1549,8 @@ func Inspect(value Value) string {
 			parts[index] = strconv.Itoa(int(value))
 		}
 		return "Bytes[" + strings.Join(parts, ", ") + "]"
+	case *stringBuilderValue:
+		return "StringBuilder(" + strconv.Quote(item.value.String()) + ")"
 	case *arrayValue:
 		parts := make([]string, len(item.Items))
 		for index, value := range item.Items {

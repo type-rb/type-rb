@@ -255,6 +255,110 @@ func TestPortableBytesDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableStringBuilderLowersAcrossBackends(t *testing.T) {
+	source := []byte(`import trb/std/string_builder
+
+def render(): String
+	mut builder := string_builder.new()
+	builder.append("A")
+	string_builder.append_codepoint(builder, 128512)
+	builder.append_codepoint(33)
+	return builder.to_s()
+end
+
+def measured(): Integer
+	mut builder := string_builder.from_string("A😀")
+	return builder.size()
+end
+
+def reset(): String
+	mut builder := string_builder.from_string("old")
+	builder.clear()
+	builder.append("new")
+	return string_builder.to_string(builder)
+end
+`)
+	wants := map[string][]string{
+		"go": {
+			`builder := &strings.Builder{}`,
+			`builder.WriteString("A")`,
+			`builder.WriteRune(rune(value))`,
+			`builder.String()`,
+			`utf8.RuneCountInString(builder.String())`,
+			`builder.Reset()`,
+		},
+		"ruby": {
+			`builder = String.new(encoding: Encoding::UTF_8)`,
+			`builder << "A"`,
+			`builder << (128512).chr(Encoding::UTF_8)`,
+			`builder.dup`,
+			`builder.each_codepoint.count`,
+			`builder.clear`,
+		},
+		"typescript": {
+			`let builder: Array<string> = [];`,
+			`builder.push("A")`,
+			`builder.push(String.fromCodePoint(value))`,
+			`builder.join("")`,
+			`Array.from(builder.join("")).length`,
+			`builder.splice(0)`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := CompileWithOptions("builder.trb", source, Options{Mode: mode, Package: "builderexample", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable StringBuilder: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s StringBuilder output is missing %q:\n%s", mode, want, output)
+			}
+		}
+		if mode == "go" {
+			fileSet := token.NewFileSet()
+			parsed, parseErr := parser.ParseFile(fileSet, "builder.go", artifact.Output, parser.AllErrors)
+			if parseErr != nil {
+				t.Fatalf("generated Go StringBuilder output does not parse: %v\n%s", parseErr, output)
+			}
+			if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("builderexample", fileSet, []*goast.File{parsed}, nil); checkErr != nil {
+				t.Fatalf("generated Go StringBuilder output does not type-check: %v\n%s", checkErr, output)
+			}
+		}
+	}
+}
+
+func TestPortableStringBuilderMutabilityAndTypesAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "receiver requires mut",
+			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := string_builder.new()\n\tbuilder.append(\"x\")\n\treturn\nend\n",
+			want:   "builder is immutable; declare it with mut to use append()",
+		},
+		{
+			name:   "package requires mut",
+			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := string_builder.new()\n\tstring_builder.clear(builder)\n\treturn\nend\n",
+			want:   "builder is immutable; declare it with mut to use clear()",
+		},
+		{
+			name:   "append type",
+			source: "import trb/std/string_builder\ndef bad()\n\tmut builder := string_builder.new()\n\tbuilder.append(1)\n\treturn\nend\n",
+			want:   "argument 1 to append() has type Integer, expected String",
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("bad.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s %s: expected %q StringBuilder diagnostic, got %v", mode, test.name, test.want, err)
+			}
+		}
+	}
+}
+
 func TestPortableResultPackageLowersAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

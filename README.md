@@ -420,9 +420,23 @@ text := bytes.to_string(payload)
 String size counts Unicode code points; Bytes size counts encoded bytes.
 Conversions use UTF-8, and byte concatenation is non-mutating.
 
-v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/bytes`, `trb/std/arrays`,
-`trb/std/numbers`, and `trb/std/result`. Result is imported as a named portable
-type and handled through ordinary exhaustive enum matching:
+Incremental text construction uses a mutable `StringBuilder`:
+
+```trb
+import trb/std/string_builder
+
+mut builder := string_builder.new()
+builder.append("Hello")
+builder.append_codepoint(33)
+message := builder.to_s()
+```
+
+Destructive builder methods require `mut`; `to_s()` returns a String snapshot.
+
+v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/bytes`,
+`trb/std/string_builder`, `trb/std/arrays`, `trb/std/numbers`, and
+`trb/std/result`. Result is imported as a named portable type and handled
+through ordinary exhaustive enum matching:
 
 ```trb
 import { Result } from trb/std/result

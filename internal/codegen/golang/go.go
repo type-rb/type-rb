@@ -906,6 +906,23 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.bytes.valid_utf8":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.Valid(" + arguments[0] + ")"
+	case "trb.std.string_builder.new":
+		g.requireImport("strings", "")
+		return "&strings.Builder{}"
+	case "trb.std.string_builder.from_string":
+		g.requireImport("strings", "")
+		return "func(value string) *strings.Builder { builder := &strings.Builder{}; builder.WriteString(value); return builder }(" + arguments[0] + ")"
+	case "trb.std.string_builder.append":
+		return arguments[0] + ".WriteString(" + arguments[1] + ")"
+	case "trb.std.string_builder.append_codepoint":
+		return "func(builder *strings.Builder, value int) { if value < 0 || value > 0x10ffff || value >= 0xd800 && value <= 0xdfff { panic(\"invalid Unicode code point\") }; builder.WriteRune(rune(value)) }(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.string_builder.length":
+		g.requireImport("unicode/utf8", "utf8")
+		return "utf8.RuneCountInString(" + arguments[0] + ".String())"
+	case "trb.std.string_builder.to_string":
+		return arguments[0] + ".String()"
+	case "trb.std.string_builder.clear":
+		return arguments[0] + ".Reset()"
 	case "trb.std.arrays.length":
 		return "len(" + arguments[0] + ")"
 	case "trb.std.arrays.push":
@@ -1066,6 +1083,9 @@ func (g *generator) goType(t types.Type) string {
 		result = "string"
 	case types.Bytes:
 		result = "[]byte"
+	case types.StringBuilder:
+		g.requireImport("strings", "")
+		result = "*strings.Builder"
 	case types.Array, types.Iterable:
 		element := "any"
 		if len(t.Args) > 0 {

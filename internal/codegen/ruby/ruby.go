@@ -494,6 +494,20 @@ func (g *generator) intrinsic(name string, arguments []string) string {
 		return arguments[0] + " + " + arguments[1]
 	case "trb.std.bytes.valid_utf8":
 		return "(" + arguments[0] + ").dup.force_encoding(Encoding::UTF_8).valid_encoding?"
+	case "trb.std.string_builder.new":
+		return "String.new(encoding: Encoding::UTF_8)"
+	case "trb.std.string_builder.from_string":
+		return "(" + arguments[0] + ").dup.force_encoding(Encoding::UTF_8)"
+	case "trb.std.string_builder.append":
+		return arguments[0] + " << " + arguments[1]
+	case "trb.std.string_builder.append_codepoint":
+		return arguments[0] + " << (" + arguments[1] + ").chr(Encoding::UTF_8)"
+	case "trb.std.string_builder.length":
+		return arguments[0] + ".each_codepoint.count"
+	case "trb.std.string_builder.to_string":
+		return arguments[0] + ".dup"
+	case "trb.std.string_builder.clear":
+		return arguments[0] + ".clear"
 	case "trb.std.arrays.length":
 		return arguments[0] + ".length"
 	case "trb.std.arrays.push":

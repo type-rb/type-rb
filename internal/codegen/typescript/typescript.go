@@ -642,6 +642,20 @@ func (g *generator) intrinsic(name string, _ *ir.Call, arguments []string) strin
 		return "((left: Uint8Array, right: Uint8Array): Uint8Array => { const value = new Uint8Array(left.byteLength + right.byteLength); value.set(left); value.set(right, left.byteLength); return value; })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.bytes.valid_utf8":
 		return "((value: Uint8Array): boolean => { try { new TextDecoder(\"utf-8\", { fatal: true }).decode(value); return true; } catch { return false; } })(" + arguments[0] + ")"
+	case "trb.std.string_builder.new":
+		return "[]"
+	case "trb.std.string_builder.from_string":
+		return "[" + arguments[0] + "]"
+	case "trb.std.string_builder.append":
+		return arguments[0] + ".push(" + arguments[1] + ")"
+	case "trb.std.string_builder.append_codepoint":
+		return "((builder: Array<string>, value: number): void => { if (value < 0 || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) { throw new RangeError(\"invalid Unicode code point\"); } builder.push(String.fromCodePoint(value)); })(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.string_builder.length":
+		return "Array.from(" + arguments[0] + ".join(\"\")).length"
+	case "trb.std.string_builder.to_string":
+		return arguments[0] + ".join(\"\")"
+	case "trb.std.string_builder.clear":
+		return arguments[0] + ".splice(0)"
 	case "trb.std.arrays.length":
 		return arguments[0] + ".length"
 	case "trb.std.arrays.push":
@@ -745,6 +759,8 @@ func tsType(t types.Type) string {
 		result = "string"
 	case types.Bytes:
 		result = "Uint8Array"
+	case types.StringBuilder:
+		result = "Array<string>"
 	case types.Array, types.Iterable:
 		element := "unknown"
 		if len(t.Args) > 0 {

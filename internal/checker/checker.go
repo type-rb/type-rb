@@ -1980,7 +1980,7 @@ func (c *Checker) requireMutable(expression ast.Expression, sc *scope, action st
 
 func isReferenceType(typ types.Type) bool {
 	switch typ.Kind {
-	case types.Array, types.Hash, types.Named:
+	case types.Array, types.Hash, types.StringBuilder, types.Named:
 		return true
 	default:
 		return false
@@ -2036,7 +2036,7 @@ func inferLibraryReturn(symbol stdlib.Symbol, receiver types.Type, arguments []t
 
 func portableReceiverKind(kind types.Kind) bool {
 	switch kind {
-	case types.Bool, types.Int, types.Float, types.String, types.Bytes, types.Array, types.Range, types.Hash:
+	case types.Bool, types.Int, types.Float, types.String, types.Bytes, types.StringBuilder, types.Array, types.Range, types.Hash:
 		return true
 	default:
 		return false

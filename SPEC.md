@@ -501,6 +501,15 @@ allows callers to reject it first. An out-of-range `at` is a runtime error.
 Consequently `String#size` counts Unicode code points while `Bytes#size`
 counts encoded bytes.
 
+`StringBuilder` is the portable mutable text accumulator from
+`trb/std/string_builder`. `new` and `from_string` construct it; `append`,
+`append_codepoint`, and `clear` are destructive operations and require a `mut`
+binding in both package and receiver forms. `to_string`/`#to_s` returns an
+immutable String snapshot, and `length`/`#size` counts Unicode code points.
+`append_codepoint` accepts a Unicode scalar value as an Integer and raises a
+runtime error for negative values, surrogate code points, or values above
+U+10FFFF.
+
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal
 semantic/IR type, but is not a TypeRB return-type spelling.

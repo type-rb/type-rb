@@ -6,20 +6,21 @@ import "strings"
 type Kind string
 
 const (
-	Invalid  Kind = "invalid"
-	Any      Kind = "any"
-	Void     Kind = "void"
-	Bool     Kind = "bool"
-	Int      Kind = "int"
-	Float    Kind = "float"
-	String   Kind = "string"
-	Bytes    Kind = "bytes"
-	Array    Kind = "array"
-	Range    Kind = "range"
-	Iterable Kind = "iterable"
-	Hash     Kind = "hash"
-	Named    Kind = "named"
-	Nil      Kind = "nil"
+	Invalid       Kind = "invalid"
+	Any           Kind = "any"
+	Void          Kind = "void"
+	Bool          Kind = "bool"
+	Int           Kind = "int"
+	Float         Kind = "float"
+	String        Kind = "string"
+	Bytes         Kind = "bytes"
+	StringBuilder Kind = "string_builder"
+	Array         Kind = "array"
+	Range         Kind = "range"
+	Iterable      Kind = "iterable"
+	Hash          Kind = "hash"
+	Named         Kind = "named"
+	Nil           Kind = "nil"
 )
 
 type Type struct {
@@ -64,6 +65,8 @@ func FromName(name string) Type {
 		return Type{Kind: String, Name: "String"}
 	case "bytes":
 		return Type{Kind: Bytes, Name: "Bytes"}
+	case "stringbuilder", "string_builder":
+		return Type{Kind: StringBuilder, Name: "StringBuilder"}
 	case "nil", "null":
 		return Type{Kind: Nil, Name: "Nil"}
 	case "array":

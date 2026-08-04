@@ -69,6 +69,7 @@ func (p *Package) DefaultAlias() string {
 
 var stringType = types.FromName("String")
 var bytesType = types.FromName("Bytes")
+var stringBuilderType = types.FromName("StringBuilder")
 var integerType = types.FromName("Integer")
 var booleanType = types.FromName("Boolean")
 var voidType = types.FromName("Void")
@@ -143,6 +144,44 @@ end
 				Return: bytesType,
 			},
 			"valid_utf8": unary("valid_utf8", "trb.std.bytes.valid_utf8", bytesType, booleanType),
+		},
+	},
+	"trb/std/string_builder": {
+		Path: "trb/std/string_builder",
+		Kind: Portable,
+		Symbols: map[string]Symbol{
+			"new": {
+				Name:      "new",
+				Intrinsic: "trb.std.string_builder.new",
+				Return:    stringBuilderType,
+			},
+			"from_string": unary("from_string", "trb.std.string_builder.from_string", stringType, stringBuilderType),
+			"append": {
+				Name:      "append",
+				Intrinsic: "trb.std.string_builder.append",
+				Parameters: []Parameter{
+					{Name: "builder", Type: stringBuilderType, Mutable: true},
+					{Name: "value", Type: stringType},
+				},
+				Return: voidType,
+			},
+			"append_codepoint": {
+				Name:      "append_codepoint",
+				Intrinsic: "trb.std.string_builder.append_codepoint",
+				Parameters: []Parameter{
+					{Name: "builder", Type: stringBuilderType, Mutable: true},
+					{Name: "value", Type: integerType},
+				},
+				Return: voidType,
+			},
+			"length":    unary("length", "trb.std.string_builder.length", stringBuilderType, integerType),
+			"to_string": unary("to_string", "trb.std.string_builder.to_string", stringBuilderType, stringType),
+			"clear": {
+				Name:       "clear",
+				Intrinsic:  "trb.std.string_builder.clear",
+				Parameters: []Parameter{{Name: "builder", Type: stringBuilderType, Mutable: true}},
+				Return:     voidType,
+			},
 		},
 	},
 	"trb/std/arrays": {
@@ -282,6 +321,13 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"at":         {PackagePath: "trb/std/bytes", Symbol: "at"},
 		"concat":     {PackagePath: "trb/std/bytes", Symbol: "concat"},
 		"valid_utf8": {PackagePath: "trb/std/bytes", Symbol: "valid_utf8"},
+	},
+	types.StringBuilder: {
+		"append":           {PackagePath: "trb/std/string_builder", Symbol: "append"},
+		"append_codepoint": {PackagePath: "trb/std/string_builder", Symbol: "append_codepoint"},
+		"size":             {PackagePath: "trb/std/string_builder", Symbol: "length"},
+		"to_s":             {PackagePath: "trb/std/string_builder", Symbol: "to_string"},
+		"clear":            {PackagePath: "trb/std/string_builder", Symbol: "clear"},
 	},
 }
 

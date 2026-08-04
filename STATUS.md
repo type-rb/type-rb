@@ -72,14 +72,18 @@ Implemented:
 - Cross-file checking of imported constructors, fields, methods, inheritance,
   and interface conformance, with target-relative backend imports.
 - Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`,
-  `trb/std/bytes`, `trb/std/numbers`, and `trb/std/result` packages, plus
-  mode-checked Ruby, Go, and TypeScript platform packages.
+  `trb/std/bytes`, `trb/std/string_builder`, `trb/std/numbers`, and
+  `trb/std/result` packages, plus mode-checked Ruby, Go, and TypeScript platform
+  packages.
 - Compiler-owned receiver-method contracts shared with portable package APIs,
   initially covering `Integer#to_s`, `String#to_i`, and Unicode-aware
   `String#size` across the checker, typed IR, all backends, and the REPL.
 - A distinct portable `Bytes` type with UTF-8 conversion, byte length/indexing,
   non-mutating concatenation, validity checks, package and receiver APIs, three
   backend representations, and typed-IR REPL values.
+- A portable mutable `StringBuilder` with checked `mut` receiver/package
+  operations, Unicode scalar appends, String snapshots, code-point length,
+  clear, three backend representations, and typed-IR REPL execution.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.
