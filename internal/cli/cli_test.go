@@ -184,6 +184,34 @@ func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableArrayAndHashOperationsAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-collections-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "import trb/std/arrays\nimport trb/std/hashes\nmut numbers := [1, 2]\nnumbers.first()\nnumbers.last()\nnumbers.fetch(1)\nnumbers.empty?()\nnumbers.dup()\narrays.push(numbers, 3)\nnumbers\nlabels: Hash<Integer, String> := {1 => \"one\", 2 => \"two\"}\nlabels.fetch(2)\nlabels.key?(3)\nlabels.keys()\nlabels.values()\nhashes.copy(labels)\n:quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "[1, 2] : Array<Integer>\n1 : Integer\n2 : Integer\n2 : Integer\nfalse : Boolean\n[1, 2] : Array<Integer>\n[1, 2, 3] : Array<Integer>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"two\" : String\nfalse : Boolean\n[1, 2] : Array<Integer>\n[\"one\", \"two\"] : Array<String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s Array/Hash REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesCompilerOwnedUnicodeAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()

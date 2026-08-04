@@ -27,6 +27,7 @@ type Parameter struct {
 type Symbol struct {
 	Name            string
 	Intrinsic       string
+	TypeParameters  []string
 	Receiver        types.Type
 	ReceiverMutable bool
 	Parameters      []Parameter
@@ -74,6 +75,9 @@ var integerType = types.FromName("Integer")
 var booleanType = types.FromName("Boolean")
 var voidType = types.FromName("Void")
 var anyType = types.FromName("Any")
+var typeT = types.FromName("T")
+var typeK = types.FromName("K")
+var typeV = types.FromName("V")
 
 var registry = map[string]*Package{
 	"trb/std/result": {
@@ -213,12 +217,62 @@ end
 		Path: "trb/std/arrays",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
-			"length": unary("length", "trb.std.arrays.length", types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Any")}}, integerType),
-			"push": {
-				Name: "push", Intrinsic: "trb.std.arrays.push",
-				Parameters: []Parameter{{Name: "values", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Any")}}, Mutable: true}, {Name: "value", Type: types.FromName("Any")}},
-				Return:     voidType,
+			"length": genericUnary("length", "trb.std.arrays.length", []string{"T"}, arrayOf(typeT), integerType),
+			"empty":  genericUnary("empty", "trb.std.arrays.empty", []string{"T"}, arrayOf(typeT), booleanType),
+			"fetch": {
+				Name:           "fetch",
+				Intrinsic:      "trb.std.arrays.fetch",
+				TypeParameters: []string{"T"},
+				Parameters: []Parameter{
+					{Name: "values", Type: arrayOf(typeT)},
+					{Name: "index", Type: integerType},
+				},
+				Return: typeT,
 			},
+			"first": genericUnary("first", "trb.std.arrays.first", []string{"T"}, arrayOf(typeT), typeT),
+			"last":  genericUnary("last", "trb.std.arrays.last", []string{"T"}, arrayOf(typeT), typeT),
+			"copy":  genericUnary("copy", "trb.std.arrays.copy", []string{"T"}, arrayOf(typeT), arrayOf(typeT)),
+			"push": {
+				Name:           "push",
+				Intrinsic:      "trb.std.arrays.push",
+				TypeParameters: []string{"T"},
+				Parameters: []Parameter{
+					{Name: "values", Type: arrayOf(typeT), Mutable: true},
+					{Name: "value", Type: typeT},
+				},
+				Return: voidType,
+			},
+		},
+	},
+	"trb/std/hashes": {
+		Path: "trb/std/hashes",
+		Kind: Portable,
+		Symbols: map[string]Symbol{
+			"length": genericUnary("length", "trb.std.hashes.length", []string{"K", "V"}, hashOf(typeK, typeV), integerType),
+			"empty":  genericUnary("empty", "trb.std.hashes.empty", []string{"K", "V"}, hashOf(typeK, typeV), booleanType),
+			"fetch": {
+				Name:           "fetch",
+				Intrinsic:      "trb.std.hashes.fetch",
+				TypeParameters: []string{"K", "V"},
+				Parameters: []Parameter{
+					{Name: "values", Type: hashOf(typeK, typeV)},
+					{Name: "key", Type: typeK},
+				},
+				Return: typeV,
+			},
+			"contains_key": {
+				Name:           "contains_key",
+				Intrinsic:      "trb.std.hashes.contains_key",
+				TypeParameters: []string{"K", "V"},
+				Parameters: []Parameter{
+					{Name: "values", Type: hashOf(typeK, typeV)},
+					{Name: "key", Type: typeK},
+				},
+				Return: booleanType,
+			},
+			"keys":   genericUnary("keys", "trb.std.hashes.keys", []string{"K", "V"}, hashOf(typeK, typeV), arrayOf(typeK)),
+			"values": genericUnary("values", "trb.std.hashes.values", []string{"K", "V"}, hashOf(typeK, typeV), arrayOf(typeV)),
+			"copy":   genericUnary("copy", "trb.std.hashes.copy", []string{"K", "V"}, hashOf(typeK, typeV), hashOf(typeK, typeV)),
 		},
 	},
 	"trb/std/numbers": {
@@ -360,7 +414,22 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"clear":            {PackagePath: "trb/std/string_builder", Symbol: "clear"},
 	},
 	types.Array: {
-		"size": {PackagePath: "trb/std/arrays", Symbol: "length"},
+		"size":   {PackagePath: "trb/std/arrays", Symbol: "length"},
+		"empty?": {PackagePath: "trb/std/arrays", Symbol: "empty"},
+		"fetch":  {PackagePath: "trb/std/arrays", Symbol: "fetch"},
+		"first":  {PackagePath: "trb/std/arrays", Symbol: "first"},
+		"last":   {PackagePath: "trb/std/arrays", Symbol: "last"},
+		"dup":    {PackagePath: "trb/std/arrays", Symbol: "copy"},
+		"push":   {PackagePath: "trb/std/arrays", Symbol: "push"},
+	},
+	types.Hash: {
+		"size":   {PackagePath: "trb/std/hashes", Symbol: "length"},
+		"empty?": {PackagePath: "trb/std/hashes", Symbol: "empty"},
+		"fetch":  {PackagePath: "trb/std/hashes", Symbol: "fetch"},
+		"key?":   {PackagePath: "trb/std/hashes", Symbol: "contains_key"},
+		"keys":   {PackagePath: "trb/std/hashes", Symbol: "keys"},
+		"values": {PackagePath: "trb/std/hashes", Symbol: "values"},
+		"dup":    {PackagePath: "trb/std/hashes", Symbol: "copy"},
 	},
 }
 
@@ -371,6 +440,20 @@ func unary(name, intrinsic string, parameter, result types.Type) Symbol {
 		Parameters: []Parameter{{Name: "value", Type: parameter}},
 		Return:     result,
 	}
+}
+
+func genericUnary(name, intrinsic string, typeParameters []string, parameter, result types.Type) Symbol {
+	symbol := unary(name, intrinsic, parameter, result)
+	symbol.TypeParameters = typeParameters
+	return symbol
+}
+
+func arrayOf(element types.Type) types.Type {
+	return types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{element}}
+}
+
+func hashOf(key, value types.Type) types.Type {
+	return types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{key, value}}
 }
 
 func Lookup(packagePath string) (*Package, bool) {
@@ -397,11 +480,69 @@ func LookupReceiverMethod(receiver types.Type, name string) (*Package, Symbol, b
 	if len(symbol.Parameters) == 0 {
 		return nil, Symbol{}, false
 	}
+	symbol = Instantiate(symbol, []types.Type{receiver})
 	symbol.Name = name
 	symbol.Receiver = receiver
 	symbol.ReceiverMutable = symbol.Parameters[0].Mutable
 	symbol.Parameters = append([]Parameter(nil), symbol.Parameters[1:]...)
 	return definition, symbol, true
+}
+
+// Instantiate substitutes compiler-owned type parameters inferred from call
+// arguments. The first occurrence fixes a type variable; later occurrences
+// are checked against that substitution by the ordinary checker.
+func Instantiate(symbol Symbol, arguments []types.Type) Symbol {
+	typeParameters := map[string]bool{}
+	for _, name := range symbol.TypeParameters {
+		typeParameters[name] = true
+	}
+	bindings := map[string]types.Type{}
+	for index, actual := range arguments {
+		parameterIndex := index
+		if parameterIndex >= len(symbol.Parameters) {
+			if !symbol.Variadic || len(symbol.Parameters) == 0 {
+				break
+			}
+			parameterIndex = len(symbol.Parameters) - 1
+		}
+		bindType(symbol.Parameters[parameterIndex].Type, actual, typeParameters, bindings)
+	}
+	result := symbol
+	result.Parameters = append([]Parameter(nil), symbol.Parameters...)
+	for index := range result.Parameters {
+		result.Parameters[index].Type = substituteType(result.Parameters[index].Type, bindings)
+	}
+	result.Return = substituteType(result.Return, bindings)
+	return result
+}
+
+func bindType(pattern, actual types.Type, typeParameters map[string]bool, bindings map[string]types.Type) {
+	if typeParameters[pattern.Name] && pattern.Kind == types.Named && len(pattern.Args) == 0 {
+		if _, exists := bindings[pattern.Name]; !exists && actual.Kind != types.Invalid {
+			bindings[pattern.Name] = actual
+		}
+		return
+	}
+	if pattern.Kind != actual.Kind || len(pattern.Args) != len(actual.Args) {
+		return
+	}
+	for index := range pattern.Args {
+		bindType(pattern.Args[index], actual.Args[index], typeParameters, bindings)
+	}
+}
+
+func substituteType(input types.Type, bindings map[string]types.Type) types.Type {
+	if replacement, exists := bindings[input.Name]; exists && input.Kind == types.Named && len(input.Args) == 0 {
+		replacement.Nullable = replacement.Nullable || input.Nullable
+		replacement.Readonly = replacement.Readonly || input.Readonly
+		return replacement
+	}
+	result := input
+	result.Args = make([]types.Type, len(input.Args))
+	for index, argument := range input.Args {
+		result.Args[index] = substituteType(argument, bindings)
+	}
+	return result
 }
 
 func IsReservedPath(packagePath string) bool {

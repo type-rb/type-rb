@@ -525,6 +525,19 @@ The initial built-in receiver surface also includes `String#codepoints`,
 the earlier conversion and size methods, each resolves to its corresponding
 portable package contract rather than a target-native method by name.
 
+Compiler-owned package contracts may declare internal type parameters. They
+are inferred from call arguments and receivers; this is library-contract
+inference, not a mode-specific relaxation or user-defined implicit generic
+call syntax. `trb/std/arrays` provides `length`, `empty`, strict zero-based
+`fetch`, strict `first`/`last`, shallow `copy`, and mutable `push` for
+`Array<T>`. Receiver spellings are `size`, `empty?`, `fetch`, `first`, `last`,
+`dup`, and `push`. `trb/std/hashes` provides `length`, `empty`, strict `fetch`,
+`contains_key`, `keys`, `values`, and shallow `copy` for `Hash<K, V>`;
+receiver spellings are `size`, `empty?`, `fetch`, `key?`, `keys`, `values`,
+and `dup`. Missing fetch keys, out-of-range Array indexes, and first/last on an
+empty Array are runtime errors in every mode. Hash key/value enumeration order
+is unspecified.
+
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal
 semantic/IR type, but is not a TypeRB return-type spelling.

@@ -71,7 +71,7 @@ Implemented:
   duplicate exported types, and duplicate top-level `main` definitions.
 - Cross-file checking of imported constructors, fields, methods, inheritance,
   and interface conformance, with target-relative backend imports.
-- Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`,
+- Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`, `trb/std/hashes`,
   `trb/std/bytes`, `trb/std/string_builder`, `trb/std/unicode`,
   `trb/std/numbers`, and `trb/std/result` packages, plus mode-checked Ruby, Go,
   and TypeScript platform packages.
@@ -87,8 +87,12 @@ Implemented:
 - Compiler-owned Unicode 15.0.0 range tables emitted as TypeRB source, with
   scalar/category and identifier classification, code-point construction,
   default/named imports, three runnable backends, and REPL execution.
+- Compiler-owned generic collection contracts inferred from `Array<T>` and
+  `Hash<K, V>`, with strict lookup/edge access, emptiness and size queries,
+  shallow copies, typed key/value extraction, checked Array mutation, all
+  receiver forms, three backends, and typed-IR REPL execution.
 - Expanded compiler-owned receiver methods for String code points, emptiness,
-  containment and case conversion, plus Array size.
+  containment and case conversion.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.

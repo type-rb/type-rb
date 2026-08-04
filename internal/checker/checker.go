@@ -1590,10 +1590,6 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.result.Expressions[n.Receiver] = receiverType
 		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
-		if receiverType.Kind == types.Array && n.Name == "push" {
-			typ = types.Type{Kind: types.Void, Name: "Void"}
-			break
-		}
 		if identifier, ok := n.Receiver.(*ast.Identifier); ok {
 			if imported := c.resolution.Packages[identifier.Name]; imported != nil {
 				if binding, exists := c.resolution.Member(identifier.Name, n.Name); exists {
@@ -1721,16 +1717,20 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				break
 			}
 			typ = binding.Type()
-			c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
-			if binding.Library != nil {
+			library := c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
+			if library != nil {
 				receiverType := invalidType()
-				if member, method := n.Callee.(*ast.MemberExpression); method && binding.Library.HasReceiver() {
+				if member, method := n.Callee.(*ast.MemberExpression); method && library.HasReceiver() {
 					receiverType = c.result.Expressions[member.Receiver]
-					if binding.Library.ReceiverMutable {
+					if library.ReceiverMutable {
 						c.requireMutable(member.Receiver, sc, binding.Name+"()")
 					}
 				}
-				typ = inferLibraryReturn(*binding.Library, receiverType, argumentTypes)
+				typ = inferLibraryReturn(*library, receiverType, argumentTypes)
+				if unresolved := unresolvedLibraryTypeParameters(*library, typ); len(unresolved) > 0 {
+					c.error(n.Span(), fmt.Sprintf("cannot infer %s for %s()", strings.Join(unresolved, ", "), binding.Name))
+					typ = invalidType()
+				}
 			}
 		}
 		if member, ok := c.external[n.Callee]; ok {
@@ -1754,10 +1754,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if member, ok := n.Callee.(*ast.MemberExpression); ok {
 			receiverType := c.checkExpression(member.Receiver, sc)
 			classAccess := c.classMemberAccess(member.Receiver, sc)
-			if receiverType.Kind == types.Array && member.Name == "push" {
-				c.checkArrayPush(n, member, receiverType, argumentTypes, sc)
-				typ = types.Type{Kind: types.Void, Name: "Void"}
-			} else if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
+			if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
 				typ = methodReturnType(local.method)
 				c.checkArguments(n.Span(), local.method, n.Arguments, argumentTypes)
 			}
@@ -1881,19 +1878,22 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 	}
 }
 
-func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Binding, arguments []ast.CallArgument, actual []types.Type, sc *scope) {
+func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Binding, arguments []ast.CallArgument, actual []types.Type, sc *scope) *stdlib.Symbol {
 	var parameters []types.Type
 	required := 0
 	variadic := false
 	name := binding.Name
+	var library *stdlib.Symbol
 	if binding.Library != nil {
-		for _, parameter := range binding.Library.Parameters {
+		specialized := stdlib.Instantiate(*binding.Library, actual)
+		library = &specialized
+		for _, parameter := range specialized.Parameters {
 			parameters = append(parameters, parameter.Type)
 			if !parameter.Optional {
 				required++
 			}
 		}
-		variadic = binding.Library.Variadic
+		variadic = specialized.Variadic
 	} else if binding.Export != nil {
 		parameters = append(parameters, binding.Export.Parameters...)
 		required = binding.Export.Required
@@ -1909,7 +1909,7 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		} else {
 			c.error(span, fmt.Sprintf("%s() expects %d..%d arguments, got %d", name, required, len(parameters), len(arguments)))
 		}
-		return
+		return library
 	}
 	for i, actualType := range actual {
 		parameterIndex := i
@@ -1925,21 +1925,11 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		if !types.Assignable(expected, actualType) {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, name, actualType, expected))
 		}
-		if binding.Library != nil && parameterIndex < len(binding.Library.Parameters) && binding.Library.Parameters[parameterIndex].Mutable {
+		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Mutable {
 			c.requireMutable(arguments[i].Value, sc, name+"()")
 		}
 	}
-}
-
-func (c *Checker) checkArrayPush(call *ast.CallExpression, member *ast.MemberExpression, receiverType types.Type, arguments []types.Type, sc *scope) {
-	c.requireMutable(member.Receiver, sc, "push()")
-	if len(arguments) != 1 {
-		c.error(call.Span(), fmt.Sprintf("push() expects 1 argument, got %d", len(arguments)))
-		return
-	}
-	if len(receiverType.Args) > 0 && !types.Assignable(receiverType.Args[0], arguments[0]) {
-		c.error(call.Arguments[0].Value.Span(), fmt.Sprintf("argument 1 to push() has type %s, expected %s", arguments[0], receiverType.Args[0]))
-	}
+	return library
 }
 
 func (c *Checker) requireMutable(expression ast.Expression, sc *scope, action string) {
@@ -2032,6 +2022,25 @@ func inferLibraryReturn(symbol stdlib.Symbol, receiver types.Type, arguments []t
 	default:
 		return symbol.Return
 	}
+}
+
+func unresolvedLibraryTypeParameters(symbol stdlib.Symbol, typ types.Type) []string {
+	present := map[string]bool{}
+	var visit func(types.Type)
+	visit = func(current types.Type) {
+		present[current.Name] = true
+		for _, argument := range current.Args {
+			visit(argument)
+		}
+	}
+	visit(typ)
+	var result []string
+	for _, name := range symbol.TypeParameters {
+		if present[name] {
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 func portableReceiverKind(kind types.Kind) bool {

@@ -487,8 +487,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return "{" + strings.Join(parts, ", ") + "}"
 	case *ir.Unary:
 		op := n.Operator
-		if op == "not" {
-			op = "!"
+		if op == "not" || op == "!" {
+			return "!(" + g.expr(n.Operand) + ")"
 		}
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Binary:
@@ -695,8 +695,35 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".splice(0)"
 	case "trb.std.arrays.length":
 		return arguments[0] + ".length"
+	case "trb.std.arrays.empty":
+		return arguments[0] + ".length === 0"
+	case "trb.std.arrays.fetch":
+		return "((): " + tsType(call.ExprType()) + " => { const values = " + arguments[0] + "; const index = " + arguments[1] + "; if (index < 0 || index >= values.length) { throw new Error(\"Array index is out of bounds\"); } return values[index]!; })()"
+	case "trb.std.arrays.first":
+		return "((): " + tsType(call.ExprType()) + " => { const values = " + arguments[0] + "; if (values.length === 0) { throw new Error(\"Array is empty\"); } return values[0]!; })()"
+	case "trb.std.arrays.last":
+		return "((): " + tsType(call.ExprType()) + " => { const values = " + arguments[0] + "; if (values.length === 0) { throw new Error(\"Array is empty\"); } return values[values.length - 1]!; })()"
+	case "trb.std.arrays.copy":
+		return "[..." + arguments[0] + "]"
 	case "trb.std.arrays.push":
 		return arguments[0] + ".push(" + arguments[1] + ")"
+	case "trb.std.hashes.length":
+		return "Object.keys(" + arguments[0] + ").length"
+	case "trb.std.hashes.empty":
+		return "Object.keys(" + arguments[0] + ").length === 0"
+	case "trb.std.hashes.fetch":
+		return "((): " + tsType(call.ExprType()) + " => { const values = " + arguments[0] + "; const key = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(values, key)) { throw new Error(\"Hash key is missing\"); } return values[key]; })()"
+	case "trb.std.hashes.contains_key":
+		return "Object.prototype.hasOwnProperty.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.hashes.keys":
+		if len(call.ExprType().Args) == 1 && call.ExprType().Args[0].Kind == types.Int {
+			return "Object.keys(" + arguments[0] + ").map(Number)"
+		}
+		return "Object.keys(" + arguments[0] + ")"
+	case "trb.std.hashes.values":
+		return "Object.values(" + arguments[0] + ")"
+	case "trb.std.hashes.copy":
+		return "({ ..." + arguments[0] + " })"
 	case "trb.std.numbers.to_string":
 		return "String(" + arguments[0] + ")"
 	case "trb.std.numbers.parse_integer":

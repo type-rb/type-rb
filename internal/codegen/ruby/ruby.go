@@ -365,8 +365,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return "{" + strings.Join(parts, ", ") + "}"
 	case *ir.Unary:
 		op := n.Operator
-		if op == "not" {
-			op = "!"
+		if op == "not" || op == "!" {
+			return "!(" + g.expr(n.Operand) + ")"
 		}
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Binary:
@@ -540,8 +540,32 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".clear"
 	case "trb.std.arrays.length":
 		return arguments[0] + ".length"
+	case "trb.std.arrays.empty":
+		return arguments[0] + ".empty?"
+	case "trb.std.arrays.fetch":
+		return "->(values, index) { raise IndexError, \"Array index is out of bounds\" if index < 0 || index >= values.length; values.fetch(index) }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.arrays.first":
+		return "->(values) { raise IndexError, \"Array is empty\" if values.empty?; values.fetch(0) }.call(" + arguments[0] + ")"
+	case "trb.std.arrays.last":
+		return "->(values) { raise IndexError, \"Array is empty\" if values.empty?; values.fetch(values.length - 1) }.call(" + arguments[0] + ")"
+	case "trb.std.arrays.copy":
+		return arguments[0] + ".dup"
 	case "trb.std.arrays.push":
 		return arguments[0] + " << " + arguments[1]
+	case "trb.std.hashes.length":
+		return arguments[0] + ".length"
+	case "trb.std.hashes.empty":
+		return arguments[0] + ".empty?"
+	case "trb.std.hashes.fetch":
+		return arguments[0] + ".fetch(" + arguments[1] + ")"
+	case "trb.std.hashes.contains_key":
+		return arguments[0] + ".key?(" + arguments[1] + ")"
+	case "trb.std.hashes.keys":
+		return arguments[0] + ".keys"
+	case "trb.std.hashes.values":
+		return arguments[0] + ".values"
+	case "trb.std.hashes.copy":
+		return arguments[0] + ".dup"
 	case "trb.std.numbers.to_string":
 		return arguments[0] + ".to_s"
 	case "trb.std.numbers.parse_integer":

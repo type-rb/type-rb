@@ -1415,6 +1415,55 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("arrays.length expects Array")
 		}
 		return Value{Type: typ, Data: int64(len(array.Items))}, nil
+	case "trb.std.arrays.empty":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.empty expects Array")
+		}
+		return Value{Type: typ, Data: len(array.Items) == 0}, nil
+	case "trb.std.arrays.fetch":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		index, integer := values[1].Data.(int64)
+		if !ok || !integer || index < 0 || index >= int64(len(array.Items)) {
+			return Value{}, errors.New("Array index is out of bounds")
+		}
+		result := array.Items[index]
+		result.Type = typ
+		return result, nil
+	case "trb.std.arrays.first", "trb.std.arrays.last":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.first/last expects Array")
+		}
+		if len(array.Items) == 0 {
+			return Value{}, errors.New("Array is empty")
+		}
+		index := 0
+		if name == "trb.std.arrays.last" {
+			index = len(array.Items) - 1
+		}
+		result := array.Items[index]
+		result.Type = typ
+		return result, nil
+	case "trb.std.arrays.copy":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.copy expects Array")
+		}
+		items := append([]Value(nil), array.Items...)
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
 	case "trb.std.arrays.push":
 		if err := require(2); err != nil {
 			return Value{}, err
@@ -1425,6 +1474,75 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		array.Items = append(array.Items, values[1])
 		return Value{Type: typ}, nil
+	case "trb.std.hashes.length", "trb.std.hashes.empty":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		hash, ok := values[0].Data.(*hashValue)
+		if !ok {
+			return Value{}, errors.New("hashes.length/empty expects Hash")
+		}
+		if name == "trb.std.hashes.empty" {
+			return Value{Type: typ, Data: len(hash.Entries) == 0}, nil
+		}
+		return Value{Type: typ, Data: int64(len(hash.Entries))}, nil
+	case "trb.std.hashes.fetch":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		hash, ok := values[0].Data.(*hashValue)
+		if !ok {
+			return Value{}, errors.New("hashes.fetch expects Hash")
+		}
+		for _, entry := range hash.Entries {
+			if equal(entry.Key, values[1]) {
+				result := entry.Value
+				result.Type = typ
+				return result, nil
+			}
+		}
+		return Value{}, errors.New("Hash key is missing")
+	case "trb.std.hashes.contains_key":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		hash, ok := values[0].Data.(*hashValue)
+		if !ok {
+			return Value{}, errors.New("hashes.contains_key expects Hash")
+		}
+		for _, entry := range hash.Entries {
+			if equal(entry.Key, values[1]) {
+				return Value{Type: typ, Data: true}, nil
+			}
+		}
+		return Value{Type: typ, Data: false}, nil
+	case "trb.std.hashes.keys", "trb.std.hashes.values":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		hash, ok := values[0].Data.(*hashValue)
+		if !ok {
+			return Value{}, errors.New("hashes.keys/values expects Hash")
+		}
+		items := make([]Value, 0, len(hash.Entries))
+		for _, entry := range hash.Entries {
+			if name == "trb.std.hashes.keys" {
+				items = append(items, entry.Key)
+			} else {
+				items = append(items, entry.Value)
+			}
+		}
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.hashes.copy":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		hash, ok := values[0].Data.(*hashValue)
+		if !ok {
+			return Value{}, errors.New("hashes.copy expects Hash")
+		}
+		entries := append([]hashEntry(nil), hash.Entries...)
+		return Value{Type: typ, Data: &hashValue{Entries: entries}}, nil
 	case "trb.std.numbers.to_string":
 		if err := require(1); err != nil {
 			return Value{}, err

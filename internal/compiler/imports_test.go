@@ -359,6 +359,143 @@ func TestPortableStringBuilderMutabilityAndTypesAreModeIndependent(t *testing.T)
 	}
 }
 
+func TestPortableArrayAndHashOperationsLowerAcrossBackends(t *testing.T) {
+	source := []byte(`import trb/std/arrays
+import trb/std/hashes
+
+def array_value(): Integer
+	values := [1, 2, 3]
+	return arrays.copy(values).fetch(1) + values.first() + values.last()
+end
+
+def array_state(): Boolean
+	values := [1]
+	return values.size() == 1 and not values.empty?()
+end
+
+def grow()
+	mut values := [1]
+	arrays.push(values, 2)
+	values.push(3)
+	return
+end
+
+def hash_value(): String
+	labels: Hash<Integer, String> := {1 => "one", 2 => "two"}
+	return labels.fetch(1) + hashes.fetch(labels, 2)
+end
+
+def hash_key(): Integer
+	labels: Hash<Integer, String> := {1 => "one"}
+	return labels.keys().first()
+end
+
+def copied_hash_value(): String
+	labels: Hash<Integer, String> := {1 => "one"}
+	return hashes.copy(labels).values().first()
+end
+
+def hash_state(): Boolean
+	labels: Hash<Integer, String> := {1 => "one"}
+	return labels.size() == 1 and not labels.empty?() and labels.key?(1)
+end
+`)
+	wants := map[string][]string{
+		"go": {
+			`slices.Clone(values)`,
+			`panic("Array index is out of bounds")`,
+			`values = append(values, 2)`,
+			`maps.Keys(labels)`,
+			`maps.Values(maps.Clone(labels))`,
+			`panic("Hash key is missing")`,
+		},
+		"ruby": {
+			`values.dup`,
+			`raise IndexError, "Array index is out of bounds"`,
+			`values << 2`,
+			`labels.keys`,
+			`labels.dup.values`,
+			`labels.fetch(1)`,
+		},
+		"typescript": {
+			`[...values]`,
+			`throw new Error("Array index is out of bounds")`,
+			`values.push(2)`,
+			`Object.keys(labels).map(Number)`,
+			`Object.values(({ ...labels }))`,
+			`throw new Error("Hash key is missing")`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := CompileWithOptions("collections.trb", source, Options{Mode: mode, Package: "collectionsexample", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable Array/Hash operations: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s Array/Hash output is missing %q:\n%s", mode, want, output)
+			}
+		}
+		if mode == "go" {
+			fileSet := token.NewFileSet()
+			parsed, parseErr := parser.ParseFile(fileSet, "collections.go", artifact.Output, parser.AllErrors)
+			if parseErr != nil {
+				t.Fatalf("generated Go Array/Hash output does not parse: %v\n%s", parseErr, output)
+			}
+			if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("collectionsexample", fileSet, []*goast.File{parsed}, nil); checkErr != nil {
+				t.Fatalf("generated Go Array/Hash output does not type-check: %v\n%s", checkErr, output)
+			}
+		}
+	}
+}
+
+func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "receiver push type",
+			source: "def bad()\n\tmut values := [1]\n\tvalues.push(\"two\")\n\treturn\nend\n",
+			want:   "argument 1 to push() has type String, expected Integer",
+		},
+		{
+			name:   "package push type",
+			source: "import trb/std/arrays\ndef bad()\n\tmut values := [1]\n\tarrays.push(values, \"two\")\n\treturn\nend\n",
+			want:   "argument 2 to push() has type String, expected Integer",
+		},
+		{
+			name:   "receiver push requires mut",
+			source: "def bad()\n\tvalues := [1]\n\tvalues.push(2)\n\treturn\nend\n",
+			want:   "values is immutable; declare it with mut to use push()",
+		},
+		{
+			name:   "hash receiver key type",
+			source: "def bad(): String\n\tlabels: Hash<Integer, String> := {1 => \"one\"}\n\treturn labels.fetch(\"1\")\nend\n",
+			want:   "argument 1 to fetch() has type String, expected Integer",
+		},
+		{
+			name:   "hash package key type",
+			source: "import trb/std/hashes\ndef bad(): String\n\tlabels: Hash<Integer, String> := {1 => \"one\"}\n\treturn hashes.fetch(labels, \"1\")\nend\n",
+			want:   "argument 2 to fetch() has type String, expected Integer",
+		},
+		{
+			name:   "unresolved hash value type",
+			source: "def bad(): Array<String>\n\treturn {}.values()\nend\n",
+			want:   "cannot infer V for values()",
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("bad.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s %s: expected %q Array/Hash diagnostic, got %v", mode, test.name, test.want, err)
+			}
+		}
+	}
+}
+
 func TestCompilerOwnedUnicodePackageLowersSameTablesAcrossBackends(t *testing.T) {
 	consumerSource := SourceUnit{
 		Filename:   "/project/main.trb",

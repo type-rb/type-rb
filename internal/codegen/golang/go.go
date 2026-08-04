@@ -709,8 +709,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.goType(n.ExprType()) + "{" + strings.Join(parts, ", ") + "}"
 	case *ir.Unary:
 		op := n.Operator
-		if op == "not" {
-			op = "!"
+		if op == "not" || op == "!" {
+			return "!(" + g.expr(n.Operand) + ")"
 		}
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Binary:
@@ -762,10 +762,6 @@ func (g *generator) expr(expression ir.Expression) string {
 				}
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
-		}
-		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "push" && member.Receiver.ExprType().Kind == types.Array && len(parts) == 1 {
-			receiver := g.expr(member.Receiver)
-			return receiver + " = append(" + receiver + ", " + parts[0] + ")"
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok {
@@ -964,8 +960,38 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".Reset()"
 	case "trb.std.arrays.length":
 		return "len(" + arguments[0] + ")"
+	case "trb.std.arrays.empty":
+		return "len(" + arguments[0] + ") == 0"
+	case "trb.std.arrays.fetch":
+		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; index := " + arguments[1] + "; if index < 0 || index >= len(values) { panic(\"Array index is out of bounds\") }; return values[index] }()"
+	case "trb.std.arrays.first":
+		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; return values[0] }()"
+	case "trb.std.arrays.last":
+		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; return values[len(values)-1] }()"
+	case "trb.std.arrays.copy":
+		g.requireImport("slices", "")
+		return "slices.Clone(" + arguments[0] + ")"
 	case "trb.std.arrays.push":
 		return arguments[0] + " = append(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.hashes.length":
+		return "len(" + arguments[0] + ")"
+	case "trb.std.hashes.empty":
+		return "len(" + arguments[0] + ") == 0"
+	case "trb.std.hashes.fetch":
+		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; key := " + arguments[1] + "; value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; return value }()"
+	case "trb.std.hashes.contains_key":
+		return "func() bool { values := " + arguments[0] + "; key := " + arguments[1] + "; _, ok := values[key]; return ok }()"
+	case "trb.std.hashes.keys":
+		g.requireImport("maps", "")
+		g.requireImport("slices", "")
+		return "slices.Collect(maps.Keys(" + arguments[0] + "))"
+	case "trb.std.hashes.values":
+		g.requireImport("maps", "")
+		g.requireImport("slices", "")
+		return "slices.Collect(maps.Values(" + arguments[0] + "))"
+	case "trb.std.hashes.copy":
+		g.requireImport("maps", "")
+		return "maps.Clone(" + arguments[0] + ")"
 	case "trb.std.numbers.to_string":
 		g.requireImport("strconv", "")
 		return "strconv.Itoa(" + arguments[0] + ")"

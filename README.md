@@ -433,6 +433,24 @@ message := builder.to_s()
 
 Destructive builder methods require `mut`; `to_s()` returns a String snapshot.
 
+Portable collections expose both package and Ruby-like receiver forms:
+
+```trb
+import trb/std/arrays
+import trb/std/hashes
+
+mut values := [1, 2]
+values.push(3)
+first := arrays.first(values)
+
+labels: Hash<Integer, String> := {1 => "one"}
+known := labels.key?(1)
+keys := hashes.keys(labels)
+```
+
+These contracts infer `T`, `K`, and `V` from the collection. `fetch`,
+`first`, and `last` are strict; `dup`/`copy` creates a shallow copy.
+
 Unicode scalar classification comes from one compiler-owned data set shared by
 all targets:
 
