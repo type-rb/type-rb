@@ -43,12 +43,13 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 	case *ast.ImportStatement:
 		result := &ir.Import{Base: base(n.Base), Path: n.Path, Symbols: append([]string(nil), n.Symbols...), Alias: n.Alias, SymbolKinds: map[string]string{}}
 		if resolved := l.checked.Resolution.Imports[n]; resolved != nil {
-			result.Path = resolved.Path
+			result.Path = resolved.RuntimePath()
 			result.Symbols = append([]string(nil), resolved.Symbols...)
 			result.Alias = resolved.Alias
 			result.Kind = string(resolved.Kind)
 			result.Standard = resolved.Definition != nil
 			result.Platform = resolved.Definition != nil && resolved.Definition.Kind == "platform"
+			result.Runtime = resolved.Definition != nil && resolved.Definition.Source != ""
 			for name, exported := range resolved.Exports {
 				result.SymbolKinds[name] = string(exported.Kind)
 			}
@@ -260,7 +261,7 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 	if !ok || binding.Import == nil {
 		return nil
 	}
-	result := &ir.Reference{Package: binding.Import.Path, Alias: binding.Import.Alias, Symbol: binding.Name}
+	result := &ir.Reference{Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name}
 	if binding.Library != nil {
 		result.Intrinsic = binding.Library.Intrinsic
 	}

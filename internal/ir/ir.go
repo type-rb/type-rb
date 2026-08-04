@@ -43,6 +43,7 @@ type Import struct {
 	Kind     string
 	Standard bool
 	Platform bool
+	Runtime  bool
 	// SymbolKinds distinguishes value records from reference classes in
 	// backends whose representation makes that distinction explicit.
 	SymbolKinds map[string]string

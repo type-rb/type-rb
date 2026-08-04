@@ -82,6 +82,90 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 	}
 }
 
+func TestPortableResultPackageLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Result } from trb/std/result
+
+def successful(): Result<Integer, String>
+	return Result<Integer, String>::Ok(7)
+end
+
+def unwrap(value: Result<Integer, String>): Integer
+	case value
+	when Result::Ok(number)
+		return number
+	when Result::Err(error)
+		return 0
+	end
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/result-app", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected the standard Result package: %v", mode, err)
+		}
+		var consumer, runtime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/result/index":
+				runtime = artifact
+			}
+		}
+		if consumer == nil || runtime == nil {
+			t.Fatalf("%s did not compile both the consumer and Result runtime: %#v", mode, artifacts)
+		}
+		consumerWants := map[string][]string{
+			"go":         {`__trb_result "example.com/result-app/trb/std/result"`, "__trb_result.Result[int, string]", "__trb_result.NewResultOk[int, string](7)", "__trbCase1.Kind == __trb_result.ResultOkTag"},
+			"ruby":       {`require_relative "./trb/std/result/index"`, "Result::Ok.new(7)", "when Result::Ok"},
+			"typescript": {`import { Result } from "./trb/std/result/index.ts";`, "Result<number, string>", "Result.Ok<number, string>(7)", `__trbCase1.kind === "Ok"`},
+		}[mode]
+		for _, want := range consumerWants {
+			if output := string(consumer.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s Result consumer is missing %q:\n%s", mode, want, output)
+			}
+		}
+		runtimeWants := map[string][]string{
+			"go":         {"type Result[T any, E any] struct", "func NewResultOk[T any, E any](value T) Result[T, E]"},
+			"ruby":       {"module Result", "Ok = Data.define(:value)", "Err = Data.define(:error)"},
+			"typescript": {"export type Result<T, E> =", "export const Result = Object.freeze({", "Ok: <T, E>(value: T): Result<T, E>"},
+		}[mode]
+		for _, want := range runtimeWants {
+			if output := string(runtime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s Result runtime is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableResultPackageDiagnostics(t *testing.T) {
+	wrongArity := []byte(`import { Result } from trb/std/result
+
+def bad(value: Result<Integer>)
+	return
+end
+`)
+	if _, err := Compile("bad.trb", wrongArity, "go"); err == nil || !strings.Contains(err.Error(), "Result expects 2 type argument(s), got 1") {
+		t.Fatalf("expected standard Result type-arity diagnostic, got %v", err)
+	}
+
+	wrongPayload := []byte(`import { Result } from trb/std/result
+
+def bad(): Result<Integer, String>
+	return Result<Integer, String>::Ok("not an integer")
+end
+`)
+	if _, err := Compile("bad.trb", wrongPayload, "typescript"); err == nil || !strings.Contains(err.Error(), "enum payload argument 1 has type String, expected Integer") {
+		t.Fatalf("expected standard Result payload diagnostic, got %v", err)
+	}
+}
+
 func TestPutsPreludeLowersWithoutImportAcrossBackends(t *testing.T) {
 	source := []byte("def main()\n  puts(1 + 2)\n  return\nend\n")
 	tests := []struct {

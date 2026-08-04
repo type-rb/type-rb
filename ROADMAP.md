@@ -10,8 +10,10 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 
 ## 1. Complete the portable language core
 
-- Finish essential collection and control-flow syntax: transformations,
-  first-class blocks/lambdas, and structured error handling.
+- Finish essential collection and control-flow syntax: transformations and
+  first-class blocks/lambdas. Portable `Result<T, E>` with explicit exhaustive
+  handling is implemented; concise propagation syntax remains a later
+  ergonomics decision.
 - Add union types, position-typed Tuples, and precise nullable/optional
   semantics. Payload-bearing enums, exhaustive payload pattern narrowing, and
   explicit generics for payload enums/top-level functions are implemented;
@@ -61,7 +63,8 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 
 ## 5. Standard library and package ecosystem
 
-- Provide portable collection, JSON, filesystem/path, time, environment,
+- Expand the compiler-owned standard library beyond Result with portable
+  collection, JSON, filesystem/path, time, environment,
   process, regular-expression, HTTP, and encoding packages where semantics can
   be made consistent across targets.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.

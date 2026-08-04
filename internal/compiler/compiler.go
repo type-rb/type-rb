@@ -3,6 +3,7 @@ package compiler
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -13,23 +14,26 @@ import (
 	"github.com/type-rb/type-rb/internal/lower"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/typeprovider"
 )
 
 type Artifact struct {
-	Filename string
-	Mode     string
-	AST      *ast.Program
-	IR       *ir.Program
-	Output   []byte
+	Filename      string
+	Mode          string
+	AST           *ast.Program
+	IR            *ir.Program
+	Output        []byte
+	CompilerOwned bool
 }
 
 type SourceUnit struct {
-	Filename   string
-	Source     []byte
-	ModulePath string
-	Package    string
+	Filename      string
+	Source        []byte
+	ModulePath    string
+	Package       string
+	CompilerOwned bool
 }
 
 type CompileError struct {
@@ -116,6 +120,17 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		}
 		programs[source.ModulePath] = program
 	}
+	for _, source := range compilerOwnedSourceUnits(programs, options) {
+		program, diagnostics := parser.Parse(source.Source)
+		configureProgram(program, options, source.ModulePath, source.Package)
+		diagnostics = append(diagnostics, modeDiagnostics(program, options.Mode)...)
+		if hasErrors(diagnostics) {
+			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
+		}
+		units = append(units, source)
+		programs[source.ModulePath] = program
+	}
+	sort.Slice(units, func(i, j int) bool { return units[i].ModulePath < units[j].ModulePath })
 
 	modules := make([]resolver.Module, 0, len(units))
 	for _, source := range units {
@@ -180,9 +195,47 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		if err != nil {
 			return nil, err
 		}
-		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: lowered, Output: output})
+		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: lowered, Output: output, CompilerOwned: source.CompilerOwned})
 	}
 	return artifacts, nil
+}
+
+func compilerOwnedSourceUnits(programs map[string]*ast.Program, options Options) []SourceUnit {
+	definitions := map[string]*stdlib.Package{}
+	for _, program := range programs {
+		for _, statement := range program.Statements {
+			imported, ok := statement.(*ast.ImportStatement)
+			if !ok {
+				continue
+			}
+			definition, exists := stdlib.Lookup(imported.Path)
+			if !exists || definition.Source == "" || definition.ModulePath == "" {
+				continue
+			}
+			definitions[definition.ModulePath] = definition
+		}
+	}
+	modulePaths := make([]string, 0, len(definitions))
+	for modulePath := range definitions {
+		modulePaths = append(modulePaths, modulePath)
+	}
+	sort.Strings(modulePaths)
+	root := projectRoot(options)
+	if root == "" {
+		root = "."
+	}
+	result := make([]SourceUnit, 0, len(modulePaths))
+	for _, modulePath := range modulePaths {
+		definition := definitions[modulePath]
+		result = append(result, SourceUnit{
+			Filename:      filepath.Join(root, ".trb", "stdlib", filepath.FromSlash(modulePath)+".trb"),
+			Source:        []byte(definition.Source),
+			ModulePath:    modulePath,
+			Package:       filepath.Base(filepath.Dir(filepath.FromSlash(modulePath))),
+			CompilerOwned: true,
+		})
+	}
+	return result
 }
 
 func configureProgram(program *ast.Program, options Options, modulePath, packageName string) {

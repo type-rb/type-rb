@@ -88,7 +88,7 @@ func Generate(program *ir.Program) string {
 	for _, importPath := range paths {
 		alias := g.imports[importPath]
 		if alias != "" && alias != pathpkg.Base(importPath) {
-			output.WriteString("import " + goIdentifier(alias, false) + " " + strconv.Quote(importPath) + "\n")
+			output.WriteString("import " + goImportAlias(alias) + " " + strconv.Quote(importPath) + "\n")
 		} else {
 			output.WriteString("import " + strconv.Quote(importPath) + "\n")
 		}
@@ -105,7 +105,7 @@ func Generate(program *ir.Program) string {
 }
 
 func (g *generator) importStatement(imported *ir.Import) {
-	if imported.Standard {
+	if imported.Standard && !imported.Runtime {
 		return
 	}
 	directory := pathpkg.Dir(imported.Path)
@@ -128,7 +128,7 @@ func (g *generator) importStatement(imported *ir.Import) {
 	}
 	g.requireImport(importPath, alias)
 	for _, symbol := range imported.Symbols {
-		g.typeAliases[symbol] = goIdentifier(alias, false)
+		g.typeAliases[symbol] = goImportAlias(alias)
 		g.typeKinds[symbol] = imported.SymbolKinds[symbol]
 	}
 }
@@ -1010,7 +1010,14 @@ func (g *generator) referenceAlias(reference *ir.Reference) string {
 	if alias == "" {
 		alias = pathpkg.Base(directory)
 	}
-	return goIdentifier(alias, false)
+	return goImportAlias(alias)
+}
+
+func goImportAlias(name string) string {
+	if strings.HasPrefix(name, "__trb_") {
+		return name
+	}
+	return goIdentifier(name, false)
 }
 
 func goImportedName(name, kind string) string {

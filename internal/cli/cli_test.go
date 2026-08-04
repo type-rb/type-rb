@@ -379,6 +379,34 @@ func TestReplEvaluatesExplicitUserGenerics(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesStandardResult(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-result-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "import { Result } from trb/std/result\n" +
+		"def unwrap(value: Result<Integer, String>): Integer; case value; when Result::Ok(number); return number; when Result::Err(error); return 0; end; end\n" +
+		"unwrap(Result<Integer, String>::Ok(7))\n" +
+		"Result<Integer, String>::Err(\"missing\")\n" +
+		":quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "7 : Integer\nResult::Err(error: \"missing\") : Result<Integer, String>\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected standard Result REPL output\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplRequiresProjectConfiguration(t *testing.T) {
 	root := t.TempDir()
 	previous, err := os.Getwd()
@@ -566,6 +594,41 @@ func TestBuildCanEmbedInExistingRailsProjectWithoutManagingGemfile(t *testing.T)
 	}
 	if strings.Contains(stdout.String(), "packages ->") {
 		t.Fatalf("external build reported a managed manifest:\n%s", stdout.String())
+	}
+}
+
+func TestBuildEmitsCompilerOwnedResultRuntimeWhenSourceDirIsProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.SourceDir = "."
+	config.OutDir = "build"
+	copyFiles := false
+	config.CopyFiles = &copyFiles
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { Result } from trb/std/result
+
+def successful(): Result<Integer, String>
+	return Result<Integer, String>::Ok(1)
+end
+`
+	if err := os.WriteFile(filepath.Join(root, "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	runtime, err := os.ReadFile(filepath.Join(root, "build", "trb", "std", "result", "index.rb"))
+	if err != nil || !strings.Contains(string(runtime), "module Result") {
+		t.Fatalf("compiler-owned Result runtime was not emitted: err=%v\n%s", err, runtime)
+	}
+	consumer, err := os.ReadFile(filepath.Join(root, "build", "main.rb"))
+	if err != nil || !strings.Contains(string(consumer), `require_relative "./trb/std/result/index"`) {
+		t.Fatalf("Result consumer did not require its runtime: err=%v\n%s", err, consumer)
 	}
 }
 

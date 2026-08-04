@@ -57,7 +57,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(comment(n.Text))
 	case *ir.Import:
-		if n.Standard {
+		if n.Standard && !n.Runtime {
 			if n.Path == "trb/platform/typescript/react" {
 				g.line(`import React from "react";`)
 				g.line(`import { createRoot } from "react-dom/client";`)

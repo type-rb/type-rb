@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 ## Current State
 
@@ -56,6 +56,9 @@ Implemented:
   with invariant type arguments, checker-owned substitution, imported generic
   signatures, generic case narrowing, three backend outputs, formatter support,
   and typed-IR REPL execution.
+- Portable `Result<T, E>` from `trb/std/result`, implemented as compiler-owned
+  TypeRB source with checked `Ok`/`Err` payloads, exhaustive pattern matching,
+  generated runtime modules for all three backends, and typed-IR REPL execution.
 - Go-like no-value return syntax: the return annotation is omitted and explicit
   `: Void` return types are rejected while typed IR retains an internal Void.
 - Explicit Ruby-native AST/IR nodes for open-ended Rails DSL.
@@ -68,8 +71,9 @@ Implemented:
   duplicate exported types, and duplicate top-level `main` definitions.
 - Cross-file checking of imported constructors, fields, methods, inheritance,
   and interface conformance, with target-relative backend imports.
-- Portable `trb/std/io` and `trb/std/strings` packages lowered from resolved IR
-  symbols, plus mode-checked Ruby, Go, and TypeScript platform packages.
+- Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`,
+  `trb/std/numbers`, and `trb/std/result` packages, plus mode-checked Ruby, Go,
+  and TypeScript platform packages.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.
@@ -114,9 +118,9 @@ semantic type model, and source maps are later work.
 
 The broader path to practical production use is tracked in `ROADMAP.md`.
 
-1. Define the standard `Result<T, E>` API and its concise propagation syntax,
-   then add filesystem/process APIs required to move the lexer/parser into the
-   stage-1 self-host tree.
+1. Add filesystem/process APIs required to move the lexer/parser into the
+   stage-1 self-host tree. Revisit concise Result propagation syntax only after
+   explicit Result handling has been exercised in real application code.
 2. Generate runtime JSON decoders from record contracts and add wire-compatible
    optional/nullable semantics.
 3. Add a concise React view/component syntax above the current explicit element

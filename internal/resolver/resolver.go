@@ -80,11 +80,22 @@ type Import struct {
 	Node       *ast.ImportStatement
 	Kind       ImportKind
 	Path       string
+	ModulePath string
 	Alias      string
 	Symbols    []string
 	Definition *stdlib.Package
 	Exports    map[string]Export
 	Filename   string
+}
+
+func (i *Import) RuntimePath() string {
+	if i != nil && i.ModulePath != "" {
+		return i.ModulePath
+	}
+	if i == nil {
+		return ""
+	}
+	return i.Path
 }
 
 type Binding struct {
@@ -399,6 +410,7 @@ func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagn
 			Node:       node,
 			Kind:       StandardImport,
 			Path:       node.Path,
+			ModulePath: definition.ModulePath,
 			Alias:      node.Alias,
 			Definition: definition,
 			Exports:    map[string]Export{},
@@ -406,7 +418,18 @@ func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagn
 		if !definition.Supports(options.Mode) {
 			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not support mode %s", node.Path, options.Mode))}
 		}
-		if resolved.Alias == "" && len(node.Symbols) == 0 {
+		if definition.Source != "" {
+			program, sourceDiagnostics := parser.Parse([]byte(definition.Source))
+			for _, item := range sourceDiagnostics {
+				if item.Severity == diagnostic.Error {
+					return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("compiler-owned package %s is invalid: %s", node.Path, item.Message))}
+				}
+			}
+			resolved.Exports = CollectExports(program.Statements)
+		}
+		if definition.RuntimeAlias != "" {
+			resolved.Alias = definition.RuntimeAlias
+		} else if resolved.Alias == "" && len(node.Symbols) == 0 {
 			resolved.Alias = definition.DefaultAlias()
 		}
 		if len(node.Symbols) > 0 {
@@ -415,9 +438,14 @@ func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagn
 			for name := range definition.Symbols {
 				resolved.Symbols = append(resolved.Symbols, name)
 			}
+			for name := range resolved.Exports {
+				resolved.Symbols = append(resolved.Symbols, name)
+			}
 		}
 		for _, name := range resolved.Symbols {
-			if _, exists := definition.Symbols[name]; !exists {
+			_, librarySymbol := definition.Symbols[name]
+			_, sourceExport := resolved.Exports[name]
+			if !librarySymbol && !sourceExport {
 				return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not export %s", node.Path, name))}
 			}
 		}
@@ -513,6 +541,10 @@ func finalizeProjectImport(resolved *Import) (*Import, []diagnostic.Diagnostic) 
 }
 
 func bindingFor(imported *Import, name string) (Binding, bool) {
+	if exported, ok := imported.Exports[name]; ok {
+		copy := exported
+		return Binding{Import: imported, Name: name, Export: &copy}, true
+	}
 	if imported.Definition != nil {
 		symbol, ok := imported.Definition.Symbols[name]
 		if !ok {
@@ -521,12 +553,7 @@ func bindingFor(imported *Import, name string) (Binding, bool) {
 		copy := symbol
 		return Binding{Import: imported, Name: name, Library: &copy}, true
 	}
-	exported, ok := imported.Exports[name]
-	if !ok {
-		return Binding{}, false
-	}
-	copy := exported
-	return Binding{Import: imported, Name: name, Export: &copy}, true
+	return Binding{}, false
 }
 
 func CollectExports(statements []ast.Statement) map[string]Export {

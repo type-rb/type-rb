@@ -1,5 +1,6 @@
 import trb/std/io
 import trb/std/strings
+import { Result } from trb/std/result
 
 # The same portable source runs in Ruby, Go, and TypeScript.
 class Greeter
@@ -10,27 +11,22 @@ class Greeter
 	end
 end
 
-enum GreetingResult<T, E>
-	Ok(value: T)
-	Err(error: E)
-end
-
 def identity<T>(value: T): T
 	return value
 end
 
-def recipient_name(result: GreetingResult<String, String>): String
+def recipient_name(result: Result<String, String>): String
 	case result
-	when GreetingResult::Ok(value)
+	when Result::Ok(value)
 		return value
-	when GreetingResult::Err(error)
+	when Result::Err(error)
 		return error
 	end
 end
 
 def main()
 	greeter := Greeter.new()
-	recipient := GreetingResult<String, String>::Ok(identity<String>("TypeRB"))
+	recipient := Result<String, String>::Ok(identity<String>("TypeRB"))
 	io.puts(strings.uppercase(greeter.greet(recipient_name(recipient)))) # trb fmt keeps this comment.
 	return
 end

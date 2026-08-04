@@ -397,7 +397,25 @@ puts(1 + 2)
 io.puts(strings.uppercase("Hello"))
 ```
 
-v0.1 includes `trb/std/io` and `trb/std/strings`. Platform APIs use mode-checked
+v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/arrays`,
+`trb/std/numbers`, and `trb/std/result`. Result is imported as a named portable
+type and handled through ordinary exhaustive enum matching:
+
+```trb
+import { Result } from trb/std/result
+
+def unwrap(result: Result<Integer, String>): Integer
+	case result
+	when Result::Ok(value)
+		return value
+	when Result::Err(error)
+		return 0
+	end
+end
+```
+
+No Result propagation operator is selected in v0.1; explicit handling provides
+the baseline for evaluating a future sugar syntax. Platform APIs use mode-checked
 packages such as `trb/platform/ruby/rails`, `trb/platform/go/context`, and
 `trb/platform/typescript/node`. Importing a platform package from a mismatched
 mode is a compile error. Rails projects use `ruby.loader: "zeitwerk"`, making

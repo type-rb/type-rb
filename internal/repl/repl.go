@@ -123,6 +123,11 @@ func Run(options Options) error {
 			continue
 		}
 
+		for _, program := range next.Programs {
+			if program.ModulePath != next.Session.IR.ModulePath {
+				evaluator.LoadDefinitions(program)
+			}
+		}
 		evaluator.LoadDefinitions(next.Session.IR)
 		result, runtimeErr := evaluateInterruptibly(evaluator, next.Session.IR.Statements[statementCount:], next.Session.IR.ModulePath)
 		if runtimeErr != nil {

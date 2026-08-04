@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 ## 1. Language Goals
 
@@ -279,6 +279,36 @@ inferred from Ruby, Go, or TypeScript:
   instance/class methods, constraints, variance declarations, and type-argument
   inference are staged work rather than implicit target-language behavior.
 
+### 4.1 Standard Result
+
+- `trb/std/result` exports the portable `Result<T, E>` payload enum with
+  `Ok(value: T)` and `Err(error: E)` variants. It is imported explicitly with
+  `import { Result } from trb/std/result`.
+- Construction and handling use the ordinary generic enum rules. v0.1 keeps
+  both control-flow paths visible with explicit constructors and exhaustive
+  pattern matching:
+
+```trb
+import { Result } from trb/std/result
+
+def unwrap(result: Result<Integer, String>): Integer
+	case result
+	when Result::Ok(value)
+		return value
+	when Result::Err(error)
+		return 0
+	end
+end
+```
+
+- The declaration is compiler-owned TypeRB source and passes through the same
+  AST, checker, typed IR, and backend pipeline as application enums. Project
+  builds emit its runtime module into the generated target tree.
+- Concise propagation syntax such as postfix `?`, postfix `!`, or prefix `try`
+  is deliberately not selected in v0.1. It may be added later as syntax sugar
+  over explicit Result matching and early return after real application usage
+  establishes which form is worth reserving.
+
 ## 5. Example (Current Direction)
 
 ```trb
@@ -439,8 +469,8 @@ types reject unknown members rather than silently degrading to `Any`.
 ### 8.3 Project and Package Configuration
 
 `trbconfig.jsonc` is the source of truth for target selection, source/output
-directories, and target dependencies. It accepts JSONC comments and trailing
-commas. `trb sync` derives `Gemfile`, `go.mod`, or `package.json`; `trb install`
+directories, and target dependencies. It accepts JSONC comments but rejects
+trailing commas. `trb sync` derives `Gemfile`, `go.mod`, or `package.json`; `trb install`
 delegates installation to Bundler, the Go toolchain, or npm.
 
 Imports pass through a dedicated resolver between parsing and checking. The

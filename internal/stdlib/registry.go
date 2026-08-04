@@ -35,6 +35,9 @@ type Symbol struct {
 
 type Package struct {
 	Path         string
+	ModulePath   string
+	RuntimeAlias string
+	Source       string
 	Kind         Kind
 	Targets      map[string]bool
 	NativeSyntax bool
@@ -60,6 +63,18 @@ var voidType = types.FromName("Void")
 var anyType = types.FromName("Any")
 
 var registry = map[string]*Package{
+	"trb/std/result": {
+		Path:         "trb/std/result",
+		ModulePath:   "trb/std/result/index",
+		RuntimeAlias: "__trb_result",
+		Source: `enum Result<T, E>
+	Ok(value: T)
+	Err(error: E)
+end
+`,
+		Kind:    Portable,
+		Symbols: map[string]Symbol{},
+	},
 	"trb/std/io": {
 		Path: "trb/std/io",
 		Kind: Portable,

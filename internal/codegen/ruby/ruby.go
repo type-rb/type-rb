@@ -64,7 +64,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(n.Text, "")
 	case *ir.Import:
-		if n.Standard || g.loader == "zeitwerk" {
+		if (n.Standard || g.loader == "zeitwerk") && !n.Runtime {
 			return
 		}
 		g.line("require_relative "+strconv.Quote(rubyImportPath(g.modulePath, n.Path)), n.TrailingComment)
