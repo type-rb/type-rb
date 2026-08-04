@@ -513,15 +513,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		return "((start: number, end: number) => Array.from({ length: Math.max(0, end - start + " + extra + ") }, (_, index) => start + index))(" + g.expr(n.Start) + ", " + g.expr(n.End) + ")"
 	case *ir.Member:
 		receiver := g.expr(n.Receiver)
-		name := n.Name
-		if name == "to_s" {
-			name = "toString"
-		}
 		op := "."
 		if n.Safe {
 			op = "?."
 		}
-		return receiver + op + name
+		return receiver + op + n.Name
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
 		for i, argument := range n.Arguments {
@@ -536,6 +532,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		args := strings.Join(parts, ", ")
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
+			if reference.ReceiverMethod {
+				if member, ok := n.Callee.(*ir.Member); ok {
+					parts = append([]string{g.expr(member.Receiver)}, parts...)
+				}
+			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {

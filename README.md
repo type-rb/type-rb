@@ -395,7 +395,16 @@ import trb/std/strings
 
 puts(1 + 2)
 io.puts(strings.uppercase("Hello"))
+
+text := 123.to_s()
+number := "123".to_i()
+length := "Hello".size()
 ```
+
+Ruby-like receiver methods on portable built-in and standard types resolve to
+the same compiler-owned contracts as their package-function forms. They are
+therefore type checked and lowered consistently instead of exposing Ruby, Go,
+or TypeScript methods directly.
 
 v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/arrays`,
 `trb/std/numbers`, and `trb/std/result`. Result is imported as a named portable

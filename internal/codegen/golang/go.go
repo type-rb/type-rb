@@ -753,6 +753,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		args := strings.Join(parts, ", ")
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
+			if reference.ReceiverMethod {
+				if member, ok := n.Callee.(*ir.Member); ok {
+					parts = append([]string{g.expr(member.Receiver)}, parts...)
+				}
+			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "push" && member.Receiver.ExprType().Kind == types.Array && len(parts) == 1 {

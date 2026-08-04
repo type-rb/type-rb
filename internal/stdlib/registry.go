@@ -25,12 +25,23 @@ type Parameter struct {
 }
 
 type Symbol struct {
-	Name       string
-	Intrinsic  string
-	Parameters []Parameter
-	Return     types.Type
-	Variadic   bool
-	Inference  string
+	Name            string
+	Intrinsic       string
+	Receiver        types.Type
+	ReceiverMutable bool
+	Parameters      []Parameter
+	Return          types.Type
+	Variadic        bool
+	Inference       string
+}
+
+func (s Symbol) HasReceiver() bool {
+	return s.Receiver.Kind != "" && s.Receiver.Kind != types.Invalid
+}
+
+type receiverMethodTarget struct {
+	PackagePath string
+	Symbol      string
 }
 
 type Package struct {
@@ -223,6 +234,20 @@ end
 	},
 }
 
+// receiverMethods maps Ruby-like method syntax to the same compiler-owned
+// contract used by the corresponding portable package function. A backend
+// therefore lowers 123.to_s() and numbers.to_string(123) through one
+// intrinsic instead of maintaining a second, target-specific method table.
+var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
+	types.Int: {
+		"to_s": {PackagePath: "trb/std/numbers", Symbol: "to_string"},
+	},
+	types.String: {
+		"to_i": {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
+		"size": {PackagePath: "trb/std/strings", Symbol: "length"},
+	},
+}
+
 func unary(name, intrinsic string, parameter, result types.Type) Symbol {
 	return Symbol{
 		Name:       name,
@@ -235,6 +260,32 @@ func unary(name, intrinsic string, parameter, result types.Type) Symbol {
 func Lookup(packagePath string) (*Package, bool) {
 	definition, ok := registry[packagePath]
 	return definition, ok
+}
+
+func LookupReceiverMethod(receiver types.Type, name string) (*Package, Symbol, bool) {
+	if receiver.Nullable {
+		return nil, Symbol{}, false
+	}
+	target, ok := receiverMethods[receiver.Kind][name]
+	if !ok {
+		return nil, Symbol{}, false
+	}
+	definition, ok := Lookup(target.PackagePath)
+	if !ok {
+		return nil, Symbol{}, false
+	}
+	symbol, ok := definition.Symbols[target.Symbol]
+	if !ok {
+		return nil, Symbol{}, false
+	}
+	if len(symbol.Parameters) == 0 {
+		return nil, Symbol{}, false
+	}
+	symbol.Name = name
+	symbol.Receiver = receiver
+	symbol.ReceiverMutable = symbol.Parameters[0].Mutable
+	symbol.Parameters = append([]Parameter(nil), symbol.Parameters[1:]...)
+	return definition, symbol, true
 }
 
 func IsReservedPath(packagePath string) bool {

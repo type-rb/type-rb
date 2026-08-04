@@ -440,9 +440,10 @@ func NewExprBase(span token.Span, typ types.Type) ExprBase {
 // project references use Package, Alias, Symbol, and ExportKind for
 // target-specific qualification.
 type Reference struct {
-	Package    string
-	Alias      string
-	Symbol     string
-	ExportKind string
-	Intrinsic  string
+	Package        string
+	Alias          string
+	Symbol         string
+	ExportKind     string
+	Intrinsic      string
+	ReceiverMethod bool
 }

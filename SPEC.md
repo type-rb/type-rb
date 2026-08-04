@@ -482,6 +482,15 @@ The portable prelude contains `puts(value: Any)`, preserving Ruby-like source
 while lowering to the appropriate output primitive in each mode. An
 explicit `import trb/std/io` exposes the identical intrinsic as `io.puts`.
 
+Portable built-in and standard types may expose Ruby-like receiver methods.
+Receiver syntax is not target-native escape syntax: the resolver maps it to a
+compiler-owned standard-library contract, and typed IR records that contract.
+The package and receiver forms consequently share argument checking, return
+types, REPL semantics, and backend lowering. The initial surface includes
+`Integer#to_s`, `String#to_i`, and Unicode-code-point-based `String#size`,
+corresponding to `trb/std/numbers` and `trb/std/strings` operations. Unknown
+members on portable built-in types are compile errors in every mode.
+
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal
 semantic/IR type, but is not a TypeRB return-type spelling.

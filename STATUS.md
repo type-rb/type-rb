@@ -74,6 +74,9 @@ Implemented:
 - Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`,
   `trb/std/numbers`, and `trb/std/result` packages, plus mode-checked Ruby, Go,
   and TypeScript platform packages.
+- Compiler-owned receiver-method contracts shared with portable package APIs,
+  initially covering `Integer#to_s`, `String#to_i`, and Unicode-aware
+  `String#size` across the checker, typed IR, all backends, and the REPL.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.

@@ -602,7 +602,17 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		}
 		return e.member(receiver, node.Name, module)
 	case *ir.Call:
-		arguments := make([]evaluatedArgument, 0, len(node.Arguments))
+		reference := expressionReference(node.Callee)
+		arguments := make([]evaluatedArgument, 0, len(node.Arguments)+1)
+		if reference != nil && reference.Intrinsic != "" && reference.ReceiverMethod {
+			if member, ok := node.Callee.(*ir.Member); ok {
+				receiver, err := e.expression(member.Receiver, module, sc)
+				if err != nil {
+					return Value{}, err
+				}
+				arguments = append(arguments, evaluatedArgument{Value: receiver})
+			}
+		}
 		for _, argument := range node.Arguments {
 			value, err := e.expression(argument.Value, module, sc)
 			if err != nil {
@@ -610,7 +620,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			}
 			arguments = append(arguments, evaluatedArgument{Name: argument.Name, Value: value})
 		}
-		if reference := expressionReference(node.Callee); reference != nil && reference.Intrinsic != "" {
+		if reference != nil && reference.Intrinsic != "" {
 			return e.intrinsic(reference.Intrinsic, arguments, node.ExprType())
 		}
 		var callee Value

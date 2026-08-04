@@ -415,6 +415,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[i] = value
 		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
+			if reference.ReceiverMethod {
+				if member, ok := n.Callee.(*ir.Member); ok {
+					parts = append([]string{g.expr(member.Receiver)}, parts...)
+				}
+			}
 			return g.intrinsic(reference.Intrinsic, parts)
 		}
 		return g.expr(n.Callee) + "(" + strings.Join(parts, ", ") + ")"

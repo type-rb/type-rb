@@ -82,6 +82,90 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 	}
 }
 
+func TestPortableReceiverMethodsShareStandardContractsAcrossBackends(t *testing.T) {
+	source := []byte(`import trb/std/numbers
+
+def receiver_text(): String
+	return 123.to_s()
+end
+
+def package_text(): String
+	return numbers.to_string(123)
+end
+
+def parsed(): Integer
+	return "123".to_i()
+end
+
+def text_size(): Integer
+	return "a😀".size()
+end
+`)
+	wants := map[string][]string{
+		"go":         {`strconv.Itoa(123)`, `strconv.Atoi("123")`, `utf8.RuneCountInString("a😀")`},
+		"ruby":       {`123.to_s`, `Integer("123")`, `"a😀".each_codepoint.count`},
+		"typescript": {`String(123)`, `Number.parseInt("123", 10)`, `Array.from("a😀").length`},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := CompileWithOptions("methods.trb", source, Options{Mode: mode, Package: "methods", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable receiver methods: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s receiver method is missing %q:\n%s", mode, want, output)
+			}
+		}
+
+		var receiverReference, packageReference *ir.Reference
+		for _, statement := range artifact.IR.Statements {
+			method, ok := statement.(*ir.Method)
+			if !ok || len(method.Body) == 0 {
+				continue
+			}
+			returned, ok := method.Body[0].(*ir.Return)
+			if !ok || returned.Value == nil {
+				continue
+			}
+			call, ok := returned.Value.(*ir.Call)
+			if !ok {
+				continue
+			}
+			switch method.Name {
+			case "receiver_text":
+				receiverReference = call.Callee.(*ir.Member).Reference
+			case "package_text":
+				packageReference = call.Callee.(*ir.Member).Reference
+			}
+		}
+		if receiverReference == nil || packageReference == nil ||
+			receiverReference.Intrinsic != packageReference.Intrinsic ||
+			receiverReference.Package != packageReference.Package ||
+			!receiverReference.ReceiverMethod || packageReference.ReceiverMethod {
+			t.Fatalf("%s did not retain a shared package/receiver contract: receiver=%#v package=%#v", mode, receiverReference, packageReference)
+		}
+	}
+}
+
+func TestPortableReceiverMethodDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "arity", source: "def bad(): String\n\treturn 1.to_s(2)\nend\n", want: "to_s() expects 0..0 arguments, got 1"},
+		{name: "unknown", source: "def bad(): Integer\n\treturn 1.size()\nend\n", want: "type Integer has no member size"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("bad.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s %s: expected %q diagnostic, got %v", mode, test.name, test.want, err)
+			}
+		}
+	}
+}
+
 func TestPortableResultPackageLowersAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

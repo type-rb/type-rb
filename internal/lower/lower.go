@@ -264,6 +264,7 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 	result := &ir.Reference{Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name}
 	if binding.Library != nil {
 		result.Intrinsic = binding.Library.Intrinsic
+		result.ReceiverMethod = binding.Library.HasReceiver()
 	}
 	if binding.Export != nil {
 		result.ExportKind = string(binding.Export.Kind)

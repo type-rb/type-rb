@@ -1638,6 +1638,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				break
 			}
 		}
+		if !classAccess && !n.Namespace {
+			if binding, exists := c.resolution.ReceiverMethod(receiverType, n.Name); exists {
+				typ = binding.Type()
+				c.result.References[n] = binding
+				break
+			}
+		}
 		if strings.HasPrefix(n.Name, "_") {
 			self, ok := n.Receiver.(*ast.Identifier)
 			if !ok || (self.Name != "self" && !strings.HasPrefix(self.Name, "@")) {
@@ -1671,6 +1678,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Span(), fmt.Sprintf("type %s imported from %s has no member %s", receiverType.Name, imported.Import.Path, n.Name))
 			} else if declared, exists := c.declarations().Type(receiverType.Name); exists {
 				c.error(n.Span(), fmt.Sprintf("type %s provided by Rails has no member %s", declared.Name, n.Name))
+			} else if portableReceiverKind(receiverType.Kind) {
+				c.error(n.Span(), fmt.Sprintf("type %s has no member %s", receiverType, n.Name))
 			}
 		}
 	case *ast.CallExpression:
@@ -1714,7 +1723,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = binding.Type()
 			c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
 			if binding.Library != nil {
-				typ = inferLibraryReturn(*binding.Library, argumentTypes)
+				receiverType := invalidType()
+				if member, method := n.Callee.(*ast.MemberExpression); method && binding.Library.HasReceiver() {
+					receiverType = c.result.Expressions[member.Receiver]
+					if binding.Library.ReceiverMutable {
+						c.requireMutable(member.Receiver, sc, binding.Name+"()")
+					}
+				}
+				typ = inferLibraryReturn(*binding.Library, receiverType, argumentTypes)
 			}
 		}
 		if member, ok := c.external[n.Callee]; ok {
@@ -1999,7 +2015,7 @@ func (c *Checker) contextualizeHashLiteral(expression ast.Expression, expected, 
 	return expected
 }
 
-func inferLibraryReturn(symbol stdlib.Symbol, arguments []types.Type) types.Type {
+func inferLibraryReturn(symbol stdlib.Symbol, receiver types.Type, arguments []types.Type) types.Type {
 	argument := func(index int) types.Type {
 		if index < 0 || index >= len(arguments) {
 			return symbol.Return
@@ -2007,12 +2023,23 @@ func inferLibraryReturn(symbol stdlib.Symbol, arguments []types.Type) types.Type
 		return arguments[index]
 	}
 	switch symbol.Inference {
+	case "receiver":
+		return receiver
 	case "argument_1":
 		return argument(1)
 	case "array_of_argument_1":
 		return types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{argument(1)}}
 	default:
 		return symbol.Return
+	}
+}
+
+func portableReceiverKind(kind types.Kind) bool {
+	switch kind {
+	case types.Bool, types.Int, types.Float, types.String, types.Array, types.Range, types.Hash:
+		return true
+	default:
+		return false
 	}
 }
 

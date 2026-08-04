@@ -309,6 +309,25 @@ func (r Result) Member(alias, name string) (Binding, bool) {
 	return bindingFor(imported, name)
 }
 
+// ReceiverMethod returns an implicit portable method binding. The binding is
+// deliberately backed by the same standard package definition as its
+// function form, even though TypeRB source does not need to import the method.
+func (r Result) ReceiverMethod(receiver types.Type, name string) (Binding, bool) {
+	definition, symbol, ok := stdlib.LookupReceiverMethod(receiver, name)
+	if !ok {
+		return Binding{}, false
+	}
+	imported := &Import{
+		Kind:       StandardImport,
+		Path:       definition.Path,
+		ModulePath: definition.ModulePath,
+		Alias:      definition.DefaultAlias(),
+		Definition: definition,
+		Exports:    map[string]Export{},
+	}
+	return Binding{Import: imported, Name: name, Library: &symbol}, true
+}
+
 func (r Result) TypeMember(typeName, name string) (Binding, bool) {
 	for _, binding := range r.Symbols {
 		if binding.Export == nil || binding.Export.Name != typeName {
