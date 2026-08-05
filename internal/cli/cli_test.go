@@ -308,13 +308,13 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "Result::Ok(value: true) : Result<Boolean, FileError>\n" +
-			"Result::Ok(value: true) : Result<Boolean, FileError>\n" +
+		want := "Result::Ok(value: Unit()) : Result<Unit, FileError>\n" +
+			"Result::Ok(value: Unit()) : Result<Unit, FileError>\n" +
 			"Result::Ok(value: \"A😀\") : Result<String, FileError>\n" +
 			"Result::Ok(value: true) : Result<Boolean, FileError>\n" +
 			"Result::Ok(value: false) : Result<Boolean, FileError>\n" +
 			"Result::Ok(value: [\"note.txt\"]) : Result<Array<String>, FileError>\n" +
-			"Result::Ok(value: true) : Result<Boolean, FileError>\n" +
+			"Result::Ok(value: Unit()) : Result<Unit, FileError>\n" +
 			"Result::Ok(value: Bytes[66]) : Result<Bytes, FileError>\n" +
 			"\"read_text\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {

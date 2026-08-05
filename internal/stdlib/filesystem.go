@@ -2,6 +2,7 @@ package stdlib
 
 func filesystemSource() string {
 	return `import { Result } from trb/std/result
+import { Unit } from trb/std/unit
 import trb/internal/filesystem as native_fs
 
 record FileError
@@ -22,15 +23,15 @@ def read_bytes(path: String): Result<Bytes, FileError>
 	return native_fs.read_bytes(path)
 end
 
-def write_text(path: String, value: String): Result<Boolean, FileError>
+def write_text(path: String, value: String): Result<Unit, FileError>
 	return native_fs.write_text(path, value)
 end
 
-def write_bytes(path: String, value: Bytes): Result<Boolean, FileError>
+def write_bytes(path: String, value: Bytes): Result<Unit, FileError>
 	return native_fs.write_bytes(path, value)
 end
 
-def create_directory(path: String): Result<Boolean, FileError>
+def create_directory(path: String): Result<Unit, FileError>
 	return native_fs.create_directory(path)
 end
 

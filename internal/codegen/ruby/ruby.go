@@ -539,11 +539,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.internal.filesystem.read_bytes":
 		return "->(path) { begin; " + filesystemOK("File.binread(path).b") + "; rescue StandardError => error; " + filesystemError("read_bytes", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
 	case "trb.internal.filesystem.write_text":
-		return "->(path, value) { begin; File.binwrite(path, value.encode(Encoding::UTF_8)); " + filesystemOK("true") + "; rescue StandardError => error; " + filesystemError("write_text", "path", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+		return "->(path, value) { begin; File.binwrite(path, value.encode(Encoding::UTF_8)); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + filesystemError("write_text", "path", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.internal.filesystem.write_bytes":
-		return "->(path, value) { begin; File.binwrite(path, value); " + filesystemOK("true") + "; rescue StandardError => error; " + filesystemError("write_bytes", "path", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+		return "->(path, value) { begin; File.binwrite(path, value); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + filesystemError("write_bytes", "path", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.internal.filesystem.create_directory":
-		return "->(path) { begin; require \"fileutils\"; FileUtils.mkdir_p(path); " + filesystemOK("true") + "; rescue StandardError => error; " + filesystemError("create_directory", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+		return "->(path) { begin; require \"fileutils\"; FileUtils.mkdir_p(path); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + filesystemError("create_directory", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
 	case "trb.internal.filesystem.list":
 		return "->(path) { begin; " + filesystemOK("Dir.children(path).sort") + "; rescue StandardError => error; " + filesystemError("list", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
 	case "trb.internal.json.parse":

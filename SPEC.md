@@ -592,8 +592,12 @@ inspection failures. Text is written as UTF-8 and invalid UTF-8 is replaced by
 U+FFFD when read. Byte operations preserve raw bytes. `create_directory` is
 recursive, writes do not implicitly create parent directories, and `list`
 returns immediate child names sorted by UTF-8 byte sequence rather than
-recursive or absolute paths. Successful mutating operations return `Ok(true)`
-in v0.1. The TypeScript backend uses the current Node host filesystem; a
+recursive or absolute paths. Successful writes and directory creation return
+`Ok(Unit.new())`, typed as `Result<Unit, FileError>`. `Unit` is a portable
+zero-field value from `trb/std/unit`; unlike `Void`, it can be stored in a
+generic value while carrying no application data. `Void` remains a function
+return category whose annotation is omitted. The TypeScript backend uses the
+current Node host filesystem; a
 runtime without that host API returns `Err` rather than exposing
 browser-specific behavior.
 

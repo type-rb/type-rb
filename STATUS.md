@@ -74,8 +74,8 @@ Implemented:
 - Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`, `trb/std/hashes`,
   `trb/std/bytes`, `trb/std/string_builder`, `trb/std/unicode`,
   `trb/std/path`, `trb/std/filesystem`, `trb/std/numbers`, and
-  `trb/std/result` packages, plus mode-checked Ruby, Go, and TypeScript platform
-  packages.
+  `trb/std/result` packages, plus portable `Unit` values and mode-checked Ruby,
+  Go, and TypeScript platform packages.
 - Compiler-owned receiver-method contracts shared with portable package APIs,
   including strict and Result-returning integer conversion and Unicode-aware
   `String#size` across the checker, typed IR, all backends, and the REPL.
@@ -105,8 +105,9 @@ Implemented:
   generated targets and the REPL.
 - A compiler-owned portable filesystem facade with typed `FileError` values,
   UTF-8 and raw-byte I/O, existence checks, recursive directory creation,
-  sorted listing, an inaccessible internal intrinsic boundary, runnable Go,
-  Ruby, and TypeScript output, and matching typed-IR REPL execution.
+  sorted listing, meaningful `Result<Unit, FileError>` mutation results, an
+  inaccessible internal intrinsic boundary, runnable Go, Ruby, and TypeScript
+  output, and matching typed-IR REPL execution.
 - A compiler-owned portable JSON/JSONC value model with typed syntax, decode,
   and encode errors, JSON Pointer paths, comment-aware JSONC parsing, strict
   trailing-comma rejection, safe cross-target number semantics, runnable Go,

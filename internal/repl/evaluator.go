@@ -1365,7 +1365,11 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		if err := os.WriteFile(path, data, 0o644); err != nil {
 			return e.filesystemErr(typ, operation, path, err)
 		}
-		return e.filesystemOK(typ, Value{Type: types.FromName("Boolean"), Data: true})
+		unit, err := e.unitValue()
+		if err != nil {
+			return Value{}, err
+		}
+		return e.filesystemOK(typ, unit)
 	case "trb.internal.filesystem.create_directory":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1377,7 +1381,11 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return e.filesystemErr(typ, "create_directory", path, err)
 		}
-		return e.filesystemOK(typ, Value{Type: types.FromName("Boolean"), Data: true})
+		unit, err := e.unitValue()
+		if err != nil {
+			return Value{}, err
+		}
+		return e.filesystemOK(typ, unit)
 	case "trb.internal.filesystem.list":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1953,6 +1961,14 @@ func (e *Evaluator) filesystemOK(resultType types.Type, value Value) (Value, err
 			Payload:    map[string]Value{"value": value},
 		},
 	}, nil
+}
+
+func (e *Evaluator) unitValue() (Value, error) {
+	definition, ok := e.definitions[symbolKey("trb/std/unit/index", "Unit")].(*recordDefinition)
+	if !ok {
+		return Value{}, errors.New("operation requires trb/std/unit")
+	}
+	return Value{Type: types.FromName("Unit"), Data: &recordInstance{Definition: definition, Fields: map[string]Value{}}}, nil
 }
 
 func (e *Evaluator) stringResultErr(resultType types.Type, message string) (Value, error) {

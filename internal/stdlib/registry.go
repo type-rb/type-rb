@@ -72,6 +72,7 @@ func (p *Package) DefaultAlias() string {
 var stringType = types.FromName("String")
 var bytesType = types.FromName("Bytes")
 var stringBuilderType = types.FromName("StringBuilder")
+var unitType = types.FromName("Unit")
 var integerType = types.FromName("Integer")
 var booleanType = types.FromName("Boolean")
 var voidType = types.FromName("Void")
@@ -84,6 +85,15 @@ var jsonValueType = types.FromName("JsonValue")
 var jsonErrorType = types.FromName("JsonError")
 
 var registry = map[string]*Package{
+	"trb/std/unit": {
+		Path:       "trb/std/unit",
+		ModulePath: "trb/std/unit/index",
+		Source: `record Unit
+end
+`,
+		Kind:    Portable,
+		Symbols: map[string]Symbol{},
+	},
 	"trb/std/result": {
 		Path:         "trb/std/result",
 		ModulePath:   "trb/std/result/index",
@@ -149,7 +159,7 @@ end
 				Name:       "create_directory",
 				Intrinsic:  "trb.internal.filesystem.create_directory",
 				Parameters: []Parameter{{Name: "path", Type: stringType}},
-				Return:     filesystemResult(booleanType),
+				Return:     filesystemResult(unitType),
 			},
 			"list": filesystemUnary("list", arrayOf(stringType)),
 		},
@@ -644,7 +654,7 @@ func filesystemWrite(name string, value types.Type) Symbol {
 		Name:       name,
 		Intrinsic:  "trb.internal.filesystem." + name,
 		Parameters: []Parameter{{Name: "path", Type: stringType}, {Name: "value", Type: value}},
-		Return:     filesystemResult(booleanType),
+		Return:     filesystemResult(unitType),
 	}
 }
 

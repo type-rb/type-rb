@@ -1001,16 +1001,16 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "func() " + resultType + " { path := " + arguments[0] + "; data, err := os.ReadFile(path); if err != nil { return " + filesystemError("read_bytes", "path", "err.Error()") + " }; return " + filesystemOK("data") + " }()"
 	case "trb.internal.filesystem.write_text":
 		g.requireImport("os", "")
-		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { path := " + arguments[0] + "; err := os.WriteFile(path, []byte(" + arguments[1] + "), 0o644); if err != nil { return " + filesystemError("write_text", "path", "err.Error()") + " }; return " + filesystemOK("true") + " }()"
+		resultType, successType, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; err := os.WriteFile(path, []byte(" + arguments[1] + "), 0o644); if err != nil { return " + filesystemError("write_text", "path", "err.Error()") + " }; return " + filesystemOK(successType+"{}") + " }()"
 	case "trb.internal.filesystem.write_bytes":
 		g.requireImport("os", "")
-		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { path := " + arguments[0] + "; err := os.WriteFile(path, " + arguments[1] + ", 0o644); if err != nil { return " + filesystemError("write_bytes", "path", "err.Error()") + " }; return " + filesystemOK("true") + " }()"
+		resultType, successType, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; err := os.WriteFile(path, " + arguments[1] + ", 0o644); if err != nil { return " + filesystemError("write_bytes", "path", "err.Error()") + " }; return " + filesystemOK(successType+"{}") + " }()"
 	case "trb.internal.filesystem.create_directory":
 		g.requireImport("os", "")
-		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { path := " + arguments[0] + "; err := os.MkdirAll(path, 0o755); if err != nil { return " + filesystemError("create_directory", "path", "err.Error()") + " }; return " + filesystemOK("true") + " }()"
+		resultType, successType, _ := filesystemResultType()
+		return "func() " + resultType + " { path := " + arguments[0] + "; err := os.MkdirAll(path, 0o755); if err != nil { return " + filesystemError("create_directory", "path", "err.Error()") + " }; return " + filesystemOK(successType+"{}") + " }()"
 	case "trb.internal.filesystem.list":
 		g.requireImport("os", "")
 		g.requireImport("slices", "")

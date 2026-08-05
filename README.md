@@ -508,7 +508,10 @@ end
 recursive directory creation, and sorted directory listing. It accepts host
 paths; use `trb/std/path` separately when target-independent lexical path
 manipulation is required. All failures carry `operation`, `path`, and `message`
-in `FileError` instead of leaking target exceptions.
+in `FileError` instead of leaking target exceptions. Writes and directory
+creation return `Result<Unit, FileError>`: `Unit` is the portable value meaning
+"completed", while `Void` remains the absence of a return value and is omitted
+from function declarations.
 
 Portable JSON and JSONC provide typed record codecs in addition to an explicit
 value enum:
@@ -558,8 +561,8 @@ identifier classification.
 v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/bytes`,
 `trb/std/string_builder`, `trb/std/unicode`, `trb/std/arrays`,
 `trb/std/hashes`, `trb/std/path`, `trb/std/filesystem`, `trb/std/numbers`,
-`trb/std/json`, `trb/std/jsonc`, and `trb/std/result`. Result is imported as a
-named portable type and handled
+`trb/std/json`, `trb/std/jsonc`, `trb/std/unit`, and `trb/std/result`. Result is
+imported as a named portable type and handled
 through ordinary exhaustive enum matching:
 
 ```trb

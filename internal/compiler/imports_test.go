@@ -822,6 +822,46 @@ end
 	}
 }
 
+func TestPortableUnitValueLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Unit } from trb/std/unit
+
+def completed(): Unit
+	return Unit.new()
+end
+`),
+	}
+	wants := map[string]string{
+		"go":         "return unit.Unit{}",
+		"ruby":       "return Unit.new",
+		"typescript": "return ({} satisfies Unit);",
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/unit-app", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected Unit: %v", mode, err)
+		}
+		var consumer, runtime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/unit/index":
+				runtime = artifact
+			}
+		}
+		if consumer == nil || runtime == nil {
+			t.Fatalf("%s did not compile the Unit consumer and runtime: %#v", mode, artifacts)
+		}
+		if output := string(consumer.Output); !strings.Contains(output, wants[mode]) {
+			t.Fatalf("generated %s Unit consumer is missing %q:\n%s", mode, wants[mode], output)
+		}
+	}
+}
+
 func TestPortableResultPackageDiagnostics(t *testing.T) {
 	wrongArity := []byte(`import { Result } from trb/std/result
 
@@ -935,7 +975,7 @@ end
 		if err != nil {
 			t.Fatalf("%s rejected the standard filesystem package: %v", mode, err)
 		}
-		var consumer, filesystemRuntime, resultRuntime *Artifact
+		var consumer, filesystemRuntime, resultRuntime, unitRuntime *Artifact
 		for _, artifact := range artifacts {
 			switch artifact.IR.ModulePath {
 			case "main":
@@ -944,10 +984,12 @@ end
 				filesystemRuntime = artifact
 			case "trb/std/result/index":
 				resultRuntime = artifact
+			case "trb/std/unit/index":
+				unitRuntime = artifact
 			}
 		}
-		if consumer == nil || filesystemRuntime == nil || resultRuntime == nil {
-			t.Fatalf("%s did not compile the consumer, filesystem runtime, and transitive Result runtime: %#v", mode, artifacts)
+		if consumer == nil || filesystemRuntime == nil || resultRuntime == nil || unitRuntime == nil {
+			t.Fatalf("%s did not compile the consumer, filesystem runtime, and transitive Result/Unit runtimes: %#v", mode, artifacts)
 		}
 		consumerWants := map[string][]string{
 			"go":         {`"example.com/filesystem-app/trb/std/filesystem"`, "filesystem.ReadText(path)"},
@@ -960,9 +1002,9 @@ end
 			}
 		}
 		runtimeWants := map[string][]string{
-			"go":         {"type FileError struct", "os.ReadFile(path)", "__trb_result.NewResultErr[string, FileError]", "slices.Sort(names)"},
-			"ruby":       {"FileError = Data.define(:operation, :path, :message)", "File.binread(path)", "Result::Err.new", "Dir.children(path).sort"},
-			"typescript": {"export interface FileError", `getBuiltinModule?.("fs")`, "Result.Err<string, FileError>", "fs.readdirSync(__trbPath)"},
+			"go":         {"type FileError struct", "os.ReadFile(path)", "__trb_result.NewResultErr[string, FileError]", "__trb_result.NewResultOk[unit.Unit, FileError]", "slices.Sort(names)"},
+			"ruby":       {"FileError = Data.define(:operation, :path, :message)", "File.binread(path)", "Result::Err.new", "Result::Ok.new(Unit.new)", "Dir.children(path).sort"},
+			"typescript": {"export interface FileError", `getBuiltinModule?.("fs")`, "Result.Err<string, FileError>", "Result.Ok<Unit, FileError>", "{} satisfies Unit", "fs.readdirSync(__trbPath)"},
 		}[mode]
 		for _, want := range runtimeWants {
 			if output := string(filesystemRuntime.Output); !strings.Contains(output, want) {
