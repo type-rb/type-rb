@@ -1,15 +1,32 @@
 class Trb < Formula
-  desc "Typed language that transpiles to Ruby, Go, and TypeScript"
-  homepage "https://github.com/type-rb/type-rb-codex"
-  url "https://github.com/type-rb/type-rb-codex/releases/download/v@VERSION@/type-rb-@VERSION@.tar.gz"
-  sha256 "@SHA256@"
-  head "https://github.com/type-rb/type-rb-codex.git", branch: "main"
+  desc "Ruby-shaped typed language that targets Ruby, Go, and TypeScript"
+  homepage "https://github.com/type-rb/type-rb"
+  license "MIT"
 
-  depends_on "go" => :build
+  on_macos do
+    on_arm do
+      url "https://github.com/type-rb/type-rb/releases/download/v@VERSION@/trb_@VERSION@_darwin_arm64.tar.gz"
+      sha256 "@DARWIN_ARM64_SHA256@"
+    end
+    on_intel do
+      url "https://github.com/type-rb/type-rb/releases/download/v@VERSION@/trb_@VERSION@_darwin_amd64.tar.gz"
+      sha256 "@DARWIN_AMD64_SHA256@"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/type-rb/type-rb/releases/download/v@VERSION@/trb_@VERSION@_linux_arm64.tar.gz"
+      sha256 "@LINUX_ARM64_SHA256@"
+    end
+    on_intel do
+      url "https://github.com/type-rb/type-rb/releases/download/v@VERSION@/trb_@VERSION@_linux_amd64.tar.gz"
+      sha256 "@LINUX_AMD64_SHA256@"
+    end
+  end
 
   def install
-    ldflags = ["-X", "github.com/type-rb/type-rb/internal/cli.Version=#{version}"]
-    system "go", "build", *std_go_args(ldflags:), "./cmd/trb"
+    bin.install "trb"
   end
 
   test do
@@ -40,7 +57,7 @@ class Trb < Formula
       end
     TRB
 
-    system bin/"trb", "fmt", "--check", testpath/"src/main.trb"
+    system bin/"trb", "fmt", testpath/"src/main.trb"
     system bin/"trb", "build", "--config", testpath/"trbconfig.jsonc"
     assert_path_exists testpath/"build/main.go"
     assert_match "fmt.Println(\"installed with Homebrew\")", (testpath/"build/main.go").read

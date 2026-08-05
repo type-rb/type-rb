@@ -1,17 +1,15 @@
 # Releasing TypeRB
 
-TypeRB uses a source-building Homebrew Formula. Release archives are generated
-with `git archive` and deterministic gzip metadata, rather than using GitHub's
-automatically generated source archives, so the Formula checksum remains under
-the project's control.
+TypeRB publishes prebuilt `trb` binaries for macOS and Linux on Arm64 and
+x86-64. The Homebrew Formula selects the matching archive, so installing the
+compiler does not require Go.
 
 ## One-time setup
 
 1. Create the public GitHub repository `type-rb/homebrew-tap`.
-2. Give the source repository a `HOMEBREW_TAP_TOKEN` Actions secret whose token
-   can update that repository.
-3. Choose the project license. Add the license file to this repository and the
-   matching `license` declaration to `packaging/homebrew/trb.rb.in`.
+2. Create a fine-grained personal access token that has `Contents: Read and
+   write` access to that repository. Store it in the source repository as the
+   Actions secret `HOMEBREW_TAP_TOKEN`.
 
 The tap repository uses the standard layout:
 
@@ -35,10 +33,10 @@ git push origin v0.1.0
 The release workflow then:
 
 1. repeats the tests and bootstrap check;
-2. creates `type-rb-VERSION.tar.gz` and its checksum;
-3. renders and uploads `trb.rb`;
-4. creates the GitHub release; and
-5. commits the Formula to `type-rb/homebrew-tap` when the tap token is set.
+2. builds four `trb_VERSION_OS_ARCH.tar.gz` binary archives;
+3. writes `checksums.txt` and renders `trb.rb`;
+4. creates or updates the GitHub release; and
+5. commits the Formula to `type-rb/homebrew-tap`.
 
 Users can then install with:
 
@@ -49,5 +47,9 @@ brew install type-rb/tap/trb
 To render a Formula without making a release:
 
 ```sh
-./scripts/render-homebrew-formula.sh 0.1.0 SHA256 /tmp/trb.rb
+./scripts/package-release.sh 0.1.0 /tmp/type-rb-release
 ```
+
+That directory contains the four archives, their checksums, and the rendered
+Formula. TypeRB does not publish a Homebrew `HEAD` build; tagged releases keep
+the installed compiler and Formula in sync.
