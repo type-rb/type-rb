@@ -1,0 +1,4 @@
+interface:
+  display_name: "Publish TypeRB"
+  short_description: "Create TypeRB branches, commits, labels, and PRs"
+  default_prompt: "Use $publish-typerb to publish this TypeRB change through a correctly named branch and pull request."

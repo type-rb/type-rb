@@ -1,0 +1,4 @@
+interface:
+  display_name: "Develop TypeRB"
+  short_description: "Evolve TypeRB syntax, semantics, and compiler safely"
+  default_prompt: "Use $develop-typerb to implement and verify the next TypeRB language change."
