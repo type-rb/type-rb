@@ -22,7 +22,7 @@ Mode selection controls transpilation output and package-manager/toolchain
 integration:
 
 - Go mode generates `go.mod` and uses the Go module toolchain.
-- Ruby mode generates `Gemfile` and uses Bundler.
+- Ruby mode generates `Gemfile`, defaults to Ruby 4.0.6, and uses Bundler.
 - TypeScript mode generates `package.json` and uses npm in v0.1.
 
 Mode never changes TypeRB grammar or relaxes its portable type rules. The same
@@ -474,8 +474,10 @@ integration rather than the portable language specification.
 
 `trbconfig.jsonc` is the source of truth for target selection, source/output
 directories, and target dependencies. It accepts JSONC comments but rejects
-trailing commas. `trb sync` derives `Gemfile`, `go.mod`, or `package.json`; `trb install`
-delegates installation to Bundler, the Go toolchain, or npm.
+trailing commas. `trb sync` derives `Gemfile` plus `.ruby-version`, `go.mod`, or
+`package.json`; `trb install` delegates installation to Bundler, the Go
+toolchain, or npm. Managed Ruby projects use the Bundler version included with
+their configured Ruby release.
 
 `trb build` emits generated source into `outDir`. Go projects may instead use
 `trb build --compile` to compile the complete configured project with

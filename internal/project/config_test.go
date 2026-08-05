@@ -44,7 +44,7 @@ func TestLoadJSONCWithComments(t *testing.T) {
 	if config.Mode != "ruby" || config.Dependencies["rails"] != "~> 8.0" {
 		t.Fatalf("unexpected config: %#v", config)
 	}
-	if config.Ruby == nil || config.Ruby.Source != "https://rubygems.org" {
+	if config.Ruby == nil || config.Ruby.Source != "https://rubygems.org" || config.Ruby.Version != DefaultRubyVersion {
 		t.Fatalf("unexpected Ruby config: %#v", config.Ruby)
 	}
 }

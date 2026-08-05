@@ -23,10 +23,17 @@ func TestSyncRubyGemfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{`source "https://rubygems.org"`, `gem "rails", "~> 8.0"`, `gem "rspec-rails", "~> 7.0"`} {
+	for _, want := range []string{`source "https://rubygems.org"`, `ruby "` + project.DefaultRubyVersion + `"`, `gem "rails", "~> 8.0"`, `gem "rspec-rails", "~> 7.0"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Gemfile does not contain %q:\n%s", want, text)
 		}
+	}
+	version, err := os.ReadFile(filepath.Join(config.Root, ".ruby-version"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(version) != project.DefaultRubyVersion+"\n" {
+		t.Fatalf("unexpected .ruby-version: %q", version)
 	}
 }
 
@@ -83,7 +90,9 @@ func TestExternalPackageManagementDoesNotWriteManifest(t *testing.T) {
 	if _, err := Sync(config); err == nil || !strings.Contains(err.Error(), "package management is external") {
 		t.Fatalf("expected external package management error, got %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "Gemfile")); !os.IsNotExist(err) {
-		t.Fatalf("external package management wrote Gemfile: %v", err)
+	for _, name := range []string{"Gemfile", ".ruby-version"} {
+		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+			t.Fatalf("external package management wrote %s: %v", name, err)
+		}
 	}
 }
