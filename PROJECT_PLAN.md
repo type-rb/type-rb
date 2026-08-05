@@ -23,7 +23,7 @@ Recommended columns:
 Recommended custom fields:
 
 - `Area`: lexer, parser, ast, resolver, typechecker, ir, codegen, formatter, cli, docs, infra
-- `Target`: ruby, typescript, go, all, none
+- `Target`: go, ruby, typescript, all, none
 - `Phase`: mvp, alpha, beta, later
 - `Risk`: low, medium, high
 - `Size`: xs, s, m, l
@@ -142,7 +142,7 @@ private parser control flow or internal helper functions.
 
 - Project mode selection through `trbconfig.jsonc`.
 - explicit project, standard-library, and platform imports, with a deliberately
-  small portable prelude for Ruby-like fundamentals such as `puts`.
+  small portable prelude for fundamentals such as `puts`.
 - class declarations.
 - field declarations.
 - method declarations.

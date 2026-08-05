@@ -26,7 +26,7 @@ Portable syntax has dedicated AST and IR nodes. Ruby syntax which is valid in a
 Rails application but outside the portable grammar is represented by dedicated
 `NativeStatement`, `NativeBlock`, and `NativeExpression` nodes. These nodes
 retain source spans/text, pass through the Ruby backend, and are compile errors
-for TypeScript and Go.
+for Go and TypeScript.
 
 The formatter parses the program, then prints from the lossless token stream.
 This preserves comments and heredocs independently from backend lowering.

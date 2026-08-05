@@ -1,0 +1,55 @@
+# Development and compiler architecture
+
+TypeRB is implemented in Go 1.26. Clone the repository and run:
+
+```sh
+go test ./...
+go vet ./...
+./scripts/check-self-host.sh
+```
+
+## Compiler pipeline
+
+Every target uses the same phase pipeline:
+
+```text
+lossless tokens
+  -> syntax AST
+  -> resolver and type checker
+  -> typed IR
+  -> Go, Ruby, or TypeScript backend
+```
+
+Compiler phase boundaries live under `internal/ast`, `internal/checker`,
+`internal/ir`, `internal/lower`, and `internal/codegen`. Backends consume typed
+IR and do not inspect parser state or rewrite source text.
+
+Read the [language specification](../SPEC.md) for semantics and the
+[architecture decisions](decisions/) for long-term implementation choices.
+
+## Formatter guarantees
+
+`trb fmt` parses source and uses the lossless token stream when printing. It is
+deterministic and idempotent and preserves:
+
+- standalone and trailing `#` comments;
+- quoted and interpolated strings;
+- percent literals;
+- heredoc bodies and their internal whitespace; and
+- platform DSL block parameters and literal syntax.
+
+The canonical indentation is one tab per nesting level. Indentation is not
+configurable in the current alpha.
+
+## Development workflow
+
+Keep one grammar and portable semantics across modes. Target-specific APIs and
+compatibility behavior belong behind explicit `trb/platform/<mode>/*` imports.
+Language changes must pass through syntax AST, checked types, typed IR, and each
+affected backend.
+
+For contribution sequencing and test strategy, see the
+[project plan](../PROJECT_PLAN.md). For current gaps, see
+[status](../STATUS.md) and the [roadmap](../ROADMAP.md).
+
+Releases are described in [releasing.md](releasing.md).
