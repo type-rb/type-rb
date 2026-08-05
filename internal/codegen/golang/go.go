@@ -713,6 +713,13 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "!(" + g.expr(n.Operand) + ")"
 		}
 		return op + g.unaryOperand(n.Operand)
+	case *ir.Conversion:
+		switch n.Kind {
+		case ir.IntegerToFloatConversion:
+			return "float64(" + g.expr(n.Value) + ")"
+		default:
+			return g.expr(n.Value)
+		}
 	case *ir.Binary:
 		op := n.Operator
 		if op == "and" {
@@ -979,6 +986,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	switch name {
 	case "trb.std.io.puts":
 		g.requireImport("fmt", "")
+		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Float {
+			return "fmt.Println(" + g.portableFloatString(arguments[0]) + ")"
+		}
 		return "fmt.Println(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.path.separator":
 		return pathCall("separator") + "()"
@@ -1187,6 +1197,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.numbers.to_string":
 		g.requireImport("strconv", "")
 		return "strconv.Itoa(" + arguments[0] + ")"
+	case "trb.std.numbers.integer_to_float":
+		return "float64(" + arguments[0] + ")"
+	case "trb.std.numbers.float_to_string":
+		return g.portableFloatString(arguments[0])
+	case "trb.std.numbers.float_to_integer":
+		g.requireImport("math", "")
+		return "func() int { value := " + arguments[0] + "; if math.IsNaN(value) || math.IsInf(value, 0) { panic(\"Float cannot be converted to Integer\") }; if value < -9007199254740991 || value > 9007199254740991 { panic(\"Integer is outside the portable range\") }; return int(math.Trunc(value)) }()"
 	case "trb.std.numbers.parse_integer":
 		g.requireImport("regexp", "")
 		g.requireImport("strconv", "")
@@ -1252,6 +1269,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) portableFloatString(value string) string {
+	g.requireImport("math", "")
+	g.requireImport("strconv", "")
+	g.requireImport("strings", "")
+	return "func() string { value := " + value + "; if math.IsNaN(value) { return \"NaN\" }; if math.IsInf(value, 1) { return \"Infinity\" }; if math.IsInf(value, -1) { return \"-Infinity\" }; if value == 0 { return \"0.0\" }; text := strconv.FormatFloat(value, 'f', -1, 64); if !strings.Contains(text, \".\") { text += \".0\" }; return text }()"
 }
 
 func (g *generator) jsonParse(call *ir.Call, argument string, comments bool) string {
@@ -1857,6 +1881,8 @@ func expressionUsesInterpolation(expression ir.Expression) bool {
 		}
 	case *ir.Unary:
 		return expressionUsesInterpolation(n.Operand)
+	case *ir.Conversion:
+		return expressionUsesInterpolation(n.Value)
 	case *ir.Binary:
 		return expressionUsesInterpolation(n.Left) || expressionUsesInterpolation(n.Right)
 	case *ir.Range:

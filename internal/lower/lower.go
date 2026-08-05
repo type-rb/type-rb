@@ -201,6 +201,18 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 	if node == nil {
 		return nil
 	}
+	result := l.expressionWithoutConversion(node)
+	if target, ok := l.checked.Conversions[node]; ok && result != nil {
+		return &ir.Conversion{
+			ExprBase: ir.NewExprBase(node.Span(), target),
+			Kind:     ir.IntegerToFloatConversion,
+			Value:    result,
+		}
+	}
+	return result
+}
+
+func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression {
 	typ := l.checked.Expressions[node]
 	base := ir.NewExprBase(node.Span(), typ)
 	switch n := node.(type) {

@@ -514,6 +514,13 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "!(" + g.expr(n.Operand) + ")"
 		}
 		return op + g.unaryOperand(n.Operand)
+	case *ir.Conversion:
+		switch n.Kind {
+		case ir.IntegerToFloatConversion:
+			return "Number(" + g.expr(n.Value) + ")"
+		default:
+			return g.expr(n.Value)
+		}
 	case *ir.Binary:
 		op := n.Operator
 		if op == "and" {
@@ -715,6 +722,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	filesystemMessage := `const message = error instanceof Error ? error.message : String(error); `
 	switch name {
 	case "trb.std.io.puts":
+		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Float {
+			return "console.log(" + portableFloatString(arguments[0]) + ")"
+		}
 		return "console.log(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.path.separator":
 		return pathCall("separator") + "()"
@@ -891,6 +901,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "({ ..." + arguments[0] + " })"
 	case "trb.std.numbers.to_string":
 		return "String(" + arguments[0] + ")"
+	case "trb.std.numbers.integer_to_float":
+		return "Number(" + arguments[0] + ")"
+	case "trb.std.numbers.float_to_string":
+		return portableFloatString(arguments[0])
+	case "trb.std.numbers.float_to_integer":
+		return "((): number => { const value = " + arguments[0] + "; if (!Number.isFinite(value)) { throw new RangeError(\"Float cannot be converted to Integer\"); } const integer = Math.trunc(value); if (!Number.isSafeInteger(integer)) { throw new RangeError(\"Integer is outside the portable range\"); } return integer; })()"
 	case "trb.std.numbers.parse_integer":
 		return "((): number => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { throw new Error(\"invalid Integer\"); } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { throw new Error(\"Integer is outside the portable range\"); } return __trbValue; })()"
 	case "trb.std.numbers.try_parse_integer":
@@ -921,6 +937,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "undefined"
 	}
+}
+
+func portableFloatString(value string) string {
+	return "((): string => { const value = " + value + "; if (Number.isNaN(value)) return \"NaN\"; if (value === Infinity) return \"Infinity\"; if (value === -Infinity) return \"-Infinity\"; if (value === 0) return \"0.0\"; const raw = String(value); if (!/[eE]/.test(raw)) return raw.includes(\".\") ? raw : raw + \".0\"; const [mantissa, exponentText] = raw.toLowerCase().split(\"e\"); const negative = mantissa!.startsWith(\"-\"); const unsigned = negative ? mantissa!.slice(1) : mantissa!; const [whole, fraction = \"\"] = unsigned.split(\".\"); const digits = whole! + fraction; const decimal = whole!.length + Number(exponentText); let text: string; if (decimal <= 0) text = \"0.\" + \"0\".repeat(-decimal) + digits; else if (decimal >= digits.length) text = digits + \"0\".repeat(decimal - digits.length) + \".0\"; else text = digits.slice(0, decimal) + \".\" + digits.slice(decimal); text = text.replace(/(\\.\\d*?)0+$/, \"$1\").replace(/\\.$/, \".0\"); return negative ? \"-\" + text : text; })()"
 }
 
 func tsJSONParse(call *ir.Call, argument string, comments bool) string {

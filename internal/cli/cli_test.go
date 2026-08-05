@@ -141,13 +141,13 @@ func TestReplEvaluatesPortableReceiverMethodsAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import { Result } from trb/std/result\n123.to_s()\n\"123\".to_i()\n\"123\".try_to_i()\n\"12x\".try_to_i()\n\"9007199254740992\".try_to_i()\n\"a😀\".size()\n:quit\n"
+		input := "import { Result } from trb/std/result\n123.to_s()\n0.25.to_s()\n(-0.0).to_s()\n2.to_f()\n(-2.75).to_i()\n0.25 * 100\n1 == 1.0\n\"123\".to_i()\n\"123\".try_to_i()\n\"12x\".try_to_i()\n\"9007199254740992\".try_to_i()\n\"a😀\".size()\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "\"123\" : String\n123 : Integer\nResult::Ok(value: 123) : Result<Integer, String>\nResult::Err(error: \"invalid Integer\") : Result<Integer, String>\nResult::Err(error: \"Integer is outside the portable range\") : Result<Integer, String>\n2 : Integer\n"
+		want := "\"123\" : String\n\"0.25\" : String\n\"0.0\" : String\n2 : Float\n-2 : Integer\n25 : Float\ntrue : Boolean\n123 : Integer\nResult::Ok(value: 123) : Result<Integer, String>\nResult::Err(error: \"invalid Integer\") : Result<Integer, String>\nResult::Err(error: \"Integer is outside the portable range\") : Result<Integer, String>\n2 : Integer\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s receiver-method REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}

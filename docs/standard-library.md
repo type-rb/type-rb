@@ -35,6 +35,9 @@ as `trb/std/strings` and `trb/std/numbers`:
 import trb/std/strings
 
 text := 123.to_s()
+ratio_text := 0.25.to_s()
+ratio := 25.to_f()
+whole := 2.75.to_i()
 number := "123".to_i()
 safe_number := "123".try_to_i()
 length := "Hello".size()
@@ -45,6 +48,12 @@ Integer parsing accepts a complete ASCII decimal integer with an optional sign.
 `to_i()` raises on invalid or non-portable input; `try_to_i()` returns
 `Result<Integer, String>`. Parsed integers use the portable exact range
 `-9007199254740991..9007199254740991`.
+
+`Integer#to_f()` is an exact widening conversion. `Float#to_i()` truncates
+toward zero and raises for non-finite or out-of-range values. `Float#to_s()`
+uses a portable fixed decimal spelling without exponent notation, including
+`.0` for integral Float values. Their package forms are `numbers.to_float`,
+`numbers.truncate`, and `numbers.float_to_string`.
 
 `String#size` counts Unicode code points. Additional receiver operations
 include `codepoints`, `empty?`, `include?`, `start_with?`, `end_with?`, `split`,

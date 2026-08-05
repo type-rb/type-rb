@@ -111,8 +111,10 @@ else
 end
 ```
 
-`Integer` and `Float` operands are not mixed implicitly. Arithmetic,
-comparison, equality, and Boolean operators are checked before lowering.
+Numeric expressions may mix `Integer` and `Float`. The `Integer` operand is
+widened to `Float`, and typed IR retains that conversion for every backend and
+the REPL. The same safe widening is available in typed initialization,
+assignment, arguments, and returns; narrowing to `Integer` remains explicit.
 Integer division truncates toward zero in every target.
 
 ## Classes, interfaces, and modules
