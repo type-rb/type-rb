@@ -977,6 +977,66 @@ end
 	}
 }
 
+func TestInferredResultOperationsLoadTheirRuntimeAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`def inspect_results()
+	puts("not-an-integer".try_to_i())
+	puts([1, 2].try_fetch(9))
+	puts({"name" => "Ada"}.try_fetch("missing"))
+	return
+end
+`),
+	}
+
+	wants := map[string][]string{
+		"go": {
+			`__trb_result "example.com/inferred-results/trb/std/result"`,
+			`__trb_result.NewResultErr[int, string]("invalid Integer")`,
+			`__trb_result.NewResultErr[int, string]("Array index is out of bounds")`,
+			`__trb_result.NewResultErr[string, string]("Hash key is missing")`,
+		},
+		"ruby": {
+			`require_relative "./trb/std/result/index"`,
+			`Result::Err.new("invalid Integer")`,
+			`Result::Err.new("Array index is out of bounds")`,
+			`Result::Err.new("Hash key is missing")`,
+		},
+		"typescript": {
+			`import { Result } from "./trb/std/result/index.ts";`,
+			`Result.Err<number, string>("invalid Integer")`,
+			`Result.Err<number, string>("Array index is out of bounds")`,
+			`Result.Err<string, string>("Hash key is missing")`,
+		},
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/inferred-results", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected inferred Result operations: %v", mode, err)
+		}
+		var consumer, resultRuntime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/result/index":
+				resultRuntime = artifact
+			}
+		}
+		if consumer == nil || resultRuntime == nil {
+			t.Fatalf("%s did not compile the consumer and inferred Result runtime: %#v", mode, artifacts)
+		}
+		for _, want := range wants[mode] {
+			if output := string(consumer.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s inferred Result operation is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
 func TestPortableFilesystemPackageLowersAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

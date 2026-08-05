@@ -191,13 +191,23 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		}
 	}
 
-	artifacts := make([]*Artifact, 0, len(units))
+	checkedPrograms := make(map[string]checker.Result, len(units))
 	for _, source := range units {
 		program := programs[source.ModulePath]
 		checked, diagnostics := checker.CheckWithOptions(program, resolutions[source.ModulePath], checker.Options{AllowUnusedImports: options.AllowUnusedImports})
 		if hasErrors(diagnostics) {
 			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
 		}
+		checkedPrograms[source.ModulePath] = checked
+	}
+	if runtimeUnits := compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options); len(runtimeUnits) > 0 {
+		return CompileProject(append(units, runtimeUnits...), options)
+	}
+
+	artifacts := make([]*Artifact, 0, len(units))
+	for _, source := range units {
+		program := programs[source.ModulePath]
+		checked := checkedPrograms[source.ModulePath]
 		lowered := lower.Program(checked)
 		output, err := codegen.Generate(lowered)
 		if err != nil {
@@ -226,6 +236,26 @@ func compilerOwnedSourceUnits(programs map[string]*ast.Program, options Options)
 			definitions[definition.ModulePath] = definition
 		}
 	}
+	return compilerOwnedPackageSourceUnits(definitions, options)
+}
+
+func compilerOwnedRuntimeSourceUnits(checkedPrograms map[string]checker.Result, programs map[string]*ast.Program, options Options) []SourceUnit {
+	definitions := map[string]*stdlib.Package{}
+	for _, checked := range checkedPrograms {
+		for _, definition := range checked.RuntimeDependencies {
+			if definition == nil || definition.Source == "" || definition.ModulePath == "" {
+				continue
+			}
+			if _, alreadyLoaded := programs[definition.ModulePath]; alreadyLoaded {
+				continue
+			}
+			definitions[definition.ModulePath] = definition
+		}
+	}
+	return compilerOwnedPackageSourceUnits(definitions, options)
+}
+
+func compilerOwnedPackageSourceUnits(definitions map[string]*stdlib.Package, options Options) []SourceUnit {
 	modulePaths := make([]string, 0, len(definitions))
 	for modulePath := range definitions {
 		modulePaths = append(modulePaths, modulePath)

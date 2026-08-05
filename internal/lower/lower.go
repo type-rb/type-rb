@@ -3,6 +3,8 @@
 package lower
 
 import (
+	"sort"
+
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/ir"
@@ -13,14 +15,52 @@ type lowerer struct{ checked checker.Result }
 
 func Program(checked checker.Result) *ir.Program {
 	l := &lowerer{checked: checked}
+	statements := l.statements(checked.Program.Statements)
+	statements = append(l.runtimeImports(statements), statements...)
 	return &ir.Program{
 		Mode:       checked.Program.Mode,
 		Package:    checked.Program.Package,
 		ModulePath: checked.Program.ModulePath,
 		GoModule:   checked.Program.GoModule,
 		RubyLoader: checked.Program.RubyLoader,
-		Statements: l.statements(checked.Program.Statements),
+		Statements: statements,
 	}
+}
+
+func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
+	loaded := map[string]bool{}
+	for _, statement := range statements {
+		if imported, ok := statement.(*ir.Import); ok {
+			loaded[imported.Path] = true
+		}
+	}
+	paths := make([]string, 0, len(l.checked.RuntimeDependencies))
+	for packagePath, definition := range l.checked.RuntimeDependencies {
+		if definition == nil || definition.ModulePath == "" || loaded[definition.ModulePath] {
+			continue
+		}
+		paths = append(paths, packagePath)
+	}
+	sort.Strings(paths)
+	imports := make([]ir.Statement, 0, len(paths))
+	for _, packagePath := range paths {
+		definition := l.checked.RuntimeDependencies[packagePath]
+		imported := &ir.Import{
+			Path:             definition.ModulePath,
+			Alias:            definition.RuntimeAlias,
+			Kind:             "standard",
+			Standard:         true,
+			Runtime:          true,
+			IntrinsicSymbols: map[string]bool{},
+			SymbolKinds:      map[string]string{},
+		}
+		for _, exported := range definition.RuntimeExports {
+			imported.Symbols = append(imported.Symbols, exported.Name)
+			imported.SymbolKinds[exported.Name] = exported.Kind
+		}
+		imports = append(imports, imported)
+	}
+	return imports
 }
 
 func (l *lowerer) statements(nodes []ast.Statement) []ir.Statement {

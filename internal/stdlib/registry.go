@@ -37,6 +37,11 @@ type Symbol struct {
 	Inference       string
 }
 
+type RuntimeExport struct {
+	Name string
+	Kind string
+}
+
 func (s Symbol) HasReceiver() bool {
 	return s.Receiver.Kind != "" && s.Receiver.Kind != types.Invalid
 }
@@ -47,16 +52,17 @@ type receiverMethodTarget struct {
 }
 
 type Package struct {
-	Path         string
-	ModulePath   string
-	RuntimeAlias string
-	Source       string
-	Kind         Kind
-	Internal     bool
-	Targets      map[string]bool
-	NativeSyntax bool
-	TypeProvider string
-	Symbols      map[string]Symbol
+	Path           string
+	ModulePath     string
+	RuntimeAlias   string
+	RuntimeExports []RuntimeExport
+	Source         string
+	Kind           Kind
+	Internal       bool
+	Targets        map[string]bool
+	NativeSyntax   bool
+	TypeProvider   string
+	Symbols        map[string]Symbol
 }
 
 func (p *Package) Supports(mode string) bool {
@@ -99,9 +105,10 @@ end
 		Symbols: map[string]Symbol{},
 	},
 	"trb/std/result": {
-		Path:         "trb/std/result",
-		ModulePath:   "trb/std/result/index",
-		RuntimeAlias: "__trb_result",
+		Path:           "trb/std/result",
+		ModulePath:     "trb/std/result/index",
+		RuntimeAlias:   "__trb_result",
+		RuntimeExports: []RuntimeExport{{Name: "Result", Kind: "enum"}},
 		Source: `enum Result<T, E>
 	Ok(value: T)
 	Err(error: E)
@@ -745,6 +752,34 @@ func jsonParse(name string) Symbol {
 func Lookup(packagePath string) (*Package, bool) {
 	definition, ok := registry[packagePath]
 	return definition, ok
+}
+
+// RuntimeDependenciesForType returns compiler-owned modules whose runtime
+// declarations are named by a library intrinsic's result type. Source code
+// still needs an explicit import to refer to those declarations directly.
+func RuntimeDependenciesForType(typ types.Type) []*Package {
+	names := map[string]bool{}
+	var collect func(types.Type)
+	collect = func(current types.Type) {
+		if current.Name != "" {
+			names[current.Name] = true
+		}
+		for _, argument := range current.Args {
+			collect(argument)
+		}
+	}
+	collect(typ)
+
+	dependencies := []*Package{}
+	for _, definition := range registry {
+		for _, exported := range definition.RuntimeExports {
+			if names[exported.Name] {
+				dependencies = append(dependencies, definition)
+				break
+			}
+		}
+	}
+	return dependencies
 }
 
 func LookupReceiverMethod(receiver types.Type, name string) (*Package, Symbol, bool) {

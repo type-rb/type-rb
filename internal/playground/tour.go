@@ -54,10 +54,10 @@ var tourLessons = []Lesson{
 	},
 	{
 		ID: "collections", Chapter: "Write programs", Title: "Collections", Eyebrow: "06 · Write programs",
-		Description: "Array and Hash element types are inferred. map, select, and reduce transform values; fetch is strict while try_fetch returns an explicit Result.",
-		Source:      "import { Result } from trb/std/result\n\nnumbers := [1, 2, 3, 4]\nlabels := {\"language\" => \"TypeRB\"}\n\ndoubled := numbers.map do |number|\n\tnumber * 2\nend\neven := numbers.select do |number|\n\tnumber % 2 == 0\nend\ntotal := even.reduce(0) do |sum, number|\n\tsum + number\nend\nmissing: Result<Integer, String> := numbers.try_fetch(9)\n\nputs(doubled)\nputs(even)\nputs(total)\nputs(labels.fetch(\"language\"))\nputs(missing)\n",
-		Expected:    "[2, 4, 6, 8]\n[2, 4]\n6\nTypeRB\nResult::Err(error: \"Array index is out of bounds\")\n",
-		Hint:        "Change the select predicate, or use try_fetch(0) to see the success variant.",
+		Description: "Array and Hash element types are inferred. map, select, and reduce transform values, while fetch performs a checked lookup.",
+		Source:      "numbers := [1, 2, 3, 4]\nlabels := {\"language\" => \"TypeRB\"}\n\ndoubled := numbers.map do |number|\n\tnumber * 2\nend\neven := numbers.select do |number|\n\tnumber % 2 == 0\nend\ntotal := even.reduce(0) do |sum, number|\n\tsum + number\nend\n\nputs(doubled)\nputs(even)\nputs(total)\nputs(labels.fetch(\"language\"))\n",
+		Expected:    "[2, 4, 6, 8]\n[2, 4]\n6\nTypeRB\n",
+		Hint:        "Change the select predicate, or add another key and fetch it from labels.",
 	},
 	{
 		ID: "records", Chapter: "Model data and errors", Title: "Records for data", Eyebrow: "07 · Model data",
@@ -75,7 +75,7 @@ var tourLessons = []Lesson{
 	},
 	{
 		ID: "result", Chapter: "Model data and errors", Title: "Enums and Result", Eyebrow: "09 · Model errors",
-		Description: "Result<T, E> is a standard generic payload enum. Exhaustive case matching binds its success or error payload and keeps both paths visible.",
+		Description: "Result<T, E> is a standard generic payload enum. Calls infer concrete Result types, while exhaustive case matching binds success and error payloads and keeps both paths visible.",
 		Source:      "import { Result } from trb/std/result\n\ndef display(result: Result<Integer, String>): String\n\tcase result\n\twhen Result::Ok(value)\n\t\treturn \"number: \" + value.to_s()\n\twhen Result::Err(error)\n\t\treturn \"error: \" + error\n\tend\nend\n\nputs(display(\"42\".try_to_i()))\nputs(display(\"nope\".try_to_i()))\n",
 		Expected:    "number: 42\nerror: invalid Integer\n",
 		Hint:        "Define your own payload enum and remove one when branch to see exhaustive checking.",
