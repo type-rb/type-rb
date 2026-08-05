@@ -26,8 +26,19 @@ go install github.com/type-rb/type-rb/cmd/trb@latest
 
 ## Try TypeRB
 
-Start a typed REPL from any directory. It uses Go mode when no project
-configuration is present:
+Open the local browser playground or follow the guided language tour:
+
+```sh
+trb play
+trb tour
+```
+
+Both commands run locally and open a browser. The playground can execute,
+format, and transpile scratch TypeRB while switching between Go, Ruby, and
+TypeScript output.
+
+For a terminal workflow, start a typed REPL from any directory. It uses Go
+mode when no project configuration is present:
 
 ```console
 $ trb repl

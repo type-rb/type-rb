@@ -20,6 +20,10 @@ Implemented:
 - A project-aware typed-IR REPL with persistent state, multiline editing,
   history, reverse search, completion, colors, interrupts, imports, and type
   inspection.
+- A local browser playground with TypeRB syntax highlighting, formatting,
+  typed-IR execution, and generated-source views for all three backends.
+- A guided browser tour whose lessons can be validated across every mode with
+  `trb tour --check`.
 - Project initialization, dependency configuration, target-manifest
   generation, and target package installation.
 - Managed and external package modes, allowing generated source to be embedded

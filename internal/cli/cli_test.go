@@ -29,6 +29,29 @@ func TestVersionCommandUsesBuildVersion(t *testing.T) {
 	}
 }
 
+func TestPlaygroundModeSelection(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		selected, err := playgroundMode(mode)
+		if err != nil || selected != mode {
+			t.Fatalf("playgroundMode(%q) = %q, %v", mode, selected, err)
+		}
+	}
+	if _, err := playgroundMode("python"); err == nil || !strings.Contains(err.Error(), "--mode must be") {
+		t.Fatalf("unexpected invalid-mode result: %v", err)
+	}
+}
+
+func TestTourCheckRejectsServerFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"tour", "--check", "--mode", "go"}); status != 1 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "tour --check cannot be combined") {
+		t.Fatalf("unexpected error: %s", stderr.String())
+	}
+}
+
 func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
