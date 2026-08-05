@@ -268,6 +268,7 @@ type IterationExpression struct {
 	Source    Expression
 	Operation string
 	SliceSize Expression
+	Initial   Expression
 	WithIndex bool
 	Block     *BlockExpression
 }

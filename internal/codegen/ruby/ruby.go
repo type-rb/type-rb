@@ -394,6 +394,8 @@ func (g *generator) expr(expression ir.Expression) string {
 			operator = "..."
 		}
 		return g.expr(n.Start) + operator + g.expr(n.End)
+	case *ir.Transform:
+		return g.transform(n)
 	case *ir.Member:
 		op := "."
 		if n.Namespace {
@@ -440,6 +442,28 @@ func (g *generator) expr(expression ir.Expression) string {
 		return n.Text
 	default:
 		return ""
+	}
+}
+
+func (g *generator) transform(transform *ir.Transform) string {
+	source := g.expr(transform.Source)
+	if _, rangeSource := transform.Source.(*ir.Range); rangeSource {
+		source = "(" + source + ")"
+	}
+	result := g.expr(transform.Result)
+	switch transform.Operation {
+	case "map", "select":
+		operation := transform.Operation
+		parameters := []string{transform.Item}
+		if transform.WithIndex {
+			operation += ".with_index"
+			parameters = append(parameters, transform.Index)
+		}
+		return source + "." + operation + " { |" + strings.Join(parameters, ", ") + "| " + result + " }"
+	case "reduce":
+		return source + ".reduce(" + g.expr(transform.Initial) + ") { |" + transform.Accumulator + ", " + transform.Item + "| " + result + " }"
+	default:
+		return "nil"
 	}
 }
 

@@ -766,6 +766,101 @@ func TestInvalidPortableOperatorsAreRejectedAcrossModes(t *testing.T) {
 	}
 }
 
+func TestPortableCollectionTransformationsAcrossModes(t *testing.T) {
+	source := []byte(`def mapped(): Array<String>
+	return [1, 2].map do |value|
+		value.to_s()
+	end
+end
+
+def indexed(): Array<Integer>
+	return [10, 20].map.with_index do |value, index|
+		value + index
+	end
+end
+
+def selected(): Array<Integer>
+	return (0..4).select do |value|
+		value % 2 == 0
+	end
+end
+
+def total(): Integer
+	return [1, 2, 3].reduce(0) do |sum, value|
+		sum + value
+	end
+end
+`)
+	wants := map[string][]string{
+		"go": {
+			`make([]string, 0, len(`,
+			`append(__trbResult`,
+			`if (value % 2) == 0`,
+			`sum := __trbResult`,
+		},
+		"ruby": {
+			`.map { |value| value.to_s }`,
+			`.map.with_index { |value, index| value + index }`,
+			`.select { |value| ((value).remainder(2)) == 0 }`,
+			`.reduce(0) { |sum, value| sum + value }`,
+		},
+		"typescript": {
+			`.map((value) => String(value))`,
+			`.map((value, index) => value + index)`,
+			`.select`,
+			`.reduce((sum, value) => sum + value, 0)`,
+		},
+	}
+	// TypeScript calls the portable select operation through Array#filter.
+	wants["typescript"][2] = `.filter((value) => (value % 2) == 0)`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := CompileWithOptions("transforms.trb", source, Options{Mode: mode, Package: "transforms", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable collection transformations: %v", mode, err)
+		}
+		for _, want := range wants[mode] {
+			if output := string(artifact.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s transformation is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableCollectionTransformationDiagnosticsAcrossModes(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{
+			source: "def bad(): Array<Integer>\n\treturn [1].select do |value|\n\t\tvalue\n\tend\nend\n",
+			want:   "select block result must be Boolean, got Integer",
+		},
+		{
+			source: "def bad(): Array<Integer>\n\treturn [1].map do |value|\n\t\tvalue\n\t\tvalue + 1\n\tend\nend\n",
+			want:   "map block must contain exactly one result expression in v0.1",
+		},
+		{
+			source: "def bad(): Integer\n\treturn [1].reduce(0) do |sum, value|\n\t\tvalue.to_s()\n\tend\nend\n",
+			want:   "reduce block result is String, expected Integer",
+		},
+		{
+			source: "def bad(): Integer\n\treturn [1].reduce do |sum, value|\n\t\tsum + value\n\tend\nend\n",
+			want:   "reduce expects exactly one positional initial value",
+		},
+		{
+			source: "def bad(): Array<Integer>\n\treturn [1].map do |value, index|\n\t\tvalue + index\n\tend\nend\n",
+			want:   "map block expects 1 parameter(s), got 2",
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("bad.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s: expected %q collection-transformation diagnostic, got %v", mode, test.want, err)
+			}
+		}
+	}
+}
+
 func TestNullableEqualityAndRubyNativeOperatorsHaveExplicitBoundaries(t *testing.T) {
 	portable := []byte(`def missing(value: String?): Boolean
   return value == nil

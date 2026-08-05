@@ -132,6 +132,9 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return &ir.Next{Base: base(n.Base)}
 	case *ast.ExpressionStatement:
 		if iteration, ok := n.Expression.(*ast.IterationExpression); ok {
+			if iteration.Operation == "map" || iteration.Operation == "select" || iteration.Operation == "reduce" {
+				return &ir.ExpressionStatement{Base: base(n.Base), Expression: l.expression(iteration)}
+			}
 			result := &ir.Iterate{
 				Base:      base(n.Base),
 				Source:    l.expression(iteration.Source),
@@ -231,6 +234,42 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 		return &ir.Binary{ExprBase: base, Left: l.expression(n.Left), Operator: n.Operator, Right: l.expression(n.Right)}
 	case *ast.RangeExpression:
 		return &ir.Range{ExprBase: base, Start: l.expression(n.Start), End: l.expression(n.End), Exclusive: n.Exclusive}
+	case *ast.IterationExpression:
+		result := &ir.Transform{
+			ExprBase:  base,
+			Source:    l.expression(n.Source),
+			Operation: n.Operation,
+			Initial:   l.expression(n.Initial),
+			WithIndex: n.WithIndex,
+			ItemType:  l.checked.Iterations[n],
+		}
+		if n.Block != nil {
+			if n.Operation == "reduce" {
+				if len(n.Block.Parameters) > 0 {
+					result.Accumulator = n.Block.Parameters[0]
+				}
+				if len(n.Block.Parameters) > 1 {
+					result.Item = n.Block.Parameters[1]
+				}
+			} else {
+				if len(n.Block.Parameters) > 0 {
+					result.Item = n.Block.Parameters[0]
+				}
+				if len(n.Block.Parameters) > 1 {
+					result.Index = n.Block.Parameters[1]
+				}
+			}
+			if len(n.Block.Body) > 0 {
+				last := len(n.Block.Body) - 1
+				if expression, ok := n.Block.Body[last].(*ast.ExpressionStatement); ok {
+					result.Body = l.statements(n.Block.Body[:last])
+					result.Result = l.expression(expression.Expression)
+				} else {
+					result.Body = l.statements(n.Block.Body)
+				}
+			}
+		}
+		return result
 	case *ast.CallExpression:
 		if variant, ok := l.checked.EnumConstructors[n]; ok {
 			result := &ir.EnumConstruct{ExprBase: base, EnumName: variant.EnumName, Member: variant.Name, TypeArguments: append([]types.Type(nil), variant.TypeArguments...), Reference: l.reference(n.Callee)}

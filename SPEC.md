@@ -555,6 +555,19 @@ missing-value messages. Hash key/value enumeration order is unspecified.
 an empty Array. Receiver lookup checks the complete collection type, so a
 method constrained to `Array<String>` is not exposed on `Array<Integer>`.
 
+`map`, `select`, and `reduce(initial)` are structured, value-producing
+collection expressions rather than target-native callback calls. `map` returns
+`Array<U>` inferred from its block result, `select` requires a Boolean block
+result and retains `Array<T>`, and `reduce` requires its block result to remain
+assignable to the initial accumulator type. `map.with_index` and
+`select.with_index` bind a zero-based Integer index; `reduce.with_index` is not
+part of v0.1. Transformation blocks use their final expression as the value.
+The v0.1 parser/checker accepts exactly one expression in these blocks; this is
+an explicit staging boundary for later structured multi-statement block and
+first-class lambda semantics. The AST and typed IR retain the source,
+operation, bindings, item type, accumulator, and result expression until
+backend lowering and REPL evaluation.
+
 `trb/std/path` defines portable logical paths as `/`-separated Strings. It is
 compiler-owned TypeRB source, so `clean`, two-part `join`, `absolute`,
 `components`, `base`, `directory`, and `separator` execute the same lexical

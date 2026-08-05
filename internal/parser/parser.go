@@ -102,8 +102,6 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseCase()
 	case "while":
 		return p.parseWhile()
-	case "return":
-		return p.parseReturn()
 	case "break", "next":
 		return p.parseLoopControl(word)
 	case "import":
@@ -117,6 +115,12 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	}
 	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
+	if blockOperation := p.tryIterationStatement(line, next, base); blockOperation != nil {
+		return blockOperation
+	}
+	if word == "return" {
+		return p.parseReturn()
+	}
 
 	if field := p.tryField(line, base); field != nil {
 		p.pos = next
@@ -130,9 +134,6 @@ func (p *Parser) parseStatement() ast.Statement {
 		p.pos = next
 		return assignment
 	}
-	if iteration := p.tryIteration(line, next, base); iteration != nil {
-		return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
-	}
 	if p.opensNativeBlock(line) {
 		return p.parseNativeBlock()
 	}
@@ -145,12 +146,57 @@ func (p *Parser) parseStatement() ast.Statement {
 	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
 }
 
-func (p *Parser) tryIteration(line []token.Token, next int, base ast.Base) *ast.IterationExpression {
-	if doAt := topLevelIndex(line, "do"); doAt > 0 {
-		iteration, ok := p.iterationHeader(line[:doAt])
+func (p *Parser) tryIterationStatement(line []token.Token, next int, base ast.Base) ast.Statement {
+	blockAt := topLevelIndex(line, "do")
+	if blockAt <= 0 {
+		blockAt = topLevelIndex(line, "{")
+	}
+	if blockAt <= 0 {
+		return nil
+	}
+
+	prefix := line[:blockAt]
+	header := prefix
+	wrapper := "expression"
+	if prefix[0].Lexeme == "return" {
+		wrapper = "return"
+		header = prefix[1:]
+	} else if assign := topLevelIndex(prefix, ":="); assign > 0 {
+		wrapper = "variable"
+		header = prefix[assign+1:]
+	} else if assign := topLevelIndex(prefix, "="); assign > 0 {
+		wrapper = "assignment"
+		header = prefix[assign+1:]
+	}
+	iteration, ok := p.iterationHeader(header)
+	if !ok {
+		return nil
+	}
+	iteration = p.parseIterationBlock(line, next, base, iteration)
+	switch wrapper {
+	case "return":
+		return &ast.ReturnStatement{Base: iteration.Base, Value: iteration}
+	case "variable":
+		statement, ok := p.tryVariable(prefix, iteration.Base).(*ast.VariableStatement)
 		if !ok {
-			return nil
+			return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
 		}
+		statement.Value = iteration
+		return statement
+	case "assignment":
+		statement, ok := p.tryAssignment(prefix, iteration.Base).(*ast.AssignmentStatement)
+		if !ok {
+			return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
+		}
+		statement.Value = iteration
+		return statement
+	default:
+		return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
+	}
+}
+
+func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base, iteration *ast.IterationExpression) *ast.IterationExpression {
+	if doAt := topLevelIndex(line, "do"); doAt > 0 {
 		parameters, ok := p.blockParameters(line[doAt+1:])
 		if !ok {
 			p.errorAt(spanOf(line[doAt:]), "iteration block parameters must be written as |item| or |item, index|")
@@ -168,11 +214,7 @@ func (p *Parser) tryIteration(line []token.Token, next int, base ast.Base) *ast.
 
 	braceAt := topLevelIndex(line, "{")
 	if braceAt <= 0 {
-		return nil
-	}
-	iteration, ok := p.iterationHeader(line[:braceAt])
-	if !ok {
-		return nil
+		return iteration
 	}
 	close := matchingIndex(line, braceAt, "{", "}")
 	if close < 0 {
@@ -292,21 +334,27 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 	iteration := &ast.IterationExpression{WithIndex: withIndex}
 	switch node := expression.(type) {
 	case *ast.MemberExpression:
-		if node.Name != "each" {
+		if node.Name != "each" && node.Name != "map" && node.Name != "select" && node.Name != "reduce" {
 			return nil, false
 		}
 		iteration.Source = node.Receiver
-		iteration.Operation = "each"
+		iteration.Operation = node.Name
 	case *ast.CallExpression:
 		member, memberOK := node.Callee.(*ast.MemberExpression)
-		if !memberOK || (member.Name != "each" && member.Name != "each_slice") {
+		if !memberOK || (member.Name != "each" && member.Name != "each_slice" && member.Name != "map" && member.Name != "select" && member.Name != "reduce") {
 			return nil, false
 		}
 		iteration.Source = member.Receiver
 		iteration.Operation = member.Name
-		if member.Name == "each" {
+		if member.Name == "each" || member.Name == "map" || member.Name == "select" {
 			if len(node.Arguments) != 0 {
-				p.errorAt(node.Span(), "each does not take arguments")
+				p.errorAt(node.Span(), member.Name+" does not take arguments")
+			}
+		} else if member.Name == "reduce" {
+			if len(node.Arguments) != 1 || node.Arguments[0].Name != "" || node.Arguments[0].Splat != "" {
+				p.errorAt(node.Span(), "reduce expects exactly one positional initial value")
+			} else {
+				iteration.Initial = node.Arguments[0].Value
 			}
 		} else if len(node.Arguments) != 1 || node.Arguments[0].Name != "" || node.Arguments[0].Splat != "" {
 			p.errorAt(node.Span(), "each_slice expects exactly one positional size argument")

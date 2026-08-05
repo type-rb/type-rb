@@ -693,6 +693,8 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		return indexValue(receiver, index, node.ExprType())
+	case *ir.Transform:
+		return e.transform(node, module, sc)
 	case *ir.Block:
 		return Value{Type: node.ExprType(), Data: node}, nil
 	case *ir.NativeExpression:
@@ -700,6 +702,64 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 	default:
 		return Value{}, fmt.Errorf("unsupported REPL expression %T", expression)
 	}
+}
+
+func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Value, error) {
+	source, err := e.expression(node.Source, module, sc)
+	if err != nil {
+		return Value{}, err
+	}
+	items, err := iterableValues(source)
+	if err != nil {
+		return Value{}, err
+	}
+	if node.Operation == "reduce" {
+		accumulator, err := e.expression(node.Initial, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		for _, item := range items {
+			if err := e.checkContext(); err != nil {
+				return Value{}, err
+			}
+			iterationScope := &scope{parent: sc, values: map[string]Value{}}
+			iterationScope.values[node.Accumulator] = accumulator
+			iterationScope.values[node.Item] = item
+			accumulator, err = e.expression(node.Result, module, iterationScope)
+			if err != nil {
+				return Value{}, err
+			}
+		}
+		accumulator.Type = node.ExprType()
+		return accumulator, nil
+	}
+
+	result := &arrayValue{}
+	for index, item := range items {
+		if err := e.checkContext(); err != nil {
+			return Value{}, err
+		}
+		iterationScope := &scope{parent: sc, values: map[string]Value{node.Item: item}}
+		if node.WithIndex {
+			iterationScope.values[node.Index] = Value{Type: types.FromName("Integer"), Data: int64(index)}
+		}
+		value, err := e.expression(node.Result, module, iterationScope)
+		if err != nil {
+			return Value{}, err
+		}
+		if node.Operation == "select" {
+			selected, ok := value.Data.(bool)
+			if !ok {
+				return Value{}, errors.New("select block result must be Boolean")
+			}
+			if selected {
+				result.Items = append(result.Items, item)
+			}
+			continue
+		}
+		result.Items = append(result.Items, value)
+	}
+	return Value{Type: node.ExprType(), Data: result}, nil
 }
 
 func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowResult, error) {

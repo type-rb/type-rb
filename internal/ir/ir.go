@@ -259,6 +259,25 @@ type Iterate struct {
 
 func (*Iterate) irStatement() {}
 
+// Transform is a value-producing collection operation. It is distinct from a
+// target callback so checker-derived item/result types and block semantics are
+// retained until backend lowering.
+type Transform struct {
+	ExprBase
+	Source      Expression
+	Operation   string
+	Initial     Expression
+	WithIndex   bool
+	Item        string
+	Index       string
+	Accumulator string
+	ItemType    types.Type
+	Body        []Statement
+	Result      Expression
+}
+
+func (*Transform) irExpression() {}
+
 type Native struct {
 	Base
 	Text string

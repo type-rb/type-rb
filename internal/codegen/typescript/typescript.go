@@ -536,6 +536,8 @@ func (g *generator) expr(expression ir.Expression) string {
 			extra = "0"
 		}
 		return "((start: number, end: number) => Array.from({ length: Math.max(0, end - start + " + extra + ") }, (_, index) => start + index))(" + g.expr(n.Start) + ", " + g.expr(n.End) + ")"
+	case *ir.Transform:
+		return g.transform(n)
 	case *ir.Member:
 		receiver := g.expr(n.Receiver)
 		op := "."
@@ -602,6 +604,27 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
 		return ""
+	}
+}
+
+func (g *generator) transform(transform *ir.Transform) string {
+	source := g.expr(transform.Source)
+	result := g.expr(transform.Result)
+	switch transform.Operation {
+	case "map", "select":
+		parameters := transform.Item
+		if transform.WithIndex {
+			parameters += ", " + transform.Index
+		}
+		operation := transform.Operation
+		if operation == "select" {
+			operation = "filter"
+		}
+		return source + "." + operation + "((" + parameters + ") => " + result + ")"
+	case "reduce":
+		return source + ".reduce((" + transform.Accumulator + ", " + transform.Item + ") => " + result + ", " + g.expr(transform.Initial) + ")"
+	default:
+		return "undefined"
 	}
 }
 

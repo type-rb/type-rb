@@ -87,6 +87,22 @@ func TestFormatPortableIterationAndRanges(t *testing.T) {
 	}
 }
 
+func TestFormatPortableCollectionTransformations(t *testing.T) {
+	source := []byte("def values():Array<Integer>\nmapped := [1,2].map do |value| # map\nvalue*2 # result\nend\nreturn mapped.select.with_index{|value,index| value>index}\nend\n")
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "def values(): Array<Integer>\n\tmapped := [1, 2].map do |value| # map\n\t\tvalue * 2 # result\n\tend\n\treturn mapped.select.with_index { |value, index| value > index }\nend\n"
+	if string(formatted) != want {
+		t.Fatalf("unexpected collection-transformation formatting:\n%s", formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("collection-transformation formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatEnumCaseUsesTabsAndPreservesComments(t *testing.T) {
 	source := []byte("enum  State # enum\nOpen # open\nClosed\nend\ndef label(value:State):String\ncase value # select\nwhen State::Open # branch\nreturn \"open\" # result\nwhen State::Closed\nreturn \"closed\"\nend\nend\n")
 	formatted, diagnostics := Format(source)

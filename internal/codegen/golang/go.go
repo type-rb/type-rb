@@ -736,6 +736,8 @@ func (g *generator) expr(expression ir.Expression) string {
 			inclusiveEnd = "; if start <= end { values = append(values, end) }"
 		}
 		return "func() []int { start, end := " + g.expr(n.Start) + ", " + g.expr(n.End) + "; values := []int{}; for value := start; value < end; value++ { values = append(values, value) }" + inclusiveEnd + "; return values }()"
+	case *ir.Transform:
+		return g.transform(n)
 	case *ir.Member:
 		if n.Namespace && isUpper(n.Name) {
 			owner := n.Receiver.ExprType().Name
@@ -829,6 +831,48 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
 		return ""
+	}
+}
+
+func (g *generator) transform(transform *ir.Transform) string {
+	g.temporary++
+	suffix := strconv.Itoa(g.temporary)
+	items := "__trbItems" + suffix
+	result := "__trbResult" + suffix
+	item := goIdentifier(transform.Item, false)
+	if item == "" || item == "_" {
+		item = "__trbItem" + suffix
+	}
+	source := g.expr(transform.Source)
+	value := g.expr(transform.Result)
+	switch transform.Operation {
+	case "map":
+		index := "_"
+		if transform.WithIndex {
+			index = goIdentifier(transform.Index, false)
+			if index == "" {
+				index = "_"
+			}
+		}
+		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := make(" + g.goType(transform.ExprType()) + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { " + result + " = append(" + result + ", " + value + ") }; return " + result + " }()"
+	case "select":
+		index := "_"
+		if transform.WithIndex {
+			index = goIdentifier(transform.Index, false)
+			if index == "" {
+				index = "_"
+			}
+		}
+		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := make(" + g.goType(transform.ExprType()) + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { if " + value + " { " + result + " = append(" + result + ", " + item + ") } }; return " + result + " }()"
+	case "reduce":
+		accumulator := goIdentifier(transform.Accumulator, false)
+		binding := ""
+		if accumulator != "" && accumulator != "_" {
+			binding = accumulator + " := " + result + "; "
+		}
+		return "func() " + g.goType(transform.ExprType()) + " { " + result + " := " + g.expr(transform.Initial) + "; for _, " + item + " := range " + source + " { " + binding + result + " = " + value + " }; return " + result + " }()"
+	default:
+		return "nil"
 	}
 }
 

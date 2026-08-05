@@ -96,6 +96,10 @@ Implemented:
 - Expanded compiler-owned receiver methods for String code points, emptiness,
   containment, prefix/suffix checks, exact splitting and case conversion, plus
   constrained `Array<String>` joining and generic mutable Array pop.
+- Structured, value-producing `map`, `select`, and `reduce(initial)` collection
+  expressions with typed item/result/accumulator IR, optional index binding for
+  map/select, formatter support, three runnable backends, and matching REPL
+  execution. v0.1 transformation blocks contain one result expression.
 - A `/`-based portable lexical path library written in compiler-owned TypeRB,
   with normalization, joining, inspection and decomposition shared by all
   generated targets and the REPL.
@@ -155,9 +159,10 @@ semantic type model, and source maps are later work.
 
 The broader path to practical production use is tracked in `ROADMAP.md`.
 
-1. Add collection transformations and the remaining small receiver APIs needed
-   by real standard-library code; safe conversion and lookup Results are now
-   available as the explicit baseline.
+1. Extend collection transformation blocks beyond the v0.1 single-expression
+   baseline and add the remaining small receiver APIs needed by real
+   standard-library code; safe conversion and lookup Results are available as
+   the explicit failure baseline.
 2. Add process APIs required to move the lexer/parser into the stage-1
    self-host tree. Revisit concise Result propagation syntax only after
    explicit Result handling has been exercised in real application code.

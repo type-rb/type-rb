@@ -10,10 +10,11 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 
 ## 1. Complete the portable language core
 
-- Finish essential collection and control-flow syntax: transformations and
-  first-class blocks/lambdas. Portable `Result<T, E>` with explicit exhaustive
-  handling and safe conversion/lookup APIs is implemented; concise propagation
-  syntax remains a later ergonomics decision.
+- Extend the implemented typed `map`/`select`/`reduce` expressions from their
+  single-result-expression v0.1 blocks to structured multi-statement blocks,
+  then add first-class blocks/lambdas. Portable `Result<T, E>` with explicit
+  exhaustive handling and safe conversion/lookup APIs is implemented; concise
+  propagation syntax remains a later ergonomics decision.
 - Add union types, position-typed Tuples, and precise nullable/optional
   semantics. Payload-bearing enums, exhaustive payload pattern narrowing, and
   explicit generics for payload enums/top-level functions are implemented;

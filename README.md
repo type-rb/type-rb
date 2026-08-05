@@ -461,6 +461,26 @@ These contracts infer `T`, `K`, and `V` from the collection. `fetch`,
 `first`, and `last` are strict; `try_fetch` returns `Result<T, String>` or
 `Result<V, String>`; `dup`/`copy` creates a shallow copy.
 
+Value-producing collection blocks are portable syntax backed by typed IR:
+
+```trb
+labels := [1, 2, 3].map do |value|
+	"item-" + value.to_s()
+end
+
+visible := labels.select.with_index do |label, index|
+	!label.empty?() and index < 2
+end
+
+total := [1, 2, 3].reduce(0) do |sum, value|
+	sum + value
+end
+```
+
+The block's expression is its result. v0.1 transformation blocks contain one
+result expression; this keeps `map`, `select`, and `reduce` semantics identical
+while structured multi-statement blocks are developed.
+
 Portable lexical paths are available as compiler-owned TypeRB code:
 
 ```trb

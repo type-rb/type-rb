@@ -1708,6 +1708,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			elementType = types.Type{Kind: types.Any, Name: "Any"}
 		}
 		itemType := elementType
+		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce"
 		if n.Operation == "each_slice" {
 			if n.SliceSize == nil {
 				c.error(n.Span(), "each_slice expects exactly one size argument")
@@ -1727,16 +1728,33 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.result.Iterations[n] = itemType
 		if n.Block != nil {
 			expected := 1
-			if n.WithIndex {
+			if n.Operation == "reduce" {
+				expected = 2
+				if n.WithIndex {
+					c.error(n.Span(), "reduce.with_index is not supported; use an explicit counter")
+				}
+			} else if n.WithIndex {
 				expected = 2
 			}
 			if len(n.Block.Parameters) != expected {
 				c.error(n.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", n.Operation, expected, len(n.Block.Parameters)))
 			}
 			blockScope := &scope{parent: sc, values: map[string]symbol{}}
+			accumulatorType := types.Type{Kind: types.Any, Name: "Any"}
+			if n.Operation == "reduce" {
+				if n.Initial == nil {
+					c.error(n.Span(), "reduce expects exactly one positional initial value")
+				} else {
+					accumulatorType = c.checkExpression(n.Initial, sc)
+				}
+			}
 			for index, name := range n.Block.Parameters {
 				parameterType := itemType
-				if index == 1 {
+				if n.Operation == "reduce" {
+					if index == 0 {
+						parameterType = accumulatorType
+					}
+				} else if index == 1 {
 					parameterType = types.FromName("Integer")
 				}
 				if _, duplicate := blockScope.values[name]; duplicate {
@@ -1745,12 +1763,44 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 				blockScope.values[name] = symbol{typ: parameterType, mutable: true, span: n.Block.Span()}
 			}
-			c.loopDepth++
-			c.checkStatements(n.Block.Body, blockScope)
-			c.loopDepth--
-			c.result.Expressions[n.Block] = types.Type{Kind: types.Void, Name: "Void"}
+			if transform {
+				if len(n.Block.Body) != 1 {
+					c.error(n.Block.Span(), fmt.Sprintf("%s block must contain exactly one result expression in v0.1", n.Operation))
+				}
+				c.checkStatements(n.Block.Body, blockScope)
+				blockType := types.Type{Kind: types.Any, Name: "Any"}
+				if len(n.Block.Body) == 1 {
+					if result, ok := n.Block.Body[0].(*ast.ExpressionStatement); ok {
+						blockType = c.result.Expressions[result.Expression]
+					} else {
+						c.error(n.Block.Body[0].Span(), fmt.Sprintf("%s block result must be an expression", n.Operation))
+					}
+				}
+				c.result.Expressions[n.Block] = blockType
+				switch n.Operation {
+				case "map":
+					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{blockType}}
+				case "select":
+					if blockType.Kind != types.Bool || blockType.Nullable {
+						c.error(n.Block.Span(), fmt.Sprintf("select block result must be Boolean, got %s", blockType))
+					}
+					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
+				case "reduce":
+					if !types.Assignable(accumulatorType, blockType) {
+						c.error(n.Block.Span(), fmt.Sprintf("reduce block result is %s, expected %s", blockType, accumulatorType))
+					}
+					typ = accumulatorType
+				}
+			} else {
+				c.loopDepth++
+				c.checkStatements(n.Block.Body, blockScope)
+				c.loopDepth--
+				c.result.Expressions[n.Block] = types.Type{Kind: types.Void, Name: "Void"}
+			}
 		}
-		typ = types.Type{Kind: types.Void, Name: "Void"}
+		if !transform {
+			typ = types.Type{Kind: types.Void, Name: "Void"}
+		}
 	case *ast.GenericExpression:
 		receiverType := c.checkExpression(n.Receiver, sc)
 		application, ok := c.resolveGenericApplication(n)
