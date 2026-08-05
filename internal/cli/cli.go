@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,6 +27,13 @@ import (
 // Version is a variable so release builds can inject the tag with Go's -X
 // linker flag while local source builds retain a useful development version.
 var Version = "0.1.0-dev"
+
+type buildArtifactKind string
+
+const (
+	buildArtifactSource     buildArtifactKind = "source"
+	buildArtifactExecutable buildArtifactKind = "executable"
+)
 
 type CLI struct {
 	Stdin  io.Reader
@@ -160,6 +168,8 @@ func (c *CLI) runBuild(args []string) error {
 	stdout := flags.Bool("stdout", false, "write one compiled file to stdout")
 	check := flags.Bool("check", false, "compile without writing output")
 	copyFlag := flags.String("copy", "", "override config copyFiles (true or false)")
+	compile := flags.Bool("compile", false, "produce an executable with the target toolchain")
+	outfile := flags.String("outfile", "", "executable output path relative to the project root")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -167,6 +177,25 @@ func (c *CLI) runBuild(args []string) error {
 	config, err := loadConfig(*configPath, firstOr(paths, "."))
 	if err != nil {
 		return err
+	}
+	kind := buildArtifactSource
+	if *compile {
+		kind = buildArtifactExecutable
+	}
+	if kind == buildArtifactExecutable {
+		if config.Mode != "go" {
+			return fmt.Errorf("--compile is supported only for mode go; project mode is %s", config.Mode)
+		}
+		if len(paths) != 0 {
+			return errors.New("--compile builds the configured project and does not accept source paths")
+		}
+		if *stdout || *check || *copyFlag != "" || *outDirFlag != "" {
+			return errors.New("--compile cannot be combined with --stdout, --check, --copy, or --out-dir")
+		}
+		return c.buildGoExecutable(config, *outfile)
+	}
+	if *outfile != "" {
+		return errors.New("--outfile requires --compile")
 	}
 	sourceRoot := config.SourcePath()
 	if len(paths) == 0 {
@@ -286,6 +315,83 @@ func (c *CLI) runBuild(args []string) error {
 	return nil
 }
 
+func (c *CLI) buildGoExecutable(config *project.Config, outfile string) error {
+	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return errors.New("no .trb files found")
+	}
+	compiled, err := compileProject(config, files)
+	if err != nil {
+		return err
+	}
+	entrySource := mainSource(compiled)
+	if entrySource == "" {
+		return errors.New("project has no top-level main(); define def main() before using --compile")
+	}
+	if config.ManagesPackages() {
+		if _, err := packageManager.Sync(config); err != nil {
+			return err
+		}
+	}
+	output, err := executableOutputPath(config, outfile)
+	if err != nil {
+		return err
+	}
+	buildRoot, err := os.MkdirTemp("", "trb-build-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(buildRoot)
+	generated, err := writeCompiledTree(config, compiled, buildRoot)
+	if err != nil {
+		return err
+	}
+	if err := copyGoModuleFiles(config, buildRoot); err != nil {
+		return err
+	}
+	target := generated[entrySource]
+	if target == "" {
+		return errors.New("compiler did not produce the top-level main() artifact")
+	}
+	if info, statErr := os.Stat(output); statErr == nil && info.IsDir() {
+		return fmt.Errorf("--outfile must name a file; %s is a directory", output)
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return err
+	}
+	command := exec.Command("go", "build", "-o", output, ".")
+	command.Dir = filepath.Dir(target)
+	command.Stdout = c.Stdout
+	command.Stderr = c.Stderr
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("go build: %w", err)
+	}
+	fmt.Fprintf(c.Stdout, "executable -> %s\n", output)
+	return nil
+}
+
+func executableOutputPath(config *project.Config, outfile string) (string, error) {
+	if outfile == "" {
+		name := strings.TrimSpace(config.Name)
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\\`) {
+			return "", fmt.Errorf("project name %q cannot be used as an executable filename; pass --outfile", config.Name)
+		}
+		outfile = filepath.Join("bin", name)
+	}
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(outfile), ".exe") {
+		outfile += ".exe"
+	}
+	if !filepath.IsAbs(outfile) {
+		outfile = filepath.Join(config.Root, outfile)
+	}
+	return filepath.Abs(outfile)
+}
+
 func (c *CLI) runProgram(args []string) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
@@ -340,53 +446,24 @@ func (c *CLI) runProgram(args []string) error {
 	}
 	defer os.RemoveAll(runRoot)
 	target := ""
-	compiledNames := make([]string, 0, len(compiled))
-	for name := range compiled {
-		compiledNames = append(compiledNames, name)
-	}
-	sort.Strings(compiledNames)
 	entrySource := filename
 	if entrySource == "" {
-		for _, sourceName := range compiledNames {
-			if artifactHasMain(compiled[sourceName]) {
-				entrySource = sourceName
-				break
-			}
-		}
+		entrySource = mainSource(compiled)
 		if entrySource == "" {
 			return errors.New("project has no top-level main(); define def main() or pass a .trb file explicitly")
 		}
 	}
-	for _, sourceName := range compiledNames {
-		artifact := compiled[sourceName]
-		relative, _ := generatedRelative(config, sourceName, artifact)
-		generated := filepath.Join(runRoot, relative)
-		if err := os.MkdirAll(filepath.Dir(generated), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(generated, artifact.Output, 0o644); err != nil {
-			return err
-		}
-		if sourceName == entrySource {
-			target = generated
-		}
+	generated, err := writeCompiledTree(config, compiled, runRoot)
+	if err != nil {
+		return err
 	}
+	target = generated[entrySource]
 	if target == "" {
 		return fmt.Errorf("%s is outside configured sourceDir %s", entrySource, config.SourceDir)
 	}
 	if config.Mode == "go" {
-		for _, manifest := range []string{"go.mod", "go.sum"} {
-			sourcePath := filepath.Join(config.Root, manifest)
-			data, readErr := os.ReadFile(sourcePath)
-			if os.IsNotExist(readErr) {
-				continue
-			}
-			if readErr != nil {
-				return readErr
-			}
-			if err := os.WriteFile(filepath.Join(runRoot, manifest), data, 0o644); err != nil {
-				return err
-			}
+		if err := copyGoModuleFiles(config, runRoot); err != nil {
+			return err
 		}
 		if config.Go.Sqldef != nil {
 			if err := c.applySqldef(config); err != nil {
@@ -861,6 +938,58 @@ func compilerOptions(config *project.Config) compiler.Options {
 	return options
 }
 
+func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Artifact, root string) (map[string]string, error) {
+	generated := make(map[string]string, len(compiled))
+	for _, sourceName := range sortedArtifactNames(compiled) {
+		artifact := compiled[sourceName]
+		relative, _ := generatedRelative(config, sourceName, artifact)
+		output := filepath.Join(root, relative)
+		if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(output, artifact.Output, 0o644); err != nil {
+			return nil, err
+		}
+		generated[sourceName] = output
+	}
+	return generated, nil
+}
+
+func copyGoModuleFiles(config *project.Config, root string) error {
+	for _, manifest := range []string{"go.mod", "go.sum"} {
+		sourcePath := filepath.Join(config.Root, manifest)
+		data, err := os.ReadFile(sourcePath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(root, manifest), data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sortedArtifactNames(compiled map[string]*compiler.Artifact) []string {
+	names := make([]string, 0, len(compiled))
+	for name := range compiled {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func mainSource(compiled map[string]*compiler.Artifact) string {
+	for _, sourceName := range sortedArtifactNames(compiled) {
+		if artifactHasMain(compiled[sourceName]) {
+			return sourceName
+		}
+	}
+	return ""
+}
+
 func artifactHasMain(artifact *compiler.Artifact) bool {
 	if artifact == nil || artifact.IR == nil {
 		return false
@@ -1004,6 +1133,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [directory]")
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build [--check] [paths...]")
+	fmt.Fprintln(c.Stdout, "  trb build --compile [--outfile FILE]")
 	fmt.Fprintln(c.Stdout, "  trb run [FILE.trb] [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb sync")

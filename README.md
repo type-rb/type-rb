@@ -72,6 +72,13 @@ trb run
 `trb run` builds in a temporary directory before executing the program. Use
 `trb build` when you want to keep the generated source.
 
+Go projects can also produce an executable:
+
+```sh
+trb build --compile
+./bin/hello
+```
+
 ## Targets
 
 - **Go** for native binaries and services
