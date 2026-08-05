@@ -4,11 +4,12 @@ Last updated: 2026-08-04
 
 ## 1. Language Goals
 
-TypeRB is a class-based, statically typed language implemented in Go and transpiled to Ruby, TypeScript, and Go.
+TypeRB is a class-based, statically typed language. Its compiler is implemented
+in Go and targets Go, Ruby, and TypeScript.
 
 Design principles:
 
-- Keep Ruby ergonomics while removing implicit behavior.
+- Keep the source concise while removing implicit behavior.
 - Prefer explicit, simple, Go-like rules.
 - Keep syntax and semantics consistent across transpile targets.
 
@@ -38,7 +39,7 @@ mode by itself does not enable them.
 - Method declaration keyword: `def`.
 - Block terminator: `end`.
 - Parentheses are never omitted in ordinary calls. Portable iterator blocks
-  use the Ruby-shaped `values.each do |value| ... end` syntax.
+  use `values.each do |value| ... end` syntax.
 - `return` is mandatory in method bodies.
 - No explicit `void` type notation (Go-like). Methods with no return value omit return type.
 - Outside `()`, `[]`, and `{}`, `;` is equivalent to a newline between
@@ -164,7 +165,7 @@ mode by itself does not enable them.
   arguments. Bare `Hash` is rejected outside the explicit Ruby-native
   compatibility surface.
 - v0.1 portable keys are non-nullable `String` or `Integer` values. A literal
-  must use one homogeneous key type. The Ruby-shaped `name: value` literal
+  must use one homogeneous key type. The label-style `name: value` literal
   spelling has a `String` key in portable TypeRB; it becomes a Ruby `Symbol`
   only under an explicit Ruby-native import.
 - Non-empty literals infer their key and value types. Heterogeneous values
@@ -246,7 +247,7 @@ end
   to both instance and class methods.
 
 The following class semantics remain deliberately unsettled rather than being
-inferred from Ruby, Go, or TypeScript:
+inferred from Go, Ruby, or TypeScript:
 
 - portable `super(...)`, superclass constructor chaining, field initialization
   order, and the Go representation of an initialized superclass;
@@ -421,7 +422,7 @@ Next discussion should define:
 3. Parse diagnostic schema.
 4. Type-checking phases and symbol-table structure.
 5. Incremental rollout plan for generics and function-call inference.
-6. Code generation architecture for Ruby/TypeScript/Go backends.
+6. Code generation architecture for Go/Ruby/TypeScript backends.
 7. Formatter stability guarantees and initial unsupported cases.
 
 ## 8. v0.1 Implementation Profile
@@ -451,7 +452,7 @@ explicit native syntax nodes:
 - `NativeExpression`
 
 Native nodes are preserved through AST and IR and emitted only by the Ruby
-backend. TypeScript and Go report them as compile errors. This is the v0.1
+backend. Go and TypeScript report them as compile errors. This is the v0.1
 extension mechanism for gem-provided Rails DSL; it is not a text-rewrite
 compiler path.
 
@@ -478,11 +479,11 @@ resolver validates project files and exports, rejects platform packages in the
 wrong mode, and records package/symbol identities for lowering. Standard calls
 therefore reach IR as resolved intrinsics rather than target-language text.
 
-The portable prelude contains `puts(value: Any)`, preserving Ruby-like source
-while lowering to the appropriate output primitive in each mode. An
-explicit `import trb/std/io` exposes the identical intrinsic as `io.puts`.
+The portable prelude contains `puts(value: Any)` and lowers it to the
+appropriate output primitive in each mode. An explicit `import trb/std/io`
+exposes the identical intrinsic as `io.puts`.
 
-Portable built-in and standard types may expose Ruby-like receiver methods.
+Portable built-in and standard types may expose receiver methods.
 Receiver syntax is not target-native escape syntax: the resolver maps it to a
 compiler-owned standard-library contract, and typed IR records that contract.
 The package and receiver forms consequently share argument checking, return
@@ -733,7 +734,7 @@ end
 Record construction is keyword-only and checked against the complete field
 set. Records cannot inherit. The syntax AST and typed IR have dedicated record
 and record-field nodes. Go lowers a record to a value struct with JSON tags,
-TypeScript lowers it to an interface, and Ruby lowers it to `Data`.
+Ruby lowers it to `Data`, and TypeScript lowers it to an interface.
 
 Projects may map a portable source directory into the import graph with
 `localPackages`. An `index.trb` file is the package entry module, so two projects

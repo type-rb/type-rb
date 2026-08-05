@@ -10,7 +10,7 @@ Implemented:
 
 - `trb fmt`, with canonical tab indentation plus comment, percent-literal,
   interpolation, and heredoc preservation.
-- `trb build` with Ruby, TypeScript, and Go backends selected by the project
+- `trb build` with Go, Ruby, and TypeScript backends selected by the project
   `trbconfig.jsonc`.
 - `trb run` for compiling a project in a temporary tree and executing its
   conventional top-level `main()`; an explicit `.trb` file remains available
@@ -23,7 +23,7 @@ Implemented:
 - `trb init`, `sync`, `add`, `remove`, and `install`, with generated Gemfile,
   go.mod, or package.json ownership based on project mode.
 - `packageManagement: "external"` for embedding generated source in an
-  existing Rails/Go/TypeScript project without modifying its manifest.
+  existing Go, Rails, or TypeScript project without modifying its manifest.
 - Project-tree builds which copy non-`.trb` files for runnable Rails output.
 - Lossless lexer with byte/line/column spans.
 - Handwritten recursive-descent and Pratt parser.
@@ -75,7 +75,7 @@ Implemented:
   `trb/std/bytes`, `trb/std/string_builder`, `trb/std/unicode`,
   `trb/std/path`, `trb/std/filesystem`, `trb/std/process`, `trb/std/numbers`,
   and `trb/std/result` packages, plus portable `Unit` values and mode-checked
-  Ruby, Go, and TypeScript platform packages.
+  Go, Ruby, and TypeScript platform packages.
 - Compiler-owned receiver-method contracts shared with portable package APIs,
   including strict and Result-returning integer conversion and Unicode-aware
   `String#size` across the checker, typed IR, all backends, and the REPL.
@@ -120,8 +120,8 @@ Implemented:
   nullable and nested fields, typed arrays and String-keyed Hashes, and REPL
   execution.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
-  keyword-only construction, field checking, Go structs/JSON/GORM tags,
-  TypeScript interfaces, and Ruby `Data` output.
+  keyword-only construction, field checking, Go structs/JSON/GORM tags, Ruby
+  `Data` output, and TypeScript interfaces.
 - `localPackages` workspace imports, allowing one portable record package to be
   compiled into applications with different target modes.
 - Explicit Go net/http and GORM/SQLite platform packages, React/browser

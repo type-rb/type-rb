@@ -176,7 +176,7 @@ Choose the first code generation backend for MVP.
 
 ## Scope
 
-- Compare Ruby, TypeScript, and Go as first backend targets.
+- Compare Go, Ruby, and TypeScript as first backend targets.
 - Document the decision in `docs/decisions/`.
 
 ## Out of Scope

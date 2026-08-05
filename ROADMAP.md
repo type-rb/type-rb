@@ -44,7 +44,7 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 
 - Add stable diagnostic codes, recovery after multiple errors, related spans,
   and actionable suggestions.
-- Add source maps from generated Ruby, Go, and TypeScript back to `.trb` spans.
+- Add source maps from generated Go, Ruby, and TypeScript back to `.trb` spans.
 - Add incremental project compilation, dependency-aware invalidation, and a
   persistent build cache.
 - Maintain target-conformance suites that run equivalent TypeRB programs in all
@@ -100,7 +100,7 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 ## Exploratory: native TypeRB runtime
 
 A future `mode: trb` may execute checked TypeRB through typed IR or cached
-bytecode without emitting Ruby, Go, or TypeScript source. The existing REPL
+bytecode without emitting Go, Ruby, or TypeScript source. The existing REPL
 evaluator is an early implementation seed, not a production runtime.
 
 This is intentionally only a possibility, not a committed target or release
