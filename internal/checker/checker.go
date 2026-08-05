@@ -31,6 +31,7 @@ type Result struct {
 	CasePatterns        map[ast.Expression]CasePattern
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
+	RuntimeDependencies map[string]*stdlib.Package
 }
 
 type CodecApplication struct {
@@ -210,6 +211,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			CasePatterns:        map[ast.Expression]CasePattern{},
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
+			RuntimeDependencies: map[string]*stdlib.Package{},
 		},
 		classes:            map[string]*classInfo{},
 		records:            map[string]*recordInfo{},
@@ -712,6 +714,9 @@ func (c *Checker) recordReference(expression ast.Expression, binding resolver.Bi
 	c.result.References[expression] = binding
 	c.markImportUsed(binding)
 	if binding.Library != nil {
+		for _, definition := range stdlib.RuntimeDependenciesForType(binding.Library.Return) {
+			c.result.RuntimeDependencies[definition.Path] = definition
+		}
 		for _, name := range binding.Library.RequiredSymbols {
 			c.markImportedSymbolUsed(name)
 		}

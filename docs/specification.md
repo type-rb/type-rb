@@ -330,6 +330,12 @@ end
 - The declaration is compiler-owned TypeRB source and passes through the same
   AST, checker, typed IR, and backend pipeline as application enums. Project
   builds emit its runtime module into the generated target tree.
+- A standard-library operation may infer a `Result<T, E>` without a source
+  import, for example `missing := values.try_fetch(9)`. The checker records the
+  compiler-owned runtime dependency and project compilation emits and imports
+  the Result runtime automatically. Source references to the declaration
+  itself—including type annotations, constructors, and case patterns—still
+  require `import { Result } from trb/std/result`.
 - Concise propagation syntax such as postfix `?`, postfix `!`, or prefix `try`
   is deliberately not selected in v0.1. It may be added later as syntax sugar
   over explicit Result matching and early return after real application usage
