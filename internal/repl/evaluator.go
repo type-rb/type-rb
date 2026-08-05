@@ -411,6 +411,9 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 				}
 				branchScope := &scope{parent: sc, values: map[string]Value{}}
 				for _, binding := range branch.Bindings {
+					if binding.Name == "_" {
+						continue
+					}
 					branchScope.values[binding.Name] = variant.Payload[binding.Field]
 				}
 				return e.evaluate(branch.Body, module, branchScope)

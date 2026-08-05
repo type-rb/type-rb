@@ -27,6 +27,7 @@ type Parameter struct {
 type Symbol struct {
 	Name            string
 	Intrinsic       string
+	RequiredSymbols []string
 	TypeParameters  []string
 	Receiver        types.Type
 	ReceiverMutable bool
@@ -214,18 +215,20 @@ end
 		Symbols: map[string]Symbol{
 			"parse": jsonParse("parse"),
 			"decode": {
-				Name:           "decode",
-				Intrinsic:      "trb.internal.json.decode",
-				TypeParameters: []string{"T"},
-				Parameters:     []Parameter{{Name: "source", Type: stringType}},
-				Return:         jsonResult(typeT),
+				Name:            "decode",
+				Intrinsic:       "trb.internal.json.decode",
+				RequiredSymbols: []string{"JsonError"},
+				TypeParameters:  []string{"T"},
+				Parameters:      []Parameter{{Name: "source", Type: stringType}},
+				Return:          jsonResult(typeT),
 			},
 			"encode": {
-				Name:           "encode",
-				Intrinsic:      "trb.internal.json.encode",
-				TypeParameters: []string{"T"},
-				Parameters:     []Parameter{{Name: "value", Type: typeT}},
-				Return:         jsonResult(stringType),
+				Name:            "encode",
+				Intrinsic:       "trb.internal.json.encode",
+				RequiredSymbols: []string{"JsonError"},
+				TypeParameters:  []string{"T"},
+				Parameters:      []Parameter{{Name: "value", Type: typeT}},
+				Return:          jsonResult(stringType),
 			},
 			"stringify": {
 				Name:       "stringify",
@@ -727,12 +730,16 @@ func nullable(value types.Type) types.Type {
 }
 
 func jsonParse(name string) Symbol {
-	return Symbol{
+	result := Symbol{
 		Name:       name,
 		Intrinsic:  "trb.internal.json." + name,
 		Parameters: []Parameter{{Name: "source", Type: stringType}},
 		Return:     jsonResult(jsonValueType),
 	}
+	if name == "parse_jsonc" {
+		result.RequiredSymbols = []string{"JsonErrorKind"}
+	}
+	return result
 }
 
 func Lookup(packagePath string) (*Package, bool) {

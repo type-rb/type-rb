@@ -796,7 +796,7 @@ def unwrap(value: Result<Integer, String>): Integer
 	case value
 	when Result::Ok(number)
 		return number
-	when Result::Err(error)
+	when Result::Err(_)
 		return 0
 	end
 end
@@ -1275,7 +1275,7 @@ end
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Address, User } from contracts/user
+		Source: []byte(`import { User } from contracts/user
 import { JsonError, decode, encode } from trb/std/json
 import { Result } from trb/std/result
 
@@ -1393,7 +1393,7 @@ func TestPortableStringLengthUsesUnicodeCodePoints(t *testing.T) {
 }
 
 func TestPlatformPackageIsModeChecked(t *testing.T) {
-	source := []byte("import trb/platform/go/context\n\ndef main()\n  ctx := context.background()\n  return\nend\n")
+	source := []byte("import trb/platform/go/context\n\ndef main()\n  context.background()\n  return\nend\n")
 	if _, err := Compile("main.trb", source, "typescript"); err == nil || !strings.Contains(err.Error(), "does not support mode typescript") {
 		t.Fatalf("expected platform mode diagnostic, got %v", err)
 	}
@@ -1750,7 +1750,7 @@ def unwrap(result: Result<Integer, String>): Integer
 	case result
 	when Result::Ok(value)
 		return value
-	when Result::Err(error)
+	when Result::Err(_)
 		return 0
 	end
 end

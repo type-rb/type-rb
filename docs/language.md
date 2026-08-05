@@ -60,6 +60,11 @@ import trb/platform/go/http
 Project package identities come from paths below `sourceDir`; source files do
 not declare target packages.
 
+Ordinary imports must be used. Package imports require a member reference, and
+each symbol named inside `{ ... }` must be referenced. Compiler integration
+imports count as semantic uses when they activate their documented syntax or
+type provider.
+
 ## Types and bindings
 
 Type annotations use `name: Type`. `:=` declares a local binding and infers its
@@ -97,6 +102,26 @@ DEFAULT_LIMIT := 100
 
 Constant initializers may be runtime expressions, but constants cannot be
 rebound or passed to destructive APIs.
+
+Local bindings declared inside methods must be used. Iterator and enum-pattern
+bindings follow the same rule; write `_` when a block or pattern intentionally
+discards one value:
+
+```trb
+values.each do |_|
+	puts("tick")
+end
+
+case result
+when Result::Ok(value)
+	puts(value)
+when Result::Err(_)
+	puts("failed")
+end
+```
+
+Method parameters, fields, constants, and top-level bindings are not rejected
+solely for being unused.
 
 ## Conditions and operators
 

@@ -62,6 +62,8 @@ Implemented portable behavior includes:
   initialization;
 - immutable `:=` bindings and explicit `mut` for reassignment or destructive
   collection operations;
+- mode-independent diagnostics for unused ordinary imports, method-local
+  bindings, iterator parameters, and enum-pattern bindings;
 - non-nullable Boolean conditions and portable operator semantics;
 - `if`, `elsif`, `else`, `while`, integer ranges, structured collection
   iteration, `break`, `next`, and `return`;

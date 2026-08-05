@@ -193,6 +193,9 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line("when "+g.expr(branch.Value), branch.TrailingComment)
 			g.indent++
 			for _, binding := range branch.Bindings {
+				if binding.Name == "_" {
+					continue
+				}
 				g.line(binding.Name+" = "+value+"."+binding.Field, "")
 			}
 			g.statements(branch.Body)

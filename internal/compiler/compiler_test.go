@@ -265,7 +265,7 @@ func TestPortableIterationAndRangesLowerAcrossBackends(t *testing.T) {
 	source := []byte(`def total(): Integer
   mut result := 0
   [1, 2, 3].each { |value| result += value }
-  [1].each do |unused|
+  [1].each do |_|
     result += 1
   end
   (0...3).each.with_index do |value, index|
@@ -900,7 +900,7 @@ func TestPortableCollectionTransformationDiagnosticsAcrossModes(t *testing.T) {
 			want:   "map block must contain exactly one result expression in v0.1",
 		},
 		{
-			source: "def bad(): Integer\n\treturn [1].reduce(0) do |sum, value|\n\t\tvalue.to_s()\n\tend\nend\n",
+			source: "def bad(): Integer\n\treturn [1].reduce(0) do |_, value|\n\t\tvalue.to_s()\n\tend\nend\n",
 			want:   "reduce block result is String, expected Integer",
 		},
 		{
@@ -991,7 +991,7 @@ func TestBreakAndNextLowerAcrossPortableLoops(t *testing.T) {
     end
     total += value
   end
-  [1, 2, 3].each { |value| next }
+  [1, 2, 3].each { |_| next }
   return total
 end
 `)

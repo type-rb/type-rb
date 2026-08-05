@@ -763,7 +763,7 @@ func TestReplEvaluatesExplicitUserGenerics(t *testing.T) {
 
 	input := "enum Result<T, E>; Ok(value: T); Err(error: E); end\n" +
 		"def identity<T>(value: T): T; return value; end\n" +
-		"def unwrap(value: Result<Integer, String>): Integer; case value; when Result::Ok(number); return number; when Result::Err(error); return 0; end; end\n" +
+		"def unwrap(value: Result<Integer, String>): Integer; case value; when Result::Ok(number); return number; when Result::Err(_); return 0; end; end\n" +
 		"unwrap(Result<Integer, String>::Ok(identity<Integer>(7)))\n" +
 		"identity<String>(\"Ada\")\n" +
 		":quit\n"
@@ -791,7 +791,7 @@ func TestReplEvaluatesStandardResult(t *testing.T) {
 	}
 
 	input := "import { Result } from trb/std/result\n" +
-		"def unwrap(value: Result<Integer, String>): Integer; case value; when Result::Ok(number); return number; when Result::Err(error); return 0; end; end\n" +
+		"def unwrap(value: Result<Integer, String>): Integer; case value; when Result::Ok(number); return number; when Result::Err(_); return 0; end; end\n" +
 		"unwrap(Result<Integer, String>::Ok(7))\n" +
 		"Result<Integer, String>::Err(\"missing\")\n" +
 		":quit\n"
@@ -1698,7 +1698,7 @@ func TestBuildCompilesLocalRecordPackageIntoGoTargetTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainPath := filepath.Join(appRoot, "src", "main.trb")
-	main := "import { Message } from acme/contracts\n\ndef main()\n  message := Message.new(text: \"shared\")\n  return\nend\n"
+	main := "import { Message } from acme/contracts\n\ndef main()\n  message := Message.new(text: \"shared\")\n  puts(message.text)\n  return\nend\n"
 	if err := os.WriteFile(mainPath, []byte(main), 0o644); err != nil {
 		t.Fatal(err)
 	}
