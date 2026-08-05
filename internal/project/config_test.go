@@ -2,11 +2,19 @@ package project
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestFindReportsMissingConfiguration(t *testing.T) {
+	_, err := Find(t.TempDir())
+	if !errors.Is(err, ErrConfigNotFound) {
+		t.Fatalf("expected ErrConfigNotFound, got %v", err)
+	}
+}
 
 func TestLoadJSONCWithComments(t *testing.T) {
 	root := t.TempDir()

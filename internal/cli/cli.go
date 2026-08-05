@@ -424,19 +424,23 @@ func (c *CLI) runRepl(args []string) error {
 	flags := flag.NewFlagSet("repl", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
+	mode := flags.String("mode", "", "REPL mode: ruby, go, or typescript")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("repl does not accept source arguments; use :load FILE inside the REPL")
 	}
-	config, err := loadConfig(*configPath, ".")
-	if err != nil {
-		return fmt.Errorf("repl requires a trbconfig.jsonc: %w", err)
-	}
-	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+	config, projectAware, err := loadReplConfig(*configPath, *mode)
 	if err != nil {
 		return err
+	}
+	var files []string
+	if projectAware {
+		files, err = collectTRB([]string{config.SourcePath()}, config.OutputPath())
+		if err != nil {
+			return err
+		}
 	}
 	sessionFilename := filepath.Join(config.SourcePath(), ".trb-repl.trb")
 	sessionModule := "__trb_repl__"
@@ -471,6 +475,12 @@ func (c *CLI) runRepl(args []string) error {
 		}
 		return compilation, nil
 	}
+	historyFile := ""
+	if projectAware {
+		historyFile = filepath.Join(config.Root, ".trb", "repl_history")
+	} else if cacheRoot, cacheErr := os.UserCacheDir(); cacheErr == nil {
+		historyFile = filepath.Join(cacheRoot, "trb", "repl_history_"+config.Mode)
+	}
 	return repl.Run(repl.Options{
 		Mode:        config.Mode,
 		ProjectName: config.Name,
@@ -479,9 +489,77 @@ func (c *CLI) runRepl(args []string) error {
 		Stdout:      c.Stdout,
 		Stderr:      c.Stderr,
 		Interactive: interactiveTerminal(c.Stdin, c.Stdout),
-		HistoryFile: filepath.Join(config.Root, ".trb", "repl_history"),
+		HistoryFile: historyFile,
 		Compile:     compile,
 	})
+}
+
+func loadReplConfig(explicit, requestedMode string) (*project.Config, bool, error) {
+	if requestedMode != "" && requestedMode != "ruby" && requestedMode != "go" && requestedMode != "typescript" {
+		return nil, false, fmt.Errorf("repl --mode must be ruby, go, or typescript; got %q", requestedMode)
+	}
+	config, err := loadConfig(explicit, ".")
+	if err == nil {
+		if requestedMode != "" && requestedMode != config.Mode {
+			config = replConfigForMode(config, requestedMode)
+			if err := config.Validate(); err != nil {
+				return nil, false, err
+			}
+		}
+		return config, true, nil
+	}
+	if explicit != "" || !errors.Is(err, project.ErrConfigNotFound) {
+		return nil, false, err
+	}
+	if requestedMode == "" {
+		requestedMode = "go"
+	}
+	root, absoluteErr := filepath.Abs(".")
+	if absoluteErr != nil {
+		return nil, false, absoluteErr
+	}
+	config = project.New(root, requestedMode)
+	config.Name = "scratch"
+	config.PackageManagement = project.ExternalPackages
+	if config.Go != nil {
+		config.Go.Module = "trb.local/repl"
+	}
+	if err := config.Validate(); err != nil {
+		return nil, false, err
+	}
+	return config, false, nil
+}
+
+func replConfigForMode(base *project.Config, mode string) *project.Config {
+	config := *base
+	config.Mode = mode
+	config.Ruby = nil
+	config.Go = nil
+	config.TypeScript = nil
+	switch mode {
+	case "ruby":
+		config.Ruby = &project.RubyConfig{Source: "https://rubygems.org", Loader: "require_relative"}
+		if base.Ruby != nil {
+			clone := *base.Ruby
+			config.Ruby = &clone
+		}
+	case "go":
+		config.Go = &project.GoConfig{Module: "trb.local/repl", Version: "1.26", RootPackage: "main", IndirectDependencies: map[string]string{}}
+		if base.Go != nil {
+			clone := *base.Go
+			config.Go = &clone
+			if config.Go.Module == "" {
+				config.Go.Module = "trb.local/repl"
+			}
+		}
+	case "typescript":
+		config.TypeScript = &project.TypeScriptConfig{PackageManager: "npm", ModuleType: "module", Scripts: map[string]string{}}
+		if base.TypeScript != nil {
+			clone := *base.TypeScript
+			config.TypeScript = &clone
+		}
+	}
+	return &config
 }
 
 func (c *CLI) applySqldef(config *project.Config) error {
@@ -927,7 +1005,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb run [FILE.trb] [-- arguments...]")
-	fmt.Fprintln(c.Stdout, "  trb repl [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--dev] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb remove PACKAGE")
