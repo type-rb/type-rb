@@ -13,6 +13,9 @@ import (
 
 const ConfigName = "trbconfig.jsonc"
 
+// ErrConfigNotFound reports that discovery reached the filesystem root.
+var ErrConfigNotFound = errors.New(ConfigName + " not found")
+
 const (
 	ManagedPackages  = "managed"
 	ExternalPackages = "external"
@@ -81,7 +84,7 @@ func Find(start string) (*Config, error) {
 		}
 		parent := filepath.Dir(absolute)
 		if parent == absolute {
-			return nil, fmt.Errorf("%s not found from %s", ConfigName, start)
+			return nil, fmt.Errorf("%w from %s", ErrConfigNotFound, start)
 		}
 		absolute = parent
 	}

@@ -781,8 +781,11 @@ func TestReplEvaluatesStandardResult(t *testing.T) {
 	}
 }
 
-func TestReplRequiresProjectConfiguration(t *testing.T) {
+func TestReplDefaultsToGoWithoutProjectConfiguration(t *testing.T) {
 	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "broken.trb"), []byte("if\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	previous, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -793,11 +796,85 @@ func TestReplRequiresProjectConfiguration(t *testing.T) {
 	defer func() { _ = os.Chdir(previous) }()
 
 	var stdout, stderr bytes.Buffer
-	command := &CLI{Stdin: strings.NewReader(":quit\n"), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"repl"}); status != 1 {
+	command := &CLI{Stdin: strings.NewReader("import trb/platform/go/context\n1 + 2\n:quit\n"), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl"}); status != 0 {
 		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "repl requires a trbconfig.jsonc") {
+	if stdout.String() != "3 : Integer\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected configless REPL output\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestReplModeFlagWorksWithoutProjectConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		mode        string
+		packagePath string
+	}{
+		{mode: "go", packagePath: "trb/platform/go/context"},
+		{mode: "ruby", packagePath: "trb/platform/ruby/rails"},
+		{mode: "typescript", packagePath: "trb/platform/typescript/node"},
+	} {
+		t.Run(test.mode, func(t *testing.T) {
+			root := t.TempDir()
+			previous, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chdir(root); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = os.Chdir(previous) }()
+
+			input := "import " + test.packagePath + "\n1\n:quit\n"
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"repl", "--mode", test.mode}); status != 0 {
+				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			if stdout.String() != "1 : Integer\n" || stderr.Len() != 0 {
+				t.Fatalf("unexpected %s REPL output\nstdout=%s\nstderr=%s", test.mode, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestReplModeFlagOverridesProjectMode(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.Go.Module = "example.com/type-rb/repl-mode-override"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "import trb/platform/ruby/rails\n1\n:quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path, "--mode", "ruby"}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "1 : Integer\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected overridden REPL output\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestReplRejectsInvalidMode(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(":quit\n"), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--mode", "python"}); status != 1 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "repl --mode must be ruby, go, or typescript") {
+		t.Fatalf("unexpected error: %s", stderr.String())
+	}
+}
+
+func TestReplDoesNotIgnoreMissingExplicitConfig(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(":quit\n"), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", "missing.jsonc", "--mode", "ruby"}); status != 1 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "missing.jsonc") {
 		t.Fatalf("unexpected error: %s", stderr.String())
 	}
 }
