@@ -48,6 +48,12 @@ func Sync(config *project.Config) (string, error) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return "", err
 	}
+	if config.Mode == "ruby" {
+		versionPath := filepath.Join(config.Root, ".ruby-version")
+		if err := os.WriteFile(versionPath, []byte(config.Ruby.Version+"\n"), 0o644); err != nil {
+			return "", err
+		}
+	}
 	return path, nil
 }
 

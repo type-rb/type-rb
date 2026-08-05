@@ -24,8 +24,6 @@ jobs:
           cache: true
 
       - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: ruby
 
       - name: Verify compiler and bootstrap boundary
         run: |

@@ -43,8 +43,8 @@ the backend, target toolchain, and package ecosystem. It does not select a
 grammar variant or loosen portable type checking. Target-specific capabilities
 require an explicit `trb/platform/<mode>/*` import.
 
-Go mode owns `go.mod`, Ruby mode owns `Gemfile`, and TypeScript mode owns
-`package.json`. These manifests are deterministic views of
+Go mode owns `go.mod`, Ruby mode owns `Gemfile` and `.ruby-version`, and
+TypeScript mode owns `package.json`. These files are deterministic views of
 `trbconfig.jsonc`. Edit dependencies through the config or `trb add` and
 `trb remove`, then run `trb sync`.
 
@@ -86,17 +86,23 @@ Map a portable source directory into the project import graph with
 An `index.trb` file is the package entry module. Projects in different modes can
 import the same package without copying its source.
 
-## Ruby loader
+## Ruby toolchain and loader
 
-Ruby projects can select how generated imports are loaded:
+Ruby projects default to the current supported Ruby release and can select how
+generated imports are loaded:
 
 ```jsonc
 {
   "ruby": {
+    "version": "4.0.6",
     "loader": "zeitwerk"
   }
 }
 ```
+
+For a managed Ruby project, `trb sync` writes the configured version to both
+`Gemfile` and `.ruby-version`. Bundler itself uses the version included with
+that Ruby release.
 
 The `require_relative` loader emits explicit relative requires. The `zeitwerk`
 loader keeps project imports as compile-time dependencies without emitting

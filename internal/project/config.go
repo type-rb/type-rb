@@ -13,6 +13,9 @@ import (
 
 const ConfigName = "trbconfig.jsonc"
 
+// DefaultRubyVersion is the current Ruby toolchain supported by TypeRB.
+const DefaultRubyVersion = "4.0.6"
+
 // ErrConfigNotFound reports that discovery reached the filesystem root.
 var ErrConfigNotFound = errors.New(ConfigName + " not found")
 
@@ -228,6 +231,9 @@ func (c *Config) applyDefaults() {
 		}
 		if c.Ruby.Source == "" {
 			c.Ruby.Source = "https://rubygems.org"
+		}
+		if c.Ruby.Version == "" {
+			c.Ruby.Version = DefaultRubyVersion
 		}
 		if c.Ruby.Loader == "" {
 			c.Ruby.Loader = "require_relative"
