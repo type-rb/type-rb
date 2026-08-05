@@ -1,6 +1,6 @@
 ---
 name: publish-typerb
-description: Publish TypeRB changes through GitHub. Use when creating a branch, choosing commit messages, pushing work, opening or updating a pull request, assigning change-type labels, or preparing a TypeRB change for review and merge.
+description: Publish TypeRB changes through GitHub. Use when creating a branch, choosing commit messages, pushing work, opening or updating a pull request, assigning its author and change-type label, or preparing a TypeRB change for review and merge.
 ---
 
 # Publish TypeRB
@@ -40,6 +40,7 @@ Use `<type>/<short-kebab-description>`, for example `feat/homebrew-install` or `
 3. Open a pull request targeting `main`. Keep it draft while required work remains.
 4. Summarize what changed, why, user or developer impact, checks, and intentional follow-ups.
 5. Apply the label that exactly matches the branch prefix. Apply exactly one change-type label; unrelated status or area labels may coexist.
-6. Mark the pull request ready only when it is reviewable and required checks pass.
+6. Assign the pull request author to the pull request. Read the author login from the created pull request response or current pull request metadata; do not guess it.
+7. Mark the pull request ready only when it is reviewable and required checks pass.
 
 If a needed change-type label does not exist, create it before assigning it. Keep label names identical to the prefixes above.
