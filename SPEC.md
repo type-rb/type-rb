@@ -575,6 +575,30 @@ in v0.1. The TypeScript backend uses the current Node host filesystem; a
 runtime without that host API returns `Err` rather than exposing
 browser-specific behavior.
 
+`trb/std/json` provides the portable JSON value model. `JsonValue` is a
+payload enum with `Null`, `Boolean`, `Integer`, `Float`, `String`, `Array`, and
+`Object` variants. `parse` and `stringify` return `Result` values carrying a
+`JsonError`; typed accessors such as `as_string`, `as_array`, and `field`
+report decode errors instead of exposing target casts or unchecked dynamic
+values. Error paths use JSON Pointer escaping. Line and column are one-based
+when the target parser provides a stable source location and are otherwise
+`nil`.
+
+JSON numbers that are integral are represented as `Integer` only within the
+portable exact range -9007199254740991 through 9007199254740991. Fractional
+finite numbers are `Float`; non-finite or out-of-range values are errors. JSON
+object serialization order and spelling details such as escaping are not part
+of the portable contract. Applications must compare the decoded value rather
+than serialized bytes when canonical output is required.
+
+`trb/std/jsonc` shares the same value and error types and exposes `parse` with
+line (`//`) and block (`/* ... */`) comments enabled. Removing comments
+preserves source offsets. JSONC does not enable trailing commas: both JSON and
+JSONC reject them. Application code cannot import the compiler-only
+`trb/internal/json` lowering boundary. Go output currently uses the stable
+`encoding/json` API; Go 1.26's `encoding/json/v2` remains an opt-in experiment
+and is not required by generated projects.
+
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal
 semantic/IR type, but is not a TypeRB return-type spelling.

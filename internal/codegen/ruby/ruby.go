@@ -522,6 +522,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(path) { begin; require \"fileutils\"; FileUtils.mkdir_p(path); " + filesystemOK("true") + "; rescue StandardError => error; " + filesystemError("create_directory", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
 	case "trb.internal.filesystem.list":
 		return "->(path) { begin; " + filesystemOK("Dir.children(path).sort") + "; rescue StandardError => error; " + filesystemError("list", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.internal.json.parse":
+		return rubyJSONParse(arguments[0], false)
+	case "trb.internal.json.parse_jsonc":
+		return rubyJSONParse(arguments[0], true)
+	case "trb.internal.json.stringify":
+		return rubyJSONStringify(arguments[0])
 	case "trb.std.strings.length":
 		return arguments[0] + ".each_codepoint.count"
 	case "trb.std.strings.empty":
@@ -625,6 +631,31 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func rubyJSONParse(argument string, comments bool) string {
+	strip := ""
+	if comments {
+		strip = `strip_comments = ->(input) { result = input.dup; in_string = false; escaped = false; index = 0; while index < result.bytesize; byte = result.getbyte(index); if in_string; if escaped; escaped = false; elsif byte == 92; escaped = true; elsif byte == 34; in_string = false; end; index += 1; next; end; if byte == 34; in_string = true; index += 1; next; end; if byte == 47 && index + 1 < result.bytesize; following = result.getbyte(index + 1); if following == 47; result.setbyte(index, 32); result.setbyte(index + 1, 32); index += 2; while index < result.bytesize && result.getbyte(index) != 10; result.setbyte(index, 32) unless result.getbyte(index) == 13; index += 1; end; next; elsif following == 42; result.setbyte(index, 32); result.setbyte(index + 1, 32); index += 2; while index < result.bytesize; if index + 1 < result.bytesize && result.getbyte(index) == 42 && result.getbyte(index + 1) == 47; result.setbyte(index, 32); result.setbyte(index + 1, 32); index += 2; break; end; byte = result.getbyte(index); result.setbyte(index, 32) unless byte == 10 || byte == 13; index += 1; end; next; end; end; index += 1; end; result }; source = strip_comments.call(source); `
+	}
+	errorValue := func(kind, message, path, line, column string) string {
+		return "JsonError.new(kind: JsonErrorKind::" + kind + ", message: " + message + ", path: " + path + ", line: " + line + ", column: " + column + ")"
+	}
+	conversionError := errorValue("Decode", "message", "path", "nil", "nil")
+	convert := "convert = nil; convert = ->(value, path) { if value.nil?; JsonValue::Null; elsif value == true || value == false; JsonValue::Boolean.new(value); elsif value.is_a?(Integer) || value.is_a?(Float); number = value.to_f; unless number.finite?; message = \"JSON number is not finite\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; if number == number.to_i; if number < -9007199254740991 || number > 9007199254740991; message = \"JSON integer is outside the portable range\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; JsonValue::Integer.new(number.to_i); else; JsonValue::Float.new(number); end; elsif value.is_a?(String); JsonValue::String.new(value); elsif value.is_a?(Array); JsonValue::Array.new(value.each_with_index.map { |item, index| convert.call(item, path + \"/\" + index.to_s) }); elsif value.is_a?(Hash); fields = {}; value.each { |key, item| escaped = key.gsub(\"~\", \"~0\").gsub(\"/\", \"~1\"); fields[key] = convert.call(item, path + \"/\" + escaped) }; JsonValue::Object.new(fields); else; message = \"unsupported JSON value\"; throw :__trb_json_error, [:error, " + conversionError + "]; end }"
+	syntaxError := errorValue("Syntax", "error.message", `""`, "line", "column")
+	genericError := errorValue("Syntax", "error.message", `""`, "nil", "nil")
+	return "->(source) { begin; require \"json\"; " + strip + convert + "; raw = JSON.parse(source); outcome = catch(:__trb_json_error) { [:ok, convert.call(raw, \"\")] }; if outcome[0] == :error; Result::Err.new(outcome[1]); else; Result::Ok.new(outcome[1]); end; rescue JSON::ParserError => error; line_match = error.message.match(/line (\\d+)/); column_match = error.message.match(/column (\\d+)/); line = line_match && line_match[1].to_i; column = column_match && column_match[1].to_i; Result::Err.new(" + syntaxError + "); rescue StandardError => error; Result::Err.new(" + genericError + "); end }.call(" + argument + ")"
+}
+
+func rubyJSONStringify(argument string) string {
+	errorValue := func(message, path string) string {
+		return "JsonError.new(kind: JsonErrorKind::Encode, message: " + message + ", path: " + path + ", line: nil, column: nil)"
+	}
+	conversionError := errorValue("message", "path")
+	convert := "convert = nil; convert = ->(value, path) { if value.equal?(JsonValue::Null); nil; elsif value.is_a?(JsonValue::Boolean); value.value; elsif value.is_a?(JsonValue::Integer); if value.value < -9007199254740991 || value.value > 9007199254740991; message = \"JSON integer is outside the portable range\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; value.value; elsif value.is_a?(JsonValue::Float); unless value.value.finite?; message = \"JSON Float must be finite\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; value.value; elsif value.is_a?(JsonValue::String); value.value; elsif value.is_a?(JsonValue::Array); value.value.each_with_index.map { |item, index| convert.call(item, path + \"/\" + index.to_s) }; elsif value.is_a?(JsonValue::Object); fields = {}; value.value.each { |key, item| escaped = key.gsub(\"~\", \"~0\").gsub(\"/\", \"~1\"); fields[key] = convert.call(item, path + \"/\" + escaped) }; fields; else; message = \"unsupported JSON value\"; throw :__trb_json_error, [:error, " + conversionError + "]; end }"
+	encodeError := errorValue("error.message", `""`)
+	return "->(value) { begin; require \"json\"; " + convert + "; outcome = catch(:__trb_json_error) { [:ok, convert.call(value, \"\")] }; if outcome[0] == :error; Result::Err.new(outcome[1]); else; Result::Ok.new(JSON.generate(outcome[1])); end; rescue StandardError => error; Result::Err.new(" + encodeError + "); end }.call(" + argument + ")"
 }
 
 func expressionReference(expression ir.Expression) *ir.Reference {

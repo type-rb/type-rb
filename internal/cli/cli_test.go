@@ -295,6 +295,50 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableJSONAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-json-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := strings.Join([]string{
+			"import { JsonError, JsonValue, as_string, parse, stringify } from trb/std/json",
+			"import trb/std/jsonc",
+			"import { Result } from trb/std/result",
+			`parse("1")`,
+			`parse("1.5")`,
+			`parse("{\"name\":\"Ada\",\"enabled\":true}")`,
+			`jsonc.parse("{\n  // comment\n  \"name\": \"Ada\"\n}")`,
+			`stringify(JsonValue::Object({"name" => JsonValue::String("Ada")}))`,
+			`as_string(JsonValue::Integer(1))`,
+			":quit",
+		}, "\n") + "\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "Result::Ok(value: JsonValue::Integer(value: 1)) : Result<JsonValue, JsonError>\n" +
+			"Result::Ok(value: JsonValue::Float(value: 1.5)) : Result<JsonValue, JsonError>\n" +
+			"Result::Ok(value: JsonValue::Object(value: {\"enabled\": JsonValue::Boolean(value: true), \"name\": JsonValue::String(value: \"Ada\")})) : Result<JsonValue, JsonError>\n" +
+			"Result::Ok(value: JsonValue::Object(value: {\"name\": JsonValue::String(value: \"Ada\")})) : Result<JsonValue, JsonError>\n" +
+			"Result::Ok(value: \"{\\\"name\\\":\\\"Ada\\\"}\") : Result<String, JsonError>\n" +
+			"Result::Err(error: JsonError(kind: JsonErrorKind::Decode, message: \"JSON value is not String\", path: \"\", line: nil, column: nil)) : Result<String, JsonError>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s JSON REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesCompilerOwnedUnicodeAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -851,6 +895,62 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 		}
 		if want := "A😀\nread_text\nnote.txt,\uE000,\U00010000\ntrue\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s filesystem program output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunCompilerOwnedJSONAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby JSON run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript JSON run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-json-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := "import { JsonError, JsonValue, parse, stringify } from trb/std/json\n" +
+			"import trb/std/jsonc\n" +
+			"import { Result } from trb/std/result\n\n" +
+			"def render(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); case stringify(item); when Result::Ok(source); return source; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
+			"def error_path(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)); when Result::Err(error); return error.path; end; end\n\n" +
+			"def valid(value: Result<JsonValue, JsonError>): Boolean; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)).empty?(); when Result::Err(error); return error.message.empty?() or !error.message.empty?(); end; end\n\n" +
+			"def main()\n" +
+			"\tputs(render(jsonc.parse(\"{\\n  // comment\\n  \\\"items\\\": [1, 1.5, true, null]\\n}\")))\n" +
+			"\tputs(error_path(parse(\"{\\\"items\\\":[9007199254740992]}\")))\n" +
+			"\tputs(valid(jsonc.parse(\"{\\\"value\\\":1,}\")))\n" +
+			"\treturn\n" +
+			"end\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "{\"items\":[1,1.5,true,null]}\n/items/0\ntrue\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s JSON program output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

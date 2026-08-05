@@ -80,6 +80,8 @@ var typeT = types.FromName("T")
 var typeK = types.FromName("K")
 var typeV = types.FromName("V")
 var fileErrorType = types.FromName("FileError")
+var jsonValueType = types.FromName("JsonValue")
+var jsonErrorType = types.FromName("JsonError")
 
 var registry = map[string]*Package{
 	"trb/std/result": {
@@ -150,6 +152,50 @@ end
 				Return:     filesystemResult(booleanType),
 			},
 			"list": filesystemUnary("list", arrayOf(stringType)),
+		},
+	},
+	"trb/std/json": {
+		Path:       "trb/std/json",
+		ModulePath: "trb/std/json/index",
+		Source:     jsonSource(),
+		Kind:       Portable,
+		Symbols: map[string]Symbol{
+			"parse": jsonParse("parse"),
+			"stringify": {
+				Name:       "stringify",
+				Intrinsic:  "trb.internal.json.stringify",
+				Parameters: []Parameter{{Name: "value", Type: jsonValueType}},
+				Return:     jsonResult(stringType),
+			},
+		},
+	},
+	"trb/std/jsonc": {
+		Path:       "trb/std/jsonc",
+		ModulePath: "trb/std/jsonc/index",
+		Source:     jsoncSource(),
+		Kind:       Portable,
+		Symbols: map[string]Symbol{
+			"parse": {
+				Name:       "parse",
+				Intrinsic:  "trb.internal.json.parse_jsonc",
+				Parameters: []Parameter{{Name: "source", Type: stringType}},
+				Return:     jsonResult(jsonValueType),
+			},
+		},
+	},
+	"trb/internal/json": {
+		Path:     "trb/internal/json",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"parse":       jsonParse("parse"),
+			"parse_jsonc": jsonParse("parse_jsonc"),
+			"stringify": {
+				Name:       "stringify",
+				Intrinsic:  "trb.internal.json.stringify",
+				Parameters: []Parameter{{Name: "value", Type: jsonValueType}},
+				Return:     jsonResult(stringType),
+			},
 		},
 	},
 	"trb/std/strings": {
@@ -559,6 +605,19 @@ func filesystemWrite(name string, value types.Type) Symbol {
 		Intrinsic:  "trb.internal.filesystem." + name,
 		Parameters: []Parameter{{Name: "path", Type: stringType}, {Name: "value", Type: value}},
 		Return:     filesystemResult(booleanType),
+	}
+}
+
+func jsonResult(value types.Type) types.Type {
+	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, jsonErrorType}}
+}
+
+func jsonParse(name string) Symbol {
+	return Symbol{
+		Name:       name,
+		Intrinsic:  "trb.internal.json." + name,
+		Parameters: []Parameter{{Name: "source", Type: stringType}},
+		Return:     jsonResult(jsonValueType),
 	}
 }
 

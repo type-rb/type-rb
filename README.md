@@ -480,6 +480,29 @@ paths; use `trb/std/path` separately when target-independent lexical path
 manipulation is required. All failures carry `operation`, `path`, and `message`
 in `FileError` instead of leaking target exceptions.
 
+Portable JSON and JSONC use an explicit value enum and typed Result errors:
+
+```trb
+import { JsonError, JsonValue, field } from trb/std/json
+import { parse } from trb/std/jsonc
+import { Result } from trb/std/result
+
+def read_name(source: String): Result<JsonValue, JsonError>
+	case parse(source)
+	when Result::Ok(value)
+		return field(value, "name")
+	when Result::Err(error)
+		return Result<JsonValue, JsonError>::Err(error)
+	end
+end
+```
+
+`json.parse` accepts strict JSON, while `jsonc.parse` additionally accepts line
+and block comments. Both reject trailing commas. `json.stringify` returns a
+`Result<String, JsonError>`, and accessors such as `json.as_string` keep type
+mismatches explicit. Typed record codecs are the next layer; the current API
+does not convert an arbitrary record through target reflection.
+
 Unicode scalar classification comes from one compiler-owned data set shared by
 all targets:
 
@@ -498,8 +521,9 @@ identifier classification.
 
 v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/bytes`,
 `trb/std/string_builder`, `trb/std/unicode`, `trb/std/arrays`,
-`trb/std/hashes`, `trb/std/path`, `trb/std/filesystem`, `trb/std/numbers`, and
-`trb/std/result`. Result is imported as a named portable type and handled
+`trb/std/hashes`, `trb/std/path`, `trb/std/filesystem`, `trb/std/numbers`,
+`trb/std/json`, `trb/std/jsonc`, and `trb/std/result`. Result is imported as a
+named portable type and handled
 through ordinary exhaustive enum matching:
 
 ```trb

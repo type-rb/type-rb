@@ -937,6 +937,86 @@ func TestPortableFilesystemPackageDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableJSONPackagesCompileAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { JsonError, JsonValue, parse } from trb/std/json
+import trb/std/jsonc
+import { Result } from trb/std/result
+
+def strict(source: String): Result<JsonValue, JsonError>
+	return parse(source)
+end
+
+def comments(source: String): Result<JsonValue, JsonError>
+	return jsonc.parse(source)
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/json-app", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected the JSON packages: %v", mode, err)
+		}
+		modules := map[string]bool{}
+		for _, artifact := range artifacts {
+			modules[artifact.IR.ModulePath] = true
+		}
+		for _, module := range []string{"main", "trb/std/json/index", "trb/std/jsonc/index", "trb/std/result/index"} {
+			if !modules[module] {
+				t.Fatalf("%s omitted compiler-owned module %s: %#v", mode, module, artifacts)
+			}
+		}
+	}
+}
+
+func TestPortableJSONPackagesReportDiagnosticsAcrossBackends(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		modulePath string
+		want       string
+	}{
+		{
+			name:   "parse source",
+			source: "import { parse } from trb/std/json\nvalue := parse(1)\n",
+			want:   "argument 1 to parse() has type Integer, expected String",
+		},
+		{
+			name:   "stringify value",
+			source: "import { stringify } from trb/std/json\nvalue := stringify(\"not JSON\")\n",
+			want:   "argument 1 to stringify() has type String, expected JsonValue",
+		},
+		{
+			name:       "internal import",
+			source:     "import trb/internal/json as native_json\nvalue := native_json.parse(\"null\")\n",
+			modulePath: "trb/std/user_source_cannot_spoof_internal_json_access",
+			want:       "package trb/internal/json is internal to the TypeRB standard library",
+		},
+	}
+	for _, test := range tests {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			t.Run(test.name+"/"+mode, func(t *testing.T) {
+				modulePath := test.modulePath
+				if modulePath == "" {
+					modulePath = "main"
+				}
+				_, err := CompileProject([]SourceUnit{{
+					Filename:   "/project/main.trb",
+					ModulePath: modulePath,
+					Package:    "main",
+					Source:     []byte(test.source),
+				}}, Options{Mode: mode, GoModule: "example.com/json-diagnostics", RubyLoader: "require_relative"})
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("expected %s diagnostic %q, got %v", mode, test.want, err)
+				}
+			})
+		}
+	}
+}
+
 func TestPutsPreludeLowersWithoutImportAcrossBackends(t *testing.T) {
 	source := []byte("def main()\n  puts(1 + 2)\n  return\nend\n")
 	tests := []struct {

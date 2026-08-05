@@ -2,6 +2,7 @@ package repl
 
 import (
 	"context"
+	stdjson "encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -632,7 +633,9 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		}
 		var callee Value
 		var err error
-		if member, ok := node.Callee.(*ir.Member); ok {
+		if member, ok := node.Callee.(*ir.Member); ok && member.Reference != nil && member.Reference.Package != "" {
+			callee, err = e.expression(node.Callee, module, sc)
+		} else if member, ok := node.Callee.(*ir.Member); ok {
 			receiver, receiverErr := e.expression(member.Receiver, module, sc)
 			if receiverErr != nil {
 				return Value{}, receiverErr
@@ -1338,6 +1341,23 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
 		return e.filesystemOK(typ, Value{Type: arrayType, Data: &arrayValue{Items: items}})
+	case "trb.internal.json.parse", "trb.internal.json.parse_jsonc":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		source, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("json.parse expects String")
+		}
+		if name == "trb.internal.json.parse_jsonc" {
+			source = stripJSONC(source)
+		}
+		return e.parseJSON(typ, source)
+	case "trb.internal.json.stringify":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		return e.stringifyJSON(typ, values[0])
 	case "trb.std.strings.length":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1843,6 +1863,295 @@ func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string,
 			Payload:    map[string]Value{"error": errorValue},
 		},
 	}, nil
+}
+
+func (e *Evaluator) parseJSON(resultType types.Type, source string) (Value, error) {
+	decoder := stdjson.NewDecoder(strings.NewReader(source))
+	decoder.UseNumber()
+	var raw any
+	if err := decoder.Decode(&raw); err != nil {
+		line, column := jsonSourceLocation(source, err)
+		return e.jsonError(resultType, "Syntax", err.Error(), "", line, column)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			err = errors.New("JSON source contains multiple values")
+		}
+		line, column := jsonSourceLocation(source, err)
+		return e.jsonError(resultType, "Syntax", err.Error(), "", line, column)
+	}
+	value, conversionErr := e.jsonValue(raw, "")
+	if conversionErr != nil {
+		return e.jsonError(resultType, "Decode", conversionErr.message, conversionErr.path, nil, nil)
+	}
+	return e.jsonOK(resultType, value)
+}
+
+func (e *Evaluator) stringifyJSON(resultType types.Type, value Value) (Value, error) {
+	raw, conversionErr := jsonRaw(value, "")
+	if conversionErr != nil {
+		return e.jsonError(resultType, "Encode", conversionErr.message, conversionErr.path, nil, nil)
+	}
+	encoded, err := stdjson.Marshal(raw)
+	if err != nil {
+		return e.jsonError(resultType, "Encode", err.Error(), "", nil, nil)
+	}
+	return e.jsonOK(resultType, Value{Type: types.FromName("String"), Data: string(encoded)})
+}
+
+type jsonConversionError struct {
+	path    string
+	message string
+}
+
+func (e *Evaluator) jsonValue(raw any, path string) (Value, *jsonConversionError) {
+	definition, ok := e.definitions[symbolKey("trb/std/json/index", "JsonValue")].(*enumDefinition)
+	if !ok {
+		return Value{}, &jsonConversionError{path: path, message: "JSON runtime is not loaded"}
+	}
+	typ := types.FromName("JsonValue")
+	construct := func(name string, payload map[string]Value) Value {
+		return Value{Type: typ, Data: &enumValue{Definition: definition, Name: name, Payload: payload}}
+	}
+	switch value := raw.(type) {
+	case nil:
+		return construct("Null", map[string]Value{}), nil
+	case bool:
+		return construct("Boolean", map[string]Value{"value": {Type: types.FromName("Boolean"), Data: value}}), nil
+	case stdjson.Number:
+		number, err := strconv.ParseFloat(string(value), 64)
+		if err != nil || math.IsInf(number, 0) || math.IsNaN(number) {
+			return Value{}, &jsonConversionError{path: path, message: "JSON number is not finite"}
+		}
+		if math.Trunc(number) == number {
+			if number < -9007199254740991 || number > 9007199254740991 {
+				return Value{}, &jsonConversionError{path: path, message: "JSON integer is outside the portable range"}
+			}
+			return construct("Integer", map[string]Value{"value": {Type: types.FromName("Integer"), Data: int64(number)}}), nil
+		}
+		return construct("Float", map[string]Value{"value": {Type: types.FromName("Float"), Data: number}}), nil
+	case string:
+		return construct("String", map[string]Value{"value": {Type: types.FromName("String"), Data: value}}), nil
+	case []any:
+		items := make([]Value, len(value))
+		for index, item := range value {
+			converted, err := e.jsonValue(item, path+"/"+strconv.Itoa(index))
+			if err != nil {
+				return Value{}, err
+			}
+			items[index] = converted
+		}
+		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{typ}}
+		return construct("Array", map[string]Value{"value": {Type: arrayType, Data: &arrayValue{Items: items}}}), nil
+	case map[string]any:
+		keys := make([]string, 0, len(value))
+		for key := range value {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		entries := make([]hashEntry, 0, len(keys))
+		for _, key := range keys {
+			escaped := strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
+			converted, err := e.jsonValue(value[key], path+"/"+escaped)
+			if err != nil {
+				return Value{}, err
+			}
+			entries = append(entries, hashEntry{
+				Key:   Value{Type: types.FromName("String"), Data: key},
+				Value: converted,
+			})
+		}
+		hashType := types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("String"), typ}}
+		return construct("Object", map[string]Value{"value": {Type: hashType, Data: &hashValue{Entries: entries}}}), nil
+	default:
+		return Value{}, &jsonConversionError{path: path, message: "unsupported JSON value"}
+	}
+}
+
+func jsonRaw(value Value, path string) (any, *jsonConversionError) {
+	item, ok := value.Data.(*enumValue)
+	if !ok || item.Definition.Node.Name != "JsonValue" {
+		return nil, &jsonConversionError{path: path, message: "unsupported JSON value"}
+	}
+	payload := item.Payload["value"]
+	switch item.Name {
+	case "Null":
+		return nil, nil
+	case "Boolean":
+		return payload.Data.(bool), nil
+	case "Integer":
+		integer := payload.Data.(int64)
+		if integer < -9007199254740991 || integer > 9007199254740991 {
+			return nil, &jsonConversionError{path: path, message: "JSON integer is outside the portable range"}
+		}
+		return integer, nil
+	case "Float":
+		floating := payload.Data.(float64)
+		if math.IsInf(floating, 0) || math.IsNaN(floating) {
+			return nil, &jsonConversionError{path: path, message: "JSON Float must be finite"}
+		}
+		return floating, nil
+	case "String":
+		return payload.Data.(string), nil
+	case "Array":
+		array := payload.Data.(*arrayValue)
+		result := make([]any, len(array.Items))
+		for index, child := range array.Items {
+			converted, err := jsonRaw(child, path+"/"+strconv.Itoa(index))
+			if err != nil {
+				return nil, err
+			}
+			result[index] = converted
+		}
+		return result, nil
+	case "Object":
+		hash := payload.Data.(*hashValue)
+		result := make(map[string]any, len(hash.Entries))
+		for _, entry := range hash.Entries {
+			key := entry.Key.Data.(string)
+			escaped := strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
+			converted, err := jsonRaw(entry.Value, path+"/"+escaped)
+			if err != nil {
+				return nil, err
+			}
+			result[key] = converted
+		}
+		return result, nil
+	default:
+		return nil, &jsonConversionError{path: path, message: "unsupported JSON value"}
+	}
+}
+
+func (e *Evaluator) jsonOK(resultType types.Type, value Value) (Value, error) {
+	return e.filesystemOK(resultType, value)
+}
+
+func (e *Evaluator) jsonError(resultType types.Type, kind, message, path string, line, column *int64) (Value, error) {
+	resultDefinition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("JSON requires trb/std/result")
+	}
+	errorDefinition, ok := e.definitions[symbolKey("trb/std/json/index", "JsonError")].(*recordDefinition)
+	if !ok {
+		return Value{}, errors.New("JSON runtime is not loaded")
+	}
+	kindDefinition, ok := e.definitions[symbolKey("trb/std/json/index", "JsonErrorKind")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("JSON runtime is not loaded")
+	}
+	nullableInteger := types.FromName("Integer")
+	nullableInteger.Nullable = true
+	lineValue := Value{Type: nullableInteger}
+	if line != nil {
+		lineValue.Data = *line
+	}
+	columnValue := Value{Type: nullableInteger}
+	if column != nil {
+		columnValue.Data = *column
+	}
+	kindValue := Value{Type: types.FromName("JsonErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
+	errorType := types.FromName("JsonError")
+	if len(resultType.Args) == 2 {
+		errorType = resultType.Args[1]
+	}
+	errorValue := Value{
+		Type: errorType,
+		Data: &recordInstance{
+			Definition: errorDefinition,
+			Fields: map[string]Value{
+				"kind":    kindValue,
+				"message": {Type: types.FromName("String"), Data: message},
+				"path":    {Type: types.FromName("String"), Data: path},
+				"line":    lineValue,
+				"column":  columnValue,
+			},
+		},
+	}
+	return Value{
+		Type: resultType,
+		Data: &enumValue{
+			Definition: resultDefinition,
+			Name:       "Err",
+			Payload:    map[string]Value{"error": errorValue},
+		},
+	}, nil
+}
+
+func jsonSourceLocation(source string, parseErr error) (*int64, *int64) {
+	syntax, ok := parseErr.(*stdjson.SyntaxError)
+	if !ok {
+		return nil, nil
+	}
+	offset := int(syntax.Offset) - 1
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(source) {
+		offset = len(source)
+	}
+	line, column := int64(1), int64(1)
+	for _, value := range source[:offset] {
+		if value == '\n' {
+			line++
+			column = 1
+		} else {
+			column++
+		}
+	}
+	return &line, &column
+}
+
+func stripJSONC(source string) string {
+	result := []byte(source)
+	inString := false
+	escaped := false
+	for index := 0; index < len(result); index++ {
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if result[index] == '\\' {
+				escaped = true
+			} else if result[index] == '"' {
+				inString = false
+			}
+			continue
+		}
+		if result[index] == '"' {
+			inString = true
+			continue
+		}
+		if result[index] != '/' || index+1 >= len(result) {
+			continue
+		}
+		if result[index+1] == '/' {
+			result[index], result[index+1] = ' ', ' '
+			index += 2
+			for index < len(result) && result[index] != '\n' {
+				if result[index] != '\r' {
+					result[index] = ' '
+				}
+				index++
+			}
+			index--
+		} else if result[index+1] == '*' {
+			result[index], result[index+1] = ' ', ' '
+			index += 2
+			for index < len(result) {
+				if index+1 < len(result) && result[index] == '*' && result[index+1] == '/' {
+					result[index], result[index+1] = ' ', ' '
+					index++
+					break
+				}
+				if result[index] != '\n' && result[index] != '\r' {
+					result[index] = ' '
+				}
+				index++
+			}
+		}
+	}
+	return string(result)
 }
 
 func literal(node *ir.Literal) (Value, error) {

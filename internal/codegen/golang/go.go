@@ -964,6 +964,19 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("slices", "")
 		resultType, _, _ := filesystemResultType()
 		return "func() " + resultType + " { path := " + arguments[0] + "; entries, err := os.ReadDir(path); if err != nil { return " + filesystemError("list", "path", "err.Error()") + " }; names := make([]string, 0, len(entries)); for _, entry := range entries { names = append(names, entry.Name()) }; slices.Sort(names); return " + filesystemOK("names") + " }()"
+	case "trb.internal.json.parse":
+		return g.jsonParse(call, arguments[0], false)
+	case "trb.internal.json.parse_jsonc":
+		if reference := expressionReference(call.Callee); reference != nil && reference.Package == "trb/std/jsonc/index" && g.modulePath != reference.Package {
+			alias := reference.Alias
+			if alias == "" {
+				alias = pathpkg.Base(pathpkg.Dir(reference.Package))
+			}
+			return goImportAlias(alias) + ".Parse(" + arguments[0] + ")"
+		}
+		return g.jsonParse(call, arguments[0], true)
+	case "trb.internal.json.stringify":
+		return g.jsonStringify(call, arguments[0])
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"
@@ -1142,6 +1155,71 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) jsonParse(call *ir.Call, argument string, comments bool) string {
+	g.requireImport("encoding/json", "stdjson")
+	g.requireImport("errors", "")
+	g.requireImport("io", "")
+	g.requireImport("math", "")
+	g.requireImport("strconv", "")
+	g.requireImport("strings", "")
+	result := call.ExprType()
+	resultType := g.goType(result)
+	valueType := g.goType(types.FromName("JsonValue"))
+	errorType := g.goType(types.FromName("JsonError"))
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	jsonAlias := g.typeAliases["JsonValue"]
+	prefix := ""
+	if jsonAlias != "" {
+		prefix = jsonAlias + "."
+	}
+	ok := func(value string) string {
+		return resultAlias + ".NewResultOk[" + valueType + ", " + errorType + "](" + value + ")"
+	}
+	errResult := func(kind, message, path, line, column string) string {
+		value := errorType + "{Kind: " + prefix + "JsonErrorKind" + kind + ", Message: " + message + ", Path: " + path + ", Line: " + line + ", Column: " + column + "}"
+		return resultAlias + ".NewResultErr[" + valueType + ", " + errorType + "](" + value + ")"
+	}
+	strip := ""
+	if comments {
+		strip = `stripComments := func(input string) string { result := []byte(input); inString := false; escaped := false; for index := 0; index < len(result); index++ { if inString { if escaped { escaped = false; continue }; if result[index] == '\\' { escaped = true } else if result[index] == '"' { inString = false }; continue }; if result[index] == '"' { inString = true; continue }; if result[index] != '/' || index+1 >= len(result) { continue }; if result[index+1] == '/' { result[index], result[index+1] = ' ', ' '; index += 2; for index < len(result) && result[index] != '\n' { if result[index] != '\r' { result[index] = ' ' }; index++ }; index-- } else if result[index+1] == '*' { result[index], result[index+1] = ' ', ' '; index += 2; for index < len(result) { if index+1 < len(result) && result[index] == '*' && result[index+1] == '/' { result[index], result[index+1] = ' ', ' '; index++; break }; if result[index] != '\n' && result[index] != '\r' { result[index] = ' ' }; index++ } } }; return string(result) }; source = stripComments(source); `
+	}
+	conversionError := "func(path, message string) *" + errorType + " { value := " + errorType + "{Kind: " + prefix + "JsonErrorKindDecode, Message: message, Path: path}; return &value }"
+	convert := "var convert func(any, string) (" + valueType + ", *" + errorType + "); convert = func(input any, path string) (" + valueType + ", *" + errorType + ") { switch value := input.(type) { case nil: return " + prefix + "JsonValueNull, nil; case bool: return " + prefix + "NewJsonValueBoolean(value), nil; case stdjson.Number: number, parseErr := strconv.ParseFloat(string(value), 64); if parseErr != nil || math.IsInf(number, 0) || math.IsNaN(number) { return " + valueType + "{}, conversionError(path, \"JSON number is not finite\") }; if math.Trunc(number) == number { if number < -9007199254740991 || number > 9007199254740991 { return " + valueType + "{}, conversionError(path, \"JSON integer is outside the portable range\") }; return " + prefix + "NewJsonValueInteger(int(number)), nil }; return " + prefix + "NewJsonValueFloat(number), nil; case string: return " + prefix + "NewJsonValueString(value), nil; case []any: items := make([]" + valueType + ", len(value)); for index, item := range value { converted, conversionErr := convert(item, path+\"/\"+strconv.Itoa(index)); if conversionErr != nil { return " + valueType + "{}, conversionErr }; items[index] = converted }; return " + prefix + "NewJsonValueArray(items), nil; case map[string]any: fields := make(map[string]" + valueType + ", len(value)); for key, item := range value { escaped := strings.ReplaceAll(strings.ReplaceAll(key, \"~\", \"~0\"), \"/\", \"~1\"); converted, conversionErr := convert(item, path+\"/\"+escaped); if conversionErr != nil { return " + valueType + "{}, conversionErr }; fields[key] = converted }; return " + prefix + "NewJsonValueObject(fields), nil; default: return " + valueType + "{}, conversionError(path, \"unsupported JSON value\") } }"
+	location := "func(source string, parseErr error) (*int, *int) { syntax, ok := parseErr.(*stdjson.SyntaxError); if !ok { return nil, nil }; offset := int(syntax.Offset) - 1; if offset < 0 { offset = 0 }; if offset > len(source) { offset = len(source) }; line, column := 1, 1; for _, value := range source[:offset] { if value == '\\n' { line++; column = 1 } else { column++ } }; return &line, &column }"
+	return "func() " + resultType + " { source := " + argument + "; " + strip + "sourceLocation := " + location + "; decoder := stdjson.NewDecoder(strings.NewReader(source)); decoder.UseNumber(); var raw any; if err := decoder.Decode(&raw); err != nil { lineValue, columnValue := sourceLocation(source, err); return " + errResult("Syntax", "err.Error()", `""`, "lineValue", "columnValue") + " }; if err := decoder.Decode(&struct{}{}); err != io.EOF { if err == nil { err = errors.New(\"JSON source contains multiple values\") }; lineValue, columnValue := sourceLocation(source, err); return " + errResult("Syntax", "err.Error()", `""`, "lineValue", "columnValue") + " }; conversionError := " + conversionError + "; " + convert + "; value, conversionErr := convert(raw, \"\"); if conversionErr != nil { return " + resultAlias + ".NewResultErr[" + valueType + ", " + errorType + "](*conversionErr) }; return " + ok("value") + " }()"
+}
+
+func (g *generator) jsonStringify(call *ir.Call, argument string) string {
+	g.requireImport("encoding/json", "stdjson")
+	g.requireImport("math", "")
+	g.requireImport("strconv", "")
+	g.requireImport("strings", "")
+	result := call.ExprType()
+	resultType := g.goType(result)
+	valueType := g.goType(types.FromName("JsonValue"))
+	errorType := g.goType(types.FromName("JsonError"))
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	jsonAlias := g.typeAliases["JsonValue"]
+	prefix := ""
+	if jsonAlias != "" {
+		prefix = jsonAlias + "."
+	}
+	ok := resultAlias + ".NewResultOk[string, " + errorType + "]"
+	errResult := func(message, path string) string {
+		value := errorType + "{Kind: " + prefix + "JsonErrorKindEncode, Message: " + message + ", Path: " + path + "}"
+		return resultAlias + ".NewResultErr[string, " + errorType + "](" + value + ")"
+	}
+	conversionError := "func(path, message string) *" + errorType + " { value := " + errorType + "{Kind: " + prefix + "JsonErrorKindEncode, Message: message, Path: path}; return &value }"
+	convert := "var convert func(" + valueType + ", string) (any, *" + errorType + "); convert = func(value " + valueType + ", path string) (any, *" + errorType + ") { switch value.Kind { case " + prefix + "JsonValueNullTag: return nil, nil; case " + prefix + "JsonValueBooleanTag: return value.BooleanValue, nil; case " + prefix + "JsonValueIntegerTag: if value.IntegerValue < -9007199254740991 || value.IntegerValue > 9007199254740991 { return nil, conversionError(path, \"JSON integer is outside the portable range\") }; return value.IntegerValue, nil; case " + prefix + "JsonValueFloatTag: if math.IsInf(value.FloatValue, 0) || math.IsNaN(value.FloatValue) { return nil, conversionError(path, \"JSON Float must be finite\") }; return value.FloatValue, nil; case " + prefix + "JsonValueStringTag: return value.StringValue, nil; case " + prefix + "JsonValueArrayTag: items := make([]any, len(value.ArrayValue)); for index, item := range value.ArrayValue { converted, conversionErr := convert(item, path+\"/\"+strconv.Itoa(index)); if conversionErr != nil { return nil, conversionErr }; items[index] = converted }; return items, nil; case " + prefix + "JsonValueObjectTag: fields := make(map[string]any, len(value.ObjectValue)); for key, item := range value.ObjectValue { escaped := strings.ReplaceAll(strings.ReplaceAll(key, \"~\", \"~0\"), \"/\", \"~1\"); converted, conversionErr := convert(item, path+\"/\"+escaped); if conversionErr != nil { return nil, conversionErr }; fields[key] = converted }; return fields, nil; default: return nil, conversionError(path, \"unsupported JSON value\") } }"
+	return "func() " + resultType + " { conversionError := " + conversionError + "; " + convert + "; raw, conversionErr := convert(" + argument + ", \"\"); if conversionErr != nil { return " + resultAlias + ".NewResultErr[string, " + errorType + "](*conversionErr) }; encoded, err := stdjson.Marshal(raw); if err != nil { return " + errResult("err.Error()", `""`) + " }; return " + ok + "(string(encoded)) }()"
 }
 
 func (g *generator) gormRead(call *ir.Call, arguments []string, operation string) string {

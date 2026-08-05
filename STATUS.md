@@ -102,6 +102,10 @@ Implemented:
   UTF-8 and raw-byte I/O, existence checks, recursive directory creation,
   sorted listing, an inaccessible internal intrinsic boundary, runnable Go,
   Ruby, and TypeScript output, and matching typed-IR REPL execution.
+- A compiler-owned portable JSON/JSONC value model with typed syntax, decode,
+  and encode errors, JSON Pointer paths, comment-aware JSONC parsing, strict
+  trailing-comma rejection, safe cross-target number semantics, runnable Go,
+  Ruby, and TypeScript output, and typed-IR REPL execution.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.
@@ -146,11 +150,11 @@ semantic type model, and source maps are later work.
 
 The broader path to practical production use is tracked in `ROADMAP.md`.
 
-1. Add JSONC and process APIs required to move the lexer/parser into the
-   stage-1 self-host tree. Revisit concise Result propagation syntax only after
-   explicit Result handling has been exercised in real application code.
-2. Generate runtime JSON decoders from record contracts and add wire-compatible
+1. Generate runtime JSON decoders from record contracts and add wire-compatible
    optional/nullable semantics.
+2. Add process APIs required to move the lexer/parser into the stage-1
+   self-host tree. Revisit concise Result propagation syntax only after
+   explicit Result handling has been exercised in real application code.
 3. Add a concise React view/component syntax above the current explicit element
    builder.
 4. Extend structured iterator IR with transformations such as `map`, `select`,
