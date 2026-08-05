@@ -1613,6 +1613,15 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("string_builder.length expects StringBuilder")
 		}
 		return Value{Type: typ, Data: int64(utf8.RuneCountInString(builder.value.String()))}, nil
+	case "trb.std.string_builder.empty":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		builder, ok := values[0].Data.(*stringBuilderValue)
+		if !ok {
+			return Value{}, errors.New("string_builder.empty expects StringBuilder")
+		}
+		return Value{Type: typ, Data: builder.value.Len() == 0}, nil
 	case "trb.std.string_builder.to_string":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1662,6 +1671,17 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		result := array.Items[index]
 		result.Type = typ
 		return result, nil
+	case "trb.std.arrays.try_fetch":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		index, integer := values[1].Data.(int64)
+		if !ok || !integer || index < 0 || index >= int64(len(array.Items)) {
+			return e.stringResultErr(typ, "Array index is out of bounds")
+		}
+		result := array.Items[index]
+		return e.filesystemOK(typ, result)
 	case "trb.std.arrays.first", "trb.std.arrays.last":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1762,6 +1782,20 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			}
 		}
 		return Value{}, errors.New("Hash key is missing")
+	case "trb.std.hashes.try_fetch":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		hash, ok := values[0].Data.(*hashValue)
+		if !ok {
+			return Value{}, errors.New("hashes.try_fetch expects Hash")
+		}
+		for _, entry := range hash.Entries {
+			if equal(entry.Key, values[1]) {
+				return e.filesystemOK(typ, entry.Value)
+			}
+		}
+		return e.stringResultErr(typ, "Hash key is missing")
 	case "trb.std.hashes.contains_key":
 		if err := require(2); err != nil {
 			return Value{}, err
@@ -1816,11 +1850,24 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		if !ok {
 			return Value{}, errors.New("numbers.parse_integer expects String")
 		}
-		parsed, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return Value{}, err
+		parsed, message := parsePortableInteger(value)
+		if message != "" {
+			return Value{}, errors.New(message)
 		}
 		return Value{Type: typ, Data: parsed}, nil
+	case "trb.std.numbers.try_parse_integer":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("numbers.try_parse_integer expects String")
+		}
+		parsed, message := parsePortableInteger(value)
+		if message != "" {
+			return e.stringResultErr(typ, message)
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("Integer"), Data: parsed})
 	case "trb.platform.typescript.node.argv":
 		return Value{Type: typ, Data: &arrayValue{}}, nil
 	case "trb.platform.go.context.background", "trb.platform.go.context.todo":
@@ -1846,6 +1893,41 @@ func (e *Evaluator) filesystemOK(resultType types.Type, value Value) (Value, err
 			Payload:    map[string]Value{"value": value},
 		},
 	}, nil
+}
+
+func (e *Evaluator) stringResultErr(resultType types.Type, message string) (Value, error) {
+	definition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("operation requires trb/std/result")
+	}
+	errorValue := Value{Type: types.FromName("String"), Data: message}
+	if len(resultType.Args) == 2 {
+		errorValue.Type = resultType.Args[1]
+	}
+	return Value{Type: resultType, Data: &enumValue{Definition: definition, Name: "Err", Payload: map[string]Value{"error": errorValue}}}, nil
+}
+
+func parsePortableInteger(input string) (int64, string) {
+	if input == "" {
+		return 0, "invalid Integer"
+	}
+	start := 0
+	if input[0] == '+' || input[0] == '-' {
+		start = 1
+	}
+	if start == len(input) {
+		return 0, "invalid Integer"
+	}
+	for index := start; index < len(input); index++ {
+		if input[index] < '0' || input[index] > '9' {
+			return 0, "invalid Integer"
+		}
+	}
+	value, err := strconv.ParseInt(input, 10, 64)
+	if err != nil || value < -9007199254740991 || value > 9007199254740991 {
+		return 0, "Integer is outside the portable range"
+	}
+	return value, ""
 }
 
 func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string, cause error) (Value, error) {

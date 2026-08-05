@@ -906,6 +906,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return alias + ".NewResultOk[" + successType + ", " + errorType + "](" + value + ")"
 	}
+	resultError := func(value string) string {
+		_, successType, errorType := filesystemResultType()
+		alias := g.typeAliases["Result"]
+		if alias == "" {
+			alias = "__trb_result"
+		}
+		return alias + ".NewResultErr[" + successType + ", " + errorType + "](" + value + ")"
+	}
 	filesystemError := func(operation, path, message string) string {
 		_, successType, errorType := filesystemResultType()
 		alias := g.typeAliases["Result"]
@@ -1054,6 +1062,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.string_builder.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ".String())"
+	case "trb.std.string_builder.empty":
+		return arguments[0] + ".Len() == 0"
 	case "trb.std.string_builder.to_string":
 		return arguments[0] + ".String()"
 	case "trb.std.string_builder.clear":
@@ -1064,6 +1074,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "len(" + arguments[0] + ") == 0"
 	case "trb.std.arrays.fetch":
 		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; index := " + arguments[1] + "; if index < 0 || index >= len(values) { panic(\"Array index is out of bounds\") }; return values[index] }()"
+	case "trb.std.arrays.try_fetch":
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { values := " + arguments[0] + "; index := " + arguments[1] + "; if index < 0 || index >= len(values) { return " + resultError(strconv.Quote("Array index is out of bounds")) + " }; return " + filesystemOK("values[index]") + " }()"
 	case "trb.std.arrays.first":
 		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; return values[0] }()"
 	case "trb.std.arrays.last":
@@ -1084,6 +1097,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "len(" + arguments[0] + ") == 0"
 	case "trb.std.hashes.fetch":
 		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; key := " + arguments[1] + "; value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; return value }()"
+	case "trb.std.hashes.try_fetch":
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { values := " + arguments[0] + "; key := " + arguments[1] + "; value, ok := values[key]; if !ok { return " + resultError(strconv.Quote("Hash key is missing")) + " }; return " + filesystemOK("value") + " }()"
 	case "trb.std.hashes.contains_key":
 		return "func() bool { values := " + arguments[0] + "; key := " + arguments[1] + "; _, ok := values[key]; return ok }()"
 	case "trb.std.hashes.keys":
@@ -1101,8 +1117,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("strconv", "")
 		return "strconv.Itoa(" + arguments[0] + ")"
 	case "trb.std.numbers.parse_integer":
+		g.requireImport("regexp", "")
 		g.requireImport("strconv", "")
-		return "func() int { value, err := strconv.Atoi(" + arguments[0] + "); if err != nil { panic(err) }; return value }()"
+		return "func() int { input := " + arguments[0] + "; valid, _ := regexp.MatchString(`^[+-]?[0-9]+$`, input); if !valid { panic(\"invalid Integer\") }; value, err := strconv.ParseInt(input, 10, 64); if err != nil || value < -9007199254740991 || value > 9007199254740991 { panic(\"Integer is outside the portable range\") }; return int(value) }()"
+	case "trb.std.numbers.try_parse_integer":
+		g.requireImport("regexp", "")
+		g.requireImport("strconv", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { input := " + arguments[0] + "; valid, _ := regexp.MatchString(`^[+-]?[0-9]+$`, input); if !valid { return " + resultError(strconv.Quote("invalid Integer")) + " }; value, err := strconv.ParseInt(input, 10, 64); if err != nil || value < -9007199254740991 || value > 9007199254740991 { return " + resultError(strconv.Quote("Integer is outside the portable range")) + " }; return " + filesystemOK("int(value)") + " }()"
 	case "trb.platform.go.context.background":
 		g.requireImport("context", "")
 		return "context.Background()"

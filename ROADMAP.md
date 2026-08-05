@@ -12,8 +12,8 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 
 - Finish essential collection and control-flow syntax: transformations and
   first-class blocks/lambdas. Portable `Result<T, E>` with explicit exhaustive
-  handling is implemented; concise propagation syntax remains a later
-  ergonomics decision.
+  handling and safe conversion/lookup APIs is implemented; concise propagation
+  syntax remains a later ergonomics decision.
 - Add union types, position-typed Tuples, and precise nullable/optional
   semantics. Payload-bearing enums, exhaustive payload pattern narrowing, and
   explicit generics for payload enums/top-level functions are implemented;

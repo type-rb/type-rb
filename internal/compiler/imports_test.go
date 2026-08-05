@@ -102,9 +102,9 @@ def text_size(): Integer
 end
 `)
 	wants := map[string][]string{
-		"go":         {`strconv.Itoa(123)`, `strconv.Atoi("123")`, `utf8.RuneCountInString("a😀")`},
-		"ruby":       {`123.to_s`, `Integer("123")`, `"a😀".each_codepoint.count`},
-		"typescript": {`String(123)`, `Number.parseInt("123", 10)`, `Array.from("a😀").length`},
+		"go":         {`strconv.Itoa(123)`, `regexp.MatchString`, `strconv.ParseInt`, `utf8.RuneCountInString("a😀")`},
+		"ruby":       {`123.to_s`, `Integer(input, 10)`, `"a😀".each_codepoint.count`},
+		"typescript": {`String(123)`, `Number.isSafeInteger(__trbValue)`, `Array.from("a😀").length`},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		artifact, err := CompileWithOptions("methods.trb", source, Options{Mode: mode, Package: "methods", RubyLoader: "require_relative"})
@@ -271,6 +271,11 @@ def measured(): Integer
 	return builder.size()
 end
 
+def blank(): Boolean
+	builder := string_builder.new()
+	return builder.empty?()
+end
+
 def reset(): String
 	mut builder := string_builder.from_string("old")
 	builder.clear()
@@ -285,6 +290,7 @@ end
 			`builder.WriteRune(rune(value))`,
 			`builder.String()`,
 			`utf8.RuneCountInString(builder.String())`,
+			`builder.Len() == 0`,
 			`builder.Reset()`,
 		},
 		"ruby": {
@@ -293,6 +299,7 @@ end
 			`builder << (128512).chr(Encoding::UTF_8)`,
 			`builder.dup`,
 			`builder.each_codepoint.count`,
+			`builder.empty?`,
 			`builder.clear`,
 		},
 		"typescript": {
@@ -301,6 +308,7 @@ end
 			`builder.push(String.fromCodePoint(value))`,
 			`builder.join("")`,
 			`Array.from(builder.join("")).length`,
+			`builder.length === 0`,
 			`builder.splice(0)`,
 		},
 	}
@@ -833,6 +841,78 @@ end
 `)
 	if _, err := Compile("bad.trb", wrongPayload, "typescript"); err == nil || !strings.Contains(err.Error(), "enum payload argument 1 has type String, expected Integer") {
 		t.Fatalf("expected standard Result payload diagnostic, got %v", err)
+	}
+}
+
+func TestSafePortableConversionAndLookupLowerAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Result } from trb/std/result
+import trb/std/arrays
+import trb/std/hashes
+import trb/std/numbers
+
+def parsed(value: String): Result<Integer, String>
+	return value.try_to_i()
+end
+
+def package_parsed(value: String): Result<Integer, String>
+	return numbers.try_parse_integer(value)
+end
+
+def array_value(values: Array<Integer>, index: Integer): Result<Integer, String>
+	return arrays.try_fetch(values, index)
+end
+
+def hash_value(values: Hash<String, Integer>, key: String): Result<Integer, String>
+	return hashes.try_fetch(values, key)
+end
+`),
+	}
+
+	wants := map[string][]string{
+		"go": {
+			`regexp.MatchString`,
+			`__trb_result.NewResultErr[int, string]("invalid Integer")`,
+			`__trb_result.NewResultErr[int, string]("Array index is out of bounds")`,
+			`__trb_result.NewResultErr[int, string]("Hash key is missing")`,
+		},
+		"ruby": {
+			`Result::Err.new("invalid Integer")`,
+			`Result::Err.new("Array index is out of bounds")`,
+			`Result::Err.new("Hash key is missing")`,
+		},
+		"typescript": {
+			`Result.Err<number, string>("invalid Integer")`,
+			`Result.Err<number, string>("Array index is out of bounds")`,
+			`Result.Err<number, string>("Hash key is missing")`,
+		},
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/safe-values", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected safe portable operations: %v", mode, err)
+		}
+		var consumer, resultRuntime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/result/index":
+				resultRuntime = artifact
+			}
+		}
+		if consumer == nil || resultRuntime == nil {
+			t.Fatalf("%s did not compile the consumer and Result runtime: %#v", mode, artifacts)
+		}
+		for _, want := range wants[mode] {
+			if output := string(consumer.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s safe operation is missing %q:\n%s", mode, want, output)
+			}
+		}
 	}
 }
 

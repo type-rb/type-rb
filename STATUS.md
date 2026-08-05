@@ -77,21 +77,22 @@ Implemented:
   `trb/std/result` packages, plus mode-checked Ruby, Go, and TypeScript platform
   packages.
 - Compiler-owned receiver-method contracts shared with portable package APIs,
-  initially covering `Integer#to_s`, `String#to_i`, and Unicode-aware
+  including strict and Result-returning integer conversion and Unicode-aware
   `String#size` across the checker, typed IR, all backends, and the REPL.
 - A distinct portable `Bytes` type with UTF-8 conversion, byte length/indexing,
   non-mutating concatenation, validity checks, package and receiver APIs, three
   backend representations, and typed-IR REPL values.
 - A portable mutable `StringBuilder` with checked `mut` receiver/package
   operations, Unicode scalar appends, String snapshots, code-point length,
-  clear, three backend representations, and typed-IR REPL execution.
+  emptiness, clear, three backend representations, and typed-IR REPL execution.
 - Compiler-owned Unicode 15.0.0 range tables emitted as TypeRB source, with
   scalar/category and identifier classification, code-point construction,
   default/named imports, three runnable backends, and REPL execution.
 - Compiler-owned generic collection contracts inferred from `Array<T>` and
-  `Hash<K, V>`, with strict lookup/edge access, emptiness and size queries,
-  shallow copies, typed key/value extraction, checked Array mutation, all
-  receiver forms, three backends, and typed-IR REPL execution.
+  `Hash<K, V>`, with strict and Result-returning lookup, strict edge access,
+  emptiness and size queries, shallow copies, typed key/value extraction,
+  checked Array mutation, all receiver forms, three backends, and typed-IR REPL
+  execution.
 - Expanded compiler-owned receiver methods for String code points, emptiness,
   containment, prefix/suffix checks, exact splitting and case conversion, plus
   constrained `Array<String>` joining and generic mutable Array pop.
@@ -154,8 +155,9 @@ semantic type model, and source maps are later work.
 
 The broader path to practical production use is tracked in `ROADMAP.md`.
 
-1. Add safe conversion and lookup Results, collection transformations, and
-   the remaining small receiver APIs needed by real standard-library code.
+1. Add collection transformations and the remaining small receiver APIs needed
+   by real standard-library code; safe conversion and lookup Results are now
+   available as the explicit baseline.
 2. Add process APIs required to move the lexer/parser into the stage-1
    self-host tree. Revisit concise Result propagation syntax only after
    explicit Result handling has been exercised in real application code.

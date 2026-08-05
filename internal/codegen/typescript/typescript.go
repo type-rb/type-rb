@@ -679,6 +679,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "{ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + " } satisfies " + errorType
 		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
+	resultError := func(value string) string {
+		_, successType, errorType := filesystemResultType()
+		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
+	}
 	filesystemHandle := `const fs = (globalThis as any).process?.getBuiltinModule?.("fs"); if (fs === undefined) { throw new Error("filesystem is unavailable"); } `
 	filesystemMessage := `const message = error instanceof Error ? error.message : String(error); `
 	switch name {
@@ -799,6 +803,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "((builder: Array<string>, value: number): void => { if (value < 0 || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) { throw new RangeError(\"invalid Unicode code point\"); } builder.push(String.fromCodePoint(value)); })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.string_builder.length":
 		return "Array.from(" + arguments[0] + ".join(\"\")).length"
+	case "trb.std.string_builder.empty":
+		return arguments[0] + ".length === 0"
 	case "trb.std.string_builder.to_string":
 		return arguments[0] + ".join(\"\")"
 	case "trb.std.string_builder.clear":
@@ -808,11 +814,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.empty":
 		return arguments[0] + ".length === 0"
 	case "trb.std.arrays.fetch":
-		return "((): " + tsType(call.ExprType()) + " => { const values = " + arguments[0] + "; const index = " + arguments[1] + "; if (index < 0 || index >= values.length) { throw new Error(\"Array index is out of bounds\"); } return values[index]!; })()"
+		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { throw new Error(\"Array index is out of bounds\"); } return __trbValues[__trbIndex]!; })()"
+	case "trb.std.arrays.try_fetch":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { return " + resultError(strconv.Quote("Array index is out of bounds")) + "; } return " + filesystemOK("__trbValues[__trbIndex]!") + "; })()"
 	case "trb.std.arrays.first":
-		return "((): " + tsType(call.ExprType()) + " => { const values = " + arguments[0] + "; if (values.length === 0) { throw new Error(\"Array is empty\"); } return values[0]!; })()"
+		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[0]!; })()"
 	case "trb.std.arrays.last":
-		return "((): " + tsType(call.ExprType()) + " => { const values = " + arguments[0] + "; if (values.length === 0) { throw new Error(\"Array is empty\"); } return values[values.length - 1]!; })()"
+		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[__trbValues.length - 1]!; })()"
 	case "trb.std.arrays.copy":
 		return "[..." + arguments[0] + "]"
 	case "trb.std.arrays.join":
@@ -826,7 +835,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hashes.empty":
 		return "Object.keys(" + arguments[0] + ").length === 0"
 	case "trb.std.hashes.fetch":
-		return "((): " + tsType(call.ExprType()) + " => { const values = " + arguments[0] + "; const key = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(values, key)) { throw new Error(\"Hash key is missing\"); } return values[key]; })()"
+		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } return __trbValues[__trbKey]; })()"
+	case "trb.std.hashes.try_fetch":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { return " + resultError(strconv.Quote("Hash key is missing")) + "; } return " + filesystemOK("__trbValues[__trbKey]") + "; })()"
 	case "trb.std.hashes.contains_key":
 		return "Object.prototype.hasOwnProperty.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.hashes.keys":
@@ -841,7 +853,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.numbers.to_string":
 		return "String(" + arguments[0] + ")"
 	case "trb.std.numbers.parse_integer":
-		return "Number.parseInt(" + arguments[0] + ", 10)"
+		return "((): number => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { throw new Error(\"invalid Integer\"); } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { throw new Error(\"Integer is outside the portable range\"); } return __trbValue; })()"
+	case "trb.std.numbers.try_parse_integer":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { return " + resultError(strconv.Quote("invalid Integer")) + "; } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { return " + resultError(strconv.Quote("Integer is outside the portable range")) + "; } return " + filesystemOK("__trbValue") + "; })()"
 	case "trb.platform.typescript.node.argv":
 		return "process.argv.slice(2)"
 	case "trb.platform.typescript.react.element":

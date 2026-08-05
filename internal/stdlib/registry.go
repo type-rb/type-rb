@@ -330,6 +330,7 @@ end
 				Return: voidType,
 			},
 			"length":    unary("length", "trb.std.string_builder.length", stringBuilderType, integerType),
+			"empty":     unary("empty", "trb.std.string_builder.empty", stringBuilderType, booleanType),
 			"to_string": unary("to_string", "trb.std.string_builder.to_string", stringBuilderType, stringType),
 			"clear": {
 				Name:       "clear",
@@ -354,6 +355,16 @@ end
 					{Name: "index", Type: integerType},
 				},
 				Return: typeT,
+			},
+			"try_fetch": {
+				Name:           "try_fetch",
+				Intrinsic:      "trb.std.arrays.try_fetch",
+				TypeParameters: []string{"T"},
+				Parameters: []Parameter{
+					{Name: "values", Type: arrayOf(typeT)},
+					{Name: "index", Type: integerType},
+				},
+				Return: stringErrorResult(typeT),
 			},
 			"first": genericUnary("first", "trb.std.arrays.first", []string{"T"}, arrayOf(typeT), typeT),
 			"last":  genericUnary("last", "trb.std.arrays.last", []string{"T"}, arrayOf(typeT), typeT),
@@ -399,6 +410,16 @@ end
 				},
 				Return: typeV,
 			},
+			"try_fetch": {
+				Name:           "try_fetch",
+				Intrinsic:      "trb.std.hashes.try_fetch",
+				TypeParameters: []string{"K", "V"},
+				Parameters: []Parameter{
+					{Name: "values", Type: hashOf(typeK, typeV)},
+					{Name: "key", Type: typeK},
+				},
+				Return: stringErrorResult(typeV),
+			},
 			"contains_key": {
 				Name:           "contains_key",
 				Intrinsic:      "trb.std.hashes.contains_key",
@@ -418,8 +439,9 @@ end
 		Path: "trb/std/numbers",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
-			"to_string":     unary("to_string", "trb.std.numbers.to_string", integerType, stringType),
-			"parse_integer": unary("parse_integer", "trb.std.numbers.parse_integer", stringType, integerType),
+			"to_string":         unary("to_string", "trb.std.numbers.to_string", integerType, stringType),
+			"parse_integer":     unary("parse_integer", "trb.std.numbers.parse_integer", stringType, integerType),
+			"try_parse_integer": unary("try_parse_integer", "trb.std.numbers.try_parse_integer", stringType, stringErrorResult(integerType)),
 		},
 	},
 	"trb/platform/ruby/native": {
@@ -530,6 +552,7 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 	},
 	types.String: {
 		"to_i":        {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
+		"try_to_i":    {PackagePath: "trb/std/numbers", Symbol: "try_parse_integer"},
 		"size":        {PackagePath: "trb/std/strings", Symbol: "length"},
 		"empty?":      {PackagePath: "trb/std/strings", Symbol: "empty"},
 		"upcase":      {PackagePath: "trb/std/strings", Symbol: "uppercase"},
@@ -552,28 +575,31 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"append":           {PackagePath: "trb/std/string_builder", Symbol: "append"},
 		"append_codepoint": {PackagePath: "trb/std/string_builder", Symbol: "append_codepoint"},
 		"size":             {PackagePath: "trb/std/string_builder", Symbol: "length"},
+		"empty?":           {PackagePath: "trb/std/string_builder", Symbol: "empty"},
 		"to_s":             {PackagePath: "trb/std/string_builder", Symbol: "to_string"},
 		"clear":            {PackagePath: "trb/std/string_builder", Symbol: "clear"},
 	},
 	types.Array: {
-		"size":   {PackagePath: "trb/std/arrays", Symbol: "length"},
-		"empty?": {PackagePath: "trb/std/arrays", Symbol: "empty"},
-		"fetch":  {PackagePath: "trb/std/arrays", Symbol: "fetch"},
-		"first":  {PackagePath: "trb/std/arrays", Symbol: "first"},
-		"last":   {PackagePath: "trb/std/arrays", Symbol: "last"},
-		"dup":    {PackagePath: "trb/std/arrays", Symbol: "copy"},
-		"join":   {PackagePath: "trb/std/arrays", Symbol: "join"},
-		"pop":    {PackagePath: "trb/std/arrays", Symbol: "pop"},
-		"push":   {PackagePath: "trb/std/arrays", Symbol: "push"},
+		"size":      {PackagePath: "trb/std/arrays", Symbol: "length"},
+		"empty?":    {PackagePath: "trb/std/arrays", Symbol: "empty"},
+		"fetch":     {PackagePath: "trb/std/arrays", Symbol: "fetch"},
+		"try_fetch": {PackagePath: "trb/std/arrays", Symbol: "try_fetch"},
+		"first":     {PackagePath: "trb/std/arrays", Symbol: "first"},
+		"last":      {PackagePath: "trb/std/arrays", Symbol: "last"},
+		"dup":       {PackagePath: "trb/std/arrays", Symbol: "copy"},
+		"join":      {PackagePath: "trb/std/arrays", Symbol: "join"},
+		"pop":       {PackagePath: "trb/std/arrays", Symbol: "pop"},
+		"push":      {PackagePath: "trb/std/arrays", Symbol: "push"},
 	},
 	types.Hash: {
-		"size":   {PackagePath: "trb/std/hashes", Symbol: "length"},
-		"empty?": {PackagePath: "trb/std/hashes", Symbol: "empty"},
-		"fetch":  {PackagePath: "trb/std/hashes", Symbol: "fetch"},
-		"key?":   {PackagePath: "trb/std/hashes", Symbol: "contains_key"},
-		"keys":   {PackagePath: "trb/std/hashes", Symbol: "keys"},
-		"values": {PackagePath: "trb/std/hashes", Symbol: "values"},
-		"dup":    {PackagePath: "trb/std/hashes", Symbol: "copy"},
+		"size":      {PackagePath: "trb/std/hashes", Symbol: "length"},
+		"empty?":    {PackagePath: "trb/std/hashes", Symbol: "empty"},
+		"fetch":     {PackagePath: "trb/std/hashes", Symbol: "fetch"},
+		"try_fetch": {PackagePath: "trb/std/hashes", Symbol: "try_fetch"},
+		"key?":      {PackagePath: "trb/std/hashes", Symbol: "contains_key"},
+		"keys":      {PackagePath: "trb/std/hashes", Symbol: "keys"},
+		"values":    {PackagePath: "trb/std/hashes", Symbol: "values"},
+		"dup":       {PackagePath: "trb/std/hashes", Symbol: "copy"},
 	},
 }
 
@@ -624,6 +650,10 @@ func filesystemWrite(name string, value types.Type) Symbol {
 
 func jsonResult(value types.Type) types.Type {
 	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, jsonErrorType}}
+}
+
+func stringErrorResult(value types.Type) types.Type {
+	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, stringType}}
 }
 
 func jsonParse(name string) Symbol {

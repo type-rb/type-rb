@@ -592,6 +592,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + " << (" + arguments[1] + ").chr(Encoding::UTF_8)"
 	case "trb.std.string_builder.length":
 		return arguments[0] + ".each_codepoint.count"
+	case "trb.std.string_builder.empty":
+		return arguments[0] + ".empty?"
 	case "trb.std.string_builder.to_string":
 		return arguments[0] + ".dup"
 	case "trb.std.string_builder.clear":
@@ -602,6 +604,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".empty?"
 	case "trb.std.arrays.fetch":
 		return "->(values, index) { raise IndexError, \"Array index is out of bounds\" if index < 0 || index >= values.length; values.fetch(index) }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.arrays.try_fetch":
+		return "->(values, index) { index < 0 || index >= values.length ? Result::Err.new(\"Array index is out of bounds\") : Result::Ok.new(values.fetch(index)) }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.first":
 		return "->(values) { raise IndexError, \"Array is empty\" if values.empty?; values.fetch(0) }.call(" + arguments[0] + ")"
 	case "trb.std.arrays.last":
@@ -620,6 +624,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".empty?"
 	case "trb.std.hashes.fetch":
 		return arguments[0] + ".fetch(" + arguments[1] + ")"
+	case "trb.std.hashes.try_fetch":
+		return "->(values, key) { values.key?(key) ? Result::Ok.new(values[key]) : Result::Err.new(\"Hash key is missing\") }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.hashes.contains_key":
 		return arguments[0] + ".key?(" + arguments[1] + ")"
 	case "trb.std.hashes.keys":
@@ -631,7 +637,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.numbers.to_string":
 		return arguments[0] + ".to_s"
 	case "trb.std.numbers.parse_integer":
-		return "Integer(" + arguments[0] + ")"
+		return "->(input) { raise ArgumentError, \"invalid Integer\" unless /\\A[+-]?[0-9]+\\z/.match?(input); value = Integer(input, 10); raise RangeError, \"Integer is outside the portable range\" if value < -9007199254740991 || value > 9007199254740991; value }.call(" + arguments[0] + ")"
+	case "trb.std.numbers.try_parse_integer":
+		return "->(input) { if !/\\A[+-]?[0-9]+\\z/.match?(input); Result::Err.new(\"invalid Integer\"); else; value = Integer(input, 10); if value < -9007199254740991 || value > 9007199254740991; Result::Err.new(\"Integer is outside the portable range\"); else; Result::Ok.new(value); end; end }.call(" + arguments[0] + ")"
 	default:
 		return "nil"
 	}

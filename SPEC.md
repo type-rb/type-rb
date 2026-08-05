@@ -487,9 +487,15 @@ Receiver syntax is not target-native escape syntax: the resolver maps it to a
 compiler-owned standard-library contract, and typed IR records that contract.
 The package and receiver forms consequently share argument checking, return
 types, REPL semantics, and backend lowering. The initial surface includes
-`Integer#to_s`, `String#to_i`, and Unicode-code-point-based `String#size`,
-corresponding to `trb/std/numbers` and `trb/std/strings` operations. Unknown
-members on portable built-in types are compile errors in every mode.
+`Integer#to_s`, `String#to_i`, `String#try_to_i`, and
+Unicode-code-point-based `String#size`, corresponding to `trb/std/numbers` and
+`trb/std/strings` operations. Unknown members on portable built-in types are
+compile errors in every mode. Integer parsing accepts only a complete ASCII
+decimal spelling matching `[+-]?[0-9]+`; values outside
+`-9007199254740991..9007199254740991` are rejected so every target has the
+same exact result. `to_i` raises a runtime error, while `try_to_i` and package
+`try_parse_integer` return `Result<Integer, String>` with a stable error
+message.
 
 `Bytes` is the portable immutable binary-sequence type; it is not an alias for
 `Array<Integer>` or `String`. `trb/std/bytes` provides UTF-8 `from_string` and
@@ -505,7 +511,8 @@ counts encoded bytes.
 `trb/std/string_builder`. `new` and `from_string` construct it; `append`,
 `append_codepoint`, and `clear` are destructive operations and require a `mut`
 binding in both package and receiver forms. `to_string`/`#to_s` returns an
-immutable String snapshot, and `length`/`#size` counts Unicode code points.
+immutable String snapshot, `length`/`#size` counts Unicode code points, and
+`empty`/`#empty?` tests whether no text has been appended.
 `append_codepoint` accepts a Unicode scalar value as an Integer and raises a
 runtime error for negative values, surrogate code points, or values above
 U+10FFFF.
@@ -532,14 +539,16 @@ Compiler-owned package contracts may declare internal type parameters. They
 are inferred from call arguments and receivers; this is library-contract
 inference, not a mode-specific relaxation or user-defined implicit generic
 call syntax. `trb/std/arrays` provides `length`, `empty`, strict zero-based
-`fetch`, strict `first`/`last`, shallow `copy`, and mutable `push` for
-`Array<T>`. Receiver spellings are `size`, `empty?`, `fetch`, `first`, `last`,
-`dup`, and `push`. `trb/std/hashes` provides `length`, `empty`, strict `fetch`,
-`contains_key`, `keys`, `values`, and shallow `copy` for `Hash<K, V>`;
-receiver spellings are `size`, `empty?`, `fetch`, `key?`, `keys`, `values`,
-and `dup`. Missing fetch keys, out-of-range Array indexes, and first/last on an
-empty Array are runtime errors in every mode. Hash key/value enumeration order
-is unspecified.
+`fetch`, safe `try_fetch`, strict `first`/`last`, shallow `copy`, and mutable
+`push` for `Array<T>`. Receiver spellings are `size`, `empty?`, `fetch`,
+`try_fetch`, `first`, `last`, `dup`, and `push`. `trb/std/hashes` provides
+`length`, `empty`, strict `fetch`, safe `try_fetch`, `contains_key`, `keys`,
+`values`, and shallow `copy` for `Hash<K, V>`; receiver spellings are `size`,
+`empty?`, `fetch`, `try_fetch`, `key?`, `keys`, `values`, and `dup`. Missing
+strict fetch keys, out-of-range strict Array indexes, and first/last on an
+empty Array are runtime errors in every mode. Safe fetch returns
+`Result<T, String>` for Arrays and `Result<V, String>` for Hashes, with stable
+missing-value messages. Hash key/value enumeration order is unspecified.
 
 `Array<String>` additionally provides package/receiver `join`, and generic
 `Array<T>` provides mutable, strict `pop`. `pop` requires `mut` and raises on

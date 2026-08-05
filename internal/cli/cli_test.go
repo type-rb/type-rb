@@ -116,13 +116,13 @@ func TestReplEvaluatesPortableReceiverMethodsAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "123.to_s()\n\"123\".to_i()\n\"a😀\".size()\n:quit\n"
+		input := "import { Result } from trb/std/result\n123.to_s()\n\"123\".to_i()\n\"123\".try_to_i()\n\"12x\".try_to_i()\n\"9007199254740992\".try_to_i()\n\"a😀\".size()\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "\"123\" : String\n123 : Integer\n2 : Integer\n"
+		want := "\"123\" : String\n123 : Integer\nResult::Ok(value: 123) : Result<Integer, String>\nResult::Err(error: \"invalid Integer\") : Result<Integer, String>\nResult::Err(error: \"Integer is outside the portable range\") : Result<Integer, String>\n2 : Integer\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s receiver-method REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -172,13 +172,13 @@ func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/string_builder\nmut builder := string_builder.from_string(\"A\")\nbuilder.append(\"😀\")\nbuilder.append_codepoint(33)\nbuilder\nbuilder.size()\nsnapshot := builder.to_s()\nbuilder.clear()\nbuilder.to_s()\nsnapshot\n:quit\n"
+		input := "import trb/std/string_builder\nmut builder := string_builder.from_string(\"A\")\nbuilder.empty?()\nbuilder.append(\"😀\")\nbuilder.append_codepoint(33)\nbuilder\nbuilder.size()\nsnapshot := builder.to_s()\nbuilder.clear()\nbuilder.empty?()\nbuilder.to_s()\nsnapshot\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "StringBuilder(\"A\") : StringBuilder\nStringBuilder(\"A😀!\") : StringBuilder\n3 : Integer\n\"A😀!\" : String\n\"\" : String\n\"A😀!\" : String\n"
+		want := "StringBuilder(\"A\") : StringBuilder\nfalse : Boolean\nStringBuilder(\"A😀!\") : StringBuilder\n3 : Integer\n\"A😀!\" : String\ntrue : Boolean\n\"\" : String\n\"A😀!\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s StringBuilder REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -200,13 +200,13 @@ func TestReplEvaluatesPortableArrayAndHashOperationsAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/arrays\nimport trb/std/hashes\nmut numbers := [1, 2]\nnumbers.first()\nnumbers.last()\nnumbers.fetch(1)\nnumbers.empty?()\nnumbers.dup()\narrays.push(numbers, 3)\nnumbers\nlabels: Hash<Integer, String> := {1 => \"one\", 2 => \"two\"}\nlabels.fetch(2)\nlabels.key?(3)\nlabels.keys()\nlabels.values()\nhashes.copy(labels)\n\"a/b/\".split(\"/\")\n\"TypeRB\".start_with?(\"Type\")\n\"TypeRB\".end_with?(\"RB\")\nmut words := [\"root\", \"leaf\"]\nwords.pop()\nwords.join(\"/\")\n:quit\n"
+		input := "import { Result } from trb/std/result\nimport trb/std/arrays\nimport trb/std/hashes\nmut numbers := [1, 2]\nnumbers.first()\nnumbers.last()\nnumbers.fetch(1)\nnumbers.try_fetch(1)\nnumbers.try_fetch(9)\nnumbers.empty?()\nnumbers.dup()\narrays.push(numbers, 3)\nnumbers\nlabels: Hash<Integer, String> := {1 => \"one\", 2 => \"two\"}\nlabels.fetch(2)\nlabels.try_fetch(2)\nlabels.try_fetch(9)\nlabels.key?(3)\nlabels.keys()\nlabels.values()\nhashes.copy(labels)\n\"a/b/\".split(\"/\")\n\"TypeRB\".start_with?(\"Type\")\n\"TypeRB\".end_with?(\"RB\")\nmut words := [\"root\", \"leaf\"]\nwords.pop()\nwords.join(\"/\")\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "[1, 2] : Array<Integer>\n1 : Integer\n2 : Integer\n2 : Integer\nfalse : Boolean\n[1, 2] : Array<Integer>\n[1, 2, 3] : Array<Integer>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"two\" : String\nfalse : Boolean\n[1, 2] : Array<Integer>\n[\"one\", \"two\"] : Array<String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n[\"a\", \"b\", \"\"] : Array<String>\ntrue : Boolean\ntrue : Boolean\n[\"root\", \"leaf\"] : Array<String>\n\"leaf\" : String\n\"root\" : String\n"
+		want := "[1, 2] : Array<Integer>\n1 : Integer\n2 : Integer\n2 : Integer\nResult::Ok(value: 2) : Result<Integer, String>\nResult::Err(error: \"Array index is out of bounds\") : Result<Integer, String>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[1, 2, 3] : Array<Integer>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"two\" : String\nResult::Ok(value: \"two\") : Result<String, String>\nResult::Err(error: \"Hash key is missing\") : Result<String, String>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[\"one\", \"two\"] : Array<String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n[\"a\", \"b\", \"\"] : Array<String>\ntrue : Boolean\ntrue : Boolean\n[\"root\", \"leaf\"] : Array<String>\n\"leaf\" : String\n\"root\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s Array/Hash REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -868,6 +868,69 @@ func TestRunCompilerOwnedUnicodeAcrossAvailableBackends(t *testing.T) {
 		}
 		if want := "15.0.0\ntrue\n😀\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s Unicode program output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby safe-operation run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript safe-operation run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-safe-operation-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := "import { Result } from trb/std/result\n" +
+			"import trb/std/string_builder\n\n" +
+			"def integer_result(value: Result<Integer, String>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error; end; end\n" +
+			"def string_result(value: Result<String, String>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error; end; end\n\n" +
+			"def main()\n" +
+			"\tputs(integer_result(\"12\".try_to_i()))\n" +
+			"\tputs(integer_result(\"12x\".try_to_i()))\n" +
+			"\tputs(integer_result(\"9007199254740992\".try_to_i()))\n" +
+			"\tvalues := [7]\n" +
+			"\tputs(integer_result(values.try_fetch(0)))\n" +
+			"\tputs(integer_result(values.try_fetch(1)))\n" +
+			"\tlabels: Hash<String, String> := {\"name\" => \"Ada\"}\n" +
+			"\tputs(string_result(labels.try_fetch(\"name\")))\n" +
+			"\tputs(string_result(labels.try_fetch(\"missing\")))\n" +
+			"\tbuilder := string_builder.new()\n" +
+			"\tputs(builder.empty?())\n" +
+			"\treturn\n" +
+			"end\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "ok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s safe-operation output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

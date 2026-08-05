@@ -398,6 +398,7 @@ io.puts(strings.uppercase("Hello"))
 
 text := 123.to_s()
 number := "123".to_i()
+safe_number := "123".try_to_i()
 length := "Hello".size()
 ```
 
@@ -405,6 +406,11 @@ Ruby-like receiver methods on portable built-in and standard types resolve to
 the same compiler-owned contracts as their package-function forms. They are
 therefore type checked and lowered consistently instead of exposing Ruby, Go,
 or TypeScript methods directly.
+
+`to_i()` accepts only a complete ASCII decimal integer with an optional sign
+and raises on invalid or non-portable input. `try_to_i()` returns
+`Result<Integer, String>` instead. Portable integers parsed from text are
+limited to JavaScript's exact safe-integer range so all modes agree.
 
 Binary data uses the distinct portable `Bytes` type:
 
@@ -428,6 +434,7 @@ import trb/std/string_builder
 mut builder := string_builder.new()
 builder.append("Hello")
 builder.append_codepoint(33)
+blank := builder.empty?()
 message := builder.to_s()
 ```
 
@@ -438,6 +445,7 @@ Portable collections expose both package and Ruby-like receiver forms:
 ```trb
 import trb/std/arrays
 import trb/std/hashes
+import { Result } from trb/std/result
 
 mut values := [1, 2]
 values.push(3)
@@ -445,11 +453,13 @@ first := arrays.first(values)
 
 labels: Hash<Integer, String> := {1 => "one"}
 known := labels.key?(1)
+label := labels.try_fetch(1)
 keys := hashes.keys(labels)
 ```
 
 These contracts infer `T`, `K`, and `V` from the collection. `fetch`,
-`first`, and `last` are strict; `dup`/`copy` creates a shallow copy.
+`first`, and `last` are strict; `try_fetch` returns `Result<T, String>` or
+`Result<V, String>`; `dup`/`copy` creates a shallow copy.
 
 Portable lexical paths are available as compiler-owned TypeRB code:
 
