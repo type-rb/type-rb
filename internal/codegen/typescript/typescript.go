@@ -263,6 +263,9 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line(header + condition + ") {" + tsTrailingComment(branch.TrailingComment))
 			g.indent++
 			for _, binding := range branch.Bindings {
+				if binding.Name == "_" {
+					continue
+				}
 				g.line("const " + binding.Name + " = " + value + "." + binding.Field + ";")
 			}
 			g.statements(branch.Body)

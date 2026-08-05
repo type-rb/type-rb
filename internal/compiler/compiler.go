@@ -42,13 +42,14 @@ type CompileError struct {
 }
 
 type Options struct {
-	Mode        string
-	Package     string
-	ModulePath  string
-	GoModule    string
-	RubyLoader  string
-	SourceRoot  string
-	ProjectRoot string
+	Mode               string
+	Package            string
+	ModulePath         string
+	GoModule           string
+	RubyLoader         string
+	SourceRoot         string
+	ProjectRoot        string
+	AllowUnusedImports bool
 }
 
 const MainFunction = "main"
@@ -91,7 +92,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 	}
 	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: filename, Declarations: declarations})
 	diagnostics = append(diagnostics, resolveDiagnostics...)
-	checked, checkDiagnostics := checker.Check(program, resolved)
+	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{AllowUnusedImports: options.AllowUnusedImports})
 	diagnostics = append(diagnostics, checkDiagnostics...)
 	if hasErrors(diagnostics) {
 		return nil, &CompileError{Filename: filename, Diagnostics: diagnostics}
@@ -193,7 +194,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	artifacts := make([]*Artifact, 0, len(units))
 	for _, source := range units {
 		program := programs[source.ModulePath]
-		checked, diagnostics := checker.Check(program, resolutions[source.ModulePath])
+		checked, diagnostics := checker.CheckWithOptions(program, resolutions[source.ModulePath], checker.Options{AllowUnusedImports: options.AllowUnusedImports})
 		if hasErrors(diagnostics) {
 			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
 		}

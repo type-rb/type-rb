@@ -542,7 +542,9 @@ func (c *CLI) runRepl(args []string) error {
 			ModulePath: sessionModule,
 			Package:    sessionPackage,
 		})
-		artifacts, err := compiler.CompileProject(units, compilerOptions(config))
+		options := compilerOptions(config)
+		options.AllowUnusedImports = true
+		artifacts, err := compiler.CompileProject(units, options)
 		if err != nil {
 			return nil, err
 		}

@@ -245,6 +245,9 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line(header + condition + " {" + goTrailingComment(branch.TrailingComment))
 			g.indent++
 			for _, binding := range branch.Bindings {
+				if binding.Name == "_" {
+					continue
+				}
 				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
 				g.line(goIdentifier(binding.Name, false) + " := " + value + "." + field)
 			}

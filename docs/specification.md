@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-05
+Last updated: 2026-08-06
 
 ## 1. Language Goals
 
@@ -102,6 +102,10 @@ mode by itself does not enable them.
 ### 3.7 Imports and Formatting
 
 - Imports are explicit in every mode and are resolved before type checking.
+- Every ordinary import must be used. A package import is used by referencing
+  one of its members; every symbol in a named import list must be referenced.
+  Imports that explicitly activate a compiler integration, such as a native
+  syntax or type provider package, count as semantic uses.
 - Project module identities come from paths below `sourceDir`; source files do
   not declare target packages.
 - Portable packages use `trb/std/*`. Mode-specific APIs use mode-checked
@@ -110,6 +114,18 @@ mode by itself does not enable them.
 - Canonical TypeRB indentation is one tab per nesting level. Formatter
   configuration is not part of v0.1; a future configuration surface may
   select a different indentation style without changing language semantics.
+
+#### Unused bindings
+
+- A local binding declared inside a method must be referenced. Iterator block
+  parameters and payload-pattern bindings follow the same rule.
+- The exact name `_` explicitly discards an iterator or pattern value and
+  cannot be read as an expression. More than one binding with the same name,
+  including `_`, remains a duplicate in one block or pattern.
+- Method parameters, fields, constants, and top-level bindings are not subject
+  to the local unused-binding rule. The REPL also permits an import-only
+  submission because a later submission may use it; project builds still
+  enforce ordinary import usage.
 
 ### 3.8 Program Entry
 

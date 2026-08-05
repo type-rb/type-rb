@@ -4,6 +4,7 @@ package checker
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -94,6 +95,8 @@ type symbol struct {
 	owner    string
 	span     token.Span
 	variable *ast.VariableStatement
+	used     *bool
+	useKind  string
 }
 
 type scope struct {
@@ -111,6 +114,17 @@ func (s *scope) lookup(name string) (symbol, bool) {
 		}
 	}
 	return symbol{}, false
+}
+
+func (s *scope) markUsed(name string) {
+	for current := s; current != nil; current = current.parent {
+		if value, ok := current.values[name]; ok {
+			if value.used != nil {
+				*value.used = true
+			}
+			return
+		}
+	}
 }
 
 type classInfo struct {
@@ -147,29 +161,39 @@ type typeDeclaration struct {
 }
 
 type Checker struct {
-	mode            string
-	result          Result
-	diags           []diagnostic.Diagnostic
-	classes         map[string]*classInfo
-	records         map[string]*recordInfo
-	enums           map[string]*enumInfo
-	interfaces      map[string]*ast.InterfaceStatement
-	functions       map[string]*ast.MethodStatement
-	current         *classInfo
-	classMethod     bool
-	initializing    int
-	loopDepth       int
-	moduleDepth     int
-	returns         []types.Type
-	resolution      resolver.Result
-	external        map[ast.Expression]declaration.Member
-	declaredTypes   map[string]typeDeclaration
-	enumCallee      int
-	enumPattern     int
-	enumPatternType types.Type
+	mode               string
+	result             Result
+	diags              []diagnostic.Diagnostic
+	classes            map[string]*classInfo
+	records            map[string]*recordInfo
+	enums              map[string]*enumInfo
+	interfaces         map[string]*ast.InterfaceStatement
+	functions          map[string]*ast.MethodStatement
+	current            *classInfo
+	classMethod        bool
+	initializing       int
+	loopDepth          int
+	moduleDepth        int
+	returns            []types.Type
+	resolution         resolver.Result
+	external           map[ast.Expression]declaration.Member
+	declaredTypes      map[string]typeDeclaration
+	enumCallee         int
+	enumPattern        int
+	enumPatternType    types.Type
+	usedImports        map[*ast.ImportStatement]map[string]bool
+	allowUnusedImports bool
+}
+
+type Options struct {
+	AllowUnusedImports bool
 }
 
 func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnostic.Diagnostic) {
+	return CheckWithOptions(program, resolution, Options{})
+}
+
+func CheckWithOptions(program *ast.Program, resolution resolver.Result, options Options) (Result, []diagnostic.Diagnostic) {
 	c := &Checker{
 		mode: program.Mode,
 		result: Result{
@@ -187,14 +211,16 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
 		},
-		classes:       map[string]*classInfo{},
-		records:       map[string]*recordInfo{},
-		enums:         map[string]*enumInfo{},
-		interfaces:    map[string]*ast.InterfaceStatement{},
-		functions:     map[string]*ast.MethodStatement{},
-		resolution:    resolution,
-		external:      map[ast.Expression]declaration.Member{},
-		declaredTypes: map[string]typeDeclaration{},
+		classes:            map[string]*classInfo{},
+		records:            map[string]*recordInfo{},
+		enums:              map[string]*enumInfo{},
+		interfaces:         map[string]*ast.InterfaceStatement{},
+		functions:          map[string]*ast.MethodStatement{},
+		resolution:         resolution,
+		external:           map[ast.Expression]declaration.Member{},
+		declaredTypes:      map[string]typeDeclaration{},
+		usedImports:        map[*ast.ImportStatement]map[string]bool{},
+		allowUnusedImports: options.AllowUnusedImports,
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ast.MethodStatement); ok {
@@ -204,6 +230,9 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 	c.collect(program.Statements)
 	c.validateTypeReferences(program.Statements)
 	c.checkStatements(program.Statements, &scope{values: map[string]symbol{}, constantsAllowed: true, enumsAllowed: true})
+	if !c.allowUnusedImports {
+		c.checkUnusedImports(program.Statements)
+	}
 	return c.result, c.diags
 }
 
@@ -272,6 +301,9 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 	}
 	for _, argument := range ref.Arguments {
 		c.validateTypeReference(argument)
+	}
+	if binding, imported := c.resolution.ImportedType(ref.Name); imported {
+		c.markImportUsed(binding)
 	}
 	if expected, generic := c.genericTypeArity(ref.Name); generic {
 		if len(ref.Arguments) != expected {
@@ -402,6 +434,7 @@ func (c *Checker) declareType(name, kind string, span token.Span) bool {
 }
 
 func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
+	defer c.checkUnusedBindings(sc)
 	for _, statement := range statements {
 		switch n := statement.(type) {
 		case *ast.ClassStatement:
@@ -508,6 +541,9 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 		case *ast.VariableStatement:
 			valueType := c.checkExpression(n.Value, sc)
 			variableType := valueType
+			if n.Name == "_" {
+				c.error(n.Span(), "blank binding _ is only valid as a parameter or pattern binding")
+			}
 			if n.Constant {
 				if n.Mutable {
 					c.error(n.Span(), fmt.Sprintf("constant %s cannot be declared with mut", n.Name))
@@ -535,7 +571,13 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 				if n.Constant {
 					variableType.Readonly = true
 				}
-				sc.values[n.Name] = symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n}
+				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n}
+				if len(c.returns) > 0 && !n.Constant && n.Name != "_" {
+					used := false
+					declared.used = &used
+					declared.useKind = "local variable"
+				}
+				sc.values[n.Name] = declared
 			}
 			if n.Constant {
 				c.result.ConstantOwners[n] = sc.constantOwner
@@ -635,6 +677,93 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 	}
 }
 
+func (c *Checker) checkUnusedBindings(sc *scope) {
+	type trackedBinding struct {
+		name  string
+		value symbol
+	}
+	tracked := make([]trackedBinding, 0, len(sc.values))
+	for name, value := range sc.values {
+		if value.used != nil && !*value.used {
+			tracked = append(tracked, trackedBinding{name: name, value: value})
+		}
+	}
+	sort.Slice(tracked, func(i, j int) bool {
+		left := tracked[i].value.span.Start.Offset
+		right := tracked[j].value.span.Start.Offset
+		if left == right {
+			return tracked[i].name < tracked[j].name
+		}
+		return left < right
+	})
+	for _, binding := range tracked {
+		c.error(binding.value.span, fmt.Sprintf("%s %s is not used", binding.value.useKind, binding.name))
+	}
+}
+
+func (c *Checker) markImportUsed(binding resolver.Binding) {
+	if binding.Import == nil || binding.Import.Node == nil {
+		return
+	}
+	c.markImportNodeUsed(binding.Import, binding.Name)
+}
+
+func (c *Checker) recordReference(expression ast.Expression, binding resolver.Binding) {
+	c.result.References[expression] = binding
+	c.markImportUsed(binding)
+	if binding.Library != nil {
+		for _, name := range binding.Library.RequiredSymbols {
+			c.markImportedSymbolUsed(name)
+		}
+	}
+}
+
+func (c *Checker) markImportedSymbolUsed(name string) {
+	if binding, ok := c.resolution.Symbols[name]; ok {
+		c.markImportUsed(binding)
+	}
+}
+
+func (c *Checker) markImportNodeUsed(imported *resolver.Import, symbolName string) {
+	if imported == nil || imported.Node == nil {
+		return
+	}
+	used := c.usedImports[imported.Node]
+	if used == nil {
+		used = map[string]bool{}
+		c.usedImports[imported.Node] = used
+	}
+	used[""] = true
+	if symbolName != "" {
+		used[symbolName] = true
+	}
+}
+
+func (c *Checker) checkUnusedImports(statements []ast.Statement) {
+	for _, statement := range statements {
+		node, ok := statement.(*ast.ImportStatement)
+		if !ok {
+			continue
+		}
+		imported := c.resolution.Imports[node]
+		if imported == nil || imported.Definition != nil && (imported.Definition.NativeSyntax || imported.Definition.TypeProvider != "") {
+			continue
+		}
+		used := c.usedImports[node]
+		if len(node.Symbols) == 0 {
+			if !used[""] {
+				c.error(node.Span(), fmt.Sprintf("import %s is not used", node.Path))
+			}
+			continue
+		}
+		for _, name := range node.Symbols {
+			if !used[name] {
+				c.error(node.Span(), fmt.Sprintf("imported symbol %s is not used", name))
+			}
+		}
+	}
+}
+
 func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, construct string) {
 	typ := c.checkExpression(expression, sc)
 	if typ.Kind == types.Invalid || typ.Kind == types.Bool && !typ.Nullable {
@@ -696,7 +825,13 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 					continue
 				}
 				field := variant.Fields[index]
-				branchScope.values[binding.Name] = symbol{typ: field.Type, span: binding.Span()}
+				declared := symbol{typ: field.Type, span: binding.Span()}
+				if binding.Name != "_" {
+					used := false
+					declared.used = &used
+					declared.useKind = "pattern binding"
+				}
+				branchScope.values[binding.Name] = declared
 				bindings = append(bindings, CaseBinding{Name: binding.Name, Field: field})
 			}
 			c.result.CasePatterns[branch.Value] = CasePattern{
@@ -1344,10 +1479,12 @@ func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
 	}
 	if name == "ReactComponent" {
 		if imported := c.resolution.Packages["react"]; imported != nil && imported.Path == "trb/platform/typescript/react" {
+			c.markImportNodeUsed(imported, "")
 			return
 		}
 	}
 	if imported, ok := c.resolution.ImportedType(name); ok && imported.Export.Kind == resolver.ClassExport {
+		c.markImportUsed(imported)
 		return
 	}
 	if _, ok := c.declarations().Type(name); ok {
@@ -1378,6 +1515,7 @@ func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
 				required[method.Name] = signatureFromMethod(method)
 			}
 		} else if imported, ok := c.resolution.ImportedType(interfaceName); ok && imported.Export.Kind == resolver.InterfaceExport {
+			c.markImportUsed(imported)
 			for name, member := range imported.Export.Members {
 				required[name] = signatureFromResolvedMember(member)
 			}
@@ -1641,14 +1779,20 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	typ := types.Type{Kind: types.Any, Name: "Any"}
 	switch n := expression.(type) {
 	case *ast.Identifier:
+		if n.Name == "_" {
+			c.error(n.Span(), "blank binding _ cannot be used as a value")
+			typ = invalidType()
+			break
+		}
 		if value, ok := sc.lookup(n.Name); ok {
 			typ = value.typ
+			sc.markUsed(n.Name)
 			if value.constant {
 				c.result.Constants[n] = value.owner
 			}
 		} else if binding, ok := c.resolution.Symbols[n.Name]; ok {
 			typ = binding.Type()
-			c.result.References[n] = binding
+			c.recordReference(n, binding)
 		} else if member, ok := c.currentDeclarationMember(n.Name); ok {
 			typ = member.Return
 			c.external[n] = member
@@ -1806,7 +1950,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.error(n.Block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
 					continue
 				}
-				blockScope.values[name] = symbol{typ: parameterType, mutable: true, span: n.Block.Span()}
+				declared := symbol{typ: parameterType, mutable: true, span: n.Block.Span()}
+				if name != "_" {
+					used := false
+					declared.used = &used
+					declared.useKind = "block parameter"
+				}
+				blockScope.values[name] = declared
 			}
 			if transform {
 				if len(n.Block.Body) != 1 {
@@ -1853,6 +2003,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = types.Type{Kind: types.Void, Name: "Void"}
 		}
 	case *ast.GenericExpression:
+		for _, argument := range n.Arguments {
+			c.validateTypeReference(argument)
+		}
 		receiverType := c.checkExpression(n.Receiver, sc)
 		application, ok := c.resolveGenericApplication(n)
 		if !ok {
@@ -1870,9 +2023,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		classAccess := c.classMemberAccess(n.Receiver, sc)
 		if identifier, ok := n.Receiver.(*ast.Identifier); ok {
 			if imported := c.resolution.Packages[identifier.Name]; imported != nil {
+				c.markImportNodeUsed(imported, "")
 				if binding, exists := c.resolution.Member(identifier.Name, n.Name); exists {
 					typ = binding.Type()
-					c.result.References[n] = binding
+					c.recordReference(n, binding)
 				} else {
 					c.error(n.Span(), fmt.Sprintf("package %s does not export %s", imported.Path, n.Name))
 				}
@@ -1894,7 +2048,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				break
 			}
 			if binding, exists := c.resolution.TypeMember(receiverType.Name, n.Name); exists {
-				c.result.References[n] = binding
+				c.recordReference(n, binding)
 			}
 			typ = receiverType
 			if len(variant.Fields) > 0 && c.enumCallee == 0 && c.enumPattern == 0 {
@@ -1915,7 +2069,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if !classAccess && !n.Namespace {
 			if binding, exists := c.resolution.ReceiverMethod(receiverType, n.Name); exists {
 				typ = binding.Type()
-				c.result.References[n] = binding
+				c.recordReference(n, binding)
 				break
 			}
 		}
@@ -1931,7 +2085,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = member.typ
 		} else if binding, exists := c.importedAncestorMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = binding.Type()
-			c.result.References[n] = binding
+			c.markImportedSymbolUsed(receiverType.Name)
+			c.recordReference(n, binding)
 		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = member.Return
 			c.external[n] = member
@@ -1949,6 +2104,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 				c.error(n.Span(), fmt.Sprintf("class %s has no %s member %s", receiverType.Name, kind, n.Name))
 			} else if imported, exists := c.resolution.ImportedType(receiverType.Name); exists {
+				c.markImportUsed(imported)
 				c.error(n.Span(), fmt.Sprintf("type %s imported from %s has no member %s", receiverType.Name, imported.Import.Path, n.Name))
 			} else if declared, exists := c.declarations().Type(receiverType.Name); exists {
 				c.error(n.Span(), fmt.Sprintf("type %s provided by Rails has no member %s", declared.Name, n.Name))

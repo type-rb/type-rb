@@ -92,7 +92,7 @@ func TestRunRejectsHostAndPlatformPackages(t *testing.T) {
 	for _, source := range []string{
 		"import trb/std/filesystem\nfilesystem.exists(\".\")\n",
 		"import trb/std/process\nprocess.argv()\n",
-		"import trb/platform/go/http\n",
+		"import trb/platform/go/http\nhttp.router()\n",
 	} {
 		result := post(t, Handler(Options{Mode: "go"}), "/api/run", request{Source: source, Mode: "go"})
 		if result.OK || len(result.Diagnostics) == 0 || !strings.Contains(result.Diagnostics[0].Message, "not available in the browser playground") {
