@@ -12,14 +12,15 @@ larger applications.
 ## Language and libraries
 
 - [Language guide](language.md)
-- [Language specification](../SPEC.md)
+- [Language specification](specification.md)
 - [Standard library](standard-library.md)
 - [Rails guide](guides/rails.md)
 
 ## Project
 
-- [Current status](../STATUS.md)
-- [Roadmap](../ROADMAP.md)
+- [Current status](status.md)
+- [Roadmap](roadmap.md)
+- [Project plan](project-plan.md)
 - [Development and compiler architecture](development.md)
 - [Release process](releasing.md)
 - [Architecture decisions](decisions/)

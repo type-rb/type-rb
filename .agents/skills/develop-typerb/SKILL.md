@@ -5,7 +5,8 @@ description: Evolve the TypeRB language and toolchain. Use when changing TypeRB 
 
 # Develop TypeRB
 
-Read `SPEC.md` and the relevant implementation before changing behavior.
+Read `docs/specification.md` and the relevant implementation before changing
+behavior.
 
 Preserve these invariants:
 
@@ -21,5 +22,6 @@ For each coherent change:
 2. Exercise the typed-IR REPL when runtime expression semantics change.
 3. Run `GOCACHE=/tmp/type-rb-go-cache go test ./...` and `trb fmt --check .`.
 4. Check affected examples with `trb build --check`.
-5. Update `SPEC.md`, `STATUS.md`, or `ROADMAP.md` only where behavior or status changed.
+5. Update `docs/specification.md`, `docs/status.md`, or `docs/roadmap.md` only
+   where behavior or status changed.
 6. Commit the completed work unit. Use Go 1.26 and current target language features; legacy target versions are out of scope.

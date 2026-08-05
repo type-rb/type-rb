@@ -185,7 +185,7 @@ import { ProcessError, ProcessResult, run } from trb/std/process
 import { Result } from trb/std/result
 
 def run_formatter(files: Array<String>): Result<ProcessResult, ProcessError>
-	return run("gofmt", files)
+	return run("formatter", files)
 end
 ```
 
@@ -262,6 +262,5 @@ The current portable standard library includes:
 - `trb/std/result`
 - `trb/std/unit`
 
-Platform packages are mode checked. Examples include
-`trb/platform/go/http`, `trb/platform/ruby/rails`, and
-`trb/platform/typescript/react`.
+Platform packages are mode checked and remain separate from the portable
+standard library.

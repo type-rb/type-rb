@@ -26,8 +26,9 @@ Run the full checks, create the version tag, and push it:
 ```sh
 go test ./...
 ./scripts/check-self-host.sh
-git tag v0.1.0
-git push origin v0.1.0
+release_version=X.Y.Z
+git tag "v${release_version}"
+git push origin "v${release_version}"
 ```
 
 The release workflow then:
@@ -47,7 +48,7 @@ brew install type-rb/tap/trb
 To render a Formula without making a release:
 
 ```sh
-./scripts/package-release.sh 0.1.0 /tmp/type-rb-release
+./scripts/package-release.sh X.Y.Z /tmp/type-rb-release
 ```
 
 That directory contains the four archives, their checksums, and the rendered

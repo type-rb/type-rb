@@ -5,7 +5,7 @@ mode selects code generation and package tooling, while explicit imports expose
 target-specific APIs.
 
 This guide summarizes the implemented language. The
-[specification](../SPEC.md) is the detailed source of truth.
+[specification](specification.md) is the detailed source of truth.
 
 ## Program structure
 
@@ -151,13 +151,13 @@ classes, and a final field/method collision rule remain alpha design work.
 `record` declares a closed product type for data shared across targets:
 
 ```trb
-record TodoItem
+record Message
 	id: Integer
-	title: String
-	completed: Boolean
+	text: String
+	delivered: Boolean
 end
 
-item := TodoItem.new(id: 1, title: "Try TypeRB", completed: false)
+message := Message.new(id: 1, text: "Hello", delivered: false)
 ```
 
 Construction is keyword-only and checks the complete field set. Records cannot

@@ -2,11 +2,12 @@
 
 This roadmap records the capabilities required to move TypeRB from the current
 alpha compiler to a language that can be used for maintained production
-applications. Ordering may change as real Go, Ruby/Rails, and TypeScript/React
-projects expose missing language features.
+applications. Ordering may change as real Go, Ruby, and TypeScript projects
+expose missing language features.
 
-For implemented behavior, see `STATUS.md`. Language decisions belong in
-`SPEC.md`; this document tracks outcomes rather than detailed syntax.
+For implemented behavior, see [status.md](status.md). Language decisions belong
+in [specification.md](specification.md); this document tracks outcomes rather
+than detailed syntax.
 
 ## 1. Complete the portable language core
 
@@ -79,11 +80,12 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 - Extend the generated JSON codecs and client/server contracts from shared
   records with versioned wire fields, validation policy, schema export, and
   compatibility checking.
-- Continue the Go API, Rails, and React vertical slices with authentication,
-  validation, transactions, background work, and realistic failure paths.
+- Continue representative backend, server-rendered, and browser application
+  slices with authentication, validation, transactions, background work, and
+  realistic failure paths.
 - Separate one-shot `trb run` from framework development servers and add a
-  coherent `trb dev`/runtime-adapter model for Rails, Vite, and future TypeRB
-  frameworks.
+  coherent `trb dev` and runtime-adapter model for backend and frontend
+  development servers.
 - Define database migration/schema workflows without making ordinary compiler
   commands perform surprising destructive operations.
 
