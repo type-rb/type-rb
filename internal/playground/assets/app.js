@@ -47,7 +47,7 @@ const state = {
 	mode: "go",
 	lessons: [],
 	lessonIndex: -1,
-	completed: new Set(readJSON("trb.tour.v1.completed", [])),
+	completed: new Set(readJSON("trb.tour.v2.completed", [])),
 	baseline: "",
 	busy: false,
 };
@@ -370,16 +370,25 @@ function persistSource() {
 }
 
 function lessonStorageKey(id) {
-	return `trb.tour.v1.source.${id}`;
+	return `trb.tour.v2.source.${id}`;
 }
 
 function renderLessonList() {
 	elements.lessonList.replaceChildren();
+	let chapter = "";
 	state.lessons.forEach((lesson, index) => {
+		if (lesson.chapter !== chapter) {
+			chapter = lesson.chapter;
+			const heading = document.createElement("li");
+			heading.className = "lesson-chapter";
+			heading.textContent = chapter;
+			elements.lessonList.append(heading);
+		}
 		const item = document.createElement("li");
 		const button = document.createElement("button");
 		button.type = "button";
 		button.className = "lesson-button";
+		button.classList.toggle("complete", state.completed.has(lesson.id));
 		button.dataset.index = String(index);
 		button.innerHTML = `<span class="lesson-number">${state.completed.has(lesson.id) ? "✓" : String(index + 1).padStart(2, "0")}</span><span>${escapeHTML(lesson.title)}</span>`;
 		button.addEventListener("click", () => selectLesson(index));
@@ -416,7 +425,7 @@ function completeCurrentLesson() {
 	const lesson = state.lessons[state.lessonIndex];
 	if (!lesson) return;
 	state.completed.add(lesson.id);
-	localStorage.setItem("trb.tour.v1.completed", JSON.stringify([...state.completed]));
+	localStorage.setItem("trb.tour.v2.completed", JSON.stringify([...state.completed]));
 	renderLessonList();
 	for (const button of elements.lessonList.querySelectorAll(".lesson-button")) {
 		button.classList.toggle("active", Number(button.dataset.index) === state.lessonIndex);

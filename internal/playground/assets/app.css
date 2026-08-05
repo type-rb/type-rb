@@ -767,6 +767,19 @@ body.tour-page .tour-footer {
 	list-style: none;
 }
 
+.lesson-chapter {
+	margin: 19px 8px 6px;
+	color: var(--subtle);
+	font-size: 9px;
+	font-weight: 750;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+}
+
+.lesson-chapter:first-child {
+	margin-top: 0;
+}
+
 .lesson-button {
 	display: grid;
 	grid-template-columns: 22px 1fr;

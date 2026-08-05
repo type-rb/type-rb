@@ -24,18 +24,30 @@ To build the compiler from source, use Go 1.26:
 go install github.com/type-rb/type-rb/cmd/trb@latest
 ```
 
-## Try TypeRB
+## Playground
 
-Open the local browser playground or follow the guided language tour:
+Open a local browser playground for experimenting with TypeRB:
 
 ```sh
 trb play
+```
+
+It can execute, format, and transpile scratch TypeRB while switching between
+Go, Ruby, and TypeScript output. The server listens only on your local machine.
+
+## Tour
+
+Learn the language through a guided, executable tour:
+
+```sh
 trb tour
 ```
 
-Both commands run locally and open a browser. The playground can execute,
-format, and transpile scratch TypeRB while switching between Go, Ruby, and
-TypeScript output.
+The four chapters cover values and bindings, program structure, data and error
+modeling, and portable code across all three targets. Every lesson can be
+edited, run, formatted, and transpiled in the browser.
+
+## REPL
 
 For a terminal workflow, start a typed REPL from any directory. It uses Go
 mode when no project configuration is present:

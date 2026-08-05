@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -114,18 +115,26 @@ func TestAPIRejectsCrossOriginRequests(t *testing.T) {
 
 func TestTourCatalogHasStableUniqueLessons(t *testing.T) {
 	lessons := Tour()
-	if len(lessons) < 6 {
-		t.Fatalf("tour is too short: %d lessons", len(lessons))
+	if len(lessons) != 12 {
+		t.Fatalf("tour has %d lessons, want 12", len(lessons))
 	}
 	seen := map[string]bool{}
+	chapters := []string{}
 	for _, lesson := range lessons {
-		if lesson.ID == "" || lesson.Title == "" || lesson.Source == "" || lesson.Expected == "" {
+		if lesson.ID == "" || lesson.Chapter == "" || lesson.Title == "" || lesson.Source == "" || lesson.Expected == "" {
 			t.Fatalf("incomplete lesson: %#v", lesson)
 		}
 		if seen[lesson.ID] {
 			t.Fatalf("duplicate lesson id %q", lesson.ID)
 		}
 		seen[lesson.ID] = true
+		if len(chapters) == 0 || chapters[len(chapters)-1] != lesson.Chapter {
+			chapters = append(chapters, lesson.Chapter)
+		}
+	}
+	wantChapters := []string{"Start", "Write programs", "Model data and errors", "Portability"}
+	if !slices.Equal(chapters, wantChapters) {
+		t.Fatalf("tour chapters=%v, want %v", chapters, wantChapters)
 	}
 }
 
