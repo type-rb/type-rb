@@ -702,6 +702,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "{ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + " } satisfies " + errorType
 		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
+	processError := func(operation, command, message string) string {
+		_, successType, errorType := filesystemResultType()
+		value := "{ operation: " + strconv.Quote(operation) + ", command: " + command + ", message: " + message + " } satisfies " + errorType
+		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
+	}
 	resultError := func(value string) string {
 		_, successType, errorType := filesystemResultType()
 		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
@@ -747,6 +752,17 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		resultType, _, _ := filesystemResultType()
 		compare := "(left, right) => { const leftBytes = new TextEncoder().encode(left); const rightBytes = new TextEncoder().encode(right); const length = Math.min(leftBytes.length, rightBytes.length); for (let index = 0; index < length; index += 1) { if (leftBytes[index] !== rightBytes[index]) { return leftBytes[index]! - rightBytes[index]!; } } return leftBytes.length - rightBytes.length; }"
 		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "const names = (fs.readdirSync(__trbPath) as Array<string>).sort(" + compare + "); return " + filesystemOK("names") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("list", "__trbPath", "message") + "; } })()"
+	case "trb.internal.process.arguments":
+		return `(Reflect.get(globalThis, "process")?.argv ?? []).slice(2)`
+	case "trb.internal.process.environment":
+		return "Reflect.get(globalThis, \"process\")?.env?.[" + arguments[0] + "] ?? null"
+	case "trb.internal.process.working_directory":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { try { const host = Reflect.get(globalThis, \"process\"); if (host?.cwd === undefined) { throw new Error(\"process working directory is unavailable\"); } return " + filesystemOK("host.cwd()") + "; } catch (error) { " + filesystemMessage + "return " + processError("working_directory", strconv.Quote(""), "message") + "; } })()"
+	case "trb.internal.process.run":
+		resultType, successType, _ := filesystemResultType()
+		value := "{ status, stdout: decode(output.stdout), stderr: decode(output.stderr), success: status === 0 } satisfies " + successType
+		return "((): " + resultType + " => { const __trbCommand = " + arguments[0] + "; const __trbArguments = " + arguments[1] + "; try { const host = Reflect.get(globalThis, \"process\"); const childProcess = host?.getBuiltinModule?.(\"child_process\"); if (childProcess === undefined) { throw new Error(\"process execution is unavailable\"); } const output = childProcess.spawnSync(__trbCommand, __trbArguments); if (output.error !== undefined) { throw output.error; } const status = typeof output.status === \"number\" ? output.status : -1; const decode = (value: Uint8Array | undefined): string => new TextDecoder(\"utf-8\").decode(value ?? new Uint8Array()); return " + filesystemOK(value) + "; } catch (error) { " + filesystemMessage + "return " + processError("run", "__trbCommand", "message") + "; } })()"
 	case "trb.internal.json.parse":
 		if runtimeCall, ok := g.importedJSONCall(call, "trb/std/json/index", arguments); ok {
 			return runtimeCall

@@ -514,6 +514,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "FileError.new(operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ")"
 		return "Result::Err.new(" + value + ")"
 	}
+	processError := func(operation, command, message string) string {
+		value := "ProcessError.new(operation: " + strconv.Quote(operation) + ", command: " + command + ", message: " + message + ")"
+		return "Result::Err.new(" + value + ")"
+	}
 	switch name {
 	case "trb.std.io.puts":
 		return "$stdout.puts(" + strings.Join(arguments, ", ") + ")"
@@ -546,6 +550,16 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(path) { begin; require \"fileutils\"; FileUtils.mkdir_p(path); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + filesystemError("create_directory", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
 	case "trb.internal.filesystem.list":
 		return "->(path) { begin; " + filesystemOK("Dir.children(path).sort") + "; rescue StandardError => error; " + filesystemError("list", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.internal.process.arguments":
+		return "ARGV.dup"
+	case "trb.internal.process.environment":
+		return "ENV[" + arguments[0] + "]"
+	case "trb.internal.process.working_directory":
+		return "-> { begin; " + filesystemOK("Dir.pwd") + "; rescue StandardError => error; " + processError("working_directory", strconv.Quote(""), "error.message") + "; end }.call"
+	case "trb.internal.process.run":
+		text := "->(value) { value.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace) }"
+		value := "ProcessResult.new(status: status.exitstatus || -1, stdout: text.call(stdout), stderr: text.call(stderr), success: status.success?)"
+		return "->(command, arguments) { begin; require \"open3\"; stdout, stderr, status = Open3.capture3(command, *arguments); text = " + text + "; " + filesystemOK(value) + "; rescue StandardError => error; " + processError("run", "command", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.internal.json.parse":
 		return rubyJSONParse(arguments[0], false)
 	case "trb.internal.json.parse_jsonc":

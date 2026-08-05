@@ -323,6 +323,46 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableProcessAcrossModes(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh is unavailable")
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-process-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("TRB_PROCESS_REPL_TEST", "available")
+		input := "import trb/std/process\n" +
+			"import { Result } from trb/std/result\n" +
+			"def describe(value: Result<ProcessResult, ProcessError>): String; case value; when Result::Ok(result); return result.status.to_s() + \":\" + result.stdout + \":\" + result.stderr; when Result::Err(error); return error.operation; end; end\n" +
+			"def operation(value: Result<ProcessResult, ProcessError>): String; case value; when Result::Ok(result); return result.stdout; when Result::Err(error); return error.operation; end; end\n" +
+			"process.argv()\n" +
+			"process.environment(\"TRB_PROCESS_REPL_TEST\")\n" +
+			"describe(process.run(\"/bin/sh\", [\"-c\", \"printf out; printf err >&2; exit 3\"]))\n" +
+			"empty_args: Array<String> := []\n" +
+			"operation(process.run(\"/type-rb-command-that-does-not-exist\", empty_args))\n" +
+			":quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "[] : Array<String>\n\"available\" : String?\n\"3:out:err\" : String\n[] : Array<String>\n\"run\" : String\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s process REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableJSONAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -1084,6 +1124,103 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 		}
 		if want := "A😀\nread_text\nnote.txt,\uE000,\U00010000\ntrue\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s filesystem program output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunCompilerOwnedProcessAcrossAvailableBackends(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh is unavailable")
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby process run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript process run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-process-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { ProcessError, ProcessResult, argv, run, working_directory } from trb/std/process
+import { Result } from trb/std/result
+
+def describe(value: Result<ProcessResult, ProcessError>): String
+	case value
+	when Result::Ok(result)
+		return result.status.to_s() + ":" + result.stdout + ":" + result.stderr
+	when Result::Err(error)
+		return "error:" + error.operation
+	end
+end
+
+def succeeded(value: Result<ProcessResult, ProcessError>): Boolean
+	case value
+	when Result::Ok(result)
+		return result.success
+	when Result::Err(error)
+		return error.message.empty?()
+	end
+end
+
+def operation(value: Result<ProcessResult, ProcessError>): String
+	case value
+	when Result::Ok(result)
+		return result.stdout
+	when Result::Err(error)
+		return error.operation
+	end
+end
+
+def directory_available(value: Result<String, ProcessError>): Boolean
+	case value
+	when Result::Ok(directory)
+		return !directory.empty?()
+	when Result::Err(error)
+		return error.message.empty?()
+	end
+end
+
+def main()
+	result := run("/bin/sh", ["-c", "printf out; printf err >&2; exit 7"])
+	puts(describe(result))
+	puts(succeeded(result))
+	empty_arguments: Array<String> := []
+	puts(operation(run("/type-rb-command-that-does-not-exist", empty_arguments)))
+	puts(directory_available(working_directory()))
+	puts(argv().size())
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "7:out:err\nfalse\nrun\ntrue\n0\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s process output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

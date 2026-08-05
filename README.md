@@ -513,6 +513,22 @@ creation return `Result<Unit, FileError>`: `Unit` is the portable value meaning
 "completed", while `Void` remains the absence of a return value and is omitted
 from function declarations.
 
+Host process access is also explicit and never invokes a shell implicitly:
+
+```trb
+import { ProcessError, ProcessResult, run } from trb/std/process
+import { Result } from trb/std/result
+
+def run_formatter(files: Array<String>): Result<ProcessResult, ProcessError>
+	return run("gofmt", files)
+end
+```
+
+`trb/std/process` provides `argv`, nullable environment lookup,
+`working_directory`, and captured execution. A non-zero exit is
+`Ok(ProcessResult)` with `success == false`; `Err(ProcessError)` means the
+process could not be started or the host operation itself failed.
+
 Portable JSON and JSONC provide typed record codecs in addition to an explicit
 value enum:
 
@@ -561,8 +577,8 @@ identifier classification.
 v0.1 includes `trb/std/io`, `trb/std/strings`, `trb/std/bytes`,
 `trb/std/string_builder`, `trb/std/unicode`, `trb/std/arrays`,
 `trb/std/hashes`, `trb/std/path`, `trb/std/filesystem`, `trb/std/numbers`,
-`trb/std/json`, `trb/std/jsonc`, `trb/std/unit`, and `trb/std/result`. Result is
-imported as a named portable type and handled
+`trb/std/json`, `trb/std/jsonc`, `trb/std/process`, `trb/std/unit`, and
+`trb/std/result`. Result is imported as a named portable type and handled
 through ordinary exhaustive enum matching:
 
 ```trb

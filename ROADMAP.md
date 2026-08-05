@@ -64,10 +64,10 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 
 ## 5. Standard library and package ecosystem
 
-- Expand the compiler-owned standard library beyond the current Result,
-  Unit, collection, Unicode, path, filesystem, and typed JSON/JSONC baseline
-  with time, environment, process, regular-expression, HTTP, and encoding
-  packages where semantics can be made consistent across targets.
+- Expand the compiler-owned standard library beyond the current Result, Unit,
+  collection, Unicode, path, filesystem, process, and typed JSON/JSONC baseline
+  with time, regular-expression, HTTP, and encoding packages where semantics
+  can be made consistent across targets.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
 - Stabilize compiler-owned library type providers so gems, Go modules, and npm
   packages do not require application-authored signature files.

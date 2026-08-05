@@ -601,6 +601,21 @@ current Node host filesystem; a
 runtime without that host API returns `Err` rather than exposing
 browser-specific behavior.
 
+`trb/std/process` is the explicit host-process bridge. It exports `argv()`,
+`environment(name)`, `working_directory()`, and `run(command, args)`, plus
+`ProcessResult` and `ProcessError`. `argv` excludes the executable name.
+Missing environment variables return `nil` through `String?`, while
+`working_directory` returns `Result<String, ProcessError>`.
+
+`run` accepts a command String and a separate `Array<String>` of arguments and
+never inserts a shell. It captures stdout and stderr as UTF-8 Strings, replacing
+invalid input with U+FFFD. A process that starts and exits with any status
+returns `Ok(ProcessResult)`; the record contains `status`, `stdout`, `stderr`,
+and `success`. Launch or host failures return `Err(ProcessError)` with
+`operation`, `command`, and `message`. Working-directory selection, stdin,
+streaming, signals, timeouts, and explicit process exit are outside the v0.1
+API.
+
 `trb/std/json` provides the portable JSON value model. `JsonValue` is a
 payload enum with `Null`, `Boolean`, `Integer`, `Float`, `String`, `Array`, and
 `Object` variants. `parse` and `stringify` return `Result` values carrying a

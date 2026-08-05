@@ -73,9 +73,9 @@ Implemented:
   and interface conformance, with target-relative backend imports.
 - Portable `trb/std/io`, `trb/std/strings`, `trb/std/arrays`, `trb/std/hashes`,
   `trb/std/bytes`, `trb/std/string_builder`, `trb/std/unicode`,
-  `trb/std/path`, `trb/std/filesystem`, `trb/std/numbers`, and
-  `trb/std/result` packages, plus portable `Unit` values and mode-checked Ruby,
-  Go, and TypeScript platform packages.
+  `trb/std/path`, `trb/std/filesystem`, `trb/std/process`, `trb/std/numbers`,
+  and `trb/std/result` packages, plus portable `Unit` values and mode-checked
+  Ruby, Go, and TypeScript platform packages.
 - Compiler-owned receiver-method contracts shared with portable package APIs,
   including strict and Result-returning integer conversion and Unicode-aware
   `String#size` across the checker, typed IR, all backends, and the REPL.
@@ -108,6 +108,9 @@ Implemented:
   sorted listing, meaningful `Result<Unit, FileError>` mutation results, an
   inaccessible internal intrinsic boundary, runnable Go, Ruby, and TypeScript
   output, and matching typed-IR REPL execution.
+- A compiler-owned portable process facade with argv/environment/working
+  directory access, shell-free captured execution, typed non-zero exits versus
+  launch errors, runnable Go/Ruby/TypeScript output, and REPL execution.
 - A compiler-owned portable JSON/JSONC value model with typed syntax, decode,
   and encode errors, JSON Pointer paths, comment-aware JSONC parsing, strict
   trailing-comma rejection, safe cross-target number semantics, runnable Go,
@@ -164,7 +167,7 @@ The broader path to practical production use is tracked in `ROADMAP.md`.
    baseline and add the remaining small receiver APIs needed by real
    standard-library code; safe conversion and lookup Results are available as
    the explicit failure baseline.
-2. Add process APIs required to move the lexer/parser into the stage-1
+2. Exercise the process APIs while moving the lexer/parser into the stage-1
    self-host tree. Revisit concise Result propagation syntax only after
    explicit Result handling has been exercised in real application code.
 3. Add a concise React view/component syntax above the current explicit element

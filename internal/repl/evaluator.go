@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"bytes"
 	"context"
 	stdjson "encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"os/exec"
 	pathpkg "path"
 	"reflect"
 	"sort"
@@ -1409,6 +1411,71 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
 		return e.filesystemOK(typ, Value{Type: arrayType, Data: &arrayValue{Items: items}})
+	case "trb.internal.process.arguments":
+		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
+		return Value{Type: arrayType, Data: &arrayValue{}}, nil
+	case "trb.internal.process.environment":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		name, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("process.environment expects String")
+		}
+		value, found := os.LookupEnv(name)
+		if !found {
+			return Value{Type: typ, Data: nil}, nil
+		}
+		return Value{Type: typ, Data: value}, nil
+	case "trb.internal.process.working_directory":
+		directory, err := os.Getwd()
+		if err != nil {
+			return e.processErr(typ, "working_directory", "", err)
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: directory})
+	case "trb.internal.process.run":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		commandName, commandOK := values[0].Data.(string)
+		argumentValues, argumentsOK := values[1].Data.(*arrayValue)
+		if !commandOK || !argumentsOK {
+			return Value{}, errors.New("process.run expects a String command and Array<String> arguments")
+		}
+		commandArguments := make([]string, len(argumentValues.Items))
+		for index, argument := range argumentValues.Items {
+			value, ok := argument.Data.(string)
+			if !ok {
+				return Value{}, errors.New("process.run arguments must be String")
+			}
+			commandArguments[index] = value
+		}
+		command := exec.CommandContext(e.context, commandName, commandArguments...)
+		var stdout, stderr bytes.Buffer
+		command.Stdout = &stdout
+		command.Stderr = &stderr
+		runErr := command.Run()
+		status := int64(0)
+		if runErr != nil {
+			var exitError *exec.ExitError
+			if errors.As(runErr, &exitError) {
+				status = int64(exitError.ExitCode())
+			} else {
+				return e.processErr(typ, "run", commandName, runErr)
+			}
+		}
+		definition, ok := e.definitions[symbolKey("trb/std/process/index", "ProcessResult")].(*recordDefinition)
+		if !ok {
+			return Value{}, errors.New("process.run requires trb/std/process")
+		}
+		fields := map[string]Value{
+			"status":  {Type: types.FromName("Integer"), Data: status},
+			"stdout":  {Type: types.FromName("String"), Data: strings.ToValidUTF8(stdout.String(), "�")},
+			"stderr":  {Type: types.FromName("String"), Data: strings.ToValidUTF8(stderr.String(), "�")},
+			"success": {Type: types.FromName("Boolean"), Data: status == 0},
+		}
+		value := Value{Type: types.FromName("ProcessResult"), Data: &recordInstance{Definition: definition, Fields: fields}}
+		return e.filesystemOK(typ, value)
 	case "trb.internal.json.parse", "trb.internal.json.parse_jsonc":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -2038,6 +2105,23 @@ func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string,
 			Payload:    map[string]Value{"error": errorValue},
 		},
 	}, nil
+}
+
+func (e *Evaluator) processErr(resultType types.Type, operation, command string, cause error) (Value, error) {
+	resultDefinition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("process operation requires trb/std/result")
+	}
+	errorDefinition, ok := e.definitions[symbolKey("trb/std/process/index", "ProcessError")].(*recordDefinition)
+	if !ok {
+		return Value{}, errors.New("process operation requires trb/std/process")
+	}
+	errorValue := Value{Type: types.FromName("ProcessError"), Data: &recordInstance{Definition: errorDefinition, Fields: map[string]Value{
+		"operation": {Type: types.FromName("String"), Data: operation},
+		"command":   {Type: types.FromName("String"), Data: command},
+		"message":   {Type: types.FromName("String"), Data: cause.Error()},
+	}}}
+	return Value{Type: resultType, Data: &enumValue{Definition: resultDefinition, Name: "Err", Payload: map[string]Value{"error": errorValue}}}, nil
 }
 
 func (e *Evaluator) parseJSON(resultType types.Type, source string) (Value, error) {

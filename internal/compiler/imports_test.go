@@ -1059,6 +1059,98 @@ func TestPortableFilesystemPackageDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableProcessPackageLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { ProcessError, ProcessResult, run } from trb/std/process
+import { Result } from trb/std/result
+
+def execute(command: String, args: Array<String>): Result<ProcessResult, ProcessError>
+	return run(command, args)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`exec.Command(commandName, commandArguments...)`,
+			`ProcessResult{Status: status`,
+			`os.LookupEnv(`,
+		},
+		"ruby": {
+			`Open3.capture3(command, *arguments)`,
+			`ProcessResult.new(status: status.exitstatus || -1`,
+			`ENV[name]`,
+		},
+		"typescript": {
+			`childProcess.spawnSync(__trbCommand, __trbArguments)`,
+			`} satisfies ProcessResult`,
+			`?.env?.[name] ?? null`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/process-app", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected the standard process package: %v", mode, err)
+		}
+		var consumer, runtime, resultRuntime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/process/index":
+				runtime = artifact
+			case "trb/std/result/index":
+				resultRuntime = artifact
+			}
+		}
+		if consumer == nil || runtime == nil || resultRuntime == nil {
+			t.Fatalf("%s did not compile the process consumer and runtimes: %#v", mode, artifacts)
+		}
+		for _, want := range wants[mode] {
+			if output := string(runtime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s process runtime is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableProcessPackageDiagnosticsAcrossBackends(t *testing.T) {
+	tests := []struct {
+		source     string
+		modulePath string
+		want       string
+	}{
+		{
+			source: "import { run } from trb/std/process\nvalue := run(\"tool\", [1])\n",
+			want:   "argument 2 to run() has type Array<Integer>, expected Array<String>",
+		},
+		{
+			source:     "import trb/internal/process\nvalue := process.argv()\n",
+			modulePath: "trb/std/user_source_cannot_import_internal_process",
+			want:       "package trb/internal/process is internal to the TypeRB standard library",
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			modulePath := test.modulePath
+			if modulePath == "" {
+				modulePath = "main"
+			}
+			_, err := CompileProject([]SourceUnit{{
+				Filename:   "/project/main.trb",
+				ModulePath: modulePath,
+				Package:    "main",
+				Source:     []byte(test.source),
+			}}, Options{Mode: mode, GoModule: "example.com/process-diagnostics", RubyLoader: "require_relative"})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s: expected process diagnostic %q, got %v", mode, test.want, err)
+			}
+		}
+	}
+}
+
 func TestPortableJSONPackagesCompileAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

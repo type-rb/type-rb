@@ -83,6 +83,8 @@ var typeV = types.FromName("V")
 var fileErrorType = types.FromName("FileError")
 var jsonValueType = types.FromName("JsonValue")
 var jsonErrorType = types.FromName("JsonError")
+var processResultType = types.FromName("ProcessResult")
+var processErrorType = types.FromName("ProcessError")
 
 var registry = map[string]*Package{
 	"trb/std/unit": {
@@ -144,6 +146,45 @@ end
 		Source:     filesystemSource(),
 		Kind:       Portable,
 		Symbols:    map[string]Symbol{},
+	},
+	"trb/std/process": {
+		Path:       "trb/std/process",
+		ModulePath: "trb/std/process/index",
+		Source:     processSource(),
+		Kind:       Portable,
+		Symbols:    map[string]Symbol{},
+	},
+	"trb/internal/process": {
+		Path:     "trb/internal/process",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"argv": {
+				Name:      "argv",
+				Intrinsic: "trb.internal.process.arguments",
+				Return:    arrayOf(stringType),
+			},
+			"environment": {
+				Name:       "environment",
+				Intrinsic:  "trb.internal.process.environment",
+				Parameters: []Parameter{{Name: "name", Type: stringType}},
+				Return:     nullable(stringType),
+			},
+			"working_directory": {
+				Name:      "working_directory",
+				Intrinsic: "trb.internal.process.working_directory",
+				Return:    processResult(stringType),
+			},
+			"run": {
+				Name:      "run",
+				Intrinsic: "trb.internal.process.run",
+				Parameters: []Parameter{
+					{Name: "command", Type: stringType},
+					{Name: "arguments", Type: arrayOf(stringType)},
+				},
+				Return: processResult(processResultType),
+			},
+		},
 	},
 	"trb/internal/filesystem": {
 		Path:     "trb/internal/filesystem",
@@ -664,6 +705,16 @@ func jsonResult(value types.Type) types.Type {
 
 func stringErrorResult(value types.Type) types.Type {
 	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, stringType}}
+}
+
+func processResult(value types.Type) types.Type {
+	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, processErrorType}}
+}
+
+func nullable(value types.Type) types.Type {
+	result := value
+	result.Nullable = true
+	return result
 }
 
 func jsonParse(name string) Symbol {

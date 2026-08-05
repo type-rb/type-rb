@@ -967,6 +967,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := errorType + "{Operation: " + strconv.Quote(operation) + ", Path: " + path + ", Message: " + message + "}"
 		return alias + ".NewResultErr[" + successType + ", " + errorType + "](" + value + ")"
 	}
+	processError := func(operation, command, message string) string {
+		_, successType, errorType := filesystemResultType()
+		alias := g.typeAliases["Result"]
+		if alias == "" {
+			alias = "__trb_result"
+		}
+		value := errorType + "{Operation: " + strconv.Quote(operation) + ", Command: " + command + ", Message: " + message + "}"
+		return alias + ".NewResultErr[" + successType + ", " + errorType + "](" + value + ")"
+	}
 	switch name {
 	case "trb.std.io.puts":
 		g.requireImport("fmt", "")
@@ -1016,6 +1025,24 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("slices", "")
 		resultType, _, _ := filesystemResultType()
 		return "func() " + resultType + " { path := " + arguments[0] + "; entries, err := os.ReadDir(path); if err != nil { return " + filesystemError("list", "path", "err.Error()") + " }; names := make([]string, 0, len(entries)); for _, entry := range entries { names = append(names, entry.Name()) }; slices.Sort(names); return " + filesystemOK("names") + " }()"
+	case "trb.internal.process.arguments":
+		g.requireImport("os", "")
+		return "append([]string{}, os.Args[1:]...)"
+	case "trb.internal.process.environment":
+		g.requireImport("os", "")
+		return "func() *string { value, found := os.LookupEnv(" + arguments[0] + "); if !found { return nil }; return &value }()"
+	case "trb.internal.process.working_directory":
+		g.requireImport("os", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { directory, err := os.Getwd(); if err != nil { return " + processError("working_directory", strconv.Quote(""), "err.Error()") + " }; return " + filesystemOK("directory") + " }()"
+	case "trb.internal.process.run":
+		g.requireImport("bytes", "")
+		g.requireImport("errors", "")
+		g.requireImport("os/exec", "exec")
+		g.requireImport("strings", "")
+		resultType, successType, _ := filesystemResultType()
+		value := successType + "{Status: status, Stdout: strings.ToValidUTF8(stdout.String(), \"�\"), Stderr: strings.ToValidUTF8(stderr.String(), \"�\"), Success: status == 0}"
+		return "func() " + resultType + " { commandName := " + arguments[0] + "; commandArguments := " + arguments[1] + "; process := exec.Command(commandName, commandArguments...); var stdout bytes.Buffer; var stderr bytes.Buffer; process.Stdout = &stdout; process.Stderr = &stderr; err := process.Run(); status := 0; if err != nil { var exitError *exec.ExitError; if errors.As(err, &exitError) { status = exitError.ExitCode() } else { return " + processError("run", "commandName", "err.Error()") + " } }; return " + filesystemOK(value) + " }()"
 	case "trb.internal.json.parse":
 		return g.jsonParse(call, arguments[0], false)
 	case "trb.internal.json.parse_jsonc":
