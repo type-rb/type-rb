@@ -16,6 +16,12 @@ Preserve these invariants:
 - Keep `trb fmt` deterministic and preserve comments.
 - Treat compiler-owned package declarations as the source of external types; do not require application authors to maintain signature files.
 
+Test stable behavior rather than incidental representation:
+
+- Prefer compiler and CLI integration tests for portable semantics and diagnostics across modes.
+- Add focused package unit tests when a boundary needs faster or more precise feedback.
+- Before refactoring, add characterization coverage for the behavior being preserved. Avoid full AST, IR, or generated-file snapshots unless that exact representation is the contract.
+
 For each coherent change:
 
 1. Add positive and diagnostic tests, covering Ruby, Go, and TypeScript when the feature is portable.
