@@ -92,6 +92,8 @@ than detailed syntax.
 ## 7. Distribution and long-term operation
 
 - Keep Homebrew and direct binary installation reproducible and signed.
+- Publish hosted `/play/` and `/tour/` editions of the local browser tools with
+  an appropriately sandboxed compiler runtime and shareable source links.
 - Test supported OS/architecture and current target-toolchain combinations in
   CI.
 - Publish a searchable language/standard-library reference, tutorials, and a

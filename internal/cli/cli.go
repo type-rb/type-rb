@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,13 +21,14 @@ import (
 	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/ir"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
+	"github.com/type-rb/type-rb/internal/playground"
 	"github.com/type-rb/type-rb/internal/project"
 	"github.com/type-rb/type-rb/internal/repl"
 )
 
 // Version is a variable so release builds can inject the tag with Go's -X
 // linker flag while local source builds retain a useful development version.
-var Version = "0.1.0-dev"
+var Version = "0.1.2-dev"
 
 type buildArtifactKind string
 
@@ -58,6 +60,10 @@ func (c *CLI) Run(args []string) int {
 		err = c.runProgram(args[1:])
 	case "repl":
 		err = c.runRepl(args[1:])
+	case "play":
+		err = c.runPlay(args[1:])
+	case "tour":
+		err = c.runTour(args[1:])
 	case "init":
 		err = c.runInit(args[1:])
 	case "sync":
@@ -569,6 +575,67 @@ func (c *CLI) runRepl(args []string) error {
 		HistoryFile: historyFile,
 		Compile:     compile,
 	})
+}
+
+func (c *CLI) runPlay(args []string) error {
+	return c.runBrowserTool("play", args, false)
+}
+
+func (c *CLI) runTour(args []string) error {
+	return c.runBrowserTool("tour", args, true)
+}
+
+func (c *CLI) runBrowserTool(page string, args []string, allowCheck bool) error {
+	flags := flag.NewFlagSet(page, flag.ContinueOnError)
+	flags.SetOutput(c.Stderr)
+	mode := flags.String("mode", "", "initial mode: ruby, go, or typescript")
+	port := flags.Int("port", 0, "local HTTP port; zero chooses an available port")
+	noOpen := flags.Bool("no-open", false, "serve without opening a browser")
+	var check *bool
+	if allowCheck {
+		check = flags.Bool("check", false, "validate every tour lesson without opening a browser")
+	}
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("%s does not accept source arguments", page)
+	}
+	if check != nil && *check {
+		if *mode != "" || *port != 0 || *noOpen {
+			return errors.New("tour --check cannot be combined with --mode, --port, or --no-open")
+		}
+		count, err := playground.ValidateTour(context.Background())
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(c.Stdout, "checked %d tour lesson execution(s)\n", count)
+		return nil
+	}
+	initialMode, err := playgroundMode(*mode)
+	if err != nil {
+		return err
+	}
+	return playground.Serve(playground.Options{
+		Mode: initialMode, Page: page, Port: *port, OpenBrowser: !*noOpen, Version: Version, Stdout: c.Stdout, Stderr: c.Stderr,
+	})
+}
+
+func playgroundMode(requested string) (string, error) {
+	if requested != "" {
+		if requested != "ruby" && requested != "go" && requested != "typescript" {
+			return "", fmt.Errorf("--mode must be ruby, go, or typescript; got %q", requested)
+		}
+		return requested, nil
+	}
+	config, err := project.Find(".")
+	if err == nil {
+		return config.Mode, nil
+	}
+	if !errors.Is(err, project.ErrConfigNotFound) {
+		return "", err
+	}
+	return "go", nil
 }
 
 func loadReplConfig(explicit, requestedMode string) (*project.Config, bool, error) {
@@ -1136,6 +1203,9 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--outfile FILE]")
 	fmt.Fprintln(c.Stdout, "  trb run [FILE.trb] [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb play [--mode ruby|go|typescript] [--port PORT] [--no-open]")
+	fmt.Fprintln(c.Stdout, "  trb tour [--mode ruby|go|typescript] [--port PORT] [--no-open]")
+	fmt.Fprintln(c.Stdout, "  trb tour --check")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--dev] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb remove PACKAGE")

@@ -2,7 +2,7 @@ import trb/std/io
 import trb/std/strings
 import { Result } from trb/std/result
 
-# The same portable source runs in Ruby, Go, and TypeScript.
+# The same portable source runs in Go, Ruby, and TypeScript.
 class Greeter
 	readonly @message: String := "Hello"
 

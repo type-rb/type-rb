@@ -4,6 +4,17 @@ TypeRB publishes prebuilt `trb` binaries for macOS and Linux on Arm64 and
 x86-64. The Homebrew Formula selects the matching archive, so installing the
 compiler does not require Go.
 
+## Version convention
+
+The version embedded in source builds is the next planned release followed by
+`-dev`, such as `0.1.2-dev`. A release tag uses the corresponding stable version,
+such as `v0.1.2`; release packaging replaces the development version in every
+binary with `0.1.2`.
+
+After publishing a release, advance the source version to the next planned
+patch release in a pull request. Homebrew publishes only stable tagged releases
+and never consumes a `-dev` version.
+
 ## One-time setup
 
 1. Create the public GitHub repository `type-rb/homebrew-tap`.

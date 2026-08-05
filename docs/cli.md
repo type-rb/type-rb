@@ -147,3 +147,43 @@ Ctrl-D exits.
 
 Project history is stored in `.trb/repl_history`. Scratch history is stored in
 the user cache and separated by mode.
+
+## Playground and tour
+
+```sh
+# Open an isolated scratch playground in the default browser.
+trb play
+
+# Choose the initial target and a fixed local port.
+trb play --mode typescript --port 3000
+
+# Print the URL without opening a browser.
+trb play --no-open
+
+# Open the guided language tour.
+trb tour
+
+# Validate every lesson in all three modes without starting a server.
+trb tour --check
+```
+
+`trb play` and `trb tour` bind only to `127.0.0.1`. A zero or omitted port
+selects an available port. Without `--mode`, the nearest project mode becomes
+the initial target; when there is no project, the initial target is Go. The
+target can be changed inside the browser.
+
+The editor provides dependency-free TypeRB syntax highlighting and shortcuts
+for tab indentation and Cmd/Ctrl-Enter execution. Run compiles through the
+ordinary parser, resolver, type checker, and typed IR evaluator. Transpile
+shows the generated source for the selected backend, and Format uses the same
+comment-preserving formatter as `trb fmt`.
+
+Browser runs are isolated scratch evaluations. They do not load project files,
+invoke `main()`, or start a target toolchain. Top-level expressions are
+evaluated from a fresh state on each run. Host filesystem, process, and
+platform packages are rejected during browser execution; they may still be
+type checked and displayed with Transpile.
+
+The tour stores lesson edits and completion progress in the local browser.
+`trb tour --check` is the explicit checkpoint for compiling and evaluating all
+lessons in Go, Ruby, and TypeScript modes.

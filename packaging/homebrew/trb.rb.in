@@ -1,5 +1,5 @@
 class Trb < Formula
-  desc "Ruby-shaped typed language that targets Ruby, Go, and TypeScript"
+  desc "Statically typed language that targets Go, Ruby, and TypeScript"
   homepage "https://github.com/type-rb/type-rb"
   license "MIT"
 

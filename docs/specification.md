@@ -455,7 +455,9 @@ grammar through native syntax nodes:
 - `NativeExpression`
 
 Native nodes are preserved through AST and IR and emitted only by the Ruby
-backend. Go and TypeScript report them as compile errors. This is the v0.1
+backend. Go and TypeScript report fallback nodes as unsupported portable
+syntax rather than exposing Ruby-native AST terminology in user diagnostics.
+This is the v0.1
 extension mechanism for library-provided DSLs; it is not a text-rewrite compiler
 path.
 
@@ -787,3 +789,27 @@ Ctrl-B/F, Ctrl-A/E, Ctrl-P/N, and Alt-B/F navigation bindings. Piped input
 remains deterministic and free of terminal control sequences. Ctrl-C interrupts
 the current input or IR evaluation and returns to the prompt; it does not leave
 the REPL.
+
+### 8.10 Local browser playground and tour
+
+`trb play` serves an isolated scratch playground on `127.0.0.1` and opens it in
+the default browser. `trb tour` serves the same compiler surface with ordered
+language lessons, local progress, and editable source. Both choose Go when no
+project is present; a discovered project mode or explicit `--mode` selects the
+initial target, and the browser can switch among Go, Ruby, and TypeScript.
+
+Run requests use the ordinary parser, resolver, checker, typed IR lowering, and
+REPL evaluator. Each request starts with fresh scratch state and evaluates
+top-level statements rather than invoking `main()` or a target toolchain.
+Evaluation has a time limit. Filesystem, process, and platform imports are
+rejected for browser execution, while Transpile may still compile them and
+display selected-target source. Format uses the ordinary lossless formatter.
+
+The browser editor's TypeRB syntax highlighting is a presentation feature and
+does not define lexical or semantic behavior. The compiler remains the only
+source of diagnostics and accepted syntax. Compile diagnostics retain their
+source range, which the browser presents as a source line and caret marker.
+Runtime errors remain message-only until runtime source mapping and stack
+translation are implemented. `trb tour --check` compiles and
+evaluates each shipped lesson in all three modes as an explicit release or
+language-change checkpoint; ordinary project builds do not validate the tour.
