@@ -339,6 +339,44 @@ func TestReplEvaluatesPortableJSONAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesTypedJSONRecordCodecsAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-json-codec-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := strings.Join([]string{
+			"import { JsonError, decode, encode } from trb/std/json",
+			"import { Result } from trb/std/result",
+			`record User; id: Integer @json("user_id"); name: String; end`,
+			`decode<User>("{\"user_id\":1,\"name\":\"Ada\"}")`,
+			`encode(User.new(id: 2, name: "Lin"))`,
+			`decode<User>("{\"user_id\":1}")`,
+			":quit",
+		}, "\n") + "\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "Result::Ok(value: User(id: 1, name: \"Ada\")) : Result<User, JsonError>\n" +
+			"Result::Ok(value: \"{\\\"name\\\":\\\"Lin\\\",\\\"user_id\\\":2}\") : Result<String, JsonError>\n" +
+			"Result::Err(error: JsonError(kind: JsonErrorKind::Decode, message: \"missing field name\", path: \"/name\", line: nil, column: nil)) : Result<User, JsonError>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s typed JSON codec REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesCompilerOwnedUnicodeAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -951,6 +989,66 @@ func TestRunCompilerOwnedJSONAcrossAvailableBackends(t *testing.T) {
 		}
 		if want := "{\"items\":[1,1.5,true,null]}\n/items/0\ntrue\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s JSON program output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunTypedJSONRecordCodecsAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby typed JSON codec run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript typed JSON codec run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-json-codec-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		contracts := filepath.Join(root, "src", "contracts", "user.trb")
+		if err := os.MkdirAll(filepath.Dir(contracts), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		contractSource := "record Address\n\tcity: String\nend\n\n" +
+			"record User\n\tid: Integer @json(\"user_id\")\n\tname: String\n\tnickname: String?\n\tscores: Array<Float>\n\tmetadata: Hash<String, Integer>\n\taddress: Address\nend\n"
+		if err := os.WriteFile(contracts, []byte(contractSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := "import { Address, User } from contracts/user\n" +
+			"import { JsonError, decode, encode } from trb/std/json\n" +
+			"import { Result } from trb/std/result\n\n" +
+			"def round_trip(source: String): String; case decode<User>(source); when Result::Ok(user); case encode(user); when Result::Ok(encoded); case decode<User>(encoded); when Result::Ok(copy); return copy.name + \":\" + copy.address.city; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
+			"def main()\n" +
+			"\tputs(round_trip(\"{\\\"user_id\\\":7,\\\"name\\\":\\\"Ada\\\",\\\"scores\\\":[1,1.5],\\\"metadata\\\":{\\\"active\\\":1},\\\"address\\\":{\\\"city\\\":\\\"Tokyo\\\"}}\"))\n" +
+			"\tputs(round_trip(\"{\\\"user_id\\\":7,\\\"scores\\\":[],\\\"metadata\\\":{},\\\"address\\\":{\\\"city\\\":\\\"Tokyo\\\"}}\"))\n" +
+			"\tputs(round_trip(\"{\\\"user_id\\\":7,\\\"name\\\":\\\"Ada\\\",\\\"scores\\\":[],\\\"metadata\\\":{},\\\"address\\\":{\\\"city\\\":1}}\"))\n" +
+			"\treturn\n" +
+			"end\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "Ada:Tokyo\n/name\n/address/city\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s typed JSON codec output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

@@ -629,7 +629,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			arguments = append(arguments, evaluatedArgument{Name: argument.Name, Value: value})
 		}
 		if reference != nil && reference.Intrinsic != "" {
-			return e.intrinsic(reference.Intrinsic, arguments, node.ExprType())
+			return e.intrinsic(reference.Intrinsic, arguments, node.ExprType(), node.Codec)
 		}
 		var callee Value
 		var err error
@@ -652,7 +652,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, fmt.Errorf("%s is not callable", Inspect(callee))
 		}
 		if function.Intrinsic != "" {
-			return e.intrinsic(function.Intrinsic, arguments, node.ExprType())
+			return e.intrinsic(function.Intrinsic, arguments, node.ExprType(), nil)
 		}
 		return e.call(function, arguments)
 	case *ir.EnumConstruct:
@@ -1164,7 +1164,7 @@ func validUnicodeScalar(value int64) bool {
 	return value >= 0 && value <= utf8.MaxRune && (value < 0xd800 || value > 0xdfff)
 }
 
-func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ types.Type) (Value, error) {
+func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ types.Type, codec *ir.CodecSchema) (Value, error) {
 	values := func() []Value {
 		result := make([]Value, len(arguments))
 		for index, argument := range arguments {
@@ -1358,6 +1358,23 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, err
 		}
 		return e.stringifyJSON(typ, values[0])
+	case "trb.internal.json.decode":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		source, ok := values[0].Data.(string)
+		if !ok || codec == nil {
+			return Value{}, errors.New("json.decode requires a checked codec and String source")
+		}
+		return e.decodeJSONCodec(typ, source, codec)
+	case "trb.internal.json.encode":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		if codec == nil {
+			return Value{}, errors.New("json.encode requires a checked codec")
+		}
+		return e.encodeJSONCodec(typ, values[0], codec)
 	case "trb.std.strings.length":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1899,6 +1916,213 @@ func (e *Evaluator) stringifyJSON(resultType types.Type, value Value) (Value, er
 	return e.jsonOK(resultType, Value{Type: types.FromName("String"), Data: string(encoded)})
 }
 
+func (e *Evaluator) decodeJSONCodec(resultType types.Type, source string, schema *ir.CodecSchema) (Value, error) {
+	parseType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("JsonValue"), types.FromName("JsonError")}}
+	parsed, err := e.parseJSON(parseType, source)
+	if err != nil {
+		return Value{}, err
+	}
+	result, ok := parsed.Data.(*enumValue)
+	if !ok {
+		return Value{}, errors.New("json.decode parser returned an invalid Result")
+	}
+	if result.Name == "Err" {
+		return e.jsonCodecErr(resultType, result.Payload["error"])
+	}
+	decoded, conversionErr := e.decodeJSONCodecValue(schema, result.Payload["value"], "")
+	if conversionErr != nil {
+		return e.jsonError(resultType, "Decode", conversionErr.message, conversionErr.path, nil, nil)
+	}
+	return e.jsonOK(resultType, decoded)
+}
+
+func (e *Evaluator) encodeJSONCodec(resultType types.Type, value Value, schema *ir.CodecSchema) (Value, error) {
+	raw, conversionErr := jsonCodecRaw(schema, value, "")
+	if conversionErr != nil {
+		return e.jsonError(resultType, "Encode", conversionErr.message, conversionErr.path, nil, nil)
+	}
+	jsonValue, conversionErr := e.jsonValue(raw, "")
+	if conversionErr != nil {
+		return e.jsonError(resultType, "Encode", conversionErr.message, conversionErr.path, nil, nil)
+	}
+	return e.stringifyJSON(resultType, jsonValue)
+}
+
+func (e *Evaluator) decodeJSONCodecValue(schema *ir.CodecSchema, value Value, path string) (Value, *jsonConversionError) {
+	variant, ok := value.Data.(*enumValue)
+	if !ok || variant.Definition.Node.Name != "JsonValue" {
+		return Value{}, &jsonConversionError{path: path, message: "expected JSON value"}
+	}
+	if schema.Type.Nullable {
+		if variant.Name == "Null" {
+			return Value{Type: schema.Type}, nil
+		}
+		nonnull := *schema
+		nonnull.Type.Nullable = false
+		decoded, err := e.decodeJSONCodecValue(&nonnull, value, path)
+		if err == nil {
+			decoded.Type = schema.Type
+		}
+		return decoded, err
+	}
+	payload := variant.Payload["value"]
+	mismatch := func(expected string) (Value, *jsonConversionError) {
+		return Value{}, &jsonConversionError{path: path, message: "expected " + expected}
+	}
+	switch schema.Kind {
+	case "boolean":
+		if variant.Name != "Boolean" {
+			return mismatch("Boolean")
+		}
+		return Value{Type: schema.Type, Data: payload.Data}, nil
+	case "integer":
+		if variant.Name != "Integer" {
+			return mismatch("Integer")
+		}
+		return Value{Type: schema.Type, Data: payload.Data}, nil
+	case "float":
+		if variant.Name == "Integer" {
+			return Value{Type: schema.Type, Data: float64(payload.Data.(int64))}, nil
+		}
+		if variant.Name != "Float" {
+			return mismatch("Float")
+		}
+		return Value{Type: schema.Type, Data: payload.Data}, nil
+	case "string":
+		if variant.Name != "String" {
+			return mismatch("String")
+		}
+		return Value{Type: schema.Type, Data: payload.Data}, nil
+	case "array":
+		if variant.Name != "Array" {
+			return mismatch("Array")
+		}
+		array := payload.Data.(*arrayValue)
+		items := make([]Value, len(array.Items))
+		for index, item := range array.Items {
+			decoded, err := e.decodeJSONCodecValue(schema.Element, item, path+"/"+strconv.Itoa(index))
+			if err != nil {
+				return Value{}, err
+			}
+			items[index] = decoded
+		}
+		return Value{Type: schema.Type, Data: &arrayValue{Items: items}}, nil
+	case "hash":
+		if variant.Name != "Object" {
+			return mismatch("Object")
+		}
+		hash := payload.Data.(*hashValue)
+		entries := make([]hashEntry, len(hash.Entries))
+		for index, entry := range hash.Entries {
+			key := entry.Key.Data.(string)
+			escaped := strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
+			decoded, err := e.decodeJSONCodecValue(schema.Element, entry.Value, path+"/"+escaped)
+			if err != nil {
+				return Value{}, err
+			}
+			entries[index] = hashEntry{Key: Value{Type: types.FromName("String"), Data: key}, Value: decoded}
+		}
+		return Value{Type: schema.Type, Data: &hashValue{Entries: entries}}, nil
+	case "record":
+		if variant.Name != "Object" {
+			return mismatch(schema.Type.Name)
+		}
+		definition, ok := e.definitions[symbolKey(schema.Module, schema.Type.Name)].(*recordDefinition)
+		if !ok {
+			return Value{}, &jsonConversionError{path: path, message: "record " + schema.Type.Name + " is not loaded"}
+		}
+		byName := map[string]Value{}
+		for _, entry := range payload.Data.(*hashValue).Entries {
+			byName[entry.Key.Data.(string)] = entry.Value
+		}
+		fields := map[string]Value{}
+		for _, field := range schema.Fields {
+			fieldPath := path + "/" + jsonPointerEscapeREPL(field.WireName)
+			raw, exists := byName[field.WireName]
+			if !exists {
+				if field.Schema.Type.Nullable {
+					fields[field.Name] = Value{Type: field.Schema.Type}
+					continue
+				}
+				return Value{}, &jsonConversionError{path: fieldPath, message: "missing field " + field.WireName}
+			}
+			decoded, err := e.decodeJSONCodecValue(field.Schema, raw, fieldPath)
+			if err != nil {
+				return Value{}, err
+			}
+			fields[field.Name] = decoded
+		}
+		return Value{Type: schema.Type, Data: &recordInstance{Definition: definition, Fields: fields}}, nil
+	}
+	return Value{}, &jsonConversionError{path: path, message: "unsupported JSON codec type"}
+}
+
+func jsonCodecRaw(schema *ir.CodecSchema, value Value, path string) (any, *jsonConversionError) {
+	if schema.Type.Nullable && value.Data == nil {
+		return nil, nil
+	}
+	switch schema.Kind {
+	case "boolean", "integer", "float", "string":
+		return value.Data, nil
+	case "array":
+		array, ok := value.Data.(*arrayValue)
+		if !ok {
+			return nil, &jsonConversionError{path: path, message: "expected Array"}
+		}
+		result := make([]any, len(array.Items))
+		for index, item := range array.Items {
+			converted, err := jsonCodecRaw(schema.Element, item, path+"/"+strconv.Itoa(index))
+			if err != nil {
+				return nil, err
+			}
+			result[index] = converted
+		}
+		return result, nil
+	case "hash":
+		hash, ok := value.Data.(*hashValue)
+		if !ok {
+			return nil, &jsonConversionError{path: path, message: "expected Hash"}
+		}
+		result := map[string]any{}
+		for _, entry := range hash.Entries {
+			key := entry.Key.Data.(string)
+			converted, err := jsonCodecRaw(schema.Element, entry.Value, path+"/"+jsonPointerEscapeREPL(key))
+			if err != nil {
+				return nil, err
+			}
+			result[key] = converted
+		}
+		return result, nil
+	case "record":
+		record, ok := value.Data.(*recordInstance)
+		if !ok {
+			return nil, &jsonConversionError{path: path, message: "expected " + schema.Type.Name}
+		}
+		result := map[string]any{}
+		for _, field := range schema.Fields {
+			converted, err := jsonCodecRaw(field.Schema, record.Fields[field.Name], path+"/"+jsonPointerEscapeREPL(field.WireName))
+			if err != nil {
+				return nil, err
+			}
+			result[field.WireName] = converted
+		}
+		return result, nil
+	}
+	return nil, &jsonConversionError{path: path, message: "unsupported JSON codec type"}
+}
+
+func (e *Evaluator) jsonCodecErr(resultType types.Type, errorValue Value) (Value, error) {
+	definition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("JSON requires trb/std/result")
+	}
+	return Value{Type: resultType, Data: &enumValue{Definition: definition, Name: "Err", Payload: map[string]Value{"error": errorValue}}}, nil
+}
+
+func jsonPointerEscapeREPL(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "~", "~0"), "/", "~1")
+}
+
 type jsonConversionError struct {
 	path    string
 	message string
@@ -1930,6 +2154,16 @@ func (e *Evaluator) jsonValue(raw any, path string) (Value, *jsonConversionError
 			return construct("Integer", map[string]Value{"value": {Type: types.FromName("Integer"), Data: int64(number)}}), nil
 		}
 		return construct("Float", map[string]Value{"value": {Type: types.FromName("Float"), Data: number}}), nil
+	case int64:
+		if value < -9007199254740991 || value > 9007199254740991 {
+			return Value{}, &jsonConversionError{path: path, message: "JSON integer is outside the portable range"}
+		}
+		return construct("Integer", map[string]Value{"value": {Type: types.FromName("Integer"), Data: value}}), nil
+	case float64:
+		if math.IsInf(value, 0) || math.IsNaN(value) {
+			return Value{}, &jsonConversionError{path: path, message: "JSON number is not finite"}
+		}
+		return construct("Float", map[string]Value{"value": {Type: types.FromName("Float"), Data: value}}), nil
 	case string:
 		return construct("String", map[string]Value{"value": {Type: types.FromName("String"), Data: value}}), nil
 	case []any:
@@ -2275,6 +2509,8 @@ func expressionReference(expression ir.Expression) *ir.Reference {
 		return node.Reference
 	case *ir.Member:
 		return node.Reference
+	case *ir.TypeApply:
+		return expressionReference(node.Receiver)
 	default:
 		return nil
 	}

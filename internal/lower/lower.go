@@ -41,7 +41,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 	case *ast.BlankStatement:
 		return nil
 	case *ast.ImportStatement:
-		result := &ir.Import{Base: base(n.Base), Path: n.Path, Symbols: append([]string(nil), n.Symbols...), Alias: n.Alias, SymbolKinds: map[string]string{}}
+		result := &ir.Import{Base: base(n.Base), Path: n.Path, Symbols: append([]string(nil), n.Symbols...), Alias: n.Alias, SymbolKinds: map[string]string{}, IntrinsicSymbols: map[string]bool{}}
 		if resolved := l.checked.Resolution.Imports[n]; resolved != nil {
 			result.Path = resolved.RuntimePath()
 			result.Symbols = append([]string(nil), resolved.Symbols...)
@@ -53,6 +53,15 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			result.Runtime = resolved.Definition != nil && resolved.Definition.Source != ""
 			for name, exported := range resolved.Exports {
 				result.SymbolKinds[name] = string(exported.Kind)
+			}
+			if resolved.Definition != nil {
+				for name, symbol := range resolved.Definition.Symbols {
+					if symbol.Intrinsic != "" {
+						if _, hasRuntimeExport := resolved.Exports[name]; !hasRuntimeExport {
+							result.IntrinsicSymbols[name] = true
+						}
+					}
+				}
 			}
 		}
 		return result
@@ -231,6 +240,9 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 			return result
 		}
 		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee)}
+		if codec, ok := l.checked.CodecApplications[n]; ok {
+			result.Codec = lowerCodecSchema(codec.Schema)
+		}
 		for _, argument := range n.Arguments {
 			result.Arguments = append(result.Arguments, ir.CallArgument{Name: argument.Name, Value: l.expression(argument.Value), Splat: argument.Splat})
 		}
@@ -255,6 +267,20 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 	default:
 		return nil
 	}
+}
+
+func lowerCodecSchema(schema checker.CodecSchema) *ir.CodecSchema {
+	result := &ir.CodecSchema{Type: schema.Type, Kind: schema.Kind, Module: schema.Module}
+	if schema.Reference != nil {
+		result.Reference = &ir.Reference{Package: schema.Reference.Import.RuntimePath(), Alias: schema.Reference.Import.Alias, Symbol: schema.Reference.Name, ExportKind: string(schema.Reference.Export.Kind)}
+	}
+	if schema.Element != nil {
+		result.Element = lowerCodecSchema(*schema.Element)
+	}
+	for _, field := range schema.Fields {
+		result.Fields = append(result.Fields, ir.CodecField{Name: field.Name, WireName: field.WireName, Schema: lowerCodecSchema(*field.Schema)})
+	}
+	return result
 }
 
 func (l *lowerer) reference(node ast.Expression) *ir.Reference {

@@ -28,6 +28,27 @@ type Result struct {
 	EnumConstructors    map[*ast.CallExpression]EnumVariant
 	CasePatterns        map[ast.Expression]CasePattern
 	GenericApplications map[*ast.GenericExpression]GenericApplication
+	CodecApplications   map[*ast.CallExpression]CodecApplication
+}
+
+type CodecApplication struct {
+	Operation string
+	Schema    CodecSchema
+}
+
+type CodecSchema struct {
+	Type      types.Type
+	Kind      string
+	Module    string
+	Reference *resolver.Binding
+	Element   *CodecSchema
+	Fields    []CodecField
+}
+
+type CodecField struct {
+	Name     string
+	WireName string
+	Schema   *CodecSchema
 }
 
 type EnumField struct {
@@ -162,6 +183,7 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 			EnumConstructors:    map[*ast.CallExpression]EnumVariant{},
 			CasePatterns:        map[ast.Expression]CasePattern{},
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
+			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
 		},
 		classes:       map[string]*classInfo{},
 		records:       map[string]*recordInfo{},
@@ -849,17 +871,30 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.Variadic = application.Variadic || parameter.Rest || parameter.KeywordRest
 		}
 		application.ReturnType = methodReturnType(method)
-	} else if binding, ok := c.result.References[node.Receiver]; ok && binding.Export != nil {
-		application.TypeParameters = append([]string(nil), binding.Export.TypeParameters...)
-		switch binding.Export.Kind {
-		case resolver.EnumExport:
-			application.Kind = "enum"
-		case resolver.FunctionExport:
+	} else if binding, ok := c.result.References[node.Receiver]; ok {
+		if binding.Export != nil {
+			application.TypeParameters = append([]string(nil), binding.Export.TypeParameters...)
+			switch binding.Export.Kind {
+			case resolver.EnumExport:
+				application.Kind = "enum"
+			case resolver.FunctionExport:
+				application.Kind = "function"
+				application.Parameters = append([]types.Type(nil), binding.Export.Parameters...)
+				application.Required = binding.Export.Required
+				application.Variadic = binding.Export.Variadic
+				application.ReturnType = binding.Export.Type
+			}
+		} else if binding.Library != nil {
 			application.Kind = "function"
-			application.Parameters = append([]types.Type(nil), binding.Export.Parameters...)
-			application.Required = binding.Export.Required
-			application.Variadic = binding.Export.Variadic
-			application.ReturnType = binding.Export.Type
+			application.TypeParameters = append([]string(nil), binding.Library.TypeParameters...)
+			for _, parameter := range binding.Library.Parameters {
+				application.Parameters = append(application.Parameters, parameter.Type)
+				if !parameter.Optional {
+					application.Required++
+				}
+			}
+			application.Variadic = binding.Library.Variadic
+			application.ReturnType = binding.Library.Return
 		}
 	}
 	if application.Kind == "" || len(application.TypeParameters) == 0 {
@@ -905,6 +940,148 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 		result.Args[index] = substituteType(argument, substitutions)
 	}
 	return result
+}
+
+func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic string, typ types.Type) {
+	operation := ""
+	switch intrinsic {
+	case "trb.internal.json.decode":
+		operation = "decode"
+	case "trb.internal.json.encode":
+		operation = "encode"
+	default:
+		return
+	}
+	schema, ok := c.codecSchema(call.Span(), typ, map[string]bool{})
+	if ok {
+		c.result.CodecApplications[call] = CodecApplication{Operation: operation, Schema: schema}
+	}
+}
+
+func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[string]bool) (CodecSchema, bool) {
+	schema := CodecSchema{Type: typ}
+	base := typ
+	base.Nullable = false
+	switch base.Kind {
+	case types.Bool:
+		schema.Kind = "boolean"
+	case types.Int:
+		schema.Kind = "integer"
+	case types.Float:
+		schema.Kind = "float"
+	case types.String:
+		schema.Kind = "string"
+	case types.Array:
+		if len(base.Args) != 1 {
+			c.error(span, "JSON codec requires a typed Array<T>")
+			return schema, false
+		}
+		element, ok := c.codecSchema(span, base.Args[0], visiting)
+		if !ok {
+			return schema, false
+		}
+		schema.Kind = "array"
+		schema.Element = &element
+	case types.Hash:
+		if len(base.Args) != 2 || base.Args[0].Kind != types.String || base.Args[0].Nullable {
+			c.error(span, "JSON codec requires Hash<String, V>")
+			return schema, false
+		}
+		element, ok := c.codecSchema(span, base.Args[1], visiting)
+		if !ok {
+			return schema, false
+		}
+		schema.Kind = "hash"
+		schema.Element = &element
+	case types.Named:
+		fields, module, reference, ok := c.codecRecord(base.Name)
+		if !ok {
+			c.error(span, fmt.Sprintf("JSON codec type %s must be a record or JSON-compatible built-in type", typ))
+			return schema, false
+		}
+		key := module + "#" + base.Name
+		if visiting[key] {
+			c.error(span, fmt.Sprintf("recursive JSON codec record %s is not supported yet", base.Name))
+			return schema, false
+		}
+		visiting[key] = true
+		defer delete(visiting, key)
+		schema.Kind = "record"
+		schema.Module = module
+		if reference != nil {
+			copy := *reference
+			schema.Reference = &copy
+		}
+		seen := map[string]bool{}
+		for _, field := range fields {
+			wireName := field.JSONName
+			if wireName == "" {
+				wireName = field.Name
+			}
+			if wireName == "-" || wireName == "" {
+				c.error(span, fmt.Sprintf("record field %s has unsupported JSON name %q", field.Name, wireName))
+				return schema, false
+			}
+			if seen[wireName] {
+				c.error(span, fmt.Sprintf("record %s maps more than one field to JSON name %q", base.Name, wireName))
+				return schema, false
+			}
+			seen[wireName] = true
+			fieldSchema, fieldOK := c.codecSchema(span, field.Type, visiting)
+			if !fieldOK {
+				return schema, false
+			}
+			schema.Fields = append(schema.Fields, CodecField{Name: field.Name, WireName: wireName, Schema: &fieldSchema})
+		}
+	default:
+		c.error(span, fmt.Sprintf("JSON codec type %s is not supported", typ))
+		return schema, false
+	}
+	return schema, true
+}
+
+func (c *Checker) codecRecord(name string) ([]resolver.RecordField, string, *resolver.Binding, bool) {
+	if record := c.records[name]; record != nil {
+		fields := make([]resolver.RecordField, len(record.fields))
+		for index, field := range record.fields {
+			fields[index] = resolver.RecordField{Name: field.Name, JSONName: checkerRecordJSONName(field), Type: fromTypeRef(field.Type)}
+		}
+		return fields, c.result.Program.ModulePath, nil, true
+	}
+	if binding, ok := c.resolution.ImportedType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
+		copy := binding
+		return append([]resolver.RecordField(nil), binding.Export.Fields...), binding.Import.RuntimePath(), &copy, true
+	}
+	for _, binding := range c.resolution.Symbols {
+		if binding.Import == nil {
+			continue
+		}
+		exported, ok := binding.Import.Exports[name]
+		if !ok || exported.Kind != resolver.RecordExport {
+			continue
+		}
+		copyExport := exported
+		copy := resolver.Binding{Import: binding.Import, Name: name, Export: &copyExport}
+		return append([]resolver.RecordField(nil), exported.Fields...), binding.Import.RuntimePath(), &copy, true
+	}
+	return nil, "", nil, false
+}
+
+func checkerRecordJSONName(field *ast.RecordFieldStatement) string {
+	for _, attribute := range field.Attributes {
+		if attribute.Name != "json" || len(attribute.Arguments) == 0 {
+			continue
+		}
+		literal, ok := attribute.Arguments[0].Value.(*ast.Literal)
+		if !ok || literal.Kind != ast.StringLiteral {
+			continue
+		}
+		value, err := strconv.Unquote(literal.Raw)
+		if err == nil {
+			return strings.Split(value, ",")[0]
+		}
+	}
+	return field.Name
 }
 
 func (c *Checker) checkTypedArguments(span token.Span, name string, parameters []types.Type, required int, variadic bool, arguments []ast.CallArgument, actual []types.Type) {
@@ -1699,6 +1876,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			c.checkTypedArguments(n.Span(), application.Name, application.Parameters, application.Required, application.Variadic, n.Arguments, argumentTypes)
 			typ = application.ReturnType
+			if binding, imported := c.result.References[generic.Receiver]; imported && binding.Library != nil && len(application.TypeArguments) == 1 {
+				c.checkCodecApplication(n, binding.Library.Intrinsic, application.TypeArguments[0])
+			}
 			break
 		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok {
@@ -1730,6 +1910,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				if unresolved := unresolvedLibraryTypeParameters(*library, typ); len(unresolved) > 0 {
 					c.error(n.Span(), fmt.Sprintf("cannot infer %s for %s()", strings.Join(unresolved, ", "), binding.Name))
 					typ = invalidType()
+				}
+				if library.Intrinsic == "trb.internal.json.encode" && len(argumentTypes) == 1 {
+					c.checkCodecApplication(n, library.Intrinsic, argumentTypes[0])
 				}
 			}
 		}

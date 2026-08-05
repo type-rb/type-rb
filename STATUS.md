@@ -106,6 +106,10 @@ Implemented:
   and encode errors, JSON Pointer paths, comment-aware JSONC parsing, strict
   trailing-comma rejection, safe cross-target number semantics, runnable Go,
   Ruby, and TypeScript output, and typed-IR REPL execution.
+- Checked JSON record codecs retained as typed-IR schemas and generated for all
+  backends without target reflection, including wire-name attributes,
+  nullable and nested fields, typed arrays and String-keyed Hashes, and REPL
+  execution.
 - Closed `record` declarations as distinct AST/typed-IR nodes, with
   keyword-only construction, field checking, Go structs/JSON/GORM tags,
   TypeScript interfaces, and Ruby `Data` output.
@@ -150,8 +154,8 @@ semantic type model, and source maps are later work.
 
 The broader path to practical production use is tracked in `ROADMAP.md`.
 
-1. Generate runtime JSON decoders from record contracts and add wire-compatible
-   optional/nullable semantics.
+1. Add safe conversion and lookup Results, collection transformations, and
+   the remaining small receiver APIs needed by real standard-library code.
 2. Add process APIs required to move the lexer/parser into the stage-1
    self-host tree. Revisit concise Result propagation syntax only after
    explicit Result handling has been exercised in real application code.

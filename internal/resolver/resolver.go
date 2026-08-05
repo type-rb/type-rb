@@ -9,6 +9,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -56,8 +57,9 @@ type Export struct {
 }
 
 type RecordField struct {
-	Name string
-	Type types.Type
+	Name     string
+	JSONName string
+	Type     types.Type
 }
 
 type EnumVariant struct {
@@ -622,7 +624,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 						continue
 					}
 					typ := typeRef(field.Type)
-					exported.Fields = append(exported.Fields, RecordField{Name: field.Name, Type: typ})
+					exported.Fields = append(exported.Fields, RecordField{Name: field.Name, JSONName: recordJSONName(field), Type: typ})
 					exported.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: typ}
 				}
 				result[node.Name] = exported
@@ -690,6 +692,23 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		}
 	}
 	return result
+}
+
+func recordJSONName(field *ast.RecordFieldStatement) string {
+	for _, attribute := range field.Attributes {
+		if attribute.Name != "json" || len(attribute.Arguments) == 0 {
+			continue
+		}
+		literal, ok := attribute.Arguments[0].Value.(*ast.Literal)
+		if !ok || literal.Kind != ast.StringLiteral {
+			continue
+		}
+		value, err := strconv.Unquote(literal.Raw)
+		if err == nil {
+			return strings.Split(value, ",")[0]
+		}
+	}
+	return field.Name
 }
 
 func variableType(node *ast.VariableStatement) types.Type {

@@ -64,10 +64,9 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 ## 5. Standard library and package ecosystem
 
 - Expand the compiler-owned standard library beyond the current Result,
-  collection, Unicode, path, filesystem, and JSON/JSONC value-model baseline
-  with typed JSON codecs, time, environment, process, regular-expression,
-  HTTP, and encoding packages where semantics can be made consistent across
-  targets.
+  collection, Unicode, path, filesystem, and typed JSON/JSONC baseline with
+  time, environment, process, regular-expression, HTTP, and encoding packages
+  where semantics can be made consistent across targets.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
 - Stabilize compiler-owned library type providers so gems, Go modules, and npm
   packages do not require application-authored signature files.
@@ -76,8 +75,9 @@ For implemented behavior, see `STATUS.md`. Language decisions belong in
 
 ## 6. Application-level proof
 
-- Generate validated JSON codecs and client/server contracts from shared
-  records, including optional, nullable, and versioned wire fields.
+- Extend the generated JSON codecs and client/server contracts from shared
+  records with versioned wire fields, validation policy, schema export, and
+  compatibility checking.
 - Continue the Go API, Rails, and React vertical slices with authentication,
   validation, transactions, background work, and realistic failure paths.
 - Separate one-shot `trb run` from framework development servers and add a

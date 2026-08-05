@@ -70,13 +70,21 @@ func (g *generator) statement(statement ir.Statement) {
 		} else if len(n.Symbols) > 0 {
 			values := make([]string, 0, len(n.Symbols))
 			types := make([]string, 0, len(n.Symbols))
+			intrinsicRuntime := false
 			for _, symbol := range n.Symbols {
+				if n.IntrinsicSymbols[symbol] {
+					intrinsicRuntime = true
+					continue
+				}
 				switch n.SymbolKinds[symbol] {
 				case "record", "interface":
 					types = append(types, symbol)
 				default:
 					values = append(values, symbol)
 				}
+			}
+			if intrinsicRuntime {
+				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
 			if len(values) > 0 {
 				g.line("import { " + strings.Join(values, ", ") + " } from " + strconv.Quote(importPath) + ";")
@@ -727,6 +735,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 			return runtimeCall
 		}
 		return tsJSONStringify(call, arguments[0])
+	case "trb.internal.json.decode":
+		return g.tsJSONDecode(call, arguments[0])
+	case "trb.internal.json.encode":
+		return g.tsJSONEncode(call, arguments[0])
 	case "trb.std.strings.length":
 		return "Array.from(" + arguments[0] + ").length"
 	case "trb.std.strings.empty":
@@ -871,6 +883,150 @@ func tsJSONStringify(call *ir.Call, argument string) string {
 	return "((): " + resultType + " => { const encodeError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Encode, message, path, line: null, column: null }); const failure = (error: JsonError): never => { throw { __trbJSONError: true, error }; }; const convert = (value: JsonValue, path: string): unknown => { switch (value.kind) { case \"Null\": return null; case \"Boolean\": return value.value; case \"Integer\": if (!Number.isSafeInteger(value.value)) { return failure(encodeError(path, \"JSON integer is outside the portable range\")); } return value.value; case \"Float\": if (!Number.isFinite(value.value)) { return failure(encodeError(path, \"JSON Float must be finite\")); } return value.value; case \"String\": return value.value; case \"Array\": return value.value.map((item, index) => convert(item, path + \"/\" + String(index))); case \"Object\": { const fields: Record<string, unknown> = {}; for (const [key, item] of Object.entries(value.value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); fields[key] = convert(item, path + \"/\" + escaped); } return fields; } } }; try { return Result.Ok<string, JsonError>(JSON.stringify(convert(" + argument + ", \"\"))); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONError === true) { return Result.Err<string, JsonError>((error as any).error as JsonError); } const message = error instanceof Error ? error.message : String(error); return Result.Err<string, JsonError>(encodeError(\"\", message)); } })()"
 }
 
+func (g *generator) tsJSONDecode(call *ir.Call, argument string) string {
+	if call.Codec == nil {
+		return "undefined"
+	}
+	jsonAlias := tsJSONRuntimeAlias(call)
+	builder := &tsJSONCodecBuilder{jsonAlias: jsonAlias}
+	decoder := builder.decoder(call.Codec)
+	resultType := tsType(call.ExprType())
+	valueType := tsCodecType(call.Codec)
+	errorType := jsonAlias + ".JsonError"
+	return "((): " + resultType + " => { const codecError = (path: string, message: string): " + errorType + " => ({ kind: " + jsonAlias + ".JsonErrorKind.Decode, message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + jsonAlias + ".parse(" + argument + "); if (parsed.kind === \"Err\") { return Result.Err<" + valueType + ", " + errorType + ">(parsed.error); } try { return Result.Ok<" + valueType + ", " + errorType + ">(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return Result.Err<" + valueType + ", " + errorType + ">((error as any).error as " + errorType + "); } throw error; } })()"
+}
+
+func (g *generator) tsJSONEncode(call *ir.Call, argument string) string {
+	if call.Codec == nil {
+		return "undefined"
+	}
+	jsonAlias := tsJSONRuntimeAlias(call)
+	builder := &tsJSONCodecBuilder{jsonAlias: jsonAlias}
+	encoder := builder.encoder(call.Codec)
+	return "((): " + tsType(call.ExprType()) + " => { " + builder.source.String() + " return " + jsonAlias + ".stringify(" + encoder + "(" + argument + ")); })()"
+}
+
+func tsJSONRuntimeAlias(call *ir.Call) string {
+	reference := expressionReference(call.Callee)
+	if reference != nil && reference.Alias != "" {
+		return reference.Alias
+	}
+	return "__trb_json"
+}
+
+func tsCodecType(schema *ir.CodecSchema) string {
+	if schema == nil {
+		return "unknown"
+	}
+	return tsType(schema.Type)
+}
+
+type tsJSONCodecBuilder struct {
+	jsonAlias string
+	source    strings.Builder
+	next      int
+}
+
+func (b *tsJSONCodecBuilder) name(prefix string) string {
+	b.next++
+	return "__trbJSON" + prefix + strconv.Itoa(b.next)
+}
+
+func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
+	name := b.name("Decode")
+	valueType := tsCodecType(schema)
+	jsonValue := b.jsonAlias + ".JsonValue"
+	if schema.Type.Nullable {
+		nonnull := *schema
+		nonnull.Type.Nullable = false
+		child := b.decoder(&nonnull)
+		b.source.WriteString("const " + name + " = (value: " + jsonValue + ", path: string): " + valueType + " => { if (value.kind === \"Null\") { return null; } return " + child + "(value, path); }; ")
+		return name
+	}
+	expected := func(kind string) string { return "return fail(path, " + strconv.Quote("expected "+kind) + ")" }
+	body := ""
+	switch schema.Kind {
+	case "boolean":
+		body = "if (value.kind !== \"Boolean\") { " + expected("Boolean") + "; } return value.value;"
+	case "integer":
+		body = "if (value.kind !== \"Integer\") { " + expected("Integer") + "; } return value.value;"
+	case "float":
+		body = "if (value.kind === \"Integer\") { return value.value; } if (value.kind !== \"Float\") { " + expected("Float") + "; } return value.value;"
+	case "string":
+		body = "if (value.kind !== \"String\") { " + expected("String") + "; } return value.value;"
+	case "array":
+		child := b.decoder(schema.Element)
+		body = "if (value.kind !== \"Array\") { " + expected("Array") + "; } return value.value.map((item, index) => " + child + "(item, path + \"/\" + String(index)));"
+	case "hash":
+		child := b.decoder(schema.Element)
+		body = "if (value.kind !== \"Object\") { " + expected("Object") + "; } const decoded: Record<string, " + tsCodecType(schema.Element) + "> = {}; for (const [key, item] of Object.entries(value.value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); decoded[key] = " + child + "(item, path + \"/\" + escaped); } return decoded;"
+	case "record":
+		var fields strings.Builder
+		fields.WriteString("if (value.kind !== \"Object\") { " + expected(schema.Type.Name) + "; } ")
+		parts := make([]string, 0, len(schema.Fields))
+		for index, field := range schema.Fields {
+			child := b.decoder(field.Schema)
+			variable := "field" + strconv.Itoa(index)
+			path := "path + " + strconv.Quote("/"+tsJSONPointerEscape(field.WireName))
+			fields.WriteString("let " + variable + ": " + tsCodecType(field.Schema) + "; if (Object.prototype.hasOwnProperty.call(value.value, " + strconv.Quote(field.WireName) + ")) { " + variable + " = " + child + "(value.value[" + strconv.Quote(field.WireName) + "]!, " + path + "); }")
+			if field.Schema.Type.Nullable {
+				fields.WriteString(" else { " + variable + " = null; }")
+			} else {
+				fields.WriteString(" else { " + variable + " = fail(" + path + ", " + strconv.Quote("missing field "+field.WireName) + "); }")
+			}
+			fields.WriteString(" ")
+			parts = append(parts, field.Name+": "+variable)
+		}
+		fields.WriteString("return { " + strings.Join(parts, ", ") + " };")
+		body = fields.String()
+	}
+	b.source.WriteString("const " + name + " = (value: " + jsonValue + ", path: string): " + valueType + " => { " + body + " }; ")
+	return name
+}
+
+func tsJSONPointerEscape(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "~", "~0"), "/", "~1")
+}
+
+func (b *tsJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
+	name := b.name("Encode")
+	valueType := tsCodecType(schema)
+	jsonValue := b.jsonAlias + ".JsonValue"
+	if schema.Type.Nullable {
+		nonnull := *schema
+		nonnull.Type.Nullable = false
+		child := b.encoder(&nonnull)
+		b.source.WriteString("const " + name + " = (value: " + valueType + "): " + jsonValue + " => value === null ? " + b.jsonAlias + ".JsonValue.Null : " + child + "(value); ")
+		return name
+	}
+	body := ""
+	switch schema.Kind {
+	case "boolean":
+		body = "return " + b.jsonAlias + ".JsonValue.Boolean(value);"
+	case "integer":
+		body = "return " + b.jsonAlias + ".JsonValue.Integer(value);"
+	case "float":
+		body = "return " + b.jsonAlias + ".JsonValue.Float(value);"
+	case "string":
+		body = "return " + b.jsonAlias + ".JsonValue.String(value);"
+	case "array":
+		child := b.encoder(schema.Element)
+		body = "return " + b.jsonAlias + ".JsonValue.Array(value.map((item) => " + child + "(item)));"
+	case "hash":
+		child := b.encoder(schema.Element)
+		body = "const fields: Record<string, " + jsonValue + "> = {}; for (const [key, item] of Object.entries(value)) { fields[key] = " + child + "(item); } return " + b.jsonAlias + ".JsonValue.Object(fields);"
+	case "record":
+		parts := make([]string, 0, len(schema.Fields))
+		for _, field := range schema.Fields {
+			child := b.encoder(field.Schema)
+			parts = append(parts, strconv.Quote(field.WireName)+": "+child+"(value."+field.Name+")")
+		}
+		body = "return " + b.jsonAlias + ".JsonValue.Object({ " + strings.Join(parts, ", ") + " });"
+	}
+	b.source.WriteString("const " + name + " = (value: " + valueType + "): " + jsonValue + " => { " + body + " }; ")
+	return name
+}
+
 func (g *generator) fetchJSON(method string, arguments []string) string {
 	return "void fetch(" + arguments[0] + ", { method: \"" + method + "\", headers: { \"Content-Type\": \"application/json\" }, body: JSON.stringify(" + arguments[1] + ") }).then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }).then(" + arguments[2] + " as any)"
 }
@@ -881,6 +1037,8 @@ func expressionReference(expression ir.Expression) *ir.Reference {
 		return node.Reference
 	case *ir.Member:
 		return node.Reference
+	case *ir.TypeApply:
+		return expressionReference(node.Receiver)
 	default:
 		return nil
 	}

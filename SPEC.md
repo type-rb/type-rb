@@ -599,6 +599,23 @@ JSONC reject them. Application code cannot import the compiler-only
 `encoding/json` API; Go 1.26's `encoding/json/v2` remains an opt-in experiment
 and is not required by generated projects.
 
+Typed codecs use `decode<T>(source)` and `encode(value)`. The decoder requires
+an explicit target type; the encoder infers it from its argument, while
+`encode<T>(value)` is also valid. The checker constructs a closed codec schema
+and retains it in typed IR. Backends generate conversions from that schema and
+do not discover record fields through target reflection or accept unchecked
+target casts in TypeRB source.
+
+Codec schemas support Boolean, Integer, Float, String, nullable forms, arrays,
+`Hash<String, V>`, and nested records. A record field's source name is its wire
+name unless `@json("wire_name")` overrides it. Missing nullable fields decode
+as `nil`; missing non-nullable fields and values of the wrong shape return a
+Decode error at the field's JSON Pointer path. Unknown object fields are
+ignored for forward compatibility. An integral JSON number may decode as
+Float, but a fractional number cannot decode as Integer. Bytes, enums,
+classes, untyped collections, non-String Hash keys, and recursive record
+graphs are rejected at compile time in v0.1.
+
 Functions that return no value omit the return annotation: `def save()` is
 valid, while `def save(): Void` is a syntax error. `Void` remains an internal
 semantic/IR type, but is not a TypeRB return-type spelling.

@@ -528,6 +528,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return rubyJSONParse(arguments[0], true)
 	case "trb.internal.json.stringify":
 		return rubyJSONStringify(arguments[0])
+	case "trb.internal.json.decode":
+		return rubyJSONDecode(call, arguments[0])
+	case "trb.internal.json.encode":
+		return rubyJSONEncode(call, arguments[0])
 	case "trb.std.strings.length":
 		return arguments[0] + ".each_codepoint.count"
 	case "trb.std.strings.empty":
@@ -658,12 +662,134 @@ func rubyJSONStringify(argument string) string {
 	return "->(value) { begin; require \"json\"; " + convert + "; outcome = catch(:__trb_json_error) { [:ok, convert.call(value, \"\")] }; if outcome[0] == :error; Result::Err.new(outcome[1]); else; Result::Ok.new(JSON.generate(outcome[1])); end; rescue StandardError => error; Result::Err.new(" + encodeError + "); end }.call(" + argument + ")"
 }
 
+func rubyJSONDecode(call *ir.Call, argument string) string {
+	if call.Codec == nil {
+		return "nil"
+	}
+	builder := &rubyJSONCodecBuilder{}
+	decoder := builder.decoder(call.Codec)
+	parsed := rubyJSONParse(argument, false)
+	errorValue := "JsonError.new(kind: JsonErrorKind::Decode, message: message, path: path, line: nil, column: nil)"
+	return "-> { fail = ->(path, message) { throw :__trb_json_codec_error, [:error, " + errorValue + "] }; " + builder.source.String() + " parsed = " + parsed + "; if parsed.is_a?(Result::Err); parsed; else; outcome = catch(:__trb_json_codec_error) { [:ok, " + decoder + ".call(parsed.value, \"\")] }; if outcome[0] == :error; Result::Err.new(outcome[1]); else; Result::Ok.new(outcome[1]); end; end }.call"
+}
+
+func rubyJSONEncode(call *ir.Call, argument string) string {
+	if call.Codec == nil {
+		return "nil"
+	}
+	builder := &rubyJSONCodecBuilder{}
+	encoder := builder.encoder(call.Codec)
+	return "-> { " + builder.source.String() + " encoded = " + encoder + ".call(" + argument + "); " + rubyJSONStringify("encoded") + " }.call"
+}
+
+type rubyJSONCodecBuilder struct {
+	source strings.Builder
+	next   int
+}
+
+func (b *rubyJSONCodecBuilder) name(prefix string) string {
+	b.next++
+	return "__trb_json_" + strings.ToLower(prefix) + "_" + strconv.Itoa(b.next)
+}
+
+func (b *rubyJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
+	name := b.name("decode")
+	if schema.Type.Nullable {
+		nonnull := *schema
+		nonnull.Type.Nullable = false
+		child := b.decoder(&nonnull)
+		b.source.WriteString(name + " = ->(value, path) { value.equal?(JsonValue::Null) ? nil : " + child + ".call(value, path) }; ")
+		return name
+	}
+	expected := func(kind string) string { return "fail.call(path, " + strconv.Quote("expected "+kind) + ")" }
+	body := ""
+	switch schema.Kind {
+	case "boolean":
+		body = "unless value.is_a?(JsonValue::Boolean); " + expected("Boolean") + "; end; value.value"
+	case "integer":
+		body = "unless value.is_a?(JsonValue::Integer); " + expected("Integer") + "; end; value.value"
+	case "float":
+		body = "if value.is_a?(JsonValue::Integer); value.value.to_f; elsif value.is_a?(JsonValue::Float); value.value; else; " + expected("Float") + "; end"
+	case "string":
+		body = "unless value.is_a?(JsonValue::String); " + expected("String") + "; end; value.value"
+	case "array":
+		child := b.decoder(schema.Element)
+		body = "unless value.is_a?(JsonValue::Array); " + expected("Array") + "; end; value.value.each_with_index.map { |item, index| " + child + ".call(item, path + \"/\" + index.to_s) }"
+	case "hash":
+		child := b.decoder(schema.Element)
+		body = "unless value.is_a?(JsonValue::Object); " + expected("Object") + "; end; decoded = {}; value.value.each { |key, item| escaped = key.gsub(\"~\", \"~0\").gsub(\"/\", \"~1\"); decoded[key] = " + child + ".call(item, path + \"/\" + escaped) }; decoded"
+	case "record":
+		var fields strings.Builder
+		fields.WriteString("unless value.is_a?(JsonValue::Object); " + expected(schema.Type.Name) + "; end; ")
+		parts := make([]string, 0, len(schema.Fields))
+		for index, field := range schema.Fields {
+			child := b.decoder(field.Schema)
+			variable := "field" + strconv.Itoa(index)
+			path := "path + " + strconv.Quote("/"+rubyJSONPointerEscape(field.WireName))
+			fields.WriteString("if value.value.key?(" + strconv.Quote(field.WireName) + "); " + variable + " = " + child + ".call(value.value[" + strconv.Quote(field.WireName) + "], " + path + "); ")
+			if field.Schema.Type.Nullable {
+				fields.WriteString("else; " + variable + " = nil; end; ")
+			} else {
+				fields.WriteString("else; " + variable + " = fail.call(" + path + ", " + strconv.Quote("missing field "+field.WireName) + "); end; ")
+			}
+			parts = append(parts, field.Name+": "+variable)
+		}
+		fields.WriteString(schema.Type.Name + ".new(" + strings.Join(parts, ", ") + ")")
+		body = fields.String()
+	}
+	b.source.WriteString(name + " = ->(value, path) { " + body + " }; ")
+	return name
+}
+
+func rubyJSONPointerEscape(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "~", "~0"), "/", "~1")
+}
+
+func (b *rubyJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
+	name := b.name("encode")
+	if schema.Type.Nullable {
+		nonnull := *schema
+		nonnull.Type.Nullable = false
+		child := b.encoder(&nonnull)
+		b.source.WriteString(name + " = ->(value) { value.nil? ? JsonValue::Null : " + child + ".call(value) }; ")
+		return name
+	}
+	body := ""
+	switch schema.Kind {
+	case "boolean":
+		body = "JsonValue::Boolean.new(value)"
+	case "integer":
+		body = "JsonValue::Integer.new(value)"
+	case "float":
+		body = "JsonValue::Float.new(value)"
+	case "string":
+		body = "JsonValue::String.new(value)"
+	case "array":
+		child := b.encoder(schema.Element)
+		body = "JsonValue::Array.new(value.map { |item| " + child + ".call(item) })"
+	case "hash":
+		child := b.encoder(schema.Element)
+		body = "fields = {}; value.each { |key, item| fields[key] = " + child + ".call(item) }; JsonValue::Object.new(fields)"
+	case "record":
+		parts := make([]string, 0, len(schema.Fields))
+		for _, field := range schema.Fields {
+			child := b.encoder(field.Schema)
+			parts = append(parts, strconv.Quote(field.WireName)+" => "+child+".call(value."+field.Name+")")
+		}
+		body = "JsonValue::Object.new({" + strings.Join(parts, ", ") + "})"
+	}
+	b.source.WriteString(name + " = ->(value) { " + body + " }; ")
+	return name
+}
+
 func expressionReference(expression ir.Expression) *ir.Reference {
 	switch node := expression.(type) {
 	case *ir.Identifier:
 		return node.Reference
 	case *ir.Member:
 		return node.Reference
+	case *ir.TypeApply:
+		return expressionReference(node.Receiver)
 	default:
 		return nil
 	}

@@ -45,6 +45,9 @@ type Import struct {
 	Standard  bool
 	Platform  bool
 	Runtime   bool
+	// IntrinsicSymbols are resolved at compile time and have no corresponding
+	// runtime export in a compiler-owned source module.
+	IntrinsicSymbols map[string]bool
 	// SymbolKinds distinguishes value records from reference classes in
 	// backends whose representation makes that distinction explicit.
 	SymbolKinds map[string]string
@@ -371,9 +374,28 @@ type Call struct {
 	Callee    Expression
 	Arguments []CallArgument
 	Block     *Block
+	Codec     *CodecSchema
 }
 
 func (*Call) irExpression() {}
+
+// CodecSchema is the checked, target-independent shape used by typed JSON
+// encode/decode intrinsics. Backends consume this schema instead of reflecting
+// over a generated target type.
+type CodecSchema struct {
+	Type      types.Type
+	Kind      string
+	Module    string
+	Reference *Reference
+	Element   *CodecSchema
+	Fields    []CodecField
+}
+
+type CodecField struct {
+	Name     string
+	WireName string
+	Schema   *CodecSchema
+}
 
 // EnumConstruct preserves nominal variant construction through lowering. It
 // must not become an ordinary call because every backend uses a different

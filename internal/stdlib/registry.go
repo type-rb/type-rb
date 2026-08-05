@@ -161,6 +161,20 @@ end
 		Kind:       Portable,
 		Symbols: map[string]Symbol{
 			"parse": jsonParse("parse"),
+			"decode": {
+				Name:           "decode",
+				Intrinsic:      "trb.internal.json.decode",
+				TypeParameters: []string{"T"},
+				Parameters:     []Parameter{{Name: "source", Type: stringType}},
+				Return:         jsonResult(typeT),
+			},
+			"encode": {
+				Name:           "encode",
+				Intrinsic:      "trb.internal.json.encode",
+				TypeParameters: []string{"T"},
+				Parameters:     []Parameter{{Name: "value", Type: typeT}},
+				Return:         jsonResult(stringType),
+			},
 			"stringify": {
 				Name:       "stringify",
 				Intrinsic:  "trb.internal.json.stringify",

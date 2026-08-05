@@ -480,28 +480,34 @@ paths; use `trb/std/path` separately when target-independent lexical path
 manipulation is required. All failures carry `operation`, `path`, and `message`
 in `FileError` instead of leaking target exceptions.
 
-Portable JSON and JSONC use an explicit value enum and typed Result errors:
+Portable JSON and JSONC provide typed record codecs in addition to an explicit
+value enum:
 
 ```trb
-import { JsonError, JsonValue, field } from trb/std/json
-import { parse } from trb/std/jsonc
+import { JsonError, decode, encode } from trb/std/json
 import { Result } from trb/std/result
 
-def read_name(source: String): Result<JsonValue, JsonError>
-	case parse(source)
-	when Result::Ok(value)
-		return field(value, "name")
-	when Result::Err(error)
-		return Result<JsonValue, JsonError>::Err(error)
-	end
+record User
+	id: Integer @json("user_id")
+	name: String
+	nickname: String?
+end
+
+def decode_user(source: String): Result<User, JsonError>
+	return decode<User>(source)
+end
+
+def encode_user(user: User): Result<String, JsonError>
+	return encode(user)
 end
 ```
 
 `json.parse` accepts strict JSON, while `jsonc.parse` additionally accepts line
 and block comments. Both reject trailing commas. `json.stringify` returns a
 `Result<String, JsonError>`, and accessors such as `json.as_string` keep type
-mismatches explicit. Typed record codecs are the next layer; the current API
-does not convert an arbitrary record through target reflection.
+mismatches explicit. Typed codecs support nullable fields, arrays,
+`Hash<String, V>`, nested records, and `@json` wire names. The compiler derives
+and retains their schemas in typed IR rather than reflecting over target code.
 
 Unicode scalar classification comes from one compiler-owned data set shared by
 all targets:

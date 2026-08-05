@@ -977,6 +977,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.jsonParse(call, arguments[0], true)
 	case "trb.internal.json.stringify":
 		return g.jsonStringify(call, arguments[0])
+	case "trb.internal.json.decode":
+		return g.jsonDecode(call, arguments[0])
+	case "trb.internal.json.encode":
+		return g.jsonEncode(call, arguments[0])
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"
@@ -1222,6 +1226,194 @@ func (g *generator) jsonStringify(call *ir.Call, argument string) string {
 	return "func() " + resultType + " { conversionError := " + conversionError + "; " + convert + "; raw, conversionErr := convert(" + argument + ", \"\"); if conversionErr != nil { return " + resultAlias + ".NewResultErr[string, " + errorType + "](*conversionErr) }; encoded, err := stdjson.Marshal(raw); if err != nil { return " + errResult("err.Error()", `""`) + " }; return " + ok + "(string(encoded)) }()"
 }
 
+func (g *generator) jsonDecode(call *ir.Call, argument string) string {
+	if call.Codec == nil {
+		return "nil"
+	}
+	g.requireImport("strconv", "")
+	g.requireImport("strings", "")
+	jsonAlias := g.jsonRuntimeAlias(call)
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	valueType := g.goCodecType(call.Codec)
+	errorType := jsonAlias + ".JsonError"
+	resultType := g.goType(call.ExprType())
+	builder := &goJSONCodecBuilder{generator: g, jsonAlias: jsonAlias, errorType: errorType}
+	decoder := builder.decoder(call.Codec)
+	decodeError := "func(path, message string) *" + errorType + " { value := " + errorType + "{Kind: " + jsonAlias + ".JsonErrorKindDecode, Message: message, Path: path}; return &value }"
+	parse := jsonAlias + ".Parse(" + argument + ")"
+	errResult := resultAlias + ".NewResultErr[" + valueType + ", " + errorType + "]"
+	okResult := resultAlias + ".NewResultOk[" + valueType + ", " + errorType + "]"
+	return "func() " + resultType + " { decodeError := " + decodeError + "; " + builder.source.String() + " parsed := " + parse + "; if parsed.Kind == " + resultAlias + ".ResultErrTag { return " + errResult + "(parsed.ErrError) }; decoded, codecErr := " + decoder + "(parsed.OkValue, \"\"); if codecErr != nil { return " + errResult + "(*codecErr) }; return " + okResult + "(decoded) }()"
+}
+
+func (g *generator) jsonEncode(call *ir.Call, argument string) string {
+	if call.Codec == nil {
+		return "nil"
+	}
+	jsonAlias := g.jsonRuntimeAlias(call)
+	builder := &goJSONCodecBuilder{generator: g, jsonAlias: jsonAlias, errorType: jsonAlias + ".JsonError"}
+	encoder := builder.encoder(call.Codec)
+	return "func() " + g.goType(call.ExprType()) + " { " + builder.source.String() + " return " + jsonAlias + ".Stringify(" + encoder + "(" + argument + ")) }()"
+}
+
+func (g *generator) jsonRuntimeAlias(call *ir.Call) string {
+	reference := expressionReference(call.Callee)
+	if reference != nil && reference.Alias != "" {
+		return goImportAlias(reference.Alias)
+	}
+	if reference != nil && reference.Package != "" {
+		return goImportAlias(pathpkg.Base(pathpkg.Dir(reference.Package)))
+	}
+	return "json"
+}
+
+func (g *generator) goCodecType(schema *ir.CodecSchema) string {
+	if schema == nil {
+		return "any"
+	}
+	base := schema.Type
+	nullable := base.Nullable
+	base.Nullable = false
+	var result string
+	switch schema.Kind {
+	case "array":
+		result = "[]" + g.goCodecType(schema.Element)
+	case "hash":
+		result = "map[string]" + g.goCodecType(schema.Element)
+	case "record":
+		result = goIdentifier(base.Name, true)
+		if schema.Reference != nil && schema.Reference.Package != "" && schema.Reference.Package != g.modulePath {
+			alias := schema.Reference.Alias
+			if alias == "" {
+				alias = pathpkg.Base(pathpkg.Dir(schema.Reference.Package))
+			}
+			result = goImportAlias(alias) + "." + result
+		}
+	default:
+		result = g.goType(base)
+	}
+	if nullable {
+		return "*" + result
+	}
+	return result
+}
+
+type goJSONCodecBuilder struct {
+	generator *generator
+	jsonAlias string
+	errorType string
+	source    strings.Builder
+	next      int
+}
+
+func (b *goJSONCodecBuilder) name(prefix string) string {
+	b.next++
+	return "__trbJSON" + prefix + strconv.Itoa(b.next)
+}
+
+func (b *goJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
+	name := b.name("Decode")
+	valueType := b.generator.goCodecType(schema)
+	jsonValue := b.jsonAlias + ".JsonValue"
+	zero := "var zero " + valueType + "; return zero, decodeError(path, message)"
+	expected := func(kind string) string {
+		return "message := \"expected " + kind + "\"; " + zero
+	}
+	if schema.Type.Nullable {
+		nonnull := *schema
+		nonnull.Type.Nullable = false
+		child := b.decoder(&nonnull)
+		body := "if value.Kind == " + b.jsonAlias + ".JsonValueNullTag { return nil, nil }; decoded, err := " + child + "(value, path); if err != nil { return nil, err }; return &decoded, nil"
+		b.source.WriteString(name + " := func(value " + jsonValue + ", path string) (" + valueType + ", *" + b.errorType + ") { " + body + " }; ")
+		return name
+	}
+	body := ""
+	switch schema.Kind {
+	case "boolean":
+		body = "if value.Kind != " + b.jsonAlias + ".JsonValueBooleanTag { " + expected("Boolean") + " }; return value.BooleanValue, nil"
+	case "integer":
+		body = "if value.Kind != " + b.jsonAlias + ".JsonValueIntegerTag { " + expected("Integer") + " }; return value.IntegerValue, nil"
+	case "float":
+		body = "if value.Kind == " + b.jsonAlias + ".JsonValueIntegerTag { return float64(value.IntegerValue), nil }; if value.Kind != " + b.jsonAlias + ".JsonValueFloatTag { " + expected("Float") + " }; return value.FloatValue, nil"
+	case "string":
+		body = "if value.Kind != " + b.jsonAlias + ".JsonValueStringTag { " + expected("String") + " }; return value.StringValue, nil"
+	case "array":
+		child := b.decoder(schema.Element)
+		elementType := b.generator.goCodecType(schema.Element)
+		body = "if value.Kind != " + b.jsonAlias + ".JsonValueArrayTag { " + expected("Array") + " }; decoded := make([]" + elementType + ", len(value.ArrayValue)); for index, item := range value.ArrayValue { child, err := " + child + "(item, path+\"/\"+strconv.Itoa(index)); if err != nil { var zero " + valueType + "; return zero, err }; decoded[index] = child }; return decoded, nil"
+	case "hash":
+		child := b.decoder(schema.Element)
+		elementType := b.generator.goCodecType(schema.Element)
+		body = "if value.Kind != " + b.jsonAlias + ".JsonValueObjectTag { " + expected("Object") + " }; decoded := make(map[string]" + elementType + ", len(value.ObjectValue)); for key, item := range value.ObjectValue { escaped := strings.ReplaceAll(strings.ReplaceAll(key, \"~\", \"~0\"), \"/\", \"~1\"); child, err := " + child + "(item, path+\"/\"+escaped); if err != nil { var zero " + valueType + "; return zero, err }; decoded[key] = child }; return decoded, nil"
+	case "record":
+		var fields strings.Builder
+		fields.WriteString("if value.Kind != " + b.jsonAlias + ".JsonValueObjectTag { " + expected(schema.Type.Name) + " }; ")
+		constructor := make([]string, 0, len(schema.Fields))
+		for index, field := range schema.Fields {
+			child := b.decoder(field.Schema)
+			variable := "field" + strconv.Itoa(index)
+			fieldType := b.generator.goCodecType(field.Schema)
+			path := strconv.Quote("/" + jsonPointerEscape(field.WireName))
+			fields.WriteString("var " + variable + " " + fieldType + "; if raw, exists := value.ObjectValue[" + strconv.Quote(field.WireName) + "]; exists { decoded, err := " + child + "(raw, path+" + path + "); if err != nil { var zero " + valueType + "; return zero, err }; " + variable + " = decoded }")
+			if !field.Schema.Type.Nullable {
+				fields.WriteString(" else { message := " + strconv.Quote("missing field "+field.WireName) + "; var zero " + valueType + "; return zero, decodeError(path+" + path + ", message) }")
+			}
+			fields.WriteString("; ")
+			constructor = append(constructor, goIdentifier(field.Name, true)+": "+variable)
+		}
+		fields.WriteString("return " + valueType + "{" + strings.Join(constructor, ", ") + "}, nil")
+		body = fields.String()
+	}
+	b.source.WriteString(name + " := func(value " + jsonValue + ", path string) (" + valueType + ", *" + b.errorType + ") { " + body + " }; ")
+	return name
+}
+
+func (b *goJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
+	name := b.name("Encode")
+	valueType := b.generator.goCodecType(schema)
+	jsonValue := b.jsonAlias + ".JsonValue"
+	if schema.Type.Nullable {
+		nonnull := *schema
+		nonnull.Type.Nullable = false
+		child := b.encoder(&nonnull)
+		b.source.WriteString(name + " := func(value " + valueType + ") " + jsonValue + " { if value == nil { return " + b.jsonAlias + ".JsonValueNull }; return " + child + "(*value) }; ")
+		return name
+	}
+	body := ""
+	switch schema.Kind {
+	case "boolean":
+		body = "return " + b.jsonAlias + ".NewJsonValueBoolean(value)"
+	case "integer":
+		body = "return " + b.jsonAlias + ".NewJsonValueInteger(value)"
+	case "float":
+		body = "return " + b.jsonAlias + ".NewJsonValueFloat(value)"
+	case "string":
+		body = "return " + b.jsonAlias + ".NewJsonValueString(value)"
+	case "array":
+		child := b.encoder(schema.Element)
+		body = "items := make([]" + jsonValue + ", len(value)); for index, item := range value { items[index] = " + child + "(item) }; return " + b.jsonAlias + ".NewJsonValueArray(items)"
+	case "hash":
+		child := b.encoder(schema.Element)
+		body = "fields := make(map[string]" + jsonValue + ", len(value)); for key, item := range value { fields[key] = " + child + "(item) }; return " + b.jsonAlias + ".NewJsonValueObject(fields)"
+	case "record":
+		parts := make([]string, 0, len(schema.Fields))
+		for _, field := range schema.Fields {
+			child := b.encoder(field.Schema)
+			parts = append(parts, strconv.Quote(field.WireName)+": "+child+"(value."+goIdentifier(field.Name, true)+")")
+		}
+		body = "return " + b.jsonAlias + ".NewJsonValueObject(map[string]" + jsonValue + "{" + strings.Join(parts, ", ") + "})"
+	}
+	b.source.WriteString(name + " := func(value " + valueType + ") " + jsonValue + " { " + body + " }; ")
+	return name
+}
+
+func jsonPointerEscape(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "~", "~0"), "/", "~1")
+}
+
 func (g *generator) gormRead(call *ir.Call, arguments []string, operation string) string {
 	resultType := g.goType(call.ExprType())
 	valueType := resultType
@@ -1257,6 +1449,8 @@ func expressionReference(expression ir.Expression) *ir.Reference {
 		return node.Reference
 	case *ir.Member:
 		return node.Reference
+	case *ir.TypeApply:
+		return expressionReference(node.Receiver)
 	default:
 		return nil
 	}

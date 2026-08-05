@@ -1017,6 +1017,104 @@ func TestPortableJSONPackagesReportDiagnosticsAcrossBackends(t *testing.T) {
 	}
 }
 
+func TestTypedJSONRecordCodecsLowerAcrossBackends(t *testing.T) {
+	contracts := SourceUnit{
+		Filename:   "/project/contracts/user.trb",
+		ModulePath: "contracts/user",
+		Package:    "user",
+		Source: []byte(`record Address
+	city: String
+end
+
+record User
+	id: Integer @json("user_id")
+	name: String
+	nickname: String?
+	scores: Array<Float>
+	metadata: Hash<String, Integer>
+	address: Address
+end
+`),
+	}
+	main := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Address, User } from contracts/user
+import { JsonError, decode, encode } from trb/std/json
+import { Result } from trb/std/result
+
+def decode_user(source: String): Result<User, JsonError>
+	return decode<User>(source)
+end
+
+def encode_user(user: User): Result<String, JsonError>
+	return encode(user)
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{contracts, main}, Options{Mode: mode, GoModule: "example.com/json-codec", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected typed JSON codecs: %v", mode, err)
+		}
+		var output string
+		for _, artifact := range artifacts {
+			if artifact.IR.ModulePath == "main" {
+				output = string(artifact.Output)
+			}
+		}
+		for _, want := range map[string][]string{
+			"go":         {"func DecodeUser", "JsonErrorKindDecode", "Id: field0"},
+			"ruby":       {"JsonErrorKind::Decode", `User.new(id: field0`},
+			"typescript": {"JsonErrorKind.Decode", "return { id: field0"},
+		}[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("%s typed JSON codec output does not contain %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestTypedJSONRecordCodecsReportDiagnosticsAcrossBackends(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "decode requires a type",
+			source: "import { decode } from trb/std/json\nvalue := decode(\"{}\")\n",
+			want:   "cannot infer T for decode()",
+		},
+		{
+			name:   "class is not a record codec",
+			source: "import { decode } from trb/std/json\nclass User; end\nvalue := decode<User>(\"{}\")\n",
+			want:   "JSON codec type User must be a record or JSON-compatible built-in type",
+		},
+		{
+			name:   "unsupported record field",
+			source: "import { decode } from trb/std/json\nrecord Document; payload: Bytes; end\nvalue := decode<Document>(\"{}\")\n",
+			want:   "JSON codec type Bytes is not supported",
+		},
+		{
+			name:   "recursive record",
+			source: "import { decode } from trb/std/json\nrecord Node; child: Node?; end\nvalue := decode<Node>(\"{}\")\n",
+			want:   "recursive JSON codec record Node is not supported yet",
+		},
+	}
+	for _, test := range tests {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			t.Run(test.name+"/"+mode, func(t *testing.T) {
+				_, err := CompileProject([]SourceUnit{{Filename: "/project/main.trb", ModulePath: "main", Package: "main", Source: []byte(test.source)}}, Options{Mode: mode, GoModule: "example.com/json-codec-diagnostics", RubyLoader: "require_relative"})
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("expected %s diagnostic %q, got %v", mode, test.want, err)
+				}
+			})
+		}
+	}
+}
+
 func TestPutsPreludeLowersWithoutImportAcrossBackends(t *testing.T) {
 	source := []byte("def main()\n  puts(1 + 2)\n  return\nend\n")
 	tests := []struct {
