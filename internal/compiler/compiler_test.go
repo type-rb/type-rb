@@ -673,13 +673,17 @@ func TestPortableOperatorRulesAndBackendSemantics(t *testing.T) {
   power: Integer := 2 ** 3
   float_power: Float := 2.0 ** 3.0
   ratio: Float := 8.0 / 2.0
+  mixed_product: Float := 0.25 * 100
+  widened: Float := grouped
   message: String := "type" + "rb"
   mut updated: Integer := 8
   updated /= 3
+  mut accumulated: Float := 1
+  accumulated += 2
   mut enabled: Boolean := true
   enabled &&= false
   words: Boolean := true and false
-  return grouped == 9 && quotient == -2 && remainder == -1 && power == 8 && float_power == 8.0 && ratio >= 4.0 && message == "typerb" && updated == 2 && !enabled && !words
+  return grouped == 9 && quotient == -2 && remainder == -1 && power == 8 && float_power == 8.0 && ratio >= 4.0 && mixed_product == 25.0 && widened == 9.0 && accumulated == 3.0 && 1 == 1.0 && 1 < 1.5 && message == "typerb" && updated == 2 && !enabled && !words
 end
 `)
 
@@ -693,7 +697,7 @@ end
 	}
 
 	goOutput := string(artifacts["go"].Output)
-	for _, want := range []string{`import "math"`, `(1 + 2) * 3`, `panic("negative Integer exponent")`, `math.Pow(2.0, 3.0)`} {
+	for _, want := range []string{`import "math"`, `(1 + 2) * 3`, `panic("negative Integer exponent")`, `math.Pow(2.0, 3.0)`, `0.25 * float64(100)`, `float64(grouped)`, `accumulated += float64(2)`, `float64(1) == 1.0`} {
 		if !strings.Contains(goOutput, want) {
 			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
 		}
@@ -708,15 +712,62 @@ end
 	}
 
 	rubyOutput := string(artifacts["ruby"].Output)
-	for _, want := range []string{".quo(2).truncate", ".remainder(2)", "updated = (updated).quo(3).truncate", "words = true && false"} {
+	for _, want := range []string{".quo(2).truncate", ".remainder(2)", "updated = (updated).quo(3).truncate", "0.25 * (100).to_f", "widened = (grouped).to_f", "accumulated += (2).to_f", "words = true && false"} {
 		if !strings.Contains(rubyOutput, want) {
 			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
 		}
 	}
 	typescriptOutput := string(artifacts["typescript"].Output)
-	for _, want := range []string{"Math.trunc((-5) / 2)", "updated = Math.trunc(updated / 3)"} {
+	for _, want := range []string{"Math.trunc((-5) / 2)", "updated = Math.trunc(updated / 3)", "0.25 * Number(100)", "Number(grouped)", "accumulated += Number(2)"} {
 		if !strings.Contains(typescriptOutput, want) {
 			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
+		}
+	}
+}
+
+func TestIntegerToFloatWideningIsExplicitInTypedIR(t *testing.T) {
+	source := []byte(`def accept(value: Float): Float
+	return value
+end
+
+def direct(value: Integer): Float
+	return value
+end
+
+def through_call(value: Integer): Float
+	result: Float := accept(value)
+	return result + value
+end
+`)
+
+	wants := map[string][]string{
+		"go":         {"return float64(value)", "Accept(float64(value))", "result + float64(value)"},
+		"ruby":       {"return (value).to_f", "accept((value).to_f)", "result + (value).to_f"},
+		"typescript": {"return Number(value)", "accept(Number(value))", "result + Number(value)"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("widening.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected Integer-to-Float widening: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s widening is missing %q:\n%s", mode, want, output)
+			}
+		}
+
+		var directReturn ir.Expression
+		for _, statement := range artifact.IR.Statements {
+			method, ok := statement.(*ir.Method)
+			if !ok || method.Name != "direct" || len(method.Body) == 0 {
+				continue
+			}
+			directReturn = method.Body[0].(*ir.Return).Value
+		}
+		conversion, ok := directReturn.(*ir.Conversion)
+		if !ok || conversion.Kind != ir.IntegerToFloatConversion || conversion.ExprType().Kind != types.Float || conversion.Value.ExprType().Kind != types.Int {
+			t.Fatalf("%s did not retain widening in typed IR: %#v", mode, directReturn)
 		}
 	}
 }
@@ -736,11 +787,6 @@ func TestInvalidPortableOperatorsAreRejectedAcrossModes(t *testing.T) {
 			name:   "unary not integer",
 			source: "def bad(): Boolean\n  return !1\nend\n",
 			want:   "operator ! does not support Integer",
-		},
-		{
-			name:   "mixed numeric arithmetic",
-			source: "def bad(): Float\n  return 1 + 2.0\nend\n",
-			want:   "operator + does not support Integer and Float",
 		},
 		{
 			name:   "string ordering",

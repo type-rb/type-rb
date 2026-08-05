@@ -93,6 +93,27 @@ def package_text(): String
 	return numbers.to_string(123)
 end
 
+def float_text(): String
+	return 0.25.to_s()
+end
+
+def package_float_text(): String
+	return numbers.float_to_string(0.25)
+end
+
+def integer_as_float(): Float
+	return 2.to_f()
+end
+
+def truncated_float(): Integer
+	return (-2.75).to_i()
+end
+
+def print_float()
+	puts(0.25 * 100)
+	return
+end
+
 def parsed(): Integer
 	return "123".to_i()
 end
@@ -102,9 +123,9 @@ def text_size(): Integer
 end
 `)
 	wants := map[string][]string{
-		"go":         {`strconv.Itoa(123)`, `regexp.MatchString`, `strconv.ParseInt`, `utf8.RuneCountInString("a😀")`},
-		"ruby":       {`123.to_s`, `Integer(input, 10)`, `"a😀".each_codepoint.count`},
-		"typescript": {`String(123)`, `Number.isSafeInteger(__trbValue)`, `Array.from("a😀").length`},
+		"go":         {`strconv.Itoa(123)`, `strconv.FormatFloat(value, 'f', -1, 64)`, `float64(2)`, `math.Trunc(value)`, `fmt.Println(func() string`, `regexp.MatchString`, `strconv.ParseInt`, `utf8.RuneCountInString("a😀")`},
+		"ruby":       {`123.to_s`, `raw = value.to_s`, `(2).to_f`, `value.truncate`, `$stdout.puts(->(value)`, `Integer(input, 10)`, `"a😀".each_codepoint.count`},
+		"typescript": {`String(123)`, `const raw = String(value)`, `Number(2)`, `Math.trunc(value)`, `console.log(((): string`, `Number.isSafeInteger(__trbValue)`, `Array.from("a😀").length`},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		artifact, err := CompileWithOptions("methods.trb", source, Options{Mode: mode, Package: "methods", RubyLoader: "require_relative"})

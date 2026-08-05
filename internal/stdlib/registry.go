@@ -74,6 +74,7 @@ var bytesType = types.FromName("Bytes")
 var stringBuilderType = types.FromName("StringBuilder")
 var unitType = types.FromName("Unit")
 var integerType = types.FromName("Integer")
+var floatType = types.FromName("Float")
 var booleanType = types.FromName("Boolean")
 var voidType = types.FromName("Void")
 var anyType = types.FromName("Any")
@@ -491,6 +492,9 @@ end
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"to_string":         unary("to_string", "trb.std.numbers.to_string", integerType, stringType),
+			"to_float":          unary("to_float", "trb.std.numbers.integer_to_float", integerType, floatType),
+			"float_to_string":   unary("float_to_string", "trb.std.numbers.float_to_string", floatType, stringType),
+			"truncate":          unary("truncate", "trb.std.numbers.float_to_integer", floatType, integerType),
 			"parse_integer":     unary("parse_integer", "trb.std.numbers.parse_integer", stringType, integerType),
 			"try_parse_integer": unary("try_parse_integer", "trb.std.numbers.try_parse_integer", stringType, stringErrorResult(integerType)),
 		},
@@ -600,6 +604,11 @@ end
 var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 	types.Int: {
 		"to_s": {PackagePath: "trb/std/numbers", Symbol: "to_string"},
+		"to_f": {PackagePath: "trb/std/numbers", Symbol: "to_float"},
+	},
+	types.Float: {
+		"to_s": {PackagePath: "trb/std/numbers", Symbol: "float_to_string"},
+		"to_i": {PackagePath: "trb/std/numbers", Symbol: "truncate"},
 	},
 	types.String: {
 		"to_i":        {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},

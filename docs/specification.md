@@ -78,6 +78,10 @@ mode by itself does not enable them.
   `values.push(item)` or `arrays.push(values, item)`.
 - A readonly reference cannot be made mutable merely by assigning it to a new
   `mut` binding.
+- A non-nullable `Integer` is assignable to a non-nullable `Float`. The checker
+  records this widening explicitly and typed IR lowers it in initializers,
+  assignments, arguments, record and enum payloads, defaults, and returns.
+  `Float` does not narrow implicitly to `Integer`.
 - Method parameters and iterator block parameters are mutable bindings in
   v0.1. Class fields use their existing `readonly` modifier instead of `mut`.
 - `@ivar := expr` is disallowed; instance variables use declared fields and `=` updates.
@@ -133,17 +137,19 @@ mode by itself does not enable them.
 
 - `!` and `not` accept non-nullable `Boolean`; unary `+` and `-` accept a
   non-nullable `Integer` or `Float` and preserve that type.
-- `+` accepts matching numeric types or two `String` values. `-`, `*`, `/`,
-  and `**` accept matching numeric types. `%` accepts two `Integer` values.
-- `<`, `<=`, `>`, and `>=` compare matching numeric types. Portable `==` and
-  `!=` compare matching non-nullable scalar types (`Boolean`, `Integer`,
-  `Float`, and `String`), two values of the same payloadless enum type, or a
-  nullable value with `nil`. Equality for payload-bearing enums is reserved
-  until one structural rule can be implemented identically by every backend.
+- `+` accepts numeric values or two `String` values. `-`, `*`, `/`, and `**`
+  accept numeric values. When one numeric operand is `Float`, an `Integer`
+  operand is widened and the result is `Float`; two `Integer` operands retain
+  an `Integer` result. `%` accepts two `Integer` values.
+- `<`, `<=`, `>`, and `>=` compare numeric values with the same widening rule.
+  Portable `==` and `!=` compare numeric values, matching non-nullable
+  `Boolean` or `String` values, two values of the same payloadless enum type,
+  or a nullable value with `nil`. Equality for payload-bearing enums is
+  reserved until one structural rule can be implemented identically by every
+  backend.
 - `&&`, `||`, `and`, and `or` accept two non-nullable `Boolean` values and
   return `Boolean`. Compound assignments apply the corresponding binary rule
   before checking that the result remains assignable to the mutable target.
-- TypeRB does not implicitly mix `Integer` and `Float` operands.
 - Integer `/` truncates toward zero, `%` is its corresponding remainder, and a
   negative exponent is invalid for Integer `**`. Backends and the REPL preserve
   these semantics instead of inheriting different target-language behavior.
@@ -495,14 +501,16 @@ therefore reach IR as resolved intrinsics rather than target-language text.
 
 The portable prelude contains `puts(value: Any)` and lowers it to the
 appropriate output primitive in each mode. An explicit `import trb/std/io`
-exposes the identical intrinsic as `io.puts`.
+exposes the identical intrinsic as `io.puts`. A statically typed `Float`
+argument uses the same portable decimal spelling as `Float#to_s`.
 
 Portable built-in and standard types may expose receiver methods.
 Receiver syntax is not target-native escape syntax: the resolver maps it to a
 compiler-owned standard-library contract, and typed IR records that contract.
 The package and receiver forms consequently share argument checking, return
 types, REPL semantics, and backend lowering. The initial surface includes
-`Integer#to_s`, `String#to_i`, `String#try_to_i`, and
+`Integer#to_s`, `Integer#to_f`, `Float#to_s`, `Float#to_i`, `String#to_i`,
+`String#try_to_i`, and
 Unicode-code-point-based `String#size`, corresponding to `trb/std/numbers` and
 `trb/std/strings` operations. Unknown members on portable built-in types are
 compile errors in every mode. Integer parsing accepts only a complete ASCII
@@ -511,6 +519,13 @@ decimal spelling matching `[+-]?[0-9]+`; values outside
 same exact result. `to_i` raises a runtime error, while `try_to_i` and package
 `try_parse_integer` return `Result<Integer, String>` with a stable error
 message.
+
+`Integer#to_f` is exact over the portable Integer range. `Float#to_i`
+truncates toward zero and raises for a non-finite value or a result outside the
+portable Integer range. `Float#to_s` emits the shortest fixed decimal spelling
+used by the compiler runtime, never exponent notation; integral values retain
+`.0`, negative zero is normalized to `0.0`, and non-finite values use `NaN`,
+`Infinity`, or `-Infinity`.
 
 `Bytes` is the portable immutable binary-sequence type; it is not an alias for
 `Array<Integer>` or `String`. `trb/std/bytes` provides UTF-8 `from_string` and

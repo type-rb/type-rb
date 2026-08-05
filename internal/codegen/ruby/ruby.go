@@ -369,6 +369,13 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "!(" + g.expr(n.Operand) + ")"
 		}
 		return op + g.unaryOperand(n.Operand)
+	case *ir.Conversion:
+		switch n.Kind {
+		case ir.IntegerToFloatConversion:
+			return "(" + g.expr(n.Value) + ").to_f"
+		default:
+			return g.expr(n.Value)
+		}
 	case *ir.Binary:
 		left := g.binaryOperand(n.Left)
 		right := g.binaryOperand(n.Right)
@@ -520,6 +527,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	}
 	switch name {
 	case "trb.std.io.puts":
+		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Float {
+			return "$stdout.puts(" + portableFloatString(arguments[0]) + ")"
+		}
 		return "$stdout.puts(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.path.separator":
 		return pathCall("separator") + "()"
@@ -674,6 +684,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".dup"
 	case "trb.std.numbers.to_string":
 		return arguments[0] + ".to_s"
+	case "trb.std.numbers.integer_to_float":
+		return "(" + arguments[0] + ").to_f"
+	case "trb.std.numbers.float_to_string":
+		return portableFloatString(arguments[0])
+	case "trb.std.numbers.float_to_integer":
+		return "->(value) { raise FloatDomainError, \"Float cannot be converted to Integer\" unless value.finite?; integer = value.truncate; raise RangeError, \"Integer is outside the portable range\" if integer < -9007199254740991 || integer > 9007199254740991; integer }.call(" + arguments[0] + ")"
 	case "trb.std.numbers.parse_integer":
 		return "->(input) { raise ArgumentError, \"invalid Integer\" unless /\\A[+-]?[0-9]+\\z/.match?(input); value = Integer(input, 10); raise RangeError, \"Integer is outside the portable range\" if value < -9007199254740991 || value > 9007199254740991; value }.call(" + arguments[0] + ")"
 	case "trb.std.numbers.try_parse_integer":
@@ -681,6 +697,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func portableFloatString(value string) string {
+	return "->(value) { if value.nan?; \"NaN\"; elsif value.infinite? == 1; \"Infinity\"; elsif value.infinite? == -1; \"-Infinity\"; elsif value.zero?; \"0.0\"; else; raw = value.to_s; if raw.downcase.include?(\"e\"); mantissa, exponent_text = raw.downcase.split(\"e\", 2); negative = mantissa.start_with?(\"-\"); unsigned = negative ? mantissa[1..] : mantissa; whole, fraction = unsigned.split(\".\", 2); digits = whole + (fraction || \"\"); decimal = whole.length + exponent_text.to_i; if decimal <= 0; text = \"0.\" + (\"0\" * -decimal) + digits; elsif decimal >= digits.length; text = digits + (\"0\" * (decimal - digits.length)) + \".0\"; else; text = digits[0, decimal] + \".\" + digits[decimal..]; end; text = text.sub(/(\\.\\d*?)0+\\z/, '\\1').sub(/\\.\\z/, \".0\"); negative ? \"-\" + text : text; else; raw.include?(\".\") ? raw : raw + \".0\"; end; end }.call(" + value + ")"
 }
 
 func rubyJSONParse(argument string, comments bool) string {

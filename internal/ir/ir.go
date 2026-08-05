@@ -365,6 +365,18 @@ type Unary struct {
 
 func (*Unary) irExpression() {}
 
+type ConversionKind string
+
+const IntegerToFloatConversion ConversionKind = "integer_to_float"
+
+type Conversion struct {
+	ExprBase
+	Kind  ConversionKind
+	Value Expression
+}
+
+func (*Conversion) irExpression() {}
+
 type Binary struct {
 	ExprBase
 	Left     Expression

@@ -559,6 +559,21 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return value, nil
 		}
 		return Value{}, fmt.Errorf("operator %s does not support %s", node.Operator, value.Type)
+	case *ir.Conversion:
+		value, err := e.expression(node.Value, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		switch node.Kind {
+		case ir.IntegerToFloatConversion:
+			integer, ok := value.Data.(int64)
+			if !ok {
+				return Value{}, fmt.Errorf("cannot convert %s to Float", value.Type)
+			}
+			return Value{Type: node.ExprType(), Data: float64(integer)}, nil
+		default:
+			return Value{}, fmt.Errorf("unknown conversion %s", node.Kind)
+		}
 	case *ir.Binary:
 		left, err := e.expression(node.Left, module, sc)
 		if err != nil {
@@ -1244,6 +1259,10 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 	case "trb.std.io.puts":
 		if err := require(1); err != nil {
 			return Value{}, err
+		}
+		if value, ok := values[0].Data.(float64); ok {
+			fmt.Fprintln(e.stdout, portableFloatText(value))
+			return Value{Type: typ}, nil
 		}
 		fmt.Fprintln(e.stdout, plain(values[0]))
 		return Value{Type: typ}, nil
@@ -1977,6 +1996,39 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, err
 		}
 		return Value{Type: typ, Data: plain(values[0])}, nil
+	case "trb.std.numbers.integer_to_float":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(int64)
+		if !ok {
+			return Value{}, errors.New("numbers.to_float expects Integer")
+		}
+		return Value{Type: typ, Data: float64(value)}, nil
+	case "trb.std.numbers.float_to_string":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(float64)
+		if !ok {
+			return Value{}, errors.New("numbers.float_to_string expects Float")
+		}
+		return Value{Type: typ, Data: portableFloatText(value)}, nil
+	case "trb.std.numbers.float_to_integer":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(float64)
+		if !ok {
+			return Value{}, errors.New("numbers.truncate expects Float")
+		}
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return Value{}, errors.New("Float cannot be converted to Integer")
+		}
+		if value < -9007199254740991 || value > 9007199254740991 {
+			return Value{}, errors.New("Integer is outside the portable range")
+		}
+		return Value{Type: typ, Data: int64(math.Trunc(value))}, nil
 	case "trb.std.numbers.parse_integer":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -2071,6 +2123,24 @@ func parsePortableInteger(input string) (int64, string) {
 		return 0, "Integer is outside the portable range"
 	}
 	return value, ""
+}
+
+func portableFloatText(value float64) string {
+	text := strconv.FormatFloat(value, 'f', -1, 64)
+	switch {
+	case math.IsNaN(value):
+		return "NaN"
+	case math.IsInf(value, 1):
+		return "Infinity"
+	case math.IsInf(value, -1):
+		return "-Infinity"
+	case value == 0:
+		return "0.0"
+	case !strings.Contains(text, "."):
+		return text + ".0"
+	default:
+		return text
+	}
 }
 
 func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string, cause error) (Value, error) {

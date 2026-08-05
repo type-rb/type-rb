@@ -19,6 +19,7 @@ import (
 type Result struct {
 	Program             *ast.Program
 	Expressions         map[ast.Expression]types.Type
+	Conversions         map[ast.Expression]types.Type
 	Variables           map[*ast.VariableStatement]types.Type
 	Iterations          map[*ast.IterationExpression]types.Type
 	Constants           map[ast.Expression]string
@@ -174,6 +175,7 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 		result: Result{
 			Program:             program,
 			Expressions:         map[ast.Expression]types.Type{},
+			Conversions:         map[ast.Expression]types.Type{},
 			Variables:           map[*ast.VariableStatement]types.Type{},
 			Iterations:          map[*ast.IterationExpression]types.Type{},
 			Constants:           map[ast.Expression]string{},
@@ -497,7 +499,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 				valueType := c.checkExpression(n.Value, sc)
 				declared := fromTypeRef(n.Type)
 				valueType = c.contextualizeHashLiteral(n.Value, declared, valueType)
-				if !n.Type.Empty() && !types.Assignable(declared, valueType) {
+				if !n.Type.Empty() && !c.assignable(n.Value, declared, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot initialize %s with %s", declared, valueType))
 				}
 			}
@@ -517,7 +519,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			if !n.Type.Empty() {
 				variableType = fromTypeRef(n.Type)
 				valueType = c.contextualizeHashLiteral(n.Value, variableType, valueType)
-				if !types.Assignable(variableType, valueType) {
+				if !c.assignable(n.Value, variableType, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", valueType, variableType))
 				}
 			}
@@ -568,7 +570,13 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 					assignedType = types.Type{Kind: types.Invalid, Name: "Invalid"}
 				} else {
 					assignedType = c.checkBinaryOperator(n.Span(), strings.TrimSuffix(n.Operator, "="), leftType, rightType)
+					if leftType.Kind == types.Float && rightType.Kind == types.Int && isNonNullableNumber(leftType) && isNonNullableNumber(rightType) {
+						c.recordIntegerToFloat(n.Value)
+					}
 				}
+			}
+			if n.Operator == "=" && leftType.Kind != types.Any {
+				c.assignable(n.Value, leftType, rightType)
 			}
 			if leftType.Kind != types.Any && !types.Assignable(leftType, assignedType) {
 				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", assignedType, leftType))
@@ -581,7 +589,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			if len(c.returns) > 0 {
 				expected := c.returns[len(c.returns)-1]
 				actual = c.contextualizeHashLiteral(n.Value, expected, actual)
-				if !types.Assignable(expected, actual) {
+				if !c.assignable(n.Value, expected, actual) {
 					c.error(n.Span(), fmt.Sprintf("return type is %s, expected %s", actual, expected))
 				}
 			}
@@ -836,7 +844,7 @@ func (c *Checker) checkEnumConstructor(call *ast.CallExpression, variant EnumVar
 		if argument.Name != "" || argument.Splat != "" {
 			c.error(argument.Value.Span(), "enum payload arguments must be positional values")
 		}
-		if !types.Assignable(variant.Fields[index].Type, arguments[index]) {
+		if !c.assignable(argument.Value, variant.Fields[index].Type, arguments[index]) {
 			c.error(argument.Value.Span(), fmt.Sprintf("enum payload argument %d has type %s, expected %s", index+1, arguments[index], variant.Fields[index].Type))
 		}
 	}
@@ -1099,7 +1107,7 @@ func (c *Checker) checkTypedArguments(span token.Span, name string, parameters [
 		}
 		expected := parameters[parameterIndex]
 		actualType = c.contextualizeHashLiteral(arguments[index].Value, expected, actualType)
-		if !types.Assignable(expected, actualType) {
+		if !c.assignable(arguments[index].Value, expected, actualType) {
 			c.error(arguments[index].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", index+1, name, actualType, expected))
 		}
 	}
@@ -1160,19 +1168,19 @@ func (c *Checker) checkBinaryOperator(span token.Span, operator string, left, ri
 		if isNonNullable(left, types.String) && isNonNullable(right, types.String) {
 			return types.FromName("String")
 		}
-		if sameNonNullableNumber(left, right) {
-			return plainNumberType(left.Kind)
+		if isNonNullableNumber(left) && isNonNullableNumber(right) {
+			return commonNumberType(left, right)
 		}
 	case "-", "*", "/", "**":
-		if sameNonNullableNumber(left, right) {
-			return plainNumberType(left.Kind)
+		if isNonNullableNumber(left) && isNonNullableNumber(right) {
+			return commonNumberType(left, right)
 		}
 	case "%":
 		if isNonNullable(left, types.Int) && isNonNullable(right, types.Int) {
 			return types.FromName("Integer")
 		}
 	case "<", "<=", ">", ">=":
-		if sameNonNullableNumber(left, right) {
+		if isNonNullableNumber(left) && isNonNullableNumber(right) {
 			return types.FromName("Boolean")
 		}
 	case "==", "!=":
@@ -1208,15 +1216,38 @@ func isNonNullableNumber(typ types.Type) bool {
 	return !typ.Nullable && (typ.Kind == types.Int || typ.Kind == types.Float)
 }
 
-func sameNonNullableNumber(left, right types.Type) bool {
-	return isNonNullableNumber(left) && isNonNullableNumber(right) && left.Kind == right.Kind
-}
-
 func plainNumberType(kind types.Kind) types.Type {
 	if kind == types.Float {
 		return types.FromName("Float")
 	}
 	return types.FromName("Integer")
+}
+
+func commonNumberType(left, right types.Type) types.Type {
+	if left.Kind == types.Float || right.Kind == types.Float {
+		return types.FromName("Float")
+	}
+	return types.FromName("Integer")
+}
+
+func (c *Checker) assignable(expression ast.Expression, target, actual types.Type) bool {
+	if !types.Assignable(target, actual) {
+		return false
+	}
+	c.recordAssignableConversion(expression, target, actual)
+	return true
+}
+
+func (c *Checker) recordAssignableConversion(expression ast.Expression, target, actual types.Type) {
+	if target.Kind == types.Float && actual.Kind == types.Int && !target.Nullable && !actual.Nullable {
+		c.recordIntegerToFloat(expression)
+	}
+}
+
+func (c *Checker) recordIntegerToFloat(expression ast.Expression) {
+	if expression != nil {
+		c.result.Conversions[expression] = types.FromName("Float")
+	}
 }
 
 func (c *Checker) portableEqualityOperands(left, right types.Type) bool {
@@ -1226,7 +1257,13 @@ func (c *Checker) portableEqualityOperands(left, right types.Type) bool {
 	if right.Kind == types.Nil {
 		return left.Nullable
 	}
-	if left.Nullable || right.Nullable || left.Kind != right.Kind {
+	if left.Nullable || right.Nullable {
+		return false
+	}
+	if isNonNullableNumber(left) && isNonNullableNumber(right) {
+		return true
+	}
+	if left.Kind != right.Kind {
 		return false
 	}
 	switch left.Kind {
@@ -1263,7 +1300,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		if parameter.Default != nil {
 			actual := c.checkExpression(parameter.Default, methodScope)
 			actual = c.contextualizeHashLiteral(parameter.Default, typ, actual)
-			if !types.Assignable(typ, actual) {
+			if !c.assignable(parameter.Default, typ, actual) {
 				c.error(parameter.Default.Span(), fmt.Sprintf("default value has type %s, expected %s", actual, typ))
 			}
 		}
@@ -1686,6 +1723,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		left := c.checkExpression(n.Left, sc)
 		right := c.checkExpression(n.Right, sc)
 		typ = c.checkBinaryOperator(n.Span(), n.Operator, left, right)
+		if typ.Kind != types.Invalid && isNonNullableNumber(left) && isNonNullableNumber(right) && left.Kind != right.Kind {
+			if left.Kind == types.Int {
+				c.recordIntegerToFloat(n.Left)
+			}
+			if right.Kind == types.Int {
+				c.recordIntegerToFloat(n.Right)
+			}
+		}
 	case *ast.RangeExpression:
 		start := c.checkExpression(n.Start, sc)
 		end := c.checkExpression(n.End, sc)
@@ -1786,7 +1831,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					}
 					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
 				case "reduce":
-					if !types.Assignable(accumulatorType, blockType) {
+					var resultExpression ast.Expression
+					if len(n.Block.Body) == 1 {
+						if result, ok := n.Block.Body[0].(*ast.ExpressionStatement); ok {
+							resultExpression = result.Expression
+						}
+					}
+					if !c.assignable(resultExpression, accumulatorType, blockType) {
 						c.error(n.Block.Span(), fmt.Sprintf("reduce block result is %s, expected %s", blockType, accumulatorType))
 					}
 					typ = accumulatorType
@@ -2100,7 +2151,7 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 		used[argument.Name] = true
 		actual := c.result.Expressions[argument.Value]
 		actual = c.contextualizeHashLiteral(argument.Value, field.Type, actual)
-		if !types.Assignable(field.Type, actual) {
+		if !c.assignable(argument.Value, field.Type, actual) {
 			c.error(argument.Value.Span(), fmt.Sprintf("record field %s has type %s, expected %s", field.Name, actual, field.Type))
 		}
 	}
@@ -2157,6 +2208,8 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		actual[i] = actualType
 		if !libraryAssignable(expected, actualType) {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, name, actualType, expected))
+		} else {
+			c.recordAssignableConversion(arguments[i].Value, expected, actualType)
 		}
 		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Mutable {
 			c.requireMutable(arguments[i].Value, sc, name+"()")
@@ -2249,7 +2302,7 @@ func (c *Checker) contextualizeHashLiteral(expression ast.Expression, expected, 
 		for _, entry := range literal.Entries {
 			valueType := c.result.Expressions[entry.Value]
 			valueType = c.contextualizeHashLiteral(entry.Value, expected.Args[1], valueType)
-			if !types.Assignable(expected.Args[1], valueType) {
+			if !c.assignable(entry.Value, expected.Args[1], valueType) {
 				return actual
 			}
 		}
@@ -2349,7 +2402,7 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 		bindDeclarationType(parameter.Type, actual[index], typeParameters, bindings)
 		expected := instantiateDeclarationType(parameter.Type, bindings)
 		actual[index] = c.contextualizeHashLiteral(argument.Value, expected, actual[index])
-		if !types.Assignable(expected, actual[index]) {
+		if !c.assignable(argument.Value, expected, actual[index]) {
 			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", index+1, member.Name, actual[index], expected))
 		}
 	}
@@ -2441,7 +2494,7 @@ func (c *Checker) checkArguments(span token.Span, method *ast.MethodStatement, a
 		}
 		argumentType = c.contextualizeHashLiteral(arguments[i].Value, expected, argumentType)
 		actual[i] = argumentType
-		if !types.Assignable(expected, argumentType) {
+		if !c.assignable(arguments[i].Value, expected, argumentType) {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, method.Name, argumentType, expected))
 		}
 	}
