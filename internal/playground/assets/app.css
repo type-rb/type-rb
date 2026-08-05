@@ -646,8 +646,21 @@ h1 {
 }
 
 .diagnostic-message {
+	display: block;
 	color: #e2c3bd;
 	font: 12px/1.55 var(--editor-font);
+}
+
+.diagnostic-source {
+	margin: 11px 0 0;
+	padding: 10px 11px;
+	overflow-x: auto;
+	border: 1px solid rgba(255, 255, 255, 0.06);
+	border-radius: 7px;
+	background: rgba(0, 0, 0, 0.18);
+	color: #aeb5c2;
+	font: 11px/1.65 var(--editor-font);
+	white-space: pre;
 }
 
 .output-footer {

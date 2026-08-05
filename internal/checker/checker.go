@@ -612,13 +612,13 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			c.loopDepth--
 		case *ast.NativeStatement:
 			if c.mode != "ruby" {
-				c.error(n.Span(), "Ruby-native statement is only available in mode: ruby")
+				c.error(n.Span(), "unsupported statement syntax in portable TypeRB")
 			} else if !c.resolution.NativeSyntax {
 				c.error(n.Span(), "Ruby-native syntax requires import trb/platform/ruby/native or trb/platform/ruby/rails")
 			}
 		case *ast.NativeBlock:
 			if c.mode != "ruby" {
-				c.error(n.Span(), "Ruby-native block is only available in mode: ruby")
+				c.error(n.Span(), "unsupported block syntax in portable TypeRB")
 			} else if !c.resolution.NativeSyntax {
 				c.error(n.Span(), "Ruby-native syntax requires import trb/platform/ruby/native or trb/platform/ruby/rails")
 			}
@@ -2049,7 +2049,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}})
 	case *ast.NativeExpression:
 		if c.mode != "ruby" {
-			c.error(n.Span(), "Ruby-native expression is only available in mode: ruby")
+			c.error(n.Span(), "unsupported expression syntax in portable TypeRB")
 		} else if !c.resolution.NativeSyntax {
 			c.error(n.Span(), "Ruby-native syntax requires import trb/platform/ruby/native or trb/platform/ruby/rails")
 		}

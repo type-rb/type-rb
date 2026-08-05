@@ -62,10 +62,12 @@ type response struct {
 }
 
 type Diagnostic struct {
-	Severity string `json:"severity"`
-	Message  string `json:"message"`
-	Line     int    `json:"line,omitempty"`
-	Column   int    `json:"column,omitempty"`
+	Severity  string `json:"severity"`
+	Message   string `json:"message"`
+	Line      int    `json:"line,omitempty"`
+	Column    int    `json:"column,omitempty"`
+	EndLine   int    `json:"endLine,omitempty"`
+	EndColumn int    `json:"endColumn,omitempty"`
 }
 
 type configResponse struct {
@@ -338,7 +340,8 @@ func diagnosticsFrom(_ string, diagnostics []diagnostic.Diagnostic) []Diagnostic
 	result := make([]Diagnostic, 0, len(diagnostics))
 	for _, item := range diagnostics {
 		result = append(result, Diagnostic{
-			Severity: string(item.Severity), Message: item.Message, Line: item.Span.Start.Line, Column: item.Span.Start.Column,
+			Severity: string(item.Severity), Message: item.Message,
+			Line: item.Span.Start.Line, Column: item.Span.Start.Column, EndLine: item.Span.End.Line, EndColumn: item.Span.End.Column,
 		})
 	}
 	return result

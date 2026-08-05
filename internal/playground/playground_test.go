@@ -56,7 +56,20 @@ func TestRunReturnsSourceDiagnostics(t *testing.T) {
 		t.Fatalf("expected a diagnostic: %#v", result)
 	}
 	first := result.Diagnostics[0]
-	if first.Line != 2 || first.Column == 0 || !strings.Contains(first.Message, "immutable") {
+	if first.Line != 2 || first.Column == 0 || first.EndLine != 2 || first.EndColumn <= first.Column || !strings.Contains(first.Message, "immutable") {
+		t.Fatalf("unexpected diagnostic: %#v", first)
+	}
+}
+
+func TestRunReportsMalformedPortableExpressionsWithoutLeakingNativeASTTerms(t *testing.T) {
+	result := post(t, Handler(Options{Mode: "go"}), "/api/run", request{
+		Source: "value := `native command`\n", Mode: "go",
+	})
+	if result.OK || len(result.Diagnostics) == 0 {
+		t.Fatalf("expected a diagnostic: %#v", result)
+	}
+	first := result.Diagnostics[0]
+	if first.Message != "unsupported expression syntax in portable TypeRB" || strings.Contains(first.Message, "Ruby-native") {
 		t.Fatalf("unexpected diagnostic: %#v", first)
 	}
 }

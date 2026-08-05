@@ -455,7 +455,9 @@ grammar through native syntax nodes:
 - `NativeExpression`
 
 Native nodes are preserved through AST and IR and emitted only by the Ruby
-backend. Go and TypeScript report them as compile errors. This is the v0.1
+backend. Go and TypeScript report fallback nodes as unsupported portable
+syntax rather than exposing Ruby-native AST terminology in user diagnostics.
+This is the v0.1
 extension mechanism for library-provided DSLs; it is not a text-rewrite compiler
 path.
 
@@ -805,6 +807,9 @@ display selected-target source. Format uses the ordinary lossless formatter.
 
 The browser editor's TypeRB syntax highlighting is a presentation feature and
 does not define lexical or semantic behavior. The compiler remains the only
-source of diagnostics and accepted syntax. `trb tour --check` compiles and
+source of diagnostics and accepted syntax. Compile diagnostics retain their
+source range, which the browser presents as a source line and caret marker.
+Runtime errors remain message-only until runtime source mapping and stack
+translation are implemented. `trb tour --check` compiles and
 evaluates each shipped lesson in all three modes as an explicit release or
 language-change checkpoint; ordinary project builds do not validate the tour.

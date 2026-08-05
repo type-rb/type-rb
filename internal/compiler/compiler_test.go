@@ -446,10 +446,24 @@ func TestRecordConstructionChecksKeywordFields(t *testing.T) {
 	}
 }
 
-func TestPortableBackendRejectsRailsNativeNodes(t *testing.T) {
-	_, err := Compile("bad.trb", []byte("class User\n  belongs_to :account\nend\n"), "go")
-	if err == nil || !strings.Contains(err.Error(), "Ruby-native statement") {
-		t.Fatalf("expected native-node diagnostic, got %v", err)
+func TestPortableBackendsReportNativeFallbackAsUnsupportedSyntax(t *testing.T) {
+	for _, mode := range []string{"go", "typescript"} {
+		_, err := Compile("bad.trb", []byte("class User\n  belongs_to :account\nend\n"), mode)
+		if err == nil || !strings.Contains(err.Error(), "unsupported statement syntax in portable TypeRB") {
+			t.Fatalf("%s: expected portable statement-syntax diagnostic, got %v", mode, err)
+		}
+
+		_, err = Compile("bad.trb", []byte("value := `native command`\n"), mode)
+		if err == nil || !strings.Contains(err.Error(), "unsupported expression syntax in portable TypeRB") {
+			t.Fatalf("%s: expected portable expression-syntax diagnostic, got %v", mode, err)
+		}
+	}
+}
+
+func TestRubyNativeFallbackStillRequiresExplicitImport(t *testing.T) {
+	_, err := Compile("bad.trb", []byte("class User\n  belongs_to :account\nend\n"), "ruby")
+	if err == nil || !strings.Contains(err.Error(), "Ruby-native syntax requires import") {
+		t.Fatalf("expected explicit Ruby-native import diagnostic, got %v", err)
 	}
 }
 

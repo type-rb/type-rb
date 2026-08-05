@@ -165,8 +165,20 @@ function showDiagnostics(payload) {
 		const card = document.createElement("button");
 		card.type = "button";
 		card.className = "diagnostic";
-		const location = item.line ? `main.trb:${item.line}:${item.column || 1} · ${item.severity}` : item.severity;
-		card.innerHTML = `<span class="diagnostic-location">${escapeHTML(location)}</span><span class="diagnostic-message">${escapeHTML(item.message)}</span>`;
+		const location = document.createElement("span");
+		location.className = "diagnostic-location";
+		location.textContent = item.line ? `main.trb:${item.line}:${item.column || 1} · compile ${item.severity}` : `runtime ${item.severity}`;
+		const message = document.createElement("span");
+		message.className = "diagnostic-message";
+		message.textContent = item.message;
+		card.append(location, message);
+		const frame = diagnosticSourceFrame(item);
+		if (frame) {
+			const source = document.createElement("pre");
+			source.className = "diagnostic-source";
+			source.textContent = frame;
+			card.append(source);
+		}
 		if (item.line) {
 			card.addEventListener("click", () => focusLocation(item.line, item.column || 1));
 		}
@@ -176,6 +188,21 @@ function showDiagnostics(payload) {
 	elements.executionTime.textContent = `${payload.durationMs ?? 0} ms`;
 	setStatus("error", "Error");
 	selectTab("result");
+}
+
+function diagnosticSourceFrame(item) {
+	if (!item.line) return "";
+	const sourceLine = elements.editor.value.split("\n")[item.line - 1];
+	if (sourceLine === undefined) return "";
+	const column = Math.max(1, item.column || 1);
+	const displayLine = sourceLine.replaceAll("\t", "    ");
+	const displayPrefix = sourceLine.slice(0, column - 1).replaceAll("\t", "    ");
+	let markerLength = 1;
+	if (item.endLine === item.line && item.endColumn > column) {
+		markerLength = Math.max(1, sourceLine.slice(column - 1, item.endColumn - 1).replaceAll("\t", "    ").length);
+	}
+	const lineNumber = String(item.line);
+	return `${lineNumber} │ ${displayLine}\n${" ".repeat(lineNumber.length)} │ ${" ".repeat(displayPrefix.length)}${"^".repeat(markerLength)}`;
 }
 
 function focusLocation(line, column) {
