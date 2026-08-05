@@ -82,8 +82,8 @@ trb build --compile
 ## Targets
 
 - **Go** for native binaries and services
-- **Ruby** for Ruby applications, including Rails
-- **TypeScript** for Node.js and browser applications, including React
+- **Ruby** for server and application development
+- **TypeScript** for server and browser applications
 
 Every target uses the same TypeRB grammar and portable semantics. A target mode
 selects the backend, toolchain, and package ecosystem. Target-specific APIs

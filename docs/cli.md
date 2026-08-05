@@ -15,9 +15,9 @@ trb init --mode typescript .
 trb sync
 
 # Update dependencies in trbconfig.jsonc and regenerate the manifest.
-trb add rails "~> 8.0"
-trb add --dev rspec-rails "~> 7.0"
-trb remove rspec-rails
+trb add PACKAGE VERSION
+trb add --dev PACKAGE VERSION
+trb remove PACKAGE
 
 # Run go mod download, bundle install, or npm install.
 trb install

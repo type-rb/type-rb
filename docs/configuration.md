@@ -17,7 +17,7 @@ comments. Trailing commas are not allowed.
   "copyFiles": true,
   "packageManagement": "managed",
   "dependencies": {
-    "gorm.io/gorm": "v1.31.1"
+    "example.com/acme/library": "v1.2.3"
   },
   "devDependencies": {},
   "go": {
@@ -78,7 +78,7 @@ Map a portable source directory into the project import graph with
 ```jsonc
 {
   "localPackages": {
-    "todo/contracts": "../../packages/contracts/src"
+    "acme/contracts": "../../packages/contracts/src"
   }
 }
 ```
@@ -86,9 +86,9 @@ Map a portable source directory into the project import graph with
 An `index.trb` file is the package entry module. Projects in different modes can
 import the same package without copying its source.
 
-## Rails loader
+## Ruby loader
 
-Ruby projects using Rails can select Zeitwerk loading:
+Ruby projects can select how generated imports are loaded:
 
 ```jsonc
 {
@@ -98,5 +98,6 @@ Ruby projects using Rails can select Zeitwerk loading:
 }
 ```
 
-Project imports then remain compile-time dependencies without emitting Ruby
-`require` calls.
+The `require_relative` loader emits explicit relative requires. The `zeitwerk`
+loader keeps project imports as compile-time dependencies without emitting
+Ruby `require` calls.

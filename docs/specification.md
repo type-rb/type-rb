@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 ## 1. Language Goals
 
@@ -15,14 +15,14 @@ Design principles:
 
 ## 2. Project Target Modes
 
-A project declares exactly one output mode in `trbconfig.jsonc`: `ruby`, `go`,
+A project declares exactly one output mode in `trbconfig.jsonc`: `go`, `ruby`,
 or `typescript`. Source files do not contain mode declarations.
 
 Mode selection controls transpilation output and package-manager/toolchain
 integration:
 
-- Ruby mode generates `Gemfile` and uses Bundler.
 - Go mode generates `go.mod` and uses the Go module toolchain.
+- Ruby mode generates `Gemfile` and uses Bundler.
 - TypeScript mode generates `package.json` and uses npm in v0.1.
 
 Mode never changes TypeRB grammar or relaxes its portable type rules. The same
@@ -416,7 +416,7 @@ possible without rewriting the rest of the compiler.
 
 ## 7. Next Phase: Detailed Design
 
-Project execution policy is tracked in `PROJECT_PLAN.md`.
+Project execution policy is tracked in [project-plan.md](project-plan.md).
 
 Next discussion should define:
 
@@ -445,10 +445,10 @@ Code generators consume IR and do not inspect parser state or source text.
 Expressions in checked portable syntax have a semantic type in the checker
 result and IR.
 
-### 8.2 Ruby and Rails Interoperability
+### 8.2 Ruby interoperability
 
-The Ruby mode accepts normal Ruby/Rails DSL outside the portable grammar through
-explicit native syntax nodes:
+The Ruby mode accepts explicitly imported Ruby syntax outside the portable
+grammar through native syntax nodes:
 
 - `NativeStatement`
 - `NativeBlock`
@@ -456,19 +456,17 @@ explicit native syntax nodes:
 
 Native nodes are preserved through AST and IR and emitted only by the Ruby
 backend. Go and TypeScript report them as compile errors. This is the v0.1
-extension mechanism for gem-provided Rails DSL; it is not a text-rewrite
-compiler path.
+extension mechanism for library-provided DSLs; it is not a text-rewrite compiler
+path.
 
-Rails projects may mix `.rb` and `.trb` files. Project builds copy non-`.trb`
+Ruby projects may mix `.rb` and `.trb` files. Project builds copy non-`.trb`
 files and replace each `.trb` file with the extension selected by the project
 mode in `trbconfig.jsonc`.
 
-Importing `trb/platform/ruby/rails` also activates the compiler-owned Rails type
-provider. Providers produce a target-independent Declaration IR; application
-authors do not maintain parallel signature files. The Rails provider parses
-`db/schema.rb` into a dedicated Schema AST and derives ActiveRecord model,
-column, finder, relation, controller, and included-helper types. Known provider
-types reject unknown members rather than silently degrading to `Any`.
+Platform packages may activate compiler-owned type providers. Providers produce
+a target-independent Declaration IR so application authors do not maintain
+parallel signature files. Provider-specific inference belongs to its platform
+integration rather than the portable language specification.
 
 ### 8.3 Project and Package Configuration
 
@@ -735,11 +733,10 @@ mode. `each_slice` sizes must be positive.
 `record` is a closed product type, not class syntax sugar:
 
 ```trb
-record TodoItem
+record Message
 	id: Integer
-	title: String
-	completed: Boolean
-	tags: Array<Tag>
+	text: String
+	delivered: Boolean
 end
 ```
 
@@ -753,23 +750,22 @@ Projects may map a portable source directory into the import graph with
 with different modes can import the same source without copying it:
 
 ```jsonc
-"localPackages": {
-  "todo/contracts": "../../packages/contracts/src",
+{
+  "localPackages": {
+    "acme/contracts": "../../packages/contracts/src"
+  }
 }
 ```
 
-### 8.8 Explicit platform application APIs
+### 8.8 Explicit platform APIs
 
-The first full v0.1 target uses `trb/platform/go/http` with the current Go 1.26
-toolchain and ServeMux
-patterns, `trb/platform/go/gorm` for typed GORM operations, and
-`trb/platform/typescript/react`/`web` for React and Fetch. These are resolved
-platform imports and typed intrinsics; application source does not contain raw
-target-language fragments.
+Target-specific capabilities use resolved `trb/platform/<mode>/*` imports and
+typed intrinsics. Application source does not contain raw target-language
+fragments, and selecting a mode does not enable a platform API implicitly.
 
-For Go projects, `go.sqldef` may declare a command, arguments, database, and
-schema. `trb run` applies the schema before starting the generated program and
-passes the selected database path explicitly.
+Platform integrations may add explicit toolchain or lifecycle configuration.
+Their concrete contracts are documented with the integration and do not change
+portable grammar or semantics.
 
 ### 8.9 Project-aware REPL
 

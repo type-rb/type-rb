@@ -4,8 +4,9 @@ This document defines how TypeRB work should be split, tracked, and delivered.
 The goal is to make a long-running compiler project manageable through small,
 loosely coupled, test-first increments.
 
-For current status and immediate next tasks, read `STATUS.md`. Product-level
-capability milestones are tracked separately in `ROADMAP.md`.
+For current status and immediate next tasks, read [status.md](status.md).
+Product-level capability milestones are tracked separately in
+[roadmap.md](roadmap.md).
 
 ## 1. Work Management
 
@@ -100,9 +101,9 @@ Recommended package boundaries:
 - `types`: type representation and assignability rules
 - `checker`: syntax AST to typed AST or typed IR
 - `ir`: target-independent typed representation if needed
+- `codegen/go`: Go output
 - `codegen/ruby`: Ruby output
 - `codegen/typescript`: TypeScript output
-- `codegen/go`: Go output
 - `formatter`: syntax AST plus token/comment stream to formatted source
 - `cli`: command-line entrypoints such as `trb fmt`
 
@@ -128,58 +129,7 @@ Tests should assert public outputs: token streams, AST snapshots, diagnostics,
 typed results, generated code, and formatted source. Avoid tests that lock down
 private parser control flow or internal helper functions.
 
-## 6. Milestones
-
-### Milestone 1: Compiler Skeleton
-
-- Go module and CLI skeleton.
-- Source position and diagnostic model.
-- Lexer with comment token preservation.
-- Minimal parser infrastructure.
-- Test harness and golden test helpers.
-
-### Milestone 2: MVP Syntax
-
-- Project mode selection through `trbconfig.jsonc`.
-- explicit project, standard-library, and platform imports, with a deliberately
-  small portable prelude for fundamentals such as `puts`.
-- class declarations.
-- field declarations.
-- method declarations.
-- local `:=` declarations.
-- assignments.
-- returns.
-- method and constructor calls.
-
-### Milestone 3: MVP Semantics
-
-- scopes and symbol tables.
-- class/member resolution.
-- explicit field initialization checks.
-- private name access checks.
-- simple local inference from `:=`.
-- return type validation.
-
-### Milestone 4: First Backend
-
-- Choose one backend first, preferably TypeScript or Ruby.
-- Add golden codegen tests.
-- Keep backend-specific behavior isolated.
-
-### Milestone 5: Formatter MVP
-
-- Format comment-free source.
-- Preserve source spans.
-- Reject or conservatively handle unsupported comment placement.
-- Add golden formatting tests.
-
-### Milestone 6: Multi-target Expansion
-
-- Add remaining backends incrementally.
-- Add target-specific tests.
-- Keep all backends isolated behind the shared typed IR.
-
-## 7. Pull Request Policy
+## 6. Pull Request Policy
 
 Pull requests should be narrow and phase-oriented.
 
@@ -194,7 +144,7 @@ Avoid PRs that combine unrelated layers, such as parser rewrites plus formatter
 changes plus backend changes, unless the issue explicitly requires the combined
 change.
 
-## 8. Decision Records
+## 7. Decision Records
 
 For decisions that affect long-term architecture, add a short decision record in
 `docs/decisions/`.

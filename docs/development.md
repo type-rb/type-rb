@@ -24,7 +24,7 @@ Compiler phase boundaries live under `internal/ast`, `internal/checker`,
 `internal/ir`, `internal/lower`, and `internal/codegen`. Backends consume typed
 IR and do not inspect parser state or rewrite source text.
 
-Read the [language specification](../SPEC.md) for semantics and the
+Read the [language specification](specification.md) for semantics and the
 [architecture decisions](decisions/) for long-term implementation choices.
 
 ## Formatter guarantees
@@ -49,7 +49,7 @@ Language changes must pass through syntax AST, checked types, typed IR, and each
 affected backend.
 
 For contribution sequencing and test strategy, see the
-[project plan](../PROJECT_PLAN.md). For current gaps, see
-[status](../STATUS.md) and the [roadmap](../ROADMAP.md).
+[project plan](project-plan.md). For current gaps, see
+[status](status.md) and the [roadmap](roadmap.md).
 
 Releases are described in [releasing.md](releasing.md).
