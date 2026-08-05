@@ -1,58 +1,74 @@
-# TypeRB v0.1
+# TypeRB
 
-TypeRB is a class-based typed language implemented in Go. A `.trb` file is
-formatted by `trb fmt` and transpiled by `trb build` to Ruby, TypeScript, or Go.
-The target is selected once per project in `trbconfig.jsonc`.
-
-See [`STATUS.md`](STATUS.md) for implemented behavior and
-[`ROADMAP.md`](ROADMAP.md) for the path from the current alpha to practical
-production use.
-
-v0.1 includes a real compiler pipeline:
-
-```text
-source -> lossless lexer -> syntax AST -> resolver/type checker
-       -> typed IR -> Ruby / TypeScript / Go backend
-```
-
-The Ruby backend is designed for normal Rails applications. Portable TypeRB
-syntax is type checked. Open-ended Rails DSL such as associations, validations,
-routes, migrations, callbacks, scopes, jobs, mailers, and concerns is retained
-as explicit Ruby-native AST/IR nodes and emitted without losing behavior.
+TypeRB is a Ruby-shaped typed language that transpiles one common syntax to
+Ruby, Go, or TypeScript. Format source with `trb fmt`, build it with
+`trb build`, and use explicit imports when code needs a target-specific API.
 
 ## Install
 
-Once the first tagged release is published, Homebrew releases are distributed
-from the TypeRB tap:
-
 ```sh
 brew install type-rb/tap/trb
+trb version
 ```
 
-The generated Formula also carries a `head` definition, so after the tap has
-been initialized it can install the development build with
-`brew install --HEAD type-rb/tap/trb`.
+Homebrew installs a prebuilt compiler on macOS or Linux. Go, Ruby, and Node are
+not dependencies of the Formula; install the target toolchain when you want to
+run generated code or manage that target's packages.
+
+To build the compiler from source instead, use Go 1.26:
 
 ```sh
 go install github.com/type-rb/type-rb/cmd/trb@latest
 ```
 
-For a repository checkout, use the bootstrap launcher. It rebuilds the Go
-bootstrap compiler internally when compiler sources change, then delegates to
-the normal `trb` CLI. The commands in this documentation assume that launcher
-or an installed binary is already on `PATH`:
+## Getting started
+
+Start a typed REPL from any directory. No configuration file is required; the
+default mode is Go:
 
 ```sh
-trb version
+$ trb repl
+trb:go> 1 + 2
+3 : Integer
 ```
 
-The compiler targets the current Go toolchain (Go 1.26). The minimum version is
-advanced as new stable Go releases become the development baseline.
+Choose another mode for a one-off session without creating or changing a
+project:
 
-Maintainers publish a release by pushing a `v*` tag. The release workflow runs
-the test suite and self-host bootstrap check, creates a deterministic source
-archive, and updates `type-rb/homebrew-tap` when the repository secret
-`HOMEBREW_TAP_TOKEN` is configured.
+```sh
+trb repl --mode ruby
+trb repl --mode typescript
+```
+
+Create a Go project when you are ready to build and run a program:
+
+```sh
+trb init --mode go --module example.com/hello hello
+cd hello
+```
+
+Create `main.trb`:
+
+```trb
+import trb/std/io
+
+def main()
+	io.puts("Hello from TypeRB")
+	return
+end
+```
+
+Then format and run it. `trb run` builds in a temporary directory first, so a
+separate build step is unnecessary:
+
+```sh
+trb fmt
+trb run
+```
+
+See [`STATUS.md`](STATUS.md) for implemented behavior and
+[`ROADMAP.md`](ROADMAP.md) for the path from the current alpha to practical
+production use.
 
 ## Commands
 
@@ -90,9 +106,10 @@ trb run -- first-argument
 # Explicitly choose a source file for a one-off run.
 trb run test.trb
 
-# Start the project-aware typed IR REPL. The mode, imports, local packages, and
-# type providers come from trbconfig.jsonc.
+# Start a typed IR REPL. Without a project config, it uses a scratch Go session.
 trb repl
+trb repl --mode ruby
+trb repl --mode typescript
 trb repl --config path/to/trbconfig.jsonc
 
 # Generate Gemfile, go.mod, or package.json from trbconfig.jsonc.
@@ -107,13 +124,19 @@ trb remove rspec-rails
 trb install
 ```
 
-`trb repl` requires a project configuration. Each submission is parsed,
-resolved, type checked, and lowered through the normal compiler pipeline before
-evaluation, so platform packages are accepted or rejected according to the
-configured mode. The initial evaluator supports portable expressions, state,
-conditionals, loops, functions, classes, records, enums with exhaustive case,
-project imports, and portable standard-library intrinsics. A mode-specific intrinsic without a REPL runtime
-adapter produces an explicit runtime diagnostic.
+`trb repl` discovers `trbconfig.jsonc` when one is available, so project
+imports, local packages, and type providers work automatically. Without a
+config it starts an isolated Go-mode scratch session. `--mode` selects Ruby,
+Go, or TypeScript for only that session and takes precedence over a discovered
+project mode; `--config` selects a project explicitly.
+
+Each submission is parsed, resolved, type checked, and lowered through the
+normal compiler pipeline before evaluation, so platform packages are accepted
+or rejected according to the active mode. The initial evaluator supports
+portable expressions, state, conditionals, loops, functions, classes, records,
+enums with exhaustive case, project imports, and portable standard-library
+intrinsics. A mode-specific intrinsic without a REPL runtime adapter produces
+an explicit runtime diagnostic.
 
 REPL commands are `:type EXPRESSION`, `:load FILE`, `:reload`, `:help`, and
 `:quit`. Multiline declarations and delimiter-balanced calls use a continuation
@@ -121,8 +144,9 @@ prompt automatically. Interactive terminals provide colored input/results, Tab
 completion, cursor editing, Up/Down history, and Ctrl-R reverse search. Common
 Readline/Emacs navigation is available: Ctrl-B/F moves by character, Ctrl-A/E
 by line, Alt-B/F by word, and Ctrl-P/N moves vertically or through history.
-History is retained per project in `.trb/repl_history`; Ctrl-C cancels the
-current input or running evaluation without leaving the REPL, and Ctrl-D exits.
+History is retained in `.trb/repl_history` for project sessions and in the user
+cache for scratch sessions, separated by mode. Ctrl-C cancels the current input
+or running evaluation without leaving the REPL, and Ctrl-D exits.
 
 `trb build` compiles every input before writing any generated file. When a
 directory is built, non-`.trb` files are copied by default, producing a runnable
@@ -152,14 +176,14 @@ Mode belongs here, not in individual source files:
   "outDir": "build",
   "copyFiles": true,
   "dependencies": {
-    "rails": "~> 8.0",
+    "rails": "~> 8.0"
   },
   "devDependencies": {
-    "rspec-rails": "~> 7.0",
+    "rspec-rails": "~> 7.0"
   },
   "ruby": {
-    "loader": "zeitwerk",
-  },
+    "loader": "zeitwerk"
+  }
 }
 ```
 
@@ -358,9 +382,6 @@ bundle exec rails test
 
 See [`examples/rails`](examples/rails) for controllers, models, concerns, jobs,
 mailers, routes, and migrations.
-
-[`examples/core-api`](examples/core-api) demonstrates the external-package
-layout used to compile a TypeRB controller into an existing Rails application.
 
 [`examples/todo`](examples/todo) is the first complete v0.1 vertical slice. A
 single portable `record` package is compiled into a Go/GORM/net/http API and a

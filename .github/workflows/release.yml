@@ -14,11 +14,11 @@ jobs:
     env:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -28,40 +28,52 @@ jobs:
           go test ./...
           ./scripts/check-self-host.sh
 
-      - name: Build deterministic source archive and Formula
+      - name: Package release binaries and Formula
         id: package
         shell: bash
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          archive="type-rb-${version}.tar.gz"
-          mkdir -p dist
-          git archive --format=tar --prefix="type-rb-${version}/" "$GITHUB_REF_NAME" | gzip -n > "dist/${archive}"
-          checksum=$(sha256sum "dist/${archive}" | cut -d ' ' -f 1)
-          ./scripts/render-homebrew-formula.sh "$version" "$checksum" dist/trb.rb
-          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+          ./scripts/package-release.sh "$version" dist
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME"
-          "dist/${{ steps.package.outputs.archive }}"
-          dist/trb.rb
-          --verify-tag
-          --generate-notes
+      - name: Require Homebrew tap credentials
+        shell: bash
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "HOMEBREW_TAP_TOKEN must be configured to update type-rb/homebrew-tap" >&2
+            exit 1
+          fi
 
       - name: Check out Homebrew tap
-        if: env.HOMEBREW_TAP_TOKEN != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: type-rb/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: dist/homebrew-tap
 
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              dist/trb_*.tar.gz \
+              dist/checksums.txt \
+              dist/trb.rb \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              dist/trb_*.tar.gz \
+              dist/checksums.txt \
+              dist/trb.rb \
+              --verify-tag \
+              --generate-notes
+          fi
+
       - name: Publish Formula to Homebrew tap
-        if: env.HOMEBREW_TAP_TOKEN != ''
         shell: bash
         run: |
           set -euo pipefail
