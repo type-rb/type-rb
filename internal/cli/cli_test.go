@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -920,6 +922,129 @@ func TestBuildCopiesRailsProjectAndTranspilesTRBTree(t *testing.T) {
 	}
 	if strings.Contains(string(generated), "mode: ruby") || !strings.Contains(string(generated), "resources :posts") {
 		t.Fatalf("unexpected generated routes:\n%s", generated)
+	}
+}
+
+func TestBuildCompileCreatesRunnableGoExecutable(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not installed")
+	}
+	for _, test := range []struct {
+		name     string
+		outfile  string
+		relative string
+	}{
+		{name: "default", relative: filepath.Join("bin", "hello-default")},
+		{name: "outfile", outfile: filepath.Join("dist", "hello"), relative: filepath.Join("dist", "hello")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, "go")
+			config.Name = "hello-" + test.name
+			config.SourceDir = "src"
+			config.Go.Module = "example.com/type-rb/" + config.Name
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			source := "def main()\n  puts(\"Hello compiled\")\n  return\nend\n"
+			if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+			t.Setenv("CGO_ENABLED", "0")
+
+			args := []string{"build", "--config", config.Path, "--compile"}
+			if test.outfile != "" {
+				args = append(args, "--outfile", test.outfile)
+			}
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run(args); status != 0 {
+				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			output := filepath.Join(root, test.relative)
+			if runtime.GOOS == "windows" {
+				output += ".exe"
+			}
+			info, err := os.Stat(output)
+			if err != nil || info.IsDir() {
+				t.Fatalf("executable was not created at %s: info=%v err=%v", output, info, err)
+			}
+			if want := "executable -> " + output + "\n"; stdout.String() != want || stderr.Len() != 0 {
+				t.Fatalf("unexpected build output\nwant: %q\nstdout: %q\nstderr: %q", want, stdout.String(), stderr.String())
+			}
+			result, err := exec.Command(output).CombinedOutput()
+			if err != nil || string(result) != "Hello compiled\n" {
+				t.Fatalf("compiled executable failed: err=%v output=%q", err, result)
+			}
+			if _, err := os.Stat(filepath.Join(root, "build", "main.go")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("--compile retained generated source: %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildCompileValidatesModeAndFlags(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		mode string
+		args []string
+		want string
+	}{
+		{name: "ruby", mode: "ruby", args: []string{"--compile"}, want: "--compile is supported only for mode go"},
+		{name: "typescript", mode: "typescript", args: []string{"--compile"}, want: "--compile is supported only for mode go"},
+		{name: "outfile", mode: "go", args: []string{"--outfile", "bin/app"}, want: "--outfile requires --compile"},
+		{name: "check", mode: "go", args: []string{"--compile", "--check"}, want: "--compile cannot be combined"},
+		{name: "path", mode: "go", args: []string{"--compile", "."}, want: "--compile builds the configured project"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, test.mode)
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/compile-flags"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			args := append([]string{"build", "--config", config.Path}, test.args...)
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run(args); status != 1 {
+				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), test.want) {
+				t.Fatalf("unexpected diagnostic: %s", stderr.String())
+			}
+		})
+	}
+}
+
+func TestBuildCompileRequiresMain(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/library"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "library.trb"), []byte("def value(): Integer\n  return 1\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path, "--compile"}); status != 1 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "project has no top-level main()") {
+		t.Fatalf("unexpected diagnostic: %s", stderr.String())
 	}
 }
 

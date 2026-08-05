@@ -57,6 +57,12 @@ trb build --out-dir dist .
 # Compile one file to stdout.
 trb build --stdout app/models/post.trb
 
+# Build a Go project into bin/<project-name>.
+trb build --compile
+
+# Choose the executable output file.
+trb build --compile --outfile bin/api
+
 # Build in a temporary directory and run the project's main().
 trb run
 trb run -- first-argument
@@ -72,6 +78,19 @@ Library projects may omit `main`, but cannot be run directly.
 `trb build` compiles every input before writing generated files. Directory
 builds copy non-`.trb` files by default, producing a runnable project tree. Use
 `--copy=false` when only generated source is wanted.
+
+In Go mode, `trb build --compile` generates Go source in a temporary directory,
+invokes `go build`, and keeps only the executable. The default output is
+`bin/<project-name>` below the project root. A relative `--outfile` is also
+resolved from the project root. `--compile` builds the complete configured
+project, requires a top-level `main()`, and cannot be combined with source
+paths, `--check`, `--stdout`, `--copy`, or `--out-dir`.
+
+Ruby and TypeScript executable packaging is not implemented. `--compile`
+reports an unsupported-mode error for those projects. The Go executable
+contains compiled code and linked dependencies, but TypeRB does not embed
+application files, run schema-management commands, or remove system-library
+requirements introduced by a dependency.
 
 Output names follow the project mode:
 

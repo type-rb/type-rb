@@ -12,6 +12,9 @@ Implemented:
   interpolation, and heredoc preservation.
 - `trb build` with Go, Ruby, and TypeScript backends selected by the project
   `trbconfig.jsonc`.
+- `trb build --compile` for producing a Go executable from a complete project
+  through temporary generated source, with a default `bin/<project-name>` or
+  explicit `--outfile` destination.
 - `trb run` for compiling a project in a temporary tree and executing its
   conventional top-level `main()`; an explicit `.trb` file remains available
   as a one-off override.

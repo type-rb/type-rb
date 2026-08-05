@@ -114,6 +114,9 @@ mode by itself does not enable them.
   `trbconfig.jsonc`.
 - `trb run` compiles the project before every execution; a preceding
   `trb build` is not required.
+- `trb build` emits generated target source. In Go mode,
+  `trb build --compile` instead invokes the Go toolchain and emits an
+  executable, using temporary generated source.
 - Projects intended only as libraries may omit `main`.
 
 ### 3.9 Boolean Conditions
@@ -473,6 +476,15 @@ types reject unknown members rather than silently degrading to `Any`.
 directories, and target dependencies. It accepts JSONC comments but rejects
 trailing commas. `trb sync` derives `Gemfile`, `go.mod`, or `package.json`; `trb install`
 delegates installation to Bundler, the Go toolchain, or npm.
+
+`trb build` emits generated source into `outDir`. Go projects may instead use
+`trb build --compile` to compile the complete configured project with
+`go build`. Generated Go source lives in a temporary directory and only the
+executable is retained. Its default path is `bin/<project-name>`; `--outfile`
+overrides the file path relative to the project root. The operation requires
+one top-level `main()` and does not embed application files or run project
+setup commands. Ruby and TypeScript executable packaging is not part of this
+phase.
 
 Imports pass through a dedicated resolver between parsing and checking. The
 resolver validates project files and exports, rejects platform packages in the
