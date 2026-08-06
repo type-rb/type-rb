@@ -1190,8 +1190,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "strings.Join(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.pop":
 		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; index := len(values) - 1; value := values[index]; " + arguments[0] + " = values[:index]; return value }()"
+	case "trb.std.arrays.shift":
+		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; value := values[0]; " + arguments[0] + " = values[1:]; return value }()"
 	case "trb.std.arrays.push":
 		return arguments[0] + " = append(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.arrays.unshift":
+		return "func() { values := " + arguments[0] + "; value := " + arguments[1] + "; values = append(values, value); copy(values[1:], values[:len(values)-1]); values[0] = value; " + arguments[0] + " = values }()"
+	case "trb.std.arrays.reverse":
+		g.requireImport("slices", "")
+		return "func() " + g.goType(call.ExprType()) + " { values := slices.Clone(" + arguments[0] + "); slices.Reverse(values); return values }()"
 	case "trb.std.hashes.length":
 		return "len(" + arguments[0] + ")"
 	case "trb.std.hashes.empty":

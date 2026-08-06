@@ -720,6 +720,15 @@ def grow()
 	return
 end
 
+def edge_values(): Integer
+	mut values := [2, 3]
+	first := arrays.shift(values)
+	values.unshift(1)
+	arrays.unshift(values, 0)
+	reversed := arrays.reverse(values)
+	return first + reversed.first() + values.reverse().last()
+end
+
 def hash_value(): String
 	labels: Hash<Integer, String> := {1 => "one", 2 => "two"}
 	return labels.fetch(1) + hashes.fetch(labels, 2)
@@ -755,6 +764,9 @@ end
 			`slices.Clone(values)`,
 			`panic("Array index is out of bounds")`,
 			`values = append(values, 2)`,
+			`values = values[1:]`,
+			`copy(values[1:], values[:len(values)-1])`,
+			`slices.Reverse(values)`,
 			`maps.Keys(labels)`,
 			`maps.Values(maps.Clone(labels))`,
 			`panic("Hash key is missing")`,
@@ -766,6 +778,9 @@ end
 			`values.dup`,
 			`raise IndexError, "Array index is out of bounds"`,
 			`values << 2`,
+			`values.shift`,
+			`values.unshift(1)`,
+			`values.reverse`,
 			`labels.keys`,
 			`labels.dup.values`,
 			`labels.fetch(1)`,
@@ -777,6 +792,9 @@ end
 			`[...values]`,
 			`throw new Error("Array index is out of bounds")`,
 			`values.push(2)`,
+			`values.shift()`,
+			`values.unshift(1)`,
+			`[...values].reverse()`,
 			`Object.keys(labels).map(Number)`,
 			`Object.values(({ ...labels }))`,
 			`throw new Error("Hash key is missing")`,
@@ -859,6 +877,21 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 			name:   "pop requires mut",
 			source: "def bad(): Integer\n\tvalues := [1]\n\treturn values.pop()\nend\n",
 			want:   "values is immutable; declare it with mut to use pop()",
+		},
+		{
+			name:   "shift requires mut",
+			source: "def bad(): Integer\n\tvalues := [1]\n\treturn values.shift()\nend\n",
+			want:   "values is immutable; declare it with mut to use shift()",
+		},
+		{
+			name:   "package unshift requires mut",
+			source: "import trb/std/arrays\ndef bad()\n\tvalues := [1]\n\tarrays.unshift(values, 0)\n\treturn\nend\n",
+			want:   "values is immutable; declare it with mut to use unshift()",
+		},
+		{
+			name:   "unshift value type",
+			source: "def bad()\n\tmut values := [1]\n\tvalues.unshift(\"zero\")\n\treturn\nend\n",
+			want:   "argument 1 to unshift() has type String, expected Integer",
 		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {

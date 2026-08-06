@@ -241,6 +241,15 @@ puts(scores["ada"])
 
 Index and hash lookup are strict and fail at runtime when the value is absent.
 Safe `Result`-returning operations are available in the standard library.
+Destructive Array operations require a `mut` binding, while `reverse` returns
+a new shallow Array:
+
+```trb
+mut values := [2, 3]
+first := values.shift()
+values.unshift(1)
+reversed := values.reverse()
+```
 
 Arrays and integer ranges support structured iteration:
 

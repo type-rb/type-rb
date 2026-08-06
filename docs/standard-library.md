@@ -135,7 +135,9 @@ import trb/std/hashes
 
 mut values := [1, 2]
 values.push(3)
-first := arrays.first(values)
+first := values.shift()
+values.unshift(0)
+reversed := arrays.reverse(values)
 
 labels: Hash<Integer, String> := {1 => "one"}
 known := labels.key?(1)
@@ -144,14 +146,14 @@ keys := hashes.keys(labels)
 ```
 
 Arrays provide size, emptiness, strict `fetch`, safe `try_fetch`, `first`,
-`last`, shallow `dup`, mutable `push`, and mutable strict `pop`.
-`Array<String>` also provides `join`.
+`last`, shallow `dup`, mutable `push`/`unshift`, mutable strict `pop`/`shift`,
+and non-destructive shallow `reverse`. `Array<String>` also provides `join`.
 
 Hashes provide size, emptiness, strict `fetch`, safe `try_fetch`, key checks,
 keys, values, and shallow `dup`. Hash enumeration order is unspecified.
 
 Strict operations fail at runtime for missing keys, invalid indexes, or empty
-edge/pop operations. Safe fetch returns a `Result` with a stable error value.
+edge removals. Safe fetch returns a `Result` with a stable error value.
 
 `map`, `select`, and `reduce` are structured language expressions rather than
 target callbacks. See the [language guide](language.md#arrays-hashes-and-iteration)
