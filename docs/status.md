@@ -92,6 +92,8 @@ toolchains where available.
 
 The current alpha does not yet provide:
 
+- a complete everyday receiver API for scalar values, strings, Arrays, and
+  Hashes, or structured error types for every safe parse and lookup operation;
 - union types or position-typed tuples;
 - inferred type arguments or generic records, classes, and methods;
 - complete superclass construction and override semantics;
