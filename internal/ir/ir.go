@@ -45,6 +45,10 @@ type Import struct {
 	Standard  bool
 	Platform  bool
 	Runtime   bool
+	// Implicit identifies compiler-injected runtime dependencies that are not
+	// source-visible imports. Language tooling must not offer their exports as
+	// though the application imported them explicitly.
+	Implicit bool
 	// IntrinsicSymbols are resolved at compile time and have no corresponding
 	// runtime export in a compiler-owned source module.
 	IntrinsicSymbols map[string]bool

@@ -2,7 +2,10 @@ module github.com/type-rb/type-rb
 
 go 1.26
 
-require github.com/reeflective/readline v1.3.1-0.20260802023205-4d8e27a037bd
+require (
+	github.com/creack/pty v1.1.24
+	github.com/reeflective/readline v1.3.1-0.20260802023205-4d8e27a037bd
+)
 
 require (
 	github.com/rivo/uniseg v0.4.7 // indirect

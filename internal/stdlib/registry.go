@@ -5,6 +5,7 @@ package stdlib
 
 import (
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/types"
@@ -810,6 +811,27 @@ func LookupReceiverMethod(receiver types.Type, name string) (*Package, Symbol, b
 	symbol.ReceiverMutable = symbol.Parameters[0].Mutable
 	symbol.Parameters = append([]Parameter(nil), symbol.Parameters[1:]...)
 	return definition, symbol, true
+}
+
+// ReceiverMethods returns the portable receiver methods available for a
+// checked type. Language tooling uses the same contracts as the checker so
+// completion cannot advertise target-native or otherwise invalid members.
+func ReceiverMethods(receiver types.Type) []Symbol {
+	targets := receiverMethods[receiver.Kind]
+	names := make([]string, 0, len(targets))
+	for name := range targets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	methods := make([]Symbol, 0, len(names))
+	for _, name := range names {
+		_, method, ok := LookupReceiverMethod(receiver, name)
+		if ok {
+			methods = append(methods, method)
+		}
+	}
+	return methods
 }
 
 func receiverMatches(pattern, actual types.Type, typeParameterNames []string) bool {

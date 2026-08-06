@@ -829,6 +829,25 @@ remains deterministic and free of terminal control sequences. Ctrl-C interrupts
 the current input or IR evaluation and returns to the prompt; it does not leave
 the REPL.
 
+Completion and live syntax highlighting use a presentation-independent
+language-service layer. Completion combines the active module's checked typed
+IR with tolerant lexical analysis of the submission being edited. It offers
+keywords, built-in types and functions, visible bindings, declarations,
+explicit imports, receiver methods, and enum or module members. Compiler-added
+runtime dependencies do not become source-visible completion candidates. The
+service returns candidate labels and insertion text, semantic kinds, and UTF-8
+byte replacement ranges; the Readline adapter owns Tab menus and terminal
+rendering. A callable with a known signature, no parameters, and no required
+explicit type arguments keeps its name as the candidate label and inserts the
+complete call with `()`.
+
+Syntax highlighting likewise returns classified source spans rather than ANSI
+text. The REPL adapter colors keywords, types, constants, literals, comments,
+functions, methods, and lexically invalid input while preserving the original
+source bytes. The same completion and classification results are intended for
+future browser and LSP adapters; neither terminal colors nor Readline types are
+part of the language-service API.
+
 ### 8.10 Local browser playground and tour
 
 `trb play` serves an isolated scratch playground on `127.0.0.1` and opens it in

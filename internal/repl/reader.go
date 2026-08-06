@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
+	"github.com/type-rb/type-rb/internal/languageservice"
 )
 
 var (
@@ -56,9 +58,15 @@ func newTerminalReader(options Options, history []string) (*readline.Shell, erro
 	})
 	terminal.AcceptMultiline = func(line []rune) bool { return Complete(string(line)) }
 	terminal.SyntaxHighlighter = func(line []rune) string {
-		return colorInput + string(line) + colorReset
+		source := string(line)
+		if options.language == nil {
+			return colorInput + source + colorReset
+		}
+		return highlightInput(source, options.language.Highlight(source))
 	}
-	terminal.Completer = completeInput
+	terminal.Completer = func(line []rune, cursor int) readline.Completions {
+		return completeInput(options.language, line, cursor)
+	}
 	if err := terminal.Config.Set("enable-bracketed-paste", true); err != nil {
 		return nil, err
 	}
@@ -189,63 +197,66 @@ func saveHistory(filename string, history []string) error {
 	return os.Chmod(filename, 0o600)
 }
 
-type completionItem struct {
-	Text        string
-	Description string
+var commandCompletions = []languageservice.CompletionItem{
+	{Label: ":help", Kind: languageservice.CompletionCommand, Detail: "show REPL commands"},
+	{Label: ":type", Kind: languageservice.CompletionCommand, Detail: "show an expression's checked type"},
+	{Label: ":load", Kind: languageservice.CompletionCommand, Detail: "load a .trb file"},
+	{Label: ":reload", Kind: languageservice.CompletionCommand, Detail: "reload the project"},
+	{Label: ":quit", Kind: languageservice.CompletionCommand, Detail: "leave the REPL"},
 }
 
-var completionItems = []completionItem{
-	{Text: ":help", Description: "show REPL commands"},
-	{Text: ":type", Description: "show an expression's checked type"},
-	{Text: ":load", Description: "load a .trb file"},
-	{Text: ":reload", Description: "reload the project"},
-	{Text: ":quit", Description: "leave the REPL"},
-	{Text: "class", Description: "declare a reference type"},
-	{Text: "record", Description: "declare a data value"},
-	{Text: "enum", Description: "declare a closed nominal type"},
-	{Text: "module", Description: "group declarations"},
-	{Text: "interface", Description: "declare required methods"},
-	{Text: "def", Description: "declare a function or method"},
-	{Text: "if", Description: "start a conditional"},
-	{Text: "case", Description: "dispatch on an enum"},
-	{Text: "when", Description: "handle an enum member"},
-	{Text: "elsif", Description: "add a conditional branch"},
-	{Text: "else", Description: "add a fallback branch"},
-	{Text: "while", Description: "start a loop"},
-	{Text: "return", Description: "return from a function"},
-	{Text: "end", Description: "close a block"},
-	{Text: "import", Description: "import a package"},
-	{Text: "true", Description: "Boolean literal"},
-	{Text: "false", Description: "Boolean literal"},
-	{Text: "nil", Description: "empty value"},
-	{Text: "puts", Description: "write a value to standard output"},
-}
-
-func completionSuggestions(input string) []completionItem {
-	word := input
-	if separator := strings.LastIndexAny(word, " \t\r\n([{,"); separator >= 0 {
-		word = word[separator+1:]
-	}
-	if word == "" {
+func completionSuggestions(service *languageservice.Service, input string, cursor int) []languageservice.CompletionItem {
+	if cursor < 0 || cursor > len(input) {
 		return nil
 	}
-	var suggestions []completionItem
-	for _, item := range completionItems {
-		if strings.HasPrefix(item.Text, word) {
-			suggestions = append(suggestions, item)
+	if strings.HasPrefix(strings.TrimLeft(input, " \t"), ":") {
+		prefix := input[:cursor]
+		start := strings.LastIndexAny(prefix, " \t\r\n") + 1
+		replacement := languageservice.OffsetRange{Start: start, End: cursor}
+		var suggestions []languageservice.CompletionItem
+		for _, item := range commandCompletions {
+			if strings.HasPrefix(item.Label, prefix[start:]) {
+				item.Replacement = replacement
+				suggestions = append(suggestions, item)
+			}
 		}
+		return suggestions
 	}
-	return suggestions
+	if service == nil {
+		return nil
+	}
+	return service.Complete(input, cursor)
 }
 
-func completeInput(line []rune, cursor int) readline.Completions {
+func completeInput(service *languageservice.Service, line []rune, cursor int) readline.Completions {
 	if cursor < 0 || cursor > len(line) {
 		return readline.Completions{}
 	}
-	suggestions := completionSuggestions(string(line[:cursor]))
-	values := make([]string, 0, len(suggestions)*2)
+	source := string(line)
+	byteCursor := len(string(line[:cursor]))
+	suggestions := completionSuggestions(service, source, byteCursor)
+	values := make([]readline.Completion, 0, len(suggestions))
 	for _, item := range suggestions {
-		values = append(values, item.Text, item.Description)
+		value := item.InsertText
+		if value == "" {
+			value = item.Label
+		}
+		values = append(values, readline.Completion{
+			Value:       value,
+			Display:     item.Label,
+			Description: item.Detail,
+			Tag:         string(item.Kind),
+		})
 	}
-	return readline.CompleteValuesDescribed(values...).NoSpace()
+	if len(values) == 0 {
+		return readline.Completions{}
+	}
+	replacement := suggestions[0].Replacement
+	if replacement.Start < 0 || replacement.Start > byteCursor || replacement.End < byteCursor || replacement.End > len(source) || !utf8.ValidString(source[replacement.Start:replacement.End]) {
+		return readline.Completions{}
+	}
+	result := readline.CompleteRaw(values).JustifyDescriptions()
+	result.PREFIX = source[replacement.Start:byteCursor]
+	result.SUFFIX = source[byteCursor:replacement.End]
+	return result
 }
