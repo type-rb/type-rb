@@ -1085,6 +1085,16 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "utf8.RuneCountInString(" + arguments[0] + ")"
 	case "trb.std.strings.empty":
 		return arguments[0] + " == \"\""
+	case "trb.std.strings.strip", "trb.std.strings.lstrip", "trb.std.strings.rstrip":
+		g.requireImport("strings", "")
+		g.requireImport("unicode", "")
+		function := "TrimFunc"
+		if name == "trb.std.strings.lstrip" {
+			function = "TrimLeftFunc"
+		} else if name == "trb.std.strings.rstrip" {
+			function = "TrimRightFunc"
+		}
+		return "strings." + function + "(" + arguments[0] + ", unicode.IsSpace)"
 	case "trb.std.strings.uppercase":
 		g.requireImport("strings", "")
 		return "strings.ToUpper(" + arguments[0] + ")"

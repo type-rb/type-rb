@@ -68,8 +68,11 @@ and `odd?()`. Floats provide `abs()`, `finite?()`, `infinite?()`, and `nan?()`;
 `numbers.infinite`, and `numbers.nan`, plus `booleans.to_string`.
 
 `String#size` counts Unicode code points. Additional receiver operations
-include `codepoints`, `empty?`, `include?`, `start_with?`, `end_with?`, `split`,
-`upcase`, and `downcase`.
+include `codepoints`, `empty?`, `strip`, `lstrip`, `rstrip`, `include?`,
+`start_with?`, `end_with?`, `split`, `upcase`, and `downcase`. String trimming
+uses the pinned Unicode 15.0 `White_Space` set, preserves internal whitespace,
+and does not remove U+FEFF. Package forms use the same names from
+`trb/std/strings`.
 
 ## Bytes
 

@@ -435,6 +435,69 @@ func TestPortableReceiverMethodDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableStringTrimmingLowersAcrossBackends(t *testing.T) {
+	source := []byte(`import trb/std/strings
+
+def package_strip(value: String): String
+	return strings.strip(value)
+end
+
+def receiver_strip(value: String): String
+	return value.strip()
+end
+
+def receiver_lstrip(value: String): String
+	return value.lstrip()
+end
+
+def receiver_rstrip(value: String): String
+	return value.rstrip()
+end
+`)
+	wants := map[string][]string{
+		"go":         {"strings.TrimFunc(value, unicode.IsSpace)", "strings.TrimLeftFunc(value, unicode.IsSpace)", "strings.TrimRightFunc(value, unicode.IsSpace)"},
+		"ruby":       {`\u{0009}-\u{000D}`, `\u{3000}`},
+		"typescript": {`\u0009-\u000d`, `\u3000`},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := CompileWithOptions("strings.trb", source, Options{Mode: mode, Package: "strings_example", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable String trimming: %v", mode, err)
+		}
+		for _, want := range wants[mode] {
+			if !strings.Contains(string(artifact.Output), want) {
+				t.Fatalf("generated %s String trimming is missing %q:\n%s", mode, want, artifact.Output)
+			}
+		}
+	}
+}
+
+func TestPortableStringTrimmingDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "package argument type",
+			source: "import trb/std/strings\ndef bad(): String\n\treturn strings.strip(1)\nend\n",
+			want:   "argument 1 to strip() has type Integer, expected String",
+		},
+		{
+			name:   "receiver arity",
+			source: "def bad(): String\n\treturn \"value\".lstrip(1)\nend\n",
+			want:   "lstrip() expects 0..0 arguments, got 1",
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("bad.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s %s: expected %q diagnostic, got %v", mode, test.name, test.want, err)
+			}
+		}
+	}
+}
+
 func TestPortableBytesPackageAndReceiverMethodsLowerAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/bytes
 

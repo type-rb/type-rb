@@ -68,3 +68,26 @@ func TestReceiverContractsCanConstrainCollectionArguments(t *testing.T) {
 		t.Fatal("Array<Integer>#join incorrectly matched Array<String>")
 	}
 }
+
+func TestStringTrimmingReceiversSharePackageContracts(t *testing.T) {
+	definition, ok := Lookup("trb/std/strings")
+	if !ok {
+		t.Fatal("strings package is missing")
+	}
+	for _, name := range []string{"strip", "lstrip", "rstrip"} {
+		packageSymbol, ok := definition.Symbols[name]
+		if !ok {
+			t.Fatalf("strings.%s is missing", name)
+		}
+		pkg, receiverSymbol, ok := LookupReceiverMethod(types.FromName("String"), name)
+		if !ok {
+			t.Fatalf("String#%s is missing", name)
+		}
+		if pkg != definition || receiverSymbol.Intrinsic != packageSymbol.Intrinsic {
+			t.Fatalf("String#%s does not share its package contract: package=%v receiver=%s expected=%s", name, pkg, receiverSymbol.Intrinsic, packageSymbol.Intrinsic)
+		}
+		if len(receiverSymbol.Parameters) != 0 || receiverSymbol.Return.Kind != types.String {
+			t.Fatalf("String#%s has the wrong signature: %#v", name, receiverSymbol)
+		}
+	}
+}

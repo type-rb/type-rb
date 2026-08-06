@@ -587,6 +587,16 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".each_codepoint.count"
 	case "trb.std.strings.empty":
 		return arguments[0] + ".empty?"
+	case "trb.std.strings.strip", "trb.std.strings.lstrip", "trb.std.strings.rstrip":
+		whitespace := `[\u{0009}-\u{000D}\u{0020}\u{0085}\u{00A0}\u{1680}\u{2000}-\u{200A}\u{2028}-\u{2029}\u{202F}\u{205F}\u{3000}]`
+		value := "(" + arguments[0] + ")"
+		if name != "trb.std.strings.rstrip" {
+			value += `.sub(/\A` + whitespace + `+/u, "")`
+		}
+		if name != "trb.std.strings.lstrip" {
+			value += `.sub(/` + whitespace + `+\z/u, "")`
+		}
+		return value
 	case "trb.std.strings.uppercase":
 		return arguments[0] + ".upcase"
 	case "trb.std.strings.lowercase":

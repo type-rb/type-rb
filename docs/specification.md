@@ -603,10 +603,13 @@ classification never delegates to independently versioned Ruby or JavaScript
 Unicode databases.
 
 The built-in receiver surface also includes `String#codepoints`, `#empty?`,
-`#include?`, `#start_with?`, `#end_with?`, `#split`, `#upcase`, and
-`#downcase`, plus collection operations described below. String splitting uses
-an exact String separator, preserves empty fields including a trailing field,
-and raises a runtime error for an empty separator. As with the earlier
+`#strip`, `#lstrip`, `#rstrip`, `#include?`, `#start_with?`, `#end_with?`,
+`#split`, `#upcase`, and `#downcase`, plus collection operations described
+below. The three trimming operations remove Unicode 15.0 `White_Space` values
+from both ends, the left end, or the right end respectively. They preserve
+internal whitespace and do not treat U+FEFF as whitespace. String splitting
+uses an exact String separator, preserves empty fields including a trailing
+field, and raises a runtime error for an empty separator. As with the earlier
 conversion and size methods, each resolves to its corresponding portable
 package contract rather than a target-native method by name.
 
