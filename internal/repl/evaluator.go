@@ -1550,6 +1550,23 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("strings.empty expects String")
 		}
 		return Value{Type: typ, Data: value == ""}, nil
+	case "trb.std.strings.strip", "trb.std.strings.lstrip", "trb.std.strings.rstrip":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("String trimming expects String")
+		}
+		switch name {
+		case "trb.std.strings.lstrip":
+			value = strings.TrimLeftFunc(value, unicode.IsSpace)
+		case "trb.std.strings.rstrip":
+			value = strings.TrimRightFunc(value, unicode.IsSpace)
+		default:
+			value = strings.TrimFunc(value, unicode.IsSpace)
+		}
+		return Value{Type: typ, Data: value}, nil
 	case "trb.std.strings.uppercase", "trb.std.strings.lowercase":
 		if err := require(1); err != nil {
 			return Value{}, err

@@ -185,6 +185,37 @@ func TestReplRetainsPredicateAndBangFunctionNamesAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableStringTrimmingAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-string-trimming-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "\"\\t\\u00a0\\u3000 TypeRB \\u0085\\n\".strip()\n" +
+			"\"\\t\\u3000TypeRB\".lstrip()\n" +
+			"\"TypeRB\\u00a0\\u3000\".rstrip()\n" +
+			"\" \\ufeffTypeRB\\ufeff \".strip() == \"\\ufeffTypeRB\\ufeff\"\n" +
+			":quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "\"TypeRB\" : String\n\"TypeRB\" : String\n\"TypeRB\" : String\ntrue : Boolean\n"; stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s String trimming REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableBytesAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -1234,6 +1265,57 @@ func TestRunPredicateAndBangNamesAcrossAvailableBackends(t *testing.T) {
 		want := "true\nlocal\ntrue\nimported\nquestion\ntrue\ntrue\nbase\ntrue\ntrue\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s suffixed-name output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunPortableStringTrimmingAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby String trimming run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript String trimming run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/string-trimming-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := "def main()\n" +
+			"\tputs(\"\\t\\u00a0\\u3000 TypeRB \\u0085\\n\".strip())\n" +
+			"\tputs(\"\\t\\u3000TypeRB\".lstrip())\n" +
+			"\tputs(\"TypeRB\\u00a0\\u3000\".rstrip())\n" +
+			"\tputs(\" \\ufeffTypeRB\\ufeff \".strip() == \"\\ufeffTypeRB\\ufeff\")\n" +
+			"\treturn\n" +
+			"end\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "TypeRB\nTypeRB\nTypeRB\ntrue\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s String trimming output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

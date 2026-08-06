@@ -827,6 +827,16 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Array.from(" + arguments[0] + ").length"
 	case "trb.std.strings.empty":
 		return arguments[0] + ".length === 0"
+	case "trb.std.strings.strip", "trb.std.strings.lstrip", "trb.std.strings.rstrip":
+		whitespace := `[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]`
+		value := "(" + arguments[0] + ")"
+		if name != "trb.std.strings.rstrip" {
+			value += `.replace(/^` + whitespace + `+/u, "")`
+		}
+		if name != "trb.std.strings.lstrip" {
+			value += `.replace(/` + whitespace + `+$/u, "")`
+		}
+		return value
 	case "trb.std.strings.uppercase":
 		return arguments[0] + ".toUpperCase()"
 	case "trb.std.strings.lowercase":

@@ -281,6 +281,9 @@ end
 		Symbols: map[string]Symbol{
 			"length":    unary("length", "trb.std.strings.length", stringType, integerType),
 			"empty":     unary("empty", "trb.std.strings.empty", stringType, booleanType),
+			"strip":     unary("strip", "trb.std.strings.strip", stringType, stringType),
+			"lstrip":    unary("lstrip", "trb.std.strings.lstrip", stringType, stringType),
+			"rstrip":    unary("rstrip", "trb.std.strings.rstrip", stringType, stringType),
 			"uppercase": unary("uppercase", "trb.std.strings.uppercase", stringType, stringType),
 			"lowercase": unary("lowercase", "trb.std.strings.lowercase", stringType, stringType),
 			"starts_with": {
@@ -656,6 +659,9 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"try_to_i":    {PackagePath: "trb/std/numbers", Symbol: "try_parse_integer"},
 		"size":        {PackagePath: "trb/std/strings", Symbol: "length"},
 		"empty?":      {PackagePath: "trb/std/strings", Symbol: "empty"},
+		"strip":       {PackagePath: "trb/std/strings", Symbol: "strip"},
+		"lstrip":      {PackagePath: "trb/std/strings", Symbol: "lstrip"},
+		"rstrip":      {PackagePath: "trb/std/strings", Symbol: "rstrip"},
 		"upcase":      {PackagePath: "trb/std/strings", Symbol: "uppercase"},
 		"downcase":    {PackagePath: "trb/std/strings", Symbol: "lowercase"},
 		"include?":    {PackagePath: "trb/std/strings", Symbol: "contains"},
