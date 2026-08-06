@@ -21,6 +21,21 @@ import (
 const replCompletionPTYChild = "TRB_REPL_COMPLETION_PTY_CHILD"
 
 func TestCompletionRemainsCommittedBeforeTrailingInput(t *testing.T) {
+	output := runCompletionPTY(t, "pu\t(1)\r")
+	if !bytes.Contains(output, []byte("[LINE:puts(1)]")) {
+		t.Fatalf("completed line was not preserved: %q", output)
+	}
+}
+
+func TestZeroArgumentCompletionInsertsParentheses(t *testing.T) {
+	output := runCompletionPTY(t, "\"hello\".si\t\r")
+	if !bytes.Contains(output, []byte("[LINE:\"hello\".size()]")) {
+		t.Fatalf("zero-argument call was not completed: %q", output)
+	}
+}
+
+func runCompletionPTY(t *testing.T, input string) []byte {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -32,7 +47,7 @@ func TestCompletionRemainsCommittedBeforeTrailingInput(t *testing.T) {
 	}
 	defer terminal.Close()
 
-	if _, err := terminal.Write([]byte("pu\t(1)\r")); err != nil {
+	if _, err := terminal.Write([]byte(input)); err != nil {
 		t.Fatal(err)
 	}
 	output, err := io.ReadAll(terminal)
@@ -45,9 +60,7 @@ func TestCompletionRemainsCommittedBeforeTrailingInput(t *testing.T) {
 	if err := command.Wait(); err != nil {
 		t.Fatalf("REPL helper failed: %v: %q", err, output)
 	}
-	if !bytes.Contains(output, []byte("[LINE:puts(1)]")) {
-		t.Fatalf("completed line was not preserved: %q", output)
-	}
+	return output
 }
 
 func TestCompletionPTYChild(t *testing.T) {

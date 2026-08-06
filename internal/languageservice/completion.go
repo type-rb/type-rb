@@ -70,7 +70,7 @@ func Complete(request CompletionRequest) []CompletionItem {
 	for _, name := range builtInTypes {
 		byName[name] = Symbol{Name: name, Kind: CompletionType, Detail: "built-in type", Type: types.FromName(name)}
 	}
-	byName["puts"] = Symbol{Name: "puts", Kind: CompletionFunction, Detail: "puts(value: Any)", Type: types.FromName("Void")}
+	byName["puts"] = Symbol{Name: "puts", Kind: CompletionFunction, Detail: "puts(value: Any)", Type: types.FromName("Void"), Call: &CallInfo{ParameterCount: 1}}
 	for name, detail := range keywordDetails {
 		if _, exists := byName[name]; !exists {
 			byName[name] = Symbol{Name: name, Kind: CompletionKeyword, Detail: detail}
@@ -158,7 +158,7 @@ func receiverMembers(receiver types.Type, context Context) []Symbol {
 		result = append(result, context.TypeMembers[parts[len(parts)-1]]...)
 	}
 	for _, method := range stdlib.ReceiverMethods(receiver) {
-		result = append(result, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: librarySignature(method), Type: method.Return})
+		result = append(result, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: librarySignature(method), Type: method.Return, Call: &CallInfo{ParameterCount: len(method.Parameters)}})
 	}
 	byName := map[string]Symbol{}
 	for _, symbol := range result {
@@ -181,7 +181,11 @@ func completionItems(symbols []Symbol, replacement OffsetRange) []CompletionItem
 }
 
 func completionFromSymbol(symbol Symbol, replacement OffsetRange) CompletionItem {
-	return CompletionItem{Label: symbol.Name, Kind: symbol.Kind, Detail: symbol.Detail, Replacement: replacement}
+	insertText := symbol.Name
+	if symbol.Call != nil && symbol.Call.ParameterCount == 0 && !symbol.Call.ExplicitTypeArguments {
+		insertText += "()"
+	}
+	return CompletionItem{Label: symbol.Name, InsertText: insertText, Kind: symbol.Kind, Detail: symbol.Detail, Replacement: replacement}
 }
 
 func filterCompletions(items []CompletionItem, prefix string) []CompletionItem {

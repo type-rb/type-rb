@@ -46,6 +46,7 @@ func BuildContext(programs []*ir.Program, modulePath string) Context {
 		Kind:   CompletionFunction,
 		Detail: "puts(value: Any)",
 		Type:   types.FromName("Void"),
+		Call:   &CallInfo{ParameterCount: 1},
 	}
 
 	context.Symbols = make([]Symbol, 0, len(visible))
@@ -121,6 +122,7 @@ func standardSymbols(definition *stdlib.Package) []Symbol {
 			Kind:   CompletionFunction,
 			Detail: librarySignature(library),
 			Type:   library.Return,
+			Call:   &CallInfo{ParameterCount: len(library.Parameters)},
 		})
 	}
 	for _, exported := range definition.RuntimeExports {
@@ -148,7 +150,7 @@ func collectSymbols(statements []ir.Statement, owner string, typeMembers map[str
 			if privateName(node.Name) {
 				continue
 			}
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionFunction, Detail: methodSignature(node), Type: node.ReturnType})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionFunction, Detail: methodSignature(node), Type: node.ReturnType, Call: methodCallInfo(node)})
 		case *ir.Class:
 			qualified := qualify(owner, node.Name)
 			instance, namespace := classMembers(node.Body, qualified, typeMembers)
@@ -169,7 +171,7 @@ func collectSymbols(statements []ir.Statement, owner string, typeMembers map[str
 			methods := make([]Symbol, 0, len(node.Methods))
 			for _, method := range node.Methods {
 				if !privateName(method.Name) {
-					methods = append(methods, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: methodSignature(method), Type: method.ReturnType})
+					methods = append(methods, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: methodSignature(method), Type: method.ReturnType, Call: methodCallInfo(method)})
 				}
 			}
 			typeMembers[qualified] = methods
@@ -189,6 +191,7 @@ func classMembers(statements []ir.Statement, owner string, typeMembers map[strin
 	instance := []Symbol{}
 	namespace := []Symbol{}
 	constructor := "new()"
+	constructorCall := &CallInfo{}
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Field:
@@ -200,12 +203,13 @@ func classMembers(statements []ir.Statement, owner string, typeMembers map[strin
 		case *ir.Method:
 			if node.Name == "initialize" {
 				constructor = constructorSignature(node, owner)
+				constructorCall = methodCallInfo(node)
 				continue
 			}
 			if privateName(node.Name) {
 				continue
 			}
-			symbol := Symbol{Name: node.Name, Kind: CompletionMethod, Detail: methodSignature(node), Type: node.ReturnType}
+			symbol := Symbol{Name: node.Name, Kind: CompletionMethod, Detail: methodSignature(node), Type: node.ReturnType, Call: methodCallInfo(node)}
 			if node.Class {
 				namespace = append(namespace, symbol)
 			} else {
@@ -215,7 +219,7 @@ func classMembers(statements []ir.Statement, owner string, typeMembers map[strin
 			namespace = append(namespace, collectSymbols([]ir.Statement{statement}, owner, typeMembers)...)
 		}
 	}
-	namespace = append(namespace, Symbol{Name: "new", Kind: CompletionMethod, Detail: constructor, Type: types.FromName(owner)})
+	namespace = append(namespace, Symbol{Name: "new", Kind: CompletionMethod, Detail: constructor, Type: types.FromName(owner), Call: constructorCall})
 	sortSymbols(instance)
 	sortSymbols(namespace)
 	return instance, namespace
@@ -233,7 +237,7 @@ func recordMembers(statements []ir.Statement, owner string) ([]Symbol, []Symbol)
 		parameters = append(parameters, field.Name+": "+field.Type.String())
 	}
 	sortSymbols(instance)
-	namespace := []Symbol{{Name: "new", Kind: CompletionMethod, Detail: "new(" + strings.Join(parameters, ", ") + "): " + owner, Type: types.FromName(owner)}}
+	namespace := []Symbol{{Name: "new", Kind: CompletionMethod, Detail: "new(" + strings.Join(parameters, ", ") + "): " + owner, Type: types.FromName(owner), Call: &CallInfo{ParameterCount: len(parameters)}}}
 	return instance, namespace
 }
 
@@ -274,6 +278,13 @@ func methodSignature(method *ir.Method) string {
 		result += ": " + method.ReturnType.String()
 	}
 	return result
+}
+
+func methodCallInfo(method *ir.Method) *CallInfo {
+	return &CallInfo{
+		ParameterCount:        len(method.Parameters),
+		ExplicitTypeArguments: len(method.TypeParameters) > 0,
+	}
 }
 
 func constructorSignature(method *ir.Method, owner string) string {

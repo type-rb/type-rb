@@ -237,8 +237,12 @@ func completeInput(service *languageservice.Service, line []rune, cursor int) re
 	suggestions := completionSuggestions(service, source, byteCursor)
 	values := make([]readline.Completion, 0, len(suggestions))
 	for _, item := range suggestions {
+		value := item.InsertText
+		if value == "" {
+			value = item.Label
+		}
 		values = append(values, readline.Completion{
-			Value:       item.Label,
+			Value:       value,
 			Display:     item.Label,
 			Description: item.Detail,
 			Tag:         string(item.Kind),

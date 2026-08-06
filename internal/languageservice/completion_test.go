@@ -32,6 +32,7 @@ def greet(name: String): String
 end
 
 user := User.new("Ada")
+str_a := "hello"
 `
 
 func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
@@ -42,17 +43,19 @@ func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
 			service.Update([]*ir.Program{artifact.IR}, "repl")
 
 			for _, test := range []struct {
-				source string
-				want   string
-				kind   languageservice.CompletionKind
+				source     string
+				want       string
+				insertText string
+				kind       languageservice.CompletionKind
 			}{
-				{source: "gre", want: "greet", kind: languageservice.CompletionFunction},
-				{source: "user.na", want: "name", kind: languageservice.CompletionMethod},
-				{source: "State::Cl", want: "Closed", kind: languageservice.CompletionEnumMember},
-				{source: `"hello".si`, want: "size", kind: languageservice.CompletionMethod},
-				{source: `["a", "b"].jo`, want: "join", kind: languageservice.CompletionMethod},
-				{source: "0.25.to_", want: "to_i", kind: languageservice.CompletionMethod},
-				{source: "0.25.to_", want: "to_s", kind: languageservice.CompletionMethod},
+				{source: "gre", want: "greet", insertText: "greet", kind: languageservice.CompletionFunction},
+				{source: "user.na", want: "name", insertText: "name()", kind: languageservice.CompletionMethod},
+				{source: "State::Cl", want: "Closed", insertText: "Closed", kind: languageservice.CompletionEnumMember},
+				{source: `"hello".si`, want: "size", insertText: "size()", kind: languageservice.CompletionMethod},
+				{source: "str_a.siz", want: "size", insertText: "size()", kind: languageservice.CompletionMethod},
+				{source: `["a", "b"].jo`, want: "join", insertText: "join", kind: languageservice.CompletionMethod},
+				{source: "0.25.to_", want: "to_i", insertText: "to_i()", kind: languageservice.CompletionMethod},
+				{source: "0.25.to_", want: "to_s", insertText: "to_s()", kind: languageservice.CompletionMethod},
 			} {
 				items := service.Complete(test.source, len(test.source))
 				item, ok := findCompletion(items, test.want)
@@ -61,6 +64,9 @@ func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
 				}
 				if item.Kind != test.kind {
 					t.Errorf("Complete(%q) kind=%q, want %q", test.source, item.Kind, test.kind)
+				}
+				if item.InsertText != test.insertText {
+					t.Errorf("Complete(%q) insert text=%q, want %q", test.source, item.InsertText, test.insertText)
 				}
 				if got := test.source[item.Replacement.Start:len(test.source)]; got == "" {
 					t.Errorf("Complete(%q) returned empty replacement prefix", test.source)

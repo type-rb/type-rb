@@ -32,11 +32,21 @@ type OffsetRange struct {
 	End   int
 }
 
+// CompletionItem separates the displayed label from the exact source text
+// that replaces Replacement.
 type CompletionItem struct {
 	Label       string
+	InsertText  string
 	Kind        CompletionKind
 	Detail      string
 	Replacement OffsetRange
+}
+
+// CallInfo records structured call syntax without making adapters parse the
+// human-readable signature in Detail.
+type CallInfo struct {
+	ParameterCount        int
+	ExplicitTypeArguments bool
 }
 
 // Symbol is the UI-independent semantic shape consumed by completion.
@@ -45,6 +55,7 @@ type Symbol struct {
 	Kind    CompletionKind
 	Detail  string
 	Type    types.Type
+	Call    *CallInfo
 	Members []Symbol
 }
 
