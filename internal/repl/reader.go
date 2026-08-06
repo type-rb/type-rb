@@ -251,7 +251,7 @@ func completeInput(service *languageservice.Service, line []rune, cursor int) re
 	if replacement.Start < 0 || replacement.Start > byteCursor || replacement.End < byteCursor || replacement.End > len(source) || !utf8.ValidString(source[replacement.Start:replacement.End]) {
 		return readline.Completions{}
 	}
-	result := readline.CompleteRaw(values).NoSpace().JustifyDescriptions()
+	result := readline.CompleteRaw(values).JustifyDescriptions()
 	result.PREFIX = source[replacement.Start:byteCursor]
 	result.SUFFIX = source[byteCursor:replacement.End]
 	return result
