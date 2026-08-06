@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -79,6 +80,8 @@ func (g *generator) statement(statement ir.Statement) {
 				switch n.SymbolKinds[symbol] {
 				case "record", "interface":
 					types = append(types, symbol)
+				case "function":
+					values = append(values, tsCallableName(symbol))
 				default:
 					values = append(values, symbol)
 				}
@@ -164,7 +167,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("export interface " + n.Name + " {")
 		g.indent++
 		for _, method := range n.Methods {
-			g.line(method.Name + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + ";")
+			g.line(tsMethodName(method.Name) + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + ";")
 		}
 		g.indent--
 		g.line("}")
@@ -404,16 +407,15 @@ func (g *generator) method(method *ir.Method) {
 		g.line("constructor(" + g.parameters(method.Parameters) + ") {")
 	} else {
 		prefix := ""
-		name := method.Name
-		if name == "component_did_mount" {
+		name := tsMethodName(method.Name)
+		if method.Name == "component_did_mount" {
 			name = "componentDidMount"
 		}
 		if method.Class {
 			prefix = "static "
 		}
-		if strings.HasPrefix(name, "_") {
+		if strings.HasPrefix(method.Name, "_") {
 			prefix += "private "
-			name = strings.TrimPrefix(name, "_")
 		}
 		g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + " {")
 	}
@@ -426,7 +428,7 @@ func (g *generator) method(method *ir.Method) {
 }
 
 func (g *generator) function(method *ir.Method) {
-	name := method.Name
+	name := tsCallableName(method.Name)
 	prefix := "export function "
 	if name == "main" {
 		prefix = "function "
@@ -472,10 +474,13 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "this"
 		}
 		if g.inClass > 0 && g.methods[n.Name] {
-			return "this." + strings.TrimPrefix(n.Name, "_") + ".bind(this)"
+			return "this." + tsMethodName(n.Name) + ".bind(this)"
 		}
 		if n.Owner != "" {
-			return strings.ReplaceAll(n.Owner, "::", ".") + "." + n.Name
+			return strings.ReplaceAll(n.Owner, "::", ".") + "." + tsCallableName(n.Name)
+		}
+		if n.Reference != nil && n.Reference.ExportKind == "function" {
+			return tsCallableName(n.Name)
 		}
 		return n.Name
 	case *ir.Literal:
@@ -554,7 +559,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if n.Safe {
 			op = "?."
 		}
-		return receiver + op + n.Name
+		return receiver + op + tsMethodName(n.Name)
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
 		for i, argument := range n.Arguments {
@@ -582,8 +587,13 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return "new " + g.expr(member.Receiver) + "(" + args + ")"
 		}
-		if identifier, ok := n.Callee.(*ir.Identifier); ok && g.inClass > 0 && g.methods[identifier.Name] {
-			return "this." + strings.TrimPrefix(identifier.Name, "_") + "(" + args + ")"
+		if identifier, ok := n.Callee.(*ir.Identifier); ok {
+			if g.inClass > 0 && g.methods[identifier.Name] {
+				return "this." + tsMethodName(identifier.Name) + "(" + args + ")"
+			}
+			if g.topFunctions[identifier.Name] {
+				return tsCallableName(identifier.Name) + "(" + args + ")"
+			}
 		}
 		return g.expr(n.Callee) + "(" + args + ")"
 	case *ir.EnumConstruct:
@@ -605,7 +615,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		for index, argument := range n.Arguments {
 			arguments[index] = tsType(argument)
 		}
-		return g.expr(n.Receiver) + "<" + strings.Join(arguments, ", ") + ">"
+		name := g.expr(n.Receiver)
+		if identifier, ok := n.Receiver.(*ir.Identifier); ok && g.topFunctions[identifier.Name] {
+			name = tsCallableName(identifier.Name)
+		}
+		return name + "<" + strings.Join(arguments, ", ") + ">"
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()
@@ -615,6 +629,20 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func tsCallableName(name string) string {
+	if kind, encoded, ok := naming.CallableSuffix(name); ok {
+		return "$trb$" + kind + "$" + encoded
+	}
+	return name
+}
+
+func tsMethodName(name string) string {
+	if _, _, ok := naming.CallableSuffix(name); ok {
+		return tsCallableName(name)
+	}
+	return strings.TrimPrefix(name, "_")
 }
 
 func (g *generator) transform(transform *ir.Transform) string {

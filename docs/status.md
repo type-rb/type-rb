@@ -58,7 +58,8 @@ text.
 
 Implemented portable behavior includes:
 
-- functions, classes, inheritance, interfaces, modules, records, and constants;
+- functions, classes, inheritance, interfaces, modules, records, and constants,
+  including portable function and method names ending in `?` or `!`;
 - typed fields, `readonly`, private members, class members, and checked
   initialization;
 - immutable `:=` bindings and explicit `mut` for reassignment or destructive

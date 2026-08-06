@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -558,6 +559,9 @@ func (g *generator) class(class *ir.Class) {
 	}
 	g.indent--
 	g.line("}")
+	for _, interfaceName := range class.Implements {
+		g.line("var _ " + g.goType(types.FromName(interfaceName)) + " = (*" + name + ")(nil)")
+	}
 	g.b.WriteByte('\n')
 
 	initialize := findInitialize(methods)
@@ -661,6 +665,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		if n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.Package != "" {
 			if alias := g.referenceAlias(n.Reference); alias != "" {
 				return alias + "." + goImportedName(n.Name, n.Reference.ExportKind)
+			}
+			if n.Reference.ExportKind == "function" {
+				return goMethodName(n.Name)
 			}
 		}
 		if n.Owner != "" {
@@ -1736,6 +1743,13 @@ func goFieldName(name string) string {
 
 func goMethodName(name string) string {
 	private := strings.HasPrefix(name, "_")
+	if kind, encoded, ok := naming.CallableSuffix(name); ok {
+		prefix := "Trb" + upperFirst(kind) + "_"
+		if private {
+			prefix = "trb" + upperFirst(kind) + "_"
+		}
+		return prefix + encoded
+	}
 	name = strings.TrimPrefix(name, "_")
 	return goIdentifier(name, !private && name != "main")
 }
