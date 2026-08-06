@@ -689,14 +689,36 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".to_s"
 	case "trb.std.numbers.integer_to_float":
 		return "(" + arguments[0] + ").to_f"
+	case "trb.std.numbers.integer_absolute":
+		return "(" + arguments[0] + ").abs"
+	case "trb.std.numbers.integer_zero":
+		return "(" + arguments[0] + ").zero?"
+	case "trb.std.numbers.integer_positive":
+		return "(" + arguments[0] + ").positive?"
+	case "trb.std.numbers.integer_negative":
+		return "(" + arguments[0] + ").negative?"
+	case "trb.std.numbers.integer_even":
+		return "(" + arguments[0] + ").even?"
+	case "trb.std.numbers.integer_odd":
+		return "(" + arguments[0] + ").odd?"
 	case "trb.std.numbers.float_to_string":
 		return portableFloatString(arguments[0])
 	case "trb.std.numbers.float_to_integer":
 		return "->(value) { raise FloatDomainError, \"Float cannot be converted to Integer\" unless value.finite?; integer = value.truncate; raise RangeError, \"Integer is outside the portable range\" if integer < -9007199254740991 || integer > 9007199254740991; integer }.call(" + arguments[0] + ")"
+	case "trb.std.numbers.float_absolute":
+		return "(" + arguments[0] + ").abs"
+	case "trb.std.numbers.float_finite":
+		return "(" + arguments[0] + ").finite?"
+	case "trb.std.numbers.float_infinite":
+		return "!((" + arguments[0] + ").infinite?).nil?"
+	case "trb.std.numbers.float_nan":
+		return "(" + arguments[0] + ").nan?"
 	case "trb.std.numbers.parse_integer":
 		return "->(input) { raise ArgumentError, \"invalid Integer\" unless /\\A[+-]?[0-9]+\\z/.match?(input); value = Integer(input, 10); raise RangeError, \"Integer is outside the portable range\" if value < -9007199254740991 || value > 9007199254740991; value }.call(" + arguments[0] + ")"
 	case "trb.std.numbers.try_parse_integer":
 		return "->(input) { if !/\\A[+-]?[0-9]+\\z/.match?(input); Result::Err.new(\"invalid Integer\"); else; value = Integer(input, 10); if value < -9007199254740991 || value > 9007199254740991; Result::Err.new(\"Integer is outside the portable range\"); else; Result::Ok.new(value); end; end }.call(" + arguments[0] + ")"
+	case "trb.std.booleans.to_string":
+		return "(" + arguments[0] + ").to_s"
 	default:
 		return "nil"
 	}

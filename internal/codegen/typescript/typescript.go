@@ -906,15 +906,37 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "String(" + arguments[0] + ")"
 	case "trb.std.numbers.integer_to_float":
 		return "Number(" + arguments[0] + ")"
+	case "trb.std.numbers.integer_absolute":
+		return "Math.abs(" + arguments[0] + ")"
+	case "trb.std.numbers.integer_zero":
+		return arguments[0] + " === 0"
+	case "trb.std.numbers.integer_positive":
+		return arguments[0] + " > 0"
+	case "trb.std.numbers.integer_negative":
+		return arguments[0] + " < 0"
+	case "trb.std.numbers.integer_even":
+		return arguments[0] + " % 2 === 0"
+	case "trb.std.numbers.integer_odd":
+		return arguments[0] + " % 2 !== 0"
 	case "trb.std.numbers.float_to_string":
 		return portableFloatString(arguments[0])
 	case "trb.std.numbers.float_to_integer":
 		return "((): number => { const value = " + arguments[0] + "; if (!Number.isFinite(value)) { throw new RangeError(\"Float cannot be converted to Integer\"); } const integer = Math.trunc(value); if (!Number.isSafeInteger(integer)) { throw new RangeError(\"Integer is outside the portable range\"); } return integer; })()"
+	case "trb.std.numbers.float_absolute":
+		return "Math.abs(" + arguments[0] + ")"
+	case "trb.std.numbers.float_finite":
+		return "Number.isFinite(" + arguments[0] + ")"
+	case "trb.std.numbers.float_infinite":
+		return "((value: number): boolean => value === Infinity || value === -Infinity)(" + arguments[0] + ")"
+	case "trb.std.numbers.float_nan":
+		return "Number.isNaN(" + arguments[0] + ")"
 	case "trb.std.numbers.parse_integer":
 		return "((): number => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { throw new Error(\"invalid Integer\"); } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { throw new Error(\"Integer is outside the portable range\"); } return __trbValue; })()"
 	case "trb.std.numbers.try_parse_integer":
 		resultType, _, _ := filesystemResultType()
 		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { return " + resultError(strconv.Quote("invalid Integer")) + "; } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { return " + resultError(strconv.Quote("Integer is outside the portable range")) + "; } return " + filesystemOK("__trbValue") + "; })()"
+	case "trb.std.booleans.to_string":
+		return "String(" + arguments[0] + ")"
 	case "trb.platform.typescript.node.argv":
 		return "process.argv.slice(2)"
 	case "trb.platform.typescript.react.element":

@@ -169,6 +169,92 @@ end
 	}
 }
 
+func TestPortableScalarReceiverMethodsLowerAcrossBackends(t *testing.T) {
+	source := []byte(`import trb/std/numbers
+import trb/std/booleans
+
+def integer_absolute(): Integer
+	return (-4).abs()
+end
+
+def package_integer_absolute(): Integer
+	return numbers.absolute(-4)
+end
+
+def integer_predicates(value: Integer): Boolean
+	return value.zero?() || value.positive?() || value.negative?() || value.even?() || value.odd?()
+end
+
+def float_absolute(): Float
+	return (-0.25).abs()
+end
+
+def float_predicates(value: Float): Boolean
+	return value.finite?() || value.infinite?() || value.nan?()
+end
+
+def boolean_text(): String
+	return true.to_s()
+end
+
+def package_boolean_text(): String
+	return booleans.to_string(false)
+end
+`)
+	wants := map[string][]string{
+		"go": {
+			`if value < 0`,
+			`value == 0`,
+			`value > 0`,
+			`value < 0`,
+			`value%2 == 0`,
+			`value%2 != 0`,
+			`math.Abs`,
+			`!math.IsNaN(value) && !math.IsInf(value, 0)`,
+			`math.IsInf(value, 0)`,
+			`math.IsNaN(value)`,
+			`strconv.FormatBool`,
+		},
+		"ruby": {
+			`.abs`,
+			`.zero?`,
+			`.positive?`,
+			`.negative?`,
+			`.even?`,
+			`.odd?`,
+			`.finite?`,
+			`!((value).infinite?).nil?`,
+			`.nan?`,
+			`(true).to_s`,
+		},
+		"typescript": {
+			`Math.abs`,
+			`value === 0`,
+			`value > 0`,
+			`value < 0`,
+			`value % 2 === 0`,
+			`value % 2 !== 0`,
+			`Math.abs`,
+			`Number.isFinite(value)`,
+			`value === Infinity || value === -Infinity`,
+			`Number.isNaN(value)`,
+			`String(true)`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := CompileWithOptions("scalar_methods.trb", source, Options{Mode: mode, Package: "scalar_methods", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable scalar receiver methods: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s scalar receiver method is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
 func TestPortableReceiverMethodDiagnosticsAreModeIndependent(t *testing.T) {
 	tests := []struct {
 		name   string

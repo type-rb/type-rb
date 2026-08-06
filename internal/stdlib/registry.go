@@ -504,10 +504,27 @@ end
 		Symbols: map[string]Symbol{
 			"to_string":         unary("to_string", "trb.std.numbers.to_string", integerType, stringType),
 			"to_float":          unary("to_float", "trb.std.numbers.integer_to_float", integerType, floatType),
+			"absolute":          unary("absolute", "trb.std.numbers.integer_absolute", integerType, integerType),
+			"zero":              unary("zero", "trb.std.numbers.integer_zero", integerType, booleanType),
+			"positive":          unary("positive", "trb.std.numbers.integer_positive", integerType, booleanType),
+			"negative":          unary("negative", "trb.std.numbers.integer_negative", integerType, booleanType),
+			"even":              unary("even", "trb.std.numbers.integer_even", integerType, booleanType),
+			"odd":               unary("odd", "trb.std.numbers.integer_odd", integerType, booleanType),
 			"float_to_string":   unary("float_to_string", "trb.std.numbers.float_to_string", floatType, stringType),
 			"truncate":          unary("truncate", "trb.std.numbers.float_to_integer", floatType, integerType),
+			"float_absolute":    unary("float_absolute", "trb.std.numbers.float_absolute", floatType, floatType),
+			"finite":            unary("finite", "trb.std.numbers.float_finite", floatType, booleanType),
+			"infinite":          unary("infinite", "trb.std.numbers.float_infinite", floatType, booleanType),
+			"nan":               unary("nan", "trb.std.numbers.float_nan", floatType, booleanType),
 			"parse_integer":     unary("parse_integer", "trb.std.numbers.parse_integer", stringType, integerType),
 			"try_parse_integer": unary("try_parse_integer", "trb.std.numbers.try_parse_integer", stringType, stringErrorResult(integerType)),
+		},
+	},
+	"trb/std/booleans": {
+		Path: "trb/std/booleans",
+		Kind: Portable,
+		Symbols: map[string]Symbol{
+			"to_string": unary("to_string", "trb.std.booleans.to_string", booleanType, stringType),
 		},
 	},
 	"trb/platform/ruby/native": {
@@ -614,12 +631,25 @@ end
 // intrinsic instead of maintaining a second, target-specific method table.
 var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 	types.Int: {
-		"to_s": {PackagePath: "trb/std/numbers", Symbol: "to_string"},
-		"to_f": {PackagePath: "trb/std/numbers", Symbol: "to_float"},
+		"to_s":      {PackagePath: "trb/std/numbers", Symbol: "to_string"},
+		"to_f":      {PackagePath: "trb/std/numbers", Symbol: "to_float"},
+		"abs":       {PackagePath: "trb/std/numbers", Symbol: "absolute"},
+		"zero?":     {PackagePath: "trb/std/numbers", Symbol: "zero"},
+		"positive?": {PackagePath: "trb/std/numbers", Symbol: "positive"},
+		"negative?": {PackagePath: "trb/std/numbers", Symbol: "negative"},
+		"even?":     {PackagePath: "trb/std/numbers", Symbol: "even"},
+		"odd?":      {PackagePath: "trb/std/numbers", Symbol: "odd"},
 	},
 	types.Float: {
-		"to_s": {PackagePath: "trb/std/numbers", Symbol: "float_to_string"},
-		"to_i": {PackagePath: "trb/std/numbers", Symbol: "truncate"},
+		"to_s":      {PackagePath: "trb/std/numbers", Symbol: "float_to_string"},
+		"to_i":      {PackagePath: "trb/std/numbers", Symbol: "truncate"},
+		"abs":       {PackagePath: "trb/std/numbers", Symbol: "float_absolute"},
+		"finite?":   {PackagePath: "trb/std/numbers", Symbol: "finite"},
+		"infinite?": {PackagePath: "trb/std/numbers", Symbol: "infinite"},
+		"nan?":      {PackagePath: "trb/std/numbers", Symbol: "nan"},
+	},
+	types.Bool: {
+		"to_s": {PackagePath: "trb/std/booleans", Symbol: "to_string"},
 	},
 	types.String: {
 		"to_i":        {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},

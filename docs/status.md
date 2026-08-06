@@ -73,8 +73,9 @@ Implemented portable behavior includes:
   payload enums and top-level functions;
 - `Result<T, E>` and `Unit`;
 - value-producing `map`, `select`, and `reduce` expressions;
-- portable strings, bytes, Unicode classification, text building, collections,
-  logical paths, filesystem access, process execution, and JSON/JSONC codecs;
+- portable scalar receiver operations, strings, bytes, Unicode classification,
+  text building, collections, logical paths, filesystem access, process
+  execution, and JSON/JSONC codecs;
 - local packages shared across projects with different output modes; and
 - explicit mode-checked platform imports without grammar variants.
 
@@ -92,8 +93,9 @@ toolchains where available.
 
 The current alpha does not yet provide:
 
-- a complete everyday receiver API for scalar values, strings, Arrays, and
-  Hashes, or structured error types for every safe parse and lookup operation;
+- a complete everyday receiver API beyond the initial scalar baseline for
+  strings, Arrays, and Hashes, or structured error types for every safe parse
+  and lookup operation;
 - union types or position-typed tuples;
 - inferred type arguments or generic records, classes, and methods;
 - complete superclass construction and override semantics;

@@ -141,13 +141,13 @@ func TestReplEvaluatesPortableReceiverMethodsAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "123.to_s()\n0.25.to_s()\n(-0.0).to_s()\n2.to_f()\n(-2.75).to_i()\n0.25 * 100\n1 == 1.0\n\"123\".to_i()\n\"123\".try_to_i()\n\"12x\".try_to_i()\n\"9007199254740992\".try_to_i()\n\"a😀\".size()\n:quit\n"
+		input := "123.to_s()\n0.25.to_s()\n(-0.0).to_s()\n2.to_f()\n(-2.75).to_i()\n(-4).abs()\n0.zero?()\n1.positive?()\n(-1).negative?()\n2.even?()\n3.odd?()\n(-0.25).abs()\n0.25.finite?()\ntrue.to_s()\nfalse.to_s()\n0.25 * 100\n1 == 1.0\n\"123\".to_i()\n\"123\".try_to_i()\n\"12x\".try_to_i()\n\"9007199254740992\".try_to_i()\n\"a😀\".size()\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "\"123\" : String\n\"0.25\" : String\n\"0.0\" : String\n2 : Float\n-2 : Integer\n25 : Float\ntrue : Boolean\n123 : Integer\nResult::Ok(value: 123) : Result<Integer, String>\nResult::Err(error: \"invalid Integer\") : Result<Integer, String>\nResult::Err(error: \"Integer is outside the portable range\") : Result<Integer, String>\n2 : Integer\n"
+		want := "\"123\" : String\n\"0.25\" : String\n\"0.0\" : String\n2 : Float\n-2 : Integer\n4 : Integer\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\n0.25 : Float\ntrue : Boolean\n\"true\" : String\n\"false\" : String\n25 : Float\ntrue : Boolean\n123 : Integer\nResult::Ok(value: 123) : Result<Integer, String>\nResult::Err(error: \"invalid Integer\") : Result<Integer, String>\nResult::Err(error: \"Integer is outside the portable range\") : Result<Integer, String>\n2 : Integer\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s receiver-method REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -1192,10 +1192,14 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			t.Fatal(err)
 		}
 		source := "import { Result } from trb/std/result\n" +
-			"import trb/std/string_builder\n\n" +
+			"import trb/std/string_builder\n" +
+			"import trb/std/numbers\n" +
+			"import trb/std/booleans\n\n" +
 			"def integer_result(value: Result<Integer, String>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error; end; end\n" +
-			"def string_result(value: Result<String, String>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error; end; end\n\n" +
+			"def string_result(value: Result<String, String>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error; end; end\n" +
+			"def scalar_check(value: Float): Boolean; return (-4).abs() == numbers.absolute(-4) && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == booleans.to_string(true); end\n\n" +
 			"def main()\n" +
+			"\tputs(scalar_check(0.25))\n" +
 			"\tputs(integer_result(\"12\".try_to_i()))\n" +
 			"\tputs(integer_result(\"12x\".try_to_i()))\n" +
 			"\tputs(integer_result(\"9007199254740992\".try_to_i()))\n" +
@@ -1221,7 +1225,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "ok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
+		want := "true\nok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s safe-operation output: want %q, got %q", mode, want, stdout.String())
 		}

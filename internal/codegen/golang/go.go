@@ -1202,11 +1202,35 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "strconv.Itoa(" + arguments[0] + ")"
 	case "trb.std.numbers.integer_to_float":
 		return "float64(" + arguments[0] + ")"
+	case "trb.std.numbers.integer_absolute":
+		return "func(value int) int { if value < 0 { return -value }; return value }(" + arguments[0] + ")"
+	case "trb.std.numbers.integer_zero":
+		return arguments[0] + " == 0"
+	case "trb.std.numbers.integer_positive":
+		return arguments[0] + " > 0"
+	case "trb.std.numbers.integer_negative":
+		return arguments[0] + " < 0"
+	case "trb.std.numbers.integer_even":
+		return arguments[0] + "%2 == 0"
+	case "trb.std.numbers.integer_odd":
+		return arguments[0] + "%2 != 0"
 	case "trb.std.numbers.float_to_string":
 		return g.portableFloatString(arguments[0])
 	case "trb.std.numbers.float_to_integer":
 		g.requireImport("math", "")
 		return "func() int { value := " + arguments[0] + "; if math.IsNaN(value) || math.IsInf(value, 0) { panic(\"Float cannot be converted to Integer\") }; if value < -9007199254740991 || value > 9007199254740991 { panic(\"Integer is outside the portable range\") }; return int(math.Trunc(value)) }()"
+	case "trb.std.numbers.float_absolute":
+		g.requireImport("math", "")
+		return "math.Abs(" + arguments[0] + ")"
+	case "trb.std.numbers.float_finite":
+		g.requireImport("math", "")
+		return "func(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }(" + arguments[0] + ")"
+	case "trb.std.numbers.float_infinite":
+		g.requireImport("math", "")
+		return "math.IsInf(" + arguments[0] + ", 0)"
+	case "trb.std.numbers.float_nan":
+		g.requireImport("math", "")
+		return "math.IsNaN(" + arguments[0] + ")"
 	case "trb.std.numbers.parse_integer":
 		g.requireImport("regexp", "")
 		g.requireImport("strconv", "")
@@ -1216,6 +1240,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("strconv", "")
 		resultType, _, _ := filesystemResultType()
 		return "func() " + resultType + " { input := " + arguments[0] + "; valid, _ := regexp.MatchString(`^[+-]?[0-9]+$`, input); if !valid { return " + resultError(strconv.Quote("invalid Integer")) + " }; value, err := strconv.ParseInt(input, 10, 64); if err != nil || value < -9007199254740991 || value > 9007199254740991 { return " + resultError(strconv.Quote("Integer is outside the portable range")) + " }; return " + filesystemOK("int(value)") + " }()"
+	case "trb.std.booleans.to_string":
+		g.requireImport("strconv", "")
+		return "strconv.FormatBool(" + arguments[0] + ")"
 	case "trb.platform.go.context.background":
 		g.requireImport("context", "")
 		return "context.Background()"
