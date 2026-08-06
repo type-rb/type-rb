@@ -90,7 +90,7 @@ mode by itself does not enable them.
   the receiver of a destructive collection operation.
 - `mut x := expr` introduces a mutable local binding. `mut` is required for
   later `=`/compound assignment and destructive operations such as
-  `values.push(item)` or `arrays.push(values, item)`.
+  `values.push(item)`, `values.shift()`, or their package forms.
 - A readonly reference cannot be made mutable merely by assigning it to a new
   `mut` binding.
 - A non-nullable `Integer` is assignable to a non-nullable `Float`. The checker
@@ -628,10 +628,13 @@ empty Array are runtime errors in every mode. Safe fetch returns
 `Result<T, String>` for Arrays and `Result<V, String>` for Hashes, with stable
 missing-value messages. Hash key/value enumeration order is unspecified.
 
-`Array<String>` additionally provides package/receiver `join`, and generic
-`Array<T>` provides mutable, strict `pop`. `pop` requires `mut` and raises on
-an empty Array. Receiver lookup checks the complete collection type, so a
-method constrained to `Array<String>` is not exposed on `Array<Integer>`.
+`Array<String>` additionally provides package/receiver `join`. Generic
+`Array<T>` provides mutable strict `pop` and `shift`, mutable `unshift(value)`,
+and non-destructive shallow `reverse`. The two strict removals require `mut`
+and raise on an empty Array; `unshift` also requires `mut`. `reverse` returns a
+new Array and leaves the receiver unchanged. Receiver lookup checks the
+complete collection type, so a method constrained to `Array<String>` is not
+exposed on `Array<Integer>`.
 
 `map`, `select`, and `reduce(initial)` are structured, value-producing
 collection expressions rather than target-native callback calls. `map` returns

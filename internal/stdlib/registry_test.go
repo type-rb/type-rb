@@ -44,17 +44,26 @@ func TestGenericReceiverContractsSpecializeReturnTypes(t *testing.T) {
 	}
 }
 
-func TestArrayPushReceiverUsesPackageMutabilityContract(t *testing.T) {
+func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
-	_, push, ok := LookupReceiverMethod(arrayType, "push")
-	if !ok {
-		t.Fatal("Array#push is missing")
+	for _, name := range []string{"pop", "push", "shift", "unshift"} {
+		_, method, ok := LookupReceiverMethod(arrayType, name)
+		if !ok {
+			t.Fatalf("Array#%s is missing", name)
+		}
+		if !method.ReceiverMutable {
+			t.Fatalf("Array#%s lost the package receiver mutability requirement", name)
+		}
 	}
-	if !push.ReceiverMutable {
-		t.Fatal("Array#push lost the package receiver mutability requirement")
+	for _, name := range []string{"push", "unshift"} {
+		_, method, _ := LookupReceiverMethod(arrayType, name)
+		if len(method.Parameters) != 1 || method.Parameters[0].Type.Kind != types.Int {
+			t.Fatalf("Array#%s value parameter was not specialized: %#v", name, method.Parameters)
+		}
 	}
-	if len(push.Parameters) != 1 || push.Parameters[0].Type.Kind != types.Int {
-		t.Fatalf("Array#push value parameter was not specialized: %#v", push.Parameters)
+	_, reverse, ok := LookupReceiverMethod(arrayType, "reverse")
+	if !ok || reverse.ReceiverMutable || reverse.Return.String() != "Array<Integer>" {
+		t.Fatalf("Array#reverse has the wrong contract: %#v", reverse)
 	}
 }
 

@@ -677,8 +677,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".join(" + arguments[1] + ")"
 	case "trb.std.arrays.pop":
 		return "->(values) { raise IndexError, \"Array is empty\" if values.empty?; values.pop }.call(" + arguments[0] + ")"
+	case "trb.std.arrays.shift":
+		return "->(values) { raise IndexError, \"Array is empty\" if values.empty?; values.shift }.call(" + arguments[0] + ")"
 	case "trb.std.arrays.push":
 		return arguments[0] + " << " + arguments[1]
+	case "trb.std.arrays.unshift":
+		return arguments[0] + ".unshift(" + arguments[1] + ")"
+	case "trb.std.arrays.reverse":
+		return arguments[0] + ".reverse"
 	case "trb.std.hashes.length":
 		return arguments[0] + ".length"
 	case "trb.std.hashes.empty":

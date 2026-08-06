@@ -448,6 +448,13 @@ end
 				Parameters:     []Parameter{{Name: "values", Type: arrayOf(typeT), Mutable: true}},
 				Return:         typeT,
 			},
+			"shift": {
+				Name:           "shift",
+				Intrinsic:      "trb.std.arrays.shift",
+				TypeParameters: []string{"T"},
+				Parameters:     []Parameter{{Name: "values", Type: arrayOf(typeT), Mutable: true}},
+				Return:         typeT,
+			},
 			"push": {
 				Name:           "push",
 				Intrinsic:      "trb.std.arrays.push",
@@ -458,6 +465,17 @@ end
 				},
 				Return: voidType,
 			},
+			"unshift": {
+				Name:           "unshift",
+				Intrinsic:      "trb.std.arrays.unshift",
+				TypeParameters: []string{"T"},
+				Parameters: []Parameter{
+					{Name: "values", Type: arrayOf(typeT), Mutable: true},
+					{Name: "value", Type: typeT},
+				},
+				Return: voidType,
+			},
+			"reverse": genericUnary("reverse", "trb.std.arrays.reverse", []string{"T"}, arrayOf(typeT), arrayOf(typeT)),
 		},
 	},
 	"trb/std/hashes": {
@@ -696,7 +714,10 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"dup":       {PackagePath: "trb/std/arrays", Symbol: "copy"},
 		"join":      {PackagePath: "trb/std/arrays", Symbol: "join"},
 		"pop":       {PackagePath: "trb/std/arrays", Symbol: "pop"},
+		"shift":     {PackagePath: "trb/std/arrays", Symbol: "shift"},
 		"push":      {PackagePath: "trb/std/arrays", Symbol: "push"},
+		"unshift":   {PackagePath: "trb/std/arrays", Symbol: "unshift"},
+		"reverse":   {PackagePath: "trb/std/arrays", Symbol: "reverse"},
 	},
 	types.Hash: {
 		"size":      {PackagePath: "trb/std/hashes", Symbol: "length"},

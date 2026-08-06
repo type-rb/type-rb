@@ -1918,6 +1918,21 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		array.Items = array.Items[:index]
 		result.Type = typ
 		return result, nil
+	case "trb.std.arrays.shift":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.shift expects Array")
+		}
+		if len(array.Items) == 0 {
+			return Value{}, errors.New("Array is empty")
+		}
+		result := array.Items[0]
+		array.Items = array.Items[1:]
+		result.Type = typ
+		return result, nil
 	case "trb.std.arrays.push":
 		if err := require(2); err != nil {
 			return Value{}, err
@@ -1928,6 +1943,31 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		array.Items = append(array.Items, values[1])
 		return Value{Type: typ}, nil
+	case "trb.std.arrays.unshift":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.unshift expects Array")
+		}
+		array.Items = append(array.Items, Value{})
+		copy(array.Items[1:], array.Items)
+		array.Items[0] = values[1]
+		return Value{Type: typ}, nil
+	case "trb.std.arrays.reverse":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.reverse expects Array")
+		}
+		items := make([]Value, len(array.Items))
+		for index := range array.Items {
+			items[len(array.Items)-1-index] = array.Items[index]
+		}
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
 	case "trb.std.hashes.length", "trb.std.hashes.empty":
 		if err := require(1); err != nil {
 			return Value{}, err
