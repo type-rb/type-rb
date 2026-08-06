@@ -65,10 +65,17 @@ than detailed syntax.
 
 ## 5. Standard library and package ecosystem
 
-- Expand the compiler-owned standard library beyond the current Result, Unit,
-  collection, Unicode, path, filesystem, process, and typed JSON/JSONC baseline
-  with time, regular-expression, HTTP, and encoding packages where semantics
-  can be made consistent across targets.
+- Complete the everyday receiver surface for scalar values, Unicode strings,
+  Arrays, and Hashes before adding broader packages. Keep operations that need
+  first-class blocks staged with the language-level block/lambda work.
+- Replace provisional String errors from safe parsing and collection lookup
+  with structured portable error types before those APIs become stable.
+- Expand the compiler-owned baseline with math, hex, Base64, SHA-256/SHA-512,
+  HMAC, random, UUID, regular-expression, URL, and time packages. Prefer
+  `Bytes` at binary and digest boundaries, and keep legacy hashes explicitly
+  limited to compatibility use.
+- Treat browser execution as the primary portable TypeScript environment;
+  Node-only APIs and backend/server integrations remain platform packages.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
 - Stabilize compiler-owned library type providers so gems, Go modules, and npm
   packages do not require application-authored signature files.
