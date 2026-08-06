@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"encoding/hex"
 	goast "go/ast"
 	"go/importer"
 	"go/parser"
@@ -250,6 +251,167 @@ end
 		for _, want := range wants[mode] {
 			if !strings.Contains(output, want) {
 				t.Fatalf("generated %s scalar receiver method is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortablePredicateAndBangNamesLowerAcrossBackends(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/contracts/capability.trb",
+		ModulePath: "contracts/capability",
+		Package:    "contracts",
+		Source: []byte(`interface Capability
+	ready?(): Boolean
+	save!(): String
+end
+`),
+	}
+	helpers := SourceUnit{
+		Filename:   "/project/helpers/functions.trb",
+		ModulePath: "helpers/functions",
+		Package:    "helpers",
+		Source: []byte(`def imported_ready?(): Boolean
+	return true
+end
+
+def imported_save!(): String
+	return "imported"
+end
+
+def imported_label?(): String
+	return "question"
+end
+`),
+	}
+	base := SourceUnit{
+		Filename:   "/project/models/base.trb",
+		ModulePath: "models/base",
+		Package:    "models",
+		Source: []byte(`import { Capability } from contracts/capability
+
+class Base implements Capability
+	def ready?(): Boolean
+		return true
+	end
+
+	def save!(): String
+		return "base"
+	end
+
+	def self.available?(): Boolean
+		return true
+	end
+end
+
+def base_available?(): Boolean
+	return Base.available?()
+end
+`),
+	}
+	child := SourceUnit{
+		Filename:   "/project/models/child.trb",
+		ModulePath: "models/child",
+		Package:    "models",
+		Source: []byte(`import { Base, base_available? } from models/base
+
+class Child < Base
+	def ready?(): Boolean
+		return true
+	end
+
+	def child_ready?(): Boolean
+		return self.ready?()
+	end
+
+	def inherited_available?(): Boolean
+		return base_available?()
+	end
+end
+`),
+	}
+	main := SourceUnit{
+		Filename:   "/project/app/main.trb",
+		ModulePath: "app/main",
+		Package:    "main",
+		Source: []byte(`import { imported_ready?, imported_save!, imported_label? } from helpers/functions
+import { base_available? } from models/base
+import { Child } from models/child
+
+def local_ready?(): Boolean
+	return true
+end
+
+def local_save!(): String
+	return "local"
+end
+
+def main()
+	child := Child.new()
+	puts(local_ready?())
+	puts(local_save!())
+	puts(imported_ready?())
+	puts(imported_save!())
+	puts(imported_label?())
+	puts(base_available?())
+	puts(child.ready?())
+	puts(child.save!())
+	puts(child.child_ready?())
+	puts(child.inherited_available?())
+	return
+end
+`),
+	}
+
+	encoded := func(name string) string {
+		return hex.EncodeToString([]byte(name))
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{main, child, base, helpers, contract}, Options{Mode: mode, GoModule: "example.com/predicate-names", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable predicate/bang names: %v", mode, err)
+		}
+		outputs := map[string]string{}
+		for _, artifact := range artifacts {
+			outputs[artifact.IR.ModulePath] = string(artifact.Output)
+		}
+		wants := map[string]map[string][]string{
+			"go": {
+				"contracts/capability": {"TrbQuestion_" + encoded("ready?") + "() bool", "TrbBang_" + encoded("save!") + "() string"},
+				"helpers/functions":    {"func TrbQuestion_" + encoded("imported_ready?") + "() bool", "func TrbBang_" + encoded("imported_save!") + "() string", "func TrbQuestion_" + encoded("imported_label?") + "() string"},
+				"models/base":          {"var _ contracts.Capability = (*Base)(nil)", "func (self *Base) TrbQuestion_" + encoded("ready?") + "() bool", "func (self *Base) TrbBang_" + encoded("save!") + "() string", "func BaseTrbQuestion_" + encoded("available?") + "() bool"},
+				"models/child":         {"func (self *Child) TrbQuestion_" + encoded("ready?") + "() bool", "func (self *Child) TrbQuestion_" + encoded("child_ready?") + "() bool", "self.TrbQuestion_" + encoded("ready?") + "()", "TrbQuestion_" + encoded("base_available?") + "()"},
+				"app/main":             {"helpers.TrbQuestion_" + encoded("imported_ready?") + "()", "helpers.TrbQuestion_" + encoded("imported_label?") + "()", "models.TrbQuestion_" + encoded("base_available?") + "()", "child.TrbBang_" + encoded("save!") + "()"},
+			},
+			"ruby": {
+				"contracts/capability": {"def ready?()", "def save!()"},
+				"helpers/functions":    {"def imported_ready?()", "def imported_save!()", "def imported_label?()"},
+				"models/base":          {"def ready?()", "def save!()", "def self.available?()"},
+				"models/child":         {"def ready?()", "def child_ready?()", "self.ready?()", "base_available?()"},
+				"app/main":             {"imported_ready?()", "imported_label?()", "base_available?()", "child.save!()"},
+			},
+			"typescript": {
+				"contracts/capability": {"$trb$question$" + encoded("ready?") + "(): boolean", "$trb$bang$" + encoded("save!") + "(): string"},
+				"helpers/functions":    {"function $trb$question$" + encoded("imported_ready?"), "function $trb$bang$" + encoded("imported_save!"), "function $trb$question$" + encoded("imported_label?")},
+				"models/base":          {"$trb$question$" + encoded("ready?") + "(): boolean", "$trb$bang$" + encoded("save!") + "(): string", "static $trb$question$" + encoded("available?")},
+				"models/child":         {"$trb$question$" + encoded("ready?") + "(): boolean", "$trb$question$" + encoded("child_ready?") + "(): boolean", "this.$trb$question$" + encoded("ready?") + "()", "$trb$question$" + encoded("base_available?") + "()"},
+				"app/main":             {"$trb$question$" + encoded("imported_ready?") + "()", "$trb$question$" + encoded("imported_label?") + "()", "$trb$question$" + encoded("base_available?") + "()", "child.$trb$bang$" + encoded("save!") + "()"},
+			},
+		}[mode]
+		for module, fragments := range wants {
+			for _, fragment := range fragments {
+				if !strings.Contains(outputs[module], fragment) {
+					t.Fatalf("generated %s module %s is missing %q:\n%s", mode, module, fragment, outputs[module])
+				}
+			}
+		}
+
+		for _, artifact := range artifacts {
+			if artifact.IR.ModulePath != "helpers/functions" {
+				continue
+			}
+			if method, ok := artifact.IR.Statements[0].(*ir.Method); !ok || method.Name != "imported_ready?" {
+				t.Fatalf("%s changed the typed-IR source name: %#v", mode, artifact.IR.Statements[0])
 			}
 		}
 	}

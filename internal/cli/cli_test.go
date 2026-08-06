@@ -154,6 +154,37 @@ func TestReplEvaluatesPortableReceiverMethodsAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplRetainsPredicateAndBangFunctionNamesAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-suffixed-name-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "def ready?(): Boolean; return true; end\n" +
+			"def save!(): String; return \"saved\"; end\n" +
+			"ready?()\n" +
+			"save!()\n" +
+			":quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "true : Boolean\n\"saved\" : String\n"; stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s suffixed-name REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableBytesAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -1117,6 +1148,93 @@ func TestRunCompilesProjectImportClosure(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join(root, "trb-run-*"))
 	if err != nil || len(matches) != 0 {
 		t.Fatalf("run directory leaked: matches=%v err=%v", matches, err)
+	}
+}
+
+func TestRunPredicateAndBangNamesAcrossAvailableBackends(t *testing.T) {
+	files := map[string]string{
+		"contracts/capability.trb": "interface Capability\n\tready?(): Boolean\n\tsave!(): String\nend\n",
+		"helpers/functions.trb": "def imported_ready?(): Boolean\n\treturn true\nend\n\n" +
+			"def imported_save!(): String\n\treturn \"imported\"\nend\n\n" +
+			"def imported_label?(): String\n\treturn \"question\"\nend\n",
+		"models/base.trb": "import { Capability } from contracts/capability\n\n" +
+			"class Base implements Capability\n" +
+			"\tdef ready?(): Boolean\n\t\treturn true\n\tend\n\n" +
+			"\tdef save!(): String\n\t\treturn \"base\"\n\tend\n\n" +
+			"\tdef self.available?(): Boolean\n\t\treturn true\n\tend\n" +
+			"end\n\n" +
+			"def base_available?(): Boolean\n\treturn Base.available?()\nend\n",
+		"models/child.trb": "import { Base, base_available? } from models/base\n\n" +
+			"class Child < Base\n" +
+			"\tdef ready?(): Boolean\n\t\treturn true\n\tend\n\n" +
+			"\tdef child_ready?(): Boolean\n\t\treturn self.ready?()\n\tend\n" +
+			"\n\tdef inherited_available?(): Boolean\n\t\treturn base_available?()\n\tend\n" +
+			"end\n",
+		"main.trb": "import { imported_ready?, imported_save!, imported_label? } from helpers/functions\n" +
+			"import { base_available? } from models/base\n" +
+			"import { Child } from models/child\n\n" +
+			"def local_ready?(): Boolean\n\treturn true\nend\n\n" +
+			"def local_save!(): String\n\treturn \"local\"\nend\n\n" +
+			"def main()\n" +
+			"\tchild := Child.new()\n" +
+			"\tputs(local_ready?())\n" +
+			"\tputs(local_save!())\n" +
+			"\tputs(imported_ready?())\n" +
+			"\tputs(imported_save!())\n" +
+			"\tputs(imported_label?())\n" +
+			"\tputs(base_available?())\n" +
+			"\tputs(child.ready?())\n" +
+			"\tputs(child.save!())\n" +
+			"\tputs(child.child_ready?())\n" +
+			"\tputs(child.inherited_available?())\n" +
+			"\treturn\n" +
+			"end\n",
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby suffixed-name run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript suffixed-name run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/suffixed-name-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		for name, source := range files {
+			filename := filepath.Join(root, "src", filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filename, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "true\nlocal\ntrue\nimported\nquestion\ntrue\ntrue\nbase\ntrue\ntrue\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s suffixed-name output: want %q, got %q", mode, want, stdout.String())
+		}
 	}
 }
 

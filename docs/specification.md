@@ -49,6 +49,21 @@ mode by itself does not enable them.
   inside opaque literals and the compact iterator form
   `values.each { |value| puts(value); puts(value) }` remain intact.
 
+#### Callable names ending in `?` or `!`
+
+- A function or method name may end in one `?` or `!`. The suffix is part of
+  the source-level name and is preserved in the AST, typed IR, diagnostics,
+  imports, completion, interface checks, and inheritance.
+- The suffix is a naming convention only. `?` does not imply a Boolean return
+  type, and `!` does not imply mutation, failure, exception behavior, or
+  `Result` propagation. Those properties remain explicit in the signature and
+  implementation.
+- Ruby output retains the source spelling. Backends whose ordinary identifiers
+  cannot contain the suffix encode the complete UTF-8 source name in a
+  compiler-reserved namespace. This makes the lowering deterministic and keeps
+  distinct TypeRB names from silently colliding. Encoded target names are a
+  compiler implementation detail rather than a target-language API contract.
+
 ### 3.2 Typing
 
 - Parameter/type annotation form is `name: Type`.
