@@ -2,10 +2,15 @@ package repl
 
 import (
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/reeflective/readline/inputrc"
+	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/languageservice"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 func TestCompleteTracksBlocksAndDelimiters(t *testing.T) {
@@ -62,6 +67,7 @@ func TestHistoryRoundTripsMultilineSubmissions(t *testing.T) {
 }
 
 func TestCompleteInputSuggestsCommandsAndLanguageKeywords(t *testing.T) {
+	service := languageservice.New("go")
 	tests := []struct {
 		input string
 		want  string
@@ -71,15 +77,54 @@ func TestCompleteInputSuggestsCommandsAndLanguageKeywords(t *testing.T) {
 		{input: "put", want: "puts"},
 	}
 	for _, test := range tests {
-		suggestions := completionSuggestions(test.input)
-		if len(suggestions) == 0 || suggestions[0].Text != test.want {
+		suggestions := completionSuggestions(service, test.input, len(test.input))
+		if len(suggestions) == 0 || suggestions[0].Label != test.want {
 			t.Errorf("completionSuggestions(%q)=%v, want first suggestion %q", test.input, suggestions, test.want)
 		}
 	}
 }
 
+func TestCompleteInputUsesCheckedReplContextForMembers(t *testing.T) {
+	service := languageservice.New("go")
+	service.Update([]*ir.Program{{
+		Mode:       "go",
+		ModulePath: "repl",
+		Statements: []ir.Statement{
+			&ir.Class{Name: "User", Body: []ir.Statement{
+				&ir.Method{Name: "name", ReturnType: types.FromName("String")},
+			}},
+			&ir.Variable{Name: "user", Type: types.FromName("User")},
+		},
+	}}, "repl")
+
+	input := "user.na"
+	suggestions := completionSuggestions(service, input, len(input))
+	if len(suggestions) != 1 || suggestions[0].Label != "name" {
+		t.Fatalf("suggestions=%#v", suggestions)
+	}
+	if suggestions[0].Replacement != (languageservice.OffsetRange{Start: 5, End: 7}) {
+		t.Fatalf("replacement=%#v", suggestions[0].Replacement)
+	}
+}
+
+func TestHighlightInputRendersANSIWithoutChangingSource(t *testing.T) {
+	service := languageservice.New("go")
+	service.Update([]*ir.Program{{Mode: "go", ModulePath: "repl"}}, "repl")
+	source := "puts(\"hello\") # note"
+	rendered := highlightInput(source, service.Highlight(source))
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(rendered, "")
+	if plain != source {
+		t.Fatalf("plain=%q, want %q", plain, source)
+	}
+	for _, color := range []string{colorFunction, colorString, colorComment} {
+		if !strings.Contains(rendered, color) {
+			t.Errorf("rendered input is missing color %q: %q", color, rendered)
+		}
+	}
+}
+
 func TestTerminalReaderUsesMultilineAwareHistoryNavigation(t *testing.T) {
-	terminal, err := newTerminalReader(Options{Mode: "go"}, nil)
+	terminal, err := newTerminalReader(Options{Mode: "go", language: languageservice.New("go")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

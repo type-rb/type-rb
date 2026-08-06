@@ -14,6 +14,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -34,6 +35,7 @@ type Options struct {
 	Interactive bool
 	HistoryFile string
 	Compile     CompileFunc
+	language    *languageservice.Service
 }
 
 func Run(options Options) error {
@@ -48,6 +50,8 @@ func Run(options Options) error {
 	if err := evaluator.LoadProject(compilation.Programs, compilation.Session.IR.ModulePath); err != nil {
 		return err
 	}
+	options.language = languageservice.New(options.Mode)
+	options.language.Update(compilation.Programs, compilation.Session.IR.ModulePath)
 
 	if options.Interactive {
 		fmt.Fprintf(options.Stdout, "%s %s\n%s %s\n%s %s\n\n",
@@ -108,6 +112,7 @@ func Run(options Options) error {
 				compilation = nextCompilation
 				statementCount = len(compilation.Session.IR.Statements)
 				evaluator = nextEvaluator
+				options.language.Update(compilation.Programs, compilation.Session.IR.ModulePath)
 			}
 			continue
 		}
@@ -141,6 +146,7 @@ func Run(options Options) error {
 		source = candidate
 		statementCount = len(next.Session.IR.Statements)
 		compilation = next
+		options.language.Update(compilation.Programs, compilation.Session.IR.ModulePath)
 		if result.Display && result.Value.Type.Kind != types.Void {
 			fmt.Fprintf(options.Stdout, "%s %s %s\n", colorize(options.Interactive, colorValue, Inspect(result.Value)), colorize(options.Interactive, colorMuted, ":"), colorize(options.Interactive, colorType, result.Value.Type.String()))
 		}

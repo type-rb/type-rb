@@ -51,6 +51,7 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 			Kind:             "standard",
 			Standard:         true,
 			Runtime:          true,
+			Implicit:         true,
 			IntrinsicSymbols: map[string]bool{},
 			SymbolKinds:      map[string]string{},
 		}
