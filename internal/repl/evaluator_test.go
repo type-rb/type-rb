@@ -4,12 +4,38 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
+
+func TestEvaluateFloatClassificationIntrinsics(t *testing.T) {
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	floatType := types.FromName("Float")
+	booleanType := types.FromName("Boolean")
+	tests := []struct {
+		name  string
+		value float64
+		want  bool
+	}{
+		{name: "trb.std.numbers.float_finite", value: 0.25, want: true},
+		{name: "trb.std.numbers.float_finite", value: math.Inf(1), want: false},
+		{name: "trb.std.numbers.float_infinite", value: math.Inf(-1), want: true},
+		{name: "trb.std.numbers.float_nan", value: math.NaN(), want: true},
+	}
+	for _, test := range tests {
+		result, err := evaluator.intrinsic(test.name, []evaluatedArgument{{Value: Value{Type: floatType, Data: test.value}}}, booleanType, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if got, ok := result.Data.(bool); !ok || got != test.want {
+			t.Fatalf("%s(%v)=%#v, want %t", test.name, test.value, result.Data, test.want)
+		}
+	}
+}
 
 func TestEvaluateContextStopsCanceledEvaluation(t *testing.T) {
 	integer := types.FromName("Integer")

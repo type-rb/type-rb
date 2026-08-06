@@ -531,12 +531,14 @@ Receiver syntax is not target-native escape syntax: the resolver maps it to a
 compiler-owned standard-library contract, and typed IR records that contract.
 The package and receiver forms consequently share argument checking, return
 types, REPL semantics, and backend lowering. The initial surface includes
-`Integer#to_s`, `Integer#to_f`, `Float#to_s`, `Float#to_i`, `String#to_i`,
-`String#try_to_i`, and
-Unicode-code-point-based `String#size`, corresponding to `trb/std/numbers` and
-`trb/std/strings` operations. Unknown members on portable built-in types are
-compile errors in every mode. Integer parsing accepts only a complete ASCII
-decimal spelling matching `[+-]?[0-9]+`; values outside
+`Integer#to_s`, `#to_f`, `#abs`, `#zero?`, `#positive?`, `#negative?`, `#even?`,
+and `#odd?`; `Float#to_s`, `#to_i`, `#abs`, `#finite?`, `#infinite?`, and
+`#nan?`; `Boolean#to_s`; `String#to_i`, `String#try_to_i`; and
+Unicode-code-point-based `String#size`. These correspond to
+`trb/std/numbers`, `trb/std/booleans`, and `trb/std/strings` operations.
+Unknown members on portable built-in types are compile errors in every mode.
+Integer parsing accepts only a complete ASCII decimal spelling matching
+`[+-]?[0-9]+`; values outside
 `-9007199254740991..9007199254740991` are rejected so every target has the
 same exact result. `to_i` raises a runtime error, while `try_to_i` and package
 `try_parse_integer` return `Result<Integer, String>` with a stable error
@@ -548,6 +550,12 @@ portable Integer range. `Float#to_s` emits the shortest fixed decimal spelling
 used by the compiler runtime, never exponent notation; integral values retain
 `.0`, negative zero is normalized to `0.0`, and non-finite values use `NaN`,
 `Infinity`, or `-Infinity`.
+
+Numeric `abs` returns the non-negative magnitude; Float negative zero becomes
+positive zero and NaN remains NaN. Integer sign, zero, and parity predicates
+have their ordinary mathematical meaning. `Float#finite?` excludes both
+infinities and NaN, `#infinite?` recognizes either infinity, and `#nan?`
+recognizes NaN. `Boolean#to_s` returns exactly `true` or `false` in lowercase.
 
 `Bytes` is the portable immutable binary-sequence type; it is not an alias for
 `Array<Integer>` or `String`. `trb/std/bytes` provides UTF-8 `from_string` and

@@ -2008,6 +2008,36 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("numbers.to_float expects Integer")
 		}
 		return Value{Type: typ, Data: float64(value)}, nil
+	case "trb.std.numbers.integer_absolute",
+		"trb.std.numbers.integer_zero",
+		"trb.std.numbers.integer_positive",
+		"trb.std.numbers.integer_negative",
+		"trb.std.numbers.integer_even",
+		"trb.std.numbers.integer_odd":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(int64)
+		if !ok {
+			return Value{}, errors.New("numbers Integer predicate expects Integer")
+		}
+		switch name {
+		case "trb.std.numbers.integer_absolute":
+			if value < 0 {
+				value = -value
+			}
+			return Value{Type: typ, Data: value}, nil
+		case "trb.std.numbers.integer_zero":
+			return Value{Type: typ, Data: value == 0}, nil
+		case "trb.std.numbers.integer_positive":
+			return Value{Type: typ, Data: value > 0}, nil
+		case "trb.std.numbers.integer_negative":
+			return Value{Type: typ, Data: value < 0}, nil
+		case "trb.std.numbers.integer_even":
+			return Value{Type: typ, Data: value%2 == 0}, nil
+		default:
+			return Value{Type: typ, Data: value%2 != 0}, nil
+		}
 	case "trb.std.numbers.float_to_string":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -2032,6 +2062,27 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("Integer is outside the portable range")
 		}
 		return Value{Type: typ, Data: int64(math.Trunc(value))}, nil
+	case "trb.std.numbers.float_absolute",
+		"trb.std.numbers.float_finite",
+		"trb.std.numbers.float_infinite",
+		"trb.std.numbers.float_nan":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(float64)
+		if !ok {
+			return Value{}, errors.New("numbers Float predicate expects Float")
+		}
+		switch name {
+		case "trb.std.numbers.float_absolute":
+			return Value{Type: typ, Data: math.Abs(value)}, nil
+		case "trb.std.numbers.float_finite":
+			return Value{Type: typ, Data: !math.IsNaN(value) && !math.IsInf(value, 0)}, nil
+		case "trb.std.numbers.float_infinite":
+			return Value{Type: typ, Data: math.IsInf(value, 0)}, nil
+		default:
+			return Value{Type: typ, Data: math.IsNaN(value)}, nil
+		}
 	case "trb.std.numbers.parse_integer":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -2058,6 +2109,15 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return e.stringResultErr(typ, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Integer"), Data: parsed})
+	case "trb.std.booleans.to_string":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bool)
+		if !ok {
+			return Value{}, errors.New("booleans.to_string expects Boolean")
+		}
+		return Value{Type: typ, Data: strconv.FormatBool(value)}, nil
 	case "trb.platform.typescript.node.argv":
 		return Value{Type: typ, Data: &arrayValue{}}, nil
 	case "trb.platform.go.context.background", "trb.platform.go.context.todo":

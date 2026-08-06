@@ -65,9 +65,10 @@ than detailed syntax.
 
 ## 5. Standard library and package ecosystem
 
-- Complete the everyday receiver surface for scalar values, Unicode strings,
-  Arrays, and Hashes before adding broader packages. Keep operations that need
-  first-class blocks staged with the language-level block/lambda work.
+- Build on the implemented scalar receiver baseline to complete the everyday
+  surface for Unicode strings, Arrays, and Hashes before adding broader
+  packages. Keep operations that need first-class blocks staged with the
+  language-level block/lambda work.
 - Replace provisional String errors from safe parsing and collection lookup
   with structured portable error types before those APIs become stable.
 - Expand the compiler-owned baseline with math, hex, Base64, SHA-256/SHA-512,
