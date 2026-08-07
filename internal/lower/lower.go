@@ -259,7 +259,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	base := ir.NewExprBase(node.Span(), typ)
 	switch n := node.(type) {
 	case *ast.Identifier:
-		return &ir.Identifier{ExprBase: base, Name: n.Name, Owner: l.checked.Constants[n], Reference: l.reference(n)}
+		return &ir.Identifier{ExprBase: base, Name: n.Name, Owner: l.checked.Constants[n], Lexical: l.checked.LexicalBindings[n], Reference: l.reference(n)}
 	case *ast.Literal:
 		return &ir.Literal{ExprBase: base, Kind: string(n.Kind), Raw: n.Raw}
 	case *ast.InterpolatedString:
