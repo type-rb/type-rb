@@ -1987,7 +1987,7 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		array, ok := values[0].Data.(*arrayValue)
 		index, integer := values[1].Data.(int64)
 		if !ok || !integer || index < 0 || index >= int64(len(array.Items)) {
-			return e.stringResultErr(typ, "Array index is out of bounds")
+			return e.indexLookupResultErr(typ, index, int64(len(array.Items)), "Array index is out of bounds")
 		}
 		result := array.Items[index]
 		return e.filesystemOK(typ, result)
@@ -2162,7 +2162,7 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 				return e.filesystemOK(typ, entry.Value)
 			}
 		}
-		return e.stringResultErr(typ, "Hash key is missing")
+		return e.keyLookupResultErr(typ, values[1], "Hash key is missing")
 	case "trb.std.hashes.contains_key":
 		if err := require(2); err != nil {
 			return Value{}, err
@@ -2363,7 +2363,11 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		parsed, message := parsePortableInteger(value)
 		if message != "" {
-			return e.stringResultErr(typ, message)
+			kind := "InvalidFormat"
+			if message == "Integer is outside the portable range" {
+				kind = "OutOfRange"
+			}
+			return e.numberParseResultErr(typ, kind, value, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Integer"), Data: parsed})
 	case "trb.std.booleans.to_string":
@@ -2410,16 +2414,50 @@ func (e *Evaluator) unitValue() (Value, error) {
 	return Value{Type: types.FromName("Unit"), Data: &recordInstance{Definition: definition, Fields: map[string]Value{}}}, nil
 }
 
-func (e *Evaluator) stringResultErr(resultType types.Type, message string) (Value, error) {
+func (e *Evaluator) structuredResultErr(resultType types.Type, name string, fields map[string]Value) (Value, error) {
 	definition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
 	if !ok {
 		return Value{}, errors.New("operation requires trb/std/result")
 	}
-	errorValue := Value{Type: types.FromName("String"), Data: message}
-	if len(resultType.Args) == 2 {
-		errorValue.Type = resultType.Args[1]
+	errorDefinition, ok := e.definitions[symbolKey("trb/std/errors/index", name)].(*recordDefinition)
+	if !ok {
+		return Value{}, errors.New("operation requires trb/std/errors")
 	}
+	errorType := types.FromName(name)
+	if len(resultType.Args) == 2 {
+		errorType = resultType.Args[1]
+	}
+	errorValue := Value{Type: errorType, Data: &recordInstance{Definition: errorDefinition, Fields: fields}}
 	return Value{Type: resultType, Data: &enumValue{Definition: definition, Name: "Err", Payload: map[string]Value{"error": errorValue}}}, nil
+}
+
+func (e *Evaluator) numberParseResultErr(resultType types.Type, kind, input, message string) (Value, error) {
+	kindDefinition, ok := e.definitions[symbolKey("trb/std/errors/index", "NumberParseErrorKind")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("operation requires trb/std/errors")
+	}
+	kindValue := Value{Type: types.FromName("NumberParseErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
+	return e.structuredResultErr(resultType, "NumberParseError", map[string]Value{
+		"kind":    kindValue,
+		"input":   {Type: types.FromName("String"), Data: input},
+		"message": {Type: types.FromName("String"), Data: message},
+	})
+}
+
+func (e *Evaluator) indexLookupResultErr(resultType types.Type, index, size int64, message string) (Value, error) {
+	return e.structuredResultErr(resultType, "IndexLookupError", map[string]Value{
+		"index":   {Type: types.FromName("Integer"), Data: index},
+		"size":    {Type: types.FromName("Integer"), Data: size},
+		"message": {Type: types.FromName("String"), Data: message},
+	})
+}
+
+func (e *Evaluator) keyLookupResultErr(resultType types.Type, key Value, message string) (Value, error) {
+	key.Type = types.UnionOf(types.FromName("String"), types.FromName("Integer"))
+	return e.structuredResultErr(resultType, "KeyLookupError", map[string]Value{
+		"key":     key,
+		"message": {Type: types.FromName("String"), Data: message},
+	})
 }
 
 func parsePortableInteger(input string) (int64, string) {

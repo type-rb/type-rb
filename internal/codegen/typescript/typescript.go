@@ -961,6 +961,18 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		_, successType, errorType := filesystemResultType()
 		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
+	numberParseError := func(kind, input, message string) string {
+		value := "({ kind: NumberParseErrorKind." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies NumberParseError)"
+		return resultError(value)
+	}
+	indexLookupError := func(index, size, message string) string {
+		value := "({ index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies IndexLookupError)"
+		return resultError(value)
+	}
+	keyLookupError := func(key, message string) string {
+		value := "({ key: " + key + ", message: " + strconv.Quote(message) + " } satisfies KeyLookupError)"
+		return resultError(value)
+	}
 	filesystemHandle := `const fs = (globalThis as any).process?.getBuiltinModule?.("fs"); if (fs === undefined) { throw new Error("filesystem is unavailable"); } `
 	filesystemMessage := `const message = error instanceof Error ? error.message : String(error); `
 	switch name {
@@ -1119,7 +1131,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { throw new Error(\"Array index is out of bounds\"); } return __trbValues[__trbIndex]!; })()"
 	case "trb.std.arrays.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { return " + resultError(strconv.Quote("Array index is out of bounds")) + "; } return " + filesystemOK("__trbValues[__trbIndex]!") + "; })()"
+		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { return " + indexLookupError("__trbIndex", "__trbValues.length", "Array index is out of bounds") + "; } return " + filesystemOK("__trbValues[__trbIndex]!") + "; })()"
 	case "trb.std.arrays.first":
 		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[0]!; })()"
 	case "trb.std.arrays.last":
@@ -1150,7 +1162,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } return __trbValues[__trbKey]; })()"
 	case "trb.std.hashes.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { return " + resultError(strconv.Quote("Hash key is missing")) + "; } return " + filesystemOK("__trbValues[__trbKey]") + "; })()"
+		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { return " + keyLookupError("__trbKey", "Hash key is missing") + "; } return " + filesystemOK("__trbValues[__trbKey]") + "; })()"
 	case "trb.std.hashes.contains_key":
 		return "Object.prototype.hasOwnProperty.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.hashes.keys":
@@ -1200,7 +1212,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "((): number => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { throw new Error(\"invalid Integer\"); } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { throw new Error(\"Integer is outside the portable range\"); } return __trbValue; })()"
 	case "trb.std.numbers.try_parse_integer":
 		resultType, _, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { return " + resultError(strconv.Quote("invalid Integer")) + "; } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { return " + resultError(strconv.Quote("Integer is outside the portable range")) + "; } return " + filesystemOK("__trbValue") + "; })()"
+		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { return " + numberParseError("InvalidFormat", "__trbInput", "invalid Integer") + "; } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { return " + numberParseError("OutOfRange", "__trbInput", "Integer is outside the portable range") + "; } return " + filesystemOK("__trbValue") + "; })()"
 	case "trb.std.booleans.to_string":
 		return "String(" + arguments[0] + ")"
 	case "trb.platform.typescript.node.argv":

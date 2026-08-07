@@ -46,8 +46,7 @@ target code, browser tools, and the initial self-host tree.
 
 The current alpha does not yet provide:
 
-- a complete everyday receiver API or structured error types for every safe
-  parse and lookup operation;
+- a complete everyday receiver API;
 - position-typed tuples or comprehensive narrowing for nullable and structured
   union alternatives;
 - inferred type arguments or generic records, classes, and methods;

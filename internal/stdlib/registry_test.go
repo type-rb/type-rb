@@ -44,6 +44,27 @@ func TestGenericReceiverContractsSpecializeReturnTypes(t *testing.T) {
 	}
 }
 
+func TestSafeReceiverContractsUseStructuredErrors(t *testing.T) {
+	tests := []struct {
+		receiver types.Type
+		name     string
+		want     string
+	}{
+		{receiver: types.FromName("String"), name: "try_to_i", want: "Result<Integer, NumberParseError>"},
+		{receiver: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}, name: "try_fetch", want: "Result<String, IndexLookupError>"},
+		{receiver: types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("Integer"), types.FromName("String")}}, name: "try_fetch", want: "Result<String, KeyLookupError>"},
+	}
+	for _, test := range tests {
+		_, method, ok := LookupReceiverMethod(test.receiver, test.name)
+		if !ok {
+			t.Fatalf("%s#%s is missing", test.receiver, test.name)
+		}
+		if got := method.Return.String(); got != test.want {
+			t.Fatalf("%s#%s return=%s, want %s", test.receiver, test.name, got, test.want)
+		}
+	}
+}
+
 func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
 	for _, name := range []string{"pop", "push", "shift", "unshift"} {

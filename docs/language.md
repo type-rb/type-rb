@@ -329,8 +329,9 @@ end
 
 Index and hash lookup are strict and fail at runtime when the value is absent.
 Hash deletion is strict as well. Safe `Result`-returning lookup is available in
-the standard library. `merge` is non-destructive; `update` and `delete` require
-a `mut` receiver.
+the standard library with `IndexLookupError` and `KeyLookupError` values from
+`trb/std/errors`. `merge` is non-destructive; `update` and `delete` require a
+`mut` receiver.
 Destructive Array operations require a `mut` binding, while `reverse` returns
 a new shallow Array:
 

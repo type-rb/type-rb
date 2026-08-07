@@ -66,8 +66,6 @@ than detailed syntax.
 - Complete the everyday receiver surface for Unicode strings, Arrays, and
   Hashes. Keep operations that need first-class blocks staged with the
   language-level block/lambda work.
-- Replace provisional String errors from safe parsing and collection lookup
-  with structured portable error types before those APIs become stable.
 - Expand the compiler-owned baseline with math, hex, Base64, SHA-256/SHA-512,
   HMAC, random, UUID, regular-expression, URL, and time packages. Prefer
   `Bytes` at binary and digest boundaries, and keep legacy hashes explicitly

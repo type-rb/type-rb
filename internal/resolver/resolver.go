@@ -127,6 +127,7 @@ type Result struct {
 	Symbols      map[string]Binding
 	NativeSyntax bool
 	Declarations *declaration.Catalog
+	Catalog      *Catalog
 }
 
 type Options struct {
@@ -139,18 +140,20 @@ type Options struct {
 }
 
 type Module struct {
-	Path     string
-	Filename string
-	Program  *ast.Program
-	Exports  map[string]Export
+	Path          string
+	Filename      string
+	Program       *ast.Program
+	Exports       map[string]Export
+	CompilerOwned bool
 }
 
 type Catalog struct {
-	Modules map[string]*Module
+	Modules            map[string]*Module
+	CompilerOwnedTypes map[string]Export
 }
 
 func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic) {
-	catalog := &Catalog{Modules: map[string]*Module{}}
+	catalog := &Catalog{Modules: map[string]*Module{}, CompilerOwnedTypes: map[string]Export{}}
 	diagnostics := map[string][]diagnostic.Diagnostic{}
 	for i := range modules {
 		module := &modules[i]
@@ -229,6 +232,9 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		exported := typesByName[name]
 		owner := typeOwners[name]
 		owner.Exports[name] = *exported
+		if owner.CompilerOwned {
+			catalog.CompilerOwnedTypes[name] = *exported
+		}
 	}
 	return catalog, diagnostics
 }
@@ -239,6 +245,7 @@ func Resolve(program *ast.Program, options Options) (Result, []diagnostic.Diagno
 		Packages:     map[string]*Import{},
 		Symbols:      map[string]Binding{},
 		Declarations: options.Declarations,
+		Catalog:      options.Catalog,
 	}
 	var diagnostics []diagnostic.Diagnostic
 	for _, statement := range program.Statements {
@@ -279,6 +286,17 @@ func Resolve(program *ast.Program, options Options) (Result, []diagnostic.Diagno
 	}
 	addPrelude(&result)
 	return result, diagnostics
+}
+
+// CompilerOwnedType returns declarations that were inferred from a portable
+// library result. It supports member checking on inferred values without
+// making the type name available to source annotations that omitted an import.
+func (r Result) CompilerOwnedType(name string) (Export, bool) {
+	if r.Catalog == nil {
+		return Export{}, false
+	}
+	exported, ok := r.Catalog.CompilerOwnedTypes[name]
+	return exported, ok
 }
 
 // addPrelude exposes the small set of Ruby-like, target-independent helpers

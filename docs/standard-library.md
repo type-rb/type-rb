@@ -50,8 +50,9 @@ upper := strings.uppercase("Hello")
 
 Integer parsing accepts a complete ASCII decimal integer with an optional sign.
 `to_i()` raises on invalid or non-portable input; `try_to_i()` returns
-`Result<Integer, String>`. Parsed integers use the portable exact range
-`-9007199254740991..9007199254740991`.
+`Result<Integer, NumberParseError>`. The error preserves its
+`NumberParseErrorKind`, input, and message. Parsed integers use the portable
+exact range `-9007199254740991..9007199254740991`.
 
 `Integer#to_f()` is an exact widening conversion. `Float#to_i()` truncates
 toward zero and raises for non-finite or out-of-range values. `Float#to_s()`
@@ -174,7 +175,10 @@ types and traverses a shallow entry snapshot. Hash enumeration order is
 unspecified.
 
 Strict operations fail at runtime for missing keys, invalid indexes, or empty
-edge removals. Safe fetch returns a `Result` with a stable error value.
+edge removals. Array safe fetch returns `Result<T, IndexLookupError>` with the
+requested index and collection size. Hash safe fetch returns
+`Result<V, KeyLookupError>` with the missing `String | Integer` key. Both errors
+also carry a stable message.
 
 Array `map`, `select`, and `reduce` are structured language expressions rather
 than target callbacks. See the
@@ -308,6 +312,7 @@ The current portable standard library includes:
 - `trb/std/json`
 - `trb/std/jsonc`
 - `trb/std/result`
+- `trb/std/errors`
 - `trb/std/unit`
 
 Platform packages are mode checked and remain separate from the portable

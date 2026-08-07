@@ -395,6 +395,13 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 		c.error(ref.Span(), "Never is an internal compiler type and cannot be written in source")
 		return
 	}
+	if _, _, compilerOwned := stdlib.LookupRuntimeExport(ref.Name); compilerOwned {
+		_, declared := c.declaredTypes[ref.Name]
+		_, imported := c.resolution.ImportedType(ref.Name)
+		if !declared && !imported {
+			c.error(ref.Span(), fmt.Sprintf("type %s is not declared or imported", ref.Name))
+		}
+	}
 	for _, argument := range ref.Arguments {
 		c.validateTypeReference(argument)
 	}
@@ -2481,6 +2488,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = member.Return
 			c.external[n] = member
+		} else if exported, exists := c.resolution.CompilerOwnedType(receiverType.Name); exists {
+			if member, found := exported.Members[n.Name]; found && !member.Class {
+				typ = member.Type
+			} else if n.Name != "new" {
+				c.error(n.Span(), fmt.Sprintf("type %s has no member %s", receiverType.Name, n.Name))
+			}
 		} else if n.Name != "new" {
 			if _, exists := c.localMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)

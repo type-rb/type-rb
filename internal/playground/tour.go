@@ -75,8 +75,8 @@ var tourLessons = []Lesson{
 	},
 	{
 		ID: "result", Chapter: "Model data and errors", Title: "Enums and Result", Eyebrow: "09 · Model errors",
-		Description: "Result<T, E> is a standard generic payload enum. Calls infer concrete Result types, while exhaustive case matching binds success and error payloads and keeps both paths visible.",
-		Source:      "import { Result } from trb/std/result\n\ndef display(result: Result<Integer, String>): String\n\tcase result\n\twhen Result::Ok(value)\n\t\treturn \"number: \" + value.to_s()\n\twhen Result::Err(error)\n\t\treturn \"error: \" + error\n\tend\nend\n\nputs(display(\"42\".try_to_i()))\nputs(display(\"nope\".try_to_i()))\n",
+		Description: "Result<T, E> is a standard generic payload enum. Safe standard-library operations return structured errors, while exhaustive case matching keeps both paths visible.",
+		Source:      "import { NumberParseError } from trb/std/errors\nimport { Result } from trb/std/result\n\ndef display(result: Result<Integer, NumberParseError>): String\n\tcase result\n\twhen Result::Ok(value)\n\t\treturn \"number: \" + value.to_s()\n\twhen Result::Err(error)\n\t\treturn \"error: \" + error.message\n\tend\nend\n\nputs(display(\"42\".try_to_i()))\nputs(display(\"nope\".try_to_i()))\n",
 		Expected:    "number: 42\nerror: invalid Integer\n",
 		Hint:        "Define your own payload enum and remove one when branch to see exhaustive checking.",
 	},
