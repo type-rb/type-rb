@@ -1,7 +1,10 @@
 // Package types contains target-independent semantic types.
 package types
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 type Kind string
 
@@ -19,6 +22,7 @@ const (
 	Range         Kind = "range"
 	Iterable      Kind = "iterable"
 	Hash          Kind = "hash"
+	Union         Kind = "union"
 	Named         Kind = "named"
 	Nil           Kind = "nil"
 )
@@ -32,6 +36,17 @@ type Type struct {
 }
 
 func (t Type) String() string {
+	if t.Kind == Union {
+		parts := make([]string, len(t.Args))
+		for index, alternative := range t.Args {
+			parts[index] = alternative.String()
+		}
+		name := strings.Join(parts, " | ")
+		if t.Nullable {
+			return "(" + name + ")?"
+		}
+		return name
+	}
 	name := t.Name
 	if name == "" {
 		name = string(t.Kind)
@@ -97,15 +112,106 @@ func CommonType(left, right Type) (Type, bool) {
 		((left.Kind == Int && right.Kind == Float) || (left.Kind == Float && right.Kind == Int)) {
 		return FromName("Float"), true
 	}
-	return Type{}, false
+	return UnionOf(left, right), true
+}
+
+// UnionOf constructs a canonical union. Nested unions are flattened,
+// equivalent alternatives are removed, and Integer is subsumed by Float
+// because portable Integer-to-Float widening is safe.
+func UnionOf(input ...Type) Type {
+	var alternatives []Type
+	var appendType func(Type)
+	appendType = func(candidate Type) {
+		if candidate.Kind == Any {
+			alternatives = []Type{FromName("Any")}
+			return
+		}
+		if len(alternatives) == 1 && alternatives[0].Kind == Any {
+			return
+		}
+		if candidate.Kind == Union && !candidate.Nullable {
+			for _, nested := range candidate.Args {
+				appendType(nested)
+			}
+			return
+		}
+		for _, existing := range alternatives {
+			if Equivalent(existing, candidate) {
+				return
+			}
+		}
+		alternatives = append(alternatives, candidate)
+	}
+	for _, candidate := range input {
+		appendType(candidate)
+	}
+
+	hasFloat := false
+	for _, alternative := range alternatives {
+		hasFloat = hasFloat || alternative.Kind == Float && !alternative.Nullable
+	}
+	if hasFloat {
+		filtered := alternatives[:0]
+		for _, alternative := range alternatives {
+			if alternative.Kind != Int || alternative.Nullable {
+				filtered = append(filtered, alternative)
+			}
+		}
+		alternatives = filtered
+	}
+	slices.SortFunc(alternatives, func(left, right Type) int {
+		return strings.Compare(left.String(), right.String())
+	})
+	if len(alternatives) == 0 {
+		return Type{Kind: Invalid, Name: "Invalid"}
+	}
+	if len(alternatives) == 1 {
+		return alternatives[0]
+	}
+	return Type{Kind: Union, Name: "Union", Args: alternatives}
 }
 
 func Assignable(target, value Type) bool {
 	if target.Kind == Any || value.Kind == Any || target.Kind == Invalid || value.Kind == Invalid {
 		return true
 	}
+	if target.Kind == Nil {
+		return value.Kind == Nil
+	}
 	if value.Kind == Nil {
 		return target.Nullable
+	}
+	if value.Nullable && !target.Nullable {
+		return false
+	}
+	target.Nullable = false
+	value.Nullable = false
+	if target.Kind == Union {
+		values := []Type{value}
+		if value.Kind == Union {
+			values = value.Args
+		}
+		for _, candidate := range values {
+			accepted := false
+			for _, alternative := range target.Args {
+				if Assignable(alternative, candidate) {
+					accepted = true
+					break
+				}
+			}
+			if !accepted {
+				return false
+			}
+		}
+		return true
+	}
+	if value.Kind == Union {
+		for _, alternative := range value.Args {
+			if !Assignable(target, alternative) {
+				return false
+			}
+		}
+		return true
 	}
 	if target.Kind == Float && value.Kind == Int {
 		return true
@@ -116,11 +222,19 @@ func Assignable(target, value Type) bool {
 		}
 		return len(target.Args) == len(value.Args) && Assignable(target.Args[0], value.Args[0])
 	}
-	if target.Kind == Hash && value.Kind == Hash {
+	if (target.Kind == Array || target.Kind == Hash) && value.Kind == target.Kind {
 		if len(target.Args) == 0 || len(value.Args) == 0 {
 			return true
 		}
-		return len(target.Args) == 2 && len(value.Args) == 2 && Equivalent(target.Args[0], value.Args[0]) && Equivalent(target.Args[1], value.Args[1])
+		if len(target.Args) != len(value.Args) {
+			return false
+		}
+		for index := range target.Args {
+			if !Equivalent(target.Args[index], value.Args[index]) {
+				return false
+			}
+		}
+		return true
 	}
 	if target.Kind != value.Kind {
 		return false

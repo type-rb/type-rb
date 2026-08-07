@@ -233,6 +233,10 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line("}")
 	case *ir.Case:
+		if n.TypeUnion {
+			g.typeUnionCase(n)
+			break
+		}
 		g.statements(n.Leading)
 		g.temporary++
 		value := "__trbCase" + strconv.Itoa(g.temporary)
@@ -289,6 +293,47 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Iterate:
 		g.iterate(n)
 	}
+}
+
+func (g *generator) typeUnionCase(node *ir.Case) {
+	g.statements(node.Leading)
+	g.temporary++
+	value := "__trbCase" + strconv.Itoa(g.temporary)
+	typed := value + "Value"
+	g.line("{")
+	g.indent++
+	g.line(value + " := " + g.expr(node.Value) + goTrailingComment(node.TrailingComment))
+	g.line("switch " + typed + " := " + value + ".(type) {")
+	g.indent++
+	for _, branch := range node.Branches {
+		g.line("case " + g.goType(branch.MatchType) + ":" + goTrailingComment(branch.TrailingComment))
+		g.indent++
+		for _, binding := range branch.Bindings {
+			if binding.Name == "_" {
+				continue
+			}
+			name := goBindingIdentifier(binding.Name)
+			g.line(name + " := " + typed)
+			if namedUnusedBinding(binding.Name) {
+				g.line("_ = " + name)
+			}
+		}
+		g.statements(branch.Body)
+		g.indent--
+	}
+	g.line("default:")
+	g.indent++
+	if node.HasElse {
+		g.line("_ = " + typed)
+		g.statements(node.Else)
+	} else {
+		g.line("panic(\"unreachable exhaustive case\")")
+	}
+	g.indent--
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
 }
 
 func (g *generator) iterate(iteration *ir.Iterate) {
@@ -776,6 +821,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		switch n.Kind {
 		case ir.IntegerToFloatConversion:
 			return "float64(" + g.expr(n.Value) + ")"
+		case ir.UnionIntegerToFloatConversion:
+			return "func(value any) any { if integer, ok := value.(int); ok { return float64(integer) }; return value }(" + g.expr(n.Value) + ")"
 		default:
 			return g.expr(n.Value)
 		}
@@ -1758,7 +1805,7 @@ func (g *generator) goType(t types.Type) string {
 	switch t.Kind {
 	case types.Void:
 		result = ""
-	case types.Any, types.Invalid:
+	case types.Any, types.Invalid, types.Union:
 		result = "any"
 	case types.Bool:
 		result = "bool"

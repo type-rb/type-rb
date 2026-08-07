@@ -682,6 +682,128 @@ func TestReplInfersCommonNumericCollectionTypesAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplInfersAndNarrowsUnionTypesAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-union-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := `def describe(value: Integer | String): String
+	case value
+	when Integer(number)
+		return number.to_s()
+	when String(text)
+		return text
+	end
+end
+describe(3)
+describe("Ada")
+values := [1, "two"]
+values
+fields := { count: 1, name: "Ada" }
+fields
+fields[:count]
+:quit
+`
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "\"3\" : String\n\"Ada\" : String\n[1, \"two\"] : Array<Integer | String>\n[1, \"two\"] : Array<Integer | String>\n{\"count\": 1, \"name\": \"Ada\"} : Hash<String, Integer | String>\n{\"count\": 1, \"name\": \"Ada\"} : Hash<String, Integer | String>\n1 : Integer | String\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s union REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestRunUnionTypesAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby union run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript union run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-union-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `def describe(value: Integer | String): String
+	case value
+	when Integer(number)
+		return number.to_s()
+	when String(text)
+		return text
+	end
+end
+
+def widen(value: Integer | String): Float | String
+	return value
+end
+
+def describe_wide(value: Float | String): String
+	case value
+	when Float(number)
+		return number.to_s()
+	when String(text)
+		return text
+	end
+end
+
+def main()
+	values := [1, "Ada"]
+	values.each do |value|
+		puts(describe(value))
+	end
+	fields := { count: 2, name: "Grace" }
+	puts(describe(fields[:count]))
+	puts(describe(fields[:name]))
+	puts(describe_wide(widen(1)))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "1\nAda\n2\nGrace\n1.0\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s union output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestReplRejectsPlatformPackageForConfiguredModeAndContinues(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

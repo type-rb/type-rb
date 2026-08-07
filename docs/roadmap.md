@@ -16,8 +16,9 @@ than detailed syntax.
   then add first-class blocks/lambdas. Portable `Result<T, E>` with explicit
   exhaustive handling and safe conversion/lookup APIs is implemented; concise
   propagation syntax remains a later ergonomics decision.
-- Add union types, position-typed Tuples, and precise nullable/optional
-  semantics. Payload-bearing enums, exhaustive payload pattern narrowing, and
+- Extend union type-pattern narrowing beyond the implemented scalar baseline,
+  then add position-typed Tuples and precise nullable/optional semantics.
+  Payload-bearing enums, exhaustive payload and scalar-union narrowing, and
   explicit generics for payload enums/top-level functions are implemented;
   inference and generic records/classes/methods remain.
 - Define mutation effects for methods and parameters so immutable values remain

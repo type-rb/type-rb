@@ -71,6 +71,42 @@ mode by itself does not enable them.
 - Type inference is enabled for `:=`.
 - Explicit type with initialization is allowed: `x: T := expr`.
 
+#### Union types
+
+- `A | B` is a portable union type. Unions are flattened, duplicate
+  alternatives are removed, and their displayed order is deterministic.
+- Collection inference first retains an equivalent type, then selects the most
+  specific type available through safe implicit conversion, and otherwise
+  constructs a union. Because Integer widens safely to Float,
+  `Integer | Float` normalizes to `Float` rather than remaining a union.
+- A value is assignable to a union when it is assignable to one of the union's
+  alternatives. A union is assignable to another union only when every source
+  alternative is accepted by the target. A union does not implicitly narrow
+  to one alternative.
+- Direct operators and receiver methods are not selected from a union. Code
+  must first narrow the value with an exhaustive type case. The initial
+  portable type patterns are non-nullable Boolean, Integer, Float, and String:
+
+```trb
+def describe(value: Integer | String): String
+	case value
+	when Integer(number)
+		return number.to_s()
+	when String(text)
+		return text
+	end
+end
+```
+
+- A type pattern binds exactly one narrowed value. The exact `_` discards it,
+  while `_name` follows the ordinary readable unused-binding opt-out rule.
+  Without `else`, every union alternative must be handled exactly once. An
+  `else` handles the remaining alternatives.
+- More complex values may be retained in a union and passed through compatible
+  annotations or `Any`, but type patterns for nullable, collection, enum,
+  record, and class alternatives are staged until one runtime test model is
+  specified across all backends.
+
 ### 3.3 Access Rules (Private)
 
 - Private class/method names must start with `_`.
@@ -219,10 +255,10 @@ mode by itself does not enable them.
 - Non-empty literals infer their key and value types. Equivalent values retain
   their type; values with a safe most-specific common type use that type and
   receive the required implicit conversions. For example, Integer and Float
-  values infer Float. Values without a safe common type currently widen to
-  `Any`; the union-type phase will retain alternatives such as
-  `Integer | String`. An empty `{}` receives its type from a declared variable,
-  field, parameter, record field, assignment target, or return type.
+  values infer Float. Values without a safe common type retain their
+  alternatives in a normalized union such as `Integer | String`. An empty `{}`
+  receives its type from a declared variable, field, parameter, record field,
+  assignment target, or return type.
 - A fresh literal may be contextually widened when every entry is assignable,
   for example `Hash<String, Any> := {"count" => 1}`. Existing mutable Hash
   values are invariant in both arguments, preventing an alias from inserting
@@ -249,10 +285,10 @@ mode by itself does not enable them.
   missing-key behavior is represented directly in typed IR. Write
   `hash[key] = hash[key] + value` in v0.1.
 
-Arrays and Hashes describe homogeneous collections. Future union types retain
-the alternatives of heterogeneous collection values, while a Tuple retains
-the type of each array-like position and a `record` retains the type of each
-named field. `Array<Integer | String>[0]` therefore remains
+Arrays and Hashes describe homogeneous collections. A union element type
+retains the alternatives of heterogeneous collection values, while a future
+Tuple retains the type of each array-like position and a `record` retains the
+type of each named field. `Array<Integer | String>[0]` therefore remains
 `Integer | String`; exact constant-index inference belongs to Tuple.
 
 ### 3.13 Enums, payloads, and exhaustive case

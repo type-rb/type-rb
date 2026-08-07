@@ -215,3 +215,15 @@ func TestFormatTypedHashAndNestedGenericsPreservesComments(t *testing.T) {
 		t.Fatalf("Hash formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
 	}
 }
+
+func TestFormatUnionTypesAndPatterns(t *testing.T) {
+	source := []byte("def describe(value:Integer|String):String\ncase value\nwhen Integer(number)\nreturn number.to_s()\nwhen String(text)\nreturn text\nend\nend\n")
+	want := "def describe(value: Integer | String): String\n\tcase value\n\twhen Integer(number)\n\t\treturn number.to_s()\n\twhen String(text)\n\t\treturn text\n\tend\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected union formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}

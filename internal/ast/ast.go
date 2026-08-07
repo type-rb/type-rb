@@ -297,13 +297,21 @@ type TypeRef struct {
 	Base
 	Name      string
 	Arguments []TypeRef
+	Union     []TypeRef
 	Nullable  bool
 	Array     bool
 }
 
-func (t TypeRef) Empty() bool { return t.Name == "" }
+func (t TypeRef) Empty() bool { return t.Name == "" && len(t.Union) == 0 }
 
 func (t TypeRef) String() string {
+	if len(t.Union) > 0 {
+		parts := make([]string, len(t.Union))
+		for index, alternative := range t.Union {
+			parts[index] = alternative.String()
+		}
+		return strings.Join(parts, " | ")
+	}
 	if t.Name == "" {
 		return ""
 	}
