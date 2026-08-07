@@ -1,0 +1,71 @@
+name: Pages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'production' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify compiler and tour
+        run: |
+          go test ./...
+          go run ./cmd/trb tour --check
+
+      - name: Build browser playground
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(go run ./cmd/trb version)"
+          version="${version#trb }"
+          ./scripts/build-playground-site.sh dist/playground "$version"
+          test -s dist/playground/play/index.html
+          test -s dist/playground/tour/index.html
+          test -s dist/playground/assets/trb.wasm
+          test -s dist/playground/assets/wasm_exec.js
+          grep -F '"transport": "wasm"' dist/playground/runtime.json
+          grep -F '"version": "'"$version"'"' dist/playground/runtime.json
+
+      - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v6
+
+      - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/playground
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

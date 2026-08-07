@@ -26,18 +26,24 @@ go install github.com/type-rb/type-rb/cmd/trb@latest
 
 ## Playground
 
-Open a local browser playground for experimenting with TypeRB:
+Open the [hosted playground](https://type-rb.github.io/type-rb/play/) to write,
+run, format, and transpile TypeRB directly in the browser.
+
+Launch the same playground locally with the compiler installed on your
+machine:
 
 ```sh
 trb play
 ```
 
-It can execute, format, and transpile scratch TypeRB while switching between
-Go, Ruby, and TypeScript output. The server listens only on your local machine.
+Both versions switch between Go, Ruby, and TypeScript output. The hosted
+version runs the compiler on your device through WebAssembly; source code is
+not sent to a compiler service. The local command listens only on your machine.
 
 ## Tour
 
-Learn the language through a guided, executable tour:
+Start the [hosted tour](https://type-rb.github.io/type-rb/tour/) for a guided,
+executable introduction, or launch the same tour locally:
 
 ```sh
 trb tour

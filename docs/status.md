@@ -27,6 +27,9 @@ Implemented:
   `trb tour --check`.
 - A host-independent browser build that runs the same playground compiler and
   typed-IR evaluator in a Web Worker through Go WebAssembly.
+- Hosted [playground](https://type-rb.github.io/type-rb/play/) and
+  [tour](https://type-rb.github.io/type-rb/tour/) builds published from `main`
+  through GitHub Pages.
 - Project initialization, dependency configuration, target-manifest
   generation, and target package installation.
 - Managed and external package modes, allowing generated source to be embedded
