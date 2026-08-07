@@ -1351,23 +1351,24 @@ func TestSafePortableConversionAndLookupLowerAcrossBackends(t *testing.T) {
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
+import { IndexLookupError, KeyLookupError, NumberParseError } from trb/std/errors
 import trb/std/arrays
 import trb/std/hashes
 import trb/std/numbers
 
-def parsed(value: String): Result<Integer, String>
+def parsed(value: String): Result<Integer, NumberParseError>
 	return value.try_to_i()
 end
 
-def package_parsed(value: String): Result<Integer, String>
+def package_parsed(value: String): Result<Integer, NumberParseError>
 	return numbers.try_parse_integer(value)
 end
 
-def array_value(values: Array<Integer>, index: Integer): Result<Integer, String>
+def array_value(values: Array<Integer>, index: Integer): Result<Integer, IndexLookupError>
 	return arrays.try_fetch(values, index)
 end
 
-def hash_value(values: Hash<String, Integer>, key: String): Result<Integer, String>
+def hash_value(values: Hash<String, Integer>, key: String): Result<Integer, KeyLookupError>
 	return hashes.try_fetch(values, key)
 end
 `),
@@ -1376,19 +1377,19 @@ end
 	wants := map[string][]string{
 		"go": {
 			`regexp.MatchString`,
-			`__trb_result.NewResultErr[int, string]("invalid Integer")`,
-			`__trb_result.NewResultErr[int, string]("Array index is out of bounds")`,
-			`__trb_result.NewResultErr[int, string]("Hash key is missing")`,
+			`__trb_errors.NumberParseError{Kind: __trb_errors.NumberParseErrorKindInvalidformat, Input: input, Message: "invalid Integer"}`,
+			`__trb_errors.IndexLookupError{Index: index, Size: len(values), Message: "Array index is out of bounds"}`,
+			`__trb_errors.KeyLookupError{Key: key, Message: "Hash key is missing"}`,
 		},
 		"ruby": {
-			`Result::Err.new("invalid Integer")`,
-			`Result::Err.new("Array index is out of bounds")`,
-			`Result::Err.new("Hash key is missing")`,
+			`NumberParseError.new(kind: NumberParseErrorKind::InvalidFormat, input: input, message: "invalid Integer")`,
+			`IndexLookupError.new(index: index, size: values.length, message: "Array index is out of bounds")`,
+			`KeyLookupError.new(key: key, message: "Hash key is missing")`,
 		},
 		"typescript": {
-			`Result.Err<number, string>("invalid Integer")`,
-			`Result.Err<number, string>("Array index is out of bounds")`,
-			`Result.Err<number, string>("Hash key is missing")`,
+			`{ kind: NumberParseErrorKind.InvalidFormat, input: __trbInput, message: "invalid Integer" } satisfies NumberParseError`,
+			`{ index: __trbIndex, size: __trbValues.length, message: "Array index is out of bounds" } satisfies IndexLookupError`,
+			`{ key: __trbKey, message: "Hash key is missing" } satisfies KeyLookupError`,
 		},
 	}
 
@@ -1397,21 +1398,62 @@ end
 		if err != nil {
 			t.Fatalf("%s rejected safe portable operations: %v", mode, err)
 		}
-		var consumer, resultRuntime *Artifact
+		var consumer, resultRuntime, errorRuntime *Artifact
 		for _, artifact := range artifacts {
 			switch artifact.IR.ModulePath {
 			case "main":
 				consumer = artifact
 			case "trb/std/result/index":
 				resultRuntime = artifact
+			case "trb/std/errors/index":
+				errorRuntime = artifact
 			}
 		}
-		if consumer == nil || resultRuntime == nil {
-			t.Fatalf("%s did not compile the consumer and Result runtime: %#v", mode, artifacts)
+		if consumer == nil || resultRuntime == nil || errorRuntime == nil {
+			t.Fatalf("%s did not compile the consumer and structured error runtimes: %#v", mode, artifacts)
 		}
 		for _, want := range wants[mode] {
 			if output := string(consumer.Output); !strings.Contains(output, want) {
 				t.Fatalf("generated %s safe operation is missing %q:\n%s", mode, want, output)
+			}
+		}
+		errorWants := map[string][]string{
+			"go":         {"type NumberParseErrorKind int", "type NumberParseError struct", "type IndexLookupError struct", "type KeyLookupError struct"},
+			"ruby":       {"NumberParseError = Data.define(:kind, :input, :message)", "IndexLookupError = Data.define(:index, :size, :message)", "KeyLookupError = Data.define(:key, :message)"},
+			"typescript": {"export type NumberParseErrorKind", "export interface NumberParseError", "export interface IndexLookupError", "export interface KeyLookupError"},
+		}[mode]
+		for _, want := range errorWants {
+			if output := string(errorRuntime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s error runtime is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestStructuredSafeOperationsRejectStringErrorAnnotationsAcrossBackends(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "number parse", source: `"nope".try_to_i()`, want: "Result<Integer, NumberParseError>"},
+		{name: "array lookup", source: `[1].try_fetch(9)`, want: "Result<Integer, IndexLookupError>"},
+		{name: "hash lookup", source: `{"name" => "Ada"}.try_fetch("missing")`, want: "Result<String, KeyLookupError>"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			source := SourceUnit{
+				Filename:   "/project/main.trb",
+				ModulePath: "main",
+				Package:    "main",
+				Source:     []byte("import { Result } from trb/std/result\n\ndef value(): Result<Integer, String>\n\treturn " + test.source + "\nend\n"),
+			}
+			if test.name == "hash lookup" {
+				source.Source = []byte("import { Result } from trb/std/result\n\ndef value(): Result<String, String>\n\treturn " + test.source + "\nend\n")
+			}
+			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/structured-error-diagnostic", RubyLoader: "require_relative"})
+			if err == nil || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "expected Result") {
+				t.Fatalf("%s %s: expected structured error result diagnostic, got %v", mode, test.name, err)
 			}
 		}
 	}
@@ -1434,21 +1476,24 @@ end
 	wants := map[string][]string{
 		"go": {
 			`__trb_result "example.com/inferred-results/trb/std/result"`,
-			`__trb_result.NewResultErr[int, string]("invalid Integer")`,
-			`__trb_result.NewResultErr[int, string]("Array index is out of bounds")`,
-			`__trb_result.NewResultErr[string, string]("Hash key is missing")`,
+			`__trb_errors "example.com/inferred-results/trb/std/errors"`,
+			`__trb_errors.NumberParseError{Kind: __trb_errors.NumberParseErrorKindInvalidformat, Input: input, Message: "invalid Integer"}`,
+			`__trb_errors.IndexLookupError{Index: index, Size: len(values), Message: "Array index is out of bounds"}`,
+			`__trb_errors.KeyLookupError{Key: key, Message: "Hash key is missing"}`,
 		},
 		"ruby": {
 			`require_relative "./trb/std/result/index"`,
-			`Result::Err.new("invalid Integer")`,
-			`Result::Err.new("Array index is out of bounds")`,
-			`Result::Err.new("Hash key is missing")`,
+			`require_relative "./trb/std/errors/index"`,
+			`NumberParseError.new(kind: NumberParseErrorKind::InvalidFormat, input: input, message: "invalid Integer")`,
+			`IndexLookupError.new(index: index, size: values.length, message: "Array index is out of bounds")`,
+			`KeyLookupError.new(key: key, message: "Hash key is missing")`,
 		},
 		"typescript": {
 			`import { Result } from "./trb/std/result/index.ts";`,
-			`Result.Err<number, string>("invalid Integer")`,
-			`Result.Err<number, string>("Array index is out of bounds")`,
-			`Result.Err<string, string>("Hash key is missing")`,
+			`import { NumberParseErrorKind } from "./trb/std/errors/index.ts";`,
+			`{ kind: NumberParseErrorKind.InvalidFormat, input: __trbInput, message: "invalid Integer" } satisfies NumberParseError`,
+			`{ index: __trbIndex, size: __trbValues.length, message: "Array index is out of bounds" } satisfies IndexLookupError`,
+			`{ key: __trbKey, message: "Hash key is missing" } satisfies KeyLookupError`,
 		},
 	}
 
@@ -1457,22 +1502,86 @@ end
 		if err != nil {
 			t.Fatalf("%s rejected inferred Result operations: %v", mode, err)
 		}
-		var consumer, resultRuntime *Artifact
+		var consumer, resultRuntime, errorRuntime *Artifact
 		for _, artifact := range artifacts {
 			switch artifact.IR.ModulePath {
 			case "main":
 				consumer = artifact
 			case "trb/std/result/index":
 				resultRuntime = artifact
+			case "trb/std/errors/index":
+				errorRuntime = artifact
 			}
 		}
-		if consumer == nil || resultRuntime == nil {
-			t.Fatalf("%s did not compile the consumer and inferred Result runtime: %#v", mode, artifacts)
+		if consumer == nil || resultRuntime == nil || errorRuntime == nil {
+			t.Fatalf("%s did not compile the consumer and inferred structured error runtimes: %#v", mode, artifacts)
 		}
 		for _, want := range wants[mode] {
 			if output := string(consumer.Output); !strings.Contains(output, want) {
 				t.Fatalf("generated %s inferred Result operation is missing %q:\n%s", mode, want, output)
 			}
+		}
+	}
+}
+
+func TestInferredStructuredErrorFieldsAreAvailableWithoutErrorImports(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Result } from trb/std/result
+
+def inspect()
+	parsed := "nope".try_to_i()
+	case parsed
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error.input + ":" + error.message)
+	end
+
+	indexed := [1].try_fetch(9)
+	case indexed
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error.index + error.size)
+	end
+
+	keyed := {"name" => "Ada"}.try_fetch("missing")
+	case keyed
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		case error.key
+		when Integer(key)
+			puts(key)
+		when String(key)
+			puts(key)
+		end
+	end
+	return
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/inferred-structured-fields", RubyLoader: "require_relative"}); err != nil {
+			t.Fatalf("%s rejected inferred structured error fields: %v", mode, err)
+		}
+	}
+}
+
+func TestStructuredErrorTypeNamesStillRequireExplicitImports(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source:     []byte("def inspect(error: NumberParseError)\n\tputs(error.message)\n\treturn\nend\n"),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/structured-error-import", RubyLoader: "require_relative"})
+		if err == nil || !strings.Contains(err.Error(), "type NumberParseError is not declared or imported") {
+			t.Fatalf("%s: expected explicit structured error import diagnostic, got %v", mode, err)
 		}
 	}
 }

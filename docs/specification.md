@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-07
+Last updated: 2026-08-08
 
 ## 1. Language Goals
 
@@ -444,10 +444,13 @@ end
   builds emit its runtime module into the generated target tree.
 - A standard-library operation may infer a `Result<T, E>` without a source
   import, for example `missing := values.try_fetch(9)`. The checker records the
-  compiler-owned runtime dependency and project compilation emits and imports
-  the Result runtime automatically. Source references to the declaration
-  itself—including type annotations, constructors, and case patterns—still
-  require `import { Result } from trb/std/result`.
+  compiler-owned runtime dependencies and project compilation emits and
+  imports `Result` and structured error declarations automatically. Members of
+  an inferred error value remain typed without an error-package import. Source
+  references to a declaration itself—including type annotations, constructors,
+  and case patterns—still require an explicit import such as
+  `import { Result } from trb/std/result` or
+  `import { IndexLookupError } from trb/std/errors`.
 - Concise propagation syntax such as postfix `?`, postfix `!`, or prefix `try`
   is deliberately not selected in v0.1. It may be added later as syntax sugar
   over explicit Result matching and early return after real application usage

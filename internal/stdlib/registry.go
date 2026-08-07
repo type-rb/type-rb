@@ -96,6 +96,9 @@ var jsonValueType = types.FromName("JsonValue")
 var jsonErrorType = types.FromName("JsonError")
 var processResultType = types.FromName("ProcessResult")
 var processErrorType = types.FromName("ProcessError")
+var numberParseErrorType = types.FromName("NumberParseError")
+var indexLookupErrorType = types.FromName("IndexLookupError")
+var keyLookupErrorType = types.FromName("KeyLookupError")
 
 var registry = map[string]*Package{
 	"trb/std/unit": {
@@ -117,6 +120,20 @@ end
 	Err(error: E)
 end
 `,
+		Kind:    Portable,
+		Symbols: map[string]Symbol{},
+	},
+	"trb/std/errors": {
+		Path:         "trb/std/errors",
+		ModulePath:   "trb/std/errors/index",
+		RuntimeAlias: "__trb_errors",
+		RuntimeExports: []RuntimeExport{
+			{Name: "NumberParseErrorKind", Kind: "enum"},
+			{Name: "NumberParseError", Kind: "record"},
+			{Name: "IndexLookupError", Kind: "record"},
+			{Name: "KeyLookupError", Kind: "record"},
+		},
+		Source:  errorsSource(),
 		Kind:    Portable,
 		Symbols: map[string]Symbol{},
 	},
@@ -432,7 +449,7 @@ end
 					{Name: "values", Type: arrayOf(typeT)},
 					{Name: "index", Type: integerType},
 				},
-				Return: stringErrorResult(typeT),
+				Return: structuredErrorResult(typeT, indexLookupErrorType),
 			},
 			"first": genericUnary("first", "trb.std.arrays.first", []string{"T"}, arrayOf(typeT), typeT),
 			"last":  genericUnary("last", "trb.std.arrays.last", []string{"T"}, arrayOf(typeT), typeT),
@@ -526,7 +543,7 @@ end
 					{Name: "values", Type: hashOf(typeK, typeV)},
 					{Name: "key", Type: typeK},
 				},
-				Return: stringErrorResult(typeV),
+				Return: structuredErrorResult(typeV, keyLookupErrorType),
 			},
 			"contains_key": {
 				Name:           "contains_key",
@@ -592,7 +609,7 @@ end
 			"infinite":          unary("infinite", "trb.std.numbers.float_infinite", floatType, booleanType),
 			"nan":               unary("nan", "trb.std.numbers.float_nan", floatType, booleanType),
 			"parse_integer":     unary("parse_integer", "trb.std.numbers.parse_integer", stringType, integerType),
-			"try_parse_integer": unary("try_parse_integer", "trb.std.numbers.try_parse_integer", stringType, stringErrorResult(integerType)),
+			"try_parse_integer": unary("try_parse_integer", "trb.std.numbers.try_parse_integer", stringType, structuredErrorResult(integerType, numberParseErrorType)),
 		},
 	},
 	"trb/std/booleans": {
@@ -839,8 +856,8 @@ func jsonResult(value types.Type) types.Type {
 	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, jsonErrorType}}
 }
 
-func stringErrorResult(value types.Type) types.Type {
-	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, stringType}}
+func structuredErrorResult(value, failure types.Type) types.Type {
+	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, failure}}
 }
 
 func processResult(value types.Type) types.Type {

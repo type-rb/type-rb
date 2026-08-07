@@ -2481,6 +2481,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = member.Return
 			c.external[n] = member
+		} else if exported, exists := c.resolution.CompilerOwnedType(receiverType.Name); exists {
+			if member, found := exported.Members[n.Name]; found && !member.Class {
+				typ = member.Type
+			} else if n.Name != "new" {
+				c.error(n.Span(), fmt.Sprintf("type %s has no member %s", receiverType.Name, n.Name))
+			}
 		} else if n.Name != "new" {
 			if _, exists := c.localMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)

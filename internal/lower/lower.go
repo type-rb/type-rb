@@ -28,15 +28,24 @@ func Program(checked checker.Result) *ir.Program {
 }
 
 func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
-	loaded := map[string]bool{}
+	loaded := map[string]*ir.Import{}
 	for _, statement := range statements {
 		if imported, ok := statement.(*ir.Import); ok {
-			loaded[imported.Path] = true
+			loaded[imported.Path] = imported
 		}
 	}
 	paths := make([]string, 0, len(l.checked.RuntimeDependencies))
 	for packagePath, definition := range l.checked.RuntimeDependencies {
-		if definition == nil || definition.ModulePath == "" || loaded[definition.ModulePath] {
+		if definition == nil || definition.ModulePath == "" {
+			continue
+		}
+		if imported := loaded[definition.ModulePath]; imported != nil {
+			for _, exported := range definition.RuntimeExports {
+				if !contains(imported.Symbols, exported.Name) {
+					imported.Symbols = append(imported.Symbols, exported.Name)
+				}
+				imported.SymbolKinds[exported.Name] = exported.Kind
+			}
 			continue
 		}
 		paths = append(paths, packagePath)
@@ -62,6 +71,15 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 		imports = append(imports, imported)
 	}
 	return imports
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *lowerer) statements(nodes []ast.Statement) []ir.Statement {

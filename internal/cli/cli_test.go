@@ -147,7 +147,7 @@ func TestReplEvaluatesPortableReceiverMethodsAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "\"123\" : String\n\"0.25\" : String\n\"0.0\" : String\n2 : Float\n-2 : Integer\n4 : Integer\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\n0.25 : Float\ntrue : Boolean\n\"true\" : String\n\"false\" : String\n25 : Float\ntrue : Boolean\n123 : Integer\nResult::Ok(value: 123) : Result<Integer, String>\nResult::Err(error: \"invalid Integer\") : Result<Integer, String>\nResult::Err(error: \"Integer is outside the portable range\") : Result<Integer, String>\n2 : Integer\n"
+		want := "\"123\" : String\n\"0.25\" : String\n\"0.0\" : String\n2 : Float\n-2 : Integer\n4 : Integer\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\n0.25 : Float\ntrue : Boolean\n\"true\" : String\n\"false\" : String\n25 : Float\ntrue : Boolean\n123 : Integer\nResult::Ok(value: 123) : Result<Integer, NumberParseError>\nResult::Err(error: NumberParseError(kind: NumberParseErrorKind::InvalidFormat, input: \"12x\", message: \"invalid Integer\")) : Result<Integer, NumberParseError>\nResult::Err(error: NumberParseError(kind: NumberParseErrorKind::OutOfRange, input: \"9007199254740992\", message: \"Integer is outside the portable range\")) : Result<Integer, NumberParseError>\n2 : Integer\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s receiver-method REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -293,7 +293,7 @@ func TestReplEvaluatesPortableArrayAndHashOperationsAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "[1, 2] : Array<Integer>\n1 : Integer\n2 : Integer\n2 : Integer\nResult::Ok(value: 2) : Result<Integer, String>\nResult::Err(error: \"Array index is out of bounds\") : Result<Integer, String>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[1, 2, 3] : Array<Integer>\n1 : Integer\n[3, 2, 0] : Array<Integer>\n[0, 2, 3] : Array<Integer>\n0 : Integer\n[3, 2, 1] : Array<Integer>\n[1, 2, 3] : Array<Integer>\ntrue : Boolean\n1 : Integer\nfalse : Boolean\n1 : Integer\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"two\" : String\nResult::Ok(value: \"two\") : Result<String, String>\nResult::Err(error: \"Hash key is missing\") : Result<String, String>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[\"one\", \"two\"] : Array<String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n{1: \"one\", 2: \"TWO\", 3: \"three\"} : Hash<Integer, String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"one\" : String\n\"TWO\" : String\n{3: \"three\", 4: \"four\"} : Hash<Integer, String>\n[\"a\", \"b\", \"\"] : Array<String>\ntrue : Boolean\ntrue : Boolean\n[\"root\", \"leaf\"] : Array<String>\n\"leaf\" : String\n\"root\" : String\n"
+		want := "[1, 2] : Array<Integer>\n1 : Integer\n2 : Integer\n2 : Integer\nResult::Ok(value: 2) : Result<Integer, IndexLookupError>\nResult::Err(error: IndexLookupError(index: 9, size: 2, message: \"Array index is out of bounds\")) : Result<Integer, IndexLookupError>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[1, 2, 3] : Array<Integer>\n1 : Integer\n[3, 2, 0] : Array<Integer>\n[0, 2, 3] : Array<Integer>\n0 : Integer\n[3, 2, 1] : Array<Integer>\n[1, 2, 3] : Array<Integer>\ntrue : Boolean\n1 : Integer\nfalse : Boolean\n1 : Integer\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"two\" : String\nResult::Ok(value: \"two\") : Result<String, KeyLookupError>\nResult::Err(error: KeyLookupError(key: 9, message: \"Hash key is missing\")) : Result<String, KeyLookupError>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[\"one\", \"two\"] : Array<String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n{1: \"one\", 2: \"TWO\", 3: \"three\"} : Hash<Integer, String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"one\" : String\n\"TWO\" : String\n{3: \"three\", 4: \"four\"} : Hash<Integer, String>\n[\"a\", \"b\", \"\"] : Array<String>\ntrue : Boolean\ntrue : Boolean\n[\"root\", \"leaf\"] : Array<String>\n\"leaf\" : String\n\"root\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s Array/Hash REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -1687,23 +1687,25 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			t.Fatal(err)
 		}
 		source := "import { Result } from trb/std/result\n" +
+			"import { IndexLookupError, KeyLookupError, NumberParseError } from trb/std/errors\n" +
 			"import trb/std/string_builder\n" +
 			"import trb/std/numbers\n" +
 			"import trb/std/booleans\n\n" +
-			"def integer_result(value: Result<Integer, String>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error; end; end\n" +
-			"def string_result(value: Result<String, String>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error; end; end\n" +
+			"def parse_result(value: Result<Integer, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
+			"def index_result(value: Result<Integer, IndexLookupError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
+			"def key_result(value: Result<String, KeyLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def scalar_check(value: Float): Boolean; return (-4).abs() == numbers.absolute(-4) && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == booleans.to_string(true); end\n\n" +
 			"def main()\n" +
 			"\tputs(scalar_check(0.25))\n" +
-			"\tputs(integer_result(\"12\".try_to_i()))\n" +
-			"\tputs(integer_result(\"12x\".try_to_i()))\n" +
-			"\tputs(integer_result(\"9007199254740992\".try_to_i()))\n" +
+			"\tputs(parse_result(\"12\".try_to_i()))\n" +
+			"\tputs(parse_result(\"12x\".try_to_i()))\n" +
+			"\tputs(parse_result(\"9007199254740992\".try_to_i()))\n" +
 			"\tvalues := [7]\n" +
-			"\tputs(integer_result(values.try_fetch(0)))\n" +
-			"\tputs(integer_result(values.try_fetch(1)))\n" +
+			"\tputs(index_result(values.try_fetch(0)))\n" +
+			"\tputs(index_result(values.try_fetch(1)))\n" +
 			"\tlabels: Hash<String, String> := {\"name\" => \"Ada\"}\n" +
-			"\tputs(string_result(labels.try_fetch(\"name\")))\n" +
-			"\tputs(string_result(labels.try_fetch(\"missing\")))\n" +
+			"\tputs(key_result(labels.try_fetch(\"name\")))\n" +
+			"\tputs(key_result(labels.try_fetch(\"missing\")))\n" +
 			"\tbuilder := string_builder.new()\n" +
 			"\tputs(builder.empty?())\n" +
 			"\treturn\n" +

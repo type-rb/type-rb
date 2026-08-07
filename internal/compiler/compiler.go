@@ -141,7 +141,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 
 	modules := make([]resolver.Module, 0, len(units))
 	for _, source := range units {
-		modules = append(modules, resolver.Module{Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath]})
+		modules = append(modules, resolver.Module{Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath], CompilerOwned: source.CompilerOwned})
 	}
 	catalog, catalogDiagnostics := resolver.NewCatalog(modules)
 	for _, source := range units {
@@ -192,16 +192,20 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	}
 
 	checkedPrograms := make(map[string]checker.Result, len(units))
+	checkDiagnostics := make(map[string][]diagnostic.Diagnostic, len(units))
 	for _, source := range units {
 		program := programs[source.ModulePath]
 		checked, diagnostics := checker.CheckWithOptions(program, resolutions[source.ModulePath], checker.Options{AllowUnusedImports: options.AllowUnusedImports})
-		if hasErrors(diagnostics) {
-			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
-		}
 		checkedPrograms[source.ModulePath] = checked
+		checkDiagnostics[source.ModulePath] = diagnostics
 	}
 	if runtimeUnits := compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options); len(runtimeUnits) > 0 {
 		return CompileProject(append(units, runtimeUnits...), options)
+	}
+	for _, source := range units {
+		if diagnostics := checkDiagnostics[source.ModulePath]; hasErrors(diagnostics) {
+			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
+		}
 	}
 
 	artifacts := make([]*Artifact, 0, len(units))
