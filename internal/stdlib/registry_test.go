@@ -65,6 +65,38 @@ func TestSafeReceiverContractsUseStructuredErrors(t *testing.T) {
 	}
 }
 
+func TestNumericReceiverAndMathContracts(t *testing.T) {
+	for _, test := range []struct {
+		receiver types.Type
+		name     string
+		want     string
+	}{
+		{receiver: types.FromName("Integer"), name: "min", want: "Integer"},
+		{receiver: types.FromName("Integer"), name: "max", want: "Integer"},
+		{receiver: types.FromName("Integer"), name: "clamp", want: "Integer"},
+		{receiver: types.FromName("Float"), name: "floor", want: "Integer"},
+		{receiver: types.FromName("Float"), name: "ceil", want: "Integer"},
+		{receiver: types.FromName("Float"), name: "round", want: "Integer"},
+		{receiver: types.FromName("Float"), name: "truncate", want: "Integer"},
+	} {
+		_, method, ok := LookupReceiverMethod(test.receiver, test.name)
+		if !ok || method.Return.String() != test.want {
+			t.Fatalf("%s#%s contract=%#v, want %s", test.receiver, test.name, method, test.want)
+		}
+	}
+
+	definition, ok := Lookup("trb/std/math")
+	if !ok {
+		t.Fatal("math package is missing")
+	}
+	for _, name := range []string{"sqrt", "exp", "log", "log2", "log10"} {
+		symbol, ok := definition.Symbols[name]
+		if !ok || len(symbol.Parameters) != 1 || symbol.Parameters[0].Type.Kind != types.Float || symbol.Return.Kind != types.Float {
+			t.Fatalf("math.%s contract=%#v", name, symbol)
+		}
+	}
+}
+
 func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
 	for _, name := range []string{"pop", "push", "shift", "unshift"} {

@@ -37,6 +37,66 @@ func TestEvaluateFloatClassificationIntrinsics(t *testing.T) {
 	}
 }
 
+func TestEvaluatePortableNumericAndMathIntrinsics(t *testing.T) {
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	integerType := types.FromName("Integer")
+	floatType := types.FromName("Float")
+	integer := func(value int64) evaluatedArgument {
+		return evaluatedArgument{Value: Value{Type: integerType, Data: value}}
+	}
+	floating := func(value float64) evaluatedArgument {
+		return evaluatedArgument{Value: Value{Type: floatType, Data: value}}
+	}
+
+	for _, test := range []struct {
+		name string
+		args []evaluatedArgument
+		want int64
+	}{
+		{name: "trb.std.numbers.integer_min", args: []evaluatedArgument{integer(5), integer(3)}, want: 3},
+		{name: "trb.std.numbers.integer_max", args: []evaluatedArgument{integer(5), integer(7)}, want: 7},
+		{name: "trb.std.numbers.integer_clamp", args: []evaluatedArgument{integer(12), integer(0), integer(10)}, want: 10},
+		{name: "trb.std.numbers.float_floor", args: []evaluatedArgument{floating(-2.75)}, want: -3},
+		{name: "trb.std.numbers.float_ceil", args: []evaluatedArgument{floating(-2.75)}, want: -2},
+		{name: "trb.std.numbers.float_round", args: []evaluatedArgument{floating(-2.5)}, want: -3},
+	} {
+		result, err := evaluator.intrinsic(test.name, test.args, integerType, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if got, ok := result.Data.(int64); !ok || got != test.want {
+			t.Fatalf("%s result=%#v, want %d", test.name, result.Data, test.want)
+		}
+	}
+
+	for _, test := range []struct {
+		name  string
+		value float64
+		want  float64
+	}{
+		{name: "trb.std.math.sqrt", value: 9, want: 3},
+		{name: "trb.std.math.exp", value: 0, want: 1},
+		{name: "trb.std.math.log", value: 1, want: 0},
+		{name: "trb.std.math.log2", value: 8, want: 3},
+		{name: "trb.std.math.log10", value: 100, want: 2},
+	} {
+		result, err := evaluator.intrinsic(test.name, []evaluatedArgument{floating(test.value)}, floatType, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if got, ok := result.Data.(float64); !ok || got != test.want {
+			t.Fatalf("%s(%v)=%#v, want %v", test.name, test.value, result.Data, test.want)
+		}
+	}
+
+	if _, err := evaluator.intrinsic("trb.std.numbers.integer_clamp", []evaluatedArgument{integer(1), integer(2), integer(0)}, integerType, nil); err == nil || err.Error() != "clamp minimum exceeds maximum" {
+		t.Fatalf("unexpected clamp error: %v", err)
+	}
+	if _, err := evaluator.intrinsic("trb.std.numbers.float_floor", []evaluatedArgument{floating(math.Inf(1))}, integerType, nil); err == nil || err.Error() != "Float cannot be converted to Integer" {
+		t.Fatalf("unexpected non-finite floor error: %v", err)
+	}
+}
+
 func TestEvaluateContextStopsCanceledEvaluation(t *testing.T) {
 	integer := types.FromName("Integer")
 	statements := []ir.Statement{

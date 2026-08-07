@@ -891,6 +891,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "(" + arguments[0] + ").to_f"
 	case "trb.std.numbers.integer_absolute":
 		return "(" + arguments[0] + ").abs"
+	case "trb.std.numbers.integer_min":
+		return "[(" + arguments[0] + "), (" + arguments[1] + ")].min"
+	case "trb.std.numbers.integer_max":
+		return "[(" + arguments[0] + "), (" + arguments[1] + ")].max"
+	case "trb.std.numbers.integer_clamp":
+		return "->(value, minimum, maximum) { raise ArgumentError, \"clamp minimum exceeds maximum\" if minimum > maximum; value.clamp(minimum, maximum) }.call(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.numbers.integer_zero":
 		return "(" + arguments[0] + ").zero?"
 	case "trb.std.numbers.integer_positive":
@@ -904,7 +910,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.numbers.float_to_string":
 		return portableFloatString(arguments[0])
 	case "trb.std.numbers.float_to_integer":
-		return "->(value) { raise FloatDomainError, \"Float cannot be converted to Integer\" unless value.finite?; integer = value.truncate; raise RangeError, \"Integer is outside the portable range\" if integer < -9007199254740991 || integer > 9007199254740991; integer }.call(" + arguments[0] + ")"
+		return portableFloatInteger(arguments[0], "truncate")
+	case "trb.std.numbers.float_floor":
+		return portableFloatInteger(arguments[0], "floor")
+	case "trb.std.numbers.float_ceil":
+		return portableFloatInteger(arguments[0], "ceil")
+	case "trb.std.numbers.float_round":
+		return portableFloatInteger(arguments[0], "round")
 	case "trb.std.numbers.float_absolute":
 		return "(" + arguments[0] + ").abs"
 	case "trb.std.numbers.float_finite":
@@ -917,11 +929,29 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(input) { raise ArgumentError, \"invalid Integer\" unless /\\A[+-]?[0-9]+\\z/.match?(input); value = Integer(input, 10); raise RangeError, \"Integer is outside the portable range\" if value < -9007199254740991 || value > 9007199254740991; value }.call(" + arguments[0] + ")"
 	case "trb.std.numbers.try_parse_integer":
 		return "->(input) { if !/\\A[+-]?[0-9]+\\z/.match?(input); " + numberParseError("InvalidFormat", "input", "invalid Integer") + "; else; value = Integer(input, 10); if value < -9007199254740991 || value > 9007199254740991; " + numberParseError("OutOfRange", "input", "Integer is outside the portable range") + "; else; Result::Ok.new(value); end; end }.call(" + arguments[0] + ")"
+	case "trb.std.math.sqrt":
+		return "->(value) { value < 0 ? Float::NAN : Math.sqrt(value) }.call(" + arguments[0] + ")"
+	case "trb.std.math.exp":
+		return "Math.exp(" + arguments[0] + ")"
+	case "trb.std.math.log":
+		return portableLog(arguments[0], "log")
+	case "trb.std.math.log2":
+		return portableLog(arguments[0], "log2")
+	case "trb.std.math.log10":
+		return portableLog(arguments[0], "log10")
 	case "trb.std.booleans.to_string":
 		return "(" + arguments[0] + ").to_s"
 	default:
 		return "nil"
 	}
+}
+
+func portableFloatInteger(value, operation string) string {
+	return "->(value) { raise FloatDomainError, \"Float cannot be converted to Integer\" unless value.finite?; integer = value." + operation + "; raise RangeError, \"Integer is outside the portable range\" if integer < -9007199254740991 || integer > 9007199254740991; integer }.call(" + value + ")"
+}
+
+func portableLog(value, operation string) string {
+	return "->(value) { if value < 0; Float::NAN; elsif value.zero?; -Float::INFINITY; else; Math." + operation + "(value); end }.call(" + value + ")"
 }
 
 func portableFloatString(value string) string {

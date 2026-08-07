@@ -2265,6 +2265,38 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("numbers.to_float expects Integer")
 		}
 		return Value{Type: typ, Data: float64(value)}, nil
+	case "trb.std.numbers.integer_min", "trb.std.numbers.integer_max":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		left, leftOK := values[0].Data.(int64)
+		right, rightOK := values[1].Data.(int64)
+		if !leftOK || !rightOK {
+			return Value{}, errors.New("numbers min/max expect Integer values")
+		}
+		if name == "trb.std.numbers.integer_min" && right < left || name == "trb.std.numbers.integer_max" && right > left {
+			left = right
+		}
+		return Value{Type: typ, Data: left}, nil
+	case "trb.std.numbers.integer_clamp":
+		if err := require(3); err != nil {
+			return Value{}, err
+		}
+		value, valueOK := values[0].Data.(int64)
+		minimum, minimumOK := values[1].Data.(int64)
+		maximum, maximumOK := values[2].Data.(int64)
+		if !valueOK || !minimumOK || !maximumOK {
+			return Value{}, errors.New("numbers.clamp expects Integer values")
+		}
+		if minimum > maximum {
+			return Value{}, errors.New("clamp minimum exceeds maximum")
+		}
+		if value < minimum {
+			value = minimum
+		} else if value > maximum {
+			value = maximum
+		}
+		return Value{Type: typ, Data: value}, nil
 	case "trb.std.numbers.integer_absolute",
 		"trb.std.numbers.integer_zero",
 		"trb.std.numbers.integer_positive",
@@ -2319,6 +2351,29 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("Integer is outside the portable range")
 		}
 		return Value{Type: typ, Data: int64(math.Trunc(value))}, nil
+	case "trb.std.numbers.float_floor", "trb.std.numbers.float_ceil", "trb.std.numbers.float_round":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(float64)
+		if !ok {
+			return Value{}, errors.New("numbers rounding expects Float")
+		}
+		switch name {
+		case "trb.std.numbers.float_floor":
+			value = math.Floor(value)
+		case "trb.std.numbers.float_ceil":
+			value = math.Ceil(value)
+		default:
+			value = math.Round(value)
+		}
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return Value{}, errors.New("Float cannot be converted to Integer")
+		}
+		if value < -9007199254740991 || value > 9007199254740991 {
+			return Value{}, errors.New("Integer is outside the portable range")
+		}
+		return Value{Type: typ, Data: int64(value)}, nil
 	case "trb.std.numbers.float_absolute",
 		"trb.std.numbers.float_finite",
 		"trb.std.numbers.float_infinite",
@@ -2370,6 +2425,27 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return e.numberParseResultErr(typ, kind, value, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Integer"), Data: parsed})
+	case "trb.std.math.sqrt", "trb.std.math.exp", "trb.std.math.log", "trb.std.math.log2", "trb.std.math.log10":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(float64)
+		if !ok {
+			return Value{}, errors.New("math function expects Float")
+		}
+		switch name {
+		case "trb.std.math.sqrt":
+			value = math.Sqrt(value)
+		case "trb.std.math.exp":
+			value = math.Exp(value)
+		case "trb.std.math.log":
+			value = math.Log(value)
+		case "trb.std.math.log2":
+			value = math.Log2(value)
+		default:
+			value = math.Log10(value)
+		}
+		return Value{Type: typ, Data: value}, nil
 	case "trb.std.booleans.to_string":
 		if err := require(1); err != nil {
 			return Value{}, err
