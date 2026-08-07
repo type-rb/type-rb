@@ -1,0 +1,18 @@
+def ready?(): Boolean
+	message := "not # a comment #{1 + {two: 2}["two"]}"
+	literal := 'still not # a comment'
+	values: Hash<String, Array<Integer>> := { numbers: [1, 2, 3] }
+	inclusive := 0..10
+	exclusive := 0...10
+	payload := <<~JSON
+{"status":"ok"}
+JSON
+	after := 42 # highlighting resumes here
+	puts(message)
+	puts(literal)
+	puts(values.size())
+	puts(inclusive.to_s())
+	puts(exclusive.to_s())
+	puts(payload)
+	return !false
+end

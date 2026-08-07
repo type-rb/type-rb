@@ -39,10 +39,21 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tools/textmate/package-lock.json
+
       - name: Verify compiler and tour
         run: |
           go test ./...
           go run ./cmd/trb tour --check
+
+      - name: Verify TextMate grammar
+        run: |
+          npm ci --prefix tools/textmate
+          npm test --prefix tools/textmate
 
       - name: Build browser playground
         shell: bash

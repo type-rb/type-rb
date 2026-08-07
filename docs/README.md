@@ -14,6 +14,7 @@ larger applications.
 - [Language guide](language.md)
 - [Language specification](specification.md)
 - [Standard library](standard-library.md)
+- [Syntax highlighting](syntax-highlighting.md)
 - [Rails guide](guides/rails.md)
 
 ## Project

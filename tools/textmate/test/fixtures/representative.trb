@@ -1,0 +1,48 @@
+import { Result } from trb/std/result
+
+module Demo
+	API_VERSION := "v1"
+
+	interface Renderable
+		render(): String
+	end
+
+	record User
+		id: Integer
+		name: String
+	end
+
+	enum Outcome<T>
+		Ok(value: T)
+		Err(message: String)
+	end
+
+	class Greeter implements Renderable
+		readonly @name: String
+		@_count: Integer
+
+		def initialize(name: String)
+			@name = name
+			@_count = 1
+			return
+		end
+
+		def render(): String
+			result := Outcome<String>::Ok(@name)
+			return case result
+			when Outcome::Ok(value)
+				if @_count > 0
+					"Hello, #{value}"
+				else
+					"Hello"
+				end
+			when Outcome::Err(message)
+				message
+			end
+		end
+	end
+end
+
+[1, 2, 3].each do |number|
+	puts(number)
+end

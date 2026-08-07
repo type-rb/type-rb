@@ -1,0 +1,10 @@
+{
+  "name": "TypeRB",
+  "languageId": "trb",
+  "scopeName": "source.trb",
+  "extensions": [
+    ".trb"
+  ],
+  "grammar": "./typerb.tmLanguage.json",
+  "license": "MIT"
+}
