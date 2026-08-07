@@ -19,13 +19,28 @@ end
 ```
 
 Functions and methods use `def` and `end`. Calls include parentheses. A
-function that returns no value omits the return annotation, but still ends its
-executed path with `return`:
+function that returns no value omits the return annotation and may either fall
+through or use a bare `return`:
 
 ```trb
 def print_name(name: String)
 	puts(name)
 	return
+end
+```
+
+A function with an explicit return type must use a value-bearing `return` on
+every path. Final expressions are not implicit returns. Complete `if` flow and
+exhaustive enum or union `case` flow can satisfy this rule without a trailing
+return after the construct:
+
+```trb
+def label(ready: Boolean): String
+	if ready
+		return "ready"
+	else
+		return "waiting"
+	end
 end
 ```
 

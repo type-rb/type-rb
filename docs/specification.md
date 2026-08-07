@@ -37,8 +37,17 @@ mode by itself does not enable them.
 - Block terminator: `end`.
 - Parentheses are never omitted in ordinary calls. Portable iterator blocks
   use `values.each do |value| ... end` syntax.
-- `return` is mandatory in method bodies.
-- No explicit `void` type notation (Go-like). Methods with no return value omit return type.
+- Functions and methods with an explicit return type must return a value on
+  every reachable path. Final expressions are not implicit returns.
+- Complete `if` flow and exhaustive enum or union `case` flow can satisfy the
+  return rule. A return inside a loop alone does not prove that the function
+  returns because initial loop analysis is conservative.
+- A terminal unresolved expression enabled by an explicit Ruby-native import
+  delegates its return behavior to Ruby and is outside this portable check.
+  Known TypeRB expressions do not gain implicit return behavior from that
+  import.
+- No explicit `void` type notation (Go-like). Methods with no return value omit
+  the return type and may fall through or use a bare `return`.
 - Outside `()`, `[]`, and `{}`, `;` is equivalent to a newline between
   complete statements. This is common syntax in every mode, so compact input
   such as `class Empty; end` has the same meaning as its multiline form.

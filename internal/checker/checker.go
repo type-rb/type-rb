@@ -183,6 +183,7 @@ type Checker struct {
 	initializing       int
 	loopDepth          int
 	moduleDepth        int
+	interfaceDepth     int
 	returns            []types.Type
 	resolution         resolver.Result
 	external           map[ast.Expression]declaration.Member
@@ -631,9 +632,11 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner, enumsAllowed: true})
 			c.moduleDepth--
 		case *ast.InterfaceStatement:
+			c.interfaceDepth++
 			for _, method := range n.Methods {
 				c.checkMethod(method, sc)
 			}
+			c.interfaceDepth--
 		case *ast.FieldStatement:
 			if n.Value != nil {
 				valueType := c.checkExpression(n.Value, sc)
@@ -1821,12 +1824,158 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		c.initializing++
 	}
 	c.checkStatements(method.Body, methodScope)
+	if c.interfaceDepth == 0 && returnType.Kind != types.Void && c.statementsFallThrough(method.Body) && !c.hasNativeImplicitReturn(method.Body) {
+		c.error(method.Span(), fmt.Sprintf("%s() must return %s on every path", method.Name, returnType))
+	}
 	if method.Name == "initialize" && c.current != nil {
 		c.initializing--
 	}
 	c.loopDepth = previousLoopDepth
 	c.returns = c.returns[:len(c.returns)-1]
 	c.classMethod = previousClassMethod
+}
+
+func (c *Checker) statementsFallThrough(statements []ast.Statement) bool {
+	for _, statement := range statements {
+		if !c.statementFallsThrough(statement) {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Checker) statementFallsThrough(statement ast.Statement) bool {
+	switch node := statement.(type) {
+	case *ast.ReturnStatement:
+		return false
+	case *ast.IfStatement:
+		if !node.HasElse || c.statementsFallThrough(node.Then) || c.statementsFallThrough(node.Else) {
+			return true
+		}
+		for _, branch := range node.ElseIf {
+			if c.statementsFallThrough(branch.Body) {
+				return true
+			}
+		}
+		return false
+	case *ast.CaseStatement:
+		return c.caseFallsThrough(node)
+	case *ast.NativeBlock:
+		return c.statementsFallThrough(node.Body)
+	case *ast.ExpressionStatement:
+		return c.expressionFallsThrough(node.Expression)
+	case *ast.VariableStatement:
+		return c.expressionFallsThrough(node.Value)
+	case *ast.AssignmentStatement:
+		return c.expressionFallsThrough(node.Value)
+	default:
+		return true
+	}
+}
+
+func (c *Checker) caseFallsThrough(node *ast.CaseStatement) bool {
+	if !c.statementsFallThrough(node.Leading) {
+		return false
+	}
+	if !node.HasElse && !c.caseCoversSelector(node) {
+		return true
+	}
+	for _, branch := range node.Branches {
+		if c.statementsFallThrough(branch.Body) {
+			return true
+		}
+	}
+	return node.HasElse && c.statementsFallThrough(node.Else)
+}
+
+func (c *Checker) caseCoversSelector(node *ast.CaseStatement) bool {
+	selectorType := c.result.Expressions[node.Value]
+	wanted := map[string]bool{}
+	if selectorType.Kind == types.Union {
+		for _, alternative := range selectorType.Args {
+			wanted[alternative.String()] = true
+		}
+		for _, branch := range node.Branches {
+			pattern := c.result.CasePatterns[branch.Value]
+			if pattern.TypeUnion && pattern.MatchType.Kind != types.Invalid {
+				delete(wanted, pattern.MatchType.String())
+			}
+		}
+	} else {
+		variants, ok := c.enumVariants(selectorType)
+		if !ok {
+			return false
+		}
+		for _, variant := range variants {
+			wanted[variant.Name] = true
+		}
+		for _, branch := range node.Branches {
+			pattern, ok := c.result.CasePatterns[branch.Value]
+			if ok {
+				delete(wanted, pattern.Variant.Name)
+			}
+		}
+	}
+	return len(wanted) == 0
+}
+
+func (c *Checker) expressionFallsThrough(expression ast.Expression) bool {
+	if expression == nil {
+		return true
+	}
+	return c.result.Expressions[expression].Kind != types.Never
+}
+
+func (c *Checker) hasNativeImplicitReturn(statements []ast.Statement) bool {
+	if !c.rubyNativeSyntax() {
+		return false
+	}
+	for index := len(statements) - 1; index >= 0; index-- {
+		switch statement := statements[index].(type) {
+		case *ast.CommentStatement, *ast.BlankStatement:
+			continue
+		case *ast.NativeStatement, *ast.NativeBlock:
+			return true
+		case *ast.ExpressionStatement:
+			return c.nativeEscapeExpression(statement.Expression)
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func (c *Checker) nativeEscapeExpression(expression ast.Expression) bool {
+	switch node := expression.(type) {
+	case *ast.NativeExpression:
+		return true
+	case *ast.Identifier:
+		_, constant := c.result.Constants[node]
+		if c.result.LexicalBindings[node] || constant {
+			return false
+		}
+		if _, ok := c.result.References[node]; ok {
+			return false
+		}
+		if _, ok := c.external[node]; ok {
+			return false
+		}
+		if c.functions[node.Name] != nil || c.current != nil && c.current.methods[node.Name] != nil {
+			return false
+		}
+		_, declared := c.declaredTypes[node.Name]
+		return !declared
+	case *ast.CallExpression:
+		return c.nativeEscapeExpression(node.Callee)
+	case *ast.MemberExpression:
+		return c.nativeEscapeExpression(node.Receiver)
+	case *ast.GenericExpression:
+		return c.nativeEscapeExpression(node.Receiver)
+	case *ast.IndexExpression:
+		return c.nativeEscapeExpression(node.Receiver)
+	default:
+		return false
+	}
 }
 
 func (c *Checker) checkTypeParameters(parameters []ast.TypeParameter) {

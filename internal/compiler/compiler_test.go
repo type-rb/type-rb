@@ -2359,6 +2359,168 @@ func TestVoidReturnTypeMustBeOmitted(t *testing.T) {
 	}
 }
 
+func TestValueReturningFunctionsMustReturnOnEveryPath(t *testing.T) {
+	invalid := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "function falls through",
+			source: `def hello(): String
+	puts("hello!")
+end
+`,
+		},
+		{
+			name: "partial conditional",
+			source: `def label(ready: Boolean): String
+	if ready
+		return "ready"
+	end
+end
+`,
+		},
+		{
+			name: "loop return is not guaranteed",
+			source: `def label(): String
+	while true
+		return "ready"
+	end
+end
+`,
+		},
+		{
+			name: "instance method falls through",
+			source: `class Greeter
+	def hello(): String
+		puts("hello!")
+	end
+end
+`,
+		},
+		{
+			name: "class method falls through",
+			source: `class Greeter
+	def self.hello(): String
+		puts("hello!")
+	end
+end
+`,
+		},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				_, err := Compile("missing_return.trb", []byte(test.source), mode)
+				if err == nil || !strings.Contains(err.Error(), "must return String on every path") {
+					t.Fatalf("%s: expected missing return diagnostic, got %v", mode, err)
+				}
+			}
+		})
+	}
+
+	valid := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "direct return",
+			source: `def hello(): String
+	return "hello!"
+end
+`,
+		},
+		{
+			name: "complete conditional",
+			source: `def label(ready: Boolean): String
+	if ready
+		return "ready"
+	else
+		return "waiting"
+	end
+end
+`,
+		},
+		{
+			name: "return after partial conditional",
+			source: `def label(ready: Boolean): String
+	if ready
+		return "ready"
+	end
+	return "waiting"
+end
+`,
+		},
+		{
+			name: "exhaustive enum case",
+			source: `enum State
+	Ready
+	Waiting
+end
+
+def label(state: State): String
+	case state
+	when State::Ready
+		return "ready"
+	when State::Waiting
+		return "waiting"
+	end
+end
+`,
+		},
+		{
+			name: "exhaustive union case",
+			source: `def label(value: Integer | String): String
+	case value
+	when Integer(number)
+		return number.to_s()
+	when String(text)
+		return text
+	end
+end
+`,
+		},
+		{
+			name: "no-value function",
+			source: `def greet()
+	puts("hello!")
+end
+`,
+		},
+	}
+	for _, test := range valid {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("complete_return.trb", []byte(test.source), mode); err != nil {
+					t.Fatalf("%s rejected complete return flow: %v", mode, err)
+				}
+			}
+		})
+	}
+}
+
+func TestValueReturnFlowKeepsRubyNativeEscapeExplicit(t *testing.T) {
+	native := []byte(`import trb/platform/ruby/native
+
+def framework_value(): Any
+	framework_call()
+end
+`)
+	if _, err := Compile("native_return.trb", native, "ruby"); err != nil {
+		t.Fatalf("explicit Ruby-native terminal expression was rejected: %v", err)
+	}
+
+	portable := []byte(`import trb/platform/ruby/native
+
+def echo(value: String): String
+	value
+end
+`)
+	if _, err := Compile("portable_return.trb", portable, "ruby"); err == nil || !strings.Contains(err.Error(), "echo() must return String on every path") {
+		t.Fatalf("portable expression incorrectly used Ruby implicit return: %v", err)
+	}
+}
+
 func TestImmutableBindingsRequireMutForReassignmentAndArrayUpdates(t *testing.T) {
 	invalid := []struct {
 		name   string
