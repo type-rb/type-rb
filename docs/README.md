@@ -20,7 +20,17 @@ larger applications.
 
 - [Current status](status.md)
 - [Roadmap](roadmap.md)
-- [Project plan](project-plan.md)
 - [Development and compiler architecture](development.md)
 - [Release process](releasing.md)
 - [Architecture decisions](decisions/)
+
+## Document ownership
+
+- `language.md` teaches implemented syntax; `specification.md` defines its
+  normative semantics.
+- `standard-library.md`, `cli.md`, and `configuration.md` are the references for
+  those public surfaces.
+- `status.md` records current capability and limitations; `roadmap.md` contains
+  future outcomes only.
+- Decision records preserve durable rationale. Scoped implementation work
+  belongs in GitHub issues rather than progress logs in this directory.

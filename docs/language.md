@@ -239,6 +239,35 @@ end
 text := identity<String>("value")
 ```
 
+## Control-flow expressions
+
+Complete `if` and exhaustive `case` constructs can produce values. An `if`
+expression always requires `else`; a `case` expression requires either an
+`else` branch or exhaustive enum/union coverage:
+
+```trb
+label := if enabled
+	"enabled"
+else
+	"disabled"
+end
+
+description := case token
+when Token::Text(value)
+	"text: " + value
+when Token::Integer(value)
+	value.to_s()
+when Token::EOF
+	"eof"
+end
+```
+
+Each branch ends with its result expression. Earlier statements in that branch
+run before the result is evaluated. Branch types must be equivalent or have a
+safe common type such as `Float` for `Integer` and `Float`; TypeRB does not
+silently fall back to `Any` or create a new union for incompatible branches.
+The statement forms remain available when no value is needed.
+
 ## Arrays, hashes, and iteration
 
 Arrays and hashes are homogeneous collections. Hash keys are non-nullable
