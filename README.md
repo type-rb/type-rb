@@ -7,6 +7,24 @@
 TypeRB is a statically typed programming language that compiles to Go, Ruby,
 and TypeScript.
 
+## Try TypeRB
+
+[A Tour of TypeRB](https://type-rb.github.io/type-rb/tour/)
+
+Learn the language through guided, executable lessons.
+
+[TypeRB Playground](https://type-rb.github.io/type-rb/play/)
+
+Write, run, format, and transpile TypeRB while switching between Go, Ruby, and
+TypeScript output.
+
+With the compiler installed, launch the same tools locally:
+
+```sh
+trb tour
+trb play
+```
+
 ## Install
 
 ```sh
@@ -14,44 +32,11 @@ brew install type-rb/tap/trb
 trb version
 ```
 
-Homebrew installs a prebuilt compiler on macOS or Linux. Install the target
-toolchain separately when you want to run generated code or manage its
-packages.
-
 To build the compiler from source, use Go 1.26:
 
 ```sh
 go install github.com/type-rb/type-rb/cmd/trb@latest
 ```
-
-## Playground
-
-Open the [hosted playground](https://type-rb.github.io/type-rb/play/) to write,
-run, format, and transpile TypeRB directly in the browser.
-
-Launch the same playground locally with the compiler installed on your
-machine:
-
-```sh
-trb play
-```
-
-Both versions switch between Go, Ruby, and TypeScript output. The hosted
-version runs the compiler on your device through WebAssembly; source code is
-not sent to a compiler service. The local command listens only on your machine.
-
-## Tour
-
-Start the [hosted tour](https://type-rb.github.io/type-rb/tour/) for a guided,
-executable introduction, or launch the same tour locally:
-
-```sh
-trb tour
-```
-
-The four chapters cover values and bindings, program structure, data and error
-modeling, and portable code across all three targets. Every lesson can be
-edited, run, formatted, and transpiled in the browser.
 
 ## REPL
 

@@ -5,6 +5,7 @@ const elements = {
 	lineNumbers: document.querySelector("#line-numbers"),
 	mode: document.querySelector("#mode"),
 	version: document.querySelector("#version"),
+	pageName: document.querySelector("#page-name"),
 	run: document.querySelector("#run-button"),
 	format: document.querySelector("#format-button"),
 	transpile: document.querySelector("#transpile-button"),
@@ -50,6 +51,11 @@ const state = {
 	completed: new Set(readJSON("trb.tour.v2.completed", [])),
 	baseline: "",
 	busy: false,
+};
+
+const pageTitles = {
+	play: "TypeRB Playground",
+	tour: "A Tour of TypeRB",
 };
 
 let runtime = null;
@@ -533,8 +539,14 @@ async function initializeTour() {
 }
 
 async function initialize() {
+	const pageTitle = pageTitles[state.page];
+	document.title = pageTitle;
+	elements.pageName.textContent = pageTitle;
 	for (const link of document.querySelectorAll("[data-page-link]")) {
-		link.classList.toggle("active", link.dataset.pageLink === state.page);
+		const active = link.dataset.pageLink === state.page;
+		link.classList.toggle("active", active);
+		if (active) link.setAttribute("aria-current", "page");
+		else link.removeAttribute("aria-current");
 	}
 	const response = await fetch(new URL("../runtime.json", document.baseURI));
 	const config = await response.json();
