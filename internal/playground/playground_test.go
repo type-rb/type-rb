@@ -23,6 +23,9 @@ func TestHandlerServesPlaygroundAndConfiguration(t *testing.T) {
 	if !strings.Contains(page.Body.String(), "TypeRB Playground") || !strings.Contains(page.Body.String(), `id="editor"`) {
 		t.Fatalf("playground markup is incomplete:\n%s", page.Body.String())
 	}
+	if !strings.Contains(page.Body.String(), `href="../" aria-label="TypeRB home"`) {
+		t.Fatalf("playground logo does not link to the site homepage:\n%s", page.Body.String())
+	}
 	if policy := page.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "connect-src 'self'") {
 		t.Fatalf("missing local-only content security policy: %q", policy)
 	}
@@ -189,6 +192,18 @@ func TestExportStaticBuildsHostIndependentSite(t *testing.T) {
 	markup := string(data)
 	if !strings.Contains(markup, `href="../assets/app.css"`) || strings.Contains(markup, `href="/assets/`) {
 		t.Fatalf("static markup is not base-path independent:\n%s", markup)
+	}
+
+	data, err = os.ReadFile(filepath.Join(output, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	landing := string(data)
+	if strings.Contains(landing, "http-equiv=\"refresh\"") || !strings.Contains(landing, `href="tour/"`) || !strings.Contains(landing, `href="play/"`) {
+		t.Fatalf("static homepage does not link to the tour and playground:\n%s", landing)
+	}
+	if strings.Index(landing, `href="tour/"`) > strings.Index(landing, `href="play/"`) {
+		t.Fatalf("static homepage should present the tour before the playground:\n%s", landing)
 	}
 
 	data, err = os.ReadFile(filepath.Join(output, "runtime.json"))

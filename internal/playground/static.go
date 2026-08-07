@@ -64,19 +64,11 @@ func ExportStatic(options StaticOptions) error {
 	if err := writeStaticJSON(options.OutputDir, "tour.json", Tour()); err != nil {
 		return err
 	}
-	return writeStaticFile(options.OutputDir, "index.html", []byte(`<!doctype html>
-<html lang="en">
-	<head>
-		<meta charset="utf-8">
-		<meta http-equiv="refresh" content="0; url=play/">
-		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<title>TypeRB Playground</title>
-	</head>
-	<body>
-		<p><a href="play/">Open the TypeRB Playground</a></p>
-	</body>
-</html>
-`))
+	landing, err := webAssets.ReadFile("assets/landing.html")
+	if err != nil {
+		return err
+	}
+	return writeStaticFile(options.OutputDir, "index.html", landing)
 }
 
 func writeStaticJSON(outputDir, name string, value any) error {
