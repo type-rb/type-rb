@@ -29,6 +29,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: ruby/setup-ruby@v1
+
       - name: Verify compiler and tour
         run: |
           go test ./...
