@@ -67,6 +67,22 @@ func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 	}
 }
 
+func TestArrayValueQueryReceiversPreserveEqualityRequirements(t *testing.T) {
+	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
+	for _, name := range []string{"include?", "count"} {
+		_, method, ok := LookupReceiverMethod(arrayType, name)
+		if !ok {
+			t.Fatalf("Array#%s is missing", name)
+		}
+		if len(method.Parameters) != 1 || method.Parameters[0].Type.String() != "String" {
+			t.Fatalf("Array#%s value parameter was not specialized: %#v", name, method.Parameters)
+		}
+		if len(method.EqualityTypes) != 1 || method.EqualityTypes[0].String() != "String" {
+			t.Fatalf("Array#%s equality requirement was not specialized: %#v", name, method.EqualityTypes)
+		}
+	}
+}
+
 func TestReceiverContractsCanConstrainCollectionArguments(t *testing.T) {
 	stringsType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
 	if _, _, ok := LookupReceiverMethod(stringsType, "join"); !ok {

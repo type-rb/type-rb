@@ -1884,6 +1884,24 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		items := append([]Value(nil), array.Items...)
 		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.arrays.contains", "trb.std.arrays.count":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.contains/count expects Array")
+		}
+		count := int64(0)
+		for _, item := range array.Items {
+			if equal(item, values[1]) {
+				count++
+			}
+		}
+		if name == "trb.std.arrays.contains" {
+			return Value{Type: typ, Data: count > 0}, nil
+		}
+		return Value{Type: typ, Data: count}, nil
 	case "trb.std.arrays.join":
 		if err := require(2); err != nil {
 			return Value{}, err

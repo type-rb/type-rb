@@ -673,6 +673,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(values) { raise IndexError, \"Array is empty\" if values.empty?; values.fetch(values.length - 1) }.call(" + arguments[0] + ")"
 	case "trb.std.arrays.copy":
 		return arguments[0] + ".dup"
+	case "trb.std.arrays.contains":
+		return arguments[0] + ".include?(" + arguments[1] + ")"
+	case "trb.std.arrays.count":
+		return arguments[0] + ".count(" + arguments[1] + ")"
 	case "trb.std.arrays.join":
 		return arguments[0] + ".join(" + arguments[1] + ")"
 	case "trb.std.arrays.pop":
