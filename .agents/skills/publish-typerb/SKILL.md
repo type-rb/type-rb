@@ -44,3 +44,12 @@ Use `<type>/<short-kebab-description>`, for example `feat/homebrew-install` or `
 7. Mark the pull request ready only when it is reviewable and required checks pass.
 
 If a needed change-type label does not exist, create it before assigning it. Keep label names identical to the prefixes above.
+
+## After merge
+
+1. Confirm the pull request merged, then switch to `main`.
+2. Fetch `origin` with pruning and fast-forward local `main` to `origin/main`.
+3. Delete the merged local head branch with `git branch -d <branch>`.
+4. Verify that local `main` is clean and synchronized.
+
+Delete only the pull request's confirmed merged branch. Never use `-D` or bulk-delete local branches as a routine post-merge step.
