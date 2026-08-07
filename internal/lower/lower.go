@@ -358,14 +358,15 @@ func (l *lowerer) ifNode(node *ast.IfStatement, expression bool) *ir.If {
 		Condition: l.expression(node.Condition),
 		HasElse:   node.HasElse,
 	}
-	result.Then, result.ThenResult = l.controlFlowBranch(node.Then, expression)
-	result.Else, result.ElseResult = l.controlFlowBranch(node.Else, expression)
+	result.Then, result.ThenResult, result.ThenDiverges = l.controlFlowBranch(node.Then, expression)
+	result.Else, result.ElseResult, result.ElseDiverges = l.controlFlowBranch(node.Else, expression)
 	for _, branch := range node.ElseIf {
-		body, branchResult := l.controlFlowBranch(branch.Body, expression)
+		body, branchResult, diverges := l.controlFlowBranch(branch.Body, expression)
 		result.ElseIf = append(result.ElseIf, ir.IfBranch{
 			Condition: l.expression(branch.Condition),
 			Body:      body,
 			Result:    branchResult,
+			Diverges:  diverges,
 		})
 	}
 	return result
@@ -384,14 +385,15 @@ func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
 		Leading:  l.statements(node.Leading),
 		HasElse:  node.HasElse,
 	}
-	result.Else, result.ElseResult = l.controlFlowBranch(node.Else, expression)
+	result.Else, result.ElseResult, result.ElseDiverges = l.controlFlowBranch(node.Else, expression)
 	for _, branch := range node.Branches {
-		body, branchResult := l.controlFlowBranch(branch.Body, expression)
+		body, branchResult, diverges := l.controlFlowBranch(branch.Body, expression)
 		lowered := ir.CaseBranch{
-			Base:   ir.Base{Span: branch.Span(), TrailingComment: branch.TrailingComment},
-			Value:  l.expression(branch.Value),
-			Body:   body,
-			Result: branchResult,
+			Base:     ir.Base{Span: branch.Span(), TrailingComment: branch.TrailingComment},
+			Value:    l.expression(branch.Value),
+			Body:     body,
+			Result:   branchResult,
+			Diverges: diverges,
 		}
 		if pattern, ok := l.checked.CasePatterns[branch.Value]; ok {
 			lowered.TypePattern = pattern.TypeUnion
@@ -409,17 +411,31 @@ func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
 	return result
 }
 
-func (l *lowerer) controlFlowBranch(body []ast.Statement, expression bool) ([]ir.Statement, ir.Expression) {
+func (l *lowerer) controlFlowBranch(body []ast.Statement, expression bool) ([]ir.Statement, ir.Expression, bool) {
 	if !expression {
-		return l.statements(body), nil
+		return l.statements(body), nil, false
 	}
 	resultIndex, result := lowerControlFlowBranchExpression(body)
 	if result == nil {
-		return l.statements(body), nil
+		return l.statements(body), nil, terminalControlFlowTransfer(body)
 	}
 	statements := l.statements(body[:resultIndex])
 	statements = append(statements, l.statements(body[resultIndex+1:])...)
-	return statements, l.expression(result)
+	return statements, l.expression(result), l.checked.Expressions[result].Kind == types.Never
+}
+
+func terminalControlFlowTransfer(body []ast.Statement) bool {
+	for index := len(body) - 1; index >= 0; index-- {
+		switch body[index].(type) {
+		case *ast.CommentStatement, *ast.BlankStatement:
+			continue
+		case *ast.ReturnStatement, *ast.BreakStatement, *ast.NextStatement:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func lowerControlFlowBranchExpression(body []ast.Statement) (int, ast.Expression) {

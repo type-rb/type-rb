@@ -213,6 +213,8 @@ func (g *generator) statement(statement ir.Statement) {
 		if g.functionDepth > 0 && !n.Constant && namedUnusedBinding(n.Name) {
 			g.line("void " + n.Name + ";")
 		}
+	case *ir.Temporary:
+		g.line("let " + n.Name + ": " + tsType(n.Type) + ";")
 	case *ir.Assignment:
 		target := g.assignmentTarget(n.Target)
 		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
@@ -744,19 +746,25 @@ func (g *generator) ifExpression(node *ir.If) string {
 	child.line("if (" + child.expr(node.Condition) + ") {" + tsTrailingComment(node.TrailingComment))
 	child.indent++
 	child.statements(node.Then)
-	child.line("return " + child.expr(node.ThenResult) + ";")
+	if !node.ThenDiverges {
+		child.line("return " + child.expr(node.ThenResult) + ";")
+	}
 	child.indent--
 	for _, branch := range node.ElseIf {
 		child.line("} else if (" + child.expr(branch.Condition) + ") {")
 		child.indent++
 		child.statements(branch.Body)
-		child.line("return " + child.expr(branch.Result) + ";")
+		if !branch.Diverges {
+			child.line("return " + child.expr(branch.Result) + ";")
+		}
 		child.indent--
 	}
 	child.line("} else {")
 	child.indent++
 	child.statements(node.Else)
-	child.line("return " + child.expr(node.ElseResult) + ";")
+	if !node.ElseDiverges {
+		child.line("return " + child.expr(node.ElseResult) + ";")
+	}
 	child.indent--
 	child.line("}")
 	child.indent--
@@ -808,14 +816,18 @@ func (g *generator) caseExpression(node *ir.Case) string {
 			}
 		}
 		child.statements(branch.Body)
-		child.line("return " + child.expr(branch.Result) + ";")
+		if !branch.Diverges {
+			child.line("return " + child.expr(branch.Result) + ";")
+		}
 		child.indent--
 	}
 	child.line("} else {")
 	child.indent++
 	if node.HasElse {
 		child.statements(node.Else)
-		child.line("return " + child.expr(node.ElseResult) + ";")
+		if !node.ElseDiverges {
+			child.line("return " + child.expr(node.ElseResult) + ";")
+		}
 	} else {
 		child.line("throw new Error(\"unreachable exhaustive case\");")
 	}

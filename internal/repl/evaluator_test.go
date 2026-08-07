@@ -236,3 +236,31 @@ func TestEvaluateIfExpression(t *testing.T) {
 		t.Fatalf("unexpected if expression result: %#v", result)
 	}
 }
+
+func TestEvaluateDivergingIfExpressionPropagatesReturn(t *testing.T) {
+	booleanType := types.FromName("Boolean")
+	stringType := types.FromName("String")
+	literal := func(kind, raw string, typ types.Type) *ir.Literal {
+		return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, typ), Kind: kind, Raw: raw}
+	}
+	ifExpression := &ir.If{
+		ExprBase:     ir.NewExprBase(token.Span{}, stringType),
+		Condition:    literal("boolean", "false", booleanType),
+		ThenResult:   literal("string", `"value"`, stringType),
+		Else:         []ir.Statement{&ir.Return{Value: literal("string", `"returned"`, stringType)}},
+		ElseDiverges: true,
+		HasElse:      true,
+	}
+
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	result, err := evaluator.Evaluate([]ir.Statement{
+		&ir.ExpressionStatement{Expression: ifExpression},
+		&ir.ExpressionStatement{Expression: literal("string", `"unreachable"`, stringType)},
+	}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Display || Inspect(result.Value) != `"returned"` || result.Value.Type.String() != "String" {
+		t.Fatalf("unexpected propagated return: %#v", result)
+	}
+}

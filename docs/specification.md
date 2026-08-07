@@ -330,18 +330,31 @@ end
 - An `if` expression must contain an `else`, even when it has one or more
   `elsif` branches. A `case` expression must be exhaustive under the ordinary
   enum or union rules; an `else` may cover the remaining alternatives.
-- Every branch must end in an expression. Blank lines and comments after that
-  expression do not change the result. Earlier statements execute within the
-  branch scope before the result expression is evaluated.
+- A branch must end in a result expression or transfer control with `return`,
+  `break`, or `next`. Blank lines and comments after the final expression or
+  transfer do not change the branch. Earlier statements execute within the
+  branch scope first. The ordinary function and loop placement rules for each
+  transfer still apply.
 - Branch result types must be equivalent or admit one safe common type. The
   checker applies the same explicit Integer-to-Float widening used by ordinary
   assignment. It does not choose `Any` or synthesize a new union merely to
-  combine incompatible branch results.
-- `return`, `break`, and `next` are not permitted inside an expression branch
-  until divergence has a target-independent type and IR representation.
-- Typed IR retains each branch result. Go and TypeScript lower expressions to
-  typed immediately invoked functions, Ruby uses its native value-producing
-  control flow, and the REPL evaluates the selected result directly.
+  combine incompatible branch results. Diverging branches are excluded from
+  this common-type calculation.
+- The checker represents divergence with the internal bottom type `Never`.
+  When every branch diverges, the control-flow expression also has `Never`;
+  otherwise its type is the common type of the value-producing branches.
+  `Never` is not a source-level type name in v0.1.
+- Typed IR records each branch result and whether that branch diverges. Go and
+  TypeScript hoist expressions containing enclosing transfers into structured
+  statements and compiler-owned temporaries, preserving the function or loop
+  that owns `return`, `break`, or `next`. Ruby uses native value-producing
+  control flow, and the REPL propagates the same transfer directly.
+- Divergence is supported in ordinary expression positions. The single-result
+  blocks of `map`, `select`, and `reduce` are still lowered as target callbacks
+  and therefore reject an enclosing `return`; explicit `each` remains the
+  portable alternative until multi-statement transformations are designed.
+  This rule does not make loops into expressions, add values to `break` or
+  `next`, or introduce additional unreachable-code diagnostics.
 
 ```trb
 label := if ready
@@ -354,7 +367,7 @@ text := case result
 when Result::Ok(value)
 	value.to_s()
 when Result::Err(error)
-	error
+	return fallback(error)
 end
 ```
 

@@ -10,6 +10,9 @@ import (
 )
 
 func Generate(program *ir.Program) ([]byte, error) {
+	if program.Mode == "go" || program.Mode == "typescript" {
+		program = normalizeDivergingControlFlow(program)
+	}
 	switch program.Mode {
 	case "ruby":
 		return []byte(ruby.Generate(program)), nil

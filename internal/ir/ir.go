@@ -167,6 +167,17 @@ type Variable struct {
 
 func (*Variable) irStatement() {}
 
+// Temporary declares an uninitialized compiler-owned local. Portable source
+// cannot construct this node; backend normalization uses it when a value-
+// producing control-flow expression must be emitted as enclosing statements.
+type Temporary struct {
+	Base
+	Name string
+	Type types.Type
+}
+
+func (*Temporary) irStatement() {}
+
 type Assignment struct {
 	Base
 	Target   Expression
@@ -202,16 +213,19 @@ type IfBranch struct {
 	Condition Expression
 	Body      []Statement
 	Result    Expression
+	Diverges  bool
 }
 type If struct {
 	ExprBase
-	Condition  Expression
-	Then       []Statement
-	ThenResult Expression
-	ElseIf     []IfBranch
-	Else       []Statement
-	ElseResult Expression
-	HasElse    bool
+	Condition    Expression
+	Then         []Statement
+	ThenResult   Expression
+	ThenDiverges bool
+	ElseIf       []IfBranch
+	Else         []Statement
+	ElseResult   Expression
+	ElseDiverges bool
+	HasElse      bool
 }
 
 func (*If) irStatement()  {}
@@ -228,6 +242,7 @@ type CaseBranch struct {
 	MatchType   types.Type
 	Body        []Statement
 	Result      Expression
+	Diverges    bool
 }
 
 type CaseBinding struct {
@@ -238,13 +253,14 @@ type CaseBinding struct {
 
 type Case struct {
 	ExprBase
-	Value      Expression
-	Leading    []Statement
-	Branches   []CaseBranch
-	Else       []Statement
-	HasElse    bool
-	TypeUnion  bool
-	ElseResult Expression
+	Value        Expression
+	Leading      []Statement
+	Branches     []CaseBranch
+	Else         []Statement
+	HasElse      bool
+	TypeUnion    bool
+	ElseResult   Expression
+	ElseDiverges bool
 }
 
 func (*Case) irStatement()  {}
@@ -325,6 +341,7 @@ type Identifier struct {
 	Name      string
 	Owner     string
 	Lexical   bool // Resolved to a lexical binding rather than a same-named member.
+	Generated bool // Compiler-owned name that must bypass source identifier rewriting.
 	Reference *Reference
 }
 

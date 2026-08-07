@@ -266,7 +266,25 @@ Each branch ends with its result expression. Earlier statements in that branch
 run before the result is evaluated. Branch types must be equivalent or have a
 safe common type such as `Float` for `Integer` and `Float`; TypeRB does not
 silently fall back to `Any` or create a new union for incompatible branches.
-The statement forms remain available when no value is needed.
+A branch may instead leave its enclosing function or loop with `return`,
+`break`, or `next`. Such a branch does not participate in the common result
+type:
+
+```trb
+value := case result
+when Result::Ok(found)
+	found
+when Result::Err(error)
+	return fallback(error)
+end
+```
+
+The ordinary placement rules still apply: `return` requires a function or
+method, while `break` and `next` require a loop. The internal `Never` type used
+to model these paths is not source syntax. A `return` inside the single-result
+block of `map`, `select`, or `reduce` remains unsupported; use explicit `each`
+when a transformation needs enclosing control flow. The statement forms remain
+available when no value is needed.
 
 ## Arrays, hashes, and iteration
 

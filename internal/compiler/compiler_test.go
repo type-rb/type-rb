@@ -946,9 +946,8 @@ end
 	wants := map[string][]string{
 		"go": {
 			"func Describe(value any) string",
-			"switch __trbCase1Value := __trbCase1.(type)",
-			"case int:",
-			"number := __trbCase1Value",
+			"if __trbCase1Value1, ok := __trbCase1.(int); ok {",
+			"number := __trbCase1Value1",
 			`[]any{1, "two"}`,
 			`map[string]any{"count": 1, "name": "Ada"}`,
 			`[]any{float64(1), 2.5, "two"}`,
@@ -1320,6 +1319,42 @@ func TestBreakAndNextRequireAnEnclosingLoop(t *testing.T) {
 	}
 }
 
+func TestDivergenceSyntaxRequiresAnExistingControlFlowOwner(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: "return 1\n", want: "return is only valid inside a function or method"},
+		{source: "def invalid(): Never\n\treturn\nend\n", want: "Never is an internal compiler type and cannot be written in source"},
+	}
+	for _, test := range tests {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			if _, err := Compile("invalid_divergence.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+			}
+		}
+	}
+}
+
+func TestCollectionTransformationRejectsEnclosingReturn(t *testing.T) {
+	source := []byte(`def invalid(values: Array<Integer>): Array<Integer>
+	return values.map do |value|
+		if value == 0
+			return []
+		else
+			value
+		end
+	end
+end
+`)
+	want := "return is not supported inside value-producing collection transformations yet"
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("invalid_transform_return.trb", source, mode); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: expected %q diagnostic, got %v", mode, want, err)
+		}
+	}
+}
+
 func TestBreakAndNextDoNotAcceptValues(t *testing.T) {
 	for _, keyword := range []string{"break", "next"} {
 		source := []byte("def invalid()\n  while true\n    " + keyword + " 1\n  end\n  return\nend\n")
@@ -1631,7 +1666,7 @@ func TestCaseExpressionDiagnosticsAreModeIndependent(t *testing.T) {
 		},
 		{
 			name:   "missing branch value",
-			source: "enum State\n\tOpen\nend\ndef value(state: State): String\n\treturn case state\n\twhen State::Open\n\t\treturn \"open\"\n\tend\nend\n",
+			source: "enum State\n\tOpen\nend\ndef value(state: State): String\n\treturn case state\n\twhen State::Open\n\t\t# no value\n\tend\nend\n",
 			want:   "case expression branch must end with an expression",
 		},
 	}
@@ -1789,7 +1824,7 @@ func TestIfExpressionDiagnosticsAreModeIndependent(t *testing.T) {
 		},
 		{
 			name:   "missing branch value",
-			source: "def value(enabled: Boolean): String\n\treturn if enabled\n\t\treturn \"on\"\n\telse\n\t\t\"off\"\n\tend\nend\n",
+			source: "def value(enabled: Boolean): String\n\treturn if enabled\n\t\t# no value\n\telse\n\t\t\"off\"\n\tend\nend\n",
 			want:   "if expression branch must end with an expression",
 		},
 	}
@@ -1823,6 +1858,97 @@ end
 		if ifExpression.ExprType().String() != "Float" || ifExpression.ThenResult.ExprType().String() != "Float" {
 			t.Fatalf("%s did not retain Float branch widening in IR: %#v", mode, ifExpression)
 		}
+	}
+}
+
+func TestDivergingControlFlowExpressionAcrossModes(t *testing.T) {
+	source := []byte(`enum Outcome
+	Found(value: String)
+	Missing(message: String)
+end
+
+def describe(outcome: Outcome): String
+	message := "result: " + case outcome
+	when Outcome::Found(value)
+		value
+	when Outcome::Missing(reason)
+		return "missing: " + reason
+	end
+	return message
+end
+
+def choose(enabled: Boolean): String
+	message := if enabled
+		"enabled"
+	else
+		return "disabled"
+	end
+	return message
+end
+
+def choose_directly(enabled: Boolean): String
+	return if enabled
+		return "left"
+	else
+		return "right"
+	end
+end
+
+def choose_nested(primary: Boolean, secondary: Boolean): String
+	message := if primary
+		if secondary
+			return "first"
+		else
+			return "second"
+		end
+	else
+		"fallback"
+	end
+	return message
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("diverging_expression.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected diverging control-flow expressions: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	for mode, wants := range map[string][]string{
+		"go":         {"var __trbValue", "return \"missing: \" + reason", "return \"disabled\""},
+		"ruby":       {"message = \"result: \" + begin", "return \"missing: \" + reason", "return \"disabled\""},
+		"typescript": {"let __trbValue", "return \"missing: \" + reason;", "return \"disabled\";"},
+	} {
+		output := string(artifacts[mode].Output)
+		for _, want := range wants {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s diverging expression is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "diverging_expression.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, artifacts["go"].Output)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated diverging expression Go did not type-check: %v\n%s", err, artifacts["go"].Output)
+	}
+
+	method := artifacts["go"].IR.Statements[1].(*ir.Method)
+	variable := method.Body[0].(*ir.Variable)
+	binary := variable.Value.(*ir.Binary)
+	caseExpression := binary.Right.(*ir.Case)
+	if !caseExpression.Branches[1].Diverges || caseExpression.Branches[1].Result != nil || caseExpression.ExprType().String() != "String" {
+		t.Fatalf("typed IR did not retain the diverging case branch: %#v", caseExpression.Branches[1])
+	}
+	allDiverge := artifacts["go"].IR.Statements[3].(*ir.Method).Body[0].(*ir.Return).Value.(*ir.If)
+	if allDiverge.ExprType().Kind != types.Never || !allDiverge.ThenDiverges || !allDiverge.ElseDiverges {
+		t.Fatalf("all-diverging if expression was not typed as Never: %#v", allDiverge)
 	}
 }
 
