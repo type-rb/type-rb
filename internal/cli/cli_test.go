@@ -102,6 +102,43 @@ func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 	}
 }
 
+func TestReplRejectsValueReturningFunctionThatFallsThrough(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-return-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := `def hello2(): String
+	puts("hello!")
+end
+def hello2(): String
+	return "hello!"
+end
+hello2()
+:quit
+`
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if want := "\"hello!\" : String\n"; stdout.String() != want {
+		t.Fatalf("unexpected REPL output\nwant:\n%s\ngot:\n%s", want, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "hello2() must return String on every path") {
+		t.Fatalf("REPL did not reject the incomplete function:\n%s", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "nil : String") {
+		t.Fatalf("REPL evaluated an incomplete function as a String:\n%s", stdout.String())
+	}
+}
+
 func TestReplSupportsPreludeAndNamespacedPutsForAnyValue(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
