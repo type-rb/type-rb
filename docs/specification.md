@@ -18,12 +18,9 @@ Design principles:
 A project declares exactly one output mode in `trbconfig.jsonc`: `go`, `ruby`,
 or `typescript`. Source files do not contain mode declarations.
 
-Mode selection controls transpilation output and package-manager/toolchain
-integration:
-
-- Go mode generates `go.mod` and uses the Go module toolchain.
-- Ruby mode generates `Gemfile`, defaults to Ruby 4.0.6, and uses Bundler.
-- TypeScript mode generates `package.json` and uses npm in v0.1.
+Mode selection controls transpilation output and target package/toolchain
+integration. The concrete manifest and toolchain settings belong to the
+[project configuration reference](configuration.md).
 
 Mode never changes TypeRB grammar or relaxes its portable type rules. The same
 source syntax has the same meaning in every mode. Target-specific APIs,
@@ -191,12 +188,9 @@ end
 - A runnable project defines exactly one top-level `def main()`.
 - `main` is a language convention and is not configurable in
   `trbconfig.jsonc`.
-- `trb run` compiles the project before every execution; a preceding
-  `trb build` is not required.
-- `trb build` emits generated target source. In Go mode,
-  `trb build --compile` instead invokes the Go toolchain and emits an
-  executable, using temporary generated source.
 - Projects intended only as libraries may omit `main`.
+
+Build and execution behavior belongs to the [CLI reference](cli.md).
 
 ### 3.9 Boolean Conditions
 
@@ -265,13 +259,6 @@ end
   a value that violates the original Hash type.
 - Updating an entry requires a `mut` receiver. `hash[key] = value` may insert
   or replace an entry and checks both key and value types.
-- `hash.delete(key)` is a strict destructive removal. It requires `mut`,
-  returns the removed value, and raises a runtime error when the key is absent.
-- `hash.merge(other)` returns a new shallow Hash and leaves both inputs
-  unchanged. `hash.update(other)` applies the same right-hand-wins rule to its
-  receiver, requires `mut`, and has no return value. Existing Hash arguments
-  must have exactly the same `K` and `V`; a fresh literal may still be checked
-  contextually against that exact type.
 - `hash.each do |key, value| ... end` binds a `K` key and its `V` value through
   structured iteration IR. It requires exactly two block parameters and has
   the same `break`, `next`, and enclosing-method `return` behavior as Array
@@ -279,8 +266,7 @@ end
   block call, while enumeration order is unspecified. Hash `each.with_index`,
   `each_slice`, `map`, `select`, and `reduce` are not enabled in v0.1.
 - `hash[key]` is a required lookup and raises a runtime error when the key is
-  absent in every backend and the REPL. A future optional lookup API will
-  return a nullable/optional value explicitly.
+  absent in every backend and the REPL.
 - Compound assignment to a Hash entry is reserved until its evaluate-once and
   missing-key behavior is represented directly in typed IR. Write
   `hash[key] = hash[key] + value` in v0.1.
@@ -290,6 +276,9 @@ retains the alternatives of heterogeneous collection values, while a future
 Tuple retains the type of each array-like position and a `record` retains the
 type of each named field. `Array<Integer | String>[0]` therefore remains
 `Integer | String`; exact constant-index inference belongs to Tuple.
+
+The complete collection receiver and package API belongs to the
+[standard-library reference](standard-library.md).
 
 ### 3.13 Enums, payloads, and exhaustive case
 
