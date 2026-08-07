@@ -141,6 +141,8 @@ func (g *generator) statement(statement ir.Statement) {
 		g.method(n, nil)
 	case *ir.Variable:
 		g.line(n.Name+" = "+g.expr(n.Value), n.TrailingComment)
+	case *ir.Temporary:
+		g.line(n.Name+" = nil", n.TrailingComment)
 	case *ir.Assignment:
 		target := g.assignmentTarget(n.Target)
 		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
@@ -524,19 +526,25 @@ func (g *generator) ifExpression(node *ir.If) string {
 	child.line("if "+child.expr(node.Condition), node.TrailingComment)
 	child.indent++
 	child.statements(node.Then)
-	child.line(child.expr(node.ThenResult), "")
+	if node.ThenResult != nil {
+		child.line(child.expr(node.ThenResult), "")
+	}
 	child.indent--
 	for _, branch := range node.ElseIf {
 		child.line("elsif "+child.expr(branch.Condition), "")
 		child.indent++
 		child.statements(branch.Body)
-		child.line(child.expr(branch.Result), "")
+		if branch.Result != nil {
+			child.line(child.expr(branch.Result), "")
+		}
 		child.indent--
 	}
 	child.line("else", "")
 	child.indent++
 	child.statements(node.Else)
-	child.line(child.expr(node.ElseResult), "")
+	if node.ElseResult != nil {
+		child.line(child.expr(node.ElseResult), "")
+	}
 	child.indent--
 	child.line("end", "")
 	child.indent--
@@ -586,14 +594,18 @@ func (g *generator) caseExpression(node *ir.Case) string {
 			child.line(binding.Name+" = "+bindingValue, "")
 		}
 		child.statements(branch.Body)
-		child.line(child.expr(branch.Result), "")
+		if branch.Result != nil {
+			child.line(child.expr(branch.Result), "")
+		}
 		child.indent--
 	}
 	child.line("else", "")
 	child.indent++
 	if node.HasElse {
 		child.statements(node.Else)
-		child.line(child.expr(node.ElseResult), "")
+		if node.ElseResult != nil {
+			child.line(child.expr(node.ElseResult), "")
+		}
 	} else {
 		child.line(`raise "unreachable exhaustive case"`, "")
 	}

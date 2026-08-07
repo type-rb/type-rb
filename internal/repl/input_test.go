@@ -146,3 +146,17 @@ func TestTerminalReaderUsesMultilineAwareHistoryNavigation(t *testing.T) {
 		}
 	}
 }
+
+func TestCompleteTracksValueProducingControlFlow(t *testing.T) {
+	for _, source := range []string{
+		"value := if enabled\n\t1",
+		"def value(result: Result<Integer, String>): Integer\n\treturn case result\n\twhen Result::Ok(value)\n\t\tvalue\n\tend",
+	} {
+		if Complete(source) {
+			t.Fatalf("value-producing control flow should be incomplete: %q", source)
+		}
+		if !Complete(source + "\nend") {
+			t.Fatalf("closed value-producing control flow should be complete: %q", source)
+		}
+	}
+}

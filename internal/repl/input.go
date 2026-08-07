@@ -36,7 +36,7 @@ func Complete(source string) bool {
 		}
 		if lineStart && item.Kind == token.Identifier {
 			switch item.Lexeme {
-			case "class", "record", "enum", "module", "interface", "def", "if", "case", "while":
+			case "class", "record", "enum", "module", "interface", "def", "while":
 				blocks++
 				lineOpenedBlock = true
 			case "end":
@@ -44,6 +44,10 @@ func Complete(source string) bool {
 					blocks--
 				}
 			}
+		}
+		if item.Kind == token.Identifier && (item.Lexeme == "if" || item.Lexeme == "case") {
+			blocks++
+			lineOpenedBlock = true
 		}
 		if item.Lexeme == "do" && len(delimiters) == 0 && !lineOpenedBlock {
 			blocks++

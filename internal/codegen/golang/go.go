@@ -189,6 +189,8 @@ func (g *generator) statement(statement ir.Statement) {
 				g.line("_ = " + name)
 			}
 		}
+	case *ir.Temporary:
+		g.line("var " + n.Name + " " + g.goType(n.Type))
 	case *ir.Assignment:
 		target := g.assignmentTarget(n.Target)
 		switch n.Operator {
@@ -299,14 +301,16 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 	g.statements(node.Leading)
 	g.temporary++
 	value := "__trbCase" + strconv.Itoa(g.temporary)
-	typed := value + "Value"
 	g.line("{")
 	g.indent++
 	g.line(value + " := " + g.expr(node.Value) + goTrailingComment(node.TrailingComment))
-	g.line("switch " + typed + " := " + value + ".(type) {")
-	g.indent++
-	for _, branch := range node.Branches {
-		g.line("case " + g.goType(branch.MatchType) + ":" + goTrailingComment(branch.TrailingComment))
+	for index, branch := range node.Branches {
+		typed := value + "Value" + strconv.Itoa(index+1)
+		header := "if "
+		if index > 0 {
+			header = "} else if "
+		}
+		g.line(header + typed + ", ok := " + value + ".(" + g.goType(branch.MatchType) + "); ok {" + goTrailingComment(branch.TrailingComment))
 		g.indent++
 		for _, binding := range branch.Bindings {
 			if binding.Name == "_" {
@@ -321,15 +325,13 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 		g.statements(branch.Body)
 		g.indent--
 	}
-	g.line("default:")
+	g.line("} else {")
 	g.indent++
 	if node.HasElse {
-		g.line("_ = " + typed)
 		g.statements(node.Else)
 	} else {
 		g.line("panic(\"unreachable exhaustive case\")")
 	}
-	g.indent--
 	g.indent--
 	g.line("}")
 	g.indent--
@@ -748,6 +750,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Case:
 		return g.caseExpression(n)
 	case *ir.Identifier:
+		if n.Generated {
+			return n.Name
+		}
 		if strings.HasPrefix(n.Name, "@") {
 			return "self." + goFieldName(n.Name)
 		}
@@ -973,19 +978,25 @@ func (g *generator) ifExpression(node *ir.If) string {
 	child.line("if " + child.expr(node.Condition) + " {" + goTrailingComment(node.TrailingComment))
 	child.indent++
 	child.statements(node.Then)
-	child.line("return " + child.expr(node.ThenResult))
+	if !node.ThenDiverges {
+		child.line("return " + child.expr(node.ThenResult))
+	}
 	child.indent--
 	for _, branch := range node.ElseIf {
 		child.line("} else if " + child.expr(branch.Condition) + " {")
 		child.indent++
 		child.statements(branch.Body)
-		child.line("return " + child.expr(branch.Result))
+		if !branch.Diverges {
+			child.line("return " + child.expr(branch.Result))
+		}
 		child.indent--
 	}
 	child.line("} else {")
 	child.indent++
 	child.statements(node.Else)
-	child.line("return " + child.expr(node.ElseResult))
+	if !node.ElseDiverges {
+		child.line("return " + child.expr(node.ElseResult))
+	}
 	child.indent--
 	child.line("}")
 	child.indent--
@@ -1035,7 +1046,9 @@ func (g *generator) caseExpression(node *ir.Case) string {
 				}
 			}
 			child.statements(branch.Body)
-			child.line("return " + child.expr(branch.Result))
+			if !branch.Diverges {
+				child.line("return " + child.expr(branch.Result))
+			}
 			child.indent--
 		}
 		child.line("default:")
@@ -1043,7 +1056,9 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		if node.HasElse {
 			child.line("_ = " + typed)
 			child.statements(node.Else)
-			child.line("return " + child.expr(node.ElseResult))
+			if !node.ElseDiverges {
+				child.line("return " + child.expr(node.ElseResult))
+			}
 		} else {
 			child.line("panic(\"unreachable exhaustive case\")")
 		}
@@ -1074,14 +1089,18 @@ func (g *generator) caseExpression(node *ir.Case) string {
 				}
 			}
 			child.statements(branch.Body)
-			child.line("return " + child.expr(branch.Result))
+			if !branch.Diverges {
+				child.line("return " + child.expr(branch.Result))
+			}
 			child.indent--
 		}
 		child.line("} else {")
 		child.indent++
 		if node.HasElse {
 			child.statements(node.Else)
-			child.line("return " + child.expr(node.ElseResult))
+			if !node.ElseDiverges {
+				child.line("return " + child.expr(node.ElseResult))
+			}
 		} else {
 			child.line("panic(\"unreachable exhaustive case\")")
 		}

@@ -804,6 +804,151 @@ end
 	}
 }
 
+func TestDivergingControlFlowExpressionsAcrossAvailableBackendsAndREPL(t *testing.T) {
+	definitions := `enum Outcome
+	Found(value: String)
+	Missing
+end
+
+def describe(outcome: Outcome): String
+	value := case outcome
+	when Outcome::Found(found)
+		found
+	when Outcome::Missing
+		return "missing"
+	end
+	return "found: " + value
+end
+
+def stop_before_two(): String
+	mut result := ""
+	[1, 2, 3].each do |number|
+		value := if number == 2
+			break
+		else
+			number.to_s()
+		end
+		result += value
+	end
+	return result
+end
+
+def skip_two(): String
+	mut result := ""
+	[1, 2, 3].each do |number|
+		value := if number == 2
+			next
+		else
+			number.to_s()
+		end
+		result += value
+	end
+	return result
+end
+
+def nested_choice(primary: Boolean, secondary: Boolean): String
+	value := if primary
+		if secondary
+			return "first"
+		else
+			return "second"
+		end
+	else
+		"fallback"
+	end
+	return value
+end
+
+def stop_on_string(values: Array<Integer | String>): String
+	mut result := ""
+	values.each do |value|
+		text := case value
+		when Integer(number)
+			number.to_s()
+		when String(_text)
+			break
+		end
+		result += text
+	end
+	return result
+end
+`
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/diverging-control-flow-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		replInput := definitions + `describe(Outcome::Found("Ada"))
+describe(Outcome::Missing)
+stop_before_two()
+skip_two()
+nested_choice(true, false)
+nested_choice(false, false)
+stop_on_string([1, "stop", 2])
+:quit
+`
+		var replStdout, replStderr bytes.Buffer
+		replCommand := &CLI{Stdin: strings.NewReader(replInput), Stdout: &replStdout, Stderr: &replStderr}
+		if status := replCommand.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s REPL status=%d stderr=%s", mode, status, replStderr.String())
+		}
+		replWant := "\"found: Ada\" : String\n\"missing\" : String\n\"1\" : String\n\"13\" : String\n\"second\" : String\n\"fallback\" : String\n\"1\" : String\n"
+		if replStdout.String() != replWant || replStderr.Len() != 0 {
+			t.Fatalf("unexpected %s diverging REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, replWant, replStdout.String(), replStderr.String())
+		}
+
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby diverging run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript diverging run")
+				continue
+			}
+		}
+		source := definitions + `
+def main()
+	puts(describe(Outcome::Found("Ada")))
+	puts(describe(Outcome::Missing))
+	puts(stop_before_two())
+	puts(skip_two())
+	puts(nested_choice(true, false))
+	puts(nested_choice(false, false))
+	puts(stop_on_string([1, "stop", 2]))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "found: Ada\nmissing\n1\n13\nsecond\nfallback\n1\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s diverging output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestReplRejectsPlatformPackageForConfiguredModeAndContinues(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

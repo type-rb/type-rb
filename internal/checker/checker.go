@@ -391,6 +391,10 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 		}
 		return
 	}
+	if ref.Name == "Never" {
+		c.error(ref.Span(), "Never is an internal compiler type and cannot be written in source")
+		return
+	}
 	for _, argument := range ref.Arguments {
 		c.validateTypeReference(argument)
 	}
@@ -724,7 +728,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			if n.Value != nil {
 				actual = c.checkExpression(n.Value, sc)
 			}
-			if len(c.returns) > 0 {
+			if len(c.returns) == 0 {
+				c.error(n.Span(), "return is only valid inside a function or method")
+			} else {
 				expected := c.returns[len(c.returns)-1]
 				actual = c.contextualizeCollectionLiteral(n.Value, expected, actual)
 				if !c.assignable(n.Value, expected, actual) {
@@ -859,7 +865,7 @@ func (c *Checker) checkUnusedImports(statements []ast.Statement) {
 
 func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, construct string) {
 	typ := c.checkExpression(expression, sc)
-	if typ.Kind == types.Invalid || typ.Kind == types.Bool && !typ.Nullable {
+	if typ.Kind == types.Invalid || typ.Kind == types.Never || typ.Kind == types.Bool && !typ.Nullable {
 		return
 	}
 	if typ.Kind == types.Any && c.mode == "ruby" && c.resolution.NativeSyntax {
@@ -1075,11 +1081,11 @@ func (c *Checker) checkControlFlowBranch(body []ast.Statement, sc *scope, span t
 	resultIndex, result := controlFlowBranchExpression(body)
 	if result == nil {
 		c.checkStatements(body, sc)
+		if terminalControlFlowTransfer(body) != nil {
+			return &controlFlowBranchResult{typ: types.Type{Kind: types.Never, Name: "Never"}}
+		}
 		c.error(span, fmt.Sprintf("%s expression branch must end with an expression", construct))
 		return &controlFlowBranchResult{typ: invalidType()}
-	}
-	if transfer := controlFlowBranchTransfer(body); transfer != nil {
-		c.error(transfer.Span(), fmt.Sprintf("%s expression branch cannot contain return, break, or next", construct))
 	}
 	c.checkStatementSequence(body[:resultIndex], sc)
 	typ := c.checkExpression(result, sc)
@@ -1088,40 +1094,15 @@ func (c *Checker) checkControlFlowBranch(body []ast.Statement, sc *scope, span t
 	return &controlFlowBranchResult{expression: result, typ: typ}
 }
 
-func controlFlowBranchTransfer(body []ast.Statement) ast.Statement {
-	for _, statement := range body {
-		switch node := statement.(type) {
+func terminalControlFlowTransfer(body []ast.Statement) ast.Statement {
+	for index := len(body) - 1; index >= 0; index-- {
+		switch statement := body[index].(type) {
+		case *ast.CommentStatement, *ast.BlankStatement:
+			continue
 		case *ast.ReturnStatement, *ast.BreakStatement, *ast.NextStatement:
 			return statement
-		case *ast.IfStatement:
-			groups := [][]ast.Statement{node.Then, node.Else}
-			for _, branch := range node.ElseIf {
-				groups = append(groups, branch.Body)
-			}
-			for _, group := range groups {
-				if transfer := controlFlowBranchTransfer(group); transfer != nil {
-					return transfer
-				}
-			}
-		case *ast.CaseStatement:
-			for _, branch := range node.Branches {
-				if transfer := controlFlowBranchTransfer(branch.Body); transfer != nil {
-					return transfer
-				}
-			}
-			if transfer := controlFlowBranchTransfer(node.Else); transfer != nil {
-				return transfer
-			}
-		case *ast.WhileStatement:
-			if transfer := controlFlowBranchTransfer(node.Body); transfer != nil {
-				return transfer
-			}
-		case *ast.ExpressionStatement:
-			if iteration, ok := node.Expression.(*ast.IterationExpression); ok && iteration.Block != nil {
-				if transfer := controlFlowBranchTransfer(iteration.Block.Body); transfer != nil {
-					return transfer
-				}
-			}
+		default:
+			return nil
 		}
 	}
 	return nil
@@ -1149,6 +1130,16 @@ func (c *Checker) controlFlowResultType(construct string, span token.Span, resul
 		c.error(span, fmt.Sprintf("%s expression has no value-producing branches", construct))
 		return invalidType()
 	}
+	valueResults := make([]controlFlowBranchResult, 0, len(results))
+	for _, result := range results {
+		if result.typ.Kind != types.Never {
+			valueResults = append(valueResults, result)
+		}
+	}
+	if len(valueResults) == 0 {
+		return types.Type{Kind: types.Never, Name: "Never"}
+	}
+	results = valueResults
 	common := results[0].typ
 	compatible := common.Kind != types.Invalid
 	for index := 1; index < len(results); index++ {
@@ -1584,6 +1575,9 @@ func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand t
 	if operand.Kind == types.Invalid {
 		return invalidType()
 	}
+	if operand.Kind == types.Never {
+		return types.Type{Kind: types.Never, Name: "Never"}
+	}
 	if operand.Kind == types.Any && c.rubyNativeSyntax() {
 		if operator == "!" || operator == "not" {
 			return types.FromName("Boolean")
@@ -1616,6 +1610,18 @@ func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand t
 func (c *Checker) checkBinaryOperator(span token.Span, operator string, left, right types.Type) types.Type {
 	if left.Kind == types.Invalid || right.Kind == types.Invalid {
 		return invalidType()
+	}
+	if left.Kind == types.Never {
+		return types.Type{Kind: types.Never, Name: "Never"}
+	}
+	if right.Kind == types.Never {
+		if operator == "&&" || operator == "||" || operator == "and" || operator == "or" {
+			if isNonNullable(left, types.Bool) {
+				return types.FromName("Boolean")
+			}
+		} else {
+			return types.Type{Kind: types.Never, Name: "Never"}
+		}
 	}
 	if c.rubyNativeSyntax() && (left.Kind == types.Any || right.Kind == types.Any) {
 		switch operator {
@@ -2232,12 +2238,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.RangeExpression:
 		start := c.checkExpression(n.Start, sc)
 		end := c.checkExpression(n.End, sc)
-		if start.Kind != types.Int || end.Kind != types.Int {
+		if start.Kind == types.Never || end.Kind == types.Never {
+			typ = types.Type{Kind: types.Never, Name: "Never"}
+		} else if start.Kind != types.Int || end.Kind != types.Int {
 			c.error(n.Span(), fmt.Sprintf("range endpoints must be Integer, got %s and %s", start, end))
+		} else {
+			typ = types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}
 		}
-		typ = types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}
 	case *ast.IterationExpression:
 		sourceType := c.checkExpression(n.Source, sc)
+		if sourceType.Kind == types.Never {
+			typ = types.Type{Kind: types.Never, Name: "Never"}
+			break
+		}
 		elementType, iterable := iterableElementType(sourceType)
 		hashSource := sourceType.Kind == types.Hash && len(sourceType.Args) == 2
 		if hashSource {
@@ -2346,6 +2359,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.checkStatements(n.Block.Body, blockScope)
 				}
 				if resultExpression != nil {
+					if transfer := expressionReturn(resultExpression); transfer != nil {
+						c.error(transfer.Span(), "return is not supported inside value-producing collection transformations yet")
+					}
 					blockType = c.result.Expressions[resultExpression]
 				}
 				c.result.Expressions[n.Block] = blockType
@@ -2387,6 +2403,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = application.ReturnType
 	case *ast.MemberExpression:
 		receiverType := c.checkExpression(n.Receiver, sc)
+		if receiverType.Kind == types.Never {
+			typ = types.Type{Kind: types.Never, Name: "Never"}
+			break
+		}
 		if c.enumPattern > 0 && receiverType.Name == c.enumPatternType.Name && len(receiverType.Args) == 0 {
 			receiverType = c.enumPatternType
 			c.result.Expressions[n.Receiver] = receiverType
@@ -2600,7 +2620,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.IndexExpression:
 		receiver := c.checkExpression(n.Receiver, sc)
 		indexType := c.checkExpression(n.Index, sc)
-		if receiver.Kind == types.Array && len(receiver.Args) > 0 {
+		if receiver.Kind == types.Never || indexType.Kind == types.Never {
+			typ = types.Type{Kind: types.Never, Name: "Never"}
+		} else if receiver.Kind == types.Array && len(receiver.Args) > 0 {
 			if indexType.Kind != types.Int || indexType.Nullable {
 				c.error(n.Index.Span(), fmt.Sprintf("Array index must be Integer, got %s", indexType))
 			}
@@ -2635,6 +2657,124 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	}
 	c.result.Expressions[expression] = typ
 	return typ
+}
+
+func expressionReturn(expression ast.Expression) ast.Statement {
+	if expression == nil {
+		return nil
+	}
+	switch node := expression.(type) {
+	case *ast.IfStatement:
+		if result := expressionReturn(node.Condition); result != nil {
+			return result
+		}
+		groups := [][]ast.Statement{node.Then, node.Else}
+		for _, branch := range node.ElseIf {
+			groups = append(groups, branch.Body)
+		}
+		for _, group := range groups {
+			if result := statementsReturn(group); result != nil {
+				return result
+			}
+		}
+	case *ast.CaseStatement:
+		if result := expressionReturn(node.Value); result != nil {
+			return result
+		}
+		for _, branch := range node.Branches {
+			if result := statementsReturn(branch.Body); result != nil {
+				return result
+			}
+		}
+		return statementsReturn(node.Else)
+	case *ast.InterpolatedString:
+		for _, part := range node.Parts {
+			if result := expressionReturn(part.Expression); result != nil {
+				return result
+			}
+		}
+	case *ast.ArrayLiteral:
+		for _, element := range node.Elements {
+			if result := expressionReturn(element); result != nil {
+				return result
+			}
+		}
+	case *ast.HashLiteral:
+		for _, entry := range node.Entries {
+			if result := expressionReturn(entry.Key); result != nil {
+				return result
+			}
+			if result := expressionReturn(entry.Value); result != nil {
+				return result
+			}
+		}
+	case *ast.UnaryExpression:
+		return expressionReturn(node.Operand)
+	case *ast.BinaryExpression:
+		if result := expressionReturn(node.Left); result != nil {
+			return result
+		}
+		return expressionReturn(node.Right)
+	case *ast.RangeExpression:
+		if result := expressionReturn(node.Start); result != nil {
+			return result
+		}
+		return expressionReturn(node.End)
+	case *ast.CallExpression:
+		if result := expressionReturn(node.Callee); result != nil {
+			return result
+		}
+		for _, argument := range node.Arguments {
+			if result := expressionReturn(argument.Value); result != nil {
+				return result
+			}
+		}
+		if node.Block != nil {
+			return statementsReturn(node.Block.Body)
+		}
+	case *ast.GenericExpression:
+		return expressionReturn(node.Receiver)
+	case *ast.MemberExpression:
+		return expressionReturn(node.Receiver)
+	case *ast.IndexExpression:
+		if result := expressionReturn(node.Receiver); result != nil {
+			return result
+		}
+		return expressionReturn(node.Index)
+	case *ast.BlockExpression:
+		return statementsReturn(node.Body)
+	}
+	return nil
+}
+
+func statementsReturn(statements []ast.Statement) ast.Statement {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ast.ReturnStatement:
+			return node
+		case *ast.ExpressionStatement:
+			if result := expressionReturn(node.Expression); result != nil {
+				return result
+			}
+		case *ast.IfStatement:
+			if result := expressionReturn(node); result != nil {
+				return result
+			}
+		case *ast.CaseStatement:
+			if result := expressionReturn(node); result != nil {
+				return result
+			}
+		case *ast.WhileStatement:
+			if result := statementsReturn(node.Body); result != nil {
+				return result
+			}
+		case *ast.NativeBlock:
+			if result := statementsReturn(node.Body); result != nil {
+				return result
+			}
+		}
+	}
+	return nil
 }
 
 func (c *Checker) inferCollectionType(expressions []ast.Expression, sc *scope) types.Type {
@@ -2852,7 +2992,7 @@ func isReferenceType(typ types.Type) bool {
 }
 
 func portableHashKey(typ types.Type) bool {
-	return !typ.Nullable && (typ.Kind == types.String || typ.Kind == types.Int)
+	return typ.Kind == types.Never || !typ.Nullable && (typ.Kind == types.String || typ.Kind == types.Int)
 }
 
 func (c *Checker) contextualizeCollectionLiteral(expression ast.Expression, expected, actual types.Type) types.Type {

@@ -296,6 +296,14 @@ type flowResult struct {
 	Loop     loopFlow
 }
 
+type controlTransfer struct {
+	flow flowResult
+}
+
+func (*controlTransfer) Error() string {
+	return "control transfer from a value-producing branch"
+}
+
 type loopFlow uint8
 
 const (
@@ -312,6 +320,10 @@ func (e *Evaluator) evaluate(statements []ir.Statement, module string, sc *scope
 		}
 		result, err := e.statement(statement, module, sc)
 		if err != nil {
+			var transfer *controlTransfer
+			if errors.As(err, &transfer) {
+				return transfer.flow, nil
+			}
 			return flowResult{}, err
 		}
 		if result.Display || result.Returned {
@@ -532,7 +544,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		if flow.Returned || flow.Loop != loopNone {
-			return Value{}, fmt.Errorf("control transfer from an if expression branch is not supported")
+			return Value{}, &controlTransfer{flow: flow}
 		}
 		if result == nil {
 			return Value{}, fmt.Errorf("if expression branch has no result")
@@ -548,7 +560,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		if flow.Returned || flow.Loop != loopNone {
-			return Value{}, fmt.Errorf("control transfer from a case expression branch is not supported")
+			return Value{}, &controlTransfer{flow: flow}
 		}
 		if result == nil {
 			return Value{}, fmt.Errorf("case expression branch has no result")

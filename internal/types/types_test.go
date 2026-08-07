@@ -69,6 +69,23 @@ func TestCommonTypeUsesPortableNumericWidening(t *testing.T) {
 	}
 }
 
+func TestNeverIsTheInternalBottomType(t *testing.T) {
+	never := Type{Kind: Never, Name: "Never"}
+	stringType := FromName("String")
+	if !Assignable(stringType, never) {
+		t.Fatal("Never must be assignable to every value type")
+	}
+	for _, pair := range [][2]Type{{never, stringType}, {stringType, never}} {
+		common, ok := CommonType(pair[0], pair[1])
+		if !ok || !Equivalent(common, stringType) {
+			t.Fatalf("Never and String should join as String, got %s, %v", common, ok)
+		}
+	}
+	if union := UnionOf(never, stringType); !Equivalent(union, stringType) {
+		t.Fatalf("Never must not add an alternative to a union, got %s", union)
+	}
+}
+
 func TestUnionNormalizationAndAssignability(t *testing.T) {
 	integer := FromName("Integer")
 	float := FromName("Float")

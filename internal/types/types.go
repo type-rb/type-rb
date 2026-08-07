@@ -9,7 +9,10 @@ import (
 type Kind string
 
 const (
-	Invalid       Kind = "invalid"
+	Invalid Kind = "invalid"
+	// Never is the compiler-internal bottom type for expressions that cannot
+	// produce a value because control leaves the current flow.
+	Never         Kind = "never"
 	Any           Kind = "any"
 	Void          Kind = "void"
 	Bool          Kind = "bool"
@@ -102,6 +105,12 @@ func FromName(name string) Type {
 // Any: callers choose whether a missing common type is an error, a union, or a
 // dynamic boundary.
 func CommonType(left, right Type) (Type, bool) {
+	if left.Kind == Never {
+		return right, true
+	}
+	if right.Kind == Never {
+		return left, true
+	}
 	if Equivalent(left, right) {
 		return left, true
 	}
@@ -120,8 +129,13 @@ func CommonType(left, right Type) (Type, bool) {
 // because portable Integer-to-Float widening is safe.
 func UnionOf(input ...Type) Type {
 	var alternatives []Type
+	sawNever := false
 	var appendType func(Type)
 	appendType = func(candidate Type) {
+		if candidate.Kind == Never {
+			sawNever = true
+			return
+		}
 		if candidate.Kind == Any {
 			alternatives = []Type{FromName("Any")}
 			return
@@ -163,6 +177,9 @@ func UnionOf(input ...Type) Type {
 		return strings.Compare(left.String(), right.String())
 	})
 	if len(alternatives) == 0 {
+		if sawNever {
+			return Type{Kind: Never, Name: "Never"}
+		}
 		return Type{Kind: Invalid, Name: "Invalid"}
 	}
 	if len(alternatives) == 1 {
@@ -172,6 +189,9 @@ func UnionOf(input ...Type) Type {
 }
 
 func Assignable(target, value Type) bool {
+	if value.Kind == Never {
+		return true
+	}
 	if target.Kind == Any || value.Kind == Any || target.Kind == Invalid || value.Kind == Invalid {
 		return true
 	}
