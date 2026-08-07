@@ -97,6 +97,7 @@ var jsonErrorType = types.FromName("JsonError")
 var processResultType = types.FromName("ProcessResult")
 var processErrorType = types.FromName("ProcessError")
 var numberParseErrorType = types.FromName("NumberParseError")
+var hexDecodeErrorType = types.FromName("HexDecodeError")
 var indexLookupErrorType = types.FromName("IndexLookupError")
 var keyLookupErrorType = types.FromName("KeyLookupError")
 
@@ -384,6 +385,29 @@ end
 				Return: bytesType,
 			},
 			"valid_utf8": unary("valid_utf8", "trb.std.bytes.valid_utf8", bytesType, booleanType),
+		},
+	},
+	"trb/std/encoding/hex": {
+		Path:       "trb/std/encoding/hex",
+		ModulePath: "trb/std/encoding/hex/index",
+		RuntimeExports: []RuntimeExport{
+			{Name: "HexDecodeErrorKind", Kind: "enum"},
+			{Name: "HexDecodeError", Kind: "record"},
+		},
+		Source: hexSource(),
+		Kind:   Portable,
+		Symbols: map[string]Symbol{
+			"encode": unary("encode", "trb.std.encoding.hex.encode", bytesType, stringType),
+			"decode": unary("decode", "trb.std.encoding.hex.decode", stringType, structuredErrorResult(bytesType, hexDecodeErrorType)),
+		},
+	},
+	"trb/internal/encoding/hex": {
+		Path:     "trb/internal/encoding/hex",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"encode": unary("encode", "trb.std.encoding.hex.encode", bytesType, stringType),
+			"decode": unary("decode", "trb.std.encoding.hex.decode", stringType, structuredErrorResult(bytesType, hexDecodeErrorType)),
 		},
 	},
 	"trb/std/string_builder": {

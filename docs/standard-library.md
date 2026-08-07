@@ -109,6 +109,23 @@ String conversion uses UTF-8. Decoding invalid input replaces it with U+FFFD;
 call `valid_utf8()` first when invalid bytes must be rejected. Byte indexing is
 strict and concatenation is non-mutating.
 
+## Binary encoding
+
+`trb/std/encoding/hex` converts between `Bytes` and hexadecimal text:
+
+```trb
+import trb/std/encoding/hex
+
+text := hex.encode("A😀".to_bytes())
+decoded := hex.decode("41F09F9880")
+```
+
+Encoding uses lowercase ASCII. Decoding accepts uppercase or lowercase input
+and returns `Result<Bytes, HexDecodeError>`. Invalid characters and odd-length
+input are distinguished by `HexDecodeErrorKind`; the error also preserves the
+input, a zero-based character position, and a message. For odd-length input,
+the position is the missing character at the end of the string.
+
 ## StringBuilder and Unicode
 
 Use `StringBuilder` for incremental text construction:
@@ -319,6 +336,7 @@ The current portable standard library includes:
 - `trb/std/math`
 - `trb/std/booleans`
 - `trb/std/bytes`
+- `trb/std/encoding/hex`
 - `trb/std/string_builder`
 - `trb/std/unicode`
 - `trb/std/arrays`

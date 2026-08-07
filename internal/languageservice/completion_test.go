@@ -135,7 +135,7 @@ func TestCompletionDoesNotExposeImplicitRuntimeImports(t *testing.T) {
 	artifact := compile(t, "go", "missing := [1].try_fetch(9)\n")
 	service := languageservice.New("go")
 	service.Update([]*ir.Program{artifact.IR}, "repl")
-	for _, name := range []string{"Result", "IndexLookupError", "KeyLookupError", "NumberParseError"} {
+	for _, name := range []string{"Result", "IndexLookupError", "KeyLookupError", "NumberParseError", "HexDecodeError"} {
 		if _, ok := findCompletion(service.Complete(name[:3], 3), name); ok {
 			t.Fatalf("implicit runtime dependency %s was exposed as a source import", name)
 		}

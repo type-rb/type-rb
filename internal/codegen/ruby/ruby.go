@@ -694,6 +694,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "NumberParseError.new(kind: NumberParseErrorKind::" + kind + ", input: " + input + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
 	}
+	hexDecodeError := func(kind, input, index, message string) string {
+		value := "HexDecodeError.new(kind: HexDecodeErrorKind::" + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + ")"
+		return "Result::Err.new(" + value + ")"
+	}
 	indexLookupError := func(index, size, message string) string {
 		value := "IndexLookupError.new(index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
@@ -817,6 +821,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + " + " + arguments[1]
 	case "trb.std.bytes.valid_utf8":
 		return "(" + arguments[0] + ").dup.force_encoding(Encoding::UTF_8).valid_encoding?"
+	case "trb.std.encoding.hex.encode":
+		return "(" + arguments[0] + ").unpack1(\"H*\")"
+	case "trb.std.encoding.hex.decode":
+		invalid := hexDecodeError("InvalidCharacter", "input", "invalid_index", "invalid hexadecimal character")
+		odd := hexDecodeError("OddLength", "input", "characters.length", "hex input has odd length")
+		return "->(input) { characters = input.each_char.to_a; invalid_index = characters.find_index { |character| !character.match?(/\\A[0-9A-Fa-f]\\z/) }; if invalid_index; " + invalid + "; elsif characters.length.odd?; " + odd + "; else; Result::Ok.new([input].pack(\"H*\").b); end }.call(" + arguments[0] + ")"
 	case "trb.std.string_builder.new":
 		return "String.new(encoding: Encoding::UTF_8)"
 	case "trb.std.string_builder.from_string":

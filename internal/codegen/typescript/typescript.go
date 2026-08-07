@@ -965,6 +965,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "({ kind: NumberParseErrorKind." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies NumberParseError)"
 		return resultError(value)
 	}
+	hexDecodeError := func(kind, input, index, message string) string {
+		value := "({ kind: HexDecodeErrorKind." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies HexDecodeError)"
+		return resultError(value)
+	}
 	indexLookupError := func(index, size, message string) string {
 		value := "({ index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies IndexLookupError)"
 		return resultError(value)
@@ -1107,6 +1111,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "((left: Uint8Array, right: Uint8Array): Uint8Array => { const value = new Uint8Array(left.byteLength + right.byteLength); value.set(left); value.set(right, left.byteLength); return value; })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.bytes.valid_utf8":
 		return "((value: Uint8Array): boolean => { try { new TextDecoder(\"utf-8\", { fatal: true }).decode(value); return true; } catch { return false; } })(" + arguments[0] + ")"
+	case "trb.std.encoding.hex.encode":
+		return "Array.from(" + arguments[0] + ", (value) => value.toString(16).padStart(2, \"0\")).join(\"\")"
+	case "trb.std.encoding.hex.decode":
+		resultType, _, _ := filesystemResultType()
+		invalid := hexDecodeError("InvalidCharacter", "__trbInput", "__trbInvalidIndex", "invalid hexadecimal character")
+		odd := hexDecodeError("OddLength", "__trbInput", "__trbCharacters.length", "hex input has odd length")
+		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; const __trbCharacters = Array.from(__trbInput); const __trbInvalidIndex = __trbCharacters.findIndex((character) => !/^[0-9A-Fa-f]$/.test(character)); if (__trbInvalidIndex >= 0) { return " + invalid + "; } if (__trbCharacters.length % 2 !== 0) { return " + odd + "; } const __trbValue = new Uint8Array(__trbCharacters.length / 2); for (let index = 0; index < __trbCharacters.length; index += 2) { __trbValue[index / 2] = Number.parseInt(__trbCharacters[index]! + __trbCharacters[index + 1]!, 16); } return " + filesystemOK("__trbValue") + "; })()"
 	case "trb.std.string_builder.new":
 		return "[]"
 	case "trb.std.string_builder.from_string":

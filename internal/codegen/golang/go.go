@@ -1274,6 +1274,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := g.goType(types.FromName("NumberParseError")) + "{Kind: " + alias + "." + goConstantIdentifier("NumberParseErrorKind", kind) + ", Input: " + input + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
+	hexDecodeError := func(kind, input, index, message string) string {
+		alias := g.typeAliases["HexDecodeErrorKind"]
+		kindName := goConstantIdentifier("HexDecodeErrorKind", kind)
+		if alias != "" {
+			kindName = alias + "." + kindName
+		}
+		value := g.goType(types.FromName("HexDecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Index: " + index + ", Message: " + strconv.Quote(message) + "}"
+		return resultError(value)
+	}
 	indexLookupError := func(index, size, message string) string {
 		value := g.goType(types.FromName("IndexLookupError")) + "{Index: " + index + ", Size: " + size + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
@@ -1457,6 +1466,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.bytes.valid_utf8":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.Valid(" + arguments[0] + ")"
+	case "trb.std.encoding.hex.encode":
+		g.requireImport("encoding/hex", "stdhex")
+		return "stdhex.EncodeToString(" + arguments[0] + ")"
+	case "trb.std.encoding.hex.decode":
+		g.requireImport("encoding/hex", "stdhex")
+		resultType, _, _ := filesystemResultType()
+		invalid := "character < '0' || character > '9' && character < 'A' || character > 'F' && character < 'a' || character > 'f'"
+		return "func() " + resultType + " { input := " + arguments[0] + "; length := 0; for _, character := range input { if " + invalid + " { return " + hexDecodeError("InvalidCharacter", "input", "length", "invalid hexadecimal character") + " }; length++ }; if length%2 != 0 { return " + hexDecodeError("OddLength", "input", "length", "hex input has odd length") + " }; value, _ := stdhex.DecodeString(input); return " + filesystemOK("value") + " }()"
 	case "trb.std.string_builder.new":
 		g.requireImport("strings", "")
 		return "&strings.Builder{}"

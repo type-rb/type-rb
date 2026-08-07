@@ -97,6 +97,19 @@ func TestNumericReceiverAndMathContracts(t *testing.T) {
 	}
 }
 
+func TestPortableHexContract(t *testing.T) {
+	definition, ok := Lookup("trb/std/encoding/hex")
+	if !ok {
+		t.Fatal("hex package is missing")
+	}
+	if got := definition.Symbols["encode"].Return.String(); got != "String" {
+		t.Fatalf("hex.encode return=%s, want String", got)
+	}
+	if got := definition.Symbols["decode"].Return.String(); got != "Result<Bytes, HexDecodeError>" {
+		t.Fatalf("hex.decode return=%s, want Result<Bytes, HexDecodeError>", got)
+	}
+}
+
 func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
 	for _, name := range []string{"pop", "push", "shift", "unshift"} {
