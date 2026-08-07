@@ -1842,15 +1842,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.SymbolLiteral:
 		typ = types.FromName("String")
 	case *ast.ArrayLiteral:
-		element := types.Type{Kind: types.Any, Name: "Any"}
-		if len(n.Elements) > 0 {
-			element = c.checkExpression(n.Elements[0], sc)
-			for _, item := range n.Elements[1:] {
-				if current := c.checkExpression(item, sc); !types.Assignable(element, current) || !types.Assignable(current, element) {
-					element = types.Type{Kind: types.Any, Name: "Any"}
-				}
-			}
-		}
+		element := c.inferCollectionType(n.Elements, sc)
 		typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{element}}
 	case *ast.HashLiteral:
 		if len(n.Entries) == 0 {
@@ -1858,23 +1850,21 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			break
 		}
 		keyType := c.checkExpression(n.Entries[0].Key, sc)
-		valueType := c.checkExpression(n.Entries[0].Value, sc)
 		if !portableHashKey(keyType) && !c.rubyNativeSyntax() {
 			c.error(n.Entries[0].Key.Span(), fmt.Sprintf("Hash key must be String or Integer, got %s", keyType))
 		}
+		values := []ast.Expression{n.Entries[0].Value}
 		for _, entry := range n.Entries[1:] {
 			currentKey := c.checkExpression(entry.Key, sc)
-			currentValue := c.checkExpression(entry.Value, sc)
 			if !portableHashKey(currentKey) && !c.rubyNativeSyntax() {
 				c.error(entry.Key.Span(), fmt.Sprintf("Hash key must be String or Integer, got %s", currentKey))
 			}
 			if !types.Equivalent(keyType, currentKey) {
 				c.error(entry.Key.Span(), fmt.Sprintf("Hash literal key type is %s, expected %s", currentKey, keyType))
 			}
-			if !types.Equivalent(valueType, currentValue) {
-				valueType = types.FromName("Any")
-			}
+			values = append(values, entry.Value)
 		}
+		valueType := c.inferCollectionType(values, sc)
 		typ = types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{keyType, valueType}}
 	case *ast.UnaryExpression:
 		operand := c.checkExpression(n.Operand, sc)
@@ -2292,6 +2282,31 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	}
 	c.result.Expressions[expression] = typ
 	return typ
+}
+
+func (c *Checker) inferCollectionType(expressions []ast.Expression, sc *scope) types.Type {
+	if len(expressions) == 0 {
+		return types.FromName("Any")
+	}
+
+	checked := make([]types.Type, len(expressions))
+	for index, expression := range expressions {
+		checked[index] = c.checkExpression(expression, sc)
+	}
+
+	common := checked[0]
+	for _, current := range checked[1:] {
+		joined, ok := types.CommonType(common, current)
+		if !ok {
+			common = types.FromName("Any")
+			break
+		}
+		common = joined
+	}
+	for index, expression := range expressions {
+		c.recordAssignableConversion(expression, common, checked[index])
+	}
+	return common
 }
 
 func iterableElementType(typ types.Type) (types.Type, bool) {
