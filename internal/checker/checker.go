@@ -271,32 +271,96 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement) {
 			}
 		case *ast.FieldStatement:
 			c.validateTypeReference(node.Type)
+			c.validateExpressionTypeReferences(node.Value)
 		case *ast.MethodStatement:
 			c.validateMethodTypes(node)
 			c.validateTypeReferences(node.Body)
 		case *ast.VariableStatement:
 			c.validateTypeReference(node.Type)
+			c.validateExpressionTypeReferences(node.Value)
+		case *ast.AssignmentStatement:
+			c.validateExpressionTypeReferences(node.Target)
+			c.validateExpressionTypeReferences(node.Value)
+		case *ast.ReturnStatement:
+			c.validateExpressionTypeReferences(node.Value)
 		case *ast.IfStatement:
+			c.validateExpressionTypeReferences(node.Condition)
 			c.validateTypeReferences(node.Then)
 			for _, branch := range node.ElseIf {
 				c.validateTypeReferences(branch.Body)
 			}
 			c.validateTypeReferences(node.Else)
 		case *ast.CaseStatement:
+			c.validateExpressionTypeReferences(node.Value)
 			c.validateTypeReferences(node.Leading)
 			for _, branch := range node.Branches {
 				c.validateTypeReferences(branch.Body)
 			}
 			c.validateTypeReferences(node.Else)
 		case *ast.WhileStatement:
+			c.validateExpressionTypeReferences(node.Condition)
 			c.validateTypeReferences(node.Body)
 		case *ast.ExpressionStatement:
-			if iteration, ok := node.Expression.(*ast.IterationExpression); ok && iteration.Block != nil {
-				c.validateTypeReferences(iteration.Block.Body)
-			}
+			c.validateExpressionTypeReferences(node.Expression)
 		case *ast.NativeBlock:
 			c.validateTypeReferences(node.Body)
 		}
+	}
+}
+
+func (c *Checker) validateExpressionTypeReferences(expression ast.Expression) {
+	switch node := expression.(type) {
+	case nil:
+		return
+	case *ast.CaseStatement:
+		c.validateExpressionTypeReferences(node.Value)
+		c.validateTypeReferences(node.Leading)
+		for _, branch := range node.Branches {
+			c.validateExpressionTypeReferences(branch.Value)
+			c.validateTypeReferences(branch.Body)
+		}
+		c.validateTypeReferences(node.Else)
+	case *ast.IterationExpression:
+		c.validateExpressionTypeReferences(node.Source)
+		c.validateExpressionTypeReferences(node.SliceSize)
+		c.validateExpressionTypeReferences(node.Initial)
+		if node.Block != nil {
+			c.validateTypeReferences(node.Block.Body)
+		}
+	case *ast.ArrayLiteral:
+		for _, element := range node.Elements {
+			c.validateExpressionTypeReferences(element)
+		}
+	case *ast.HashLiteral:
+		for _, entry := range node.Entries {
+			c.validateExpressionTypeReferences(entry.Key)
+			c.validateExpressionTypeReferences(entry.Value)
+		}
+	case *ast.UnaryExpression:
+		c.validateExpressionTypeReferences(node.Operand)
+	case *ast.BinaryExpression:
+		c.validateExpressionTypeReferences(node.Left)
+		c.validateExpressionTypeReferences(node.Right)
+	case *ast.RangeExpression:
+		c.validateExpressionTypeReferences(node.Start)
+		c.validateExpressionTypeReferences(node.End)
+	case *ast.CallExpression:
+		c.validateExpressionTypeReferences(node.Callee)
+		for _, argument := range node.Arguments {
+			c.validateExpressionTypeReferences(argument.Value)
+		}
+	case *ast.MemberExpression:
+		c.validateExpressionTypeReferences(node.Receiver)
+	case *ast.GenericExpression:
+		c.validateExpressionTypeReferences(node.Receiver)
+		for _, argument := range node.Arguments {
+			c.validateTypeReference(argument)
+		}
+	case *ast.IndexExpression:
+		c.validateExpressionTypeReferences(node.Receiver)
+		c.validateExpressionTypeReferences(node.Index)
+	case *ast.BlockExpression:
+		c.validateTypeReferences(node.Body)
 	}
 }
 
@@ -304,6 +368,7 @@ func (c *Checker) validateMethodTypes(method *ast.MethodStatement) {
 	c.validateTypeReference(method.ReturnType)
 	for _, parameter := range method.Parameters {
 		c.validateTypeReference(parameter.Type)
+		c.validateExpressionTypeReferences(parameter.Default)
 	}
 }
 
@@ -452,7 +517,11 @@ func (c *Checker) declareType(name, kind string, span token.Span) bool {
 }
 
 func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
-	defer c.checkUnusedBindings(sc)
+	c.checkStatementSequence(statements, sc)
+	c.checkUnusedBindings(sc)
+}
+
+func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) {
 	for _, statement := range statements {
 		switch n := statement.(type) {
 		case *ast.ClassStatement:
@@ -672,7 +741,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			}
 			c.checkStatements(n.Else, &scope{parent: sc, values: map[string]symbol{}})
 		case *ast.CaseStatement:
-			c.checkCase(n, sc)
+			c.checkCase(n, sc, false)
 		case *ast.WhileStatement:
 			c.checkBooleanCondition(n.Condition, sc, "while")
 			c.loopDepth++
@@ -799,11 +868,15 @@ func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, co
 	c.error(expression.Span(), fmt.Sprintf("%s condition must be Boolean, got %s", construct, typ))
 }
 
-func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
+type controlFlowBranchResult struct {
+	expression ast.Expression
+	typ        types.Type
+}
+
+func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool) types.Type {
 	selectorType := c.checkExpression(node.Value, sc)
 	if selectorType.Kind == types.Union {
-		c.checkUnionCase(node, sc, selectorType)
-		return
+		return c.checkUnionCase(node, sc, selectorType, expression)
 	}
 	variants, enum := c.enumVariants(selectorType)
 	if !enum && selectorType.Kind != types.Invalid {
@@ -817,6 +890,7 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 	c.checkStatements(node.Leading, &scope{parent: sc, values: map[string]symbol{}})
 
 	seen := map[string]bool{}
+	results := []controlFlowBranchResult{}
 	for _, branch := range node.Branches {
 		previousPatternType := c.enumPatternType
 		c.enumPatternType = selectorType
@@ -865,27 +939,32 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 				PayloadEnum: enumHasPayload(variants),
 			}
 		}
-		c.checkStatements(branch.Body, branchScope)
-	}
-	if node.HasElse {
-		c.checkStatements(node.Else, &scope{parent: sc, values: map[string]symbol{}})
-		return
-	}
-	if !enum {
-		return
-	}
-	missing := make([]string, 0, len(variants))
-	for _, variant := range variants {
-		if !seen[variant.Name] {
-			missing = append(missing, variant.Name)
+		if result := c.checkControlFlowBranch(branch.Body, branchScope, branch.Span(), "case", expression); result != nil {
+			results = append(results, *result)
 		}
 	}
-	if len(missing) > 0 {
-		c.error(node.Span(), fmt.Sprintf("case for %s is not exhaustive; missing %s", selectorType, strings.Join(missing, ", ")))
+	if node.HasElse {
+		if result := c.checkControlFlowBranch(node.Else, &scope{parent: sc, values: map[string]symbol{}}, node.Span(), "case", expression); result != nil {
+			results = append(results, *result)
+		}
+	} else if enum {
+		missing := make([]string, 0, len(variants))
+		for _, variant := range variants {
+			if !seen[variant.Name] {
+				missing = append(missing, variant.Name)
+			}
+		}
+		if len(missing) > 0 {
+			c.error(node.Span(), fmt.Sprintf("case for %s is not exhaustive; missing %s", selectorType, strings.Join(missing, ", ")))
+		}
 	}
+	if !expression {
+		return types.FromName("Void")
+	}
+	return c.controlFlowResultType("case", node.Span(), results)
 }
 
-func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorType types.Type) {
+func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorType types.Type, expression bool) types.Type {
 	for _, statement := range node.Leading {
 		if _, comment := statement.(*ast.CommentStatement); !comment {
 			c.error(statement.Span(), "case statements must be inside a when or else branch")
@@ -894,6 +973,7 @@ func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorTyp
 	c.checkStatements(node.Leading, &scope{parent: sc, values: map[string]symbol{}})
 
 	seen := map[string]bool{}
+	results := []controlFlowBranchResult{}
 	for _, branch := range node.Branches {
 		identifier, ok := branch.Value.(*ast.Identifier)
 		matchType := types.Type{Kind: types.Invalid, Name: "Invalid"}
@@ -933,22 +1013,143 @@ func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorTyp
 			bindings = append(bindings, CaseBinding{Name: binding.Name, Field: EnumField{Type: matchType}})
 		}
 		c.result.CasePatterns[branch.Value] = CasePattern{Bindings: bindings, MatchType: matchType, TypeUnion: true}
-		c.checkStatements(branch.Body, branchScope)
+		if result := c.checkControlFlowBranch(branch.Body, branchScope, branch.Span(), "case", expression); result != nil {
+			results = append(results, *result)
+		}
 	}
 
 	if node.HasElse {
-		c.checkStatements(node.Else, &scope{parent: sc, values: map[string]symbol{}})
-		return
-	}
-	missing := []string{}
-	for _, alternative := range selectorType.Args {
-		if !seen[alternative.String()] {
-			missing = append(missing, alternative.String())
+		if result := c.checkControlFlowBranch(node.Else, &scope{parent: sc, values: map[string]symbol{}}, node.Span(), "case", expression); result != nil {
+			results = append(results, *result)
+		}
+	} else {
+		missing := []string{}
+		for _, alternative := range selectorType.Args {
+			if !seen[alternative.String()] {
+				missing = append(missing, alternative.String())
+			}
+		}
+		if len(missing) > 0 {
+			c.error(node.Span(), fmt.Sprintf("case for %s is not exhaustive; missing %s", selectorType, strings.Join(missing, ", ")))
 		}
 	}
-	if len(missing) > 0 {
-		c.error(node.Span(), fmt.Sprintf("case for %s is not exhaustive; missing %s", selectorType, strings.Join(missing, ", ")))
+	if !expression {
+		return types.FromName("Void")
 	}
+	return c.controlFlowResultType("case", node.Span(), results)
+}
+
+func (c *Checker) checkControlFlowBranch(body []ast.Statement, sc *scope, span token.Span, construct string, expression bool) *controlFlowBranchResult {
+	if !expression {
+		c.checkStatements(body, sc)
+		return nil
+	}
+	resultIndex, result := controlFlowBranchExpression(body)
+	if result == nil {
+		c.checkStatements(body, sc)
+		c.error(span, fmt.Sprintf("%s expression branch must end with an expression", construct))
+		return &controlFlowBranchResult{typ: invalidType()}
+	}
+	if transfer := controlFlowBranchTransfer(body); transfer != nil {
+		c.error(transfer.Span(), fmt.Sprintf("%s expression branch cannot contain return, break, or next", construct))
+	}
+	c.checkStatementSequence(body[:resultIndex], sc)
+	typ := c.checkExpression(result, sc)
+	c.checkStatementSequence(body[resultIndex+1:], sc)
+	c.checkUnusedBindings(sc)
+	return &controlFlowBranchResult{expression: result, typ: typ}
+}
+
+func controlFlowBranchTransfer(body []ast.Statement) ast.Statement {
+	for _, statement := range body {
+		switch node := statement.(type) {
+		case *ast.ReturnStatement, *ast.BreakStatement, *ast.NextStatement:
+			return statement
+		case *ast.IfStatement:
+			groups := [][]ast.Statement{node.Then, node.Else}
+			for _, branch := range node.ElseIf {
+				groups = append(groups, branch.Body)
+			}
+			for _, group := range groups {
+				if transfer := controlFlowBranchTransfer(group); transfer != nil {
+					return transfer
+				}
+			}
+		case *ast.CaseStatement:
+			for _, branch := range node.Branches {
+				if transfer := controlFlowBranchTransfer(branch.Body); transfer != nil {
+					return transfer
+				}
+			}
+			if transfer := controlFlowBranchTransfer(node.Else); transfer != nil {
+				return transfer
+			}
+		case *ast.WhileStatement:
+			if transfer := controlFlowBranchTransfer(node.Body); transfer != nil {
+				return transfer
+			}
+		case *ast.ExpressionStatement:
+			if iteration, ok := node.Expression.(*ast.IterationExpression); ok && iteration.Block != nil {
+				if transfer := controlFlowBranchTransfer(iteration.Block.Body); transfer != nil {
+					return transfer
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func controlFlowBranchExpression(body []ast.Statement) (int, ast.Expression) {
+	for index := len(body) - 1; index >= 0; index-- {
+		switch statement := body[index].(type) {
+		case *ast.CommentStatement, *ast.BlankStatement:
+			continue
+		case *ast.ExpressionStatement:
+			return index, statement.Expression
+		default:
+			if expression, ok := statement.(ast.Expression); ok {
+				return index, expression
+			}
+			return index, nil
+		}
+	}
+	return -1, nil
+}
+
+func (c *Checker) controlFlowResultType(construct string, span token.Span, results []controlFlowBranchResult) types.Type {
+	if len(results) == 0 {
+		c.error(span, fmt.Sprintf("%s expression has no value-producing branches", construct))
+		return invalidType()
+	}
+	common := results[0].typ
+	compatible := common.Kind != types.Invalid
+	for index := 1; index < len(results); index++ {
+		current := results[index]
+		if current.typ.Kind == types.Invalid || common.Kind == types.Invalid {
+			compatible = false
+			continue
+		}
+		if types.Equivalent(common, current.typ) {
+			continue
+		}
+		if common.Kind != types.Any && current.typ.Kind != types.Any && types.Assignable(common, current.typ) {
+			c.recordAssignableConversion(current.expression, common, current.typ)
+			continue
+		}
+		if common.Kind != types.Any && current.typ.Kind != types.Any && types.Assignable(current.typ, common) {
+			for previous := 0; previous < index; previous++ {
+				c.recordAssignableConversion(results[previous].expression, current.typ, results[previous].typ)
+			}
+			common = current.typ
+			continue
+		}
+		c.error(current.expression.Span(), fmt.Sprintf("%s expression branches have incompatible types %s and %s", construct, common, current.typ))
+		compatible = false
+	}
+	if !compatible {
+		return invalidType()
+	}
+	return common
 }
 
 func runtimeMatchableUnionType(typ types.Type) bool {
@@ -1906,6 +2107,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	}
 	typ := types.Type{Kind: types.Any, Name: "Any"}
 	switch n := expression.(type) {
+	case *ast.CaseStatement:
+		typ = c.checkCase(n, sc, true)
 	case *ast.Identifier:
 		if n.Name == "_" {
 			c.error(n.Span(), "blank binding _ cannot be used as a value")
@@ -2095,14 +2298,25 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				if len(n.Block.Body) != 1 {
 					c.error(n.Block.Span(), fmt.Sprintf("%s block must contain exactly one result expression in v0.1", n.Operation))
 				}
-				c.checkStatements(n.Block.Body, blockScope)
 				blockType := types.Type{Kind: types.Any, Name: "Any"}
+				var resultExpression ast.Expression
 				if len(n.Block.Body) == 1 {
 					if result, ok := n.Block.Body[0].(*ast.ExpressionStatement); ok {
-						blockType = c.result.Expressions[result.Expression]
+						resultExpression = result.Expression
+						c.checkStatements(n.Block.Body, blockScope)
+					} else if result, ok := n.Block.Body[0].(ast.Expression); ok {
+						resultExpression = result
+						blockType = c.checkExpression(result, blockScope)
+						c.checkUnusedBindings(blockScope)
 					} else {
+						c.checkStatements(n.Block.Body, blockScope)
 						c.error(n.Block.Body[0].Span(), fmt.Sprintf("%s block result must be an expression", n.Operation))
 					}
+				} else {
+					c.checkStatements(n.Block.Body, blockScope)
+				}
+				if resultExpression != nil {
+					blockType = c.result.Expressions[resultExpression]
 				}
 				c.result.Expressions[n.Block] = blockType
 				switch n.Operation {
@@ -2114,12 +2328,6 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					}
 					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
 				case "reduce":
-					var resultExpression ast.Expression
-					if len(n.Block.Body) == 1 {
-						if result, ok := n.Block.Body[0].(*ast.ExpressionStatement); ok {
-							resultExpression = result.Expression
-						}
-					}
 					if !c.assignable(resultExpression, accumulatorType, blockType) {
 						c.error(n.Block.Span(), fmt.Sprintf("reduce block result is %s, expected %s", blockType, accumulatorType))
 					}

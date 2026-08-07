@@ -222,6 +222,7 @@ type CaseBranch struct {
 	TypePattern bool
 	MatchType   types.Type
 	Body        []Statement
+	Result      Expression
 }
 
 type CaseBinding struct {
@@ -231,16 +232,18 @@ type CaseBinding struct {
 }
 
 type Case struct {
-	Base
-	Value     Expression
-	Leading   []Statement
-	Branches  []CaseBranch
-	Else      []Statement
-	HasElse   bool
-	TypeUnion bool
+	ExprBase
+	Value      Expression
+	Leading    []Statement
+	Branches   []CaseBranch
+	Else       []Statement
+	HasElse    bool
+	TypeUnion  bool
+	ElseResult Expression
 }
 
-func (*Case) irStatement() {}
+func (*Case) irStatement()  {}
+func (*Case) irExpression() {}
 
 type While struct {
 	Base

@@ -399,49 +399,11 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		}
 		return e.evaluate(node.Else, module, &scope{parent: sc, values: map[string]Value{}})
 	case *ir.Case:
-		value, err := e.expression(node.Value, module, sc)
+		body, _, branchScope, err := e.selectCaseBranch(node, module, sc)
 		if err != nil {
 			return flowResult{}, err
 		}
-		for _, branch := range node.Branches {
-			if branch.TypePattern {
-				if !matchesTypePattern(value, branch.MatchType) {
-					continue
-				}
-				branchScope := &scope{parent: sc, values: map[string]Value{}}
-				for _, binding := range branch.Bindings {
-					if binding.Name == "_" {
-						continue
-					}
-					narrowed := value
-					narrowed.Type = binding.Type
-					branchScope.values[binding.Name] = narrowed
-				}
-				return e.evaluate(branch.Body, module, branchScope)
-			}
-			if branch.PayloadEnum {
-				variant, ok := value.Data.(*enumValue)
-				if !ok || variant.Name != branch.Member {
-					continue
-				}
-				branchScope := &scope{parent: sc, values: map[string]Value{}}
-				for _, binding := range branch.Bindings {
-					if binding.Name == "_" {
-						continue
-					}
-					branchScope.values[binding.Name] = variant.Payload[binding.Field]
-				}
-				return e.evaluate(branch.Body, module, branchScope)
-			}
-			candidate, err := e.expression(branch.Value, module, sc)
-			if err != nil {
-				return flowResult{}, err
-			}
-			if equal(value, candidate) {
-				return e.evaluate(branch.Body, module, &scope{parent: sc, values: map[string]Value{}})
-			}
-		}
-		return e.evaluate(node.Else, module, &scope{parent: sc, values: map[string]Value{}})
+		return e.evaluate(body, module, branchScope)
 	case *ir.While:
 		last := flowResult{}
 		for iterations := 0; ; iterations++ {
@@ -477,6 +439,54 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 	}
 }
 
+func (e *Evaluator) selectCaseBranch(node *ir.Case, module string, sc *scope) ([]ir.Statement, ir.Expression, *scope, error) {
+	value, err := e.expression(node.Value, module, sc)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, branch := range node.Branches {
+		branchScope := &scope{parent: sc, values: map[string]Value{}}
+		if branch.TypePattern {
+			if !matchesTypePattern(value, branch.MatchType) {
+				continue
+			}
+			for _, binding := range branch.Bindings {
+				if binding.Name == "_" {
+					continue
+				}
+				narrowed := value
+				narrowed.Type = binding.Type
+				branchScope.values[binding.Name] = narrowed
+			}
+			return branch.Body, branch.Result, branchScope, nil
+		}
+		if branch.PayloadEnum {
+			variant, ok := value.Data.(*enumValue)
+			if !ok || variant.Name != branch.Member {
+				continue
+			}
+			for _, binding := range branch.Bindings {
+				if binding.Name == "_" {
+					continue
+				}
+				branchScope.values[binding.Name] = variant.Payload[binding.Field]
+			}
+			return branch.Body, branch.Result, branchScope, nil
+		}
+		candidate, err := e.expression(branch.Value, module, sc)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if equal(value, candidate) {
+			return branch.Body, branch.Result, branchScope, nil
+		}
+	}
+	if node.HasElse {
+		return node.Else, node.ElseResult, &scope{parent: sc, values: map[string]Value{}}, nil
+	}
+	return nil, nil, nil, fmt.Errorf("unreachable exhaustive case")
+}
+
 func matchesTypePattern(value Value, typ types.Type) bool {
 	switch typ.Kind {
 	case types.Bool:
@@ -504,6 +514,22 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		return Value{Type: types.FromName("Void")}, nil
 	}
 	switch node := expression.(type) {
+	case *ir.Case:
+		body, result, branchScope, err := e.selectCaseBranch(node, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		flow, err := e.evaluate(body, module, branchScope)
+		if err != nil {
+			return Value{}, err
+		}
+		if flow.Returned || flow.Loop != loopNone {
+			return Value{}, fmt.Errorf("control transfer from a case expression branch is not supported")
+		}
+		if result == nil {
+			return Value{}, fmt.Errorf("case expression branch has no result")
+		}
+		return e.expression(result, module, branchScope)
 	case *ir.Literal:
 		return literal(node)
 	case *ir.InterpolatedString:

@@ -743,6 +743,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return ""
 	}
 	switch n := expression.(type) {
+	case *ir.Case:
+		return g.caseExpression(n)
 	case *ir.Identifier:
 		if strings.HasPrefix(n.Name, "@") {
 			return "self." + goFieldName(n.Name)
@@ -945,6 +947,106 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) caseExpression(node *ir.Case) string {
+	child := &generator{
+		functionDepth: g.functionDepth,
+		receiver:      g.receiver,
+		inConstructor: g.inConstructor,
+		methods:       g.methods,
+		topMethods:    g.topMethods,
+		staticMethods: g.staticMethods,
+		records:       g.records,
+		classes:       g.classes,
+		typeAliases:   g.typeAliases,
+		typeKinds:     g.typeKinds,
+		imports:       g.imports,
+		modulePath:    g.modulePath,
+		goModule:      g.goModule,
+		temporary:     g.temporary,
+	}
+	child.line("func() " + child.goType(node.ExprType()) + " {")
+	child.indent++
+	child.statements(node.Leading)
+	child.temporary++
+	value := "__trbCase" + strconv.Itoa(child.temporary)
+	child.line(value + " := " + child.expr(node.Value) + goTrailingComment(node.TrailingComment))
+	if node.TypeUnion {
+		typed := value + "Value"
+		child.line("switch " + typed + " := " + value + ".(type) {")
+		child.indent++
+		for _, branch := range node.Branches {
+			child.line("case " + child.goType(branch.MatchType) + ":" + goTrailingComment(branch.TrailingComment))
+			child.indent++
+			for _, binding := range branch.Bindings {
+				if binding.Name == "_" {
+					continue
+				}
+				name := goBindingIdentifier(binding.Name)
+				child.line(name + " := " + typed)
+				if namedUnusedBinding(binding.Name) {
+					child.line("_ = " + name)
+				}
+			}
+			child.statements(branch.Body)
+			child.line("return " + child.expr(branch.Result))
+			child.indent--
+		}
+		child.line("default:")
+		child.indent++
+		if node.HasElse {
+			child.line("_ = " + typed)
+			child.statements(node.Else)
+			child.line("return " + child.expr(node.ElseResult))
+		} else {
+			child.line("panic(\"unreachable exhaustive case\")")
+		}
+		child.indent--
+		child.indent--
+		child.line("}")
+	} else {
+		for index, branch := range node.Branches {
+			header := "if "
+			if index > 0 {
+				header = "} else if "
+			}
+			condition := value + " == " + child.expr(branch.Value)
+			if branch.PayloadEnum {
+				condition = value + ".Kind == " + child.enumTag(branch)
+			}
+			child.line(header + condition + " {" + goTrailingComment(branch.TrailingComment))
+			child.indent++
+			for _, binding := range branch.Bindings {
+				if binding.Name == "_" {
+					continue
+				}
+				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
+				name := goBindingIdentifier(binding.Name)
+				child.line(name + " := " + value + "." + field)
+				if namedUnusedBinding(binding.Name) {
+					child.line("_ = " + name)
+				}
+			}
+			child.statements(branch.Body)
+			child.line("return " + child.expr(branch.Result))
+			child.indent--
+		}
+		child.line("} else {")
+		child.indent++
+		if node.HasElse {
+			child.statements(node.Else)
+			child.line("return " + child.expr(node.ElseResult))
+		} else {
+			child.line("panic(\"unreachable exhaustive case\")")
+		}
+		child.indent--
+		child.line("}")
+	}
+	child.indent--
+	child.line("}()")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) transform(transform *ir.Transform) string {

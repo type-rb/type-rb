@@ -555,6 +555,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return ""
 	}
 	switch n := expression.(type) {
+	case *ir.Case:
+		return g.caseExpression(n)
 	case *ir.Identifier:
 		if strings.HasPrefix(n.Name, "@") {
 			return "this.__trb_" + strings.TrimPrefix(strings.TrimPrefix(n.Name, "@"), "_")
@@ -723,6 +725,68 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) caseExpression(node *ir.Case) string {
+	child := &generator{
+		inClass:       g.inClass,
+		functionDepth: g.functionDepth,
+		methods:       g.methods,
+		modulePath:    g.modulePath,
+		topFunctions:  g.topFunctions,
+		records:       g.records,
+		temporary:     g.temporary,
+	}
+	child.line("((): " + tsType(node.ExprType()) + " => {")
+	child.indent++
+	child.statements(node.Leading)
+	child.temporary++
+	value := "__trbCase" + strconv.Itoa(child.temporary)
+	child.line("const " + value + " = " + child.expr(node.Value) + ";" + tsTrailingComment(node.TrailingComment))
+	for index, branch := range node.Branches {
+		header := "if ("
+		if index > 0 {
+			header = "} else if ("
+		}
+		condition := value + " === " + child.expr(branch.Value)
+		if branch.PayloadEnum {
+			condition = value + ".kind === " + strconv.Quote(branch.Member)
+		} else if branch.TypePattern {
+			condition = tsTypePattern(value, branch.MatchType)
+		}
+		child.line(header + condition + ") {" + tsTrailingComment(branch.TrailingComment))
+		child.indent++
+		for _, binding := range branch.Bindings {
+			if binding.Name == "_" {
+				continue
+			}
+			bindingValue := value
+			if branch.PayloadEnum {
+				bindingValue += "." + binding.Field
+			}
+			child.line("const " + binding.Name + " = " + bindingValue + ";")
+			if namedUnusedBinding(binding.Name) {
+				child.line("void " + binding.Name + ";")
+			}
+		}
+		child.statements(branch.Body)
+		child.line("return " + child.expr(branch.Result) + ";")
+		child.indent--
+	}
+	child.line("} else {")
+	child.indent++
+	if node.HasElse {
+		child.statements(node.Else)
+		child.line("return " + child.expr(node.ElseResult) + ";")
+	} else {
+		child.line("throw new Error(\"unreachable exhaustive case\");")
+	}
+	child.indent--
+	child.line("}")
+	child.indent--
+	child.line("})()")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
 }
 
 func tsCallableName(name string) string {

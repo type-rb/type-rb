@@ -249,7 +249,8 @@ type CaseStatement struct {
 	HasElse  bool
 }
 
-func (*CaseStatement) statementNode() {}
+func (*CaseStatement) statementNode()  {}
+func (*CaseStatement) expressionNode() {}
 
 type WhileStatement struct {
 	Base

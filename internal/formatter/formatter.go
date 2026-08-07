@@ -401,6 +401,11 @@ func opensEndBlock(tokens []token.Token) bool {
 	case "class", "record", "enum", "module", "interface", "def", "if", "unless", "case", "begin", "while", "until", "for":
 		return true
 	}
+	for _, item := range tokens {
+		if item.Lexeme == "case" {
+			return true
+		}
+	}
 	depth := 0
 	for _, item := range tokens {
 		switch item.Lexeme {
