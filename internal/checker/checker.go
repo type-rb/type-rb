@@ -23,6 +23,7 @@ type Result struct {
 	Conversions         map[ast.Expression]types.Type
 	Variables           map[*ast.VariableStatement]types.Type
 	Iterations          map[*ast.IterationExpression]types.Type
+	IterationBindings   map[*ast.IterationExpression][]types.Type
 	Constants           map[ast.Expression]string
 	ConstantOwners      map[*ast.VariableStatement]string
 	Resolution          resolver.Result
@@ -203,6 +204,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			Conversions:         map[ast.Expression]types.Type{},
 			Variables:           map[*ast.VariableStatement]types.Type{},
 			Iterations:          map[*ast.IterationExpression]types.Type{},
+			IterationBindings:   map[*ast.IterationExpression][]types.Type{},
 			Constants:           map[ast.Expression]string{},
 			ConstantOwners:      map[*ast.VariableStatement]string{},
 			Resolution:          resolution,
@@ -1890,6 +1892,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.IterationExpression:
 		sourceType := c.checkExpression(n.Source, sc)
 		elementType, iterable := iterableElementType(sourceType)
+		hashSource := sourceType.Kind == types.Hash && len(sourceType.Args) == 2
+		if hashSource {
+			elementType = sourceType.Args[1]
+			iterable = true
+		}
 		if !iterable && c.mode == "ruby" && c.resolution.NativeSyntax {
 			// Ruby platform objects such as ActiveRecord::Relation participate in
 			// native Enumerable even before a provider can expose their element
@@ -1901,9 +1908,16 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.error(n.Source.Span(), fmt.Sprintf("%s is not iterable", sourceType))
 			elementType = types.Type{Kind: types.Any, Name: "Any"}
 		}
+		hashEach := hashSource && n.Operation == "each"
+		if hashSource && !hashEach {
+			c.error(n.Span(), "Hash iteration supports only each in v0.1")
+		}
+		if hashEach && n.WithIndex {
+			c.error(n.Span(), "Hash#each.with_index is not supported in v0.1")
+		}
 		itemType := elementType
 		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce"
-		if n.Operation == "each_slice" {
+		if n.Operation == "each_slice" && !hashSource {
 			if n.SliceSize == nil {
 				c.error(n.Span(), "each_slice expects exactly one size argument")
 			} else {
@@ -1921,18 +1935,6 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		c.result.Iterations[n] = itemType
 		if n.Block != nil {
-			expected := 1
-			if n.Operation == "reduce" {
-				expected = 2
-				if n.WithIndex {
-					c.error(n.Span(), "reduce.with_index is not supported; use an explicit counter")
-				}
-			} else if n.WithIndex {
-				expected = 2
-			}
-			if len(n.Block.Parameters) != expected {
-				c.error(n.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", n.Operation, expected, len(n.Block.Parameters)))
-			}
 			blockScope := &scope{parent: sc, values: map[string]symbol{}}
 			accumulatorType := types.Type{Kind: types.Any, Name: "Any"}
 			if n.Operation == "reduce" {
@@ -1942,14 +1944,26 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					accumulatorType = c.checkExpression(n.Initial, sc)
 				}
 			}
+			bindingTypes := []types.Type{itemType}
+			switch {
+			case hashEach:
+				bindingTypes = []types.Type{sourceType.Args[0], sourceType.Args[1]}
+			case n.Operation == "reduce":
+				bindingTypes = []types.Type{accumulatorType, itemType}
+				if n.WithIndex {
+					c.error(n.Span(), "reduce.with_index is not supported; use an explicit counter")
+				}
+			case n.WithIndex:
+				bindingTypes = []types.Type{itemType, types.FromName("Integer")}
+			}
+			c.result.IterationBindings[n] = append([]types.Type(nil), bindingTypes...)
+			if len(n.Block.Parameters) != len(bindingTypes) {
+				c.error(n.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", n.Operation, len(bindingTypes), len(n.Block.Parameters)))
+			}
 			for index, name := range n.Block.Parameters {
-				parameterType := itemType
-				if n.Operation == "reduce" {
-					if index == 0 {
-						parameterType = accumulatorType
-					}
-				} else if index == 1 {
-					parameterType = types.FromName("Integer")
+				parameterType := types.Type{Kind: types.Any, Name: "Any"}
+				if index < len(bindingTypes) {
+					parameterType = bindingTypes[index]
 				}
 				if _, duplicate := blockScope.values[name]; duplicate {
 					c.error(n.Block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))

@@ -249,15 +249,19 @@ func (*While) irStatement() {}
 
 // Iterate is a structured loop rather than a callback invocation. Backends
 // can therefore preserve TypeRB control-flow semantics inside an each block.
+// Bindings retain the checked type of every source-level block parameter.
+type IterationBinding struct {
+	Name string
+	Type types.Type
+}
+
 type Iterate struct {
 	Base
 	Source    Expression
 	Operation string
 	SliceSize Expression
 	WithIndex bool
-	Item      string
-	Index     string
-	ItemType  types.Type
+	Bindings  []IterationBinding
 	Body      []Statement
 }
 

@@ -199,7 +199,7 @@ func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base
 	if doAt := topLevelIndex(line, "do"); doAt > 0 {
 		parameters, ok := p.blockParameters(line[doAt+1:])
 		if !ok {
-			p.errorAt(spanOf(line[doAt:]), "iteration block parameters must be written as |item| or |item, index|")
+			p.errorAt(spanOf(line[doAt:]), "iteration block parameters must be written as |name, ...|")
 		}
 		p.pos = next
 		block := &ast.BlockExpression{Base: ast.Base{SourceSpan: spanOf(line[doAt:])}, Parameters: parameters}

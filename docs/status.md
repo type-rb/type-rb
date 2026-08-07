@@ -67,8 +67,8 @@ Implemented portable behavior includes:
 - mode-independent diagnostics for unused ordinary imports, method-local
   bindings, iterator parameters, and enum-pattern bindings;
 - non-nullable Boolean conditions and portable operator semantics;
-- `if`, `elsif`, `else`, `while`, integer ranges, structured collection
-  iteration, `break`, `next`, and `return`;
+- `if`, `elsif`, `else`, `while`, integer ranges, structured Array/range
+  iteration, typed Hash key/value iteration, `break`, `next`, and `return`;
 - typed Arrays and `Hash<K, V>` values with strict and safe lookup operations;
 - payload enums, exhaustive pattern matching, and explicit initial generics for
   payload enums and top-level functions;

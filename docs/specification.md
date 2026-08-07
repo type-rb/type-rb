@@ -225,6 +225,12 @@ mode by itself does not enable them.
   receiver, requires `mut`, and has no return value. Existing Hash arguments
   must have exactly the same `K` and `V`; a fresh literal may still be checked
   contextually against that exact type.
+- `hash.each do |key, value| ... end` binds a `K` key and its `V` value through
+  structured iteration IR. It requires exactly two block parameters and has
+  the same `break`, `next`, and enclosing-method `return` behavior as Array
+  iteration. Iteration uses a shallow entry snapshot captured before the first
+  block call, while enumeration order is unspecified. Hash `each.with_index`,
+  `each_slice`, `map`, `select`, and `reduce` are not enabled in v0.1.
 - `hash[key]` is a required lookup and raises a runtime error when the key is
   absent in every backend and the REPL. A future optional lookup API will
   return a nullable/optional value explicitly.
@@ -655,6 +661,13 @@ mutates its receiver and returns no value. `delete` returns `V` and removes the
 entry atomically, or raises `Hash key is missing` without changing the Hash.
 Enumeration order remains unspecified after all three operations.
 
+Hash `each` binds key and value separately rather than exposing a target-native
+pair or entry object. Checked binding types are retained in typed iteration IR,
+so Integer keys remain Integer in every backend, including TypeScript object
+enumeration. The shallow entry snapshot keeps structural mutation during a
+block from changing the entries still scheduled for that iteration. Hash
+traversal order is deliberately unspecified.
+
 `map`, `select`, and `reduce(initial)` are structured, value-producing
 collection expressions rather than target-native callback calls. `map` returns
 `Array<U>` inferred from its block result, `select` requires a Boolean block
@@ -802,6 +815,16 @@ values.each do |value|
 end
 
 values.each { |value| puts(value) }
+```
+
+Hashes use the same structured iteration node with separate typed key and value
+bindings:
+
+```trb
+labels.each do |key, value|
+	puts(key)
+	puts(value)
+end
 ```
 
 `each_slice(size)` yields `Array<T>`. Appending `.with_index` adds a zero-based

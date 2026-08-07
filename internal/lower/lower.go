@@ -182,14 +182,15 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 				Operation: iteration.Operation,
 				SliceSize: l.expression(iteration.SliceSize),
 				WithIndex: iteration.WithIndex,
-				ItemType:  l.checked.Iterations[iteration],
 			}
 			if iteration.Block != nil {
-				if len(iteration.Block.Parameters) > 0 {
-					result.Item = iteration.Block.Parameters[0]
-				}
-				if len(iteration.Block.Parameters) > 1 {
-					result.Index = iteration.Block.Parameters[1]
+				bindingTypes := l.checked.IterationBindings[iteration]
+				for index, name := range iteration.Block.Parameters {
+					typ := types.Type{Kind: types.Any, Name: "Any"}
+					if index < len(bindingTypes) {
+						typ = bindingTypes[index]
+					}
+					result.Bindings = append(result.Bindings, ir.IterationBinding{Name: name, Type: typ})
 				}
 				result.Body = l.statements(iteration.Block.Body)
 			}
