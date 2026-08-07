@@ -48,8 +48,17 @@ compatibility behavior belong behind explicit `trb/platform/<mode>/*` imports.
 Language changes must pass through syntax AST, checked types, typed IR, and each
 affected backend.
 
-For contribution sequencing and test strategy, see the
-[project plan](project-plan.md). For current gaps, see
-[status](status.md) and the [roadmap](roadmap.md).
+Create an issue before work that requires a language or architectural decision.
+Tasks with settled behavior can proceed as focused pull requests. Keep each PR
+narrow enough to review as one outcome, and include invalid-input diagnostics
+when the change introduces a new rule.
+
+Test public phase boundaries rather than private helper structure. Depending on
+the change, this includes parsed AST shape, checker diagnostics and inferred
+types, typed IR, generated source for every affected backend, formatter
+idempotence and comment preservation, and REPL evaluation. Run the full Go test
+suite and the relevant example checks before merging.
+
+For current gaps, see [status](status.md) and the [roadmap](roadmap.md).
 
 Releases are described in [releasing.md](releasing.md).

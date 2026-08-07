@@ -11,16 +11,13 @@ than detailed syntax.
 
 ## 1. Complete the portable language core
 
-- Extend the implemented typed `map`/`select`/`reduce` expressions from their
-  single-result-expression v0.1 blocks to structured multi-statement blocks,
-  then add first-class blocks/lambdas. Portable `Result<T, E>` with explicit
-  exhaustive handling and safe conversion/lookup APIs is implemented; concise
-  propagation syntax remains a later ergonomics decision.
-- Extend union type-pattern narrowing beyond the implemented scalar baseline,
-  then add position-typed Tuples and precise nullable/optional semantics.
-  Payload-bearing enums, exhaustive payload and scalar-union narrowing, and
-  explicit generics for payload enums/top-level functions are implemented;
-  inference and generic records/classes/methods remain.
+- Extend collection transformations to structured multi-statement blocks, then
+  add first-class blocks and lambdas. Evaluate concise `Result` propagation
+  syntax only after application usage establishes a clear ergonomic need.
+- Extend union type-pattern narrowing to nullable, collection, enum, record,
+  and class alternatives. Add position-typed Tuples and precise optional-value
+  semantics.
+- Add type-argument inference and generics for records, classes, and methods.
 - Define mutation effects for methods and parameters so immutable values remain
   safe across calls, not only assignments and known collection operations.
 - Complete the portable class model with explicit superclass construction and
@@ -66,9 +63,8 @@ than detailed syntax.
 
 ## 5. Standard library and package ecosystem
 
-- Build on the implemented scalar receiver baseline to complete the everyday
-  surface for Unicode strings, Arrays, and Hashes before adding broader
-  packages. Keep operations that need first-class blocks staged with the
+- Complete the everyday receiver surface for Unicode strings, Arrays, and
+  Hashes. Keep operations that need first-class blocks staged with the
   language-level block/lambda work.
 - Replace provisional String errors from safe parsing and collection lookup
   with structured portable error types before those APIs become stable.
