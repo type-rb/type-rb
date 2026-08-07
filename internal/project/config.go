@@ -16,6 +16,9 @@ const ConfigName = "trbconfig.jsonc"
 // DefaultRubyVersion is the current Ruby toolchain supported by TypeRB.
 const DefaultRubyVersion = "4.0.6"
 
+// DefaultTypeScriptVersion tracks the current TypeScript release.
+const DefaultTypeScriptVersion = "latest"
+
 // ErrConfigNotFound reports that discovery reached the filesystem root.
 var ErrConfigNotFound = errors.New(ConfigName + " not found")
 
@@ -132,6 +135,9 @@ func New(root, mode string) *Config {
 		LocalPackages:   map[string]string{},
 		Root:            absolute,
 		Path:            filepath.Join(absolute, ConfigName),
+	}
+	if mode == "typescript" {
+		config.DevDependencies["typescript"] = DefaultTypeScriptVersion
 	}
 	config.applyDefaults()
 	return config
