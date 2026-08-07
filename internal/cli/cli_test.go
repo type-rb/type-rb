@@ -357,6 +357,37 @@ func TestReplEvaluatesPortableBytesAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableHexAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-hex-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "import trb/std/encoding/hex\nhex.encode(\"A😀\".to_bytes())\nhex.decode(\"41F09F9880\")\nhex.decode(\"0g\")\nhex.decode(\"abc\")\n:quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "\"41f09f9880\" : String\n" +
+			"Result::Ok(value: Bytes[65, 240, 159, 152, 128]) : Result<Bytes, HexDecodeError>\n" +
+			"Result::Err(error: HexDecodeError(kind: HexDecodeErrorKind::InvalidCharacter, input: \"0g\", index: 1, message: \"invalid hexadecimal character\")) : Result<Bytes, HexDecodeError>\n" +
+			"Result::Err(error: HexDecodeError(kind: HexDecodeErrorKind::OddLength, input: \"abc\", index: 3, message: \"hex input has odd length\")) : Result<Bytes, HexDecodeError>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s hex REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -1790,6 +1821,70 @@ end
 		want := "3\n7\n10\n-3\n-2\n3\n-3\n2\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s portable math output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunPortableHexAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby hex run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript hex run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/portable-hex-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { Result } from trb/std/result
+import { decode, encode } from trb/std/encoding/hex
+
+def decoded_text(input: String): String
+	case decode(input)
+	when Result::Ok(value)
+		return value.to_s()
+	when Result::Err(error)
+		return error.message + ":" + error.index.to_s()
+	end
+end
+
+def main()
+	puts(encode("A😀".to_bytes()))
+	puts(decoded_text("41F09F9880"))
+	puts(decoded_text("0g"))
+	puts(decoded_text("abc"))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "41f09f9880\nA😀\ninvalid hexadecimal character:1\nhex input has odd length:3\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s portable hex output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

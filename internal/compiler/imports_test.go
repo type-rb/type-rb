@@ -654,6 +654,92 @@ func TestPortableBytesDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableHexPackageLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Result } from trb/std/result
+import { HexDecodeError, decode, encode } from trb/std/encoding/hex
+
+def encoded(value: Bytes): String
+	return encode(value)
+end
+
+def decoded(value: String): Result<Bytes, HexDecodeError>
+	return decode(value)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`stdhex.EncodeToString(value)`,
+			`stdhex.DecodeString(input)`,
+			`HexDecodeError{Kind: HexDecodeErrorKindInvalidcharacter`,
+			`HexDecodeErrorKindOddlength`,
+		},
+		"ruby": {
+			`.unpack1("H*")`,
+			`[input].pack("H*").b`,
+			`HexDecodeError.new(kind: HexDecodeErrorKind::InvalidCharacter`,
+			`HexDecodeErrorKind::OddLength`,
+		},
+		"typescript": {
+			`value.toString(16).padStart(2, "0")`,
+			`new Uint8Array(__trbCharacters.length / 2)`,
+			`kind: HexDecodeErrorKind.InvalidCharacter`,
+			`kind: HexDecodeErrorKind.OddLength`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/portable-hex", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable hex: %v", mode, err)
+		}
+		var consumer, resultRuntime, hexRuntime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/result/index":
+				resultRuntime = artifact
+			case "trb/std/encoding/hex/index":
+				hexRuntime = artifact
+			}
+		}
+		if consumer == nil || resultRuntime == nil || hexRuntime == nil {
+			t.Fatalf("%s did not compile the hex consumer and runtimes: %#v", mode, artifacts)
+		}
+		for _, want := range wants[mode] {
+			if output := string(hexRuntime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s hex output is missing %q:\n%s", mode, want, output)
+			}
+		}
+		errorWants := map[string][]string{
+			"go":         {"type HexDecodeErrorKind int", "type HexDecodeError struct"},
+			"ruby":       {"HexDecodeErrorKind = Data.define(:name)", "HexDecodeError = Data.define(:kind, :input, :index, :message)"},
+			"typescript": {"export type HexDecodeErrorKind", "export interface HexDecodeError"},
+		}[mode]
+		for _, want := range errorWants {
+			if output := string(hexRuntime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s error runtime is missing %q:\n%s", mode, want, output)
+			}
+		}
+		if mode == "typescript" && strings.Contains(string(hexRuntime.Output), `from "./index.ts"`) {
+			t.Fatalf("generated TypeScript hex runtime imports itself:\n%s", hexRuntime.Output)
+		}
+	}
+}
+
+func TestPortableHexDiagnosticsAreModeIndependent(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := Compile("bad.trb", []byte("import { encode } from trb/std/encoding/hex\ndef bad(): String\n\treturn encode(\"41\")\nend\n"), mode)
+		if err == nil || !strings.Contains(err.Error(), "argument 1 to encode() has type String, expected Bytes") {
+			t.Fatalf("%s: expected portable hex argument diagnostic, got %v", mode, err)
+		}
+	}
+}
+
 func TestPortableStringBuilderLowersAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/string_builder
 

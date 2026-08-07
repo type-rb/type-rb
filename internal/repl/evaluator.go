@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	stdhex "encoding/hex"
 	stdjson "encoding/json"
 	"errors"
 	"fmt"
@@ -1875,6 +1876,38 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("bytes.valid_utf8 expects Bytes")
 		}
 		return Value{Type: typ, Data: utf8.Valid(value)}, nil
+	case "trb.std.encoding.hex.encode":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("hex.encode expects Bytes")
+		}
+		return Value{Type: typ, Data: stdhex.EncodeToString(value)}, nil
+	case "trb.std.encoding.hex.decode":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		input, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("hex.decode expects String")
+		}
+		length := int64(0)
+		for _, character := range input {
+			if !hexadecimalCharacter(character) {
+				return e.hexDecodeResultErr(typ, "InvalidCharacter", input, length, "invalid hexadecimal character")
+			}
+			length++
+		}
+		if length%2 != 0 {
+			return e.hexDecodeResultErr(typ, "OddLength", input, length, "hex input has odd length")
+		}
+		value, err := stdhex.DecodeString(input)
+		if err != nil {
+			return Value{}, err
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(value)})
 	case "trb.std.string_builder.new":
 		return Value{Type: typ, Data: &stringBuilderValue{}}, nil
 	case "trb.std.string_builder.from_string":
@@ -2491,13 +2524,17 @@ func (e *Evaluator) unitValue() (Value, error) {
 }
 
 func (e *Evaluator) structuredResultErr(resultType types.Type, name string, fields map[string]Value) (Value, error) {
+	return e.structuredResultErrFrom(resultType, "trb/std/errors/index", name, fields)
+}
+
+func (e *Evaluator) structuredResultErrFrom(resultType types.Type, modulePath, name string, fields map[string]Value) (Value, error) {
 	definition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
 	if !ok {
 		return Value{}, errors.New("operation requires trb/std/result")
 	}
-	errorDefinition, ok := e.definitions[symbolKey("trb/std/errors/index", name)].(*recordDefinition)
+	errorDefinition, ok := e.definitions[symbolKey(modulePath, name)].(*recordDefinition)
 	if !ok {
-		return Value{}, errors.New("operation requires trb/std/errors")
+		return Value{}, fmt.Errorf("operation requires %s", strings.TrimSuffix(modulePath, "/index"))
 	}
 	errorType := types.FromName(name)
 	if len(resultType.Args) == 2 {
@@ -2518,6 +2555,24 @@ func (e *Evaluator) numberParseResultErr(resultType types.Type, kind, input, mes
 		"input":   {Type: types.FromName("String"), Data: input},
 		"message": {Type: types.FromName("String"), Data: message},
 	})
+}
+
+func (e *Evaluator) hexDecodeResultErr(resultType types.Type, kind, input string, index int64, message string) (Value, error) {
+	kindDefinition, ok := e.definitions[symbolKey("trb/std/encoding/hex/index", "HexDecodeErrorKind")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("operation requires trb/std/encoding/hex")
+	}
+	kindValue := Value{Type: types.FromName("HexDecodeErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
+	return e.structuredResultErrFrom(resultType, "trb/std/encoding/hex/index", "HexDecodeError", map[string]Value{
+		"kind":    kindValue,
+		"input":   {Type: types.FromName("String"), Data: input},
+		"index":   {Type: types.FromName("Integer"), Data: index},
+		"message": {Type: types.FromName("String"), Data: message},
+	})
+}
+
+func hexadecimalCharacter(value rune) bool {
+	return value >= '0' && value <= '9' || value >= 'A' && value <= 'F' || value >= 'a' && value <= 'f'
 }
 
 func (e *Evaluator) indexLookupResultErr(resultType types.Type, index, size int64, message string) (Value, error) {

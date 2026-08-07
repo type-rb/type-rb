@@ -819,6 +819,9 @@ func (c *Checker) recordReference(expression ast.Expression, binding resolver.Bi
 	c.markImportUsed(binding)
 	if binding.Library != nil {
 		for _, definition := range stdlib.RuntimeDependenciesForType(binding.Library.Return) {
+			if definition.ModulePath == c.result.Program.ModulePath {
+				continue
+			}
 			c.result.RuntimeDependencies[definition.Path] = definition
 		}
 		for _, name := range binding.Library.RequiredSymbols {
