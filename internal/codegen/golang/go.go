@@ -1185,6 +1185,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.copy":
 		g.requireImport("slices", "")
 		return "slices.Clone(" + arguments[0] + ")"
+	case "trb.std.arrays.contains":
+		g.requireImport("slices", "")
+		return "slices.Contains(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.arrays.count":
+		return "func() int { values := " + arguments[0] + "; target := " + arguments[1] + "; count := 0; for _, value := range values { if value == target { count++ } }; return count }()"
 	case "trb.std.arrays.join":
 		g.requireImport("strings", "")
 		return "strings.Join(" + arguments[0] + ", " + arguments[1] + ")"

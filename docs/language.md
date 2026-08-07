@@ -249,7 +249,13 @@ mut values := [2, 3]
 first := values.shift()
 values.unshift(1)
 reversed := values.reverse()
+known := values.include?(2)
+occurrences := values.count(3)
 ```
+
+Membership and occurrence counting use portable `==` and are therefore
+available for numeric, Boolean, String, and payloadless enum elements. They do
+not implicitly enable target-native structural equality for nested values.
 
 Arrays and integer ranges support structured iteration:
 

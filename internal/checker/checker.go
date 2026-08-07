@@ -2176,6 +2176,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				if library.Intrinsic == "trb.internal.json.encode" && len(argumentTypes) == 1 {
 					c.checkCodecApplication(n, library.Intrinsic, argumentTypes[0])
 				}
+				c.checkLibraryEqualityRequirements(n.Span(), binding.Name, *library)
 			}
 		}
 		if member, ok := c.external[n.Callee]; ok {
@@ -2397,6 +2398,17 @@ func libraryAssignable(expected, actual types.Type) bool {
 			libraryAssignable(expected.Args[0], actual.Args[0]) && libraryAssignable(expected.Args[1], actual.Args[1])
 	}
 	return types.Assignable(expected, actual)
+}
+
+func (c *Checker) checkLibraryEqualityRequirements(span token.Span, name string, symbol stdlib.Symbol) {
+	for _, typ := range symbol.EqualityTypes {
+		if typ.Kind == types.Invalid || len(unresolvedLibraryTypeParameters(symbol, typ)) > 0 {
+			continue
+		}
+		if !c.portableEqualityOperands(typ, typ) {
+			c.error(span, fmt.Sprintf("portable equality is not defined for %s, required by %s()", typ, name))
+		}
+	}
 }
 
 func (c *Checker) requireMutable(expression ast.Expression, sc *scope, action string) {

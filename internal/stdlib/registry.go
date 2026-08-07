@@ -30,6 +30,7 @@ type Symbol struct {
 	Intrinsic       string
 	RequiredSymbols []string
 	TypeParameters  []string
+	EqualityTypes   []types.Type
 	Receiver        types.Type
 	ReceiverMutable bool
 	Parameters      []Parameter
@@ -435,6 +436,28 @@ end
 			"first": genericUnary("first", "trb.std.arrays.first", []string{"T"}, arrayOf(typeT), typeT),
 			"last":  genericUnary("last", "trb.std.arrays.last", []string{"T"}, arrayOf(typeT), typeT),
 			"copy":  genericUnary("copy", "trb.std.arrays.copy", []string{"T"}, arrayOf(typeT), arrayOf(typeT)),
+			"contains": {
+				Name:           "contains",
+				Intrinsic:      "trb.std.arrays.contains",
+				TypeParameters: []string{"T"},
+				EqualityTypes:  []types.Type{typeT},
+				Parameters: []Parameter{
+					{Name: "values", Type: arrayOf(typeT)},
+					{Name: "value", Type: typeT},
+				},
+				Return: booleanType,
+			},
+			"count": {
+				Name:           "count",
+				Intrinsic:      "trb.std.arrays.count",
+				TypeParameters: []string{"T"},
+				EqualityTypes:  []types.Type{typeT},
+				Parameters: []Parameter{
+					{Name: "values", Type: arrayOf(typeT)},
+					{Name: "value", Type: typeT},
+				},
+				Return: integerType,
+			},
 			"join": {
 				Name:       "join",
 				Intrinsic:  "trb.std.arrays.join",
@@ -712,6 +735,8 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"first":     {PackagePath: "trb/std/arrays", Symbol: "first"},
 		"last":      {PackagePath: "trb/std/arrays", Symbol: "last"},
 		"dup":       {PackagePath: "trb/std/arrays", Symbol: "copy"},
+		"include?":  {PackagePath: "trb/std/arrays", Symbol: "contains"},
+		"count":     {PackagePath: "trb/std/arrays", Symbol: "count"},
 		"join":      {PackagePath: "trb/std/arrays", Symbol: "join"},
 		"pop":       {PackagePath: "trb/std/arrays", Symbol: "pop"},
 		"shift":     {PackagePath: "trb/std/arrays", Symbol: "shift"},
@@ -956,6 +981,10 @@ func Instantiate(symbol Symbol, arguments []types.Type) Symbol {
 		result.Parameters[index].Type = substituteType(result.Parameters[index].Type, bindings)
 	}
 	result.Return = substituteType(result.Return, bindings)
+	result.EqualityTypes = append([]types.Type(nil), symbol.EqualityTypes...)
+	for index := range result.EqualityTypes {
+		result.EqualityTypes[index] = substituteType(result.EqualityTypes[index], bindings)
+	}
 	return result
 }
 

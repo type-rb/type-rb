@@ -138,16 +138,25 @@ values.push(3)
 first := values.shift()
 values.unshift(0)
 reversed := arrays.reverse(values)
+known := values.include?(2)
+occurrences := arrays.count(values, 2)
 
 labels: Hash<Integer, String> := {1 => "one"}
-known := labels.key?(1)
+known_label := labels.key?(1)
 label := labels.try_fetch(1)
 keys := hashes.keys(labels)
 ```
 
 Arrays provide size, emptiness, strict `fetch`, safe `try_fetch`, `first`,
 `last`, shallow `dup`, mutable `push`/`unshift`, mutable strict `pop`/`shift`,
-and non-destructive shallow `reverse`. `Array<String>` also provides `join`.
+non-destructive shallow `reverse`, value membership, and occurrence counting.
+`Array<String>` also provides `join`.
+
+Value membership is `include?` on a receiver and `arrays.contains` in package
+form. `count(value)` has the same name in both forms. Both use portable `==`
+semantics and are available when the element type is numeric, Boolean, String,
+or a payloadless enum. They do not inherit target-native structural equality
+for Arrays, Hashes, records, or payload-bearing enums.
 
 Hashes provide size, emptiness, strict `fetch`, safe `try_fetch`, key checks,
 keys, values, and shallow `dup`. Hash enumeration order is unspecified.

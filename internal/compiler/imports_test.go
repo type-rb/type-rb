@@ -703,6 +703,11 @@ func TestPortableArrayAndHashOperationsLowerAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/arrays
 import trb/std/hashes
 
+enum QueryState
+	Ready
+	Done
+end
+
 def array_value(): Integer
 	values := [1, 2, 3]
 	return arrays.copy(values).fetch(1) + values.first() + values.last()
@@ -727,6 +732,23 @@ def edge_values(): Integer
 	arrays.unshift(values, 0)
 	reversed := arrays.reverse(values)
 	return first + reversed.first() + values.reverse().last()
+end
+
+def query_values(): Integer
+	values := [1, 2, 1]
+	if values.include?(2) and arrays.contains(values, 1)
+		return values.count(1) + arrays.count(values, 2)
+	end
+	return 0
+end
+
+def enum_query(state: QueryState): Boolean
+	return [QueryState::Ready, QueryState::Done].include?(state)
+end
+
+def float_query(): Boolean
+	values := [1.0, 2.0]
+	return values.include?(1)
 end
 
 def hash_value(): String
@@ -767,6 +789,9 @@ end
 			`values = values[1:]`,
 			`copy(values[1:], values[:len(values)-1])`,
 			`slices.Reverse(values)`,
+			`slices.Contains(values, 2)`,
+			`slices.Contains(values, float64(1))`,
+			`target := 1`,
 			`maps.Keys(labels)`,
 			`maps.Values(maps.Clone(labels))`,
 			`panic("Hash key is missing")`,
@@ -781,6 +806,9 @@ end
 			`values.shift`,
 			`values.unshift(1)`,
 			`values.reverse`,
+			`values.include?(2)`,
+			`values.include?((1).to_f)`,
+			`values.count(1)`,
 			`labels.keys`,
 			`labels.dup.values`,
 			`labels.fetch(1)`,
@@ -795,6 +823,9 @@ end
 			`values.shift()`,
 			`values.unshift(1)`,
 			`[...values].reverse()`,
+			`values.indexOf(2) >= 0`,
+			`values.indexOf(Number(1)) >= 0`,
+			`if (value === target)`,
 			`Object.keys(labels).map(Number)`,
 			`Object.values(({ ...labels }))`,
 			`throw new Error("Hash key is missing")`,
@@ -892,6 +923,26 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 			name:   "unshift value type",
 			source: "def bad()\n\tmut values := [1]\n\tvalues.unshift(\"zero\")\n\treturn\nend\n",
 			want:   "argument 1 to unshift() has type String, expected Integer",
+		},
+		{
+			name:   "include value type",
+			source: "def bad(): Boolean\n\treturn [1].include?(\"one\")\nend\n",
+			want:   "argument 1 to include?() has type String, expected Integer",
+		},
+		{
+			name:   "receiver equality requirement",
+			source: "def bad(): Boolean\n\treturn [[1]].include?([1])\nend\n",
+			want:   "portable equality is not defined for Array<Integer>, required by include?()",
+		},
+		{
+			name:   "package equality requirement",
+			source: "import trb/std/arrays\ndef bad(): Integer\n\treturn arrays.count([[1]], [1])\nend\n",
+			want:   "portable equality is not defined for Array<Integer>, required by count()",
+		},
+		{
+			name:   "payload enum equality requirement",
+			source: "enum Box\n\tValue(value: Integer)\nend\ndef bad(value: Box): Boolean\n\treturn [value].include?(value)\nend\n",
+			want:   "portable equality is not defined for Box, required by include?()",
 		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {

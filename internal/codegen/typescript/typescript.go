@@ -914,6 +914,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[__trbValues.length - 1]!; })()"
 	case "trb.std.arrays.copy":
 		return "[..." + arguments[0] + "]"
+	case "trb.std.arrays.contains":
+		return "(" + arguments[0] + ".indexOf(" + arguments[1] + ") >= 0)"
+	case "trb.std.arrays.count":
+		return "((values: Array<unknown>, target: unknown): number => { let count = 0; for (const value of values) { if (value === target) { count++; } } return count; })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.join":
 		return arguments[0] + ".join(" + arguments[1] + ")"
 	case "trb.std.arrays.pop":

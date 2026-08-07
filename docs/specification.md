@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-06
+Last updated: 2026-08-07
 
 ## 1. Language Goals
 
@@ -617,9 +617,11 @@ Compiler-owned package contracts may declare internal type parameters. They
 are inferred from call arguments and receivers; this is library-contract
 inference, not a mode-specific relaxation or user-defined implicit generic
 call syntax. `trb/std/arrays` provides `length`, `empty`, strict zero-based
-`fetch`, safe `try_fetch`, strict `first`/`last`, shallow `copy`, and mutable
-`push` for `Array<T>`. Receiver spellings are `size`, `empty?`, `fetch`,
-`try_fetch`, `first`, `last`, `dup`, and `push`. `trb/std/hashes` provides
+`fetch`, safe `try_fetch`, strict `first`/`last`, shallow `copy`/`reverse`,
+value `contains`/`count`, mutable `push`/`unshift`, and mutable strict
+`pop`/`shift` for `Array<T>`. Receiver spellings include `size`, `empty?`,
+`fetch`, `try_fetch`, `first`, `last`, `dup`, `reverse`, `include?`, `count`,
+`push`, `unshift`, `pop`, and `shift`. `trb/std/hashes` provides
 `length`, `empty`, strict `fetch`, safe `try_fetch`, `contains_key`, `keys`,
 `values`, and shallow `copy` for `Hash<K, V>`; receiver spellings are `size`,
 `empty?`, `fetch`, `try_fetch`, `key?`, `keys`, `values`, and `dup`. Missing
@@ -628,13 +630,16 @@ empty Array are runtime errors in every mode. Safe fetch returns
 `Result<T, String>` for Arrays and `Result<V, String>` for Hashes, with stable
 missing-value messages. Hash key/value enumeration order is unspecified.
 
-`Array<String>` additionally provides package/receiver `join`. Generic
-`Array<T>` provides mutable strict `pop` and `shift`, mutable `unshift(value)`,
-and non-destructive shallow `reverse`. The two strict removals require `mut`
-and raise on an empty Array; `unshift` also requires `mut`. `reverse` returns a
-new Array and leaves the receiver unchanged. Receiver lookup checks the
-complete collection type, so a method constrained to `Array<String>` is not
-exposed on `Array<Integer>`.
+`Array<String>` additionally provides package/receiver `join`. `contains` and
+receiver `include?` report whether a value occurs; `count` returns its number
+of occurrences. Their value argument must be assignable to `T`, and `T` must
+support portable `==`: numeric types, Boolean, String, or a payloadless enum.
+They use the same equality semantics as `==`, so Float NaN does not match
+itself. Target-native structural collection or record equality is not exposed.
+The two strict removals require `mut` and raise on an empty Array; `unshift`
+also requires `mut`. `reverse` returns a new Array and leaves the receiver
+unchanged. Receiver lookup checks the complete collection type, so a method
+constrained to `Array<String>` is not exposed on `Array<Integer>`.
 
 `map`, `select`, and `reduce(initial)` are structured, value-producing
 collection expressions rather than target-native callback calls. `map` returns
