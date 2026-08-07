@@ -283,7 +283,42 @@ func (g *generator) statement(statement ir.Statement) {
 }
 
 func (g *generator) iterate(iteration *ir.Iterate) {
-	item := goIdentifier(iteration.Item, false)
+	binding := func(index int) ir.IterationBinding {
+		if index < len(iteration.Bindings) {
+			return iteration.Bindings[index]
+		}
+		return ir.IterationBinding{Name: "_", Type: types.Type{Kind: types.Any, Name: "Any"}}
+	}
+	if iteration.Source.ExprType().Kind == types.Hash {
+		g.requireImport("maps", "")
+		keyBinding := binding(0)
+		valueBinding := binding(1)
+		key := goIdentifier(keyBinding.Name, false)
+		value := goIdentifier(valueBinding.Name, false)
+		switch {
+		case keyBinding.Name != "_" && valueBinding.Name != "_":
+			g.line("for " + key + ", " + value + " := range maps.Clone(" + g.expr(iteration.Source) + ") {")
+		case keyBinding.Name != "_":
+			g.line("for " + key + " := range maps.Clone(" + g.expr(iteration.Source) + ") {")
+		case valueBinding.Name != "_":
+			g.line("for _, " + value + " := range maps.Clone(" + g.expr(iteration.Source) + ") {")
+		default:
+			g.line("for range maps.Clone(" + g.expr(iteration.Source) + ") {")
+		}
+		g.indent++
+		if keyBinding.Name != "_" {
+			g.line("_ = " + key)
+		}
+		if valueBinding.Name != "_" {
+			g.line("_ = " + value)
+		}
+		g.statements(iteration.Body)
+		g.indent--
+		g.line("}")
+		return
+	}
+	itemBinding := binding(0)
+	item := goIdentifier(itemBinding.Name, false)
 	if iteration.Operation == "each_slice" {
 		g.temporary++
 		suffix := strconv.Itoa(g.temporary)
@@ -302,14 +337,15 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.line("}")
 		g.line("for " + offset + " := 0; " + offset + " < len(" + items + "); " + offset + " += " + size + " {")
 		g.indent++
-		if iteration.Item != "_" {
+		if itemBinding.Name != "_" {
 			g.line(end + " := min(" + offset + "+" + size + ", len(" + items + "))")
 			g.line(item + " := " + items + "[" + offset + ":" + end + "]")
 			g.line("_ = " + item)
 		}
 		if iteration.WithIndex {
-			if iteration.Index != "_" {
-				index := goIdentifier(iteration.Index, false)
+			indexBinding := binding(1)
+			if indexBinding.Name != "_" {
+				index := goIdentifier(indexBinding.Name, false)
 				g.line(index + " := " + offset + " / " + size)
 				g.line("_ = " + index)
 			}
@@ -321,21 +357,22 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.line("}")
 		return
 	}
-	if iteration.WithIndex && iteration.Index != "_" && iteration.Item != "_" {
-		g.line("for " + goIdentifier(iteration.Index, false) + ", " + item + " := range " + g.expr(iteration.Source) + " {")
-	} else if iteration.WithIndex && iteration.Index != "_" {
-		g.line("for " + goIdentifier(iteration.Index, false) + " := range " + g.expr(iteration.Source) + " {")
-	} else if iteration.Item != "_" {
+	indexBinding := binding(1)
+	if iteration.WithIndex && indexBinding.Name != "_" && itemBinding.Name != "_" {
+		g.line("for " + goIdentifier(indexBinding.Name, false) + ", " + item + " := range " + g.expr(iteration.Source) + " {")
+	} else if iteration.WithIndex && indexBinding.Name != "_" {
+		g.line("for " + goIdentifier(indexBinding.Name, false) + " := range " + g.expr(iteration.Source) + " {")
+	} else if itemBinding.Name != "_" {
 		g.line("for _, " + item + " := range " + g.expr(iteration.Source) + " {")
 	} else {
 		g.line("for range " + g.expr(iteration.Source) + " {")
 	}
 	g.indent++
-	if iteration.Item != "_" {
+	if itemBinding.Name != "_" {
 		g.line("_ = " + item)
 	}
-	if iteration.WithIndex && iteration.Index != "_" {
-		g.line("_ = " + goIdentifier(iteration.Index, false))
+	if iteration.WithIndex && indexBinding.Name != "_" {
+		g.line("_ = " + goIdentifier(indexBinding.Name, false))
 	}
 	g.statements(iteration.Body)
 	g.indent--

@@ -231,9 +231,12 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.WithIndex {
 			header += ".with_index"
 		}
-		parameters := []string{n.Item}
-		if n.WithIndex {
-			parameters = append(parameters, n.Index)
+		if n.Source.ExprType().Kind == types.Hash {
+			header = source + ".to_a.each"
+		}
+		parameters := make([]string, 0, len(n.Bindings))
+		for _, binding := range n.Bindings {
+			parameters = append(parameters, binding.Name)
 		}
 		g.line(header+" do |"+strings.Join(parameters, ", ")+"|", n.TrailingComment)
 		g.indent++

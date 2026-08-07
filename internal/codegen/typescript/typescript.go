@@ -302,6 +302,34 @@ func (g *generator) statement(statement ir.Statement) {
 }
 
 func (g *generator) iterate(iteration *ir.Iterate) {
+	binding := func(index int) ir.IterationBinding {
+		if index < len(iteration.Bindings) {
+			return iteration.Bindings[index]
+		}
+		return ir.IterationBinding{Name: "_", Type: types.Type{Kind: types.Any, Name: "Any"}}
+	}
+	if iteration.Source.ExprType().Kind == types.Hash {
+		keyBinding := binding(0)
+		valueBinding := binding(1)
+		key := keyBinding.Name
+		loopKey := key
+		if keyBinding.Type.Kind == types.Int && key != "_" {
+			g.temporary++
+			loopKey = "__trbKey" + strconv.Itoa(g.temporary)
+		}
+		g.line("for (let [" + loopKey + ", " + valueBinding.Name + "] of Object.entries(" + g.expr(iteration.Source) + ")) {")
+		g.indent++
+		if loopKey != key {
+			g.line("let " + key + " = Number(" + loopKey + ");")
+		}
+		g.line("void " + key + ";")
+		g.line("void " + valueBinding.Name + ";")
+		g.statements(iteration.Body)
+		g.indent--
+		g.line("}")
+		return
+	}
+	itemBinding := binding(0)
 	if iteration.Operation == "each_slice" {
 		g.temporary++
 		suffix := strconv.Itoa(g.temporary)
@@ -315,11 +343,12 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.line("if (" + size + " <= 0) throw new Error(\"each_slice size must be greater than zero\");")
 		g.line("for (let " + offset + " = 0; " + offset + " < " + items + ".length; " + offset + " += " + size + ") {")
 		g.indent++
-		g.line("let " + iteration.Item + " = " + items + ".slice(" + offset + ", " + offset + " + " + size + ");")
-		g.line("void " + iteration.Item + ";")
+		g.line("let " + itemBinding.Name + " = " + items + ".slice(" + offset + ", " + offset + " + " + size + ");")
+		g.line("void " + itemBinding.Name + ";")
 		if iteration.WithIndex {
-			g.line("let " + iteration.Index + " = Math.floor(" + offset + " / " + size + ");")
-			g.line("void " + iteration.Index + ";")
+			indexBinding := binding(1)
+			g.line("let " + indexBinding.Name + " = Math.floor(" + offset + " / " + size + ");")
+			g.line("void " + indexBinding.Name + ";")
 		}
 		g.statements(iteration.Body)
 		g.indent--
@@ -328,15 +357,16 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.line("}")
 		return
 	}
+	indexBinding := binding(1)
 	if iteration.WithIndex {
-		g.line("for (let [" + iteration.Index + ", " + iteration.Item + "] of " + g.expr(iteration.Source) + ".entries()) {")
+		g.line("for (let [" + indexBinding.Name + ", " + itemBinding.Name + "] of " + g.expr(iteration.Source) + ".entries()) {")
 	} else {
-		g.line("for (let " + iteration.Item + " of " + g.expr(iteration.Source) + ") {")
+		g.line("for (let " + itemBinding.Name + " of " + g.expr(iteration.Source) + ") {")
 	}
 	g.indent++
-	g.line("void " + iteration.Item + ";")
+	g.line("void " + itemBinding.Name + ";")
 	if iteration.WithIndex {
-		g.line("void " + iteration.Index + ";")
+		g.line("void " + indexBinding.Name + ";")
 	}
 	g.statements(iteration.Body)
 	g.indent--

@@ -241,6 +241,10 @@ puts(scores["ada"])
 snapshot := scores.merge({linus: 3})
 scores.update({ada: 10})
 removed := scores.delete("grace")
+
+scores.each do |name, score|
+	puts(name + ": " + score.to_s())
+end
 ```
 
 Index and hash lookup are strict and fail at runtime when the value is absent.
@@ -263,7 +267,7 @@ Membership and occurrence counting use portable `==` and are therefore
 available for numeric, Boolean, String, and payloadless enum elements. They do
 not implicitly enable target-native structural equality for nested values.
 
-Arrays and integer ranges support structured iteration:
+Arrays, integer ranges, and hashes support structured iteration:
 
 ```trb
 [1, 2, 3].each do |value|
@@ -275,10 +279,19 @@ end
 values.each_slice(2).with_index do |slice, index|
 	puts(index)
 end
+
+scores.each do |name, score|
+	puts(name)
+	puts(score)
+end
 ```
 
 `break` exits the innermost loop and `next` skips to its next iteration.
 `return` exits the enclosing function, including from an iterator block.
+Hash iteration always binds key and value separately. Its enumeration order is
+unspecified, and the entries are captured in a shallow snapshot before the
+first iteration. Indexed and transforming Hash iteration is not part of the
+current alpha.
 
 Value-producing collection blocks are part of the typed IR:
 
@@ -296,7 +309,8 @@ total := [1, 2, 3].reduce(0) do |sum, value|
 end
 ```
 
-The current alpha accepts one result expression in transformation blocks.
+These transformations currently operate on Arrays. The current alpha accepts
+one result expression in transformation blocks.
 Structured multi-statement blocks and first-class lambdas are planned.
 
 ## Result

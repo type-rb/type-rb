@@ -69,8 +69,7 @@ func TestEvaluatePortableRangeIteration(t *testing.T) {
 		&ir.Iterate{
 			Source:    &ir.Range{ExprBase: ir.NewExprBase(token.Span{}, rangeType), Start: literal("0"), End: literal("4"), Exclusive: true},
 			Operation: "each",
-			Item:      "value",
-			ItemType:  integer,
+			Bindings:  []ir.IterationBinding{{Name: "value", Type: integer}},
 			Body: []ir.Statement{&ir.Assignment{
 				Target:   identifier("sum"),
 				Operator: "+=",
@@ -85,6 +84,49 @@ func TestEvaluatePortableRangeIteration(t *testing.T) {
 	}
 	if !result.Display || Inspect(result.Value) != "6" {
 		t.Fatalf("unexpected range iteration result: %#v", result)
+	}
+}
+
+func TestEvaluatePortableHashIteration(t *testing.T) {
+	integer := types.FromName("Integer")
+	hashType := types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{integer, integer}}
+	literal := func(raw string) *ir.Literal {
+		return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, integer), Kind: "integer", Raw: raw}
+	}
+	identifier := func(name string) *ir.Identifier {
+		return &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, integer), Name: name}
+	}
+	statements := []ir.Statement{
+		&ir.Variable{Name: "sum", Type: integer, Mutable: true, Value: literal("0")},
+		&ir.Iterate{
+			Source: &ir.Hash{ExprBase: ir.NewExprBase(token.Span{}, hashType), Entries: []ir.HashEntry{
+				{Key: literal("1"), Value: literal("2")},
+				{Key: literal("3"), Value: literal("4")},
+			}},
+			Operation: "each",
+			Bindings: []ir.IterationBinding{
+				{Name: "key", Type: integer},
+				{Name: "value", Type: integer},
+			},
+			Body: []ir.Statement{&ir.Assignment{
+				Target:   identifier("sum"),
+				Operator: "+=",
+				Value: &ir.Binary{
+					ExprBase: ir.NewExprBase(token.Span{}, integer),
+					Left:     identifier("key"),
+					Operator: "+",
+					Right:    identifier("value"),
+				},
+			}},
+		},
+		&ir.ExpressionStatement{Expression: identifier("sum")},
+	}
+	result, err := NewEvaluator(&bytes.Buffer{}, "go").Evaluate(statements, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Display || Inspect(result.Value) != "10" {
+		t.Fatalf("unexpected Hash iteration result: %#v", result)
 	}
 }
 

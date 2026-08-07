@@ -787,6 +787,36 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 	if err != nil {
 		return flowResult{}, err
 	}
+	if hash, ok := source.Data.(*hashValue); ok {
+		entries := append([]hashEntry(nil), hash.Entries...)
+		for _, entry := range entries {
+			if err := e.checkContext(); err != nil {
+				return flowResult{}, err
+			}
+			iterationScope := &scope{parent: sc, values: map[string]Value{}}
+			values := []Value{entry.Key, entry.Value}
+			for index, binding := range node.Bindings {
+				if index >= len(values) {
+					break
+				}
+				value := values[index]
+				value.Type = binding.Type
+				iterationScope.values[binding.Name] = value
+			}
+			result, err := e.evaluate(node.Body, module, iterationScope)
+			if err != nil || result.Returned {
+				return result, err
+			}
+			switch result.Loop {
+			case loopBreak:
+				result.Loop = loopNone
+				return result, nil
+			case loopNext:
+				continue
+			}
+		}
+		return flowResult{}, nil
+	}
 	items, err := iterableValues(source)
 	if err != nil {
 		return flowResult{}, err
@@ -804,6 +834,7 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 		size = int(integer)
 	}
 	iterationIndex := 0
+	itemBinding := node.Bindings[0]
 	for offset := 0; offset < len(items); offset += size {
 		if err := e.checkContext(); err != nil {
 			return flowResult{}, err
@@ -815,12 +846,14 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 				end = len(items)
 			}
 			slice := append([]Value(nil), items[offset:end]...)
-			iterationScope.values[node.Item] = Value{Type: node.ItemType, Data: &arrayValue{Items: slice}}
+			iterationScope.values[itemBinding.Name] = Value{Type: itemBinding.Type, Data: &arrayValue{Items: slice}}
 		} else {
-			iterationScope.values[node.Item] = items[offset]
+			item := items[offset]
+			item.Type = itemBinding.Type
+			iterationScope.values[itemBinding.Name] = item
 		}
 		if node.WithIndex {
-			iterationScope.values[node.Index] = Value{Type: types.FromName("Integer"), Data: int64(iterationIndex)}
+			iterationScope.values[node.Bindings[1].Name] = Value{Type: node.Bindings[1].Type, Data: int64(iterationIndex)}
 		}
 		result, err := e.evaluate(node.Body, module, iterationScope)
 		if err != nil || result.Returned {

@@ -336,12 +336,107 @@ end
 
 	method := goArtifact.IR.Statements[0].(*ir.Method)
 	iteration, ok := method.Body[1].(*ir.Iterate)
-	if !ok || iteration.ItemType.Kind != types.Int {
+	if !ok || len(iteration.Bindings) != 1 || iteration.Bindings[0].Type.Kind != types.Int {
 		t.Fatalf("iterator item type was not retained in IR: %#v", method.Body[1])
 	}
 	rangeIteration := method.Body[3].(*ir.Iterate)
 	if sourceRange, ok := rangeIteration.Source.(*ir.Range); !ok || !sourceRange.Exclusive {
 		t.Fatalf("exclusive range was not retained in IR: %#v", rangeIteration.Source)
+	}
+}
+
+func TestPortableHashIterationLowersAcrossBackends(t *testing.T) {
+	source := []byte(`def hash_total(labels: Hash<Integer, String>): Integer
+	mut total := 0
+	labels.each do |key, value|
+		if key == 2
+			next
+		end
+		total += key + value.size()
+	end
+	labels.each { |_, value| total += value.size() }
+	return total
+end
+`)
+
+	goArtifact, err := Compile("hash_iteration.trb", source, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "hash_iteration.go", goArtifact.Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, goArtifact.Output)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated Go does not type-check: %v\n%s", err, goArtifact.Output)
+	}
+	goOutput := string(goArtifact.Output)
+	for _, expected := range []string{"for key, value := range maps.Clone(labels)", "for _, value := range maps.Clone(labels)"} {
+		if !strings.Contains(goOutput, expected) {
+			t.Fatalf("missing %q in generated Go:\n%s", expected, goOutput)
+		}
+	}
+
+	rubyArtifact, err := Compile("hash_iteration.trb", source, "ruby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rubyOutput := string(rubyArtifact.Output)
+	for _, expected := range []string{"labels.to_a.each do |key, value|", "labels.to_a.each do |_, value|"} {
+		if !strings.Contains(rubyOutput, expected) {
+			t.Fatalf("missing %q in generated Ruby:\n%s", expected, rubyOutput)
+		}
+	}
+
+	typescriptArtifact, err := Compile("hash_iteration.trb", source, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	typescriptOutput := string(typescriptArtifact.Output)
+	for _, expected := range []string{"Object.entries(labels)", "let key = Number(__trbKey1);", "void value;"} {
+		if !strings.Contains(typescriptOutput, expected) {
+			t.Fatalf("missing %q in generated TypeScript:\n%s", expected, typescriptOutput)
+		}
+	}
+
+	method := goArtifact.IR.Statements[0].(*ir.Method)
+	iteration, ok := method.Body[1].(*ir.Iterate)
+	if !ok || len(iteration.Bindings) != 2 || iteration.Bindings[0].Type.Kind != types.Int || iteration.Bindings[1].Type.Kind != types.String {
+		t.Fatalf("Hash key/value binding types were not retained in IR: %#v", method.Body[1])
+	}
+}
+
+func TestPortableHashIterationRejectsUnspecifiedForms(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "missing value binding",
+			source: "def bad(labels: Hash<Integer, String>)\n\tlabels.each do |key|\n\t\tputs(key)\n\tend\n\treturn\nend\n",
+			want:   "each block expects 2 parameter(s), got 1",
+		},
+		{
+			name:   "indexed Hash iteration",
+			source: "def bad(labels: Hash<Integer, String>)\n\tlabels.each.with_index do |key, value|\n\t\tputs(key)\n\t\tputs(value)\n\tend\n\treturn\nend\n",
+			want:   "Hash#each.with_index is not supported in v0.1",
+		},
+		{
+			name:   "Hash transform",
+			source: "def bad(labels: Hash<Integer, String>): Array<String>\n\treturn labels.map do |value|\n\t\tvalue\n\tend\nend\n",
+			want:   "Hash iteration supports only each in v0.1",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_hash_iteration.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
 	}
 }
 

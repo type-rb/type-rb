@@ -147,6 +147,9 @@ label := labels.try_fetch(1)
 keys := hashes.keys(labels)
 combined := labels.merge({2 => "two"})
 labels.update({2 => "two"})
+labels.each do |key, value|
+	puts(key.to_s() + ": " + value)
+end
 removed := hashes.delete(labels, 1)
 ```
 
@@ -166,14 +169,16 @@ checks, keys, values, shallow `dup`/`merge`, and mutable `update`. `merge`
 returns a new shallow Hash, while `update` mutates its receiver; duplicate keys
 use the right-hand value. `delete` requires `mut`, returns the removed value,
 and fails when the key is absent. Existing Hash arguments keep their exact key
-and value types. Hash enumeration order is unspecified.
+and value types. `each` binds the key and value with their respective generic
+types and traverses a shallow entry snapshot. Hash enumeration order is
+unspecified.
 
 Strict operations fail at runtime for missing keys, invalid indexes, or empty
 edge removals. Safe fetch returns a `Result` with a stable error value.
 
-`map`, `select`, and `reduce` are structured language expressions rather than
-target callbacks. See the [language guide](language.md#arrays-hashes-and-iteration)
-for examples.
+Array `map`, `select`, and `reduce` are structured language expressions rather
+than target callbacks. See the
+[language guide](language.md#arrays-hashes-and-iteration) for examples.
 
 ## Logical paths
 
