@@ -204,33 +204,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		return result
 	case *ast.CaseStatement:
-		result := &ir.Case{
-			Base:    base(n.Base),
-			Value:   l.expression(n.Value),
-			Leading: l.statements(n.Leading),
-			Else:    l.statements(n.Else),
-			HasElse: n.HasElse,
-		}
-		for _, branch := range n.Branches {
-			lowered := ir.CaseBranch{
-				Base:  base(branch.Base),
-				Value: l.expression(branch.Value),
-				Body:  l.statements(branch.Body),
-			}
-			if pattern, ok := l.checked.CasePatterns[branch.Value]; ok {
-				lowered.TypePattern = pattern.TypeUnion
-				lowered.MatchType = pattern.MatchType
-				result.TypeUnion = result.TypeUnion || pattern.TypeUnion
-				lowered.EnumName = pattern.Variant.EnumName
-				lowered.Member = pattern.Variant.Name
-				lowered.PayloadEnum = pattern.PayloadEnum
-				for _, binding := range pattern.Bindings {
-					lowered.Bindings = append(lowered.Bindings, ir.CaseBinding{Name: binding.Name, Field: binding.Field.Name, Type: binding.Field.Type})
-				}
-			}
-			result.Branches = append(result.Branches, lowered)
-		}
-		return result
+		return l.caseNode(n, false)
 	case *ast.WhileStatement:
 		return &ir.While{Base: base(n.Base), Condition: l.expression(n.Condition), Body: l.statements(n.Body)}
 	case *ast.NativeStatement:
@@ -265,6 +239,8 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	typ := l.checked.Expressions[node]
 	base := ir.NewExprBase(node.Span(), typ)
 	switch n := node.(type) {
+	case *ast.CaseStatement:
+		return l.caseNode(n, true)
 	case *ast.Identifier:
 		return &ir.Identifier{ExprBase: base, Name: n.Name, Owner: l.checked.Constants[n], Lexical: l.checked.LexicalBindings[n], Reference: l.reference(n)}
 	case *ast.Literal:
@@ -325,6 +301,9 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				if expression, ok := n.Block.Body[last].(*ast.ExpressionStatement); ok {
 					result.Body = l.statements(n.Block.Body[:last])
 					result.Result = l.expression(expression.Expression)
+				} else if expression, ok := n.Block.Body[last].(ast.Expression); ok {
+					result.Body = l.statements(n.Block.Body[:last])
+					result.Result = l.expression(expression)
 				} else {
 					result.Body = l.statements(n.Block.Body)
 				}
@@ -367,6 +346,74 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	default:
 		return nil
 	}
+}
+
+func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
+	typ := types.FromName("Void")
+	if expression {
+		typ = l.checked.Expressions[node]
+	}
+	exprBase := ir.NewExprBase(node.Span(), typ)
+	exprBase.TrailingComment = node.TrailingComment
+	result := &ir.Case{
+		ExprBase: exprBase,
+		Value:    l.expression(node.Value),
+		Leading:  l.statements(node.Leading),
+		HasElse:  node.HasElse,
+	}
+	result.Else, result.ElseResult = l.controlFlowBranch(node.Else, expression)
+	for _, branch := range node.Branches {
+		body, branchResult := l.controlFlowBranch(branch.Body, expression)
+		lowered := ir.CaseBranch{
+			Base:   ir.Base{Span: branch.Span(), TrailingComment: branch.TrailingComment},
+			Value:  l.expression(branch.Value),
+			Body:   body,
+			Result: branchResult,
+		}
+		if pattern, ok := l.checked.CasePatterns[branch.Value]; ok {
+			lowered.TypePattern = pattern.TypeUnion
+			lowered.MatchType = pattern.MatchType
+			result.TypeUnion = result.TypeUnion || pattern.TypeUnion
+			lowered.EnumName = pattern.Variant.EnumName
+			lowered.Member = pattern.Variant.Name
+			lowered.PayloadEnum = pattern.PayloadEnum
+			for _, binding := range pattern.Bindings {
+				lowered.Bindings = append(lowered.Bindings, ir.CaseBinding{Name: binding.Name, Field: binding.Field.Name, Type: binding.Field.Type})
+			}
+		}
+		result.Branches = append(result.Branches, lowered)
+	}
+	return result
+}
+
+func (l *lowerer) controlFlowBranch(body []ast.Statement, expression bool) ([]ir.Statement, ir.Expression) {
+	if !expression {
+		return l.statements(body), nil
+	}
+	resultIndex, result := lowerControlFlowBranchExpression(body)
+	if result == nil {
+		return l.statements(body), nil
+	}
+	statements := l.statements(body[:resultIndex])
+	statements = append(statements, l.statements(body[resultIndex+1:])...)
+	return statements, l.expression(result)
+}
+
+func lowerControlFlowBranchExpression(body []ast.Statement) (int, ast.Expression) {
+	for index := len(body) - 1; index >= 0; index-- {
+		switch statement := body[index].(type) {
+		case *ast.CommentStatement, *ast.BlankStatement:
+			continue
+		case *ast.ExpressionStatement:
+			return index, statement.Expression
+		default:
+			if expression, ok := statement.(ast.Expression); ok {
+				return index, expression
+			}
+			return index, nil
+		}
+	}
+	return -1, nil
 }
 
 func lowerCodecSchema(schema checker.CodecSchema) *ir.CodecSchema {

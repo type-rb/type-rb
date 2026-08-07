@@ -164,3 +164,44 @@ func TestEvaluateEnumAndCase(t *testing.T) {
 		t.Fatalf("unexpected enum case result: %#v", result)
 	}
 }
+
+func TestEvaluateCaseExpression(t *testing.T) {
+	enumType := types.FromName("State")
+	stringType := types.FromName("String")
+	definition := &ir.Enum{Name: "State", Body: []ir.Statement{
+		&ir.EnumMember{Name: "Open"},
+		&ir.EnumMember{Name: "Closed"},
+	}}
+	state := func(member string) *ir.Member {
+		return &ir.Member{
+			ExprBase:  ir.NewExprBase(token.Span{}, enumType),
+			Receiver:  &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, enumType), Name: "State"},
+			Name:      member,
+			Namespace: true,
+		}
+	}
+	text := func(value string) *ir.Literal {
+		return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, stringType), Kind: "string", Raw: `"` + value + `"`}
+	}
+
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	evaluator.LoadDefinitions(&ir.Program{ModulePath: "repl", Statements: []ir.Statement{definition}})
+	caseExpression := &ir.Case{
+		ExprBase: ir.NewExprBase(token.Span{}, stringType),
+		Value:    state("Closed"),
+		Branches: []ir.CaseBranch{
+			{Value: state("Open"), Result: text("open")},
+			{Value: state("Closed"), Result: text("closed")},
+		},
+	}
+	result, err := evaluator.Evaluate([]ir.Statement{
+		&ir.Variable{Name: "message", Type: stringType, Value: caseExpression},
+		&ir.ExpressionStatement{Expression: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, stringType), Name: "message"}},
+	}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Display || Inspect(result.Value) != `"closed"` || result.Value.Type.String() != "String" {
+		t.Fatalf("unexpected case expression result: %#v", result)
+	}
+}

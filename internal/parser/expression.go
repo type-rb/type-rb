@@ -9,11 +9,16 @@ import (
 )
 
 type exprParser struct {
-	tokens []token.Token
-	pos    int
+	tokens   []token.Token
+	pos      int
+	embedded map[int]ast.Expression
 }
 
 func parseExpressionTokens(tokens []token.Token) (ast.Expression, bool) {
+	return parseExpressionTokensWithEmbedded(tokens, nil)
+}
+
+func parseExpressionTokensWithEmbedded(tokens []token.Token, embedded map[int]ast.Expression) (ast.Expression, bool) {
 	filtered := make([]token.Token, 0, len(tokens))
 	for _, tok := range tokens {
 		if tok.Kind != token.Newline && tok.Kind != token.Comment {
@@ -23,7 +28,7 @@ func parseExpressionTokens(tokens []token.Token) (ast.Expression, bool) {
 	if len(filtered) == 0 {
 		return nil, false
 	}
-	p := &exprParser{tokens: filtered}
+	p := &exprParser{tokens: filtered, embedded: embedded}
 	expr := p.parse(0)
 	return expr, expr != nil && p.pos == len(p.tokens)
 }
@@ -154,6 +159,9 @@ func (p *exprParser) parsePrefix() ast.Expression {
 	}
 	tok := p.tokens[p.pos]
 	p.pos++
+	if expression := p.embedded[tok.Span.Start.Offset]; expression != nil {
+		return expression
+	}
 	switch tok.Lexeme {
 	case "!", "not", "-", "+", "~":
 		operand := p.parse(11)

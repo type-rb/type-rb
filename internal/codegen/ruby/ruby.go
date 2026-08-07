@@ -390,6 +390,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return ""
 	}
 	switch n := expression.(type) {
+	case *ir.Case:
+		return g.caseExpression(n)
 	case *ir.Identifier:
 		return n.Name
 	case *ir.Literal:
@@ -505,6 +507,66 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) caseExpression(node *ir.Case) string {
+	child := &generator{
+		loader:       g.loader,
+		modulePath:   g.modulePath,
+		topFunctions: g.topFunctions,
+		nativeSyntax: g.nativeSyntax,
+		temporary:    g.temporary,
+	}
+	child.line("begin", "")
+	child.indent++
+	child.statements(node.Leading)
+	payload := caseHasPayload(node)
+	caseValue := child.expr(node.Value)
+	value := ""
+	caseComment := node.TrailingComment
+	if payload || node.TypeUnion {
+		child.temporary++
+		value = "__trb_case" + strconv.Itoa(child.temporary)
+		child.line(value+" = "+caseValue, node.TrailingComment)
+		caseValue = value
+		caseComment = ""
+	}
+	child.line("case "+caseValue, caseComment)
+	for _, branch := range node.Branches {
+		pattern := child.expr(branch.Value)
+		if node.TypeUnion {
+			pattern = rubyTypePattern(branch.MatchType)
+		}
+		child.line("when "+pattern, branch.TrailingComment)
+		child.indent++
+		for _, binding := range branch.Bindings {
+			if binding.Name == "_" {
+				continue
+			}
+			bindingValue := value
+			if branch.PayloadEnum {
+				bindingValue += "." + binding.Field
+			}
+			child.line(binding.Name+" = "+bindingValue, "")
+		}
+		child.statements(branch.Body)
+		child.line(child.expr(branch.Result), "")
+		child.indent--
+	}
+	child.line("else", "")
+	child.indent++
+	if node.HasElse {
+		child.statements(node.Else)
+		child.line(child.expr(node.ElseResult), "")
+	} else {
+		child.line(`raise "unreachable exhaustive case"`, "")
+	}
+	child.indent--
+	child.line("end", "")
+	child.indent--
+	child.line("end", "")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) transform(transform *ir.Transform) string {

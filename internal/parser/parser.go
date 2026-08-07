@@ -115,6 +115,9 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	}
 	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
+	if expression := p.tryCaseExpressionStatement(line, next, base); expression != nil {
+		return expression
+	}
 	if blockOperation := p.tryIterationStatement(line, next, base); blockOperation != nil {
 		return blockOperation
 	}
@@ -144,6 +147,79 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	p.pos = next
 	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
+}
+
+func (p *Parser) tryCaseExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {
+	caseAt := -1
+	for index, item := range line {
+		if index > 0 && item.Lexeme == "case" {
+			caseAt = index
+			break
+		}
+	}
+	if caseAt < 0 {
+		return nil
+	}
+
+	casePosition := -1
+	for index := p.pos; index < len(p.tokens); index++ {
+		if p.tokens[index].Span.Start.Offset == line[caseAt].Span.Start.Offset {
+			casePosition = index
+			break
+		}
+	}
+	if casePosition < 0 {
+		return nil
+	}
+
+	p.pos = casePosition
+	caseNode, ok := p.parseCase().(*ast.CaseStatement)
+	if !ok {
+		return nil
+	}
+	parsedNext := p.pos
+
+	wrapped := append([]token.Token(nil), line[:caseAt]...)
+	wrapped = append(wrapped, line[caseAt])
+	for _, item := range line[caseAt+1:] {
+		if item.Span.Start.Offset >= caseNode.Span().End.Offset {
+			wrapped = append(wrapped, item)
+		}
+	}
+	base.SourceSpan.End = caseNode.Span().End
+	if len(wrapped) > 0 && wrapped[len(wrapped)-1].Span.End.Offset > base.SourceSpan.End.Offset {
+		base.SourceSpan.End = wrapped[len(wrapped)-1].Span.End
+	}
+	embedded := map[int]ast.Expression{line[caseAt].Span.Start.Offset: caseNode}
+
+	var statement ast.Statement
+	if len(wrapped) > 0 && wrapped[0].Lexeme == "return" {
+		value, valid := parseExpressionTokensWithEmbedded(wrapped[1:], embedded)
+		if valid {
+			statement = &ast.ReturnStatement{Base: base, Value: value}
+		}
+	}
+	if statement == nil {
+		statement = p.tryVariableWithEmbedded(wrapped, base, embedded)
+	}
+	if statement == nil {
+		statement = p.tryAssignmentWithEmbedded(wrapped, base, embedded)
+	}
+	if statement == nil {
+		if value, valid := parseExpressionTokensWithEmbedded(wrapped, embedded); valid {
+			statement = &ast.ExpressionStatement{Base: base, Expression: value}
+		}
+	}
+	if statement == nil {
+		p.errorAt(base.SourceSpan, "case expression is not valid in this expression context")
+		statement = &ast.ExpressionStatement{Base: base, Expression: caseNode}
+	}
+	if next > parsedNext {
+		p.pos = next
+	} else {
+		p.pos = parsedNext
+	}
+	return statement
 }
 
 func (p *Parser) tryIterationStatement(line []token.Token, next int, base ast.Base) ast.Statement {
@@ -1070,6 +1146,10 @@ func (p *Parser) tryField(line []token.Token, base ast.Base) ast.Statement {
 }
 
 func (p *Parser) tryVariable(line []token.Token, base ast.Base) ast.Statement {
+	return p.tryVariableWithEmbedded(line, base, nil)
+}
+
+func (p *Parser) tryVariableWithEmbedded(line []token.Token, base ast.Base, embedded map[int]ast.Expression) ast.Statement {
 	assign := topLevelIndex(line, ":=")
 	if assign < 0 || assign == 0 {
 		return nil
@@ -1088,7 +1168,7 @@ func (p *Parser) tryVariable(line []token.Token, base ast.Base) ast.Statement {
 	if len(left) > 1 && left[1].Lexeme == ":" {
 		n.Type = parseType(left[2:])
 	}
-	n.Value, _ = parseExpressionTokens(line[assign+1:])
+	n.Value, _ = parseExpressionTokensWithEmbedded(line[assign+1:], embedded)
 	if n.Value == nil {
 		n.Value = nativeExpression(line[assign+1:], p)
 	}
@@ -1096,13 +1176,17 @@ func (p *Parser) tryVariable(line []token.Token, base ast.Base) ast.Statement {
 }
 
 func (p *Parser) tryAssignment(line []token.Token, base ast.Base) ast.Statement {
+	return p.tryAssignmentWithEmbedded(line, base, nil)
+}
+
+func (p *Parser) tryAssignmentWithEmbedded(line []token.Token, base ast.Base, embedded map[int]ast.Expression) ast.Statement {
 	for _, op := range []string{"=", "+=", "-=", "*=", "/=", "||=", "&&="} {
 		at := topLevelIndex(line, op)
 		if at <= 0 {
 			continue
 		}
 		left, lok := parseExpressionTokens(line[:at])
-		right, rok := parseExpressionTokens(line[at+1:])
+		right, rok := parseExpressionTokensWithEmbedded(line[at+1:], embedded)
 		if lok && rok {
 			return &ast.AssignmentStatement{Base: base, Target: left, Operator: op, Value: right}
 		}

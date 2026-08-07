@@ -1513,6 +1513,167 @@ end
 	}
 }
 
+func TestCaseExpressionAcrossModes(t *testing.T) {
+	source := []byte(`enum Outcome
+	Text(value: String)
+	Count(value: Integer)
+end
+
+def render(outcome: Outcome): String
+	result := case outcome
+	when Outcome::Text(value)
+		decorated := "text:" + value
+		decorated
+	when Outcome::Count(value)
+		value.to_s()
+	end
+	return result
+end
+
+def direct(outcome: Outcome): String
+	return case outcome
+	when Outcome::Text(value)
+		value
+	when Outcome::Count(value)
+		value.to_s()
+	end
+end
+
+def assign(outcome: Outcome): String
+	mut result := ""
+	result = case outcome
+	when Outcome::Text(value)
+		value
+	when Outcome::Count(value)
+		value.to_s()
+	end
+	return result
+end
+
+def render_all(outcomes: Array<Outcome>): Array<String>
+	return outcomes.map do |outcome|
+		case outcome
+		when Outcome::Text(value)
+			value
+		when Outcome::Count(value)
+			value.to_s()
+		end
+	end
+end
+
+def main()
+	puts(
+		case Outcome::Text("ok")
+		when Outcome::Text(value)
+			value
+		when Outcome::Count(value)
+			value.to_s()
+		end
+	)
+	return
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("case_expression.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected case expressions: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	for mode, wants := range map[string][]string{
+		"go":         {"result := func() string {", "return decorated", "return func() string {"},
+		"ruby":       {"result = begin", "return begin", "case __trb_case"},
+		"typescript": {"const result: string = (()", "return decorated;", "return (()"},
+	} {
+		output := string(artifacts[mode].Output)
+		for _, want := range wants {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s case expression is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "case_expression.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, artifacts["go"].Output)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated case expression Go did not type-check: %v\n%s", err, artifacts["go"].Output)
+	}
+
+	method := artifacts["go"].IR.Statements[1].(*ir.Method)
+	variable := method.Body[0].(*ir.Variable)
+	caseExpression, ok := variable.Value.(*ir.Case)
+	if !ok || caseExpression.ExprType().String() != "String" || caseExpression.Branches[0].Result == nil {
+		t.Fatalf("case expression value was not retained in typed IR: %#v", variable.Value)
+	}
+	astMethod := artifacts["go"].AST.Statements[1].(*ast.MethodStatement)
+	astVariable := astMethod.Body[0].(*ast.VariableStatement)
+	if _, ok := astVariable.Value.(*ast.CaseStatement); !ok {
+		t.Fatalf("case expression value was not retained in syntax AST: %T", astVariable.Value)
+	}
+}
+
+func TestCaseExpressionDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "incompatible branches",
+			source: "enum State\n\tOpen\n\tClosed\nend\ndef value(state: State): String\n\treturn case state\n\twhen State::Open\n\t\t\"open\"\n\twhen State::Closed\n\t\t1\n\tend\nend\n",
+			want:   "case expression branches have incompatible types String and Integer",
+		},
+		{
+			name:   "missing branch value",
+			source: "enum State\n\tOpen\nend\ndef value(state: State): String\n\treturn case state\n\twhen State::Open\n\t\treturn \"open\"\n\tend\nend\n",
+			want:   "case expression branch must end with an expression",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_case_expression.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestCaseExpressionUsesSafeCommonBranchType(t *testing.T) {
+	source := []byte(`enum Choice
+	Whole
+	Fraction
+end
+
+def number(choice: Choice): Float
+	return case choice
+	when Choice::Whole
+		1
+	when Choice::Fraction
+		2.5
+	end
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("numeric_case_expression.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected compatible numeric branches: %v", mode, err)
+		}
+		method := artifact.IR.Statements[1].(*ir.Method)
+		caseExpression := method.Body[0].(*ir.Return).Value.(*ir.Case)
+		if caseExpression.ExprType().String() != "Float" || caseExpression.Branches[0].Result.ExprType().String() != "Float" {
+			t.Fatalf("%s did not retain Float branch widening in IR: %#v", mode, caseExpression)
+		}
+	}
+}
+
 func TestPayloadEnumAndPatternBindingAcrossModes(t *testing.T) {
 	source := []byte(`enum Token
 	Text(value: String)
