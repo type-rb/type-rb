@@ -48,6 +48,26 @@ TypeScript mode owns `package.json`. These files are deterministic views of
 `trbconfig.jsonc`. Edit dependencies through the config or `trb add` and
 `trb remove`, then run `trb sync`.
 
+## TypeScript toolchain
+
+New managed TypeScript projects use ESM, npm, and the latest TypeScript release:
+
+```jsonc
+{
+  "devDependencies": {
+    "typescript": "latest"
+  },
+  "typescript": {
+    "packageManager": "npm",
+    "moduleType": "module"
+  }
+}
+```
+
+TypeRB targets the current TypeScript release without legacy code-generation
+branches. Browser applications are the primary TypeScript use case; APIs tied
+to a particular runtime remain explicit platform packages.
+
 ## Package management
 
 The default `"packageManagement": "managed"` lets TypeRB generate and use the

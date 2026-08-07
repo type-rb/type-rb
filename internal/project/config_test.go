@@ -117,3 +117,10 @@ func TestExternalPackageManagement(t *testing.T) {
 		t.Fatal("external project must not be treated as a trb-managed package project")
 	}
 }
+
+func TestNewTypeScriptProjectUsesLatestCompiler(t *testing.T) {
+	config := New(t.TempDir(), "typescript")
+	if got := config.DevDependencies["typescript"]; got != DefaultTypeScriptVersion {
+		t.Fatalf("unexpected TypeScript version: %q", got)
+	}
+}

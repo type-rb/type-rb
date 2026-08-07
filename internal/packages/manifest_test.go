@@ -72,13 +72,14 @@ func TestSyncNpmPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	var manifest struct {
-		Type         string            `json:"type"`
-		Dependencies map[string]string `json:"dependencies"`
+		Type            string            `json:"type"`
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Type != "module" || manifest.Dependencies["zod"] != "^4.0.0" {
+	if manifest.Type != "module" || manifest.Dependencies["zod"] != "^4.0.0" || manifest.DevDependencies["typescript"] != project.DefaultTypeScriptVersion {
 		t.Fatalf("unexpected package.json: %s", data)
 	}
 }
