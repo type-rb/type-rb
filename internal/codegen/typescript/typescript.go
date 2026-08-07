@@ -555,6 +555,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return ""
 	}
 	switch n := expression.(type) {
+	case *ir.If:
+		return g.ifExpression(n)
 	case *ir.Case:
 		return g.caseExpression(n)
 	case *ir.Identifier:
@@ -725,6 +727,42 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) ifExpression(node *ir.If) string {
+	child := &generator{
+		inClass:       g.inClass,
+		functionDepth: g.functionDepth,
+		methods:       g.methods,
+		modulePath:    g.modulePath,
+		topFunctions:  g.topFunctions,
+		records:       g.records,
+		temporary:     g.temporary,
+	}
+	child.line("((): " + tsType(node.ExprType()) + " => {")
+	child.indent++
+	child.line("if (" + child.expr(node.Condition) + ") {" + tsTrailingComment(node.TrailingComment))
+	child.indent++
+	child.statements(node.Then)
+	child.line("return " + child.expr(node.ThenResult) + ";")
+	child.indent--
+	for _, branch := range node.ElseIf {
+		child.line("} else if (" + child.expr(branch.Condition) + ") {")
+		child.indent++
+		child.statements(branch.Body)
+		child.line("return " + child.expr(branch.Result) + ";")
+		child.indent--
+	}
+	child.line("} else {")
+	child.indent++
+	child.statements(node.Else)
+	child.line("return " + child.expr(node.ElseResult) + ";")
+	child.indent--
+	child.line("}")
+	child.indent--
+	child.line("})()")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) caseExpression(node *ir.Case) string {

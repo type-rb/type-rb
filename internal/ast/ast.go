@@ -222,9 +222,11 @@ type IfStatement struct {
 	Then      []Statement
 	ElseIf    []IfBranch
 	Else      []Statement
+	HasElse   bool
 }
 
-func (*IfStatement) statementNode() {}
+func (*IfStatement) statementNode()  {}
+func (*IfStatement) expressionNode() {}
 
 type CaseBranch struct {
 	Base

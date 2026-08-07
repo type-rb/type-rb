@@ -135,6 +135,22 @@ func TestFormatCaseExpressionUsesCanonicalIndentationAndPreservesComments(t *tes
 	}
 }
 
+func TestFormatIfExpressionUsesCanonicalIndentationAndPreservesComments(t *testing.T) {
+	source := []byte("def label(enabled:Boolean):String\nresult:=if enabled # choose\n\"on\" # yes\nelsif false\n\"never\"\nelse # fallback\n\"off\"\nend\nreturn result\nend\n")
+	want := "def label(enabled: Boolean): String\n\tresult := if enabled # choose\n\t\t\"on\" # yes\n\telsif false\n\t\t\"never\"\n\telse # fallback\n\t\t\"off\"\n\tend\n\treturn result\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected if expression formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("if expression formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatPayloadEnumAndPatternBindings(t *testing.T) {
 	source := []byte("enum  Token # token\nText(value:String) # text\nPair(left:Integer,right:Integer)\nEOF\nend\ndef render(value:Token):String\ncase value\nwhen Token::Text(text) # bind\nreturn text\nwhen Token::Pair(left,right)\nreturn \"pair\"\nwhen Token::EOF\nreturn \"eof\"\nend\nend\n")
 	formatted, diagnostics := Format(source)
