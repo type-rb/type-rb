@@ -1186,6 +1186,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Number(" + arguments[0] + ")"
 	case "trb.std.numbers.integer_absolute":
 		return "Math.abs(" + arguments[0] + ")"
+	case "trb.std.numbers.integer_min":
+		return "Math.min(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.numbers.integer_max":
+		return "Math.max(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.numbers.integer_clamp":
+		return "((value: number, minimum: number, maximum: number): number => { if (minimum > maximum) throw new RangeError(\"clamp minimum exceeds maximum\"); return Math.min(Math.max(value, minimum), maximum); })(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.numbers.integer_zero":
 		return arguments[0] + " === 0"
 	case "trb.std.numbers.integer_positive":
@@ -1199,7 +1205,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.numbers.float_to_string":
 		return portableFloatString(arguments[0])
 	case "trb.std.numbers.float_to_integer":
-		return "((): number => { const value = " + arguments[0] + "; if (!Number.isFinite(value)) { throw new RangeError(\"Float cannot be converted to Integer\"); } const integer = Math.trunc(value); if (!Number.isSafeInteger(integer)) { throw new RangeError(\"Integer is outside the portable range\"); } return integer; })()"
+		return portableFloatInteger(arguments[0], "Math.trunc(value)")
+	case "trb.std.numbers.float_floor":
+		return portableFloatInteger(arguments[0], "Math.floor(value)")
+	case "trb.std.numbers.float_ceil":
+		return portableFloatInteger(arguments[0], "Math.ceil(value)")
+	case "trb.std.numbers.float_round":
+		return portableFloatInteger(arguments[0], "value < 0 ? -Math.round(-value) : Math.round(value)")
 	case "trb.std.numbers.float_absolute":
 		return "Math.abs(" + arguments[0] + ")"
 	case "trb.std.numbers.float_finite":
@@ -1213,6 +1225,16 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.numbers.try_parse_integer":
 		resultType, _, _ := filesystemResultType()
 		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { return " + numberParseError("InvalidFormat", "__trbInput", "invalid Integer") + "; } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { return " + numberParseError("OutOfRange", "__trbInput", "Integer is outside the portable range") + "; } return " + filesystemOK("__trbValue") + "; })()"
+	case "trb.std.math.sqrt":
+		return "Math.sqrt(" + arguments[0] + ")"
+	case "trb.std.math.exp":
+		return "Math.exp(" + arguments[0] + ")"
+	case "trb.std.math.log":
+		return "Math.log(" + arguments[0] + ")"
+	case "trb.std.math.log2":
+		return "Math.log2(" + arguments[0] + ")"
+	case "trb.std.math.log10":
+		return "Math.log10(" + arguments[0] + ")"
 	case "trb.std.booleans.to_string":
 		return "String(" + arguments[0] + ")"
 	case "trb.platform.typescript.node.argv":
@@ -1240,6 +1262,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "undefined"
 	}
+}
+
+func portableFloatInteger(value, operation string) string {
+	return "((): number => { const value = " + value + "; if (!Number.isFinite(value)) { throw new RangeError(\"Float cannot be converted to Integer\"); } const integer = " + operation + "; if (!Number.isSafeInteger(integer)) { throw new RangeError(\"Integer is outside the portable range\"); } return integer; })()"
 }
 
 func portableFloatString(value string) string {

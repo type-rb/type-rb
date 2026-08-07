@@ -57,7 +57,9 @@ func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
 				{source: "0.25.to_", want: "to_i", insertText: "to_i()", kind: languageservice.CompletionMethod},
 				{source: "0.25.to_", want: "to_s", insertText: "to_s()", kind: languageservice.CompletionMethod},
 				{source: "1.pos", want: "positive?", insertText: "positive?()", kind: languageservice.CompletionMethod},
+				{source: "1.mi", want: "min", insertText: "min", kind: languageservice.CompletionMethod},
 				{source: "0.25.fin", want: "finite?", insertText: "finite?()", kind: languageservice.CompletionMethod},
+				{source: "0.25.flo", want: "floor", insertText: "floor()", kind: languageservice.CompletionMethod},
 				{source: "true.to_", want: "to_s", insertText: "to_s()", kind: languageservice.CompletionMethod},
 			} {
 				items := service.Complete(test.source, len(test.source))

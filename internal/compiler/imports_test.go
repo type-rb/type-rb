@@ -124,7 +124,7 @@ def text_size(): Integer
 end
 `)
 	wants := map[string][]string{
-		"go":         {`strconv.Itoa(123)`, `strconv.FormatFloat(value, 'f', -1, 64)`, `float64(2)`, `math.Trunc(value)`, `fmt.Println(func() string`, `regexp.MatchString`, `strconv.ParseInt`, `utf8.RuneCountInString("a😀")`},
+		"go":         {`strconv.Itoa(123)`, `strconv.FormatFloat(value, 'f', -1, 64)`, `float64(2)`, `math.Trunc(-2.75)`, `fmt.Println(func() string`, `regexp.MatchString`, `strconv.ParseInt`, `utf8.RuneCountInString("a😀")`},
 		"ruby":       {`123.to_s`, `raw = value.to_s`, `(2).to_f`, `value.truncate`, `$stdout.puts(->(value)`, `Integer(input, 10)`, `"a😀".each_codepoint.count`},
 		"typescript": {`String(123)`, `const raw = String(value)`, `Number(2)`, `Math.trunc(value)`, `console.log(((): string`, `Number.isSafeInteger(__trbValue)`, `Array.from("a😀").length`},
 	}
@@ -182,12 +182,20 @@ def package_integer_absolute(): Integer
 	return numbers.absolute(-4)
 end
 
+def integer_bounds(): Integer
+	return 5.min(3) + 5.max(7) + 12.clamp(0, 10)
+end
+
 def integer_predicates(value: Integer): Boolean
 	return value.zero?() || value.positive?() || value.negative?() || value.even?() || value.odd?()
 end
 
 def float_absolute(): Float
 	return (-0.25).abs()
+end
+
+def float_rounding(): Integer
+	return (-2.75).floor() + (-2.75).ceil() + (-2.5).round() + 2.75.truncate()
 end
 
 def float_predicates(value: Float): Boolean
@@ -205,12 +213,19 @@ end
 	wants := map[string][]string{
 		"go": {
 			`if value < 0`,
+			`min(5, 3)`,
+			`max(5, 7)`,
+			`clamp minimum exceeds maximum`,
 			`value == 0`,
 			`value > 0`,
 			`value < 0`,
 			`value%2 == 0`,
 			`value%2 != 0`,
 			`math.Abs`,
+			`math.Floor`,
+			`math.Ceil`,
+			`math.Round`,
+			`math.Trunc`,
 			`!math.IsNaN(value) && !math.IsInf(value, 0)`,
 			`math.IsInf(value, 0)`,
 			`math.IsNaN(value)`,
@@ -218,6 +233,13 @@ end
 		},
 		"ruby": {
 			`.abs`,
+			`[(5), (3)].min`,
+			`[(5), (7)].max`,
+			`value.clamp(minimum, maximum)`,
+			`value.floor`,
+			`value.ceil`,
+			`value.round`,
+			`value.truncate`,
 			`.zero?`,
 			`.positive?`,
 			`.negative?`,
@@ -230,6 +252,13 @@ end
 		},
 		"typescript": {
 			`Math.abs`,
+			`Math.min(5, 3)`,
+			`Math.max(5, 7)`,
+			`Math.min(Math.max(value, minimum), maximum)`,
+			`Math.floor(value)`,
+			`Math.ceil(value)`,
+			`value < 0 ? -Math.round(-value) : Math.round(value)`,
+			`Math.trunc(value)`,
 			`value === 0`,
 			`value > 0`,
 			`value < 0`,
@@ -252,6 +281,44 @@ end
 			if !strings.Contains(output, want) {
 				t.Fatalf("generated %s scalar receiver method is missing %q:\n%s", mode, want, output)
 			}
+		}
+	}
+}
+
+func TestPortableMathPackageLowersAcrossBackends(t *testing.T) {
+	source := []byte(`import trb/std/math
+
+def calculate(): Float
+	return math.sqrt(9) + math.exp(0.0) + math.log(1.0) + math.log2(8.0) + math.log10(100.0)
+end
+`)
+	wants := map[string][]string{
+		"go":         {"math.Sqrt(float64(9))", "math.Exp(0.0)", "math.Log(1.0)", "math.Log2(8.0)", "math.Log10(100.0)"},
+		"ruby":       {"Math.sqrt(value)", ".call((9).to_f)", "Math.exp(0.0)", "Math.log(value)", "Math.log2(value)", "Math.log10(value)"},
+		"typescript": {"Math.sqrt(Number(9))", "Math.exp(0.0)", "Math.log(1.0)", "Math.log2(8.0)", "Math.log10(100.0)"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := CompileWithOptions("math.trb", source, Options{Mode: mode, Package: "portable_math", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable math: %v", mode, err)
+		}
+		for _, want := range wants[mode] {
+			if !strings.Contains(string(artifact.Output), want) {
+				t.Fatalf("generated %s math is missing %q:\n%s", mode, want, artifact.Output)
+			}
+		}
+	}
+
+	invalid := []struct {
+		source string
+		want   string
+	}{
+		{source: "import trb/std/math\n\ndef bad(): Float\n\treturn math.sqrt(\"nine\")\nend\n", want: "argument 1 to sqrt() has type String, expected Float"},
+		{source: "def bad(): Integer\n\treturn 1.5.clamp(0, 1)\nend\n", want: "type Float has no member clamp"},
+	}
+	for _, test := range invalid {
+		if _, err := Compile("bad_math.trb", []byte(test.source), "go"); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("expected math diagnostic %q, got %v", test.want, err)
 		}
 	}
 }

@@ -178,13 +178,89 @@ func TestReplEvaluatesPortableReceiverMethodsAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "123.to_s()\n0.25.to_s()\n(-0.0).to_s()\n2.to_f()\n(-2.75).to_i()\n(-4).abs()\n0.zero?()\n1.positive?()\n(-1).negative?()\n2.even?()\n3.odd?()\n(-0.25).abs()\n0.25.finite?()\ntrue.to_s()\nfalse.to_s()\n0.25 * 100\n1 == 1.0\n\"123\".to_i()\n\"123\".try_to_i()\n\"12x\".try_to_i()\n\"9007199254740992\".try_to_i()\n\"a😀\".size()\n:quit\n"
+		input := `import trb/std/math
+123.to_s()
+0.25.to_s()
+(-0.0).to_s()
+2.to_f()
+(-2.75).to_i()
+(-4).abs()
+0.zero?()
+1.positive?()
+(-1).negative?()
+2.even?()
+3.odd?()
+(-0.25).abs()
+0.25.finite?()
+true.to_s()
+false.to_s()
+0.25 * 100
+1 == 1.0
+"123".to_i()
+"123".try_to_i()
+"12x".try_to_i()
+"9007199254740992".try_to_i()
+5.min(3)
+5.max(7)
+12.clamp(0, 10)
+(-2.75).floor()
+(-2.75).ceil()
+2.5.round()
+(-2.5).round()
+2.75.truncate()
+math.sqrt(9)
+math.exp(0)
+math.log(1)
+math.log2(8)
+math.log10(100)
+math.sqrt(-1).nan?()
+math.log(0).infinite?()
+"a😀".size()
+:quit
+`
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "\"123\" : String\n\"0.25\" : String\n\"0.0\" : String\n2 : Float\n-2 : Integer\n4 : Integer\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\n0.25 : Float\ntrue : Boolean\n\"true\" : String\n\"false\" : String\n25 : Float\ntrue : Boolean\n123 : Integer\nResult::Ok(value: 123) : Result<Integer, NumberParseError>\nResult::Err(error: NumberParseError(kind: NumberParseErrorKind::InvalidFormat, input: \"12x\", message: \"invalid Integer\")) : Result<Integer, NumberParseError>\nResult::Err(error: NumberParseError(kind: NumberParseErrorKind::OutOfRange, input: \"9007199254740992\", message: \"Integer is outside the portable range\")) : Result<Integer, NumberParseError>\n2 : Integer\n"
+		want := `"123" : String
+"0.25" : String
+"0.0" : String
+2 : Float
+-2 : Integer
+4 : Integer
+true : Boolean
+true : Boolean
+true : Boolean
+true : Boolean
+true : Boolean
+0.25 : Float
+true : Boolean
+"true" : String
+"false" : String
+25 : Float
+true : Boolean
+123 : Integer
+Result::Ok(value: 123) : Result<Integer, NumberParseError>
+Result::Err(error: NumberParseError(kind: NumberParseErrorKind::InvalidFormat, input: "12x", message: "invalid Integer")) : Result<Integer, NumberParseError>
+Result::Err(error: NumberParseError(kind: NumberParseErrorKind::OutOfRange, input: "9007199254740992", message: "Integer is outside the portable range")) : Result<Integer, NumberParseError>
+3 : Integer
+7 : Integer
+10 : Integer
+-3 : Integer
+-2 : Integer
+3 : Integer
+-3 : Integer
+2 : Integer
+3 : Float
+1 : Float
+0 : Float
+3 : Float
+2 : Float
+true : Boolean
+true : Boolean
+2 : Integer
+`
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s receiver-method REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -1648,6 +1724,72 @@ func TestRunPortableStringTrimmingAcrossAvailableBackends(t *testing.T) {
 		}
 		if want := "TypeRB\nTypeRB\nTypeRB\ntrue\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s String trimming output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunPortableMathAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby math run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript math run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/portable-math-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import trb/std/math
+
+def main()
+	puts(5.min(3))
+	puts(5.max(7))
+	puts(12.clamp(0, 10))
+	puts((-2.75).floor())
+	puts((-2.75).ceil())
+	puts(2.5.round())
+	puts((-2.5).round())
+	puts(2.75.truncate())
+	puts(math.sqrt(9) == 3.0)
+	puts(math.exp(0) == 1.0)
+	puts(math.log(1) == 0.0)
+	puts(math.log2(8) == 3.0)
+	puts(math.log10(100) == 2.0)
+	puts(math.sqrt(-1).nan?())
+	puts(math.log(0).infinite?())
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "3\n7\n10\n-3\n-2\n3\n-3\n2\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s portable math output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

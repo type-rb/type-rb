@@ -1548,6 +1548,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "float64(" + arguments[0] + ")"
 	case "trb.std.numbers.integer_absolute":
 		return "func(value int) int { if value < 0 { return -value }; return value }(" + arguments[0] + ")"
+	case "trb.std.numbers.integer_min":
+		return "min(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.numbers.integer_max":
+		return "max(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.numbers.integer_clamp":
+		return "func(value, minimum, maximum int) int { if minimum > maximum { panic(\"clamp minimum exceeds maximum\") }; return min(max(value, minimum), maximum) }(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.numbers.integer_zero":
 		return arguments[0] + " == 0"
 	case "trb.std.numbers.integer_positive":
@@ -1561,8 +1567,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.numbers.float_to_string":
 		return g.portableFloatString(arguments[0])
 	case "trb.std.numbers.float_to_integer":
-		g.requireImport("math", "")
-		return "func() int { value := " + arguments[0] + "; if math.IsNaN(value) || math.IsInf(value, 0) { panic(\"Float cannot be converted to Integer\") }; if value < -9007199254740991 || value > 9007199254740991 { panic(\"Integer is outside the portable range\") }; return int(math.Trunc(value)) }()"
+		return g.portableFloatInteger(arguments[0], "Trunc")
+	case "trb.std.numbers.float_floor":
+		return g.portableFloatInteger(arguments[0], "Floor")
+	case "trb.std.numbers.float_ceil":
+		return g.portableFloatInteger(arguments[0], "Ceil")
+	case "trb.std.numbers.float_round":
+		return g.portableFloatInteger(arguments[0], "Round")
 	case "trb.std.numbers.float_absolute":
 		g.requireImport("math", "")
 		return "math.Abs(" + arguments[0] + ")"
@@ -1584,6 +1595,21 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("strconv", "")
 		resultType, _, _ := filesystemResultType()
 		return "func() " + resultType + " { input := " + arguments[0] + "; valid, _ := regexp.MatchString(`^[+-]?[0-9]+$`, input); if !valid { return " + numberParseError("InvalidFormat", "input", "invalid Integer") + " }; value, err := strconv.ParseInt(input, 10, 64); if err != nil || value < -9007199254740991 || value > 9007199254740991 { return " + numberParseError("OutOfRange", "input", "Integer is outside the portable range") + " }; return " + filesystemOK("int(value)") + " }()"
+	case "trb.std.math.sqrt":
+		g.requireImport("math", "")
+		return "math.Sqrt(" + arguments[0] + ")"
+	case "trb.std.math.exp":
+		g.requireImport("math", "")
+		return "math.Exp(" + arguments[0] + ")"
+	case "trb.std.math.log":
+		g.requireImport("math", "")
+		return "math.Log(" + arguments[0] + ")"
+	case "trb.std.math.log2":
+		g.requireImport("math", "")
+		return "math.Log2(" + arguments[0] + ")"
+	case "trb.std.math.log10":
+		g.requireImport("math", "")
+		return "math.Log10(" + arguments[0] + ")"
 	case "trb.std.booleans.to_string":
 		g.requireImport("strconv", "")
 		return "strconv.FormatBool(" + arguments[0] + ")"
@@ -1643,6 +1669,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) portableFloatInteger(value, operation string) string {
+	g.requireImport("math", "")
+	return "func() int { value := math." + operation + "(" + value + "); if math.IsNaN(value) || math.IsInf(value, 0) { panic(\"Float cannot be converted to Integer\") }; if value < -9007199254740991 || value > 9007199254740991 { panic(\"Integer is outside the portable range\") }; return int(value) }()"
 }
 
 func (g *generator) portableFloatString(value string) string {

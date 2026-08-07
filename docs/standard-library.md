@@ -32,6 +32,7 @@ Portable built-in types expose receiver methods backed by the same contracts
 as `trb/std/numbers`, `trb/std/booleans`, and `trb/std/strings`:
 
 ```trb
+import trb/std/math
 import trb/std/strings
 
 text := 123.to_s()
@@ -39,6 +40,9 @@ ratio_text := 0.25.to_s()
 ratio := 25.to_f()
 whole := 2.75.to_i()
 distance := (-8).abs()
+bounded := 12.clamp(0, 10)
+rounded := (-2.5).round()
+root := math.sqrt(9)
 even := distance.even?()
 ordinary := ratio.finite?()
 enabled := true.to_s()
@@ -61,12 +65,24 @@ uses a portable fixed decimal spelling without exponent notation, including
 `numbers.truncate`, and `numbers.float_to_string`.
 
 Integers provide `abs()`, `zero?()`, `positive?()`, `negative?()`, `even?()`,
-and `odd?()`. Floats provide `abs()`, `finite?()`, `infinite?()`, and `nan?()`;
-`abs()` converts negative zero to positive zero and leaves NaN as NaN.
+`odd?()`, `min()`, `max()`, and `clamp()`. An invalid clamp range raises.
+Floats provide `abs()`, `floor()`, `ceil()`, `round()`, `truncate()`,
+`finite?()`, `infinite?()`, and `nan?()`; the integer conversions reject
+non-finite and out-of-range results. `round()` resolves halfway values away
+from zero. `abs()` converts negative zero to positive zero and leaves NaN as
+NaN.
+
+`trb/std/math` provides `sqrt`, `exp`, `log`, `log2`, and `log10`, returning
+Float. Integer arguments use the ordinary safe widening to Float. Negative
+square roots and logarithms are NaN, and logarithms of zero are negative
+infinity. Exponentiation remains the `**` operator.
+
 `Boolean#to_s()` returns lowercase `"true"` or `"false"`. Package forms use
 `numbers.absolute`, `numbers.zero`, `numbers.positive`, `numbers.negative`,
 `numbers.even`, `numbers.odd`, `numbers.float_absolute`, `numbers.finite`,
-`numbers.infinite`, and `numbers.nan`, plus `booleans.to_string`.
+`numbers.infinite`, and `numbers.nan`, plus `numbers.min`, `numbers.max`,
+`numbers.clamp`, `numbers.floor`, `numbers.ceil`, `numbers.round`,
+`numbers.truncate`, and `booleans.to_string`.
 
 `String#size` counts Unicode code points. Additional receiver operations
 include `codepoints`, `empty?`, `strip`, `lstrip`, `rstrip`, `include?`,
@@ -300,6 +316,7 @@ The current portable standard library includes:
 - `trb/std/io`
 - `trb/std/strings`
 - `trb/std/numbers`
+- `trb/std/math`
 - `trb/std/booleans`
 - `trb/std/bytes`
 - `trb/std/string_builder`
