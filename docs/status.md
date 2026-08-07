@@ -28,7 +28,8 @@ and JSON/JSONC. Its public contracts are listed in the
 The typed-IR REPL supports persistent state, multiline editing, history,
 completion, suggestions, syntax highlighting, interrupts, and type inspection.
 The same compiler and evaluator power the local and hosted playground and tour.
-Command details belong in the [CLI reference](cli.md).
+The repository also publishes a reusable TextMate grammar for lexical editor
+highlighting. Command details belong in the [CLI reference](cli.md).
 
 The compiler pipeline is:
 
