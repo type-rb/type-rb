@@ -114,7 +114,7 @@ func ValidateTour(ctx context.Context) (int, error) {
 	count := 0
 	for _, lesson := range tourLessons {
 		for _, mode := range []string{"go", "ruby", "typescript"} {
-			result := evaluate(ctx, lesson.Source, mode)
+			result := Run(ctx, lesson.Source, mode)
 			if !result.OK {
 				message := "unknown failure"
 				if len(result.Diagnostics) > 0 {
