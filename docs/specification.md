@@ -216,10 +216,13 @@ mode by itself does not enable them.
   must use one homogeneous key type. The label-style `name: value` literal
   spelling has a `String` key in portable TypeRB; it becomes a Ruby `Symbol`
   only under an explicit Ruby-native import.
-- Non-empty literals infer their key and value types. Heterogeneous values
-  currently widen to `Any`; a future union-type phase will infer types such as
-  `Integer | String` instead. An empty `{}` receives its type from a declared
-  variable, field, parameter, record field, assignment target, or return type.
+- Non-empty literals infer their key and value types. Equivalent values retain
+  their type; values with a safe most-specific common type use that type and
+  receive the required implicit conversions. For example, Integer and Float
+  values infer Float. Values without a safe common type currently widen to
+  `Any`; the union-type phase will retain alternatives such as
+  `Integer | String`. An empty `{}` receives its type from a declared variable,
+  field, parameter, record field, assignment target, or return type.
 - A fresh literal may be contextually widened when every entry is assignable,
   for example `Hash<String, Any> := {"count" => 1}`. Existing mutable Hash
   values are invariant in both arguments, preventing an alias from inserting

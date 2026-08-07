@@ -487,8 +487,12 @@ func inferArrayElement(tokens []token.Token, start int) types.Type {
 		}
 		if inferred.Kind == "" {
 			inferred = current
-		} else if !types.Equivalent(inferred, current) {
-			return types.FromName("Any")
+		} else {
+			joined, ok := types.CommonType(inferred, current)
+			if !ok {
+				return types.FromName("Any")
+			}
+			inferred = joined
 		}
 		expecting = false
 	}

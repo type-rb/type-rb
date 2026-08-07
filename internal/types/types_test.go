@@ -50,3 +50,21 @@ func TestAssignableNamedGenericIsInvariant(t *testing.T) {
 		t.Fatal("different or missing named generic arguments must not be assignable")
 	}
 }
+
+func TestCommonTypeUsesPortableNumericWidening(t *testing.T) {
+	integer := FromName("Integer")
+	float := FromName("Float")
+	stringType := FromName("String")
+
+	if common, ok := CommonType(integer, integer); !ok || !Equivalent(common, integer) {
+		t.Fatalf("equivalent types should retain their type: %s, %v", common, ok)
+	}
+	for _, pair := range [][2]Type{{integer, float}, {float, integer}} {
+		if common, ok := CommonType(pair[0], pair[1]); !ok || !Equivalent(common, float) {
+			t.Fatalf("Integer and Float should join as Float: %s, %v", common, ok)
+		}
+	}
+	if common, ok := CommonType(integer, stringType); ok {
+		t.Fatalf("unrelated types should not have a common type, got %s", common)
+	}
+}

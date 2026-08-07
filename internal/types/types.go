@@ -82,6 +82,24 @@ func FromName(name string) Type {
 	}
 }
 
+// CommonType returns the most-specific type that can represent both inputs
+// through portable implicit conversions. It deliberately does not fall back to
+// Any: callers choose whether a missing common type is an error, a union, or a
+// dynamic boundary.
+func CommonType(left, right Type) (Type, bool) {
+	if Equivalent(left, right) {
+		return left, true
+	}
+	if left.Kind == Any || right.Kind == Any {
+		return FromName("Any"), true
+	}
+	if !left.Nullable && !right.Nullable &&
+		((left.Kind == Int && right.Kind == Float) || (left.Kind == Float && right.Kind == Int)) {
+		return FromName("Float"), true
+	}
+	return Type{}, false
+}
+
 func Assignable(target, value Type) bool {
 	if target.Kind == Any || value.Kind == Any || target.Kind == Invalid || value.Kind == Invalid {
 		return true

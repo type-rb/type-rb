@@ -867,6 +867,55 @@ end
 	}
 }
 
+func TestCollectionLiteralsInferCommonNumericTypeAcrossBackends(t *testing.T) {
+	source := []byte(`def array_values(): Array<Float>
+	return [1, 2.5]
+end
+
+def hash_values(): Hash<String, Float>
+	return { integer: 1, float: 2.5 }
+end
+`)
+
+	wants := map[string][]string{
+		"go":         {"[]float64{float64(1), 2.5}", `map[string]float64{"integer": float64(1), "float": 2.5}`},
+		"ruby":       {"[(1).to_f, 2.5]", `{"integer" => (1).to_f, "float" => 2.5}`},
+		"typescript": {"[Number(1), 2.5]", `{["integer"]: Number(1), ["float"]: 2.5}`},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("common_collections.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected collection common-type inference: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s common-type inference is missing %q:\n%s", mode, want, output)
+			}
+		}
+
+		for _, statement := range artifact.IR.Statements {
+			method, ok := statement.(*ir.Method)
+			if !ok || len(method.Body) == 0 {
+				continue
+			}
+			returned := method.Body[0].(*ir.Return).Value
+			if returned.ExprType().Kind == types.Array {
+				array := returned.(*ir.Array)
+				if _, ok := array.Elements[0].(*ir.Conversion); !ok {
+					t.Fatalf("%s Array literal did not retain Integer-to-Float conversion in typed IR: %#v", mode, array.Elements[0])
+				}
+			}
+			if returned.ExprType().Kind == types.Hash {
+				hash := returned.(*ir.Hash)
+				if _, ok := hash.Entries[0].Value.(*ir.Conversion); !ok {
+					t.Fatalf("%s Hash literal did not retain Integer-to-Float conversion in typed IR: %#v", mode, hash.Entries[0].Value)
+				}
+			}
+		}
+	}
+}
+
 func TestInvalidPortableOperatorsAreRejectedAcrossModes(t *testing.T) {
 	tests := []struct {
 		name   string

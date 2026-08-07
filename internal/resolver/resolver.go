@@ -738,10 +738,12 @@ func variableType(node *ast.VariableStatement) types.Type {
 			element = expressionLiteralType(value.Elements[0])
 			for _, expression := range value.Elements[1:] {
 				current := expressionLiteralType(expression)
-				if !types.Assignable(element, current) || !types.Assignable(current, element) {
+				joined, ok := types.CommonType(element, current)
+				if !ok {
 					element = types.FromName("Any")
 					break
 				}
+				element = joined
 			}
 		}
 		return types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{element}}
@@ -756,7 +758,12 @@ func variableType(node *ast.VariableStatement) types.Type {
 				key = types.FromName("Any")
 			}
 			if current := expressionLiteralType(entry.Value); !types.Equivalent(item, current) {
-				item = types.FromName("Any")
+				joined, ok := types.CommonType(item, current)
+				if !ok {
+					item = types.FromName("Any")
+				} else {
+					item = joined
+				}
 			}
 		}
 		return types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{key, item}}
