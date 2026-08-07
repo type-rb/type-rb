@@ -245,6 +245,28 @@ Arrays and hashes are homogeneous collections. Hash keys are non-nullable
 `String` or `Integer` values in the current alpha:
 
 ```trb
+numbers := [1, 2.5]                 # Array<Float>
+values := [1, "two"]                # Array<Integer | String>
+fields := {count: 1, name: "Ada"}  # Hash<String, Integer | String>
+```
+
+Literal inference retains one equivalent type, uses a safe common type such as
+Float for mixed Integer and Float values, and otherwise constructs a union.
+Narrow a scalar union with an exhaustive type case before using
+alternative-specific operations:
+
+```trb
+case fields[:count]
+when Integer(number)
+	puts(number + 1)
+when String(text)
+	puts(text)
+end
+```
+
+Ordinary homogeneous collection operations remain unchanged:
+
+```trb
 mut scores: Hash<String, Integer> := {ada: 1}
 scores["grace"] = 2
 puts(scores["ada"])

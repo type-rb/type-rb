@@ -916,6 +916,142 @@ end
 	}
 }
 
+func TestUnionTypesInferAndNarrowAcrossBackends(t *testing.T) {
+	source := []byte(`def describe(value: Integer | String): String
+	case value
+	when Integer(number)
+		return number.to_s()
+	when String(text)
+		return text
+	end
+end
+
+def values(): Array<Integer | String>
+	return [1, "two"]
+end
+
+def fields(): Hash<String, Integer | String>
+	return { count: 1, name: "Ada" }
+end
+
+def mixed(): Array<Float | String>
+	return [1, 2.5, "two"]
+end
+
+def widen(value: Integer | String): Float | String
+	return value
+end
+`)
+
+	wants := map[string][]string{
+		"go": {
+			"func Describe(value any) string",
+			"switch __trbCase1Value := __trbCase1.(type)",
+			"case int:",
+			"number := __trbCase1Value",
+			`[]any{1, "two"}`,
+			`map[string]any{"count": 1, "name": "Ada"}`,
+			`[]any{float64(1), 2.5, "two"}`,
+			"if integer, ok := value.(int); ok {",
+			"return float64(integer)",
+		},
+		"ruby": {
+			"when Integer",
+			"number = __trb_case1",
+			`[1, "two"]`,
+			`{"count" => 1, "name" => "Ada"}`,
+			`[(1).to_f, 2.5, "two"]`,
+			"(->(value) { value.is_a?(Integer) ? value.to_f : value }).call(value)",
+		},
+		"typescript": {
+			"value: number | string",
+			`typeof __trbCase1 === "number"`,
+			"const number = __trbCase1;",
+			`Array<number | string>`,
+			`Record<string, number | string>`,
+			`[Number(1), 2.5, "two"]`,
+			`((value: number | string): number | string => typeof value === "number" ? Number(value) : value)(value)`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("unions.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected portable union types: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s union support is missing %q:\n%s", mode, want, output)
+			}
+		}
+		if mode == "go" {
+			fileSet := token.NewFileSet()
+			parsed, parseErr := parser.ParseFile(fileSet, "unions.go", artifact.Output, parser.AllErrors)
+			if parseErr != nil {
+				t.Fatalf("generated Go union output did not parse: %v\n%s", parseErr, output)
+			}
+			if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); typeErr != nil {
+				t.Fatalf("generated Go union output did not type-check: %v\n%s", typeErr, output)
+			}
+		}
+		for _, statement := range artifact.IR.Statements {
+			method, ok := statement.(*ir.Method)
+			if !ok || method.Name != "values" {
+				continue
+			}
+			returned := method.Body[0].(*ir.Return).Value
+			if returned.ExprType().String() != "Array<Integer | String>" {
+				t.Fatalf("%s typed IR lost inferred union: %s", mode, returned.ExprType())
+			}
+		}
+	}
+}
+
+func TestInvalidUnionTypeUsageIsRejectedAcrossModes(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "union does not narrow implicitly",
+			source: "def bad(value: Integer | String): Integer\n\treturn value\nend\n",
+			want:   "return type is Integer | String, expected Integer",
+		},
+		{
+			name: "type case must be exhaustive",
+			source: `def bad(value: Integer | String): String
+	case value
+	when Integer(number)
+		return number.to_s()
+	end
+end
+`,
+			want: "case for Integer | String is not exhaustive; missing String",
+		},
+		{
+			name: "pattern must be an alternative",
+			source: `def bad(value: Integer | String): String
+	case value
+	when Boolean(flag)
+		return flag.to_s()
+	else
+		return "other"
+	end
+end
+`,
+			want: "when type must be an alternative of Integer | String",
+		},
+	}
+	for _, test := range tests {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			if _, err := Compile("invalid_union.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s %s: expected %q, got %v", mode, test.name, test.want, err)
+			}
+		}
+	}
+}
+
 func TestInvalidPortableOperatorsAreRejectedAcrossModes(t *testing.T) {
 	tests := []struct {
 		name   string

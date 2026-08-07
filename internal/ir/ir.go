@@ -219,6 +219,8 @@ type CaseBranch struct {
 	Member      string
 	Bindings    []CaseBinding
 	PayloadEnum bool
+	TypePattern bool
+	MatchType   types.Type
 	Body        []Statement
 }
 
@@ -230,11 +232,12 @@ type CaseBinding struct {
 
 type Case struct {
 	Base
-	Value    Expression
-	Leading  []Statement
-	Branches []CaseBranch
-	Else     []Statement
-	HasElse  bool
+	Value     Expression
+	Leading   []Statement
+	Branches  []CaseBranch
+	Else      []Statement
+	HasElse   bool
+	TypeUnion bool
 }
 
 func (*Case) irStatement() {}
@@ -377,6 +380,7 @@ func (*Unary) irExpression() {}
 type ConversionKind string
 
 const IntegerToFloatConversion ConversionKind = "integer_to_float"
+const UnionIntegerToFloatConversion ConversionKind = "union_integer_to_float"
 
 type Conversion struct {
 	ExprBase

@@ -251,6 +251,10 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line("}")
 	case *ir.Case:
+		if n.TypeUnion {
+			g.typeUnionCase(n)
+			break
+		}
 		g.statements(n.Leading)
 		g.temporary++
 		value := "__trbCase" + strconv.Itoa(g.temporary)
@@ -304,6 +308,58 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("}")
 	case *ir.Iterate:
 		g.iterate(n)
+	}
+}
+
+func (g *generator) typeUnionCase(node *ir.Case) {
+	g.statements(node.Leading)
+	g.temporary++
+	value := "__trbCase" + strconv.Itoa(g.temporary)
+	g.line("{")
+	g.indent++
+	g.line("const " + value + " = " + g.expr(node.Value) + ";" + tsTrailingComment(node.TrailingComment))
+	for index, branch := range node.Branches {
+		header := "if ("
+		if index > 0 {
+			header = "} else if ("
+		}
+		g.line(header + tsTypePattern(value, branch.MatchType) + ") {" + tsTrailingComment(branch.TrailingComment))
+		g.indent++
+		for _, binding := range branch.Bindings {
+			if binding.Name == "_" {
+				continue
+			}
+			g.line("const " + binding.Name + " = " + value + ";")
+			if namedUnusedBinding(binding.Name) {
+				g.line("void " + binding.Name + ";")
+			}
+		}
+		g.statements(branch.Body)
+		g.indent--
+	}
+	g.line("} else {")
+	g.indent++
+	if node.HasElse {
+		g.statements(node.Else)
+	} else {
+		g.line("throw new Error(\"unreachable exhaustive case\");")
+	}
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+}
+
+func tsTypePattern(value string, typ types.Type) string {
+	switch typ.Kind {
+	case types.Bool:
+		return "typeof " + value + ` === "boolean"`
+	case types.Int, types.Float:
+		return "typeof " + value + ` === "number"`
+	case types.String:
+		return "typeof " + value + ` === "string"`
+	default:
+		return "false"
 	}
 }
 
@@ -562,6 +618,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		switch n.Kind {
 		case ir.IntegerToFloatConversion:
 			return "Number(" + g.expr(n.Value) + ")"
+		case ir.UnionIntegerToFloatConversion:
+			return "((value: " + tsType(n.Value.ExprType()) + "): " + tsType(n.ExprType()) + " => typeof value === \"number\" ? Number(value) : value)(" + g.expr(n.Value) + ")"
 		default:
 			return g.expr(n.Value)
 		}
@@ -1297,6 +1355,12 @@ func tsType(t types.Type) string {
 		result = "void"
 	case types.Any, types.Invalid:
 		result = "unknown"
+	case types.Union:
+		alternatives := make([]string, len(t.Args))
+		for index, alternative := range t.Args {
+			alternatives[index] = tsType(alternative)
+		}
+		result = strings.Join(alternatives, " | ")
 	case types.Bool:
 		result = "boolean"
 	case types.Int, types.Float:

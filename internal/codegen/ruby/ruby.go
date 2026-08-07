@@ -179,6 +179,10 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line("end", "")
 	case *ir.Case:
+		if n.TypeUnion {
+			g.typeUnionCase(n)
+			break
+		}
 		g.statements(n.Leading)
 		caseValue := g.expr(n.Value)
 		payload := caseHasPayload(n)
@@ -255,6 +259,49 @@ func (g *generator) statement(statement ir.Statement) {
 			closer = "end"
 		}
 		g.line(closer, "")
+	}
+}
+
+func (g *generator) typeUnionCase(node *ir.Case) {
+	g.statements(node.Leading)
+	g.temporary++
+	value := "__trb_case" + strconv.Itoa(g.temporary)
+	g.line(value+" = "+g.expr(node.Value), node.TrailingComment)
+	g.line("case "+value, "")
+	for _, branch := range node.Branches {
+		g.line("when "+rubyTypePattern(branch.MatchType), branch.TrailingComment)
+		g.indent++
+		for _, binding := range branch.Bindings {
+			if binding.Name != "_" {
+				g.line(binding.Name+" = "+value, "")
+			}
+		}
+		g.statements(branch.Body)
+		g.indent--
+	}
+	g.line("else", "")
+	g.indent++
+	if node.HasElse {
+		g.statements(node.Else)
+	} else {
+		g.line(`raise "unreachable exhaustive case"`, "")
+	}
+	g.indent--
+	g.line("end", "")
+}
+
+func rubyTypePattern(typ types.Type) string {
+	switch typ.Kind {
+	case types.Bool:
+		return "TrueClass, FalseClass"
+	case types.Int:
+		return "Integer"
+	case types.Float:
+		return "Float"
+	case types.String:
+		return "String"
+	default:
+		return "Object"
 	}
 }
 
@@ -379,6 +426,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		switch n.Kind {
 		case ir.IntegerToFloatConversion:
 			return "(" + g.expr(n.Value) + ").to_f"
+		case ir.UnionIntegerToFloatConversion:
+			return "(->(value) { value.is_a?(Integer) ? value.to_f : value }).call(" + g.expr(n.Value) + ")"
 		default:
 			return g.expr(n.Value)
 		}

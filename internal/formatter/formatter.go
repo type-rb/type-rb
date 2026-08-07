@@ -190,6 +190,9 @@ func formatTokens(tokens []token.Token) string {
 			openingPipe := current.Lexeme == "|" && (previous.Lexeme == "do" || previous.Lexeme == "{")
 			closingPipe := current.Lexeme == "|" && inBlockParameters && !openingPipe
 			space := needsSpace(beforePrevious, *previous, current, next)
+			if (current.Lexeme == "|" || previous.Lexeme == "|") && !openingPipe && !closingPipe && !inBlockParameters {
+				space = true
+			}
 			if lineKind == "class" && current.Lexeme == "<" {
 				space = true
 			}

@@ -218,6 +218,9 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 				Body:  l.statements(branch.Body),
 			}
 			if pattern, ok := l.checked.CasePatterns[branch.Value]; ok {
+				lowered.TypePattern = pattern.TypeUnion
+				lowered.MatchType = pattern.MatchType
+				result.TypeUnion = result.TypeUnion || pattern.TypeUnion
 				lowered.EnumName = pattern.Variant.EnumName
 				lowered.Member = pattern.Variant.Name
 				lowered.PayloadEnum = pattern.PayloadEnum
@@ -245,9 +248,13 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 	}
 	result := l.expressionWithoutConversion(node)
 	if target, ok := l.checked.Conversions[node]; ok && result != nil {
+		kind := ir.IntegerToFloatConversion
+		if result.ExprType().Kind == types.Union {
+			kind = ir.UnionIntegerToFloatConversion
+		}
 		return &ir.Conversion{
 			ExprBase: ir.NewExprBase(node.Span(), target),
-			Kind:     ir.IntegerToFloatConversion,
+			Kind:     kind,
 			Value:    result,
 		}
 	}
@@ -396,6 +403,13 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 }
 
 func lowerType(ref ast.TypeRef) types.Type {
+	if len(ref.Union) > 0 {
+		alternatives := make([]types.Type, len(ref.Union))
+		for index, alternative := range ref.Union {
+			alternatives[index] = lowerType(alternative)
+		}
+		return types.UnionOf(alternatives...)
+	}
 	t := types.FromName(ref.Name)
 	t.Nullable = ref.Nullable
 	for _, arg := range ref.Arguments {

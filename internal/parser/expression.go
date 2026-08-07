@@ -389,6 +389,13 @@ func parseType(tokens []token.Token) ast.TypeRef {
 		return ast.TypeRef{}
 	}
 	tokens = expandGenericClosers(tokens)
+	if alternatives := splitTopLevel(tokens, "|"); len(alternatives) > 1 {
+		result := ast.TypeRef{Base: ast.Base{SourceSpan: spanOf(tokens)}}
+		for _, alternative := range alternatives {
+			result.Union = append(result.Union, parseType(alternative))
+		}
+		return result
+	}
 	t := ast.TypeRef{Base: ast.Base{SourceSpan: spanOf(tokens)}}
 	end := len(tokens)
 	if tokens[end-1].Lexeme == "?" {

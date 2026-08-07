@@ -404,6 +404,21 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 			return flowResult{}, err
 		}
 		for _, branch := range node.Branches {
+			if branch.TypePattern {
+				if !matchesTypePattern(value, branch.MatchType) {
+					continue
+				}
+				branchScope := &scope{parent: sc, values: map[string]Value{}}
+				for _, binding := range branch.Bindings {
+					if binding.Name == "_" {
+						continue
+					}
+					narrowed := value
+					narrowed.Type = binding.Type
+					branchScope.values[binding.Name] = narrowed
+				}
+				return e.evaluate(branch.Body, module, branchScope)
+			}
 			if branch.PayloadEnum {
 				variant, ok := value.Data.(*enumValue)
 				if !ok || variant.Name != branch.Member {
@@ -459,6 +474,25 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		return flowResult{}, fmt.Errorf("native %s syntax is not executable by the typed IR REPL", e.mode)
 	default:
 		return flowResult{}, fmt.Errorf("unsupported REPL statement %T", statement)
+	}
+}
+
+func matchesTypePattern(value Value, typ types.Type) bool {
+	switch typ.Kind {
+	case types.Bool:
+		_, ok := value.Data.(bool)
+		return ok
+	case types.Int:
+		_, ok := value.Data.(int64)
+		return ok
+	case types.Float:
+		_, ok := value.Data.(float64)
+		return ok
+	case types.String:
+		_, ok := value.Data.(string)
+		return ok
+	default:
+		return false
 	}
 }
 
@@ -574,6 +608,12 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 				return Value{}, fmt.Errorf("cannot convert %s to Float", value.Type)
 			}
 			return Value{Type: node.ExprType(), Data: float64(integer)}, nil
+		case ir.UnionIntegerToFloatConversion:
+			if integer, ok := value.Data.(int64); ok {
+				value.Data = float64(integer)
+			}
+			value.Type = node.ExprType()
+			return value, nil
 		default:
 			return Value{}, fmt.Errorf("unknown conversion %s", node.Kind)
 		}

@@ -898,15 +898,20 @@ func (p *Parser) parseCase() ast.Statement {
 		if branch.Value == nil {
 			p.errorAt(spanOf(parts), "when requires exactly one enum member")
 		} else if call, ok := branch.Value.(*ast.CallExpression); ok {
-			member, namespace := call.Callee.(*ast.MemberExpression)
-			if !namespace || !member.Namespace || call.Block != nil {
-				p.errorAt(call.Span(), "payload enum pattern must be Variant(name, ...)")
+			member, enumPattern := call.Callee.(*ast.MemberExpression)
+			_, typePattern := call.Callee.(*ast.Identifier)
+			if call.Block != nil || !typePattern && (!enumPattern || !member.Namespace) {
+				p.errorAt(call.Span(), "case pattern must be Variant(name, ...) or Type(name)")
 			} else {
 				valid := true
+				if typePattern && len(call.Arguments) != 1 {
+					p.errorAt(call.Span(), "union type pattern expects exactly one binding")
+					valid = false
+				}
 				for _, argument := range call.Arguments {
 					identifier, identifierOK := argument.Value.(*ast.Identifier)
 					if !identifierOK || argument.Name != "" || argument.Splat != "" {
-						p.errorAt(argument.Value.Span(), "payload enum pattern bindings must be identifiers")
+						p.errorAt(argument.Value.Span(), "case pattern bindings must be identifiers")
 						valid = false
 						continue
 					}

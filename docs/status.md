@@ -71,6 +71,8 @@ Implemented portable behavior includes:
 - `if`, `elsif`, `else`, `while`, integer ranges, structured Array/range
   iteration, typed Hash key/value iteration, `break`, `next`, and `return`;
 - typed Arrays and `Hash<K, V>` values with strict and safe lookup operations;
+- normalized union types, collection union inference, and exhaustive scalar
+  type-pattern narrowing;
 - payload enums, exhaustive pattern matching, and explicit initial generics for
   payload enums and top-level functions;
 - `Result<T, E>` and `Unit`;
@@ -98,7 +100,8 @@ The current alpha does not yet provide:
 - a complete everyday receiver API beyond the initial scalar baseline for
   strings, Arrays, and Hashes, or structured error types for every safe parse
   and lookup operation;
-- union types or position-typed tuples;
+- position-typed tuples or type-pattern narrowing for nullable, collection,
+  enum, record, and class union alternatives;
 - inferred type arguments or generic records, classes, and methods;
 - complete superclass construction and override semantics;
 - first-class blocks or multi-statement collection transformations;

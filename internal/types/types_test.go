@@ -64,7 +64,42 @@ func TestCommonTypeUsesPortableNumericWidening(t *testing.T) {
 			t.Fatalf("Integer and Float should join as Float: %s, %v", common, ok)
 		}
 	}
-	if common, ok := CommonType(integer, stringType); ok {
-		t.Fatalf("unrelated types should not have a common type, got %s", common)
+	if common, ok := CommonType(integer, stringType); !ok || common.String() != "Integer | String" {
+		t.Fatalf("unrelated types should form a normalized union, got %s, %v", common, ok)
+	}
+}
+
+func TestUnionNormalizationAndAssignability(t *testing.T) {
+	integer := FromName("Integer")
+	float := FromName("Float")
+	stringType := FromName("String")
+	union := UnionOf(stringType, UnionOf(integer, stringType))
+	if union.String() != "Integer | String" {
+		t.Fatalf("union was not flattened, deduplicated, and sorted: %s", union)
+	}
+	if widened := UnionOf(stringType, integer, float); widened.String() != "Float | String" {
+		t.Fatalf("Integer should be subsumed by Float in a union: %s", widened)
+	}
+	if !Assignable(union, integer) || !Assignable(union, stringType) {
+		t.Fatal("each alternative should be assignable to its union")
+	}
+	if Assignable(integer, union) || Assignable(stringType, union) {
+		t.Fatal("a union should not be assignable to one of its alternatives")
+	}
+	wider := UnionOf(integer, stringType, FromName("Boolean"))
+	if !Assignable(wider, union) || Assignable(union, wider) {
+		t.Fatal("union assignability should follow alternative inclusion")
+	}
+	numericWidened := UnionOf(float, stringType)
+	if !Assignable(numericWidened, union) {
+		t.Fatal("each source union alternative should permit a safe target conversion")
+	}
+}
+
+func TestArrayAssignabilityIsInvariant(t *testing.T) {
+	integers := Type{Kind: Array, Name: "Array", Args: []Type{FromName("Integer")}}
+	values := Type{Kind: Array, Name: "Array", Args: []Type{UnionOf(FromName("Integer"), FromName("String"))}}
+	if Assignable(values, integers) || Assignable(integers, values) {
+		t.Fatal("mutable Array type arguments must be invariant")
 	}
 }

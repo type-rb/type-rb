@@ -813,6 +813,13 @@ func typeRef(ref ast.TypeRef) types.Type {
 	if ref.Empty() {
 		return types.FromName("Any")
 	}
+	if len(ref.Union) > 0 {
+		alternatives := make([]types.Type, len(ref.Union))
+		for index, alternative := range ref.Union {
+			alternatives[index] = typeRef(alternative)
+		}
+		return types.UnionOf(alternatives...)
+	}
 	result := types.FromName(ref.Name)
 	result.Nullable = ref.Nullable
 	for _, argument := range ref.Arguments {

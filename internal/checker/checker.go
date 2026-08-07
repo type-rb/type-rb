@@ -89,6 +89,8 @@ type CasePattern struct {
 	Variant     EnumVariant
 	Bindings    []CaseBinding
 	PayloadEnum bool
+	MatchType   types.Type
+	TypeUnion   bool
 }
 
 type symbol struct {
@@ -307,6 +309,12 @@ func (c *Checker) validateMethodTypes(method *ast.MethodStatement) {
 
 func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 	if ref.Empty() {
+		return
+	}
+	if len(ref.Union) > 0 {
+		for _, alternative := range ref.Union {
+			c.validateTypeReference(alternative)
+		}
 		return
 	}
 	for _, argument := range ref.Arguments {
@@ -541,7 +549,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			if n.Value != nil {
 				valueType := c.checkExpression(n.Value, sc)
 				declared := fromTypeRef(n.Type)
-				valueType = c.contextualizeHashLiteral(n.Value, declared, valueType)
+				valueType = c.contextualizeCollectionLiteral(n.Value, declared, valueType)
 				if !n.Type.Empty() && !c.assignable(n.Value, declared, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot initialize %s with %s", declared, valueType))
 				}
@@ -564,7 +572,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			}
 			if !n.Type.Empty() {
 				variableType = fromTypeRef(n.Type)
-				valueType = c.contextualizeHashLiteral(n.Value, variableType, valueType)
+				valueType = c.contextualizeCollectionLiteral(n.Value, variableType, valueType)
 				if !c.assignable(n.Value, variableType, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", valueType, variableType))
 				}
@@ -596,7 +604,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 		case *ast.AssignmentStatement:
 			leftType := c.checkExpression(n.Target, sc)
 			rightType := c.checkExpression(n.Value, sc)
-			rightType = c.contextualizeHashLiteral(n.Value, leftType, rightType)
+			rightType = c.contextualizeCollectionLiteral(n.Value, leftType, rightType)
 			if identifier, ok := n.Target.(*ast.Identifier); ok && !strings.HasPrefix(identifier.Name, "@") {
 				if _, exists := sc.lookup(identifier.Name); !exists {
 					_, imported := c.result.References[identifier]
@@ -640,7 +648,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 			}
 			if len(c.returns) > 0 {
 				expected := c.returns[len(c.returns)-1]
-				actual = c.contextualizeHashLiteral(n.Value, expected, actual)
+				actual = c.contextualizeCollectionLiteral(n.Value, expected, actual)
 				if !c.assignable(n.Value, expected, actual) {
 					c.error(n.Span(), fmt.Sprintf("return type is %s, expected %s", actual, expected))
 				}
@@ -793,6 +801,10 @@ func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, co
 
 func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 	selectorType := c.checkExpression(node.Value, sc)
+	if selectorType.Kind == types.Union {
+		c.checkUnionCase(node, sc, selectorType)
+		return
+	}
 	variants, enum := c.enumVariants(selectorType)
 	if !enum && selectorType.Kind != types.Invalid {
 		c.error(node.Value.Span(), fmt.Sprintf("case value must be an enum, got %s", selectorType))
@@ -870,6 +882,84 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 	}
 	if len(missing) > 0 {
 		c.error(node.Span(), fmt.Sprintf("case for %s is not exhaustive; missing %s", selectorType, strings.Join(missing, ", ")))
+	}
+}
+
+func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorType types.Type) {
+	for _, statement := range node.Leading {
+		if _, comment := statement.(*ast.CommentStatement); !comment {
+			c.error(statement.Span(), "case statements must be inside a when or else branch")
+		}
+	}
+	c.checkStatements(node.Leading, &scope{parent: sc, values: map[string]symbol{}})
+
+	seen := map[string]bool{}
+	for _, branch := range node.Branches {
+		identifier, ok := branch.Value.(*ast.Identifier)
+		matchType := types.Type{Kind: types.Invalid, Name: "Invalid"}
+		if ok {
+			candidate := types.FromName(identifier.Name)
+			for _, alternative := range selectorType.Args {
+				if types.Equivalent(alternative, candidate) {
+					matchType = alternative
+					break
+				}
+			}
+		}
+		if matchType.Kind == types.Invalid {
+			c.error(branch.Value.Span(), fmt.Sprintf("when type must be an alternative of %s", selectorType))
+		} else if !runtimeMatchableUnionType(matchType) {
+			c.error(branch.Value.Span(), fmt.Sprintf("union type pattern does not yet support %s", matchType))
+		} else if seen[matchType.String()] {
+			c.error(branch.Value.Span(), fmt.Sprintf("union type %s is handled more than once", matchType))
+		} else {
+			seen[matchType.String()] = true
+		}
+		c.result.Expressions[branch.Value] = matchType
+
+		branchScope := &scope{parent: sc, values: map[string]symbol{}}
+		bindings := []CaseBinding{}
+		if len(branch.Bindings) != 1 {
+			c.error(branch.Value.Span(), fmt.Sprintf("union type pattern %s expects exactly one binding, got %d", matchType, len(branch.Bindings)))
+		} else if matchType.Kind != types.Invalid {
+			binding := branch.Bindings[0]
+			declared := symbol{typ: matchType, span: binding.Span()}
+			if tracksUnusedBinding(binding.Name) {
+				used := false
+				declared.used = &used
+				declared.useKind = "pattern binding"
+			}
+			branchScope.values[binding.Name] = declared
+			bindings = append(bindings, CaseBinding{Name: binding.Name, Field: EnumField{Type: matchType}})
+		}
+		c.result.CasePatterns[branch.Value] = CasePattern{Bindings: bindings, MatchType: matchType, TypeUnion: true}
+		c.checkStatements(branch.Body, branchScope)
+	}
+
+	if node.HasElse {
+		c.checkStatements(node.Else, &scope{parent: sc, values: map[string]symbol{}})
+		return
+	}
+	missing := []string{}
+	for _, alternative := range selectorType.Args {
+		if !seen[alternative.String()] {
+			missing = append(missing, alternative.String())
+		}
+	}
+	if len(missing) > 0 {
+		c.error(node.Span(), fmt.Sprintf("case for %s is not exhaustive; missing %s", selectorType, strings.Join(missing, ", ")))
+	}
+}
+
+func runtimeMatchableUnionType(typ types.Type) bool {
+	if typ.Nullable || len(typ.Args) > 0 {
+		return false
+	}
+	switch typ.Kind {
+	case types.Bool, types.Int, types.Float, types.String:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1254,7 +1344,7 @@ func (c *Checker) checkTypedArguments(span token.Span, name string, parameters [
 			continue
 		}
 		expected := parameters[parameterIndex]
-		actualType = c.contextualizeHashLiteral(arguments[index].Value, expected, actualType)
+		actualType = c.contextualizeCollectionLiteral(arguments[index].Value, expected, actualType)
 		if !c.assignable(arguments[index].Value, expected, actualType) {
 			c.error(arguments[index].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", index+1, name, actualType, expected))
 		}
@@ -1387,9 +1477,34 @@ func (c *Checker) assignable(expression ast.Expression, target, actual types.Typ
 }
 
 func (c *Checker) recordAssignableConversion(expression ast.Expression, target, actual types.Type) {
-	if target.Kind == types.Float && actual.Kind == types.Int && !target.Nullable && !actual.Nullable {
-		c.recordIntegerToFloat(expression)
+	if target.Kind == types.Union && actual.Kind == types.Union && unionContainsKind(target, types.Float) && unionContainsKind(actual, types.Int) {
+		c.result.Conversions[expression] = target
+		return
 	}
+	if actual.Kind != types.Int || actual.Nullable || target.Nullable {
+		return
+	}
+	if target.Kind == types.Float {
+		c.recordIntegerToFloat(expression)
+		return
+	}
+	if target.Kind == types.Union {
+		for _, alternative := range target.Args {
+			if alternative.Kind == types.Float && !alternative.Nullable {
+				c.recordIntegerToFloat(expression)
+				return
+			}
+		}
+	}
+}
+
+func unionContainsKind(typ types.Type, kind types.Kind) bool {
+	for _, alternative := range typ.Args {
+		if alternative.Kind == kind && !alternative.Nullable {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Checker) recordIntegerToFloat(expression ast.Expression) {
@@ -1447,7 +1562,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		methodScope.values[parameter.Name] = symbol{typ: typ, mutable: true, span: parameter.Span()}
 		if parameter.Default != nil {
 			actual := c.checkExpression(parameter.Default, methodScope)
-			actual = c.contextualizeHashLiteral(parameter.Default, typ, actual)
+			actual = c.contextualizeCollectionLiteral(parameter.Default, typ, actual)
 			if !c.assignable(parameter.Default, typ, actual) {
 				c.error(parameter.Default.Span(), fmt.Sprintf("default value has type %s, expected %s", actual, typ))
 			}
@@ -2350,7 +2465,7 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 		}
 		used[argument.Name] = true
 		actual := c.result.Expressions[argument.Value]
-		actual = c.contextualizeHashLiteral(argument.Value, field.Type, actual)
+		actual = c.contextualizeCollectionLiteral(argument.Value, field.Type, actual)
 		if !c.assignable(argument.Value, field.Type, actual) {
 			c.error(argument.Value.Span(), fmt.Sprintf("record field %s has type %s, expected %s", field.Name, actual, field.Type))
 		}
@@ -2404,7 +2519,7 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 			continue
 		}
 		expected := parameters[parameterIndex]
-		actualType = c.contextualizeHashLiteral(arguments[i].Value, expected, actualType)
+		actualType = c.contextualizeCollectionLiteral(arguments[i].Value, expected, actualType)
 		actual[i] = actualType
 		assignable := libraryAssignable(expected, actualType)
 		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Exact {
@@ -2502,8 +2617,26 @@ func portableHashKey(typ types.Type) bool {
 	return !typ.Nullable && (typ.Kind == types.String || typ.Kind == types.Int)
 }
 
-func (c *Checker) contextualizeHashLiteral(expression ast.Expression, expected, actual types.Type) types.Type {
-	if expression == nil || expected.Kind != types.Hash || len(expected.Args) != 2 || actual.Kind != types.Hash {
+func (c *Checker) contextualizeCollectionLiteral(expression ast.Expression, expected, actual types.Type) types.Type {
+	if expression == nil {
+		return actual
+	}
+	if expected.Kind == types.Array && len(expected.Args) == 1 && actual.Kind == types.Array {
+		literal, ok := expression.(*ast.ArrayLiteral)
+		if !ok {
+			return actual
+		}
+		for _, element := range literal.Elements {
+			elementType := c.result.Expressions[element]
+			elementType = c.contextualizeCollectionLiteral(element, expected.Args[0], elementType)
+			if !c.assignable(element, expected.Args[0], elementType) {
+				return actual
+			}
+		}
+		c.result.Expressions[expression] = expected
+		return expected
+	}
+	if expected.Kind != types.Hash || len(expected.Args) != 2 || actual.Kind != types.Hash {
 		return actual
 	}
 	literal, ok := expression.(*ast.HashLiteral)
@@ -2516,7 +2649,7 @@ func (c *Checker) contextualizeHashLiteral(expression ast.Expression, expected, 
 		}
 		for _, entry := range literal.Entries {
 			valueType := c.result.Expressions[entry.Value]
-			valueType = c.contextualizeHashLiteral(entry.Value, expected.Args[1], valueType)
+			valueType = c.contextualizeCollectionLiteral(entry.Value, expected.Args[1], valueType)
 			if !c.assignable(entry.Value, expected.Args[1], valueType) {
 				return actual
 			}
@@ -2616,7 +2749,7 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 		}
 		bindDeclarationType(parameter.Type, actual[index], typeParameters, bindings)
 		expected := instantiateDeclarationType(parameter.Type, bindings)
-		actual[index] = c.contextualizeHashLiteral(argument.Value, expected, actual[index])
+		actual[index] = c.contextualizeCollectionLiteral(argument.Value, expected, actual[index])
 		if !c.assignable(argument.Value, expected, actual[index]) {
 			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", index+1, member.Name, actual[index], expected))
 		}
@@ -2707,7 +2840,7 @@ func (c *Checker) checkArguments(span token.Span, method *ast.MethodStatement, a
 		if method.Parameters[i].Type.Empty() || method.Parameters[i].Rest || method.Parameters[i].KeywordRest {
 			continue
 		}
-		argumentType = c.contextualizeHashLiteral(arguments[i].Value, expected, argumentType)
+		argumentType = c.contextualizeCollectionLiteral(arguments[i].Value, expected, argumentType)
 		actual[i] = argumentType
 		if !c.assignable(arguments[i].Value, expected, argumentType) {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, method.Name, argumentType, expected))
@@ -2716,6 +2849,13 @@ func (c *Checker) checkArguments(span token.Span, method *ast.MethodStatement, a
 }
 
 func fromTypeRef(ref ast.TypeRef) types.Type {
+	if len(ref.Union) > 0 {
+		alternatives := make([]types.Type, len(ref.Union))
+		for index, alternative := range ref.Union {
+			alternatives[index] = fromTypeRef(alternative)
+		}
+		return types.UnionOf(alternatives...)
+	}
 	t := types.FromName(ref.Name)
 	t.Nullable = ref.Nullable
 	for _, argument := range ref.Arguments {
