@@ -218,6 +218,13 @@ mode by itself does not enable them.
   a value that violates the original Hash type.
 - Updating an entry requires a `mut` receiver. `hash[key] = value` may insert
   or replace an entry and checks both key and value types.
+- `hash.delete(key)` is a strict destructive removal. It requires `mut`,
+  returns the removed value, and raises a runtime error when the key is absent.
+- `hash.merge(other)` returns a new shallow Hash and leaves both inputs
+  unchanged. `hash.update(other)` applies the same right-hand-wins rule to its
+  receiver, requires `mut`, and has no return value. Existing Hash arguments
+  must have exactly the same `K` and `V`; a fresh literal may still be checked
+  contextually against that exact type.
 - `hash[key]` is a required lookup and raises a runtime error when the key is
   absent in every backend and the REPL. A future optional lookup API will
   return a nullable/optional value explicitly.
@@ -622,11 +629,12 @@ value `contains`/`count`, mutable `push`/`unshift`, and mutable strict
 `pop`/`shift` for `Array<T>`. Receiver spellings include `size`, `empty?`,
 `fetch`, `try_fetch`, `first`, `last`, `dup`, `reverse`, `include?`, `count`,
 `push`, `unshift`, `pop`, and `shift`. `trb/std/hashes` provides
-`length`, `empty`, strict `fetch`, safe `try_fetch`, `contains_key`, `keys`,
-`values`, and shallow `copy` for `Hash<K, V>`; receiver spellings are `size`,
-`empty?`, `fetch`, `try_fetch`, `key?`, `keys`, `values`, and `dup`. Missing
-strict fetch keys, out-of-range strict Array indexes, and first/last on an
-empty Array are runtime errors in every mode. Safe fetch returns
+`length`, `empty`, strict `fetch`/`delete`, safe `try_fetch`, `contains_key`,
+`keys`, `values`, shallow `copy`/`merge`, and mutable `update` for `Hash<K, V>`;
+receiver spellings are `size`, `empty?`, `fetch`, `try_fetch`, `key?`, `keys`,
+`values`, `dup`, `delete`, `merge`, and `update`. Missing strict fetch/delete
+keys, out-of-range strict Array indexes, and first/last on an empty Array are
+runtime errors in every mode. Safe fetch returns
 `Result<T, String>` for Arrays and `Result<V, String>` for Hashes, with stable
 missing-value messages. Hash key/value enumeration order is unspecified.
 
@@ -640,6 +648,12 @@ The two strict removals require `mut` and raise on an empty Array; `unshift`
 also requires `mut`. `reverse` returns a new Array and leaves the receiver
 unchanged. Receiver lookup checks the complete collection type, so a method
 constrained to `Array<String>` is not exposed on `Array<Integer>`.
+
+Hash `merge` and `update` resolve duplicate keys in favor of the right-hand
+Hash. `merge` returns a shallow copy without mutating either input; `update`
+mutates its receiver and returns no value. `delete` returns `V` and removes the
+entry atomically, or raises `Hash key is missing` without changing the Hash.
+Enumeration order remains unspecified after all three operations.
 
 `map`, `select`, and `reduce(initial)` are structured, value-producing
 collection expressions rather than target-native callback calls. `map` returns

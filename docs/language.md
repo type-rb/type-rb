@@ -237,10 +237,16 @@ Arrays and hashes are homogeneous collections. Hash keys are non-nullable
 mut scores: Hash<String, Integer> := {ada: 1}
 scores["grace"] = 2
 puts(scores["ada"])
+
+snapshot := scores.merge({linus: 3})
+scores.update({ada: 10})
+removed := scores.delete("grace")
 ```
 
 Index and hash lookup are strict and fail at runtime when the value is absent.
-Safe `Result`-returning operations are available in the standard library.
+Hash deletion is strict as well. Safe `Result`-returning lookup is available in
+the standard library. `merge` is non-destructive; `update` and `delete` require
+a `mut` receiver.
 Destructive Array operations require a `mut` binding, while `reverse` returns
 a new shallow Array:
 

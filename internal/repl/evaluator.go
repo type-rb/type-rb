@@ -2069,6 +2069,53 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		entries := append([]hashEntry(nil), hash.Entries...)
 		return Value{Type: typ, Data: &hashValue{Entries: entries}}, nil
+	case "trb.std.hashes.delete":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		hash, ok := values[0].Data.(*hashValue)
+		if !ok {
+			return Value{}, errors.New("hashes.delete expects Hash")
+		}
+		for index, entry := range hash.Entries {
+			if equal(entry.Key, values[1]) {
+				result := entry.Value
+				hash.Entries = append(hash.Entries[:index], hash.Entries[index+1:]...)
+				result.Type = typ
+				return result, nil
+			}
+		}
+		return Value{}, errors.New("Hash key is missing")
+	case "trb.std.hashes.merge", "trb.std.hashes.update":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		left, leftOK := values[0].Data.(*hashValue)
+		right, rightOK := values[1].Data.(*hashValue)
+		if !leftOK || !rightOK {
+			return Value{}, errors.New("hashes.merge/update expects Hash values")
+		}
+		target := left
+		if name == "trb.std.hashes.merge" {
+			target = &hashValue{Entries: append([]hashEntry(nil), left.Entries...)}
+		}
+		for _, incoming := range right.Entries {
+			replaced := false
+			for index, existing := range target.Entries {
+				if equal(existing.Key, incoming.Key) {
+					target.Entries[index].Value = incoming.Value
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				target.Entries = append(target.Entries, incoming)
+			}
+		}
+		if name == "trb.std.hashes.merge" {
+			return Value{Type: typ, Data: target}, nil
+		}
+		return Value{Type: typ}, nil
 	case "trb.std.numbers.to_string":
 		if err := require(1); err != nil {
 			return Value{}, err

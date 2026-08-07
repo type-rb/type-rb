@@ -766,6 +766,21 @@ def copied_hash_value(): String
 	return hashes.copy(labels).values().first()
 end
 
+def merged_hash_value(): Integer
+	values: Hash<String, Integer> := {"one" => 1, "two" => 2}
+	merged := values.merge({"two" => 20, "three" => 3})
+	return merged.fetch("two") + hashes.merge(values, {"four" => 4}).fetch("four") + values.fetch("two")
+end
+
+def updated_hash_value(): String
+	mut labels: Hash<Integer, String> := {1 => "one", 2 => "two"}
+	labels.update({2 => "TWO", 3 => "three"})
+	hashes.update(labels, {4 => "four"})
+	first := labels.delete(1)
+	second := hashes.delete(labels, 2)
+	return first + second + labels.fetch(3) + labels.fetch(4)
+end
+
 def hash_state(): Boolean
 	labels: Hash<Integer, String> := {1 => "one"}
 	return labels.size() == 1 and not labels.empty?() and labels.key?(1)
@@ -794,6 +809,10 @@ end
 			`target := 1`,
 			`maps.Keys(labels)`,
 			`maps.Values(maps.Clone(labels))`,
+			`values := maps.Clone(values)`,
+			`maps.Copy(values, map[string]int`,
+			`maps.Copy(labels, map[int]string`,
+			`delete(values, key)`,
 			`panic("Hash key is missing")`,
 			`strings.HasPrefix("TypeRB", "Type")`,
 			`strings.Split(value, separator)`,
@@ -811,6 +830,9 @@ end
 			`values.count(1)`,
 			`labels.keys`,
 			`labels.dup.values`,
+			`values.merge({`,
+			`labels.update({`,
+			`values.delete(key)`,
 			`labels.fetch(1)`,
 			`"TypeRB".start_with?("Type")`,
 			`value.split(separator, -1)`,
@@ -828,6 +850,9 @@ end
 			`if (value === target)`,
 			`Object.keys(labels).map(Number)`,
 			`Object.values(({ ...labels }))`,
+			`({ ...values, ...{`,
+			`Object.assign(labels, {`,
+			`Reflect.deleteProperty(__trbValues, __trbKey)`,
 			`throw new Error("Hash key is missing")`,
 			`"TypeRB".startsWith("Type")`,
 			`return value.split(separator);`,
@@ -888,6 +913,26 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 			name:   "hash package key type",
 			source: "import trb/std/hashes\ndef bad(): String\n\tlabels: Hash<Integer, String> := {1 => \"one\"}\n\treturn hashes.fetch(labels, \"1\")\nend\n",
 			want:   "argument 2 to fetch() has type String, expected Integer",
+		},
+		{
+			name:   "hash delete requires mut",
+			source: "def bad(): String\n\tlabels: Hash<Integer, String> := {1 => \"one\"}\n\treturn labels.delete(1)\nend\n",
+			want:   "labels is immutable; declare it with mut to use delete()",
+		},
+		{
+			name:   "hash package update requires mut",
+			source: "import trb/std/hashes\ndef bad()\n\tlabels: Hash<Integer, String> := {1 => \"one\"}\n\thashes.update(labels, {2 => \"two\"})\n\treturn\nend\n",
+			want:   "labels is immutable; declare it with mut to use update()",
+		},
+		{
+			name:   "hash merge keeps value type exact",
+			source: "def bad(): Hash<String, Float>\n\tvalues: Hash<String, Float> := {\"one\" => 1.0}\n\tother: Hash<String, Integer> := {\"two\" => 2}\n\treturn values.merge(other)\nend\n",
+			want:   "argument 1 to merge() has type Hash<String, Integer>, expected Hash<String, Float>",
+		},
+		{
+			name:   "hash update key type",
+			source: "def bad()\n\tmut values: Hash<String, Integer> := {\"one\" => 1}\n\tvalues.update({2 => 2})\n\treturn\nend\n",
+			want:   "argument 1 to update() has type Hash<Integer, Integer>, expected Hash<String, Integer>",
 		},
 		{
 			name:   "unresolved hash value type",
