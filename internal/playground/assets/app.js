@@ -43,7 +43,7 @@ puts(doubled)
 `;
 
 const state = {
-	page: location.pathname.startsWith("/tour") ? "tour" : "play",
+	page: location.pathname.split("/").filter(Boolean).at(-1) === "tour" ? "tour" : "play",
 	mode: "go",
 	lessons: [],
 	lessonIndex: -1,
@@ -51,6 +51,9 @@ const state = {
 	baseline: "",
 	busy: false,
 };
+
+let runtime = null;
+let tourURL = new URL("../tour.json", document.baseURI);
 
 const keywords = new Set([
 	"and", "break", "case", "class", "def", "do", "else", "elsif", "end", "enum",
@@ -215,22 +218,102 @@ function focusLocation(line, column) {
 	updateCursor();
 }
 
-async function requestAPI(path) {
-	const response = await fetch(path, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ source: elements.editor.value, mode: state.mode }),
-	});
-	const payload = await response.json();
-	if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}`);
-	return payload;
+class HTTPRuntime {
+	constructor(baseURL) {
+		this.baseURL = baseURL;
+	}
+
+	async invoke(operation, source, mode) {
+		const response = await fetch(new URL(operation, this.baseURL), {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ source, mode }),
+		});
+		const payload = await response.json();
+		if (!response.ok) throw new Error(payload.error || `Request failed with ${response.status}`);
+		return payload;
+	}
+}
+
+class WasmRuntime {
+	constructor(workerURL) {
+		this.workerURL = workerURL;
+		this.nextID = 1;
+		this.pending = new Map();
+		this.start();
+	}
+
+	start() {
+		this.worker = new Worker(this.workerURL);
+		this.ready = new Promise((resolve, reject) => {
+			this.resolveReady = resolve;
+			this.rejectReady = reject;
+		});
+		this.worker.addEventListener("message", (event) => this.handleMessage(event.data));
+		this.worker.addEventListener("error", (event) => {
+			this.fail(new Error(event.message || "The browser compiler worker failed"));
+		});
+	}
+
+	handleMessage(message) {
+		if (message.type === "ready") {
+			this.resolveReady();
+			return;
+		}
+		if (message.type === "fatal") {
+			this.fail(new Error(message.message || "The browser compiler could not start"));
+			return;
+		}
+		const request = this.pending.get(message.id);
+		if (!request) return;
+		this.pending.delete(message.id);
+		clearTimeout(request.timer);
+		if (message.type === "result") request.resolve(message.payload);
+		else request.reject(new Error(message.message || "The browser compiler failed"));
+	}
+
+	fail(error) {
+		this.rejectReady(error);
+		for (const request of this.pending.values()) {
+			clearTimeout(request.timer);
+			request.reject(error);
+		}
+		this.pending.clear();
+		this.worker?.terminate();
+		this.worker = null;
+	}
+
+	restart(error) {
+		this.fail(error);
+		this.start();
+	}
+
+	async invoke(operation, source, mode) {
+		if (!this.worker) this.start();
+		await this.ready;
+		const id = this.nextID++;
+		return new Promise((resolve, reject) => {
+			const limit = operation === "run" ? 4500 : 15000;
+			const timer = setTimeout(() => {
+				const error = new Error(`${operation} exceeded the browser execution limit`);
+				this.restart(error);
+			}, limit);
+			this.pending.set(id, { resolve, reject, timer });
+			this.worker.postMessage({ id, operation, source, mode });
+		});
+	}
+}
+
+async function requestRuntime(operation) {
+	if (!runtime) throw new Error("The compiler runtime is not ready");
+	return runtime.invoke(operation, elements.editor.value, state.mode);
 }
 
 async function run() {
 	if (state.busy) return;
 	setBusy(true, "Running");
 	try {
-		const payload = await requestAPI("/api/run");
+		const payload = await requestRuntime("run");
 		if (payload.ok) {
 			showResult(payload);
 			if (state.page === "tour") completeCurrentLesson();
@@ -248,7 +331,7 @@ async function transpile() {
 	if (state.busy) return;
 	setBusy(true, "Compiling");
 	try {
-		const payload = await requestAPI("/api/transpile");
+		const payload = await requestRuntime("transpile");
 		if (payload.ok) {
 			elements.target.textContent = payload.generated || "// No generated source.";
 			elements.executionTime.textContent = `${payload.durationMs ?? 0} ms`;
@@ -268,7 +351,7 @@ async function formatSource() {
 	if (state.busy) return;
 	setBusy(true, "Formatting");
 	try {
-		const payload = await requestAPI("/api/format");
+		const payload = await requestRuntime("format");
 		if (payload.ok) {
 			elements.editor.value = payload.formatted;
 			updateEditor();
@@ -441,7 +524,7 @@ function updateTourProgress() {
 
 async function initializeTour() {
 	document.body.classList.add("tour-page");
-	const response = await fetch("/api/tour");
+	const response = await fetch(tourURL);
 	state.lessons = await response.json();
 	renderLessonList();
 	const requested = location.hash.slice(1);
@@ -453,8 +536,14 @@ async function initialize() {
 	for (const link of document.querySelectorAll("[data-page-link]")) {
 		link.classList.toggle("active", link.dataset.pageLink === state.page);
 	}
-	const response = await fetch("/api/config");
+	const response = await fetch(new URL("../runtime.json", document.baseURI));
 	const config = await response.json();
+	if (config.transport === "wasm") {
+		runtime = new WasmRuntime(new URL("../assets/playground-worker.js", document.baseURI));
+	} else {
+		runtime = new HTTPRuntime(new URL("../api/", document.baseURI));
+		tourURL = new URL("../api/tour", document.baseURI);
+	}
 	elements.version.textContent = config.version || "local";
 	const savedMode = localStorage.getItem("trb.play.mode");
 	setMode(config.modes.includes(savedMode) ? savedMode : config.mode);

@@ -966,13 +966,21 @@ source bytes. The same completion and classification results are intended for
 future browser and LSP adapters; neither terminal colors nor Readline types are
 part of the language-service API.
 
-### 8.10 Local browser playground and tour
+### 8.10 Browser playground and tour
 
 `trb play` serves an isolated scratch playground on `127.0.0.1` and opens it in
 the default browser. `trb tour` serves the same compiler surface with ordered
 language lessons, local progress, and editable source. Both choose Go when no
 project is present; a discovered project mode or explicit `--mode` selects the
 initial target, and the browser can switch among Go, Ruby, and TypeScript.
+
+The local commands use an HTTP transport to the compiler embedded in the CLI.
+The host-independent static build runs the same playground engine as Go
+WebAssembly inside a Web Worker. Run, Transpile, and Format therefore do not
+send source to a hosted compiler service. A browser execution limit may
+terminate and recreate the worker without changing compiler semantics. Static
+asset URLs are relative so the build can run beneath a project base path or a
+future custom domain.
 
 Run requests use the ordinary parser, resolver, checker, typed IR lowering, and
 REPL evaluator. Each request starts with fresh scratch state and evaluates

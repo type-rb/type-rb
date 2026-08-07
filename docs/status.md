@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-06
+Last updated: 2026-08-07
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -25,6 +25,8 @@ Implemented:
   typed-IR execution, and generated-source views for all three backends.
 - A guided browser tour whose lessons can be validated across every mode with
   `trb tour --check`.
+- A host-independent browser build that runs the same playground compiler and
+  typed-IR evaluator in a Web Worker through Go WebAssembly.
 - Project initialization, dependency configuration, target-manifest
   generation, and target package installation.
 - Managed and external package modes, allowing generated source to be embedded

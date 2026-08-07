@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -27,11 +29,11 @@ func TestHandlerServesPlaygroundAndConfiguration(t *testing.T) {
 
 	config := httptest.NewRecorder()
 	handler.ServeHTTP(config, httptest.NewRequest(http.MethodGet, "/api/config", nil))
-	var payload configResponse
+	var payload Config
 	if err := json.Unmarshal(config.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Mode != "ruby" || payload.Page != "play" || payload.Version != "1.2.3-test" {
+	if payload.Transport != "http" || payload.Mode != "ruby" || payload.Page != "play" || payload.Version != "1.2.3-test" {
 		t.Fatalf("unexpected config: %#v", payload)
 	}
 }
@@ -39,7 +41,7 @@ func TestHandlerServesPlaygroundAndConfiguration(t *testing.T) {
 func TestRunUsesCompilerTypedIRAndReturnsGeneratedTarget(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		handler := Handler(Options{Mode: mode})
-		result := post(t, handler, "/api/run", request{Source: "value := 1 + 2\nputs(value)\n", Mode: mode})
+		result := post(t, handler, "/api/run", Request{Source: "value := 1 + 2\nputs(value)\n", Mode: mode})
 		if !result.OK || result.Output != "3\n" {
 			t.Fatalf("%s run failed: %#v", mode, result)
 		}
@@ -50,7 +52,7 @@ func TestRunUsesCompilerTypedIRAndReturnsGeneratedTarget(t *testing.T) {
 }
 
 func TestRunReturnsSourceDiagnostics(t *testing.T) {
-	result := post(t, Handler(Options{Mode: "go"}), "/api/run", request{
+	result := post(t, Handler(Options{Mode: "go"}), "/api/run", Request{
 		Source: "name := \"Ada\"\nname = 1\n", Mode: "go",
 	})
 	if result.OK || len(result.Diagnostics) == 0 {
@@ -63,7 +65,7 @@ func TestRunReturnsSourceDiagnostics(t *testing.T) {
 }
 
 func TestRunReportsMalformedPortableExpressionsWithoutLeakingNativeASTTerms(t *testing.T) {
-	result := post(t, Handler(Options{Mode: "go"}), "/api/run", request{
+	result := post(t, Handler(Options{Mode: "go"}), "/api/run", Request{
 		Source: "value := `native command`\n", Mode: "go",
 	})
 	if result.OK || len(result.Diagnostics) == 0 {
@@ -76,7 +78,7 @@ func TestRunReportsMalformedPortableExpressionsWithoutLeakingNativeASTTerms(t *t
 }
 
 func TestFormatUsesCommentPreservingFormatter(t *testing.T) {
-	result := post(t, Handler(Options{Mode: "go"}), "/api/format", request{
+	result := post(t, Handler(Options{Mode: "go"}), "/api/format", Request{
 		Source: "def greet(name: String) # keep\n puts(name)\n return\nend\n", Mode: "go",
 	})
 	if !result.OK {
@@ -94,10 +96,19 @@ func TestRunRejectsHostAndPlatformPackages(t *testing.T) {
 		"import trb/std/process\nprocess.argv()\n",
 		"import trb/platform/go/http\nhttp.router()\n",
 	} {
-		result := post(t, Handler(Options{Mode: "go"}), "/api/run", request{Source: source, Mode: "go"})
+		result := post(t, Handler(Options{Mode: "go"}), "/api/run", Request{Source: source, Mode: "go"})
 		if result.OK || len(result.Diagnostics) == 0 || !strings.Contains(result.Diagnostics[0].Message, "not available in the browser playground") {
 			t.Fatalf("host capability was not rejected for %q: %#v", source, result)
 		}
+	}
+}
+
+func TestRunStopsCanceledEvaluation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	cancel()
+	result := Run(ctx, "while true\nend\n", "go")
+	if result.OK || len(result.Diagnostics) == 0 || !strings.Contains(result.Diagnostics[0].Message, "evaluation exceeded") {
+		t.Fatalf("canceled evaluation was not stopped: %#v", result)
 	}
 }
 
@@ -151,7 +162,49 @@ func TestValidateTourAcrossModes(t *testing.T) {
 	}
 }
 
-func post(t *testing.T, handler http.Handler, path string, input request) response {
+func TestExportStaticBuildsHostIndependentSite(t *testing.T) {
+	output := t.TempDir()
+	if err := ExportStatic(StaticOptions{OutputDir: output, Version: "1.2.3-test"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"index.html",
+		"runtime.json",
+		"tour.json",
+		"play/index.html",
+		"tour/index.html",
+		"assets/app.css",
+		"assets/app.js",
+		"assets/playground-worker.js",
+	} {
+		if _, err := os.Stat(filepath.Join(output, name)); err != nil {
+			t.Fatalf("missing static file %s: %v", name, err)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(output, "play/index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(data)
+	if !strings.Contains(markup, `href="../assets/app.css"`) || strings.Contains(markup, `href="/assets/`) {
+		t.Fatalf("static markup is not base-path independent:\n%s", markup)
+	}
+
+	data, err = os.ReadFile(filepath.Join(output, "runtime.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.Transport != "wasm" || config.Mode != "go" || config.Version != "1.2.3-test" {
+		t.Fatalf("unexpected static config: %#v", config)
+	}
+}
+
+func post(t *testing.T, handler http.Handler, path string, input Request) Response {
 	t.Helper()
 	data, err := json.Marshal(input)
 	if err != nil {
@@ -164,7 +217,7 @@ func post(t *testing.T, handler http.Handler, path string, input request) respon
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("POST %s status=%d body=%s", path, recorder.Code, recorder.Body.String())
 	}
-	var result response
+	var result Response
 	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}

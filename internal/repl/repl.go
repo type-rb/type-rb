@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 // Package repl implements TypeRB's project-aware interactive evaluator. Every
 // accepted input is compiled through the normal project pipeline before its
 // typed IR is evaluated.
