@@ -888,6 +888,20 @@ func Lookup(packagePath string) (*Package, bool) {
 	return definition, ok
 }
 
+// LookupRuntimeExport returns the compiler-owned package that declares name.
+// Inferred library result types may use these declarations internally, while
+// source annotations still require an explicit import.
+func LookupRuntimeExport(name string) (*Package, RuntimeExport, bool) {
+	for _, definition := range registry {
+		for _, exported := range definition.RuntimeExports {
+			if exported.Name == name {
+				return definition, exported, true
+			}
+		}
+	}
+	return nil, RuntimeExport{}, false
+}
+
 // RuntimeDependenciesForType returns compiler-owned modules whose runtime
 // declarations are named by a library intrinsic's result type. Source code
 // still needs an explicit import to refer to those declarations directly.

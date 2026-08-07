@@ -395,6 +395,13 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 		c.error(ref.Span(), "Never is an internal compiler type and cannot be written in source")
 		return
 	}
+	if _, _, compilerOwned := stdlib.LookupRuntimeExport(ref.Name); compilerOwned {
+		_, declared := c.declaredTypes[ref.Name]
+		_, imported := c.resolution.ImportedType(ref.Name)
+		if !declared && !imported {
+			c.error(ref.Span(), fmt.Sprintf("type %s is not declared or imported", ref.Name))
+		}
+	}
 	for _, argument := range ref.Arguments {
 		c.validateTypeReference(argument)
 	}
