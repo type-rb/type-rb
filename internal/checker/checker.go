@@ -24,6 +24,7 @@ type Result struct {
 	Variables           map[*ast.VariableStatement]types.Type
 	Iterations          map[*ast.IterationExpression]types.Type
 	IterationBindings   map[*ast.IterationExpression][]types.Type
+	LexicalBindings     map[*ast.Identifier]bool
 	Constants           map[ast.Expression]string
 	ConstantOwners      map[*ast.VariableStatement]string
 	Resolution          resolver.Result
@@ -99,6 +100,10 @@ type symbol struct {
 	variable *ast.VariableStatement
 	used     *bool
 	useKind  string
+}
+
+func tracksUnusedBinding(name string) bool {
+	return name != "_" && !strings.HasPrefix(name, "_")
 }
 
 type scope struct {
@@ -205,6 +210,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			Variables:           map[*ast.VariableStatement]types.Type{},
 			Iterations:          map[*ast.IterationExpression]types.Type{},
 			IterationBindings:   map[*ast.IterationExpression][]types.Type{},
+			LexicalBindings:     map[*ast.Identifier]bool{},
 			Constants:           map[ast.Expression]string{},
 			ConstantOwners:      map[*ast.VariableStatement]string{},
 			Resolution:          resolution,
@@ -576,7 +582,7 @@ func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 					variableType.Readonly = true
 				}
 				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n}
-				if len(c.returns) > 0 && !n.Constant && n.Name != "_" {
+				if len(c.returns) > 0 && !n.Constant && tracksUnusedBinding(n.Name) {
 					used := false
 					declared.used = &used
 					declared.useKind = "local variable"
@@ -833,7 +839,7 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope) {
 				}
 				field := variant.Fields[index]
 				declared := symbol{typ: field.Type, span: binding.Span()}
-				if binding.Name != "_" {
+				if tracksUnusedBinding(binding.Name) {
 					used := false
 					declared.used = &used
 					declared.useKind = "pattern binding"
@@ -1793,6 +1799,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if value, ok := sc.lookup(n.Name); ok {
 			typ = value.typ
+			if !value.constant {
+				c.result.LexicalBindings[n] = true
+			}
 			sc.markUsed(n.Name)
 			if value.constant {
 				c.result.Constants[n] = value.owner
@@ -1970,7 +1979,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					continue
 				}
 				declared := symbol{typ: parameterType, mutable: true, span: n.Block.Span()}
-				if name != "_" {
+				if tracksUnusedBinding(name) {
 					used := false
 					declared.used = &used
 					declared.useKind = "block parameter"

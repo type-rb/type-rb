@@ -210,6 +210,9 @@ func (g *generator) statement(statement ir.Statement) {
 			prefix = "export "
 		}
 		g.line(prefix + keyword + " " + n.Name + ": " + tsType(n.Type) + " = " + g.expr(n.Value) + ";")
+		if g.functionDepth > 0 && !n.Constant && namedUnusedBinding(n.Name) {
+			g.line("void " + n.Name + ";")
+		}
 	case *ir.Assignment:
 		target := g.assignmentTarget(n.Target)
 		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
@@ -270,6 +273,9 @@ func (g *generator) statement(statement ir.Statement) {
 					continue
 				}
 				g.line("const " + binding.Name + " = " + value + "." + binding.Field + ";")
+				if namedUnusedBinding(binding.Name) {
+					g.line("void " + binding.Name + ";")
+				}
 			}
 			g.statements(branch.Body)
 			g.indent--
@@ -673,6 +679,10 @@ func tsMethodName(name string) string {
 		return tsCallableName(name)
 	}
 	return strings.TrimPrefix(name, "_")
+}
+
+func namedUnusedBinding(name string) bool {
+	return name != "_" && strings.HasPrefix(name, "_")
 }
 
 func (g *generator) transform(transform *ir.Transform) string {

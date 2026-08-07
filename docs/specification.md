@@ -135,8 +135,16 @@ mode by itself does not enable them.
 - A local binding declared inside a method must be referenced. Iterator block
   parameters and payload-pattern bindings follow the same rule.
 - The exact name `_` explicitly discards an iterator or pattern value and
-  cannot be read as an expression. More than one binding with the same name,
-  including `_`, remains a duplicate in one block or pattern.
+  cannot be read as an expression or used as a local declaration name. A name
+  that begins with `_`, such as `_value`, remains a normal readable binding but
+  is exempt from the unused-binding error. This opt-out applies consistently to
+  method-local, iterator, and payload-pattern bindings. More than one binding
+  with the same name, including `_`, remains a duplicate in one block or
+  pattern.
+- Leading `_` therefore remains context-sensitive but unambiguous: it marks a
+  class member private in a member declaration and opts a lexical binding out
+  of required-use checking in a local, iterator, or pattern declaration. A
+  lexical binding keeps ordinary scope precedence over a same-named member.
 - Method parameters, fields, constants, and top-level bindings are not subject
   to the local unused-binding rule. The REPL also permits an import-only
   submission because a later submission may use it; project builds still

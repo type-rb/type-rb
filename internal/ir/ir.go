@@ -313,6 +313,7 @@ type Identifier struct {
 	ExprBase
 	Name      string
 	Owner     string
+	Lexical   bool // Resolved to a lexical binding rather than a same-named member.
 	Reference *Reference
 }
 

@@ -104,21 +104,32 @@ Constant initializers may be runtime expressions, but constants cannot be
 rebound or passed to destructive APIs.
 
 Local bindings declared inside methods must be used. Iterator and enum-pattern
-bindings follow the same rule; write `_` when a block or pattern intentionally
-discards one value:
+bindings follow the same rule. The exact name `_` discards a value and cannot
+be read. A descriptive name beginning with `_` remains readable but does not
+produce an unused-binding error:
 
 ```trb
-values.each do |_|
+values.each do |_value|
 	puts("tick")
+end
+
+values.each do |_value|
+	puts(_value) # _value remains readable
 end
 
 case result
 when Result::Ok(value)
 	puts(value)
-when Result::Err(_)
+when Result::Err(_error)
 	puts("failed")
 end
 ```
+
+Use `_` for a value that is intentionally inaccessible and `_name` when the
+role should remain visible or the binding may be referenced later.
+This does not make a local binding private. Leading `_` denotes privacy only on
+class members; ordinary lexical scope still distinguishes a local `_value`
+from a private `_value()` method.
 
 Method parameters, fields, constants, and top-level bindings are not rejected
 solely for being unused.
