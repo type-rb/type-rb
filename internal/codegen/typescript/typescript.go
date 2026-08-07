@@ -950,6 +950,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Object.values(" + arguments[0] + ")"
 	case "trb.std.hashes.copy":
 		return "({ ..." + arguments[0] + " })"
+	case "trb.std.hashes.delete":
+		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } const __trbValue = __trbValues[__trbKey]; Reflect.deleteProperty(__trbValues, __trbKey); return __trbValue; })()"
+	case "trb.std.hashes.merge":
+		return "({ ..." + arguments[0] + ", ..." + arguments[1] + " })"
+	case "trb.std.hashes.update":
+		return "Object.assign(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.numbers.to_string":
 		return "String(" + arguments[0] + ")"
 	case "trb.std.numbers.integer_to_float":

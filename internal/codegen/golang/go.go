@@ -1226,6 +1226,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hashes.copy":
 		g.requireImport("maps", "")
 		return "maps.Clone(" + arguments[0] + ")"
+	case "trb.std.hashes.delete":
+		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; key := " + arguments[1] + "; value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; delete(values, key); return value }()"
+	case "trb.std.hashes.merge":
+		g.requireImport("maps", "")
+		return "func() " + g.goType(call.ExprType()) + " { values := maps.Clone(" + arguments[0] + "); maps.Copy(values, " + arguments[1] + "); return values }()"
+	case "trb.std.hashes.update":
+		g.requireImport("maps", "")
+		return "maps.Copy(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.numbers.to_string":
 		g.requireImport("strconv", "")
 		return "strconv.Itoa(" + arguments[0] + ")"

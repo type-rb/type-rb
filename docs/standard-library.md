@@ -141,10 +141,13 @@ reversed := arrays.reverse(values)
 known := values.include?(2)
 occurrences := arrays.count(values, 2)
 
-labels: Hash<Integer, String> := {1 => "one"}
+mut labels: Hash<Integer, String> := {1 => "one"}
 known_label := labels.key?(1)
 label := labels.try_fetch(1)
 keys := hashes.keys(labels)
+combined := labels.merge({2 => "two"})
+labels.update({2 => "two"})
+removed := hashes.delete(labels, 1)
 ```
 
 Arrays provide size, emptiness, strict `fetch`, safe `try_fetch`, `first`,
@@ -158,8 +161,12 @@ semantics and are available when the element type is numeric, Boolean, String,
 or a payloadless enum. They do not inherit target-native structural equality
 for Arrays, Hashes, records, or payload-bearing enums.
 
-Hashes provide size, emptiness, strict `fetch`, safe `try_fetch`, key checks,
-keys, values, and shallow `dup`. Hash enumeration order is unspecified.
+Hashes provide size, emptiness, strict `fetch`/`delete`, safe `try_fetch`, key
+checks, keys, values, shallow `dup`/`merge`, and mutable `update`. `merge`
+returns a new shallow Hash, while `update` mutates its receiver; duplicate keys
+use the right-hand value. `delete` requires `mut`, returns the removed value,
+and fails when the key is absent. Existing Hash arguments keep their exact key
+and value types. Hash enumeration order is unspecified.
 
 Strict operations fail at runtime for missing keys, invalid indexes, or empty
 edge removals. Safe fetch returns a `Result` with a stable error value.

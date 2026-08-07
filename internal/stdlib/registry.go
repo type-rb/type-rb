@@ -23,6 +23,7 @@ type Parameter struct {
 	Type     types.Type
 	Optional bool
 	Mutable  bool
+	Exact    bool
 }
 
 type Symbol struct {
@@ -540,6 +541,36 @@ end
 			"keys":   genericUnary("keys", "trb.std.hashes.keys", []string{"K", "V"}, hashOf(typeK, typeV), arrayOf(typeK)),
 			"values": genericUnary("values", "trb.std.hashes.values", []string{"K", "V"}, hashOf(typeK, typeV), arrayOf(typeV)),
 			"copy":   genericUnary("copy", "trb.std.hashes.copy", []string{"K", "V"}, hashOf(typeK, typeV), hashOf(typeK, typeV)),
+			"delete": {
+				Name:           "delete",
+				Intrinsic:      "trb.std.hashes.delete",
+				TypeParameters: []string{"K", "V"},
+				Parameters: []Parameter{
+					{Name: "values", Type: hashOf(typeK, typeV), Mutable: true, Exact: true},
+					{Name: "key", Type: typeK},
+				},
+				Return: typeV,
+			},
+			"merge": {
+				Name:           "merge",
+				Intrinsic:      "trb.std.hashes.merge",
+				TypeParameters: []string{"K", "V"},
+				Parameters: []Parameter{
+					{Name: "values", Type: hashOf(typeK, typeV), Exact: true},
+					{Name: "other", Type: hashOf(typeK, typeV), Exact: true},
+				},
+				Return: hashOf(typeK, typeV),
+			},
+			"update": {
+				Name:           "update",
+				Intrinsic:      "trb.std.hashes.update",
+				TypeParameters: []string{"K", "V"},
+				Parameters: []Parameter{
+					{Name: "values", Type: hashOf(typeK, typeV), Mutable: true, Exact: true},
+					{Name: "other", Type: hashOf(typeK, typeV), Exact: true},
+				},
+				Return: voidType,
+			},
 		},
 	},
 	"trb/std/numbers": {
@@ -753,6 +784,9 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"keys":      {PackagePath: "trb/std/hashes", Symbol: "keys"},
 		"values":    {PackagePath: "trb/std/hashes", Symbol: "values"},
 		"dup":       {PackagePath: "trb/std/hashes", Symbol: "copy"},
+		"delete":    {PackagePath: "trb/std/hashes", Symbol: "delete"},
+		"merge":     {PackagePath: "trb/std/hashes", Symbol: "merge"},
+		"update":    {PackagePath: "trb/std/hashes", Symbol: "update"},
 	},
 }
 

@@ -83,6 +83,31 @@ func TestArrayValueQueryReceiversPreserveEqualityRequirements(t *testing.T) {
 	}
 }
 
+func TestHashMutationReceiversPreserveMutabilityAndExactTypes(t *testing.T) {
+	hashType := types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("Integer"), types.FromName("String")}}
+	for _, name := range []string{"delete", "update"} {
+		_, method, ok := LookupReceiverMethod(hashType, name)
+		if !ok {
+			t.Fatalf("Hash#%s is missing", name)
+		}
+		if !method.ReceiverMutable {
+			t.Fatalf("Hash#%s lost the package receiver mutability requirement", name)
+		}
+	}
+	_, deleteMethod, _ := LookupReceiverMethod(hashType, "delete")
+	if deleteMethod.Return.String() != "String" || len(deleteMethod.Parameters) != 1 || deleteMethod.Parameters[0].Type.String() != "Integer" {
+		t.Fatalf("Hash#delete has the wrong specialized contract: %#v", deleteMethod)
+	}
+	_, updateMethod, _ := LookupReceiverMethod(hashType, "update")
+	if len(updateMethod.Parameters) != 1 || !updateMethod.Parameters[0].Exact || updateMethod.Parameters[0].Type.String() != "Hash<Integer, String>" {
+		t.Fatalf("Hash#update has the wrong exact argument contract: %#v", updateMethod)
+	}
+	_, mergeMethod, ok := LookupReceiverMethod(hashType, "merge")
+	if !ok || mergeMethod.ReceiverMutable || mergeMethod.Return.String() != "Hash<Integer, String>" || len(mergeMethod.Parameters) != 1 || !mergeMethod.Parameters[0].Exact {
+		t.Fatalf("Hash#merge has the wrong contract: %#v", mergeMethod)
+	}
+}
+
 func TestReceiverContractsCanConstrainCollectionArguments(t *testing.T) {
 	stringsType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
 	if _, _, ok := LookupReceiverMethod(stringsType, "join"); !ok {

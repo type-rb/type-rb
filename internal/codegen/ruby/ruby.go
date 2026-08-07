@@ -705,6 +705,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".values"
 	case "trb.std.hashes.copy":
 		return arguments[0] + ".dup"
+	case "trb.std.hashes.delete":
+		return "->(values, key) { raise KeyError, \"Hash key is missing\" unless values.key?(key); values.delete(key) }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.hashes.merge":
+		return arguments[0] + ".merge(" + arguments[1] + ")"
+	case "trb.std.hashes.update":
+		return arguments[0] + ".update(" + arguments[1] + ")"
 	case "trb.std.numbers.to_string":
 		return arguments[0] + ".to_s"
 	case "trb.std.numbers.integer_to_float":

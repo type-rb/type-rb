@@ -2368,7 +2368,11 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		expected := parameters[parameterIndex]
 		actualType = c.contextualizeHashLiteral(arguments[i].Value, expected, actualType)
 		actual[i] = actualType
-		if !libraryAssignable(expected, actualType) {
+		assignable := libraryAssignable(expected, actualType)
+		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Exact {
+			assignable = types.Equivalent(expected, actualType)
+		}
+		if !assignable {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, name, actualType, expected))
 		} else {
 			c.recordAssignableConversion(arguments[i].Value, expected, actualType)
