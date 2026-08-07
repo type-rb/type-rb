@@ -9,24 +9,10 @@ class PostsController < ApplicationController
 		return
 	end
 
-	def create()
-		post := Post.new(post_params())
-		if post.save()
-			render(json: post, status: :created)
-		else
-			render(json: post.errors(), status: :unprocessable_entity)
-		end
-		return
-	end
-
 	private
 
 	def set_post()
 		@post = Post.find(params[:id])
 		return
-	end
-
-	def post_params(): ActionController::Parameters
-		return params.require(:post).permit(:title, :body, :published_at)
 	end
 end
