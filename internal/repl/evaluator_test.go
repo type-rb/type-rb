@@ -205,3 +205,34 @@ func TestEvaluateCaseExpression(t *testing.T) {
 		t.Fatalf("unexpected case expression result: %#v", result)
 	}
 }
+
+func TestEvaluateIfExpression(t *testing.T) {
+	booleanType := types.FromName("Boolean")
+	stringType := types.FromName("String")
+	literal := func(kind, raw string, typ types.Type) *ir.Literal {
+		return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, typ), Kind: kind, Raw: raw}
+	}
+	ifExpression := &ir.If{
+		ExprBase:   ir.NewExprBase(token.Span{}, stringType),
+		Condition:  literal("boolean", "false", booleanType),
+		ThenResult: literal("string", `"on"`, stringType),
+		ElseIf: []ir.IfBranch{{
+			Condition: literal("boolean", "true", booleanType),
+			Result:    literal("string", `"secondary"`, stringType),
+		}},
+		ElseResult: literal("string", `"off"`, stringType),
+		HasElse:    true,
+	}
+
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	result, err := evaluator.Evaluate([]ir.Statement{
+		&ir.Variable{Name: "message", Type: stringType, Value: ifExpression},
+		&ir.ExpressionStatement{Expression: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, stringType), Name: "message"}},
+	}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Display || Inspect(result.Value) != `"secondary"` || result.Value.Type.String() != "String" {
+		t.Fatalf("unexpected if expression result: %#v", result)
+	}
+}

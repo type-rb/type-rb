@@ -743,6 +743,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return ""
 	}
 	switch n := expression.(type) {
+	case *ir.If:
+		return g.ifExpression(n)
 	case *ir.Case:
 		return g.caseExpression(n)
 	case *ir.Identifier:
@@ -947,6 +949,49 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) ifExpression(node *ir.If) string {
+	child := &generator{
+		functionDepth: g.functionDepth,
+		receiver:      g.receiver,
+		inConstructor: g.inConstructor,
+		methods:       g.methods,
+		topMethods:    g.topMethods,
+		staticMethods: g.staticMethods,
+		records:       g.records,
+		classes:       g.classes,
+		typeAliases:   g.typeAliases,
+		typeKinds:     g.typeKinds,
+		imports:       g.imports,
+		modulePath:    g.modulePath,
+		goModule:      g.goModule,
+		temporary:     g.temporary,
+	}
+	child.line("func() " + child.goType(node.ExprType()) + " {")
+	child.indent++
+	child.line("if " + child.expr(node.Condition) + " {" + goTrailingComment(node.TrailingComment))
+	child.indent++
+	child.statements(node.Then)
+	child.line("return " + child.expr(node.ThenResult))
+	child.indent--
+	for _, branch := range node.ElseIf {
+		child.line("} else if " + child.expr(branch.Condition) + " {")
+		child.indent++
+		child.statements(branch.Body)
+		child.line("return " + child.expr(branch.Result))
+		child.indent--
+	}
+	child.line("} else {")
+	child.indent++
+	child.statements(node.Else)
+	child.line("return " + child.expr(node.ElseResult))
+	child.indent--
+	child.line("}")
+	child.indent--
+	child.line("}()")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) caseExpression(node *ir.Case) string {
@@ -2203,6 +2248,24 @@ func expressionUsesInterpolation(expression ir.Expression) bool {
 		return expressionUsesInterpolation(n.Receiver) || expressionUsesInterpolation(n.Index)
 	case *ir.Block:
 		return usesInterpolation(n.Body)
+	case *ir.If:
+		if expressionUsesInterpolation(n.Condition) || expressionUsesInterpolation(n.ThenResult) || expressionUsesInterpolation(n.ElseResult) || usesInterpolation(n.Then) || usesInterpolation(n.Else) {
+			return true
+		}
+		for _, branch := range n.ElseIf {
+			if expressionUsesInterpolation(branch.Condition) || expressionUsesInterpolation(branch.Result) || usesInterpolation(branch.Body) {
+				return true
+			}
+		}
+	case *ir.Case:
+		if expressionUsesInterpolation(n.Value) || expressionUsesInterpolation(n.ElseResult) || usesInterpolation(n.Leading) || usesInterpolation(n.Else) {
+			return true
+		}
+		for _, branch := range n.Branches {
+			if expressionUsesInterpolation(branch.Value) || expressionUsesInterpolation(branch.Result) || usesInterpolation(branch.Body) {
+				return true
+			}
+		}
 	}
 	return false
 }

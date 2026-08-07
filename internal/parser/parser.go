@@ -115,7 +115,7 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	}
 	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
-	if expression := p.tryCaseExpressionStatement(line, next, base); expression != nil {
+	if expression := p.tryControlFlowExpressionStatement(line, next, base); expression != nil {
 		return expression
 	}
 	if blockOperation := p.tryIterationStatement(line, next, base); blockOperation != nil {
@@ -149,48 +149,55 @@ func (p *Parser) parseStatement() ast.Statement {
 	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
 }
 
-func (p *Parser) tryCaseExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {
-	caseAt := -1
+func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {
+	controlAt := -1
+	construct := ""
 	for index, item := range line {
-		if index > 0 && item.Lexeme == "case" {
-			caseAt = index
+		if index > 0 && (item.Lexeme == "case" || item.Lexeme == "if") {
+			controlAt = index
+			construct = item.Lexeme
 			break
 		}
 	}
-	if caseAt < 0 {
+	if controlAt < 0 {
 		return nil
 	}
 
-	casePosition := -1
+	controlPosition := -1
 	for index := p.pos; index < len(p.tokens); index++ {
-		if p.tokens[index].Span.Start.Offset == line[caseAt].Span.Start.Offset {
-			casePosition = index
+		if p.tokens[index].Span.Start.Offset == line[controlAt].Span.Start.Offset {
+			controlPosition = index
 			break
 		}
 	}
-	if casePosition < 0 {
+	if controlPosition < 0 {
 		return nil
 	}
 
-	p.pos = casePosition
-	caseNode, ok := p.parseCase().(*ast.CaseStatement)
-	if !ok {
+	p.pos = controlPosition
+	var controlNode ast.Expression
+	if construct == "case" {
+		controlNode, _ = p.parseCase().(*ast.CaseStatement)
+	} else {
+		controlNode, _ = p.parseIf().(*ast.IfStatement)
+	}
+	if controlNode == nil {
 		return nil
 	}
 	parsedNext := p.pos
 
-	wrapped := append([]token.Token(nil), line[:caseAt]...)
-	wrapped = append(wrapped, line[caseAt])
-	for _, item := range line[caseAt+1:] {
-		if item.Span.Start.Offset >= caseNode.Span().End.Offset {
+	wrapped := append([]token.Token(nil), line[:controlAt]...)
+	wrapped = append(wrapped, line[controlAt])
+	for _, item := range line[controlAt+1:] {
+		if item.Span.Start.Offset >= controlNode.Span().End.Offset {
 			wrapped = append(wrapped, item)
 		}
 	}
-	base.SourceSpan.End = caseNode.Span().End
+	base.SourceSpan.End = controlNode.Span().End
 	if len(wrapped) > 0 && wrapped[len(wrapped)-1].Span.End.Offset > base.SourceSpan.End.Offset {
 		base.SourceSpan.End = wrapped[len(wrapped)-1].Span.End
 	}
-	embedded := map[int]ast.Expression{line[caseAt].Span.Start.Offset: caseNode}
+	embedded := map[int]ast.Expression{line[controlAt].Span.Start.Offset: controlNode}
 
 	var statement ast.Statement
 	if len(wrapped) > 0 && wrapped[0].Lexeme == "return" {
@@ -211,8 +218,8 @@ func (p *Parser) tryCaseExpressionStatement(line []token.Token, next int, base a
 		}
 	}
 	if statement == nil {
-		p.errorAt(base.SourceSpan, "case expression is not valid in this expression context")
-		statement = &ast.ExpressionStatement{Base: base, Expression: caseNode}
+		p.errorAt(base.SourceSpan, construct+" expression is not valid in this expression context")
+		statement = &ast.ExpressionStatement{Base: base, Expression: controlNode}
 	}
 	if next > parsedNext {
 		p.pos = next
@@ -947,6 +954,7 @@ func (p *Parser) parseIf() ast.Statement {
 		n.ElseIf = append(n.ElseIf, ast.IfBranch{Condition: cond, Body: body})
 	}
 	if !p.atEOF() && p.current().Lexeme == "else" {
+		n.HasElse = true
 		_, _, nx, _ := p.logicalLine(p.pos)
 		p.pos = nx
 		n.Else = p.parseStatements(map[string]bool{"end": true})

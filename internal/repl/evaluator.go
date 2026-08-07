@@ -381,23 +381,11 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 	case *ir.Next:
 		return flowResult{Loop: loopNext}, nil
 	case *ir.If:
-		condition, err := e.expression(node.Condition, module, sc)
+		body, _, branchScope, err := e.selectIfBranch(node, module, sc)
 		if err != nil {
 			return flowResult{}, err
 		}
-		if truthy(condition) {
-			return e.evaluate(node.Then, module, &scope{parent: sc, values: map[string]Value{}})
-		}
-		for _, branch := range node.ElseIf {
-			condition, err := e.expression(branch.Condition, module, sc)
-			if err != nil {
-				return flowResult{}, err
-			}
-			if truthy(condition) {
-				return e.evaluate(branch.Body, module, &scope{parent: sc, values: map[string]Value{}})
-			}
-		}
-		return e.evaluate(node.Else, module, &scope{parent: sc, values: map[string]Value{}})
+		return e.evaluate(body, module, branchScope)
 	case *ir.Case:
 		body, _, branchScope, err := e.selectCaseBranch(node, module, sc)
 		if err != nil {
@@ -437,6 +425,26 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 	default:
 		return flowResult{}, fmt.Errorf("unsupported REPL statement %T", statement)
 	}
+}
+
+func (e *Evaluator) selectIfBranch(node *ir.If, module string, sc *scope) ([]ir.Statement, ir.Expression, *scope, error) {
+	condition, err := e.expression(node.Condition, module, sc)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if truthy(condition) {
+		return node.Then, node.ThenResult, &scope{parent: sc, values: map[string]Value{}}, nil
+	}
+	for _, branch := range node.ElseIf {
+		condition, err := e.expression(branch.Condition, module, sc)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if truthy(condition) {
+			return branch.Body, branch.Result, &scope{parent: sc, values: map[string]Value{}}, nil
+		}
+	}
+	return node.Else, node.ElseResult, &scope{parent: sc, values: map[string]Value{}}, nil
 }
 
 func (e *Evaluator) selectCaseBranch(node *ir.Case, module string, sc *scope) ([]ir.Statement, ir.Expression, *scope, error) {
@@ -514,6 +522,22 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		return Value{Type: types.FromName("Void")}, nil
 	}
 	switch node := expression.(type) {
+	case *ir.If:
+		body, result, branchScope, err := e.selectIfBranch(node, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		flow, err := e.evaluate(body, module, branchScope)
+		if err != nil {
+			return Value{}, err
+		}
+		if flow.Returned || flow.Loop != loopNone {
+			return Value{}, fmt.Errorf("control transfer from an if expression branch is not supported")
+		}
+		if result == nil {
+			return Value{}, fmt.Errorf("if expression branch has no result")
+		}
+		return e.expression(result, module, branchScope)
 	case *ir.Case:
 		body, result, branchScope, err := e.selectCaseBranch(node, module, sc)
 		if err != nil {

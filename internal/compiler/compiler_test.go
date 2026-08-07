@@ -1674,6 +1674,158 @@ end
 	}
 }
 
+func TestIfExpressionAcrossModes(t *testing.T) {
+	source := []byte(`def choose(primary: Boolean, secondary: Boolean): String
+	result := if primary
+		value := "primary"
+		value
+	elsif secondary
+		"secondary"
+	else
+		"fallback"
+	end
+	return result
+end
+
+def direct(enabled: Boolean): String
+	return if enabled
+		"on"
+	else
+		"off"
+	end
+end
+
+def assign(enabled: Boolean): String
+	mut result := ""
+	result = if enabled
+		"on"
+	else
+		"off"
+	end
+	return result
+end
+
+def render_all(flags: Array<Boolean>): Array<String>
+	return flags.map do |enabled|
+		if enabled
+			"on"
+		else
+			"off"
+		end
+	end
+end
+
+def main()
+	puts(
+		if true
+			"on"
+		else
+			"off"
+		end
+	)
+	return
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("if_expression.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected if expressions: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	for mode, wants := range map[string][]string{
+		"go":         {"result := func() string {", "return value", "return func() string {"},
+		"ruby":       {"result = begin", "return begin", "elsif secondary"},
+		"typescript": {"const result: string = ((): string => {", "return value;", "return (()"},
+	} {
+		output := string(artifacts[mode].Output)
+		for _, want := range wants {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s if expression is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "if_expression.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, artifacts["go"].Output)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated if expression Go did not type-check: %v\n%s", err, artifacts["go"].Output)
+	}
+
+	method := artifacts["go"].IR.Statements[0].(*ir.Method)
+	variable := method.Body[0].(*ir.Variable)
+	ifExpression, ok := variable.Value.(*ir.If)
+	if !ok || ifExpression.ExprType().String() != "String" || ifExpression.ThenResult == nil || ifExpression.ElseIf[0].Result == nil || ifExpression.ElseResult == nil {
+		t.Fatalf("if expression value was not retained in typed IR: %#v", variable.Value)
+	}
+	astMethod := artifacts["go"].AST.Statements[0].(*ast.MethodStatement)
+	astVariable := astMethod.Body[0].(*ast.VariableStatement)
+	if _, ok := astVariable.Value.(*ast.IfStatement); !ok {
+		t.Fatalf("if expression value was not retained in syntax AST: %T", astVariable.Value)
+	}
+}
+
+func TestIfExpressionDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "missing else",
+			source: "def value(enabled: Boolean): String\n\treturn if enabled\n\t\t\"on\"\n\tend\nend\n",
+			want:   "if expression requires an else branch",
+		},
+		{
+			name:   "incompatible branches",
+			source: "def value(enabled: Boolean): String\n\treturn if enabled\n\t\t\"on\"\n\telse\n\t\t1\n\tend\nend\n",
+			want:   "if expression branches have incompatible types String and Integer",
+		},
+		{
+			name:   "missing branch value",
+			source: "def value(enabled: Boolean): String\n\treturn if enabled\n\t\treturn \"on\"\n\telse\n\t\t\"off\"\n\tend\nend\n",
+			want:   "if expression branch must end with an expression",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_if_expression.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestIfExpressionUsesSafeCommonBranchType(t *testing.T) {
+	source := []byte(`def number(whole: Boolean): Float
+	return if whole
+		1
+	else
+		2.5
+	end
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("numeric_if_expression.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected compatible numeric branches: %v", mode, err)
+		}
+		method := artifact.IR.Statements[0].(*ir.Method)
+		ifExpression := method.Body[0].(*ir.Return).Value.(*ir.If)
+		if ifExpression.ExprType().String() != "Float" || ifExpression.ThenResult.ExprType().String() != "Float" {
+			t.Fatalf("%s did not retain Float branch widening in IR: %#v", mode, ifExpression)
+		}
+	}
+}
+
 func TestPayloadEnumAndPatternBindingAcrossModes(t *testing.T) {
 	source := []byte(`enum Token
 	Text(value: String)

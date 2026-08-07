@@ -287,6 +287,7 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement) {
 			c.validateExpressionTypeReferences(node.Condition)
 			c.validateTypeReferences(node.Then)
 			for _, branch := range node.ElseIf {
+				c.validateExpressionTypeReferences(branch.Condition)
 				c.validateTypeReferences(branch.Body)
 			}
 			c.validateTypeReferences(node.Else)
@@ -312,6 +313,14 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression) {
 	switch node := expression.(type) {
 	case nil:
 		return
+	case *ast.IfStatement:
+		c.validateExpressionTypeReferences(node.Condition)
+		c.validateTypeReferences(node.Then)
+		for _, branch := range node.ElseIf {
+			c.validateExpressionTypeReferences(branch.Condition)
+			c.validateTypeReferences(branch.Body)
+		}
+		c.validateTypeReferences(node.Else)
 	case *ast.CaseStatement:
 		c.validateExpressionTypeReferences(node.Value)
 		c.validateTypeReferences(node.Leading)
@@ -733,13 +742,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 		case *ast.ExpressionStatement:
 			c.checkExpression(n.Expression, sc)
 		case *ast.IfStatement:
-			c.checkBooleanCondition(n.Condition, sc, "if")
-			c.checkStatements(n.Then, &scope{parent: sc, values: map[string]symbol{}})
-			for _, branch := range n.ElseIf {
-				c.checkBooleanCondition(branch.Condition, sc, "elsif")
-				c.checkStatements(branch.Body, &scope{parent: sc, values: map[string]symbol{}})
-			}
-			c.checkStatements(n.Else, &scope{parent: sc, values: map[string]symbol{}})
+			c.checkIf(n, sc, false)
 		case *ast.CaseStatement:
 			c.checkCase(n, sc, false)
 		case *ast.WhileStatement:
@@ -871,6 +874,31 @@ func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, co
 type controlFlowBranchResult struct {
 	expression ast.Expression
 	typ        types.Type
+}
+
+func (c *Checker) checkIf(node *ast.IfStatement, sc *scope, expression bool) types.Type {
+	results := []controlFlowBranchResult{}
+	c.checkBooleanCondition(node.Condition, sc, "if")
+	if result := c.checkControlFlowBranch(node.Then, &scope{parent: sc, values: map[string]symbol{}}, node.Span(), "if", expression); result != nil {
+		results = append(results, *result)
+	}
+	for _, branch := range node.ElseIf {
+		c.checkBooleanCondition(branch.Condition, sc, "elsif")
+		if result := c.checkControlFlowBranch(branch.Body, &scope{parent: sc, values: map[string]symbol{}}, node.Span(), "if", expression); result != nil {
+			results = append(results, *result)
+		}
+	}
+	if node.HasElse {
+		if result := c.checkControlFlowBranch(node.Else, &scope{parent: sc, values: map[string]symbol{}}, node.Span(), "if", expression); result != nil {
+			results = append(results, *result)
+		}
+	} else if expression {
+		c.error(node.Span(), "if expression requires an else branch")
+	}
+	if !expression {
+		return types.FromName("Void")
+	}
+	return c.controlFlowResultType("if", node.Span(), results)
 }
 
 func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool) types.Type {
@@ -2107,6 +2135,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	}
 	typ := types.Type{Kind: types.Any, Name: "Any"}
 	switch n := expression.(type) {
+	case *ast.IfStatement:
+		typ = c.checkIf(n, sc, true)
 	case *ast.CaseStatement:
 		typ = c.checkCase(n, sc, true)
 	case *ast.Identifier:

@@ -198,11 +198,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		return &ir.ExpressionStatement{Base: base(n.Base), Expression: l.expression(n.Expression)}
 	case *ast.IfStatement:
-		result := &ir.If{Base: base(n.Base), Condition: l.expression(n.Condition), Then: l.statements(n.Then), Else: l.statements(n.Else)}
-		for _, branch := range n.ElseIf {
-			result.ElseIf = append(result.ElseIf, ir.IfBranch{Condition: l.expression(branch.Condition), Body: l.statements(branch.Body)})
-		}
-		return result
+		return l.ifNode(n, false)
 	case *ast.CaseStatement:
 		return l.caseNode(n, false)
 	case *ast.WhileStatement:
@@ -239,6 +235,8 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	typ := l.checked.Expressions[node]
 	base := ir.NewExprBase(node.Span(), typ)
 	switch n := node.(type) {
+	case *ast.IfStatement:
+		return l.ifNode(n, true)
 	case *ast.CaseStatement:
 		return l.caseNode(n, true)
 	case *ast.Identifier:
@@ -346,6 +344,31 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	default:
 		return nil
 	}
+}
+
+func (l *lowerer) ifNode(node *ast.IfStatement, expression bool) *ir.If {
+	typ := types.FromName("Void")
+	if expression {
+		typ = l.checked.Expressions[node]
+	}
+	exprBase := ir.NewExprBase(node.Span(), typ)
+	exprBase.TrailingComment = node.TrailingComment
+	result := &ir.If{
+		ExprBase:  exprBase,
+		Condition: l.expression(node.Condition),
+		HasElse:   node.HasElse,
+	}
+	result.Then, result.ThenResult = l.controlFlowBranch(node.Then, expression)
+	result.Else, result.ElseResult = l.controlFlowBranch(node.Else, expression)
+	for _, branch := range node.ElseIf {
+		body, branchResult := l.controlFlowBranch(branch.Body, expression)
+		result.ElseIf = append(result.ElseIf, ir.IfBranch{
+			Condition: l.expression(branch.Condition),
+			Body:      body,
+			Result:    branchResult,
+		})
+	}
+	return result
 }
 
 func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {

@@ -201,16 +201,21 @@ func (*ExpressionStatement) irStatement() {}
 type IfBranch struct {
 	Condition Expression
 	Body      []Statement
+	Result    Expression
 }
 type If struct {
-	Base
-	Condition Expression
-	Then      []Statement
-	ElseIf    []IfBranch
-	Else      []Statement
+	ExprBase
+	Condition  Expression
+	Then       []Statement
+	ThenResult Expression
+	ElseIf     []IfBranch
+	Else       []Statement
+	ElseResult Expression
+	HasElse    bool
 }
 
-func (*If) irStatement() {}
+func (*If) irStatement()  {}
+func (*If) irExpression() {}
 
 type CaseBranch struct {
 	Base

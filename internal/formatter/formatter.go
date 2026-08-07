@@ -402,7 +402,7 @@ func opensEndBlock(tokens []token.Token) bool {
 		return true
 	}
 	for _, item := range tokens {
-		if item.Lexeme == "case" {
+		if item.Lexeme == "case" || item.Lexeme == "if" {
 			return true
 		}
 	}
