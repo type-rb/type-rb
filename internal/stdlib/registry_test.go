@@ -127,6 +127,19 @@ func TestPortableBase64Contract(t *testing.T) {
 	}
 }
 
+func TestPortableURLComponentContract(t *testing.T) {
+	definition, ok := Lookup("trb/std/url")
+	if !ok {
+		t.Fatal("url package is missing")
+	}
+	if got := definition.Symbols["encode_component"].Return.String(); got != "String" {
+		t.Fatalf("url.encode_component return=%s, want String", got)
+	}
+	if got := definition.Symbols["decode_component"].Return.String(); got != "Result<String, PercentDecodeError>" {
+		t.Fatalf("url.decode_component return=%s, want Result<String, PercentDecodeError>", got)
+	}
+}
+
 func TestPortableHashContract(t *testing.T) {
 	definition, ok := Lookup("trb/std/hash")
 	if !ok {

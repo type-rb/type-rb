@@ -1661,6 +1661,97 @@ func TestPortablePathDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableURLComponentsLowerAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Result } from trb/std/result
+import { PercentDecodeError, decode_component, encode_component } from trb/std/url
+
+def encoded(value: String): String
+	return encode_component(value)
+end
+
+def decoded(value: String): Result<String, PercentDecodeError>
+	return decode_component(value)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`const hexadecimal = "0123456789ABCDEF"`,
+			`utf8.Valid(value)`,
+			`PercentDecodeErrorKindInvalidescape`,
+			`PercentDecodeErrorKindInvalidutf8`,
+		},
+		"ruby": {
+			`format("%%%02X", byte)`,
+			`bytes.pack("C*").force_encoding(Encoding::UTF_8)`,
+			`PercentDecodeErrorKind::InvalidEscape`,
+			`PercentDecodeErrorKind::InvalidUtf8`,
+		},
+		"typescript": {
+			`new TextEncoder().encode(value)`,
+			`new TextDecoder("utf-8", { fatal: true })`,
+			`PercentDecodeErrorKind.InvalidEscape`,
+			`PercentDecodeErrorKind.InvalidUtf8`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/portable-url", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable URL components: %v", mode, err)
+		}
+		var consumer, resultRuntime, urlRuntime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/result/index":
+				resultRuntime = artifact
+			case "trb/std/url/index":
+				urlRuntime = artifact
+			}
+		}
+		if consumer == nil || resultRuntime == nil || urlRuntime == nil {
+			t.Fatalf("%s did not compile the URL consumer and runtimes: %#v", mode, artifacts)
+		}
+		for _, want := range wants[mode] {
+			if output := string(urlRuntime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s URL output is missing %q:\n%s", mode, want, output)
+			}
+		}
+		errorWants := map[string][]string{
+			"go":         {"type PercentDecodeErrorKind int", "type PercentDecodeError struct"},
+			"ruby":       {"PercentDecodeErrorKind = Data.define(:name)", "PercentDecodeError = Data.define(:kind, :input, :message)"},
+			"typescript": {"export type PercentDecodeErrorKind", "export interface PercentDecodeError"},
+		}[mode]
+		for _, want := range errorWants {
+			if output := string(urlRuntime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s URL error runtime is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableURLComponentDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: "import { encode_component } from trb/std/url\ndef bad(): String\n\treturn encode_component(1)\nend\n", want: "argument 1 to encode_component() has type Integer, expected String"},
+		{source: "import { decode_component } from trb/std/url\ndef bad()\n\tdecode_component(1)\n\treturn\nend\n", want: "argument 1 to decode_component() has type Integer, expected String"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("bad.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s: expected %q URL component diagnostic, got %v", mode, test.want, err)
+			}
+		}
+	}
+}
+
 func TestCompilerOwnedUnicodePackageLowersSameTablesAcrossBackends(t *testing.T) {
 	consumerSource := SourceUnit{
 		Filename:   "/project/main.trb",

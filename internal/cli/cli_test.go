@@ -2387,6 +2387,81 @@ end
 	}
 }
 
+func TestRunPortableURLComponentsAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby URL component run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript URL component run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/portable-url-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { Result } from trb/std/result
+import { PercentDecodeError, PercentDecodeErrorKind, decode_component, encode_component } from trb/std/url
+
+def decode(value: String): Result<String, PercentDecodeError>
+	return decode_component(value)
+end
+
+def decoded(value: String): String
+	case decode(value)
+	when Result::Ok(text)
+		return text
+	when Result::Err(error)
+		case error.kind
+		when PercentDecodeErrorKind::InvalidEscape
+			return "invalid escape"
+		when PercentDecodeErrorKind::InvalidUtf8
+			return "invalid utf8"
+		end
+	end
+end
+
+def main()
+	puts(encode_component("a b/😀+~"))
+	puts(decoded("a%20b%2F%F0%9F%98%80%2B~"))
+	puts(decoded("a+b"))
+	puts(decoded("%"))
+	puts(decoded("%FF"))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "a%20b%2F%F0%9F%98%80%2B~\na b/😀+~\na+b\ninvalid escape\ninvalid utf8\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s portable URL component output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunCompilerOwnedUnicodeAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

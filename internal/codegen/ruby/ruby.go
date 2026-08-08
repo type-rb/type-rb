@@ -705,6 +705,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "Base64DecodeError.new(kind: Base64DecodeErrorKind::" + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
 	}
+	percentDecodeError := func(kind, input, message string) string {
+		value := "PercentDecodeError.new(kind: PercentDecodeErrorKind::" + kind + ", input: " + input + ", message: " + strconv.Quote(message) + ")"
+		return "Result::Err.new(" + value + ")"
+	}
 	indexLookupError := func(index, size, message string) string {
 		value := "IndexLookupError.new(index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
@@ -733,6 +737,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return pathCall("base") + "(" + arguments[0] + ")"
 	case "trb.std.path.directory":
 		return pathCall("directory") + "(" + arguments[0] + ")"
+	case "trb.std.url.encode_component":
+		return "->(value) { value.encode(Encoding::UTF_8).bytes.map { |byte| unreserved = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 45 || byte == 46 || byte == 95 || byte == 126; unreserved ? byte.chr : format(\"%%%02X\", byte) }.join }.call(" + arguments[0] + ")"
+	case "trb.std.url.decode_component":
+		invalidEscape := percentDecodeError("InvalidEscape", "input", "invalid percent escape in URL component")
+		invalidUtf8 := percentDecodeError("InvalidUtf8", "input", "decoded URL component is not valid UTF-8")
+		return "->(input) { characters = input.each_char.to_a; bytes = []; failure = nil; index = 0; while index < characters.length; character = characters[index]; if character != \"%\"; bytes.concat(character.encode(Encoding::UTF_8).bytes); index += 1; next; end; if index + 2 >= characters.length || !characters[index + 1].match?(/\\A[0-9A-Fa-f]\\z/) || !characters[index + 2].match?(/\\A[0-9A-Fa-f]\\z/); failure = " + invalidEscape + "; break; end; bytes << (characters[index + 1] + characters[index + 2]).to_i(16); index += 3; end; if failure; failure; else; value = bytes.pack(\"C*\").force_encoding(Encoding::UTF_8); if value.valid_encoding?; Result::Ok.new(value); else; " + invalidUtf8 + "; end; end }.call(" + arguments[0] + ")"
 	case "trb.internal.filesystem.exists":
 		return "->(path) { begin; File.stat(path); " + filesystemOK("true") + "; rescue Errno::ENOENT; " + filesystemOK("false") + "; rescue StandardError => error; " + filesystemError("exists", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
 	case "trb.internal.filesystem.read_text":
