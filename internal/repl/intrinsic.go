@@ -1245,6 +1245,36 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return e.numberParseResultErr(typ, kind, value, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Integer"), Data: parsed})
+	case "trb.std.numbers.parse_float":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("numbers.parse_float expects String")
+		}
+		parsed, message := parsePortableFloat(value)
+		if message != "" {
+			return Value{}, errors.New(message)
+		}
+		return Value{Type: typ, Data: parsed}, nil
+	case "trb.std.numbers.try_parse_float":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("numbers.try_parse_float expects String")
+		}
+		parsed, message := parsePortableFloat(value)
+		if message != "" {
+			kind := "InvalidFormat"
+			if message == "Float is outside the portable range" {
+				kind = "OutOfRange"
+			}
+			return e.numberParseResultErr(typ, kind, value, message)
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("Float"), Data: parsed})
 	case "trb.std.math.sqrt", "trb.std.math.exp", "trb.std.math.log", "trb.std.math.log2", "trb.std.math.log10":
 		if err := require(1); err != nil {
 			return Value{}, err

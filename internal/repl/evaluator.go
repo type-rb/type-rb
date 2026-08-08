@@ -1642,6 +1642,58 @@ func parsePortableInteger(input string) (int64, string) {
 	return value, ""
 }
 
+func parsePortableFloat(input string) (float64, string) {
+	if !isPortableFloatText(input) {
+		return 0, "invalid Float"
+	}
+	value, err := strconv.ParseFloat(input, 64)
+	if math.IsInf(value, 0) || (err != nil && value != 0) {
+		return 0, "Float is outside the portable range"
+	}
+	return value, ""
+}
+
+func isPortableFloatText(input string) bool {
+	if input == "" {
+		return false
+	}
+	index := 0
+	if input[index] == '+' || input[index] == '-' {
+		index++
+	}
+	wholeDigits := 0
+	for index < len(input) && input[index] >= '0' && input[index] <= '9' {
+		wholeDigits++
+		index++
+	}
+	fractionDigits := 0
+	if index < len(input) && input[index] == '.' {
+		index++
+		for index < len(input) && input[index] >= '0' && input[index] <= '9' {
+			fractionDigits++
+			index++
+		}
+	}
+	if wholeDigits == 0 && fractionDigits == 0 {
+		return false
+	}
+	if index < len(input) && (input[index] == 'e' || input[index] == 'E') {
+		index++
+		if index < len(input) && (input[index] == '+' || input[index] == '-') {
+			index++
+		}
+		exponentDigits := 0
+		for index < len(input) && input[index] >= '0' && input[index] <= '9' {
+			exponentDigits++
+			index++
+		}
+		if exponentDigits == 0 {
+			return false
+		}
+	}
+	return index == len(input)
+}
+
 func portableFloatText(value float64) string {
 	text := strconv.FormatFloat(value, 'f', -1, 64)
 	switch {

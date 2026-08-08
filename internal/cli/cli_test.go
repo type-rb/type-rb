@@ -270,6 +270,10 @@ false.to_s()
 "123".try_to_i()
 "12x".try_to_i()
 "9007199254740992".try_to_i()
+"12.5".to_f()
+"+.5e1".try_to_f()
+"1.2x".try_to_f()
+"1e9999".try_to_f()
 5.min(3)
 5.max(7)
 12.clamp(0, 10)
@@ -314,6 +318,10 @@ true : Boolean
 Result::Ok(value: 123) : Result<Integer, NumberParseError>
 Result::Err(error: NumberParseError(kind: NumberParseErrorKind::InvalidFormat, input: "12x", message: "invalid Integer")) : Result<Integer, NumberParseError>
 Result::Err(error: NumberParseError(kind: NumberParseErrorKind::OutOfRange, input: "9007199254740992", message: "Integer is outside the portable range")) : Result<Integer, NumberParseError>
+12.5 : Float
+Result::Ok(value: 5) : Result<Float, NumberParseError>
+Result::Err(error: NumberParseError(kind: NumberParseErrorKind::InvalidFormat, input: "1.2x", message: "invalid Float")) : Result<Float, NumberParseError>
+Result::Err(error: NumberParseError(kind: NumberParseErrorKind::OutOfRange, input: "1e9999", message: "Float is outside the portable range")) : Result<Float, NumberParseError>
 3 : Integer
 7 : Integer
 10 : Integer
@@ -2713,6 +2721,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"import trb/std/numbers\n" +
 			"import trb/std/booleans\n\n" +
 			"def parse_result(value: Result<Integer, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
+			"def float_result(value: Result<Float, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def index_result(value: Result<Integer, IndexLookupError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def key_result(value: Result<String, KeyLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def scalar_check(value: Float): Boolean; return (-4).abs() == numbers.absolute(-4) && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == booleans.to_string(true); end\n\n" +
@@ -2721,6 +2730,11 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"\tputs(parse_result(\"12\".try_to_i()))\n" +
 			"\tputs(parse_result(\"12x\".try_to_i()))\n" +
 			"\tputs(parse_result(\"9007199254740992\".try_to_i()))\n" +
+			"\tputs(float_result(\"12.5\".try_to_f()))\n" +
+			"\tputs(float_result(\"+.5e1\".try_to_f()))\n" +
+			"\tputs(float_result(\"1.2x\".try_to_f()))\n" +
+			"\tputs(float_result(\"1e9999\".try_to_f()))\n" +
+			"\tputs(float_result(\"1e-9999\".try_to_f()))\n" +
 			"\tvalues := [7]\n" +
 			"\tputs(index_result(values.try_fetch(0)))\n" +
 			"\tputs(index_result(values.try_fetch(1)))\n" +
@@ -2739,7 +2753,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "true\nok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
+		want := "true\nok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:12.5\nok:5.0\nerr:invalid Float\nerr:Float is outside the portable range\nok:0.0\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s safe-operation output: want %q, got %q", mode, want, stdout.String())
 		}

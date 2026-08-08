@@ -355,6 +355,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(input) { raise ArgumentError, \"invalid Integer\" unless /\\A[+-]?[0-9]+\\z/.match?(input); value = Integer(input, 10); raise RangeError, \"Integer is outside the portable range\" if value < -9007199254740991 || value > 9007199254740991; value }.call(" + arguments[0] + ")"
 	case "trb.std.numbers.try_parse_integer":
 		return "->(input) { if !/\\A[+-]?[0-9]+\\z/.match?(input); " + numberParseError("InvalidFormat", "input", "invalid Integer") + "; else; value = Integer(input, 10); if value < -9007199254740991 || value > 9007199254740991; " + numberParseError("OutOfRange", "input", "Integer is outside the portable range") + "; else; Result::Ok.new(value); end; end }.call(" + arguments[0] + ")"
+	case "trb.std.numbers.parse_float":
+		return "->(input) { raise ArgumentError, \"invalid Float\" unless /\\A[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?\\z/.match?(input); value = Float(input); raise RangeError, \"Float is outside the portable range\" unless value.finite?; value }.call(" + arguments[0] + ")"
+	case "trb.std.numbers.try_parse_float":
+		return "->(input) { if !/\\A[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?\\z/.match?(input); " + numberParseError("InvalidFormat", "input", "invalid Float") + "; else; value = Float(input); if !value.finite?; " + numberParseError("OutOfRange", "input", "Float is outside the portable range") + "; else; Result::Ok.new(value); end; end }.call(" + arguments[0] + ")"
 	case "trb.std.math.sqrt":
 		return "->(value) { value < 0 ? Float::NAN : Math.sqrt(value) }.call(" + arguments[0] + ")"
 	case "trb.std.math.exp":

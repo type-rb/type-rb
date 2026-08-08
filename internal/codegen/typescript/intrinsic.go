@@ -405,6 +405,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.numbers.try_parse_integer":
 		resultType, _, _ := filesystemResultType()
 		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?[0-9]+$/.test(__trbInput)) { return " + numberParseError("InvalidFormat", "__trbInput", "invalid Integer") + "; } const __trbValue = Number(__trbInput); if (!Number.isSafeInteger(__trbValue)) { return " + numberParseError("OutOfRange", "__trbInput", "Integer is outside the portable range") + "; } return " + filesystemOK("__trbValue") + "; })()"
+	case "trb.std.numbers.parse_float":
+		return "((): number => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(__trbInput)) { throw new Error(\"invalid Float\"); } const __trbValue = Number(__trbInput); if (!Number.isFinite(__trbValue)) { throw new RangeError(\"Float is outside the portable range\"); } return __trbValue; })()"
+	case "trb.std.numbers.try_parse_float":
+		resultType, _, _ := filesystemResultType()
+		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; if (!/^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(__trbInput)) { return " + numberParseError("InvalidFormat", "__trbInput", "invalid Float") + "; } const __trbValue = Number(__trbInput); if (!Number.isFinite(__trbValue)) { return " + numberParseError("OutOfRange", "__trbInput", "Float is outside the portable range") + "; } return " + filesystemOK("__trbValue") + "; })()"
 	case "trb.std.math.sqrt":
 		return "Math.sqrt(" + arguments[0] + ")"
 	case "trb.std.math.exp":

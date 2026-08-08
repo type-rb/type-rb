@@ -504,6 +504,17 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("strconv", "")
 		resultType, _, _ := filesystemResultType()
 		return "func() " + resultType + " { input := " + arguments[0] + "; valid, _ := regexp.MatchString(`^[+-]?[0-9]+$`, input); if !valid { return " + numberParseError("InvalidFormat", "input", "invalid Integer") + " }; value, err := strconv.ParseInt(input, 10, 64); if err != nil || value < -9007199254740991 || value > 9007199254740991 { return " + numberParseError("OutOfRange", "input", "Integer is outside the portable range") + " }; return " + filesystemOK("int(value)") + " }()"
+	case "trb.std.numbers.parse_float":
+		g.requireImport("math", "")
+		g.requireImport("regexp", "")
+		g.requireImport("strconv", "")
+		return "func() float64 { input := " + arguments[0] + "; valid, _ := regexp.MatchString(`^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`, input); if !valid { panic(\"invalid Float\") }; value, err := strconv.ParseFloat(input, 64); if math.IsInf(value, 0) || (err != nil && value != 0) { panic(\"Float is outside the portable range\") }; return value }()"
+	case "trb.std.numbers.try_parse_float":
+		g.requireImport("math", "")
+		g.requireImport("regexp", "")
+		g.requireImport("strconv", "")
+		resultType, _, _ := filesystemResultType()
+		return "func() " + resultType + " { input := " + arguments[0] + "; valid, _ := regexp.MatchString(`^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`, input); if !valid { return " + numberParseError("InvalidFormat", "input", "invalid Float") + " }; value, err := strconv.ParseFloat(input, 64); if math.IsInf(value, 0) || (err != nil && value != 0) { return " + numberParseError("OutOfRange", "input", "Float is outside the portable range") + " }; return " + filesystemOK("value") + " }()"
 	case "trb.std.math.sqrt":
 		g.requireImport("math", "")
 		return "math.Sqrt(" + arguments[0] + ")"

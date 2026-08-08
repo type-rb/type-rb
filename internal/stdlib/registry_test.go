@@ -51,6 +51,7 @@ func TestSafeReceiverContractsUseStructuredErrors(t *testing.T) {
 		want     string
 	}{
 		{receiver: types.FromName("String"), name: "try_to_i", want: "Result<Integer, NumberParseError>"},
+		{receiver: types.FromName("String"), name: "try_to_f", want: "Result<Float, NumberParseError>"},
 		{receiver: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}, name: "try_fetch", want: "Result<String, IndexLookupError>"},
 		{receiver: types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("Integer"), types.FromName("String")}}, name: "try_fetch", want: "Result<String, KeyLookupError>"},
 	}

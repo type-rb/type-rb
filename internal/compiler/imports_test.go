@@ -2101,6 +2101,22 @@ def package_parsed(value: String): Result<Integer, NumberParseError>
 	return numbers.try_parse_integer(value)
 end
 
+def parsed_float(value: String): Result<Float, NumberParseError>
+	return value.try_to_f()
+end
+
+def package_parsed_float(value: String): Result<Float, NumberParseError>
+	return numbers.try_parse_float(value)
+end
+
+def float_value(value: String): Float
+	return value.to_f()
+end
+
+def package_float_value(value: String): Float
+	return numbers.parse_float(value)
+end
+
 def array_value(values: Array<Integer>, index: Integer): Result<Integer, IndexLookupError>
 	return arrays.try_fetch(values, index)
 end
@@ -2114,17 +2130,23 @@ end
 	wants := map[string][]string{
 		"go": {
 			`regexp.MatchString`,
+			`panic("invalid Float")`,
 			`__trb_errors.NumberParseError{Kind: __trb_errors.NumberParseErrorKindInvalidformat, Input: input, Message: "invalid Integer"}`,
+			`__trb_errors.NumberParseError{Kind: __trb_errors.NumberParseErrorKindInvalidformat, Input: input, Message: "invalid Float"}`,
 			`__trb_errors.IndexLookupError{Index: index, Size: len(values), Message: "Array index is out of bounds"}`,
 			`__trb_errors.KeyLookupError{Key: key, Message: "Hash key is missing"}`,
 		},
 		"ruby": {
+			`raise ArgumentError, "invalid Float"`,
 			`NumberParseError.new(kind: NumberParseErrorKind::InvalidFormat, input: input, message: "invalid Integer")`,
+			`NumberParseError.new(kind: NumberParseErrorKind::InvalidFormat, input: input, message: "invalid Float")`,
 			`IndexLookupError.new(index: index, size: values.length, message: "Array index is out of bounds")`,
 			`KeyLookupError.new(key: key, message: "Hash key is missing")`,
 		},
 		"typescript": {
+			`throw new Error("invalid Float")`,
 			`{ kind: NumberParseErrorKind.InvalidFormat, input: __trbInput, message: "invalid Integer" } satisfies NumberParseError`,
+			`{ kind: NumberParseErrorKind.InvalidFormat, input: __trbInput, message: "invalid Float" } satisfies NumberParseError`,
 			`{ index: __trbIndex, size: __trbValues.length, message: "Array index is out of bounds" } satisfies IndexLookupError`,
 			`{ key: __trbKey, message: "Hash key is missing" } satisfies KeyLookupError`,
 		},
@@ -2174,6 +2196,7 @@ func TestStructuredSafeOperationsRejectStringErrorAnnotationsAcrossBackends(t *t
 		want   string
 	}{
 		{name: "number parse", source: `"nope".try_to_i()`, want: "Result<Integer, NumberParseError>"},
+		{name: "float parse", source: `"nope".try_to_f()`, want: "Result<Float, NumberParseError>"},
 		{name: "array lookup", source: `[1].try_fetch(9)`, want: "Result<Integer, IndexLookupError>"},
 		{name: "hash lookup", source: `{"name" => "Ada"}.try_fetch("missing")`, want: "Result<String, KeyLookupError>"},
 	}
@@ -2203,6 +2226,7 @@ func TestInferredResultOperationsLoadTheirRuntimeAcrossBackends(t *testing.T) {
 		Package:    "main",
 		Source: []byte(`def inspect_results()
 	puts("not-an-integer".try_to_i())
+	puts("not-a-float".try_to_f())
 	puts([1, 2].try_fetch(9))
 	puts({"name" => "Ada"}.try_fetch("missing"))
 	return
@@ -2215,6 +2239,7 @@ end
 			`__trb_result "example.com/inferred-results/trb/std/result"`,
 			`__trb_errors "example.com/inferred-results/trb/std/errors"`,
 			`__trb_errors.NumberParseError{Kind: __trb_errors.NumberParseErrorKindInvalidformat, Input: input, Message: "invalid Integer"}`,
+			`__trb_errors.NumberParseError{Kind: __trb_errors.NumberParseErrorKindInvalidformat, Input: input, Message: "invalid Float"}`,
 			`__trb_errors.IndexLookupError{Index: index, Size: len(values), Message: "Array index is out of bounds"}`,
 			`__trb_errors.KeyLookupError{Key: key, Message: "Hash key is missing"}`,
 		},
@@ -2222,6 +2247,7 @@ end
 			`require_relative "./trb/std/result/index"`,
 			`require_relative "./trb/std/errors/index"`,
 			`NumberParseError.new(kind: NumberParseErrorKind::InvalidFormat, input: input, message: "invalid Integer")`,
+			`NumberParseError.new(kind: NumberParseErrorKind::InvalidFormat, input: input, message: "invalid Float")`,
 			`IndexLookupError.new(index: index, size: values.length, message: "Array index is out of bounds")`,
 			`KeyLookupError.new(key: key, message: "Hash key is missing")`,
 		},
@@ -2229,6 +2255,7 @@ end
 			`import { Result } from "./trb/std/result/index.ts";`,
 			`import { NumberParseErrorKind } from "./trb/std/errors/index.ts";`,
 			`{ kind: NumberParseErrorKind.InvalidFormat, input: __trbInput, message: "invalid Integer" } satisfies NumberParseError`,
+			`{ kind: NumberParseErrorKind.InvalidFormat, input: __trbInput, message: "invalid Float" } satisfies NumberParseError`,
 			`{ index: __trbIndex, size: __trbValues.length, message: "Array index is out of bounds" } satisfies IndexLookupError`,
 			`{ key: __trbKey, message: "Hash key is missing" } satisfies KeyLookupError`,
 		},

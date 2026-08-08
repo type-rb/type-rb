@@ -793,6 +793,8 @@ end
 			"nan":               unary("nan", "trb.std.numbers.float_nan", floatType, booleanType),
 			"parse_integer":     unary("parse_integer", "trb.std.numbers.parse_integer", stringType, integerType),
 			"try_parse_integer": unary("try_parse_integer", "trb.std.numbers.try_parse_integer", stringType, structuredErrorResult(integerType, numberParseErrorType)),
+			"parse_float":       unary("parse_float", "trb.std.numbers.parse_float", stringType, floatType),
+			"try_parse_float":   unary("try_parse_float", "trb.std.numbers.try_parse_float", stringType, structuredErrorResult(floatType, numberParseErrorType)),
 		},
 	},
 	"trb/std/math": {
@@ -947,6 +949,8 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 	types.String: {
 		"to_i":        {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
 		"try_to_i":    {PackagePath: "trb/std/numbers", Symbol: "try_parse_integer"},
+		"to_f":        {PackagePath: "trb/std/numbers", Symbol: "parse_float"},
+		"try_to_f":    {PackagePath: "trb/std/numbers", Symbol: "try_parse_float"},
 		"size":        {PackagePath: "trb/std/strings", Symbol: "length"},
 		"empty?":      {PackagePath: "trb/std/strings", Symbol: "empty"},
 		"strip":       {PackagePath: "trb/std/strings", Symbol: "strip"},
