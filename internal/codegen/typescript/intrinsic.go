@@ -447,12 +447,21 @@ func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
 	}
 	parseCall := *call
 	parseCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("JsonValue"), types.FromName("JsonError")}}
-	source := "new TextDecoder().decode(" + request + ".body)"
-	parsed := tsJSONParse(&parseCall, source, false)
+	parsed := tsJSONParse(&parseCall, "source", false)
 	builder := &tsJSONCodecBuilder{}
 	decoder := builder.decoder(call.Codec)
 	valueType := tsCodecType(call.Codec)
-	return "((): " + tsType(call.ExprType()) + " => { const codecError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Decode, message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parsed + "; if (parsed.kind === \"Err\") { return Result.Err<" + valueType + ", JsonError>(parsed.error); } try { return Result.Ok<" + valueType + ", JsonError>(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return Result.Err<" + valueType + ", JsonError>((error as any).error as JsonError); } throw error; } })()"
+	errorType := "__trb_web.RequestError"
+	errResult := func(value string) string {
+		return "Result.Err<" + valueType + ", " + errorType + ">(" + value + ")"
+	}
+	okResult := "Result.Ok<" + valueType + ", " + errorType + ">"
+	missing := "__trb_web.RequestError.MissingContentType"
+	duplicate := "__trb_web.RequestError.DuplicateContentType"
+	unsupported := "__trb_web.RequestError.UnsupportedContentType(contentTypes[0]!)"
+	invalidUTF8 := "__trb_web.RequestError.InvalidUtf8"
+	invalidJSON := func(value string) string { return "__trb_web.RequestError.InvalidJson(" + value + ")" }
+	return "(() => { const requestValue = " + request + "; const contentTypes = Object.entries(requestValue.headers).filter(([name]) => name.toLowerCase() === \"content-type\").flatMap(([, values]) => values); if (contentTypes.length === 0) return " + errResult(missing) + "; if (contentTypes.length !== 1) return " + errResult(duplicate) + "; const mediaType = contentTypes[0]!.split(\";\", 1)[0]!.trim().toLowerCase(); if (mediaType !== \"application/json\" && !(mediaType.startsWith(\"application/\") && mediaType.endsWith(\"+json\"))) return " + errResult(unsupported) + "; let source: string; try { source = new TextDecoder(\"utf-8\", { fatal: true }).decode(requestValue.body); } catch { return " + errResult(invalidUTF8) + "; } const codecError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Decode, message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parsed + "; if (parsed.kind === \"Err\") return " + errResult(invalidJSON("parsed.error")) + "; try { return " + okResult + "(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) return " + errResult(invalidJSON("(error as any).error as JsonError")) + "; throw error; } })()"
 }
 
 func (g *generator) tsWebJSON(call *ir.Call, arguments []string) string {

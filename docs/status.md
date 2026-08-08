@@ -42,7 +42,10 @@ request methods are uppercased and case-insensitive header names are merged
 under lowercase keys. Request paths are decoded exactly once as UTF-8 at the
 dispatcher boundary. Malformed escapes, encoded separators, backslashes, and
 dot segments receive a portable JSON 400 response. Repeated and trailing
-slashes remain distinct paths instead of being silently collapsed. Root and nested
+slashes remain distinct paths instead of being silently collapsed. Typed
+`request_json<T>` accepts `application/json` and `application/*+json`, rejects
+ambiguous content types and invalid UTF-8, and reports each failure as a
+`RequestError` without exposing backend parser behavior. Root and nested
 `_middleware.trb` files form the same outer-to-inner onion chain in every
 backend. A single middleware file can build an explicit `Array<Middleware>`
 and pass it to `compose`; the first item is the outermost layer, and `Next` can

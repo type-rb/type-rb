@@ -3499,7 +3499,7 @@ def main()
 		method: "POST",
 		path: "/todos/7",
 		query_string: "tag=type+rb&tag=go",
-		headers: {},
+		headers: { "content-type" => ["application/json"] },
 		body: "{\"title\":\"ship\"}".to_bytes(),
 	)
 	response := dispatch(request)
@@ -3590,6 +3590,126 @@ end
 		}
 		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship:type rb:go\"}\n405\nOPTIONS, POST\n{\"error\":\"method_not_allowed\"}\n413\n{\"error\":\"payload_too_large\"}\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web JSON output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunOfficialWebRequestErrorsAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web request error run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web request error run")
+				continue
+			}
+		}
+
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-request-error-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+
+		mainSource := `import { Request } from trb/web
+import { dispatch } from trb/web/testing
+import { decode } from trb/std/encoding/hex
+import { Result } from trb/std/result
+
+record RequestInput
+	headers: Hash<String, Array<String>>
+	body: Bytes
+end
+
+def print_response(input: RequestInput)
+	response := dispatch(Request.new(
+		method: "POST",
+		path: "/payload",
+		query_string: "",
+		headers: input.headers,
+		body: input.body,
+	))
+	puts(response.status)
+	puts(response.body.to_s())
+	return
+end
+
+def main()
+	valid_body := "{\"title\":\"ship\"}".to_bytes()
+	print_response(RequestInput.new(headers: {}, body: valid_body))
+	print_response(RequestInput.new(headers: { "Content-Type" => ["application/json"], "content-type" => ["application/json"] }, body: valid_body))
+	print_response(RequestInput.new(headers: { "content-type" => ["text/plain"] }, body: valid_body))
+	print_response(RequestInput.new(headers: { "content-type" => ["Application/JSON; Charset=UTF-8"] }, body: valid_body))
+	print_response(RequestInput.new(headers: { "content-type" => ["application/vnd.example+json"] }, body: valid_body))
+	case decode("FF")
+	when Result::Ok(invalid_utf8)
+		print_response(RequestInput.new(headers: { "content-type" => ["application/json"] }, body: invalid_utf8))
+	when Result::Err(_error)
+		return
+	end
+	print_response(RequestInput.new(headers: { "content-type" => ["application/json"] }, body: "{".to_bytes()))
+	return
+end
+`
+		routeSource := `import { Context, RequestError, Response, request_json, text } from trb/web
+import { Result } from trb/std/result
+
+record Payload
+	title: String
+end
+
+def post(context: Context): Response
+	case request_json<Payload>(context.request)
+	when Result::Ok(payload)
+		return text("ok:" + payload.title)
+	when Result::Err(error)
+		case error
+		when RequestError::MissingContentType
+			return text("missing_content_type", 400)
+		when RequestError::DuplicateContentType
+			return text("duplicate_content_type", 400)
+		when RequestError::UnsupportedContentType(value)
+			return text("unsupported_content_type:" + value, 400)
+		when RequestError::InvalidUtf8
+			return text("invalid_utf8", 400)
+		when RequestError::InvalidJson(_json_error)
+			return text("invalid_json", 400)
+		end
+	end
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "payload.trb"), []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "400\nmissing_content_type\n" +
+			"400\nduplicate_content_type\n" +
+			"400\nunsupported_content_type:text/plain\n" +
+			"200\nok:ship\n" +
+			"200\nok:ship\n" +
+			"400\ninvalid_utf8\n" +
+			"400\ninvalid_json\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web request error output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

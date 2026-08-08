@@ -121,7 +121,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.internal.json.encode":
 		return rubyJSONEncode(call, arguments[0])
 	case "trb.web.request_json":
-		return rubyJSONDecode(call, "("+arguments[0]+".body).dup.force_encoding(Encoding::UTF_8).scrub")
+		return rubyWebRequestJSON(call, arguments[0])
 	case "trb.web.json":
 		return rubyWebJSON(call, arguments)
 	case "trb.web.serve":
@@ -367,6 +367,11 @@ func rubyWebLogger(arguments []string) string {
 		options = "logger_options = " + arguments[2] + "; "
 	}
 	return "-> { require \"json\"; logger_context = " + arguments[0] + "; logger_next_handler = " + arguments[1] + "; " + options + "excluded = logger_options && logger_options.exclude_paths.include?(logger_context.request.path); if excluded; logger_next_handler.call(logger_context); else; started = Process.clock_gettime(Process::CLOCK_MONOTONIC); status = 500; begin; response = logger_next_handler.call(logger_context); status = response.status; response; ensure; level = status >= 500 ? \"error\" : \"info\"; entry = { timestamp: Time.now.utc.strftime(\"%Y-%m-%dT%H:%M:%S.%9NZ\"), level: level, event: \"http_request\", method: logger_context.request.method, path: logger_context.request.path, status: status, duration_ms: (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0 }; output = logger_options && logger_options.stderr ? $stderr : $stdout; output.puts(JSON.generate(entry)); end; end }.call"
+}
+
+func rubyWebRequestJSON(call *ir.Call, request string) string {
+	decoded := rubyJSONDecode(call, "source")
+	return "-> { request_value = " + request + "; content_types = request_value.headers.each_with_object([]) { |(name, values), result| result.concat(values) if name.downcase == \"content-type\" }; if content_types.empty?; Result::Err.new(RequestError::MissingContentType); elsif content_types.length != 1; Result::Err.new(RequestError::DuplicateContentType); else; media_type = content_types.first.split(\";\", 2).first.strip.downcase; if media_type != \"application/json\" && !(media_type.start_with?(\"application/\") && media_type.end_with?(\"+json\")); Result::Err.new(RequestError::UnsupportedContentType.new(content_types.first)); else; source = request_value.body.dup.force_encoding(Encoding::UTF_8); if !source.valid_encoding?; Result::Err.new(RequestError::InvalidUtf8); else; decoded = " + decoded + "; if decoded.is_a?(Result::Err); Result::Err.new(RequestError::InvalidJson.new(decoded.error)); else; decoded; end; end; end; end }.call"
 }
 
 func rubyWebJSON(call *ir.Call, arguments []string) string {
