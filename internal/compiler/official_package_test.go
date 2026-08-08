@@ -162,6 +162,36 @@ end
 	}
 }
 
+func TestOfficialCORSRejectsInvalidOriginOptions(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Options, PreflightMaxAge } from trb/web/middleware/cors
+
+def invalid(): Options
+	return Options.new(
+		allow_origins: [1],
+		allow_methods: ["GET"],
+		allow_headers: [],
+		expose_headers: [],
+		credentials: false,
+		max_age: PreflightMaxAge::Disabled,
+	)
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
+			if err == nil || !strings.Contains(err.Error(), "record field allow_origins has type Array<Integer>, expected Array<String>") {
+				t.Fatalf("unexpected diagnostic: %v", err)
+			}
+		})
+	}
+}
+
 func TestUserSourceCannotClaimOfficialPackageNamespace(t *testing.T) {
 	_, err := CompileProject([]SourceUnit{{
 		Filename:   "/project/trb/web/index.trb",

@@ -73,3 +73,16 @@ func TestBundledWebSecureHeadersMiddlewarePackage(t *testing.T) {
 		t.Fatal("secure headers package source is empty")
 	}
 }
+
+func TestBundledWebCORSMiddlewarePackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/web/middleware/cors")
+	if !ok {
+		t.Fatal("trb/web/middleware/cors is not registered")
+	}
+	if packageDefinition.Definition.ModulePath != "trb/web/middleware/cors/index" {
+		t.Fatalf("module = %q", packageDefinition.Definition.ModulePath)
+	}
+	if packageDefinition.Definition.Source == "" {
+		t.Fatal("CORS package source is empty")
+	}
+}

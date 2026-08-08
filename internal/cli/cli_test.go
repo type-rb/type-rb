@@ -3842,6 +3842,137 @@ end
 	}
 }
 
+func TestRunOfficialWebCORSAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web CORS run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web CORS run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-cors-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def main()
+	allowed := dispatch(Request.new(
+		method: "GET",
+		path: "/allowed",
+		query_string: "",
+		headers: {"origin" => ["https://app.example"]},
+		body: "".to_bytes(),
+	))
+	puts(allowed.headers["access-control-allow-origin"][0])
+	puts(allowed.headers["access-control-allow-credentials"][0])
+	puts(allowed.headers["access-control-expose-headers"][0])
+	puts(allowed.headers["vary"].join("|"))
+
+	disallowed := dispatch(Request.new(
+		method: "GET",
+		path: "/disallowed",
+		query_string: "",
+		headers: {"origin" => ["https://other.example"]},
+		body: "".to_bytes(),
+	))
+	puts(disallowed.headers.key?("access-control-allow-origin"))
+	puts(disallowed.headers["vary"].join("|"))
+
+	preflight := dispatch(Request.new(
+		method: "OPTIONS",
+		path: "/allowed",
+		query_string: "",
+		headers: {
+			"origin" => ["https://app.example"],
+			"access-control-request-method" => ["POST"],
+			"access-control-request-headers" => ["content-type, x-trace"],
+		},
+		body: "".to_bytes(),
+	))
+	puts(preflight.status)
+	puts(preflight.headers["access-control-allow-methods"][0])
+	puts(preflight.headers["access-control-allow-headers"][0])
+	puts(preflight.headers["access-control-max-age"][0])
+	puts(preflight.headers["vary"].join("|"))
+	puts(preflight.headers.key?("x-handler"))
+
+	wildcard := dispatch(Request.new(
+		method: "GET",
+		path: "/wildcard",
+		query_string: "",
+		headers: {"origin" => ["https://any.example"]},
+		body: "".to_bytes(),
+	))
+	puts(wildcard.headers["access-control-allow-origin"][0])
+	puts(wildcard.headers["vary"].join("|"))
+	return
+end
+`
+		middlewareSource := `import { Context, Next, Response } from trb/web
+import trb/web/middleware/cors
+import { Options, PreflightMaxAge } from trb/web/middleware/cors
+
+CORS_OPTIONS := Options.new(
+	allow_origins: ["https://app.example"],
+	allow_methods: ["GET", "POST", "OPTIONS"],
+	allow_headers: [],
+	expose_headers: ["x-trace-id"],
+	credentials: true,
+	max_age: PreflightMaxAge::Seconds(600),
+)
+
+def call(context: Context, next_handler: Next): Response
+	if context.request.path == "/wildcard"
+		return cors.call(context, next_handler)
+	end
+	return cors.call(context, next_handler, CORS_OPTIONS)
+end
+`
+		routeSource := `import { Context, Response, text, with_header } from trb/web
+
+def get(_context: Context): Response
+	return with_header(with_header(text("ok"), "Vary", "Accept"), "X-Handler", "route")
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "_middleware.trb"), []byte(middlewareSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"allowed.trb", "disallowed.trb", "wildcard.trb"} {
+			if err := os.WriteFile(filepath.Join(root, "src", "routes", name), []byte(routeSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "https://app.example\ntrue\nx-trace-id\nAccept|Origin\nfalse\nAccept|Origin\n204\nGET, POST, OPTIONS\ncontent-type, x-trace\n600\nOrigin|Access-Control-Request-Headers\nfalse\n*\nAccept\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web CORS output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunWithoutSourceRequiresMain(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

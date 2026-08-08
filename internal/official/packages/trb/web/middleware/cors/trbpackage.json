@@ -1,0 +1,7 @@
+{
+  "name": "trb/web/middleware/cors",
+  "version": "0.1.0",
+  "module": "trb/web/middleware/cors/index",
+  "source": "src/index.trb",
+  "nativeDependencies": {}
+}

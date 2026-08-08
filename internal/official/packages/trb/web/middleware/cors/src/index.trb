@@ -1,0 +1,132 @@
+import { Context, Next, Request, Response, add_header, empty, header_values, with_header } from trb/web
+
+enum PreflightMaxAge
+	Disabled
+	Seconds(value: Integer)
+end
+
+record Options
+	allow_origins: Array<String>
+	allow_methods: Array<String>
+	allow_headers: Array<String>
+	expose_headers: Array<String>
+	credentials: Boolean
+	max_age: PreflightMaxAge
+end
+
+def default_options(): Options
+	return Options.new(
+		allow_origins: ["*"],
+		allow_methods: ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH", "OPTIONS"],
+		allow_headers: [],
+		expose_headers: [],
+		credentials: false,
+		max_age: PreflightMaxAge::Disabled,
+	)
+end
+
+def call(context: Context, next_handler: Next, options: Options = default_options()): Response
+	request := context.request
+	origin := _request_origin(request)
+	if _preflight?(request)
+		return _preflight_response(request, origin, options)
+	end
+	response := next_handler.call(context)
+	return _apply_actual_response(response, origin, options)
+end
+
+def _request_origin(request: Request): String
+	values := header_values(request, "origin")
+	if values.size() != 1
+		return ""
+	end
+	return values[0]
+end
+
+def _preflight?(request: Request): Boolean
+	if request.method != "OPTIONS"
+		return false
+	end
+	return header_values(request, "access-control-request-method").size() == 1
+end
+
+def _preflight_response(request: Request, origin: String, options: Options): Response
+	mut response := empty()
+	if _varies_by_origin?(options)
+		response = add_header(response, "vary", "Origin")
+	end
+	allowed_origin := _allowed_origin(origin, options)
+	if allowed_origin == ""
+		return response
+	end
+	response = _apply_origin(response, allowed_origin, options)
+	if !options.allow_methods.empty?()
+		response = with_header(response, "access-control-allow-methods", options.allow_methods.join(", "))
+	end
+	if options.allow_headers.empty?()
+		requested_headers := header_values(request, "access-control-request-headers")
+		if !requested_headers.empty?()
+			response = with_header(response, "access-control-allow-headers", requested_headers.join(", "))
+			response = add_header(response, "vary", "Access-Control-Request-Headers")
+		end
+	else
+		response = with_header(response, "access-control-allow-headers", options.allow_headers.join(", "))
+	end
+	return _apply_max_age(response, options.max_age)
+end
+
+def _apply_actual_response(response: Response, origin: String, options: Options): Response
+	mut result := response
+	if _varies_by_origin?(options)
+		result = add_header(result, "vary", "Origin")
+	end
+	allowed_origin := _allowed_origin(origin, options)
+	if allowed_origin == ""
+		return result
+	end
+	result = _apply_origin(result, allowed_origin, options)
+	if !options.expose_headers.empty?()
+		result = with_header(result, "access-control-expose-headers", options.expose_headers.join(", "))
+	end
+	return result
+end
+
+def _allowed_origin(origin: String, options: Options): String
+	if origin == ""
+		return ""
+	end
+	if options.allow_origins.include?("*")
+		if options.credentials
+			return origin
+		end
+		return "*"
+	end
+	if options.allow_origins.include?(origin)
+		return origin
+	end
+	return ""
+end
+
+def _varies_by_origin?(options: Options): Boolean
+	return !options.allow_origins.include?("*") || options.credentials
+end
+
+def _apply_origin(response: Response, origin: String, options: Options): Response
+	mut result := with_header(response, "access-control-allow-origin", origin)
+	if options.credentials
+		result = with_header(result, "access-control-allow-credentials", "true")
+	end
+	return result
+end
+
+def _apply_max_age(response: Response, max_age: PreflightMaxAge): Response
+	case max_age
+	when PreflightMaxAge::Disabled
+		return response
+	when PreflightMaxAge::Seconds(value)
+		if value < 0
+			return response
+		end
+		return with_header(response, "access-control-max-age", value.to_s())
+	end
+end
