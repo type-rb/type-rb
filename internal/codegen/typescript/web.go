@@ -137,7 +137,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			g.line("const " + nextName + " = " + handlerName + ";")
 			g.line(handlerName + " = (middleware_context: TrbWebContext): TrbWebResponse => " + middleware.TargetHandler + "(middleware_context, new TrbWebNext(" + nextName + "));")
 		}
-		g.line("return " + handlerName + "(" + contextName + ");")
+		g.line("return trb_web_finalize_response(request, " + handlerName + "(" + contextName + "));")
 		g.indent--
 		g.line("}")
 	}
@@ -150,13 +150,14 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("} catch {")
 	g.indent++
-	g.line(`return trb_web_finalize_response(request, { status: 500, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"internal_server_error\"}") });`)
+	g.line(`return trb_web_finalize_response(request, trb_web_internal_server_error());`)
 	g.indent--
 	g.line("}")
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_finalize_response(request: TrbWebRequest, response: TrbWebResponse): TrbWebResponse {")
 	g.indent++
+	g.line("if (!trb_web_valid_response(response)) response = trb_web_internal_server_error();")
 	g.line(`if (request.method.toUpperCase() !== "HEAD") return response;`)
 	g.line("return { ...response, body: new Uint8Array() };")
 	g.indent--
@@ -165,9 +166,20 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 
 func (g *generator) webProtocolResponses() {
 	g.line("const TRB_WEB_MAX_BODY_BYTES = " + strconv.Itoa(webintegration.MaxBodyBytes) + ";")
+	g.line("function trb_web_internal_server_error(): TrbWebResponse {")
+	g.indent++
+	g.line(`return { status: 500, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"internal_server_error\"}") };`)
+	g.indent--
+	g.line("}")
 	g.line("function trb_web_payload_too_large(): TrbWebResponse {")
 	g.indent++
 	g.line(`return { status: 413, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"payload_too_large\"}") };`)
+	g.indent--
+	g.line("}")
+	g.line("function trb_web_valid_response(response: TrbWebResponse): boolean {")
+	g.indent++
+	g.line("if (!Number.isInteger(response.status) || response.status < 100 || response.status > 999) return false;")
+	g.line(`return Object.entries(response.headers).every(([name, values]) => /^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+$/.test(name) && values.every((value) => !value.includes("\r") && !value.includes("\n")));`)
 	g.indent--
 	g.line("}")
 }
