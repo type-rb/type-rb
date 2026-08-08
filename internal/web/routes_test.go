@@ -72,6 +72,29 @@ func TestDiscoverRejectsInvalidRouteFiles(t *testing.T) {
 	}
 }
 
+func TestDiscoverMiddlewaresOrdersRootBeforeNestedScopes(t *testing.T) {
+	root := t.TempDir()
+	sources := []Source{
+		parsedSource(t, filepath.Join(root, "routes", "todos", "_middleware.trb"), "routes/todos/_middleware", "def call(context: Context, next: Next): Response\n\treturn next.call(context)\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "_middleware.trb"), "routes/_middleware", "def call(context: Context, next: Next): Response\n\treturn next.call(context)\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "admin", "_middleware.trb"), "routes/admin/_middleware", "def call(context: Context, next: Next): Response\n\treturn next.call(context)\nend\n"),
+	}
+
+	middlewares := discoverMiddlewares(sources, root)
+	if len(middlewares) != 3 {
+		t.Fatalf("got %d middlewares, want 3", len(middlewares))
+	}
+	if middlewares[0].Directory != "" || middlewares[0].TargetHandler != "trb_web_middleware_0" {
+		t.Fatalf("unexpected root middleware: %#v", middlewares[0])
+	}
+	if middlewares[1].Directory != "admin" || middlewares[2].Directory != "todos" {
+		t.Fatalf("unexpected nested middleware order: %#v", middlewares)
+	}
+	if !appliesToRoute("", "todos/items") || !appliesToRoute("todos", "todos/items") || appliesToRoute("admin", "todos/items") {
+		t.Fatal("middleware scopes do not follow the route directory hierarchy")
+	}
+}
+
 func parsedSource(t *testing.T, filename, modulePath, source string) Source {
 	t.Helper()
 	program, diagnostics := parser.Parse([]byte(source))
