@@ -266,6 +266,9 @@ func needsSpace(beforePrevious *token.Token, previous, current token.Token, next
 	if previous.Lexeme == "!" || previous.Lexeme == "~" {
 		return false
 	}
+	if current.Lexeme == "?" {
+		return false
+	}
 	if current.Lexeme == ":" {
 		return current.Span.Start.Offset > previous.Span.End.Offset
 	}
