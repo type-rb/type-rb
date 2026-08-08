@@ -40,8 +40,10 @@ start a generated Go, Ruby, or TypeScript HTTP server with `serve()`. Unhandled
 handler failures become a portable JSON 500 response. Root and nested
 `_middleware.trb` files form the same outer-to-inner onion chain in every
 backend. The first packaged middleware emits JSONL access logs and supports
-typed output and path-exclusion options. Production lifecycle controls and
-additional middleware are still under development. Routing distinguishes
+typed output and path-exclusion options. A portable secure-headers middleware
+adds a conservative browser-security preset and accepts an explicit typed
+header map. Production lifecycle controls and additional middleware are still
+under development. Routing distinguishes
 missing paths from unsupported methods and returns a portable JSON 405 response
 with an `Allow` header. Request bodies are limited to 1 MiB before dispatch and
 oversized requests receive the same JSON 413 response in every backend. Query

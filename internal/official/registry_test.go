@@ -60,3 +60,16 @@ func TestBundledWebLoggerMiddlewarePackage(t *testing.T) {
 		t.Fatalf("unexpected logger call contract: %#v", call)
 	}
 }
+
+func TestBundledWebSecureHeadersMiddlewarePackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/web/middleware/secure_headers")
+	if !ok {
+		t.Fatal("trb/web/middleware/secure_headers is not registered")
+	}
+	if packageDefinition.Definition.ModulePath != "trb/web/middleware/secure_headers/index" {
+		t.Fatalf("module = %q", packageDefinition.Definition.ModulePath)
+	}
+	if packageDefinition.Definition.Source == "" {
+		t.Fatal("secure headers package source is empty")
+	}
+}

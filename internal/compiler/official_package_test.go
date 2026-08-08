@@ -139,6 +139,29 @@ end
 	}
 }
 
+func TestOfficialSecureHeadersRejectInvalidHeaderValues(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Options } from trb/web/middleware/secure_headers
+
+def invalid(): Options
+	return Options.new(headers: {"x-example" => 1})
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
+			if err == nil || !strings.Contains(err.Error(), "record field headers has type Hash<String, Integer>, expected Hash<String, String>") {
+				t.Fatalf("unexpected diagnostic: %v", err)
+			}
+		})
+	}
+}
+
 func TestUserSourceCannotClaimOfficialPackageNamespace(t *testing.T) {
 	_, err := CompileProject([]SourceUnit{{
 		Filename:   "/project/trb/web/index.trb",
