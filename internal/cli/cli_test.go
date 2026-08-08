@@ -388,6 +388,45 @@ func TestReplEvaluatesPortableHexAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableBase64AcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-base64-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "import trb/std/encoding/base64\nbase64.encode(\"A😀\".to_bytes())\nbase64.url_encode(\"???\".to_bytes())\nbase64.decode(\"QfCfmIA=\")\nbase64.url_decode(\"Pz8_\")\nbase64.decode(\"AAA\")\nbase64.decode(\"AA=A\")\nbase64.decode(\"AA$=\")\nbase64.decode(\"AB==\")\nbase64.url_decode(\"A\")\nbase64.url_decode(\"AA==\")\nbase64.url_decode(\"AA$\")\nbase64.url_decode(\"AB\")\n:quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "\"QfCfmIA=\" : String\n" +
+			"\"Pz8_\" : String\n" +
+			"Result::Ok(value: Bytes[65, 240, 159, 152, 128]) : Result<Bytes, Base64DecodeError>\n" +
+			"Result::Ok(value: Bytes[63, 63, 63]) : Result<Bytes, Base64DecodeError>\n" +
+			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidLength, input: \"AAA\", index: 3, message: \"base64 input length must be a multiple of 4\")) : Result<Bytes, Base64DecodeError>\n" +
+			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidPadding, input: \"AA=A\", index: 3, message: \"invalid base64 padding\")) : Result<Bytes, Base64DecodeError>\n" +
+			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidCharacter, input: \"AA$=\", index: 2, message: \"invalid base64 character\")) : Result<Bytes, Base64DecodeError>\n" +
+			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::NonCanonical, input: \"AB==\", index: 1, message: \"non-canonical base64 encoding\")) : Result<Bytes, Base64DecodeError>\n" +
+			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidLength, input: \"A\", index: 1, message: \"base64url input has invalid length\")) : Result<Bytes, Base64DecodeError>\n" +
+			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidPadding, input: \"AA==\", index: 2, message: \"base64url input must not contain padding\")) : Result<Bytes, Base64DecodeError>\n" +
+			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidCharacter, input: \"AA$\", index: 2, message: \"invalid base64url character\")) : Result<Bytes, Base64DecodeError>\n" +
+			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::NonCanonical, input: \"AB\", index: 1, message: \"non-canonical base64url encoding\")) : Result<Bytes, Base64DecodeError>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s base64 REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -1885,6 +1924,96 @@ end
 		}
 		if want := "41f09f9880\nA😀\ninvalid hexadecimal character:1\nhex input has odd length:3\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s portable hex output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunPortableBase64AcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby base64 run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript base64 run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/portable-base64-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { Result } from trb/std/result
+import { decode, encode, url_decode, url_encode } from trb/std/encoding/base64
+
+def decoded_text(input: String): String
+	case decode(input)
+	when Result::Ok(value)
+		return value.to_s()
+	when Result::Err(error)
+		return error.message + ":" + error.index.to_s()
+	end
+end
+
+def url_decoded_text(input: String): String
+	case url_decode(input)
+	when Result::Ok(value)
+		return value.to_s()
+	when Result::Err(error)
+		return error.message + ":" + error.index.to_s()
+	end
+end
+
+def main()
+	puts(encode("A😀".to_bytes()))
+	puts(url_encode("???".to_bytes()))
+	puts(decoded_text("QfCfmIA="))
+	puts(url_decoded_text("Pz8_"))
+	puts(decoded_text("AAA"))
+	puts(decoded_text("AA=A"))
+	puts(decoded_text("AA$="))
+	puts(decoded_text("AB=="))
+	puts(url_decoded_text("A"))
+	puts(url_decoded_text("AA=="))
+	puts(url_decoded_text("AA$"))
+	puts(url_decoded_text("AB"))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "QfCfmIA=\nPz8_\nA😀\n???\n" +
+			"base64 input length must be a multiple of 4:3\n" +
+			"invalid base64 padding:3\n" +
+			"invalid base64 character:2\n" +
+			"non-canonical base64 encoding:1\n" +
+			"base64url input has invalid length:1\n" +
+			"base64url input must not contain padding:2\n" +
+			"invalid base64url character:2\n" +
+			"non-canonical base64url encoding:1\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s portable base64 output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

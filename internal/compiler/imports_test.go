@@ -740,6 +740,100 @@ func TestPortableHexDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableBase64PackageLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Result } from trb/std/result
+import { Base64DecodeError, decode, encode, url_decode, url_encode } from trb/std/encoding/base64
+
+def encoded(value: Bytes): String
+	return encode(value) + url_encode(value)
+end
+
+def decoded(value: String): Result<Bytes, Base64DecodeError>
+	return decode(value)
+end
+
+def url_decoded(value: String): Result<Bytes, Base64DecodeError>
+	return url_decode(value)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`stdbase64.StdEncoding.EncodeToString(value)`,
+			`stdbase64.RawURLEncoding.EncodeToString(value)`,
+			`stdbase64.StdEncoding.Strict().DecodeString(input)`,
+			`stdbase64.RawURLEncoding.Strict().DecodeString(input)`,
+			`Base64DecodeErrorKindInvalidlength`,
+			`Base64DecodeErrorKindNoncanonical`,
+		},
+		"ruby": {
+			`[value].pack("m0")`,
+			`.tr("+/", "-_").delete("=")`,
+			`input.unpack1("m0").b`,
+			`Base64DecodeErrorKind::InvalidLength`,
+			`Base64DecodeErrorKind::NonCanonical`,
+		},
+		"typescript": {
+			`return btoa(binary)`,
+			`const binary = atob(__trbInput)`,
+			`const padded = __trbInput.replace`,
+			`kind: Base64DecodeErrorKind.InvalidLength`,
+			`kind: Base64DecodeErrorKind.NonCanonical`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/portable-base64", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable base64: %v", mode, err)
+		}
+		var consumer, resultRuntime, base64Runtime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/result/index":
+				resultRuntime = artifact
+			case "trb/std/encoding/base64/index":
+				base64Runtime = artifact
+			}
+		}
+		if consumer == nil || resultRuntime == nil || base64Runtime == nil {
+			t.Fatalf("%s did not compile the base64 consumer and runtimes: %#v", mode, artifacts)
+		}
+		for _, want := range wants[mode] {
+			if output := string(base64Runtime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s base64 output is missing %q:\n%s", mode, want, output)
+			}
+		}
+		errorWants := map[string][]string{
+			"go":         {"type Base64DecodeErrorKind int", "type Base64DecodeError struct"},
+			"ruby":       {"Base64DecodeErrorKind = Data.define(:name)", "Base64DecodeError = Data.define(:kind, :input, :index, :message)"},
+			"typescript": {"export type Base64DecodeErrorKind", "export interface Base64DecodeError"},
+		}[mode]
+		for _, want := range errorWants {
+			if output := string(base64Runtime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s base64 error runtime is missing %q:\n%s", mode, want, output)
+			}
+		}
+		if mode == "typescript" && strings.Contains(string(base64Runtime.Output), `from "./index.ts"`) {
+			t.Fatalf("generated TypeScript base64 runtime imports itself:\n%s", base64Runtime.Output)
+		}
+	}
+}
+
+func TestPortableBase64DiagnosticsAreModeIndependent(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := Compile("bad.trb", []byte("import { encode } from trb/std/encoding/base64\ndef bad(): String\n\treturn encode(\"QQ==\")\nend\n"), mode)
+		if err == nil || !strings.Contains(err.Error(), "argument 1 to encode() has type String, expected Bytes") {
+			t.Fatalf("%s: expected portable base64 argument diagnostic, got %v", mode, err)
+		}
+	}
+}
+
 func TestPortableStringBuilderLowersAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/string_builder
 

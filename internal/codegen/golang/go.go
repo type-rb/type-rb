@@ -1283,6 +1283,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := g.goType(types.FromName("HexDecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Index: " + index + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
+	base64DecodeError := func(kind, input, index, message string) string {
+		alias := g.typeAliases["Base64DecodeErrorKind"]
+		kindName := goConstantIdentifier("Base64DecodeErrorKind", kind)
+		if alias != "" {
+			kindName = alias + "." + kindName
+		}
+		value := g.goType(types.FromName("Base64DecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Index: " + index + ", Message: " + strconv.Quote(message) + "}"
+		return resultError(value)
+	}
 	indexLookupError := func(index, size, message string) string {
 		value := g.goType(types.FromName("IndexLookupError")) + "{Index: " + index + ", Size: " + size + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
@@ -1474,6 +1483,22 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		resultType, _, _ := filesystemResultType()
 		invalid := "character < '0' || character > '9' && character < 'A' || character > 'F' && character < 'a' || character > 'f'"
 		return "func() " + resultType + " { input := " + arguments[0] + "; length := 0; for _, character := range input { if " + invalid + " { return " + hexDecodeError("InvalidCharacter", "input", "length", "invalid hexadecimal character") + " }; length++ }; if length%2 != 0 { return " + hexDecodeError("OddLength", "input", "length", "hex input has odd length") + " }; value, _ := stdhex.DecodeString(input); return " + filesystemOK("value") + " }()"
+	case "trb.std.encoding.base64.encode":
+		g.requireImport("encoding/base64", "stdbase64")
+		return "stdbase64.StdEncoding.EncodeToString(" + arguments[0] + ")"
+	case "trb.std.encoding.base64.url_encode":
+		g.requireImport("encoding/base64", "stdbase64")
+		return "stdbase64.RawURLEncoding.EncodeToString(" + arguments[0] + ")"
+	case "trb.std.encoding.base64.decode":
+		g.requireImport("encoding/base64", "stdbase64")
+		resultType, _, _ := filesystemResultType()
+		invalid := "(character < 'A' || character > 'Z') && (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '+' && character != '/'"
+		return "func() " + resultType + " { input := " + arguments[0] + "; characters := []rune(input); if len(characters)%4 != 0 { return " + base64DecodeError("InvalidLength", "input", "len(characters)", "base64 input length must be a multiple of 4") + " }; padding := 0; for index, character := range characters { if character == '=' { padding++; if index < len(characters)-2 || padding > 2 { return " + base64DecodeError("InvalidPadding", "input", "index", "invalid base64 padding") + " }; continue }; if padding > 0 { return " + base64DecodeError("InvalidPadding", "input", "index", "invalid base64 padding") + " }; if " + invalid + " { return " + base64DecodeError("InvalidCharacter", "input", "index", "invalid base64 character") + " } }; value, err := stdbase64.StdEncoding.Strict().DecodeString(input); if err != nil { return " + base64DecodeError("NonCanonical", "input", "len(characters)-padding-1", "non-canonical base64 encoding") + " }; return " + filesystemOK("value") + " }()"
+	case "trb.std.encoding.base64.url_decode":
+		g.requireImport("encoding/base64", "stdbase64")
+		resultType, _, _ := filesystemResultType()
+		invalid := "(character < 'A' || character > 'Z') && (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' && character != '_'"
+		return "func() " + resultType + " { input := " + arguments[0] + "; characters := []rune(input); if len(characters)%4 == 1 { return " + base64DecodeError("InvalidLength", "input", "len(characters)", "base64url input has invalid length") + " }; for index, character := range characters { if character == '=' { return " + base64DecodeError("InvalidPadding", "input", "index", "base64url input must not contain padding") + " }; if " + invalid + " { return " + base64DecodeError("InvalidCharacter", "input", "index", "invalid base64url character") + " } }; value, err := stdbase64.RawURLEncoding.Strict().DecodeString(input); if err != nil { return " + base64DecodeError("NonCanonical", "input", "len(characters)-1", "non-canonical base64url encoding") + " }; return " + filesystemOK("value") + " }()"
 	case "trb.std.string_builder.new":
 		g.requireImport("strings", "")
 		return "&strings.Builder{}"
