@@ -77,6 +77,9 @@ than detailed syntax.
 
 ## 6. Application-level proof
 
+- Build the official portable `trb/web` package around compile-time file-based
+  routes, typed JSON requests and responses, middleware, and consistent HTTP
+  behavior across Go, Ruby, and TypeScript runtimes.
 - Extend the generated JSON codecs and client/server contracts from shared
   records with versioned wire fields, validation policy, schema export, and
   compatibility checking.

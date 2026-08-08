@@ -19,7 +19,16 @@ type Program struct {
 	ModulePath string
 	GoModule   string
 	RubyLoader string
+	WebRoutes  []WebRoute
 	Statements []Statement
+}
+
+type WebRoute struct {
+	Method         string
+	Path           string
+	ModulePath     string
+	Handler        string
+	PathParameters []string
 }
 
 type Statement interface{ irStatement() }
