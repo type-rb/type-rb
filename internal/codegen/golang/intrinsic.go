@@ -218,6 +218,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "trbWebServe(" + port + ")"
 	case "trb.web.testing.dispatch":
 		return "trbWebDispatch(" + arguments[0] + ")"
+	case "trb.web.middleware.logger.call":
+		return g.webLogger(call, arguments)
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"
@@ -550,6 +552,19 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) webLogger(call *ir.Call, arguments []string) string {
+	g.requireImport("encoding/json", "json")
+	g.requireImport("fmt", "")
+	g.requireImport("os", "")
+	g.requireImport("time", "")
+	options := ""
+	if len(arguments) > 2 {
+		g.requireImport("slices", "")
+		options = "options := " + arguments[2] + "; excluded = slices.Contains(options.ExcludePaths, loggerContext.Request.Path); useStderr = options.Stderr; "
+	}
+	return "func() (response " + g.goType(call.ExprType()) + ") { loggerContext := " + arguments[0] + "; loggerNextHandler := " + arguments[1] + "; excluded := false; useStderr := false; " + options + "if excluded { return loggerNextHandler.Call(loggerContext) }; started := time.Now(); status := 500; defer func() { level := \"info\"; if status >= 500 { level = \"error\" }; entry := map[string]any{\"timestamp\": time.Now().UTC().Format(time.RFC3339Nano), \"level\": level, \"event\": \"http_request\", \"method\": loggerContext.Request.Method, \"path\": loggerContext.Request.Path, \"status\": status, \"duration_ms\": float64(time.Since(started).Nanoseconds()) / 1e6}; encoded, _ := json.Marshal(entry); output := os.Stdout; if useStderr { output = os.Stderr }; fmt.Fprintln(output, string(encoded)) }(); response = loggerNextHandler.Call(loggerContext); status = response.Status; return response }()"
 }
 
 func (g *generator) webRequestJSON(call *ir.Call, request string) string {

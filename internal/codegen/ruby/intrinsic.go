@@ -129,6 +129,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "trb_web_serve(" + port + ")"
 	case "trb.web.testing.dispatch":
 		return "trb_web_dispatch(" + arguments[0] + ")"
+	case "trb.web.middleware.logger.call":
+		return rubyWebLogger(arguments)
 	case "trb.std.strings.length":
 		return arguments[0] + ".each_codepoint.count"
 	case "trb.std.strings.empty":
@@ -354,6 +356,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func rubyWebLogger(arguments []string) string {
+	options := "options = nil; "
+	if len(arguments) > 2 {
+		options = "options = " + arguments[2] + "; "
+	}
+	return "-> { require \"json\"; logger_context = " + arguments[0] + "; logger_next_handler = " + arguments[1] + "; " + options + "excluded = options && options.exclude_paths.include?(logger_context.request.path); if excluded; logger_next_handler.call(logger_context); else; started = Process.clock_gettime(Process::CLOCK_MONOTONIC); status = 500; begin; response = logger_next_handler.call(logger_context); status = response.status; response; ensure; level = status >= 500 ? \"error\" : \"info\"; entry = { timestamp: Time.now.utc.strftime(\"%Y-%m-%dT%H:%M:%S.%9NZ\"), level: level, event: \"http_request\", method: logger_context.request.method, path: logger_context.request.path, status: status, duration_ms: (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0 }; output = options && options.stderr ? $stderr : $stdout; output.puts(JSON.generate(entry)); end; end }.call"
 }
 
 func rubyWebJSON(call *ir.Call, arguments []string) string {

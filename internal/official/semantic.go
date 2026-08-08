@@ -15,8 +15,25 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 		return webSymbols()
 	case "trb.web.testing":
 		return webTestingSymbols()
+	case "trb.web.middleware.logger":
+		return webLoggerSymbols()
 	default:
 		panic(fmt.Sprintf("unknown official package semantic provider %q", provider))
+	}
+}
+
+func webLoggerSymbols() map[string]stdlib.Symbol {
+	return map[string]stdlib.Symbol{
+		"call": {
+			Name:      "call",
+			Intrinsic: "trb.web.middleware.logger.call",
+			Parameters: []stdlib.Parameter{
+				{Name: "context", Type: types.FromName("Context")},
+				{Name: "next_handler", Type: types.FromName("Next")},
+				{Name: "options", Type: types.FromName("Options"), Optional: true},
+			},
+			Return: types.FromName("Response"),
+		},
 	}
 }
 
