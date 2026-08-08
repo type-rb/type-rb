@@ -200,6 +200,18 @@ Keys, messages, and tags are `Bytes`. `equal()` compares equal-length tags
 without content-dependent branching and returns `false` when their lengths
 differ. Use it instead of ordinary collection comparison when verifying a tag.
 
+Use `trb/std/secure_compare` for the same comparison contract outside HMAC:
+
+```trb
+import trb/std/secure_compare
+
+matches := secure_compare.equal(actual_digest, expected_digest)
+```
+
+`equal()` accepts two `Bytes` values. For equal-length values it examines every
+byte without content-dependent branching. A length mismatch returns `false`;
+the input lengths are not treated as secret.
+
 ## Randomness
 
 `trb/std/random` provides non-cryptographic random values for sampling,
@@ -484,6 +496,7 @@ The current portable standard library includes:
 - `trb/std/encoding/base64`
 - `trb/std/hash`
 - `trb/std/hmac`
+- `trb/std/secure_compare`
 - `trb/std/string_builder`
 - `trb/std/unicode`
 - `trb/std/arrays`

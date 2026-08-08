@@ -23,7 +23,7 @@ current semantics.
 The compiler-owned portable library covers scalar and collection foundations,
 `Result`, bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
 SHA-256/SHA-512 hashing and HMAC, non-cryptographic and secure randomness,
-Unicode text, logical paths,
+constant-time byte comparison, Unicode text, logical paths,
 URL component and query handling, filesystem and process access, and JSON/JSONC. Its
 public contracts are listed in the
 [standard-library reference](standard-library.md).

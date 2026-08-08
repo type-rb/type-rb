@@ -371,7 +371,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("crypto/hmac", "stdhmac")
 		g.requireImport("crypto/sha512", "stdsha512")
 		return "func(key []byte, message []byte) []byte { digest := stdhmac.New(stdsha512.New, key); _, _ = digest.Write(message); return digest.Sum(nil) }(" + arguments[0] + ", " + arguments[1] + ")"
-	case "trb.std.hmac.equal":
+	case "trb.std.hmac.equal", "trb.std.secure_compare.equal":
 		g.requireImport("crypto/hmac", "stdhmac")
 		return "stdhmac.Equal(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.random.float":
