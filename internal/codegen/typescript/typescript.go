@@ -590,7 +590,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if n.Name == "self" {
 			return "this"
 		}
-		if g.inClass > 0 && g.methods[n.Name] {
+		if !n.Lexical && g.inClass > 0 && g.methods[n.Name] {
 			return "this." + tsMethodName(n.Name) + ".bind(this)"
 		}
 		if n.Owner != "" {
@@ -712,7 +712,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "new " + g.expr(member.Receiver) + "(" + args + ")"
 		}
 		if identifier, ok := n.Callee.(*ir.Identifier); ok {
-			if g.inClass > 0 && g.methods[identifier.Name] {
+			if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] {
 				return "this." + tsMethodName(identifier.Name) + "(" + args + ")"
 			}
 			if g.topFunctions[identifier.Name] {

@@ -691,8 +691,8 @@ end
 class Person implements Named
 	@value: String
 
-	def initialize(value: String)
-		@value = value
+	def initialize(name: String)
+		@value = name
 		return
 	end
 
@@ -720,6 +720,9 @@ end
 		}
 		if len(artifact.Output) == 0 {
 			t.Fatalf("%s emitted no output", mode)
+		}
+		if mode == "typescript" && strings.Contains(string(artifact.Output), "this.name.bind(this)") {
+			t.Fatalf("lexical parameter name was lowered as a method:\n%s", artifact.Output)
 		}
 	}
 }

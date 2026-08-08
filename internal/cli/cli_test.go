@@ -1874,8 +1874,8 @@ end
 class Person implements Named
 	@value: String
 
-	def initialize(value: String)
-		@value = value
+	def initialize(name: String)
+		@value = name
 		return
 	end
 

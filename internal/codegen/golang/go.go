@@ -988,7 +988,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 		}
 		if identifier, ok := n.Callee.(*ir.Identifier); ok {
-			if g.receiver != "" && g.methods[identifier.Name] {
+			if !identifier.Lexical && g.receiver != "" && g.methods[identifier.Name] {
 				return g.receiver + "." + goMethodName(identifier.Name) + "(" + args + ")"
 			}
 			if g.topMethods[identifier.Name] {
