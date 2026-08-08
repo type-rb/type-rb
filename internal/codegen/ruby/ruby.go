@@ -15,15 +15,19 @@ type generator struct {
 	loader       string
 	modulePath   string
 	topFunctions map[string]bool
+	topTargets   map[string]string
 	nativeSyntax bool
 	temporary    int
 }
 
 func Generate(program *ir.Program) string {
-	g := &generator{loader: program.RubyLoader, modulePath: program.ModulePath, topFunctions: map[string]bool{}}
+	g := &generator{loader: program.RubyLoader, modulePath: program.ModulePath, topFunctions: map[string]bool{}, topTargets: map[string]string{}}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
+			if method.TargetName != "" {
+				g.topTargets[method.Name] = method.TargetName
+			}
 		}
 		if imported, ok := statement.(*ir.Import); ok && (imported.Path == "trb/platform/ruby/native" || imported.Path == "trb/platform/ruby/rails") {
 			g.nativeSyntax = true
@@ -350,6 +354,9 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 
 func (g *generator) method(method *ir.Method, fields []*ir.Field) {
 	name := method.Name
+	if !method.Class && method.TargetName != "" {
+		name = method.TargetName
+	}
 	if method.Class {
 		name = "self." + name
 	}
@@ -397,6 +404,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Case:
 		return g.caseExpression(n)
 	case *ir.Identifier:
+		if !n.Lexical && g.topTargets[n.Name] != "" {
+			return g.topTargets[n.Name]
+		}
 		return n.Name
 	case *ir.Literal:
 		return n.Raw

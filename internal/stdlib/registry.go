@@ -31,16 +31,17 @@ type Symbol struct {
 	Intrinsic string
 	// RuntimeIndependent marks an intrinsic that is fully lowered by every
 	// backend even when its public package also provides a source wrapper.
-	RuntimeIndependent bool
-	RequiredSymbols    []string
-	TypeParameters     []string
-	EqualityTypes      []types.Type
-	Receiver           types.Type
-	ReceiverMutable    bool
-	Parameters         []Parameter
-	Return             types.Type
-	Variadic           bool
-	Inference          string
+	RuntimeIndependent  bool
+	RequiredSymbols     []string
+	TypeParameters      []string
+	EqualityTypes       []types.Type
+	Receiver            types.Type
+	ReceiverMutable     bool
+	Parameters          []Parameter
+	Return              types.Type
+	Variadic            bool
+	Inference           string
+	RuntimeDependencies []types.Type
 }
 
 type RuntimeExport struct {
@@ -270,8 +271,13 @@ end
 	"trb/std/json": {
 		Path:       "trb/std/json",
 		ModulePath: "trb/std/json/index",
-		Source:     jsonSource(),
-		Kind:       Portable,
+		RuntimeExports: []RuntimeExport{
+			{Name: "JsonErrorKind", Kind: "enum"},
+			{Name: "JsonError", Kind: "record"},
+			{Name: "JsonValue", Kind: "enum"},
+		},
+		Source: jsonSource(),
+		Kind:   Portable,
 		Symbols: map[string]Symbol{
 			"parse": jsonParse("parse"),
 			"decode": {

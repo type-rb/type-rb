@@ -18,16 +18,20 @@ type generator struct {
 	methods       map[string]bool
 	modulePath    string
 	topFunctions  map[string]bool
+	topTargets    map[string]string
 	records       map[string]bool
 	typeAliases   map[string]string
 	temporary     int
 }
 
 func Generate(program *ir.Program) string {
-	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, records: map[string]bool{}, typeAliases: map[string]string{}}
+	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
+			if method.TargetName != "" {
+				g.topTargets[method.Name] = method.TargetName
+			}
 		}
 		if record, ok := statement.(*ir.Record); ok {
 			g.records[record.Name] = true
@@ -531,7 +535,11 @@ func (g *generator) method(method *ir.Method) {
 }
 
 func (g *generator) function(method *ir.Method) {
-	name := tsCallableName(method.Name)
+	name := method.Name
+	if method.TargetName != "" {
+		name = method.TargetName
+	}
+	name = tsCallableName(name)
 	prefix := "export function "
 	if name == "main" {
 		prefix = "function "
@@ -701,7 +709,11 @@ func (g *generator) expr(expression ir.Expression) string {
 				return "this." + tsMethodName(identifier.Name) + "(" + args + ")"
 			}
 			if g.topFunctions[identifier.Name] {
-				return tsCallableName(identifier.Name) + "(" + args + ")"
+				name := identifier.Name
+				if target := g.topTargets[identifier.Name]; target != "" {
+					name = target
+				}
+				return tsCallableName(name) + "(" + args + ")"
 			}
 		}
 		return g.expr(n.Callee) + "(" + args + ")"
@@ -726,7 +738,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		name := g.expr(n.Receiver)
 		if identifier, ok := n.Receiver.(*ir.Identifier); ok && g.topFunctions[identifier.Name] {
-			name = tsCallableName(identifier.Name)
+			name = identifier.Name
+			if target := g.topTargets[identifier.Name]; target != "" {
+				name = target
+			}
+			name = tsCallableName(name)
 		}
 		return name + "<" + strings.Join(arguments, ", ") + ">"
 	case *ir.Index:
@@ -1001,7 +1017,7 @@ func (b *tsJSONCodecBuilder) name(prefix string) string {
 func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 	name := b.name("Decode")
 	valueType := tsCodecType(schema)
-	jsonValue := b.jsonAlias + ".JsonValue"
+	jsonValue := tsJSONQualified(b.jsonAlias, "JsonValue")
 	if schema.Type.Nullable {
 		nonnull := *schema
 		nonnull.Type.Nullable = false
@@ -1054,40 +1070,47 @@ func tsJSONPointerEscape(value string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(value, "~", "~0"), "/", "~1")
 }
 
+func tsJSONQualified(alias, name string) string {
+	if alias == "" {
+		return name
+	}
+	return alias + "." + name
+}
+
 func (b *tsJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 	name := b.name("Encode")
 	valueType := tsCodecType(schema)
-	jsonValue := b.jsonAlias + ".JsonValue"
+	jsonValue := tsJSONQualified(b.jsonAlias, "JsonValue")
 	if schema.Type.Nullable {
 		nonnull := *schema
 		nonnull.Type.Nullable = false
 		child := b.encoder(&nonnull)
-		b.source.WriteString("const " + name + " = (value: " + valueType + "): " + jsonValue + " => value === null ? " + b.jsonAlias + ".JsonValue.Null : " + child + "(value); ")
+		b.source.WriteString("const " + name + " = (value: " + valueType + "): " + jsonValue + " => value === null ? " + tsJSONQualified(b.jsonAlias, "JsonValue.Null") + " : " + child + "(value); ")
 		return name
 	}
 	body := ""
 	switch schema.Kind {
 	case "boolean":
-		body = "return " + b.jsonAlias + ".JsonValue.Boolean(value);"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Boolean") + "(value);"
 	case "integer":
-		body = "return " + b.jsonAlias + ".JsonValue.Integer(value);"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Integer") + "(value);"
 	case "float":
-		body = "return " + b.jsonAlias + ".JsonValue.Float(value);"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Float") + "(value);"
 	case "string":
-		body = "return " + b.jsonAlias + ".JsonValue.String(value);"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.String") + "(value);"
 	case "array":
 		child := b.encoder(schema.Element)
-		body = "return " + b.jsonAlias + ".JsonValue.Array(value.map((item) => " + child + "(item)));"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Array") + "(value.map((item) => " + child + "(item)));"
 	case "hash":
 		child := b.encoder(schema.Element)
-		body = "const fields: Record<string, " + jsonValue + "> = {}; for (const [key, item] of Object.entries(value)) { fields[key] = " + child + "(item); } return " + b.jsonAlias + ".JsonValue.Object(fields);"
+		body = "const fields: Record<string, " + jsonValue + "> = {}; for (const [key, item] of Object.entries(value)) { fields[key] = " + child + "(item); } return " + tsJSONQualified(b.jsonAlias, "JsonValue.Object") + "(fields);"
 	case "record":
 		parts := make([]string, 0, len(schema.Fields))
 		for _, field := range schema.Fields {
 			child := b.encoder(field.Schema)
 			parts = append(parts, strconv.Quote(field.WireName)+": "+child+"(value."+field.Name+")")
 		}
-		body = "return " + b.jsonAlias + ".JsonValue.Object({ " + strings.Join(parts, ", ") + " });"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Object") + "({ " + strings.Join(parts, ", ") + " });"
 	}
 	b.source.WriteString("const " + name + " = (value: " + valueType + "): " + jsonValue + " => { " + body + " }; ")
 	return name

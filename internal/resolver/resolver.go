@@ -148,6 +148,7 @@ type Module struct {
 	Program       *ast.Program
 	Exports       map[string]Export
 	CompilerOwned bool
+	Official      bool
 }
 
 type Catalog struct {
@@ -235,7 +236,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		exported := typesByName[name]
 		owner := typeOwners[name]
 		owner.Exports[name] = *exported
-		if owner.CompilerOwned {
+		if owner.CompilerOwned || owner.Official {
 			catalog.CompilerOwnedTypes[name] = *exported
 		}
 	}

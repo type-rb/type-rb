@@ -827,6 +827,13 @@ func (c *Checker) recordReference(expression ast.Expression, binding resolver.Bi
 			}
 			c.result.RuntimeDependencies[definition.Path] = definition
 		}
+		for _, runtimeType := range binding.Library.RuntimeDependencies {
+			for _, definition := range stdlib.RuntimeDependenciesForType(runtimeType) {
+				if definition.ModulePath != c.result.Program.ModulePath {
+					c.result.RuntimeDependencies[definition.Path] = definition
+				}
+			}
+		}
 		for _, name := range binding.Library.RequiredSymbols {
 			c.markImportedSymbolUsed(name)
 		}
@@ -1427,9 +1434,9 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic string, typ types.Type) {
 	operation := ""
 	switch intrinsic {
-	case "trb.internal.json.decode":
+	case "trb.internal.json.decode", "trb.web.request_json":
 		operation = "decode"
-	case "trb.internal.json.encode":
+	case "trb.internal.json.encode", "trb.web.json":
 		operation = "encode"
 	default:
 		return
@@ -2727,7 +2734,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.error(n.Span(), fmt.Sprintf("cannot infer %s for %s()", strings.Join(unresolved, ", "), binding.Name))
 					typ = invalidType()
 				}
-				if library.Intrinsic == "trb.internal.json.encode" && len(argumentTypes) == 1 {
+				if (library.Intrinsic == "trb.internal.json.encode" || library.Intrinsic == "trb.web.json") && len(argumentTypes) >= 1 {
 					c.checkCodecApplication(n, library.Intrinsic, argumentTypes[0])
 				}
 				c.checkLibraryEqualityRequirements(n.Span(), binding.Name, *library)

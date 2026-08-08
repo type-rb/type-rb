@@ -33,6 +33,7 @@ type Route struct {
 	Path           string
 	ModulePath     string
 	Handler        string
+	TargetHandler  string
 	PathParameters []string
 	Span           token.Span
 }
@@ -94,6 +95,9 @@ func Discover(sources []Source, sourceRoot string) ([]Route, []Issue) {
 		}
 		return routes[i].ModulePath < routes[j].ModulePath
 	})
+	for index := range routes {
+		routes[index].TargetHandler = fmt.Sprintf("trb_web_route_%d", index)
+	}
 	issues = append(issues, conflictIssues(routes)...)
 	sort.Slice(issues, func(i, j int) bool {
 		if issues[i].Filename != issues[j].Filename {
