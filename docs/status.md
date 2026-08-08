@@ -39,7 +39,10 @@ handlers through the same dispatcher in all three backends. Applications can
 start a generated Go, Ruby, or TypeScript HTTP server with `serve()`. Unhandled
 handler failures become a portable JSON 500 response. Before middleware runs,
 request methods are uppercased and case-insensitive header names are merged
-under lowercase keys. Root and nested
+under lowercase keys. Request paths are decoded exactly once as UTF-8 at the
+dispatcher boundary. Malformed escapes, encoded separators, backslashes, and
+dot segments receive a portable JSON 400 response. Repeated and trailing
+slashes remain distinct paths instead of being silently collapsed. Root and nested
 `_middleware.trb` files form the same outer-to-inner onion chain in every
 backend. A single middleware file can build an explicit `Array<Middleware>`
 and pass it to `compose`; the first item is the outermost layer, and `Next` can

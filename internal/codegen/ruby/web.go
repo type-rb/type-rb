@@ -46,9 +46,12 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("begin", "")
 	g.indent++
 	g.line("request = trb_web_normalize_request(request)", "")
+	g.line("normalized_path = trb_web_normalize_path(request.path)", "")
+	g.line("return trb_web_finalize_response(request, trb_web_bad_request) if normalized_path.nil?", "")
+	g.line("request = Request.new(method: request.method, path: normalized_path, query_string: request.query_string, headers: request.headers, body: request.body)", "")
 	g.line("return trb_web_finalize_response(request, trb_web_payload_too_large) if request.body.bytesize > TRB_WEB_MAX_BODY_BYTES", "")
 	g.line("method = request.method.upcase", "")
-	g.line(`segments = request.path.split("/").reject(&:empty?)`, "")
+	g.line(`segments = request.path == "/" ? [] : request.path.delete_prefix("/").split("/", -1)`, "")
 	g.line("allowed_methods = []", "")
 	g.line("explicit_head = false", "")
 	for _, route := range routes {
@@ -163,9 +166,32 @@ func (g *generator) webProtocolResponses() {
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
+	g.line("def trb_web_normalize_path(path)", "")
+	g.indent++
+	g.line(`return nil unless path.start_with?("/") && !path.include?("\\")`, "")
+	g.line(`segments = path.split("/", -1)`, "")
+	g.line("segments.each_with_index do |segment, index|", "")
+	g.indent++
+	g.line(`return nil if segment.match?(/%(?![0-9A-Fa-f]{2})/)`, "")
+	g.line(`decoded = segment.b.gsub(/%([0-9A-Fa-f]{2})/) { [$1.to_i(16)].pack("C") }.force_encoding(Encoding::UTF_8)`, "")
+	g.line(`return nil unless decoded.valid_encoding?`, "")
+	g.line(`return nil if decoded == "." || decoded == ".." || decoded.include?("/") || decoded.include?("\\")`, "")
+	g.line("segments[index] = decoded", "")
+	g.indent--
+	g.line("end", "")
+	g.line(`segments.join("/")`, "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
 	g.line("def trb_web_internal_server_error", "")
 	g.indent++
 	g.line(`Response.new(status: 500, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"internal_server_error\"}".b)`, "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
+	g.line("def trb_web_bad_request", "")
+	g.indent++
+	g.line(`Response.new(status: 400, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"bad_request\"}".b)`, "")
 	g.indent--
 	g.line("end", "")
 	g.line("", "")

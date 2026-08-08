@@ -57,9 +57,12 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("try {")
 	g.indent++
 	g.line("request = trb_web_normalize_request(request);")
+	g.line("const normalized_path = trb_web_normalize_path(request.path);")
+	g.line("if (normalized_path === undefined) return trb_web_finalize_response(request, trb_web_bad_request());")
+	g.line("request = { ...request, path: normalized_path };")
 	g.line("if (request.body.byteLength > TRB_WEB_MAX_BODY_BYTES) return trb_web_finalize_response(request, trb_web_payload_too_large());")
 	g.line("const method = request.method.toUpperCase();")
-	g.line(`const segments = request.path.split("/").filter((segment) => segment.length > 0);`)
+	g.line(`const segments = request.path === "/" ? [] : request.path.slice(1).split("/");`)
 	g.line("let allowed_methods: string[] = [];")
 	g.line("let explicit_head = false;")
 	for _, route := range routes {
@@ -179,9 +182,37 @@ func (g *generator) webProtocolResponses() {
 	g.line("return { ...request, method: request.method.toUpperCase(), headers };")
 	g.indent--
 	g.line("}")
+	g.line("function trb_web_normalize_path(path: string): string | undefined {")
+	g.indent++
+	g.line(`if (!path.startsWith("/") || path.includes("\\")) return undefined;`)
+	g.line(`const segments = path.split("/");`)
+	g.line("for (let index = 0; index < segments.length; index += 1) {")
+	g.indent++
+	g.line("let decoded: string;")
+	g.line("try {")
+	g.indent++
+	g.line("decoded = decodeURIComponent(segments[index]!);")
+	g.indent--
+	g.line("} catch {")
+	g.indent++
+	g.line("return undefined;")
+	g.indent--
+	g.line("}")
+	g.line(`if (decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\")) return undefined;`)
+	g.line("segments[index] = decoded;")
+	g.indent--
+	g.line("}")
+	g.line(`return segments.join("/");`)
+	g.indent--
+	g.line("}")
 	g.line("function trb_web_internal_server_error(): TrbWebResponse {")
 	g.indent++
 	g.line(`return { status: 500, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"internal_server_error\"}") };`)
+	g.indent--
+	g.line("}")
+	g.line("function trb_web_bad_request(): TrbWebResponse {")
+	g.indent++
+	g.line(`return { status: 400, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"bad_request\"}") };`)
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_payload_too_large(): TrbWebResponse {")
@@ -280,8 +311,11 @@ func (g *generator) webServer() {
 	g.line("offset += chunk.byteLength;")
 	g.indent--
 	g.line("}")
-	g.line(`const url = new URL(incoming.url ?? "/", "http://localhost");`)
-	g.line(`response = trb_web_dispatch({ method: incoming.method ?? "GET", path: url.pathname, query_string: url.search.slice(1), headers, body });`)
+	g.line(`const target = incoming.url ?? "/";`)
+	g.line(`const query_index = target.indexOf("?");`)
+	g.line(`const path = query_index === -1 ? target : target.slice(0, query_index);`)
+	g.line(`const query_string = query_index === -1 ? "" : target.slice(query_index + 1);`)
+	g.line(`response = trb_web_dispatch({ method: incoming.method ?? "GET", path, query_string, headers, body });`)
 	g.indent--
 	g.line("}")
 	g.line("for (const [name, values] of Object.entries(response.headers)) {")
