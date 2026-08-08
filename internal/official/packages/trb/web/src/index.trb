@@ -1,4 +1,5 @@
 import { Result } from trb/std/result
+import { JsonError } from trb/std/json
 import { PercentDecodeError, QueryParameter, parse_query } from trb/std/url
 
 record Request
@@ -23,6 +24,14 @@ end
 enum HeaderValueError
 	Missing(name: String)
 	Duplicate(name: String)
+end
+
+enum RequestError
+	MissingContentType
+	DuplicateContentType
+	UnsupportedContentType(value: String)
+	InvalidUtf8
+	InvalidJson(error: JsonError)
 end
 
 enum CookieSameSite

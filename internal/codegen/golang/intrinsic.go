@@ -571,7 +571,37 @@ func (g *generator) webLogger(call *ir.Call, arguments []string) string {
 }
 
 func (g *generator) webRequestJSON(call *ir.Call, request string) string {
-	return g.jsonDecode(call, "string("+request+".Body)")
+	if call.Codec == nil || len(call.ExprType().Args) != 2 {
+		return "nil"
+	}
+	g.requireImport("strings", "")
+	g.requireImport("unicode/utf8", "utf8")
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	webAlias := "web"
+	if reference := expressionReference(call.Callee); reference != nil {
+		if alias := g.referenceAlias(reference); alias != "" {
+			webAlias = alias
+		}
+	}
+	valueType := g.goCodecType(call.Codec)
+	requestErrorType := webAlias + ".RequestError"
+	resultType := resultAlias + ".Result[" + valueType + ", " + requestErrorType + "]"
+	errResult := func(value string) string {
+		return resultAlias + ".NewResultErr[" + valueType + ", " + requestErrorType + "](" + value + ")"
+	}
+	okResult := resultAlias + ".NewResultOk[" + valueType + ", " + requestErrorType + "]"
+	innerCall := *call
+	innerCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{call.ExprType().Args[0], types.FromName("JsonError")}}
+	decoded := g.jsonDecode(&innerCall, "string(requestValue.Body)")
+	missing := webAlias + "." + goConstantIdentifier("RequestError", "MissingContentType")
+	duplicate := webAlias + "." + goConstantIdentifier("RequestError", "DuplicateContentType")
+	unsupported := webAlias + ".New" + goIdentifier("RequestError", true) + goIdentifier("UnsupportedContentType", true) + "(contentTypes[0])"
+	invalidUTF8 := webAlias + "." + goConstantIdentifier("RequestError", "InvalidUtf8")
+	invalidJSON := webAlias + ".New" + goIdentifier("RequestError", true) + goIdentifier("InvalidJson", true) + "(decoded.ErrError)"
+	return "func() " + resultType + " { requestValue := " + request + "; contentTypes := []string{}; for name, values := range requestValue.Headers { if strings.EqualFold(name, \"content-type\") { contentTypes = append(contentTypes, values...) } }; if len(contentTypes) == 0 { return " + errResult(missing) + " }; if len(contentTypes) != 1 { return " + errResult(duplicate) + " }; mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentTypes[0], \";\", 2)[0])); if mediaType != \"application/json\" && !(strings.HasPrefix(mediaType, \"application/\") && strings.HasSuffix(mediaType, \"+json\")) { return " + errResult(unsupported) + " }; if !utf8.Valid(requestValue.Body) { return " + errResult(invalidUTF8) + " }; decoded := " + decoded + "; if decoded.Kind == " + resultAlias + ".ResultErrTag { return " + errResult(invalidJSON) + " }; return " + okResult + "(decoded.OkValue) }()"
 }
 
 func (g *generator) webJSON(call *ir.Call, arguments []string) string {

@@ -20,7 +20,7 @@ func TestBundledWebPackage(t *testing.T) {
 		t.Fatal("package source is empty")
 	}
 	requestJSON := packageDefinition.Definition.Symbols["request_json"]
-	if requestJSON.Intrinsic != "trb.web.request_json" || requestJSON.Return.String() != "Result<T, JsonError>" {
+	if requestJSON.Intrinsic != "trb.web.request_json" || requestJSON.Return.String() != "Result<T, RequestError>" {
 		t.Fatalf("unexpected request_json contract: %#v", requestJSON)
 	}
 	json := packageDefinition.Definition.Symbols["json"]
