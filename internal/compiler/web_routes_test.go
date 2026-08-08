@@ -253,11 +253,11 @@ func assertWebServerTarget(t *testing.T, mode string, artifact *Artifact) {
 	var targets []string
 	switch mode {
 	case "go":
-		targets = []string{"func trbWebServe(port int64)", "http.MaxBytesReader(writer, request.Body, trbWebMaxBodyBytes)", "QueryString: request.URL.RawQuery", "trbWebServe(4100)"}
+		targets = []string{"func trbWebServe(port int64)", "http.MaxBytesReader(writer, request.Body, trbWebMaxBodyBytes)", "request.URL.EscapedPath()", "request.URL.RawQuery", "trbWebServe(4100)"}
 	case "ruby":
 		targets = []string{"def trb_web_serve(port)", "content_length > TRB_WEB_MAX_BODY_BYTES", `path, query_string = target.split("?", 2)`, "trb_web_serve(4100)"}
 	case "typescript":
-		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(port: number)", "if (size > TRB_WEB_MAX_BODY_BYTES)", "query_string: url.search.slice(1)", "trb_web_serve(4100);"}
+		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(port: number)", "if (size > TRB_WEB_MAX_BODY_BYTES)", `const target = incoming.url ?? "/";`, "path, query_string, headers, body", "trb_web_serve(4100);"}
 	}
 	targets = append(targets, "payload_too_large")
 	for _, target := range targets {

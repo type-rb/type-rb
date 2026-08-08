@@ -21,7 +21,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	routes := manifest.Routes
 	webPath := pathpkg.Join(g.goModule, "trb/web")
 	g.requireImport(webPath, "web")
+	g.requireImport("net/url", "neturl")
 	g.requireImport("strings", "")
+	g.requireImport("unicode/utf8", "")
 	if len(routes) > 0 {
 		g.requireImport("slices", "")
 	}
@@ -82,6 +84,13 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("}")
 	g.indent--
 	g.line("}()")
+	g.line("normalizedPath, validPath := trbWebNormalizePath(request.Path)")
+	g.line("if !validPath {")
+	g.indent++
+	g.line("return trbWebBadRequest()")
+	g.indent--
+	g.line("}")
+	g.line("request.Path = normalizedPath")
 	g.line("if len(request.Body) > trbWebMaxBodyBytes {")
 	g.indent++
 	g.line("return trbWebPayloadTooLarge()")
@@ -95,11 +104,10 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		return
 	}
 	g.line("method := strings.ToUpper(request.Method)")
-	g.line("cleanPath := strings.Trim(request.Path, \"/\")")
 	g.line("segments := []string{}")
-	g.line("if cleanPath != \"\" {")
+	g.line("if request.Path != \"/\" {")
 	g.indent++
-	g.line("segments = strings.Split(cleanPath, \"/\")")
+	g.line("segments = strings.Split(strings.TrimPrefix(request.Path, \"/\"), \"/\")")
 	g.indent--
 	g.line("}")
 	g.line("allowedMethods := []string{}")
@@ -240,6 +248,29 @@ func (g *generator) webProtocolResponses() {
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.line("func trbWebNormalizePath(path string) (string, bool) {")
+	g.indent++
+	g.line("if !strings.HasPrefix(path, \"/\") || strings.Contains(path, \"\\\\\") {")
+	g.indent++
+	g.line("return \"\", false")
+	g.indent--
+	g.line("}")
+	g.line("segments := strings.Split(path, \"/\")")
+	g.line("for index, segment := range segments {")
+	g.indent++
+	g.line("decoded, err := neturl.PathUnescape(segment)")
+	g.line("if err != nil || !utf8.ValidString(decoded) || decoded == \".\" || decoded == \"..\" || strings.ContainsAny(decoded, \"/\\\\\") {")
+	g.indent++
+	g.line("return \"\", false")
+	g.indent--
+	g.line("}")
+	g.line("segments[index] = decoded")
+	g.indent--
+	g.line("}")
+	g.line("return strings.Join(segments, \"/\"), true")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 	g.line("func trbWebInternalServerError() web.Response {")
 	g.indent++
 	g.line("return web.Response{Status: 500, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")}")
@@ -369,7 +400,7 @@ func (g *generator) webServer() {
 	g.line("response = trbWebDispatch(web.Request{")
 	g.indent++
 	g.line("Method: request.Method,")
-	g.line("Path: request.URL.Path,")
+	g.line("Path: request.URL.EscapedPath(),")
 	g.line("QueryString: request.URL.RawQuery,")
 	g.line("Headers: map[string][]string(request.Header.Clone()),")
 	g.line("Body: body,")

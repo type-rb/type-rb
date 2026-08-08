@@ -4594,3 +4594,106 @@ func TestBuildCompilesLocalRecordPackageIntoGoTargetTree(t *testing.T) {
 		t.Fatalf("application did not consume local record: err=%v\n%s", err, mainOutput)
 	}
 }
+
+func TestRunOfficialWebPathNormalizationAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web path normalization run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web path normalization run")
+				continue
+			}
+		}
+
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-path-normalization-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+
+		mainSource := `import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def print_response(path: String)
+	response := dispatch(Request.new(
+		method: "GET",
+		path: path,
+		query_string: "",
+		headers: {},
+		body: "".to_bytes(),
+	))
+	puts(response.status)
+	puts(response.body.to_s())
+	return
+end
+
+def main()
+	print_response("/files/hello%20world")
+	print_response("/files/%E3%81%82")
+	print_response("/files/a+b")
+	[
+		"/files/%",
+		"/files/%FF",
+		"/files/%2F",
+		"/files/%5c",
+		"/files/\\",
+		"/files/.",
+		"/files/%2e",
+		"/files/..",
+		"/files/%2E%2e",
+		"files/value",
+	].each do |path|
+		print_response(path)
+	end
+	print_response("/files//value")
+	print_response("/files/value/")
+	return
+end
+`
+		routeSource := `import { Context, Response, path_param } from trb/web
+
+def get(context: Context): Response
+	value := context.request.path + "|" + path_param(context, "name")
+	return Response.new(status: 200, headers: {}, body: value.to_bytes())
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src", "routes", "files"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "files", "[name].trb"), []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+
+		var want strings.Builder
+		want.WriteString("200\n/files/hello world|hello world\n")
+		want.WriteString("200\n/files/あ|あ\n")
+		want.WriteString("200\n/files/a+b|a+b\n")
+		for range 10 {
+			want.WriteString("400\n{\"error\":\"bad_request\"}\n")
+		}
+		for range 2 {
+			want.WriteString("404\n{\"error\":\"not_found\"}\n")
+		}
+		if stdout.String() != want.String() {
+			t.Fatalf("unexpected %s trb/web path output: want %q, got %q", mode, want.String(), stdout.String())
+		}
+	}
+}
