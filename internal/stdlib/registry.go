@@ -401,6 +401,13 @@ end
 				Parameters: []Parameter{{Name: "value", Type: stringType}},
 				Return:     types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{integerType}},
 			},
+			"characters": {
+				Name:       "characters",
+				Intrinsic:  "trb.std.strings.characters",
+				Parameters: []Parameter{{Name: "value", Type: stringType}},
+				Return:     arrayOf(stringType),
+			},
+			"reverse": unary("reverse", "trb.std.strings.reverse", stringType, stringType),
 			"fetch": {
 				Name:       "fetch",
 				Intrinsic:  "trb.std.strings.fetch",
@@ -975,6 +982,8 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"end_with?":   {PackagePath: "trb/std/strings", Symbol: "ends_with"},
 		"split":       {PackagePath: "trb/std/strings", Symbol: "split"},
 		"codepoints":  {PackagePath: "trb/std/strings", Symbol: "codepoints"},
+		"chars":       {PackagePath: "trb/std/strings", Symbol: "characters"},
+		"reverse":     {PackagePath: "trb/std/strings", Symbol: "reverse"},
 		"fetch":       {PackagePath: "trb/std/strings", Symbol: "fetch"},
 		"try_fetch":   {PackagePath: "trb/std/strings", Symbol: "try_fetch"},
 		"to_bytes":    {PackagePath: "trb/std/bytes", Symbol: "from_string"},

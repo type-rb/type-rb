@@ -67,6 +67,21 @@ func TestSafeReceiverContractsUseStructuredErrors(t *testing.T) {
 	}
 }
 
+func TestStringCharacterReceiverContracts(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want string
+	}{
+		{name: "chars", want: "Array<String>"},
+		{name: "reverse", want: "String"},
+	} {
+		_, method, ok := LookupReceiverMethod(types.FromName("String"), test.name)
+		if !ok || method.Return.String() != test.want {
+			t.Fatalf("String#%s contract=%#v, want %s", test.name, method, test.want)
+		}
+	}
+}
+
 func TestNumericReceiverAndMathContracts(t *testing.T) {
 	for _, test := range []struct {
 		receiver types.Type

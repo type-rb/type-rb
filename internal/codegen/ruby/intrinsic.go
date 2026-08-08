@@ -173,6 +173,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".include?(" + arguments[1] + ")"
 	case "trb.std.strings.codepoints":
 		return arguments[0] + ".codepoints"
+	case "trb.std.strings.characters":
+		return arguments[0] + ".each_char.to_a"
+	case "trb.std.strings.reverse":
+		return arguments[0] + ".each_char.to_a.reverse.join"
 	case "trb.std.strings.fetch":
 		return "->(value, index) { characters = value.each_char.to_a; raise IndexError, \"String index is out of bounds\" if index < 0 || index >= characters.length; characters.fetch(index) }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.strings.try_fetch":

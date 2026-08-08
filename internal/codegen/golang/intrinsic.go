@@ -282,6 +282,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.strings.codepoints":
 		g.requireImport("unicode/utf8", "utf8")
 		return "func(value string) []int { result := make([]int, 0, utf8.RuneCountInString(value)); for _, codepoint := range value { result = append(result, int(codepoint)) }; return result }(" + arguments[0] + ")"
+	case "trb.std.strings.characters":
+		g.requireImport("unicode/utf8", "utf8")
+		return "func(value string) []string { result := make([]string, 0, utf8.RuneCountInString(value)); for _, character := range value { result = append(result, string(character)) }; return result }(" + arguments[0] + ")"
+	case "trb.std.strings.reverse":
+		g.requireImport("slices", "")
+		return "func(value string) string { characters := []rune(value); slices.Reverse(characters); return string(characters) }(" + arguments[0] + ")"
 	case "trb.std.strings.fetch":
 		return "func() string { value := []rune(" + arguments[0] + "); index := " + arguments[1] + "; if index < 0 || index >= len(value) { panic(\"String index is out of bounds\") }; return string(value[index]) }()"
 	case "trb.std.strings.try_fetch":
