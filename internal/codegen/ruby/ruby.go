@@ -64,7 +64,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(n.Text, "")
 	case *ir.Import:
-		if (n.Standard || g.loader == "zeitwerk") && !n.Runtime {
+		if n.Standard && (!n.Runtime || !n.RuntimeRequired) || g.loader == "zeitwerk" && !n.Runtime {
 			return
 		}
 		g.line("require_relative "+strconv.Quote(rubyImportPath(g.modulePath, n.Path)), n.TrailingComment)
@@ -465,6 +465,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if receiver, ok := n.Receiver.(*ir.Identifier); ok && n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.Package != "" && n.Reference.Alias != "" && receiver.Name == n.Reference.Alias && n.Reference.ExportKind == "function" {
+			return n.Name
+		}
 		op := "."
 		if n.Namespace {
 			op = "::"

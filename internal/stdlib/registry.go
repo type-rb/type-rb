@@ -27,17 +27,20 @@ type Parameter struct {
 }
 
 type Symbol struct {
-	Name            string
-	Intrinsic       string
-	RequiredSymbols []string
-	TypeParameters  []string
-	EqualityTypes   []types.Type
-	Receiver        types.Type
-	ReceiverMutable bool
-	Parameters      []Parameter
-	Return          types.Type
-	Variadic        bool
-	Inference       string
+	Name      string
+	Intrinsic string
+	// RuntimeIndependent marks an intrinsic that is fully lowered by every
+	// backend even when its public package also provides a source wrapper.
+	RuntimeIndependent bool
+	RequiredSymbols    []string
+	TypeParameters     []string
+	EqualityTypes      []types.Type
+	Receiver           types.Type
+	ReceiverMutable    bool
+	Parameters         []Parameter
+	Return             types.Type
+	Variadic           bool
+	Inference          string
 }
 
 type RuntimeExport struct {
@@ -398,8 +401,8 @@ end
 		Source: hexSource(),
 		Kind:   Portable,
 		Symbols: map[string]Symbol{
-			"encode": unary("encode", "trb.std.encoding.hex.encode", bytesType, stringType),
-			"decode": unary("decode", "trb.std.encoding.hex.decode", stringType, structuredErrorResult(bytesType, hexDecodeErrorType)),
+			"encode": runtimeIndependent(unary("encode", "trb.std.encoding.hex.encode", bytesType, stringType)),
+			"decode": runtimeIndependent(unary("decode", "trb.std.encoding.hex.decode", stringType, structuredErrorResult(bytesType, hexDecodeErrorType))),
 		},
 	},
 	"trb/internal/encoding/hex": {
@@ -421,10 +424,10 @@ end
 		Source: base64Source(),
 		Kind:   Portable,
 		Symbols: map[string]Symbol{
-			"encode":     unary("encode", "trb.std.encoding.base64.encode", bytesType, stringType),
-			"decode":     unary("decode", "trb.std.encoding.base64.decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType)),
-			"url_encode": unary("url_encode", "trb.std.encoding.base64.url_encode", bytesType, stringType),
-			"url_decode": unary("url_decode", "trb.std.encoding.base64.url_decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType)),
+			"encode":     runtimeIndependent(unary("encode", "trb.std.encoding.base64.encode", bytesType, stringType)),
+			"decode":     runtimeIndependent(unary("decode", "trb.std.encoding.base64.decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType))),
+			"url_encode": runtimeIndependent(unary("url_encode", "trb.std.encoding.base64.url_encode", bytesType, stringType)),
+			"url_decode": runtimeIndependent(unary("url_decode", "trb.std.encoding.base64.url_decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType))),
 		},
 	},
 	"trb/internal/encoding/base64": {
@@ -945,6 +948,11 @@ func unary(name, intrinsic string, parameter, result types.Type) Symbol {
 		Parameters: []Parameter{{Name: "value", Type: parameter}},
 		Return:     result,
 	}
+}
+
+func runtimeIndependent(symbol Symbol) Symbol {
+	symbol.RuntimeIndependent = true
+	return symbol
 }
 
 func bytesBinary(name, intrinsic string, result types.Type) Symbol {

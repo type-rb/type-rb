@@ -34,6 +34,7 @@ type Result struct {
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
 	RuntimeDependencies map[string]*stdlib.Package
+	ImportUses          map[*ast.ImportStatement]map[string]bool
 }
 
 type CodecApplication struct {
@@ -204,6 +205,7 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 }
 
 func CheckWithOptions(program *ast.Program, resolution resolver.Result, options Options) (Result, []diagnostic.Diagnostic) {
+	importUses := map[*ast.ImportStatement]map[string]bool{}
 	c := &Checker{
 		mode: program.Mode,
 		result: Result{
@@ -223,6 +225,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
 			RuntimeDependencies: map[string]*stdlib.Package{},
+			ImportUses:          importUses,
 		},
 		classes:            map[string]*classInfo{},
 		records:            map[string]*recordInfo{},
@@ -232,7 +235,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		resolution:         resolution,
 		external:           map[ast.Expression]declaration.Member{},
 		declaredTypes:      map[string]typeDeclaration{},
-		usedImports:        map[*ast.ImportStatement]map[string]bool{},
+		usedImports:        importUses,
 		allowUnusedImports: options.AllowUnusedImports,
 	}
 	for _, statement := range program.Statements {

@@ -740,6 +740,119 @@ func TestPortableHexDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestCompilerOwnedIntrinsicOnlyNamespaceImportOmitsUnusedRuntimeImport(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import trb/std/encoding/hex
+
+def encoded(value: Bytes): String
+	return hex.encode(value)
+end
+`),
+	}
+	wants := map[string]string{
+		"go":         `stdhex.EncodeToString(value)`,
+		"ruby":       `.unpack1("H*")`,
+		"typescript": `value.toString(16).padStart(2, "0")`,
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/namespace-intrinsic", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected an intrinsic-only namespace import: %v", mode, err)
+		}
+		consumer := findArtifactByModule(artifacts, "main")
+		if consumer == nil {
+			t.Fatalf("%s omitted the namespace-import consumer: %#v", mode, artifacts)
+		}
+		output := string(consumer.Output)
+		if !strings.Contains(output, wants[mode]) {
+			t.Fatalf("generated %s intrinsic-only consumer is missing %q:\n%s", mode, wants[mode], output)
+		}
+		if strings.Contains(output, "trb/std/encoding/hex/index") || mode == "go" && strings.Contains(output, "example.com/namespace-intrinsic/trb/std/encoding/hex") {
+			t.Fatalf("generated %s intrinsic-only consumer retained the compiler-owned runtime import:\n%s", mode, output)
+		}
+	}
+}
+
+func TestCompilerOwnedNamespaceImportsRetainRequiredRuntimeAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import trb/std/encoding/hex
+import trb/std/filesystem
+import { Result } from trb/std/result
+
+def decoded(value: String): Result<Bytes, HexDecodeError>
+	return hex.decode(value)
+end
+
+def loaded(path: String): Result<String, FileError>
+	return filesystem.read_text(path)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`import "example.com/namespace-runtime/trb/std/encoding/hex"`,
+			`import "example.com/namespace-runtime/trb/std/filesystem"`,
+			`hex.HexDecodeError`,
+			`filesystem.ReadText(path)`,
+		},
+		"ruby": {
+			`require_relative "./trb/std/encoding/hex/index"`,
+			`require_relative "./trb/std/filesystem/index"`,
+			`def decoded(value)`,
+			`read_text(path)`,
+		},
+		"typescript": {
+			`import * as hex from "./trb/std/encoding/hex/index.ts";`,
+			`import * as filesystem from "./trb/std/filesystem/index.ts";`,
+			`hex.HexDecodeError`,
+			`hex.HexDecodeErrorKind.InvalidCharacter`,
+			`filesystem.read_text(path)`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/namespace-runtime", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected runtime namespace imports: %v", mode, err)
+		}
+		consumer := findArtifactByModule(artifacts, "main")
+		if consumer == nil {
+			t.Fatalf("%s omitted the runtime namespace consumer: %#v", mode, artifacts)
+		}
+		output := string(consumer.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s runtime namespace consumer is missing %q:\n%s", mode, want, output)
+			}
+		}
+		for _, modulePath := range []string{"trb/std/encoding/hex/index", "trb/std/filesystem/index", "trb/std/result/index"} {
+			count := 0
+			for _, artifact := range artifacts {
+				if artifact.IR.ModulePath == modulePath {
+					count++
+				}
+			}
+			if count != 1 {
+				t.Fatalf("%s emitted %s %d times, expected once", mode, modulePath, count)
+			}
+		}
+	}
+}
+
+func findArtifactByModule(artifacts []*Artifact, modulePath string) *Artifact {
+	for _, artifact := range artifacts {
+		if artifact.IR.ModulePath == modulePath {
+			return artifact
+		}
+	}
+	return nil
+}
+
 func TestPortableBase64PackageLowersAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",
