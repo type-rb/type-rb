@@ -48,6 +48,10 @@ mode by itself does not enable them.
   import.
 - No explicit `void` type notation (Go-like). Methods with no return value omit
   the return type and may fall through or use a bare `return`.
+- A trailing positional parameter may declare a default with
+  `name: Type = expression`. All following positional parameters must also
+  have defaults. Defaults are evaluated when the function or method is called,
+  may reference earlier parameters, and are used only for omitted arguments.
 - Outside `()`, `[]`, and `{}`, `;` is equivalent to a newline between
   complete statements. This is common syntax in every mode, so compact input
   such as `class Empty; end` has the same meaning as its multiline form.

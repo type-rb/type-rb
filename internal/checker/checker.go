@@ -1813,6 +1813,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	previousClassMethod := c.classMethod
 	c.classMethod = method.Class
 	methodScope := &scope{parent: parent, values: map[string]symbol{}}
+	seenPositionalDefault := false
 	for _, parameter := range method.Parameters {
 		typ := fromTypeRef(parameter.Type)
 		if parameter.Type.Empty() {
@@ -1821,7 +1822,13 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		if _, exists := methodScope.values[parameter.Name]; exists {
 			c.error(parameter.Span(), fmt.Sprintf("parameter %s is duplicated", parameter.Name))
 		}
-		methodScope.values[parameter.Name] = symbol{typ: typ, mutable: true, span: parameter.Span()}
+		if !c.rubyNativeSyntax() && !parameter.Keyword && !parameter.Rest && !parameter.KeywordRest {
+			if parameter.Default != nil {
+				seenPositionalDefault = true
+			} else if seenPositionalDefault {
+				c.error(parameter.Span(), "required positional parameter cannot follow a default parameter")
+			}
+		}
 		if parameter.Default != nil {
 			actual := c.checkExpression(parameter.Default, methodScope)
 			actual = c.contextualizeCollectionLiteral(parameter.Default, typ, actual)
@@ -1829,6 +1836,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 				c.error(parameter.Default.Span(), fmt.Sprintf("default value has type %s, expected %s", actual, typ))
 			}
 		}
+		methodScope.values[parameter.Name] = symbol{typ: typ, mutable: true, span: parameter.Span()}
 	}
 	returnType := fromTypeRef(method.ReturnType)
 	if method.ReturnType.Empty() {

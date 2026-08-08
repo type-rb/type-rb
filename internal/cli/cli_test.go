@@ -2926,6 +2926,84 @@ func TestRunTypedJSONRecordCodecsAcrossAvailableBackends(t *testing.T) {
 	}
 }
 
+func TestRunPortableDefaultArgumentsAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby default argument run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript default argument run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-default-argument-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `class Greeter
+	@prefix: String
+
+	def initialize(prefix: String = "Hello")
+		@prefix = prefix
+		return
+	end
+
+	def greet(name: String, suffix: String = "!"): String
+		return @prefix + ", " + name + suffix
+	end
+end
+
+def count_label(count: Integer = 2): String
+	return count.to_s()
+end
+
+def fallback(value: String, replacement: String = value): String
+	return replacement
+end
+
+def missing?(value: String? = nil): Boolean
+	return value == nil
+end
+
+def main()
+	puts(Greeter.new().greet("Ada"))
+	puts(Greeter.new("Hi").greet("Lin", "."))
+	puts(count_label())
+	puts(count_label(3))
+	puts(fallback("same"))
+	puts(missing?())
+	puts(missing?("value"))
+	puts(missing?(nil))
+	return
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "Hello, Ada!\nHi, Lin.\n2\n3\nsame\ntrue\nfalse\ntrue\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s default argument output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunOfficialWebRequestCookiesAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
@@ -3140,6 +3218,69 @@ end
 		want := "1\none\n2\ntwo\nthree\nyes\n204\nbody\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web response headers: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunOfficialWebResponseBuildersAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web response builder run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web response builder run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-response-builder-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { bytes, empty, text } from trb/web
+
+def main()
+	plain := text("hello")
+	not_found := text("missing", 404)
+	binary := bytes("raw".to_bytes())
+	no_content := empty()
+	reset := empty(205)
+	puts(plain.status)
+	puts(plain.headers["content-type"][0])
+	puts(plain.body.to_s())
+	puts(not_found.status)
+	puts(binary.status)
+	puts(binary.headers["content-type"][0])
+	puts(binary.body.to_s())
+	puts(no_content.status)
+	puts(no_content.headers.size())
+	puts(no_content.body.size())
+	puts(reset.status)
+	return
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "200\ntext/plain; charset=utf-8\nhello\n404\n200\napplication/octet-stream\nraw\n204\n0\n0\n205\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web response builder output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

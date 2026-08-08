@@ -671,6 +671,9 @@ func (g *generator) class(class *ir.Class) {
 		}
 		g.line("func New" + name + "(" + parameters + ") *" + name + " {")
 		g.indent++
+		if initialize != nil {
+			g.parameterDefaults(initialize.Parameters)
+		}
 		g.line("self := &" + name + "{}")
 		for _, field := range fields {
 			if field.Value != nil {
@@ -707,6 +710,7 @@ func (g *generator) classMethod(className string, method *ir.Method) {
 		g.line("func (self *" + className + ") " + name + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
 	}
 	g.indent++
+	g.parameterDefaults(method.Parameters)
 	previous := g.receiver
 	g.receiver = "self"
 	g.functionDepth++
@@ -729,6 +733,7 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 	}
 	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
 	g.indent++
+	g.parameterDefaults(method.Parameters)
 	g.functionDepth++
 	g.statements(method.Body)
 	g.functionDepth--
@@ -738,16 +743,71 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
-	parts := make([]string, len(parameters))
-	for i, parameter := range parameters {
+	optionalStart := optionalParameterStart(parameters)
+	if optionalStart < 0 {
+		optionalStart = len(parameters)
+	}
+	parts := make([]string, 0, optionalStart+1)
+	for _, parameter := range parameters[:optionalStart] {
 		name := goBindingIdentifier(parameter.Name)
 		typ := g.goType(parameter.Type)
 		if parameter.Rest {
 			typ = "..." + strings.TrimPrefix(typ, "[]")
 		}
-		parts[i] = name + " " + typ
+		parts = append(parts, name+" "+typ)
+	}
+	if optionalStart < len(parameters) {
+		parts = append(parts, "__trbOptional ...any")
 	}
 	return strings.Join(parts, ", ")
+}
+
+func optionalParameterStart(parameters []ir.Parameter) int {
+	start := -1
+	for index, parameter := range parameters {
+		if parameter.Default != nil {
+			if start < 0 {
+				start = index
+			}
+			continue
+		}
+		if start >= 0 {
+			return -1
+		}
+	}
+	return start
+}
+
+func (g *generator) parameterDefaults(parameters []ir.Parameter) {
+	start := optionalParameterStart(parameters)
+	if start < 0 {
+		return
+	}
+	for index, parameter := range parameters[start:] {
+		name := goBindingIdentifier(parameter.Name)
+		typ := g.goType(parameter.Type)
+		g.line("var " + name + " " + typ + " = " + g.expr(parameter.Default))
+		g.line("if len(__trbOptional) > " + strconv.Itoa(index) + " {")
+		g.indent++
+		switch {
+		case parameter.Type.Kind == types.Any:
+			g.line(name + " = __trbOptional[" + strconv.Itoa(index) + "]")
+		case parameter.Type.Nullable:
+			g.line("if __trbOptional[" + strconv.Itoa(index) + "] == nil {")
+			g.indent++
+			g.line(name + " = nil")
+			g.indent--
+			g.line("} else {")
+			g.indent++
+			g.line(name + " = __trbOptional[" + strconv.Itoa(index) + "].(" + typ + ")")
+			g.indent--
+			g.line("}")
+		default:
+			g.line(name + " = __trbOptional[" + strconv.Itoa(index) + "].(" + typ + ")")
+		}
+		g.indent--
+		g.line("}")
+	}
 }
 
 func (g *generator) expr(expression ir.Expression) string {
