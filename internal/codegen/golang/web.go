@@ -42,8 +42,17 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 		g.requireImport(pathpkg.Join(g.goModule, directory), directories[directory])
 	}
 
-	g.line("func trbWebDispatch(request web.Request) web.Response {")
+	g.line("func trbWebDispatch(request web.Request) (response web.Response) {")
 	g.indent++
+	g.line("defer func() {")
+	g.indent++
+	g.line("if recover() != nil {")
+	g.indent++
+	g.line("response = web.Response{Status: 500, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")}")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}()")
 	g.line("method := strings.ToUpper(request.Method)")
 	g.line("cleanPath := strings.Trim(request.Path, \"/\")")
 	g.line("segments := []string{}")

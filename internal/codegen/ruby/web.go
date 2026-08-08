@@ -35,6 +35,8 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 
 	g.line("def trb_web_dispatch(request)", "")
 	g.indent++
+	g.line("begin", "")
+	g.indent++
 	g.line("method = request.method.upcase", "")
 	g.line(`segments = request.path.split("/").reject(&:empty?)`, "")
 	for _, route := range routes {
@@ -58,6 +60,12 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 		g.line("end", "")
 	}
 	g.line(`Response.new(status: 404, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"not_found\"}".b)`, "")
+	g.indent--
+	g.line("rescue StandardError", "")
+	g.indent++
+	g.line(`Response.new(status: 500, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"internal_server_error\"}".b)`, "")
+	g.indent--
+	g.line("end", "")
 	g.indent--
 	g.line("end", "")
 }

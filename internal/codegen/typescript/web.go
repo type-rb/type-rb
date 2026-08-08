@@ -43,6 +43,8 @@ func (g *generator) webRouteImports(routes []webintegration.Route) {
 func (g *generator) webDispatcher(routes []webintegration.Route) {
 	g.line("function trb_web_dispatch(request: { method: string; path: string; headers: Record<string, string[]>; body: Uint8Array }) {")
 	g.indent++
+	g.line("try {")
+	g.indent++
 	g.line("const method = request.method.toUpperCase();")
 	g.line(`const segments = request.path.split("/").filter((segment) => segment.length > 0);`)
 	for _, route := range routes {
@@ -66,6 +68,12 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 		g.line("}")
 	}
 	g.line(`return { status: 404, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"not_found\"}") };`)
+	g.indent--
+	g.line("} catch {")
+	g.indent++
+	g.line(`return { status: 500, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"internal_server_error\"}") };`)
+	g.indent--
+	g.line("}")
 	g.indent--
 	g.line("}")
 }

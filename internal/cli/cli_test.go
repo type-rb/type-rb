@@ -3010,6 +3010,75 @@ end
 	}
 }
 
+func TestRunOfficialWebRecoveryAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web recovery run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web recovery run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-recovery-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def main()
+	request := Request.new(method: "GET", path: "/failure", headers: {}, body: "".to_bytes())
+	response := dispatch(request)
+	puts(response.status)
+	puts(response.body.to_s())
+	return
+end
+`
+		routeSource := `import { Context, Response, json } from trb/web
+
+record FailureResponse
+	value: Integer
+end
+
+def get(_context: Context): Response
+	value := "not-an-integer".to_i()
+	return json(FailureResponse.new(value: value))
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		routePath := filepath.Join(root, "src", "routes", "failure.trb")
+		if err := os.MkdirAll(filepath.Dir(routePath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(routePath, []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "500\n{\"error\":\"internal_server_error\"}\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web recovery output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunWithoutSourceRequiresMain(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
