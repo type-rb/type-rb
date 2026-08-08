@@ -4,6 +4,7 @@ package checker
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -140,6 +141,7 @@ func (s *scope) markUsed(name string) {
 type classInfo struct {
 	name       string
 	superclass string
+	interfaces []string
 	mixins     []string
 	fields     map[string]*ast.FieldStatement
 	methods    map[string]*ast.MethodStatement
@@ -454,7 +456,7 @@ func (c *Checker) collect(statements []ast.Statement) {
 			if !c.declareType(n.Name, "class", n.Span()) {
 				continue
 			}
-			info := &classInfo{name: n.Name, superclass: expressionTypeName(n.Superclass), fields: map[string]*ast.FieldStatement{}, methods: map[string]*ast.MethodStatement{}}
+			info := &classInfo{name: n.Name, superclass: expressionTypeName(n.Superclass), interfaces: append([]string(nil), n.Implements...), fields: map[string]*ast.FieldStatement{}, methods: map[string]*ast.MethodStatement{}}
 			for _, member := range n.Body {
 				switch m := member.(type) {
 				case *ast.FieldStatement:
@@ -1727,11 +1729,79 @@ func commonNumberType(left, right types.Type) types.Type {
 }
 
 func (c *Checker) assignable(expression ast.Expression, target, actual types.Type) bool {
-	if !types.Assignable(target, actual) {
+	if !c.typesAssignable(target, actual) {
 		return false
 	}
 	c.recordAssignableConversion(expression, target, actual)
 	return true
+}
+
+func (c *Checker) typesAssignable(target, actual types.Type) bool {
+	if types.Assignable(target, actual) {
+		return true
+	}
+	if actual.Nullable && !target.Nullable {
+		return false
+	}
+	target.Nullable = false
+	actual.Nullable = false
+	if target.Kind == types.Union {
+		values := []types.Type{actual}
+		if actual.Kind == types.Union {
+			values = actual.Args
+		}
+		for _, value := range values {
+			accepted := false
+			for _, alternative := range target.Args {
+				if c.typesAssignable(alternative, value) {
+					accepted = true
+					break
+				}
+			}
+			if !accepted {
+				return false
+			}
+		}
+		return true
+	}
+	if actual.Kind == types.Union {
+		for _, alternative := range actual.Args {
+			if !c.typesAssignable(target, alternative) {
+				return false
+			}
+		}
+		return true
+	}
+	return target.Kind == types.Named && actual.Kind == types.Named && c.isInterface(target.Name) && c.classImplements(actual.Name, target.Name, map[string]bool{})
+}
+
+func (c *Checker) isInterface(name string) bool {
+	if c.interfaces[name] != nil {
+		return true
+	}
+	binding, ok := c.resolution.ImportedType(name)
+	return ok && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport
+}
+
+func (c *Checker) classImplements(className, interfaceName string, seen map[string]bool) bool {
+	if className == "" || seen[className] {
+		return false
+	}
+	seen[className] = true
+	if info := c.classes[className]; info != nil {
+		if slices.Contains(info.interfaces, interfaceName) {
+			return true
+		}
+		return c.classImplements(info.superclass, interfaceName, seen)
+	}
+	binding, ok := c.resolution.ImportedType(className)
+	if !ok || binding.Export == nil || binding.Export.Kind != resolver.ClassExport {
+		return false
+	}
+	if slices.Contains(binding.Export.Interfaces, interfaceName) {
+		return true
+	}
+	return c.classImplements(binding.Export.Superclass, interfaceName, seen)
 }
 
 func (c *Checker) recordAssignableConversion(expression ast.Expression, target, actual types.Type) {

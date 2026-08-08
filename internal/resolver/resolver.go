@@ -8,6 +8,7 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,6 +56,7 @@ type Export struct {
 	EnumVariants   []EnumVariant
 	TypeParameters []string
 	Superclass     string
+	Interfaces     []string
 	Span           token.Span
 }
 
@@ -216,6 +218,11 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		state[name] = 1
 		if parent := typesByName[exported.Superclass]; parent != nil {
 			link(parent.Name)
+			for _, interfaceName := range parent.Interfaces {
+				if !slices.Contains(exported.Interfaces, interfaceName) {
+					exported.Interfaces = append(exported.Interfaces, interfaceName)
+				}
+			}
 			for memberName, member := range parent.Members {
 				if _, overridden := exported.Members[memberName]; !overridden {
 					exported.Members[memberName] = member
@@ -619,7 +626,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		switch node := statement.(type) {
 		case *ast.ClassStatement:
 			if public(node.Name) {
-				exported := Export{Name: node.Name, Kind: ClassExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Superclass: expressionName(node.Superclass), Span: node.Span()}
+				exported := Export{Name: node.Name, Kind: ClassExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Superclass: expressionName(node.Superclass), Interfaces: append([]string(nil), node.Implements...), Span: node.Span()}
 				for _, member := range node.Body {
 					switch item := member.(type) {
 					case *ast.MethodStatement:

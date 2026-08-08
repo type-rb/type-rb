@@ -683,6 +683,90 @@ end
 	}
 }
 
+func TestImplementedClassesAreAssignableToInterfaceValues(t *testing.T) {
+	source := []byte(`interface Named
+	name(): String
+end
+
+class Person implements Named
+	@value: String
+
+	def initialize(value: String)
+		@value = value
+		return
+	end
+
+	def name(): String
+		return @value
+	end
+end
+
+def display(value: Named): String
+	return value.name()
+end
+
+def build(): Named
+	return Person.new("Ada")
+end
+
+def people(): Array<Named>
+	return [Person.new("Ada"), Person.new("Grace")]
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("interfaces.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected interface values: %v", mode, err)
+		}
+		if len(artifact.Output) == 0 {
+			t.Fatalf("%s emitted no output", mode)
+		}
+	}
+}
+
+func TestInterfaceValuesRequireNominalImplementationAndInvariantArrays(t *testing.T) {
+	structural := []byte(`interface Named
+	name(): String
+end
+
+class Person
+	def name(): String
+		return "Ada"
+	end
+end
+
+def display(value: Named): String
+	return value.name()
+end
+
+def invalid(): String
+	return display(Person.new())
+end
+`)
+	if _, err := Compile("structural.trb", structural, "go"); err == nil || !strings.Contains(err.Error(), "expected Named") {
+		t.Fatalf("expected nominal interface diagnostic, got %v", err)
+	}
+
+	invariant := []byte(`interface Named
+	name(): String
+end
+
+class Person implements Named
+	def name(): String
+		return "Ada"
+	end
+end
+
+def invalid(): Array<Named>
+	people := [Person.new()]
+	return people
+end
+`)
+	if _, err := Compile("invariant.trb", invariant, "go"); err == nil || !strings.Contains(err.Error(), "expected Array<Named>") {
+		t.Fatalf("expected invariant Array diagnostic, got %v", err)
+	}
+}
+
 func TestPortableConditionsRequireNonNullableBoolean(t *testing.T) {
 	valid := []byte(`def decide(flag: Boolean)
   if flag

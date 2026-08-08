@@ -198,6 +198,11 @@ not externally. Class methods use `def self.name()`.
 Classes support inheritance, interfaces, modules, class constants, and checked
 instance/class member access. Superclass construction, override rules, generic
 classes, and a final field/method collision rule remain alpha design work.
+Classes explicitly marked with `implements` can be passed and returned through
+that interface type. Subclasses inherit the declared conformance, while a class
+with merely matching methods does not conform implicitly. Fresh literals such
+as `values: Array<Named> := [User.new(...)]` use the expected interface element
+type; existing mutable arrays remain invariant.
 
 ## Records
 
