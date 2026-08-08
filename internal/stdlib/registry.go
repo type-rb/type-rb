@@ -478,6 +478,21 @@ end
 			"equal":  bytesBinary("equal", "trb.std.hmac.equal", booleanType),
 		},
 	},
+	"trb/std/random": {
+		Path: "trb/std/random",
+		Kind: Portable,
+		Symbols: map[string]Symbol{
+			"float":   {Name: "float", Intrinsic: "trb.std.random.float", Return: floatType},
+			"integer": unary("integer", "trb.std.random.integer", integerType, integerType),
+		},
+	},
+	"trb/std/secure_random": {
+		Path: "trb/std/secure_random",
+		Kind: Portable,
+		Symbols: map[string]Symbol{
+			"bytes": unary("bytes", "trb.std.secure_random.bytes", integerType, bytesType),
+		},
+	},
 	"trb/std/string_builder": {
 		Path: "trb/std/string_builder",
 		Kind: Portable,

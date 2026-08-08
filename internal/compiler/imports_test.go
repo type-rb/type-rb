@@ -971,6 +971,76 @@ func TestPortableHMACDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableRandomPackagesLowerAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import trb/std/random
+import trb/std/secure_random
+
+def fraction(): Float
+	return random.float()
+end
+
+def index(upper: Integer): Integer
+	return random.integer(upper)
+end
+
+def token(length: Integer): Bytes
+	return secure_random.bytes(length)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`stdrand.Float64()`,
+			`stdrand.IntN(upper)`,
+			`stdcryptorand.Read(value)`,
+		},
+		"ruby": {
+			`Random.rand()`,
+			`Random.rand(upper)`,
+			`Random.urandom(length).b`,
+		},
+		"typescript": {
+			`Math.random()`,
+			`Math.floor(Math.random() * upper)`,
+			`globalThis.crypto.getRandomValues(new Uint8Array(length))`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/portable-random", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable random: %v", mode, err)
+		}
+		var output string
+		for _, artifact := range artifacts {
+			if artifact.IR.ModulePath == "main" {
+				output = string(artifact.Output)
+			}
+		}
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s random output is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableRandomDiagnosticsAreModeIndependent(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := Compile("bad.trb", []byte("import { integer } from trb/std/random\ndef bad(): Integer\n\treturn integer(1.5)\nend\n"), mode)
+		if err == nil || !strings.Contains(err.Error(), "argument 1 to integer() has type Float, expected Integer") {
+			t.Fatalf("%s: expected portable random argument diagnostic, got %v", mode, err)
+		}
+		_, err = Compile("bad.trb", []byte("import { bytes } from trb/std/secure_random\ndef bad(): Bytes\n\treturn bytes(1.5)\nend\n"), mode)
+		if err == nil || !strings.Contains(err.Error(), "argument 1 to bytes() has type Float, expected Integer") {
+			t.Fatalf("%s: expected portable secure random argument diagnostic, got %v", mode, err)
+		}
+	}
+}
+
 func TestPortableStringBuilderLowersAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/string_builder
 

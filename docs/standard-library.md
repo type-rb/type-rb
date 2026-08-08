@@ -175,6 +175,38 @@ Keys, messages, and tags are `Bytes`. `equal()` compares equal-length tags
 without content-dependent branching and returns `false` when their lengths
 differ. Use it instead of ordinary collection comparison when verifying a tag.
 
+## Randomness
+
+`trb/std/random` provides non-cryptographic random values for sampling,
+simulation, and user-interface behavior:
+
+```trb
+import trb/std/random
+
+fraction := random.float()
+index := random.integer(10)
+```
+
+`float()` returns a `Float` in the half-open interval `[0.0, 1.0)`.
+`integer(upper)` returns an `Integer` in `[0, upper)` and fails at runtime when
+`upper` is not positive. The generator and its sequence are backend-defined;
+these functions must not be used for secrets, tokens, or other security
+decisions.
+
+Use `trb/std/secure_random` when bytes must be unpredictable:
+
+```trb
+import trb/std/secure_random
+
+token := secure_random.bytes(32)
+```
+
+`bytes(length)` returns cryptographically secure `Bytes`. The portable
+synchronous contract accepts lengths from 0 through 65,536 bytes so it can use
+the browser Web Crypto source as well as native Go and Ruby sources. An invalid
+length or unavailable secure source is a runtime failure; it never falls back
+to the non-cryptographic generator.
+
 ## StringBuilder and Unicode
 
 Use `StringBuilder` for incremental text construction:

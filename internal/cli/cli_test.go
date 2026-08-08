@@ -491,6 +491,51 @@ func TestReplEvaluatesPortableHMACAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableRandomAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-random-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "import trb/std/random\nimport trb/std/secure_random\nrandom.float() >= 0.0\nrandom.float() < 1.0\nrandom.integer(10) >= 0\nrandom.integer(10) < 10\nsecure_random.bytes(0).size()\nsecure_random.bytes(32).size()\n:quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "true : Boolean\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\n0 : Integer\n32 : Integer\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s random REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestReplRejectsInvalidPortableRandomBounds(t *testing.T) {
+	input := "import trb/std/random\nimport trb/std/secure_random\nrandom.integer(0)\nsecure_random.bytes(65537)\n:quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--mode", "go"}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	for _, want := range []string{
+		"random.integer upper bound must be greater than zero",
+		"secure_random.bytes length must be between 0 and 65536",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("random REPL error is missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -2216,6 +2261,64 @@ end
 			"true\nfalse\nfalse\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s portable hmac output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunPortableRandomAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby random run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript random run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/portable-random-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import trb/std/random
+import trb/std/secure_random
+
+def main()
+	fraction := random.float()
+	index := random.integer(10)
+	puts(fraction >= 0.0 && fraction < 1.0)
+	puts(index >= 0 && index < 10)
+	puts(secure_random.bytes(0).size())
+	puts(secure_random.bytes(32).size())
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "true\ntrue\n0\n32\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s portable random output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }
