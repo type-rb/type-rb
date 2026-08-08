@@ -35,8 +35,9 @@ highlighting. Command details belong in the [CLI reference](cli.md).
 
 The early official `trb/web` package discovers file-based routes at compile
 time and runs typed request, path-parameter, JSON decode, and JSON response
-handlers through the same socketless dispatcher in all three backends. Network
-server lifecycle and middleware are still under development.
+handlers through the same dispatcher in all three backends. Applications can
+start a generated Go, Ruby, or TypeScript HTTP server with `serve()`; middleware
+and production lifecycle controls are still under development.
 
 The compiler pipeline is:
 

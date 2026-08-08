@@ -121,6 +121,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return rubyJSONDecode(call, "("+arguments[0]+".body).dup.force_encoding(Encoding::UTF_8).scrub")
 	case "trb.web.json":
 		return rubyWebJSON(call, arguments)
+	case "trb.web.serve":
+		port := "3000"
+		if len(arguments) > 0 {
+			port = arguments[0]
+		}
+		return "trb_web_serve(" + port + ")"
 	case "trb.web.testing.dispatch":
 		return "trb_web_dispatch(" + arguments[0] + ")"
 	case "trb.std.strings.length":

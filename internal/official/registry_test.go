@@ -27,6 +27,10 @@ func TestBundledWebPackage(t *testing.T) {
 	if json.Intrinsic != "trb.web.json" || len(json.Parameters) != 2 || !json.Parameters[1].Optional || json.Return.String() != "Response" {
 		t.Fatalf("unexpected json contract: %#v", json)
 	}
+	serve := packageDefinition.Definition.Symbols["serve"]
+	if serve.Intrinsic != "trb.web.serve" || serve.Return.String() != "Void" || len(serve.Parameters) != 1 || !serve.Parameters[0].Optional {
+		t.Fatalf("unexpected serve contract: %#v", serve)
+	}
 }
 
 func TestBundledWebTestingPackage(t *testing.T) {

@@ -13,7 +13,13 @@ func TestCompileProjectAttachesWebRouteManifestToMain(t *testing.T) {
 			Filename:   "/project/src/main.trb",
 			ModulePath: "main",
 			Package:    "main",
-			Source:     []byte("def main()\n\treturn\nend\n"),
+			Source: []byte(`import { serve } from trb/web
+
+def main()
+	serve(4100)
+	return
+end
+`),
 		},
 		{
 			Filename:   "/project/src/routes/todos/[id].trb",
@@ -72,6 +78,46 @@ end
 				if artifact.IR.ModulePath != "main" && webintegration.ManifestFrom(artifact.IR.Extensions) != nil {
 					t.Fatalf("route manifest was attached to %s", artifact.IR.ModulePath)
 				}
+			}
+			assertWebServerTarget(t, mode, main)
+		})
+	}
+}
+
+func TestCompileProjectGeneratesDefaultWebServerPort(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/src/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { serve } from trb/web
+
+def main()
+	serve()
+	return
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/web-server", RubyLoader: "require_relative", SourceRoot: "/project/src", ProjectRoot: "/project"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			main := artifactForModule(artifacts, "main")
+			if main == nil {
+				t.Fatal("main artifact was not generated")
+			}
+			var target string
+			switch mode {
+			case "go":
+				target = "trbWebServe(3000)"
+			case "ruby":
+				target = "trb_web_serve(3000)"
+			case "typescript":
+				target = "trb_web_serve(3000);"
+			}
+			if !strings.Contains(string(main.Output), target) {
+				t.Fatalf("%s output does not contain %q:\n%s", mode, target, main.Output)
 			}
 		})
 	}
@@ -157,5 +203,23 @@ func assertWebHandlerTarget(t *testing.T, mode string, artifact *Artifact) {
 	}
 	if !strings.Contains(string(artifact.Output), target) {
 		t.Fatalf("%s output does not contain %q:\n%s", mode, target, artifact.Output)
+	}
+}
+
+func assertWebServerTarget(t *testing.T, mode string, artifact *Artifact) {
+	t.Helper()
+	var targets []string
+	switch mode {
+	case "go":
+		targets = []string{"func trbWebServe(port int64)", "trbWebServe(4100)"}
+	case "ruby":
+		targets = []string{"def trb_web_serve(port)", "trb_web_serve(4100)"}
+	case "typescript":
+		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(port: number)", "trb_web_serve(4100);"}
+	}
+	for _, target := range targets {
+		if !strings.Contains(string(artifact.Output), target) {
+			t.Fatalf("%s output does not contain %q:\n%s", mode, target, artifact.Output)
+		}
 	}
 }
