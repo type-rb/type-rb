@@ -727,6 +727,7 @@ func (c *CLI) runInit(args []string) error {
 	flags.SetOutput(c.Stderr)
 	mode := flags.String("mode", "", "ruby, go, or typescript")
 	module := flags.String("module", "", "Go module path")
+	template := flags.String("template", "", "project template (web)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -740,10 +741,16 @@ func (c *CLI) runInit(args []string) error {
 	if *mode == "" {
 		return errors.New("init requires --mode ruby, --mode go, or --mode typescript")
 	}
+	if *template != "" && *template != "web" {
+		return fmt.Errorf("unknown project template %q; available template: web", *template)
+	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
 	}
 	config := project.New(root, *mode)
+	if *template == "web" {
+		config.SourceDir = "src"
+	}
 	if *mode == "go" {
 		config.Go.Module = *module
 		if config.Go.Module == "" {
@@ -755,6 +762,10 @@ func (c *CLI) runInit(args []string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	templateFiles := initTemplateFiles(config, *template)
+	if err := checkInitTemplateTargets(templateFiles); err != nil {
+		return err
+	}
 	if err := config.Save(); err != nil {
 		return err
 	}
@@ -762,8 +773,14 @@ func (c *CLI) runInit(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := writeInitTemplate(templateFiles); err != nil {
+		return err
+	}
 	fmt.Fprintln(c.Stdout, config.Path)
 	fmt.Fprintln(c.Stdout, manifest)
+	for _, file := range templateFiles {
+		fmt.Fprintln(c.Stdout, file.Path)
+	}
 	return nil
 }
 
@@ -1232,7 +1249,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "TypeRB compiler and package manager")
 	fmt.Fprintln(c.Stdout, "")
 	fmt.Fprintln(c.Stdout, "Usage:")
-	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [directory]")
+	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [--template web] [directory]")
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--outfile FILE]")
