@@ -3046,23 +3046,23 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship:type rb:go\"}\n405\nPOST\n{\"error\":\"method_not_allowed\"}\n413\n{\"error\":\"payload_too_large\"}\n"; stdout.String() != want {
+		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship:type rb:go\"}\n405\nOPTIONS, POST\n{\"error\":\"method_not_allowed\"}\n413\n{\"error\":\"payload_too_large\"}\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web JSON output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }
 
-func TestRunOfficialWebHeadAcrossAvailableBackends(t *testing.T) {
+func TestRunOfficialWebMethodSemanticsAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
 			if _, err := exec.LookPath("ruby"); err != nil {
-				t.Log("ruby is not installed; skipping Ruby trb/web HEAD run")
+				t.Log("ruby is not installed; skipping Ruby trb/web method semantics run")
 				continue
 			}
 		}
 		if mode == "typescript" {
 			if _, err := exec.LookPath("node"); err != nil {
-				t.Log("node is not installed; skipping TypeScript trb/web HEAD run")
+				t.Log("node is not installed; skipping TypeScript trb/web method semantics run")
 				continue
 			}
 		}
@@ -3091,6 +3091,14 @@ def main()
 	puts(explicit.status)
 	puts(explicit.body.size())
 	puts(explicit.headers["x-handler"][0])
+	automatic_options := dispatch(request("OPTIONS", "/fallback"))
+	puts(automatic_options.status)
+	puts(automatic_options.headers["allow"][0])
+	puts(automatic_options.body.size())
+	explicit_options := dispatch(request("OPTIONS", "/explicit"))
+	puts(explicit_options.status)
+	puts(explicit_options.headers["x-handler"][0])
+	puts(explicit_options.body.to_s())
 	unsupported := dispatch(request("POST", "/fallback"))
 	puts(unsupported.status)
 	puts(unsupported.headers["allow"][0])
@@ -3118,6 +3126,11 @@ end
 def head(_context: Context): Response
 	puts("explicit:head")
 	return Response.new(status: 202, headers: {"x-handler" => ["head"]}, body: "head".to_bytes())
+end
+
+def options(_context: Context): Response
+	puts("explicit:options")
+	return Response.new(status: 203, headers: {"x-handler" => ["options"]}, body: "explicit-options".to_bytes())
 end
 `
 		middlewareSource := `import { Context, Next, Response } from trb/web
@@ -3149,9 +3162,9 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "middleware:before\nfallback:get\nmiddleware:after\n200\n0\nget\nmiddleware:before\nexplicit:head\nmiddleware:after\n202\n0\nhead\n405\nGET, HEAD\n{\"error\":\"method_not_allowed\"}\n404\n0\n"
+		want := "middleware:before\nfallback:get\nmiddleware:after\n200\n0\nget\nmiddleware:before\nexplicit:head\nmiddleware:after\n202\n0\nhead\nmiddleware:before\nmiddleware:after\n204\nGET, HEAD, OPTIONS\n0\nmiddleware:before\nexplicit:options\nmiddleware:after\n203\noptions\nexplicit-options\n405\nGET, HEAD, OPTIONS\n{\"error\":\"method_not_allowed\"}\n404\n0\n"
 		if stdout.String() != want {
-			t.Fatalf("unexpected %s trb/web HEAD output: want %q, got %q", mode, want, stdout.String())
+			t.Fatalf("unexpected %s trb/web method semantics output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

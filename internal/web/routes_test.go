@@ -35,6 +35,19 @@ func TestDiscoverBuildsDeterministicFileRouteManifest(t *testing.T) {
 	}
 }
 
+func TestUniquePathRoutesKeepsOneRepresentativeInManifestOrder(t *testing.T) {
+	routes := []Route{
+		{Method: "GET", Path: "/todos", ModulePath: "routes/todos"},
+		{Method: "POST", Path: "/todos", ModulePath: "routes/todos"},
+		{Method: "GET", Path: "/users/:id", ModulePath: "routes/users/[id]"},
+	}
+
+	unique := UniquePathRoutes(routes)
+	if len(unique) != 2 || unique[0].Path != "/todos" || unique[1].Path != "/users/:id" {
+		t.Fatalf("unexpected unique routes: %#v", unique)
+	}
+}
+
 func TestDiscoverRejectsAmbiguousRoutes(t *testing.T) {
 	root := t.TempDir()
 	sources := []Source{

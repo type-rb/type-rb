@@ -109,6 +109,11 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		g.indent--
 		g.line("}")
 	}
+	g.line("if len(allowedMethods) > 0 {")
+	g.indent++
+	g.line("allowedMethods = append(allowedMethods, \"OPTIONS\")")
+	g.indent--
+	g.line("}")
 	g.line("slices.Sort(allowedMethods)")
 	g.line("allowedMethods = slices.Compact(allowedMethods)")
 	g.line("dispatchMethod := method")
@@ -144,6 +149,44 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		for middlewareIndex := len(route.Middlewares) - 1; middlewareIndex >= 0; middlewareIndex-- {
 			middleware := route.Middlewares[middlewareIndex]
 			nextName := "nextHandler" + strconv.Itoa(routeIndex) + "_" + strconv.Itoa(middlewareIndex)
+			g.line(nextName + " := " + handlerName)
+			g.line(handlerName + " = func(context web.Context) web.Response {")
+			g.indent++
+			g.line("return " + g.webCallee(middleware.ModulePath, middleware.TargetHandler, directories) + "(context, &trbWebNext{handler: " + nextName + "})")
+			g.indent--
+			g.line("}")
+		}
+		g.line("return " + handlerName + "(" + contextName + ")")
+		g.indent--
+		g.line("}")
+	}
+	for routeIndex, route := range webintegration.UniquePathRoutes(routes) {
+		segments := webRouteSegments(route.Path)
+		condition := []string{"method == \"OPTIONS\"", "len(segments) == " + strconv.Itoa(len(segments))}
+		for index, segment := range segments {
+			if !strings.HasPrefix(segment, ":") {
+				condition = append(condition, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
+			}
+		}
+		g.line("if " + strings.Join(condition, " && ") + " {")
+		g.indent++
+		g.line("pathParameters := map[string]string{}")
+		for index, segment := range segments {
+			if strings.HasPrefix(segment, ":") {
+				g.line("pathParameters[" + strconv.Quote(strings.TrimPrefix(segment, ":")) + "] = segments[" + strconv.Itoa(index) + "]")
+			}
+		}
+		contextName := "optionsContext" + strconv.Itoa(routeIndex)
+		handlerName := "optionsHandler" + strconv.Itoa(routeIndex)
+		g.line(contextName + " := web.Context{Request: request, PathParameters: pathParameters}")
+		g.line(handlerName + " := func(context web.Context) web.Response {")
+		g.indent++
+		g.line("return web.Response{Status: 204, Headers: map[string][]string{\"allow\": []string{strings.Join(allowedMethods, \", \")}}, Body: []byte{}}")
+		g.indent--
+		g.line("}")
+		for middlewareIndex := len(route.Middlewares) - 1; middlewareIndex >= 0; middlewareIndex-- {
+			middleware := route.Middlewares[middlewareIndex]
+			nextName := "optionsNextHandler" + strconv.Itoa(routeIndex) + "_" + strconv.Itoa(middlewareIndex)
 			g.line(nextName + " := " + handlerName)
 			g.line(handlerName + " = func(context web.Context) web.Response {")
 			g.indent++

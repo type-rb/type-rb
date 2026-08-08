@@ -77,6 +77,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			g.line("if (" + strings.Join(condition, " && ") + ") explicit_head = true;")
 		}
 	}
+	g.line(`if (allowed_methods.length > 0) allowed_methods.push("OPTIONS");`)
 	g.line("allowed_methods = [...new Set(allowed_methods)].sort();")
 	g.line("let dispatch_method = method;")
 	g.line(`if (method === "HEAD" && !explicit_head && allowed_methods.includes("GET")) dispatch_method = "GET";`)
@@ -107,6 +108,36 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			g.line(handlerName + " = (middleware_context: TrbWebContext): TrbWebResponse => " + middleware.TargetHandler + "(middleware_context, new TrbWebNext(" + nextName + "));")
 		}
 		g.line("return trb_web_finalize_response(request, " + handlerName + "(" + contextName + "));")
+		g.indent--
+		g.line("}")
+	}
+	for routeIndex, route := range webintegration.UniquePathRoutes(routes) {
+		segments := typescriptWebRouteSegments(route.Path)
+		condition := []string{`method === "OPTIONS"`, "segments.length === " + strconv.Itoa(len(segments))}
+		for index, segment := range segments {
+			if !strings.HasPrefix(segment, ":") {
+				condition = append(condition, "segments["+strconv.Itoa(index)+"] === "+strconv.Quote(segment))
+			}
+		}
+		g.line("if (" + strings.Join(condition, " && ") + ") {")
+		g.indent++
+		g.line("const path_parameters: Record<string, string> = {};")
+		for index, segment := range segments {
+			if strings.HasPrefix(segment, ":") {
+				g.line("path_parameters[" + strconv.Quote(strings.TrimPrefix(segment, ":")) + "] = segments[" + strconv.Itoa(index) + "]!;")
+			}
+		}
+		contextName := "options_context_" + strconv.Itoa(routeIndex)
+		handlerName := "options_handler_" + strconv.Itoa(routeIndex)
+		g.line("const " + contextName + ": TrbWebContext = { request, path_parameters };")
+		g.line("let " + handlerName + ` = (_middleware_context: TrbWebContext): TrbWebResponse => ({ status: 204, headers: { "allow": [allowed_methods.join(", ")] }, body: new Uint8Array() });`)
+		for middlewareIndex := len(route.Middlewares) - 1; middlewareIndex >= 0; middlewareIndex-- {
+			middleware := route.Middlewares[middlewareIndex]
+			nextName := "options_next_handler_" + strconv.Itoa(routeIndex) + "_" + strconv.Itoa(middlewareIndex)
+			g.line("const " + nextName + " = " + handlerName + ";")
+			g.line(handlerName + " = (middleware_context: TrbWebContext): TrbWebResponse => " + middleware.TargetHandler + "(middleware_context, new TrbWebNext(" + nextName + "));")
+		}
+		g.line("return " + handlerName + "(" + contextName + ");")
 		g.indent--
 		g.line("}")
 	}

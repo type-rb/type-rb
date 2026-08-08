@@ -66,6 +66,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			g.line("explicit_head = true if "+strings.Join(condition, " && "), "")
 		}
 	}
+	g.line(`allowed_methods << "OPTIONS" unless allowed_methods.empty?`, "")
 	g.line("allowed_methods = allowed_methods.sort.uniq", "")
 	g.line("dispatch_method = method", "")
 	g.line(`dispatch_method = "GET" if method == "HEAD" && !explicit_head && allowed_methods.include?("GET")`, "")
@@ -96,6 +97,36 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			g.line(handlerName+" = ->(middleware_context) { "+middleware.TargetHandler+"(middleware_context, TrbWebNext.new("+nextName+")) }", "")
 		}
 		g.line("return trb_web_finalize_response(request, "+handlerName+".call("+contextName+"))", "")
+		g.indent--
+		g.line("end", "")
+	}
+	for routeIndex, route := range webintegration.UniquePathRoutes(routes) {
+		segments := rubyWebRouteSegments(route.Path)
+		condition := []string{`method == "OPTIONS"`, "segments.length == " + strconv.Itoa(len(segments))}
+		for index, segment := range segments {
+			if !strings.HasPrefix(segment, ":") {
+				condition = append(condition, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
+			}
+		}
+		g.line("if "+strings.Join(condition, " && "), "")
+		g.indent++
+		g.line("path_parameters = {}", "")
+		for index, segment := range segments {
+			if strings.HasPrefix(segment, ":") {
+				g.line("path_parameters["+strconv.Quote(strings.TrimPrefix(segment, ":"))+"] = segments["+strconv.Itoa(index)+"]", "")
+			}
+		}
+		contextName := "options_context_" + strconv.Itoa(routeIndex)
+		handlerName := "options_handler_" + strconv.Itoa(routeIndex)
+		g.line(contextName+" = Context.new(request: request, path_parameters: path_parameters)", "")
+		g.line(handlerName+` = ->(_middleware_context) { Response.new(status: 204, headers: { "allow" => [allowed_methods.join(", ")] }, body: "".b) }`, "")
+		for middlewareIndex := len(route.Middlewares) - 1; middlewareIndex >= 0; middlewareIndex-- {
+			middleware := route.Middlewares[middlewareIndex]
+			nextName := "options_next_handler_" + strconv.Itoa(routeIndex) + "_" + strconv.Itoa(middlewareIndex)
+			g.line(nextName+" = "+handlerName, "")
+			g.line(handlerName+" = ->(middleware_context) { "+middleware.TargetHandler+"(middleware_context, TrbWebNext.new("+nextName+")) }", "")
+		}
+		g.line("return "+handlerName+".call("+contextName+")", "")
 		g.indent--
 		g.line("end", "")
 	}
