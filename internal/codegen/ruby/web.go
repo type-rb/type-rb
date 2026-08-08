@@ -43,13 +43,19 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 
 	g.line("def trb_web_dispatch(request)", "")
 	g.indent++
+	g.line("trb_web_dispatch_with_body_limit(request, TRB_WEB_DEFAULT_MAX_BODY_BYTES)", "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
+	g.line("def trb_web_dispatch_with_body_limit(request, max_body_bytes)", "")
+	g.indent++
 	g.line("begin", "")
 	g.indent++
 	g.line("request = trb_web_normalize_request(request)", "")
 	g.line("normalized_path = trb_web_normalize_path(request.path)", "")
 	g.line("return trb_web_finalize_response(request, trb_web_bad_request) if normalized_path.nil?", "")
 	g.line("request = Request.new(method: request.method, path: normalized_path, query_string: request.query_string, headers: request.headers, body: request.body)", "")
-	g.line("return trb_web_finalize_response(request, trb_web_payload_too_large) if request.body.bytesize > TRB_WEB_MAX_BODY_BYTES", "")
+	g.line("return trb_web_finalize_response(request, trb_web_payload_too_large) if request.body.bytesize > max_body_bytes", "")
 	g.line("method = request.method.upcase", "")
 	g.line(`segments = request.path == "/" ? [] : request.path.delete_prefix("/").split("/", -1)`, "")
 	g.line("allowed_methods = []", "")
@@ -151,7 +157,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 }
 
 func (g *generator) webProtocolResponses() {
-	g.line("TRB_WEB_MAX_BODY_BYTES = "+strconv.Itoa(webintegration.MaxBodyBytes), "")
+	g.line("TRB_WEB_DEFAULT_MAX_BODY_BYTES = "+strconv.Itoa(webintegration.MaxBodyBytes), "")
 	g.line("", "")
 	g.line("def trb_web_normalize_request(request)", "")
 	g.indent++
@@ -254,14 +260,33 @@ func rubyWebRouteSegments(path string) []string {
 
 func (g *generator) webServer() {
 	g.line("", "")
-	g.line("def trb_web_serve(port)", "")
+	g.line("def trb_web_serve(config)", "")
 	g.indent++
 	g.line(`require "socket"`, "")
-	g.line(`server = TCPServer.new("0.0.0.0", port)`, "")
-	g.line("loop do", "")
+	g.line("server = nil", "")
+	g.line("connections = {}", "")
+	g.line("state_lock = Mutex.new", "")
+	g.line("stopping = false", "")
+	g.line("previous_signal_handlers = {}", "")
+	g.line("trb_web_validate_server_config(config)", "")
+	g.line(`server = TCPServer.new(config.host, config.port)`, "")
+	g.line(`%w[INT TERM].each do |signal|`, "")
 	g.indent++
-	g.line("client = server.accept", "")
-	g.line("Thread.new(client) do |connection|", "")
+	g.line("previous_signal_handlers[signal] = Signal.trap(signal) do", "")
+	g.indent++
+	g.line("stopping = true", "")
+	g.indent--
+	g.line("end", "")
+	g.indent--
+	g.line("end", "")
+	g.line("until stopping", "")
+	g.indent++
+	g.line("ready = IO.select([server], nil, nil, 0.1)", "")
+	g.line("next if ready.nil?", "")
+	g.line("client = server.accept_nonblock(exception: false)", "")
+	g.line("next if client == :wait_readable", "")
+	g.line("state_lock.synchronize { connections[client] = nil }", "")
+	g.line("worker = Thread.new(client) do |connection|", "")
 	g.indent++
 	g.line("begin", "")
 	g.indent++
@@ -284,7 +309,7 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("end", "")
 	g.line(`content_length = (headers["content-length"]&.first || "0").to_i`, "")
-	g.line("body_too_large = content_length > TRB_WEB_MAX_BODY_BYTES", "")
+	g.line("body_too_large = content_length > config.body_limit_bytes", "")
 	g.line("if body_too_large", "")
 	g.indent++
 	g.line("response = trb_web_payload_too_large", "")
@@ -294,7 +319,7 @@ func (g *generator) webServer() {
 	g.line(`body = content_length.positive? ? connection.read(content_length) : "".b`, "")
 	g.line(`path, query_string = target.split("?", 2)`, "")
 	g.line(`query_string ||= ""`, "")
-	g.line("response = trb_web_dispatch(Request.new(method: method, path: path, query_string: query_string, headers: headers, body: body))", "")
+	g.line("response = trb_web_dispatch_with_body_limit(Request.new(method: method, path: path, query_string: query_string, headers: headers, body: body), config.body_limit_bytes)", "")
 	g.indent--
 	g.line("end", "")
 	g.line(`reason = { 200 => "OK", 201 => "Created", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 405 => "Method Not Allowed", 413 => "Content Too Large", 500 => "Internal Server Error" }[response.status] || "Response"`, "")
@@ -322,20 +347,45 @@ func (g *generator) webServer() {
 	g.line("ensure", "")
 	g.indent++
 	g.line("connection.close", "")
+	g.line("state_lock.synchronize { connections.delete(connection) }", "")
 	g.indent--
 	g.line("end", "")
 	g.indent--
 	g.line("end", "")
+	g.line("state_lock.synchronize { connections[client] = worker if connections.key?(client) }", "")
 	g.indent--
 	g.line("end", "")
-	g.indent--
-	g.line("rescue Interrupt", "")
-	g.indent++
-	g.line("nil", "")
 	g.indent--
 	g.line("ensure", "")
 	g.indent++
 	g.line("server&.close", "")
+	g.line("active_connections = state_lock.synchronize { connections.dup }", "")
+	g.line("active_workers = active_connections.values.compact", "")
+	g.line("deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + (config.shutdown_timeout_milliseconds / 1000.0)", "")
+	g.line("active_workers.each do |worker|", "")
+	g.indent++
+	g.line("remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)", "")
+	g.line("break if remaining <= 0", "")
+	g.line("worker.join(remaining)", "")
+	g.indent--
+	g.line("end", "")
+	g.line("active_connections.each_key { |connection| connection.close unless connection.closed? }", "")
+	g.line("active_workers.each do |worker|", "")
+	g.indent++
+	g.line("worker.kill if worker.alive?", "")
+	g.line("worker.join", "")
+	g.indent--
+	g.line("end", "")
+	g.line("previous_signal_handlers.each { |signal, handler| Signal.trap(signal, handler) }", "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
+	g.line("def trb_web_validate_server_config(config)", "")
+	g.indent++
+	g.line(`raise ArgumentError, "trb/web ServerConfig.host must not be empty" if config.host.strip.empty?`, "")
+	g.line(`raise ArgumentError, "trb/web ServerConfig.port must be between 1 and 65535" unless config.port.between?(1, 65_535)`, "")
+	g.line(`raise ArgumentError, "trb/web ServerConfig.body_limit_bytes must be greater than zero" unless config.body_limit_bytes.positive?`, "")
+	g.line(`raise ArgumentError, "trb/web ServerConfig.shutdown_timeout_milliseconds must not be negative" if config.shutdown_timeout_milliseconds.negative?`, "")
 	g.indent--
 	g.line("end", "")
 }

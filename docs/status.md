@@ -36,8 +36,13 @@ highlighting. Command details belong in the [CLI reference](cli.md).
 The early official `trb/web` package discovers file-based routes at compile
 time and runs typed request, path-parameter, JSON decode, and JSON response
 handlers through the same dispatcher in all three backends. Applications can
-start a generated Go, Ruby, or TypeScript HTTP server with `serve()`. Unhandled
-handler failures become a portable JSON 500 response. Before middleware runs,
+start a generated Go, Ruby, or TypeScript HTTP server with `serve()`. The
+optional `configure_server` value sets host, port, request-body limit, and
+graceful-shutdown timeout through typed keyword arguments. Every adapter
+validates that configuration before binding, handles SIGINT and SIGTERM, stops
+accepting new work, and gives active requests the configured time to finish.
+Unhandled handler failures become a portable JSON 500 response. Before
+middleware runs,
 request methods are uppercased and case-insensitive header names are merged
 under lowercase keys. Request paths are decoded exactly once as UTF-8 at the
 dispatcher boundary. Malformed escapes, encoded separators, backslashes, and
@@ -58,11 +63,12 @@ header map. An opt-in CORS middleware handles actual and preflight requests,
 explicit origin policies, credentials, exposed and allowed headers, and typed
 preflight cache duration. A request-ID middleware preserves bounded safe
 incoming IDs or generates cryptographically random IDs and exposes the chosen
-value to downstream handlers and the response. Production lifecycle controls
-and additional middleware are still under development. Routing distinguishes
+value to downstream handlers and the response. Additional middleware is still
+under development. Routing distinguishes
 missing paths from unsupported methods and returns a portable JSON 405 response
-with an `Allow` header. Request bodies are limited to 1 MiB before dispatch and
-oversized requests receive the same JSON 413 response in every backend. Query
+with an `Allow` header. Request bodies use a configurable limit of 1 MiB by
+default before dispatch, and oversized requests receive the same JSON 413
+response in every backend. Query
 parameters use the portable URL decoder and preserve repeated keys and source
 order instead of collapsing them into a hash. `query_values` returns all
 repeated values, while strict `query_value` reports malformed, missing, and

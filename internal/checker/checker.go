@@ -3114,6 +3114,7 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 
 func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Binding, arguments []ast.CallArgument, actual []types.Type, sc *scope) *stdlib.Symbol {
 	var parameters []types.Type
+	var parameterIndexes []int
 	required := 0
 	variadic := false
 	name := binding.Name
@@ -3128,6 +3129,53 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 			}
 		}
 		variadic = specialized.Variadic
+		keywordAware := false
+		for _, parameter := range specialized.Parameters {
+			keywordAware = keywordAware || parameter.Keyword
+		}
+		for _, argument := range arguments {
+			keywordAware = keywordAware || argument.Name != ""
+		}
+		if keywordAware {
+			used := make([]bool, len(specialized.Parameters))
+			position := 0
+			for _, argument := range arguments {
+				parameterIndex := -1
+				if argument.Name != "" {
+					for index, parameter := range specialized.Parameters {
+						if parameter.Keyword && parameter.Name == argument.Name {
+							parameterIndex = index
+							break
+						}
+					}
+					if parameterIndex < 0 {
+						c.error(argument.Value.Span(), fmt.Sprintf("%s() has no keyword argument %s", name, argument.Name))
+					}
+				} else {
+					for position < len(specialized.Parameters) && specialized.Parameters[position].Keyword {
+						position++
+					}
+					if position < len(specialized.Parameters) {
+						parameterIndex = position
+						position++
+					} else {
+						c.error(argument.Value.Span(), fmt.Sprintf("%s() does not accept this positional argument", name))
+					}
+				}
+				parameterIndexes = append(parameterIndexes, parameterIndex)
+				if parameterIndex >= 0 {
+					if used[parameterIndex] {
+						c.error(argument.Value.Span(), fmt.Sprintf("%s() receives argument %s more than once", name, specialized.Parameters[parameterIndex].Name))
+					}
+					used[parameterIndex] = true
+				}
+			}
+			for index, parameter := range specialized.Parameters {
+				if !parameter.Optional && !used[index] {
+					c.error(span, fmt.Sprintf("%s() is missing required argument %s", name, parameter.Name))
+				}
+			}
+		}
 	} else if binding.Export != nil {
 		parameters = append(parameters, binding.Export.Parameters...)
 		required = binding.Export.Required
@@ -3137,7 +3185,7 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		required = binding.Member.Required
 		variadic = binding.Member.Variadic
 	}
-	if len(arguments) < required || (!variadic && len(arguments) > len(parameters)) {
+	if len(parameterIndexes) == 0 && (len(arguments) < required || (!variadic && len(arguments) > len(parameters))) {
 		if variadic {
 			c.error(span, fmt.Sprintf("%s() expects at least %d arguments, got %d", name, required, len(arguments)))
 		} else {
@@ -3147,6 +3195,9 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 	}
 	for i, actualType := range actual {
 		parameterIndex := i
+		if len(parameterIndexes) > 0 {
+			parameterIndex = parameterIndexes[i]
+		}
 		if parameterIndex >= len(parameters) {
 			parameterIndex = len(parameters) - 1
 		}

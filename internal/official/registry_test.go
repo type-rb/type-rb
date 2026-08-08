@@ -27,8 +27,17 @@ func TestBundledWebPackage(t *testing.T) {
 	if json.Intrinsic != "trb.web.json" || len(json.Parameters) != 2 || !json.Parameters[1].Optional || json.Return.String() != "Response" {
 		t.Fatalf("unexpected json contract: %#v", json)
 	}
+	configureServer := packageDefinition.Definition.Symbols["configure_server"]
+	if configureServer.Intrinsic != "trb.web.configure_server" || configureServer.Return.String() != "ServerConfig" || len(configureServer.Parameters) != 4 {
+		t.Fatalf("unexpected configure_server contract: %#v", configureServer)
+	}
+	for _, parameter := range configureServer.Parameters {
+		if !parameter.Optional || !parameter.Keyword {
+			t.Fatalf("configure_server parameter is not optional keyword-only: %#v", parameter)
+		}
+	}
 	serve := packageDefinition.Definition.Symbols["serve"]
-	if serve.Intrinsic != "trb.web.serve" || serve.Return.String() != "Void" || len(serve.Parameters) != 1 || !serve.Parameters[0].Optional {
+	if serve.Intrinsic != "trb.web.serve" || serve.Return.String() != "Void" || len(serve.Parameters) != 1 || serve.Parameters[0].Type.String() != "ServerConfig" || !serve.Parameters[0].Optional {
 		t.Fatalf("unexpected serve contract: %#v", serve)
 	}
 }
