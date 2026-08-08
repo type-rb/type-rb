@@ -1,4 +1,4 @@
-import { Context, Next, Request, Response, add_header, empty, header_values, with_header } from trb/web
+import { Context, Next, Request, Response, empty, header_values, vary, with_header } from trb/web
 
 enum PreflightMaxAge
 	Disabled
@@ -53,7 +53,7 @@ end
 def _preflight_response(request: Request, origin: String, options: Options): Response
 	mut response := empty()
 	if _varies_by_origin?(options)
-		response = add_header(response, "vary", "Origin")
+		response = vary(response, "Origin")
 	end
 	allowed_origin := _allowed_origin(origin, options)
 	if allowed_origin == ""
@@ -67,7 +67,7 @@ def _preflight_response(request: Request, origin: String, options: Options): Res
 		requested_headers := header_values(request, "access-control-request-headers")
 		if !requested_headers.empty?()
 			response = with_header(response, "access-control-allow-headers", requested_headers.join(", "))
-			response = add_header(response, "vary", "Access-Control-Request-Headers")
+			response = vary(response, "Access-Control-Request-Headers")
 		end
 	else
 		response = with_header(response, "access-control-allow-headers", options.allow_headers.join(", "))
@@ -78,7 +78,7 @@ end
 def _apply_actual_response(response: Response, origin: String, options: Options): Response
 	mut result := response
 	if _varies_by_origin?(options)
-		result = add_header(result, "vary", "Origin")
+		result = vary(result, "Origin")
 	end
 	allowed_origin := _allowed_origin(origin, options)
 	if allowed_origin == ""
