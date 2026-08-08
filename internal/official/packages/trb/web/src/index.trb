@@ -15,3 +15,7 @@ record Response
 	headers: Hash<String, Array<String>>
 	body: Bytes
 end
+
+def path_param(context: Context, name: String): String
+	return context.path_parameters[name]
+end

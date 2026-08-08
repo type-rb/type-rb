@@ -152,7 +152,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 
 	modules := make([]resolver.Module, 0, len(units))
 	for _, source := range units {
-		modules = append(modules, resolver.Module{Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath], CompilerOwned: source.CompilerOwned})
+		modules = append(modules, resolver.Module{Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath], CompilerOwned: source.CompilerOwned, Official: source.Official})
 	}
 	catalog, catalogDiagnostics := resolver.NewCatalog(modules)
 	for _, source := range units {
@@ -221,7 +221,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
 		}
 	}
-	webRoutes, err := projectWebRoutes(units, programs, options)
+	webRoutes, err := projectWebRoutes(units, programs, resolutions, options)
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +231,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		program := programs[source.ModulePath]
 		checked := checkedPrograms[source.ModulePath]
 		lowered := lower.Program(checked)
+		assignWebHandlerTargets(lowered, webRoutes)
 		if source.ModulePath == ownerModule {
 			lowered.WebRoutes = webRoutes
 		}
@@ -243,7 +244,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	return artifacts, nil
 }
 
-func projectWebRoutes(units []SourceUnit, programs map[string]*ast.Program, options Options) ([]ir.WebRoute, error) {
+func projectWebRoutes(units []SourceUnit, programs map[string]*ast.Program, resolutions map[string]resolver.Result, options Options) ([]ir.WebRoute, error) {
 	if _, active := programs["trb/web/index"]; !active {
 		return nil, nil
 	}
@@ -256,6 +257,18 @@ func projectWebRoutes(units []SourceUnit, programs map[string]*ast.Program, opti
 		issue := issues[0]
 		return nil, &CompileError{Filename: issue.Filename, Diagnostics: []diagnostic.Diagnostic{{Severity: diagnostic.Error, Message: issue.Message, Span: issue.Span}}}
 	}
+	for _, route := range routes {
+		program := programs[route.ModulePath]
+		method := topLevelMethod(program, route.Handler)
+		if method == nil || !validWebHandler(method, resolutions[route.ModulePath]) {
+			message := fmt.Sprintf("%s %s handler must have signature def %s(context: Context): Response", route.Method, route.Path, route.Handler)
+			span := program.Span()
+			if method != nil {
+				span = method.Span()
+			}
+			return nil, &CompileError{Filename: route.Filename, Diagnostics: []diagnostic.Diagnostic{{Severity: diagnostic.Error, Message: message, Span: span}}}
+		}
+	}
 	result := make([]ir.WebRoute, 0, len(routes))
 	for _, route := range routes {
 		result = append(result, ir.WebRoute{
@@ -263,10 +276,56 @@ func projectWebRoutes(units []SourceUnit, programs map[string]*ast.Program, opti
 			Path:           route.Path,
 			ModulePath:     route.ModulePath,
 			Handler:        route.Handler,
+			TargetHandler:  route.TargetHandler,
 			PathParameters: append([]string(nil), route.PathParameters...),
 		})
 	}
 	return result, nil
+}
+
+func validWebHandler(method *ast.MethodStatement, resolved resolver.Result) bool {
+	if method.Class || len(method.TypeParameters) != 0 || len(method.Parameters) != 1 {
+		return false
+	}
+	parameter := method.Parameters[0]
+	if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest || !officialWebType(parameter.Type, "Context", resolved) {
+		return false
+	}
+	return officialWebType(method.ReturnType, "Response", resolved)
+}
+
+func officialWebType(ref ast.TypeRef, name string, resolved resolver.Result) bool {
+	if ref.Name != name || ref.Nullable || ref.Array || len(ref.Arguments) != 0 || len(ref.Union) != 0 {
+		return false
+	}
+	binding, imported := resolved.ImportedType(name)
+	return imported && binding.Import != nil && binding.Import.RuntimePath() == "trb/web/index"
+}
+
+func topLevelMethod(program *ast.Program, name string) *ast.MethodStatement {
+	if program == nil {
+		return nil
+	}
+	for _, statement := range program.Statements {
+		if method, ok := statement.(*ast.MethodStatement); ok && method.Name == name {
+			return method
+		}
+	}
+	return nil
+}
+
+func assignWebHandlerTargets(program *ir.Program, routes []ir.WebRoute) {
+	targets := map[string]string{}
+	for _, route := range routes {
+		if route.ModulePath == program.ModulePath {
+			targets[route.Handler] = route.TargetHandler
+		}
+	}
+	for _, statement := range program.Statements {
+		if method, ok := statement.(*ir.Method); ok {
+			method.TargetName = targets[method.Name]
+		}
+	}
 }
 
 func dependencySourceUnits(programs map[string]*ast.Program, options Options) []SourceUnit {

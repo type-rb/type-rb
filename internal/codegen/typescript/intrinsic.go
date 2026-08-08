@@ -158,6 +158,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.tsJSONDecode(call, arguments[0])
 	case "trb.internal.json.encode":
 		return g.tsJSONEncode(call, arguments[0])
+	case "trb.web.request_json":
+		return g.tsWebRequestJSON(call, arguments[0])
+	case "trb.web.json":
+		return g.tsWebJSON(call, arguments)
 	case "trb.std.strings.length":
 		return "Array.from(" + arguments[0] + ").length"
 	case "trb.std.strings.empty":
@@ -414,4 +418,35 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "undefined"
 	}
+}
+
+func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
+	if call.Codec == nil {
+		return "undefined"
+	}
+	parseCall := *call
+	parseCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("JsonValue"), types.FromName("JsonError")}}
+	source := "new TextDecoder().decode(" + request + ".body)"
+	parsed := tsJSONParse(&parseCall, source, false)
+	builder := &tsJSONCodecBuilder{}
+	decoder := builder.decoder(call.Codec)
+	valueType := tsCodecType(call.Codec)
+	return "((): " + tsType(call.ExprType()) + " => { const codecError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Decode, message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parsed + "; if (parsed.kind === \"Err\") { return Result.Err<" + valueType + ", JsonError>(parsed.error); } try { return Result.Ok<" + valueType + ", JsonError>(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return Result.Err<" + valueType + ", JsonError>((error as any).error as JsonError); } throw error; } })()"
+}
+
+func (g *generator) tsWebJSON(call *ir.Call, arguments []string) string {
+	if call.Codec == nil || len(arguments) == 0 {
+		return "undefined"
+	}
+	status := "200"
+	if len(arguments) > 1 {
+		status = arguments[1]
+	}
+	builder := &tsJSONCodecBuilder{}
+	encoder := builder.encoder(call.Codec)
+	stringifyCall := *call
+	stringifyCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), types.FromName("JsonError")}}
+	encoded := tsJSONStringify(&stringifyCall, encoder+"("+arguments[0]+")")
+	headers := `{ "content-type": ["application/json; charset=utf-8"] }`
+	return "(() => { " + builder.source.String() + " const encoded = " + encoded + "; if (encoded.kind === \"Err\") { return { status: 500, headers: " + headers + ", body: new TextEncoder().encode(\"{\\\"error\\\":\\\"internal_server_error\\\"}\") }; } return { status: " + status + ", headers: " + headers + ", body: new TextEncoder().encode(encoded.value) }; })()"
 }

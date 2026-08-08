@@ -117,6 +117,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return rubyJSONDecode(call, arguments[0])
 	case "trb.internal.json.encode":
 		return rubyJSONEncode(call, arguments[0])
+	case "trb.web.request_json":
+		return rubyJSONDecode(call, "("+arguments[0]+".body).dup.force_encoding(Encoding::UTF_8).scrub")
+	case "trb.web.json":
+		return rubyWebJSON(call, arguments)
 	case "trb.std.strings.length":
 		return arguments[0] + ".each_codepoint.count"
 	case "trb.std.strings.empty":
@@ -342,4 +346,17 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func rubyWebJSON(call *ir.Call, arguments []string) string {
+	if call.Codec == nil || len(arguments) == 0 {
+		return "nil"
+	}
+	status := "200"
+	if len(arguments) > 1 {
+		status = arguments[1]
+	}
+	encoded := rubyJSONEncode(call, arguments[0])
+	headers := `{ "content-type" => ["application/json; charset=utf-8"] }`
+	return "-> { encoded = " + encoded + "; if encoded.is_a?(Result::Err); Response.new(status: 500, headers: " + headers + ", body: \"{\\\"error\\\":\\\"internal_server_error\\\"}\".b); else; Response.new(status: " + status + ", headers: " + headers + ", body: encoded.value.b); end }.call"
 }

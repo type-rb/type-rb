@@ -24,6 +24,7 @@ type manifest struct {
 	Version            string                       `json:"version"`
 	Module             string                       `json:"module"`
 	Source             string                       `json:"source"`
+	SemanticProvider   string                       `json:"semanticProvider,omitempty"`
 	NativeDependencies map[string]map[string]string `json:"nativeDependencies,omitempty"`
 }
 
@@ -100,7 +101,7 @@ func load() map[string]*Package {
 				ModulePath: descriptor.Module,
 				Source:     string(source),
 				Kind:       stdlib.Portable,
-				Symbols:    map[string]stdlib.Symbol{},
+				Symbols:    semanticSymbols(descriptor.SemanticProvider),
 			},
 		}
 		return nil

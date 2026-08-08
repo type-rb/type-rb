@@ -22,6 +22,7 @@ type generator struct {
 	inConstructor bool
 	methods       map[string]bool
 	topMethods    map[string]bool
+	topTargets    map[string]string
 	staticMethods map[string]map[string]bool
 	records       map[string]bool
 	classes       map[string]bool
@@ -36,6 +37,7 @@ type generator struct {
 func Generate(program *ir.Program) string {
 	g := &generator{
 		topMethods:    map[string]bool{},
+		topTargets:    map[string]string{},
 		staticMethods: map[string]map[string]bool{},
 		records:       map[string]bool{},
 		classes:       map[string]bool{},
@@ -49,6 +51,9 @@ func Generate(program *ir.Program) string {
 		switch n := statement.(type) {
 		case *ir.Method:
 			g.topMethods[n.Name] = true
+			if n.TargetName != "" {
+				g.topTargets[n.Name] = n.TargetName
+			}
 		case *ir.Class:
 			g.classes[n.Name] = true
 			for _, member := range n.Body {
@@ -713,7 +718,11 @@ func (g *generator) classMethod(className string, method *ir.Method) {
 }
 
 func (g *generator) topLevelMethod(method *ir.Method) {
-	name := goMethodName(method.Name)
+	name := method.Name
+	if method.TargetName != "" {
+		name = method.TargetName
+	}
+	name = goMethodName(name)
 	if method.Name == "main" {
 		name = "main"
 	}
@@ -908,7 +917,11 @@ func (g *generator) expr(expression ir.Expression) string {
 				return g.receiver + "." + goMethodName(identifier.Name) + "(" + args + ")"
 			}
 			if g.topMethods[identifier.Name] {
-				name := goMethodName(identifier.Name)
+				name := identifier.Name
+				if target := g.topTargets[identifier.Name]; target != "" {
+					name = target
+				}
+				name = goMethodName(name)
 				if identifier.Name == "main" {
 					name = "main"
 				}
@@ -940,7 +953,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		name := g.expr(n.Receiver)
 		if identifier, ok := n.Receiver.(*ir.Identifier); ok && g.topMethods[identifier.Name] {
-			name = goMethodName(identifier.Name)
+			name = identifier.Name
+			if target := g.topTargets[identifier.Name]; target != "" {
+				name = target
+			}
+			name = goMethodName(name)
 		}
 		return name + "[" + strings.Join(arguments, ", ") + "]"
 	case *ir.Index:
@@ -1307,8 +1324,6 @@ func (g *generator) jsonDecode(call *ir.Call, argument string) string {
 	if call.Codec == nil {
 		return "nil"
 	}
-	g.requireImport("strconv", "")
-	g.requireImport("strings", "")
 	jsonAlias := g.jsonRuntimeAlias(call)
 	resultAlias := g.typeAliases["Result"]
 	if resultAlias == "" {
@@ -1338,6 +1353,12 @@ func (g *generator) jsonEncode(call *ir.Call, argument string) string {
 
 func (g *generator) jsonRuntimeAlias(call *ir.Call) string {
 	reference := expressionReference(call.Callee)
+	if reference != nil && reference.Intrinsic == "trb.web.request_json" {
+		if alias := g.typeAliases["JsonError"]; alias != "" {
+			return alias
+		}
+		return "json"
+	}
 	if reference != nil && reference.Alias != "" {
 		return goImportAlias(reference.Alias)
 	}
@@ -1418,10 +1439,12 @@ func (b *goJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 	case "string":
 		body = "if value.Kind != " + b.jsonAlias + ".JsonValueStringTag { " + expected("String") + " }; return value.StringValue, nil"
 	case "array":
+		b.generator.requireImport("strconv", "")
 		child := b.decoder(schema.Element)
 		elementType := b.generator.goCodecType(schema.Element)
 		body = "if value.Kind != " + b.jsonAlias + ".JsonValueArrayTag { " + expected("Array") + " }; decoded := make([]" + elementType + ", len(value.ArrayValue)); for index, item := range value.ArrayValue { child, err := " + child + "(item, path+\"/\"+strconv.Itoa(index)); if err != nil { var zero " + valueType + "; return zero, err }; decoded[index] = child }; return decoded, nil"
 	case "hash":
+		b.generator.requireImport("strings", "")
 		child := b.decoder(schema.Element)
 		elementType := b.generator.goCodecType(schema.Element)
 		body = "if value.Kind != " + b.jsonAlias + ".JsonValueObjectTag { " + expected("Object") + " }; decoded := make(map[string]" + elementType + ", len(value.ObjectValue)); for key, item := range value.ObjectValue { escaped := strings.ReplaceAll(strings.ReplaceAll(key, \"~\", \"~0\"), \"/\", \"~1\"); child, err := " + child + "(item, path+\"/\"+escaped); if err != nil { var zero " + valueType + "; return zero, err }; decoded[key] = child }; return decoded, nil"

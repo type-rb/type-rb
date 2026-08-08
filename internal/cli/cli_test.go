@@ -2925,6 +2925,77 @@ func TestRunTypedJSONRecordCodecsAcrossAvailableBackends(t *testing.T) {
 	}
 }
 
+func TestRunOfficialWebJSONAPIsAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web JSON run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web JSON run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-json-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { Context, Request, json, path_param, request_json } from trb/web
+import { Result } from trb/std/result
+
+record TodoRequest
+	title: String
+end
+
+record TodoResponse
+	id: String
+	title: String
+end
+
+def main()
+	request := Request.new(
+		method: "POST",
+		path: "/todos/7",
+		headers: {},
+		body: "{\"title\":\"ship\"}".to_bytes(),
+	)
+	context := Context.new(request: request, path_parameters: { "id": "7" })
+	case request_json<TodoRequest>(request)
+	when Result::Ok(payload)
+		response := json(TodoResponse.new(id: path_param(context, "id"), title: payload.title), 201)
+		puts(response.status)
+		puts(response.body.to_s())
+	when Result::Err(error)
+		puts(error.message)
+	end
+	return
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "201\n{\"id\":\"7\",\"title\":\"ship\"}\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web JSON output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunWithoutSourceRequiresMain(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

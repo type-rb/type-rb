@@ -28,6 +28,7 @@ type WebRoute struct {
 	Path           string
 	ModulePath     string
 	Handler        string
+	TargetHandler  string
 	PathParameters []string
 }
 
@@ -161,6 +162,7 @@ type Parameter struct {
 type Method struct {
 	Base
 	Name           string
+	TargetName     string
 	TypeParameters []string
 	Parameters     []Parameter
 	ReturnType     types.Type

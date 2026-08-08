@@ -206,6 +206,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.jsonDecode(call, arguments[0])
 	case "trb.internal.json.encode":
 		return g.jsonEncode(call, arguments[0])
+	case "trb.web.request_json":
+		return g.webRequestJSON(call, arguments[0])
+	case "trb.web.json":
+		return g.webJSON(call, arguments)
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"
@@ -538,4 +542,38 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) webRequestJSON(call *ir.Call, request string) string {
+	return g.jsonDecode(call, "string("+request+".Body)")
+}
+
+func (g *generator) webJSON(call *ir.Call, arguments []string) string {
+	if call.Codec == nil || len(arguments) == 0 {
+		return "nil"
+	}
+	status := "200"
+	if len(arguments) > 1 {
+		status = arguments[1]
+	}
+	jsonAlias := g.typeAliases["JsonError"]
+	if jsonAlias == "" {
+		jsonAlias = "json"
+	}
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	webAlias := "web"
+	if reference := expressionReference(call.Callee); reference != nil {
+		if alias := g.referenceAlias(reference); alias != "" {
+			webAlias = alias
+		}
+	}
+	builder := &goJSONCodecBuilder{generator: g, jsonAlias: jsonAlias, errorType: jsonAlias + ".JsonError"}
+	encoder := builder.encoder(call.Codec)
+	encoded := jsonAlias + ".Stringify(" + encoder + "(" + arguments[0] + "))"
+	responseType := webAlias + ".Response"
+	headers := "map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}"
+	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + responseType + "{Status: 500, Headers: " + headers + ", Body: []byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")} }; return " + responseType + "{Status: " + status + ", Headers: " + headers + ", Body: []byte(encoded.OkValue)} }()"
 }
