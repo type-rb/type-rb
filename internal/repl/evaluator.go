@@ -1473,6 +1473,28 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{Type: typ, Data: pathpkg.Base(cleaned)}, nil
 		}
 		return Value{Type: typ, Data: pathpkg.Dir(cleaned)}, nil
+	case "trb.std.url.encode_component":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("url.encode_component expects String")
+		}
+		return Value{Type: typ, Data: encodeURLComponent(value)}, nil
+	case "trb.std.url.decode_component":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		input, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("url.decode_component expects String")
+		}
+		value, kind, message := decodeURLComponent(input)
+		if kind != "" {
+			return e.percentDecodeResultErr(typ, kind, input, message)
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: value})
 	case "trb.internal.filesystem.exists":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -2699,6 +2721,77 @@ func (e *Evaluator) base64DecodeResultErr(resultType types.Type, kind, input str
 		"index":   {Type: types.FromName("Integer"), Data: index},
 		"message": {Type: types.FromName("String"), Data: message},
 	})
+}
+
+func (e *Evaluator) percentDecodeResultErr(resultType types.Type, kind, input, message string) (Value, error) {
+	kindDefinition, ok := e.definitions[symbolKey("trb/std/url/index", "PercentDecodeErrorKind")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("operation requires trb/std/url")
+	}
+	kindValue := Value{Type: types.FromName("PercentDecodeErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
+	return e.structuredResultErrFrom(resultType, "trb/std/url/index", "PercentDecodeError", map[string]Value{
+		"kind":    kindValue,
+		"input":   {Type: types.FromName("String"), Data: input},
+		"message": {Type: types.FromName("String"), Data: message},
+	})
+}
+
+func encodeURLComponent(value string) string {
+	const hexadecimal = "0123456789ABCDEF"
+	var builder strings.Builder
+	for _, octet := range []byte(value) {
+		if urlUnreserved(octet) {
+			builder.WriteByte(octet)
+			continue
+		}
+		builder.WriteByte('%')
+		builder.WriteByte(hexadecimal[octet>>4])
+		builder.WriteByte(hexadecimal[octet&15])
+	}
+	return builder.String()
+}
+
+func decodeURLComponent(input string) (string, string, string) {
+	characters := []rune(input)
+	value := make([]byte, 0, len(input))
+	for index := 0; index < len(characters); index++ {
+		character := characters[index]
+		if character != '%' {
+			value = append(value, []byte(string(character))...)
+			continue
+		}
+		if index+2 >= len(characters) {
+			return "", "InvalidEscape", "invalid percent escape in URL component"
+		}
+		high, highOK := hexadecimalValue(characters[index+1])
+		low, lowOK := hexadecimalValue(characters[index+2])
+		if !highOK || !lowOK {
+			return "", "InvalidEscape", "invalid percent escape in URL component"
+		}
+		value = append(value, high<<4|low)
+		index += 2
+	}
+	if !utf8.Valid(value) {
+		return "", "InvalidUtf8", "decoded URL component is not valid UTF-8"
+	}
+	return string(value), "", ""
+}
+
+func urlUnreserved(value byte) bool {
+	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '-' || value == '.' || value == '_' || value == '~'
+}
+
+func hexadecimalValue(value rune) (byte, bool) {
+	switch {
+	case value >= '0' && value <= '9':
+		return byte(value - '0'), true
+	case value >= 'A' && value <= 'F':
+		return byte(value - 'A' + 10), true
+	case value >= 'a' && value <= 'f':
+		return byte(value - 'a' + 10), true
+	default:
+		return 0, false
+	}
 }
 
 func decodeBase64(input string, urlSafe bool) ([]byte, string, int64, string) {

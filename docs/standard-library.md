@@ -315,6 +315,30 @@ The package provides `clean`, two-part `join`, `absolute`, `components`,
 `base`, `directory`, and `separator`. Its behavior does not depend on the
 target OS or current directory.
 
+## URL components
+
+`trb/std/url` percent-encodes and decodes individual URL components:
+
+```trb
+import { PercentDecodeError, decode_component, encode_component } from trb/std/url
+import { Result } from trb/std/result
+
+encoded := encode_component("todos/日本語")
+
+def decode_segment(value: String): Result<String, PercentDecodeError>
+	return decode_component(value)
+end
+```
+
+`encode_component` preserves only RFC 3986 unreserved ASCII characters and
+encodes all other UTF-8 bytes with uppercase hexadecimal escapes. It does not
+encode spaces as `+`. `decode_component` likewise preserves a literal `+` and
+returns `Result<String, PercentDecodeError>` for malformed escapes or decoded
+bytes that are not valid UTF-8.
+
+This API handles one path or query component, not a complete URL or form data.
+URL parsing and query construction remain future additions to the package.
+
 ## Filesystem
 
 `trb/std/filesystem` is the explicit host-filesystem bridge. Every operation
@@ -426,6 +450,7 @@ The current portable standard library includes:
 - `trb/std/arrays`
 - `trb/std/hashes`
 - `trb/std/path`
+- `trb/std/url`
 - `trb/std/filesystem`
 - `trb/std/process`
 - `trb/std/json`

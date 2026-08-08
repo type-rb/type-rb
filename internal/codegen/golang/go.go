@@ -1292,6 +1292,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := g.goType(types.FromName("Base64DecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Index: " + index + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
+	percentDecodeError := func(kind, input, message string) string {
+		alias := g.typeAliases["PercentDecodeErrorKind"]
+		kindName := goConstantIdentifier("PercentDecodeErrorKind", kind)
+		if alias != "" {
+			kindName = alias + "." + kindName
+		}
+		value := g.goType(types.FromName("PercentDecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Message: " + strconv.Quote(message) + "}"
+		return resultError(value)
+	}
 	indexLookupError := func(index, size, message string) string {
 		value := g.goType(types.FromName("IndexLookupError")) + "{Index: " + index + ", Size: " + size + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
@@ -1339,6 +1348,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return pathCall("base") + "(" + arguments[0] + ")"
 	case "trb.std.path.directory":
 		return pathCall("directory") + "(" + arguments[0] + ")"
+	case "trb.std.url.encode_component":
+		g.requireImport("strings", "")
+		return "func(value string) string { const hexadecimal = \"0123456789ABCDEF\"; var builder strings.Builder; for _, octet := range []byte(value) { unreserved := octet >= 'A' && octet <= 'Z' || octet >= 'a' && octet <= 'z' || octet >= '0' && octet <= '9' || octet == '-' || octet == '.' || octet == '_' || octet == '~'; if unreserved { builder.WriteByte(octet) } else { builder.WriteByte('%'); builder.WriteByte(hexadecimal[octet>>4]); builder.WriteByte(hexadecimal[octet&15]) } }; return builder.String() }(" + arguments[0] + ")"
+	case "trb.std.url.decode_component":
+		g.requireImport("unicode/utf8", "utf8")
+		resultType, _, _ := filesystemResultType()
+		invalidEscape := percentDecodeError("InvalidEscape", "input", "invalid percent escape in URL component")
+		invalidUtf8 := percentDecodeError("InvalidUtf8", "input", "decoded URL component is not valid UTF-8")
+		return "func() " + resultType + " { input := " + arguments[0] + "; characters := []rune(input); value := make([]byte, 0, len(input)); hexadecimal := func(character rune) (byte, bool) { switch { case character >= '0' && character <= '9': return byte(character - '0'), true; case character >= 'A' && character <= 'F': return byte(character - 'A' + 10), true; case character >= 'a' && character <= 'f': return byte(character - 'a' + 10), true; default: return 0, false } }; for index := 0; index < len(characters); index++ { character := characters[index]; if character != '%' { value = append(value, []byte(string(character))...); continue }; if index+2 >= len(characters) { return " + invalidEscape + " }; high, highOK := hexadecimal(characters[index+1]); low, lowOK := hexadecimal(characters[index+2]); if !highOK || !lowOK { return " + invalidEscape + " }; value = append(value, high<<4|low); index += 2 }; if !utf8.Valid(value) { return " + invalidUtf8 + " }; return " + filesystemOK("string(value)") + " }()"
 	case "trb.internal.filesystem.exists":
 		g.requireImport("errors", "")
 		g.requireImport("os", "")

@@ -984,6 +984,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "({ kind: " + g.runtimeName("Base64DecodeErrorKind") + "." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("Base64DecodeError") + ")"
 		return resultError(value)
 	}
+	percentDecodeError := func(kind, input, message string) string {
+		value := "({ kind: " + g.runtimeName("PercentDecodeErrorKind") + "." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("PercentDecodeError") + ")"
+		return resultError(value)
+	}
 	indexLookupError := func(index, size, message string) string {
 		value := "({ index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("IndexLookupError") + ")"
 		return resultError(value)
@@ -1014,6 +1018,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return pathCall("base") + "(" + arguments[0] + ")"
 	case "trb.std.path.directory":
 		return pathCall("directory") + "(" + arguments[0] + ")"
+	case "trb.std.url.encode_component":
+		return "((value: string): string => { const bytes = new TextEncoder().encode(value); let encoded = \"\"; for (const byte of bytes) { const unreserved = byte >= 65 && byte <= 90 || byte >= 97 && byte <= 122 || byte >= 48 && byte <= 57 || byte === 45 || byte === 46 || byte === 95 || byte === 126; encoded += unreserved ? String.fromCharCode(byte) : \"%\" + byte.toString(16).toUpperCase().padStart(2, \"0\"); } return encoded; })(" + arguments[0] + ")"
+	case "trb.std.url.decode_component":
+		resultType, _, _ := filesystemResultType()
+		invalidEscape := percentDecodeError("InvalidEscape", "input", "invalid percent escape in URL component")
+		invalidUtf8 := percentDecodeError("InvalidUtf8", "input", "decoded URL component is not valid UTF-8")
+		return "((): " + resultType + " => { const input = " + arguments[0] + "; const characters = Array.from(input); const bytes: Array<number> = []; const encoder = new TextEncoder(); for (let index = 0; index < characters.length; index += 1) { const character = characters[index]!; if (character !== \"%\") { bytes.push(...encoder.encode(character)); continue; } if (index + 2 >= characters.length || !/^[0-9A-Fa-f]$/.test(characters[index + 1]!) || !/^[0-9A-Fa-f]$/.test(characters[index + 2]!)) { return " + invalidEscape + "; } bytes.push(Number.parseInt(characters[index + 1]! + characters[index + 2]!, 16)); index += 2; } try { const value = new TextDecoder(\"utf-8\", { fatal: true }).decode(Uint8Array.from(bytes)); return " + filesystemOK("value") + "; } catch { return " + invalidUtf8 + "; } })()"
 	case "trb.internal.filesystem.exists":
 		resultType, _, _ := filesystemResultType()
 		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "fs.statSync(__trbPath); return " + filesystemOK("true") + "; } catch (error) { if ((error as any)?.code === \"ENOENT\") { return " + filesystemOK("false") + "; } " + filesystemMessage + "return " + filesystemError("exists", "__trbPath", "message") + "; } })()"

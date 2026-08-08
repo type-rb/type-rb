@@ -104,6 +104,7 @@ var hexDecodeErrorType = types.FromName("HexDecodeError")
 var base64DecodeErrorType = types.FromName("Base64DecodeError")
 var indexLookupErrorType = types.FromName("IndexLookupError")
 var keyLookupErrorType = types.FromName("KeyLookupError")
+var percentDecodeErrorType = types.FromName("PercentDecodeError")
 
 var registry = map[string]*Package{
 	"trb/std/unit": {
@@ -172,6 +173,29 @@ end
 			"components": unary("components", "trb.std.path.components", stringType, arrayOf(stringType)),
 			"base":       unary("base", "trb.std.path.base", stringType, stringType),
 			"directory":  unary("directory", "trb.std.path.directory", stringType, stringType),
+		},
+	},
+	"trb/std/url": {
+		Path:       "trb/std/url",
+		ModulePath: "trb/std/url/index",
+		RuntimeExports: []RuntimeExport{
+			{Name: "PercentDecodeErrorKind", Kind: "enum"},
+			{Name: "PercentDecodeError", Kind: "record"},
+		},
+		Source: urlSource(),
+		Kind:   Portable,
+		Symbols: map[string]Symbol{
+			"encode_component": runtimeIndependent(unary("encode_component", "trb.std.url.encode_component", stringType, stringType)),
+			"decode_component": runtimeIndependent(unary("decode_component", "trb.std.url.decode_component", stringType, structuredErrorResult(stringType, percentDecodeErrorType))),
+		},
+	},
+	"trb/internal/url": {
+		Path:     "trb/internal/url",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"encode_component": unary("encode_component", "trb.std.url.encode_component", stringType, stringType),
+			"decode_component": unary("decode_component", "trb.std.url.decode_component", stringType, structuredErrorResult(stringType, percentDecodeErrorType)),
 		},
 	},
 	"trb/std/filesystem": {

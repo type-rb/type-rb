@@ -97,6 +97,29 @@ func TestEvaluatePortableNumericAndMathIntrinsics(t *testing.T) {
 	}
 }
 
+func TestEvaluatePortableURLComponentHelpers(t *testing.T) {
+	if got, want := encodeURLComponent("a b/😀+~"), "a%20b%2F%F0%9F%98%80%2B~"; got != want {
+		t.Fatalf("encodeURLComponent()=%q, want %q", got, want)
+	}
+	for _, test := range []struct {
+		input       string
+		want        string
+		wantKind    string
+		wantMessage string
+	}{
+		{input: "a%20b%2F%F0%9F%98%80%2B~", want: "a b/😀+~"},
+		{input: "a+b", want: "a+b"},
+		{input: "%", wantKind: "InvalidEscape", wantMessage: "invalid percent escape in URL component"},
+		{input: "%GG", wantKind: "InvalidEscape", wantMessage: "invalid percent escape in URL component"},
+		{input: "%FF", wantKind: "InvalidUtf8", wantMessage: "decoded URL component is not valid UTF-8"},
+	} {
+		got, kind, message := decodeURLComponent(test.input)
+		if got != test.want || kind != test.wantKind || message != test.wantMessage {
+			t.Fatalf("decodeURLComponent(%q)=(%q, %q, %q), want (%q, %q, %q)", test.input, got, kind, message, test.want, test.wantKind, test.wantMessage)
+		}
+	}
+}
+
 func TestEvaluateContextStopsCanceledEvaluation(t *testing.T) {
 	integer := types.FromName("Integer")
 	statements := []ir.Statement{
