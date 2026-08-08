@@ -19,17 +19,14 @@ type Program struct {
 	ModulePath string
 	GoModule   string
 	RubyLoader string
-	WebRoutes  []WebRoute
+	Extensions []Extension
 	Statements []Statement
 }
 
-type WebRoute struct {
-	Method         string
-	Path           string
-	ModulePath     string
-	Handler        string
-	TargetHandler  string
-	PathParameters []string
+// Extension is typed compile-time data contributed by a package integration.
+// The core IR transports it without knowing package-specific schemas.
+type Extension interface {
+	ExtensionName() string
 }
 
 type Statement interface{ irStatement() }

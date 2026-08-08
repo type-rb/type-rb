@@ -8,7 +8,14 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/token"
+)
+
+const (
+	ModulePath      = "trb/web/index"
+	ProjectProvider = "trb.web.routes"
 )
 
 var handlerMethods = map[string]bool{
@@ -42,6 +49,98 @@ type Issue struct {
 	Filename string
 	Message  string
 	Span     token.Span
+}
+
+type Manifest struct {
+	Routes []Route
+}
+
+func (*Manifest) ExtensionName() string { return ProjectProvider }
+
+func ManifestFrom(extensions []ir.Extension) *Manifest {
+	for _, extension := range extensions {
+		if manifest, ok := extension.(*Manifest); ok {
+			return manifest
+		}
+	}
+	return nil
+}
+
+func Analyze(sources []Source, resolutions map[string]resolver.Result, sourceRoot string) (*Manifest, []Issue) {
+	routes, issues := Discover(sources, sourceRoot)
+	if len(issues) > 0 {
+		return &Manifest{Routes: routes}, issues
+	}
+	for _, route := range routes {
+		program := sourceProgram(sources, route.ModulePath)
+		method := topLevelMethod(program, route.Handler)
+		if method == nil || !validHandler(method, resolutions[route.ModulePath]) {
+			span := program.Span()
+			if method != nil {
+				span = method.Span()
+			}
+			return &Manifest{Routes: routes}, []Issue{{
+				Filename: route.Filename,
+				Message:  fmt.Sprintf("%s %s handler must have signature def %s(context: Context): Response", route.Method, route.Path, route.Handler),
+				Span:     span,
+			}}
+		}
+	}
+	return &Manifest{Routes: routes}, nil
+}
+
+func (m *Manifest) MethodTargets() map[string]map[string]string {
+	result := map[string]map[string]string{}
+	if m == nil {
+		return result
+	}
+	for _, route := range m.Routes {
+		if result[route.ModulePath] == nil {
+			result[route.ModulePath] = map[string]string{}
+		}
+		result[route.ModulePath][route.Handler] = route.TargetHandler
+	}
+	return result
+}
+
+func sourceProgram(sources []Source, modulePath string) *ast.Program {
+	for _, source := range sources {
+		if source.ModulePath == modulePath {
+			return source.Program
+		}
+	}
+	return nil
+}
+
+func validHandler(method *ast.MethodStatement, resolved resolver.Result) bool {
+	if method.Class || len(method.TypeParameters) != 0 || len(method.Parameters) != 1 {
+		return false
+	}
+	parameter := method.Parameters[0]
+	if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest || !officialType(parameter.Type, "Context", resolved) {
+		return false
+	}
+	return officialType(method.ReturnType, "Response", resolved)
+}
+
+func officialType(ref ast.TypeRef, name string, resolved resolver.Result) bool {
+	if ref.Name != name || ref.Nullable || ref.Array || len(ref.Arguments) != 0 || len(ref.Union) != 0 {
+		return false
+	}
+	binding, imported := resolved.ImportedType(name)
+	return imported && binding.Import != nil && binding.Import.RuntimePath() == ModulePath
+}
+
+func topLevelMethod(program *ast.Program, name string) *ast.MethodStatement {
+	if program == nil {
+		return nil
+	}
+	for _, statement := range program.Statements {
+		if method, ok := statement.(*ast.MethodStatement); ok && method.Name == name {
+			return method
+		}
+	}
+	return nil
 }
 
 func Discover(sources []Source, sourceRoot string) ([]Route, []Issue) {

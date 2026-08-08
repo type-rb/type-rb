@@ -81,9 +81,7 @@ func Generate(program *ir.Program) string {
 		}
 		g.statement(statement)
 	}
-	if program.WebRoutes != nil {
-		g.webDispatcher(program.WebRoutes)
-	}
+	g.integrations(program.Extensions)
 	packageName := program.Package
 	if packageName == "" {
 		packageName = "main"

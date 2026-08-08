@@ -13,6 +13,9 @@ func TestBundledWebPackage(t *testing.T) {
 	if packageDefinition.Definition.ModulePath != "trb/web/index" {
 		t.Fatalf("module = %q", packageDefinition.Definition.ModulePath)
 	}
+	if packageDefinition.ProjectProvider != "trb.web.routes" {
+		t.Fatalf("project provider = %q", packageDefinition.ProjectProvider)
+	}
 	if packageDefinition.Definition.Source == "" {
 		t.Fatal("package source is empty")
 	}
