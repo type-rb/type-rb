@@ -1752,7 +1752,7 @@ func TestPortableURLComponentDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
-func TestPortableURLQueryLowersAcrossBackends(t *testing.T) {
+func TestPortableURLQueryCompilesFromSharedSourceAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
@@ -1772,24 +1772,29 @@ end
 	wants := map[string][]string{
 		"go": {
 			`type QueryParameter struct`,
+			`func parseQueryParameter(value string)`,
 			`func ParseQuery(value string)`,
-			`strings.Split(input, "&")`,
-			`parameters = append(parameters, QueryParameter{Name: name, Value: value})`,
 			`func BuildQuery(parameters []QueryParameter) string`,
+			`DecodeComponent(strings.Join`,
+			`encoded := EncodeComponent(value)`,
 		},
 		"ruby": {
 			`QueryParameter = Data.define(:name, :value)`,
+			`def _parse_query_parameter(value)`,
 			`def parse_query(value)`,
-			`input.split("&", -1)`,
-			`QueryParameter.new(name: name, value: value)`,
 			`def build_query(parameters)`,
+			`case (__trb_case1 = decode_component(`,
+			`invalid percent escape in URL query component`,
+			`encoded = encode_component(value)`,
 		},
 		"typescript": {
 			`export interface QueryParameter`,
+			`function _parse_query_parameter(value: string)`,
 			`export function parse_query(value: string)`,
-			`for (const part of input.split("&"))`,
-			`parameters.push(({ name, value } satisfies QueryParameter))`,
 			`export function build_query(parameters: Array<QueryParameter>): string`,
+			`const __trbCase1 = decode_component(`,
+			`invalid percent escape in URL query component`,
+			`const encoded: string = encode_component(value)`,
 		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {

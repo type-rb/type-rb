@@ -120,38 +120,6 @@ func TestEvaluatePortableURLComponentHelpers(t *testing.T) {
 	}
 }
 
-func TestEvaluatePortableURLQueryHelpers(t *testing.T) {
-	parameters, kind, failureInput := parseURLQuery("tag=go&tag=type+rb&empty&symbol=%2B&text=%E6%97%A5%E6%9C%AC%E8%AA%9E")
-	if kind != "" || failureInput != "" {
-		t.Fatalf("parseURLQuery() failed with kind=%q input=%q", kind, failureInput)
-	}
-	want := [][2]string{{"tag", "go"}, {"tag", "type rb"}, {"empty", ""}, {"symbol", "+"}, {"text", "日本語"}}
-	if len(parameters) != len(want) {
-		t.Fatalf("parseURLQuery() returned %d parameters, want %d", len(parameters), len(want))
-	}
-	for index := range want {
-		if parameters[index] != want[index] {
-			t.Fatalf("parseURLQuery()[%d]=%#v, want %#v", index, parameters[index], want[index])
-		}
-	}
-	if got, want := buildURLQuery(parameters), "tag=go&tag=type+rb&empty=&symbol=%2B&text=%E6%97%A5%E6%9C%AC%E8%AA%9E"; got != want {
-		t.Fatalf("buildURLQuery()=%q, want %q", got, want)
-	}
-	for _, test := range []struct {
-		input     string
-		wantKind  string
-		wantInput string
-	}{
-		{input: "name=%", wantKind: "InvalidEscape", wantInput: "%"},
-		{input: "%FF=value", wantKind: "InvalidUtf8", wantInput: "%FF"},
-	} {
-		_, kind, failureInput := parseURLQuery(test.input)
-		if kind != test.wantKind || failureInput != test.wantInput {
-			t.Fatalf("parseURLQuery(%q) failure=(%q, %q), want (%q, %q)", test.input, kind, failureInput, test.wantKind, test.wantInput)
-		}
-	}
-}
-
 func TestEvaluateContextStopsCanceledEvaluation(t *testing.T) {
 	integer := types.FromName("Integer")
 	statements := []ir.Statement{

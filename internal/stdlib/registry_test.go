@@ -127,7 +127,7 @@ func TestPortableBase64Contract(t *testing.T) {
 	}
 }
 
-func TestPortableURLComponentContract(t *testing.T) {
+func TestPortableURLContract(t *testing.T) {
 	definition, ok := Lookup("trb/std/url")
 	if !ok {
 		t.Fatal("url package is missing")
@@ -140,6 +140,19 @@ func TestPortableURLComponentContract(t *testing.T) {
 	}
 	if got := definition.Symbols["parse_query"].Return.String(); got != "Result<Array<QueryParameter>, PercentDecodeError>" {
 		t.Fatalf("url.parse_query return=%s, want Result<Array<QueryParameter>, PercentDecodeError>", got)
+	}
+	if definition.Symbols["parse_query"].Intrinsic != "" || definition.Symbols["build_query"].Intrinsic != "" {
+		t.Fatal("URL query operations must remain compiler-owned TypeRB source")
+	}
+	internal, ok := Lookup("trb/internal/url")
+	if !ok {
+		t.Fatal("internal URL package is missing")
+	}
+	if _, exists := internal.Symbols["parse_query"]; exists {
+		t.Fatal("internal URL package must not expose query parsing as an intrinsic")
+	}
+	if _, exists := internal.Symbols["build_query"]; exists {
+		t.Fatal("internal URL package must not expose query building as an intrinsic")
 	}
 	build := definition.Symbols["build_query"]
 	if len(build.Parameters) != 1 || build.Parameters[0].Type.String() != "Array<QueryParameter>" || build.Return.String() != "String" {

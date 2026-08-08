@@ -2540,6 +2540,23 @@ end
 	}
 }
 
+func TestREPLPortableURLQueryUsesCompilerOwnedSource(t *testing.T) {
+	input := "import { QueryParameter, build_query, parse_query } from trb/std/url\n" +
+		"build_query([QueryParameter.new(name: \"tag\", value: \"type rb\"), QueryParameter.new(name: \"tag\", value: \"go\")])\n" +
+		"parse_query(\"tag=type+rb&tag=go\")\n" +
+		":quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--mode", "go"}); status != 0 {
+		t.Fatalf("REPL status=%d stderr=%s", status, stderr.String())
+	}
+	want := "\"tag=type+rb&tag=go\" : String\n" +
+		"Result::Ok(value: [QueryParameter(name: \"tag\", value: \"type rb\"), QueryParameter(name: \"tag\", value: \"go\")]) : Result<Array<QueryParameter>, PercentDecodeError>\n"
+	if stdout.String() != want {
+		t.Fatalf("unexpected URL query REPL output: want %q, got %q; stderr=%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestRunCompilerOwnedUnicodeAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

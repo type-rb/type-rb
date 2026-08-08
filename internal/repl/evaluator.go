@@ -1495,57 +1495,6 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return e.percentDecodeResultErr(typ, kind, input, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: value})
-	case "trb.std.url.parse_query":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		input, ok := values[0].Data.(string)
-		if !ok {
-			return Value{}, errors.New("url.parse_query expects String")
-		}
-		parameters, kind, failureInput := parseURLQuery(input)
-		if kind != "" {
-			message := "invalid percent escape in URL query component"
-			if kind == "InvalidUtf8" {
-				message = "decoded URL query component is not valid UTF-8"
-			}
-			return e.percentDecodeResultErr(typ, kind, failureInput, message)
-		}
-		definition, ok := e.definitions[symbolKey("trb/std/url/index", "QueryParameter")].(*recordDefinition)
-		if !ok {
-			return Value{}, errors.New("operation requires trb/std/url")
-		}
-		items := make([]Value, 0, len(parameters))
-		for _, parameter := range parameters {
-			items = append(items, Value{Type: types.FromName("QueryParameter"), Data: &recordInstance{Definition: definition, Fields: map[string]Value{
-				"name":  {Type: types.FromName("String"), Data: parameter[0]},
-				"value": {Type: types.FromName("String"), Data: parameter[1]},
-			}}})
-		}
-		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("QueryParameter")}}
-		return e.filesystemOK(typ, Value{Type: arrayType, Data: &arrayValue{Items: items}})
-	case "trb.std.url.build_query":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		values, ok := values[0].Data.(*arrayValue)
-		if !ok {
-			return Value{}, errors.New("url.build_query expects Array<QueryParameter>")
-		}
-		parameters := make([][2]string, 0, len(values.Items))
-		for _, value := range values.Items {
-			parameter, ok := value.Data.(*recordInstance)
-			if !ok {
-				return Value{}, errors.New("url.build_query expects QueryParameter values")
-			}
-			name, nameOK := parameter.Fields["name"].Data.(string)
-			parameterValue, valueOK := parameter.Fields["value"].Data.(string)
-			if !nameOK || !valueOK {
-				return Value{}, errors.New("url.build_query expects String parameter fields")
-			}
-			parameters = append(parameters, [2]string{name, parameterValue})
-		}
-		return Value{Type: typ, Data: buildURLQuery(parameters)}, nil
 	case "trb.internal.filesystem.exists":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -2828,72 +2777,8 @@ func decodeURLComponent(input string) (string, string, string) {
 	return string(value), "", ""
 }
 
-func parseURLQuery(input string) ([][2]string, string, string) {
-	parameters := make([][2]string, 0)
-	for _, part := range strings.Split(input, "&") {
-		if part == "" {
-			continue
-		}
-		namePart, valuePart := part, ""
-		if separator := strings.IndexByte(part, '='); separator >= 0 {
-			namePart, valuePart = part[:separator], part[separator+1:]
-		}
-		name, kind := decodeURLQueryComponent(namePart)
-		if kind != "" {
-			return nil, kind, namePart
-		}
-		value, kind := decodeURLQueryComponent(valuePart)
-		if kind != "" {
-			return nil, kind, valuePart
-		}
-		parameters = append(parameters, [2]string{name, value})
-	}
-	return parameters, "", ""
-}
-
-func buildURLQuery(parameters [][2]string) string {
-	var builder strings.Builder
-	for index, parameter := range parameters {
-		if index > 0 {
-			builder.WriteByte('&')
-		}
-		builder.WriteString(encodeURLQueryComponent(parameter[0]))
-		builder.WriteByte('=')
-		builder.WriteString(encodeURLQueryComponent(parameter[1]))
-	}
-	return builder.String()
-}
-
-func decodeURLQueryComponent(input string) (string, string) {
-	value, kind, _ := decodeURLComponent(strings.ReplaceAll(input, "+", " "))
-	return value, kind
-}
-
-func encodeURLQueryComponent(value string) string {
-	const hexadecimal = "0123456789ABCDEF"
-	var builder strings.Builder
-	for _, octet := range []byte(value) {
-		if octet == ' ' {
-			builder.WriteByte('+')
-			continue
-		}
-		if urlQueryUnreserved(octet) {
-			builder.WriteByte(octet)
-			continue
-		}
-		builder.WriteByte('%')
-		builder.WriteByte(hexadecimal[octet>>4])
-		builder.WriteByte(hexadecimal[octet&15])
-	}
-	return builder.String()
-}
-
 func urlUnreserved(value byte) bool {
 	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '-' || value == '.' || value == '_' || value == '~'
-}
-
-func urlQueryUnreserved(value byte) bool {
-	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '*' || value == '-' || value == '.' || value == '_'
 }
 
 func hexadecimalValue(value rune) (byte, bool) {
