@@ -51,8 +51,10 @@ slashes remain distinct paths instead of being silently collapsed. Terminal
 catch-all files such as `[...path].trb` match one or more decoded path
 segments and bind their slash-joined value. Route analysis rejects catch-alls
 outside the final position and any static, parameter, or catch-all pattern that
-could ambiguously match the same method and request path. Typed
-`request_json<T>` accepts `application/json` and `application/*+json`, rejects
+could ambiguously match the same method and request path. Calls to `path_param`
+inside route files require a string literal naming a parameter declared by that
+file's route pattern, so misspelled and dynamic names fail during the build.
+Typed `request_json<T>` accepts `application/json` and `application/*+json`, rejects
 ambiguous content types and invalid UTF-8, and reports each failure as a
 `RequestError` without exposing backend parser behavior. Root and nested
 `_middleware.trb` files form the same outer-to-inner onion chain in every
