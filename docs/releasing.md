@@ -12,10 +12,10 @@ such as `v0.1.2`; release packaging replaces the development version in every
 binary with `0.1.2`.
 
 After publishing a release, the Release workflow advances the source version
-to the next planned patch release and refreshes Pages. This one-line automated
-commit is the only direct-main exception to the pull-request workflow.
-Homebrew publishes only stable tagged releases and never consumes a `-dev`
-version.
+to the next planned patch release through an automatically merged pull request
+and refreshes Pages. No human review is required for this mechanical change,
+while the main branch retains its pull-request requirement. Homebrew publishes
+only stable tagged releases and never consumes a `-dev` version.
 
 ## One-time setup
 
@@ -23,8 +23,9 @@ version.
 2. Create a fine-grained personal access token that has `Contents: Read and
    write` access to that repository. Store it in the source repository as the
    Actions secret `HOMEBREW_TAP_TOKEN`.
-3. Add the GitHub Actions App as an `Always allow` bypass actor for the main
-   branch ruleset. Human changes remain subject to the pull-request rule.
+3. Enable `Allow GitHub Actions to create and approve pull requests` in the
+   repository Actions settings. The Release workflow receives pull-request
+   write access explicitly; other workflows retain their narrower permissions.
 
 The tap repository uses the standard layout:
 
@@ -51,9 +52,10 @@ The release workflow then:
 1. repeats the tests and bootstrap check;
 2. builds four `trb_VERSION_OS_ARCH.tar.gz` binary archives;
 3. writes `checksums.txt` and renders `trb.rb`;
-4. creates or updates the GitHub release; and
+4. creates or updates the GitHub release;
 5. commits the Formula to `type-rb/homebrew-tap`; and
-6. commits the next patch `-dev` version to main and dispatches Pages.
+6. opens and merges a pull request for the next patch `-dev` version, then
+   dispatches Pages.
 
 Users can then install with:
 
