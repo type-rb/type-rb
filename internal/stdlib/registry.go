@@ -157,6 +157,38 @@ end
 			},
 		},
 	},
+	"trb/internal/runtime": {
+		Path:     "trb/internal/runtime",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"fail": {
+				Name:               "fail",
+				Intrinsic:          "trb.internal.runtime.fail",
+				RuntimeIndependent: true,
+				TypeParameters:     []string{"T"},
+				Parameters:         []Parameter{{Name: "message", Type: stringType}},
+				Return:             typeT,
+			},
+		},
+	},
+	"trb/internal/web/logger": {
+		Path:     "trb/internal/web/logger",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"call": {
+				Name:      "call",
+				Intrinsic: "trb.web.middleware.logger.call",
+				Parameters: []Parameter{
+					{Name: "context", Type: types.FromName("Context")},
+					{Name: "next_handler", Type: types.FromName("Next")},
+					{Name: "options", Type: types.FromName("LoggerOptions")},
+				},
+				Return: types.FromName("Response"),
+			},
+		},
+	},
 	"trb/std/path": {
 		Path:       "trb/std/path",
 		ModulePath: "trb/std/path/index",

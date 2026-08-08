@@ -55,9 +55,21 @@ func TestBundledWebLoggerMiddlewarePackage(t *testing.T) {
 	if packageDefinition.Definition.ModulePath != "trb/web/middleware/logger/index" {
 		t.Fatalf("module = %q", packageDefinition.Definition.ModulePath)
 	}
-	call := packageDefinition.Definition.Symbols["call"]
-	if call.Intrinsic != "trb.web.middleware.logger.call" || call.Return.String() != "Response" || len(call.Parameters) != 3 || !call.Parameters[2].Optional {
-		t.Fatalf("unexpected logger call contract: %#v", call)
+	if packageDefinition.Definition.Source == "" {
+		t.Fatal("logger package source is empty")
+	}
+}
+
+func TestBundledWebMiddlewarePackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/web/middleware")
+	if !ok {
+		t.Fatal("trb/web/middleware is not registered")
+	}
+	if packageDefinition.Definition.ModulePath != "trb/web/middleware/index" {
+		t.Fatalf("module = %q", packageDefinition.Definition.ModulePath)
+	}
+	if packageDefinition.Definition.Source == "" {
+		t.Fatal("middleware package source is empty")
 	}
 }
 

@@ -1,11 +1,12 @@
 import { Context, Next, Response, with_header } from trb/web
+import { Middleware } from trb/web/middleware
 
-record Options
+record SecureHeadersOptions
 	headers: Hash<String, String>
 end
 
-def default_options(): Options
-	return Options.new(
+def default_options(): SecureHeadersOptions
+	return SecureHeadersOptions.new(
 		headers: {
 			"x-content-type-options" => "nosniff",
 			"x-frame-options" => "SAMEORIGIN",
@@ -15,7 +16,28 @@ def default_options(): Options
 	)
 end
 
-def call(context: Context, next_handler: Next, options: Options = default_options()): Response
+class SecureHeadersMiddleware implements Middleware
+	@options: SecureHeadersOptions
+
+	def initialize(options: SecureHeadersOptions)
+		@options = options
+		return
+	end
+
+	def call(context: Context, next_handler: Next): Response
+		return _invoke(context, next_handler, @options)
+	end
+end
+
+def middleware(options: SecureHeadersOptions = default_options()): Middleware
+	return SecureHeadersMiddleware.new(options)
+end
+
+def call(context: Context, next_handler: Next, options: SecureHeadersOptions = default_options()): Response
+	return _invoke(context, next_handler, options)
+end
+
+def _invoke(context: Context, next_handler: Next, options: SecureHeadersOptions): Response
 	mut response := next_handler.call(context)
 	options.headers.each do |name, value|
 		response = with_header(response, name, value)

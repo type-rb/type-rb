@@ -3179,8 +3179,37 @@ def label(): String
 end
 `),
 	}
+	consumerFunction := SourceUnit{
+		Filename:   "/project/presentation.trb",
+		ModulePath: "presentation",
+		Source: []byte(`import { Named } from contracts/named
+
+def imported_display(value: Named): String
+	return value.name()
+end
+`),
+	}
+	consumer.Source = []byte(`import { Named } from contracts/named
+import { User } from models/user
+import { imported_display } from presentation
+
+class Admin < User
+end
+
+def build(): Named
+	return Admin.new()
+end
+
+def display(value: Named): String
+	return value.name()
+end
+
+def label(): String
+	return imported_display(User.new())
+end
+`)
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		if _, err := CompileProject([]SourceUnit{contract, valid, consumer}, Options{Mode: mode, GoModule: "example.com/interfaces", RubyLoader: "require_relative"}); err != nil {
+		if _, err := CompileProject([]SourceUnit{contract, valid, consumerFunction, consumer}, Options{Mode: mode, GoModule: "example.com/interfaces", RubyLoader: "require_relative"}); err != nil {
 			t.Fatalf("%s rejected imported interface values: %v", mode, err)
 		}
 	}

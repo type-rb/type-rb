@@ -724,6 +724,24 @@ end
 	}
 }
 
+func TestGoConstructorPreservesMultiwordClassNames(t *testing.T) {
+	source := []byte(`class TraceMiddleware
+end
+
+def build(): TraceMiddleware
+	return TraceMiddleware.new()
+end
+`)
+	artifact, err := Compile("multiword_class.trb", source, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	if !strings.Contains(output, "func NewTraceMiddleware() *TraceMiddleware") || !strings.Contains(output, "return NewTraceMiddleware()") {
+		t.Fatalf("multiword class name was not preserved:\n%s", output)
+	}
+}
+
 func TestInterfaceValuesRequireNominalImplementationAndInvariantArrays(t *testing.T) {
 	structural := []byte(`interface Named
 	name(): String

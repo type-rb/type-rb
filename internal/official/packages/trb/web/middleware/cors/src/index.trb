@@ -1,11 +1,12 @@
 import { Context, Next, Request, Response, empty, header_values, vary, with_header } from trb/web
+import { Middleware } from trb/web/middleware
 
 enum PreflightMaxAge
 	Disabled
 	Seconds(value: Integer)
 end
 
-record Options
+record CORSOptions
 	allow_origins: Array<String>
 	allow_methods: Array<String>
 	allow_headers: Array<String>
@@ -14,8 +15,8 @@ record Options
 	max_age: PreflightMaxAge
 end
 
-def default_options(): Options
-	return Options.new(
+def default_options(): CORSOptions
+	return CORSOptions.new(
 		allow_origins: ["*"],
 		allow_methods: ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH", "OPTIONS"],
 		allow_headers: [],
@@ -25,7 +26,28 @@ def default_options(): Options
 	)
 end
 
-def call(context: Context, next_handler: Next, options: Options = default_options()): Response
+class CORSMiddleware implements Middleware
+	@options: CORSOptions
+
+	def initialize(options: CORSOptions)
+		@options = options
+		return
+	end
+
+	def call(context: Context, next_handler: Next): Response
+		return _invoke(context, next_handler, @options)
+	end
+end
+
+def middleware(options: CORSOptions = default_options()): Middleware
+	return CORSMiddleware.new(options)
+end
+
+def call(context: Context, next_handler: Next, options: CORSOptions = default_options()): Response
+	return _invoke(context, next_handler, options)
+end
+
+def _invoke(context: Context, next_handler: Next, options: CORSOptions): Response
 	request := context.request
 	origin := _request_origin(request)
 	if _preflight?(request)
@@ -50,7 +72,7 @@ def _preflight?(request: Request): Boolean
 	return header_values(request, "access-control-request-method").size() == 1
 end
 
-def _preflight_response(request: Request, origin: String, options: Options): Response
+def _preflight_response(request: Request, origin: String, options: CORSOptions): Response
 	mut response := empty()
 	if _varies_by_origin?(options)
 		response = vary(response, "Origin")
@@ -75,7 +97,7 @@ def _preflight_response(request: Request, origin: String, options: Options): Res
 	return _apply_max_age(response, options.max_age)
 end
 
-def _apply_actual_response(response: Response, origin: String, options: Options): Response
+def _apply_actual_response(response: Response, origin: String, options: CORSOptions): Response
 	mut result := response
 	if _varies_by_origin?(options)
 		result = vary(result, "Origin")
@@ -91,7 +113,7 @@ def _apply_actual_response(response: Response, origin: String, options: Options)
 	return result
 end
 
-def _allowed_origin(origin: String, options: Options): String
+def _allowed_origin(origin: String, options: CORSOptions): String
 	if origin == ""
 		return ""
 	end
@@ -107,11 +129,11 @@ def _allowed_origin(origin: String, options: Options): String
 	return ""
 end
 
-def _varies_by_origin?(options: Options): Boolean
+def _varies_by_origin?(options: CORSOptions): Boolean
 	return !options.allow_origins.include?("*") || options.credentials
 end
 
-def _apply_origin(response: Response, origin: String, options: Options): Response
+def _apply_origin(response: Response, origin: String, options: CORSOptions): Response
 	mut result := with_header(response, "access-control-allow-origin", origin)
 	if options.credentials
 		result = with_header(result, "access-control-allow-credentials", "true")

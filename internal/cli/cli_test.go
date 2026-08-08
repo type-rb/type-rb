@@ -3931,9 +3931,9 @@ end
 `
 		middlewareSource := `import { Context, Next, Response } from trb/web
 import trb/web/middleware/logger
-import { Options } from trb/web/middleware/logger
+import { LoggerOptions } from trb/web/middleware/logger
 
-LOGGER_OPTIONS := Options.new(stderr: false, exclude_paths: ["/health"])
+LOGGER_OPTIONS := LoggerOptions.new(stderr: false, exclude_paths: ["/health"])
 
 def call(context: Context, next_handler: Next): Response
 	return logger.call(context, next_handler, LOGGER_OPTIONS)
@@ -3979,6 +3979,117 @@ end
 	}
 }
 
+func TestRunOfficialWebMiddlewareCompositionAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby middleware composition run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript middleware composition run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-middleware-composition-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def main()
+	ordered := dispatch(Request.new(method: "GET", path: "/ordered", query_string: "", headers: {}, body: "".to_bytes()))
+	puts(ordered.status)
+	puts(ordered.headers["x-content-type-options"][0])
+	rejected := dispatch(Request.new(method: "GET", path: "/twice", query_string: "", headers: {}, body: "".to_bytes()))
+	puts(rejected.status)
+	puts(rejected.body.to_s())
+	return
+end
+`
+		middlewareSource := `import { Context, Next, Response } from trb/web
+import { Middleware, compose } from trb/web/middleware
+import trb/web/middleware/secure_headers
+
+class TraceMiddleware implements Middleware
+	@label: String
+
+	def initialize(label: String)
+		@label = label
+		return
+	end
+
+	def call(context: Context, next_handler: Next): Response
+		puts(@label + ":before")
+		response := next_handler.call(context)
+		puts(@label + ":after")
+		return response
+	end
+end
+
+class DoubleCallMiddleware implements Middleware
+	def call(context: Context, next_handler: Next): Response
+		_first := next_handler.call(context)
+		return next_handler.call(context)
+	end
+end
+
+ORDERED: Array<Middleware> := [
+	TraceMiddleware.new("first"),
+	secure_headers.middleware(),
+	TraceMiddleware.new("second"),
+]
+DOUBLE_CALL: Array<Middleware> := [DoubleCallMiddleware.new()]
+
+def call(context: Context, next_handler: Next): Response
+	if context.request.path == "/twice"
+		return compose(context, next_handler, DOUBLE_CALL)
+	end
+	return compose(context, next_handler, ORDERED)
+end
+`
+		routeSource := `import { Context, Response, text } from trb/web
+
+def get(context: Context): Response
+	puts("route:" + context.request.path)
+	return text("ok")
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "_middleware.trb"), []byte(middlewareSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "ordered.trb"), []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "twice.trb"), []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "first:before\nsecond:before\nroute:/ordered\nsecond:after\nfirst:after\n200\nnosniff\nroute:/twice\n500\n{\"error\":\"internal_server_error\"}\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s middleware composition output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunOfficialWebSecureHeadersAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
@@ -4019,9 +4130,9 @@ end
 `
 		middlewareSource := `import { Context, Next, Response } from trb/web
 import trb/web/middleware/secure_headers
-import { Options } from trb/web/middleware/secure_headers
+import { SecureHeadersOptions } from trb/web/middleware/secure_headers
 
-CUSTOM_OPTIONS := Options.new(headers: {"x-custom-security" => "enabled"})
+CUSTOM_OPTIONS := SecureHeadersOptions.new(headers: {"x-custom-security" => "enabled"})
 
 def call(context: Context, next_handler: Next): Response
 	if context.request.path == "/custom"
@@ -4247,9 +4358,9 @@ end
 `
 		middlewareSource := `import { Context, Next, Response } from trb/web
 import trb/web/middleware/cors
-import { Options, PreflightMaxAge } from trb/web/middleware/cors
+import { CORSOptions, PreflightMaxAge } from trb/web/middleware/cors
 
-CORS_OPTIONS := Options.new(
+CORS_OPTIONS := CORSOptions.new(
 	allow_origins: ["https://app.example"],
 	allow_methods: ["GET", "POST", "OPTIONS"],
 	allow_headers: [],

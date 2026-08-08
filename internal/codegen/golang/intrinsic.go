@@ -10,6 +10,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if name == "trb.internal.runtime.fail" {
+		return "func() " + g.goType(call.ExprType()) + " { panic(" + arguments[0] + ") }()"
+	}
 	unicodeAlias := "unicode"
 	pathAlias := "path"
 	reference := expressionReference(call.Callee)
@@ -562,7 +565,7 @@ func (g *generator) webLogger(call *ir.Call, arguments []string) string {
 	options := ""
 	if len(arguments) > 2 {
 		g.requireImport("slices", "")
-		options = "options := " + arguments[2] + "; excluded = slices.Contains(options.ExcludePaths, loggerContext.Request.Path); useStderr = options.Stderr; "
+		options = "loggerOptions := " + arguments[2] + "; excluded = slices.Contains(loggerOptions.ExcludePaths, loggerContext.Request.Path); useStderr = loggerOptions.Stderr; "
 	}
 	return "func() (response " + g.goType(call.ExprType()) + ") { loggerContext := " + arguments[0] + "; loggerNextHandler := " + arguments[1] + "; excluded := false; useStderr := false; " + options + "if excluded { return loggerNextHandler.Call(loggerContext) }; started := time.Now(); status := 500; defer func() { level := \"info\"; if status >= 500 { level = \"error\" }; entry := map[string]any{\"timestamp\": time.Now().UTC().Format(time.RFC3339Nano), \"level\": level, \"event\": \"http_request\", \"method\": loggerContext.Request.Method, \"path\": loggerContext.Request.Path, \"status\": status, \"duration_ms\": float64(time.Since(started).Nanoseconds()) / 1e6}; encoded, _ := json.Marshal(entry); output := os.Stdout; if useStderr { output = os.Stderr }; fmt.Fprintln(output, string(encoded)) }(); response = loggerNextHandler.Call(loggerContext); status = response.Status; return response }()"
 }

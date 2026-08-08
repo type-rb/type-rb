@@ -978,6 +978,7 @@ func (g *generator) expr(expression ir.Expression) string {
 				if alias := g.referenceAlias(identifier.Reference); alias != "" {
 					return alias + ".New" + goIdentifier(identifier.Name, true) + "(" + args + ")"
 				}
+				return "New" + goIdentifier(identifier.Name, true) + "(" + args + ")"
 			}
 			return "New" + goIdentifier(g.expr(member.Receiver), true) + "(" + args + ")"
 		}

@@ -37,6 +37,19 @@ func TestEvaluateFloatClassificationIntrinsics(t *testing.T) {
 	}
 }
 
+func TestEvaluateInternalRuntimeFailure(t *testing.T) {
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	_, err := evaluator.intrinsic(
+		"trb.internal.runtime.fail",
+		[]evaluatedArgument{{Value: Value{Type: types.FromName("String"), Data: "stopped"}}},
+		types.FromName("Response"),
+		nil,
+	)
+	if err == nil || err.Error() != "stopped" {
+		t.Fatalf("unexpected runtime failure: %v", err)
+	}
+}
+
 func TestEvaluatePortableNumericAndMathIntrinsics(t *testing.T) {
 	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
 	integerType := types.FromName("Integer")
