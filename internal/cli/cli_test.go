@@ -2462,6 +2462,84 @@ end
 	}
 }
 
+func TestRunPortableURLQueryAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby URL query run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript URL query run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/portable-url-query-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { Result } from trb/std/result
+import { QueryParameter, build_query, parse_query } from trb/std/url
+
+def print_query(source: String)
+	case parse_query(source)
+	when Result::Ok(parameters)
+		parameters.each do |parameter|
+			puts(parameter.name + ":" + parameter.value)
+		end
+	when Result::Err(error)
+		puts(error.input + ":" + error.message)
+	end
+	return
+end
+
+def main()
+	query := build_query([
+		QueryParameter.new(name: "tag", value: "type rb"),
+		QueryParameter.new(name: "tag", value: "go"),
+		QueryParameter.new(name: "symbol", value: "+&="),
+		QueryParameter.new(name: "tilde", value: "~"),
+		QueryParameter.new(name: "star", value: "*"),
+	])
+	puts(query)
+	print_query("tag=go&&tag=type+rb&empty&symbol=%2B&text=%E6%97%A5%E6%9C%AC%E8%AA%9E&")
+	print_query("name=%")
+	print_query("%FF=value")
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "tag=type+rb&tag=go&symbol=%2B%26%3D&tilde=%7E&star=*\n" +
+			"tag:go\ntag:type rb\nempty:\nsymbol:+\ntext:日本語\n" +
+			"%:invalid percent escape in URL query component\n" +
+			"%FF:decoded URL query component is not valid UTF-8\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s portable URL query output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunCompilerOwnedUnicodeAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
