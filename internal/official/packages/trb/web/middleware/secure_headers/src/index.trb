@@ -1,0 +1,24 @@
+import { Context, Next, Response, with_header } from trb/web
+
+record Options
+	headers: Hash<String, String>
+end
+
+def default_options(): Options
+	return Options.new(
+		headers: {
+			"x-content-type-options" => "nosniff",
+			"x-frame-options" => "SAMEORIGIN",
+			"referrer-policy" => "no-referrer",
+			"x-xss-protection" => "0",
+		},
+	)
+end
+
+def call(context: Context, next_handler: Next, options: Options = default_options()): Response
+	mut response := next_handler.call(context)
+	options.headers.each do |name, value|
+		response = with_header(response, name, value)
+	end
+	return response
+end

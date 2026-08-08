@@ -1,0 +1,7 @@
+{
+  "name": "trb/web/middleware/secure_headers",
+  "version": "0.1.0",
+  "module": "trb/web/middleware/secure_headers/index",
+  "source": "src/index.trb",
+  "nativeDependencies": {}
+}

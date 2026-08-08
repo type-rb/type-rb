@@ -3758,6 +3758,90 @@ end
 	}
 }
 
+func TestRunOfficialWebSecureHeadersAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web secure headers run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web secure headers run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-secure-headers-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def main()
+	default_response := dispatch(Request.new(method: "GET", path: "/default", query_string: "", headers: {}, body: "".to_bytes()))
+	puts(default_response.headers["x-content-type-options"][0])
+	puts(default_response.headers["x-frame-options"][0])
+	puts(default_response.headers["referrer-policy"][0])
+	puts(default_response.headers["x-xss-protection"][0])
+	custom_response := dispatch(Request.new(method: "GET", path: "/custom", query_string: "", headers: {}, body: "".to_bytes()))
+	puts(custom_response.headers["x-custom-security"][0])
+	puts(custom_response.headers.key?("x-content-type-options"))
+	return
+end
+`
+		middlewareSource := `import { Context, Next, Response } from trb/web
+import trb/web/middleware/secure_headers
+import { Options } from trb/web/middleware/secure_headers
+
+CUSTOM_OPTIONS := Options.new(headers: {"x-custom-security" => "enabled"})
+
+def call(context: Context, next_handler: Next): Response
+	if context.request.path == "/custom"
+		return secure_headers.call(context, next_handler, CUSTOM_OPTIONS)
+	end
+	return secure_headers.call(context, next_handler)
+end
+`
+		routeSource := `import { Context, Response, text, with_header } from trb/web
+
+def get(_context: Context): Response
+	return with_header(text("ok"), "X-Frame-Options", "DENY")
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "_middleware.trb"), []byte(middlewareSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "default.trb"), []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "custom.trb"), []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "nosniff\nSAMEORIGIN\nno-referrer\n0\nenabled\nfalse\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web secure headers output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunWithoutSourceRequiresMain(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
