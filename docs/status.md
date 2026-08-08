@@ -37,7 +37,9 @@ The early official `trb/web` package discovers file-based routes at compile
 time and runs typed request, path-parameter, JSON decode, and JSON response
 handlers through the same dispatcher in all three backends. Applications can
 start a generated Go, Ruby, or TypeScript HTTP server with `serve()`. Unhandled
-handler failures become a portable JSON 500 response. Root and nested
+handler failures become a portable JSON 500 response. Before middleware runs,
+request methods are uppercased and case-insensitive header names are merged
+under lowercase keys. Root and nested
 `_middleware.trb` files form the same outer-to-inner onion chain in every
 backend. The first packaged middleware emits JSONL access logs and supports
 typed output and path-exclusion options. A portable secure-headers middleware
