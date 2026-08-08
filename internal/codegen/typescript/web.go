@@ -74,12 +74,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("let explicit_head = false;")
 	for _, route := range routes {
 		routeSegments := typescriptWebRouteSegments(route.Path)
-		condition := []string{"segments.length === " + strconv.Itoa(len(routeSegments))}
-		for segmentIndex, segment := range routeSegments {
-			if !strings.HasPrefix(segment, ":") {
-				condition = append(condition, "segments["+strconv.Itoa(segmentIndex)+"] === "+strconv.Quote(segment))
-			}
-		}
+		condition := typescriptWebRouteConditions(routeSegments)
 		g.line("if (" + strings.Join(condition, " && ") + ") allowed_methods.push(" + strconv.Quote(route.Method) + ");")
 		if route.Method == "GET" {
 			g.line("if (" + strings.Join(condition, " && ") + `) allowed_methods.push("HEAD");`)
@@ -94,18 +89,15 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line(`if (method === "HEAD" && !explicit_head && allowed_methods.includes("GET")) dispatch_method = "GET";`)
 	for routeIndex, route := range routes {
 		segments := typescriptWebRouteSegments(route.Path)
-		condition := []string{"dispatch_method === " + strconv.Quote(route.Method), "segments.length === " + strconv.Itoa(len(segments))}
-		for index, segment := range segments {
-			if !strings.HasPrefix(segment, ":") {
-				condition = append(condition, "segments["+strconv.Itoa(index)+"] === "+strconv.Quote(segment))
-			}
-		}
+		condition := append([]string{"dispatch_method === " + strconv.Quote(route.Method)}, typescriptWebRouteConditions(segments)...)
 		g.line("if (" + strings.Join(condition, " && ") + ") {")
 		g.indent++
 		g.line("const path_parameters: Record<string, string> = {};")
 		for index, segment := range segments {
 			if strings.HasPrefix(segment, ":") {
 				g.line("path_parameters[" + strconv.Quote(strings.TrimPrefix(segment, ":")) + "] = segments[" + strconv.Itoa(index) + "]!;")
+			} else if strings.HasPrefix(segment, "*") {
+				g.line("path_parameters[" + strconv.Quote(strings.TrimPrefix(segment, "*")) + "] = segments.slice(" + strconv.Itoa(index) + ").join(\"/\");")
 			}
 		}
 		contextName := "route_context_" + strconv.Itoa(routeIndex)
@@ -124,18 +116,15 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	for routeIndex, route := range webintegration.UniquePathRoutes(routes) {
 		segments := typescriptWebRouteSegments(route.Path)
-		condition := []string{`method === "OPTIONS"`, "segments.length === " + strconv.Itoa(len(segments))}
-		for index, segment := range segments {
-			if !strings.HasPrefix(segment, ":") {
-				condition = append(condition, "segments["+strconv.Itoa(index)+"] === "+strconv.Quote(segment))
-			}
-		}
+		condition := append([]string{`method === "OPTIONS"`}, typescriptWebRouteConditions(segments)...)
 		g.line("if (" + strings.Join(condition, " && ") + ") {")
 		g.indent++
 		g.line("const path_parameters: Record<string, string> = {};")
 		for index, segment := range segments {
 			if strings.HasPrefix(segment, ":") {
 				g.line("path_parameters[" + strconv.Quote(strings.TrimPrefix(segment, ":")) + "] = segments[" + strconv.Itoa(index) + "]!;")
+			} else if strings.HasPrefix(segment, "*") {
+				g.line("path_parameters[" + strconv.Quote(strings.TrimPrefix(segment, "*")) + "] = segments.slice(" + strconv.Itoa(index) + ").join(\"/\");")
 			}
 		}
 		contextName := "options_context_" + strconv.Itoa(routeIndex)
@@ -266,6 +255,21 @@ func typescriptWebRouteSegments(path string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "/")
+}
+
+func typescriptWebRouteConditions(segments []string) []string {
+	lengthOperator := "==="
+	if len(segments) > 0 && strings.HasPrefix(segments[len(segments)-1], "*") {
+		lengthOperator = ">="
+	}
+	conditions := []string{"segments.length " + lengthOperator + " " + strconv.Itoa(len(segments))}
+	for index, segment := range segments {
+		if strings.HasPrefix(segment, ":") || strings.HasPrefix(segment, "*") {
+			continue
+		}
+		conditions = append(conditions, "segments["+strconv.Itoa(index)+"] === "+strconv.Quote(segment))
+	}
+	return conditions
 }
 
 func (g *generator) webServer() {

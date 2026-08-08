@@ -47,7 +47,11 @@ request methods are uppercased and case-insensitive header names are merged
 under lowercase keys. Request paths are decoded exactly once as UTF-8 at the
 dispatcher boundary. Malformed escapes, encoded separators, backslashes, and
 dot segments receive a portable JSON 400 response. Repeated and trailing
-slashes remain distinct paths instead of being silently collapsed. Typed
+slashes remain distinct paths instead of being silently collapsed. Terminal
+catch-all files such as `[...path].trb` match one or more decoded path
+segments and bind their slash-joined value. Route analysis rejects catch-alls
+outside the final position and any static, parameter, or catch-all pattern that
+could ambiguously match the same method and request path. Typed
 `request_json<T>` accepts `application/json` and `application/*+json`, rejects
 ambiguous content types and invalid UTF-8, and reports each failure as a
 `RequestError` without exposing backend parser behavior. Root and nested

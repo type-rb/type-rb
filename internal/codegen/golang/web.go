@@ -120,12 +120,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("explicitHead := false")
 	for _, route := range routes {
 		routeSegments := webRouteSegments(route.Path)
-		condition := []string{"len(segments) == " + strconv.Itoa(len(routeSegments))}
-		for segmentIndex, segment := range routeSegments {
-			if !strings.HasPrefix(segment, ":") {
-				condition = append(condition, "segments["+strconv.Itoa(segmentIndex)+"] == "+strconv.Quote(segment))
-			}
-		}
+		condition := goWebRouteConditions(routeSegments)
 		g.line("if " + strings.Join(condition, " && ") + " {")
 		g.indent++
 		g.line("allowedMethods = append(allowedMethods, " + strconv.Quote(route.Method) + ")")
@@ -153,18 +148,15 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("}")
 	for routeIndex, route := range routes {
 		segments := webRouteSegments(route.Path)
-		condition := []string{"dispatchMethod == " + strconv.Quote(route.Method), "len(segments) == " + strconv.Itoa(len(segments))}
-		for index, segment := range segments {
-			if !strings.HasPrefix(segment, ":") {
-				condition = append(condition, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
-			}
-		}
+		condition := append([]string{"dispatchMethod == " + strconv.Quote(route.Method)}, goWebRouteConditions(segments)...)
 		g.line("if " + strings.Join(condition, " && ") + " {")
 		g.indent++
 		g.line("pathParameters := map[string]string{}")
 		for index, segment := range segments {
 			if strings.HasPrefix(segment, ":") {
 				g.line("pathParameters[" + strconv.Quote(strings.TrimPrefix(segment, ":")) + "] = segments[" + strconv.Itoa(index) + "]")
+			} else if strings.HasPrefix(segment, "*") {
+				g.line("pathParameters[" + strconv.Quote(strings.TrimPrefix(segment, "*")) + "] = strings.Join(segments[" + strconv.Itoa(index) + ":], \"/\")")
 			}
 		}
 		contextName := "routeContext" + strconv.Itoa(routeIndex)
@@ -191,18 +183,15 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	for routeIndex, route := range webintegration.UniquePathRoutes(routes) {
 		segments := webRouteSegments(route.Path)
-		condition := []string{"method == \"OPTIONS\"", "len(segments) == " + strconv.Itoa(len(segments))}
-		for index, segment := range segments {
-			if !strings.HasPrefix(segment, ":") {
-				condition = append(condition, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
-			}
-		}
+		condition := append([]string{"method == \"OPTIONS\""}, goWebRouteConditions(segments)...)
 		g.line("if " + strings.Join(condition, " && ") + " {")
 		g.indent++
 		g.line("pathParameters := map[string]string{}")
 		for index, segment := range segments {
 			if strings.HasPrefix(segment, ":") {
 				g.line("pathParameters[" + strconv.Quote(strings.TrimPrefix(segment, ":")) + "] = segments[" + strconv.Itoa(index) + "]")
+			} else if strings.HasPrefix(segment, "*") {
+				g.line("pathParameters[" + strconv.Quote(strings.TrimPrefix(segment, "*")) + "] = strings.Join(segments[" + strconv.Itoa(index) + ":], \"/\")")
 			}
 		}
 		contextName := "optionsContext" + strconv.Itoa(routeIndex)
@@ -374,6 +363,21 @@ func webRouteSegments(path string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "/")
+}
+
+func goWebRouteConditions(segments []string) []string {
+	lengthOperator := "=="
+	if len(segments) > 0 && strings.HasPrefix(segments[len(segments)-1], "*") {
+		lengthOperator = ">="
+	}
+	conditions := []string{"len(segments) " + lengthOperator + " " + strconv.Itoa(len(segments))}
+	for index, segment := range segments {
+		if strings.HasPrefix(segment, ":") || strings.HasPrefix(segment, "*") {
+			continue
+		}
+		conditions = append(conditions, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
+	}
+	return conditions
 }
 
 func (g *generator) webServer() {

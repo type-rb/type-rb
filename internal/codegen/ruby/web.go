@@ -62,12 +62,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("explicit_head = false", "")
 	for _, route := range routes {
 		routeSegments := rubyWebRouteSegments(route.Path)
-		condition := []string{"segments.length == " + strconv.Itoa(len(routeSegments))}
-		for segmentIndex, segment := range routeSegments {
-			if !strings.HasPrefix(segment, ":") {
-				condition = append(condition, "segments["+strconv.Itoa(segmentIndex)+"] == "+strconv.Quote(segment))
-			}
-		}
+		condition := rubyWebRouteConditions(routeSegments)
 		g.line("allowed_methods << "+strconv.Quote(route.Method)+" if "+strings.Join(condition, " && "), "")
 		if route.Method == "GET" {
 			g.line(`allowed_methods << "HEAD" if `+strings.Join(condition, " && "), "")
@@ -82,18 +77,15 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line(`dispatch_method = "GET" if method == "HEAD" && !explicit_head && allowed_methods.include?("GET")`, "")
 	for routeIndex, route := range routes {
 		segments := rubyWebRouteSegments(route.Path)
-		condition := []string{"dispatch_method == " + strconv.Quote(route.Method), "segments.length == " + strconv.Itoa(len(segments))}
-		for index, segment := range segments {
-			if !strings.HasPrefix(segment, ":") {
-				condition = append(condition, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
-			}
-		}
+		condition := append([]string{"dispatch_method == " + strconv.Quote(route.Method)}, rubyWebRouteConditions(segments)...)
 		g.line("if "+strings.Join(condition, " && "), "")
 		g.indent++
 		g.line("path_parameters = {}", "")
 		for index, segment := range segments {
 			if strings.HasPrefix(segment, ":") {
 				g.line("path_parameters["+strconv.Quote(strings.TrimPrefix(segment, ":"))+"] = segments["+strconv.Itoa(index)+"]", "")
+			} else if strings.HasPrefix(segment, "*") {
+				g.line("path_parameters["+strconv.Quote(strings.TrimPrefix(segment, "*"))+"] = segments["+strconv.Itoa(index)+"..].join(\"/\")", "")
 			}
 		}
 		contextName := "route_context_" + strconv.Itoa(routeIndex)
@@ -112,18 +104,15 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	for routeIndex, route := range webintegration.UniquePathRoutes(routes) {
 		segments := rubyWebRouteSegments(route.Path)
-		condition := []string{`method == "OPTIONS"`, "segments.length == " + strconv.Itoa(len(segments))}
-		for index, segment := range segments {
-			if !strings.HasPrefix(segment, ":") {
-				condition = append(condition, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
-			}
-		}
+		condition := append([]string{`method == "OPTIONS"`}, rubyWebRouteConditions(segments)...)
 		g.line("if "+strings.Join(condition, " && "), "")
 		g.indent++
 		g.line("path_parameters = {}", "")
 		for index, segment := range segments {
 			if strings.HasPrefix(segment, ":") {
 				g.line("path_parameters["+strconv.Quote(strings.TrimPrefix(segment, ":"))+"] = segments["+strconv.Itoa(index)+"]", "")
+			} else if strings.HasPrefix(segment, "*") {
+				g.line("path_parameters["+strconv.Quote(strings.TrimPrefix(segment, "*"))+"] = segments["+strconv.Itoa(index)+"..].join(\"/\")", "")
 			}
 		}
 		contextName := "options_context_" + strconv.Itoa(routeIndex)
@@ -256,6 +245,21 @@ func rubyWebRouteSegments(path string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "/")
+}
+
+func rubyWebRouteConditions(segments []string) []string {
+	lengthOperator := "=="
+	if len(segments) > 0 && strings.HasPrefix(segments[len(segments)-1], "*") {
+		lengthOperator = ">="
+	}
+	conditions := []string{"segments.length " + lengthOperator + " " + strconv.Itoa(len(segments))}
+	for index, segment := range segments {
+		if strings.HasPrefix(segment, ":") || strings.HasPrefix(segment, "*") {
+			continue
+		}
+		conditions = append(conditions, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
+	}
+	return conditions
 }
 
 func (g *generator) webServer() {
