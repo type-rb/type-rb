@@ -14,6 +14,12 @@ record RequestCookie
 	value: String
 end
 
+enum QueryValueError
+	Malformed(error: PercentDecodeError)
+	Missing(name: String)
+	Duplicate(name: String)
+end
+
 enum CookieSameSite
 	Lax
 	Strict
@@ -126,6 +132,36 @@ end
 
 def query_parameters(request: Request): Result<Array<QueryParameter>, PercentDecodeError>
 	return parse_query(request.query_string)
+end
+
+def query_values(request: Request, name: String): Result<Array<String>, PercentDecodeError>
+	case query_parameters(request)
+	when Result::Ok(parameters)
+		mut values: Array<String> := []
+		parameters.each do |parameter|
+			if parameter.name == name
+				values.push(parameter.value)
+			end
+		end
+		return Result<Array<String>, PercentDecodeError>::Ok(values)
+	when Result::Err(error)
+		return Result<Array<String>, PercentDecodeError>::Err(error)
+	end
+end
+
+def query_value(request: Request, name: String): Result<String, QueryValueError>
+	case query_values(request, name)
+	when Result::Ok(values)
+		if values.empty?()
+			return Result<String, QueryValueError>::Err(QueryValueError::Missing(name))
+		end
+		if values.size() > 1
+			return Result<String, QueryValueError>::Err(QueryValueError::Duplicate(name))
+		end
+		return Result<String, QueryValueError>::Ok(values[0])
+	when Result::Err(error)
+		return Result<String, QueryValueError>::Err(QueryValueError::Malformed(error))
+	end
 end
 
 def header_values(request: Request, name: String): Array<String>
