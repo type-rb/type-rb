@@ -1505,6 +1505,17 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hash.sha512":
 		g.requireImport("crypto/sha512", "stdsha512")
 		return "func(value []byte) []byte { digest := stdsha512.Sum512(value); return digest[:] }(" + arguments[0] + ")"
+	case "trb.std.hmac.sha256":
+		g.requireImport("crypto/hmac", "stdhmac")
+		g.requireImport("crypto/sha256", "stdsha256")
+		return "func(key []byte, message []byte) []byte { digest := stdhmac.New(stdsha256.New, key); _, _ = digest.Write(message); return digest.Sum(nil) }(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.hmac.sha512":
+		g.requireImport("crypto/hmac", "stdhmac")
+		g.requireImport("crypto/sha512", "stdsha512")
+		return "func(key []byte, message []byte) []byte { digest := stdhmac.New(stdsha512.New, key); _, _ = digest.Write(message); return digest.Sum(nil) }(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.hmac.equal":
+		g.requireImport("crypto/hmac", "stdhmac")
+		return "stdhmac.Equal(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.string_builder.new":
 		g.requireImport("strings", "")
 		return "&strings.Builder{}"

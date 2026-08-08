@@ -457,6 +457,27 @@ end
 			"sha512": unary("sha512", "trb.std.hash.sha512", bytesType, bytesType),
 		},
 	},
+	"trb/std/hmac": {
+		Path:       "trb/std/hmac",
+		ModulePath: "trb/std/hmac/index",
+		Source:     hmacSource(),
+		Kind:       Portable,
+		Symbols: map[string]Symbol{
+			"sha256": bytesBinary("sha256", "", bytesType),
+			"sha512": bytesBinary("sha512", "", bytesType),
+			"equal":  bytesBinary("equal", "", booleanType),
+		},
+	},
+	"trb/internal/hmac": {
+		Path:     "trb/internal/hmac",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"sha256": bytesBinary("sha256", "trb.std.hmac.sha256", bytesType),
+			"sha512": bytesBinary("sha512", "trb.std.hmac.sha512", bytesType),
+			"equal":  bytesBinary("equal", "trb.std.hmac.equal", booleanType),
+		},
+	},
 	"trb/std/string_builder": {
 		Path: "trb/std/string_builder",
 		Kind: Portable,
@@ -908,6 +929,18 @@ func unary(name, intrinsic string, parameter, result types.Type) Symbol {
 		Intrinsic:  intrinsic,
 		Parameters: []Parameter{{Name: "value", Type: parameter}},
 		Return:     result,
+	}
+}
+
+func bytesBinary(name, intrinsic string, result types.Type) Symbol {
+	return Symbol{
+		Name:      name,
+		Intrinsic: intrinsic,
+		Parameters: []Parameter{
+			{Name: "left", Type: bytesType},
+			{Name: "right", Type: bytesType},
+		},
+		Return: result,
 	}
 }
 

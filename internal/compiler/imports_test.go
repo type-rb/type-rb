@@ -900,6 +900,77 @@ func TestPortableHashDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableHMACPackageLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { equal, sha256, sha512 } from trb/std/hmac
+
+def digest256(key: Bytes, message: Bytes): Bytes
+	return sha256(key, message)
+end
+
+def digest512(key: Bytes, message: Bytes): Bytes
+	return sha512(key, message)
+end
+
+def matches(left: Bytes, right: Bytes): Boolean
+	return equal(left, right)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`stdhmac.New(stdsha256.New, key)`,
+			`stdhmac.New(stdsha512.New, key)`,
+			`stdhmac.Equal(left, right)`,
+		},
+		"ruby": {
+			`OpenSSL::HMAC.digest("SHA256", key, message).b`,
+			`OpenSSL::HMAC.digest("SHA512", key, message).b`,
+			`difference |= left_byte ^ right_byte`,
+		},
+		"typescript": {
+			`const material = key.byteLength > 64 ? hash(key) : key;`,
+			`const material = key.byteLength > 128 ? hash(key) : key;`,
+			`difference |= left[index]! ^ right[index]!`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/portable-hmac", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable hmac: %v", mode, err)
+		}
+		var consumer, hmacRuntime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/hmac/index":
+				hmacRuntime = artifact
+			}
+		}
+		if consumer == nil || hmacRuntime == nil {
+			t.Fatalf("%s did not compile the hmac consumer and runtime: %#v", mode, artifacts)
+		}
+		for _, want := range wants[mode] {
+			if output := string(hmacRuntime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s hmac output is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableHMACDiagnosticsAreModeIndependent(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := Compile("bad.trb", []byte("import { sha256 } from trb/std/hmac\ndef bad(): Bytes\n\treturn sha256(\"key\", \"message\".to_bytes())\nend\n"), mode)
+		if err == nil || !strings.Contains(err.Error(), "argument 1 to sha256() has type String, expected Bytes") {
+			t.Fatalf("%s: expected portable hmac argument diagnostic, got %v", mode, err)
+		}
+	}
+}
+
 func TestPortableStringBuilderLowersAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/string_builder
 
