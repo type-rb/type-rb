@@ -9,6 +9,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if name == "trb.internal.runtime.fail" {
+		return "((): " + g.tsType(call.ExprType()) + " => { throw new Error(" + arguments[0] + "); })()"
+	}
 	unicodeAlias := "unicode"
 	pathAlias := "path"
 	reference := expressionReference(call.Callee)
@@ -431,11 +434,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 }
 
 func tsWebLogger(call *ir.Call, arguments []string) string {
-	options := "const options: { stderr: boolean; exclude_paths: string[] } | undefined = undefined; "
+	options := "const loggerOptions: { stderr: boolean; exclude_paths: string[] } | undefined = undefined; "
 	if len(arguments) > 2 {
-		options = "const options: { stderr: boolean; exclude_paths: string[] } | undefined = " + arguments[2] + "; "
+		options = "const loggerOptions: { stderr: boolean; exclude_paths: string[] } | undefined = " + arguments[2] + "; "
 	}
-	return "((): " + tsType(call.ExprType()) + " => { const loggerContext = " + arguments[0] + "; const loggerNextHandler = " + arguments[1] + "; " + options + "const excluded = options !== undefined && options.exclude_paths.includes(loggerContext.request.path); if (excluded) return loggerNextHandler.call(loggerContext); const started = performance.now(); let status = 500; try { const response = loggerNextHandler.call(loggerContext); status = response.status; return response; } finally { const entry = JSON.stringify({ timestamp: new Date().toISOString(), level: status >= 500 ? \"error\" : \"info\", event: \"http_request\", method: loggerContext.request.method, path: loggerContext.request.path, status, duration_ms: performance.now() - started }); if (options !== undefined && options.stderr) console.error(entry); else console.log(entry); } })()"
+	return "((): " + tsType(call.ExprType()) + " => { const loggerContext = " + arguments[0] + "; const loggerNextHandler = " + arguments[1] + "; " + options + "const excluded = loggerOptions !== undefined && loggerOptions.exclude_paths.includes(loggerContext.request.path); if (excluded) return loggerNextHandler.call(loggerContext); const started = performance.now(); let status = 500; try { const response = loggerNextHandler.call(loggerContext); status = response.status; return response; } finally { const entry = JSON.stringify({ timestamp: new Date().toISOString(), level: status >= 500 ? \"error\" : \"info\", event: \"http_request\", method: loggerContext.request.method, path: loggerContext.request.path, status, duration_ms: performance.now() - started }); if (loggerOptions !== undefined && loggerOptions.stderr) console.error(entry); else console.log(entry); } })()"
 }
 
 func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {

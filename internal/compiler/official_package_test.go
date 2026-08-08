@@ -168,10 +168,10 @@ func TestOfficialSecureHeadersRejectInvalidHeaderValues(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Options } from trb/web/middleware/secure_headers
+		Source: []byte(`import { SecureHeadersOptions } from trb/web/middleware/secure_headers
 
-def invalid(): Options
-	return Options.new(headers: {"x-example" => 1})
+def invalid(): SecureHeadersOptions
+	return SecureHeadersOptions.new(headers: {"x-example" => 1})
 end
 `),
 	}
@@ -191,10 +191,10 @@ func TestOfficialCORSRejectsInvalidOriginOptions(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Options, PreflightMaxAge } from trb/web/middleware/cors
+		Source: []byte(`import { CORSOptions, PreflightMaxAge } from trb/web/middleware/cors
 
-def invalid(): Options
-	return Options.new(
+def invalid(): CORSOptions
+	return CORSOptions.new(
 		allow_origins: [1],
 		allow_methods: ["GET"],
 		allow_headers: [],
@@ -221,10 +221,10 @@ func TestOfficialRequestIDRejectsInvalidLengthOptions(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Options } from trb/web/middleware/request_id
+		Source: []byte(`import { RequestIDOptions } from trb/web/middleware/request_id
 
-def invalid(): Options
-	return Options.new(header_name: "x-request-id", limit_length: "long")
+def invalid(): RequestIDOptions
+	return RequestIDOptions.new(header_name: "x-request-id", limit_length: "long")
 end
 `),
 	}
@@ -234,6 +234,51 @@ end
 			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
 			if err == nil || !strings.Contains(err.Error(), "record field limit_length has type String, expected Integer") {
 				t.Fatalf("unexpected diagnostic: %v", err)
+			}
+		})
+	}
+}
+
+func TestOfficialWebMiddlewareStackCompilesAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Context, Next, Response } from trb/web
+import { Middleware, compose } from trb/web/middleware
+import trb/web/middleware/cors
+import trb/web/middleware/logger
+import trb/web/middleware/request_id
+import trb/web/middleware/secure_headers
+
+class Terminal implements Next
+	def call(_context: Context): Response
+		return Response.new(status: 204, headers: {}, body: "".to_bytes())
+	end
+end
+
+def stack(): Array<Middleware>
+	return [
+		request_id.middleware(),
+		logger.middleware(),
+		secure_headers.middleware(),
+		cors.middleware(),
+	]
+end
+
+def dispatch(context: Context): Response
+	return compose(context, Terminal.new(), stack())
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/middleware-stack", RubyLoader: "require_relative", ProjectRoot: "/project"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifactForModule(artifacts, "trb/web/middleware/index") == nil {
+				t.Fatal("middleware runtime artifact was not generated")
 			}
 		})
 	}

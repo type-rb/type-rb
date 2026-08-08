@@ -3,6 +3,5 @@
   "version": "0.1.0",
   "module": "trb/web/middleware/logger/index",
   "source": "src/index.trb",
-  "semanticProvider": "trb.web.middleware.logger",
   "nativeDependencies": {}
 }

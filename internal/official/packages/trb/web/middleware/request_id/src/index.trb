@@ -1,18 +1,40 @@
 import { Context, Next, Response, header_value, with_header, with_request_header } from trb/web
+import { Middleware } from trb/web/middleware
 import trb/std/encoding/hex
 import { Result } from trb/std/result
 import trb/std/secure_random
 
-record Options
+record RequestIDOptions
 	header_name: String
 	limit_length: Integer
 end
 
-def default_options(): Options
-	return Options.new(header_name: "x-request-id", limit_length: 255)
+def default_options(): RequestIDOptions
+	return RequestIDOptions.new(header_name: "x-request-id", limit_length: 255)
 end
 
-def call(context: Context, next_handler: Next, options: Options = default_options()): Response
+class RequestIDMiddleware implements Middleware
+	@options: RequestIDOptions
+
+	def initialize(options: RequestIDOptions)
+		@options = options
+		return
+	end
+
+	def call(context: Context, next_handler: Next): Response
+		return _invoke(context, next_handler, @options)
+	end
+end
+
+def middleware(options: RequestIDOptions = default_options()): Middleware
+	return RequestIDMiddleware.new(options)
+end
+
+def call(context: Context, next_handler: Next, options: RequestIDOptions = default_options()): Response
+	return _invoke(context, next_handler, options)
+end
+
+def _invoke(context: Context, next_handler: Next, options: RequestIDOptions): Response
 	mut value := _generate()
 	case header_value(context.request, options.header_name)
 	when Result::Ok(candidate)

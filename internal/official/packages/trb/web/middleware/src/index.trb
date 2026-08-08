@@ -1,0 +1,38 @@
+import { Context, Next, Response } from trb/web
+import trb/internal/runtime
+
+interface Middleware
+	call(context: Context, next_handler: Next): Response
+end
+
+class WebMiddlewareChain implements Next
+	@middlewares: Array<Middleware>
+	@index: Integer
+	@terminal: Next
+	@called: Boolean
+
+	def initialize(middlewares: Array<Middleware>, index: Integer, terminal: Next)
+		@middlewares = middlewares
+		@index = index
+		@terminal = terminal
+		@called = false
+		return
+	end
+
+	def call(context: Context): Response
+		if @called
+			return runtime.fail<Response>("trb/web Next.call may only be called once")
+		end
+		@called = true
+		if @index >= @middlewares.size()
+			return @terminal.call(context)
+		end
+		current := @middlewares[@index]
+		next_handler := WebMiddlewareChain.new(@middlewares, @index + 1, @terminal)
+		return current.call(context, next_handler)
+	end
+end
+
+def compose(context: Context, next_handler: Next, middlewares: Array<Middleware>): Response
+	return WebMiddlewareChain.new(middlewares, 0, next_handler).call(context)
+end

@@ -33,6 +33,16 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		return result
 	}()
+	if name == "trb.internal.runtime.fail" {
+		if len(values) != 1 {
+			return Value{}, errors.New("runtime.fail expects one argument")
+		}
+		message, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("runtime.fail expects String")
+		}
+		return Value{}, errors.New(message)
+	}
 	require := func(count int) error {
 		if len(values) < count {
 			return fmt.Errorf("intrinsic %s requires %d arguments", name, count)

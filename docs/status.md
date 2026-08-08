@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -41,8 +41,12 @@ handler failures become a portable JSON 500 response. Before middleware runs,
 request methods are uppercased and case-insensitive header names are merged
 under lowercase keys. Root and nested
 `_middleware.trb` files form the same outer-to-inner onion chain in every
-backend. The first packaged middleware emits JSONL access logs and supports
-typed output and path-exclusion options. A portable secure-headers middleware
+backend. A single middleware file can build an explicit `Array<Middleware>`
+and pass it to `compose`; the first item is the outermost layer, and `Next` can
+still be called only once. Packaged middleware expose `middleware()` factories
+with specific option types such as `LoggerOptions` and `CORSOptions`. The
+logger emits JSONL access logs and supports typed output-selection and
+path-exclusion options. A portable secure-headers middleware
 adds a conservative browser-security preset and accepts an explicit typed
 header map. An opt-in CORS middleware handles actual and preflight requests,
 explicit origin policies, credentials, exposed and allowed headers, and typed
