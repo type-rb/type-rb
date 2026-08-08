@@ -36,13 +36,24 @@ type Source struct {
 
 type Route struct {
 	Filename       string
+	Directory      string
 	Method         string
 	Path           string
 	ModulePath     string
 	Handler        string
 	TargetHandler  string
 	PathParameters []string
+	Middlewares    []Middleware
 	Span           token.Span
+}
+
+type Middleware struct {
+	Filename      string
+	Directory     string
+	ModulePath    string
+	Handler       string
+	TargetHandler string
+	Span          token.Span
 }
 
 type Issue struct {
@@ -52,7 +63,8 @@ type Issue struct {
 }
 
 type Manifest struct {
-	Routes []Route
+	Routes      []Route
+	Middlewares []Middleware
 }
 
 func (*Manifest) ExtensionName() string { return ProjectProvider }
@@ -68,8 +80,9 @@ func ManifestFrom(extensions []ir.Extension) *Manifest {
 
 func Analyze(sources []Source, resolutions map[string]resolver.Result, sourceRoot string) (*Manifest, []Issue) {
 	routes, issues := Discover(sources, sourceRoot)
+	middlewares := discoverMiddlewares(sources, sourceRoot)
 	if len(issues) > 0 {
-		return &Manifest{Routes: routes}, issues
+		return &Manifest{Routes: routes, Middlewares: middlewares}, issues
 	}
 	for _, route := range routes {
 		program := sourceProgram(sources, route.ModulePath)
@@ -79,14 +92,36 @@ func Analyze(sources []Source, resolutions map[string]resolver.Result, sourceRoo
 			if method != nil {
 				span = method.Span()
 			}
-			return &Manifest{Routes: routes}, []Issue{{
+			return &Manifest{Routes: routes, Middlewares: middlewares}, []Issue{{
 				Filename: route.Filename,
 				Message:  fmt.Sprintf("%s %s handler must have signature def %s(context: Context): Response", route.Method, route.Path, route.Handler),
 				Span:     span,
 			}}
 		}
 	}
-	return &Manifest{Routes: routes}, nil
+	for _, middleware := range middlewares {
+		program := sourceProgram(sources, middleware.ModulePath)
+		method := topLevelMethod(program, middleware.Handler)
+		if method == nil || !validMiddleware(method, resolutions[middleware.ModulePath]) {
+			span := program.Span()
+			if method != nil {
+				span = method.Span()
+			}
+			return &Manifest{Routes: routes, Middlewares: middlewares}, []Issue{{
+				Filename: middleware.Filename,
+				Message:  "middleware must have signature def call(context: Context, next: Next): Response",
+				Span:     span,
+			}}
+		}
+	}
+	for routeIndex := range routes {
+		for _, middleware := range middlewares {
+			if appliesToRoute(middleware.Directory, routes[routeIndex].Directory) {
+				routes[routeIndex].Middlewares = append(routes[routeIndex].Middlewares, middleware)
+			}
+		}
+	}
+	return &Manifest{Routes: routes, Middlewares: middlewares}, nil
 }
 
 func (m *Manifest) MethodTargets() map[string]map[string]string {
@@ -99,6 +134,12 @@ func (m *Manifest) MethodTargets() map[string]map[string]string {
 			result[route.ModulePath] = map[string]string{}
 		}
 		result[route.ModulePath][route.Handler] = route.TargetHandler
+	}
+	for _, middleware := range m.Middlewares {
+		if result[middleware.ModulePath] == nil {
+			result[middleware.ModulePath] = map[string]string{}
+		}
+		result[middleware.ModulePath][middleware.Handler] = middleware.TargetHandler
 	}
 	return result
 }
@@ -119,6 +160,19 @@ func validHandler(method *ast.MethodStatement, resolved resolver.Result) bool {
 	parameter := method.Parameters[0]
 	if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest || !officialType(parameter.Type, "Context", resolved) {
 		return false
+	}
+	return officialType(method.ReturnType, "Response", resolved)
+}
+
+func validMiddleware(method *ast.MethodStatement, resolved resolver.Result) bool {
+	if method.Class || len(method.TypeParameters) != 0 || len(method.Parameters) != 2 {
+		return false
+	}
+	for index, expected := range []string{"Context", "Next"} {
+		parameter := method.Parameters[index]
+		if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest || !officialType(parameter.Type, expected, resolved) {
+			return false
+		}
 	}
 	return officialType(method.ReturnType, "Response", resolved)
 }
@@ -172,6 +226,7 @@ func Discover(sources []Source, sourceRoot string) ([]Route, []Issue) {
 			found = true
 			routes = append(routes, Route{
 				Filename:       source.Filename,
+				Directory:      relativeDirectory(relative),
 				Method:         strings.ToUpper(method.Name),
 				Path:           path,
 				ModulePath:     source.ModulePath,
@@ -208,6 +263,61 @@ func Discover(sources []Source, sourceRoot string) ([]Route, []Issue) {
 		return issues[i].Message < issues[j].Message
 	})
 	return routes, issues
+}
+
+func discoverMiddlewares(sources []Source, sourceRoot string) []Middleware {
+	if sourceRoot == "" {
+		return nil
+	}
+	routeRoot := filepath.Join(sourceRoot, "routes")
+	var middlewares []Middleware
+	for _, source := range sources {
+		relative, err := filepath.Rel(routeRoot, source.Filename)
+		if err != nil || escapesRoot(relative) || filepath.Base(relative) != "_middleware.trb" {
+			continue
+		}
+		middlewares = append(middlewares, Middleware{
+			Filename:   source.Filename,
+			Directory:  relativeDirectory(relative),
+			ModulePath: source.ModulePath,
+			Handler:    "call",
+			Span:       source.Program.Span(),
+		})
+	}
+	sort.Slice(middlewares, func(i, j int) bool {
+		leftDepth := directoryDepth(middlewares[i].Directory)
+		rightDepth := directoryDepth(middlewares[j].Directory)
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		if middlewares[i].Directory != middlewares[j].Directory {
+			return middlewares[i].Directory < middlewares[j].Directory
+		}
+		return middlewares[i].ModulePath < middlewares[j].ModulePath
+	})
+	for index := range middlewares {
+		middlewares[index].TargetHandler = fmt.Sprintf("trb_web_middleware_%d", index)
+	}
+	return middlewares
+}
+
+func relativeDirectory(relative string) string {
+	directory := filepath.ToSlash(filepath.Dir(relative))
+	if directory == "." {
+		return ""
+	}
+	return directory
+}
+
+func directoryDepth(directory string) int {
+	if directory == "" {
+		return 0
+	}
+	return strings.Count(directory, "/") + 1
+}
+
+func appliesToRoute(middlewareDirectory, routeDirectory string) bool {
+	return middlewareDirectory == "" || routeDirectory == middlewareDirectory || strings.HasPrefix(routeDirectory, middlewareDirectory+"/")
 }
 
 func routePath(relative string) (string, []string, string) {

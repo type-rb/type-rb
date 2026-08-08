@@ -16,6 +16,10 @@ record Response
 	body: Bytes
 end
 
+interface Next
+	call(context: Context): Response
+end
+
 def path_param(context: Context, name: String): String
 	return context.path_parameters[name]
 end
