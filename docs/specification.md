@@ -398,6 +398,14 @@ end
   retained across project imports.
 - Class constants are runtime-initialized immutable bindings and are available
   to both instance and class methods.
+- A class value is assignable to an interface only when the class explicitly
+  names that interface with `implements`, or inherits that declaration from a
+  superclass. Matching members alone do not create structural conformance.
+  The rule applies to parameters, returns, bindings, and imported classes.
+- A fresh collection literal is contextually typed when an interface element
+  type is expected, so `Array<Named> := [User.new()]` is valid when `User`
+  implements `Named`. Existing mutable collection values remain invariant;
+  an `Array<User>` binding is not assignable to `Array<Named>`.
 
 The following class semantics remain deliberately unsettled rather than being
 inferred from Go, Ruby, or TypeScript:

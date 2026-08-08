@@ -1841,6 +1841,75 @@ func TestRunPredicateAndBangNamesAcrossAvailableBackends(t *testing.T) {
 	}
 }
 
+func TestRunInterfaceValuesAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby interface-value run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript interface-value run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/interface-value-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `interface Named
+	name(): String
+end
+
+class Person implements Named
+	@value: String
+
+	def initialize(value: String)
+		@value = value
+		return
+	end
+
+	def name(): String
+		return @value
+	end
+end
+
+def display(value: Named): String
+	return value.name()
+end
+
+def main()
+	values: Array<Named> := [Person.new("Ada"), Person.new("Grace")]
+	values.each do |value|
+		puts(display(value))
+	end
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if stdout.String() != "Ada\nGrace\n" {
+			t.Fatalf("unexpected %s interface-value output %q", mode, stdout.String())
+		}
+	}
+}
+
 func TestRunPortableStringTrimmingAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

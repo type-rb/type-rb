@@ -3157,6 +3157,33 @@ func TestProjectCompilerChecksImportedInterfaces(t *testing.T) {
 	if _, err := CompileProject([]SourceUnit{contract, valid}, Options{Mode: "typescript"}); err != nil {
 		t.Fatal(err)
 	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Source: []byte(`import { Named } from contracts/named
+import { User } from models/user
+
+class Admin < User
+end
+
+def build(): Named
+	return Admin.new()
+end
+
+def display(value: Named): String
+	return value.name()
+end
+
+def label(): String
+	return display(User.new())
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := CompileProject([]SourceUnit{contract, valid, consumer}, Options{Mode: mode, GoModule: "example.com/interfaces", RubyLoader: "require_relative"}); err != nil {
+			t.Fatalf("%s rejected imported interface values: %v", mode, err)
+		}
+	}
 
 	invalid := valid
 	invalid.Source = []byte("import contracts/named\n\nclass User implements Named\n  def name(): Integer\n    return 1\n  end\nend\n")
