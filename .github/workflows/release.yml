@@ -8,7 +8,6 @@ on:
 permissions:
   actions: write
   contents: write
-  pull-requests: write
 
 concurrency:
   group: release
@@ -19,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      RELEASE_SOURCE_TOKEN: ${{ secrets.RELEASE_SOURCE_TOKEN }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -45,11 +45,15 @@ jobs:
           ./scripts/package-release.sh "$version" dist
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
-      - name: Require Homebrew tap credentials
+      - name: Require release credentials
         shell: bash
         run: |
           if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
             echo "HOMEBREW_TAP_TOKEN must be configured to update type-rb/homebrew-tap" >&2
+            exit 1
+          fi
+          if [ -z "$RELEASE_SOURCE_TOKEN" ]; then
+            echo "RELEASE_SOURCE_TOKEN must be configured to advance the development version" >&2
             exit 1
           fi
 
@@ -100,7 +104,7 @@ jobs:
       - name: Advance development version through a pull request
         id: advance
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_SOURCE_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail

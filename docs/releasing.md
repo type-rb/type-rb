@@ -23,9 +23,11 @@ only stable tagged releases and never consumes a `-dev` version.
 2. Create a fine-grained personal access token that has `Contents: Read and
    write` access to that repository. Store it in the source repository as the
    Actions secret `HOMEBREW_TAP_TOKEN`.
-3. Enable `Allow GitHub Actions to create and approve pull requests` in the
-   repository Actions settings. The Release workflow receives pull-request
-   write access explicitly; other workflows retain their narrower permissions.
+3. Create a separate fine-grained personal access token with `Contents: Read
+   and write` and `Pull requests: Read and write` access to `type-rb/type-rb`.
+   Store it as `RELEASE_SOURCE_TOKEN`. The workflow uses it only to create and
+   merge the development-version pull request; the main branch ruleset remains
+   unchanged.
 
 The tap repository uses the standard layout:
 
