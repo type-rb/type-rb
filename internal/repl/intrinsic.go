@@ -722,14 +722,18 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		digest := stdhmac.New(stdsha512.New, key)
 		_, _ = digest.Write(message)
 		return Value{Type: typ, Data: bytesValue(digest.Sum(nil))}, nil
-	case "trb.std.hmac.equal":
+	case "trb.std.hmac.equal", "trb.std.secure_compare.equal":
 		if err := require(2); err != nil {
 			return Value{}, err
 		}
 		left, leftOK := values[0].Data.(bytesValue)
 		right, rightOK := values[1].Data.(bytesValue)
 		if !leftOK || !rightOK {
-			return Value{}, errors.New("hmac.equal expects Bytes arguments")
+			operation := "hmac.equal"
+			if name == "trb.std.secure_compare.equal" {
+				operation = "secure_compare.equal"
+			}
+			return Value{}, errors.New(operation + " expects Bytes arguments")
 		}
 		return Value{Type: typ, Data: stdhmac.Equal(left, right)}, nil
 	case "trb.std.random.float":

@@ -563,7 +563,7 @@ func TestReplEvaluatesPortableHMACAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/hmac\nimport trb/std/encoding/hex\nkey := \"Jefe\".to_bytes()\nmessage := \"what do ya want for nothing?\".to_bytes()\ntag := hmac.sha256(key, message)\nhex.encode(tag)\nhex.encode(hmac.sha512(key, message))\nhmac.equal(tag, tag)\nhmac.equal(tag, hmac.sha256(key, \"other\".to_bytes()))\nhmac.equal(tag, \"short\".to_bytes())\n:quit\n"
+		input := "import trb/std/hmac\nimport trb/std/secure_compare\nimport trb/std/encoding/hex\nkey := \"Jefe\".to_bytes()\nmessage := \"what do ya want for nothing?\".to_bytes()\ntag := hmac.sha256(key, message)\nhex.encode(tag)\nhex.encode(hmac.sha512(key, message))\nhmac.equal(tag, tag)\nhmac.equal(tag, hmac.sha256(key, \"other\".to_bytes()))\nhmac.equal(tag, \"short\".to_bytes())\nsecure_compare.equal(tag, tag)\nsecure_compare.equal(tag, hmac.sha256(key, \"other\".to_bytes()))\nsecure_compare.equal(tag, \"short\".to_bytes())\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -574,6 +574,7 @@ func TestReplEvaluatesPortableHMACAcrossModes(t *testing.T) {
 			"Bytes[91, 220, 193, 70, 191, 96, 117, 78, 106, 4, 36, 38, 8, 149, 117, 199, 90, 0, 63, 8, 157, 39, 57, 131, 157, 236, 88, 185, 100, 236, 56, 67] : Bytes\n" +
 			"\"5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843\" : String\n" +
 			"\"164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737\" : String\n" +
+			"true : Boolean\nfalse : Boolean\nfalse : Boolean\n" +
 			"true : Boolean\nfalse : Boolean\nfalse : Boolean\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s hmac REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
@@ -2416,6 +2417,7 @@ func TestRunPortableHMACAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		source := `import { equal, sha256, sha512 } from trb/std/hmac
+import trb/std/secure_compare
 import { decode, encode } from trb/std/encoding/hex
 
 def main()
@@ -2434,6 +2436,9 @@ def main()
 	puts(equal(tag, tag))
 	puts(equal(tag, sha256(key, "other".to_bytes())))
 	puts(equal(tag, "short".to_bytes()))
+	puts(secure_compare.equal(tag, tag))
+	puts(secure_compare.equal(tag, sha256(key, "other".to_bytes())))
+	puts(secure_compare.equal(tag, "short".to_bytes()))
 	return
 end
 `
@@ -2449,7 +2454,7 @@ end
 			"164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737\n" +
 			"d0c62b445e5d504c9809dcaa12bfedd969deb591591984b81c68b352cec257ee\n" +
 			"435bf6bbcffb2d5301b470b17314c3571666de1cd1f96776dfd9e59ce07f32338bfca69d7be3f6d33c3eee5def6ebec48e8181d86ea9ebeeb639fa3ce6da44d7\n" +
-			"true\nfalse\nfalse\n"
+			"true\nfalse\nfalse\ntrue\nfalse\nfalse\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s portable hmac output: want %q, got %q", mode, want, stdout.String())
 		}

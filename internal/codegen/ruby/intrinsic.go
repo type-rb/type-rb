@@ -247,7 +247,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(key, message) { require \"openssl\"; OpenSSL::HMAC.digest(\"SHA256\", key, message).b }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.hmac.sha512":
 		return "->(key, message) { require \"openssl\"; OpenSSL::HMAC.digest(\"SHA512\", key, message).b }.call(" + arguments[0] + ", " + arguments[1] + ")"
-	case "trb.std.hmac.equal":
+	case "trb.std.hmac.equal", "trb.std.secure_compare.equal":
 		return "->(left, right) { if left.bytesize != right.bytesize; false; else; difference = 0; left.bytes.zip(right.bytes) { |left_byte, right_byte| difference |= left_byte ^ right_byte }; difference == 0; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.random.float":
 		return "Random.rand()"

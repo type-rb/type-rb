@@ -292,7 +292,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return hmacExpression(arguments[0], arguments[1], 64, sha256Function())
 	case "trb.std.hmac.sha512":
 		return hmacExpression(arguments[0], arguments[1], 128, sha512Function())
-	case "trb.std.hmac.equal":
+	case "trb.std.hmac.equal", "trb.std.secure_compare.equal":
 		return "((left: Uint8Array, right: Uint8Array): boolean => { if (left.byteLength !== right.byteLength) { return false; } let difference = 0; for (let index = 0; index < left.byteLength; index += 1) { difference |= left[index]! ^ right[index]!; } return difference === 0; })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.random.float":
 		return "Math.random()"

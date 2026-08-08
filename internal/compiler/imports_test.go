@@ -1102,6 +1102,49 @@ func TestPortableHMACDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableSecureComparePackageLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { equal } from trb/std/secure_compare
+
+def matches(left: Bytes, right: Bytes): Boolean
+	return equal(left, right)
+end
+`),
+	}
+	wants := map[string]string{
+		"go":         `stdhmac.Equal(left, right)`,
+		"ruby":       `difference |= left_byte ^ right_byte`,
+		"typescript": `difference |= left[index]! ^ right[index]!`,
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/portable-secure-compare", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable secure comparison: %v", mode, err)
+		}
+		var consumer *Artifact
+		for _, artifact := range artifacts {
+			if artifact.IR.ModulePath == "main" {
+				consumer = artifact
+			}
+		}
+		if consumer == nil || !strings.Contains(string(consumer.Output), wants[mode]) {
+			t.Fatalf("generated %s secure comparison is missing %q: %#v", mode, wants[mode], consumer)
+		}
+	}
+}
+
+func TestPortableSecureCompareDiagnosticsAreModeIndependent(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := Compile("bad.trb", []byte("import { equal } from trb/std/secure_compare\ndef bad(): Boolean\n\treturn equal(\"left\", \"right\".to_bytes())\nend\n"), mode)
+		if err == nil || !strings.Contains(err.Error(), "argument 1 to equal() has type String, expected Bytes") {
+			t.Fatalf("%s: expected portable secure comparison diagnostic, got %v", mode, err)
+		}
+	}
+}
+
 func TestPortableRandomPackagesLowerAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

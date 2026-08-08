@@ -571,6 +571,13 @@ end
 			"equal":  bytesBinary("equal", "trb.std.hmac.equal", booleanType),
 		},
 	},
+	"trb/std/secure_compare": {
+		Path: "trb/std/secure_compare",
+		Kind: Portable,
+		Symbols: map[string]Symbol{
+			"equal": bytesBinary("equal", "trb.std.secure_compare.equal", booleanType),
+		},
+	},
 	"trb/std/random": {
 		Path: "trb/std/random",
 		Kind: Portable,

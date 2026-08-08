@@ -210,6 +210,17 @@ func TestPortableHMACContract(t *testing.T) {
 	}
 }
 
+func TestPortableSecureCompareContract(t *testing.T) {
+	definition, ok := Lookup("trb/std/secure_compare")
+	if !ok {
+		t.Fatal("secure_compare package is missing")
+	}
+	equal, ok := definition.Symbols["equal"]
+	if !ok || len(equal.Parameters) != 2 || equal.Parameters[0].Type.String() != "Bytes" || equal.Parameters[1].Type.String() != "Bytes" || equal.Return.String() != "Boolean" {
+		t.Fatalf("secure_compare.equal contract=%#v, want (Bytes, Bytes) -> Boolean", equal)
+	}
+}
+
 func TestPortableRandomContracts(t *testing.T) {
 	random, ok := Lookup("trb/std/random")
 	if !ok {
