@@ -171,6 +171,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(value, separator) { raise ArgumentError, \"String split separator is empty\" if separator.empty?; value.split(separator, -1) }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.strings.contains":
 		return arguments[0] + ".include?(" + arguments[1] + ")"
+	case "trb.std.strings.replace_all":
+		return "->(value, pattern, replacement) { raise ArgumentError, \"String replacement pattern is empty\" if pattern.empty?; value.gsub(pattern) { replacement } }.call(" + arguments[0] + ", " + arguments[1] + ", " + arguments[2] + ")"
 	case "trb.std.strings.codepoints":
 		return arguments[0] + ".codepoints"
 	case "trb.std.strings.characters":

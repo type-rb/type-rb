@@ -279,6 +279,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.strings.contains":
 		g.requireImport("strings", "")
 		return "strings.Contains(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.strings.replace_all":
+		g.requireImport("strings", "")
+		return "func(value, pattern, replacement string) string { if pattern == \"\" { panic(\"String replacement pattern is empty\") }; return strings.ReplaceAll(value, pattern, replacement) }(" + arguments[0] + ", " + arguments[1] + ", " + arguments[2] + ")"
 	case "trb.std.strings.codepoints":
 		g.requireImport("unicode/utf8", "utf8")
 		return "func(value string) []int { result := make([]int, 0, utf8.RuneCountInString(value)); for _, codepoint := range value { result = append(result, int(codepoint)) }; return result }(" + arguments[0] + ")"
