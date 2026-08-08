@@ -69,6 +69,29 @@ end
 	}
 }
 
+func TestOfficialWebResponseCookiesRejectInvalidAttributePayloads(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { ResponseCookieAttribute } from trb/web
+
+def invalid(): ResponseCookieAttribute
+	return ResponseCookieAttribute::MaxAge("one hour")
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
+			if err == nil || !strings.Contains(err.Error(), "enum payload argument 1 has type String, expected Integer") {
+				t.Fatalf("unexpected diagnostic: %v", err)
+			}
+		})
+	}
+}
+
 func TestUserSourceCannotClaimOfficialPackageNamespace(t *testing.T) {
 	_, err := CompileProject([]SourceUnit{{
 		Filename:   "/project/trb/web/index.trb",
