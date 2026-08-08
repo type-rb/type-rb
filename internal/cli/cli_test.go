@@ -2956,13 +2956,14 @@ def main()
 	request := Request.new(
 		method: "POST",
 		path: "/todos/7",
+		query_string: "tag=type+rb&tag=go",
 		headers: {},
 		body: "{\"title\":\"ship\"}".to_bytes(),
 	)
 	response := dispatch(request)
 	puts(response.status)
 	puts(response.body.to_s())
-	method_not_allowed := dispatch(Request.new(method: "GET", path: "/todos/7", headers: {}, body: "".to_bytes()))
+	method_not_allowed := dispatch(Request.new(method: "GET", path: "/todos/7", query_string: "", headers: {}, body: "".to_bytes()))
 	puts(method_not_allowed.status)
 	puts(method_not_allowed.headers["allow"][0])
 	puts(method_not_allowed.body.to_s())
@@ -2970,13 +2971,13 @@ def main()
 	(0...21).each do |_index|
 		oversized_body = oversized_body.concat(oversized_body)
 	end
-	payload_too_large := dispatch(Request.new(method: "POST", path: "/todos/7", headers: {}, body: oversized_body))
+	payload_too_large := dispatch(Request.new(method: "POST", path: "/todos/7", query_string: "", headers: {}, body: oversized_body))
 	puts(payload_too_large.status)
 	puts(payload_too_large.body.to_s())
 	return
 end
 `
-		routeSource := `import { Context, Response, json, path_param, request_json } from trb/web
+		routeSource := `import { Context, Response, json, path_param, query_parameters, request_json } from trb/web
 import { Result } from trb/std/result
 
 record TodoRequest
@@ -2992,7 +2993,12 @@ def post(context: Context): Response
 	id := path_param(context, "id")
 	case request_json<TodoRequest>(context.request)
 	when Result::Ok(payload)
-		return json(TodoResponse.new(id: id, title: payload.title), 201)
+		case query_parameters(context.request)
+		when Result::Ok(parameters)
+			return json(TodoResponse.new(id: id, title: payload.title + ":" + parameters[0].value + ":" + parameters[1].value), 201)
+		when Result::Err(_error)
+			return json(TodoResponse.new(id: id, title: "invalid query"), 400)
+		end
 	when Result::Err(_error)
 		return json(TodoResponse.new(id: id, title: "invalid"), 400)
 	end
@@ -3040,7 +3046,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship\"}\n405\nPOST\n{\"error\":\"method_not_allowed\"}\n413\n{\"error\":\"payload_too_large\"}\n"; stdout.String() != want {
+		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship:type rb:go\"}\n405\nPOST\n{\"error\":\"method_not_allowed\"}\n413\n{\"error\":\"payload_too_large\"}\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web JSON output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
@@ -3073,7 +3079,7 @@ func TestRunOfficialWebRecoveryAcrossAvailableBackends(t *testing.T) {
 import { dispatch } from trb/web/testing
 
 def main()
-	request := Request.new(method: "GET", path: "/failure", headers: {}, body: "".to_bytes())
+	request := Request.new(method: "GET", path: "/failure", query_string: "", headers: {}, body: "".to_bytes())
 	response := dispatch(request)
 	puts(response.status)
 	puts(response.body.to_s())
@@ -3142,8 +3148,8 @@ func TestRunOfficialWebJSONLLoggerAcrossAvailableBackends(t *testing.T) {
 import { dispatch } from trb/web/testing
 
 def main()
-	_logged_response := dispatch(Request.new(method: "GET", path: "/logged", headers: {}, body: "".to_bytes()))
-	_excluded_response := dispatch(Request.new(method: "GET", path: "/health", headers: {}, body: "".to_bytes()))
+	_logged_response := dispatch(Request.new(method: "GET", path: "/logged", query_string: "", headers: {}, body: "".to_bytes()))
+	_excluded_response := dispatch(Request.new(method: "GET", path: "/health", query_string: "", headers: {}, body: "".to_bytes()))
 	return
 end
 `
