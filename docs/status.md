@@ -57,16 +57,19 @@ handler, otherwise reuse the matching GET handler and middleware chain, and
 never expose a response body. OPTIONS requests likewise prefer explicit
 handlers; otherwise a middleware-aware 204 response advertises the available
 methods through `Allow`.
-Request header lookup is case-insensitive through `header_values`. Portable
-cookie parsing preserves header order, duplicate names, and opaque values
-without delegating semantics to the target runtime.
-Responses can replace or append case-insensitive header values without mutating
-the original response through `with_header` and `add_header`.
+Request header lookup is case-insensitive; `header_value` rejects missing and
+duplicate values instead of choosing one implicitly. Portable cookie parsing
+preserves header order, duplicate names, and opaque values without delegating
+semantics to the target runtime.
+Responses can replace, append, remove, or inspect case-insensitive header values
+without mutating the original response. `vary` composes cache keys without
+duplicating an existing field.
 Typed response cookies support ordered `Domain`, `Path`, `Max-Age`, `Secure`,
 `HttpOnly`, and `SameSite` attributes while preserving multiple `Set-Cookie`
 header values.
-Portable `text`, `bytes`, and `empty` builders create common responses with
-consistent default statuses and content types.
+Portable `text`, `bytes`, `empty`, and `redirect` builders create common
+responses with consistent default statuses and content types. `with_status`
+returns a copy with a different status.
 
 The compiler pipeline is:
 

@@ -20,6 +20,11 @@ enum QueryValueError
 	Duplicate(name: String)
 end
 
+enum HeaderValueError
+	Missing(name: String)
+	Duplicate(name: String)
+end
+
 enum CookieSameSite
 	Lax
 	Strict
@@ -100,6 +105,61 @@ def add_header(response: Response, name: String, value: String): Response
 	added_values.push(value)
 	headers[normalized_name] = added_values
 	return Response.new(status: response.status, headers: headers, body: response.body)
+end
+
+def without_header(response: Response, name: String): Response
+	normalized_name := name.downcase()
+	mut headers: Hash<String, Array<String>> := {}
+	response.headers.each do |header_name, values|
+		if header_name.downcase() != normalized_name
+			headers[header_name] = values.dup()
+		end
+	end
+	return Response.new(status: response.status, headers: headers, body: response.body)
+end
+
+def with_status(response: Response, status: Integer): Response
+	mut headers: Hash<String, Array<String>> := {}
+	response.headers.each do |header_name, values|
+		headers[header_name] = values.dup()
+	end
+	return Response.new(status: status, headers: headers, body: response.body)
+end
+
+def redirect(location: String, status: Integer = 302): Response
+	return with_header(empty(status), "location", location)
+end
+
+def response_header_values(response: Response, name: String): Array<String>
+	normalized_name := name.downcase()
+	mut result: Array<String> := []
+	response.headers.each do |header_name, values|
+		if header_name.downcase() == normalized_name
+			values.each do |value|
+				result.push(value)
+			end
+		end
+	end
+	return result
+end
+
+def vary(response: Response, field: String): Response
+	normalized_field := field.strip().downcase()
+	if normalized_field == ""
+		return response
+	end
+	response_header_values(response, "vary").each do |value|
+		value.split(",").each do |existing_field|
+			normalized_existing := existing_field.strip().downcase()
+			if normalized_existing == "*" || normalized_existing == normalized_field
+				return response
+			end
+		end
+	end
+	if normalized_field == "*"
+		return with_header(response, "vary", "*")
+	end
+	return add_header(response, "vary", field.strip())
 end
 
 def new_response_cookie(name: String, value: String): ResponseCookie
@@ -195,6 +255,17 @@ def header_values(request: Request, name: String): Array<String>
 		end
 	end
 	return result
+end
+
+def header_value(request: Request, name: String): Result<String, HeaderValueError>
+	values := header_values(request, name)
+	if values.empty?()
+		return Result<String, HeaderValueError>::Err(HeaderValueError::Missing(name))
+	end
+	if values.size() > 1
+		return Result<String, HeaderValueError>::Err(HeaderValueError::Duplicate(name))
+	end
+	return Result<String, HeaderValueError>::Ok(values[0])
 end
 
 def cookies(request: Request): Array<RequestCookie>
