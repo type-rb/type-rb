@@ -528,13 +528,17 @@ func TestReplEvaluatesPortableHashAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/hash\nimport trb/std/encoding/hex\nhex.encode(hash.sha256(\"\".to_bytes()))\nhex.encode(hash.sha256(\"abc\".to_bytes()))\nhex.encode(hash.sha512(\"\".to_bytes()))\nhex.encode(hash.sha512(\"abc\".to_bytes()))\n:quit\n"
+		input := "import trb/std/hash\nimport trb/std/encoding/hex\nhex.encode(hash.md5(\"\".to_bytes()))\nhex.encode(hash.md5(\"abc\".to_bytes()))\nhex.encode(hash.sha1(\"\".to_bytes()))\nhex.encode(hash.sha1(\"abc\".to_bytes()))\nhex.encode(hash.sha256(\"\".to_bytes()))\nhex.encode(hash.sha256(\"abc\".to_bytes()))\nhex.encode(hash.sha512(\"\".to_bytes()))\nhex.encode(hash.sha512(\"abc\".to_bytes()))\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\" : String\n" +
+		want := "\"d41d8cd98f00b204e9800998ecf8427e\" : String\n" +
+			"\"900150983cd24fb0d6963f7d28e17f72\" : String\n" +
+			"\"da39a3ee5e6b4b0d3255bfef95601890afd80709\" : String\n" +
+			"\"a9993e364706816aba3e25717850c26c9cd0d89d\" : String\n" +
+			"\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\" : String\n" +
 			"\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\" : String\n" +
 			"\"cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e\" : String\n" +
 			"\"ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f\" : String\n"
@@ -2336,7 +2340,7 @@ func TestRunPortableHashAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `import { sha256, sha512 } from trb/std/hash
+		source := `import { md5, sha1, sha256, sha512 } from trb/std/hash
 import { decode, encode } from trb/std/encoding/hex
 
 def main()
@@ -2344,6 +2348,12 @@ def main()
 	a56 := a8 + a8 + a8 + a8 + a8 + a8 + a8
 	a112 := a56 + a56
 	_decoded := decode("00")
+	puts(encode(md5("".to_bytes())))
+	puts(encode(md5("abc".to_bytes())))
+	puts(encode(md5(a56.to_bytes())))
+	puts(encode(sha1("".to_bytes())))
+	puts(encode(sha1("abc".to_bytes())))
+	puts(encode(sha1(a56.to_bytes())))
 	puts(encode(sha256("".to_bytes())))
 	puts(encode(sha256("abc".to_bytes())))
 	puts(encode(sha256(a56.to_bytes())))
@@ -2361,7 +2371,13 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n" +
+		want := "d41d8cd98f00b204e9800998ecf8427e\n" +
+			"900150983cd24fb0d6963f7d28e17f72\n" +
+			"3b0c8ac703f828b04c6c197006d17218\n" +
+			"da39a3ee5e6b4b0d3255bfef95601890afd80709\n" +
+			"a9993e364706816aba3e25717850c26c9cd0d89d\n" +
+			"c2db330f6083854c99d4b5bfb6e8f29f201be699\n" +
+			"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n" +
 			"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n" +
 			"b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a\n" +
 			"cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e\n" +

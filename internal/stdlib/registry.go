@@ -533,6 +533,8 @@ end
 		Source:     hashSource(),
 		Kind:       Portable,
 		Symbols: map[string]Symbol{
+			"md5":    unary("md5", "", bytesType, bytesType),
+			"sha1":   unary("sha1", "", bytesType, bytesType),
 			"sha256": unary("sha256", "", bytesType, bytesType),
 			"sha512": unary("sha512", "", bytesType, bytesType),
 		},
@@ -542,6 +544,8 @@ end
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
+			"md5":    unary("md5", "trb.std.hash.md5", bytesType, bytesType),
+			"sha1":   unary("sha1", "trb.std.hash.sha1", bytesType, bytesType),
 			"sha256": unary("sha256", "trb.std.hash.sha256", bytesType, bytesType),
 			"sha512": unary("sha512", "trb.std.hash.sha512", bytesType, bytesType),
 		},

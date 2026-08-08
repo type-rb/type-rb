@@ -952,7 +952,15 @@ func TestPortableHashPackageLowersAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { sha256, sha512 } from trb/std/hash
+		Source: []byte(`import { md5, sha1, sha256, sha512 } from trb/std/hash
+
+def digest_md5(value: Bytes): Bytes
+	return md5(value)
+end
+
+def digest_sha1(value: Bytes): Bytes
+	return sha1(value)
+end
 
 def digest256(value: Bytes): Bytes
 	return sha256(value)
@@ -965,14 +973,20 @@ end
 	}
 	wants := map[string][]string{
 		"go": {
+			`stdmd5.Sum(value)`,
+			`stdsha1.Sum(value)`,
 			`stdsha256.Sum256(value)`,
 			`stdsha512.Sum512(value)`,
 		},
 		"ruby": {
+			`Digest::MD5.digest(value).b`,
+			`Digest::SHA1.digest(value).b`,
 			`Digest::SHA256.digest(value).b`,
 			`Digest::SHA512.digest(value).b`,
 		},
 		"typescript": {
+			`const shifts = [`,
+			`let h4 = 0xc3d2e1f0;`,
 			`const constants = new Uint32Array`,
 			`let h0 = 0x6a09e667;`,
 			`const mask = 0xffffffffffffffffn;`,
@@ -1005,10 +1019,14 @@ end
 }
 
 func TestPortableHashDiagnosticsAreModeIndependent(t *testing.T) {
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		_, err := Compile("bad.trb", []byte("import { sha256 } from trb/std/hash\ndef bad(): Bytes\n\treturn sha256(\"abc\")\nend\n"), mode)
-		if err == nil || !strings.Contains(err.Error(), "argument 1 to sha256() has type String, expected Bytes") {
-			t.Fatalf("%s: expected portable hash argument diagnostic, got %v", mode, err)
+	for _, name := range []string{"md5", "sha1", "sha256", "sha512"} {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			source := "import { " + name + " } from trb/std/hash\ndef bad(): Bytes\n\treturn " + name + "(\"abc\")\nend\n"
+			_, err := Compile("bad.trb", []byte(source), mode)
+			want := "argument 1 to " + name + "() has type String, expected Bytes"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s %s: expected portable hash argument diagnostic, got %v", mode, name, err)
+			}
 		}
 	}
 }

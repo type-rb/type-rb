@@ -280,6 +280,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		characterError := base64DecodeError("InvalidCharacter", "__trbInput", "index", "invalid base64url character")
 		nonCanonical := base64DecodeError("NonCanonical", "__trbInput", "__trbCharacters.length - 1", "non-canonical base64url encoding")
 		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; const __trbCharacters = Array.from(__trbInput); if (__trbCharacters.length % 4 === 1) { return " + lengthError + "; } for (let index = 0; index < __trbCharacters.length; index += 1) { const character = __trbCharacters[index]!; if (character === \"=\") { return " + paddingError + "; } if (!/^[A-Za-z0-9_-]$/.test(character)) { return " + characterError + "; } } const padded = __trbInput.replace(/-/g, \"+\").replace(/_/g, \"/\") + \"=\".repeat((4 - __trbInput.length % 4) % 4); const binary = atob(padded); const canonical = btoa(binary).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\"); if (canonical !== __trbInput) { return " + nonCanonical + "; } return " + filesystemOK("Uint8Array.from(binary, (character) => character.charCodeAt(0))") + "; })()"
+	case "trb.std.hash.md5":
+		return md5Expression(arguments[0])
+	case "trb.std.hash.sha1":
+		return sha1Expression(arguments[0])
 	case "trb.std.hash.sha256":
 		return sha256Expression(arguments[0])
 	case "trb.std.hash.sha512":

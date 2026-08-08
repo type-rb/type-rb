@@ -164,20 +164,27 @@ and a message.
 
 ## Hashing
 
-`trb/std/hash` computes one-shot SHA-256 and SHA-512 digests:
+`trb/std/hash` computes one-shot SHA-256 and SHA-512 digests. It also provides
+SHA-1 and MD5 for legacy compatibility and non-security checksums:
 
 ```trb
-import { sha256, sha512 } from trb/std/hash
+import { md5, sha1, sha256, sha512 } from trb/std/hash
 import { encode } from trb/std/encoding/hex
 
 digest := sha256("message".to_bytes())
 text := encode(digest)
 larger_digest := sha512("message".to_bytes())
+legacy_digest := sha1("legacy identifier".to_bytes())
+checksum := md5("legacy payload".to_bytes())
 ```
 
-Both functions accept and return `Bytes`. Digest formatting stays explicit by
+All four functions accept and return `Bytes`. Digest formatting stays explicit by
 passing the result to hexadecimal or Base64 encoding. These synchronous APIs
 have the same behavior in browsers, Bun, Node, Go, and Ruby.
+
+SHA-1 and MD5 are not suitable for passwords, signatures, certificates, or
+other collision-resistant security decisions. Prefer SHA-256 or SHA-512 unless
+an external legacy format specifically requires the older digest.
 
 `trb/std/hmac` provides HMAC-SHA-256, HMAC-SHA-512, and tag comparison:
 
