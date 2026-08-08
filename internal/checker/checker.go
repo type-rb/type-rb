@@ -1735,6 +1735,10 @@ func (c *Checker) assignable(expression ast.Expression, target, actual types.Typ
 }
 
 func (c *Checker) recordAssignableConversion(expression ast.Expression, target, actual types.Type) {
+	if expression != nil && target.Nullable && !actual.Nullable && actual.Kind != types.Nil {
+		c.result.Conversions[expression] = target
+		return
+	}
 	if target.Kind == types.Union && actual.Kind == types.Union && unionContainsKind(target, types.Float) && unionContainsKind(actual, types.Int) {
 		c.result.Conversions[expression] = target
 		return

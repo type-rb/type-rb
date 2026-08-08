@@ -645,6 +645,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "Number(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
 			return "((value: " + g.tsType(n.Value.ExprType()) + "): " + g.tsType(n.ExprType()) + " => typeof value === \"number\" ? Number(value) : value)(" + g.expr(n.Value) + ")"
+		case ir.NonNullableToNullableConversion:
+			if n.Value.ExprType().Kind == types.Int && n.ExprType().Kind == types.Float {
+				return "Number(" + g.expr(n.Value) + ")"
+			}
+			return g.expr(n.Value)
 		default:
 			return g.expr(n.Value)
 		}

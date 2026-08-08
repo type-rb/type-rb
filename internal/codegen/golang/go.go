@@ -842,6 +842,19 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "float64(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
 			return "func(value any) any { if integer, ok := value.(int); ok { return float64(integer) }; return value }(" + g.expr(n.Value) + ")"
+		case ir.NonNullableToNullableConversion:
+			value := g.expr(n.Value)
+			base := n.ExprType()
+			base.Nullable = false
+			if n.Value.ExprType().Kind == types.Int && base.Kind == types.Float {
+				value = "float64(" + value + ")"
+			}
+			baseType := g.goType(base)
+			nullableType := g.goType(n.ExprType())
+			if baseType == nullableType {
+				return value
+			}
+			return "func(value " + baseType + ") " + nullableType + " { return &value }(" + value + ")"
 		default:
 			return g.expr(n.Value)
 		}
