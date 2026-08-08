@@ -54,8 +54,8 @@ end
 			Package:    "routes",
 			Source: []byte(`import { Context, Next, Response } from trb/web
 
-def call(context: Context, next: Next): Response
-	return next.call(context)
+def call(context: Context, next_handler: Next): Response
+	return next_handler.call(context)
 end
 `),
 		},
@@ -183,7 +183,7 @@ end
 	}
 
 	_, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/web-middleware", SourceRoot: "/project/src", ProjectRoot: "/project"})
-	if err == nil || !strings.Contains(err.Error(), "middleware must have signature def call(context: Context, next: Next): Response") {
+	if err == nil || !strings.Contains(err.Error(), "middleware must have signature def call(context: Context, next_handler: Next): Response") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

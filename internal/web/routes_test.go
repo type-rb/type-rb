@@ -75,9 +75,9 @@ func TestDiscoverRejectsInvalidRouteFiles(t *testing.T) {
 func TestDiscoverMiddlewaresOrdersRootBeforeNestedScopes(t *testing.T) {
 	root := t.TempDir()
 	sources := []Source{
-		parsedSource(t, filepath.Join(root, "routes", "todos", "_middleware.trb"), "routes/todos/_middleware", "def call(context: Context, next: Next): Response\n\treturn next.call(context)\nend\n"),
-		parsedSource(t, filepath.Join(root, "routes", "_middleware.trb"), "routes/_middleware", "def call(context: Context, next: Next): Response\n\treturn next.call(context)\nend\n"),
-		parsedSource(t, filepath.Join(root, "routes", "admin", "_middleware.trb"), "routes/admin/_middleware", "def call(context: Context, next: Next): Response\n\treturn next.call(context)\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "todos", "_middleware.trb"), "routes/todos/_middleware", "def call(context: Context, next_handler: Next): Response\n\treturn next_handler.call(context)\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "_middleware.trb"), "routes/_middleware", "def call(context: Context, next_handler: Next): Response\n\treturn next_handler.call(context)\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "admin", "_middleware.trb"), "routes/admin/_middleware", "def call(context: Context, next_handler: Next): Response\n\treturn next_handler.call(context)\nend\n"),
 	}
 
 	middlewares := discoverMiddlewares(sources, root)

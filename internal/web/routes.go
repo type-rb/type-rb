@@ -109,7 +109,7 @@ func Analyze(sources []Source, resolutions map[string]resolver.Result, sourceRoo
 			}
 			return &Manifest{Routes: routes, Middlewares: middlewares}, []Issue{{
 				Filename: middleware.Filename,
-				Message:  "middleware must have signature def call(context: Context, next: Next): Response",
+				Message:  "middleware must have signature def call(context: Context, next_handler: Next): Response",
 				Span:     span,
 			}}
 		}

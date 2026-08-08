@@ -37,8 +37,10 @@ The early official `trb/web` package discovers file-based routes at compile
 time and runs typed request, path-parameter, JSON decode, and JSON response
 handlers through the same dispatcher in all three backends. Applications can
 start a generated Go, Ruby, or TypeScript HTTP server with `serve()`. Unhandled
-handler failures become a portable JSON 500 response; middleware and production
-lifecycle controls are still under development.
+handler failures become a portable JSON 500 response. Root and nested
+`_middleware.trb` files form the same outer-to-inner onion chain in every
+backend; production lifecycle controls and packaged middleware are still under
+development.
 
 The compiler pipeline is:
 

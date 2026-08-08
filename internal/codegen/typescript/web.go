@@ -12,21 +12,24 @@ import (
 func (g *generator) integrationImports(extensions []ir.Extension) {
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
 		g.line(`import { createServer } from "node:http";`)
-		g.webRouteImports(manifest.Routes)
+		g.webRouteImports(manifest)
 	}
 }
 
 func (g *generator) integrations(extensions []ir.Extension) {
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
-		g.webDispatcher(manifest.Routes)
+		g.webDispatcher(manifest)
 		g.webServer()
 	}
 }
 
-func (g *generator) webRouteImports(routes []webintegration.Route) {
+func (g *generator) webRouteImports(manifest *webintegration.Manifest) {
 	symbols := map[string][]string{}
-	for _, route := range routes {
+	for _, route := range manifest.Routes {
 		symbols[route.ModulePath] = append(symbols[route.ModulePath], route.TargetHandler)
+	}
+	for _, middleware := range manifest.Middlewares {
+		symbols[middleware.ModulePath] = append(symbols[middleware.ModulePath], middleware.TargetHandler)
 	}
 	modulePaths := make([]string, 0, len(symbols))
 	for modulePath := range symbols {
@@ -40,14 +43,21 @@ func (g *generator) webRouteImports(routes []webintegration.Route) {
 	}
 }
 
-func (g *generator) webDispatcher(routes []webintegration.Route) {
-	g.line("function trb_web_dispatch(request: { method: string; path: string; headers: Record<string, string[]>; body: Uint8Array }) {")
+func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
+	routes := manifest.Routes
+	g.line("type TrbWebRequest = { method: string; path: string; headers: Record<string, string[]>; body: Uint8Array };")
+	g.line("type TrbWebContext = { request: TrbWebRequest; path_parameters: Record<string, string> };")
+	g.line("type TrbWebResponse = { status: number; headers: Record<string, string[]>; body: Uint8Array };")
+	if len(manifest.Middlewares) > 0 {
+		g.webNext()
+	}
+	g.line("function trb_web_dispatch(request: TrbWebRequest) {")
 	g.indent++
 	g.line("try {")
 	g.indent++
 	g.line("const method = request.method.toUpperCase();")
 	g.line(`const segments = request.path.split("/").filter((segment) => segment.length > 0);`)
-	for _, route := range routes {
+	for routeIndex, route := range routes {
 		segments := typescriptWebRouteSegments(route.Path)
 		condition := []string{"method === " + strconv.Quote(route.Method), "segments.length === " + strconv.Itoa(len(segments))}
 		for index, segment := range segments {
@@ -63,7 +73,17 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 				g.line("path_parameters[" + strconv.Quote(strings.TrimPrefix(segment, ":")) + "] = segments[" + strconv.Itoa(index) + "]!;")
 			}
 		}
-		g.line("return " + route.TargetHandler + "({ request, path_parameters });")
+		contextName := "route_context_" + strconv.Itoa(routeIndex)
+		handlerName := "route_handler_" + strconv.Itoa(routeIndex)
+		g.line("const " + contextName + ": TrbWebContext = { request, path_parameters };")
+		g.line("let " + handlerName + " = (middleware_context: TrbWebContext): TrbWebResponse => " + route.TargetHandler + "(middleware_context);")
+		for middlewareIndex := len(route.Middlewares) - 1; middlewareIndex >= 0; middlewareIndex-- {
+			middleware := route.Middlewares[middlewareIndex]
+			nextName := "next_handler_" + strconv.Itoa(routeIndex) + "_" + strconv.Itoa(middlewareIndex)
+			g.line("const " + nextName + " = " + handlerName + ";")
+			g.line(handlerName + " = (middleware_context: TrbWebContext): TrbWebResponse => " + middleware.TargetHandler + "(middleware_context, new TrbWebNext(" + nextName + "));")
+		}
+		g.line("return " + handlerName + "(" + contextName + ");")
 		g.indent--
 		g.line("}")
 	}
@@ -72,6 +92,31 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 	g.line("} catch {")
 	g.indent++
 	g.line(`return { status: 500, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"internal_server_error\"}") };`)
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+}
+
+func (g *generator) webNext() {
+	g.line("class TrbWebNext {")
+	g.indent++
+	g.line("private called = false;")
+	g.line("private readonly handler: (context: TrbWebContext) => TrbWebResponse;")
+	g.line("constructor(handler: (context: TrbWebContext) => TrbWebResponse) {")
+	g.indent++
+	g.line("this.handler = handler;")
+	g.indent--
+	g.line("}")
+	g.line("call(context: TrbWebContext): TrbWebResponse {")
+	g.indent++
+	g.line("if (this.called) {")
+	g.indent++
+	g.line(`throw new Error("trb/web Next.call may only be called once");`)
+	g.indent--
+	g.line("}")
+	g.line("this.called = true;")
+	g.line("return this.handler(context);")
 	g.indent--
 	g.line("}")
 	g.indent--
