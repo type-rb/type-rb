@@ -56,10 +56,11 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("try {")
 	g.indent++
-	g.line("if (request.body.byteLength > TRB_WEB_MAX_BODY_BYTES) return trb_web_payload_too_large();")
+	g.line("if (request.body.byteLength > TRB_WEB_MAX_BODY_BYTES) return trb_web_finalize_response(request, trb_web_payload_too_large());")
 	g.line("const method = request.method.toUpperCase();")
 	g.line(`const segments = request.path.split("/").filter((segment) => segment.length > 0);`)
-	g.line("const allowed_methods: string[] = [];")
+	g.line("let allowed_methods: string[] = [];")
+	g.line("let explicit_head = false;")
 	for _, route := range routes {
 		routeSegments := typescriptWebRouteSegments(route.Path)
 		condition := []string{"segments.length === " + strconv.Itoa(len(routeSegments))}
@@ -69,10 +70,19 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			}
 		}
 		g.line("if (" + strings.Join(condition, " && ") + ") allowed_methods.push(" + strconv.Quote(route.Method) + ");")
+		if route.Method == "GET" {
+			g.line("if (" + strings.Join(condition, " && ") + `) allowed_methods.push("HEAD");`)
+		}
+		if route.Method == "HEAD" {
+			g.line("if (" + strings.Join(condition, " && ") + ") explicit_head = true;")
+		}
 	}
+	g.line("allowed_methods = [...new Set(allowed_methods)].sort();")
+	g.line("let dispatch_method = method;")
+	g.line(`if (method === "HEAD" && !explicit_head && allowed_methods.includes("GET")) dispatch_method = "GET";`)
 	for routeIndex, route := range routes {
 		segments := typescriptWebRouteSegments(route.Path)
-		condition := []string{"method === " + strconv.Quote(route.Method), "segments.length === " + strconv.Itoa(len(segments))}
+		condition := []string{"dispatch_method === " + strconv.Quote(route.Method), "segments.length === " + strconv.Itoa(len(segments))}
 		for index, segment := range segments {
 			if !strings.HasPrefix(segment, ":") {
 				condition = append(condition, "segments["+strconv.Itoa(index)+"] === "+strconv.Quote(segment))
@@ -96,22 +106,28 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			g.line("const " + nextName + " = " + handlerName + ";")
 			g.line(handlerName + " = (middleware_context: TrbWebContext): TrbWebResponse => " + middleware.TargetHandler + "(middleware_context, new TrbWebNext(" + nextName + "));")
 		}
-		g.line("return " + handlerName + "(" + contextName + ");")
+		g.line("return trb_web_finalize_response(request, " + handlerName + "(" + contextName + "));")
 		g.indent--
 		g.line("}")
 	}
 	g.line("if (allowed_methods.length > 0) {")
 	g.indent++
-	g.line(`return { status: 405, headers: { "allow": [allowed_methods.sort().join(", ")], "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"method_not_allowed\"}") };`)
+	g.line(`return trb_web_finalize_response(request, { status: 405, headers: { "allow": [allowed_methods.join(", ")], "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"method_not_allowed\"}") });`)
 	g.indent--
 	g.line("}")
-	g.line(`return { status: 404, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"not_found\"}") };`)
+	g.line(`return trb_web_finalize_response(request, { status: 404, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"not_found\"}") });`)
 	g.indent--
 	g.line("} catch {")
 	g.indent++
-	g.line(`return { status: 500, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"internal_server_error\"}") };`)
+	g.line(`return trb_web_finalize_response(request, { status: 500, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"internal_server_error\"}") });`)
 	g.indent--
 	g.line("}")
+	g.indent--
+	g.line("}")
+	g.line("function trb_web_finalize_response(request: TrbWebRequest, response: TrbWebResponse): TrbWebResponse {")
+	g.indent++
+	g.line(`if (request.method.toUpperCase() !== "HEAD") return response;`)
+	g.line("return { ...response, body: new Uint8Array() };")
 	g.indent--
 	g.line("}")
 }
