@@ -48,6 +48,8 @@ ordinary := ratio.finite?()
 enabled := true.to_s()
 number := "123".to_i()
 safe_number := "123".try_to_i()
+decimal := "12.5".to_f()
+safe_decimal := "+.5e1".try_to_f()
 length := "Hello".size()
 upper := strings.uppercase("Hello")
 ```
@@ -57,6 +59,14 @@ Integer parsing accepts a complete ASCII decimal integer with an optional sign.
 `Result<Integer, NumberParseError>`. The error preserves its
 `NumberParseErrorKind`, input, and message. Parsed integers use the portable
 exact range `-9007199254740991..9007199254740991`.
+
+Float parsing accepts a complete ASCII decimal with an optional sign, decimal
+point, and exponent. At least one digit is required. `to_f()` raises on an
+invalid spelling or a value that overflows the portable binary64 range;
+`try_to_f()` returns `Result<Float, NumberParseError>`. Non-finite spellings
+such as `NaN` and `Infinity` are not accepted. Values smaller than the binary64
+range round to signed zero consistently across backends. Package forms are
+`numbers.parse_float` and `numbers.try_parse_float`.
 
 `Integer#to_f()` is an exact widening conversion. `Float#to_i()` truncates
 toward zero and raises for non-finite or out-of-range values. `Float#to_s()`
