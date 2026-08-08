@@ -1,0 +1,7 @@
+{
+  "name": "trb/web/middleware/request_id",
+  "version": "0.1.0",
+  "module": "trb/web/middleware/request_id/index",
+  "source": "src/index.trb",
+  "nativeDependencies": {}
+}

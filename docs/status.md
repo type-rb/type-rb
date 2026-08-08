@@ -44,8 +44,10 @@ typed output and path-exclusion options. A portable secure-headers middleware
 adds a conservative browser-security preset and accepts an explicit typed
 header map. An opt-in CORS middleware handles actual and preflight requests,
 explicit origin policies, credentials, exposed and allowed headers, and typed
-preflight cache duration. Production lifecycle controls and additional
-middleware are still under development. Routing distinguishes
+preflight cache duration. A request-ID middleware preserves bounded safe
+incoming IDs or generates cryptographically random IDs and exposes the chosen
+value to downstream handlers and the response. Production lifecycle controls
+and additional middleware are still under development. Routing distinguishes
 missing paths from unsupported methods and returns a portable JSON 405 response
 with an `Allow` header. Request bodies are limited to 1 MiB before dispatch and
 oversized requests receive the same JSON 413 response in every backend. Query

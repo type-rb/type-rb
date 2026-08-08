@@ -86,3 +86,16 @@ func TestBundledWebCORSMiddlewarePackage(t *testing.T) {
 		t.Fatal("CORS package source is empty")
 	}
 }
+
+func TestBundledWebRequestIDMiddlewarePackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/web/middleware/request_id")
+	if !ok {
+		t.Fatal("trb/web/middleware/request_id is not registered")
+	}
+	if packageDefinition.Definition.ModulePath != "trb/web/middleware/request_id/index" {
+		t.Fatalf("module = %q", packageDefinition.Definition.ModulePath)
+	}
+	if packageDefinition.Definition.Source == "" {
+		t.Fatal("request ID package source is empty")
+	}
+}

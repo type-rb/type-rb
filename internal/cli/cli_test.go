@@ -3978,6 +3978,109 @@ end
 	}
 }
 
+func TestRunOfficialWebRequestIDAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web request ID run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web request ID run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-request-id-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Request, Response } from trb/web
+import { dispatch } from trb/web/testing
+
+def send(headers: Hash<String, Array<String>>): Response
+	return dispatch(Request.new(
+		method: "GET",
+		path: "/id",
+		query_string: "",
+		headers: headers,
+		body: "".to_bytes(),
+	))
+end
+
+def print_generated(response: Response)
+	value := response.body.to_s()
+	puts(value.size())
+	puts(value == response.headers["x-request-id"][0])
+	return
+end
+
+def main()
+	preserved := send({"x-request-id" => ["upstream-123"]})
+	puts(preserved.body.to_s())
+	puts(preserved.body.to_s() == preserved.headers["x-request-id"][0])
+
+	invalid := send({"x-request-id" => ["bad id"]})
+	print_generated(invalid)
+	puts(invalid.body.to_s() != "bad id")
+
+	duplicate := send({"x-request-id" => ["first", "second"]})
+	print_generated(duplicate)
+
+	missing := send({})
+	print_generated(missing)
+	return
+end
+`
+		middlewareSource := `import { Context, Next, Response } from trb/web
+import trb/web/middleware/request_id
+
+def call(context: Context, next_handler: Next): Response
+	return request_id.call(context, next_handler)
+end
+`
+		routeSource := `import { Context, Response, header_value, text } from trb/web
+import { Result } from trb/std/result
+
+def get(context: Context): Response
+	case header_value(context.request, "x-request-id")
+	when Result::Ok(value)
+		return text(value)
+	when Result::Err(_error)
+		return text("missing", 500)
+	end
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "_middleware.trb"), []byte(middlewareSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "id.trb"), []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "upstream-123\ntrue\n32\ntrue\ntrue\n32\ntrue\n32\ntrue\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web request ID output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunOfficialWebCORSAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

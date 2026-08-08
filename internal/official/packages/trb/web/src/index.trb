@@ -162,6 +162,24 @@ def vary(response: Response, field: String): Response
 	return add_header(response, "vary", field.strip())
 end
 
+def with_request_header(request: Request, name: String, value: String): Request
+	normalized_name := name.downcase()
+	mut headers: Hash<String, Array<String>> := {}
+	request.headers.each do |header_name, values|
+		if header_name.downcase() != normalized_name
+			headers[header_name] = values.dup()
+		end
+	end
+	headers[normalized_name] = [value]
+	return Request.new(
+		method: request.method,
+		path: request.path,
+		query_string: request.query_string,
+		headers: headers,
+		body: request.body,
+	)
+end
+
 def new_response_cookie(name: String, value: String): ResponseCookie
 	return ResponseCookie.new(name: name, value: value, attributes: [])
 end

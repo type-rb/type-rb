@@ -1,0 +1,47 @@
+import { Context, Next, Response, header_value, with_header, with_request_header } from trb/web
+import trb/std/encoding/hex
+import { Result } from trb/std/result
+import trb/std/secure_random
+
+record Options
+	header_name: String
+	limit_length: Integer
+end
+
+def default_options(): Options
+	return Options.new(header_name: "x-request-id", limit_length: 255)
+end
+
+def call(context: Context, next_handler: Next, options: Options = default_options()): Response
+	mut value := _generate()
+	case header_value(context.request, options.header_name)
+	when Result::Ok(candidate)
+		if _valid?(candidate, options.limit_length)
+			value = candidate
+		end
+	when Result::Err(_error)
+	end
+	request := with_request_header(context.request, options.header_name, value)
+	next_context := Context.new(request: request, path_parameters: context.path_parameters)
+	response := next_handler.call(next_context)
+	return with_header(response, options.header_name, value)
+end
+
+def _generate(): String
+	return hex.encode(secure_random.bytes(16))
+end
+
+def _valid?(value: String, limit_length: Integer): Boolean
+	if value == "" || limit_length < 1 || value.size() > limit_length
+		return false
+	end
+	value.codepoints().each do |codepoint|
+		letter := codepoint >= 65 && codepoint <= 90 || codepoint >= 97 && codepoint <= 122
+		digit := codepoint >= 48 && codepoint <= 57
+		symbol := codepoint == 45 || codepoint == 61 || codepoint == 95
+		if !letter && !digit && !symbol
+			return false
+		end
+	end
+	return true
+end
