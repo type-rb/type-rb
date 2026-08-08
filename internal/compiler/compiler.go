@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
+	"github.com/type-rb/type-rb/internal/official"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stdlib"
@@ -26,6 +27,7 @@ type Artifact struct {
 	IR            *ir.Program
 	Output        []byte
 	CompilerOwned bool
+	Official      bool
 }
 
 type SourceUnit struct {
@@ -34,6 +36,7 @@ type SourceUnit struct {
 	ModulePath    string
 	Package       string
 	CompilerOwned bool
+	Official      bool
 }
 
 type CompileError struct {
@@ -115,6 +118,13 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	for _, source := range units {
 		program, diagnostics := parser.Parse(source.Source)
 		configureProgram(program, options, source.ModulePath, source.Package)
+		if official.OwnsModule(source.ModulePath) && !source.Official {
+			diagnostics = append(diagnostics, diagnostic.Diagnostic{
+				Severity: diagnostic.Error,
+				Message:  fmt.Sprintf("module path %s is reserved for TypeRB packages", source.ModulePath),
+				Span:     program.Span(),
+			})
+		}
 		diagnostics = append(diagnostics, modeDiagnostics(program, options.Mode)...)
 		if hasErrors(diagnostics) {
 			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
@@ -122,11 +132,11 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		programs[source.ModulePath] = program
 	}
 	for {
-		compilerOwned := compilerOwnedSourceUnits(programs, options)
-		if len(compilerOwned) == 0 {
+		dependencies := dependencySourceUnits(programs, options)
+		if len(dependencies) == 0 {
 			break
 		}
-		for _, source := range compilerOwned {
+		for _, source := range dependencies {
 			program, diagnostics := parser.Parse(source.Source)
 			configureProgram(program, options, source.ModulePath, source.Package)
 			diagnostics = append(diagnostics, modeDiagnostics(program, options.Mode)...)
@@ -165,6 +175,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 			SourceRoot:    options.SourceRoot,
 			Filename:      source.Filename,
 			CompilerOwned: source.CompilerOwned,
+			Official:      source.Official,
 			Catalog:       catalog,
 			Declarations:  declarations,
 		})
@@ -217,30 +228,62 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		if err != nil {
 			return nil, err
 		}
-		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: lowered, Output: output, CompilerOwned: source.CompilerOwned})
+		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: lowered, Output: output, CompilerOwned: source.CompilerOwned, Official: source.Official})
 	}
 	return artifacts, nil
 }
 
-func compilerOwnedSourceUnits(programs map[string]*ast.Program, options Options) []SourceUnit {
+func dependencySourceUnits(programs map[string]*ast.Program, options Options) []SourceUnit {
 	definitions := map[string]*stdlib.Package{}
+	officialDefinitions := map[string]*official.Package{}
 	for _, program := range programs {
 		for _, statement := range program.Statements {
 			imported, ok := statement.(*ast.ImportStatement)
 			if !ok {
 				continue
 			}
-			definition, exists := stdlib.Lookup(imported.Path)
-			if !exists || definition.Source == "" || definition.ModulePath == "" {
+			if definition, exists := stdlib.Lookup(imported.Path); exists && definition.Source != "" && definition.ModulePath != "" {
+				if _, alreadyLoaded := programs[definition.ModulePath]; !alreadyLoaded {
+					definitions[definition.ModulePath] = definition
+				}
 				continue
 			}
-			if _, alreadyLoaded := programs[definition.ModulePath]; alreadyLoaded {
+			bundled, exists := official.Lookup(imported.Path)
+			if !exists || bundled.Definition.Source == "" || bundled.Definition.ModulePath == "" {
 				continue
 			}
-			definitions[definition.ModulePath] = definition
+			if _, alreadyLoaded := programs[bundled.Definition.ModulePath]; !alreadyLoaded {
+				officialDefinitions[bundled.Definition.ModulePath] = bundled
+			}
 		}
 	}
-	return compilerOwnedPackageSourceUnits(definitions, options)
+	result := compilerOwnedPackageSourceUnits(definitions, options)
+	result = append(result, officialPackageSourceUnits(officialDefinitions, options)...)
+	return result
+}
+
+func officialPackageSourceUnits(definitions map[string]*official.Package, options Options) []SourceUnit {
+	modulePaths := make([]string, 0, len(definitions))
+	for modulePath := range definitions {
+		modulePaths = append(modulePaths, modulePath)
+	}
+	sort.Strings(modulePaths)
+	root := projectRoot(options)
+	if root == "" {
+		root = "."
+	}
+	result := make([]SourceUnit, 0, len(modulePaths))
+	for _, modulePath := range modulePaths {
+		bundled := definitions[modulePath]
+		result = append(result, SourceUnit{
+			Filename:   filepath.Join(root, ".trb", "packages", filepath.FromSlash(modulePath)+".trb"),
+			Source:     []byte(bundled.Definition.Source),
+			ModulePath: modulePath,
+			Package:    filepath.Base(filepath.Dir(filepath.FromSlash(modulePath))),
+			Official:   true,
+		})
+	}
+	return result
 }
 
 func compilerOwnedRuntimeSourceUnits(checkedPrograms map[string]checker.Result, programs map[string]*ast.Program, options Options) []SourceUnit {

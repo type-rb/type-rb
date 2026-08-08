@@ -15,6 +15,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/official"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
@@ -25,6 +26,7 @@ type ImportKind string
 
 const (
 	StandardImport ImportKind = "standard"
+	OfficialImport ImportKind = "official"
 	ProjectImport  ImportKind = "project"
 )
 
@@ -135,6 +137,7 @@ type Options struct {
 	SourceRoot    string
 	Filename      string
 	CompilerOwned bool
+	Official      bool
 	Catalog       *Catalog
 	Declarations  *declaration.Catalog
 }
@@ -446,64 +449,71 @@ func ValidateImportGraph(catalog *Catalog, results map[string]Result) map[string
 
 func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagnostic.Diagnostic) {
 	if definition, ok := stdlib.Lookup(node.Path); ok {
-		if definition.Internal && !options.CompilerOwned {
-			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s is internal to the TypeRB standard library", node.Path))}
-		}
-		resolved := &Import{
-			Node:       node,
-			Kind:       StandardImport,
-			Path:       node.Path,
-			ModulePath: definition.ModulePath,
-			Alias:      node.Alias,
-			Definition: definition,
-			Exports:    map[string]Export{},
-		}
-		if !definition.Supports(options.Mode) {
-			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not support mode %s", node.Path, options.Mode))}
-		}
-		if definition.Source != "" {
-			program, sourceDiagnostics := parser.Parse([]byte(definition.Source))
-			for _, item := range sourceDiagnostics {
-				if item.Severity == diagnostic.Error {
-					return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("compiler-owned package %s is invalid: %s", node.Path, item.Message))}
-				}
-			}
-			resolved.Exports = CollectExports(program.Statements)
-		}
-		if definition.RuntimeAlias != "" {
-			resolved.Alias = definition.RuntimeAlias
-		} else if resolved.Alias == "" && len(node.Symbols) == 0 {
-			resolved.Alias = definition.DefaultAlias()
-		}
-		if len(node.Symbols) > 0 {
-			resolved.Symbols = append([]string(nil), node.Symbols...)
-		} else {
-			seen := map[string]bool{}
-			for name := range definition.Symbols {
-				resolved.Symbols = append(resolved.Symbols, name)
-				seen[name] = true
-			}
-			for name := range resolved.Exports {
-				if seen[name] {
-					continue
-				}
-				resolved.Symbols = append(resolved.Symbols, name)
-			}
-		}
-		for _, name := range resolved.Symbols {
-			_, librarySymbol := definition.Symbols[name]
-			_, sourceExport := resolved.Exports[name]
-			if !librarySymbol && !sourceExport {
-				return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not export %s", node.Path, name))}
-			}
-		}
-		sort.Strings(resolved.Symbols)
-		return resolved, nil
+		return resolveDefinedImport(node, definition, StandardImport, options)
+	}
+	if bundled, ok := official.Lookup(node.Path); ok {
+		return resolveDefinedImport(node, bundled.Definition, OfficialImport, options)
 	}
 	if stdlib.IsReservedPath(node.Path) {
 		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("unknown TypeRB package %s", node.Path))}
 	}
 	return resolveProjectImport(node, options)
+}
+
+func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package, kind ImportKind, options Options) (*Import, []diagnostic.Diagnostic) {
+	if definition.Internal && !options.CompilerOwned && !options.Official {
+		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s is internal to the TypeRB standard library", node.Path))}
+	}
+	resolved := &Import{
+		Node:       node,
+		Kind:       kind,
+		Path:       node.Path,
+		ModulePath: definition.ModulePath,
+		Alias:      node.Alias,
+		Definition: definition,
+		Exports:    map[string]Export{},
+	}
+	if !definition.Supports(options.Mode) {
+		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not support mode %s", node.Path, options.Mode))}
+	}
+	if definition.Source != "" {
+		program, sourceDiagnostics := parser.Parse([]byte(definition.Source))
+		for _, item := range sourceDiagnostics {
+			if item.Severity == diagnostic.Error {
+				return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s is invalid: %s", node.Path, item.Message))}
+			}
+		}
+		resolved.Exports = CollectExports(program.Statements)
+	}
+	if definition.RuntimeAlias != "" {
+		resolved.Alias = definition.RuntimeAlias
+	} else if resolved.Alias == "" && len(node.Symbols) == 0 {
+		resolved.Alias = definition.DefaultAlias()
+	}
+	if len(node.Symbols) > 0 {
+		resolved.Symbols = append([]string(nil), node.Symbols...)
+	} else {
+		seen := map[string]bool{}
+		for name := range definition.Symbols {
+			resolved.Symbols = append(resolved.Symbols, name)
+			seen[name] = true
+		}
+		for name := range resolved.Exports {
+			if seen[name] {
+				continue
+			}
+			resolved.Symbols = append(resolved.Symbols, name)
+		}
+	}
+	for _, name := range resolved.Symbols {
+		_, librarySymbol := definition.Symbols[name]
+		_, sourceExport := resolved.Exports[name]
+		if !librarySymbol && !sourceExport {
+			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not export %s", node.Path, name))}
+		}
+	}
+	sort.Strings(resolved.Symbols)
+	return resolved, nil
 }
 
 func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, []diagnostic.Diagnostic) {
