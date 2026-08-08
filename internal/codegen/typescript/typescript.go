@@ -1280,6 +1280,143 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 	return result
 }
 
+func md5Expression(argument string) string {
+	return "(" + md5Function() + ")(" + argument + ")"
+}
+
+func md5Function() string {
+	return `(input: Uint8Array): Uint8Array => {
+  const shifts = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+  ];
+  const constants = new Uint32Array([
+    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+    0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+    0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+    0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+    0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+    0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
+  ]);
+  const paddedLength = Math.ceil((input.byteLength + 9) / 64) * 64;
+  const message = new Uint8Array(paddedLength);
+  message.set(input);
+  message[input.byteLength] = 0x80;
+  const view = new DataView(message.buffer);
+  view.setBigUint64(paddedLength - 8, BigInt(input.byteLength) * 8n, true);
+  const rotateLeft = (value: number, bits: number): number => ((value << bits) | (value >>> (32 - bits))) >>> 0;
+  let h0 = 0x67452301;
+  let h1 = 0xefcdab89;
+  let h2 = 0x98badcfe;
+  let h3 = 0x10325476;
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    for (let index = 0; index < 64; index += 1) {
+      let mixed: number;
+      let wordIndex: number;
+      if (index < 16) {
+        mixed = ((b & c) | (~b & d)) >>> 0;
+        wordIndex = index;
+      } else if (index < 32) {
+        mixed = ((d & b) | (~d & c)) >>> 0;
+        wordIndex = (5 * index + 1) % 16;
+      } else if (index < 48) {
+        mixed = (b ^ c ^ d) >>> 0;
+        wordIndex = (3 * index + 5) % 16;
+      } else {
+        mixed = (c ^ (b | ~d)) >>> 0;
+        wordIndex = (7 * index) % 16;
+      }
+      const sum = (a + mixed + constants[index]! + view.getUint32(offset + wordIndex * 4, true)) >>> 0;
+      a = d;
+      d = c;
+      c = b;
+      b = (b + rotateLeft(sum, shifts[index]!)) >>> 0;
+    }
+    h0 = (h0 + a) >>> 0;
+    h1 = (h1 + b) >>> 0;
+    h2 = (h2 + c) >>> 0;
+    h3 = (h3 + d) >>> 0;
+  }
+  const digest = new Uint8Array(16);
+  const digestView = new DataView(digest.buffer);
+  [h0, h1, h2, h3].forEach((value, index) => digestView.setUint32(index * 4, value, true));
+  return digest;
+}`
+}
+
+func sha1Expression(argument string) string {
+	return "(" + sha1Function() + ")(" + argument + ")"
+}
+
+func sha1Function() string {
+	return `(input: Uint8Array): Uint8Array => {
+  const paddedLength = Math.ceil((input.byteLength + 9) / 64) * 64;
+  const message = new Uint8Array(paddedLength);
+  message.set(input);
+  message[input.byteLength] = 0x80;
+  const view = new DataView(message.buffer);
+  view.setBigUint64(paddedLength - 8, BigInt(input.byteLength) * 8n, false);
+  const rotateLeft = (value: number, bits: number): number => ((value << bits) | (value >>> (32 - bits))) >>> 0;
+  const words = new Uint32Array(80);
+  let h0 = 0x67452301;
+  let h1 = 0xefcdab89;
+  let h2 = 0x98badcfe;
+  let h3 = 0x10325476;
+  let h4 = 0xc3d2e1f0;
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    for (let index = 0; index < 16; index += 1) words[index] = view.getUint32(offset + index * 4, false);
+    for (let index = 16; index < 80; index += 1) {
+      words[index] = rotateLeft(words[index - 3]! ^ words[index - 8]! ^ words[index - 14]! ^ words[index - 16]!, 1);
+    }
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    for (let index = 0; index < 80; index += 1) {
+      let mixed: number;
+      let constant: number;
+      if (index < 20) {
+        mixed = ((b & c) | (~b & d)) >>> 0;
+        constant = 0x5a827999;
+      } else if (index < 40) {
+        mixed = (b ^ c ^ d) >>> 0;
+        constant = 0x6ed9eba1;
+      } else if (index < 60) {
+        mixed = ((b & c) | (b & d) | (c & d)) >>> 0;
+        constant = 0x8f1bbcdc;
+      } else {
+        mixed = (b ^ c ^ d) >>> 0;
+        constant = 0xca62c1d6;
+      }
+      const temporary = (rotateLeft(a, 5) + mixed + e + constant + words[index]!) >>> 0;
+      e = d;
+      d = c;
+      c = rotateLeft(b, 30);
+      b = a;
+      a = temporary;
+    }
+    h0 = (h0 + a) >>> 0;
+    h1 = (h1 + b) >>> 0;
+    h2 = (h2 + c) >>> 0;
+    h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0;
+  }
+  const digest = new Uint8Array(20);
+  const digestView = new DataView(digest.buffer);
+  [h0, h1, h2, h3, h4].forEach((value, index) => digestView.setUint32(index * 4, value, false));
+  return digest;
+}`
+}
+
 func sha256Expression(argument string) string {
 	return "(" + sha256Function() + ")(" + argument + ")"
 }

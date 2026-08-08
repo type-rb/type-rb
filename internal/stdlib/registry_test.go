@@ -182,7 +182,7 @@ func TestPortableHashContract(t *testing.T) {
 	if !ok {
 		t.Fatal("hash package is missing")
 	}
-	for _, name := range []string{"sha256", "sha512"} {
+	for _, name := range []string{"md5", "sha1", "sha256", "sha512"} {
 		symbol, ok := definition.Symbols[name]
 		if !ok {
 			t.Fatalf("hash.%s is missing", name)

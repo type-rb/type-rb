@@ -3,7 +3,9 @@ package repl
 import (
 	"bytes"
 	stdhmac "crypto/hmac"
+	stdmd5 "crypto/md5"
 	stdcryptorand "crypto/rand"
+	stdsha1 "crypto/sha1"
 	stdsha256 "crypto/sha256"
 	stdsha512 "crypto/sha512"
 	stdbase64 "encoding/base64"
@@ -663,6 +665,26 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return e.base64DecodeResultErr(typ, kind, input, index, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(value)})
+	case "trb.std.hash.md5":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("hash.md5 expects Bytes")
+		}
+		digest := stdmd5.Sum(value)
+		return Value{Type: typ, Data: bytesValue(digest[:])}, nil
+	case "trb.std.hash.sha1":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("hash.sha1 expects Bytes")
+		}
+		digest := stdsha1.Sum(value)
+		return Value{Type: typ, Data: bytesValue(digest[:])}, nil
 	case "trb.std.hash.sha256":
 		if err := require(1); err != nil {
 			return Value{}, err
