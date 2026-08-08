@@ -847,6 +847,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		characterError := base64DecodeError("InvalidCharacter", "input", "index", "invalid base64url character")
 		nonCanonical := base64DecodeError("NonCanonical", "input", "characters.length - 1", "non-canonical base64url encoding")
 		return "->(input) { characters = input.each_char.to_a; if characters.length % 4 == 1; " + lengthError + "; else; failure = nil; characters.each_with_index do |character, index|; if character == \"=\"; failure = " + paddingError + "; break; elsif !character.match?(/\\A[A-Za-z0-9_-]\\z/); failure = " + characterError + "; break; end; end; if failure; failure; else; padded = input.tr(\"-_\", \"+/\") + \"=\" * ((4 - input.length % 4) % 4); begin; value = padded.unpack1(\"m0\").b; canonical = [value].pack(\"m0\").tr(\"+/\", \"-_\").delete(\"=\"); if canonical != input; " + nonCanonical + "; else; Result::Ok.new(value); end; rescue ArgumentError; " + nonCanonical + "; end; end; end }.call(" + arguments[0] + ")"
+	case "trb.std.hash.sha256":
+		return "->(value) { require \"digest\"; Digest::SHA256.digest(value).b }.call(" + arguments[0] + ")"
+	case "trb.std.hash.sha512":
+		return "->(value) { require \"digest\"; Digest::SHA512.digest(value).b }.call(" + arguments[0] + ")"
 	case "trb.std.string_builder.new":
 		return "String.new(encoding: Encoding::UTF_8)"
 	case "trb.std.string_builder.from_string":

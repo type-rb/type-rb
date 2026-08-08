@@ -834,6 +834,72 @@ func TestPortableBase64DiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableHashPackageLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { sha256, sha512 } from trb/std/hash
+
+def digest256(value: Bytes): Bytes
+	return sha256(value)
+end
+
+def digest512(value: Bytes): Bytes
+	return sha512(value)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`stdsha256.Sum256(value)`,
+			`stdsha512.Sum512(value)`,
+		},
+		"ruby": {
+			`Digest::SHA256.digest(value).b`,
+			`Digest::SHA512.digest(value).b`,
+		},
+		"typescript": {
+			`const constants = new Uint32Array`,
+			`let h0 = 0x6a09e667;`,
+			`const mask = 0xffffffffffffffffn;`,
+			`let h0 = 0x6a09e667f3bcc908n;`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/portable-hash", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable hash: %v", mode, err)
+		}
+		var consumer, hashRuntime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/hash/index":
+				hashRuntime = artifact
+			}
+		}
+		if consumer == nil || hashRuntime == nil {
+			t.Fatalf("%s did not compile the hash consumer and runtime: %#v", mode, artifacts)
+		}
+		for _, want := range wants[mode] {
+			if output := string(hashRuntime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s hash output is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableHashDiagnosticsAreModeIndependent(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := Compile("bad.trb", []byte("import { sha256 } from trb/std/hash\ndef bad(): Bytes\n\treturn sha256(\"abc\")\nend\n"), mode)
+		if err == nil || !strings.Contains(err.Error(), "argument 1 to sha256() has type String, expected Bytes") {
+			t.Fatalf("%s: expected portable hash argument diagnostic, got %v", mode, err)
+		}
+	}
+}
+
 func TestPortableStringBuilderLowersAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/string_builder
 

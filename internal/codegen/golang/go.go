@@ -1499,6 +1499,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		resultType, _, _ := filesystemResultType()
 		invalid := "(character < 'A' || character > 'Z') && (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' && character != '_'"
 		return "func() " + resultType + " { input := " + arguments[0] + "; characters := []rune(input); if len(characters)%4 == 1 { return " + base64DecodeError("InvalidLength", "input", "len(characters)", "base64url input has invalid length") + " }; for index, character := range characters { if character == '=' { return " + base64DecodeError("InvalidPadding", "input", "index", "base64url input must not contain padding") + " }; if " + invalid + " { return " + base64DecodeError("InvalidCharacter", "input", "index", "invalid base64url character") + " } }; value, err := stdbase64.RawURLEncoding.Strict().DecodeString(input); if err != nil { return " + base64DecodeError("NonCanonical", "input", "len(characters)-1", "non-canonical base64url encoding") + " }; return " + filesystemOK("value") + " }()"
+	case "trb.std.hash.sha256":
+		g.requireImport("crypto/sha256", "stdsha256")
+		return "func(value []byte) []byte { digest := stdsha256.Sum256(value); return digest[:] }(" + arguments[0] + ")"
+	case "trb.std.hash.sha512":
+		g.requireImport("crypto/sha512", "stdsha512")
+		return "func(value []byte) []byte { digest := stdsha512.Sum512(value); return digest[:] }(" + arguments[0] + ")"
 	case "trb.std.string_builder.new":
 		g.requireImport("strings", "")
 		return "&strings.Builder{}"

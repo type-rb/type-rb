@@ -127,6 +127,22 @@ func TestPortableBase64Contract(t *testing.T) {
 	}
 }
 
+func TestPortableHashContract(t *testing.T) {
+	definition, ok := Lookup("trb/std/hash")
+	if !ok {
+		t.Fatal("hash package is missing")
+	}
+	for _, name := range []string{"sha256", "sha512"} {
+		symbol, ok := definition.Symbols[name]
+		if !ok {
+			t.Fatalf("hash.%s is missing", name)
+		}
+		if len(symbol.Parameters) != 1 || symbol.Parameters[0].Type.String() != "Bytes" || symbol.Return.String() != "Bytes" {
+			t.Fatalf("hash.%s contract=%#v, want Bytes -> Bytes", name, symbol)
+		}
+	}
+}
+
 func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
 	for _, name := range []string{"pop", "push", "shift", "unshift"} {
