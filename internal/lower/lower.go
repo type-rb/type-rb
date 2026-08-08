@@ -56,15 +56,16 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 	for _, packagePath := range paths {
 		definition := l.checked.RuntimeDependencies[packagePath]
 		imported := &ir.Import{
-			Path:             definition.ModulePath,
-			Alias:            definition.RuntimeAlias,
-			Kind:             "standard",
-			Standard:         true,
-			Runtime:          true,
-			RuntimeRequired:  true,
-			Implicit:         true,
-			IntrinsicSymbols: map[string]bool{},
-			SymbolKinds:      map[string]string{},
+			Path:                      definition.ModulePath,
+			Alias:                     definition.RuntimeAlias,
+			Kind:                      "standard",
+			Standard:                  true,
+			Runtime:                   true,
+			RuntimeRequired:           true,
+			Implicit:                  true,
+			IntrinsicSymbols:          map[string]bool{},
+			RuntimeIndependentSymbols: map[string]bool{},
+			SymbolKinds:               map[string]string{},
 		}
 		for _, exported := range definition.RuntimeExports {
 			imported.Symbols = append(imported.Symbols, exported.Name)
@@ -102,7 +103,15 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 	case *ast.BlankStatement:
 		return nil
 	case *ast.ImportStatement:
-		result := &ir.Import{Base: base(n.Base), Path: n.Path, Symbols: append([]string(nil), n.Symbols...), Alias: n.Alias, SymbolKinds: map[string]string{}, IntrinsicSymbols: map[string]bool{}}
+		result := &ir.Import{
+			Base:                      base(n.Base),
+			Path:                      n.Path,
+			Symbols:                   append([]string(nil), n.Symbols...),
+			Alias:                     n.Alias,
+			SymbolKinds:               map[string]string{},
+			IntrinsicSymbols:          map[string]bool{},
+			RuntimeIndependentSymbols: map[string]bool{},
+		}
 		if resolved := l.checked.Resolution.Imports[n]; resolved != nil {
 			result.Path = resolved.RuntimePath()
 			result.Symbols = append([]string(nil), resolved.Symbols...)
@@ -121,10 +130,13 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 						if _, hasRuntimeExport := resolved.Exports[name]; symbol.RuntimeIndependent || !hasRuntimeExport {
 							result.IntrinsicSymbols[name] = true
 						}
+						if symbol.RuntimeIndependent {
+							result.RuntimeIndependentSymbols[name] = true
+						}
 					}
 				}
 				for name := range l.checked.ImportUses[n] {
-					if name != "" && !result.IntrinsicSymbols[name] {
+					if name != "" && !result.RuntimeIndependentSymbols[name] {
 						result.RuntimeRequired = true
 					}
 				}

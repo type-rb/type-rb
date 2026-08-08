@@ -52,9 +52,12 @@ type Import struct {
 	// source-visible imports. Language tooling must not offer their exports as
 	// though the application imported them explicitly.
 	Implicit bool
-	// IntrinsicSymbols are fully lowered by the backend and do not call their
-	// compiler-owned source module.
+	// IntrinsicSymbols are lowered by the backend instead of being imported as
+	// named functions from a compiler-owned source module.
 	IntrinsicSymbols map[string]bool
+	// RuntimeIndependentSymbols are the intrinsic subset that does not
+	// reference the compiler-owned source module on any backend.
+	RuntimeIndependentSymbols map[string]bool
 	// SymbolKinds distinguishes value records from reference classes in
 	// backends whose representation makes that distinction explicit.
 	SymbolKinds map[string]string

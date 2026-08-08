@@ -78,8 +78,12 @@ func (g *generator) statement(statement ir.Statement) {
 		} else if len(n.Symbols) > 0 {
 			values := make([]string, 0, len(n.Symbols))
 			types := make([]string, 0, len(n.Symbols))
+			intrinsicRuntime := false
 			for _, symbol := range n.Symbols {
 				if n.IntrinsicSymbols[symbol] {
+					if !n.RuntimeIndependentSymbols[symbol] {
+						intrinsicRuntime = true
+					}
 					continue
 				}
 				switch n.SymbolKinds[symbol] {
@@ -90,6 +94,9 @@ func (g *generator) statement(statement ir.Statement) {
 				default:
 					values = append(values, symbol)
 				}
+			}
+			if intrinsicRuntime {
+				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
 			if len(values) > 0 {
 				g.line("import { " + strings.Join(values, ", ") + " } from " + strconv.Quote(importPath) + ";")
