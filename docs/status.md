@@ -61,6 +61,8 @@ the original response through `with_header` and `add_header`.
 Typed response cookies support ordered `Domain`, `Path`, `Max-Age`, `Secure`,
 `HttpOnly`, and `SameSite` attributes while preserving multiple `Set-Cookie`
 header values.
+Portable `text`, `bytes`, and `empty` builders create common responses with
+consistent default statuses and content types.
 
 The compiler pipeline is:
 

@@ -2386,6 +2386,29 @@ end
 	}
 }
 
+func TestPortableDefaultParametersMustBeTrailing(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "required after default",
+			source: "def invalid(optional: String = \"value\", required: String): String\n\treturn required\nend\n",
+			want:   "required positional parameter cannot follow a default parameter",
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				if _, err := Compile("invalid_default.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("unexpected diagnostic: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestVoidReturnTypeMustBeOmitted(t *testing.T) {
 	valid := []byte("def save()\n  return\nend\n")
 	if _, err := Compile("valid.trb", valid, "go"); err != nil {

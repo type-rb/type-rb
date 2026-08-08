@@ -52,6 +52,26 @@ record Response
 	body: Bytes
 end
 
+def text(value: String, status: Integer = 200): Response
+	return Response.new(
+		status: status,
+		headers: { "content-type" =>["text/plain; charset=utf-8"] },
+		body: value.to_bytes(),
+	)
+end
+
+def bytes(value: Bytes, status: Integer = 200): Response
+	return Response.new(
+		status: status,
+		headers: { "content-type" =>["application/octet-stream"] },
+		body: value,
+	)
+end
+
+def empty(status: Integer = 204): Response
+	return Response.new(status: status, headers: {}, body: "".to_bytes())
+end
+
 def with_header(response: Response, name: String, value: String): Response
 	normalized_name := name.downcase()
 	mut headers: Hash<String, Array<String>> := {}
