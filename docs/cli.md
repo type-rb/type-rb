@@ -11,6 +11,9 @@ trb init --mode go --module example.com/acme/app .
 trb init --mode ruby .
 trb init --mode typescript .
 
+# Generate a portable JSON API project for any target.
+trb init --mode go --module example.com/acme/api --template web .
+
 # Generate go.mod, Gemfile, or package.json from trbconfig.jsonc.
 trb sync
 
@@ -22,6 +25,10 @@ trb remove PACKAGE
 # Run go mod download, bundle install, or npm install.
 trb install
 ```
+
+The `web` template uses `src` as the source root and creates `main.trb`, an
+index route, and an explicit root middleware stack with request IDs and JSONL
+access logging. It never replaces an existing source file.
 
 ## Format
 

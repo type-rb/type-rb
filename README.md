@@ -93,6 +93,15 @@ trb build --compile
 ./bin/hello
 ```
 
+To start a portable JSON API with file-based routes and explicit request ID
+and access-log middleware, generate the Web template:
+
+```sh
+trb init --mode go --module example.com/api --template web api
+cd api
+trb run
+```
+
 ## Targets
 
 - **Go** for native binaries and services

@@ -30,6 +30,75 @@ func TestVersionCommandUsesBuildVersion(t *testing.T) {
 	}
 }
 
+func TestInitWebTemplateBuildsAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "web-app")
+			arguments := []string{"init", "--mode", mode, "--template", "web"}
+			if mode == "go" {
+				arguments = append(arguments, "--module", "example.com/type-rb/web-template")
+			}
+			arguments = append(arguments, root)
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run(arguments); status != 0 {
+				t.Fatalf("init status=%d stderr=%s", status, stderr.String())
+			}
+			config, err := project.Load(filepath.Join(root, project.ConfigName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.SourceDir != "src" {
+				t.Fatalf("sourceDir=%q, want src", config.SourceDir)
+			}
+			for _, relative := range []string{"main.trb", "routes/index.trb", "routes/_middleware.trb"} {
+				path := filepath.Join(config.SourcePath(), filepath.FromSlash(relative))
+				if _, err := os.Stat(path); err != nil {
+					t.Fatalf("generated template is missing %s: %v", relative, err)
+				}
+				if !strings.Contains(stdout.String(), path) {
+					t.Fatalf("init output does not list %s:\n%s", path, stdout.String())
+				}
+			}
+
+			stdout.Reset()
+			stderr.Reset()
+			if status := command.Run([]string{"fmt", "--check", config.SourcePath()}); status != 0 {
+				t.Fatalf("fmt status=%d stderr=%s", status, stderr.String())
+			}
+			if status := command.Run([]string{"build", "--check", "--config", config.Path}); status != 0 {
+				t.Fatalf("build status=%d stderr=%s", status, stderr.String())
+			}
+		})
+	}
+}
+
+func TestInitWebTemplateDoesNotOverwriteSourceFiles(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "src", "routes", "index.trb")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	status := command.Run([]string{"init", "--mode", "go", "--module", "example.com/existing", "--template", "web", root})
+	if status != 1 || !strings.Contains(stderr.String(), "project template would overwrite") {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, project.ConfigName)); !os.IsNotExist(err) {
+		t.Fatalf("init wrote config before validating template targets: %v", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "existing\n" {
+		t.Fatalf("existing source changed: %q, %v", data, err)
+	}
+}
+
 func TestPlaygroundModeSelection(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		selected, err := playgroundMode(mode)
