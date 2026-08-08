@@ -2926,6 +2926,73 @@ func TestRunTypedJSONRecordCodecsAcrossAvailableBackends(t *testing.T) {
 	}
 }
 
+func TestRunOfficialWebRequestCookiesAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web cookie run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web cookie run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-cookie-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Request, cookie, cookies, header_values } from trb/web
+
+def main()
+	request := Request.new(
+		method: "GET",
+		path: "/",
+		query_string: "",
+		headers: {
+			"Cookie" => [
+				"session=abc; theme=dark",
+				"tag=first; broken; =empty; tag=second; token=a=b",
+			],
+		},
+		body: "".to_bytes(),
+	)
+	puts(header_values(request, "COOKIE").size())
+	parsed := cookies(request)
+	puts(parsed.size())
+	parsed.each do |value|
+		puts(value.name + "=" + value.value)
+	end
+	puts(cookie(request, "tag") == nil)
+	puts(cookie(request, "missing") == nil)
+	return
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "2\n5\nsession=abc\ntheme=dark\ntag=first\ntag=second\ntoken=a=b\nfalse\ntrue\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web cookie output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunOfficialWebJSONAPIsAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

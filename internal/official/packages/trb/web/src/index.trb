@@ -9,6 +9,11 @@ record Request
 	body: Bytes
 end
 
+record RequestCookie
+	name: String
+	value: String
+end
+
 record Context
 	request: Request
 	path_parameters: Hash<String, String>
@@ -30,4 +35,51 @@ end
 
 def query_parameters(request: Request): Result<Array<QueryParameter>, PercentDecodeError>
 	return parse_query(request.query_string)
+end
+
+def header_values(request: Request, name: String): Array<String>
+	normalized_name := name.downcase()
+	mut result: Array<String> := []
+	request.headers.each do |header_name, values|
+		if header_name.downcase() == normalized_name
+			values.each do |value|
+				result.push(value)
+			end
+		end
+	end
+	return result
+end
+
+def cookies(request: Request): Array<RequestCookie>
+	mut result: Array<RequestCookie> := []
+	header_values(request, "cookie").each do |header|
+		header.split(";").each do |part|
+			pair := part.strip()
+			if pair == ""
+				next
+			end
+			parts := pair.split("=")
+			if parts.size() < 2
+				next
+			end
+			name := parts.first().strip()
+			if name == ""
+				next
+			end
+			mut value_parts := parts.dup()
+			value_parts.shift()
+			value := value_parts.join("=").strip()
+			result.push(RequestCookie.new(name: name, value: value))
+		end
+	end
+	return result
+end
+
+def cookie(request: Request, name: String): String?
+	cookies(request).each do |candidate|
+		if candidate.name == name
+			return candidate.value
+		end
+	end
+	return nil
 end

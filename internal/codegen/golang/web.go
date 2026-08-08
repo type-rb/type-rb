@@ -21,8 +21,10 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	routes := manifest.Routes
 	webPath := pathpkg.Join(g.goModule, "trb/web")
 	g.requireImport(webPath, "web")
-	g.requireImport("slices", "")
 	g.requireImport("strings", "")
+	if len(routes) > 0 {
+		g.requireImport("slices", "")
+	}
 
 	directories := map[string]string{}
 	for _, route := range routes {
@@ -79,6 +81,13 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("return trbWebPayloadTooLarge()")
 	g.indent--
 	g.line("}")
+	if len(routes) == 0 {
+		g.line("return web.Response{Status: 404, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"not_found\\\"}\")}")
+		g.indent--
+		g.line("}")
+		g.b.WriteByte('\n')
+		return
+	}
 	g.line("method := strings.ToUpper(request.Method)")
 	g.line("cleanPath := strings.Trim(request.Path, \"/\")")
 	g.line("segments := []string{}")
