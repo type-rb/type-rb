@@ -48,7 +48,9 @@ oversized requests receive the same JSON 413 response in every backend. Query
 parameters use the portable URL decoder and preserve repeated keys and source
 order instead of collapsing them into a hash. HEAD requests prefer an explicit
 handler, otherwise reuse the matching GET handler and middleware chain, and
-never expose a response body.
+never expose a response body. OPTIONS requests likewise prefer explicit
+handlers; otherwise a middleware-aware 204 response advertises the available
+methods through `Allow`.
 
 The compiler pipeline is:
 

@@ -69,6 +69,21 @@ type Manifest struct {
 
 func (*Manifest) ExtensionName() string { return ProjectProvider }
 
+// UniquePathRoutes returns the first route for each path in manifest order.
+// Handlers in one route file share the same path parameters and middleware.
+func UniquePathRoutes(routes []Route) []Route {
+	seen := map[string]bool{}
+	result := make([]Route, 0, len(routes))
+	for _, route := range routes {
+		if seen[route.Path] {
+			continue
+		}
+		seen[route.Path] = true
+		result = append(result, route)
+	}
+	return result
+}
+
 func ManifestFrom(extensions []ir.Extension) *Manifest {
 	for _, extension := range extensions {
 		if manifest, ok := extension.(*Manifest); ok {
