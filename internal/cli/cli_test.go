@@ -1081,10 +1081,6 @@ end
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -1225,10 +1221,6 @@ end
 `
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -1625,8 +1617,6 @@ func TestBuildCompileCreatesRunnableGoExecutable(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 			t.Setenv("CGO_ENABLED", "0")
 
 			args := []string{"build", "--config", config.Path, "--compile"}
@@ -1750,8 +1740,6 @@ func TestRunCompilesProjectImportClosure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.Chdir(previous) }()
-	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-	t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 
 	for _, args := range [][]string{{"run"}, {"run", mainPath}} {
 		var stdout, stderr bytes.Buffer
@@ -1840,10 +1828,6 @@ func TestRunPredicateAndBangNamesAcrossAvailableBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -1891,10 +1875,6 @@ func TestRunPortableStringTrimmingAcrossAvailableBackends(t *testing.T) {
 			"end\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -1957,10 +1937,6 @@ end
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -2022,10 +1998,6 @@ end
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -2085,10 +2057,6 @@ end
 `
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -2167,10 +2135,6 @@ end
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -2236,10 +2200,6 @@ end
 `
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -2309,10 +2269,6 @@ end
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -2370,10 +2326,6 @@ end
 `
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -2446,10 +2398,6 @@ end
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -2521,10 +2469,6 @@ end
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -2586,10 +2530,6 @@ func TestRunCompilerOwnedUnicodeAcrossAvailableBackends(t *testing.T) {
 		source := "import trb/std/unicode\n\ndef main()\n\tputs(unicode.version())\n\tputs(unicode.letter(12354))\n\tputs(unicode.from_codepoint(128512))\n\treturn\nend\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -2655,10 +2595,6 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -2715,10 +2651,6 @@ end
 `
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -2780,10 +2712,6 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 			"end\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -2878,10 +2806,6 @@ end
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
-		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
@@ -2933,10 +2857,6 @@ func TestRunCompilerOwnedJSONAcrossAvailableBackends(t *testing.T) {
 			"end\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -2993,10 +2913,6 @@ func TestRunTypedJSONRecordCodecsAcrossAvailableBackends(t *testing.T) {
 			"end\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
 			t.Fatal(err)
-		}
-		if mode == "go" {
-			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
-			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
 		}
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
