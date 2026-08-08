@@ -99,7 +99,10 @@ and duplicate values instead of selecting one. `vary` composes cache keys
 without duplicating an existing field.
 Typed response cookies support ordered `Domain`, `Path`, `Max-Age`, `Secure`,
 `HttpOnly`, and `SameSite` attributes while preserving multiple `Set-Cookie`
-header values.
+header values. Cookie names, values, domains, paths, attribute uniqueness,
+`SameSite=None`, and the `__Secure-` and `__Host-` prefixes are validated before
+serialization. Invalid cookie construction reaches the same portable JSON 500
+boundary as any other invalid response.
 Portable `text`, `bytes`, `empty`, and `redirect` builders create common
 responses with consistent default statuses and content types. `with_status`
 returns a copy with a different status.

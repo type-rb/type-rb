@@ -1,6 +1,7 @@
 import { Result } from trb/std/result
 import { JsonError } from trb/std/json
 import { PercentDecodeError, QueryParameter, parse_query } from trb/std/url
+import trb/internal/runtime
 
 record Request
 	method: String
@@ -272,11 +273,150 @@ def new_response_cookie(name: String, value: String): ResponseCookie
 end
 
 def set_cookie(response: Response, cookie_value: ResponseCookie): Response
+	if !_valid_response_cookie?(cookie_value)
+		return runtime.fail<Response>("trb/web response cookie is invalid")
+	end
+	prefix := cookie_value.name + "="
+	response_header_values(response, "set-cookie").each do |existing_value|
+		if existing_value.start_with?(prefix)
+			return runtime.fail<Response>("trb/web response contains duplicate cookie name")
+		end
+	end
 	mut parts := [cookie_value.name + "=" + cookie_value.value]
 	cookie_value.attributes.each do |attribute|
 		parts.push(_response_cookie_attribute(attribute))
 	end
 	return add_header(response, "set-cookie", parts.join("; "))
+end
+
+def _valid_response_cookie?(cookie_value: ResponseCookie): Boolean
+	if !_valid_cookie_name?(cookie_value.name) || !_valid_cookie_value?(cookie_value.value)
+		return false
+	end
+	mut seen: Hash<String, Boolean> := {}
+	mut secure := false
+	mut has_domain := false
+	mut has_path := false
+	mut path := ""
+	mut same_site_none := false
+	cookie_value.attributes.each do |attribute|
+		name := _response_cookie_attribute_name(attribute)
+		if seen.key?(name)
+			return false
+		end
+		seen[name] = true
+		case attribute
+		when ResponseCookieAttribute::Domain(value)
+			if !_valid_cookie_domain?(value)
+				return false
+			end
+			has_domain = true
+		when ResponseCookieAttribute::Path(value)
+			if !_valid_cookie_path?(value)
+				return false
+			end
+			has_path = true
+			path = value
+		when ResponseCookieAttribute::MaxAge(seconds)
+			if seconds < 0
+				return false
+			end
+		when ResponseCookieAttribute::Secure
+			secure = true
+		when ResponseCookieAttribute::HttpOnly
+		when ResponseCookieAttribute::SameSite(value)
+			if value == CookieSameSite::None
+				same_site_none = true
+			end
+		end
+	end
+	if same_site_none && !secure
+		return false
+	end
+	normalized_name := cookie_value.name.downcase()
+	if normalized_name.start_with?("__secure-") && !secure
+		return false
+	end
+	if normalized_name.start_with?("__host-")
+		if !secure || has_domain || !has_path || path != "/"
+			return false
+		end
+	end
+	return true
+end
+
+def _valid_cookie_name?(value: String): Boolean
+	if value == ""
+		return false
+	end
+	value.codepoints().each do |codepoint|
+		letter := codepoint >= 65 && codepoint <= 90 || codepoint >= 97 && codepoint <= 122
+		digit := codepoint >= 48 && codepoint <= 57
+		symbol := codepoint == 33 || codepoint >= 35 && codepoint <= 39 || codepoint == 42 || codepoint == 43 || codepoint == 45 || codepoint == 46 || codepoint == 94 || codepoint == 95 || codepoint == 96 || codepoint == 124 || codepoint == 126
+		if !letter && !digit && !symbol
+			return false
+		end
+	end
+	return true
+end
+
+def _valid_cookie_value?(value: String): Boolean
+	value.codepoints().each do |codepoint|
+		allowed := codepoint == 33 || codepoint >= 35 && codepoint <= 43 || codepoint >= 45 && codepoint <= 58 || codepoint >= 60 && codepoint <= 91 || codepoint >= 93 && codepoint <= 126
+		if !allowed
+			return false
+		end
+	end
+	return true
+end
+
+def _valid_cookie_domain?(value: String): Boolean
+	if value == "" || value.size() > 253 || value.start_with?(".") || value.end_with?(".")
+		return false
+	end
+	value.split(".").each do |label|
+		codepoints := label.codepoints()
+		if codepoints.empty?() || codepoints.size() > 63 || codepoints[0] == 45 || codepoints[codepoints.size() - 1] == 45
+			return false
+		end
+		codepoints.each do |codepoint|
+			letter := codepoint >= 65 && codepoint <= 90 || codepoint >= 97 && codepoint <= 122
+			digit := codepoint >= 48 && codepoint <= 57
+			if !letter && !digit && codepoint != 45
+				return false
+			end
+		end
+	end
+	return true
+end
+
+def _valid_cookie_path?(value: String): Boolean
+	if !value.start_with?("/")
+		return false
+	end
+	value.codepoints().each do |codepoint|
+		if !(codepoint >= 32 && codepoint <= 58 || codepoint >= 60 && codepoint <= 126)
+			return false
+		end
+	end
+	return true
+end
+
+def _response_cookie_attribute_name(attribute: ResponseCookieAttribute): String
+	case attribute
+	when ResponseCookieAttribute::Domain(_value)
+		return "domain"
+	when ResponseCookieAttribute::Path(_value)
+		return "path"
+	when ResponseCookieAttribute::MaxAge(_seconds)
+		return "max-age"
+	when ResponseCookieAttribute::Secure
+		return "secure"
+	when ResponseCookieAttribute::HttpOnly
+		return "httponly"
+	when ResponseCookieAttribute::SameSite(_value)
+		return "samesite"
+	end
 end
 
 def _response_cookie_attribute(attribute: ResponseCookieAttribute): String

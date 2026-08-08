@@ -3596,6 +3596,156 @@ end
 	}
 }
 
+func TestRunOfficialWebRejectsInvalidResponseCookiesAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireWebServerRuntime(t, mode)
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/run-web-response-cookie-validation-test"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			mainSource := `import { Request, response_header_values } from trb/web
+import { dispatch } from trb/web/testing
+
+def main()
+	[
+		"name",
+		"value",
+		"domain",
+		"path",
+		"max-age",
+		"attribute",
+		"same-site",
+		"secure-prefix",
+		"host-prefix",
+		"duplicate",
+		"valid",
+	].each do |kind|
+		response := dispatch(Request.new(
+			method: "GET",
+			path: "/cookies/" + kind,
+			query_string: "",
+			headers: {},
+			body: "".to_bytes(),
+		))
+		puts(response.status)
+		values := response_header_values(response, "set-cookie")
+		puts(values.size())
+		if !values.empty?()
+			puts(values[0])
+		end
+	end
+	return
+end
+`
+			routeSource := `import {
+	Context,
+	CookieSameSite,
+	Response,
+	ResponseCookie,
+	ResponseCookieAttribute,
+	new_response_cookie,
+	path_param,
+	set_cookie,
+} from trb/web
+
+def get(context: Context): Response
+	kind := path_param(context, "kind")
+	base := Response.new(status: 204, headers: {}, body: "".to_bytes())
+	if kind == "name"
+		return set_cookie(base, new_response_cookie("bad name", "value"))
+	end
+	if kind == "value"
+		return set_cookie(base, new_response_cookie("session", "non ascii"))
+	end
+	if kind == "domain"
+		return set_cookie(base, ResponseCookie.new(
+			name: "session",
+			value: "value",
+			attributes: [ResponseCookieAttribute::Domain("-example.com")],
+		))
+	end
+	if kind == "path"
+		return set_cookie(base, ResponseCookie.new(
+			name: "session",
+			value: "value",
+			attributes: [ResponseCookieAttribute::Path("relative")],
+		))
+	end
+	if kind == "max-age"
+		return set_cookie(base, ResponseCookie.new(
+			name: "session",
+			value: "value",
+			attributes: [ResponseCookieAttribute::MaxAge(-1)],
+		))
+	end
+	if kind == "attribute"
+		return set_cookie(base, ResponseCookie.new(
+			name: "session",
+			value: "value",
+			attributes: [ResponseCookieAttribute::Secure, ResponseCookieAttribute::Secure],
+		))
+	end
+	if kind == "same-site"
+		return set_cookie(base, ResponseCookie.new(
+			name: "session",
+			value: "value",
+			attributes: [ResponseCookieAttribute::SameSite(CookieSameSite::None)],
+		))
+	end
+	if kind == "secure-prefix"
+		return set_cookie(base, new_response_cookie("__Secure-session", "value"))
+	end
+	if kind == "host-prefix"
+		return set_cookie(base, ResponseCookie.new(
+			name: "__Host-session",
+			value: "value",
+			attributes: [ResponseCookieAttribute::Secure, ResponseCookieAttribute::Path("/app")],
+		))
+	end
+	if kind == "duplicate"
+		first := set_cookie(base, new_response_cookie("session", "first"))
+		return set_cookie(first, new_response_cookie("session", "second"))
+	end
+	return set_cookie(base, ResponseCookie.new(
+		name: "__Host-session",
+		value: "value",
+		attributes: [
+			ResponseCookieAttribute::Secure,
+			ResponseCookieAttribute::Path("/"),
+			ResponseCookieAttribute::SameSite(CookieSameSite::None),
+		],
+	))
+end
+`
+			if err := os.MkdirAll(filepath.Join(root, "src", "routes", "cookies"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "src", "routes", "cookies", "[kind].trb"), []byte(routeSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+				t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+			}
+			want := strings.Repeat("500\n0\n", 10) + "204\n1\n__Host-session=value; Secure; Path=/; SameSite=None\n"
+			if stdout.String() != want {
+				t.Fatalf("unexpected %s response-cookie validation output: want %q, got %q", mode, want, stdout.String())
+			}
+		})
+	}
+}
+
 func TestRunOfficialWebJSONAPIsAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
