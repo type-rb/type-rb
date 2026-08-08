@@ -11,6 +11,7 @@ import (
 func TestDiscoverBuildsDeterministicFileRouteManifest(t *testing.T) {
 	root := t.TempDir()
 	sources := []Source{
+		parsedSource(t, filepath.Join(root, "routes", "assets", "[...path].trb"), "routes/assets/[...path]", "def get(context: Context): Response\n\treturn response\nend\n"),
 		parsedSource(t, filepath.Join(root, "routes", "todos", "[id].trb"), "routes/todos/[id]", "def post(context: Context): Response\n\treturn response\nend\n"),
 		parsedSource(t, filepath.Join(root, "routes", "index.trb"), "routes/index", "def get(context: Context): Response\n\treturn response\nend\n"),
 		parsedSource(t, filepath.Join(root, "main.trb"), "main", "def main()\n\treturn\nend\n"),
@@ -21,16 +22,22 @@ func TestDiscoverBuildsDeterministicFileRouteManifest(t *testing.T) {
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %#v", issues)
 	}
-	if len(routes) != 2 {
-		t.Fatalf("got %d routes, want 2", len(routes))
+	if len(routes) != 3 {
+		t.Fatalf("got %d routes, want 3", len(routes))
 	}
 	if routes[0].Method != "GET" || routes[0].Path != "/" || routes[0].ModulePath != "routes/index" {
 		t.Fatalf("unexpected root route: %#v", routes[0])
 	}
-	if routes[1].Method != "POST" || routes[1].Path != "/todos/:id" || routes[1].ModulePath != "routes/todos/[id]" {
-		t.Fatalf("unexpected parameter route: %#v", routes[1])
+	if routes[1].Method != "GET" || routes[1].Path != "/assets/*path" || routes[1].ModulePath != "routes/assets/[...path]" {
+		t.Fatalf("unexpected catch-all route: %#v", routes[1])
 	}
-	if got := strings.Join(routes[1].PathParameters, ","); got != "id" {
+	if got := strings.Join(routes[1].PathParameters, ","); got != "path" {
+		t.Fatalf("catch-all path parameters = %q, want path", got)
+	}
+	if routes[2].Method != "POST" || routes[2].Path != "/todos/:id" || routes[2].ModulePath != "routes/todos/[id]" {
+		t.Fatalf("unexpected parameter route: %#v", routes[2])
+	}
+	if got := strings.Join(routes[2].PathParameters, ","); got != "id" {
 		t.Fatalf("path parameters = %q, want id", got)
 	}
 }
@@ -61,6 +68,40 @@ func TestDiscoverRejectsAmbiguousRoutes(t *testing.T) {
 	}
 }
 
+func TestDiscoverRejectsRoutesOverlappingCatchAll(t *testing.T) {
+	root := t.TempDir()
+	sources := []Source{
+		parsedSource(t, filepath.Join(root, "routes", "assets", "[...path].trb"), "routes/assets/[...path]", "def get()\n\treturn\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "assets", "icons", "[name].trb"), "routes/assets/icons/[name]", "def get()\n\treturn\nend\n"),
+	}
+
+	_, issues := Discover(sources, root)
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, "conflicts with route") {
+		t.Fatalf("unexpected issues: %#v", issues)
+	}
+}
+
+func TestPathsOverlapUsesOneOrMoreSegmentsForParametersAndCatchAlls(t *testing.T) {
+	tests := []struct {
+		left  string
+		right string
+		want  bool
+	}{
+		{left: "/", right: "/:id", want: false},
+		{left: "/", right: "/*path", want: false},
+		{left: "/*path", right: "/readme", want: true},
+		{left: "/files", right: "/files/*path", want: false},
+		{left: "/files/:id", right: "/files/*path", want: true},
+		{left: "/files/*left", right: "/files/*right", want: true},
+		{left: "/files/*path", right: "/images/icon", want: false},
+	}
+	for _, test := range tests {
+		if got := pathsOverlap(test.left, test.right); got != test.want {
+			t.Errorf("pathsOverlap(%q, %q) = %t, want %t", test.left, test.right, got, test.want)
+		}
+	}
+}
+
 func TestDiscoverRejectsInvalidRouteFiles(t *testing.T) {
 	root := t.TempDir()
 	tests := []struct {
@@ -70,7 +111,8 @@ func TestDiscoverRejectsInvalidRouteFiles(t *testing.T) {
 		message  string
 	}{
 		{name: "missing handler", filename: "health.trb", source: "def helper()\n\treturn\nend\n", message: "at least one HTTP handler"},
-		{name: "catch all", filename: "[...path].trb", source: "def get()\n\treturn\nend\n", message: "catch-all route segments are not supported yet"},
+		{name: "empty catch all", filename: "[...].trb", source: "def get()\n\treturn\nend\n", message: "invalid catch-all route parameter"},
+		{name: "non-terminal catch all", filename: filepath.Join("[...path]", "edit.trb"), source: "def get()\n\treturn\nend\n", message: "must be the final segment"},
 		{name: "duplicate parameter", filename: filepath.Join("[id]", "[id].trb"), source: "def get()\n\treturn\nend\n", message: "route parameter \"id\" is duplicated"},
 	}
 

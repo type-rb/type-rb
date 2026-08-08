@@ -3622,6 +3622,74 @@ end
 	}
 }
 
+func TestRunOfficialWebCatchAllRoutesAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireWebServerRuntime(t, mode)
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/run-web-catch-all-test"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			mainSource := `import { Request, response_header_values } from trb/web
+import { dispatch } from trb/web/testing
+
+def show(method: String, path: String)
+	response := dispatch(Request.new(method: method, path: path, query_string: "", headers: {}, body: "".to_bytes()))
+	puts(response.status)
+	puts(response.body.to_s())
+	allow := response_header_values(response, "allow")
+	if allow.empty?()
+		puts("-")
+	else
+		puts(allow[0])
+	end
+	return
+end
+
+def main()
+	show("GET", "/files/guides/getting%20started")
+	show("GET", "/files/readme")
+	show("GET", "/files")
+	show("GET", "/files/%2Fsecret")
+	show("POST", "/files/a/b")
+	show("OPTIONS", "/files/a/b")
+	return
+end
+`
+			routeSource := `import { Context, Response, path_param, text } from trb/web
+
+def get(context: Context): Response
+	return text(path_param(context, "path"))
+end
+`
+			if err := os.MkdirAll(filepath.Join(root, "src", "routes", "files"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "src", "routes", "files", "[...path].trb"), []byte(routeSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			want := "200\nguides/getting started\n-\n200\nreadme\n-\n404\n{\"error\":\"not_found\"}\n-\n400\n{\"error\":\"bad_request\"}\n-\n405\n{\"error\":\"method_not_allowed\"}\nGET, HEAD, OPTIONS\n204\n\nGET, HEAD, OPTIONS\n"
+			if stdout.String() != want {
+				t.Fatalf("unexpected %s catch-all output: want %q, got %q", mode, want, stdout.String())
+			}
+		})
+	}
+}
+
 func TestRunOfficialWebRequestErrorsAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

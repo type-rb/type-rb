@@ -345,7 +345,20 @@ func routePath(relative string) (string, []string, string) {
 	seen := map[string]bool{}
 	for index, segment := range segments {
 		if strings.HasPrefix(segment, "[...") && strings.HasSuffix(segment, "]") {
-			return "", nil, "catch-all route segments are not supported yet"
+			name := segment[4 : len(segment)-1]
+			if !validParameterName(name) {
+				return "", nil, fmt.Sprintf("invalid catch-all route parameter %q", name)
+			}
+			if index != len(segments)-1 {
+				return "", nil, fmt.Sprintf("catch-all route parameter %q must be the final segment", name)
+			}
+			if seen[name] {
+				return "", nil, fmt.Sprintf("route parameter %q is duplicated", name)
+			}
+			seen[name] = true
+			parameters = append(parameters, name)
+			segments[index] = "*" + name
+			continue
 		}
 		if strings.HasPrefix(segment, "[") || strings.HasSuffix(segment, "]") {
 			if len(segment) < 3 || segment[0] != '[' || segment[len(segment)-1] != ']' {
@@ -387,18 +400,50 @@ func conflictIssues(routes []Route) []Issue {
 }
 
 func pathsOverlap(left, right string) bool {
-	leftSegments := strings.Split(strings.TrimPrefix(left, "/"), "/")
-	rightSegments := strings.Split(strings.TrimPrefix(right, "/"), "/")
-	if len(leftSegments) != len(rightSegments) {
+	leftSegments := routePatternSegments(left)
+	rightSegments := routePatternSegments(right)
+	leftCatchAll := catchAllSegmentIndex(leftSegments)
+	rightCatchAll := catchAllSegmentIndex(rightSegments)
+	if leftCatchAll < 0 && rightCatchAll < 0 && len(leftSegments) != len(rightSegments) {
 		return false
 	}
-	for index := range leftSegments {
+	sharedPrefix := min(len(leftSegments), len(rightSegments))
+	if leftCatchAll >= 0 {
+		sharedPrefix = min(sharedPrefix, leftCatchAll)
+	}
+	if rightCatchAll >= 0 {
+		sharedPrefix = min(sharedPrefix, rightCatchAll)
+	}
+	for index := 0; index < sharedPrefix; index++ {
 		if leftSegments[index] == rightSegments[index] || strings.HasPrefix(leftSegments[index], ":") || strings.HasPrefix(rightSegments[index], ":") {
 			continue
 		}
 		return false
 	}
-	return true
+	if leftCatchAll >= 0 && len(rightSegments) < leftCatchAll+1 {
+		return false
+	}
+	if rightCatchAll >= 0 && len(leftSegments) < rightCatchAll+1 {
+		return false
+	}
+	return leftCatchAll >= 0 || rightCatchAll >= 0 || len(leftSegments) == len(rightSegments)
+}
+
+func routePatternSegments(path string) []string {
+	trimmed := strings.Trim(path, "/")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "/")
+}
+
+func catchAllSegmentIndex(segments []string) int {
+	for index, segment := range segments {
+		if strings.HasPrefix(segment, "*") {
+			return index
+		}
+	}
+	return -1
 }
 
 func validParameterName(name string) bool {
