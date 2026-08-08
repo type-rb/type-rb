@@ -45,6 +45,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("begin", "")
 	g.indent++
+	g.line("request = trb_web_normalize_request(request)", "")
 	g.line("return trb_web_finalize_response(request, trb_web_payload_too_large) if request.body.bytesize > TRB_WEB_MAX_BODY_BYTES", "")
 	g.line("method = request.method.upcase", "")
 	g.line(`segments = request.path.split("/").reject(&:empty?)`, "")
@@ -148,6 +149,19 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 
 func (g *generator) webProtocolResponses() {
 	g.line("TRB_WEB_MAX_BODY_BYTES = "+strconv.Itoa(webintegration.MaxBodyBytes), "")
+	g.line("", "")
+	g.line("def trb_web_normalize_request(request)", "")
+	g.indent++
+	g.line("headers = {}", "")
+	g.line("request.headers.each do |name, values|", "")
+	g.indent++
+	g.line("normalized_name = name.downcase", "")
+	g.line("(headers[normalized_name] ||= []).concat(values)", "")
+	g.indent--
+	g.line("end", "")
+	g.line("Request.new(method: request.method.upcase, path: request.path, query_string: request.query_string, headers: headers, body: request.body)", "")
+	g.indent--
+	g.line("end", "")
 	g.line("", "")
 	g.line("def trb_web_internal_server_error", "")
 	g.indent++

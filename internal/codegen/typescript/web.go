@@ -56,6 +56,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("try {")
 	g.indent++
+	g.line("request = trb_web_normalize_request(request);")
 	g.line("if (request.body.byteLength > TRB_WEB_MAX_BODY_BYTES) return trb_web_finalize_response(request, trb_web_payload_too_large());")
 	g.line("const method = request.method.toUpperCase();")
 	g.line(`const segments = request.path.split("/").filter((segment) => segment.length > 0);`)
@@ -166,6 +167,18 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 
 func (g *generator) webProtocolResponses() {
 	g.line("const TRB_WEB_MAX_BODY_BYTES = " + strconv.Itoa(webintegration.MaxBodyBytes) + ";")
+	g.line("function trb_web_normalize_request(request: TrbWebRequest): TrbWebRequest {")
+	g.indent++
+	g.line("const headers: Record<string, string[]> = {};")
+	g.line("for (const [name, values] of Object.entries(request.headers)) {")
+	g.indent++
+	g.line("const normalized_name = name.toLowerCase();")
+	g.line("headers[normalized_name] = [...(headers[normalized_name] ?? []), ...values];")
+	g.indent--
+	g.line("}")
+	g.line("return { ...request, method: request.method.toUpperCase(), headers };")
+	g.indent--
+	g.line("}")
 	g.line("function trb_web_internal_server_error(): TrbWebResponse {")
 	g.indent++
 	g.line(`return { status: 500, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"internal_server_error\"}") };`)

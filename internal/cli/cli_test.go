@@ -3552,14 +3552,22 @@ func TestRunOfficialWebMethodSemanticsAcrossAvailableBackends(t *testing.T) {
 import { dispatch } from trb/web/testing
 
 def request(method: String, path: String): Request
-	return Request.new(method: method, path: path, query_string: "", headers: {}, body: "".to_bytes())
+	return Request.new(
+		method: method,
+		path: path,
+		query_string: "",
+		headers: {"X-Trace" => ["value"]},
+		body: "".to_bytes(),
+	)
 end
 
 def main()
-	fallback := dispatch(request("HEAD", "/fallback"))
+	fallback := dispatch(request("head", "/fallback"))
 	puts(fallback.status)
 	puts(fallback.body.size())
 	puts(fallback.headers["x-handler"][0])
+	puts(fallback.headers["x-method"][0])
+	puts(fallback.headers["x-trace"][0])
 	explicit := dispatch(request("HEAD", "/explicit"))
 	puts(explicit.status)
 	puts(explicit.body.size())
@@ -3584,9 +3592,17 @@ end
 `
 		fallbackRouteSource := `import { Context, Response } from trb/web
 
-def get(_context: Context): Response
+def get(context: Context): Response
 	puts("fallback:get")
-	return Response.new(status: 200, headers: {"x-handler" => ["get"]}, body: "fallback".to_bytes())
+	return Response.new(
+		status: 200,
+		headers: {
+			"x-handler" => ["get"],
+			"x-method" => [context.request.method],
+			"x-trace" => [context.request.headers["x-trace"][0]],
+		},
+		body: "fallback".to_bytes(),
+	)
 end
 `
 		explicitRouteSource := `import { Context, Response } from trb/web
@@ -3635,7 +3651,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "middleware:before\nfallback:get\nmiddleware:after\n200\n0\nget\nmiddleware:before\nexplicit:head\nmiddleware:after\n202\n0\nhead\nmiddleware:before\nmiddleware:after\n204\nGET, HEAD, OPTIONS\n0\nmiddleware:before\nexplicit:options\nmiddleware:after\n203\noptions\nexplicit-options\n405\nGET, HEAD, OPTIONS\n{\"error\":\"method_not_allowed\"}\n404\n0\n"
+		want := "middleware:before\nfallback:get\nmiddleware:after\n200\n0\nget\nHEAD\nvalue\nmiddleware:before\nexplicit:head\nmiddleware:after\n202\n0\nhead\nmiddleware:before\nmiddleware:after\n204\nGET, HEAD, OPTIONS\n0\nmiddleware:before\nexplicit:options\nmiddleware:after\n203\noptions\nexplicit-options\n405\nGET, HEAD, OPTIONS\n{\"error\":\"method_not_allowed\"}\n404\n0\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web method semantics output: want %q, got %q", mode, want, stdout.String())
 		}

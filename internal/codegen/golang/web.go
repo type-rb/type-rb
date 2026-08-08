@@ -61,7 +61,8 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 
 	g.line("func trbWebDispatch(request web.Request) (response web.Response) {")
 	g.indent++
-	g.line("headRequest := strings.EqualFold(request.Method, \"HEAD\")")
+	g.line("request = trbWebNormalizeRequest(request)")
+	g.line("headRequest := request.Method == \"HEAD\"")
 	g.line("defer func() {")
 	g.indent++
 	g.line("if recovered := recover(); recovered != nil {")
@@ -225,6 +226,19 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 
 func (g *generator) webProtocolResponses() {
 	g.line("const trbWebMaxBodyBytes = " + strconv.Itoa(webintegration.MaxBodyBytes))
+	g.b.WriteByte('\n')
+	g.line("func trbWebNormalizeRequest(request web.Request) web.Request {")
+	g.indent++
+	g.line("headers := map[string][]string{}")
+	g.line("for name, values := range request.Headers {")
+	g.indent++
+	g.line("normalizedName := strings.ToLower(name)")
+	g.line("headers[normalizedName] = append(headers[normalizedName], values...)")
+	g.indent--
+	g.line("}")
+	g.line("return web.Request{Method: strings.ToUpper(request.Method), Path: request.Path, QueryString: request.QueryString, Headers: headers, Body: request.Body}")
+	g.indent--
+	g.line("}")
 	g.b.WriteByte('\n')
 	g.line("func trbWebInternalServerError() web.Response {")
 	g.indent++
