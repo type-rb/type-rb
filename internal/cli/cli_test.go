@@ -2993,6 +2993,95 @@ end
 	}
 }
 
+func TestRunOfficialWebQueryHelpersAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web query helper run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web query helper run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-query-helper-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { QueryValueError, Request, query_value, query_values } from trb/web
+import { PercentDecodeError } from trb/std/url
+import { Result } from trb/std/result
+
+def request(query_string: String): Request
+	return Request.new(method: "GET", path: "/", query_string: query_string, headers: {}, body: "".to_bytes())
+end
+
+def render_value(result: Result<String, QueryValueError>): String
+	case result
+	when Result::Ok(value)
+		return "ok:" + value
+	when Result::Err(error)
+		case error
+		when QueryValueError::Malformed(decode_error)
+			return "malformed:" + decode_error.input
+		when QueryValueError::Missing(name)
+			return "missing:" + name
+		when QueryValueError::Duplicate(name)
+			return "duplicate:" + name
+		end
+	end
+end
+
+def print_values(result: Result<Array<String>, PercentDecodeError>)
+	case result
+	when Result::Ok(values)
+		puts(values.size())
+		values.each do |value|
+			puts(value)
+		end
+	when Result::Err(error)
+		puts(error.message)
+	end
+	return
+end
+
+def main()
+	parsed := request("tag=go&tag=web&page=2&empty=")
+	print_values(query_values(parsed, "tag"))
+	print_values(query_values(parsed, "missing"))
+	puts(render_value(query_value(parsed, "page")))
+	puts(render_value(query_value(parsed, "missing")))
+	puts(render_value(query_value(parsed, "tag")))
+	puts(render_value(query_value(request("value=%ZZ"), "value")))
+	return
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "2\ngo\nweb\n0\nok:2\nmissing:missing\nduplicate:tag\nmalformed:%ZZ\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web query helper output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunOfficialWebResponseHeadersAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
