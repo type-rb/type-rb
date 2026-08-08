@@ -40,6 +40,7 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 			continue
 		}
 		if imported := loaded[definition.ModulePath]; imported != nil {
+			imported.RuntimeRequired = true
 			for _, exported := range definition.RuntimeExports {
 				if !contains(imported.Symbols, exported.Name) {
 					imported.Symbols = append(imported.Symbols, exported.Name)
@@ -60,6 +61,7 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 			Kind:             "standard",
 			Standard:         true,
 			Runtime:          true,
+			RuntimeRequired:  true,
 			Implicit:         true,
 			IntrinsicSymbols: map[string]bool{},
 			SymbolKinds:      map[string]string{},
@@ -116,9 +118,14 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			if resolved.Definition != nil {
 				for name, symbol := range resolved.Definition.Symbols {
 					if symbol.Intrinsic != "" {
-						if _, hasRuntimeExport := resolved.Exports[name]; !hasRuntimeExport {
+						if _, hasRuntimeExport := resolved.Exports[name]; symbol.RuntimeIndependent || !hasRuntimeExport {
 							result.IntrinsicSymbols[name] = true
 						}
+					}
+				}
+				for name := range l.checked.ImportUses[n] {
+					if name != "" && !result.IntrinsicSymbols[name] {
+						result.RuntimeRequired = true
 					}
 				}
 			}

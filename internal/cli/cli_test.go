@@ -2037,6 +2037,70 @@ end
 	}
 }
 
+func TestRunCompilerOwnedNamespaceImportsAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping namespace import run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping namespace import run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/namespace-import-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import trb/std/encoding/hex
+import trb/std/process
+import { Result } from trb/std/result
+
+def decoded_text(input: String): String
+	case hex.decode(input)
+	when Result::Ok(value)
+		return value.to_s()
+	when Result::Err(error)
+		return error.message
+	end
+end
+
+def main()
+	puts(hex.encode("A".to_bytes()))
+	puts(decoded_text("41"))
+	puts(process.argv().size())
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "41\nA\n0\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s namespace import output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunPortableBase64AcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

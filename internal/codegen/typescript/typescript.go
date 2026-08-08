@@ -19,11 +19,12 @@ type generator struct {
 	modulePath    string
 	topFunctions  map[string]bool
 	records       map[string]bool
+	typeAliases   map[string]string
 	temporary     int
 }
 
 func Generate(program *ir.Program) string {
-	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, records: map[string]bool{}}
+	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, records: map[string]bool{}, typeAliases: map[string]string{}}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -58,7 +59,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(comment(n.Text))
 	case *ir.Import:
-		if n.Standard && !n.Runtime {
+		if n.Standard && (!n.Runtime || !n.RuntimeRequired) {
 			if n.Path == "trb/platform/typescript/react" {
 				g.line(`import React from "react";`)
 				g.line(`import { createRoot } from "react-dom/client";`)
@@ -67,14 +68,18 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		importPath := tsImportPath(g.modulePath, n.Path)
 		if n.Namespace && n.Alias != "" {
+			for symbol, kind := range n.SymbolKinds {
+				switch kind {
+				case "class", "record", "enum", "interface":
+					g.typeAliases[symbol] = n.Alias
+				}
+			}
 			g.line("import * as " + n.Alias + " from " + strconv.Quote(importPath) + ";")
 		} else if len(n.Symbols) > 0 {
 			values := make([]string, 0, len(n.Symbols))
 			types := make([]string, 0, len(n.Symbols))
-			intrinsicRuntime := false
 			for _, symbol := range n.Symbols {
 				if n.IntrinsicSymbols[symbol] {
-					intrinsicRuntime = true
 					continue
 				}
 				switch n.SymbolKinds[symbol] {
@@ -85,9 +90,6 @@ func (g *generator) statement(statement ir.Statement) {
 				default:
 					values = append(values, symbol)
 				}
-			}
-			if intrinsicRuntime {
-				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
 			if len(values) > 0 {
 				g.line("import { " + strings.Join(values, ", ") + " } from " + strconv.Quote(importPath) + ";")
@@ -132,7 +134,7 @@ func (g *generator) statement(statement ir.Statement) {
 			case *ir.Comment:
 				g.statement(field)
 			case *ir.RecordField:
-				g.line(field.Name + ": " + tsType(field.Type) + ";")
+				g.line(field.Name + ": " + g.tsType(field.Type) + ";")
 			}
 		}
 		g.indent--
@@ -167,7 +169,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("export interface " + n.Name + " {")
 		g.indent++
 		for _, method := range n.Methods {
-			g.line(tsMethodName(method.Name) + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + ";")
+			g.line(tsMethodName(method.Name) + "(" + g.parameters(method.Parameters) + "): " + g.tsType(method.ReturnType) + ";")
 		}
 		g.indent--
 		g.line("}")
@@ -182,7 +184,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.ReadOnly {
 			prefix += "readonly "
 		}
-		text := prefix + name + ": " + tsType(n.Type)
+		text := prefix + name + ": " + g.tsType(n.Type)
 		if n.Value != nil {
 			text += " = " + g.expr(n.Value)
 		}
@@ -195,7 +197,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 	case *ir.Variable:
 		if g.inClass > 0 && g.functionDepth == 0 && n.Constant {
-			g.line("static readonly " + n.Name + ": " + tsType(n.Type) + " = " + g.expr(n.Value) + ";")
+			g.line("static readonly " + n.Name + ": " + g.tsType(n.Type) + " = " + g.expr(n.Value) + ";")
 			break
 		}
 		keyword := "const"
@@ -209,12 +211,12 @@ func (g *generator) statement(statement ir.Statement) {
 		if g.functionDepth == 0 && n.Constant {
 			prefix = "export "
 		}
-		g.line(prefix + keyword + " " + n.Name + ": " + tsType(n.Type) + " = " + g.expr(n.Value) + ";")
+		g.line(prefix + keyword + " " + n.Name + ": " + g.tsType(n.Type) + " = " + g.expr(n.Value) + ";")
 		if g.functionDepth > 0 && !n.Constant && namedUnusedBinding(n.Name) {
 			g.line("void " + n.Name + ";")
 		}
 	case *ir.Temporary:
-		g.line("let " + n.Name + ": " + tsType(n.Type) + ";")
+		g.line("let " + n.Name + ": " + g.tsType(n.Type) + ";")
 	case *ir.Assignment:
 		target := g.assignmentTarget(n.Target)
 		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
@@ -457,7 +459,7 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 		}
 		fields := []string{"readonly kind: " + strconv.Quote(member.Name)}
 		for _, field := range member.Fields {
-			fields = append(fields, "readonly "+field.Name+": "+tsType(field.Type))
+			fields = append(fields, "readonly "+field.Name+": "+g.tsType(field.Type))
 		}
 		variants = append(variants, "{ "+strings.Join(fields, "; ")+" }")
 	}
@@ -511,7 +513,7 @@ func (g *generator) method(method *ir.Method) {
 		if strings.HasPrefix(method.Name, "_") {
 			prefix += "private "
 		}
-		g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + " {")
+		g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + g.tsType(method.ReturnType) + " {")
 	}
 	g.indent++
 	g.functionDepth++
@@ -527,7 +529,7 @@ func (g *generator) function(method *ir.Method) {
 	if name == "main" {
 		prefix = "function "
 	}
-	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + "): " + tsType(method.ReturnType) + " {")
+	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + "): " + g.tsType(method.ReturnType) + " {")
 	g.indent++
 	g.functionDepth++
 	g.statements(method.Body)
@@ -543,7 +545,7 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 		if parameter.Rest || parameter.KeywordRest {
 			name = "..." + name
 		}
-		part := name + ": " + tsType(parameter.Type)
+		part := name + ": " + g.tsType(parameter.Type)
 		if parameter.Default != nil {
 			part += " = " + g.expr(parameter.Default)
 		}
@@ -625,7 +627,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		case ir.IntegerToFloatConversion:
 			return "Number(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
-			return "((value: " + tsType(n.Value.ExprType()) + "): " + tsType(n.ExprType()) + " => typeof value === \"number\" ? Number(value) : value)(" + g.expr(n.Value) + ")"
+			return "((value: " + g.tsType(n.Value.ExprType()) + "): " + g.tsType(n.ExprType()) + " => typeof value === \"number\" ? Number(value) : value)(" + g.expr(n.Value) + ")"
 		default:
 			return g.expr(n.Value)
 		}
@@ -705,7 +707,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if len(n.TypeArguments) > 0 {
 			arguments := make([]string, len(n.TypeArguments))
 			for index, argument := range n.TypeArguments {
-				arguments[index] = tsType(argument)
+				arguments[index] = g.tsType(argument)
 			}
 			name += "<" + strings.Join(arguments, ", ") + ">"
 		}
@@ -713,7 +715,7 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.TypeApply:
 		arguments := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
-			arguments[index] = tsType(argument)
+			arguments[index] = g.tsType(argument)
 		}
 		name := g.expr(n.Receiver)
 		if identifier, ok := n.Receiver.(*ir.Identifier); ok && g.topFunctions[identifier.Name] {
@@ -723,7 +725,7 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()
-			return "((values: " + tsType(hashType) + ", key: " + tsType(hashType.Args[0]) + "): " + tsType(hashType.Args[1]) + " => { if (!Object.prototype.hasOwnProperty.call(values, key)) { throw new Error(\"Hash key is missing\"); } return values[key]; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+			return "((values: " + g.tsType(hashType) + ", key: " + g.tsType(hashType.Args[0]) + "): " + g.tsType(hashType.Args[1]) + " => { if (!Object.prototype.hasOwnProperty.call(values, key)) { throw new Error(\"Hash key is missing\"); } return values[key]; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
@@ -739,9 +741,10 @@ func (g *generator) ifExpression(node *ir.If) string {
 		modulePath:    g.modulePath,
 		topFunctions:  g.topFunctions,
 		records:       g.records,
+		typeAliases:   g.typeAliases,
 		temporary:     g.temporary,
 	}
-	child.line("((): " + tsType(node.ExprType()) + " => {")
+	child.line("((): " + child.tsType(node.ExprType()) + " => {")
 	child.indent++
 	child.line("if (" + child.expr(node.Condition) + ") {" + tsTrailingComment(node.TrailingComment))
 	child.indent++
@@ -781,9 +784,10 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		modulePath:    g.modulePath,
 		topFunctions:  g.topFunctions,
 		records:       g.records,
+		typeAliases:   g.typeAliases,
 		temporary:     g.temporary,
 	}
-	child.line("((): " + tsType(node.ExprType()) + " => {")
+	child.line("((): " + child.tsType(node.ExprType()) + " => {")
 	child.indent++
 	child.statements(node.Leading)
 	child.temporary++
@@ -939,46 +943,46 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	filesystemResultType := func() (string, string, string) {
 		result := call.ExprType()
 		if len(result.Args) != 2 {
-			return tsType(result), "unknown", "unknown"
+			return g.tsType(result), "unknown", "unknown"
 		}
-		return tsType(result), tsType(result.Args[0]), tsType(result.Args[1])
+		return g.tsType(result), g.tsType(result.Args[0]), g.tsType(result.Args[1])
 	}
 	filesystemOK := func(value string) string {
 		_, successType, errorType := filesystemResultType()
-		return "Result.Ok<" + successType + ", " + errorType + ">(" + value + ")"
+		return g.runtimeName("Result") + ".Ok<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	filesystemError := func(operation, path, message string) string {
 		_, successType, errorType := filesystemResultType()
 		value := "{ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + " } satisfies " + errorType
-		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
+		return g.runtimeName("Result") + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	processError := func(operation, command, message string) string {
 		_, successType, errorType := filesystemResultType()
 		value := "{ operation: " + strconv.Quote(operation) + ", command: " + command + ", message: " + message + " } satisfies " + errorType
-		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
+		return g.runtimeName("Result") + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	resultError := func(value string) string {
 		_, successType, errorType := filesystemResultType()
-		return "Result.Err<" + successType + ", " + errorType + ">(" + value + ")"
+		return g.runtimeName("Result") + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	numberParseError := func(kind, input, message string) string {
-		value := "({ kind: NumberParseErrorKind." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies NumberParseError)"
+		value := "({ kind: " + g.runtimeName("NumberParseErrorKind") + "." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("NumberParseError") + ")"
 		return resultError(value)
 	}
 	hexDecodeError := func(kind, input, index, message string) string {
-		value := "({ kind: HexDecodeErrorKind." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies HexDecodeError)"
+		value := "({ kind: " + g.runtimeName("HexDecodeErrorKind") + "." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("HexDecodeError") + ")"
 		return resultError(value)
 	}
 	base64DecodeError := func(kind, input, index, message string) string {
-		value := "({ kind: Base64DecodeErrorKind." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies Base64DecodeError)"
+		value := "({ kind: " + g.runtimeName("Base64DecodeErrorKind") + "." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("Base64DecodeError") + ")"
 		return resultError(value)
 	}
 	indexLookupError := func(index, size, message string) string {
-		value := "({ index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies IndexLookupError)"
+		value := "({ index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("IndexLookupError") + ")"
 		return resultError(value)
 	}
 	keyLookupError := func(key, message string) string {
-		value := "({ key: " + key + ", message: " + strconv.Quote(message) + " } satisfies KeyLookupError)"
+		value := "({ key: " + key + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("KeyLookupError") + ")"
 		return resultError(value)
 	}
 	filesystemHandle := `const fs = (globalThis as any).process?.getBuiltinModule?.("fs"); if (fs === undefined) { throw new Error("filesystem is unavailable"); } `
@@ -1177,14 +1181,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.empty":
 		return arguments[0] + ".length === 0"
 	case "trb.std.arrays.fetch":
-		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { throw new Error(\"Array index is out of bounds\"); } return __trbValues[__trbIndex]!; })()"
+		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { throw new Error(\"Array index is out of bounds\"); } return __trbValues[__trbIndex]!; })()"
 	case "trb.std.arrays.try_fetch":
 		resultType, _, _ := filesystemResultType()
 		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { return " + indexLookupError("__trbIndex", "__trbValues.length", "Array index is out of bounds") + "; } return " + filesystemOK("__trbValues[__trbIndex]!") + "; })()"
 	case "trb.std.arrays.first":
-		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[0]!; })()"
+		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[0]!; })()"
 	case "trb.std.arrays.last":
-		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[__trbValues.length - 1]!; })()"
+		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[__trbValues.length - 1]!; })()"
 	case "trb.std.arrays.copy":
 		return "[..." + arguments[0] + "]"
 	case "trb.std.arrays.contains":
@@ -1194,9 +1198,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.join":
 		return arguments[0] + ".join(" + arguments[1] + ")"
 	case "trb.std.arrays.pop":
-		return "((): " + tsType(call.ExprType()) + " => { const value = " + arguments[0] + ".pop(); if (value === undefined) { throw new Error(\"Array is empty\"); } return value; })()"
+		return "((): " + g.tsType(call.ExprType()) + " => { const value = " + arguments[0] + ".pop(); if (value === undefined) { throw new Error(\"Array is empty\"); } return value; })()"
 	case "trb.std.arrays.shift":
-		return "((): " + tsType(call.ExprType()) + " => { const value = " + arguments[0] + ".shift(); if (value === undefined) { throw new Error(\"Array is empty\"); } return value; })()"
+		return "((): " + g.tsType(call.ExprType()) + " => { const value = " + arguments[0] + ".shift(); if (value === undefined) { throw new Error(\"Array is empty\"); } return value; })()"
 	case "trb.std.arrays.push":
 		return arguments[0] + ".push(" + arguments[1] + ")"
 	case "trb.std.arrays.unshift":
@@ -1208,7 +1212,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hashes.empty":
 		return "Object.keys(" + arguments[0] + ").length === 0"
 	case "trb.std.hashes.fetch":
-		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } return __trbValues[__trbKey]; })()"
+		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } return __trbValues[__trbKey]; })()"
 	case "trb.std.hashes.try_fetch":
 		resultType, _, _ := filesystemResultType()
 		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { return " + keyLookupError("__trbKey", "Hash key is missing") + "; } return " + filesystemOK("__trbValues[__trbKey]") + "; })()"
@@ -1224,7 +1228,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hashes.copy":
 		return "({ ..." + arguments[0] + " })"
 	case "trb.std.hashes.delete":
-		return "((): " + tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } const __trbValue = __trbValues[__trbKey]; Reflect.deleteProperty(__trbValues, __trbKey); return __trbValue; })()"
+		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } const __trbValue = __trbValues[__trbKey]; Reflect.deleteProperty(__trbValues, __trbKey); return __trbValue; })()"
 	case "trb.std.hashes.merge":
 		return "({ ..." + arguments[0] + ", ..." + arguments[1] + " })"
 	case "trb.std.hashes.update":
@@ -1550,6 +1554,21 @@ func filepathRel(base, target string) (string, error) {
 }
 
 func tsType(t types.Type) string {
+	return tsTypeWithAliases(t, nil)
+}
+
+func (g *generator) tsType(t types.Type) string {
+	return tsTypeWithAliases(t, g.typeAliases)
+}
+
+func (g *generator) runtimeName(name string) string {
+	if alias := g.typeAliases[name]; alias != "" {
+		return alias + "." + name
+	}
+	return name
+}
+
+func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 	var result string
 	switch t.Kind {
 	case types.Void:
@@ -1559,7 +1578,7 @@ func tsType(t types.Type) string {
 	case types.Union:
 		alternatives := make([]string, len(t.Args))
 		for index, alternative := range t.Args {
-			alternatives[index] = tsType(alternative)
+			alternatives[index] = tsTypeWithAliases(alternative, aliases)
 		}
 		result = strings.Join(alternatives, " | ")
 	case types.Bool:
@@ -1575,7 +1594,7 @@ func tsType(t types.Type) string {
 	case types.Array, types.Iterable:
 		element := "unknown"
 		if len(t.Args) > 0 {
-			element = tsType(t.Args[0])
+			element = tsTypeWithAliases(t.Args[0], aliases)
 		}
 		result = "Array<" + element + ">"
 	case types.Range:
@@ -1584,8 +1603,8 @@ func tsType(t types.Type) string {
 		key := "string"
 		value := "unknown"
 		if len(t.Args) == 2 {
-			key = tsType(t.Args[0])
-			value = tsType(t.Args[1])
+			key = tsTypeWithAliases(t.Args[0], aliases)
+			value = tsTypeWithAliases(t.Args[1], aliases)
 		}
 		result = "Record<" + key + ", " + value + ">"
 	case types.Nil:
@@ -1601,17 +1620,20 @@ func tsType(t types.Type) string {
 		case "Callback":
 			argument := "unknown"
 			if len(t.Args) > 0 {
-				argument = tsType(t.Args[0])
+				argument = tsTypeWithAliases(t.Args[0], aliases)
 			}
 			result = "(value: " + argument + ") => void"
 		default:
 			result = t.Name
+			if alias := aliases[t.Name]; alias != "" {
+				result = alias + "." + result
+			}
 		}
 	}
 	if t.Kind == types.Named && len(t.Args) > 0 {
 		arguments := make([]string, len(t.Args))
 		for index, argument := range t.Args {
-			arguments[index] = tsType(argument)
+			arguments[index] = tsTypeWithAliases(argument, aliases)
 		}
 		result += "<" + strings.Join(arguments, ", ") + ">"
 	}

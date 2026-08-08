@@ -107,7 +107,7 @@ func Generate(program *ir.Program) string {
 }
 
 func (g *generator) importStatement(imported *ir.Import) {
-	if imported.Standard && !imported.Runtime {
+	if imported.Standard && (!imported.Runtime || !imported.RuntimeRequired) {
 		return
 	}
 	directory := pathpkg.Dir(imported.Path)
