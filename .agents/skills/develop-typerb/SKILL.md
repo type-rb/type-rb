@@ -26,7 +26,9 @@ For each coherent change:
 
 1. Add positive and diagnostic tests, covering Ruby, Go, and TypeScript when the feature is portable.
 2. Exercise the typed-IR REPL when runtime expression semantics change.
-3. Run `GOCACHE=/tmp/type-rb-go-cache go test ./...` and `trb fmt --check .`.
+3. Run `GOCACHE=/tmp/type-rb-go-cache go test ./...` and
+   `./trb fmt --check .`. Use the source-checkout launcher so an older released
+   `trb` on `PATH` cannot validate current syntax with a stale formatter.
 4. Check affected examples with `trb build --check`.
 5. Update `docs/specification.md`, `docs/status.md`, or `docs/roadmap.md` only
    where behavior or status changed.
