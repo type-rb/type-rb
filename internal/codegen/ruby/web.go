@@ -186,8 +186,9 @@ func (g *generator) webServer() {
 	g.line("else", "")
 	g.indent++
 	g.line(`body = content_length.positive? ? connection.read(content_length) : "".b`, "")
-	g.line(`path = target.split("?", 2).first`, "")
-	g.line("response = trb_web_dispatch(Request.new(method: method, path: path, headers: headers, body: body))", "")
+	g.line(`path, query_string = target.split("?", 2)`, "")
+	g.line(`query_string ||= ""`, "")
+	g.line("response = trb_web_dispatch(Request.new(method: method, path: path, query_string: query_string, headers: headers, body: body))", "")
 	g.indent--
 	g.line("end", "")
 	g.line(`reason = { 200 => "OK", 201 => "Created", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 405 => "Method Not Allowed", 413 => "Content Too Large", 500 => "Internal Server Error" }[response.status] || "Response"`, "")

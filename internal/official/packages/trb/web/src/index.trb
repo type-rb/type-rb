@@ -1,6 +1,10 @@
+import { Result } from trb/std/result
+import { PercentDecodeError, QueryParameter, parse_query } from trb/std/url
+
 record Request
 	method: String
 	path: String
+	query_string: String
 	headers: Hash<String, Array<String>>
 	body: Bytes
 end
@@ -22,4 +26,8 @@ end
 
 def path_param(context: Context, name: String): String
 	return context.path_parameters[name]
+end
+
+def query_parameters(request: Request): Result<Array<QueryParameter>, PercentDecodeError>
+	return parse_query(request.query_string)
 end

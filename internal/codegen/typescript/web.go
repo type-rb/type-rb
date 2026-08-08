@@ -45,7 +45,7 @@ func (g *generator) webRouteImports(manifest *webintegration.Manifest) {
 
 func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	routes := manifest.Routes
-	g.line("type TrbWebRequest = { method: string; path: string; headers: Record<string, string[]>; body: Uint8Array };")
+	g.line("type TrbWebRequest = { method: string; path: string; query_string: string; headers: Record<string, string[]>; body: Uint8Array };")
 	g.line("type TrbWebContext = { request: TrbWebRequest; path_parameters: Record<string, string> };")
 	g.line("type TrbWebResponse = { status: number; headers: Record<string, string[]>; body: Uint8Array };")
 	g.webProtocolResponses()
@@ -208,8 +208,8 @@ func (g *generator) webServer() {
 	g.line("offset += chunk.byteLength;")
 	g.indent--
 	g.line("}")
-	g.line(`const path = new URL(incoming.url ?? "/", "http://localhost").pathname;`)
-	g.line(`response = trb_web_dispatch({ method: incoming.method ?? "GET", path, headers, body });`)
+	g.line(`const url = new URL(incoming.url ?? "/", "http://localhost");`)
+	g.line(`response = trb_web_dispatch({ method: incoming.method ?? "GET", path: url.pathname, query_string: url.search.slice(1), headers, body });`)
 	g.indent--
 	g.line("}")
 	g.line("for (const [name, values] of Object.entries(response.headers)) {")

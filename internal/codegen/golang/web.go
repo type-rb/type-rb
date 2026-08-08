@@ -232,6 +232,7 @@ func (g *generator) webServer() {
 	g.indent++
 	g.line("Method: request.Method,")
 	g.line("Path: request.URL.Path,")
+	g.line("QueryString: request.URL.RawQuery,")
 	g.line("Headers: map[string][]string(request.Header.Clone()),")
 	g.line("Body: body,")
 	g.indent--
