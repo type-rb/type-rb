@@ -401,6 +401,18 @@ end
 				Parameters: []Parameter{{Name: "value", Type: stringType}},
 				Return:     types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{integerType}},
 			},
+			"fetch": {
+				Name:       "fetch",
+				Intrinsic:  "trb.std.strings.fetch",
+				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "index", Type: integerType}},
+				Return:     stringType,
+			},
+			"try_fetch": {
+				Name:       "try_fetch",
+				Intrinsic:  "trb.std.strings.try_fetch",
+				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "index", Type: integerType}},
+				Return:     structuredErrorResult(stringType, indexLookupErrorType),
+			},
 			"contains": {
 				Name:      "contains",
 				Intrinsic: "trb.std.strings.contains",
@@ -963,6 +975,8 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"end_with?":   {PackagePath: "trb/std/strings", Symbol: "ends_with"},
 		"split":       {PackagePath: "trb/std/strings", Symbol: "split"},
 		"codepoints":  {PackagePath: "trb/std/strings", Symbol: "codepoints"},
+		"fetch":       {PackagePath: "trb/std/strings", Symbol: "fetch"},
+		"try_fetch":   {PackagePath: "trb/std/strings", Symbol: "try_fetch"},
 		"to_bytes":    {PackagePath: "trb/std/bytes", Symbol: "from_string"},
 	},
 	types.Bytes: {
