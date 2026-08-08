@@ -18,6 +18,7 @@ import (
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/typeprovider"
+	"github.com/type-rb/type-rb/internal/web"
 )
 
 type Artifact struct {
@@ -192,6 +193,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	}
 
 	owner := ""
+	ownerModule := ""
 	for _, source := range units {
 		if hasTopLevelMethod(programs[source.ModulePath], MainFunction) {
 			if owner != "" {
@@ -199,6 +201,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 				return nil, &CompileError{Filename: source.Filename, Diagnostics: []diagnostic.Diagnostic{item}}
 			}
 			owner = source.Filename
+			ownerModule = source.ModulePath
 		}
 	}
 
@@ -218,12 +221,19 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
 		}
 	}
+	webRoutes, err := projectWebRoutes(units, programs, options)
+	if err != nil {
+		return nil, err
+	}
 
 	artifacts := make([]*Artifact, 0, len(units))
 	for _, source := range units {
 		program := programs[source.ModulePath]
 		checked := checkedPrograms[source.ModulePath]
 		lowered := lower.Program(checked)
+		if source.ModulePath == ownerModule {
+			lowered.WebRoutes = webRoutes
+		}
 		output, err := codegen.Generate(lowered)
 		if err != nil {
 			return nil, err
@@ -231,6 +241,32 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: lowered, Output: output, CompilerOwned: source.CompilerOwned, Official: source.Official})
 	}
 	return artifacts, nil
+}
+
+func projectWebRoutes(units []SourceUnit, programs map[string]*ast.Program, options Options) ([]ir.WebRoute, error) {
+	if _, active := programs["trb/web/index"]; !active {
+		return nil, nil
+	}
+	sources := make([]web.Source, 0, len(units))
+	for _, source := range units {
+		sources = append(sources, web.Source{Filename: source.Filename, ModulePath: source.ModulePath, Program: programs[source.ModulePath]})
+	}
+	routes, issues := web.Discover(sources, options.SourceRoot)
+	if len(issues) > 0 {
+		issue := issues[0]
+		return nil, &CompileError{Filename: issue.Filename, Diagnostics: []diagnostic.Diagnostic{{Severity: diagnostic.Error, Message: issue.Message, Span: issue.Span}}}
+	}
+	result := make([]ir.WebRoute, 0, len(routes))
+	for _, route := range routes {
+		result = append(result, ir.WebRoute{
+			Method:         route.Method,
+			Path:           route.Path,
+			ModulePath:     route.ModulePath,
+			Handler:        route.Handler,
+			PathParameters: append([]string(nil), route.PathParameters...),
+		})
+	}
+	return result, nil
 }
 
 func dependencySourceUnits(programs map[string]*ast.Program, options Options) []SourceUnit {
