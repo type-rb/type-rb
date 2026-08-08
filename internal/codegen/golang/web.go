@@ -55,6 +55,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	if len(manifest.Middlewares) > 0 {
 		g.webNext()
 	}
+	g.webProtocolResponses()
 
 	g.line("func trbWebDispatch(request web.Request) (response web.Response) {")
 	g.indent++
@@ -67,6 +68,11 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("}")
 	g.indent--
 	g.line("}()")
+	g.line("if len(request.Body) > trbWebMaxBodyBytes {")
+	g.indent++
+	g.line("return trbWebPayloadTooLarge()")
+	g.indent--
+	g.line("}")
 	g.line("method := strings.ToUpper(request.Method)")
 	g.line("cleanPath := strings.Trim(request.Path, \"/\")")
 	g.line("segments := []string{}")
@@ -140,6 +146,23 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.b.WriteByte('\n')
 }
 
+func (g *generator) webProtocolResponses() {
+	g.line("const trbWebMaxBodyBytes = " + strconv.Itoa(webintegration.MaxBodyBytes))
+	g.b.WriteByte('\n')
+	g.line("func trbWebBadRequest() web.Response {")
+	g.indent++
+	g.line("return web.Response{Status: 400, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"bad_request\\\"}\")}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func trbWebPayloadTooLarge() web.Response {")
+	g.indent++
+	g.line("return web.Response{Status: 413, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"payload_too_large\\\"}\")}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+}
+
 func (g *generator) webCallee(modulePath, target string, directories map[string]string) string {
 	callee := goMethodName(target)
 	if alias := directories[pathpkg.Dir(modulePath)]; alias != "" {
@@ -179,6 +202,7 @@ func webRouteSegments(path string) []string {
 }
 
 func (g *generator) webServer() {
+	g.requireImport("errors", "")
 	g.requireImport("fmt", "")
 	g.requireImport("io", "")
 	g.requireImport("net/http", "")
@@ -187,14 +211,24 @@ func (g *generator) webServer() {
 	g.indent++
 	g.line("handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {")
 	g.indent++
-	g.line("body, err := io.ReadAll(request.Body)")
+	g.line("body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, trbWebMaxBodyBytes))")
+	g.line("var response web.Response")
 	g.line("if err != nil {")
 	g.indent++
-	g.line("http.Error(writer, \"invalid request body\", http.StatusBadRequest)")
-	g.line("return")
+	g.line("var maxBytesError *http.MaxBytesError")
+	g.line("if errors.As(err, &maxBytesError) {")
+	g.indent++
+	g.line("response = trbWebPayloadTooLarge()")
+	g.indent--
+	g.line("} else {")
+	g.indent++
+	g.line("response = trbWebBadRequest()")
 	g.indent--
 	g.line("}")
-	g.line("response := trbWebDispatch(web.Request{")
+	g.indent--
+	g.line("} else {")
+	g.indent++
+	g.line("response = trbWebDispatch(web.Request{")
 	g.indent++
 	g.line("Method: request.Method,")
 	g.line("Path: request.URL.Path,")
@@ -202,6 +236,8 @@ func (g *generator) webServer() {
 	g.line("Body: body,")
 	g.indent--
 	g.line("})")
+	g.indent--
+	g.line("}")
 	g.line("for name, values := range response.Headers {")
 	g.indent++
 	g.line("for _, value := range values {")

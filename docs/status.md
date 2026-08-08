@@ -43,7 +43,8 @@ backend. The first packaged middleware emits JSONL access logs and supports
 typed output and path-exclusion options. Production lifecycle controls and
 additional middleware are still under development. Routing distinguishes
 missing paths from unsupported methods and returns a portable JSON 405 response
-with an `Allow` header.
+with an `Allow` header. Request bodies are limited to 1 MiB before dispatch and
+oversized requests receive the same JSON 413 response in every backend.
 
 The compiler pipeline is:
 
