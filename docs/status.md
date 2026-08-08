@@ -51,6 +51,9 @@ handler, otherwise reuse the matching GET handler and middleware chain, and
 never expose a response body. OPTIONS requests likewise prefer explicit
 handlers; otherwise a middleware-aware 204 response advertises the available
 methods through `Allow`.
+Request header lookup is case-insensitive through `header_values`. Portable
+cookie parsing preserves header order, duplicate names, and opaque values
+without delegating semantics to the target runtime.
 
 The compiler pipeline is:
 
