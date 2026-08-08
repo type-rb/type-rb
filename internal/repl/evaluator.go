@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	stdhmac "crypto/hmac"
 	stdsha256 "crypto/sha256"
 	stdsha512 "crypto/sha512"
 	stdbase64 "encoding/base64"
@@ -1963,6 +1964,33 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 		}
 		digest := stdsha512.Sum512(value)
 		return Value{Type: typ, Data: bytesValue(digest[:])}, nil
+	case "trb.std.hmac.sha256", "trb.std.hmac.sha512":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		key, keyOK := values[0].Data.(bytesValue)
+		message, messageOK := values[1].Data.(bytesValue)
+		if !keyOK || !messageOK {
+			return Value{}, errors.New("hmac digest expects Bytes arguments")
+		}
+		if name == "trb.std.hmac.sha256" {
+			digest := stdhmac.New(stdsha256.New, key)
+			_, _ = digest.Write(message)
+			return Value{Type: typ, Data: bytesValue(digest.Sum(nil))}, nil
+		}
+		digest := stdhmac.New(stdsha512.New, key)
+		_, _ = digest.Write(message)
+		return Value{Type: typ, Data: bytesValue(digest.Sum(nil))}, nil
+	case "trb.std.hmac.equal":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		left, leftOK := values[0].Data.(bytesValue)
+		right, rightOK := values[1].Data.(bytesValue)
+		if !leftOK || !rightOK {
+			return Value{}, errors.New("hmac.equal expects Bytes arguments")
+		}
+		return Value{Type: typ, Data: stdhmac.Equal(left, right)}, nil
 	case "trb.std.string_builder.new":
 		return Value{Type: typ, Data: &stringBuilderValue{}}, nil
 	case "trb.std.string_builder.from_string":

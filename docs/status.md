@@ -21,9 +21,9 @@ pattern matching, and value-producing `if` and `case` expressions. See the
 current semantics.
 
 The compiler-owned portable library covers scalar and collection foundations,
-`Result`, bytes, hexadecimal and Base64 encoding, SHA-256/SHA-512 hashing,
-Unicode text, logical paths, filesystem and process access, and JSON/JSONC. Its
-public contracts are listed in the
+`Result`, bytes, hexadecimal and Base64 encoding, SHA-256/SHA-512 hashing and
+HMAC, Unicode text, logical paths, filesystem and process access, and
+JSON/JSONC. Its public contracts are listed in the
 [standard-library reference](standard-library.md).
 
 The typed-IR REPL supports persistent state, multiline editing, history,

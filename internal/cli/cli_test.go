@@ -458,6 +458,39 @@ func TestReplEvaluatesPortableHashAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableHMACAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-hmac-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "import trb/std/hmac\nimport trb/std/encoding/hex\nkey := \"Jefe\".to_bytes()\nmessage := \"what do ya want for nothing?\".to_bytes()\ntag := hmac.sha256(key, message)\nhex.encode(tag)\nhex.encode(hmac.sha512(key, message))\nhmac.equal(tag, tag)\nhmac.equal(tag, hmac.sha256(key, \"other\".to_bytes()))\nhmac.equal(tag, \"short\".to_bytes())\n:quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "Bytes[74, 101, 102, 101] : Bytes\n" +
+			"Bytes[119, 104, 97, 116, 32, 100, 111, 32, 121, 97, 32, 119, 97, 110, 116, 32, 102, 111, 114, 32, 110, 111, 116, 104, 105, 110, 103, 63] : Bytes\n" +
+			"Bytes[91, 220, 193, 70, 191, 96, 117, 78, 106, 4, 36, 38, 8, 149, 117, 199, 90, 0, 63, 8, 157, 39, 57, 131, 157, 236, 88, 185, 100, 236, 56, 67] : Bytes\n" +
+			"\"5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843\" : String\n" +
+			"\"164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737\" : String\n" +
+			"true : Boolean\nfalse : Boolean\nfalse : Boolean\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s hmac REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -2112,6 +2145,77 @@ end
 			"c01d080efd492776a1c43bd23dd99d0a2e626d481e16782e75d54c2503b5dc32bd05f0f1ba33e568b88fd2d970929b719ecbb152f58f130a407c8830604b70ca\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s portable hash output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunPortableHMACAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby hmac run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript hmac run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/portable-hmac-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { equal, sha256, sha512 } from trb/std/hmac
+import { decode, encode } from trb/std/encoding/hex
+
+def main()
+	a8 := "aaaaaaaa"
+	a64 := a8 + a8 + a8 + a8 + a8 + a8 + a8 + a8
+	key80 := a64 + a8 + a8
+	key136 := a64 + a64 + a8
+	key := "Jefe".to_bytes()
+	message := "what do ya want for nothing?".to_bytes()
+	tag := sha256(key, message)
+	_decoded := decode("00")
+	puts(encode(tag))
+	puts(encode(sha512(key, message)))
+	puts(encode(sha256(key80.to_bytes(), "message".to_bytes())))
+	puts(encode(sha512(key136.to_bytes(), "message".to_bytes())))
+	puts(equal(tag, tag))
+	puts(equal(tag, sha256(key, "other".to_bytes())))
+	puts(equal(tag, "short".to_bytes()))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843\n" +
+			"164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737\n" +
+			"d0c62b445e5d504c9809dcaa12bfedd969deb591591984b81c68b352cec257ee\n" +
+			"435bf6bbcffb2d5301b470b17314c3571666de1cd1f96776dfd9e59ce07f32338bfca69d7be3f6d33c3eee5def6ebec48e8181d86ea9ebeeb639fa3ce6da44d7\n" +
+			"true\nfalse\nfalse\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s portable hmac output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

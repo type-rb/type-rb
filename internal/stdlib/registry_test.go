@@ -143,6 +143,23 @@ func TestPortableHashContract(t *testing.T) {
 	}
 }
 
+func TestPortableHMACContract(t *testing.T) {
+	definition, ok := Lookup("trb/std/hmac")
+	if !ok {
+		t.Fatal("hmac package is missing")
+	}
+	for _, name := range []string{"sha256", "sha512"} {
+		symbol, ok := definition.Symbols[name]
+		if !ok || len(symbol.Parameters) != 2 || symbol.Return.String() != "Bytes" {
+			t.Fatalf("hmac.%s contract=%#v, want (Bytes, Bytes) -> Bytes", name, symbol)
+		}
+	}
+	equal, ok := definition.Symbols["equal"]
+	if !ok || len(equal.Parameters) != 2 || equal.Return.String() != "Boolean" {
+		t.Fatalf("hmac.equal contract=%#v, want (Bytes, Bytes) -> Boolean", equal)
+	}
+}
+
 func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
 	for _, name := range []string{"pop", "push", "shift", "unshift"} {

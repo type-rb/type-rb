@@ -1144,6 +1144,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return sha256Expression(arguments[0])
 	case "trb.std.hash.sha512":
 		return sha512Expression(arguments[0])
+	case "trb.std.hmac.sha256":
+		return hmacExpression(arguments[0], arguments[1], 64, sha256Function())
+	case "trb.std.hmac.sha512":
+		return hmacExpression(arguments[0], arguments[1], 128, sha512Function())
+	case "trb.std.hmac.equal":
+		return "((left: Uint8Array, right: Uint8Array): boolean => { if (left.byteLength !== right.byteLength) { return false; } let difference = 0; for (let index = 0; index < left.byteLength; index += 1) { difference |= left[index]! ^ right[index]!; } return difference === 0; })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.string_builder.new":
 		return "[]"
 	case "trb.std.string_builder.from_string":
@@ -1610,7 +1616,11 @@ func tsType(t types.Type) string {
 }
 
 func sha256Expression(argument string) string {
-	return `((input: Uint8Array): Uint8Array => {
+	return "(" + sha256Function() + ")(" + argument + ")"
+}
+
+func sha256Function() string {
+	return `(input: Uint8Array): Uint8Array => {
   const constants = new Uint32Array([
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -1681,11 +1691,15 @@ func sha256Expression(argument string) string {
   const digestView = new DataView(digest.buffer);
   [h0, h1, h2, h3, h4, h5, h6, h7].forEach((value, index) => digestView.setUint32(index * 4, value, false));
   return digest;
-})(` + argument + `)`
+}`
 }
 
 func sha512Expression(argument string) string {
-	return `((input: Uint8Array): Uint8Array => {
+	return "(" + sha512Function() + ")(" + argument + ")"
+}
+
+func sha512Function() string {
+	return `(input: Uint8Array): Uint8Array => {
   const mask = 0xffffffffffffffffn;
   const constants = [
     0x428a2f98d728ae22n, 0x7137449123ef65cdn, 0xb5c0fbcfec4d3b2fn, 0xe9b5dba58189dbbcn,
@@ -1769,7 +1783,30 @@ func sha512Expression(argument string) string {
   const digestView = new DataView(digest.buffer);
   [h0, h1, h2, h3, h4, h5, h6, h7].forEach((value, index) => digestView.setBigUint64(index * 8, value, false));
   return digest;
-})(` + argument + `)`
+}`
+}
+
+func hmacExpression(key, message string, blockSize int, hashFunction string) string {
+	return `((key: Uint8Array, message: Uint8Array): Uint8Array => {
+  const hash = ` + hashFunction + `;
+  const material = key.byteLength > ` + strconv.Itoa(blockSize) + ` ? hash(key) : key;
+  const blockKey = new Uint8Array(` + strconv.Itoa(blockSize) + `);
+  blockKey.set(material);
+  const innerPad = new Uint8Array(` + strconv.Itoa(blockSize) + `);
+  const outerPad = new Uint8Array(` + strconv.Itoa(blockSize) + `);
+  for (let index = 0; index < blockKey.byteLength; index += 1) {
+    innerPad[index] = blockKey[index]! ^ 0x36;
+    outerPad[index] = blockKey[index]! ^ 0x5c;
+  }
+  const innerInput = new Uint8Array(innerPad.byteLength + message.byteLength);
+  innerInput.set(innerPad);
+  innerInput.set(message, innerPad.byteLength);
+  const innerDigest = hash(innerInput);
+  const outerInput = new Uint8Array(outerPad.byteLength + innerDigest.byteLength);
+  outerInput.set(outerPad);
+  outerInput.set(innerDigest, outerPad.byteLength);
+  return hash(outerInput);
+})(` + key + `, ` + message + `)`
 }
 
 func comment(text string) string {

@@ -161,6 +161,20 @@ Both functions accept and return `Bytes`. Digest formatting stays explicit by
 passing the result to hexadecimal or Base64 encoding. These synchronous APIs
 have the same behavior in browsers, Bun, Node, Go, and Ruby.
 
+`trb/std/hmac` provides HMAC-SHA-256, HMAC-SHA-512, and tag comparison:
+
+```trb
+import { equal, sha256 } from trb/std/hmac
+
+def valid_tag?(key: Bytes, message: Bytes, expected: Bytes): Boolean
+	return equal(sha256(key, message), expected)
+end
+```
+
+Keys, messages, and tags are `Bytes`. `equal()` compares equal-length tags
+without content-dependent branching and returns `false` when their lengths
+differ. Use it instead of ordinary collection comparison when verifying a tag.
+
 ## StringBuilder and Unicode
 
 Use `StringBuilder` for incremental text construction:
@@ -374,6 +388,7 @@ The current portable standard library includes:
 - `trb/std/encoding/hex`
 - `trb/std/encoding/base64`
 - `trb/std/hash`
+- `trb/std/hmac`
 - `trb/std/string_builder`
 - `trb/std/unicode`
 - `trb/std/arrays`

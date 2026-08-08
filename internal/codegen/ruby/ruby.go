@@ -851,6 +851,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(value) { require \"digest\"; Digest::SHA256.digest(value).b }.call(" + arguments[0] + ")"
 	case "trb.std.hash.sha512":
 		return "->(value) { require \"digest\"; Digest::SHA512.digest(value).b }.call(" + arguments[0] + ")"
+	case "trb.std.hmac.sha256":
+		return "->(key, message) { require \"openssl\"; OpenSSL::HMAC.digest(\"SHA256\", key, message).b }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.hmac.sha512":
+		return "->(key, message) { require \"openssl\"; OpenSSL::HMAC.digest(\"SHA512\", key, message).b }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.hmac.equal":
+		return "->(left, right) { if left.bytesize != right.bytesize; false; else; difference = 0; left.bytes.zip(right.bytes) { |left_byte, right_byte| difference |= left_byte ^ right_byte }; difference == 0; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.string_builder.new":
 		return "String.new(encoding: Encoding::UTF_8)"
 	case "trb.std.string_builder.from_string":
