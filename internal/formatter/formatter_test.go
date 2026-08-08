@@ -47,6 +47,23 @@ func TestFormatDistinguishesNamespaceAndTypedKeyword(t *testing.T) {
 	}
 }
 
+func TestFormatKeepsNullableTypeMarkersAttached(t *testing.T) {
+	source := []byte("record User\nnickname:String ?\nend\ndef find_name():String ?\nreturn nil\nend\n")
+	want := "record User\n\tnickname: String?\nend\ndef find_name(): String?\n\treturn nil\nend\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected nullable type formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("nullable type formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatPreservesRailsRegexAndPercentLiterals(t *testing.T) {
 	source := []byte("class User<ApplicationRecord\nvalidates :code,format:{with:/\\A[a-z#]+\\z/i}\nTAGS=%(alpha beta)\nend\n")
 	formatted, diagnostics := Format(source)
