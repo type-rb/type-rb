@@ -2962,6 +2962,10 @@ def main()
 	response := dispatch(request)
 	puts(response.status)
 	puts(response.body.to_s())
+	method_not_allowed := dispatch(Request.new(method: "GET", path: "/todos/7", headers: {}, body: "".to_bytes()))
+	puts(method_not_allowed.status)
+	puts(method_not_allowed.headers["allow"][0])
+	puts(method_not_allowed.body.to_s())
 	return
 end
 `
@@ -3029,7 +3033,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship\"}\n"; stdout.String() != want {
+		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship\"}\n405\nPOST\n{\"error\":\"method_not_allowed\"}\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web JSON output: want %q, got %q", mode, want, stdout.String())
 		}
 	}

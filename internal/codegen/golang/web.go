@@ -21,6 +21,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	routes := manifest.Routes
 	webPath := pathpkg.Join(g.goModule, "trb/web")
 	g.requireImport(webPath, "web")
+	g.requireImport("slices", "")
 	g.requireImport("strings", "")
 
 	directories := map[string]string{}
@@ -74,6 +75,21 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("segments = strings.Split(cleanPath, \"/\")")
 	g.indent--
 	g.line("}")
+	g.line("allowedMethods := []string{}")
+	for _, route := range routes {
+		routeSegments := webRouteSegments(route.Path)
+		condition := []string{"len(segments) == " + strconv.Itoa(len(routeSegments))}
+		for segmentIndex, segment := range routeSegments {
+			if !strings.HasPrefix(segment, ":") {
+				condition = append(condition, "segments["+strconv.Itoa(segmentIndex)+"] == "+strconv.Quote(segment))
+			}
+		}
+		g.line("if " + strings.Join(condition, " && ") + " {")
+		g.indent++
+		g.line("allowedMethods = append(allowedMethods, " + strconv.Quote(route.Method) + ")")
+		g.indent--
+		g.line("}")
+	}
 	for routeIndex, route := range routes {
 		segments := webRouteSegments(route.Path)
 		condition := []string{"method == " + strconv.Quote(route.Method), "len(segments) == " + strconv.Itoa(len(segments))}
@@ -112,6 +128,12 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		g.indent--
 		g.line("}")
 	}
+	g.line("if len(allowedMethods) > 0 {")
+	g.indent++
+	g.line("slices.Sort(allowedMethods)")
+	g.line("return web.Response{Status: 405, Headers: map[string][]string{\"allow\": []string{strings.Join(allowedMethods, \", \")}, \"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"method_not_allowed\\\"}\")}")
+	g.indent--
+	g.line("}")
 	g.line("return web.Response{Status: 404, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"not_found\\\"}\")}")
 	g.indent--
 	g.line("}")

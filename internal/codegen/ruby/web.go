@@ -46,6 +46,17 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("method = request.method.upcase", "")
 	g.line(`segments = request.path.split("/").reject(&:empty?)`, "")
+	g.line("allowed_methods = []", "")
+	for _, route := range routes {
+		routeSegments := rubyWebRouteSegments(route.Path)
+		condition := []string{"segments.length == " + strconv.Itoa(len(routeSegments))}
+		for segmentIndex, segment := range routeSegments {
+			if !strings.HasPrefix(segment, ":") {
+				condition = append(condition, "segments["+strconv.Itoa(segmentIndex)+"] == "+strconv.Quote(segment))
+			}
+		}
+		g.line("allowed_methods << "+strconv.Quote(route.Method)+" if "+strings.Join(condition, " && "), "")
+	}
 	for routeIndex, route := range routes {
 		segments := rubyWebRouteSegments(route.Path)
 		condition := []string{"method == " + strconv.Quote(route.Method), "segments.length == " + strconv.Itoa(len(segments))}
@@ -76,6 +87,11 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		g.indent--
 		g.line("end", "")
 	}
+	g.line("unless allowed_methods.empty?", "")
+	g.indent++
+	g.line(`return Response.new(status: 405, headers: { "allow" => [allowed_methods.sort.join(", ")], "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"method_not_allowed\"}".b)`, "")
+	g.indent--
+	g.line("end", "")
 	g.line(`Response.new(status: 404, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"not_found\"}".b)`, "")
 	g.indent--
 	g.line("rescue StandardError", "")
