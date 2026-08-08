@@ -315,18 +315,26 @@ The package provides `clean`, two-part `join`, `absolute`, `components`,
 `base`, `directory`, and `separator`. Its behavior does not depend on the
 target OS or current directory.
 
-## URL components
+## URL encoding
 
-`trb/std/url` percent-encodes and decodes individual URL components:
+`trb/std/url` encodes individual URL components and ordered query parameters:
 
 ```trb
-import { PercentDecodeError, decode_component, encode_component } from trb/std/url
+import { PercentDecodeError, QueryParameter, build_query, decode_component, encode_component, parse_query } from trb/std/url
 import { Result } from trb/std/result
 
 encoded := encode_component("todos/日本語")
+query := build_query([
+	QueryParameter.new(name: "tag", value: "type rb"),
+	QueryParameter.new(name: "tag", value: "go"),
+])
 
 def decode_segment(value: String): Result<String, PercentDecodeError>
 	return decode_component(value)
+end
+
+def decode_query(value: String): Result<Array<QueryParameter>, PercentDecodeError>
+	return parse_query(value)
 end
 ```
 
@@ -336,8 +344,14 @@ encode spaces as `+`. `decode_component` likewise preserves a literal `+` and
 returns `Result<String, PercentDecodeError>` for malformed escapes or decoded
 bytes that are not valid UTF-8.
 
-This API handles one path or query component, not a complete URL or form data.
-URL parsing and query construction remain future additions to the package.
+`parse_query` and `build_query` use an ordered `Array<QueryParameter>` so
+duplicate names and their global order are preserved. They accept and produce
+query strings without a leading `?`. Parsing treats `+` as a space, skips empty
+`&` segments, and normalizes a name without `=` to an empty value. Building
+uses `+` for spaces and percent-encodes reserved bytes. Invalid escapes and
+decoded bytes that are not valid UTF-8 return `PercentDecodeError`.
+
+Complete URL parsing remains a future addition to the package.
 
 ## Filesystem
 

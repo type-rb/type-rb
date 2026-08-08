@@ -105,6 +105,7 @@ var base64DecodeErrorType = types.FromName("Base64DecodeError")
 var indexLookupErrorType = types.FromName("IndexLookupError")
 var keyLookupErrorType = types.FromName("KeyLookupError")
 var percentDecodeErrorType = types.FromName("PercentDecodeError")
+var queryParameterType = types.FromName("QueryParameter")
 
 var registry = map[string]*Package{
 	"trb/std/unit": {
@@ -181,12 +182,15 @@ end
 		RuntimeExports: []RuntimeExport{
 			{Name: "PercentDecodeErrorKind", Kind: "enum"},
 			{Name: "PercentDecodeError", Kind: "record"},
+			{Name: "QueryParameter", Kind: "record"},
 		},
 		Source: urlSource(),
 		Kind:   Portable,
 		Symbols: map[string]Symbol{
 			"encode_component": runtimeIndependent(unary("encode_component", "trb.std.url.encode_component", stringType, stringType)),
 			"decode_component": runtimeIndependent(unary("decode_component", "trb.std.url.decode_component", stringType, structuredErrorResult(stringType, percentDecodeErrorType))),
+			"parse_query":      unary("parse_query", "", stringType, structuredErrorResult(arrayOf(queryParameterType), percentDecodeErrorType)),
+			"build_query":      unary("build_query", "", arrayOf(queryParameterType), stringType),
 		},
 	},
 	"trb/internal/url": {
@@ -196,6 +200,8 @@ end
 		Symbols: map[string]Symbol{
 			"encode_component": unary("encode_component", "trb.std.url.encode_component", stringType, stringType),
 			"decode_component": unary("decode_component", "trb.std.url.decode_component", stringType, structuredErrorResult(stringType, percentDecodeErrorType)),
+			"parse_query":      unary("parse_query", "trb.std.url.parse_query", stringType, structuredErrorResult(arrayOf(queryParameterType), percentDecodeErrorType)),
+			"build_query":      unary("build_query", "trb.std.url.build_query", arrayOf(queryParameterType), stringType),
 		},
 	},
 	"trb/std/filesystem": {

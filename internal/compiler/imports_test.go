@@ -1752,6 +1752,80 @@ func TestPortableURLComponentDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestPortableURLQueryLowersAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Result } from trb/std/result
+import { PercentDecodeError, QueryParameter, build_query, parse_query } from trb/std/url
+
+def parsed(value: String): Result<Array<QueryParameter>, PercentDecodeError>
+	return parse_query(value)
+end
+
+def built(parameters: Array<QueryParameter>): String
+	return build_query(parameters)
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`type QueryParameter struct`,
+			`func ParseQuery(value string)`,
+			`strings.Split(input, "&")`,
+			`parameters = append(parameters, QueryParameter{Name: name, Value: value})`,
+			`func BuildQuery(parameters []QueryParameter) string`,
+		},
+		"ruby": {
+			`QueryParameter = Data.define(:name, :value)`,
+			`def parse_query(value)`,
+			`input.split("&", -1)`,
+			`QueryParameter.new(name: name, value: value)`,
+			`def build_query(parameters)`,
+		},
+		"typescript": {
+			`export interface QueryParameter`,
+			`export function parse_query(value: string)`,
+			`for (const part of input.split("&"))`,
+			`parameters.push(({ name, value } satisfies QueryParameter))`,
+			`export function build_query(parameters: Array<QueryParameter>): string`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/portable-url-query", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable URL query operations: %v", mode, err)
+		}
+		urlRuntime := findArtifactByModule(artifacts, "trb/std/url/index")
+		if urlRuntime == nil {
+			t.Fatalf("%s did not emit the URL runtime: %#v", mode, artifacts)
+		}
+		for _, want := range wants[mode] {
+			if output := string(urlRuntime.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s URL query output is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableURLQueryDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: "import { parse_query } from trb/std/url\ndef bad()\n\tparse_query(1)\n\treturn\nend\n", want: "argument 1 to parse_query() has type Integer, expected String"},
+		{source: "import { build_query } from trb/std/url\ndef bad(): String\n\treturn build_query([1])\nend\n", want: "argument 1 to build_query() has type Array<Integer>, expected Array<QueryParameter>"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("bad.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s: expected %q URL query diagnostic, got %v", mode, test.want, err)
+			}
+		}
+	}
+}
+
 func TestCompilerOwnedUnicodePackageLowersSameTablesAcrossBackends(t *testing.T) {
 	consumerSource := SourceUnit{
 		Filename:   "/project/main.trb",

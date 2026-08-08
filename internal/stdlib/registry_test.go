@@ -138,6 +138,13 @@ func TestPortableURLComponentContract(t *testing.T) {
 	if got := definition.Symbols["decode_component"].Return.String(); got != "Result<String, PercentDecodeError>" {
 		t.Fatalf("url.decode_component return=%s, want Result<String, PercentDecodeError>", got)
 	}
+	if got := definition.Symbols["parse_query"].Return.String(); got != "Result<Array<QueryParameter>, PercentDecodeError>" {
+		t.Fatalf("url.parse_query return=%s, want Result<Array<QueryParameter>, PercentDecodeError>", got)
+	}
+	build := definition.Symbols["build_query"]
+	if len(build.Parameters) != 1 || build.Parameters[0].Type.String() != "Array<QueryParameter>" || build.Return.String() != "String" {
+		t.Fatalf("url.build_query contract=%#v, want Array<QueryParameter> -> String", build)
+	}
 }
 
 func TestPortableHashContract(t *testing.T) {
