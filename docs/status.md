@@ -39,8 +39,9 @@ handlers through the same dispatcher in all three backends. Applications can
 start a generated Go, Ruby, or TypeScript HTTP server with `serve()`. Unhandled
 handler failures become a portable JSON 500 response. Root and nested
 `_middleware.trb` files form the same outer-to-inner onion chain in every
-backend; production lifecycle controls and packaged middleware are still under
-development.
+backend. The first packaged middleware emits JSONL access logs and supports
+typed output and path-exclusion options. Production lifecycle controls and
+additional middleware are still under development.
 
 The compiler pipeline is:
 

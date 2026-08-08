@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -3099,6 +3100,94 @@ end
 		}
 		if want := "500\n{\"error\":\"internal_server_error\"}\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web recovery output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunOfficialWebJSONLLoggerAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web logger run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web logger run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-logger-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def main()
+	_logged_response := dispatch(Request.new(method: "GET", path: "/logged", headers: {}, body: "".to_bytes()))
+	_excluded_response := dispatch(Request.new(method: "GET", path: "/health", headers: {}, body: "".to_bytes()))
+	return
+end
+`
+		routeSource := `import { Context, Response } from trb/web
+
+def get(_context: Context): Response
+	return Response.new(status: 204, headers: {}, body: "".to_bytes())
+end
+`
+		middlewareSource := `import { Context, Next, Response } from trb/web
+import trb/web/middleware/logger
+import { Options } from trb/web/middleware/logger
+
+LOGGER_OPTIONS := Options.new(stderr: false, exclude_paths: ["/health"])
+
+def call(context: Context, next_handler: Next): Response
+	return logger.call(context, next_handler, LOGGER_OPTIONS)
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "logged.trb"), []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "health.trb"), []byte(routeSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "_middleware.trb"), []byte(middlewareSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+		if len(lines) != 1 {
+			t.Fatalf("%s logger emitted %d lines, want 1: %q", mode, len(lines), stdout.String())
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
+			t.Fatalf("%s logger did not emit JSONL: %v: %q", mode, err, lines[0])
+		}
+		if entry["event"] != "http_request" || entry["level"] != "info" || entry["method"] != "GET" || entry["path"] != "/logged" || entry["status"] != float64(204) {
+			t.Fatalf("unexpected %s logger entry: %#v", mode, entry)
+		}
+		if timestamp, ok := entry["timestamp"].(string); !ok || timestamp == "" {
+			t.Fatalf("%s logger timestamp is missing: %#v", mode, entry)
+		}
+		if duration, ok := entry["duration_ms"].(float64); !ok || duration < 0 {
+			t.Fatalf("%s logger duration is invalid: %#v", mode, entry)
 		}
 	}
 }
