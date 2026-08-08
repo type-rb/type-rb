@@ -55,6 +55,7 @@ character := "A😀".fetch(1)
 safe_character := "A😀".try_fetch(2)
 characters := "A😀".chars()
 reversed := "A😀".reverse()
+replaced := "a😀a".replace_all("a", "$&")
 upper := strings.uppercase("Hello")
 ```
 
@@ -103,11 +104,15 @@ than encoded bytes. Indexes are zero-based and nonnegative. `fetch()` raises
 when the index is outside the string, while `try_fetch()` returns
 `Result<String, IndexLookupError>`. Additional receiver operations include
 `chars`, `codepoints`, `reverse`, `empty?`, `strip`, `lstrip`, `rstrip`,
-`include?`, `start_with?`, `end_with?`, `split`, `upcase`, and `downcase`.
+`include?`, `start_with?`, `end_with?`, `split`, `replace_all`, `upcase`, and
+`downcase`.
 `chars()` returns one String per code point, and `reverse()` reverses that same
 sequence. String trimming uses the pinned Unicode 15.0 `White_Space` set,
-preserves internal whitespace, and does not remove U+FEFF. Package forms use
-`characters` and `reverse` from `trb/std/strings`.
+preserves internal whitespace, and does not remove U+FEFF. `replace_all()`
+replaces every non-overlapping literal occurrence. The replacement is also
+literal, so strings such as `$&` and `$1` have no special meaning; an empty
+pattern raises. Package forms use `characters`, `reverse`, and `replace_all`
+from `trb/std/strings`.
 
 ## Bytes
 

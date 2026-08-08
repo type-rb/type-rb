@@ -438,6 +438,20 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("strings.contains expects String arguments")
 		}
 		return Value{Type: typ, Data: strings.Contains(left, right)}, nil
+	case "trb.std.strings.replace_all":
+		if err := require(3); err != nil {
+			return Value{}, err
+		}
+		value, valueOK := values[0].Data.(string)
+		pattern, patternOK := values[1].Data.(string)
+		replacement, replacementOK := values[2].Data.(string)
+		if !valueOK || !patternOK || !replacementOK {
+			return Value{}, errors.New("strings.replace_all expects String arguments")
+		}
+		if pattern == "" {
+			return Value{}, errors.New("String replacement pattern is empty")
+		}
+		return Value{Type: typ, Data: strings.ReplaceAll(value, pattern, replacement)}, nil
 	case "trb.std.strings.codepoints":
 		if err := require(1); err != nil {
 			return Value{}, err

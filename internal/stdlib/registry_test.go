@@ -74,6 +74,7 @@ func TestStringCharacterReceiverContracts(t *testing.T) {
 	}{
 		{name: "chars", want: "Array<String>"},
 		{name: "reverse", want: "String"},
+		{name: "replace_all", want: "String"},
 	} {
 		_, method, ok := LookupReceiverMethod(types.FromName("String"), test.name)
 		if !ok || method.Return.String() != test.want {

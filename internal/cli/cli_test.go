@@ -415,6 +415,35 @@ func TestReplEvaluatesPortableStringTrimmingAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableStringReplacementAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-string-replacement-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "\"a😀a\".replace_all(\"a\", \"$&\")\n" +
+			"\"aaaa\".replace_all(\"aa\", \"b\")\n" +
+			":quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "\"$&😀$&\" : String\n\"bb\" : String\n"; stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s String replacement REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableBytesAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -2043,6 +2072,68 @@ func TestRunPortableStringTrimmingAcrossAvailableBackends(t *testing.T) {
 		}
 		if want := "TypeRB\nTypeRB\nTypeRB\ntrue\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s String trimming output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunPortableStringReplacementAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby String replacement run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript String replacement run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/string-replacement-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := "import trb/std/strings\n\n" +
+			"def main()\n" +
+			"\tputs(\"a😀a\".replace_all(\"a\", \"$&\"))\n" +
+			"\tputs(strings.replace_all(\"aaaa\", \"aa\", \"$1\"))\n" +
+			"\treturn\n" +
+			"end\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "$&😀$&\n$1$1\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s String replacement output: want %q, got %q", mode, want, stdout.String())
+		}
+
+		source = "def main()\n" +
+			"\tputs(\"value\".replace_all(\"\", \"x\"))\n" +
+			"\treturn\n" +
+			"end\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout.Reset()
+		stderr.Reset()
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 1 {
+			t.Fatalf("%s empty-pattern status=%d stdout=%s stderr=%s", mode, status, stdout.String(), stderr.String())
+		}
+		if want := "String replacement pattern is empty"; !strings.Contains(stderr.String(), want) {
+			t.Fatalf("unexpected %s empty-pattern diagnostic: want %q in %q", mode, want, stderr.String())
 		}
 	}
 }

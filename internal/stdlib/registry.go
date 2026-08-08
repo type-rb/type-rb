@@ -429,6 +429,16 @@ end
 				},
 				Return: booleanType,
 			},
+			"replace_all": {
+				Name:      "replace_all",
+				Intrinsic: "trb.std.strings.replace_all",
+				Parameters: []Parameter{
+					{Name: "value", Type: stringType},
+					{Name: "pattern", Type: stringType},
+					{Name: "replacement", Type: stringType},
+				},
+				Return: stringType,
+			},
 		},
 	},
 	"trb/std/unicode": {
@@ -995,6 +1005,7 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"codepoints":  {PackagePath: "trb/std/strings", Symbol: "codepoints"},
 		"chars":       {PackagePath: "trb/std/strings", Symbol: "characters"},
 		"reverse":     {PackagePath: "trb/std/strings", Symbol: "reverse"},
+		"replace_all": {PackagePath: "trb/std/strings", Symbol: "replace_all"},
 		"fetch":       {PackagePath: "trb/std/strings", Symbol: "fetch"},
 		"try_fetch":   {PackagePath: "trb/std/strings", Symbol: "try_fetch"},
 		"to_bytes":    {PackagePath: "trb/std/bytes", Symbol: "from_string"},

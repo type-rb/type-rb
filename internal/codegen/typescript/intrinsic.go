@@ -212,6 +212,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "((value: string, separator: string): Array<string> => { if (separator === \"\") { throw new Error(\"String split separator is empty\"); } return value.split(separator); })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.strings.contains":
 		return arguments[0] + ".includes(" + arguments[1] + ")"
+	case "trb.std.strings.replace_all":
+		return "((value: string, pattern: string, replacement: string): string => { if (pattern === \"\") { throw new Error(\"String replacement pattern is empty\"); } return value.split(pattern).join(replacement); })(" + arguments[0] + ", " + arguments[1] + ", " + arguments[2] + ")"
 	case "trb.std.strings.codepoints":
 		return "Array.from(" + arguments[0] + ", (value): number => value.codePointAt(0)!)"
 	case "trb.std.strings.characters":
