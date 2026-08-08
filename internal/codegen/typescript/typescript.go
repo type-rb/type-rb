@@ -1150,6 +1150,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return hmacExpression(arguments[0], arguments[1], 128, sha512Function())
 	case "trb.std.hmac.equal":
 		return "((left: Uint8Array, right: Uint8Array): boolean => { if (left.byteLength !== right.byteLength) { return false; } let difference = 0; for (let index = 0; index < left.byteLength; index += 1) { difference |= left[index]! ^ right[index]!; } return difference === 0; })(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.random.float":
+		return "Math.random()"
+	case "trb.std.random.integer":
+		return "((upper: number): number => { if (upper <= 0) { throw new RangeError(\"random.integer upper bound must be greater than zero\"); } return Math.floor(Math.random() * upper); })(" + arguments[0] + ")"
+	case "trb.std.secure_random.bytes":
+		return "((length: number): Uint8Array => { if (length < 0 || length > 65536) { throw new RangeError(\"secure_random.bytes length must be between 0 and 65536\"); } if (!globalThis.crypto) { throw new Error(\"secure random source is unavailable\"); } return globalThis.crypto.getRandomValues(new Uint8Array(length)); })(" + arguments[0] + ")"
 	case "trb.std.string_builder.new":
 		return "[]"
 	case "trb.std.string_builder.from_string":

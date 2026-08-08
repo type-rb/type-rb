@@ -857,6 +857,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(key, message) { require \"openssl\"; OpenSSL::HMAC.digest(\"SHA512\", key, message).b }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.hmac.equal":
 		return "->(left, right) { if left.bytesize != right.bytesize; false; else; difference = 0; left.bytes.zip(right.bytes) { |left_byte, right_byte| difference |= left_byte ^ right_byte }; difference == 0; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.random.float":
+		return "Random.rand()"
+	case "trb.std.random.integer":
+		return "->(upper) { raise ArgumentError, \"random.integer upper bound must be greater than zero\" if upper <= 0; Random.rand(upper) }.call(" + arguments[0] + ")"
+	case "trb.std.secure_random.bytes":
+		return "->(length) { raise ArgumentError, \"secure_random.bytes length must be between 0 and 65536\" if length < 0 || length > 65536; Random.urandom(length).b }.call(" + arguments[0] + ")"
 	case "trb.std.string_builder.new":
 		return "String.new(encoding: Encoding::UTF_8)"
 	case "trb.std.string_builder.from_string":

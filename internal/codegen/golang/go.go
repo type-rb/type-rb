@@ -1516,6 +1516,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hmac.equal":
 		g.requireImport("crypto/hmac", "stdhmac")
 		return "stdhmac.Equal(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.random.float":
+		g.requireImport("math/rand/v2", "stdrand")
+		return "stdrand.Float64()"
+	case "trb.std.random.integer":
+		g.requireImport("math/rand/v2", "stdrand")
+		return "func(upper int) int { if upper <= 0 { panic(\"random.integer upper bound must be greater than zero\") }; return stdrand.IntN(upper) }(" + arguments[0] + ")"
+	case "trb.std.secure_random.bytes":
+		g.requireImport("crypto/rand", "stdcryptorand")
+		return "func(length int) []byte { if length < 0 || length > 65536 { panic(\"secure_random.bytes length must be between 0 and 65536\") }; value := make([]byte, length); stdcryptorand.Read(value); return value }(" + arguments[0] + ")"
 	case "trb.std.string_builder.new":
 		g.requireImport("strings", "")
 		return "&strings.Builder{}"

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	stdhmac "crypto/hmac"
+	stdcryptorand "crypto/rand"
 	stdsha256 "crypto/sha256"
 	stdsha512 "crypto/sha512"
 	stdbase64 "encoding/base64"
@@ -13,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	stdrand "math/rand/v2"
 	"os"
 	"os/exec"
 	pathpkg "path"
@@ -1991,6 +1993,37 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, errors.New("hmac.equal expects Bytes arguments")
 		}
 		return Value{Type: typ, Data: stdhmac.Equal(left, right)}, nil
+	case "trb.std.random.float":
+		if err := require(0); err != nil {
+			return Value{}, err
+		}
+		return Value{Type: typ, Data: stdrand.Float64()}, nil
+	case "trb.std.random.integer":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		upper, ok := values[0].Data.(int64)
+		if !ok {
+			return Value{}, errors.New("random.integer expects Integer")
+		}
+		if upper <= 0 {
+			return Value{}, errors.New("random.integer upper bound must be greater than zero")
+		}
+		return Value{Type: typ, Data: stdrand.Int64N(upper)}, nil
+	case "trb.std.secure_random.bytes":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		length, ok := values[0].Data.(int64)
+		if !ok {
+			return Value{}, errors.New("secure_random.bytes expects Integer")
+		}
+		if length < 0 || length > 65536 {
+			return Value{}, errors.New("secure_random.bytes length must be between 0 and 65536")
+		}
+		value := make([]byte, length)
+		stdcryptorand.Read(value)
+		return Value{Type: typ, Data: bytesValue(value)}, nil
 	case "trb.std.string_builder.new":
 		return Value{Type: typ, Data: &stringBuilderValue{}}, nil
 	case "trb.std.string_builder.from_string":

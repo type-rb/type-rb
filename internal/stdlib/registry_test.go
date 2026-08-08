@@ -160,6 +160,27 @@ func TestPortableHMACContract(t *testing.T) {
 	}
 }
 
+func TestPortableRandomContracts(t *testing.T) {
+	random, ok := Lookup("trb/std/random")
+	if !ok {
+		t.Fatal("random package is missing")
+	}
+	if symbol := random.Symbols["float"]; len(symbol.Parameters) != 0 || symbol.Return.String() != "Float" {
+		t.Fatalf("random.float contract=%#v, want () -> Float", symbol)
+	}
+	if symbol := random.Symbols["integer"]; len(symbol.Parameters) != 1 || symbol.Parameters[0].Type.String() != "Integer" || symbol.Return.String() != "Integer" {
+		t.Fatalf("random.integer contract=%#v, want Integer -> Integer", symbol)
+	}
+
+	secure, ok := Lookup("trb/std/secure_random")
+	if !ok {
+		t.Fatal("secure_random package is missing")
+	}
+	if symbol := secure.Symbols["bytes"]; len(symbol.Parameters) != 1 || symbol.Parameters[0].Type.String() != "Integer" || symbol.Return.String() != "Bytes" {
+		t.Fatalf("secure_random.bytes contract=%#v, want Integer -> Bytes", symbol)
+	}
+}
+
 func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
 	for _, name := range []string{"pop", "push", "shift", "unshift"} {
