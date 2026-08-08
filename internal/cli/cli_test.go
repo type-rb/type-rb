@@ -3120,6 +3120,41 @@ end
 	}
 }
 
+func TestBuildEmitsOfficialPackageOutsideProjectSourceTree(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.SourceDir = "."
+	config.OutDir = "build"
+	copyFiles := false
+	config.CopyFiles = &copyFiles
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { Response } from trb/web
+
+def response(): Response
+	return Response.new(status: 204, headers: {}, body: "".to_bytes())
+end
+`
+	if err := os.WriteFile(filepath.Join(root, "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	packageOutput, err := os.ReadFile(filepath.Join(root, "build", "trb", "web", "index.rb"))
+	if err != nil || !strings.Contains(string(packageOutput), "Response = Data.define") {
+		t.Fatalf("official package was not emitted: err=%v\n%s", err, packageOutput)
+	}
+	consumer, err := os.ReadFile(filepath.Join(root, "build", "main.rb"))
+	if err != nil || !strings.Contains(string(consumer), `require_relative "./trb/web/index"`) {
+		t.Fatalf("official package consumer did not require its runtime: err=%v\n%s", err, consumer)
+	}
+}
+
 func TestBuildCompilesLocalRecordPackageIntoGoTargetTree(t *testing.T) {
 	workspace := t.TempDir()
 	appRoot := filepath.Join(workspace, "api")

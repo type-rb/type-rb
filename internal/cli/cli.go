@@ -955,7 +955,7 @@ func localSourceUnit(config *project.Config, packageName, packageRoot, filename 
 }
 
 func generatedRelative(config *project.Config, filename string, artifact *compiler.Artifact) (string, bool) {
-	if artifact.CompilerOwned {
+	if artifact.CompilerOwned || artifact.Official {
 		return filepath.FromSlash(artifact.IR.ModulePath) + codegen.Extension(config.Mode), true
 	}
 	relative, err := filepath.Rel(config.SourcePath(), filename)

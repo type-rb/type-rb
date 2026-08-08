@@ -1,0 +1,17 @@
+record Request
+	method: String
+	path: String
+	headers: Hash<String, Array<String>>
+	body: Bytes
+end
+
+record Context
+	request: Request
+	path_parameters: Hash<String, String>
+end
+
+record Response
+	status: Integer
+	headers: Hash<String, Array<String>>
+	body: Bytes
+end

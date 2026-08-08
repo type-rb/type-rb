@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -118,7 +119,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			result.Alias = resolved.Alias
 			result.Namespace = len(n.Symbols) == 0 && resolved.Alias != ""
 			result.Kind = string(resolved.Kind)
-			result.Standard = resolved.Definition != nil
+			result.Standard = resolved.Kind == resolver.StandardImport
 			result.Platform = resolved.Definition != nil && resolved.Definition.Kind == "platform"
 			result.Runtime = resolved.Definition != nil && resolved.Definition.Source != ""
 			for name, exported := range resolved.Exports {
