@@ -57,6 +57,17 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("const method = request.method.toUpperCase();")
 	g.line(`const segments = request.path.split("/").filter((segment) => segment.length > 0);`)
+	g.line("const allowed_methods: string[] = [];")
+	for _, route := range routes {
+		routeSegments := typescriptWebRouteSegments(route.Path)
+		condition := []string{"segments.length === " + strconv.Itoa(len(routeSegments))}
+		for segmentIndex, segment := range routeSegments {
+			if !strings.HasPrefix(segment, ":") {
+				condition = append(condition, "segments["+strconv.Itoa(segmentIndex)+"] === "+strconv.Quote(segment))
+			}
+		}
+		g.line("if (" + strings.Join(condition, " && ") + ") allowed_methods.push(" + strconv.Quote(route.Method) + ");")
+	}
 	for routeIndex, route := range routes {
 		segments := typescriptWebRouteSegments(route.Path)
 		condition := []string{"method === " + strconv.Quote(route.Method), "segments.length === " + strconv.Itoa(len(segments))}
@@ -87,6 +98,11 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		g.indent--
 		g.line("}")
 	}
+	g.line("if (allowed_methods.length > 0) {")
+	g.indent++
+	g.line(`return { status: 405, headers: { "allow": [allowed_methods.sort().join(", ")], "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"method_not_allowed\"}") };`)
+	g.indent--
+	g.line("}")
 	g.line(`return { status: 404, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"not_found\"}") };`)
 	g.indent--
 	g.line("} catch {")
