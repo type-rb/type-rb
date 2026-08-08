@@ -6,9 +6,16 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
-func (g *generator) webDispatcher(routes []ir.WebRoute) {
+func (g *generator) integrations(extensions []ir.Extension) {
+	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
+		g.webDispatcher(manifest.Routes)
+	}
+}
+
+func (g *generator) webDispatcher(routes []webintegration.Route) {
 	modules := map[string]bool{}
 	for _, route := range routes {
 		modules[route.ModulePath] = true

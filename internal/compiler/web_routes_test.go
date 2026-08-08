@@ -3,6 +3,8 @@ package compiler
 import (
 	"strings"
 	"testing"
+
+	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
 func TestCompileProjectAttachesWebRouteManifestToMain(t *testing.T) {
@@ -52,10 +54,11 @@ end
 			if main == nil {
 				t.Fatal("main artifact was not generated")
 			}
-			if len(main.IR.WebRoutes) != 1 {
-				t.Fatalf("got %d routes, want 1", len(main.IR.WebRoutes))
+			manifest := webintegration.ManifestFrom(main.IR.Extensions)
+			if manifest == nil || len(manifest.Routes) != 1 {
+				t.Fatalf("unexpected web manifest: %#v", manifest)
 			}
-			route := main.IR.WebRoutes[0]
+			route := manifest.Routes[0]
 			if route.Method != "POST" || route.Path != "/todos/:id" || route.ModulePath != "routes/todos/[id]" || route.Handler != "post" || route.TargetHandler != "trb_web_route_0" {
 				t.Fatalf("unexpected route: %#v", route)
 			}
@@ -66,7 +69,7 @@ end
 				if artifact.IR.ModulePath == "routes/todos/[id]" {
 					assertWebHandlerTarget(t, mode, artifact)
 				}
-				if artifact.IR.ModulePath != "main" && len(artifact.IR.WebRoutes) != 0 {
+				if artifact.IR.ModulePath != "main" && webintegration.ManifestFrom(artifact.IR.Extensions) != nil {
 					t.Fatalf("route manifest was attached to %s", artifact.IR.ModulePath)
 				}
 			}
@@ -127,7 +130,7 @@ func TestCompileProjectDoesNotTreatRoutesAsWebRoutesWithoutPackageImport(t *test
 		t.Fatal(err)
 	}
 	main := artifactForModule(artifacts, "main")
-	if main == nil || len(main.IR.WebRoutes) != 0 {
+	if main == nil || webintegration.ManifestFrom(main.IR.Extensions) != nil {
 		t.Fatalf("unexpected route manifest: %#v", main)
 	}
 }

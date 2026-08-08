@@ -37,18 +37,14 @@ func Generate(program *ir.Program) string {
 			g.records[record.Name] = true
 		}
 	}
-	if program.WebRoutes != nil {
-		g.webRouteImports(program.WebRoutes)
-	}
+	g.integrationImports(program.Extensions)
 	for i, statement := range program.Statements {
 		if i > 0 {
 			g.b.WriteByte('\n')
 		}
 		g.statement(statement)
 	}
-	if program.WebRoutes != nil {
-		g.webDispatcher(program.WebRoutes)
-	}
+	g.integrations(program.Extensions)
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')

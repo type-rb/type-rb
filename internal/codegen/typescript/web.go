@@ -6,9 +6,22 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
-func (g *generator) webRouteImports(routes []ir.WebRoute) {
+func (g *generator) integrationImports(extensions []ir.Extension) {
+	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
+		g.webRouteImports(manifest.Routes)
+	}
+}
+
+func (g *generator) integrations(extensions []ir.Extension) {
+	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
+		g.webDispatcher(manifest.Routes)
+	}
+}
+
+func (g *generator) webRouteImports(routes []webintegration.Route) {
 	symbols := map[string][]string{}
 	for _, route := range routes {
 		symbols[route.ModulePath] = append(symbols[route.ModulePath], route.TargetHandler)
@@ -25,7 +38,7 @@ func (g *generator) webRouteImports(routes []ir.WebRoute) {
 	}
 }
 
-func (g *generator) webDispatcher(routes []ir.WebRoute) {
+func (g *generator) webDispatcher(routes []webintegration.Route) {
 	g.line("function trb_web_dispatch(request: { method: string; path: string; headers: Record<string, string[]>; body: Uint8Array }) {")
 	g.indent++
 	g.line("const method = request.method.toUpperCase();")

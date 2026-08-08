@@ -34,9 +34,7 @@ func Generate(program *ir.Program) string {
 		}
 	}
 	g.statements(program.Statements)
-	if program.WebRoutes != nil {
-		g.webDispatcher(program.WebRoutes)
-	}
+	g.integrations(program.Extensions)
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
