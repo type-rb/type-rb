@@ -290,6 +290,8 @@ math.log10(100)
 math.sqrt(-1).nan?()
 math.log(0).infinite?()
 "a😀".size()
+"A😀".fetch(1)
+"A😀".try_fetch(2)
 :quit
 `
 		var stdout, stderr bytes.Buffer
@@ -338,6 +340,8 @@ Result::Err(error: NumberParseError(kind: NumberParseErrorKind::OutOfRange, inpu
 true : Boolean
 true : Boolean
 2 : Integer
+"😀" : String
+Result::Err(error: IndexLookupError(index: 2, size: 2, message: "String index is out of bounds")) : Result<String, IndexLookupError>
 `
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s receiver-method REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
@@ -2722,6 +2726,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"import trb/std/booleans\n\n" +
 			"def parse_result(value: Result<Integer, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def float_result(value: Result<Float, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
+			"def string_index_result(value: Result<String, IndexLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.index.to_s() + \"/\" + error.size.to_s() + \" \" + error.message; end; end\n" +
 			"def index_result(value: Result<Integer, IndexLookupError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def key_result(value: Result<String, KeyLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def scalar_check(value: Float): Boolean; return (-4).abs() == numbers.absolute(-4) && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == booleans.to_string(true); end\n\n" +
@@ -2735,6 +2740,10 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"\tputs(float_result(\"1.2x\".try_to_f()))\n" +
 			"\tputs(float_result(\"1e9999\".try_to_f()))\n" +
 			"\tputs(float_result(\"1e-9999\".try_to_f()))\n" +
+			"\tputs(\"A😀\".fetch(1))\n" +
+			"\tputs(string_index_result(\"A😀\".try_fetch(0)))\n" +
+			"\tputs(string_index_result(\"A😀\".try_fetch(2)))\n" +
+			"\tputs(string_index_result(\"A😀\".try_fetch(-1)))\n" +
 			"\tvalues := [7]\n" +
 			"\tputs(index_result(values.try_fetch(0)))\n" +
 			"\tputs(index_result(values.try_fetch(1)))\n" +
@@ -2753,7 +2762,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "true\nok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:12.5\nok:5.0\nerr:invalid Float\nerr:Float is outside the portable range\nok:0.0\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
+		want := "true\nok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:12.5\nok:5.0\nerr:invalid Float\nerr:Float is outside the portable range\nok:0.0\n😀\nok:A\nerr:2/2 String index is out of bounds\nerr:-1/2 String index is out of bounds\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s safe-operation output: want %q, got %q", mode, want, stdout.String())
 		}

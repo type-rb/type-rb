@@ -51,6 +51,8 @@ safe_number := "123".try_to_i()
 decimal := "12.5".to_f()
 safe_decimal := "+.5e1".try_to_f()
 length := "Hello".size()
+character := "A😀".fetch(1)
+safe_character := "A😀".try_fetch(2)
 upper := strings.uppercase("Hello")
 ```
 
@@ -94,12 +96,14 @@ infinity. Exponentiation remains the `**` operator.
 `numbers.clamp`, `numbers.floor`, `numbers.ceil`, `numbers.round`,
 `numbers.truncate`, and `booleans.to_string`.
 
-`String#size` counts Unicode code points. Additional receiver operations
-include `codepoints`, `empty?`, `strip`, `lstrip`, `rstrip`, `include?`,
-`start_with?`, `end_with?`, `split`, `upcase`, and `downcase`. String trimming
-uses the pinned Unicode 15.0 `White_Space` set, preserves internal whitespace,
-and does not remove U+FEFF. Package forms use the same names from
-`trb/std/strings`.
+`String#size`, `fetch`, and `try_fetch` operate on Unicode code points rather
+than encoded bytes. Indexes are zero-based and nonnegative. `fetch()` raises
+when the index is outside the string, while `try_fetch()` returns
+`Result<String, IndexLookupError>`. Additional receiver operations include
+`codepoints`, `empty?`, `strip`, `lstrip`, `rstrip`, `include?`, `start_with?`,
+`end_with?`, `split`, `upcase`, and `downcase`. String trimming uses the pinned
+Unicode 15.0 `White_Space` set, preserves internal whitespace, and does not
+remove U+FEFF. Package forms use the same names from `trb/std/strings`.
 
 ## Bytes
 

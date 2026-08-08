@@ -448,6 +448,27 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			items = append(items, Value{Type: types.FromName("Integer"), Data: int64(codepoint)})
 		}
 		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.strings.fetch", "trb.std.strings.try_fetch":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		value, valueOK := values[0].Data.(string)
+		index, indexOK := values[1].Data.(int64)
+		if !valueOK || !indexOK {
+			return Value{}, errors.New("strings.fetch expects String and Integer")
+		}
+		characters := []rune(value)
+		if index < 0 || index >= int64(len(characters)) {
+			if name == "trb.std.strings.try_fetch" {
+				return e.indexLookupResultErr(typ, index, int64(len(characters)), "String index is out of bounds")
+			}
+			return Value{}, errors.New("String index is out of bounds")
+		}
+		result := Value{Type: types.FromName("String"), Data: string(characters[index])}
+		if name == "trb.std.strings.try_fetch" {
+			return e.filesystemOK(typ, result)
+		}
+		return result, nil
 	case "trb.std.unicode.version":
 		return Value{Type: typ, Data: unicode.Version}, nil
 	case "trb.std.unicode.valid_scalar":
