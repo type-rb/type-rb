@@ -114,10 +114,10 @@ strict and concatenation is non-mutating.
 `trb/std/encoding/hex` converts between `Bytes` and hexadecimal text:
 
 ```trb
-import trb/std/encoding/hex
+import { decode, encode } from trb/std/encoding/hex
 
-text := hex.encode("A😀".to_bytes())
-decoded := hex.decode("41F09F9880")
+text := encode("A😀".to_bytes())
+decoded := decode("41F09F9880")
 ```
 
 Encoding uses lowercase ASCII. Decoding accepts uppercase or lowercase input
@@ -129,12 +129,12 @@ the position is the missing character at the end of the string.
 `trb/std/encoding/base64` provides strict standard and URL-safe Base64:
 
 ```trb
-import trb/std/encoding/base64
+import { decode, encode, url_decode, url_encode } from trb/std/encoding/base64
 
-text := base64.encode("A😀".to_bytes())
-url_text := base64.url_encode("???".to_bytes())
-decoded := base64.decode("QfCfmIA=")
-url_decoded := base64.url_decode("Pz8_")
+text := encode("A😀".to_bytes())
+url_text := url_encode("???".to_bytes())
+decoded := decode("QfCfmIA=")
+url_decoded := url_decode("Pz8_")
 ```
 
 `encode()` emits padded RFC 4648 Base64. `url_encode()` uses the URL-safe
@@ -143,6 +143,23 @@ canonical form they emit and return `Result<Bytes, Base64DecodeError>`.
 `Base64DecodeErrorKind` distinguishes invalid length, characters, padding, and
 non-canonical trailing bits; the error includes the input, zero-based position,
 and a message.
+
+## Hashing
+
+`trb/std/hash` computes one-shot SHA-256 and SHA-512 digests:
+
+```trb
+import { sha256, sha512 } from trb/std/hash
+import { encode } from trb/std/encoding/hex
+
+digest := sha256("message".to_bytes())
+text := encode(digest)
+larger_digest := sha512("message".to_bytes())
+```
+
+Both functions accept and return `Bytes`. Digest formatting stays explicit by
+passing the result to hexadecimal or Base64 encoding. These synchronous APIs
+have the same behavior in browsers, Bun, Node, Go, and Ruby.
 
 ## StringBuilder and Unicode
 
@@ -356,6 +373,7 @@ The current portable standard library includes:
 - `trb/std/bytes`
 - `trb/std/encoding/hex`
 - `trb/std/encoding/base64`
+- `trb/std/hash`
 - `trb/std/string_builder`
 - `trb/std/unicode`
 - `trb/std/arrays`

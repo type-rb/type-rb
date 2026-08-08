@@ -438,6 +438,25 @@ end
 			"url_decode": unary("url_decode", "trb.std.encoding.base64.url_decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType)),
 		},
 	},
+	"trb/std/hash": {
+		Path:       "trb/std/hash",
+		ModulePath: "trb/std/hash/index",
+		Source:     hashSource(),
+		Kind:       Portable,
+		Symbols: map[string]Symbol{
+			"sha256": unary("sha256", "", bytesType, bytesType),
+			"sha512": unary("sha512", "", bytesType, bytesType),
+		},
+	},
+	"trb/internal/hash": {
+		Path:     "trb/internal/hash",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"sha256": unary("sha256", "trb.std.hash.sha256", bytesType, bytesType),
+			"sha512": unary("sha512", "trb.std.hash.sha512", bytesType, bytesType),
+		},
+	},
 	"trb/std/string_builder": {
 		Path: "trb/std/string_builder",
 		Kind: Portable,

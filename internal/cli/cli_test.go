@@ -427,6 +427,37 @@ func TestReplEvaluatesPortableBase64AcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesPortableHashAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-hash-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "import trb/std/hash\nimport trb/std/encoding/hex\nhex.encode(hash.sha256(\"\".to_bytes()))\nhex.encode(hash.sha256(\"abc\".to_bytes()))\nhex.encode(hash.sha512(\"\".to_bytes()))\nhex.encode(hash.sha512(\"abc\".to_bytes()))\n:quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\" : String\n" +
+			"\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\" : String\n" +
+			"\"cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e\" : String\n" +
+			"\"ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f\" : String\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s hash REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -2014,6 +2045,73 @@ end
 			"non-canonical base64url encoding:1\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s portable base64 output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunPortableHashAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby hash run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript hash run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/portable-hash-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { sha256, sha512 } from trb/std/hash
+import { decode, encode } from trb/std/encoding/hex
+
+def main()
+	a8 := "aaaaaaaa"
+	a56 := a8 + a8 + a8 + a8 + a8 + a8 + a8
+	a112 := a56 + a56
+	_decoded := decode("00")
+	puts(encode(sha256("".to_bytes())))
+	puts(encode(sha256("abc".to_bytes())))
+	puts(encode(sha256(a56.to_bytes())))
+	puts(encode(sha512("".to_bytes())))
+	puts(encode(sha512("abc".to_bytes())))
+	puts(encode(sha512(a112.to_bytes())))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if mode == "go" {
+			t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "go-build"))
+			t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "go-mod"))
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n" +
+			"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n" +
+			"b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a\n" +
+			"cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e\n" +
+			"ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f\n" +
+			"c01d080efd492776a1c43bd23dd99d0a2e626d481e16782e75d54c2503b5dc32bd05f0f1ba33e568b88fd2d970929b719ecbb152f58f130a407c8830604b70ca\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s portable hash output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

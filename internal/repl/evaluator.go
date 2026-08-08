@@ -3,6 +3,8 @@ package repl
 import (
 	"bytes"
 	"context"
+	stdsha256 "crypto/sha256"
+	stdsha512 "crypto/sha512"
 	stdbase64 "encoding/base64"
 	stdhex "encoding/hex"
 	stdjson "encoding/json"
@@ -1941,6 +1943,26 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return e.base64DecodeResultErr(typ, kind, input, index, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(value)})
+	case "trb.std.hash.sha256":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("hash.sha256 expects Bytes")
+		}
+		digest := stdsha256.Sum256(value)
+		return Value{Type: typ, Data: bytesValue(digest[:])}, nil
+	case "trb.std.hash.sha512":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("hash.sha512 expects Bytes")
+		}
+		digest := stdsha512.Sum512(value)
+		return Value{Type: typ, Data: bytesValue(digest[:])}, nil
 	case "trb.std.string_builder.new":
 		return Value{Type: typ, Data: &stringBuilderValue{}}, nil
 	case "trb.std.string_builder.from_string":

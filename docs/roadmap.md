@@ -66,12 +66,13 @@ than detailed syntax.
 - Complete the everyday receiver surface for Unicode strings, Arrays, and
   Hashes. Keep operations that need first-class blocks staged with the
   language-level block/lambda work.
-- Expand the compiler-owned baseline with SHA-256/SHA-512, HMAC, random, UUID,
+- Expand the compiler-owned baseline with HMAC, random, UUID,
   regular-expression, URL, and time packages. Prefer `Bytes` at binary and
   digest boundaries, and keep legacy hashes explicitly limited to
   compatibility use.
-- Treat browser execution as the primary portable TypeScript environment;
-  Node-only APIs and backend/server integrations remain platform packages.
+- Use browser compatibility as the baseline for portable TypeScript APIs while
+  also supporting Bun and Node server runtimes. Runtime-only APIs and server
+  framework integrations remain explicit platform packages.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
 - Stabilize compiler-owned library type providers so gems, Go modules, and npm
   packages do not require application-authored signature files.
