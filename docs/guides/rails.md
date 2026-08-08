@@ -50,6 +50,3 @@ do not maintain a parallel signature file.
 
 Provider coverage is incremental. Known provider types reject unknown members;
 uncovered Ruby APIs remain behind the explicit Ruby interoperability boundary.
-
-See [`examples/rails`](../../examples/rails) for models, controllers, concerns,
-jobs, mailers, routes, and migrations.

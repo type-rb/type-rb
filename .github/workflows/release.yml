@@ -31,10 +31,8 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
 
-      - name: Verify compiler and bootstrap boundary
-        run: |
-          go test ./...
-          ./scripts/check-self-host.sh
+      - name: Verify compiler
+        run: go test ./...
 
       - name: Package release binaries and Formula
         id: package

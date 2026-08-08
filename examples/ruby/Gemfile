@@ -1,3 +1,0 @@
-# Generated from trbconfig.jsonc by trb.
-source "https://rubygems.org"
-ruby "4.0.6"
