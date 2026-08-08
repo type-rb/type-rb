@@ -421,6 +421,7 @@ type ConversionKind string
 
 const IntegerToFloatConversion ConversionKind = "integer_to_float"
 const UnionIntegerToFloatConversion ConversionKind = "union_integer_to_float"
+const NonNullableToNullableConversion ConversionKind = "non_nullable_to_nullable"
 
 type Conversion struct {
 	ExprBase

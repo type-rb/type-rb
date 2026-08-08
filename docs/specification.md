@@ -135,6 +135,9 @@ end
   `values.push(item)`, `values.shift()`, or their package forms.
 - A readonly reference cannot be made mutable merely by assigning it to a new
   `mut` binding.
+- A non-nullable value is assignable to the corresponding nullable type. The
+  typed IR records this conversion explicitly so pointer-based backends do not
+  expose their representation through portable semantics.
 - A non-nullable `Integer` is assignable to a non-nullable `Float`. The checker
   records this widening explicitly and typed IR lowers it in initializers,
   assignments, arguments, record and enum payloads, defaults, and returns.

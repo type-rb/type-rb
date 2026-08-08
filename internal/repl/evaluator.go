@@ -672,6 +672,16 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			}
 			value.Type = node.ExprType()
 			return value, nil
+		case ir.NonNullableToNullableConversion:
+			if node.Value.ExprType().Kind == types.Int && node.ExprType().Kind == types.Float {
+				integer, ok := value.Data.(int64)
+				if !ok {
+					return Value{}, fmt.Errorf("cannot convert %s to Float?", value.Type)
+				}
+				value.Data = float64(integer)
+			}
+			value.Type = node.ExprType()
+			return value, nil
 		default:
 			return Value{}, fmt.Errorf("unknown conversion %s", node.Kind)
 		}

@@ -445,6 +445,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "(" + g.expr(n.Value) + ").to_f"
 		case ir.UnionIntegerToFloatConversion:
 			return "(->(value) { value.is_a?(Integer) ? value.to_f : value }).call(" + g.expr(n.Value) + ")"
+		case ir.NonNullableToNullableConversion:
+			if n.Value.ExprType().Kind == types.Int && n.ExprType().Kind == types.Float {
+				return "(" + g.expr(n.Value) + ").to_f"
+			}
+			return g.expr(n.Value)
 		default:
 			return g.expr(n.Value)
 		}

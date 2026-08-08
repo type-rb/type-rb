@@ -867,6 +867,50 @@ end
 	}
 }
 
+func TestNonNullableValuesAreExplicitlyConvertedToNullableTypes(t *testing.T) {
+	source := []byte(`def maybe_name(): String?
+	return "Ada"
+end
+
+def maybe_ratio(): Float?
+	return 1
+end
+`)
+
+	wants := map[string][]string{
+		"go": {
+			`func(value string) *string { return &value }("Ada")`,
+			`func(value float64) *float64 { return &value }(float64(1))`,
+		},
+		"ruby":       {`return "Ada"`, `return (1).to_f`},
+		"typescript": {`return "Ada";`, `return Number(1);`},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("nullable_conversion.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected non-nullable to nullable conversion: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s nullable conversion is missing %q:\n%s", mode, want, output)
+			}
+		}
+
+		for _, statement := range artifact.IR.Statements {
+			method, ok := statement.(*ir.Method)
+			if !ok || method.Name != "maybe_name" {
+				continue
+			}
+			returned := method.Body[0].(*ir.Return).Value
+			conversion, ok := returned.(*ir.Conversion)
+			if !ok || conversion.Kind != ir.NonNullableToNullableConversion || !conversion.ExprType().Nullable || conversion.Value.ExprType().Nullable {
+				t.Fatalf("%s did not retain nullable conversion in typed IR: %#v", mode, returned)
+			}
+		}
+	}
+}
+
 func TestCollectionLiteralsInferCommonNumericTypeAcrossBackends(t *testing.T) {
 	source := []byte(`def array_values(): Array<Float>
 	return [1, 2.5]

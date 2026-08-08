@@ -258,7 +258,9 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 	result := l.expressionWithoutConversion(node)
 	if target, ok := l.checked.Conversions[node]; ok && result != nil {
 		kind := ir.IntegerToFloatConversion
-		if result.ExprType().Kind == types.Union {
+		if target.Nullable && !result.ExprType().Nullable && result.ExprType().Kind != types.Nil {
+			kind = ir.NonNullableToNullableConversion
+		} else if result.ExprType().Kind == types.Union {
 			kind = ir.UnionIntegerToFloatConversion
 		}
 		return &ir.Conversion{
