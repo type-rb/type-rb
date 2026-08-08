@@ -969,6 +969,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "({ kind: HexDecodeErrorKind." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies HexDecodeError)"
 		return resultError(value)
 	}
+	base64DecodeError := func(kind, input, index, message string) string {
+		value := "({ kind: Base64DecodeErrorKind." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies Base64DecodeError)"
+		return resultError(value)
+	}
 	indexLookupError := func(index, size, message string) string {
 		value := "({ index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies IndexLookupError)"
 		return resultError(value)
@@ -1118,6 +1122,24 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		invalid := hexDecodeError("InvalidCharacter", "__trbInput", "__trbInvalidIndex", "invalid hexadecimal character")
 		odd := hexDecodeError("OddLength", "__trbInput", "__trbCharacters.length", "hex input has odd length")
 		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; const __trbCharacters = Array.from(__trbInput); const __trbInvalidIndex = __trbCharacters.findIndex((character) => !/^[0-9A-Fa-f]$/.test(character)); if (__trbInvalidIndex >= 0) { return " + invalid + "; } if (__trbCharacters.length % 2 !== 0) { return " + odd + "; } const __trbValue = new Uint8Array(__trbCharacters.length / 2); for (let index = 0; index < __trbCharacters.length; index += 2) { __trbValue[index / 2] = Number.parseInt(__trbCharacters[index]! + __trbCharacters[index + 1]!, 16); } return " + filesystemOK("__trbValue") + "; })()"
+	case "trb.std.encoding.base64.encode":
+		return "((value: Uint8Array): string => { let binary = \"\"; for (const byte of value) { binary += String.fromCharCode(byte); } return btoa(binary); })(" + arguments[0] + ")"
+	case "trb.std.encoding.base64.url_encode":
+		return "((value: Uint8Array): string => { let binary = \"\"; for (const byte of value) { binary += String.fromCharCode(byte); } return btoa(binary).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\"); })(" + arguments[0] + ")"
+	case "trb.std.encoding.base64.decode":
+		resultType, _, _ := filesystemResultType()
+		lengthError := base64DecodeError("InvalidLength", "__trbInput", "__trbCharacters.length", "base64 input length must be a multiple of 4")
+		paddingError := base64DecodeError("InvalidPadding", "__trbInput", "index", "invalid base64 padding")
+		characterError := base64DecodeError("InvalidCharacter", "__trbInput", "index", "invalid base64 character")
+		nonCanonical := base64DecodeError("NonCanonical", "__trbInput", "__trbCharacters.length - padding - 1", "non-canonical base64 encoding")
+		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; const __trbCharacters = Array.from(__trbInput); if (__trbCharacters.length % 4 !== 0) { return " + lengthError + "; } let padding = 0; for (let index = 0; index < __trbCharacters.length; index += 1) { const character = __trbCharacters[index]!; if (character === \"=\") { padding += 1; if (index < __trbCharacters.length - 2 || padding > 2) { return " + paddingError + "; } continue; } if (padding > 0) { return " + paddingError + "; } if (!/^[A-Za-z0-9+/]$/.test(character)) { return " + characterError + "; } } const binary = atob(__trbInput); if (btoa(binary) !== __trbInput) { return " + nonCanonical + "; } return " + filesystemOK("Uint8Array.from(binary, (character) => character.charCodeAt(0))") + "; })()"
+	case "trb.std.encoding.base64.url_decode":
+		resultType, _, _ := filesystemResultType()
+		lengthError := base64DecodeError("InvalidLength", "__trbInput", "__trbCharacters.length", "base64url input has invalid length")
+		paddingError := base64DecodeError("InvalidPadding", "__trbInput", "index", "base64url input must not contain padding")
+		characterError := base64DecodeError("InvalidCharacter", "__trbInput", "index", "invalid base64url character")
+		nonCanonical := base64DecodeError("NonCanonical", "__trbInput", "__trbCharacters.length - 1", "non-canonical base64url encoding")
+		return "((): " + resultType + " => { const __trbInput = " + arguments[0] + "; const __trbCharacters = Array.from(__trbInput); if (__trbCharacters.length % 4 === 1) { return " + lengthError + "; } for (let index = 0; index < __trbCharacters.length; index += 1) { const character = __trbCharacters[index]!; if (character === \"=\") { return " + paddingError + "; } if (!/^[A-Za-z0-9_-]$/.test(character)) { return " + characterError + "; } } const padded = __trbInput.replace(/-/g, \"+\").replace(/_/g, \"/\") + \"=\".repeat((4 - __trbInput.length % 4) % 4); const binary = atob(padded); const canonical = btoa(binary).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\"); if (canonical !== __trbInput) { return " + nonCanonical + "; } return " + filesystemOK("Uint8Array.from(binary, (character) => character.charCodeAt(0))") + "; })()"
 	case "trb.std.string_builder.new":
 		return "[]"
 	case "trb.std.string_builder.from_string":

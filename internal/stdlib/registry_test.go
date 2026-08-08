@@ -110,6 +110,23 @@ func TestPortableHexContract(t *testing.T) {
 	}
 }
 
+func TestPortableBase64Contract(t *testing.T) {
+	definition, ok := Lookup("trb/std/encoding/base64")
+	if !ok {
+		t.Fatal("base64 package is missing")
+	}
+	for _, name := range []string{"encode", "url_encode"} {
+		if got := definition.Symbols[name].Return.String(); got != "String" {
+			t.Fatalf("base64.%s return=%s, want String", name, got)
+		}
+	}
+	for _, name := range []string{"decode", "url_decode"} {
+		if got := definition.Symbols[name].Return.String(); got != "Result<Bytes, Base64DecodeError>" {
+			t.Fatalf("base64.%s return=%s, want Result<Bytes, Base64DecodeError>", name, got)
+		}
+	}
+}
+
 func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
 	for _, name := range []string{"pop", "push", "shift", "unshift"} {

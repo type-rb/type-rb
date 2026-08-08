@@ -126,6 +126,24 @@ input are distinguished by `HexDecodeErrorKind`; the error also preserves the
 input, a zero-based character position, and a message. For odd-length input,
 the position is the missing character at the end of the string.
 
+`trb/std/encoding/base64` provides strict standard and URL-safe Base64:
+
+```trb
+import trb/std/encoding/base64
+
+text := base64.encode("A😀".to_bytes())
+url_text := base64.url_encode("???".to_bytes())
+decoded := base64.decode("QfCfmIA=")
+url_decoded := base64.url_decode("Pz8_")
+```
+
+`encode()` emits padded RFC 4648 Base64. `url_encode()` uses the URL-safe
+alphabet without padding. Their matching decode functions accept only the
+canonical form they emit and return `Result<Bytes, Base64DecodeError>`.
+`Base64DecodeErrorKind` distinguishes invalid length, characters, padding, and
+non-canonical trailing bits; the error includes the input, zero-based position,
+and a message.
+
 ## StringBuilder and Unicode
 
 Use `StringBuilder` for incremental text construction:
@@ -337,6 +355,7 @@ The current portable standard library includes:
 - `trb/std/booleans`
 - `trb/std/bytes`
 - `trb/std/encoding/hex`
+- `trb/std/encoding/base64`
 - `trb/std/string_builder`
 - `trb/std/unicode`
 - `trb/std/arrays`

@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	stdbase64 "encoding/base64"
 	stdhex "encoding/hex"
 	stdjson "encoding/json"
 	"errors"
@@ -1908,6 +1909,38 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			return Value{}, err
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(value)})
+	case "trb.std.encoding.base64.encode":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("base64.encode expects Bytes")
+		}
+		return Value{Type: typ, Data: stdbase64.StdEncoding.EncodeToString(value)}, nil
+	case "trb.std.encoding.base64.url_encode":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(bytesValue)
+		if !ok {
+			return Value{}, errors.New("base64.url_encode expects Bytes")
+		}
+		return Value{Type: typ, Data: stdbase64.RawURLEncoding.EncodeToString(value)}, nil
+	case "trb.std.encoding.base64.decode", "trb.std.encoding.base64.url_decode":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		input, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("base64 decode expects String")
+		}
+		urlSafe := name == "trb.std.encoding.base64.url_decode"
+		value, kind, index, message := decodeBase64(input, urlSafe)
+		if kind != "" {
+			return e.base64DecodeResultErr(typ, kind, input, index, message)
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(value)})
 	case "trb.std.string_builder.new":
 		return Value{Type: typ, Data: &stringBuilderValue{}}, nil
 	case "trb.std.string_builder.from_string":
@@ -2569,6 +2602,75 @@ func (e *Evaluator) hexDecodeResultErr(resultType types.Type, kind, input string
 		"index":   {Type: types.FromName("Integer"), Data: index},
 		"message": {Type: types.FromName("String"), Data: message},
 	})
+}
+
+func (e *Evaluator) base64DecodeResultErr(resultType types.Type, kind, input string, index int64, message string) (Value, error) {
+	kindDefinition, ok := e.definitions[symbolKey("trb/std/encoding/base64/index", "Base64DecodeErrorKind")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("operation requires trb/std/encoding/base64")
+	}
+	kindValue := Value{Type: types.FromName("Base64DecodeErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
+	return e.structuredResultErrFrom(resultType, "trb/std/encoding/base64/index", "Base64DecodeError", map[string]Value{
+		"kind":    kindValue,
+		"input":   {Type: types.FromName("String"), Data: input},
+		"index":   {Type: types.FromName("Integer"), Data: index},
+		"message": {Type: types.FromName("String"), Data: message},
+	})
+}
+
+func decodeBase64(input string, urlSafe bool) ([]byte, string, int64, string) {
+	characters := []rune(input)
+	if urlSafe {
+		if len(characters)%4 == 1 {
+			return nil, "InvalidLength", int64(len(characters)), "base64url input has invalid length"
+		}
+		for index, character := range characters {
+			if character == '=' {
+				return nil, "InvalidPadding", int64(index), "base64url input must not contain padding"
+			}
+			if !base64URLCharacter(character) {
+				return nil, "InvalidCharacter", int64(index), "invalid base64url character"
+			}
+		}
+		value, err := stdbase64.RawURLEncoding.Strict().DecodeString(input)
+		if err != nil {
+			return nil, "NonCanonical", int64(len(characters) - 1), "non-canonical base64url encoding"
+		}
+		return value, "", 0, ""
+	}
+
+	if len(characters)%4 != 0 {
+		return nil, "InvalidLength", int64(len(characters)), "base64 input length must be a multiple of 4"
+	}
+	padding := 0
+	for index, character := range characters {
+		if character == '=' {
+			padding++
+			if index < len(characters)-2 || padding > 2 {
+				return nil, "InvalidPadding", int64(index), "invalid base64 padding"
+			}
+			continue
+		}
+		if padding > 0 {
+			return nil, "InvalidPadding", int64(index), "invalid base64 padding"
+		}
+		if !base64StandardCharacter(character) {
+			return nil, "InvalidCharacter", int64(index), "invalid base64 character"
+		}
+	}
+	value, err := stdbase64.StdEncoding.Strict().DecodeString(input)
+	if err != nil {
+		return nil, "NonCanonical", int64(len(characters) - padding - 1), "non-canonical base64 encoding"
+	}
+	return value, "", 0, ""
+}
+
+func base64StandardCharacter(value rune) bool {
+	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '+' || value == '/'
+}
+
+func base64URLCharacter(value rune) bool {
+	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '-' || value == '_'
 }
 
 func hexadecimalCharacter(value rune) bool {

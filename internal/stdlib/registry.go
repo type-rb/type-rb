@@ -98,6 +98,7 @@ var processResultType = types.FromName("ProcessResult")
 var processErrorType = types.FromName("ProcessError")
 var numberParseErrorType = types.FromName("NumberParseError")
 var hexDecodeErrorType = types.FromName("HexDecodeError")
+var base64DecodeErrorType = types.FromName("Base64DecodeError")
 var indexLookupErrorType = types.FromName("IndexLookupError")
 var keyLookupErrorType = types.FromName("KeyLookupError")
 
@@ -408,6 +409,33 @@ end
 		Symbols: map[string]Symbol{
 			"encode": unary("encode", "trb.std.encoding.hex.encode", bytesType, stringType),
 			"decode": unary("decode", "trb.std.encoding.hex.decode", stringType, structuredErrorResult(bytesType, hexDecodeErrorType)),
+		},
+	},
+	"trb/std/encoding/base64": {
+		Path:       "trb/std/encoding/base64",
+		ModulePath: "trb/std/encoding/base64/index",
+		RuntimeExports: []RuntimeExport{
+			{Name: "Base64DecodeErrorKind", Kind: "enum"},
+			{Name: "Base64DecodeError", Kind: "record"},
+		},
+		Source: base64Source(),
+		Kind:   Portable,
+		Symbols: map[string]Symbol{
+			"encode":     unary("encode", "trb.std.encoding.base64.encode", bytesType, stringType),
+			"decode":     unary("decode", "trb.std.encoding.base64.decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType)),
+			"url_encode": unary("url_encode", "trb.std.encoding.base64.url_encode", bytesType, stringType),
+			"url_decode": unary("url_decode", "trb.std.encoding.base64.url_decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType)),
+		},
+	},
+	"trb/internal/encoding/base64": {
+		Path:     "trb/internal/encoding/base64",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"encode":     unary("encode", "trb.std.encoding.base64.encode", bytesType, stringType),
+			"decode":     unary("decode", "trb.std.encoding.base64.decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType)),
+			"url_encode": unary("url_encode", "trb.std.encoding.base64.url_encode", bytesType, stringType),
+			"url_decode": unary("url_decode", "trb.std.encoding.base64.url_decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType)),
 		},
 	},
 	"trb/std/string_builder": {

@@ -698,6 +698,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "HexDecodeError.new(kind: HexDecodeErrorKind::" + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
 	}
+	base64DecodeError := func(kind, input, index, message string) string {
+		value := "Base64DecodeError.new(kind: Base64DecodeErrorKind::" + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + ")"
+		return "Result::Err.new(" + value + ")"
+	}
 	indexLookupError := func(index, size, message string) string {
 		value := "IndexLookupError.new(index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
@@ -827,6 +831,22 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		invalid := hexDecodeError("InvalidCharacter", "input", "invalid_index", "invalid hexadecimal character")
 		odd := hexDecodeError("OddLength", "input", "characters.length", "hex input has odd length")
 		return "->(input) { characters = input.each_char.to_a; invalid_index = characters.find_index { |character| !character.match?(/\\A[0-9A-Fa-f]\\z/) }; if invalid_index; " + invalid + "; elsif characters.length.odd?; " + odd + "; else; Result::Ok.new([input].pack(\"H*\").b); end }.call(" + arguments[0] + ")"
+	case "trb.std.encoding.base64.encode":
+		return "[" + arguments[0] + "].pack(\"m0\")"
+	case "trb.std.encoding.base64.url_encode":
+		return "[" + arguments[0] + "].pack(\"m0\").tr(\"+/\", \"-_\").delete(\"=\")"
+	case "trb.std.encoding.base64.decode":
+		lengthError := base64DecodeError("InvalidLength", "input", "characters.length", "base64 input length must be a multiple of 4")
+		paddingError := base64DecodeError("InvalidPadding", "input", "index", "invalid base64 padding")
+		characterError := base64DecodeError("InvalidCharacter", "input", "index", "invalid base64 character")
+		nonCanonical := base64DecodeError("NonCanonical", "input", "characters.length - padding - 1", "non-canonical base64 encoding")
+		return "->(input) { characters = input.each_char.to_a; if characters.length % 4 != 0; " + lengthError + "; else; padding = 0; failure = nil; characters.each_with_index do |character, index|; if character == \"=\"; padding += 1; if index < characters.length - 2 || padding > 2; failure = " + paddingError + "; break; end; elsif padding > 0; failure = " + paddingError + "; break; elsif !character.match?(/\\A[A-Za-z0-9+\\/]\\z/); failure = " + characterError + "; break; end; end; if failure; failure; else; begin; value = input.unpack1(\"m0\").b; if [value].pack(\"m0\") != input; " + nonCanonical + "; else; Result::Ok.new(value); end; rescue ArgumentError; " + nonCanonical + "; end; end; end }.call(" + arguments[0] + ")"
+	case "trb.std.encoding.base64.url_decode":
+		lengthError := base64DecodeError("InvalidLength", "input", "characters.length", "base64url input has invalid length")
+		paddingError := base64DecodeError("InvalidPadding", "input", "index", "base64url input must not contain padding")
+		characterError := base64DecodeError("InvalidCharacter", "input", "index", "invalid base64url character")
+		nonCanonical := base64DecodeError("NonCanonical", "input", "characters.length - 1", "non-canonical base64url encoding")
+		return "->(input) { characters = input.each_char.to_a; if characters.length % 4 == 1; " + lengthError + "; else; failure = nil; characters.each_with_index do |character, index|; if character == \"=\"; failure = " + paddingError + "; break; elsif !character.match?(/\\A[A-Za-z0-9_-]\\z/); failure = " + characterError + "; break; end; end; if failure; failure; else; padded = input.tr(\"-_\", \"+/\") + \"=\" * ((4 - input.length % 4) % 4); begin; value = padded.unpack1(\"m0\").b; canonical = [value].pack(\"m0\").tr(\"+/\", \"-_\").delete(\"=\"); if canonical != input; " + nonCanonical + "; else; Result::Ok.new(value); end; rescue ArgumentError; " + nonCanonical + "; end; end; end }.call(" + arguments[0] + ")"
 	case "trb.std.string_builder.new":
 		return "String.new(encoding: Encoding::UTF_8)"
 	case "trb.std.string_builder.from_string":
