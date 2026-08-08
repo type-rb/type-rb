@@ -54,6 +54,8 @@ methods through `Allow`.
 Request header lookup is case-insensitive through `header_values`. Portable
 cookie parsing preserves header order, duplicate names, and opaque values
 without delegating semantics to the target runtime.
+Responses can replace or append case-insensitive header values without mutating
+the original response through `with_header` and `add_header`.
 
 The compiler pipeline is:
 

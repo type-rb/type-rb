@@ -2993,6 +2993,68 @@ end
 	}
 }
 
+func TestRunOfficialWebResponseHeadersAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web response header run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web response header run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-response-header-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Response, add_header, with_header } from trb/web
+
+def main()
+	base := Response.new(
+		status: 204,
+		headers: {"X-Trace" => ["one"], "x-keep" => ["yes"]},
+		body: "body".to_bytes(),
+	)
+	replaced := with_header(base, "x-TRACE", "two")
+	added := add_header(replaced, "X-Trace", "three")
+	puts(base.headers["X-Trace"].size())
+	puts(base.headers["X-Trace"][0])
+	puts(added.headers["x-trace"].size())
+	puts(added.headers["x-trace"][0])
+	puts(added.headers["x-trace"][1])
+	puts(added.headers["x-keep"][0])
+	puts(added.status)
+	puts(added.body.to_s())
+	return
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "1\none\n2\ntwo\nthree\nyes\n204\nbody\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web response headers: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunOfficialWebJSONAPIsAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
