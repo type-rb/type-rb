@@ -6,7 +6,12 @@ on:
       - "v*"
 
 permissions:
+  actions: write
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -90,3 +95,47 @@ jobs:
           git add Formula/trb.rb
           git commit -m "trb ${{ steps.package.outputs.version }}"
           git push
+
+      - name: Advance development version
+        id: advance
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_version="${{ steps.package.outputs.version }}"
+          if [[ ! "$release_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "release version is not a semantic version: $release_version" >&2
+            exit 1
+          fi
+          next_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((10#${BASH_REMATCH[3]} + 1))"
+          version_file="internal/cli/cli.go"
+
+          git fetch origin main
+          git checkout --detach origin/main
+
+          current_version="$(sed -n 's/^var Version = "\([^"]*\)"$/\1/p' "$version_file")"
+          if [ "$current_version" = "${next_version}-dev" ]; then
+            printf 'changed=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$current_version" != "${release_version}-dev" ]; then
+            echo "expected ${release_version}-dev, found $current_version" >&2
+            exit 1
+          fi
+
+          escaped_release_version="${release_version//./\\.}"
+          sed -i "s/^var Version = \"${escaped_release_version}-dev\"$/var Version = \"${next_version}-dev\"/" "$version_file"
+          grep -Fx "var Version = \"${next_version}-dev\"" "$version_file"
+          test "$(git diff --name-only)" = "$version_file"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$version_file"
+          git commit -m "Advance development version to ${next_version}-dev"
+          git push origin HEAD:main
+          printf 'changed=true\n' >> "$GITHUB_OUTPUT"
+
+      - name: Refresh development Pages
+        if: steps.advance.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main

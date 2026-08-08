@@ -11,9 +11,11 @@ The version embedded in source builds is the next planned release followed by
 such as `v0.1.2`; release packaging replaces the development version in every
 binary with `0.1.2`.
 
-After publishing a release, advance the source version to the next planned
-patch release in a pull request. Homebrew publishes only stable tagged releases
-and never consumes a `-dev` version.
+After publishing a release, the Release workflow advances the source version
+to the next planned patch release and refreshes Pages. This one-line automated
+commit is the only direct-main exception to the pull-request workflow.
+Homebrew publishes only stable tagged releases and never consumes a `-dev`
+version.
 
 ## One-time setup
 
@@ -21,6 +23,8 @@ and never consumes a `-dev` version.
 2. Create a fine-grained personal access token that has `Contents: Read and
    write` access to that repository. Store it in the source repository as the
    Actions secret `HOMEBREW_TAP_TOKEN`.
+3. Add the GitHub Actions App as an `Always allow` bypass actor for the main
+   branch ruleset. Human changes remain subject to the pull-request rule.
 
 The tap repository uses the standard layout:
 
@@ -48,7 +52,8 @@ The release workflow then:
 2. builds four `trb_VERSION_OS_ARCH.tar.gz` binary archives;
 3. writes `checksums.txt` and renders `trb.rb`;
 4. creates or updates the GitHub release; and
-5. commits the Formula to `type-rb/homebrew-tap`.
+5. commits the Formula to `type-rb/homebrew-tap`; and
+6. commits the next patch `-dev` version to main and dispatches Pages.
 
 Users can then install with:
 
