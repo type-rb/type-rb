@@ -3055,6 +3055,79 @@ end
 	}
 }
 
+func TestRunOfficialWebResponseCookiesAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web response cookie run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web response cookie run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-response-cookie-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import {
+	CookieSameSite,
+	Response,
+	ResponseCookie,
+	ResponseCookieAttribute,
+	new_response_cookie,
+	set_cookie,
+} from trb/web
+
+def main()
+	base := Response.new(status: 204, headers: {}, body: "".to_bytes())
+	simple := set_cookie(base, new_response_cookie("theme", "dark"))
+	session_cookie := ResponseCookie.new(
+		name: "session",
+		value: "abc",
+		attributes: [
+			ResponseCookieAttribute::Domain("example.com"),
+			ResponseCookieAttribute::Path("/"),
+			ResponseCookieAttribute::MaxAge(3600),
+			ResponseCookieAttribute::Secure,
+			ResponseCookieAttribute::HttpOnly,
+			ResponseCookieAttribute::SameSite(CookieSameSite::Lax),
+		],
+	)
+	complete := set_cookie(simple, session_cookie)
+	puts(base.headers.size())
+	puts(complete.headers["set-cookie"].size())
+	puts(complete.headers["set-cookie"][0])
+	puts(complete.headers["set-cookie"][1])
+	return
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "0\n2\ntheme=dark\nsession=abc; Domain=example.com; Path=/; Max-Age=3600; Secure; HttpOnly; SameSite=Lax\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web response cookie output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunOfficialWebJSONAPIsAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

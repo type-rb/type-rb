@@ -14,6 +14,27 @@ record RequestCookie
 	value: String
 end
 
+enum CookieSameSite
+	Lax
+	Strict
+	None
+end
+
+enum ResponseCookieAttribute
+	Domain(value: String)
+	Path(value: String)
+	MaxAge(seconds: Integer)
+	Secure
+	HttpOnly
+	SameSite(value: CookieSameSite)
+end
+
+record ResponseCookie
+	name: String
+	value: String
+	attributes: Array<ResponseCookieAttribute>
+end
+
 record Context
 	request: Request
 	path_parameters: Hash<String, String>
@@ -53,6 +74,46 @@ def add_header(response: Response, name: String, value: String): Response
 	added_values.push(value)
 	headers[normalized_name] = added_values
 	return Response.new(status: response.status, headers: headers, body: response.body)
+end
+
+def new_response_cookie(name: String, value: String): ResponseCookie
+	return ResponseCookie.new(name: name, value: value, attributes: [])
+end
+
+def set_cookie(response: Response, cookie_value: ResponseCookie): Response
+	mut parts := [cookie_value.name + "=" + cookie_value.value]
+	cookie_value.attributes.each do |attribute|
+		parts.push(_response_cookie_attribute(attribute))
+	end
+	return add_header(response, "set-cookie", parts.join("; "))
+end
+
+def _response_cookie_attribute(attribute: ResponseCookieAttribute): String
+	case attribute
+	when ResponseCookieAttribute::Domain(value)
+		return "Domain=" + value
+	when ResponseCookieAttribute::Path(value)
+		return "Path=" + value
+	when ResponseCookieAttribute::MaxAge(seconds)
+		return "Max-Age=" + seconds.to_s()
+	when ResponseCookieAttribute::Secure
+		return "Secure"
+	when ResponseCookieAttribute::HttpOnly
+		return "HttpOnly"
+	when ResponseCookieAttribute::SameSite(value)
+		return "SameSite=" + _cookie_same_site(value)
+	end
+end
+
+def _cookie_same_site(value: CookieSameSite): String
+	case value
+	when CookieSameSite::Lax
+		return "Lax"
+	when CookieSameSite::Strict
+		return "Strict"
+	when CookieSameSite::None
+		return "None"
+	end
 end
 
 interface Next

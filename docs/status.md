@@ -56,6 +56,9 @@ cookie parsing preserves header order, duplicate names, and opaque values
 without delegating semantics to the target runtime.
 Responses can replace or append case-insensitive header values without mutating
 the original response through `with_header` and `add_header`.
+Typed response cookies support ordered `Domain`, `Path`, `Max-Age`, `Secure`,
+`HttpOnly`, and `SameSite` attributes while preserving multiple `Set-Cookie`
+header values.
 
 The compiler pipeline is:
 
