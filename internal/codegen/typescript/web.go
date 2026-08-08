@@ -11,6 +11,7 @@ import (
 
 func (g *generator) integrationImports(extensions []ir.Extension) {
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
+		g.line(`import { createServer } from "node:http";`)
 		g.webRouteImports(manifest.Routes)
 	}
 }
@@ -18,6 +19,7 @@ func (g *generator) integrationImports(extensions []ir.Extension) {
 func (g *generator) integrations(extensions []ir.Extension) {
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
 		g.webDispatcher(manifest.Routes)
+		g.webServer()
 	}
 }
 
@@ -74,4 +76,54 @@ func typescriptWebRouteSegments(path string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "/")
+}
+
+func (g *generator) webServer() {
+	g.line("function trb_web_serve(port: number) {")
+	g.indent++
+	g.line("const server = createServer(async (incoming, writer) => {")
+	g.indent++
+	g.line("const headers: Record<string, string[]> = {};")
+	g.line("for (const [name, value] of Object.entries(incoming.headers)) {")
+	g.indent++
+	g.line("if (Array.isArray(value)) {")
+	g.indent++
+	g.line("headers[name] = value;")
+	g.indent--
+	g.line("} else if (value !== undefined) {")
+	g.indent++
+	g.line("headers[name] = [value];")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.line("const chunks: Uint8Array[] = [];")
+	g.line("for await (const chunk of incoming) {")
+	g.indent++
+	g.line(`chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk));`)
+	g.indent--
+	g.line("}")
+	g.line("const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);")
+	g.line("const body = new Uint8Array(size);")
+	g.line("let offset = 0;")
+	g.line("for (const chunk of chunks) {")
+	g.indent++
+	g.line("body.set(chunk, offset);")
+	g.line("offset += chunk.byteLength;")
+	g.indent--
+	g.line("}")
+	g.line(`const path = new URL(incoming.url ?? "/", "http://localhost").pathname;`)
+	g.line(`const response = trb_web_dispatch({ method: incoming.method ?? "GET", path, headers, body });`)
+	g.line("for (const [name, values] of Object.entries(response.headers)) {")
+	g.indent++
+	g.line("writer.setHeader(name, values);")
+	g.indent--
+	g.line("}")
+	g.line("writer.statusCode = response.status;")
+	g.line("writer.end(response.body);")
+	g.indent--
+	g.line("});")
+	g.line(`server.listen(port, "0.0.0.0");`)
+	g.indent--
+	g.line("}")
 }

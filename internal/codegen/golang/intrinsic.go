@@ -210,6 +210,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webRequestJSON(call, arguments[0])
 	case "trb.web.json":
 		return g.webJSON(call, arguments)
+	case "trb.web.serve":
+		port := "3000"
+		if len(arguments) > 0 {
+			port = arguments[0]
+		}
+		return "trbWebServe(" + port + ")"
 	case "trb.web.testing.dispatch":
 		return "trbWebDispatch(" + arguments[0] + ")"
 	case "trb.std.strings.length":

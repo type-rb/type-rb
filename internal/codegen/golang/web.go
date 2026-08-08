@@ -13,6 +13,7 @@ import (
 func (g *generator) integrations(extensions []ir.Extension) {
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
 		g.webDispatcher(manifest.Routes)
+		g.webServer()
 	}
 }
 
@@ -87,4 +88,51 @@ func webRouteSegments(path string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "/")
+}
+
+func (g *generator) webServer() {
+	g.requireImport("fmt", "")
+	g.requireImport("io", "")
+	g.requireImport("net/http", "")
+
+	g.line("func trbWebServe(port int64) {")
+	g.indent++
+	g.line("handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {")
+	g.indent++
+	g.line("body, err := io.ReadAll(request.Body)")
+	g.line("if err != nil {")
+	g.indent++
+	g.line("http.Error(writer, \"invalid request body\", http.StatusBadRequest)")
+	g.line("return")
+	g.indent--
+	g.line("}")
+	g.line("response := trbWebDispatch(web.Request{")
+	g.indent++
+	g.line("Method: request.Method,")
+	g.line("Path: request.URL.Path,")
+	g.line("Headers: map[string][]string(request.Header.Clone()),")
+	g.line("Body: body,")
+	g.indent--
+	g.line("})")
+	g.line("for name, values := range response.Headers {")
+	g.indent++
+	g.line("for _, value := range values {")
+	g.indent++
+	g.line("writer.Header().Add(name, value)")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.line("writer.WriteHeader(int(response.Status))")
+	g.line("_, _ = writer.Write(response.Body)")
+	g.indent--
+	g.line("})")
+	g.line("if err := http.ListenAndServe(fmt.Sprintf(\":%d\", port), handler); err != nil {")
+	g.indent++
+	g.line("panic(err)")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 }

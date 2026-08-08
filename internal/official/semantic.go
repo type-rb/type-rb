@@ -38,6 +38,12 @@ func webSymbols() map[string]stdlib.Symbol {
 	jsonResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, jsonError}}
 	encodingResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), jsonError}}
 	return map[string]stdlib.Symbol{
+		"serve": {
+			Name:       "serve",
+			Intrinsic:  "trb.web.serve",
+			Parameters: []stdlib.Parameter{{Name: "port", Type: types.FromName("Integer"), Optional: true}},
+			Return:     types.FromName("Void"),
+		},
 		"request_json": {
 			Name:           "request_json",
 			Intrinsic:      "trb.web.request_json",

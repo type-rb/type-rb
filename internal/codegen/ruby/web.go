@@ -12,6 +12,7 @@ import (
 func (g *generator) integrations(extensions []ir.Extension) {
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
 		g.webDispatcher(manifest.Routes)
+		g.webServer()
 	}
 }
 
@@ -67,4 +68,82 @@ func rubyWebRouteSegments(path string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "/")
+}
+
+func (g *generator) webServer() {
+	g.line("", "")
+	g.line("def trb_web_serve(port)", "")
+	g.indent++
+	g.line(`require "socket"`, "")
+	g.line(`server = TCPServer.new("0.0.0.0", port)`, "")
+	g.line("loop do", "")
+	g.indent++
+	g.line("client = server.accept", "")
+	g.line("Thread.new(client) do |connection|", "")
+	g.indent++
+	g.line("begin", "")
+	g.indent++
+	g.line("loop do", "")
+	g.indent++
+	g.line(`request_line = connection.gets("\r\n")`, "")
+	g.line("break if request_line.nil?", "")
+	g.line("request_line = request_line.strip", "")
+	g.line("next if request_line.empty?", "")
+	g.line(`method, target, version = request_line.split(" ", 3)`, "")
+	g.line("headers = {}", "")
+	g.line(`while (line = connection.gets("\r\n"))`, "")
+	g.indent++
+	g.line(`line = line.delete_suffix("\r\n")`, "")
+	g.line("break if line.empty?", "")
+	g.line(`name, value = line.split(":", 2)`, "")
+	g.line("next if value.nil?", "")
+	g.line("key = name.downcase", "")
+	g.line("(headers[key] ||= []) << value.strip", "")
+	g.indent--
+	g.line("end", "")
+	g.line(`content_length = (headers["content-length"]&.first || "0").to_i`, "")
+	g.line(`body = content_length.positive? ? connection.read(content_length) : "".b`, "")
+	g.line(`path = target.split("?", 2).first`, "")
+	g.line("response = trb_web_dispatch(Request.new(method: method, path: path, headers: headers, body: body))", "")
+	g.line(`reason = { 200 => "OK", 201 => "Created", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 500 => "Internal Server Error" }[response.status] || "Response"`, "")
+	g.line("response_headers = response.headers.dup", "")
+	g.line(`response_headers["content-length"] ||= [response.body.bytesize.to_s]`, "")
+	g.line(`keep_alive = version == "HTTP/1.1" && headers.fetch("connection", [""]).first.downcase != "close"`, "")
+	g.line(`response_headers["connection"] ||= [keep_alive ? "keep-alive" : "close"]`, "")
+	g.line(`connection.write("HTTP/1.1 #{response.status} #{reason}\r\n")`, "")
+	g.line("response_headers.each do |name, values|", "")
+	g.indent++
+	g.line("values.each do |value|", "")
+	g.indent++
+	g.line(`connection.write("#{name}: #{value}\r\n")`, "")
+	g.indent--
+	g.line("end", "")
+	g.indent--
+	g.line("end", "")
+	g.line(`connection.write("\r\n")`, "")
+	g.line("connection.write(response.body)", "")
+	g.line("break unless keep_alive", "")
+	g.indent--
+	g.line("end", "")
+	g.indent--
+	g.line("rescue StandardError", "")
+	g.line("ensure", "")
+	g.indent++
+	g.line("connection.close", "")
+	g.indent--
+	g.line("end", "")
+	g.indent--
+	g.line("end", "")
+	g.indent--
+	g.line("end", "")
+	g.indent--
+	g.line("rescue Interrupt", "")
+	g.indent++
+	g.line("nil", "")
+	g.indent--
+	g.line("ensure", "")
+	g.indent++
+	g.line("server&.close", "")
+	g.indent--
+	g.line("end", "")
 }
