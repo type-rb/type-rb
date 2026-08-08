@@ -3711,6 +3711,101 @@ end
 	}
 }
 
+func TestRunOfficialWebResponseValidationAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web response validation run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web response validation run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-response-validation-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Request, Response } from trb/web
+import { dispatch } from trb/web/testing
+
+def print_response(response: Response)
+	puts(response.status)
+	puts(response.body.to_s())
+	puts(response.headers.key?("x-injected"))
+	return
+end
+
+def main()
+	["invalid-name", "invalid-value", "invalid-status", "valid"].each do |path|
+		print_response(dispatch(Request.new(
+			method: "GET",
+			path: "/" + path,
+			query_string: "",
+			headers: {},
+			body: "".to_bytes(),
+		)))
+	end
+	return
+end
+`
+		routes := map[string]string{
+			"invalid-name.trb": `import { Context, Response } from trb/web
+
+def get(_context: Context): Response
+	return Response.new(status: 200, headers: {"bad name" => ["value"]}, body: "unsafe".to_bytes())
+end
+`,
+			"invalid-value.trb": `import { Context, Response } from trb/web
+
+def get(_context: Context): Response
+	return Response.new(status: 200, headers: {"x-safe" => ["safe\r\nx-injected: yes"]}, body: "unsafe".to_bytes())
+end
+`,
+			"invalid-status.trb": `import { Context, Response } from trb/web
+
+def get(_context: Context): Response
+	return Response.new(status: 42, headers: {}, body: "unsafe".to_bytes())
+end
+`,
+			"valid.trb": `import { Context, Response } from trb/web
+
+def get(_context: Context): Response
+	return Response.new(status: 218, headers: {"x-valid_token" => ["value"]}, body: "valid".to_bytes())
+end
+`,
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for filename, source := range routes {
+			if err := os.WriteFile(filepath.Join(root, "src", "routes", filename), []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "500\n{\"error\":\"internal_server_error\"}\nfalse\n500\n{\"error\":\"internal_server_error\"}\nfalse\n500\n{\"error\":\"internal_server_error\"}\nfalse\n218\nvalid\nfalse\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web response validation output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunOfficialWebJSONLLoggerAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

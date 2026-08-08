@@ -126,7 +126,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			g.line(nextName+" = "+handlerName, "")
 			g.line(handlerName+" = ->(middleware_context) { "+middleware.TargetHandler+"(middleware_context, TrbWebNext.new("+nextName+")) }", "")
 		}
-		g.line("return "+handlerName+".call("+contextName+")", "")
+		g.line("return trb_web_finalize_response(request, "+handlerName+".call("+contextName+"))", "")
 		g.indent--
 		g.line("end", "")
 	}
@@ -139,7 +139,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("rescue StandardError", "")
 	g.indent++
-	g.line(`trb_web_finalize_response(request, Response.new(status: 500, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"internal_server_error\"}".b))`, "")
+	g.line(`trb_web_finalize_response(request, trb_web_internal_server_error)`, "")
 	g.indent--
 	g.line("end", "")
 	g.indent--
@@ -149,6 +149,12 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 func (g *generator) webProtocolResponses() {
 	g.line("TRB_WEB_MAX_BODY_BYTES = "+strconv.Itoa(webintegration.MaxBodyBytes), "")
 	g.line("", "")
+	g.line("def trb_web_internal_server_error", "")
+	g.indent++
+	g.line(`Response.new(status: 500, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"internal_server_error\"}".b)`, "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
 	g.line("def trb_web_payload_too_large", "")
 	g.indent++
 	g.line(`Response.new(status: 413, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"payload_too_large\"}".b)`, "")
@@ -157,8 +163,20 @@ func (g *generator) webProtocolResponses() {
 	g.line("", "")
 	g.line("def trb_web_finalize_response(request, response)", "")
 	g.indent++
+	g.line("response = trb_web_internal_server_error unless trb_web_valid_response?(response)", "")
 	g.line(`return response unless request.method.upcase == "HEAD"`, "")
 	g.line(`Response.new(status: response.status, headers: response.headers, body: "".b)`, "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
+	g.line("def trb_web_valid_response?(response)", "")
+	g.indent++
+	g.line("return false unless response.status.between?(100, 999)", "")
+	g.line(`response.headers.all? do |name, values|`, "")
+	g.indent++
+	g.line(`name.match?(/\A[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+\z/) && values.all? { |value| !value.include?("\r") && !value.include?("\n") }`, "")
+	g.indent--
+	g.line("end", "")
 	g.indent--
 	g.line("end", "")
 	g.line("", "")

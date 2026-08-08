@@ -70,6 +70,9 @@ header values.
 Portable `text`, `bytes`, `empty`, and `redirect` builders create common
 responses with consistent default statuses and content types. `with_status`
 returns a copy with a different status.
+Before a response leaves the portable dispatcher, every backend rejects invalid
+status codes, header names, and CR/LF-bearing header values through the same
+JSON 500 boundary.
 
 The compiler pipeline is:
 

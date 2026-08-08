@@ -64,9 +64,14 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("headRequest := strings.EqualFold(request.Method, \"HEAD\")")
 	g.line("defer func() {")
 	g.indent++
-	g.line("if recover() != nil {")
+	g.line("if recovered := recover(); recovered != nil {")
 	g.indent++
-	g.line("response = web.Response{Status: 500, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")}")
+	g.line("response = trbWebInternalServerError()")
+	g.indent--
+	g.line("}")
+	g.line("if !trbWebValidResponse(response) {")
+	g.indent++
+	g.line("response = trbWebInternalServerError()")
 	g.indent--
 	g.line("}")
 	g.line("if headRequest {")
@@ -221,6 +226,12 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 func (g *generator) webProtocolResponses() {
 	g.line("const trbWebMaxBodyBytes = " + strconv.Itoa(webintegration.MaxBodyBytes))
 	g.b.WriteByte('\n')
+	g.line("func trbWebInternalServerError() web.Response {")
+	g.indent++
+	g.line("return web.Response{Status: 500, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 	g.line("func trbWebBadRequest() web.Response {")
 	g.indent++
 	g.line("return web.Response{Status: 400, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"bad_request\\\"}\")}")
@@ -230,6 +241,47 @@ func (g *generator) webProtocolResponses() {
 	g.line("func trbWebPayloadTooLarge() web.Response {")
 	g.indent++
 	g.line("return web.Response{Status: 413, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"payload_too_large\\\"}\")}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func trbWebValidResponse(response web.Response) bool {")
+	g.indent++
+	g.line("if response.Status < 100 || response.Status > 999 {")
+	g.indent++
+	g.line("return false")
+	g.indent--
+	g.line("}")
+	g.line("for name, values := range response.Headers {")
+	g.indent++
+	g.line("if name == \"\" {")
+	g.indent++
+	g.line("return false")
+	g.indent--
+	g.line("}")
+	g.line("for index := 0; index < len(name); index++ {")
+	g.indent++
+	g.line("character := name[index]")
+	g.line("letterOrDigit := character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9'")
+	g.line("symbol := strings.ContainsRune(\"!#$%&'*+-.^_`|~\", rune(character))")
+	g.line("if !letterOrDigit && !symbol {")
+	g.indent++
+	g.line("return false")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.line("for _, value := range values {")
+	g.indent++
+	g.line("if strings.ContainsAny(value, \"\\r\\n\") {")
+	g.indent++
+	g.line("return false")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.line("return true")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
