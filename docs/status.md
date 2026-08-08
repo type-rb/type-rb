@@ -80,7 +80,9 @@ methods through `Allow`.
 Request header lookup is case-insensitive; `header_value` rejects missing and
 duplicate values instead of choosing one implicitly. Portable cookie parsing
 preserves header order, duplicate names, and opaque values without delegating
-semantics to the target runtime.
+semantics to the target runtime. `cookie_values` returns all matching values,
+while strict `cookie_value` reports missing and duplicate names through a typed
+error.
 Responses can replace, append, remove, or inspect case-insensitive header values
 without mutating the original response. `vary` composes cache keys without
 duplicating an existing field.
