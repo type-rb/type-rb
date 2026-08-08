@@ -114,6 +114,21 @@ func Analyze(sources []Source, resolutions map[string]resolver.Result, sourceRoo
 			}}
 		}
 	}
+	for _, route := range UniquePathRoutes(routes) {
+		issues = append(issues, validatePathParameterCalls(route, sourceProgram(sources, route.ModulePath), resolutions[route.ModulePath])...)
+	}
+	if len(issues) > 0 {
+		sort.Slice(issues, func(i, j int) bool {
+			if issues[i].Filename != issues[j].Filename {
+				return issues[i].Filename < issues[j].Filename
+			}
+			if issues[i].Span.Start.Offset != issues[j].Span.Start.Offset {
+				return issues[i].Span.Start.Offset < issues[j].Span.Start.Offset
+			}
+			return issues[i].Message < issues[j].Message
+		})
+		return &Manifest{Routes: routes, Middlewares: middlewares}, issues
+	}
 	for _, middleware := range middlewares {
 		program := sourceProgram(sources, middleware.ModulePath)
 		method := topLevelMethod(program, middleware.Handler)

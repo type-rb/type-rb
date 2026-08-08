@@ -190,6 +190,111 @@ end
 	}
 }
 
+func TestCompileProjectValidatesWebPathParameterCalls(t *testing.T) {
+	main := SourceUnit{
+		Filename:   "/project/src/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source:     []byte("def main()\n\treturn\nend\n"),
+	}
+	tests := []struct {
+		name       string
+		filename   string
+		modulePath string
+		source     string
+		want       string
+	}{
+		{
+			name:       "ordinary parameter",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, path_param, text } from trb/web
+
+def get(context: Context): Response
+	return text(path_param(context, "id"))
+end
+`,
+		},
+		{
+			name:       "catch-all parameter",
+			filename:   "/project/src/routes/files/[...path].trb",
+			modulePath: "routes/files/[...path]",
+			source: `import { Context, Response, path_param, text } from trb/web
+
+def get(context: Context): Response
+	return text(path_param(context, "path"))
+end
+`,
+		},
+		{
+			name:       "unrelated local function",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, text } from trb/web
+
+def path_param(context: Context, name: String): String
+	puts(context.request.path)
+	return name
+end
+
+def get(context: Context): Response
+	name := "id"
+	return text(path_param(context, name))
+end
+`,
+		},
+		{
+			name:       "dynamic parameter name",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, path_param, text } from trb/web
+
+def get(context: Context): Response
+	name := "id"
+	return text(path_param(context, name))
+end
+`,
+			want: "path_param() name must be a string literal in a route file",
+		},
+		{
+			name:       "undeclared parameter",
+			filename:   "/project/src/routes/files/[...path].trb",
+			modulePath: "routes/files/[...path]",
+			source: `import { Context, Response, path_param, text } from trb/web
+
+def get(context: Context): Response
+	return text(path_param(context, "slug"))
+end
+`,
+			want: `path_param() references undeclared route parameter "slug"`,
+		},
+	}
+
+	for _, test := range tests {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			t.Run(test.name+"/"+mode, func(t *testing.T) {
+				route := SourceUnit{Filename: test.filename, ModulePath: test.modulePath, Package: "routes", Source: []byte(test.source)}
+				_, err := CompileProject([]SourceUnit{main, route}, Options{
+					Mode:        mode,
+					GoModule:    "example.com/web-path-parameters",
+					RubyLoader:  "require_relative",
+					SourceRoot:  "/project/src",
+					ProjectRoot: "/project",
+				})
+				if test.want == "" {
+					if err != nil {
+						t.Fatal(err)
+					}
+					return
+				}
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestCompileProjectRejectsAmbiguousWebRoutes(t *testing.T) {
 	routeSource := []byte(`import { Response } from trb/web
 
