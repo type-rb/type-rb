@@ -26,6 +26,11 @@ enum HeaderValueError
 	Duplicate(name: String)
 end
 
+enum CookieValueError
+	Missing(name: String)
+	Duplicate(name: String)
+end
+
 enum RequestError
 	MissingContentType
 	DuplicateContentType
@@ -348,4 +353,25 @@ def cookie(request: Request, name: String): String?
 		end
 	end
 	return nil
+end
+
+def cookie_values(request: Request, name: String): Array<String>
+	mut values: Array<String> := []
+	cookies(request).each do |candidate|
+		if candidate.name == name
+			values.push(candidate.value)
+		end
+	end
+	return values
+end
+
+def cookie_value(request: Request, name: String): Result<String, CookieValueError>
+	values := cookie_values(request, name)
+	if values.empty?()
+		return Result<String, CookieValueError>::Err(CookieValueError::Missing(name))
+	end
+	if values.size() > 1
+		return Result<String, CookieValueError>::Err(CookieValueError::Duplicate(name))
+	end
+	return Result<String, CookieValueError>::Ok(values[0])
 end

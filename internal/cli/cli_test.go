@@ -3096,7 +3096,17 @@ func TestRunOfficialWebRequestHeadersAndCookiesAcrossAvailableBackends(t *testin
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { HeaderValueError, Request, cookie, cookies, header_value, header_values } from trb/web
+		mainSource := `import {
+	CookieValueError,
+	HeaderValueError,
+	Request,
+	cookie,
+	cookie_value,
+	cookie_values,
+	cookies,
+	header_value,
+	header_values,
+} from trb/web
 import { Result } from trb/std/result
 
 def render_header_value(result: Result<String, HeaderValueError>): String
@@ -3108,6 +3118,20 @@ def render_header_value(result: Result<String, HeaderValueError>): String
 		when HeaderValueError::Missing(name)
 			return "missing:" + name
 		when HeaderValueError::Duplicate(name)
+			return "duplicate:" + name
+		end
+	end
+end
+
+def render_cookie_value(result: Result<String, CookieValueError>): String
+	case result
+	when Result::Ok(value)
+		return "ok:" + value
+	when Result::Err(error)
+		case error
+		when CookieValueError::Missing(name)
+			return "missing:" + name
+		when CookieValueError::Duplicate(name)
 			return "duplicate:" + name
 		end
 	end
@@ -3136,6 +3160,10 @@ def main()
 	parsed.each do |value|
 		puts(value.name + "=" + value.value)
 	end
+	puts(cookie_values(request, "tag").size())
+	puts(render_cookie_value(cookie_value(request, "session")))
+	puts(render_cookie_value(cookie_value(request, "tag")))
+	puts(render_cookie_value(cookie_value(request, "missing")))
 	puts(cookie(request, "tag") == nil)
 	puts(cookie(request, "missing") == nil)
 	return
@@ -3152,7 +3180,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "2\nok:req-1\nduplicate:cookie\nmissing:missing\n5\nsession=abc\ntheme=dark\ntag=first\ntag=second\ntoken=a=b\nfalse\ntrue\n"
+		want := "2\nok:req-1\nduplicate:cookie\nmissing:missing\n5\nsession=abc\ntheme=dark\ntag=first\ntag=second\ntoken=a=b\n2\nok:abc\nduplicate:tag\nmissing:missing\nfalse\ntrue\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web cookie output: want %q, got %q", mode, want, stdout.String())
 		}
