@@ -210,6 +210,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webRequestJSON(call, arguments[0])
 	case "trb.web.json":
 		return g.webJSON(call, arguments)
+	case "trb.web.testing.dispatch":
+		return "trbWebDispatch(" + arguments[0] + ")"
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"

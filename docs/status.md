@@ -33,6 +33,11 @@ The same compiler and evaluator power the local and hosted playground and tour.
 The repository also publishes a reusable TextMate grammar for lexical editor
 highlighting. Command details belong in the [CLI reference](cli.md).
 
+The early official `trb/web` package discovers file-based routes at compile
+time and runs typed request, path-parameter, JSON decode, and JSON response
+handlers through the same socketless dispatcher in all three backends. Network
+server lifecycle and middleware are still under development.
+
 The compiler pipeline is:
 
 ```text

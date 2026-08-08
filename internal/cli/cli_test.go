@@ -2948,7 +2948,23 @@ func TestRunOfficialWebJSONAPIsAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		source := `import { Context, Request, json, path_param, request_json } from trb/web
+		mainSource := `import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def main()
+	request := Request.new(
+		method: "POST",
+		path: "/todos/7",
+		headers: {},
+		body: "{\"title\":\"ship\"}".to_bytes(),
+	)
+	response := dispatch(request)
+	puts(response.status)
+	puts(response.body.to_s())
+	return
+end
+`
+		routeSource := `import { Context, Response, json, path_param, request_json } from trb/web
 import { Result } from trb/std/result
 
 record TodoRequest
@@ -2960,29 +2976,27 @@ record TodoResponse
 	title: String
 end
 
-def main()
-	request := Request.new(
-		method: "POST",
-		path: "/todos/7",
-		headers: {},
-		body: "{\"title\":\"ship\"}".to_bytes(),
-	)
-	context := Context.new(request: request, path_parameters: { "id": "7" })
-	case request_json<TodoRequest>(request)
+def post(context: Context): Response
+	id := path_param(context, "id")
+	case request_json<TodoRequest>(context.request)
 	when Result::Ok(payload)
-		response := json(TodoResponse.new(id: path_param(context, "id"), title: payload.title), 201)
-		puts(response.status)
-		puts(response.body.to_s())
-	when Result::Err(error)
-		puts(error.message)
+		return json(TodoResponse.new(id: id, title: payload.title), 201)
+	when Result::Err(_error)
+		return json(TodoResponse.new(id: id, title: "invalid"), 400)
 	end
-	return
 end
 `
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		routePath := filepath.Join(root, "src", "routes", "todos", "[id].trb")
+		if err := os.MkdirAll(filepath.Dir(routePath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(routePath, []byte(routeSource), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		var stdout, stderr bytes.Buffer

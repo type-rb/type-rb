@@ -13,8 +13,22 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 		return map[string]stdlib.Symbol{}
 	case "trb.web":
 		return webSymbols()
+	case "trb.web.testing":
+		return webTestingSymbols()
 	default:
 		panic(fmt.Sprintf("unknown official package semantic provider %q", provider))
+	}
+}
+
+func webTestingSymbols() map[string]stdlib.Symbol {
+	return map[string]stdlib.Symbol{
+		"dispatch": {
+			Name:               "dispatch",
+			Intrinsic:          "trb.web.testing.dispatch",
+			RuntimeIndependent: true,
+			Parameters:         []stdlib.Parameter{{Name: "request", Type: types.FromName("Request")}},
+			Return:             types.FromName("Response"),
+		},
 	}
 }
 

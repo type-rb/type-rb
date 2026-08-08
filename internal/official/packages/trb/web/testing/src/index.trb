@@ -1,0 +1,6 @@
+import { Request, Response } from trb/web
+
+record _DispatchContract
+	request: Request
+	response: Response
+end

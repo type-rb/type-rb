@@ -162,6 +162,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.tsWebRequestJSON(call, arguments[0])
 	case "trb.web.json":
 		return g.tsWebJSON(call, arguments)
+	case "trb.web.testing.dispatch":
+		return "trb_web_dispatch(" + arguments[0] + ")"
 	case "trb.std.strings.length":
 		return "Array.from(" + arguments[0] + ").length"
 	case "trb.std.strings.empty":

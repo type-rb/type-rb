@@ -1,0 +1,8 @@
+{
+  "name": "trb/web/testing",
+  "version": "0.1.0",
+  "module": "trb/web/testing/index",
+  "source": "src/index.trb",
+  "semanticProvider": "trb.web.testing",
+  "nativeDependencies": {}
+}
