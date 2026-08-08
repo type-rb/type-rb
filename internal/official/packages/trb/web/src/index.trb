@@ -34,6 +34,27 @@ enum RequestError
 	InvalidJson(error: JsonError)
 end
 
+record ServerConfig
+	host: String
+	port: Integer
+	body_limit_bytes: Integer
+	shutdown_timeout_milliseconds: Integer
+end
+
+def configure_server(
+		host:: String = "0.0.0.0",
+		port:: Integer = 3000,
+		body_limit_bytes:: Integer = 1048576,
+		shutdown_timeout_milliseconds:: Integer = 10000,
+	): ServerConfig
+	return ServerConfig.new(
+		host: host,
+		port: port,
+		body_limit_bytes: body_limit_bytes,
+		shutdown_timeout_milliseconds: shutdown_timeout_milliseconds,
+	)
+end
+
 enum CookieSameSite
 	Lax
 	Strict

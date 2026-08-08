@@ -61,7 +61,13 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	g.webProtocolResponses()
 
-	g.line("func trbWebDispatch(request web.Request) (response web.Response) {")
+	g.line("func trbWebDispatch(request web.Request) web.Response {")
+	g.indent++
+	g.line("return trbWebDispatchWithBodyLimit(request, trbWebDefaultMaxBodyBytes)")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func trbWebDispatchWithBodyLimit(request web.Request, maxBodyBytes int) (response web.Response) {")
 	g.indent++
 	g.line("request = trbWebNormalizeRequest(request)")
 	g.line("headRequest := request.Method == \"HEAD\"")
@@ -91,7 +97,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("}")
 	g.line("request.Path = normalizedPath")
-	g.line("if len(request.Body) > trbWebMaxBodyBytes {")
+	g.line("if len(request.Body) > maxBodyBytes {")
 	g.indent++
 	g.line("return trbWebPayloadTooLarge()")
 	g.indent--
@@ -233,7 +239,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 }
 
 func (g *generator) webProtocolResponses() {
-	g.line("const trbWebMaxBodyBytes = " + strconv.Itoa(webintegration.MaxBodyBytes))
+	g.line("const trbWebDefaultMaxBodyBytes = " + strconv.Itoa(webintegration.MaxBodyBytes))
 	g.b.WriteByte('\n')
 	g.line("func trbWebNormalizeRequest(request web.Request) web.Request {")
 	g.indent++
@@ -371,16 +377,23 @@ func webRouteSegments(path string) []string {
 }
 
 func (g *generator) webServer() {
+	g.requireImport("context", "")
 	g.requireImport("errors", "")
-	g.requireImport("fmt", "")
 	g.requireImport("io", "")
+	g.requireImport("net", "")
 	g.requireImport("net/http", "")
+	g.requireImport("os", "")
+	g.requireImport("os/signal", "signal")
+	g.requireImport("strconv", "")
+	g.requireImport("syscall", "")
+	g.requireImport("time", "")
 
-	g.line("func trbWebServe(port int64) {")
+	g.line("func trbWebServe(config web.ServerConfig) {")
 	g.indent++
+	g.line("trbWebValidateServerConfig(config)")
 	g.line("handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {")
 	g.indent++
-	g.line("body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, trbWebMaxBodyBytes))")
+	g.line("body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, int64(config.BodyLimitBytes)))")
 	g.line("var response web.Response")
 	g.line("if err != nil {")
 	g.indent++
@@ -397,7 +410,7 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("} else {")
 	g.indent++
-	g.line("response = trbWebDispatch(web.Request{")
+	g.line("response = trbWebDispatchWithBodyLimit(web.Request{")
 	g.indent++
 	g.line("Method: request.Method,")
 	g.line("Path: request.URL.EscapedPath(),")
@@ -405,7 +418,7 @@ func (g *generator) webServer() {
 	g.line("Headers: map[string][]string(request.Header.Clone()),")
 	g.line("Body: body,")
 	g.indent--
-	g.line("})")
+	g.line("}, config.BodyLimitBytes)")
 	g.indent--
 	g.line("}")
 	g.line("for name, values := range response.Headers {")
@@ -421,9 +434,64 @@ func (g *generator) webServer() {
 	g.line("_, _ = writer.Write(response.Body)")
 	g.indent--
 	g.line("})")
-	g.line("if err := http.ListenAndServe(fmt.Sprintf(\":%d\", port), handler); err != nil {")
+	g.line("server := &http.Server{Addr: net.JoinHostPort(config.Host, strconv.Itoa(config.Port)), Handler: handler}")
+	g.line("signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)")
+	g.line("defer stopSignals()")
+	g.line("serveErrors := make(chan error, 1)")
+	g.line("go func() {")
+	g.indent++
+	g.line("serveErrors <- server.ListenAndServe()")
+	g.indent--
+	g.line("}()")
+	g.line("select {")
+	g.line("case err := <-serveErrors:")
+	g.indent++
+	g.line("if err != nil && !errors.Is(err, http.ErrServerClosed) {")
 	g.indent++
 	g.line("panic(err)")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("case <-signalContext.Done():")
+	g.indent++
+	g.line("shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), time.Duration(config.ShutdownTimeoutMilliseconds)*time.Millisecond)")
+	g.line("shutdownErr := server.Shutdown(shutdownContext)")
+	g.line("cancelShutdown()")
+	g.line("if shutdownErr != nil {")
+	g.indent++
+	g.line("_ = server.Close()")
+	g.indent--
+	g.line("}")
+	g.line("if err := <-serveErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {")
+	g.indent++
+	g.line("panic(err)")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func trbWebValidateServerConfig(config web.ServerConfig) {")
+	g.indent++
+	g.line("if strings.TrimSpace(config.Host) == \"\" {")
+	g.indent++
+	g.line("panic(\"trb/web ServerConfig.host must not be empty\")")
+	g.indent--
+	g.line("}")
+	g.line("if config.Port < 1 || config.Port > 65535 {")
+	g.indent++
+	g.line("panic(\"trb/web ServerConfig.port must be between 1 and 65535\")")
+	g.indent--
+	g.line("}")
+	g.line("if config.BodyLimitBytes < 1 {")
+	g.indent++
+	g.line("panic(\"trb/web ServerConfig.body_limit_bytes must be greater than zero\")")
+	g.indent--
+	g.line("}")
+	g.line("if config.ShutdownTimeoutMilliseconds < 0 {")
+	g.indent++
+	g.line("panic(\"trb/web ServerConfig.shutdown_timeout_milliseconds must not be negative\")")
 	g.indent--
 	g.line("}")
 	g.indent--

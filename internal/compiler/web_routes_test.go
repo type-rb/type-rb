@@ -13,10 +13,10 @@ func TestCompileProjectAttachesWebRouteManifestToMain(t *testing.T) {
 			Filename:   "/project/src/main.trb",
 			ModulePath: "main",
 			Package:    "main",
-			Source: []byte(`import { serve } from trb/web
+			Source: []byte(`import { configure_server, serve } from trb/web
 
 def main()
-	serve(4100)
+	serve(configure_server(host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500))
 	return
 end
 `),
@@ -127,17 +127,19 @@ end
 			if main == nil {
 				t.Fatal("main artifact was not generated")
 			}
-			var target string
+			var targets []string
 			switch mode {
 			case "go":
-				target = "trbWebServe(3000)"
+				targets = []string{`trbWebServe(web.ServerConfig{Host: "0.0.0.0", Port: 3000, BodyLimitBytes: 1048576, ShutdownTimeoutMilliseconds: 10000})`}
 			case "ruby":
-				target = "trb_web_serve(3000)"
+				targets = []string{`trb_web_serve(ServerConfig.new(host: "0.0.0.0", port: 3000, body_limit_bytes: 1048576, shutdown_timeout_milliseconds: 10000))`}
 			case "typescript":
-				target = "trb_web_serve(3000);"
+				targets = []string{`trb_web_serve({ host: "0.0.0.0", port: 3000, body_limit_bytes: 1048576, shutdown_timeout_milliseconds: 10000 });`}
 			}
-			if !strings.Contains(string(main.Output), target) {
-				t.Fatalf("%s output does not contain %q:\n%s", mode, target, main.Output)
+			for _, target := range targets {
+				if !strings.Contains(string(main.Output), target) {
+					t.Fatalf("%s output does not contain %q:\n%s", mode, target, main.Output)
+				}
 			}
 		})
 	}
@@ -253,11 +255,11 @@ func assertWebServerTarget(t *testing.T, mode string, artifact *Artifact) {
 	var targets []string
 	switch mode {
 	case "go":
-		targets = []string{"func trbWebServe(port int64)", "http.MaxBytesReader(writer, request.Body, trbWebMaxBodyBytes)", "request.URL.EscapedPath()", "request.URL.RawQuery", "trbWebServe(4100)"}
+		targets = []string{"func trbWebServe(config web.ServerConfig)", "http.MaxBytesReader(writer, request.Body, int64(config.BodyLimitBytes))", "request.URL.EscapedPath()", "request.URL.RawQuery", `net.JoinHostPort(config.Host, strconv.Itoa(config.Port))`, "signal.NotifyContext", `trbWebServe(web.ServerConfig{Host: "127.0.0.1", Port: 4100, BodyLimitBytes: 2048, ShutdownTimeoutMilliseconds: 500})`}
 	case "ruby":
-		targets = []string{"def trb_web_serve(port)", "content_length > TRB_WEB_MAX_BODY_BYTES", `path, query_string = target.split("?", 2)`, "trb_web_serve(4100)"}
+		targets = []string{"def trb_web_serve(config)", "content_length > config.body_limit_bytes", `path, query_string = target.split("?", 2)`, "Signal.trap(signal)", `TCPServer.new(config.host, config.port)`, `trb_web_serve(ServerConfig.new(host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500))`}
 	case "typescript":
-		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(port: number)", "if (size > TRB_WEB_MAX_BODY_BYTES)", `const target = incoming.url ?? "/";`, "path, query_string, headers, body", "trb_web_serve(4100);"}
+		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(config: TrbWebServerConfig)", "if (size > config.body_limit_bytes)", `const target = incoming.url ?? "/";`, "path, query_string, headers, body", `process.once("SIGTERM", shutdown)`, `server.listen(config.port, config.host)`, `trb_web_serve({ host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500 });`}
 	}
 	targets = append(targets, "payload_too_large")
 	for _, target := range targets {

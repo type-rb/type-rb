@@ -691,9 +691,6 @@ func (g *generator) expr(expression ir.Expression) string {
 			if argument.Splat != "" {
 				value = "..." + value
 			}
-			if argument.Name != "" {
-				value = argument.Name + ": " + value
-			}
 			parts[i] = value
 		}
 		args := strings.Join(parts, ", ")

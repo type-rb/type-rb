@@ -22,6 +22,7 @@ type Parameter struct {
 	Name     string
 	Type     types.Type
 	Optional bool
+	Keyword  bool
 	Mutable  bool
 	Exact    bool
 }
