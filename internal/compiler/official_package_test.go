@@ -45,6 +45,30 @@ end
 	}
 }
 
+func TestOfficialWebResponseHeadersRejectNonStringValues(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Response, with_header } from trb/web
+
+def response(): Response
+	base := Response.new(status: 204, headers: {}, body: "".to_bytes())
+	return with_header(base, "x-count", 1)
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
+			if err == nil || !strings.Contains(err.Error(), "argument 3 to with_header() has type Integer, expected String") {
+				t.Fatalf("unexpected diagnostic: %v", err)
+			}
+		})
+	}
+}
+
 func TestUserSourceCannotClaimOfficialPackageNamespace(t *testing.T) {
 	_, err := CompileProject([]SourceUnit{{
 		Filename:   "/project/trb/web/index.trb",

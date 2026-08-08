@@ -25,6 +25,36 @@ record Response
 	body: Bytes
 end
 
+def with_header(response: Response, name: String, value: String): Response
+	normalized_name := name.downcase()
+	mut headers: Hash<String, Array<String>> := {}
+	response.headers.each do |header_name, values|
+		if header_name.downcase() != normalized_name
+			headers[header_name] = values.dup()
+		end
+	end
+	headers[normalized_name] = [value]
+	return Response.new(status: response.status, headers: headers, body: response.body)
+end
+
+def add_header(response: Response, name: String, value: String): Response
+	normalized_name := name.downcase()
+	mut headers: Hash<String, Array<String>> := {}
+	mut added_values: Array<String> := []
+	response.headers.each do |header_name, values|
+		if header_name.downcase() == normalized_name
+			values.each do |existing_value|
+				added_values.push(existing_value)
+			end
+		else
+			headers[header_name] = values.dup()
+		end
+	end
+	added_values.push(value)
+	headers[normalized_name] = added_values
+	return Response.new(status: response.status, headers: headers, body: response.body)
+end
+
 interface Next
 	call(context: Context): Response
 end
