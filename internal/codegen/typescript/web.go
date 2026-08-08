@@ -48,6 +48,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("type TrbWebRequest = { method: string; path: string; headers: Record<string, string[]>; body: Uint8Array };")
 	g.line("type TrbWebContext = { request: TrbWebRequest; path_parameters: Record<string, string> };")
 	g.line("type TrbWebResponse = { status: number; headers: Record<string, string[]>; body: Uint8Array };")
+	g.webProtocolResponses()
 	if len(manifest.Middlewares) > 0 {
 		g.webNext()
 	}
@@ -55,6 +56,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("try {")
 	g.indent++
+	g.line("if (request.body.byteLength > TRB_WEB_MAX_BODY_BYTES) return trb_web_payload_too_large();")
 	g.line("const method = request.method.toUpperCase();")
 	g.line(`const segments = request.path.split("/").filter((segment) => segment.length > 0);`)
 	g.line("const allowed_methods: string[] = [];")
@@ -114,6 +116,15 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("}")
 }
 
+func (g *generator) webProtocolResponses() {
+	g.line("const TRB_WEB_MAX_BODY_BYTES = " + strconv.Itoa(webintegration.MaxBodyBytes) + ";")
+	g.line("function trb_web_payload_too_large(): TrbWebResponse {")
+	g.indent++
+	g.line(`return { status: 413, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"payload_too_large\"}") };`)
+	g.indent--
+	g.line("}")
+}
+
 func (g *generator) webNext() {
 	g.line("class TrbWebNext {")
 	g.indent++
@@ -167,12 +178,28 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("}")
 	g.line("const chunks: Uint8Array[] = [];")
+	g.line("let size = 0;")
+	g.line("let body_too_large = false;")
 	g.line("for await (const chunk of incoming) {")
 	g.indent++
-	g.line(`chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk));`)
+	g.line(`const bytes = typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk);`)
+	g.line("size += bytes.byteLength;")
+	g.line("if (size > TRB_WEB_MAX_BODY_BYTES) {")
+	g.indent++
+	g.line("body_too_large = true;")
+	g.line("continue;")
 	g.indent--
 	g.line("}")
-	g.line("const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);")
+	g.line("chunks.push(bytes);")
+	g.indent--
+	g.line("}")
+	g.line("let response: TrbWebResponse;")
+	g.line("if (body_too_large) {")
+	g.indent++
+	g.line("response = trb_web_payload_too_large();")
+	g.indent--
+	g.line("} else {")
+	g.indent++
 	g.line("const body = new Uint8Array(size);")
 	g.line("let offset = 0;")
 	g.line("for (const chunk of chunks) {")
@@ -182,7 +209,9 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("}")
 	g.line(`const path = new URL(incoming.url ?? "/", "http://localhost").pathname;`)
-	g.line(`const response = trb_web_dispatch({ method: incoming.method ?? "GET", path, headers, body });`)
+	g.line(`response = trb_web_dispatch({ method: incoming.method ?? "GET", path, headers, body });`)
+	g.indent--
+	g.line("}")
 	g.line("for (const [name, values] of Object.entries(response.headers)) {")
 	g.indent++
 	g.line("writer.setHeader(name, values);")

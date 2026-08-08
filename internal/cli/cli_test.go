@@ -2966,6 +2966,13 @@ def main()
 	puts(method_not_allowed.status)
 	puts(method_not_allowed.headers["allow"][0])
 	puts(method_not_allowed.body.to_s())
+	mut oversized_body := "a".to_bytes()
+	(0...21).each do |_index|
+		oversized_body = oversized_body.concat(oversized_body)
+	end
+	payload_too_large := dispatch(Request.new(method: "POST", path: "/todos/7", headers: {}, body: oversized_body))
+	puts(payload_too_large.status)
+	puts(payload_too_large.body.to_s())
 	return
 end
 `
@@ -3033,7 +3040,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship\"}\n405\nPOST\n{\"error\":\"method_not_allowed\"}\n"; stdout.String() != want {
+		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship\"}\n405\nPOST\n{\"error\":\"method_not_allowed\"}\n413\n{\"error\":\"payload_too_large\"}\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web JSON output: want %q, got %q", mode, want, stdout.String())
 		}
 	}

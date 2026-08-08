@@ -39,11 +39,13 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	if len(manifest.Middlewares) > 0 {
 		g.webNext()
 	}
+	g.webProtocolResponses()
 
 	g.line("def trb_web_dispatch(request)", "")
 	g.indent++
 	g.line("begin", "")
 	g.indent++
+	g.line("return trb_web_payload_too_large if request.body.bytesize > TRB_WEB_MAX_BODY_BYTES", "")
 	g.line("method = request.method.upcase", "")
 	g.line(`segments = request.path.split("/").reject(&:empty?)`, "")
 	g.line("allowed_methods = []", "")
@@ -101,6 +103,17 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("end", "")
 	g.indent--
 	g.line("end", "")
+}
+
+func (g *generator) webProtocolResponses() {
+	g.line("TRB_WEB_MAX_BODY_BYTES = "+strconv.Itoa(webintegration.MaxBodyBytes), "")
+	g.line("", "")
+	g.line("def trb_web_payload_too_large", "")
+	g.indent++
+	g.line(`Response.new(status: 413, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"payload_too_large\"}".b)`, "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
 }
 
 func (g *generator) webNext() {
@@ -165,13 +178,22 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("end", "")
 	g.line(`content_length = (headers["content-length"]&.first || "0").to_i`, "")
+	g.line("body_too_large = content_length > TRB_WEB_MAX_BODY_BYTES", "")
+	g.line("if body_too_large", "")
+	g.indent++
+	g.line("response = trb_web_payload_too_large", "")
+	g.indent--
+	g.line("else", "")
+	g.indent++
 	g.line(`body = content_length.positive? ? connection.read(content_length) : "".b`, "")
 	g.line(`path = target.split("?", 2).first`, "")
 	g.line("response = trb_web_dispatch(Request.new(method: method, path: path, headers: headers, body: body))", "")
-	g.line(`reason = { 200 => "OK", 201 => "Created", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 500 => "Internal Server Error" }[response.status] || "Response"`, "")
+	g.indent--
+	g.line("end", "")
+	g.line(`reason = { 200 => "OK", 201 => "Created", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 405 => "Method Not Allowed", 413 => "Content Too Large", 500 => "Internal Server Error" }[response.status] || "Response"`, "")
 	g.line("response_headers = response.headers.dup", "")
 	g.line(`response_headers["content-length"] ||= [response.body.bytesize.to_s]`, "")
-	g.line(`keep_alive = version == "HTTP/1.1" && headers.fetch("connection", [""]).first.downcase != "close"`, "")
+	g.line(`keep_alive = !body_too_large && version == "HTTP/1.1" && headers.fetch("connection", [""]).first.downcase != "close"`, "")
 	g.line(`response_headers["connection"] ||= [keep_alive ? "keep-alive" : "close"]`, "")
 	g.line(`connection.write("HTTP/1.1 #{response.status} #{reason}\r\n")`, "")
 	g.line("response_headers.each do |name, values|", "")
