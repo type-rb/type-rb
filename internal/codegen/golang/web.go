@@ -59,11 +59,17 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 
 	g.line("func trbWebDispatch(request web.Request) (response web.Response) {")
 	g.indent++
+	g.line("headRequest := strings.EqualFold(request.Method, \"HEAD\")")
 	g.line("defer func() {")
 	g.indent++
 	g.line("if recover() != nil {")
 	g.indent++
 	g.line("response = web.Response{Status: 500, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")}")
+	g.indent--
+	g.line("}")
+	g.line("if headRequest {")
+	g.indent++
+	g.line("response.Body = []byte{}")
 	g.indent--
 	g.line("}")
 	g.indent--
@@ -82,6 +88,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("}")
 	g.line("allowedMethods := []string{}")
+	g.line("explicitHead := false")
 	for _, route := range routes {
 		routeSegments := webRouteSegments(route.Path)
 		condition := []string{"len(segments) == " + strconv.Itoa(len(routeSegments))}
@@ -93,12 +100,26 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		g.line("if " + strings.Join(condition, " && ") + " {")
 		g.indent++
 		g.line("allowedMethods = append(allowedMethods, " + strconv.Quote(route.Method) + ")")
+		if route.Method == "GET" {
+			g.line("allowedMethods = append(allowedMethods, \"HEAD\")")
+		}
+		if route.Method == "HEAD" {
+			g.line("explicitHead = true")
+		}
 		g.indent--
 		g.line("}")
 	}
+	g.line("slices.Sort(allowedMethods)")
+	g.line("allowedMethods = slices.Compact(allowedMethods)")
+	g.line("dispatchMethod := method")
+	g.line("if method == \"HEAD\" && !explicitHead && slices.Contains(allowedMethods, \"GET\") {")
+	g.indent++
+	g.line("dispatchMethod = \"GET\"")
+	g.indent--
+	g.line("}")
 	for routeIndex, route := range routes {
 		segments := webRouteSegments(route.Path)
-		condition := []string{"method == " + strconv.Quote(route.Method), "len(segments) == " + strconv.Itoa(len(segments))}
+		condition := []string{"dispatchMethod == " + strconv.Quote(route.Method), "len(segments) == " + strconv.Itoa(len(segments))}
 		for index, segment := range segments {
 			if !strings.HasPrefix(segment, ":") {
 				condition = append(condition, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
@@ -136,7 +157,6 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	g.line("if len(allowedMethods) > 0 {")
 	g.indent++
-	g.line("slices.Sort(allowedMethods)")
 	g.line("return web.Response{Status: 405, Headers: map[string][]string{\"allow\": []string{strings.Join(allowedMethods, \", \")}, \"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"method_not_allowed\\\"}\")}")
 	g.indent--
 	g.line("}")

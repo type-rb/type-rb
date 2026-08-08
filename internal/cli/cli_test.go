@@ -3052,6 +3052,110 @@ end
 	}
 }
 
+func TestRunOfficialWebHeadAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby trb/web HEAD run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript trb/web HEAD run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-web-head-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		mainSource := `import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def request(method: String, path: String): Request
+	return Request.new(method: method, path: path, query_string: "", headers: {}, body: "".to_bytes())
+end
+
+def main()
+	fallback := dispatch(request("HEAD", "/fallback"))
+	puts(fallback.status)
+	puts(fallback.body.size())
+	puts(fallback.headers["x-handler"][0])
+	explicit := dispatch(request("HEAD", "/explicit"))
+	puts(explicit.status)
+	puts(explicit.body.size())
+	puts(explicit.headers["x-handler"][0])
+	unsupported := dispatch(request("POST", "/fallback"))
+	puts(unsupported.status)
+	puts(unsupported.headers["allow"][0])
+	puts(unsupported.body.to_s())
+	missing := dispatch(request("HEAD", "/missing"))
+	puts(missing.status)
+	puts(missing.body.size())
+	return
+end
+`
+		fallbackRouteSource := `import { Context, Response } from trb/web
+
+def get(_context: Context): Response
+	puts("fallback:get")
+	return Response.new(status: 200, headers: {"x-handler" => ["get"]}, body: "fallback".to_bytes())
+end
+`
+		explicitRouteSource := `import { Context, Response } from trb/web
+
+def get(_context: Context): Response
+	puts("explicit:get")
+	return Response.new(status: 200, headers: {"x-handler" => ["get"]}, body: "get".to_bytes())
+end
+
+def head(_context: Context): Response
+	puts("explicit:head")
+	return Response.new(status: 202, headers: {"x-handler" => ["head"]}, body: "head".to_bytes())
+end
+`
+		middlewareSource := `import { Context, Next, Response } from trb/web
+
+def call(context: Context, next_handler: Next): Response
+	puts("middleware:before")
+	response := next_handler.call(context)
+	puts("middleware:after")
+	return response
+end
+`
+		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "fallback.trb"), []byte(fallbackRouteSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "explicit.trb"), []byte(explicitRouteSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "_middleware.trb"), []byte(middlewareSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "middleware:before\nfallback:get\nmiddleware:after\n200\n0\nget\nmiddleware:before\nexplicit:head\nmiddleware:after\n202\n0\nhead\n405\nGET, HEAD\n{\"error\":\"method_not_allowed\"}\n404\n0\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s trb/web HEAD output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunOfficialWebRecoveryAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {

@@ -45,10 +45,11 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("begin", "")
 	g.indent++
-	g.line("return trb_web_payload_too_large if request.body.bytesize > TRB_WEB_MAX_BODY_BYTES", "")
+	g.line("return trb_web_finalize_response(request, trb_web_payload_too_large) if request.body.bytesize > TRB_WEB_MAX_BODY_BYTES", "")
 	g.line("method = request.method.upcase", "")
 	g.line(`segments = request.path.split("/").reject(&:empty?)`, "")
 	g.line("allowed_methods = []", "")
+	g.line("explicit_head = false", "")
 	for _, route := range routes {
 		routeSegments := rubyWebRouteSegments(route.Path)
 		condition := []string{"segments.length == " + strconv.Itoa(len(routeSegments))}
@@ -58,10 +59,19 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			}
 		}
 		g.line("allowed_methods << "+strconv.Quote(route.Method)+" if "+strings.Join(condition, " && "), "")
+		if route.Method == "GET" {
+			g.line(`allowed_methods << "HEAD" if `+strings.Join(condition, " && "), "")
+		}
+		if route.Method == "HEAD" {
+			g.line("explicit_head = true if "+strings.Join(condition, " && "), "")
+		}
 	}
+	g.line("allowed_methods = allowed_methods.sort.uniq", "")
+	g.line("dispatch_method = method", "")
+	g.line(`dispatch_method = "GET" if method == "HEAD" && !explicit_head && allowed_methods.include?("GET")`, "")
 	for routeIndex, route := range routes {
 		segments := rubyWebRouteSegments(route.Path)
-		condition := []string{"method == " + strconv.Quote(route.Method), "segments.length == " + strconv.Itoa(len(segments))}
+		condition := []string{"dispatch_method == " + strconv.Quote(route.Method), "segments.length == " + strconv.Itoa(len(segments))}
 		for index, segment := range segments {
 			if !strings.HasPrefix(segment, ":") {
 				condition = append(condition, "segments["+strconv.Itoa(index)+"] == "+strconv.Quote(segment))
@@ -85,20 +95,20 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			g.line(nextName+" = "+handlerName, "")
 			g.line(handlerName+" = ->(middleware_context) { "+middleware.TargetHandler+"(middleware_context, TrbWebNext.new("+nextName+")) }", "")
 		}
-		g.line("return "+handlerName+".call("+contextName+")", "")
+		g.line("return trb_web_finalize_response(request, "+handlerName+".call("+contextName+"))", "")
 		g.indent--
 		g.line("end", "")
 	}
 	g.line("unless allowed_methods.empty?", "")
 	g.indent++
-	g.line(`return Response.new(status: 405, headers: { "allow" => [allowed_methods.sort.join(", ")], "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"method_not_allowed\"}".b)`, "")
+	g.line(`return trb_web_finalize_response(request, Response.new(status: 405, headers: { "allow" => [allowed_methods.join(", ")], "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"method_not_allowed\"}".b))`, "")
 	g.indent--
 	g.line("end", "")
-	g.line(`Response.new(status: 404, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"not_found\"}".b)`, "")
+	g.line(`trb_web_finalize_response(request, Response.new(status: 404, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"not_found\"}".b))`, "")
 	g.indent--
 	g.line("rescue StandardError", "")
 	g.indent++
-	g.line(`Response.new(status: 500, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"internal_server_error\"}".b)`, "")
+	g.line(`trb_web_finalize_response(request, Response.new(status: 500, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"internal_server_error\"}".b))`, "")
 	g.indent--
 	g.line("end", "")
 	g.indent--
@@ -111,6 +121,13 @@ func (g *generator) webProtocolResponses() {
 	g.line("def trb_web_payload_too_large", "")
 	g.indent++
 	g.line(`Response.new(status: 413, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"payload_too_large\"}".b)`, "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
+	g.line("def trb_web_finalize_response(request, response)", "")
+	g.indent++
+	g.line(`return response unless request.method.upcase == "HEAD"`, "")
+	g.line(`Response.new(status: response.status, headers: response.headers, body: "".b)`, "")
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
