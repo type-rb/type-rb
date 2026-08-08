@@ -81,6 +81,9 @@ func Generate(program *ir.Program) string {
 		}
 		g.statement(statement)
 	}
+	if program.WebRoutes != nil {
+		g.webDispatcher(program.WebRoutes)
+	}
 	packageName := program.Package
 	if packageName == "" {
 		packageName = "main"
@@ -112,7 +115,7 @@ func Generate(program *ir.Program) string {
 }
 
 func (g *generator) importStatement(imported *ir.Import) {
-	if imported.Standard && (!imported.Runtime || !imported.RuntimeRequired) {
+	if (imported.Standard || imported.Official) && (!imported.Runtime || !imported.RuntimeRequired) {
 		return
 	}
 	directory := pathpkg.Dir(imported.Path)

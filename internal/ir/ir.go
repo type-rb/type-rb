@@ -53,6 +53,7 @@ type Import struct {
 	Namespace bool
 	Kind      string
 	Standard  bool
+	Official  bool
 	Platform  bool
 	Runtime   bool
 	// RuntimeRequired records that generated code must load the compiler-owned

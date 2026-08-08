@@ -251,13 +251,7 @@ func (c *CLI) runBuild(args []string) error {
 		if artifact == nil {
 			return fmt.Errorf("compiler did not produce an artifact for %s", name)
 		}
-		ext := codegen.Extension(config.Mode)
-		stem := strings.TrimSuffix(rel, filepath.Ext(rel))
-		if filepath.Ext(stem) == ext {
-			rel = stem
-		} else {
-			rel = stem + ext
-		}
+		rel = generatedSourceRelative(config, rel)
 		artifacts = append(artifacts, built{input: name, output: filepath.Join(outDir, rel), data: artifact.Output})
 	}
 	if *stdout {
@@ -963,15 +957,54 @@ func generatedRelative(config *project.Config, filename string, artifact *compil
 	if local {
 		relative = filepath.FromSlash(artifact.IR.ModulePath) + codegen.Extension(config.Mode)
 	} else {
-		extension := codegen.Extension(config.Mode)
-		stem := strings.TrimSuffix(relative, filepath.Ext(relative))
-		if filepath.Ext(stem) == extension {
-			relative = stem
-		} else {
-			relative = stem + extension
-		}
+		relative = generatedSourceRelative(config, relative)
 	}
 	return relative, local
+}
+
+func generatedSourceRelative(config *project.Config, relative string) string {
+	extension := codegen.Extension(config.Mode)
+	stem := strings.TrimSuffix(relative, filepath.Ext(relative))
+	if filepath.Ext(stem) == extension {
+		relative = stem
+	} else {
+		relative = stem + extension
+	}
+	if config.Mode == "go" {
+		relative = goGeneratedSourceRelative(relative)
+	}
+	return relative
+}
+
+func goGeneratedSourceRelative(relative string) string {
+	directory := filepath.Dir(relative)
+	base := strings.TrimSuffix(filepath.Base(relative), ".go")
+	if strings.HasPrefix(base, "[") && strings.HasSuffix(base, "]") {
+		parameter := strings.TrimSuffix(strings.TrimPrefix(base, "["), "]")
+		prefix := "route_param_"
+		if strings.HasPrefix(parameter, "...") {
+			parameter = strings.TrimPrefix(parameter, "...")
+			prefix = "route_catch_all_"
+		}
+		base = prefix + parameter
+	}
+	var safe strings.Builder
+	for _, character := range base {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' {
+			safe.WriteRune(character)
+		} else {
+			safe.WriteByte('_')
+		}
+	}
+	base = safe.String()
+	if base == "" || strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".") {
+		base = "trb_" + base
+	}
+	filename := base + ".go"
+	if directory == "." {
+		return filename
+	}
+	return filepath.Join(directory, filename)
 }
 
 func sourceUnit(config *project.Config, filename string, source []byte) (compiler.SourceUnit, error) {

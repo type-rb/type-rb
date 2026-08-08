@@ -120,6 +120,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			result.Namespace = len(n.Symbols) == 0 && resolved.Alias != ""
 			result.Kind = string(resolved.Kind)
 			result.Standard = resolved.Kind == resolver.StandardImport
+			result.Official = resolved.Kind == resolver.OfficialImport
 			result.Platform = resolved.Definition != nil && resolved.Definition.Kind == "platform"
 			result.Runtime = resolved.Definition != nil && resolved.Definition.Source != ""
 			for name, exported := range resolved.Exports {

@@ -25,3 +25,17 @@ func TestBundledWebPackage(t *testing.T) {
 		t.Fatalf("unexpected json contract: %#v", json)
 	}
 }
+
+func TestBundledWebTestingPackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/web/testing")
+	if !ok {
+		t.Fatal("trb/web/testing is not registered")
+	}
+	if packageDefinition.Definition.ModulePath != "trb/web/testing/index" {
+		t.Fatalf("module = %q", packageDefinition.Definition.ModulePath)
+	}
+	dispatch := packageDefinition.Definition.Symbols["dispatch"]
+	if dispatch.Intrinsic != "trb.web.testing.dispatch" || dispatch.Return.String() != "Response" {
+		t.Fatalf("unexpected dispatch contract: %#v", dispatch)
+	}
+}

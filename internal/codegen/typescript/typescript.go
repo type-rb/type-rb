@@ -37,11 +37,17 @@ func Generate(program *ir.Program) string {
 			g.records[record.Name] = true
 		}
 	}
+	if program.WebRoutes != nil {
+		g.webRouteImports(program.WebRoutes)
+	}
 	for i, statement := range program.Statements {
 		if i > 0 {
 			g.b.WriteByte('\n')
 		}
 		g.statement(statement)
+	}
+	if program.WebRoutes != nil {
+		g.webDispatcher(program.WebRoutes)
 	}
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
@@ -63,7 +69,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(comment(n.Text))
 	case *ir.Import:
-		if n.Standard && (!n.Runtime || !n.RuntimeRequired) {
+		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) {
 			if n.Path == "trb/platform/typescript/react" {
 				g.line(`import React from "react";`)
 				g.line(`import { createRoot } from "react-dom/client";`)

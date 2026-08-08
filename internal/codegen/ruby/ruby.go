@@ -34,6 +34,9 @@ func Generate(program *ir.Program) string {
 		}
 	}
 	g.statements(program.Statements)
+	if program.WebRoutes != nil {
+		g.webDispatcher(program.WebRoutes)
+	}
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
@@ -68,7 +71,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(n.Text, "")
 	case *ir.Import:
-		if n.Standard && (!n.Runtime || !n.RuntimeRequired) || g.loader == "zeitwerk" && !n.Runtime {
+		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) || g.loader == "zeitwerk" && !n.Runtime {
 			return
 		}
 		g.line("require_relative "+strconv.Quote(rubyImportPath(g.modulePath, n.Path)), n.TrailingComment)
