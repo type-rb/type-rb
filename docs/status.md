@@ -41,7 +41,7 @@ lossless tokens -> syntax AST -> resolver/type checker -> typed IR -> backend
 Backends consume typed IR and do not inspect parser state or rewrite source
 text. The repository suite covers compiler phases, formatter, language
 services, REPL, project builds, standard packages, type providers, generated
-target code, browser tools, and the initial self-host tree.
+target code, and browser tools.
 
 ## Current limitations
 

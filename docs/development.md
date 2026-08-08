@@ -5,7 +5,6 @@ TypeRB is implemented in Go 1.26. Clone the repository and run:
 ```sh
 go test ./...
 go vet ./...
-./scripts/check-self-host.sh
 ```
 
 ## Compiler pipeline
@@ -57,7 +56,7 @@ Test public phase boundaries rather than private helper structure. Depending on
 the change, this includes parsed AST shape, checker diagnostics and inferred
 types, typed IR, generated source for every affected backend, formatter
 idempotence and comment preservation, and REPL evaluation. Run the full Go test
-suite and the relevant example checks before merging.
+suite and any relevant target-toolchain checks before merging.
 
 For current gaps, see [status](status.md) and the [roadmap](roadmap.md).
 

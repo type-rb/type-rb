@@ -1,6 +1,6 @@
 ---
 name: develop-typerb
-description: Evolve the TypeRB language and toolchain. Use when changing TypeRB syntax or semantics, AST/typed IR, checker rules, formatter behavior, standard or platform packages, Ruby/Go/TypeScript backends, REPL behavior, or TypeRB examples.
+description: Evolve the TypeRB language and toolchain. Use when changing TypeRB syntax or semantics, AST/typed IR, checker rules, formatter behavior, standard or platform packages, Ruby/Go/TypeScript backends, or REPL behavior.
 ---
 
 # Develop TypeRB
@@ -29,7 +29,6 @@ For each coherent change:
 3. Run `GOCACHE=/tmp/type-rb-go-cache go test ./...` and
    `./trb fmt --check .`. Use the source-checkout launcher so an older released
    `trb` on `PATH` cannot validate current syntax with a stale formatter.
-4. Check affected examples with `trb build --check`.
-5. Update `docs/specification.md`, `docs/status.md`, or `docs/roadmap.md` only
+4. Update `docs/specification.md`, `docs/status.md`, or `docs/roadmap.md` only
    where behavior or status changed.
-6. Commit the completed work unit. Use Go 1.26 and current target language features; legacy target versions are out of scope.
+5. Commit the completed work unit. Use Go 1.26 and current target language features; legacy target versions are out of scope.

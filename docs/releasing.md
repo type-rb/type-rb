@@ -43,7 +43,6 @@ Run the full checks, create the version tag, and push it:
 
 ```sh
 go test ./...
-./scripts/check-self-host.sh
 release_version=X.Y.Z
 git tag "v${release_version}"
 git push origin "v${release_version}"
@@ -51,7 +50,7 @@ git push origin "v${release_version}"
 
 The release workflow then:
 
-1. repeats the tests and bootstrap check;
+1. repeats the compiler tests;
 2. builds four `trb_VERSION_OS_ARCH.tar.gz` binary archives;
 3. writes `checksums.txt` and renders `trb.rb`;
 4. creates or updates the GitHub release;

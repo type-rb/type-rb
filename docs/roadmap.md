@@ -25,8 +25,6 @@ than detailed syntax.
   a backend-safe decision for field/method name collisions.
 - Specify module visibility, initialization order, constant evaluation, and
   cross-file semantics completely.
-- Expand the self-host tree until the lexer, parser, checker, and formatter can
-  be compiled from TypeRB sources.
 
 ## 2. Make testing a language-level workflow
 
@@ -37,7 +35,6 @@ than detailed syntax.
 - Preserve `.trb` locations in failures and stack traces.
 - Add coverage reporting after generated-code locations can be mapped back to
   TypeRB source.
-- Dogfood the test API in the compiler self-host tree and example applications.
 
 ## 3. Production diagnostics and compiler reliability
 
@@ -115,8 +112,12 @@ item. Promoting it to a public mode would require a runtime object model,
 module loading, source-mapped failures, portable filesystem/process/network
 adapters, dependency and distribution rules, and a clear story for code that
 currently imports another mode's platform packages. Internal evaluator work
-for REPL, tests, self-hosting, and backend conformance may proceed without
-committing TypeRB to shipping this mode.
+for REPL, tests, and backend conformance may proceed without committing TypeRB
+to shipping this mode.
+
+Self-hosting is deliberately outside the current roadmap. It will be
+reconsidered after the Go compiler has broad real-world use and its public
+behavior is stable.
 
 ## Practical-readiness gates
 
