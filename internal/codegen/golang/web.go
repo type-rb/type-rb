@@ -12,12 +12,13 @@ import (
 
 func (g *generator) integrations(extensions []ir.Extension) {
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
-		g.webDispatcher(manifest.Routes)
+		g.webDispatcher(manifest)
 		g.webServer()
 	}
 }
 
-func (g *generator) webDispatcher(routes []webintegration.Route) {
+func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
+	routes := manifest.Routes
 	webPath := pathpkg.Join(g.goModule, "trb/web")
 	g.requireImport(webPath, "web")
 	g.requireImport("strings", "")
@@ -25,6 +26,15 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 	directories := map[string]string{}
 	for _, route := range routes {
 		directory := pathpkg.Dir(route.ModulePath)
+		if directory == "." || directory == g.currentDirectory() {
+			continue
+		}
+		if _, exists := directories[directory]; !exists {
+			directories[directory] = "trb_route_" + strconv.Itoa(len(directories))
+		}
+	}
+	for _, middleware := range manifest.Middlewares {
+		directory := pathpkg.Dir(middleware.ModulePath)
 		if directory == "." || directory == g.currentDirectory() {
 			continue
 		}
@@ -40,6 +50,9 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 	for index, directory := range orderedDirectories {
 		directories[directory] = "trb_route_" + strconv.Itoa(index)
 		g.requireImport(pathpkg.Join(g.goModule, directory), directories[directory])
+	}
+	if len(manifest.Middlewares) > 0 {
+		g.webNext()
 	}
 
 	g.line("func trbWebDispatch(request web.Request) (response web.Response) {")
@@ -61,7 +74,7 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 	g.line("segments = strings.Split(cleanPath, \"/\")")
 	g.indent--
 	g.line("}")
-	for _, route := range routes {
+	for routeIndex, route := range routes {
 		segments := webRouteSegments(route.Path)
 		condition := []string{"method == " + strconv.Quote(route.Method), "len(segments) == " + strconv.Itoa(len(segments))}
 		for index, segment := range segments {
@@ -77,15 +90,59 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 				g.line("pathParameters[" + strconv.Quote(strings.TrimPrefix(segment, ":")) + "] = segments[" + strconv.Itoa(index) + "]")
 			}
 		}
-		callee := goMethodName(route.TargetHandler)
-		if alias := directories[pathpkg.Dir(route.ModulePath)]; alias != "" {
-			callee = goImportAlias(alias) + "." + callee
+		contextName := "routeContext" + strconv.Itoa(routeIndex)
+		handlerName := "routeHandler" + strconv.Itoa(routeIndex)
+		g.line(contextName + " := web.Context{Request: request, PathParameters: pathParameters}")
+		g.line(handlerName + " := func(context web.Context) web.Response {")
+		g.indent++
+		g.line("return " + g.webCallee(route.ModulePath, route.TargetHandler, directories) + "(context)")
+		g.indent--
+		g.line("}")
+		for middlewareIndex := len(route.Middlewares) - 1; middlewareIndex >= 0; middlewareIndex-- {
+			middleware := route.Middlewares[middlewareIndex]
+			nextName := "nextHandler" + strconv.Itoa(routeIndex) + "_" + strconv.Itoa(middlewareIndex)
+			g.line(nextName + " := " + handlerName)
+			g.line(handlerName + " = func(context web.Context) web.Response {")
+			g.indent++
+			g.line("return " + g.webCallee(middleware.ModulePath, middleware.TargetHandler, directories) + "(context, &trbWebNext{handler: " + nextName + "})")
+			g.indent--
+			g.line("}")
 		}
-		g.line("return " + callee + "(web.Context{Request: request, PathParameters: pathParameters})")
+		g.line("return " + handlerName + "(" + contextName + ")")
 		g.indent--
 		g.line("}")
 	}
 	g.line("return web.Response{Status: 404, Headers: map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}, Body: []byte(\"{\\\"error\\\":\\\"not_found\\\"}\")}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+}
+
+func (g *generator) webCallee(modulePath, target string, directories map[string]string) string {
+	callee := goMethodName(target)
+	if alias := directories[pathpkg.Dir(modulePath)]; alias != "" {
+		callee = goImportAlias(alias) + "." + callee
+	}
+	return callee
+}
+
+func (g *generator) webNext() {
+	g.line("type trbWebNext struct {")
+	g.indent++
+	g.line("called bool")
+	g.line("handler func(web.Context) web.Response")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func (next *trbWebNext) Call(context web.Context) web.Response {")
+	g.indent++
+	g.line("if next.called {")
+	g.indent++
+	g.line("panic(\"trb/web Next.call may only be called once\")")
+	g.indent--
+	g.line("}")
+	g.line("next.called = true")
+	g.line("return next.handler(context)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')

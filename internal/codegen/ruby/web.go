@@ -11,15 +11,19 @@ import (
 
 func (g *generator) integrations(extensions []ir.Extension) {
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
-		g.webDispatcher(manifest.Routes)
+		g.webDispatcher(manifest)
 		g.webServer()
 	}
 }
 
-func (g *generator) webDispatcher(routes []webintegration.Route) {
+func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
+	routes := manifest.Routes
 	modules := map[string]bool{}
 	for _, route := range routes {
 		modules[route.ModulePath] = true
+	}
+	for _, middleware := range manifest.Middlewares {
+		modules[middleware.ModulePath] = true
 	}
 	modulePaths := make([]string, 0, len(modules))
 	for modulePath := range modules {
@@ -32,6 +36,9 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 	if len(modulePaths) > 0 {
 		g.b.WriteByte('\n')
 	}
+	if len(manifest.Middlewares) > 0 {
+		g.webNext()
+	}
 
 	g.line("def trb_web_dispatch(request)", "")
 	g.indent++
@@ -39,7 +46,7 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 	g.indent++
 	g.line("method = request.method.upcase", "")
 	g.line(`segments = request.path.split("/").reject(&:empty?)`, "")
-	for _, route := range routes {
+	for routeIndex, route := range routes {
 		segments := rubyWebRouteSegments(route.Path)
 		condition := []string{"method == " + strconv.Quote(route.Method), "segments.length == " + strconv.Itoa(len(segments))}
 		for index, segment := range segments {
@@ -55,7 +62,17 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 				g.line("path_parameters["+strconv.Quote(strings.TrimPrefix(segment, ":"))+"] = segments["+strconv.Itoa(index)+"]", "")
 			}
 		}
-		g.line("return "+route.TargetHandler+"(Context.new(request: request, path_parameters: path_parameters))", "")
+		contextName := "route_context_" + strconv.Itoa(routeIndex)
+		handlerName := "route_handler_" + strconv.Itoa(routeIndex)
+		g.line(contextName+" = Context.new(request: request, path_parameters: path_parameters)", "")
+		g.line(handlerName+" = ->(middleware_context) { "+route.TargetHandler+"(middleware_context) }", "")
+		for middlewareIndex := len(route.Middlewares) - 1; middlewareIndex >= 0; middlewareIndex-- {
+			middleware := route.Middlewares[middlewareIndex]
+			nextName := "next_handler_" + strconv.Itoa(routeIndex) + "_" + strconv.Itoa(middlewareIndex)
+			g.line(nextName+" = "+handlerName, "")
+			g.line(handlerName+" = ->(middleware_context) { "+middleware.TargetHandler+"(middleware_context, TrbWebNext.new("+nextName+")) }", "")
+		}
+		g.line("return "+handlerName+".call("+contextName+")", "")
 		g.indent--
 		g.line("end", "")
 	}
@@ -68,6 +85,28 @@ func (g *generator) webDispatcher(routes []webintegration.Route) {
 	g.line("end", "")
 	g.indent--
 	g.line("end", "")
+}
+
+func (g *generator) webNext() {
+	g.line("class TrbWebNext", "")
+	g.indent++
+	g.line("def initialize(handler)", "")
+	g.indent++
+	g.line("@handler = handler", "")
+	g.line("@called = false", "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
+	g.line("def call(context)", "")
+	g.indent++
+	g.line(`raise "trb/web Next.call may only be called once" if @called`, "")
+	g.line("@called = true", "")
+	g.line("@handler.call(context)", "")
+	g.indent--
+	g.line("end", "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
 }
 
 func rubyWebRouteSegments(path string) []string {
