@@ -214,6 +214,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".includes(" + arguments[1] + ")"
 	case "trb.std.strings.codepoints":
 		return "Array.from(" + arguments[0] + ", (value): number => value.codePointAt(0)!)"
+	case "trb.std.strings.characters":
+		return "Array.from(" + arguments[0] + ")"
+	case "trb.std.strings.reverse":
+		return "Array.from(" + arguments[0] + ").reverse().join(\"\")"
 	case "trb.std.strings.fetch":
 		return "((): string => { const __trbValue = Array.from(" + arguments[0] + "); const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValue.length) { throw new Error(\"String index is out of bounds\"); } return __trbValue[__trbIndex]!; })()"
 	case "trb.std.strings.try_fetch":

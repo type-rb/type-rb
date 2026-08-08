@@ -2126,6 +2126,22 @@ def package_string_value(value: String, index: Integer): Result<String, IndexLoo
 	return strings.try_fetch(value, index)
 end
 
+def characters(value: String): Array<String>
+	return value.chars()
+end
+
+def package_characters(value: String): Array<String>
+	return strings.characters(value)
+end
+
+def reversed(value: String): String
+	return value.reverse()
+end
+
+def package_reversed(value: String): String
+	return strings.reverse(value)
+end
+
 def array_value(values: Array<Integer>, index: Integer): Result<Integer, IndexLookupError>
 	return arrays.try_fetch(values, index)
 end
@@ -2144,6 +2160,7 @@ end
 			`__trb_errors.NumberParseError{Kind: __trb_errors.NumberParseErrorKindInvalidformat, Input: input, Message: "invalid Float"}`,
 			`__trb_errors.IndexLookupError{Index: index, Size: len(values), Message: "Array index is out of bounds"}`,
 			`__trb_errors.IndexLookupError{Index: index, Size: len(value), Message: "String index is out of bounds"}`,
+			`slices.Reverse(characters)`,
 			`__trb_errors.KeyLookupError{Key: key, Message: "Hash key is missing"}`,
 		},
 		"ruby": {
@@ -2152,6 +2169,7 @@ end
 			`NumberParseError.new(kind: NumberParseErrorKind::InvalidFormat, input: input, message: "invalid Float")`,
 			`IndexLookupError.new(index: index, size: values.length, message: "Array index is out of bounds")`,
 			`IndexLookupError.new(index: index, size: characters.length, message: "String index is out of bounds")`,
+			`.each_char.to_a.reverse.join`,
 			`KeyLookupError.new(key: key, message: "Hash key is missing")`,
 		},
 		"typescript": {
@@ -2160,6 +2178,7 @@ end
 			`{ kind: NumberParseErrorKind.InvalidFormat, input: __trbInput, message: "invalid Float" } satisfies NumberParseError`,
 			`{ index: __trbIndex, size: __trbValues.length, message: "Array index is out of bounds" } satisfies IndexLookupError`,
 			`{ index: __trbIndex, size: __trbValue.length, message: "String index is out of bounds" } satisfies IndexLookupError`,
+			`.reverse().join("")`,
 			`{ key: __trbKey, message: "Hash key is missing" } satisfies KeyLookupError`,
 		},
 	}

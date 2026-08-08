@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	pathpkg "path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -448,6 +449,30 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 			items = append(items, Value{Type: types.FromName("Integer"), Data: int64(codepoint)})
 		}
 		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.strings.characters":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("strings.characters expects String")
+		}
+		items := make([]Value, 0, utf8.RuneCountInString(value))
+		for _, character := range value {
+			items = append(items, Value{Type: types.FromName("String"), Data: string(character)})
+		}
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.strings.reverse":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		value, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("strings.reverse expects String")
+		}
+		characters := []rune(value)
+		slices.Reverse(characters)
+		return Value{Type: typ, Data: string(characters)}, nil
 	case "trb.std.strings.fetch", "trb.std.strings.try_fetch":
 		if err := require(2); err != nil {
 			return Value{}, err

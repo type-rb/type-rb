@@ -53,6 +53,8 @@ safe_decimal := "+.5e1".try_to_f()
 length := "Hello".size()
 character := "A😀".fetch(1)
 safe_character := "A😀".try_fetch(2)
+characters := "A😀".chars()
+reversed := "A😀".reverse()
 upper := strings.uppercase("Hello")
 ```
 
@@ -100,10 +102,12 @@ infinity. Exponentiation remains the `**` operator.
 than encoded bytes. Indexes are zero-based and nonnegative. `fetch()` raises
 when the index is outside the string, while `try_fetch()` returns
 `Result<String, IndexLookupError>`. Additional receiver operations include
-`codepoints`, `empty?`, `strip`, `lstrip`, `rstrip`, `include?`, `start_with?`,
-`end_with?`, `split`, `upcase`, and `downcase`. String trimming uses the pinned
-Unicode 15.0 `White_Space` set, preserves internal whitespace, and does not
-remove U+FEFF. Package forms use the same names from `trb/std/strings`.
+`chars`, `codepoints`, `reverse`, `empty?`, `strip`, `lstrip`, `rstrip`,
+`include?`, `start_with?`, `end_with?`, `split`, `upcase`, and `downcase`.
+`chars()` returns one String per code point, and `reverse()` reverses that same
+sequence. String trimming uses the pinned Unicode 15.0 `White_Space` set,
+preserves internal whitespace, and does not remove U+FEFF. Package forms use
+`characters` and `reverse` from `trb/std/strings`.
 
 ## Bytes
 

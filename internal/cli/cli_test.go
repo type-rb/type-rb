@@ -292,6 +292,8 @@ math.log(0).infinite?()
 "a😀".size()
 "A😀".fetch(1)
 "A😀".try_fetch(2)
+"A😀".chars()
+"A😀".reverse()
 :quit
 `
 		var stdout, stderr bytes.Buffer
@@ -342,6 +344,8 @@ true : Boolean
 2 : Integer
 "😀" : String
 Result::Err(error: IndexLookupError(index: 2, size: 2, message: "String index is out of bounds")) : Result<String, IndexLookupError>
+["A", "😀"] : Array<String>
+"😀A" : String
 `
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s receiver-method REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
@@ -2723,7 +2727,8 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"import { IndexLookupError, KeyLookupError, NumberParseError } from trb/std/errors\n" +
 			"import trb/std/string_builder\n" +
 			"import trb/std/numbers\n" +
-			"import trb/std/booleans\n\n" +
+			"import trb/std/booleans\n" +
+			"import trb/std/strings\n\n" +
 			"def parse_result(value: Result<Integer, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def float_result(value: Result<Float, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def string_index_result(value: Result<String, IndexLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.index.to_s() + \"/\" + error.size.to_s() + \" \" + error.message; end; end\n" +
@@ -2744,6 +2749,9 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"\tputs(string_index_result(\"A😀\".try_fetch(0)))\n" +
 			"\tputs(string_index_result(\"A😀\".try_fetch(2)))\n" +
 			"\tputs(string_index_result(\"A😀\".try_fetch(-1)))\n" +
+			"\tputs(\"A😀\".chars().join(\"|\"))\n" +
+			"\tputs(\"A😀\".reverse())\n" +
+			"\tputs(strings.reverse(\"TypeRB\"))\n" +
 			"\tvalues := [7]\n" +
 			"\tputs(index_result(values.try_fetch(0)))\n" +
 			"\tputs(index_result(values.try_fetch(1)))\n" +
@@ -2762,7 +2770,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "true\nok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:12.5\nok:5.0\nerr:invalid Float\nerr:Float is outside the portable range\nok:0.0\n😀\nok:A\nerr:2/2 String index is out of bounds\nerr:-1/2 String index is out of bounds\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
+		want := "true\nok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:12.5\nok:5.0\nerr:invalid Float\nerr:Float is outside the portable range\nok:0.0\n😀\nok:A\nerr:2/2 String index is out of bounds\nerr:-1/2 String index is out of bounds\nA|😀\n😀A\nBRepyT\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s safe-operation output: want %q, got %q", mode, want, stdout.String())
 		}
