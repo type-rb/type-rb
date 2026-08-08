@@ -178,6 +178,17 @@ def response_header_values(response: Response, name: String): Array<String>
 	return result
 end
 
+def response_header_value(response: Response, name: String): Result<String, HeaderValueError>
+	values := response_header_values(response, name)
+	if values.empty?()
+		return Result<String, HeaderValueError>::Err(HeaderValueError::Missing(name))
+	end
+	if values.size() > 1
+		return Result<String, HeaderValueError>::Err(HeaderValueError::Duplicate(name))
+	end
+	return Result<String, HeaderValueError>::Ok(values[0])
+end
+
 def vary(response: Response, field: String): Response
 	normalized_field := field.strip().downcase()
 	if normalized_field == ""
@@ -206,6 +217,47 @@ def with_request_header(request: Request, name: String, value: String): Request
 		end
 	end
 	headers[normalized_name] = [value]
+	return Request.new(
+		method: request.method,
+		path: request.path,
+		query_string: request.query_string,
+		headers: headers,
+		body: request.body,
+	)
+end
+
+def add_request_header(request: Request, name: String, value: String): Request
+	normalized_name := name.downcase()
+	mut headers: Hash<String, Array<String>> := {}
+	mut added_values: Array<String> := []
+	request.headers.each do |header_name, values|
+		if header_name.downcase() == normalized_name
+			values.each do |existing_value|
+				added_values.push(existing_value)
+			end
+		else
+			headers[header_name] = values.dup()
+		end
+	end
+	added_values.push(value)
+	headers[normalized_name] = added_values
+	return Request.new(
+		method: request.method,
+		path: request.path,
+		query_string: request.query_string,
+		headers: headers,
+		body: request.body,
+	)
+end
+
+def without_request_header(request: Request, name: String): Request
+	normalized_name := name.downcase()
+	mut headers: Hash<String, Array<String>> := {}
+	request.headers.each do |header_name, values|
+		if header_name.downcase() != normalized_name
+			headers[header_name] = values.dup()
+		end
+	end
 	return Request.new(
 		method: request.method,
 		path: request.path,

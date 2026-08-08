@@ -86,14 +86,17 @@ never expose a response body. OPTIONS requests likewise prefer explicit
 handlers; otherwise a middleware-aware 204 response advertises the available
 methods through `Allow`.
 Request header lookup is case-insensitive; `header_value` rejects missing and
-duplicate values instead of choosing one implicitly. Portable cookie parsing
-preserves header order, duplicate names, and opaque values without delegating
+duplicate values instead of choosing one implicitly. Request headers can also
+be replaced, appended, or removed without mutating the original request.
+Portable cookie parsing preserves header order, duplicate names, and opaque
+values without delegating
 semantics to the target runtime. `cookie_values` returns all matching values,
 while strict `cookie_value` reports missing and duplicate names through a typed
 error.
 Responses can replace, append, remove, or inspect case-insensitive header values
-without mutating the original response. `vary` composes cache keys without
-duplicating an existing field.
+without mutating the original response. Strict response lookup rejects missing
+and duplicate values instead of selecting one. `vary` composes cache keys
+without duplicating an existing field.
 Typed response cookies support ordered `Domain`, `Path`, `Max-Age`, `Secure`,
 `HttpOnly`, and `SameSite` attributes while preserving multiple `Set-Cookie`
 header values.
