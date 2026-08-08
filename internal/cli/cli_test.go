@@ -3169,12 +3169,15 @@ func TestRunOfficialWebRequestHeadersAndCookiesAcrossAvailableBackends(t *testin
 	CookieValueError,
 	HeaderValueError,
 	Request,
+	add_request_header,
 	cookie,
 	cookie_value,
 	cookie_values,
 	cookies,
 	header_value,
 	header_values,
+	with_request_header,
+	without_request_header,
 } from trb/web
 import { Result } from trb/std/result
 
@@ -3220,6 +3223,14 @@ def main()
 		},
 		body: "".to_bytes(),
 	)
+	replaced := with_request_header(request, "cookie", "fresh=one")
+	added := add_request_header(replaced, "COOKIE", "fresh=two")
+	removed := without_request_header(added, "x-request-id")
+	puts(header_values(request, "cookie").size())
+	puts(header_values(added, "cookie").size())
+	puts(header_values(added, "cookie")[0])
+	puts(header_values(added, "cookie")[1])
+	puts(header_values(removed, "x-request-id").size())
 	puts(header_values(request, "COOKIE").size())
 	puts(render_header_value(header_value(request, "x-request-id")))
 	puts(render_header_value(header_value(request, "cookie")))
@@ -3249,7 +3260,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "2\nok:req-1\nduplicate:cookie\nmissing:missing\n5\nsession=abc\ntheme=dark\ntag=first\ntag=second\ntoken=a=b\n2\nok:abc\nduplicate:tag\nmissing:missing\nfalse\ntrue\n"
+		want := "2\n2\nfresh=one\nfresh=two\n0\n2\nok:req-1\nduplicate:cookie\nmissing:missing\n5\nsession=abc\ntheme=dark\ntag=first\ntag=second\ntoken=a=b\n2\nok:abc\nduplicate:tag\nmissing:missing\nfalse\ntrue\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web cookie output: want %q, got %q", mode, want, stdout.String())
 		}
@@ -3369,15 +3380,32 @@ func TestRunOfficialWebResponseHeadersAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		mainSource := `import {
+	HeaderValueError,
 	Response,
 	add_header,
 	redirect,
+	response_header_value,
 	response_header_values,
 	vary,
 	with_header,
 	with_status,
 	without_header,
 } from trb/web
+import { Result } from trb/std/result
+
+def render_header_value(result: Result<String, HeaderValueError>): String
+	case result
+	when Result::Ok(value)
+		return "ok:" + value
+	when Result::Err(error)
+		case error
+		when HeaderValueError::Missing(name)
+			return "missing:" + name
+		when HeaderValueError::Duplicate(name)
+			return "duplicate:" + name
+		end
+	end
+end
 
 def main()
 	base := Response.new(
@@ -3404,6 +3432,9 @@ def main()
 	puts(varied.body.to_s())
 	puts(found.size())
 	puts(found.join("|"))
+	puts(render_header_value(response_header_value(base, "x-keep")))
+	puts(render_header_value(response_header_value(added, "x-trace")))
+	puts(render_header_value(response_header_value(base, "missing")))
 	puts(default_redirect.status)
 	puts(default_redirect.headers["location"][0])
 	puts(default_redirect.body.size())
@@ -3422,7 +3453,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "1\none\n2\ntwo\nthree\nyes\nfalse\n201\nbody\n2\nAccept, Accept-Encoding|Origin\n302\n/login\n0\n307\n"
+		want := "1\none\n2\ntwo\nthree\nyes\nfalse\n201\nbody\n2\nAccept, Accept-Encoding|Origin\nok:yes\nduplicate:x-trace\nmissing:missing\n302\n/login\n0\n307\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web response headers: want %q, got %q", mode, want, stdout.String())
 		}
