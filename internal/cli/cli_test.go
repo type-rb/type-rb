@@ -286,7 +286,7 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model, belongs_to } from trb/orm\n\nclass Category < Model\nend\n\nclass Product < Model\n\tbelongs_to(Category)\nend\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model, belongs_to, has_many } from trb/orm\n\nclass Category < Model\n\thas_many(Product)\nend\n\nclass Product < Model\n\tbelongs_to(Category)\nend\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -305,6 +305,9 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`Product.where_not_exists(:category, Category.where(name: "Featured")).count()`,
 		"def grouped_product_count(): DbResult<Integer>\n\tcounts := Product.group(:category_id).count()?\n\tfiltered := Product.group(:category_id).having(:count, \">=\", 1).count()?\n\tsums := Product.group(:category_id).sum(:id)?\n\tlarge := Product.group(:category_id).having(:sum, :id, \">=\", 1).sum(:id)?\n\taverages := Product.group(:category_id).average(:id)?\n\tminimums := Product.group(:category_id).minimum(:name)?\n\tmaximums := Product.group(:category_id).maximum(:price)?\n\tpaged := Product.where().order(category_id: :desc).limit(1).group(:category_id).count()?\n\toffset := Product.where().order(category_id: :asc).offset(1).group(:category_id).count()?\n\treturn DbResult<Integer>::Ok(counts.size() + filtered.size() + sums.size() + large.size() + averages.size() + minimums.size() + maximums.size() + paged.size() + offset.size())\nend",
 		"grouped_product_count()",
+		"def nested_preload_count(): DbResult<Integer>\n\tcategories := Category.where().preload(:products, Product.where(active: true).preload(:category)).all()?\n\tproduct := categories[0].products()[0]\n\tputs(product.category().name)\n\treturn DbResult<Integer>::Ok(categories[0].products().size())\nend",
+		"nested_preload_count()",
+		"Category.where().preload(:products, Product.where().limit(1)).all()",
 		`Product.exists?(name: "Priority")`,
 		"Product.where().order(id: :asc).pluck(:name)",
 		"Product.where(active: true).first()",
@@ -345,6 +348,9 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`DbResult::Ok(value: 1) : DbResult<Integer>`,
 		`DbResult::Ok(value: 1) : DbResult<Integer>`,
 		`DbResult::Ok(value: 16) : DbResult<Integer>`,
+		`Featured`,
+		`DbResult::Ok(value: 1) : DbResult<Integer>`,
+		`DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: "ORM preload query does not accept limit, offset, or lock")) : DbResult<Array<Category>>`,
 		`DbResult::Ok(value: true) : DbResult<Boolean>`,
 		`DbResult::Ok(value: ["Priority", "Archive"]) : DbResult<Array<String>>`,
 		`DbResult::Ok(value: #<Product active: true, category_id: 1, id: 1, name: "Priority", price: 10.5>) : DbResult<Product?>`,

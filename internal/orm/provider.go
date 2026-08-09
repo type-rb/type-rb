@@ -415,20 +415,35 @@ func writeParameters(model Model, adapter string) []declaration.Parameter {
 }
 
 func preloadDeclaration(model Model) declaration.Member {
-	var values []string
-	for _, association := range model.Associations {
-		if association.Preloadable {
-			values = append(values, association.Name)
-		}
+	member := declaration.Member{
+		Name: "preload", Kind: declaration.Method, Intrinsic: "trb.orm.query.preload",
+		Return: types.FromName(model.QueryType), Provider: PackageName,
 	}
-	if len(values) == 0 {
+	for _, association := range model.Associations {
+		if !association.Preloadable {
+			continue
+		}
+		associationParameter := declaration.Parameter{
+			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
+		}
+		member.Alternatives = append(member.Alternatives,
+			declaration.Signature{
+				Parameters: []declaration.Parameter{associationParameter},
+				Return:     types.FromName(model.QueryType),
+			},
+			declaration.Signature{
+				Parameters: []declaration.Parameter{
+					associationParameter,
+					{Name: "query", Type: types.FromName(association.TargetQuery)},
+				},
+				Return: types.FromName(model.QueryType),
+			},
+		)
+	}
+	if len(member.Alternatives) == 0 {
 		return declaration.Member{}
 	}
-	return declaration.Member{
-		Name: "preload", Kind: declaration.Method, Intrinsic: "trb.orm.query.preload",
-		Parameters: []declaration.Parameter{{Name: "association", Type: types.FromName("String"), LiteralValues: values}},
-		Return:     types.FromName(model.QueryType), Provider: PackageName,
-	}
+	return member
 }
 
 func findDeclaration(model Model, primaryKey Column) declaration.Member {

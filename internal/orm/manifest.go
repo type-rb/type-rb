@@ -613,21 +613,31 @@ func contains(values []string, expected string) bool {
 }
 
 func preloadIRMethod(model Model) *ir.Method {
-	var values []string
+	method := &ir.Method{Name: "preload", External: true, ReturnType: namedType(model.QueryType)}
 	for _, association := range model.Associations {
-		if association.Preloadable {
-			values = append(values, association.Name)
+		if !association.Preloadable {
+			continue
 		}
+		associationParameter := ir.Parameter{
+			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
+		}
+		method.Alternatives = append(method.Alternatives,
+			ir.MethodSignature{
+				Parameters: []ir.Parameter{associationParameter}, ReturnType: namedType(model.QueryType),
+			},
+			ir.MethodSignature{
+				Parameters: []ir.Parameter{
+					associationParameter,
+					{Name: "query", Type: types.FromName(association.TargetQuery)},
+				},
+				ReturnType: namedType(model.QueryType),
+			},
+		)
 	}
-	if len(values) == 0 {
+	if len(method.Alternatives) == 0 {
 		return nil
 	}
-	return &ir.Method{
-		Name: "preload", External: true, ReturnType: namedType(model.QueryType),
-		Parameters: []ir.Parameter{{
-			Name: "association", Type: types.FromName("String"), LiteralValues: values,
-		}},
-	}
+	return method
 }
 
 func associationValueField(name string) string {

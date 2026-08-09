@@ -846,6 +846,16 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
+	case Category.where().preload(:products, Product.where(name: "TypeRB").preload(:category)).all()
+	when DbResult::Ok(categories)
+		categories.each do |category|
+			category.products().each do |product|
+				puts(product.category())
+			end
+		end
+	when DbResult::Err(error)
+		puts(error.message)
+	end
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -873,6 +883,8 @@ end
 		`TrbOrmCategoryQueryWhere(TrbOrmCategoryUsing(product.TrbOrmTransaction()), []string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
 		`TrbOrmProductQueryWhere(TrbOrmProductUsing(category.TrbOrmTransaction()), []string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
 		`TrbOrmProductPreload`, `trbOrmPreloadProductCategory`, `trbOrmPreloadCategoryProducts`,
+		`TrbOrmCategoryPreloadProducts`, `func(transaction *orm.TrbOrmTransaction, values []*Category) *orm.DbError`,
+		`TrbOrmProductQueryWhere(targetQuery, []string{"category_id"}, []string{"IN"}, []any{arguments})`,
 		`trbOrmPreloadCategoryProduct`, `database has_one association returned multiple rows`,
 		`TrbOrmAssociationCategory`, `TrbOrmAssociationProducts`,
 	} {
@@ -914,6 +926,8 @@ end
 		{expression: `Product.join(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
 		{expression: `Product.where_exists(:missing)`, want: `argument 1 to where_exists() must be one of "category"`},
 		{expression: `Product.where_exists(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
+		{expression: `Product.where().preload(:missing)`, want: `argument 1 to preload() must be one of "category"`},
+		{expression: `Product.where().preload(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
 		{expression: `Product.group(:missing)`, want: `argument 1 to group() must be one of`},
 		{expression: `Product.group(:category_id).having(:sum, ">", 1)`, want: `argument 1 to having() must be one of "count"`},
 		{expression: `Product.group(:category_id).sum(:name)`, want: `argument 1 to sum() must be one of`},

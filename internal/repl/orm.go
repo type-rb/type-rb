@@ -32,8 +32,13 @@ type ormQueryValue struct {
 	limit       *int64
 	offset      *int64
 	lock        bool
-	preloads    []string
+	preloads    []ormPreload
 	joins       []ormJoin
+}
+
+type ormPreload struct {
+	name  string
+	query *ormQueryValue
 }
 
 type ormJoin struct {
@@ -544,19 +549,37 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		query.lock = true
 		return ormQueryResult(typ, query), nil
 	case "trb.orm.query.preload":
-		if len(remaining) != 1 {
-			return Value{}, errors.New("ORM preload requires one association")
+		if len(remaining) < 1 || len(remaining) > 2 {
+			return Value{}, errors.New("ORM preload requires an association and optional query")
 		}
 		association, ok := remaining[0].Value.Data.(string)
 		if !ok {
 			return Value{}, errors.New("ORM preload association must be a literal name")
 		}
-		for _, existing := range query.preloads {
-			if existing == association {
+		definition, ok := query.model.Association(association)
+		if !ok || !definition.Preloadable {
+			return Value{}, fmt.Errorf("ORM model %s has no preloadable association %s", query.model.Name, association)
+		}
+		target, ok := e.ormRuntime().manifest.Model(definition.TargetModel)
+		if !ok {
+			return Value{}, errors.New("ORM preload target is not available")
+		}
+		targetQuery := &ormQueryValue{model: target}
+		if len(remaining) == 2 {
+			provided, ok := remaining[1].Value.Data.(*ormQueryValue)
+			if !ok || provided.model.Name != target.Name {
+				return Value{}, fmt.Errorf("ORM preload %s requires a %s query", association, target.Name)
+			}
+			targetQuery = cloneORMQuery(provided)
+		}
+		preload := ormPreload{name: association, query: targetQuery}
+		for index, existing := range query.preloads {
+			if existing.name == association {
+				query.preloads[index] = preload
 				return ormQueryResult(typ, query), nil
 			}
 		}
-		query.preloads = append(query.preloads, association)
+		query.preloads = append(query.preloads, preload)
 		return ormQueryResult(typ, query), nil
 	case "trb.orm.find", "trb.orm.scope.find":
 		primaryKey, ok := query.model.PrimaryKey()
@@ -782,7 +805,7 @@ func (e *Evaluator) ormQueryReceiver(arguments []evaluatedArgument) (*ormQueryVa
 func cloneORMQuery(query *ormQueryValue) *ormQueryValue {
 	result := *query
 	result.orders = append([]ormOrder(nil), query.orders...)
-	result.preloads = append([]string(nil), query.preloads...)
+	result.preloads = append([]ormPreload(nil), query.preloads...)
 	result.joins = append([]ormJoin(nil), query.joins...)
 	return &result
 }
@@ -1532,10 +1555,16 @@ func ormExplainText(value any) string {
 	return fmt.Sprint(value)
 }
 
-func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, name string) *ormFailure {
-	association, ok := model.Association(name)
+func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, preload ormPreload) *ormFailure {
+	if preload.query.transaction != nil {
+		return &ormFailure{kind: "InvalidData", message: "ORM preload query must not have a transaction scope; scope the base query instead"}
+	}
+	if preload.query.limit != nil || preload.query.offset != nil || preload.query.lock {
+		return &ormFailure{kind: "InvalidData", message: "ORM preload query does not accept limit, offset, or lock"}
+	}
+	association, ok := model.Association(preload.name)
 	if !ok || !association.Preloadable {
-		return &ormFailure{kind: "InvalidData", message: "unsupported ORM preload " + name}
+		return &ormFailure{kind: "InvalidData", message: "unsupported ORM preload " + preload.name}
 	}
 	target, ok := e.ormRuntime().manifest.Model(association.TargetModel)
 	if !ok {
@@ -1556,7 +1585,8 @@ func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, name 
 		}
 	}
 	condition := Value{Type: types.Type{Kind: types.Array, Name: "Array"}, Data: &arrayValue{Items: items}}
-	query := &ormQueryValue{model: target, predicate: ormPredicateGroup([]ormCondition{{column: association.TargetColumn, operator: "IN", value: condition}})}
+	query := cloneORMQuery(preload.query)
+	query.predicate = ormCombinePredicates("and", query.predicate, ormPredicateGroup([]ormCondition{{column: association.TargetColumn, operator: "IN", value: condition}}))
 	if len(values) > 0 {
 		if source, ok := values[0].Data.(*objectInstance); ok {
 			if scope, ok := source.Fields["@__trb_orm_query_scope"].Data.(*ormQueryValue); ok {
@@ -1578,8 +1608,8 @@ func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, name 
 		object := value.Data.(*objectInstance)
 		key := object.Fields["@"+association.SourceColumn]
 		matches := grouped[ormValueKey(key)]
-		loadedField := "@__trb_association_" + name + "_loaded"
-		valueField := "@__trb_association_" + name
+		loadedField := "@__trb_association_" + preload.name + "_loaded"
+		valueField := "@__trb_association_" + preload.name
 		object.Fields[loadedField] = Value{Type: types.FromName("Boolean"), Data: true}
 		if association.Kind == ormintegration.HasMany {
 			itemType := types.FromName(target.Name)

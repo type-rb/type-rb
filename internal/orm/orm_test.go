@@ -382,11 +382,15 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 		t.Fatalf("unexpected has_one query declaration: %#v", category.InstanceMembers["product_query"])
 	}
 	preload := productQueryMember(t, catalog, "ProductQuery", "preload")
-	if len(preload.Parameters) != 1 || len(preload.Parameters[0].LiteralValues) != 1 || preload.Parameters[0].LiteralValues[0] != "category" {
+	if preload.Intrinsic != "trb.orm.query.preload" || len(preload.Alternatives) != 2 ||
+		!reflect.DeepEqual(preload.Alternatives[0].Parameters[0].LiteralValues, []string{"category"}) ||
+		len(preload.Alternatives[1].Parameters) != 2 || preload.Alternatives[1].Parameters[1].Type.String() != "CategoryQuery" {
 		t.Fatalf("unexpected ProductQuery.preload declaration: %#v", preload)
 	}
 	categoryPreload := productQueryMember(t, catalog, "CategoryQuery", "preload")
-	if len(categoryPreload.Parameters) != 1 || !reflect.DeepEqual(categoryPreload.Parameters[0].LiteralValues, []string{"product", "products"}) {
+	if len(categoryPreload.Alternatives) != 4 ||
+		categoryPreload.Alternatives[1].Parameters[1].Type.String() != "ProductQuery" ||
+		categoryPreload.Alternatives[3].Parameters[1].Type.String() != "ProductQuery" {
 		t.Fatalf("unexpected CategoryQuery.preload declaration: %#v", categoryPreload)
 	}
 	productJoin := productQueryMember(t, catalog, "ProductQuery", "join")
