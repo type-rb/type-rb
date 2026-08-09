@@ -49,9 +49,25 @@ func (g *generator) ormFind(call *ir.Call) string {
 }
 
 func (g *generator) ormCreate(call *ir.Call) string {
-	member, ok := call.Callee.(*ir.Member)
+	model, columns, values, ok := g.ormModelWriteArguments(call)
 	if !ok {
 		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMCreate(model) + "([]string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
+func (g *generator) ormBuild(call *ir.Call) string {
+	model, columns, values, ok := g.ormModelWriteArguments(call)
+	if !ok {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMBuild(model) + "([]string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
+func (g *generator) ormModelWriteArguments(call *ir.Call) (ormintegration.Model, []string, []string, bool) {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return ormintegration.Model{}, nil, nil, false
 	}
 	modelName := member.Receiver.ExprType().Name
 	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
@@ -59,7 +75,7 @@ func (g *generator) ormCreate(call *ir.Call) string {
 	}
 	model, exists := g.orm.Model(modelName)
 	if !exists {
-		return "nil"
+		return ormintegration.Model{}, nil, nil, false
 	}
 	columns := make([]string, 0, len(call.Arguments))
 	values := make([]string, 0, len(call.Arguments))
@@ -70,7 +86,19 @@ func (g *generator) ormCreate(call *ir.Call) string {
 		columns = append(columns, strconv.Quote(argument.Name))
 		values = append(values, g.expr(argument.Value))
 	}
-	return g.ormModelQualifier(model) + goORMCreate(model) + "([]string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+	return model, columns, values, true
+}
+
+func (g *generator) ormDraftSave(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	model, exists := g.orm.DraftModel(member.Receiver.ExprType().Name)
+	if !exists {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMDraftSave(model) + "(" + g.expr(member.Receiver) + ")"
 }
 
 func (g *generator) ormUpdate(call *ir.Call) string {
@@ -1016,6 +1044,14 @@ func goORMFirst(model ormintegration.Model) string {
 
 func goORMCreate(model ormintegration.Model) string {
 	return "TrbOrmCreate" + goIdentifier(model.Name, true)
+}
+
+func goORMBuild(model ormintegration.Model) string {
+	return "TrbOrmBuild" + goIdentifier(model.Name, true)
+}
+
+func goORMDraftSave(model ormintegration.Model) string {
+	return "TrbOrmSave" + goIdentifier(model.Name, true) + "Draft"
 }
 
 func goORMUpdate(model ormintegration.Model) string {

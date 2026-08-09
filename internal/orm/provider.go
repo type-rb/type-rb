@@ -51,7 +51,14 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
+			declared.ClassMembers["build"] = buildDeclaration(model, schema.Adapter)
 			declared.ClassMembers["create"] = createDeclaration(model, schema.Adapter)
+			draft := declaration.NewType(model.DraftType(), "")
+			draft.InstanceMembers["save"] = declaration.Member{
+				Name: "save", Kind: declaration.Method, Intrinsic: "trb.orm.draft.save",
+				Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
+			}
+			catalog.Types[model.DraftType()] = draft
 		}
 		if _, ok := model.BatchKey(); ok {
 			declared.ClassMembers["find_each"] = batchDeclaration(model, "find_each", true, false)
@@ -105,7 +112,23 @@ func updateDeclaration(model Model) declaration.Member {
 	}
 }
 
+func buildDeclaration(model Model, adapter string) declaration.Member {
+	return declaration.Member{
+		Name: "build", Kind: declaration.Method, Intrinsic: "trb.orm.build",
+		Parameters: writeParameters(model, adapter), Return: types.FromName(model.DraftType()),
+		Class: true, Provider: PackageName,
+	}
+}
+
 func createDeclaration(model Model, adapter string) declaration.Member {
+	return declaration.Member{
+		Name: "create", Kind: declaration.Method, Intrinsic: "trb.orm.create",
+		Parameters: writeParameters(model, adapter), Return: dbResult(types.FromName(model.Name)),
+		Class: true, Provider: PackageName,
+	}
+}
+
+func writeParameters(model Model, adapter string) []declaration.Parameter {
 	parameters := make([]declaration.Parameter, 0, len(model.Columns))
 	for _, column := range model.Columns {
 		optional := column.Nullable || column.Generated || column.HasDefault
@@ -117,10 +140,7 @@ func createDeclaration(model Model, adapter string) declaration.Member {
 			Optional: optional,
 		})
 	}
-	return declaration.Member{
-		Name: "create", Kind: declaration.Method, Intrinsic: "trb.orm.create", Parameters: parameters,
-		Return: dbResult(types.FromName(model.Name)), Class: true, Provider: PackageName,
-	}
+	return parameters
 }
 
 func preloadDeclaration(model Model) declaration.Member {

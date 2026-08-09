@@ -15,6 +15,28 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	}
 	modelType := types.FromName(model.Name)
 	resultType := g.ormResultType(modelType)
+	draftType := goIdentifier(model.DraftType(), true)
+	g.line("type " + draftType + " struct {")
+	g.indent++
+	g.line("columns []string")
+	g.line("values []any")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMBuild(model) + "(columns []string, values []any) *" + draftType + " {")
+	g.indent++
+	g.line("draftValues := append([]any(nil), values...)")
+	g.line("for index, value := range draftValues { if bytes, ok := value.([]byte); ok { draftValues[index] = append([]byte(nil), bytes...) } }")
+	g.line("return &" + draftType + "{columns: append([]string(nil), columns...), values: draftValues}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMDraftSave(model) + "(draft *" + draftType + ") " + resultType + " {")
+	g.indent++
+	g.line("return " + goORMCreate(model) + "(draft.columns, draft.values)")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 	g.line("func " + goORMCreate(model) + "(columns []string, values []any) " + resultType + " {")
 	g.indent++
 	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")

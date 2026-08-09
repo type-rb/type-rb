@@ -39,6 +39,11 @@ def create_product(): DbResult<Product>
 	return Product.create(name: "Created", active: true)
 end
 
+def save_product(): DbResult<Product>
+	draft := Product.build(name: "Saved", active: true)
+	return draft.save()
+end
+
 def update_product(product: Product): DbResult<Product>
 	return product.update(name: "Updated")
 end
@@ -90,7 +95,8 @@ end
 		"type Product struct", "type TrbOrmProductQuery struct",
 		`trbOrmProductStatement(query, "\"id\", \"name\", \"price\", \"active\"")`,
 		"TrbOrmLoadProduct", "type ProductList = []*Product", "orm.DbResult[[]*Product]", "defer orm.TrbOrmCloseDatabase()",
-		"orm.NewDbResultErr[[]*Product]", `"database query failed"`, "TrbOrmCreateProduct", "TrbOrmUpdateProduct", "TrbOrmDeleteProduct",
+		"orm.NewDbResultErr[[]*Product]", `"database query failed"`, "type ProductDraft struct", "TrbOrmBuildProduct",
+		"TrbOrmSaveProductDraft", "TrbOrmCreateProduct", "TrbOrmUpdateProduct", "TrbOrmDeleteProduct",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
@@ -131,7 +137,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	for _, member := range product.Members {
 		classMethods[member.Name] = true
 	}
-	for _, name := range []string{"where", "find", "create", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "find", "build", "create", "find_each", "find_in_batches"} {
 		if !classMethods[name] {
 			t.Fatalf("Product.%s is missing from completion context: %#v", name, product.Members)
 		}
@@ -155,6 +161,15 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 		if !queryMethods[name] {
 			t.Fatalf("ProductQuery.%s is missing from completion context: %#v", name, context.TypeMembers["ProductQuery"])
 		}
+	}
+	draftMethods := map[string]bool{}
+	for _, member := range context.TypeMembers["ProductDraft"] {
+		if member.Kind == languageservice.CompletionMethod {
+			draftMethods[member.Name] = true
+		}
+	}
+	if !draftMethods["save"] {
+		t.Fatalf("ProductDraft.save is missing from completion context: %#v", context.TypeMembers["ProductDraft"])
 	}
 }
 
@@ -258,6 +273,14 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 	if output := string(artifacts[0].Output); !strings.Contains(output, `TrbOrmCreateProduct([]string{"name"}, []any{"Widget"})`) {
 		t.Fatalf("generated create call does not preserve schema keywords:\n%s", output)
 	}
+	artifacts, err = compile(`Product.build(name: "Widget").save()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	if !strings.Contains(output, `TrbOrmSaveProductDraft(TrbOrmBuildProduct([]string{"name"}, []any{"Widget"}))`) {
+		t.Fatalf("generated draft save does not preserve schema keywords:\n%s", output)
+	}
 	for _, test := range []struct {
 		call string
 		want string
@@ -265,9 +288,12 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		{call: `Product.create(price: 10.0)`, want: "create() is missing required argument name"},
 		{call: `Product.create(name: "Widget", price: "wrong")`, want: "has type String, expected Float?"},
 		{call: `Product.create(name: "Widget", missing: true)`, want: "create() has no keyword argument missing"},
+		{call: `Product.build(price: 10.0)`, want: "build() is missing required argument name"},
+		{call: `Product.build(name: "Widget", price: "wrong")`, want: "has type String, expected Float?"},
+		{call: `Product.build(name: "Widget", missing: true)`, want: "build() has no keyword argument missing"},
 	} {
 		if _, err := compile(test.call); err == nil || !strings.Contains(err.Error(), test.want) {
-			t.Fatalf("expected create diagnostic %q, got %v", test.want, err)
+			t.Fatalf("expected write diagnostic %q, got %v", test.want, err)
 		}
 	}
 }

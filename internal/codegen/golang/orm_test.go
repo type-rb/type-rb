@@ -63,6 +63,10 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			for _, want := range []string{
 				`"example.com/orm/trb/orm"`, `orm.DbResult[[]*Product]`, `orm.NewDbResultErr[[]*Product]`,
 				`trbOrmError(err, orm.DbErrorKindQuery, "database query failed")`, `database, err := orm.TrbOrmDatabase()`,
+				`type ProductDraft struct {`,
+				`func TrbOrmBuildProduct(columns []string, values []any) *ProductDraft`,
+				`func TrbOrmSaveProductDraft(draft *ProductDraft) orm.DbResult[*Product]`,
+				`return TrbOrmCreateProduct(draft.columns, draft.values)`,
 				`func TrbOrmCreateProduct(columns []string, values []any) orm.DbResult[*Product]`,
 				`func TrbOrmUpdateProduct(value *Product, columns []string, values []any) orm.DbResult[*Product]`,
 				`func TrbOrmDeleteProduct(value *Product) orm.DbResult[bool]`,

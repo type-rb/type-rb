@@ -62,6 +62,14 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if create.Return.String() != "DbResult<Product>" || !create.Parameters[0].Optional || create.Parameters[1].Optional || !create.Parameters[2].Optional || !create.Parameters[3].Optional {
 		t.Fatalf("unexpected create declaration: %#v", create)
 	}
+	build := product.ClassMembers["build"]
+	if build.Return.String() != "ProductDraft" || !build.Parameters[0].Optional || build.Parameters[1].Optional || !build.Parameters[2].Optional || !build.Parameters[3].Optional {
+		t.Fatalf("unexpected build declaration: %#v", build)
+	}
+	draft, exists := catalog.Type("ProductDraft")
+	if !exists || draft.InstanceMembers["save"].Return.String() != "DbResult<Product>" {
+		t.Fatalf("unexpected draft declaration: %#v", draft)
+	}
 	update := product.InstanceMembers["update"]
 	if update.Return.String() != "DbResult<Product>" || len(update.Parameters) != 4 || !update.Parameters[0].Optional {
 		t.Fatalf("unexpected update declaration: %#v", update)
@@ -196,8 +204,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 12 {
-		t.Fatalf("expected five fields and seven ORM methods, got %#v", product.Body)
+	if len(product.Body) != 13 {
+		t.Fatalf("expected five fields and eight ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -217,7 +225,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "find", "create", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "find", "create", "build", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}
@@ -237,6 +245,14 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 		if !queryMethods[name] {
 			t.Fatalf("missing generated ORM query method %s: %#v", name, query.Body)
 		}
+	}
+	draft, ok := lowered.Statements[2].(*ir.Class)
+	if !ok || !draft.External || draft.Name != "ProductDraft" || len(draft.Body) != 1 {
+		t.Fatalf("unexpected draft class: %#v", lowered.Statements[2])
+	}
+	save, ok := draft.Body[0].(*ir.Method)
+	if !ok || !save.External || save.Name != "save" || save.ReturnType.String() != "DbResult<Product>" {
+		t.Fatalf("unexpected draft save method: %#v", draft.Body[0])
 	}
 }
 

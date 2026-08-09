@@ -35,6 +35,8 @@ type Association struct {
 	Preloadable  bool
 }
 
+func (m Model) DraftType() string { return m.Name + "Draft" }
+
 func (m Model) PrimaryKey() (Column, bool) {
 	var result Column
 	found := false
@@ -185,6 +187,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 				if !existing["create"] {
 					class.Body = append(class.Body, createIRMethod(model))
 				}
+				if !existing["build"] {
+					class.Body = append(class.Body, buildIRMethod(model))
+				}
 			}
 			if _, ok := model.BatchKey(); ok {
 				for _, name := range []string{"find_each", "find_in_batches"} {
@@ -195,11 +200,25 @@ func (m *Manifest) Augment(program *ir.Program) {
 			}
 		}
 		program.Statements = append(program.Statements, &ir.Class{Name: model.QueryType, External: true, Body: queryIRMethods(model)})
+		if _, ok := model.PrimaryKey(); ok {
+			program.Statements = append(program.Statements, &ir.Class{
+				Name: model.DraftType(), External: true,
+				Body: []ir.Statement{&ir.Method{Name: "save", External: true, ReturnType: dbResult(namedType(model.Name))}},
+			})
+		}
 	}
 }
 
 func createIRMethod(model Model) *ir.Method {
-	method := &ir.Method{Name: "create", External: true, Class: true, ReturnType: dbResult(namedType(model.Name))}
+	return writeIRMethod(model, "create", dbResult(namedType(model.Name)))
+}
+
+func buildIRMethod(model Model) *ir.Method {
+	return writeIRMethod(model, "build", namedType(model.DraftType()))
+}
+
+func writeIRMethod(model Model, name string, returnType types.Type) *ir.Method {
+	method := &ir.Method{Name: name, External: true, Class: true, ReturnType: returnType}
 	for _, column := range model.Columns {
 		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
 	}
@@ -351,6 +370,18 @@ func (m *Manifest) QueryModel(name string) (Model, bool) {
 	}
 	for _, model := range m.Models {
 		if model.QueryType == name {
+			return model, true
+		}
+	}
+	return Model{}, false
+}
+
+func (m *Manifest) DraftModel(name string) (Model, bool) {
+	if m == nil {
+		return Model{}, false
+	}
+	for _, model := range m.Models {
+		if model.DraftType() == name {
 			return model, true
 		}
 	}
