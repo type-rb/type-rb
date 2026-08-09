@@ -50,6 +50,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
+		declared.ClassMembers["not"] = notDeclaration(model, "trb.orm.not", true)
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
 			declared.ClassMembers["build"] = buildDeclaration(model, schema.Adapter)
@@ -99,6 +100,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.Name] = declared
 		query := declaration.NewType(model.QueryType, "")
 		query.InstanceMembers["where"] = whereDeclaration(model, "trb.orm.query.where", false)
+		query.InstanceMembers["not"] = notDeclaration(model, "trb.orm.query.not", false)
+		query.InstanceMembers["or"] = declaration.Member{
+			Name: "or", Kind: declaration.Method, Intrinsic: "trb.orm.query.or",
+			Parameters: []declaration.Parameter{{Name: "other", Type: types.FromName(model.QueryType)}},
+			Return:     types.FromName(model.QueryType), Provider: PackageName,
+		}
 		query.InstanceMembers["order"] = orderDeclaration(model)
 		query.InstanceMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.query.limit", model.QueryType)
 		query.InstanceMembers["offset"] = integerQueryDeclaration("offset", "trb.orm.query.offset", model.QueryType)
@@ -265,6 +272,18 @@ func whereDeclaration(model Model, intrinsic string, class bool) declaration.Mem
 	return declaration.Member{
 		Name: "where", Kind: declaration.Method, Intrinsic: intrinsic, Parameters: parameters,
 		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName, Alternatives: alternatives,
+	}
+}
+
+func notDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	parameters := make([]declaration.Parameter, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: column.Type, Keyword: true, Optional: true})
+	}
+	return declaration.Member{
+		Name: "not", Kind: declaration.Method, Intrinsic: intrinsic, Parameters: parameters,
+		MinimumArguments: 1, MaximumArguments: 1,
+		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
 	}
 }
 

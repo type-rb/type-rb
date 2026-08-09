@@ -251,6 +251,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webLogger(call, arguments)
 	case "trb.orm.where":
 		return g.ormWhere(call)
+	case "trb.orm.not":
+		return g.ormNot(call)
 	case "trb.orm.find":
 		return g.ormFind(call)
 	case "trb.orm.build":
@@ -277,6 +279,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormDelete(call)
 	case "trb.orm.query.where":
 		return g.ormQueryWhere(call, arguments)
+	case "trb.orm.query.not":
+		return g.ormQueryNot(call, arguments)
+	case "trb.orm.query.or":
+		return g.ormQueryOr(call, arguments)
 	case "trb.orm.query.order":
 		return g.ormOrder(call, arguments)
 	case "trb.orm.query.limit":

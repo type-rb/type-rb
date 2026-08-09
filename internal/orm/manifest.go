@@ -179,6 +179,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["where"] {
 				class.Body = append(class.Body, whereIRMethod(model, true))
 			}
+			if !existing["not"] {
+				class.Body = append(class.Body, notIRMethod(model, true))
+			}
 			if primaryKey, ok := model.PrimaryKey(); ok {
 				keyType := primaryKey.Type
 				keyType.Nullable = false
@@ -303,6 +306,7 @@ func modelChangeIRMethod(model Model, name string, returnType types.Type) *ir.Me
 
 func queryIRMethods(model Model) []ir.Statement {
 	where := whereIRMethod(model, false)
+	not := notIRMethod(model, false)
 	order := &ir.Method{Name: "order", External: true, ReturnType: namedType(model.QueryType)}
 	for _, column := range model.Columns {
 		order.Parameters = append(order.Parameters, ir.Parameter{
@@ -314,6 +318,8 @@ func queryIRMethods(model Model) []ir.Statement {
 	firstType.Nullable = true
 	methods := []ir.Statement{
 		where,
+		not,
+		&ir.Method{Name: "or", External: true, Parameters: []ir.Parameter{{Name: "other", Type: namedType(model.QueryType)}}, ReturnType: namedType(model.QueryType)},
 		order,
 		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "offset", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
@@ -399,6 +405,14 @@ func whereIRMethod(model Model, class bool) *ir.Method {
 			}
 			method.Alternatives = append(method.Alternatives, alternative)
 		}
+	}
+	return method
+}
+
+func notIRMethod(model Model, class bool) *ir.Method {
+	method := &ir.Method{Name: "not", External: true, Class: class, ReturnType: namedType(model.QueryType)}
+	for _, column := range model.Columns {
+		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
 	}
 	return method
 }
