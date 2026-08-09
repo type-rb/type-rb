@@ -129,6 +129,7 @@ type Evaluator struct {
 	global      *scope
 	definitions map[string]any
 	moduleValue map[string]Value
+	orm         *ormRuntime
 }
 
 func NewEvaluator(stdout io.Writer, mode string) *Evaluator {
@@ -143,6 +144,9 @@ func NewEvaluator(stdout io.Writer, mode string) *Evaluator {
 }
 
 func (e *Evaluator) LoadProject(programs []*ir.Program, sessionModule string) error {
+	if err := e.loadORMRuntime(programs); err != nil {
+		return err
+	}
 	for _, program := range programs {
 		if program.ModulePath != sessionModule {
 			e.LoadDefinitions(program)
@@ -733,6 +737,13 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		}
 		return Value{Type: node.ExprType(), Data: &rangeValue{Start: startValue, End: endValue, Exclusive: node.Exclusive}}, nil
 	case *ir.Member:
+		if node.Reference != nil && node.Reference.Intrinsic == "trb.orm.column" {
+			receiver, err := e.expression(node.Receiver, module, sc)
+			if err != nil {
+				return Value{}, err
+			}
+			return e.ormColumn(receiver, node.Name)
+		}
 		if node.Reference != nil && node.Reference.Intrinsic != "" {
 			return Value{Type: node.ExprType(), Data: &callable{Intrinsic: node.Reference.Intrinsic, Module: module}}, nil
 		}
@@ -769,7 +780,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			arguments = append(arguments, evaluatedArgument{Name: argument.Name, Value: value})
 		}
 		if reference != nil && reference.Intrinsic != "" {
-			return e.intrinsic(reference.Intrinsic, arguments, node.ExprType(), node.Codec)
+			return e.intrinsicCall(reference.Intrinsic, arguments, node.ExprType(), node.Codec, node)
 		}
 		var callee Value
 		var err error
@@ -792,7 +803,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, fmt.Errorf("%s is not callable", Inspect(callee))
 		}
 		if function.Intrinsic != "" {
-			return e.intrinsic(function.Intrinsic, arguments, node.ExprType(), nil)
+			return e.intrinsicCall(function.Intrinsic, arguments, node.ExprType(), nil, node)
 		}
 		return e.call(function, arguments)
 	case *ir.EnumConstruct:
@@ -2480,6 +2491,9 @@ func Inspect(value Value) string {
 	case *objectInstance:
 		names := make([]string, 0, len(item.Fields))
 		for name := range item.Fields {
+			if strings.HasPrefix(name, "@__trb_") {
+				continue
+			}
 			names = append(names, name)
 		}
 		sort.Strings(names)
@@ -2488,6 +2502,8 @@ func Inspect(value Value) string {
 			parts = append(parts, strings.TrimPrefix(name, "@")+": "+Inspect(item.Fields[name]))
 		}
 		return "#<" + item.Definition.Node.Name + " " + strings.Join(parts, ", ") + ">"
+	case *ormQueryValue:
+		return "#<" + item.model.QueryType + ">"
 	case *typeValue:
 		if item.Record != nil {
 			return item.Record.Node.Name
