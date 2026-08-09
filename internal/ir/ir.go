@@ -76,6 +76,7 @@ func (*Import) irStatement() {}
 type Class struct {
 	Base
 	Name       string
+	External   bool
 	Superclass Expression
 	Implements []string
 	Body       []Statement
@@ -160,6 +161,7 @@ type Parameter struct {
 type Method struct {
 	Base
 	Name           string
+	External       bool
 	TargetName     string
 	TypeParameters []string
 	Parameters     []Parameter

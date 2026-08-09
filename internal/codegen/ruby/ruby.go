@@ -74,6 +74,9 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line("require_relative "+strconv.Quote(rubyImportPath(g.modulePath, n.Path)), n.TrailingComment)
 	case *ir.Class:
+		if n.External {
+			return
+		}
 		header := "class " + n.Name
 		if n.Superclass != nil {
 			header += " < " + g.expr(n.Superclass)
@@ -143,6 +146,9 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("end", "")
 	case *ir.Method:
+		if n.External {
+			return
+		}
 		g.method(n, nil)
 	case *ir.Variable:
 		g.line(n.Name+" = "+g.expr(n.Value), n.TrailingComment)

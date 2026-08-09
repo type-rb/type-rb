@@ -61,6 +61,27 @@ func TestNonInteractiveNoArgumentCommandPrintsUsage(t *testing.T) {
 	}
 }
 
+func TestOfficialPackageImportsContributeNativeDependencies(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/orm-app"
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(config.SourcePath(), "main.trb")
+	if err := os.WriteFile(sourcePath, []byte("import { Model } from trb/orm\nclass Product < Model\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dependencies, err := projectPackageDependencies(config, []string{sourcePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dependencies["modernc.org/sqlite"] != "v1.53.0" {
+		t.Fatalf("unexpected trb/orm dependencies: %#v", dependencies)
+	}
+}
+
 func TestInitWebTemplateBuildsAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {

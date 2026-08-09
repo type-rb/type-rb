@@ -116,6 +116,9 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line("import " + strconv.Quote(importPath) + ";")
 		}
 	case *ir.Class:
+		if n.External {
+			return
+		}
 		header := "export class " + n.Name
 		if n.Superclass != nil {
 			if identifier, ok := n.Superclass.(*ir.Identifier); ok && identifier.Name == "ReactComponent" {
@@ -203,6 +206,9 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line(text + ";")
 	case *ir.Method:
+		if n.External {
+			return
+		}
 		if g.inClass > 0 {
 			g.method(n)
 		} else {

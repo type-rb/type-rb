@@ -28,22 +28,23 @@ const (
 )
 
 type Config struct {
-	Schema            string            `json:"$schema,omitempty"`
-	Name              string            `json:"name"`
-	Version           string            `json:"version,omitempty"`
-	Mode              string            `json:"mode"`
-	SourceDir         string            `json:"sourceDir,omitempty"`
-	OutDir            string            `json:"outDir,omitempty"`
-	CopyFiles         *bool             `json:"copyFiles,omitempty"`
-	PackageManagement string            `json:"packageManagement,omitempty"`
-	Dependencies      map[string]string `json:"dependencies,omitempty"`
-	DevDependencies   map[string]string `json:"devDependencies,omitempty"`
-	LocalPackages     map[string]string `json:"localPackages,omitempty"`
-	Ruby              *RubyConfig       `json:"ruby,omitempty"`
-	Go                *GoConfig         `json:"go,omitempty"`
-	TypeScript        *TypeScriptConfig `json:"typescript,omitempty"`
-	Root              string            `json:"-"`
-	Path              string            `json:"-"`
+	Schema            string                     `json:"$schema,omitempty"`
+	Name              string                     `json:"name"`
+	Version           string                     `json:"version,omitempty"`
+	Mode              string                     `json:"mode"`
+	SourceDir         string                     `json:"sourceDir,omitempty"`
+	OutDir            string                     `json:"outDir,omitempty"`
+	CopyFiles         *bool                      `json:"copyFiles,omitempty"`
+	PackageManagement string                     `json:"packageManagement,omitempty"`
+	Dependencies      map[string]string          `json:"dependencies,omitempty"`
+	DevDependencies   map[string]string          `json:"devDependencies,omitempty"`
+	LocalPackages     map[string]string          `json:"localPackages,omitempty"`
+	PackageOptions    map[string]json.RawMessage `json:"packageOptions,omitempty"`
+	Ruby              *RubyConfig                `json:"ruby,omitempty"`
+	Go                *GoConfig                  `json:"go,omitempty"`
+	TypeScript        *TypeScriptConfig          `json:"typescript,omitempty"`
+	Root              string                     `json:"-"`
+	Path              string                     `json:"-"`
 }
 
 type RubyConfig struct {
@@ -133,6 +134,7 @@ func New(root, mode string) *Config {
 		Dependencies:    map[string]string{},
 		DevDependencies: map[string]string{},
 		LocalPackages:   map[string]string{},
+		PackageOptions:  map[string]json.RawMessage{},
 		Root:            absolute,
 		Path:            filepath.Join(absolute, ConfigName),
 	}
@@ -229,6 +231,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.LocalPackages == nil {
 		c.LocalPackages = map[string]string{}
+	}
+	if c.PackageOptions == nil {
+		c.PackageOptions = map[string]json.RawMessage{}
 	}
 	switch c.Mode {
 	case "ruby":

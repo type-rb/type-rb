@@ -53,6 +53,7 @@ type Options struct {
 	RubyLoader         string
 	SourceRoot         string
 	ProjectRoot        string
+	PackageOptions     map[string][]byte
 	AllowUnusedImports bool
 }
 
@@ -90,7 +91,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 			Span:     program.Span(),
 		})
 	}
-	declarations, providerErr := typeprovider.Load([]*ast.Program{program}, typeprovider.Context{ProjectRoot: projectRoot(options)})
+	declarations, providerErr := typeprovider.Load([]*ast.Program{program}, typeprovider.Context{ProjectRoot: projectRoot(options), PackageOptions: options.PackageOptions})
 	if providerErr != nil {
 		return nil, providerErr
 	}
@@ -164,7 +165,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	for _, source := range units {
 		providerPrograms = append(providerPrograms, programs[source.ModulePath])
 	}
-	declarations, providerErr := typeprovider.Load(providerPrograms, typeprovider.Context{ProjectRoot: projectRoot(options)})
+	declarations, providerErr := typeprovider.Load(providerPrograms, typeprovider.Context{ProjectRoot: projectRoot(options), PackageOptions: options.PackageOptions})
 	if providerErr != nil {
 		return nil, providerErr
 	}
@@ -230,9 +231,11 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		})
 	}
 	integrations, integrationIssues, err := projectintegration.Analyze(projectintegration.Context{
-		Sources:     integrationSources,
-		Resolutions: resolutions,
-		SourceRoot:  options.SourceRoot,
+		Sources:        integrationSources,
+		Resolutions:    resolutions,
+		SourceRoot:     options.SourceRoot,
+		ProjectRoot:    projectRoot(options),
+		PackageOptions: options.PackageOptions,
 	})
 	if err != nil {
 		return nil, err

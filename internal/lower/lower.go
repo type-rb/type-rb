@@ -513,7 +513,12 @@ func lowerCodecSchema(schema checker.CodecSchema) *ir.CodecSchema {
 func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 	binding, ok := l.checked.References[node]
 	if !ok || binding.Import == nil {
-		return nil
+		member, external := l.checked.ExternalMembers[node]
+		if !external || member.Intrinsic == "" {
+			return nil
+		}
+		_, receiver := node.(*ast.MemberExpression)
+		return &ir.Reference{Intrinsic: member.Intrinsic, Symbol: member.Name, ExportKind: string(member.Kind), ReceiverMethod: receiver}
 	}
 	result := &ir.Reference{Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name}
 	if binding.Library != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
+	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -32,6 +33,7 @@ type generator struct {
 	modulePath    string
 	goModule      string
 	temporary     int
+	orm           *ormintegration.Manifest
 }
 
 func Generate(program *ir.Program) string {
@@ -46,6 +48,7 @@ func Generate(program *ir.Program) string {
 		imports:       map[string]string{},
 		modulePath:    program.ModulePath,
 		goModule:      program.GoModule,
+		orm:           ormintegration.ManifestFrom(program.Extensions),
 	}
 	for _, statement := range program.Statements {
 		switch n := statement.(type) {
@@ -160,6 +163,9 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line("//" + strings.TrimPrefix(strings.TrimSpace(n.Text), "#"))
 	case *ir.Class:
+		if n.External {
+			break
+		}
 		g.class(n)
 	case *ir.Record:
 		g.record(n)
@@ -645,13 +651,22 @@ func (g *generator) class(class *ir.Class) {
 	previousMethods := g.methods
 	g.methods = map[string]bool{}
 	for _, method := range methods {
+		if method.External {
+			continue
+		}
 		g.methods[method.Name] = true
 	}
 	defer func() { g.methods = previousMethods }()
 	g.line("type " + name + " struct {")
 	g.indent++
 	if class.Superclass != nil {
-		g.line("*" + g.expr(class.Superclass))
+		superclass := g.expr(class.Superclass)
+		if identifier, ok := class.Superclass.(*ir.Identifier); ok {
+			if alias := g.typeAliases[identifier.Name]; alias != "" {
+				superclass = alias + "." + goIdentifier(identifier.Name, true)
+			}
+		}
+		g.line("*" + superclass)
 	}
 	for _, field := range fields {
 		g.line(goFieldName(field.Name) + " " + g.goType(field.Type))
@@ -695,7 +710,7 @@ func (g *generator) class(class *ir.Class) {
 	}
 
 	for _, method := range methods {
-		if method.Name == "initialize" {
+		if method.Name == "initialize" || method.External {
 			continue
 		}
 		g.classMethod(name, method)
@@ -944,6 +959,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if n.Reference != nil && n.Reference.Intrinsic == "trb.orm.column" {
+			return g.expr(n.Receiver) + "." + goFieldName(n.Name)
+		}
 		if n.Namespace && isUpper(n.Name) {
 			owner := n.Receiver.ExprType().Name
 			if owner == "" {
@@ -1650,6 +1668,9 @@ func (g *generator) referenceAlias(reference *ir.Reference) string {
 }
 
 func goImportAlias(name string) string {
+	if name == "_" {
+		return "_"
+	}
 	if strings.HasPrefix(name, "__trb_") {
 		return name
 	}
@@ -1709,6 +1730,8 @@ func (g *generator) goType(t types.Type) string {
 	default:
 		if t.Name == "" {
 			result = "any"
+		} else if model, ok := g.orm.QueryModel(t.Name); ok {
+			result = goORMQueryType(model)
 		} else if t.Name == "GormDB" {
 			g.requireImport("gorm.io/gorm", "gorm")
 			result = "*gorm.DB"

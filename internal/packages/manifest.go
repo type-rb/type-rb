@@ -18,6 +18,12 @@ import (
 )
 
 func Sync(config *project.Config) (string, error) {
+	return SyncWithDependencies(config, nil)
+}
+
+// SyncWithDependencies adds target dependencies required by imported TypeRB
+// packages without copying those implementation details into trbconfig.jsonc.
+func SyncWithDependencies(config *project.Config, packageDependencies map[string]string) (string, error) {
 	if !config.ManagesPackages() {
 		return "", fmt.Errorf("package management is external; trb will not modify the project manifest")
 	}
@@ -26,18 +32,22 @@ func Sync(config *project.Config) (string, error) {
 	switch config.Mode {
 	case "ruby":
 		name = "Gemfile"
-		data = rubyManifest(config)
+		var err error
+		data, err = rubyManifest(config, packageDependencies)
+		if err != nil {
+			return "", err
+		}
 	case "go":
 		name = "go.mod"
 		var err error
-		data, err = goManifest(config)
+		data, err = goManifest(config, packageDependencies)
 		if err != nil {
 			return "", err
 		}
 	case "typescript":
 		name = "package.json"
 		var err error
-		data, err = npmManifest(config)
+		data, err = npmManifest(config, packageDependencies)
 		if err != nil {
 			return "", err
 		}
@@ -58,10 +68,14 @@ func Sync(config *project.Config) (string, error) {
 }
 
 func Install(config *project.Config, stdin io.Reader, stdout, stderr io.Writer) error {
+	return InstallWithDependencies(config, nil, stdin, stdout, stderr)
+}
+
+func InstallWithDependencies(config *project.Config, packageDependencies map[string]string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if !config.ManagesPackages() {
 		return fmt.Errorf("package management is external; install dependencies with the host project")
 	}
-	if _, err := Sync(config); err != nil {
+	if _, err := SyncWithDependencies(config, packageDependencies); err != nil {
 		return err
 	}
 	var command *exec.Cmd
@@ -83,15 +97,19 @@ func Install(config *project.Config, stdin io.Reader, stdout, stderr io.Writer) 
 	return command.Run()
 }
 
-func rubyManifest(config *project.Config) []byte {
+func rubyManifest(config *project.Config, packageDependencies map[string]string) ([]byte, error) {
+	dependencies, err := mergeDependencies(config.Dependencies, packageDependencies)
+	if err != nil {
+		return nil, err
+	}
 	var out strings.Builder
 	out.WriteString("# Generated from trbconfig.jsonc by trb.\n")
 	out.WriteString("source " + strconv.Quote(config.Ruby.Source) + "\n")
 	if config.Ruby.Version != "" {
 		out.WriteString("ruby " + strconv.Quote(config.Ruby.Version) + "\n")
 	}
-	for _, name := range sortedKeys(config.Dependencies) {
-		out.WriteString(gemLine(name, config.Dependencies[name], ""))
+	for _, name := range sortedKeys(dependencies) {
+		out.WriteString(gemLine(name, dependencies[name], ""))
 	}
 	if len(config.DevDependencies) > 0 {
 		out.WriteString("\ngroup :development, :test do\n")
@@ -100,7 +118,7 @@ func rubyManifest(config *project.Config) []byte {
 		}
 		out.WriteString("end\n")
 	}
-	return []byte(out.String())
+	return []byte(out.String()), nil
 }
 
 func gemLine(name, version, indent string) string {
@@ -111,13 +129,17 @@ func gemLine(name, version, indent string) string {
 	return line + "\n"
 }
 
-func goManifest(config *project.Config) ([]byte, error) {
+func goManifest(config *project.Config, packageDependencies map[string]string) ([]byte, error) {
 	var out strings.Builder
 	out.WriteString("// Generated from trbconfig.jsonc by trb.\n")
 	out.WriteString("module " + config.Go.Module + "\n\n")
 	out.WriteString("go " + config.Go.Version + "\n")
+	dependencies, err := mergeDependencies(config.Dependencies, packageDependencies)
+	if err != nil {
+		return nil, err
+	}
 	all := map[string]string{}
-	for name, version := range config.Dependencies {
+	for name, version := range dependencies {
 		all[name] = version
 	}
 	for name, version := range config.DevDependencies {
@@ -148,7 +170,11 @@ func goManifest(config *project.Config) ([]byte, error) {
 	return []byte(out.String()), nil
 }
 
-func npmManifest(config *project.Config) ([]byte, error) {
+func npmManifest(config *project.Config, packageDependencies map[string]string) ([]byte, error) {
+	dependencies, err := mergeDependencies(config.Dependencies, packageDependencies)
+	if err != nil {
+		return nil, err
+	}
 	manifest := struct {
 		Name            string            `json:"name"`
 		Version         string            `json:"version"`
@@ -165,7 +191,7 @@ func npmManifest(config *project.Config) ([]byte, error) {
 		Type:            config.TypeScript.ModuleType,
 		PackageManager:  config.TypeScript.PackageManager,
 		Scripts:         config.TypeScript.Scripts,
-		Dependencies:    config.Dependencies,
+		Dependencies:    dependencies,
 		DevDependencies: config.DevDependencies,
 	}
 	data, err := json.MarshalIndent(manifest, "", "  ")
@@ -173,6 +199,20 @@ func npmManifest(config *project.Config) ([]byte, error) {
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+func mergeDependencies(configured, required map[string]string) (map[string]string, error) {
+	result := make(map[string]string, len(configured)+len(required))
+	for name, version := range configured {
+		result[name] = version
+	}
+	for name, version := range required {
+		if configuredVersion, exists := result[name]; exists && configuredVersion != version {
+			return nil, fmt.Errorf("dependency %s is configured as %s but an imported TypeRB package requires %s", name, configuredVersion, version)
+		}
+		result[name] = version
+	}
+	return result, nil
 }
 
 func sortedKeys(values map[string]string) []string {

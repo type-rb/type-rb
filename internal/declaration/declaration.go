@@ -24,6 +24,7 @@ type Parameter struct {
 type Member struct {
 	Name           string
 	Kind           MemberKind
+	Intrinsic      string
 	Parameters     []Parameter
 	Return         types.Type
 	Variadic       bool

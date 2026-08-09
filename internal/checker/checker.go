@@ -34,6 +34,7 @@ type Result struct {
 	CasePatterns        map[ast.Expression]CasePattern
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
+	ExternalMembers     map[ast.Expression]declaration.Member
 	RuntimeDependencies map[string]*stdlib.Package
 	ImportUses          map[*ast.ImportStatement]map[string]bool
 }
@@ -226,6 +227,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			CasePatterns:        map[ast.Expression]CasePattern{},
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
+			ExternalMembers:     map[ast.Expression]declaration.Member{},
 			RuntimeDependencies: map[string]*stdlib.Package{},
 			ImportUses:          importUses,
 		},
@@ -2417,6 +2419,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if member, ok := c.currentDeclarationMember(n.Name); ok {
 			typ = member.Return
 			c.external[n] = member
+			c.result.ExternalMembers[n] = member
 		} else if strings.HasPrefix(n.Name, "@") && c.current != nil {
 			if field, ok := c.current.fields[n.Name]; ok {
 				typ = fromTypeRef(field.Type)
@@ -2732,6 +2735,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = member.Return
 			c.external[n] = member
+			c.result.ExternalMembers[n] = member
 		} else if exported, exists := c.resolution.CompilerOwnedType(receiverType.Name); exists {
 			if member, found := exported.Members[n.Name]; found && !member.Class {
 				typ = member.Type
@@ -2755,7 +2759,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.markImportUsed(imported)
 				c.error(n.Span(), fmt.Sprintf("type %s imported from %s has no member %s", receiverType.Name, imported.Import.Path, n.Name))
 			} else if declared, exists := c.declarations().Type(receiverType.Name); exists {
-				c.error(n.Span(), fmt.Sprintf("type %s provided by Rails has no member %s", declared.Name, n.Name))
+				c.error(n.Span(), fmt.Sprintf("externally provided type %s has no member %s", declared.Name, n.Name))
 			} else if portableReceiverKind(receiverType.Kind) {
 				c.error(n.Span(), fmt.Sprintf("type %s has no member %s", receiverType, n.Name))
 			}

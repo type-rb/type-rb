@@ -246,6 +246,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "trbWebDispatch(" + arguments[0] + ")"
 	case "trb.web.middleware.logger.call":
 		return g.webLogger(call, arguments)
+	case "trb.orm.where":
+		return g.ormWhere(call)
+	case "trb.orm.query.all":
+		return g.ormAll(call, arguments)
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"

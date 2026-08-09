@@ -15,11 +15,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/codegen"
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/official"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
+	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/playground"
 	"github.com/type-rb/type-rb/internal/project"
 	"github.com/type-rb/type-rb/internal/repl"
@@ -286,7 +289,7 @@ func (c *CLI) runBuild(args []string) error {
 	}
 	manifest := ""
 	if config.ManagesPackages() {
-		manifest, err = packageManager.Sync(config)
+		manifest, err = syncProjectPackages(config, projectFiles)
 		if err != nil {
 			return err
 		}
@@ -335,7 +338,7 @@ func (c *CLI) buildGoExecutable(config *project.Config, outfile string) error {
 		return errors.New("project has no top-level main(); define def main() before using --compile")
 	}
 	if config.ManagesPackages() {
-		if _, err := packageManager.Sync(config); err != nil {
+		if _, err := syncProjectPackages(config, files); err != nil {
 			return err
 		}
 	}
@@ -367,7 +370,7 @@ func (c *CLI) buildGoExecutable(config *project.Config, outfile string) error {
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		return err
 	}
-	command := exec.Command("go", "build", "-o", output, ".")
+	command := exec.Command("go", "build", "-mod=mod", "-o", output, ".")
 	command.Dir = filepath.Dir(target)
 	command.Stdout = c.Stdout
 	command.Stderr = c.Stderr
@@ -430,14 +433,14 @@ func (c *CLI) runProgram(args []string) error {
 	if err != nil {
 		return err
 	}
-	if config.ManagesPackages() {
-		if _, err := packageManager.Sync(config); err != nil {
-			return err
-		}
-	}
 	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
 	if err != nil {
 		return err
+	}
+	if config.ManagesPackages() {
+		if _, err := syncProjectPackages(config, files); err != nil {
+			return err
+		}
 	}
 	compiled, err := compileProject(config, files)
 	if err != nil {
@@ -479,7 +482,7 @@ func (c *CLI) runProgram(args []string) error {
 	case "ruby":
 		command = exec.Command("bundle", append([]string{"exec", "ruby", target}, programArgs...)...)
 	case "go":
-		command = exec.Command("go", append([]string{"run", "."}, programArgs...)...)
+		command = exec.Command("go", append([]string{"run", "-mod=mod", "."}, programArgs...)...)
 		if config.Go.Sqldef != nil {
 			database := filepath.Join(config.Root, config.Go.Sqldef.Database)
 			command.Env = append(os.Environ(), "TRB_DATABASE="+database)
@@ -783,7 +786,11 @@ func (c *CLI) runSync(args []string) error {
 	if err != nil {
 		return err
 	}
-	manifest, err := packageManager.Sync(config)
+	files, collectErr := collectDependencyTRB(config)
+	if collectErr != nil {
+		return collectErr
+	}
+	manifest, err := syncProjectPackages(config, files)
 	if err == nil {
 		fmt.Fprintln(c.Stdout, manifest)
 	}
@@ -824,7 +831,11 @@ func (c *CLI) runAdd(args []string) error {
 	if err := config.Save(); err != nil {
 		return err
 	}
-	manifest, err := packageManager.Sync(config)
+	files, collectErr := collectDependencyTRB(config)
+	if collectErr != nil {
+		return collectErr
+	}
+	manifest, err := syncProjectPackages(config, files)
 	if err == nil {
 		fmt.Fprintf(c.Stdout, "%s %s -> %s\n", name, version, manifest)
 	}
@@ -847,7 +858,11 @@ func (c *CLI) runRemove(args []string) error {
 	if err := config.Save(); err != nil {
 		return err
 	}
-	manifest, err := packageManager.Sync(config)
+	files, collectErr := collectDependencyTRB(config)
+	if collectErr != nil {
+		return collectErr
+	}
+	manifest, err := syncProjectPackages(config, files)
 	if err == nil {
 		fmt.Fprintf(c.Stdout, "%s -> %s\n", args[0], manifest)
 	}
@@ -862,7 +877,68 @@ func (c *CLI) runInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	return packageManager.Install(config, c.Stdin, c.Stdout, c.Stderr)
+	files, err := collectDependencyTRB(config)
+	if err != nil {
+		return err
+	}
+	dependencies, err := projectPackageDependencies(config, files)
+	if err != nil {
+		return err
+	}
+	return packageManager.InstallWithDependencies(config, dependencies, c.Stdin, c.Stdout, c.Stderr)
+}
+
+func syncProjectPackages(config *project.Config, files []string) (string, error) {
+	dependencies, err := projectPackageDependencies(config, files)
+	if err != nil {
+		return "", err
+	}
+	return packageManager.SyncWithDependencies(config, dependencies)
+}
+
+func collectDependencyTRB(config *project.Config) ([]string, error) {
+	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return files, err
+}
+
+func projectPackageDependencies(config *project.Config, files []string) (map[string]string, error) {
+	units, err := projectSourceUnits(config, files)
+	if err != nil {
+		return nil, err
+	}
+	sources := make([][]byte, 0, len(units))
+	for _, unit := range units {
+		sources = append(sources, unit.Source)
+	}
+	dependencies := map[string]string{}
+	seen := map[string]bool{}
+	for len(sources) > 0 {
+		source := sources[0]
+		sources = sources[1:]
+		program, _ := parser.Parse(source)
+		for _, statement := range program.Statements {
+			imported, ok := statement.(*ast.ImportStatement)
+			if !ok {
+				continue
+			}
+			bundled, exists := official.Lookup(imported.Path)
+			if !exists || seen[bundled.Name] {
+				continue
+			}
+			seen[bundled.Name] = true
+			for name, version := range bundled.NativeDependencies[config.Mode] {
+				if existing, present := dependencies[name]; present && existing != version {
+					return nil, fmt.Errorf("TypeRB packages require conflicting versions of %s: %s and %s", name, existing, version)
+				}
+				dependencies[name] = version
+			}
+			sources = append(sources, []byte(bundled.Definition.Source))
+		}
+	}
+	return dependencies, nil
 }
 
 func loadConfig(explicit, start string) (*project.Config, error) {
@@ -1035,7 +1111,11 @@ func sourceUnit(config *project.Config, filename string, source []byte) (compile
 }
 
 func compilerOptions(config *project.Config) compiler.Options {
-	options := compiler.Options{Mode: config.Mode, SourceRoot: config.SourcePath(), ProjectRoot: config.Root}
+	packageOptions := make(map[string][]byte, len(config.PackageOptions))
+	for name, value := range config.PackageOptions {
+		packageOptions[name] = append([]byte(nil), value...)
+	}
+	options := compiler.Options{Mode: config.Mode, SourceRoot: config.SourcePath(), ProjectRoot: config.Root, PackageOptions: packageOptions}
 	if config.Ruby != nil {
 		options.RubyLoader = config.Ruby.Loader
 	}
