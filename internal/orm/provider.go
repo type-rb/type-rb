@@ -28,6 +28,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		if _, ok := model.PrimaryKey(); ok {
+			declared.InstanceMembers["with"] = withDeclaration(model)
 			declared.InstanceMembers["update"] = updateDeclaration(model)
 			declared.InstanceMembers["delete"] = declaration.Member{
 				Name: "delete", Kind: declaration.Method, Intrinsic: "trb.orm.delete",
@@ -59,6 +60,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 				Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
 			}
 			catalog.Types[model.DraftType()] = draft
+			changes := declaration.NewType(model.ChangesType(), "")
+			changes.InstanceMembers["save"] = declaration.Member{
+				Name: "save", Kind: declaration.Method, Intrinsic: "trb.orm.changes.save",
+				Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
+			}
+			catalog.Types[model.ChangesType()] = changes
 		}
 		if _, ok := model.BatchKey(); ok {
 			declared.ClassMembers["find_each"] = batchDeclaration(model, "find_each", true, false)
@@ -97,6 +104,20 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 }
 
 func updateDeclaration(model Model) declaration.Member {
+	return declaration.Member{
+		Name: "update", Kind: declaration.Method, Intrinsic: "trb.orm.update",
+		Parameters: updateParameters(model), Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
+	}
+}
+
+func withDeclaration(model Model) declaration.Member {
+	return declaration.Member{
+		Name: "with", Kind: declaration.Method, Intrinsic: "trb.orm.with",
+		Parameters: updateParameters(model), Return: types.FromName(model.ChangesType()), Provider: PackageName,
+	}
+}
+
+func updateParameters(model Model) []declaration.Parameter {
 	parameters := make([]declaration.Parameter, 0, len(model.Columns)-1)
 	for _, column := range model.Columns {
 		if column.PrimaryKey {
@@ -106,10 +127,7 @@ func updateDeclaration(model Model) declaration.Member {
 			Name: column.Name, Type: column.Type, Keyword: true, Optional: true,
 		})
 	}
-	return declaration.Member{
-		Name: "update", Kind: declaration.Method, Intrinsic: "trb.orm.update", Parameters: parameters,
-		Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
-	}
+	return parameters
 }
 
 func buildDeclaration(model Model, adapter string) declaration.Member {

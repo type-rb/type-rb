@@ -68,6 +68,10 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				`func TrbOrmSaveProductDraft(draft *ProductDraft) orm.DbResult[*Product]`,
 				`return TrbOrmCreateProduct(draft.columns, draft.values)`,
 				`func TrbOrmCreateProduct(columns []string, values []any) orm.DbResult[*Product]`,
+				`type ProductChanges struct {`,
+				`func TrbOrmWithProduct(value *Product, columns []string, values []any) *ProductChanges`,
+				`func TrbOrmSaveProductChanges(changes *ProductChanges) orm.DbResult[*Product]`,
+				`return TrbOrmUpdateProduct(changes.value, changes.columns, changes.values)`,
 				`func TrbOrmUpdateProduct(value *Product, columns []string, values []any) orm.DbResult[*Product]`,
 				`func TrbOrmDeleteProduct(value *Product) orm.DbResult[bool]`,
 			} {

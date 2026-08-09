@@ -37,6 +37,8 @@ type Association struct {
 
 func (m Model) DraftType() string { return m.Name + "Draft" }
 
+func (m Model) ChangesType() string { return m.Name + "Changes" }
+
 func (m Model) PrimaryKey() (Column, bool) {
 	var result Column
 	found := false
@@ -146,6 +148,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 				}
 			}
 			if _, ok := model.PrimaryKey(); ok {
+				if !existing["with"] {
+					class.Body = append(class.Body, withIRMethod(model))
+				}
 				if !existing["update"] {
 					class.Body = append(class.Body, updateIRMethod(model))
 				}
@@ -205,6 +210,10 @@ func (m *Manifest) Augment(program *ir.Program) {
 				Name: model.DraftType(), External: true,
 				Body: []ir.Statement{&ir.Method{Name: "save", External: true, ReturnType: dbResult(namedType(model.Name))}},
 			})
+			program.Statements = append(program.Statements, &ir.Class{
+				Name: model.ChangesType(), External: true,
+				Body: []ir.Statement{&ir.Method{Name: "save", External: true, ReturnType: dbResult(namedType(model.Name))}},
+			})
 		}
 	}
 }
@@ -226,7 +235,15 @@ func writeIRMethod(model Model, name string, returnType types.Type) *ir.Method {
 }
 
 func updateIRMethod(model Model) *ir.Method {
-	method := &ir.Method{Name: "update", External: true, ReturnType: dbResult(namedType(model.Name))}
+	return modelChangeIRMethod(model, "update", dbResult(namedType(model.Name)))
+}
+
+func withIRMethod(model Model) *ir.Method {
+	return modelChangeIRMethod(model, "with", namedType(model.ChangesType()))
+}
+
+func modelChangeIRMethod(model Model, name string, returnType types.Type) *ir.Method {
+	method := &ir.Method{Name: name, External: true, ReturnType: returnType}
 	for _, column := range model.Columns {
 		if !column.PrimaryKey {
 			method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
@@ -382,6 +399,18 @@ func (m *Manifest) DraftModel(name string) (Model, bool) {
 	}
 	for _, model := range m.Models {
 		if model.DraftType() == name {
+			return model, true
+		}
+	}
+	return Model{}, false
+}
+
+func (m *Manifest) ChangesModel(name string) (Model, bool) {
+	if m == nil {
+		return Model{}, false
+	}
+	for _, model := range m.Models {
+		if model.ChangesType() == name {
 			return model, true
 		}
 	}

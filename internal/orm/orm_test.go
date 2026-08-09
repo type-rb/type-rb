@@ -74,6 +74,14 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if update.Return.String() != "DbResult<Product>" || len(update.Parameters) != 4 || !update.Parameters[0].Optional {
 		t.Fatalf("unexpected update declaration: %#v", update)
 	}
+	with := product.InstanceMembers["with"]
+	if with.Return.String() != "ProductChanges" || len(with.Parameters) != 4 || !with.Parameters[0].Optional {
+		t.Fatalf("unexpected with declaration: %#v", with)
+	}
+	changes, exists := catalog.Type("ProductChanges")
+	if !exists || changes.InstanceMembers["save"].Return.String() != "DbResult<Product>" {
+		t.Fatalf("unexpected changes declaration: %#v", changes)
+	}
 	if product.InstanceMembers["delete"].Return.String() != "DbResult<Boolean>" {
 		t.Fatalf("unexpected delete declaration: %#v", product.InstanceMembers["delete"])
 	}
@@ -204,8 +212,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 13 {
-		t.Fatalf("expected five fields and eight ORM methods, got %#v", product.Body)
+	if len(product.Body) != 14 {
+		t.Fatalf("expected five fields and nine ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -253,6 +261,14 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	save, ok := draft.Body[0].(*ir.Method)
 	if !ok || !save.External || save.Name != "save" || save.ReturnType.String() != "DbResult<Product>" {
 		t.Fatalf("unexpected draft save method: %#v", draft.Body[0])
+	}
+	changes, ok := lowered.Statements[3].(*ir.Class)
+	if !ok || !changes.External || changes.Name != "ProductChanges" || len(changes.Body) != 1 {
+		t.Fatalf("unexpected changes class: %#v", lowered.Statements[3])
+	}
+	changeSave, ok := changes.Body[0].(*ir.Method)
+	if !ok || !changeSave.External || changeSave.Name != "save" || changeSave.ReturnType.String() != "DbResult<Product>" {
+		t.Fatalf("unexpected changes save method: %#v", changes.Body[0])
 	}
 }
 

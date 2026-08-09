@@ -85,6 +85,29 @@ func (g *generator) ormUpdateRuntime(adapter ormintegration.Adapter, model ormin
 	modelType := types.FromName(model.Name)
 	resultType := g.ormResultType(modelType)
 	modelName := goIdentifier(model.Name, true)
+	changesType := goIdentifier(model.ChangesType(), true)
+	g.line("type " + changesType + " struct {")
+	g.indent++
+	g.line("value *" + modelName)
+	g.line("columns []string")
+	g.line("values []any")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMWith(model) + "(value *" + modelName + ", columns []string, values []any) *" + changesType + " {")
+	g.indent++
+	g.line("changeValues := append([]any(nil), values...)")
+	g.line("for index, value := range changeValues { if bytes, ok := value.([]byte); ok { changeValues[index] = append([]byte(nil), bytes...) } }")
+	g.line("return &" + changesType + "{value: value, columns: append([]string(nil), columns...), values: changeValues}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMChangesSave(model) + "(changes *" + changesType + ") " + resultType + " {")
+	g.indent++
+	g.line("return " + goORMUpdate(model) + "(changes.value, changes.columns, changes.values)")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 	g.line("func " + goORMUpdate(model) + "(value *" + modelName + ", columns []string, values []any) " + resultType + " {")
 	g.indent++
 	g.line("if len(columns) == 0 { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "database update requires at least one value")) + " }")

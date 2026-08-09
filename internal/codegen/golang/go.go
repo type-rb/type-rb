@@ -1804,6 +1804,8 @@ func (g *generator) goType(t types.Type) string {
 			result = g.ormModelQualifier(model) + goORMQueryType(model)
 		} else if model, ok := g.orm.DraftModel(t.Name); ok {
 			result = g.ormModelQualifier(model) + "*" + goIdentifier(model.DraftType(), true)
+		} else if model, ok := g.orm.ChangesModel(t.Name); ok {
+			result = g.ormModelQualifier(model) + "*" + goIdentifier(model.ChangesType(), true)
 		} else if t.Name == "GormDB" {
 			g.requireImport("gorm.io/gorm", "gorm")
 			result = "*gorm.DB"
