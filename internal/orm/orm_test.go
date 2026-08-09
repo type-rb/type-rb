@@ -70,6 +70,18 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if product.ClassMembers["pluck"].Alternatives[1].Return.String() != "DbResult<Array<String>>" || product.ClassMembers["pick"].Alternatives[2].Return.String() != "DbResult<Float?>" || product.ClassMembers["ids"].Return.String() != "DbResult<Array<Integer>>" {
 		t.Fatalf("unexpected projection declarations: %#v", product.ClassMembers)
 	}
+	if product.ClassMembers["sum"].Alternatives[0].Return.String() != "DbResult<Integer>" || product.ClassMembers["sum"].Alternatives[1].Return.String() != "DbResult<Float>" {
+		t.Fatalf("unexpected sum declaration: %#v", product.ClassMembers["sum"])
+	}
+	if product.ClassMembers["average"].Alternatives[1].Return.String() != "DbResult<Float?>" {
+		t.Fatalf("unexpected average declaration: %#v", product.ClassMembers["average"])
+	}
+	if product.ClassMembers["minimum"].Alternatives[0].Return.String() != "DbResult<Integer?>" || product.ClassMembers["minimum"].Alternatives[1].Return.String() != "DbResult<String?>" || product.ClassMembers["minimum"].Alternatives[2].Return.String() != "DbResult<Float?>" {
+		t.Fatalf("unexpected minimum declaration: %#v", product.ClassMembers["minimum"])
+	}
+	if !reflect.DeepEqual(product.ClassMembers["maximum"].Parameters[0].LiteralValues, []string{"id", "name", "price"}) {
+		t.Fatalf("unexpected maximum columns: %#v", product.ClassMembers["maximum"])
+	}
 	if product.ClassMembers["find"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
 	}
@@ -145,6 +157,11 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 	if query.InstanceMembers["pluck"].Alternatives[1].Return.String() != "DbResult<Array<String>>" || query.InstanceMembers["pick"].Alternatives[2].Return.String() != "DbResult<Float?>" || query.InstanceMembers["ids"].Return.String() != "DbResult<Array<Integer>>" {
 		t.Fatalf("unexpected query projection declarations: %#v", query.InstanceMembers)
+	}
+	for _, name := range []string{"sum", "average", "minimum", "maximum"} {
+		if query.InstanceMembers[name].Intrinsic != "trb.orm.query."+name {
+			t.Fatalf("unexpected query aggregate declaration: %#v", query.InstanceMembers[name])
+		}
 	}
 	for name, expected := range map[string]string{
 		"first": "DbResult<Product?>", "count": "DbResult<Integer>", "explain": "DbResult<String>",
@@ -258,8 +275,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 23 {
-		t.Fatalf("expected five fields and eighteen ORM methods, got %#v", product.Body)
+	if len(product.Body) != 27 {
+		t.Fatalf("expected five fields and twenty-two ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -279,7 +296,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "not", "find_by", "exists?", "pluck", "pick", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "not", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}
@@ -295,7 +312,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 			queryMethods[method.Name] = true
 		}
 	}
-	for _, name := range []string{"not", "or", "find_by", "exists?", "update_all", "delete_all", "pluck", "pick", "ids", "to_sql", "explain"} {
+	for _, name := range []string{"not", "or", "find_by", "exists?", "update_all", "delete_all", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "to_sql", "explain"} {
 		if !queryMethods[name] {
 			t.Fatalf("missing generated ORM query method %s: %#v", name, query.Body)
 		}

@@ -90,6 +90,37 @@ func (m Model) Column(name string) (Column, bool) {
 	return Column{}, false
 }
 
+func AggregateResultType(operation string, column Column) (types.Type, bool) {
+	result := column.Type
+	switch operation {
+	case "sum":
+		if result.Kind != types.Int && result.Kind != types.Float {
+			return types.Type{}, false
+		}
+		result.Nullable = false
+	case "average":
+		if result.Kind != types.Int && result.Kind != types.Float {
+			return types.Type{}, false
+		}
+		result = types.FromName("Float")
+		result.Nullable = true
+	case "minimum", "maximum":
+		switch result.Kind {
+		case types.Int, types.Float, types.String:
+			result.Nullable = true
+		default:
+			return types.Type{}, false
+		}
+	default:
+		return types.Type{}, false
+	}
+	return result, true
+}
+
+func AggregateOperations() []string {
+	return []string{"sum", "average", "minimum", "maximum"}
+}
+
 func associationValueType(association Association) types.Type {
 	if association.Kind == HasMany {
 		return arrayOf(association.TargetModel)
@@ -195,6 +226,13 @@ func (m *Manifest) Augment(program *ir.Program) {
 			}
 			if !existing["pick"] {
 				class.Body = append(class.Body, projectionIRMethod(model, "pick", true, true))
+			}
+			for _, operation := range AggregateOperations() {
+				if !existing[operation] {
+					if aggregate := aggregateIRMethod(model, operation, true); aggregate != nil {
+						class.Body = append(class.Body, aggregate)
+					}
+				}
 			}
 			if primaryKey, ok := model.PrimaryKey(); ok {
 				keyType := primaryKey.Type
@@ -362,6 +400,11 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "to_sql", External: true, ReturnType: types.FromName("String")},
 		&ir.Method{Name: "explain", External: true, ReturnType: dbResult(types.FromName("String"))},
 	}
+	for _, operation := range AggregateOperations() {
+		if aggregate := aggregateIRMethod(model, operation, false); aggregate != nil {
+			methods = append(methods, aggregate)
+		}
+	}
 	if preload := preloadIRMethod(model); preload != nil {
 		methods = append(methods, preload)
 	}
@@ -473,6 +516,30 @@ func projectionIRMethod(model Model, name string, class, pick bool) *ir.Method {
 	for _, parameter := range declared.Parameters {
 		method.Parameters = append(method.Parameters, ir.Parameter{
 			Name: parameter.Name, Type: parameter.Type, Keyword: parameter.Keyword,
+			LiteralValues: append([]string(nil), parameter.LiteralValues...),
+		})
+	}
+	for _, signature := range declared.Alternatives {
+		alternative := ir.MethodSignature{ReturnType: signature.Return}
+		for _, parameter := range signature.Parameters {
+			alternative.Parameters = append(alternative.Parameters, ir.Parameter{
+				Name: parameter.Name, Type: parameter.Type, LiteralValues: append([]string(nil), parameter.LiteralValues...),
+			})
+		}
+		method.Alternatives = append(method.Alternatives, alternative)
+	}
+	return method
+}
+
+func aggregateIRMethod(model Model, operation string, class bool) *ir.Method {
+	declared, ok := aggregateDeclaration(model, operation, "", class)
+	if !ok {
+		return nil
+	}
+	method := &ir.Method{Name: operation, External: true, Class: class, ReturnType: declared.Return}
+	for _, parameter := range declared.Parameters {
+		method.Parameters = append(method.Parameters, ir.Parameter{
+			Name: parameter.Name, Type: parameter.Type,
 			LiteralValues: append([]string(nil), parameter.LiteralValues...),
 		})
 	}

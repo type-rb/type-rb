@@ -170,7 +170,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	for _, member := range product.Members {
 		classMethods[member.Name] = true
 	}
-	for _, name := range []string{"where", "not", "find_by", "exists?", "pluck", "pick", "ids", "find", "build", "create", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "not", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "build", "create", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !classMethods[name] {
 			t.Fatalf("Product.%s is missing from completion context: %#v", name, product.Members)
 		}
@@ -199,7 +199,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 			queryMethods[member.Name] = true
 		}
 	}
-	for _, name := range []string{"where", "not", "or", "find_by", "exists?", "update_all", "delete_all", "pluck", "pick", "ids", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "not", "or", "find_by", "exists?", "update_all", "delete_all", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
 		if !queryMethods[name] {
 			t.Fatalf("ProductQuery.%s is missing from completion context: %#v", name, context.TypeMembers["ProductQuery"])
 		}
@@ -243,6 +243,8 @@ func assertORMLiteralCompletions(t *testing.T, context languageservice.Context) 
 		{source: `Product.where("pr`, label: "price", insert: `price"`},
 		{source: `Product.where("price", ">`, label: ">=", insert: `>="`},
 		{source: `Product.where().order(price: :d`, label: "desc", insert: "desc"},
+		{source: `Product.sum(:pr`, label: "price", insert: "price"},
+		{source: `Product.minimum(:na`, label: "name", insert: "name"},
 		{source: "query := Product.where(name: \"Widget\")\nquery.where(\"na", label: "name", insert: `name"`},
 		{source: `Product.insert_if_absent(Product.build(name: "Widget", active: true), unique_by: [:na`, label: "name", insert: "name"},
 		{source: `Product.build(name: "Widget", active: true).upsert(unique_by: [:name], update: [:pr`, label: "price", insert: "price"},
@@ -491,7 +493,7 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	compile := func(body string) ([]*Artifact, error) {
 		return compileSource("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n")
 	}
-	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).not(name: \"Deleted\").or(Product.where(name: \"Widget\")).order(price: :desc).limit(5).offset(1)\n\tputs(Product.not(name: \"Deleted\").to_sql())\n\tputs(Product.exists?(name: \"Widget\"))\n\tputs(Product.find_by(name: \"Widget\"))\n\tputs(Product.pluck(:name))\n\tputs(Product.pick(:price))\n\tputs(Product.ids())\n\tputs(Product.where(\"price\", \">=\", 10).exists?())\n\tputs(Product.where(\"price\", \">=\", 10).find_by(name: \"Widget\"))\n\tputs(Product.where(\"price\", \">=\", 10).pluck(:name))\n\tputs(Product.where(\"price\", \">=\", 10).pick(:price))\n\tputs(Product.where(\"price\", \">=\", 10).ids())\n\tputs(Product.where(name: \"Widget\").update_all(price: 20.0))\n\tputs(Product.where(name: \"Deleted\").delete_all())\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
+	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).not(name: \"Deleted\").or(Product.where(name: \"Widget\")).order(price: :desc).limit(5).offset(1)\n\tputs(Product.not(name: \"Deleted\").to_sql())\n\tputs(Product.exists?(name: \"Widget\"))\n\tputs(Product.find_by(name: \"Widget\"))\n\tputs(Product.pluck(:name))\n\tputs(Product.pick(:price))\n\tputs(Product.sum(:price))\n\tputs(Product.average(:price))\n\tputs(Product.minimum(:name))\n\tputs(Product.maximum(:price))\n\tputs(Product.ids())\n\tputs(Product.where(\"price\", \">=\", 10).exists?())\n\tputs(Product.where(\"price\", \">=\", 10).find_by(name: \"Widget\"))\n\tputs(Product.where(\"price\", \">=\", 10).pluck(:name))\n\tputs(Product.where(\"price\", \">=\", 10).pick(:price))\n\tputs(Product.where(\"price\", \">=\", 10).sum(:price))\n\tputs(Product.where(\"price\", \">=\", 10).average(:price))\n\tputs(Product.where(\"price\", \">=\", 10).minimum(:name))\n\tputs(Product.where(\"price\", \">=\", 10).maximum(:price))\n\tputs(Product.where(\"price\", \">=\", 10).ids())\n\tputs(Product.where(name: \"Widget\").update_all(price: 20.0))\n\tputs(Product.where(name: \"Deleted\").delete_all())\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,6 +503,8 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 		"TrbOrmFirstProduct", "TrbOrmExistsProduct", "trbOrmProductPredicateSQL",
 		"TrbOrmUpdateAllProduct", "TrbOrmDeleteAllProduct", "database bulk update failed", "database bulk delete failed",
 		"TrbOrmPluckProductName", "TrbOrmPickProductPrice", "database projection query failed",
+		"TrbOrmSumProductPrice", "TrbOrmAverageProductPrice", "TrbOrmMinimumProductName", "TrbOrmMaximumProductPrice",
+		"database aggregate result was invalid", "AS trb_aggregate", `COALESCE(SUM(\"trb_value\"), 0)`,
 		"TrbOrmProductOrder", "TrbOrmProductLimit", "TrbOrmProductOffset",
 		"TrbOrmToSQLProduct", "TrbOrmExplainProduct", "EXPLAIN QUERY PLAN", "TrbOrmCountProduct", "TrbOrmFirstProduct", `statement += " ORDER BY "`,
 	} {
@@ -548,6 +552,9 @@ end
 		{body: "\tProduct.where(name: \"Widget\").update_all(price: \"twenty\")", want: "has type String, expected Float"},
 		{body: "\tProduct.pluck(:missing)", want: "must be one of"},
 		{body: "\tProduct.pick(:missing)", want: "must be one of"},
+		{body: "\tProduct.sum(:name)", want: "must be one of"},
+		{body: "\tProduct.average(:active)", want: "must be one of"},
+		{body: "\tProduct.maximum(:active)", want: "must be one of"},
 		{body: "\tProduct.ids(1)", want: "ids() expects at most 0 arguments, got 1"},
 	}
 	for _, test := range invalid {

@@ -55,6 +55,11 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		declared.ClassMembers["exists?"] = existsDeclaration(model, "trb.orm.exists", true)
 		declared.ClassMembers["pluck"] = projectionDeclaration(model, "pluck", "trb.orm.pluck", true, false)
 		declared.ClassMembers["pick"] = projectionDeclaration(model, "pick", "trb.orm.pick", true, true)
+		for _, operation := range AggregateOperations() {
+			if aggregate, ok := aggregateDeclaration(model, operation, "trb.orm."+operation, true); ok {
+				declared.ClassMembers[operation] = aggregate
+			}
+		}
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
 			declared.ClassMembers["ids"] = idsDeclaration(model, "trb.orm.ids", true, primaryKey)
@@ -123,6 +128,11 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		query.InstanceMembers["pluck"] = projectionDeclaration(model, "pluck", "trb.orm.query.pluck", false, false)
 		query.InstanceMembers["pick"] = projectionDeclaration(model, "pick", "trb.orm.query.pick", false, true)
+		for _, operation := range AggregateOperations() {
+			if aggregate, ok := aggregateDeclaration(model, operation, "trb.orm.query."+operation, false); ok {
+				query.InstanceMembers[operation] = aggregate
+			}
+		}
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			query.InstanceMembers["ids"] = idsDeclaration(model, "trb.orm.query.ids", false, primaryKey)
 		}
@@ -363,6 +373,30 @@ func projectionDeclaration(model Model, name, intrinsic string, class, pick bool
 		Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: values}},
 		Return:     alternatives[0].Return, Class: class, Provider: PackageName, Alternatives: alternatives,
 	}
+}
+
+func aggregateDeclaration(model Model, operation, intrinsic string, class bool) (declaration.Member, bool) {
+	values := make([]string, 0, len(model.Columns))
+	alternatives := make([]declaration.Signature, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		result, ok := AggregateResultType(operation, column)
+		if !ok {
+			continue
+		}
+		values = append(values, column.Name)
+		alternatives = append(alternatives, declaration.Signature{
+			Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}},
+			Return:     dbResult(result),
+		})
+	}
+	if len(alternatives) == 0 {
+		return declaration.Member{}, false
+	}
+	return declaration.Member{
+		Name: operation, Kind: declaration.Method, Intrinsic: intrinsic,
+		Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: values}},
+		Return:     alternatives[0].Return, Class: class, Provider: PackageName, Alternatives: alternatives,
+	}, true
 }
 
 func idsDeclaration(model Model, intrinsic string, class bool, primaryKey Column) declaration.Member {

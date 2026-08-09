@@ -1012,6 +1012,11 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.ormRelationWriteRuntime(adapter, model)
 	for _, column := range model.Columns {
 		g.ormProjectionRuntime(adapter, model, column)
+		for _, operation := range ormintegration.AggregateOperations() {
+			if resultType, ok := ormintegration.AggregateResultType(operation, column); ok {
+				g.ormAggregateRuntime(adapter, model, column, operation, resultType)
+			}
+		}
 	}
 	for _, association := range model.Associations {
 		if !association.Preloadable {

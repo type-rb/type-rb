@@ -263,6 +263,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormProjection(call, arguments, "pick")
 	case "trb.orm.ids", "trb.orm.query.ids":
 		return g.ormProjection(call, arguments, "ids")
+	case "trb.orm.sum", "trb.orm.query.sum":
+		return g.ormAggregate(call, arguments, "sum")
+	case "trb.orm.average", "trb.orm.query.average":
+		return g.ormAggregate(call, arguments, "average")
+	case "trb.orm.minimum", "trb.orm.query.minimum":
+		return g.ormAggregate(call, arguments, "minimum")
+	case "trb.orm.maximum", "trb.orm.query.maximum":
+		return g.ormAggregate(call, arguments, "maximum")
 	case "trb.orm.find":
 		return g.ormFind(call)
 	case "trb.orm.build":

@@ -261,6 +261,9 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		return e.ormResultOK(typ, Value{Type: types.FromName("String"), Data: detail})
 	case "trb.orm.pluck", "trb.orm.query.pluck", "trb.orm.pick", "trb.orm.query.pick", "trb.orm.ids", "trb.orm.query.ids":
 		return e.ormProjectionResult(name, typ, query, remaining)
+	case "trb.orm.sum", "trb.orm.query.sum", "trb.orm.average", "trb.orm.query.average", "trb.orm.minimum", "trb.orm.query.minimum", "trb.orm.maximum", "trb.orm.query.maximum":
+		operation := name[strings.LastIndex(name, ".")+1:]
+		return e.ormAggregateResult(operation, typ, query, remaining)
 	case "trb.orm.association.query.belongs_to", "trb.orm.association.query.has_many", "trb.orm.association.query.has_one":
 		return e.ormAssociationQuery(typ, query.model, arguments[0].Value, call)
 	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many", "trb.orm.association.loaded.has_one":
@@ -806,6 +809,68 @@ func (e *Evaluator) ormLoadProjection(query *ormQueryValue, column ormintegratio
 		return nil, &ormFailure{kind: "Query", message: "database projection query failed"}
 	}
 	return values, nil
+}
+
+func (e *Evaluator) ormAggregateResult(operation string, typ types.Type, query *ormQueryValue, arguments []evaluatedArgument) (Value, error) {
+	if len(arguments) != 1 {
+		return Value{}, errors.New("ORM aggregate requires one column")
+	}
+	columnName, _ := arguments[0].Value.Data.(string)
+	column, ok := query.model.Column(columnName)
+	if !ok {
+		return Value{}, fmt.Errorf("ORM model %s has no column %s", query.model.Name, columnName)
+	}
+	resultType, supported := ormintegration.AggregateResultType(operation, column)
+	if !supported {
+		return Value{}, fmt.Errorf("ORM %s does not support column %s", operation, columnName)
+	}
+	runtime := e.ormRuntime()
+	quotedValue := runtime.adapter.QuoteIdentifier("trb_value")
+	projection := runtime.adapter.QuoteIdentifier(column.Name) + " AS " + quotedValue
+	statement, queryArguments, err := e.ormStatement(query, projection)
+	if err != nil {
+		return Value{}, err
+	}
+	function := strings.ToUpper(operation)
+	switch operation {
+	case "average":
+		function = "AVG"
+	case "minimum":
+		function = "MIN"
+	case "maximum":
+		function = "MAX"
+	}
+	expression := function + "(" + quotedValue + ")"
+	if operation == "sum" {
+		expression = "COALESCE(" + expression + ", 0)"
+	}
+	database, failure := e.ormDatabase()
+	if failure != nil {
+		return e.ormResultErr(typ, failure.kind, failure.message)
+	}
+	rows, err := database.QueryContext(e.context, "SELECT "+expression+" FROM ("+statement+") AS trb_aggregate", queryArguments...)
+	if err != nil {
+		return e.ormResultErr(typ, "Query", "database aggregate query failed")
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return e.ormResultErr(typ, "Query", "database aggregate query failed")
+		}
+		return e.ormResultErr(typ, "InvalidData", "database aggregate result was missing")
+	}
+	var raw any
+	if err := rows.Scan(&raw); err != nil {
+		return e.ormResultErr(typ, "InvalidData", "database aggregate result was invalid")
+	}
+	if err := rows.Err(); err != nil {
+		return e.ormResultErr(typ, "Query", "database aggregate query failed")
+	}
+	value, err := ormColumnValue(resultType, raw)
+	if err != nil {
+		return e.ormResultErr(typ, "InvalidData", "database aggregate result was invalid")
+	}
+	return e.ormResultOK(typ, value)
 }
 
 func (e *Evaluator) ormExplain(query *ormQueryValue) (string, *ormFailure) {
