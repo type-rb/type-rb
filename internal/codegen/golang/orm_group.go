@@ -2,6 +2,7 @@ package golang
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
@@ -42,14 +43,24 @@ func (g *generator) ormGroup(call *ir.Call) string {
 
 func (g *generator) ormGroupHaving(call *ir.Call, arguments []string) string {
 	member, ok := call.Callee.(*ir.Member)
-	if !ok || len(arguments) != 4 {
+	if !ok || len(arguments) < 4 || len(arguments) > 5 {
 		return "nil"
 	}
 	model, column, ok := g.orm.GroupModel(member.Receiver.ExprType().Name)
 	if !ok {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMGroupHaving(model, column) + "(" + arguments[0] + ", " + arguments[2] + ", " + arguments[3] + ")"
+	expression, operatorIndex, valueIndex := "COUNT(*)", 2, 3
+	if len(arguments) == 5 {
+		operation := ormProjectionColumn(call.Arguments[0].Value)
+		targetName := ormProjectionColumn(call.Arguments[1].Value)
+		_, exists := model.Column(targetName)
+		if !exists {
+			return "nil"
+		}
+		expression, operatorIndex, valueIndex = groupedAggregateExpression(operation, "trb_value"), 3, 4
+	}
+	return g.ormModelQualifier(model) + goORMGroupHaving(model, column) + "(" + arguments[0] + ", " + strconv.Quote(expression) + ", " + arguments[operatorIndex] + ", " + arguments[valueIndex] + ")"
 }
 
 func (g *generator) ormGroupCount(call *ir.Call, arguments []string) string {
@@ -64,40 +75,95 @@ func (g *generator) ormGroupCount(call *ir.Call, arguments []string) string {
 	return g.ormModelQualifier(model) + goORMGroupCount(model, column) + "(" + arguments[0] + ")"
 }
 
-func (g *generator) ormGroupRuntime(adapter ormintegration.Adapter, model ormintegration.Model, column ormintegration.Column) {
-	groupType := goORMGroupType(model, column)
+func (g *generator) ormGroupAggregate(call *ir.Call, arguments []string, operation string) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok || len(arguments) != 2 {
+		return "nil"
+	}
+	model, groupColumn, ok := g.orm.GroupModel(member.Receiver.ExprType().Name)
+	if !ok {
+		return "nil"
+	}
+	targetName := ormProjectionColumn(call.Arguments[0].Value)
+	target, ok := model.Column(targetName)
+	if !ok {
+		return "nil"
+	}
+	if _, ok := ormintegration.AggregateResultType(operation, target); !ok {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMGroupedAggregate(model, groupColumn, operation, target) + "(" + arguments[0] + ")"
+}
+
+func (g *generator) ormGroupRuntime(adapter ormintegration.Adapter, model ormintegration.Model, groupColumn ormintegration.Column) {
+	groupType := goORMGroupType(model, groupColumn)
 	queryType := goORMQueryType(model)
-	keyType := column.Type
-	resultType := types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{keyType, types.FromName("Integer")}}
-	g.line("type " + groupType + " struct { query " + queryType + "; havingOperator string; havingValue *int }")
+	g.line("type " + groupType + " struct { query " + queryType + "; havingExpression string; havingOperator string; havingValue any }")
 	g.b.WriteByte('\n')
-	g.line("func " + goORMGroup(model, column) + "(query " + queryType + ") " + groupType + " {")
+	g.line("func " + goORMGroup(model, groupColumn) + "(query " + queryType + ") " + groupType + " {")
 	g.indent++
 	g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 { panic(\"ORM group currently accepts predicates and joins, but not order, limit, offset, lock, or preload\") }")
 	g.line("return " + groupType + "{query: query}")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func " + goORMGroupHaving(model, column) + "(grouped " + groupType + ", operator string, value int) " + groupType + " {")
+	g.line("func " + goORMGroupHaving(model, groupColumn) + "(grouped " + groupType + ", expression string, operator string, value any) " + groupType + " {")
 	g.indent++
-	g.line("switch operator { case \"=\", \"!=\", \"<\", \"<=\", \">\", \">=\": default: panic(\"unsupported ORM having operator\") }; grouped.havingOperator = operator; grouped.havingValue = &value; return grouped")
+	g.line("switch operator { case \"=\", \"!=\", \"<\", \"<=\", \">\", \">=\": default: panic(\"unsupported ORM having operator\") }; grouped.havingExpression = expression; grouped.havingOperator = operator; grouped.havingValue = value; return grouped")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func " + goORMGroupCount(model, column) + "(grouped " + groupType + ") " + g.ormResultType(resultType) + " {")
+	g.ormGroupedAggregateRuntime(adapter, model, groupColumn, "count", ormintegration.Column{}, types.FromName("Integer"))
+	for _, operation := range ormintegration.AggregateOperations() {
+		for _, target := range model.Columns {
+			if result, ok := ormintegration.AggregateResultType(operation, target); ok {
+				g.ormGroupedAggregateRuntime(adapter, model, groupColumn, operation, target, result)
+			}
+		}
+	}
+}
+
+func (g *generator) ormGroupedAggregateRuntime(adapter ormintegration.Adapter, model ormintegration.Model, groupColumn ormintegration.Column, operation string, target ormintegration.Column, valueType types.Type) {
+	groupType := goORMGroupType(model, groupColumn)
+	resultType := types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{groupColumn.Type, valueType}}
+	functionName, expression, label := goORMGroupCount(model, groupColumn), "COUNT(*)", "count"
+	projection := adapter.QuoteIdentifier(groupColumn.Name) + " AS " + adapter.QuoteIdentifier("trb_group")
+	if operation != "count" {
+		functionName = goORMGroupedAggregate(model, groupColumn, operation, target)
+		expression, label = groupedAggregateExpression(operation, "trb_value"), operation
+		projection += ", " + adapter.QuoteIdentifier(target.Name) + " AS " + adapter.QuoteIdentifier("trb_value")
+	}
+	g.line("func " + functionName + "(grouped " + groupType + ") " + g.ormResultType(resultType) + " {")
 	g.indent++
 	g.line("database, databaseError := trbOrmExecutorForQuery(grouped.query.transaction, false); if databaseError != nil { return " + g.ormResultErr(resultType, "*databaseError") + " }")
-	g.line("projection := " + strconv.Quote(adapter.QuoteIdentifier(column.Name)+" AS "+adapter.QuoteIdentifier("trb_group")))
+	g.line("projection := " + strconv.Quote(projection))
 	g.line("statement, arguments := " + goORMStatement(model) + "(grouped.query, projection)")
-	g.line("statement = \"SELECT \" + trbOrmQuoteIdentifier(\"trb_group\") + \", COUNT(*) FROM (\" + statement + \") AS trb_grouped GROUP BY \" + trbOrmQuoteIdentifier(\"trb_group\")")
-	g.line("if grouped.havingValue != nil { statement += \" HAVING COUNT(*) \" + grouped.havingOperator + \" \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *grouped.havingValue) }")
-	g.line("rows, err := database.Query(statement, arguments...); if err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database grouped count query failed\")") + " }; defer rows.Close()")
+	g.line("statement = \"SELECT \" + trbOrmQuoteIdentifier(\"trb_group\") + \", " + expression + " FROM (\" + statement + \") AS trb_grouped GROUP BY \" + trbOrmQuoteIdentifier(\"trb_group\")")
+	g.line("if grouped.havingExpression != \"\" { statement += \" HAVING \" + grouped.havingExpression + \" \" + grouped.havingOperator + \" \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, grouped.havingValue) }")
+	g.line("rows, err := database.Query(statement, arguments...); if err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database grouped "+label+" query failed\")") + " }; defer rows.Close()")
 	g.line("values := make(" + g.goType(resultType) + ")")
-	g.line("for rows.Next() { var key " + g.goType(keyType) + "; var count int; if err := rows.Scan(&key, &count); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped count row was invalid\")") + " }; values[key] = count }")
-	g.line("if err := rows.Err(); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database grouped count query failed\")") + " }; return " + g.ormResultOK(resultType, "values"))
+	g.line("for rows.Next() { var key " + g.goType(groupColumn.Type) + "; var value " + g.goType(valueType) + "; if err := rows.Scan(&key, &value); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }; values[key] = value }")
+	g.line("if err := rows.Err(); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database grouped "+label+" query failed\")") + " }; return " + g.ormResultOK(resultType, "values"))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+}
+
+func groupedAggregateExpression(operation, column string) string {
+	function := strings.ToUpper(operation)
+	switch operation {
+	case "average":
+		function = "AVG"
+	case "minimum":
+		function = "MIN"
+	case "maximum":
+		function = "MAX"
+	}
+	expression := function + "(" + column + ")"
+	if operation == "sum" {
+		expression = "COALESCE(" + expression + ", 0)"
+	}
+	return expression
 }
 
 func goORMGroupType(model ormintegration.Model, column ormintegration.Column) string {
@@ -111,4 +177,7 @@ func goORMGroupHaving(model ormintegration.Model, column ormintegration.Column) 
 }
 func goORMGroupCount(model ormintegration.Model, column ormintegration.Column) string {
 	return "TrbOrmCountGrouped" + goIdentifier(model.Name, true) + goIdentifier(column.Name, true)
+}
+func goORMGroupedAggregate(model ormintegration.Model, groupColumn ormintegration.Column, operation string, target ormintegration.Column) string {
+	return "TrbOrm" + goIdentifier(operation, true) + "Grouped" + goIdentifier(model.Name, true) + goIdentifier(groupColumn.Name, true) + goIdentifier(target.Name, true)
 }

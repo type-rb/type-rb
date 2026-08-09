@@ -206,8 +206,31 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.QueryType] = query
 		for _, column := range model.Columns {
 			grouped := declaration.NewType(model.GroupType(column), "")
-			grouped.InstanceMembers["having"] = declaration.Member{Name: "having", Kind: declaration.Method, Intrinsic: "trb.orm.group.having", Parameters: []declaration.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{"count"}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: types.FromName("Integer")}}, Return: types.FromName(model.GroupType(column)), Provider: PackageName}
+			having := declaration.Member{Name: "having", Kind: declaration.Method, Intrinsic: "trb.orm.group.having", Return: types.FromName(model.GroupType(column)), Provider: PackageName}
+			having.Alternatives = append(having.Alternatives, declaration.Signature{Parameters: []declaration.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{"count"}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: types.FromName("Integer")}}, Return: having.Return})
 			grouped.InstanceMembers["count"] = declaration.Member{Name: "count", Kind: declaration.Method, Intrinsic: "trb.orm.group.count", Return: dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{column.Type, types.FromName("Integer")}}), Provider: PackageName}
+			for _, operation := range AggregateOperations() {
+				aggregate, ok := aggregateDeclaration(model, operation, "trb.orm.group."+operation, false)
+				if !ok {
+					continue
+				}
+				for index := range aggregate.Alternatives {
+					result := aggregate.Alternatives[index].Return.Args[0]
+					aggregate.Alternatives[index].Return = dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{column.Type, result}})
+				}
+				aggregate.Return = aggregate.Alternatives[0].Return
+				grouped.InstanceMembers[operation] = aggregate
+				for _, target := range model.Columns {
+					result, ok := AggregateResultType(operation, target)
+					if !ok {
+						continue
+					}
+					result.Nullable = false
+					having.Alternatives = append(having.Alternatives, declaration.Signature{Parameters: []declaration.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{operation}}, {Name: "column", Type: types.FromName("String"), LiteralValues: []string{target.Name}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: result}}, Return: having.Return})
+				}
+			}
+			having.Parameters = having.Alternatives[0].Parameters
+			grouped.InstanceMembers["having"] = having
 			catalog.Types[model.GroupType(column)] = grouped
 		}
 		scope := declaration.NewType(model.ScopeType(), "")

@@ -259,6 +259,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormGroupHaving(call, arguments)
 	case "trb.orm.group.count":
 		return g.ormGroupCount(call, arguments)
+	case "trb.orm.group.sum", "trb.orm.group.average", "trb.orm.group.minimum", "trb.orm.group.maximum":
+		return g.ormGroupAggregate(call, arguments, name[strings.LastIndex(name, ".")+1:])
 	case "trb.orm.join":
 		return g.ormJoin(call, "INNER JOIN")
 	case "trb.orm.left_join":

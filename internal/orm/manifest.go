@@ -525,10 +525,41 @@ func groupIRMethod(model Model, class bool) *ir.Method {
 
 func groupedIRMethods(model Model, column Column) []ir.Statement {
 	key := column.Type
-	return []ir.Statement{
-		&ir.Method{Name: "having", External: true, Parameters: []ir.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{"count"}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: types.FromName("Integer")}}, ReturnType: namedType(model.GroupType(column))},
+	having := &ir.Method{Name: "having", External: true, ReturnType: namedType(model.GroupType(column))}
+	having.Alternatives = append(having.Alternatives, ir.MethodSignature{Parameters: []ir.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{"count"}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: types.FromName("Integer")}}, ReturnType: namedType(model.GroupType(column))})
+	methods := []ir.Statement{having,
 		&ir.Method{Name: "count", External: true, ReturnType: dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{key, types.FromName("Integer")}})},
 	}
+	for _, operation := range AggregateOperations() {
+		declared, ok := aggregateDeclaration(model, operation, "", false)
+		if !ok {
+			continue
+		}
+		aggregate := &ir.Method{Name: operation, External: true}
+		for _, signature := range declared.Alternatives {
+			result := signature.Return.Args[0]
+			parameters := []ir.Parameter{}
+			for _, parameter := range signature.Parameters {
+				parameters = append(parameters, ir.Parameter{Name: parameter.Name, Type: parameter.Type, LiteralValues: append([]string(nil), parameter.LiteralValues...)})
+			}
+			returnType := dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{key, result}})
+			aggregate.Alternatives = append(aggregate.Alternatives, ir.MethodSignature{Parameters: parameters, ReturnType: returnType})
+		}
+		aggregate.Parameters = aggregate.Alternatives[0].Parameters
+		aggregate.ReturnType = aggregate.Alternatives[0].ReturnType
+		methods = append(methods, aggregate)
+		for _, target := range model.Columns {
+			result, ok := AggregateResultType(operation, target)
+			if !ok {
+				continue
+			}
+			valueType := result
+			valueType.Nullable = false
+			having.Alternatives = append(having.Alternatives, ir.MethodSignature{Parameters: []ir.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{operation}}, {Name: "column", Type: types.FromName("String"), LiteralValues: []string{target.Name}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: valueType}}, ReturnType: namedType(model.GroupType(column))})
+		}
+	}
+	having.Parameters = having.Alternatives[0].Parameters
+	return methods
 }
 
 func joinIRMethod(model Model, name string, class bool) *ir.Method {

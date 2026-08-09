@@ -50,10 +50,11 @@ type ormSubqueryValue struct {
 }
 
 type ormGroupedValue struct {
-	query          *ormQueryValue
-	column         ormintegration.Column
-	havingOperator string
-	havingValue    *int64
+	query            *ormQueryValue
+	column           ormintegration.Column
+	havingExpression string
+	havingOperator   string
+	havingValue      Value
 }
 
 type ormTransactionValue struct {
@@ -335,7 +336,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		}
 		return e.ormColumn(arguments[0].Value, memberName)
 	}
-	if name == "trb.orm.group.having" || name == "trb.orm.group.count" {
+	if strings.HasPrefix(name, "trb.orm.group.") {
 		return e.ormGroupedIntrinsic(name, arguments, typ)
 	}
 	query, remaining, err := e.ormQueryReceiver(arguments)
@@ -628,23 +629,49 @@ func (e *Evaluator) ormGroupedIntrinsic(name string, arguments []evaluatedArgume
 	}
 	copy := *grouped
 	if name == "trb.orm.group.having" {
-		if len(arguments) != 4 {
+		if len(arguments) < 4 || len(arguments) > 5 {
 			return Value{}, errors.New("ORM having requires aggregate, operator, and value")
 		}
-		op, _ := arguments[2].Value.Data.(string)
-		value, _ := arguments[3].Value.Data.(int64)
+		expression, operatorIndex, valueIndex := "COUNT(*)", 2, 3
+		if len(arguments) == 5 {
+			operation, _ := arguments[1].Value.Data.(string)
+			expression, operatorIndex, valueIndex = groupedAggregateExpression(operation, "trb_value"), 3, 4
+		}
+		op, _ := arguments[operatorIndex].Value.Data.(string)
+		copy.havingExpression = expression
 		copy.havingOperator = op
-		copy.havingValue = &value
+		copy.havingValue = arguments[valueIndex].Value
 		return Value{Type: typ, Data: &copy}, nil
 	}
-	statement, queryArguments, err := e.ormStatement(copy.query, e.ormRuntime().adapter.QuoteIdentifier(copy.column.Name)+" AS "+e.ormRuntime().adapter.QuoteIdentifier("trb_group"))
+	operation := name[strings.LastIndex(name, ".")+1:]
+	valueType := types.FromName("Integer")
+	projection := e.ormRuntime().adapter.QuoteIdentifier(copy.column.Name) + " AS " + e.ormRuntime().adapter.QuoteIdentifier("trb_group")
+	expression := "COUNT(*)"
+	if operation != "count" {
+		if len(arguments) != 2 {
+			return Value{}, errors.New("ORM grouped aggregate requires one column")
+		}
+		columnName, _ := arguments[1].Value.Data.(string)
+		target, ok := copy.query.model.Column(columnName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no column %s", copy.query.model.Name, columnName)
+		}
+		var supported bool
+		valueType, supported = ormintegration.AggregateResultType(operation, target)
+		if !supported {
+			return Value{}, fmt.Errorf("ORM %s does not support column %s", operation, columnName)
+		}
+		projection += ", " + e.ormRuntime().adapter.QuoteIdentifier(target.Name) + " AS " + e.ormRuntime().adapter.QuoteIdentifier("trb_value")
+		expression = groupedAggregateExpression(operation, "trb_value")
+	}
+	statement, queryArguments, err := e.ormStatement(copy.query, projection)
 	if err != nil {
 		return Value{}, err
 	}
-	statement = "SELECT " + e.ormRuntime().adapter.QuoteIdentifier("trb_group") + ", COUNT(*) FROM (" + statement + ") AS trb_grouped GROUP BY " + e.ormRuntime().adapter.QuoteIdentifier("trb_group")
-	if copy.havingValue != nil {
-		statement += " HAVING COUNT(*) " + copy.havingOperator + " " + e.ormRuntime().adapter.Placeholder(len(queryArguments)+1)
-		queryArguments = append(queryArguments, *copy.havingValue)
+	statement = "SELECT " + e.ormRuntime().adapter.QuoteIdentifier("trb_group") + ", " + expression + " FROM (" + statement + ") AS trb_grouped GROUP BY " + e.ormRuntime().adapter.QuoteIdentifier("trb_group")
+	if copy.havingExpression != "" {
+		statement += " HAVING " + copy.havingExpression + " " + copy.havingOperator + " " + e.ormRuntime().adapter.Placeholder(len(queryArguments)+1)
+		queryArguments = append(queryArguments, copy.havingValue.Data)
 	}
 	database, failure := e.ormQueryExecutor(copy.query)
 	if failure != nil {
@@ -658,20 +685,41 @@ func (e *Evaluator) ormGroupedIntrinsic(name string, arguments []evaluatedArgume
 	entries := []hashEntry{}
 	for rows.Next() {
 		var raw any
-		var count int64
-		if err := rows.Scan(&raw, &count); err != nil {
+		var rawValue any
+		if err := rows.Scan(&raw, &rawValue); err != nil {
 			return e.ormResultErr(typ, "InvalidData", "database grouped count row was invalid")
 		}
 		key, err := ormColumnValue(copy.column.Type, raw)
 		if err != nil {
 			return e.ormResultErr(typ, "InvalidData", "database grouped count row was invalid")
 		}
-		entries = append(entries, hashEntry{Key: key, Value: Value{Type: types.FromName("Integer"), Data: count}})
+		value, err := ormColumnValue(valueType, rawValue)
+		if err != nil {
+			return e.ormResultErr(typ, "InvalidData", "database grouped aggregate row was invalid")
+		}
+		entries = append(entries, hashEntry{Key: key, Value: value})
 	}
 	if err := rows.Err(); err != nil {
 		return e.ormResultErr(typ, "Query", "database grouped count query failed")
 	}
 	return e.ormResultOK(typ, Value{Type: ormResultValueType(typ), Data: &hashValue{Entries: entries}})
+}
+
+func groupedAggregateExpression(operation, column string) string {
+	function := strings.ToUpper(operation)
+	switch operation {
+	case "average":
+		function = "AVG"
+	case "minimum":
+		function = "MIN"
+	case "maximum":
+		function = "MAX"
+	}
+	expression := function + "(" + column + ")"
+	if operation == "sum" {
+		expression = "COALESCE(" + expression + ", 0)"
+	}
+	return expression
 }
 
 func (e *Evaluator) ormQueryReceiver(arguments []evaluatedArgument) (*ormQueryValue, []evaluatedArgument, error) {
