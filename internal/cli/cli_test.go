@@ -84,24 +84,33 @@ func TestOfficialPackageImportsContributeNativeDependencies(t *testing.T) {
 }
 
 func TestOfficialPackageOptionsSelectNativeDependencies(t *testing.T) {
-	root := t.TempDir()
-	config := project.New(root, "go")
-	config.SourceDir = "src"
-	config.Go.Module = "example.com/orm-app"
-	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"postgresql","database":"postgres://localhost/app"}`)
-	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	sourcePath := filepath.Join(config.SourcePath(), "main.trb")
-	if err := os.WriteFile(sourcePath, []byte("import { Model } from trb/orm\nclass Product < Model\nend\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	dependencies, err := projectPackageDependencies(config, []string{sourcePath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dependencies["github.com/jackc/pgx/v5"] != "v5.10.0" || dependencies["modernc.org/sqlite"] != "" {
-		t.Fatalf("unexpected PostgreSQL dependencies: %#v", dependencies)
+	for _, test := range []struct {
+		adapter, database, dependency, version string
+	}{
+		{adapter: "postgresql", database: "postgres://localhost/app", dependency: "github.com/jackc/pgx/v5", version: "v5.10.0"},
+		{adapter: "mysql", database: "root@tcp(localhost)/app", dependency: "github.com/go-sql-driver/mysql", version: "v1.10.0"},
+	} {
+		t.Run(test.adapter, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, "go")
+			config.SourceDir = "src"
+			config.Go.Module = "example.com/orm-app"
+			config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"` + test.adapter + `","database":"` + test.database + `"}`)
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			sourcePath := filepath.Join(config.SourcePath(), "main.trb")
+			if err := os.WriteFile(sourcePath, []byte("import { Model } from trb/orm\nclass Product < Model\nend\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dependencies, err := projectPackageDependencies(config, []string{sourcePath})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if dependencies[test.dependency] != test.version || len(dependencies) != 1 {
+				t.Fatalf("unexpected %s dependencies: %#v", test.adapter, dependencies)
+			}
+		})
 	}
 }
 

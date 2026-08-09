@@ -125,6 +125,48 @@ func TestPostgreSQLColumnTypes(t *testing.T) {
 	}
 }
 
+func TestMySQLAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
+	adapter, err := AdapterFor("mysql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter.DriverName != "mysql" || adapter.GoDriverImport != "github.com/go-sql-driver/mysql" {
+		t.Fatalf("unexpected MySQL driver definition: %#v", adapter)
+	}
+	if got := adapter.QuoteIdentifier("product`names"); got != "`product``names`" {
+		t.Fatalf("QuoteIdentifier() = %q", got)
+	}
+	if got := adapter.Placeholder(3); got != "?" {
+		t.Fatalf("Placeholder() = %q", got)
+	}
+}
+
+func TestMySQLColumnTypes(t *testing.T) {
+	tests := []struct {
+		dataType, databaseType string
+		want                   types.Kind
+	}{
+		{dataType: "bigint", databaseType: "bigint", want: types.Int},
+		{dataType: "double", databaseType: "double", want: types.Float},
+		{dataType: "varchar", databaseType: "varchar(255)", want: types.String},
+		{dataType: "json", databaseType: "json", want: types.String},
+		{dataType: "tinyint", databaseType: "tinyint(1)", want: types.Bool},
+		{dataType: "blob", databaseType: "blob", want: types.Bytes},
+	}
+	for _, test := range tests {
+		got, err := mysqlColumnType(test.dataType, test.databaseType)
+		if err != nil {
+			t.Fatalf("mysqlColumnType(%q): %v", test.databaseType, err)
+		}
+		if got.Kind != test.want {
+			t.Fatalf("mysqlColumnType(%q) = %s, want %s", test.databaseType, got.Kind, test.want)
+		}
+	}
+	if _, err := mysqlColumnType("timestamp", "timestamp"); err == nil {
+		t.Fatal("timestamp should remain unsupported until portable time types are defined")
+	}
+}
+
 func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	root, options := sqliteFixture(t)
 	program := parseModel(t)

@@ -325,6 +325,13 @@ func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.line("func trbOrmQuoteIdentifier(name string) string {")
+	g.indent++
+	g.line("mark := " + strconv.Quote(adapter.IdentifierMark))
+	g.line("return mark + strings.ReplaceAll(name, mark, mark+mark) + mark")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 }
 
 func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter ormintegration.Adapter, model ormintegration.Model) {
@@ -450,7 +457,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("for _, condition := range query.conditions {")
 	g.indent++
 	g.line("switch condition.operator { case \"=\", \"!=\", \"<\", \"<=\", \">\", \">=\": default: panic(\"unsupported ORM comparison operator\") }")
-	g.line("column := \"\\\"\" + strings.ReplaceAll(condition.column, \"\\\"\", \"\\\"\\\"\") + \"\\\"\"")
+	g.line("column := trbOrmQuoteIdentifier(condition.column)")
 	g.line("nilValue := condition.value == nil")
 	g.line("if !nilValue { reflected := reflect.ValueOf(condition.value); nilValue = reflected.Kind() == reflect.Ptr && reflected.IsNil() }")
 	g.line("if nilValue && condition.operator == \"=\" {")
@@ -478,7 +485,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("for _, order := range query.orders {")
 	g.indent++
 	g.line("switch order.direction { case \"asc\", \"desc\": default: panic(\"unsupported ORM order direction\") }")
-	g.line("column := \"\\\"\" + strings.ReplaceAll(order.column, \"\\\"\", \"\\\"\\\"\") + \"\\\"\"")
+	g.line("column := trbOrmQuoteIdentifier(order.column)")
 	g.line("orders = append(orders, column+\" \"+strings.ToUpper(order.direction))")
 	g.indent--
 	g.line("}")
@@ -509,6 +516,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	explainPrefix := "EXPLAIN QUERY PLAN "
 	if adapter.ExplainStyle == ormintegration.ExplainText {
 		explainPrefix = "EXPLAIN "
+	} else if adapter.ExplainStyle == ormintegration.ExplainJSON {
+		explainPrefix = "EXPLAIN FORMAT=JSON "
 	}
 	g.line("rows, err := database.Query(" + strconv.Quote(explainPrefix) + "+statement, arguments...)")
 	g.line("if err != nil { panic(err) }")

@@ -4,12 +4,14 @@ go 1.26
 
 require (
 	github.com/creack/pty v1.1.24
+	github.com/go-sql-driver/mysql v1.10.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/reeflective/readline v1.3.1-0.20260802023205-4d8e27a037bd
 	modernc.org/sqlite v1.53.0
 )
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect

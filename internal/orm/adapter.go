@@ -68,6 +68,14 @@ func adapterDefinitionFor(name string) (adapterDefinition, bool) {
 			},
 			Introspector: postgresqlIntrospector{},
 		}, true
+	case "mysql":
+		return adapterDefinition{
+			Adapter: Adapter{
+				Name: "mysql", DriverName: "mysql", GoDriverImport: "github.com/go-sql-driver/mysql",
+				IdentifierMark: "`", ExplainStyle: ExplainJSON, OffsetNoLimit: " LIMIT 18446744073709551615",
+			},
+			Introspector: mysqlIntrospector{},
+		}, true
 	default:
 		return adapterDefinition{}, false
 	}
