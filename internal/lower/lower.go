@@ -124,7 +124,11 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			result.Platform = resolved.Definition != nil && resolved.Definition.Kind == "platform"
 			result.Runtime = resolved.Definition != nil && resolved.Definition.Source != ""
 			for name, exported := range resolved.Exports {
-				result.SymbolKinds[name] = string(exported.Kind)
+				kind := string(exported.Kind)
+				if exported.Kind == resolver.TypeAliasExport && exported.AliasEnum {
+					kind = "enum_alias"
+				}
+				result.SymbolKinds[name] = kind
 			}
 			if resolved.Definition != nil {
 				for name, symbol := range resolved.Definition.Symbols {
@@ -171,6 +175,20 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: lowerType(field.Type)})
 		}
 		return member
+	case *ast.TypeAliasStatement:
+		semantic := l.checked.TypeAliases[n]
+		result := &ir.TypeAlias{Base: base(n.Base), Name: n.Name, Target: semantic.Target}
+		for _, parameter := range n.TypeParameters {
+			result.TypeParameters = append(result.TypeParameters, parameter.Name)
+		}
+		for _, variant := range semantic.Variants {
+			member := ir.EnumMember{Name: variant.Name}
+			for _, field := range variant.Fields {
+				member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: field.Type})
+			}
+			result.Variants = append(result.Variants, member)
+		}
+		return result
 	case *ast.ModuleStatement:
 		return &ir.Module{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
 	case *ast.InterfaceStatement:

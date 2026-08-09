@@ -123,6 +123,16 @@ type EnumMember struct {
 
 func (*EnumMember) irStatement() {}
 
+type TypeAlias struct {
+	Base
+	Name           string
+	TypeParameters []string
+	Target         types.Type
+	Variants       []EnumMember
+}
+
+func (*TypeAlias) irStatement() {}
+
 type Module struct {
 	Base
 	Name string

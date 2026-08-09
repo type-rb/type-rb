@@ -37,6 +37,7 @@ const (
 	ClassExport     ExportKind = "class"
 	RecordExport    ExportKind = "record"
 	EnumExport      ExportKind = "enum"
+	TypeAliasExport ExportKind = "type_alias"
 	ModuleExport    ExportKind = "module"
 	InterfaceExport ExportKind = "interface"
 	FunctionExport  ExportKind = "function"
@@ -55,6 +56,8 @@ type Export struct {
 	EnumMembers    []string
 	EnumVariants   []EnumVariant
 	TypeParameters []string
+	AliasTarget    types.Type
+	AliasEnum      bool
 	Superclass     string
 	Interfaces     []string
 	Span           token.Span
@@ -187,7 +190,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		module := catalog.Modules[modulePath]
 		for name := range module.Exports {
 			exported := module.Exports[name]
-			if exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != InterfaceExport {
+			if exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != InterfaceExport {
 				continue
 			}
 			if previous := typeOwners[name]; previous != nil {
@@ -238,6 +241,42 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 	sort.Strings(typeNames)
 	for _, name := range typeNames {
 		link(name)
+	}
+	aliasState := map[string]int{}
+	var linkAlias func(string)
+	linkAlias = func(name string) {
+		exported := typesByName[name]
+		if exported == nil || exported.Kind != TypeAliasExport || aliasState[name] == 2 {
+			return
+		}
+		if aliasState[name] == 1 {
+			owner := typeOwners[name]
+			diagnostics[owner.Filename] = append(diagnostics[owner.Filename], diagnostic.Diagnostic{Severity: diagnostic.Error, Message: "type alias cycle involving " + name, Span: exported.Span})
+			return
+		}
+		aliasState[name] = 1
+		target := typesByName[exported.AliasTarget.Name]
+		if target != nil && target.Kind == TypeAliasExport {
+			linkAlias(target.Name)
+		}
+		if target != nil {
+			substitutions := typeSubstitutions(target.TypeParameters, exported.AliasTarget.Args)
+			if target.Kind == TypeAliasExport {
+				exported.AliasTarget = substituteType(target.AliasTarget, substitutions)
+				target = typesByName[exported.AliasTarget.Name]
+			}
+			if target != nil {
+				substitutions = typeSubstitutions(target.TypeParameters, exported.AliasTarget.Args)
+				exported.Members = substituteMembers(target.Members, substitutions)
+				exported.EnumMembers = append([]string(nil), target.EnumMembers...)
+				exported.EnumVariants = substituteEnumVariants(target.EnumVariants, substitutions)
+				exported.AliasEnum = target.Kind == EnumExport || target.Kind == TypeAliasExport && target.AliasEnum
+			}
+		}
+		aliasState[name] = 2
+	}
+	for _, name := range typeNames {
+		linkAlias(name)
 	}
 	for _, name := range typeNames {
 		exported := typesByName[name]
@@ -389,13 +428,13 @@ func (r Result) TypeMember(typeName, name string) (Binding, bool) {
 
 func (r Result) ImportedType(typeName string) (Binding, bool) {
 	for _, binding := range r.Symbols {
-		if binding.Export != nil && binding.Export.Name == typeName && (binding.Export.Kind == ClassExport || binding.Export.Kind == RecordExport || binding.Export.Kind == EnumExport || binding.Export.Kind == InterfaceExport) {
+		if binding.Export != nil && binding.Export.Name == typeName && (binding.Export.Kind == ClassExport || binding.Export.Kind == RecordExport || binding.Export.Kind == EnumExport || binding.Export.Kind == TypeAliasExport || binding.Export.Kind == InterfaceExport) {
 			return binding, true
 		}
 	}
 	for _, imported := range r.Packages {
 		exported, exists := imported.Exports[typeName]
-		if exists && (exported.Kind == ClassExport || exported.Kind == RecordExport || exported.Kind == EnumExport || exported.Kind == InterfaceExport) {
+		if exists && (exported.Kind == ClassExport || exported.Kind == RecordExport || exported.Kind == EnumExport || exported.Kind == TypeAliasExport || exported.Kind == InterfaceExport) {
 			copy := exported
 			return Binding{Import: imported, Name: typeName, Export: &copy}, true
 		}
@@ -492,6 +531,11 @@ func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package,
 			}
 		}
 		resolved.Exports = CollectExports(program.Statements)
+		if options.Catalog != nil {
+			if module := options.Catalog.Modules[definition.ModulePath]; module != nil {
+				resolved.Exports = module.Exports
+			}
+		}
 	}
 	if definition.RuntimeAlias != "" {
 		resolved.Alias = definition.RuntimeAlias
@@ -693,6 +737,14 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 				}
 				result[node.Name] = exported
 			}
+		case *ast.TypeAliasStatement:
+			if public(node.Name) {
+				exported := Export{Name: node.Name, Kind: TypeAliasExport, Type: types.FromName(node.Name), AliasTarget: typeRef(node.Target), Members: map[string]Member{}, Span: node.Span()}
+				for _, parameter := range node.TypeParameters {
+					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
+				}
+				result[node.Name] = exported
+			}
 		case *ast.ModuleStatement:
 			if public(node.Name) {
 				exported := Export{Name: node.Name, Kind: ModuleExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Span: node.Span()}
@@ -863,6 +915,58 @@ func typeRef(ref ast.TypeRef) types.Type {
 	}
 	if ref.Array {
 		result = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{result}, Nullable: ref.Nullable}
+	}
+	return result
+}
+
+func typeSubstitutions(parameters []string, arguments []types.Type) map[string]types.Type {
+	result := map[string]types.Type{}
+	for index, parameter := range parameters {
+		if index < len(arguments) {
+			result[parameter] = arguments[index]
+		}
+	}
+	return result
+}
+
+func substituteType(typ types.Type, substitutions map[string]types.Type) types.Type {
+	if replacement, ok := substitutions[typ.Name]; ok && typ.Kind == types.Named && len(typ.Args) == 0 {
+		replacement.Nullable = replacement.Nullable || typ.Nullable
+		replacement.Readonly = replacement.Readonly || typ.Readonly
+		return replacement
+	}
+	result := typ
+	result.Args = make([]types.Type, len(typ.Args))
+	for index, argument := range typ.Args {
+		result.Args[index] = substituteType(argument, substitutions)
+	}
+	return result
+}
+
+func substituteMembers(input map[string]Member, substitutions map[string]types.Type) map[string]Member {
+	result := make(map[string]Member, len(input))
+	for name, member := range input {
+		copy := member
+		copy.Type = substituteType(member.Type, substitutions)
+		copy.Parameters = make([]types.Type, len(member.Parameters))
+		for index, parameter := range member.Parameters {
+			copy.Parameters[index] = substituteType(parameter, substitutions)
+		}
+		result[name] = copy
+	}
+	return result
+}
+
+func substituteEnumVariants(input []EnumVariant, substitutions map[string]types.Type) []EnumVariant {
+	result := make([]EnumVariant, len(input))
+	for index, variant := range input {
+		result[index].Name = variant.Name
+		result[index].Fields = make([]RecordField, len(variant.Fields))
+		for fieldIndex, field := range variant.Fields {
+			copy := field
+			copy.Type = substituteType(field.Type, substitutions)
+			result[index].Fields[fieldIndex] = copy
+		}
 	}
 	return result
 }

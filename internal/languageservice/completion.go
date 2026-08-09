@@ -40,6 +40,7 @@ var keywordDetails = map[string]string{
 	"return":     "return from a function",
 	"self":       "current class or instance",
 	"then":       "separate a condition from its branch",
+	"type":       "declare a transparent type alias",
 	"true":       "Boolean literal",
 	"when":       "handle an enum member",
 	"while":      "start a loop",
@@ -660,7 +661,7 @@ func lexicalSymbols(source string, cursor int, context Context) []Symbol {
 			continue
 		}
 		switch item.Lexeme {
-		case "class", "record", "enum", "interface":
+		case "class", "record", "enum", "interface", "type":
 			if name, ok := tokenAt(significant, index+1); ok && name.Kind == token.Identifier {
 				known[name.Lexeme] = Symbol{Name: name.Lexeme, Kind: CompletionType, Detail: item.Lexeme, Type: types.FromName(name.Lexeme)}
 			}

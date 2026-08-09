@@ -2307,6 +2307,82 @@ end
 	}
 }
 
+func TestTransparentGenericEnumAliasesAcrossModes(t *testing.T) {
+	source := []byte(`enum Result<T, E>
+	Ok(value: T)
+	Err(error: E)
+end
+
+record DbError
+	message: String
+end
+
+type DbResult<T> = Result<T, DbError>
+
+def successful(): DbResult<Integer>
+	return DbResult<Integer>::Ok(7)
+end
+
+def value_or_zero(result: DbResult<Integer>): Integer
+	return case result
+	when DbResult::Ok(value)
+		value
+	when DbResult::Err(_error)
+		0
+	end
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("type_alias.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected transparent generic alias: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	for _, want := range []string{
+		"type DbResult[T any] = Result[T, DbError]",
+		"const DbResultOkTag = ResultOkTag",
+		"func NewDbResultOk[T any](value T) DbResult[T]",
+		"NewDbResultOk[int](7)",
+		"__trbCase1.Kind == DbResultOkTag",
+	} {
+		if !strings.Contains(goOutput, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "type_alias.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated alias Go: %v\n%s", err, goOutput)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated alias Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	rubyOutput := string(artifacts["ruby"].Output)
+	for _, want := range []string{"DbResult = Result", "DbResult::Ok.new(7)", "when DbResult::Ok"} {
+		if !strings.Contains(rubyOutput, want) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
+		}
+	}
+
+	typescriptOutput := string(artifacts["typescript"].Output)
+	for _, want := range []string{
+		"export type DbResult<T> = Result<T, DbError>;",
+		"export const DbResult = Result;",
+		"DbResult.Ok<number>(7)",
+		`__trbCase1.kind === "Ok"`,
+	} {
+		if !strings.Contains(typescriptOutput, want) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
+		}
+	}
+}
+
 func TestInitialUserGenericDiagnosticsAreModeIndependent(t *testing.T) {
 	tests := []struct {
 		name   string

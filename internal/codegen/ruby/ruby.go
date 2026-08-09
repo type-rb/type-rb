@@ -58,7 +58,7 @@ func wantsSeparation(previous, current ir.Statement) bool {
 		return false
 	}
 	switch current.(type) {
-	case *ir.Class, *ir.Record, *ir.Enum, *ir.Module, *ir.Interface, *ir.Method:
+	case *ir.Class, *ir.Record, *ir.Enum, *ir.TypeAlias, *ir.Module, *ir.Interface, *ir.Method:
 		return true
 	}
 	return false
@@ -126,6 +126,10 @@ func (g *generator) statement(statement ir.Statement) {
 			case *ir.EnumMember:
 				g.line(n.Name+"::"+member.Name+" = "+n.Name+".new(:"+member.Name+")", member.TrailingComment)
 			}
+		}
+	case *ir.TypeAlias:
+		if len(n.Variants) > 0 {
+			g.line(n.Name+" = "+n.Target.Name, n.TrailingComment)
 		}
 	case *ir.Module:
 		g.line("module "+n.Name, n.TrailingComment)

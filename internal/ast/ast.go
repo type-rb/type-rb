@@ -116,6 +116,18 @@ type EnumMemberStatement struct {
 
 func (*EnumMemberStatement) statementNode() {}
 
+// TypeAliasStatement declares a transparent source-level alias. The target is
+// retained in the syntax tree so tooling can show the authored name while the
+// checker compares the expanded type.
+type TypeAliasStatement struct {
+	Base
+	Name           string
+	TypeParameters []TypeParameter
+	Target         TypeRef
+}
+
+func (*TypeAliasStatement) statementNode() {}
+
 type ModuleStatement struct {
 	Base
 	Name string

@@ -85,6 +85,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseRecord()
 	case "enum":
 		return p.parseEnum()
+	case "type":
+		return p.parseTypeAlias()
 	case "module":
 		return p.parseModule()
 	case "interface":
@@ -599,6 +601,29 @@ func (p *Parser) parseEnum() ast.Statement {
 	}
 	_, closeSpan := p.consumeTerminator("end")
 	node.SourceSpan.End = closeSpan.End
+	return node
+}
+
+func (p *Parser) parseTypeAlias() ast.Statement {
+	start, end, next, comment := p.logicalLine(p.pos)
+	line := p.codeTokens(start, end)
+	node := &ast.TypeAliasStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
+	equal := topLevelIndex(line, "=")
+	if equal < 0 {
+		p.errorAt(spanOf(line), "type alias must be: type Name<T> = Target")
+		p.pos = next
+		return node
+	}
+	node.Name, node.TypeParameters = p.parseGenericDeclaration(line[:equal], "type alias")
+	if equal+1 >= len(line) {
+		p.errorAt(line[equal].Span, "type alias target is required after =")
+	} else {
+		node.Target = parseType(line[equal+1:])
+		if node.Target.Empty() {
+			p.errorAt(spanOf(line[equal+1:]), "type alias target must be a type")
+		}
+	}
+	p.pos = next
 	return node
 }
 

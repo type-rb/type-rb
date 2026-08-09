@@ -64,6 +64,19 @@ func TestFormatKeepsNullableTypeMarkersAttached(t *testing.T) {
 	}
 }
 
+func TestFormatTransparentGenericTypeAlias(t *testing.T) {
+	source := []byte("type  DbResult < T > =Result<T,DbError> # database result\n")
+	want := "type DbResult<T> = Result<T, DbError> # database result\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected type alias formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
 func TestFormatPreservesRailsRegexAndPercentLiterals(t *testing.T) {
 	source := []byte("class User<ApplicationRecord\nvalidates :code,format:{with:/\\A[a-z#]+\\z/i}\nTAGS=%(alpha beta)\nend\n")
 	formatted, diagnostics := Format(source)

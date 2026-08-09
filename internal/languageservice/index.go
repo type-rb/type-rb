@@ -166,6 +166,13 @@ func collectSymbols(statements []ir.Statement, owner string, typeMembers map[str
 		case *ir.Enum:
 			qualified := qualify(owner, node.Name)
 			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "enum " + qualified, Type: types.FromName(qualified), Members: enumMembers(node.Body)})
+		case *ir.TypeAlias:
+			qualified := qualify(owner, node.Name)
+			members := make([]Symbol, 0, len(node.Variants))
+			for _, variant := range node.Variants {
+				members = append(members, Symbol{Name: variant.Name, Kind: CompletionConstant, Detail: node.Target.String()})
+			}
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "type " + qualified + " = " + node.Target.String(), Type: types.FromName(qualified), Members: members})
 		case *ir.Interface:
 			qualified := qualify(owner, node.Name)
 			methods := make([]Symbol, 0, len(node.Methods))

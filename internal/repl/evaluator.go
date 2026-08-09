@@ -226,6 +226,18 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
 				}
 			}
 			e.definitions[symbolKey(module, node.Name)] = definition
+		case *ir.TypeAlias:
+			if len(node.Variants) == 0 {
+				continue
+			}
+			enumNode := &ir.Enum{Name: node.Name, TypeParameters: append([]string(nil), node.TypeParameters...)}
+			definition := &enumDefinition{Module: module, Node: enumNode, Members: map[string]*ir.EnumMember{}}
+			for index := range node.Variants {
+				member := node.Variants[index]
+				enumNode.Body = append(enumNode.Body, &member)
+				definition.Members[member.Name] = &member
+			}
+			e.definitions[symbolKey(module, node.Name)] = definition
 		case *ir.Class:
 			definition := &classDefinition{Module: module, Node: node, Methods: map[string]*ir.Method{}}
 			for _, member := range node.Body {
@@ -337,7 +349,7 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		return flowResult{}, err
 	}
 	switch node := statement.(type) {
-	case *ir.Comment, *ir.Import, *ir.Record, *ir.Enum, *ir.EnumMember, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
+	case *ir.Comment, *ir.Import, *ir.Record, *ir.Enum, *ir.EnumMember, *ir.TypeAlias, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
 		return flowResult{}, nil
 	case *ir.Class:
 		if err := e.evaluateOwnedConstants(node.Body, module, sc); err != nil {
