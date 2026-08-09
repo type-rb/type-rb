@@ -316,6 +316,8 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("}")
 	case *ir.Iterate:
 		g.iterate(n)
+	case *ir.StructuredBlock:
+		g.structuredBlock(n)
 	}
 }
 
@@ -1800,7 +1802,11 @@ func (g *generator) goType(t types.Type) string {
 	default:
 		if t.Name == "" {
 			result = "any"
+		} else if t.Name == "Transaction" && g.orm != nil {
+			result = "*" + g.ormLifecycleAlias() + ".TrbOrmTransaction"
 		} else if model, ok := g.orm.QueryModel(t.Name); ok {
+			result = g.ormModelQualifier(model) + goORMQueryType(model)
+		} else if model, ok := g.orm.ScopeModel(t.Name); ok {
 			result = g.ormModelQualifier(model) + goORMQueryType(model)
 		} else if model, ok := g.orm.DraftModel(t.Name); ok {
 			result = "*" + g.ormModelQualifier(model) + goIdentifier(model.DraftType(), true)

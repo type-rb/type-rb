@@ -16,6 +16,12 @@ end
 
 type DbResult<T> = Result<T, DbError>
 
+class Database
+end
+
+class Transaction
+end
+
 class Model
 end
 

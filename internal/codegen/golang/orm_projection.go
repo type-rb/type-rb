@@ -15,6 +15,9 @@ func (g *generator) ormProjection(call *ir.Call, arguments []string, operation s
 		return "nil"
 	}
 	model, queryReceiver := g.orm.QueryModel(member.Receiver.ExprType().Name)
+	if !queryReceiver {
+		model, queryReceiver = g.orm.ScopeModel(member.Receiver.ExprType().Name)
+	}
 	query := ""
 	if queryReceiver {
 		if len(arguments) == 0 {
@@ -74,8 +77,8 @@ func (g *generator) ormProjectionRuntime(adapter ormintegration.Adapter, model o
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
 	g.line("func " + goORMPluck(model, column.Name) + "(query " + queryType + ") " + g.ormResultType(arrayType) + " {")
 	g.indent++
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(arrayType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(arrayType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(adapter.QuoteIdentifier(column.Name)) + ")")
 	g.line("rows, err := database.Query(statement, arguments...)")
 	g.line("if err != nil { return " + g.ormResultErr(arrayType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database projection query failed\")") + " }")
@@ -99,8 +102,8 @@ func (g *generator) ormProjectionRuntime(adapter ormintegration.Adapter, model o
 	g.line("func " + goORMPick(model, column.Name) + "(query " + queryType + ") " + g.ormResultType(pickType) + " {")
 	g.indent++
 	g.line("if query.limit == nil || *query.limit > 1 { count := 1; query.limit = &count }")
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(pickType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(pickType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(adapter.QuoteIdentifier(column.Name)) + ")")
 	g.line("row := database.QueryRow(statement, arguments...)")
 	g.line("var value " + g.goType(elementType))

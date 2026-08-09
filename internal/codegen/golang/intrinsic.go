@@ -251,6 +251,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webLogger(call, arguments)
 	case "trb.orm.where":
 		return g.ormWhere(call)
+	case "trb.orm.using":
+		return g.ormUsing(call, arguments)
 	case "trb.orm.not":
 		return g.ormNot(call)
 	case "trb.orm.find_by":
@@ -277,6 +279,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormBuild(call)
 	case "trb.orm.create":
 		return g.ormCreate(call)
+	case "trb.orm.scope.find":
+		return g.ormScopeFind(call, arguments)
+	case "trb.orm.scope.build":
+		return g.ormScopeBuild(call, arguments)
+	case "trb.orm.scope.create":
+		return g.ormScopeCreate(call, arguments)
 	case "trb.orm.draft.save":
 		return g.ormDraftSave(call)
 	case "trb.orm.insert_all":
@@ -315,6 +323,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormQueryInteger(call, arguments, goORMLimit)
 	case "trb.orm.query.offset":
 		return g.ormQueryInteger(call, arguments, goORMOffset)
+	case "trb.orm.query.lock":
+		return g.ormQueryTerminal(call, arguments, goORMLock)
 	case "trb.orm.query.all":
 		return g.ormQueryTerminal(call, arguments, goORMLoader)
 	case "trb.orm.query.first":

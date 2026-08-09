@@ -1,6 +1,8 @@
 package golang
 
 import (
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 
@@ -65,13 +67,19 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 					t.Fatalf("generated %s ORM runtime is missing %q:\n%s", test.adapter, want, output)
 				}
 			}
+			if !strings.Contains(output, `statement += " FOR UPDATE"`) {
+				t.Fatalf("generated %s ORM runtime does not append the row lock clause:\n%s", test.adapter, output)
+			}
+			if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
+				t.Fatalf("generated invalid %s ORM Go: %v\n%s", test.adapter, err, output)
+			}
 			for _, want := range []string{
 				`"example.com/orm/trb/orm"`, `orm.DbResult[[]*Product]`, `orm.NewDbResultErr[[]*Product]`,
 				`trbOrmError(err, orm.DbErrorKindQuery, "database query failed")`, `database, err := orm.TrbOrmDatabase()`,
 				`type ProductDraft struct {`,
 				`func TrbOrmBuildProduct(columns []string, values []any) *ProductDraft`,
 				`func TrbOrmSaveProductDraft(draft *ProductDraft) orm.DbResult[*Product]`,
-				`return TrbOrmCreateProduct(draft.columns, draft.values)`,
+				`return TrbOrmProductCreateScoped(draft.query, draft.columns, draft.values)`,
 				`func TrbOrmCreateProduct(columns []string, values []any) orm.DbResult[*Product]`,
 				`func TrbOrmInsertAllProduct(drafts []*ProductDraft) orm.DbResult[int]`,
 				`bulk insert drafts must use the same attributes`,
@@ -101,10 +109,14 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			for _, want := range []string{
 				test.driver, "var trbOrmDatabaseOnce sync.Once", "func TrbOrmDatabase() (*sql.DB, error)",
 				`sql.Open(`, "trbOrmDatabase.Ping()", "func TrbOrmCloseDatabase() error",
+				"func TrbOrmBeginNestedTransaction(parent *TrbOrmTransaction)", `"SAVEPOINT " + savepoint`,
 			} {
 				if !strings.Contains(pool, want) {
 					t.Fatalf("generated %s ORM pool runtime is missing %q:\n%s", test.adapter, want, pool)
 				}
+			}
+			if _, err := parser.ParseFile(token.NewFileSet(), "orm.go", pool, parser.AllErrors); err != nil {
+				t.Fatalf("generated invalid %s ORM pool Go: %v\n%s", test.adapter, err, pool)
 			}
 		})
 	}

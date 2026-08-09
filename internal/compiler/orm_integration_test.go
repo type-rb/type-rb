@@ -154,6 +154,141 @@ end
 	assertORMLiteralCompletions(t, context)
 }
 
+func TestPortableORMCompilesExplicitTransactionScope(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	source := []byte(`import { Database, DbResult, Model } from trb/orm
+
+class Product < Model
+end
+
+def create_product(): DbResult<Integer>
+	return Database.transaction() do |tx|
+		products := Product.using(tx)
+		product := products.create(name: "Created")?
+		locked_products := products.where(id: product.id).lock().all()?
+		puts(locked_products.size())
+		DbResult<Integer>::Ok(product.id)
+	end
+end
+
+def create_nested_product(): DbResult<Integer>
+	return Database.transaction() do |tx|
+		nested_result := tx.transaction() do |nested|
+			products := Product.using(nested)
+			product := products.create(name: "Nested")?
+			DbResult<Integer>::Ok(product.id)
+		end
+		nested_result
+	end
+end
+
+def main()
+	puts(create_product())
+	puts(create_nested_product())
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename: filepath.Join(root, "src", "main.trb"), Source: source, ModulePath: "src/main", Package: "main",
+	}}, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output, ormOutput string
+	for _, artifact := range artifacts {
+		switch artifact.AST.ModulePath {
+		case "src/main":
+			assertORMTransactionScopeIR(t, artifact.IR)
+			output = string(artifact.Output)
+		case "trb/orm/index":
+			ormOutput = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		"func CreateProduct() orm.DbResult[int]", "orm.TrbOrmBeginTransaction()",
+		"TrbOrmProductUsing(tx)", "TrbOrmProductCreateScoped(products", "defer func()",
+		"TrbOrmProductLock(TrbOrmProductQueryWhere(products", "trbOrmExecutorForQuery(query.transaction, query.lock)",
+		"orm.TrbOrmBeginNestedTransaction(tx)", "TrbOrmProductUsing(nested)",
+		".Rollback()", ".Commit()", "orm.DbResultErrTag",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated transaction is missing %q:\n%s", expected, output)
+		}
+	}
+	for _, expected := range []string{
+		"type TrbOrmTransaction struct", "func TrbOrmBeginTransaction()", `"BEGIN IMMEDIATE"`, "func TrbOrmBeginNestedTransaction(parent *TrbOrmTransaction)",
+		`"SAVEPOINT " + savepoint`, `"ROLLBACK TO SAVEPOINT " + transaction.savepoint`, `"RELEASE SAVEPOINT " + transaction.savepoint`,
+		"func (transaction *TrbOrmTransaction) Commit()", "func (transaction *TrbOrmTransaction) Rollback()",
+	} {
+		if !strings.Contains(ormOutput, expected) {
+			t.Fatalf("generated transaction runtime is missing %q:\n%s", expected, ormOutput)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
+		t.Fatalf("generated invalid transaction Go: %v\n%s", err, output)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "orm.go", ormOutput, parser.AllErrors); err != nil {
+		t.Fatalf("generated invalid ORM transaction Go: %v\n%s", err, ormOutput)
+	}
+}
+
+func assertORMTransactionScopeIR(t *testing.T, program *ir.Program) {
+	t.Helper()
+	var method *ir.Method
+	for _, statement := range program.Statements {
+		candidate, ok := statement.(*ir.Method)
+		if ok && candidate.Name == "create_product" {
+			method = candidate
+			break
+		}
+	}
+	if method == nil || len(method.Body) != 1 {
+		t.Fatalf("unexpected transaction method IR: %#v", program.Statements)
+	}
+	block, ok := method.Body[0].(*ir.StructuredBlock)
+	if !ok {
+		t.Fatalf("unexpected transaction block IR: %#v", method.Body)
+	}
+	var product *ir.Variable
+	for _, statement := range block.Body {
+		candidate, ok := statement.(*ir.Variable)
+		if ok && candidate.Name == "product" {
+			product = candidate
+			break
+		}
+	}
+	if product == nil {
+		t.Fatalf("missing propagated product IR: %#v", block.Body)
+	}
+	result, ok := product.Value.(*ir.Case)
+	if !ok {
+		t.Fatalf("unexpected propagated product value IR: %#v", product.Value)
+	}
+	call, ok := result.Value.(*ir.Call)
+	if !ok {
+		t.Fatalf("unexpected propagated call IR: %#v", result.Value)
+	}
+	member, ok := call.Callee.(*ir.Member)
+	if !ok || member.Reference == nil || member.Reference.Intrinsic != "trb.orm.scope.create" || member.Receiver.ExprType().Name != "ProductScope" {
+		t.Fatalf("unexpected scoped create IR: %#v", call.Callee)
+	}
+}
+
 func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	t.Helper()
 	var product *languageservice.Symbol
@@ -610,7 +745,7 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	for _, expected := range []string{
 		"TrbOrmFirstProduct(TrbOrmProductWhere", "func TrbOrmBatchProduct", "__trbBatchLoop", "break __trbBatchLoop", "TrbOrmBatchProduct",
 		"orm.DbResult[int]", "orm.NewDbResultOk[int]", "orm.NewDbResultErr[int]", "__trbBatchProcessed",
-		`"batch queries do not accept order, limit, or offset"`, "reassigned = orm.NewDbResultOk[int]",
+		`"batch queries do not accept order, limit, offset, or lock"`, "reassigned = orm.NewDbResultOk[int]",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated batch query is missing %q:\n%s", expected, output)
@@ -711,8 +846,8 @@ end
 	}
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
-		`TrbOrmCategoryWhere([]string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
-		`TrbOrmProductWhere([]string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
+		`TrbOrmCategoryQueryWhere(TrbOrmCategoryUsing(product.TrbOrmTransaction()), []string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
+		`TrbOrmProductQueryWhere(TrbOrmProductUsing(category.TrbOrmTransaction()), []string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
 		`TrbOrmProductPreload`, `trbOrmPreloadProductCategory`, `trbOrmPreloadCategoryProducts`,
 		`trbOrmPreloadCategoryProduct`, `database has_one association returned multiple rows`,
 		`TrbOrmAssociationCategory`, `TrbOrmAssociationProducts`,

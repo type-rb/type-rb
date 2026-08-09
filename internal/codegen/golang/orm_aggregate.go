@@ -15,6 +15,9 @@ func (g *generator) ormAggregate(call *ir.Call, arguments []string, operation st
 		return "nil"
 	}
 	model, queryReceiver := g.orm.QueryModel(member.Receiver.ExprType().Name)
+	if !queryReceiver {
+		model, queryReceiver = g.orm.ScopeModel(member.Receiver.ExprType().Name)
+	}
 	query := ""
 	if queryReceiver {
 		if len(arguments) == 0 {
@@ -67,8 +70,8 @@ func (g *generator) ormAggregateRuntime(adapter ormintegration.Adapter, model or
 
 	g.line("func " + goORMAggregate(model, operation, column.Name) + "(query " + queryType + ") " + g.ormResultType(resultType) + " {")
 	g.indent++
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(resultType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(projection) + ")")
 	g.line("rows, err := database.Query(" + strconv.Quote("SELECT "+expression+" FROM (") + "+statement+" + strconv.Quote(") AS trb_aggregate") + ", arguments...)")
 	g.line("if err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database aggregate query failed\")") + " }")

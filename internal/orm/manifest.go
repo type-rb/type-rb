@@ -42,6 +42,8 @@ func (m Model) DraftType() string { return m.Name + "Draft" }
 
 func (m Model) ChangesType() string { return m.Name + "Changes" }
 
+func (m Model) ScopeType() string { return m.Name + "Scope" }
+
 func (m Model) PrimaryKey() (Column, bool) {
 	var result Column
 	found := false
@@ -158,6 +160,14 @@ func (m *Manifest) Augment(program *ir.Program) {
 		return
 	}
 	ensureRuntimeTypes(program)
+	if program.ModulePath == "trb/orm/index" {
+		for _, statement := range program.Statements {
+			class, ok := statement.(*ir.Class)
+			if ok && (class.Name == "Database" || class.Name == "Transaction") {
+				class.External = true
+			}
+		}
+	}
 	for _, model := range m.Models {
 		if model.ModulePath != program.ModulePath {
 			continue
@@ -176,6 +186,7 @@ func (m *Manifest) Augment(program *ir.Program) {
 					existing[node.Name] = true
 				}
 			}
+			class.Body = append(class.Body, &ir.Field{Name: ormQueryScopeField(), Type: types.FromName(model.QueryType)})
 			for _, column := range model.Columns {
 				if !existing[column.Name] {
 					class.Body = append(class.Body, &ir.Field{Name: "@" + column.Name, Type: column.Type})
@@ -211,6 +222,13 @@ func (m *Manifest) Augment(program *ir.Program) {
 			}
 			if !existing["where"] {
 				class.Body = append(class.Body, whereIRMethod(model, true))
+			}
+			if !existing["using"] {
+				class.Body = append(class.Body, &ir.Method{
+					Name: "using", External: true, Class: true,
+					Parameters: []ir.Parameter{{Name: "transaction", Type: types.FromName("Transaction")}},
+					ReturnType: types.FromName(model.ScopeType()),
+				})
 			}
 			if !existing["not"] {
 				class.Body = append(class.Body, notIRMethod(model, true))
@@ -290,6 +308,7 @@ func (m *Manifest) Augment(program *ir.Program) {
 			}
 		}
 		program.Statements = append(program.Statements, &ir.Class{Name: model.QueryType, External: true, Body: queryIRMethods(model)})
+		program.Statements = append(program.Statements, &ir.Class{Name: model.ScopeType(), External: true, Body: scopeIRMethods(model)})
 		if _, ok := model.PrimaryKey(); ok {
 			program.Statements = append(program.Statements, &ir.Class{
 				Name: model.DraftType(), External: true,
@@ -308,6 +327,30 @@ func (m *Manifest) Augment(program *ir.Program) {
 			})
 		}
 	}
+}
+
+func scopeIRMethods(model Model) []ir.Statement {
+	methods := queryIRMethods(model)
+	if primaryKey, ok := model.PrimaryKey(); ok {
+		keyType := primaryKey.Type
+		keyType.Nullable = false
+		findType := namedType(model.Name)
+		findType.Nullable = true
+		build := writeIRMethod(model, "build", namedType(model.DraftType()))
+		build.Class = false
+		create := writeIRMethod(model, "create", dbResult(namedType(model.Name)))
+		create.Class = false
+		methods = append(methods,
+			&ir.Method{
+				Name: "find", External: true,
+				Parameters: []ir.Parameter{{Name: primaryKey.Name, Type: keyType}},
+				ReturnType: dbResult(findType),
+			},
+			build,
+			create,
+		)
+	}
+	return methods
 }
 
 func uniqueByIRParameter(model Model) ir.Parameter {
@@ -394,6 +437,7 @@ func queryIRMethods(model Model) []ir.Statement {
 		order,
 		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "offset", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
+		&ir.Method{Name: "lock", External: true, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "all", External: true, ReturnType: dbResult(arrayOf(model.Name))},
 		&ir.Method{Name: "first", External: true, ReturnType: dbResult(firstType)},
 		&ir.Method{Name: "count", External: true, ReturnType: dbResult(types.FromName("Integer"))},
@@ -466,6 +510,10 @@ func associationValueField(name string) string {
 
 func associationLoadedField(name string) string {
 	return "@__trb_association_" + name + "_loaded"
+}
+
+func ormQueryScopeField() string {
+	return "@__trb_orm_query_scope"
 }
 
 func whereIRMethod(model Model, class bool) *ir.Method {
@@ -615,6 +663,18 @@ func (m *Manifest) DraftModel(name string) (Model, bool) {
 	}
 	for _, model := range m.Models {
 		if model.DraftType() == name {
+			return model, true
+		}
+	}
+	return Model{}, false
+}
+
+func (m *Manifest) ScopeModel(name string) (Model, bool) {
+	if m == nil {
+		return Model{}, false
+	}
+	for _, model := range m.Models {
+		if model.ScopeType() == name {
 			return model, true
 		}
 	}

@@ -20,6 +20,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		return nil, err
 	}
 	catalog := declaration.NewCatalog()
+	database := declaration.NewType("Database", "")
+	database.ClassMembers["transaction"] = transactionDeclaration(true)
+	catalog.Types["Database"] = database
+	transaction := declaration.NewType("Transaction", "")
+	transaction.InstanceMembers["transaction"] = transactionDeclaration(false)
+	catalog.Types["Transaction"] = transaction
 	for _, model := range models {
 		declared := declaration.NewType(model.Name, "Model")
 		for _, column := range model.Columns {
@@ -50,6 +56,11 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
+		declared.ClassMembers["using"] = declaration.Member{
+			Name: "using", Kind: declaration.Method, Intrinsic: "trb.orm.using",
+			Parameters: []declaration.Parameter{{Name: "transaction", Type: types.FromName("Transaction")}},
+			Return:     types.FromName(model.ScopeType()), Class: true, Provider: PackageName,
+		}
 		declared.ClassMembers["not"] = notDeclaration(model, "trb.orm.not", true)
 		declared.ClassMembers["find_by"] = findByDeclaration(model, "trb.orm.find_by", true)
 		declared.ClassMembers["exists?"] = existsDeclaration(model, "trb.orm.exists", true)
@@ -139,6 +150,10 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		query.InstanceMembers["order"] = orderDeclaration(model)
 		query.InstanceMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.query.limit", model.QueryType)
 		query.InstanceMembers["offset"] = integerQueryDeclaration("offset", "trb.orm.query.offset", model.QueryType)
+		query.InstanceMembers["lock"] = declaration.Member{
+			Name: "lock", Kind: declaration.Method, Intrinsic: "trb.orm.query.lock",
+			Return: types.FromName(model.QueryType), Provider: PackageName,
+		}
 		query.InstanceMembers["all"] = declaration.Member{
 			Name: "all", Kind: declaration.Method, Intrinsic: "trb.orm.query.all",
 			Return: dbResult(arrayOf(model.Name)), Provider: PackageName,
@@ -161,8 +176,45 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			query.InstanceMembers["find_in_batches"] = batchDeclaration(model, "find_in_batches", false, true)
 		}
 		catalog.Types[model.QueryType] = query
+		scope := declaration.NewType(model.ScopeType(), "")
+		for name, member := range query.InstanceMembers {
+			scope.InstanceMembers[name] = member
+		}
+		if primaryKey, ok := model.PrimaryKey(); ok {
+			scope.InstanceMembers["find"] = scopeFindDeclaration(model, primaryKey)
+			scope.InstanceMembers["build"] = scopeWriteDeclaration(model, "build", "trb.orm.scope.build", types.FromName(model.DraftType()), schema.Adapter)
+			scope.InstanceMembers["create"] = scopeWriteDeclaration(model, "create", "trb.orm.scope.create", dbResult(types.FromName(model.Name)), schema.Adapter)
+		}
+		catalog.Types[model.ScopeType()] = scope
 	}
 	return catalog, nil
+}
+
+func transactionDeclaration(class bool) declaration.Member {
+	typeParameter := types.FromName("T")
+	result := dbResult(typeParameter)
+	return declaration.Member{
+		Name: "transaction", Kind: declaration.Method, Intrinsic: "trb.orm.transaction",
+		Return: result, Class: class, TypeParameters: []string{"T"}, Provider: PackageName,
+		Block: &declaration.Block{
+			Parameters: []types.Type{types.FromName("Transaction")},
+			Return:     result, Structured: true,
+		},
+	}
+}
+
+func scopeFindDeclaration(model Model, primaryKey Column) declaration.Member {
+	member := findDeclaration(model, primaryKey)
+	member.Class = false
+	member.Intrinsic = "trb.orm.scope.find"
+	return member
+}
+
+func scopeWriteDeclaration(model Model, name, intrinsic string, result types.Type, adapter string) declaration.Member {
+	return declaration.Member{
+		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
+		Parameters: writeParameters(model, adapter), Return: result, Provider: PackageName,
+	}
 }
 
 func uniqueByDeclarationParameter(model Model) declaration.Parameter {

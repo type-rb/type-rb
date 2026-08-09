@@ -290,7 +290,7 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 
 	input := strings.Join([]string{
 		"import { Product } from main",
-		"import { DbResult } from trb/orm",
+		"import { Database, DbResult } from trb/orm",
 		"Product.where(id: [1, 2]).to_sql()",
 		`Product.exists?(name: "Priority")`,
 		"Product.where().order(id: :asc).pluck(:name)",
@@ -306,6 +306,11 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		"Product.where(id: 999).minimum(:price)",
 		"def first_product_name(): DbResult<String>\n\tcase Product.where(id: 1).all()\n\twhen DbResult::Ok(products)\n\t\treturn DbResult<String>::Ok(products[0].name)\n\twhen DbResult::Err(error)\n\t\treturn DbResult<String>::Err(error)\n\tend\nend",
 		"first_product_name()",
+		"def locked_product_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tproducts := Product.using(tx)\n\t\tlocked := products.where().lock().all()?\n\t\tDbResult<Integer>::Ok(locked.size())\n\tend\nend",
+		"locked_product_count()",
+		"def nested_product_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tnested_result := tx.transaction() do |nested|\n\t\t\tproducts := Product.using(nested)\n\t\t\tloaded := products.where().all()?\n\t\t\tDbResult<Integer>::Ok(loaded.size())\n\t\tend\n\t\tnested_result\n\tend\nend",
+		"nested_product_count()",
+		"Product.where().lock().all()",
 		":quit",
 	}, "\n") + "\n"
 	var stdout, stderr bytes.Buffer
@@ -328,6 +333,9 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`DbResult::Ok(value: 0) : DbResult<Float>`,
 		`DbResult::Ok(value: nil) : DbResult<Float?>`,
 		`DbResult::Ok(value: "Priority") : DbResult<String>`,
+		`DbResult::Ok(value: 2) : DbResult<Integer>`,
+		`DbResult::Ok(value: 2) : DbResult<Integer>`,
+		`DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: "database lock requires an explicit transaction scope")) : DbResult<Array<Product>>`,
 		"",
 	}, "\n")
 	if stdout.String() != want || stderr.Len() != 0 {
