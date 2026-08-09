@@ -44,7 +44,7 @@ For a terminal workflow, start a typed REPL from any directory. It uses Go
 mode when no project configuration is present:
 
 ```console
-$ trb repl
+$ trb
 trb:go> puts("Hello, TypeRB!")
 Hello, TypeRB!
 trb:go> 1 + 2

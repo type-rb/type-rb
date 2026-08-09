@@ -159,7 +159,7 @@ func TestValidateTourAcrossModes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("tour validation is a checkpoint test")
 	}
-	count, err := ValidateTour(context.Background())
+	count, err := validateTour(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

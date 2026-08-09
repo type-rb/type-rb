@@ -107,10 +107,8 @@ func Tour() []Lesson {
 	return append([]Lesson(nil), tourLessons...)
 }
 
-// ValidateTour compiles and evaluates every lesson in every output mode. It is
-// intentionally exposed through `trb tour --check` rather than run as part of
-// every ordinary project build.
-func ValidateTour(ctx context.Context) (int, error) {
+// validateTour compiles and evaluates every lesson in every output mode.
+func validateTour(ctx context.Context) (int, error) {
 	count := 0
 	for _, lesson := range tourLessons {
 		for _, mode := range []string{"go", "ruby", "typescript"} {
