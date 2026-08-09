@@ -187,6 +187,39 @@ select {
 	gap: 15px;
 }
 
+.github-link {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	min-height: 34px;
+	padding: 7px 10px;
+	border: 1px solid var(--line-strong);
+	border-radius: 9px;
+	color: var(--muted);
+	font-size: 12px;
+	font-weight: 650;
+	text-decoration: none;
+	transition: 140ms ease;
+}
+
+.github-link svg {
+	width: 18px;
+	height: 18px;
+	fill: currentColor;
+}
+
+.github-link:hover {
+	border-color: rgba(255, 255, 255, 0.24);
+	background: rgba(255, 255, 255, 0.045);
+	color: var(--text);
+}
+
+.github-link:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
 .mode-control {
 	display: flex;
 	align-items: center;
@@ -919,6 +952,15 @@ body.tour-page .tour-footer {
 		display: none;
 	}
 
+	.topbar .github-link {
+		width: 34px;
+		padding: 7px;
+	}
+
+	.topbar .github-link-label {
+		display: none;
+	}
+
 	.workspace {
 		min-height: calc(100vh - 58px);
 	}
@@ -1003,6 +1045,10 @@ body.tour-page .tour-footer {
 	display: flex;
 	align-items: center;
 	gap: 10px;
+}
+
+.landing-brand .github-link {
+	margin-left: auto;
 }
 
 .landing-brand .alpha-pill {

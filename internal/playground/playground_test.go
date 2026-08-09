@@ -26,6 +26,9 @@ func TestHandlerServesPlaygroundAndConfiguration(t *testing.T) {
 	if !strings.Contains(page.Body.String(), `href="../" aria-label="TypeRB home"`) {
 		t.Fatalf("playground logo does not link to the site homepage:\n%s", page.Body.String())
 	}
+	if !strings.Contains(page.Body.String(), `href="https://github.com/type-rb/type-rb"`) {
+		t.Fatalf("playground does not link to the GitHub repository:\n%s", page.Body.String())
+	}
 	if policy := page.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "connect-src 'self'") {
 		t.Fatalf("missing local-only content security policy: %q", policy)
 	}
@@ -204,6 +207,9 @@ func TestExportStaticBuildsHostIndependentSite(t *testing.T) {
 	}
 	if strings.Index(landing, `href="tour/"`) > strings.Index(landing, `href="play/"`) {
 		t.Fatalf("static homepage should present the tour before the playground:\n%s", landing)
+	}
+	if !strings.Contains(landing, `href="https://github.com/type-rb/type-rb"`) {
+		t.Fatalf("static homepage does not link to the GitHub repository:\n%s", landing)
 	}
 
 	data, err = os.ReadFile(filepath.Join(output, "runtime.json"))
