@@ -3574,6 +3574,14 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be one of %s", index+1, member.Name, quotedDeclarationValues(parameter.LiteralValues)))
 			continue
 		}
+		if len(parameter.LiteralArrays) > 0 && !declarationLiteralArrayAccepted(argument.Value, parameter.LiteralArrays) {
+			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must match one of %s", index+1, member.Name, quotedDeclarationArrays(parameter.LiteralArrays)))
+			continue
+		}
+		if len(parameter.LiteralArrayElements) > 0 && !declarationLiteralArrayElementsAccepted(argument.Value, parameter.LiteralArrayElements) {
+			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be a non-empty literal array containing only %s", index+1, member.Name, quotedDeclarationValues(parameter.LiteralArrayElements)))
+			continue
+		}
 		bindDeclarationType(parameter.Type, actual[index], typeParameters, bindings)
 		expected := instantiateDeclarationType(parameter.Type, bindings)
 		actual[index] = c.contextualizeCollectionLiteral(argument.Value, expected, actual[index])
@@ -3763,6 +3771,43 @@ func declarationLiteralValue(expression ast.Expression) (string, bool) {
 	}
 }
 
+func declarationLiteralArrayAccepted(expression ast.Expression, allowed [][]string) bool {
+	literal, ok := expression.(*ast.ArrayLiteral)
+	if !ok {
+		return false
+	}
+	values := make([]string, len(literal.Elements))
+	for index, element := range literal.Elements {
+		value, ok := declarationLiteralValue(element)
+		if !ok {
+			return false
+		}
+		values[index] = value
+	}
+	for _, candidate := range allowed {
+		if slices.Equal(values, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func declarationLiteralArrayElementsAccepted(expression ast.Expression, allowed []string) bool {
+	literal, ok := expression.(*ast.ArrayLiteral)
+	if !ok || len(literal.Elements) == 0 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, element := range literal.Elements {
+		value, ok := declarationLiteralValue(element)
+		if !ok || !slices.Contains(allowed, value) || seen[value] {
+			return false
+		}
+		seen[value] = true
+	}
+	return true
+}
+
 func sortedDeclarationValues(values map[string]bool) []string {
 	result := make([]string, 0, len(values))
 	for value := range values {
@@ -3778,6 +3823,18 @@ func quotedDeclarationValues(values []string) string {
 		quoted[index] = strconv.Quote(value)
 	}
 	return strings.Join(quoted, ", ")
+}
+
+func quotedDeclarationArrays(values [][]string) string {
+	formatted := make([]string, len(values))
+	for index, value := range values {
+		symbols := make([]string, len(value))
+		for elementIndex, element := range value {
+			symbols[elementIndex] = ":" + element
+		}
+		formatted[index] = "[" + strings.Join(symbols, ", ") + "]"
+	}
+	return strings.Join(formatted, ", ")
 }
 
 func bindDeclarationType(pattern, actual types.Type, parameters map[string]bool, bindings map[string]types.Type) {

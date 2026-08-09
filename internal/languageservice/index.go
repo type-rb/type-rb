@@ -308,8 +308,18 @@ func methodCallInfo(method *ir.Method) *CallInfo {
 func callParameter(parameter ir.Parameter) CallParameter {
 	return CallParameter{
 		Name: parameter.Name, Keyword: parameter.Keyword,
-		LiteralValues: append([]string(nil), parameter.LiteralValues...),
+		LiteralValues:        append([]string(nil), parameter.LiteralValues...),
+		LiteralArrays:        copyLiteralArrays(parameter.LiteralArrays),
+		LiteralArrayElements: append([]string(nil), parameter.LiteralArrayElements...),
 	}
+}
+
+func copyLiteralArrays(values [][]string) [][]string {
+	result := make([][]string, len(values))
+	for index, value := range values {
+		result[index] = append([]string(nil), value...)
+	}
+	return result
 }
 
 func constructorSignature(method *ir.Method, owner string) string {

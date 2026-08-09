@@ -59,10 +59,22 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 				Parameters: []declaration.Parameter{{Name: "drafts", Type: arrayOf(model.DraftType())}},
 				Return:     dbResult(types.FromName("Integer")), Class: true, Provider: PackageName,
 			}
+			declared.ClassMembers["insert_if_absent"] = declaration.Member{
+				Name: "insert_if_absent", Kind: declaration.Method, Intrinsic: "trb.orm.insert_if_absent",
+				Parameters: []declaration.Parameter{
+					{Name: "draft", Type: types.FromName(model.DraftType())}, uniqueByDeclarationParameter(model),
+				},
+				Return: dbResult(types.FromName("Boolean")), Class: true, Provider: PackageName,
+			}
 			draft := declaration.NewType(model.DraftType(), "")
 			draft.InstanceMembers["save"] = declaration.Member{
 				Name: "save", Kind: declaration.Method, Intrinsic: "trb.orm.draft.save",
 				Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
+			}
+			draft.InstanceMembers["upsert"] = declaration.Member{
+				Name: "upsert", Kind: declaration.Method, Intrinsic: "trb.orm.draft.upsert",
+				Parameters: []declaration.Parameter{uniqueByDeclarationParameter(model), updateColumnsDeclarationParameter(model)},
+				Return:     dbResult(types.FromName(model.Name)), Provider: PackageName,
 			}
 			catalog.Types[model.DraftType()] = draft
 			changes := declaration.NewType(model.ChangesType(), "")
@@ -106,6 +118,33 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.QueryType] = query
 	}
 	return catalog, nil
+}
+
+func uniqueByDeclarationParameter(model Model) declaration.Parameter {
+	return declaration.Parameter{
+		Name: "unique_by", Type: arrayOf("String"), Keyword: true,
+		LiteralArrays: uniqueColumnSets(model),
+	}
+}
+
+func updateColumnsDeclarationParameter(model Model) declaration.Parameter {
+	var values []string
+	for _, column := range model.Columns {
+		if !column.PrimaryKey && !column.Generated {
+			values = append(values, column.Name)
+		}
+	}
+	return declaration.Parameter{
+		Name: "update", Type: arrayOf("String"), Keyword: true, LiteralArrayElements: values,
+	}
+}
+
+func uniqueColumnSets(model Model) [][]string {
+	values := make([][]string, len(model.UniqueConstraints))
+	for index, constraint := range model.UniqueConstraints {
+		values[index] = append([]string(nil), constraint.Columns...)
+	}
+	return values
 }
 
 func updateDeclaration(model Model) declaration.Member {

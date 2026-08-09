@@ -53,9 +53,11 @@ type CallInfo struct {
 }
 
 type CallParameter struct {
-	Name          string
-	Keyword       bool
-	LiteralValues []string
+	Name                 string
+	Keyword              bool
+	LiteralValues        []string
+	LiteralArrays        [][]string
+	LiteralArrayElements []string
 }
 
 type CallSignature struct {

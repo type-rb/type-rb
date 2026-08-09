@@ -75,6 +75,17 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if insertAll.Return.String() != "DbResult<Integer>" || len(insertAll.Parameters) != 1 || insertAll.Parameters[0].Type.String() != "Array<ProductDraft>" {
 		t.Fatalf("unexpected insert_all declaration: %#v", insertAll)
 	}
+	insertIfAbsent := product.ClassMembers["insert_if_absent"]
+	if insertIfAbsent.Return.String() != "DbResult<Boolean>" || len(insertIfAbsent.Parameters) != 2 || len(insertIfAbsent.Parameters[1].LiteralArrays) != 2 {
+		t.Fatalf("unexpected insert_if_absent declaration: %#v", insertIfAbsent)
+	}
+	upsert := draft.InstanceMembers["upsert"]
+	if upsert.Return.String() != "DbResult<Product>" || len(upsert.Parameters) != 2 || len(upsert.Parameters[0].LiteralArrays) != 2 {
+		t.Fatalf("unexpected upsert declaration: %#v", upsert)
+	}
+	if got := strings.Join(upsert.Parameters[1].LiteralArrayElements, ","); got != "name,price,active,payload" {
+		t.Fatalf("unexpected upsert update columns: %q", got)
+	}
 	update := product.InstanceMembers["update"]
 	if update.Return.String() != "DbResult<Product>" || len(update.Parameters) != 4 || !update.Parameters[0].Optional {
 		t.Fatalf("unexpected update declaration: %#v", update)
@@ -217,8 +228,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 15 {
-		t.Fatalf("expected five fields and ten ORM methods, got %#v", product.Body)
+	if len(product.Body) != 16 {
+		t.Fatalf("expected five fields and eleven ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -238,7 +249,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "find", "create", "build", "insert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "find", "create", "build", "insert_all", "insert_if_absent", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}
@@ -260,12 +271,16 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 		}
 	}
 	draft, ok := lowered.Statements[2].(*ir.Class)
-	if !ok || !draft.External || draft.Name != "ProductDraft" || len(draft.Body) != 1 {
+	if !ok || !draft.External || draft.Name != "ProductDraft" || len(draft.Body) != 2 {
 		t.Fatalf("unexpected draft class: %#v", lowered.Statements[2])
 	}
 	save, ok := draft.Body[0].(*ir.Method)
 	if !ok || !save.External || save.Name != "save" || save.ReturnType.String() != "DbResult<Product>" {
 		t.Fatalf("unexpected draft save method: %#v", draft.Body[0])
+	}
+	upsert, ok := draft.Body[1].(*ir.Method)
+	if !ok || !upsert.External || upsert.Name != "upsert" || upsert.ReturnType.String() != "DbResult<Product>" || len(upsert.Parameters[0].LiteralArrays) != 2 {
+		t.Fatalf("unexpected draft upsert method: %#v", draft.Body[1])
 	}
 	changes, ok := lowered.Statements[3].(*ir.Class)
 	if !ok || !changes.External || changes.Name != "ProductChanges" || len(changes.Body) != 1 {

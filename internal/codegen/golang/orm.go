@@ -117,6 +117,54 @@ func (g *generator) ormInsertAll(call *ir.Call) string {
 	return g.ormModelQualifier(model) + goORMInsertAll(model) + "(" + g.expr(call.Arguments[0].Value) + ")"
 }
 
+func (g *generator) ormInsertIfAbsent(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	draft, uniqueBy := "nil", "nil"
+	for _, argument := range call.Arguments {
+		switch argument.Name {
+		case "unique_by":
+			uniqueBy = g.expr(argument.Value)
+		case "":
+			if draft == "nil" {
+				draft = g.expr(argument.Value)
+			}
+		}
+	}
+	return g.ormModelQualifier(model) + goORMInsertIfAbsent(model) + "(" + draft + ", " + uniqueBy + ")"
+}
+
+func (g *generator) ormUpsert(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	model, exists := g.orm.DraftModel(member.Receiver.ExprType().Name)
+	if !exists {
+		return "nil"
+	}
+	uniqueBy, update := "nil", "nil"
+	for _, argument := range call.Arguments {
+		switch argument.Name {
+		case "unique_by":
+			uniqueBy = g.expr(argument.Value)
+		case "update":
+			update = g.expr(argument.Value)
+		}
+	}
+	return g.ormModelQualifier(model) + goORMUpsert(model) + "(" + g.expr(member.Receiver) + ", " + uniqueBy + ", " + update + ")"
+}
+
 func (g *generator) ormUpdate(call *ir.Call) string {
 	model, receiver, columns, values, ok := g.ormModelChangeArguments(call)
 	if !ok {
@@ -1100,6 +1148,26 @@ func goORMDraftSave(model ormintegration.Model) string {
 
 func goORMInsertAll(model ormintegration.Model) string {
 	return "TrbOrmInsertAll" + goIdentifier(model.Name, true)
+}
+
+func goORMInsertIfAbsent(model ormintegration.Model) string {
+	return "TrbOrmInsert" + goIdentifier(model.Name, true) + "IfAbsent"
+}
+
+func goORMUpsert(model ormintegration.Model) string {
+	return "TrbOrmUpsert" + goIdentifier(model.Name, true)
+}
+
+func goORMDraftColumnValues(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "DraftColumnValues"
+}
+
+func goORMUniqueColumns(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "UniqueColumns"
+}
+
+func goORMWritableColumn(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "WritableColumn"
 }
 
 func goORMUpdate(model ormintegration.Model) string {

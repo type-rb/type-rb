@@ -78,8 +78,95 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.ormInsertAllRuntime(adapter, model)
+	g.ormConflictRuntime(model)
 	g.ormUpdateRuntime(adapter, model, primaryKey, projection, scanTargets)
 	g.ormDeleteRuntime(adapter, model, primaryKey)
+}
+
+func (g *generator) ormConflictRuntime(model ormintegration.Model) {
+	modelType := types.FromName(model.Name)
+	booleanType := types.FromName("Boolean")
+	draftType := goIdentifier(model.DraftType(), true)
+	g.line("func " + goORMDraftColumnValues(model) + "(draft *" + draftType + ", columns []string) ([]any, bool) {")
+	g.indent++
+	g.line("indexed := make(map[string]any, len(draft.columns))")
+	g.line("for index, column := range draft.columns { indexed[column] = draft.values[index] }")
+	g.line("values := make([]any, len(columns))")
+	g.line("for index, column := range columns { value, ok := indexed[column]; if !ok { return nil, false }; values[index] = value }")
+	g.line("return values, true")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	var uniqueChecks []string
+	for _, constraint := range model.UniqueConstraints {
+		parts := []string{"len(columns) == " + strconv.Itoa(len(constraint.Columns))}
+		for index, column := range constraint.Columns {
+			parts = append(parts, "columns["+strconv.Itoa(index)+"] == "+strconv.Quote(column))
+		}
+		uniqueChecks = append(uniqueChecks, "("+strings.Join(parts, " && ")+")")
+	}
+	if len(uniqueChecks) == 0 {
+		uniqueChecks = append(uniqueChecks, "false")
+	}
+	g.line("func " + goORMUniqueColumns(model) + "(columns []string) bool { return " + strings.Join(uniqueChecks, " || ") + " }")
+	g.b.WriteByte('\n')
+	var writableColumns []string
+	for _, column := range model.Columns {
+		if !column.PrimaryKey && !column.Generated {
+			writableColumns = append(writableColumns, strconv.Quote(column.Name))
+		}
+	}
+	g.line("func " + goORMWritableColumn(model) + "(column string) bool {")
+	g.indent++
+	if len(writableColumns) > 0 {
+		g.line("switch column { case " + strings.Join(writableColumns, ", ") + ": return true; default: return false }")
+	} else {
+		g.line("return false")
+	}
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMInsertIfAbsent(model) + "(draft *" + draftType + ", uniqueColumns []string) " + g.ormResultType(booleanType) + " {")
+	g.indent++
+	g.line("if !" + goORMUniqueColumns(model) + "(uniqueColumns) { return " + g.ormResultErr(booleanType, g.ormErrorValue("InvalidData", "unique_by must match a primary or unique constraint")) + " }")
+	g.line("uniqueValues, ok := " + goORMDraftColumnValues(model) + "(draft, uniqueColumns)")
+	g.line("if !ok { return " + g.ormResultErr(booleanType, g.ormErrorValue("InvalidData", "unique_by columns must be present in the draft")) + " }")
+	g.line("created := " + goORMCreate(model) + "(draft.columns, draft.values)")
+	g.line("if created.Kind == " + g.ormPackageAlias() + ".DbResultOkTag { return " + g.ormResultOK(booleanType, "true") + " }")
+	g.line("if created.ErrError.Kind != " + g.ormErrorKind("Constraint") + " { return " + g.ormResultErr(booleanType, "created.ErrError") + " }")
+	g.line("operators := make([]string, len(uniqueColumns)); for index := range operators { operators[index] = \"=\" }")
+	g.line("loaded := " + goORMFirst(model) + "(" + goORMWhere(model) + "(uniqueColumns, operators, uniqueValues))")
+	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(booleanType, "loaded.ErrError") + " }")
+	g.line("if loaded.OkValue != nil { return " + g.ormResultOK(booleanType, "false") + " }")
+	g.line("return " + g.ormResultErr(booleanType, "created.ErrError"))
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMUpsert(model) + "(draft *" + draftType + ", uniqueColumns []string, updateColumns []string) " + g.ormResultType(modelType) + " {")
+	g.indent++
+	g.line("if !" + goORMUniqueColumns(model) + "(uniqueColumns) { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "unique_by must match a primary or unique constraint")) + " }")
+	g.line("uniqueValues, ok := " + goORMDraftColumnValues(model) + "(draft, uniqueColumns)")
+	g.line("if !ok { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "unique_by columns must be present in the draft")) + " }")
+	g.line("seenUpdates := map[string]bool{}")
+	g.line("for _, column := range updateColumns {")
+	g.indent++
+	g.line("if !" + goORMWritableColumn(model) + "(column) || seenUpdates[column] { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "upsert update columns must be unique writable attributes")) + " }")
+	g.line("for _, uniqueColumn := range uniqueColumns { if column == uniqueColumn { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "upsert cannot update unique_by columns")) + " } }")
+	g.line("seenUpdates[column] = true")
+	g.indent--
+	g.line("}")
+	g.line("updateValues, ok := " + goORMDraftColumnValues(model) + "(draft, updateColumns)")
+	g.line("if !ok { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "upsert update columns must be present in the draft")) + " }")
+	g.line("created := " + goORMCreate(model) + "(draft.columns, draft.values)")
+	g.line("if created.Kind == " + g.ormPackageAlias() + ".DbResultOkTag || created.ErrError.Kind != " + g.ormErrorKind("Constraint") + " { return created }")
+	g.line("operators := make([]string, len(uniqueColumns)); for index := range operators { operators[index] = \"=\" }")
+	g.line("loaded := " + goORMFirst(model) + "(" + goORMWhere(model) + "(uniqueColumns, operators, uniqueValues))")
+	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(modelType, "loaded.ErrError") + " }")
+	g.line("if loaded.OkValue == nil { return created }")
+	g.line("return " + goORMUpdate(model) + "(loaded.OkValue, updateColumns, updateValues)")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 }
 
 func (g *generator) ormInsertAllRuntime(adapter ormintegration.Adapter, model ormintegration.Model) {
