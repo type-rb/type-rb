@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -12,6 +13,7 @@ type testRuntimeProvider struct {
 	configured bool
 	closed     bool
 	invocation runtimeInvocation
+	block      runtimeBlockInvocation
 }
 
 func (*testRuntimeProvider) Name() string { return "test" }
@@ -31,9 +33,40 @@ func (provider *testRuntimeProvider) Call(_ *Evaluator, invocation runtimeInvoca
 	return invocation.Arguments[0].Value, nil
 }
 
+func (provider *testRuntimeProvider) Block(_ *Evaluator, invocation runtimeBlockInvocation) (Value, error) {
+	provider.block = invocation
+	return invocation.Evaluate([]Value{{Type: types.FromName("String"), Data: "scoped"}})
+}
+
 func (provider *testRuntimeProvider) Close() error {
 	provider.closed = true
 	return nil
+}
+
+func TestRuntimeProviderOwnsStructuredResourceBlock(t *testing.T) {
+	provider := &testRuntimeProvider{}
+	evaluator := NewEvaluator(nil, "go")
+	evaluator.runtimeProviders = []runtimeProvider{provider}
+	stringType := types.FromName("String")
+	variable := &ir.Variable{Name: "result", Type: stringType}
+	result, err := evaluator.Evaluate([]ir.Statement{&ir.StructuredBlock{
+		Call: &ir.Call{Callee: &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, stringType), Name: "resource",
+			Reference: &ir.Reference{Intrinsic: "test.echo"},
+		}},
+		Intrinsic: "test.echo",
+		Bindings:  []ir.IterationBinding{{Name: "value", Type: stringType}},
+		Value: &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, stringType), Name: "value", Lexical: true,
+		},
+		Result: &ir.StructuredBlockResult{Variable: variable, Type: stringType},
+	}}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value.Data != "scoped" || provider.block.Name != "test.echo" {
+		t.Fatalf("structured runtime result=%#v invocation=%#v", result, provider.block)
+	}
 }
 
 func TestRuntimeProviderOwnsConfigurationInvocationAndLifecycle(t *testing.T) {

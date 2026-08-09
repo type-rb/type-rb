@@ -35,6 +35,7 @@ type Result struct {
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
 	TypeAliases         map[*ast.TypeAliasStatement]TypeAlias
+	StructuredBlocks    map[*ast.CallExpression]StructuredBlock
 	ExternalMembers     map[ast.Expression]declaration.Member
 	RuntimeDependencies map[string]*stdlib.Package
 	ImportUses          map[*ast.ImportStatement]map[string]bool
@@ -48,6 +49,12 @@ type CodecApplication struct {
 type TypeAlias struct {
 	Target   types.Type
 	Variants []EnumVariant
+}
+
+type StructuredBlock struct {
+	Parameters []types.Type
+	Return     types.Type
+	Result     ast.Expression
 }
 
 type CodecSchema struct {
@@ -242,6 +249,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
 			TypeAliases:         map[*ast.TypeAliasStatement]TypeAlias{},
+			StructuredBlocks:    map[*ast.CallExpression]StructuredBlock{},
 			ExternalMembers:     map[ast.Expression]declaration.Member{},
 			RuntimeDependencies: map[string]*stdlib.Package{},
 			ImportUses:          importUses,
@@ -2944,8 +2952,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if member, ok := c.external[n.Callee]; ok {
-			typ = c.checkDeclarationArguments(n.Span(), member, n.Arguments, argumentTypes)
-			c.checkDeclarationBlock(n, member, sc)
+			var bindings map[string]types.Type
+			typ, bindings = c.checkDeclarationArgumentsWithBindings(n.Span(), member, n.Arguments, argumentTypes)
+			if blockType, checked := c.checkDeclarationBlock(n, member, sc, bindings); checked {
+				typ = blockType
+			}
 		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Name == "new" {
 			if identifier, ok := member.Receiver.(*ast.Identifier); ok {
@@ -3527,8 +3538,13 @@ func portableReceiverKind(kind types.Kind) bool {
 }
 
 func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.Member, arguments []ast.CallArgument, actual []types.Type) types.Type {
+	result, _ := c.checkDeclarationArgumentsWithBindings(span, member, arguments, actual)
+	return result
+}
+
+func (c *Checker) checkDeclarationArgumentsWithBindings(span token.Span, member declaration.Member, arguments []ast.CallArgument, actual []types.Type) (types.Type, map[string]types.Type) {
 	if len(member.Alternatives) > 0 && declarationCallUsesPositionalArguments(arguments) {
-		return c.checkDeclarationAlternativeArguments(span, member, arguments, actual)
+		return c.checkDeclarationAlternativeArguments(span, member, arguments, actual), nil
 	}
 	if member.MinimumArguments > 0 && len(arguments) < member.MinimumArguments {
 		c.error(span, fmt.Sprintf("%s() expects at least %d argument(s), got %d", member.Name, member.MinimumArguments, len(arguments)))
@@ -3600,19 +3616,22 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 			c.error(span, fmt.Sprintf("%s() is missing required argument %s", member.Name, parameter.Name))
 		}
 	}
-	return instantiateDeclarationType(member.Return, bindings)
+	return instantiateDeclarationType(member.Return, bindings), bindings
 }
 
-func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declaration.Member, sc *scope) {
+func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declaration.Member, sc *scope, bindings map[string]types.Type) (types.Type, bool) {
+	if bindings == nil {
+		bindings = map[string]types.Type{}
+	}
 	if member.Block == nil {
 		if call.Block != nil {
 			c.error(call.Block.Span(), fmt.Sprintf("%s() does not accept a block", member.Name))
 		}
-		return
+		return types.Type{}, false
 	}
 	if call.Block == nil {
 		c.error(call.Span(), fmt.Sprintf("%s() requires a block", member.Name))
-		return
+		return types.Type{}, false
 	}
 	if member.Block.Structured && len(c.returns) == 0 {
 		c.error(call.Span(), fmt.Sprintf("structured block %s() is only valid inside a function or method", member.Name))
@@ -3624,7 +3643,7 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 	for index, name := range call.Block.Parameters {
 		parameterType := types.Type{Kind: types.Any, Name: "Any"}
 		if index < len(member.Block.Parameters) {
-			parameterType = member.Block.Parameters[index]
+			parameterType = instantiateDeclarationType(member.Block.Parameters[index], bindings)
 		}
 		if _, duplicate := blockScope.values[name]; duplicate {
 			c.error(call.Block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
@@ -3638,10 +3657,71 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		}
 		blockScope.values[name] = declared
 	}
-	c.loopDepth++
-	c.checkStatements(call.Block.Body, blockScope)
-	c.loopDepth--
-	c.result.Expressions[call.Block] = types.Type{Kind: types.Void, Name: "Void"}
+	if member.Block.Return.Name == "" {
+		c.loopDepth++
+		c.checkStatements(call.Block.Body, blockScope)
+		c.loopDepth--
+		c.result.Expressions[call.Block] = types.Type{Kind: types.Void, Name: "Void"}
+		return instantiateDeclarationType(member.Return, bindings), true
+	}
+
+	resultIndex, resultExpression := controlFlowBranchExpression(call.Block.Body)
+	if resultExpression == nil {
+		c.checkStatements(call.Block.Body, blockScope)
+		c.error(call.Block.Span(), fmt.Sprintf("%s block must end with a result expression", member.Name))
+		return invalidType(), true
+	}
+
+	blockReturn := instantiateDeclarationType(member.Block.Return, bindings)
+	existingPropagations := map[*ast.PropagateExpression]bool{}
+	for expression := range c.result.Propagations {
+		existingPropagations[expression] = true
+	}
+	c.returns = append(c.returns, blockReturn)
+	c.returnSources = append(c.returnSources, member.Block.Return)
+	previousLoopDepth := c.loopDepth
+	c.loopDepth = 0
+	c.checkStatementSequence(call.Block.Body[:resultIndex], blockScope)
+	actual := c.checkExpression(resultExpression, blockScope)
+	c.checkStatementSequence(call.Block.Body[resultIndex+1:], blockScope)
+	c.checkUnusedBindings(blockScope)
+	c.loopDepth = previousLoopDepth
+	c.returns = c.returns[:len(c.returns)-1]
+	c.returnSources = c.returnSources[:len(c.returnSources)-1]
+
+	typeParameters := map[string]bool{}
+	for _, name := range member.TypeParameters {
+		typeParameters[name] = true
+	}
+	bindDeclarationType(
+		c.expandAlias(member.Block.Return, map[string]bool{}),
+		c.expandAlias(actual, map[string]bool{}),
+		typeParameters,
+		bindings,
+	)
+	blockReturn = instantiateDeclarationType(member.Block.Return, bindings)
+	for expression, propagation := range c.result.Propagations {
+		if existingPropagations[expression] {
+			continue
+		}
+		propagation.Success = instantiateEnumVariant(propagation.Success, bindings)
+		propagation.Failure = instantiateEnumVariant(propagation.Failure, bindings)
+		propagation.ReturnFailure = instantiateEnumVariant(propagation.ReturnFailure, bindings)
+		propagation.SuccessType = instantiateDeclarationType(propagation.SuccessType, bindings)
+		propagation.ErrorType = instantiateDeclarationType(propagation.ErrorType, bindings)
+		propagation.ReturnType = instantiateDeclarationType(propagation.ReturnType, bindings)
+		c.result.Propagations[expression] = propagation
+	}
+	if !c.assignable(resultExpression, blockReturn, actual) {
+		c.error(resultExpression.Span(), fmt.Sprintf("%s block result has type %s, expected %s", member.Name, actual, blockReturn))
+	}
+	c.result.Expressions[call.Block] = blockReturn
+	c.result.StructuredBlocks[call] = StructuredBlock{
+		Parameters: instantiateDeclarationTypes(member.Block.Parameters, bindings),
+		Return:     blockReturn,
+		Result:     resultExpression,
+	}
+	return instantiateDeclarationType(member.Return, bindings), true
 }
 
 func (c *Checker) structuredBlockCall(expression ast.Expression) (*ast.CallExpression, declaration.Member, bool) {
@@ -3867,6 +3947,25 @@ func instantiateDeclarationType(input types.Type, bindings map[string]types.Type
 	result.Args = make([]types.Type, len(input.Args))
 	for index, argument := range input.Args {
 		result.Args[index] = instantiateDeclarationType(argument, bindings)
+	}
+	return result
+}
+
+func instantiateDeclarationTypes(input []types.Type, bindings map[string]types.Type) []types.Type {
+	result := make([]types.Type, len(input))
+	for index, typ := range input {
+		result[index] = instantiateDeclarationType(typ, bindings)
+	}
+	return result
+}
+
+func instantiateEnumVariant(input EnumVariant, bindings map[string]types.Type) EnumVariant {
+	result := input
+	result.TypeArguments = instantiateDeclarationTypes(input.TypeArguments, bindings)
+	result.Fields = make([]EnumField, len(input.Fields))
+	for index, field := range input.Fields {
+		result.Fields[index] = field
+		result.Fields[index].Type = instantiateDeclarationType(field.Type, bindings)
 	}
 	return result
 }

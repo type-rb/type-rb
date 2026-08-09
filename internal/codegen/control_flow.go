@@ -82,6 +82,14 @@ func (n *controlFlowNormalizer) reserveStatements(statements []ir.Statement) {
 				n.reserved[binding.Name] = true
 			}
 			n.reserveStatements(node.Body)
+		case *ir.StructuredBlock:
+			if node.Result != nil && node.Result.Variable != nil {
+				n.reserved[node.Result.Variable.Name] = true
+			}
+			for _, binding := range node.Bindings {
+				n.reserved[binding.Name] = true
+			}
+			n.reserveStatements(node.Body)
 		case *ir.NativeBlock:
 			n.reserveStatements(node.Body)
 		}
@@ -199,6 +207,32 @@ func (n *controlFlowNormalizer) statement(statement ir.Statement) []ir.Statement
 			copy.Result = &result
 		}
 		return append(prefix, &copy)
+	case *ir.StructuredBlock:
+		callPrefix, callExpression := n.expression(node.Call)
+		if callExpression == nil {
+			return callPrefix
+		}
+		call, ok := callExpression.(*ir.Call)
+		if !ok {
+			return callPrefix
+		}
+		copy := *node
+		copy.Call = call
+		copy.Body = n.statements(node.Body)
+		valuePrefix, value := n.expression(node.Value)
+		copy.Body = append(copy.Body, valuePrefix...)
+		copy.Value = value
+		if node.Result != nil && node.Result.Target != nil {
+			resultPrefix, target := n.expression(node.Result.Target)
+			callPrefix = append(callPrefix, resultPrefix...)
+			if target == nil {
+				return callPrefix
+			}
+			result := *node.Result
+			result.Target = target
+			copy.Result = &result
+		}
+		return append(callPrefix, &copy)
 	case *ir.NativeBlock:
 		copy := *node
 		copy.Body = n.statements(node.Body)
@@ -501,6 +535,9 @@ func containsEscapingTransfer(statements []ir.Statement, loopDepth int) bool {
 			if containsEscapingTransfer(node.Body, loopDepth+1) {
 				return true
 			}
+		case *ir.StructuredBlock:
+			// A value-producing structured block owns return and propagation.
+			// Transfers inside it do not escape into the surrounding method.
 		case *ir.NativeBlock:
 			if containsEscapingTransfer(node.Body, loopDepth) {
 				return true

@@ -341,6 +341,29 @@ type Iterate struct {
 
 func (*Iterate) irStatement() {}
 
+// StructuredBlock keeps a compiler-owned, value-producing block call as a
+// typed control-flow boundary. Backends decide how the intrinsic acquires and
+// releases its scoped resource, while the block body and result remain normal
+// TypeRB IR.
+type StructuredBlockResult struct {
+	Variable *Variable
+	Target   Expression
+	Return   bool
+	Type     types.Type
+}
+
+type StructuredBlock struct {
+	Base
+	Call      *Call
+	Intrinsic string
+	Bindings  []IterationBinding
+	Body      []Statement
+	Value     Expression
+	Result    *StructuredBlockResult
+}
+
+func (*StructuredBlock) irStatement() {}
+
 // Transform is a value-producing collection operation. It is distinct from a
 // target callback so checker-derived item/result types and block semantics are
 // retained until backend lowering.
