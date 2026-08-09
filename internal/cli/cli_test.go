@@ -66,6 +66,7 @@ func TestOfficialPackageImportsContributeNativeDependencies(t *testing.T) {
 	config := project.New(root, "go")
 	config.SourceDir = "src"
 	config.Go.Module = "example.com/orm-app"
+	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"sqlite","database":"application.sqlite3"}`)
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +80,28 @@ func TestOfficialPackageImportsContributeNativeDependencies(t *testing.T) {
 	}
 	if dependencies["modernc.org/sqlite"] != "v1.53.0" {
 		t.Fatalf("unexpected trb/orm dependencies: %#v", dependencies)
+	}
+}
+
+func TestOfficialPackageOptionsSelectNativeDependencies(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/orm-app"
+	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"postgresql","database":"postgres://localhost/app"}`)
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(config.SourcePath(), "main.trb")
+	if err := os.WriteFile(sourcePath, []byte("import { Model } from trb/orm\nclass Product < Model\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dependencies, err := projectPackageDependencies(config, []string{sourcePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dependencies["github.com/jackc/pgx/v5"] != "v5.10.0" || dependencies["modernc.org/sqlite"] != "" {
+		t.Fatalf("unexpected PostgreSQL dependencies: %#v", dependencies)
 	}
 }
 

@@ -20,23 +20,70 @@ import (
 var packageFiles embed.FS
 
 type manifest struct {
-	Name               string                       `json:"name"`
-	Version            string                       `json:"version"`
-	Module             string                       `json:"module"`
-	Source             string                       `json:"source"`
-	SemanticProvider   string                       `json:"semanticProvider,omitempty"`
-	ProjectProvider    string                       `json:"projectProvider,omitempty"`
-	TypeProvider       string                       `json:"typeProvider,omitempty"`
-	NativeDependencies map[string]map[string]string `json:"nativeDependencies,omitempty"`
+	Name                       string                                             `json:"name"`
+	Version                    string                                             `json:"version"`
+	Module                     string                                             `json:"module"`
+	Source                     string                                             `json:"source"`
+	SemanticProvider           string                                             `json:"semanticProvider,omitempty"`
+	ProjectProvider            string                                             `json:"projectProvider,omitempty"`
+	TypeProvider               string                                             `json:"typeProvider,omitempty"`
+	NativeDependencies         map[string]map[string]string                       `json:"nativeDependencies,omitempty"`
+	NativeDependenciesByOption map[string]map[string]map[string]map[string]string `json:"nativeDependenciesByOption,omitempty"`
 }
 
 type Package struct {
-	ManifestPath       string
-	Name               string
-	Version            string
-	ProjectProvider    string
-	NativeDependencies map[string]map[string]string
-	Definition         *stdlib.Package
+	ManifestPath               string
+	Name                       string
+	Version                    string
+	ProjectProvider            string
+	NativeDependencies         map[string]map[string]string
+	NativeDependenciesByOption map[string]map[string]map[string]map[string]string
+	Definition                 *stdlib.Package
+}
+
+func (p *Package) NativeDependenciesFor(mode string, rawOptions json.RawMessage) (map[string]string, error) {
+	result := map[string]string{}
+	merge := func(required map[string]string) error {
+		for name, version := range required {
+			if existing, ok := result[name]; ok && existing != version {
+				return fmt.Errorf("TypeRB package %s requires conflicting versions of %s: %s and %s", p.Name, name, existing, version)
+			}
+			result[name] = version
+		}
+		return nil
+	}
+	if err := merge(p.NativeDependencies[mode]); err != nil {
+		return nil, err
+	}
+	conditional := p.NativeDependenciesByOption[mode]
+	if len(conditional) == 0 {
+		return result, nil
+	}
+	var options map[string]json.RawMessage
+	if len(rawOptions) > 0 {
+		if err := json.Unmarshal(rawOptions, &options); err != nil {
+			return nil, fmt.Errorf("packageOptions.%q: %w", p.Name, err)
+		}
+	}
+	optionNames := make([]string, 0, len(conditional))
+	for name := range conditional {
+		optionNames = append(optionNames, name)
+	}
+	sort.Strings(optionNames)
+	for _, optionName := range optionNames {
+		var value string
+		if err := json.Unmarshal(options[optionName], &value); err != nil || value == "" {
+			return nil, fmt.Errorf("packageOptions.%q.%s is required to select native dependencies", p.Name, optionName)
+		}
+		required, ok := conditional[optionName][value]
+		if !ok {
+			return nil, fmt.Errorf("packageOptions.%q.%s has unsupported value %q", p.Name, optionName, value)
+		}
+		if err := merge(required); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 var registry = load()
@@ -95,11 +142,12 @@ func load() map[string]*Package {
 			return fmt.Errorf("%s: %w", filename, err)
 		}
 		result[descriptor.Name] = &Package{
-			ManifestPath:       filename,
-			Name:               descriptor.Name,
-			Version:            descriptor.Version,
-			ProjectProvider:    descriptor.ProjectProvider,
-			NativeDependencies: descriptor.NativeDependencies,
+			ManifestPath:               filename,
+			Name:                       descriptor.Name,
+			Version:                    descriptor.Version,
+			ProjectProvider:            descriptor.ProjectProvider,
+			NativeDependencies:         descriptor.NativeDependencies,
+			NativeDependenciesByOption: descriptor.NativeDependenciesByOption,
 			Definition: &stdlib.Package{
 				Path:         descriptor.Name,
 				ModulePath:   descriptor.Module,

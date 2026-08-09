@@ -485,7 +485,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("statement += \" ORDER BY \" + strings.Join(orders, \", \")")
 	g.indent--
 	g.line("}")
-	g.line("if query.limit != nil { statement += \" LIMIT \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *query.limit) } else if query.offset != nil { statement += \" LIMIT -1\" }")
+	g.line("if query.limit != nil { statement += \" LIMIT \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *query.limit) } else if query.offset != nil { statement += " + strconv.Quote(adapter.OffsetNoLimit) + " }")
 	g.line("if query.offset != nil { statement += \" OFFSET \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *query.offset) }")
 	g.line("return statement, arguments")
 	g.indent--
@@ -506,16 +506,26 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("if err != nil { panic(err) }")
 	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
-	g.line("rows, err := database.Query(\"EXPLAIN QUERY PLAN \"+statement, arguments...)")
+	explainPrefix := "EXPLAIN QUERY PLAN "
+	if adapter.ExplainStyle == ormintegration.ExplainText {
+		explainPrefix = "EXPLAIN "
+	}
+	g.line("rows, err := database.Query(" + strconv.Quote(explainPrefix) + "+statement, arguments...)")
 	g.line("if err != nil { panic(err) }")
 	g.line("defer rows.Close()")
 	g.line("details := []string{}")
 	g.line("for rows.Next() {")
 	g.indent++
-	g.line("var id, parent, unused int")
-	g.line("var detail string")
-	g.line("if err := rows.Scan(&id, &parent, &unused, &detail); err != nil { panic(err) }")
-	g.line("details = append(details, detail)")
+	if adapter.ExplainStyle == ormintegration.ExplainSQLite {
+		g.line("var id, parent, unused int")
+		g.line("var detail string")
+		g.line("if err := rows.Scan(&id, &parent, &unused, &detail); err != nil { panic(err) }")
+		g.line("details = append(details, detail)")
+	} else {
+		g.line("var detail string")
+		g.line("if err := rows.Scan(&detail); err != nil { panic(err) }")
+		g.line("details = append(details, detail)")
+	}
 	g.indent--
 	g.line("}")
 	g.line("if err := rows.Err(); err != nil { panic(err) }")

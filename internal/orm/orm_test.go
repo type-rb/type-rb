@@ -90,6 +90,41 @@ func TestSQLiteAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
 	}
 }
 
+func TestPostgreSQLAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
+	adapter, err := AdapterFor("postgresql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter.DriverName != "pgx" || adapter.GoDriverImport != "github.com/jackc/pgx/v5/stdlib" {
+		t.Fatalf("unexpected PostgreSQL driver definition: %#v", adapter)
+	}
+	if got := adapter.QuoteIdentifier(`product"names`); got != `"product""names"` {
+		t.Fatalf("QuoteIdentifier() = %q", got)
+	}
+	if got := adapter.Placeholder(3); got != "$3" {
+		t.Fatalf("Placeholder() = %q", got)
+	}
+}
+
+func TestPostgreSQLColumnTypes(t *testing.T) {
+	tests := map[string]types.Kind{
+		"int8": types.Int, "float8": types.Float, "text": types.String,
+		"uuid": types.String, "jsonb": types.String, "bool": types.Bool, "bytea": types.Bytes,
+	}
+	for databaseType, want := range tests {
+		got, err := postgresqlColumnType(databaseType, databaseType)
+		if err != nil {
+			t.Fatalf("postgresqlColumnType(%q): %v", databaseType, err)
+		}
+		if got.Kind != want {
+			t.Fatalf("postgresqlColumnType(%q) = %s, want %s", databaseType, got.Kind, want)
+		}
+	}
+	if _, err := postgresqlColumnType("timestamp without time zone", "timestamp"); err == nil {
+		t.Fatal("timestamp should remain unsupported until portable time types are defined")
+	}
+}
+
 func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	root, options := sqliteFixture(t)
 	program := parseModel(t)

@@ -23,6 +23,7 @@ type Adapter struct {
 	IdentifierMark string
 	NumberedBinds  bool
 	ExplainStyle   ExplainStyle
+	OffsetNoLimit  string
 }
 
 func (a Adapter) QuoteIdentifier(name string) string {
@@ -55,9 +56,17 @@ func adapterDefinitionFor(name string) (adapterDefinition, bool) {
 		return adapterDefinition{
 			Adapter: Adapter{
 				Name: "sqlite", DriverName: "sqlite", GoDriverImport: "modernc.org/sqlite",
-				IdentifierMark: `"`, ExplainStyle: ExplainSQLite,
+				IdentifierMark: `"`, ExplainStyle: ExplainSQLite, OffsetNoLimit: " LIMIT -1",
 			},
 			Introspector: sqliteIntrospector{},
+		}, true
+	case "postgresql":
+		return adapterDefinition{
+			Adapter: Adapter{
+				Name: "postgresql", DriverName: "pgx", GoDriverImport: "github.com/jackc/pgx/v5/stdlib",
+				IdentifierMark: `"`, NumberedBinds: true, ExplainStyle: ExplainText,
+			},
+			Introspector: postgresqlIntrospector{},
 		}, true
 	default:
 		return adapterDefinition{}, false

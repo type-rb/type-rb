@@ -929,7 +929,11 @@ func projectPackageDependencies(config *project.Config, files []string) (map[str
 				continue
 			}
 			seen[bundled.Name] = true
-			for name, version := range bundled.NativeDependencies[config.Mode] {
+			required, err := bundled.NativeDependenciesFor(config.Mode, config.PackageOptions[bundled.Name])
+			if err != nil {
+				return nil, err
+			}
+			for name, version := range required {
 				if existing, present := dependencies[name]; present && existing != version {
 					return nil, fmt.Errorf("TypeRB packages require conflicting versions of %s: %s and %s", name, existing, version)
 				}
