@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/types"
@@ -141,11 +142,21 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	}
 	product, _ := catalog.Type("Product")
 	category, _ := catalog.Type("Category")
-	if product.InstanceMembers["category"].Return.String() != "CategoryQuery" {
+	if product.InstanceMembers["category"].Return.String() != "Category?" {
 		t.Fatalf("unexpected belongs_to declaration: %#v", product.InstanceMembers["category"])
 	}
-	if category.InstanceMembers["products"].Return.String() != "ProductQuery" {
+	if product.InstanceMembers["category_query"].Return.String() != "CategoryQuery" {
+		t.Fatalf("unexpected belongs_to query declaration: %#v", product.InstanceMembers["category_query"])
+	}
+	if category.InstanceMembers["products"].Return.String() != "Array<Product>" {
 		t.Fatalf("unexpected has_many declaration: %#v", category.InstanceMembers["products"])
+	}
+	if category.InstanceMembers["products_query"].Return.String() != "ProductQuery" {
+		t.Fatalf("unexpected has_many query declaration: %#v", category.InstanceMembers["products_query"])
+	}
+	preload := productQueryMember(t, catalog, "ProductQuery", "preload")
+	if len(preload.Parameters) != 1 || len(preload.Parameters[0].LiteralValues) != 1 || preload.Parameters[0].LiteralValues[0] != "category" {
+		t.Fatalf("unexpected ProductQuery.preload declaration: %#v", preload)
 	}
 	manifest, err := Analyze([]*ast.Program{program}, root, options)
 	if err != nil {
@@ -161,6 +172,15 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	if !ok || hasMany.SourceColumn != "id" || hasMany.TargetColumn != "category_id" {
 		t.Fatalf("unexpected has_many association: %#v", hasMany)
 	}
+}
+
+func productQueryMember(t *testing.T, catalog *declaration.Catalog, typeName, name string) declaration.Member {
+	t.Helper()
+	query, ok := catalog.Type(typeName)
+	if !ok {
+		t.Fatalf("missing query type %s", typeName)
+	}
+	return query.InstanceMembers[name]
 }
 
 func TestSQLiteAssociationRejectsMissingForeignKey(t *testing.T) {

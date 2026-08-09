@@ -376,13 +376,15 @@ class Product < Model
 end
 
 def main()
-	products := Product.where().all()
+	products := Product.where().preload(:category).all()
 	products.each do |product|
-		puts(product.category().count())
+		puts(product.category())
+		puts(product.category_query().count())
 	end
-	categories := Category.where().all()
+	categories := Category.where().preload(:products).all()
 	categories.each do |category|
-		puts(category.products().count())
+		puts(category.products().size())
+		puts(category.products_query().count())
 	end
 end
 `)
@@ -399,6 +401,8 @@ end
 	for _, expected := range []string{
 		`TrbOrmCategoryWhere([]string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
 		`TrbOrmProductWhere([]string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
+		`TrbOrmProductPreload`, `trbOrmPreloadProductCategory`, `trbOrmPreloadCategoryProducts`,
+		`TrbOrmAssociationCategory`, `TrbOrmAssociationProducts`,
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated association query is missing %q:\n%s", expected, output)

@@ -126,7 +126,8 @@ func (g *generator) ormAssociationQuery(call *ir.Call) string {
 	if !ok {
 		return "nil"
 	}
-	association, ok := source.Association(member.Name)
+	associationName := strings.TrimSuffix(member.Name, "_query")
+	association, ok := source.Association(associationName)
 	if !ok {
 		return "nil"
 	}
@@ -137,6 +138,30 @@ func (g *generator) ormAssociationQuery(call *ir.Call) string {
 	qualifier := g.ormModelQualifier(target)
 	value := g.expr(member.Receiver) + "." + goORMColumnGetter(association.SourceColumn) + "()"
 	return qualifier + goORMWhere(target) + "([]string{" + strconv.Quote(association.TargetColumn) + "}, []string{\"=\"}, []any{" + value + "})"
+}
+
+func (g *generator) ormPreload(call *ir.Call, arguments []string) string {
+	model, query, ok := g.ormQueryModel(call, arguments)
+	if !ok || len(arguments) < 2 {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMPreload(model) + "(" + query + ", " + arguments[1] + ")"
+}
+
+func (g *generator) ormLoadedAssociation(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	source, ok := g.orm.Model(member.Receiver.ExprType().Name)
+	if !ok {
+		return "nil"
+	}
+	if _, ok := source.Association(member.Name); !ok {
+		return "nil"
+	}
+	resultType := g.goType(call.ExprType())
+	return "func() " + resultType + " { value, loaded := " + g.expr(member.Receiver) + "." + goORMAssociationGetter(member.Name) + "(); if !loaded { panic(" + strconv.Quote("ORM association "+source.Name+"."+member.Name+" was not preloaded") + ") }; if value == nil { var zero " + resultType + "; return zero }; return value.(" + resultType + ") }()"
 }
 
 func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
@@ -299,6 +324,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.line("orders []" + orderType)
 	g.line("limit *int")
 	g.line("offset *int")
+	g.line("preloads []string")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -350,6 +376,16 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.line("func " + goORMPreload(model) + "(query " + queryType + ", association string) " + queryType + " {")
+	g.indent++
+	g.line("result := query")
+	g.line("result.preloads = append([]string(nil), query.preloads...)")
+	g.line("for _, existing := range result.preloads { if existing == association { return result } }")
+	g.line("result.preloads = append(result.preloads, association)")
+	g.line("return result")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 
 	columns := make([]string, len(model.Columns))
 	scanTargets := make([]string, len(model.Columns))
@@ -359,6 +395,17 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 		g.line("func (self *" + goIdentifier(model.Name, true) + ") " + goORMColumnGetter(column.Name) + "() " + g.goType(column.Type) + " {")
 		g.indent++
 		g.line("return self." + goFieldName(column.Name))
+		g.indent--
+		g.line("}")
+		g.b.WriteByte('\n')
+	}
+	for _, association := range model.Associations {
+		if !association.Preloadable {
+			continue
+		}
+		g.line("func (self *" + goIdentifier(model.Name, true) + ") " + goORMAssociationGetter(association.Name) + "() (any, bool) {")
+		g.indent++
+		g.line("return self." + goORMAssociationValueField(association.Name) + ", self." + goORMAssociationLoadedField(association.Name))
 		g.indent--
 		g.line("}")
 		g.b.WriteByte('\n')
@@ -447,6 +494,11 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	for _, association := range model.Associations {
+		if association.Preloadable {
+			g.ormAssociationPreloader(manifest, model, association)
+		}
+	}
 
 	g.line("func " + goORMLoader(model) + "(query " + queryType + ") []*" + goIdentifier(model.Name, true) + " {")
 	g.indent++
@@ -466,6 +518,25 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.indent--
 	g.line("}")
 	g.line("if err := rows.Err(); err != nil { panic(err) }")
+	g.line("if err := rows.Close(); err != nil { panic(err) }")
+	g.line("for _, preload := range query.preloads {")
+	g.indent++
+	g.line("switch preload {")
+	for _, association := range model.Associations {
+		if association.Preloadable {
+			g.line("case " + strconv.Quote(association.Name) + ":")
+			g.indent++
+			g.line(goORMAssociationPreloader(model, association) + "(database, result)")
+			g.indent--
+		}
+	}
+	g.line("default:")
+	g.indent++
+	g.line("panic(\"unsupported ORM preload \" + preload)")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
 	g.line("return result")
 	g.indent--
 	g.line("}")
@@ -516,6 +587,105 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.b.WriteByte('\n')
 }
 
+func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, model ormintegration.Model, association ormintegration.Association) {
+	target, ok := manifest.Model(association.TargetModel)
+	if !ok {
+		return
+	}
+	sourceColumn, sourceOK := model.Column(association.SourceColumn)
+	targetColumn, targetOK := target.Column(association.TargetColumn)
+	if !sourceOK || !targetOK {
+		return
+	}
+	keyColumn := targetColumn
+	if association.Kind == ormintegration.HasMany {
+		keyColumn = sourceColumn
+	}
+	keyType := keyColumn.Type
+	keyType.Nullable = false
+	targetColumns := make([]string, len(target.Columns))
+	scanTargets := make([]string, len(target.Columns))
+	for index, column := range target.Columns {
+		targetColumns[index] = quoteORMIdentifier(column.Name)
+		scanTargets[index] = "&relatedValue." + goFieldName(column.Name)
+	}
+	function := goORMAssociationPreloader(model, association)
+	sourceType := "*" + goIdentifier(model.Name, true)
+	targetType := "*" + goIdentifier(target.Name, true)
+	valueField := goORMAssociationValueField(association.Name)
+	loadedField := goORMAssociationLoadedField(association.Name)
+
+	g.line("func " + function + "(database *sql.DB, values []" + sourceType + ") {")
+	g.indent++
+	g.line("arguments := []any{}")
+	g.line("for _, value := range values {")
+	g.indent++
+	if sourceColumn.Nullable {
+		g.line("if value." + goFieldName(sourceColumn.Name) + " != nil { arguments = append(arguments, *value." + goFieldName(sourceColumn.Name) + ") }")
+	} else {
+		g.line("arguments = append(arguments, value." + goFieldName(sourceColumn.Name) + ")")
+	}
+	g.indent--
+	g.line("}")
+	g.line("if len(arguments) == 0 {")
+	g.indent++
+	g.line("for _, value := range values {")
+	g.indent++
+	if association.Kind == ormintegration.HasMany {
+		g.line("value." + valueField + " = []" + targetType + "{}")
+	}
+	g.line("value." + loadedField + " = true")
+	g.indent--
+	g.line("}")
+	g.line("return")
+	g.indent--
+	g.line("}")
+	statement := "SELECT " + strings.Join(targetColumns, ", ") + " FROM " + quoteORMIdentifier(target.Table) + " WHERE " + quoteORMIdentifier(association.TargetColumn) + " IN ("
+	g.line("statement := " + strconv.Quote(statement) + " + strings.TrimSuffix(strings.Repeat(\"?,\", len(arguments)), \",\") + \")\"")
+	g.line("rows, err := database.Query(statement, arguments...)")
+	g.line("if err != nil { panic(err) }")
+	g.line("defer rows.Close()")
+	if association.Kind == ormintegration.BelongsTo {
+		g.line("related := map[" + g.goType(keyType) + "]" + targetType + "{}")
+	} else {
+		g.line("related := map[" + g.goType(keyType) + "][]" + targetType + "{}")
+	}
+	g.line("for rows.Next() {")
+	g.indent++
+	g.line("relatedValue := &" + goIdentifier(target.Name, true) + "{}")
+	g.line("if err := rows.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { panic(err) }")
+	if association.Kind == ormintegration.BelongsTo {
+		g.line("related[relatedValue." + goFieldName(targetColumn.Name) + "] = relatedValue")
+	} else if targetColumn.Nullable {
+		g.line("if relatedValue." + goFieldName(targetColumn.Name) + " != nil { key := *relatedValue." + goFieldName(targetColumn.Name) + "; related[key] = append(related[key], relatedValue) }")
+	} else {
+		g.line("key := relatedValue." + goFieldName(targetColumn.Name))
+		g.line("related[key] = append(related[key], relatedValue)")
+	}
+	g.indent--
+	g.line("}")
+	g.line("if err := rows.Err(); err != nil { panic(err) }")
+	g.line("for _, value := range values {")
+	g.indent++
+	if association.Kind == ormintegration.BelongsTo {
+		if sourceColumn.Nullable {
+			g.line("if value." + goFieldName(sourceColumn.Name) + " != nil { value." + valueField + " = related[*value." + goFieldName(sourceColumn.Name) + "] }")
+		} else {
+			g.line("value." + valueField + " = related[value." + goFieldName(sourceColumn.Name) + "]")
+		}
+	} else {
+		g.line("items := related[value." + goFieldName(sourceColumn.Name) + "]")
+		g.line("if items == nil { items = []" + targetType + "{} }")
+		g.line("value." + valueField + " = items")
+	}
+	g.line("value." + loadedField + " = true")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+}
+
 func goORMQueryType(model ormintegration.Model) string {
 	return "TrbOrm" + goIdentifier(model.Name, true) + "Query"
 }
@@ -548,6 +718,10 @@ func goORMOffset(model ormintegration.Model) string {
 	return "TrbOrm" + goIdentifier(model.Name, true) + "Offset"
 }
 
+func goORMPreload(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "Preload"
+}
+
 func goORMLoader(model ormintegration.Model) string {
 	return "TrbOrmLoad" + goIdentifier(model.Name, true)
 }
@@ -574,6 +748,22 @@ func goORMBatchLoader(model ormintegration.Model) string {
 
 func goORMStatement(model ormintegration.Model) string {
 	return "trbOrm" + goIdentifier(model.Name, true) + "Statement"
+}
+
+func goORMAssociationGetter(name string) string {
+	return "TrbOrmAssociation" + goIdentifier(name, true)
+}
+
+func goORMAssociationValueField(name string) string {
+	return goFieldName("@__trb_association_" + name)
+}
+
+func goORMAssociationLoadedField(name string) string {
+	return goFieldName("@__trb_association_" + name + "_loaded")
+}
+
+func goORMAssociationPreloader(model ormintegration.Model, association ormintegration.Association) string {
+	return "trbOrmPreload" + goIdentifier(model.Name, true) + goIdentifier(association.Name, true)
 }
 
 func goORMColumnGetter(column string) string {

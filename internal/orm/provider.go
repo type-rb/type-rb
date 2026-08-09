@@ -28,9 +28,16 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		for _, association := range model.Associations {
-			declared.InstanceMembers[association.Name] = declaration.Member{
-				Name: association.Name, Kind: declaration.Method,
-				Intrinsic: "trb.orm.association." + string(association.Kind),
+			if association.Preloadable {
+				declared.InstanceMembers[association.Name] = declaration.Member{
+					Name: association.Name, Kind: declaration.Method,
+					Intrinsic: "trb.orm.association.loaded." + string(association.Kind),
+					Return:    associationValueType(association), Provider: PackageName,
+				}
+			}
+			declared.InstanceMembers[association.Name+"_query"] = declaration.Member{
+				Name: association.Name + "_query", Kind: declaration.Method,
+				Intrinsic: "trb.orm.association.query." + string(association.Kind),
 				Return:    types.FromName(association.TargetQuery), Provider: PackageName,
 			}
 		}
@@ -62,6 +69,9 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		query.InstanceMembers["to_sql"] = stringQueryDeclaration("to_sql", "trb.orm.query.to_sql")
 		query.InstanceMembers["explain"] = stringQueryDeclaration("explain", "trb.orm.query.explain")
+		if preload := preloadDeclaration(model); preload.Name != "" {
+			query.InstanceMembers["preload"] = preload
+		}
 		if _, ok := model.BatchKey(); ok {
 			query.InstanceMembers["find_each"] = batchDeclaration(model, "find_each", false, false)
 			query.InstanceMembers["find_in_batches"] = batchDeclaration(model, "find_in_batches", false, true)
@@ -69,6 +79,23 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.QueryType] = query
 	}
 	return catalog, nil
+}
+
+func preloadDeclaration(model Model) declaration.Member {
+	var values []string
+	for _, association := range model.Associations {
+		if association.Preloadable {
+			values = append(values, association.Name)
+		}
+	}
+	if len(values) == 0 {
+		return declaration.Member{}
+	}
+	return declaration.Member{
+		Name: "preload", Kind: declaration.Method, Intrinsic: "trb.orm.query.preload",
+		Parameters: []declaration.Parameter{{Name: "association", Type: types.FromName("String"), LiteralValues: values}},
+		Return:     types.FromName(model.QueryType), Provider: PackageName,
+	}
 }
 
 func findDeclaration(model Model, primaryKey Column) declaration.Member {
@@ -284,9 +311,11 @@ func buildAssociation(source, target Model, kind AssociationKind, schema *Schema
 			referencedColumn = targetKey.Name
 		}
 		if kind == BelongsTo && foreignKey.Column == association.SourceColumn && foreignKey.ReferencedTable == target.Table && referencedColumn == association.TargetColumn {
+			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
 		if kind == HasMany && foreignKey.Column == association.TargetColumn && foreignKey.ReferencedTable == source.Table && referencedColumn == association.SourceColumn {
+			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
 	}
@@ -295,6 +324,20 @@ func buildAssociation(source, target Model, kind AssociationKind, schema *Schema
 		source.Name, association.Name,
 		foreignTable, foreignColumn, referencedTable, referencedColumn,
 	)
+}
+
+func preloadKeyCompatible(source, target Model, association Association) bool {
+	sourceColumn, sourceOK := source.Column(association.SourceColumn)
+	targetColumn, targetOK := target.Column(association.TargetColumn)
+	if !sourceOK || !targetOK {
+		return false
+	}
+	switch sourceColumn.Type.Kind {
+	case types.Bool, types.Int, types.Float, types.String:
+	default:
+		return false
+	}
+	return sourceColumn.Type.Kind == targetColumn.Type.Kind
 }
 
 func modelBaseName(model string) string {
