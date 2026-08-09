@@ -3400,6 +3400,9 @@ func portableReceiverKind(kind types.Kind) bool {
 }
 
 func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.Member, arguments []ast.CallArgument, actual []types.Type) types.Type {
+	if len(member.Alternatives) > 0 && declarationCallUsesPositionalArguments(arguments) {
+		return c.checkDeclarationAlternativeArguments(span, member, arguments, actual)
+	}
 	bindings := map[string]types.Type{}
 	typeParameters := map[string]bool{}
 	for _, name := range member.TypeParameters {
@@ -3440,6 +3443,10 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 			}
 			continue
 		}
+		if len(parameter.StringValues) > 0 && !declarationStringValueAccepted(argument.Value, parameter.StringValues) {
+			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be one of %s", index+1, member.Name, quotedDeclarationValues(parameter.StringValues)))
+			continue
+		}
 		bindDeclarationType(parameter.Type, actual[index], typeParameters, bindings)
 		expected := instantiateDeclarationType(parameter.Type, bindings)
 		actual[index] = c.contextualizeCollectionLiteral(argument.Value, expected, actual[index])
@@ -3453,6 +3460,113 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 		}
 	}
 	return instantiateDeclarationType(member.Return, bindings)
+}
+
+func (c *Checker) checkDeclarationAlternativeArguments(span token.Span, member declaration.Member, arguments []ast.CallArgument, actual []types.Type) types.Type {
+	candidates := make([]declaration.Signature, 0, len(member.Alternatives))
+	for _, signature := range member.Alternatives {
+		if declarationSignatureAcceptsArity(signature, len(arguments)) {
+			candidates = append(candidates, signature)
+		}
+	}
+	if len(candidates) == 0 {
+		c.error(span, fmt.Sprintf("%s() does not accept %d positional arguments", member.Name, len(arguments)))
+		return member.Return
+	}
+	for index, argument := range arguments {
+		allowed := map[string]bool{}
+		constrained := true
+		for _, signature := range candidates {
+			parameter := declarationSignatureParameter(signature, index)
+			if len(parameter.StringValues) == 0 {
+				constrained = false
+				break
+			}
+			for _, value := range parameter.StringValues {
+				allowed[value] = true
+			}
+		}
+		if !constrained {
+			continue
+		}
+		values := sortedDeclarationValues(allowed)
+		if !declarationStringValueAccepted(argument.Value, values) {
+			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be one of %s", index+1, member.Name, quotedDeclarationValues(values)))
+			return member.Return
+		}
+		filtered := candidates[:0]
+		for _, signature := range candidates {
+			if declarationStringValueAccepted(argument.Value, declarationSignatureParameter(signature, index).StringValues) {
+				filtered = append(filtered, signature)
+			}
+		}
+		candidates = filtered
+	}
+	selected := candidates[0]
+	member.Parameters = selected.Parameters
+	member.Return = selected.Return
+	member.Variadic = selected.Variadic
+	member.Alternatives = nil
+	return c.checkDeclarationArguments(span, member, arguments, actual)
+}
+
+func declarationCallUsesPositionalArguments(arguments []ast.CallArgument) bool {
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func declarationSignatureAcceptsArity(signature declaration.Signature, count int) bool {
+	required := 0
+	for _, parameter := range signature.Parameters {
+		if !parameter.Optional {
+			required++
+		}
+	}
+	return count >= required && (signature.Variadic || count <= len(signature.Parameters))
+}
+
+func declarationSignatureParameter(signature declaration.Signature, index int) declaration.Parameter {
+	if index < len(signature.Parameters) {
+		return signature.Parameters[index]
+	}
+	return signature.Parameters[len(signature.Parameters)-1]
+}
+
+func declarationStringValueAccepted(expression ast.Expression, allowed []string) bool {
+	value, ok := declarationStringLiteral(expression)
+	return ok && slices.Contains(allowed, value)
+}
+
+func declarationStringLiteral(expression ast.Expression) (string, bool) {
+	literal, ok := expression.(*ast.Literal)
+	if !ok || literal.Kind != ast.StringLiteral {
+		return "", false
+	}
+	if value, err := strconv.Unquote(literal.Raw); err == nil {
+		return value, true
+	}
+	return strings.Trim(literal.Raw, "'\""), true
+}
+
+func sortedDeclarationValues(values map[string]bool) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func quotedDeclarationValues(values []string) string {
+	quoted := make([]string, len(values))
+	for index, value := range values {
+		quoted[index] = strconv.Quote(value)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func bindDeclarationType(pattern, actual types.Type, parameters map[string]bool, bindings map[string]types.Type) {

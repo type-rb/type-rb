@@ -31,9 +31,13 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			})
 		}
 		queryType := model.Name + "Query"
+		var alternatives []declaration.Signature
+		for _, column := range model.Columns {
+			alternatives = append(alternatives, comparisonSignatures(column, queryType)...)
+		}
 		declared.ClassMembers["where"] = declaration.Member{
 			Name: "where", Kind: declaration.Method, Intrinsic: "trb.orm.where", Parameters: parameters,
-			Return: types.FromName(queryType), Class: true, Provider: PackageName,
+			Return: types.FromName(queryType), Class: true, Provider: PackageName, Alternatives: alternatives,
 		}
 		catalog.Types[model.Name] = declared
 		query := declaration.NewType(queryType, "")
@@ -44,6 +48,27 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[queryType] = query
 	}
 	return catalog, nil
+}
+
+func comparisonSignatures(column Column, queryType string) []declaration.Signature {
+	signature := func(operators []string, valueType types.Type) declaration.Signature {
+		return declaration.Signature{
+			Parameters: []declaration.Parameter{
+				{Name: "column", Type: types.FromName("String"), StringValues: []string{column.Name}},
+				{Name: "operator", Type: types.FromName("String"), StringValues: operators},
+				{Name: "value", Type: valueType},
+			},
+			Return: types.FromName(queryType),
+		}
+	}
+	result := []declaration.Signature{signature([]string{"=", "!="}, column.Type)}
+	switch column.Type.Kind {
+	case types.Int, types.Float, types.String:
+		orderedType := column.Type
+		orderedType.Nullable = false
+		result = append(result, signature([]string{"<", "<=", ">", ">="}, orderedType))
+	}
+	return result
 }
 
 func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {

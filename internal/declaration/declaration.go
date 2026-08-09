@@ -15,10 +15,17 @@ const (
 )
 
 type Parameter struct {
-	Name     string
-	Type     types.Type
-	Keyword  bool
-	Optional bool
+	Name         string
+	Type         types.Type
+	Keyword      bool
+	Optional     bool
+	StringValues []string
+}
+
+type Signature struct {
+	Parameters []Parameter
+	Return     types.Type
+	Variadic   bool
 }
 
 type Member struct {
@@ -31,6 +38,7 @@ type Member struct {
 	Class          bool
 	TypeParameters []string
 	Provider       string
+	Alternatives   []Signature
 }
 
 type Type struct {

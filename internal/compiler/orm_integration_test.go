@@ -125,6 +125,55 @@ func TestPortableORMWhereUsesSchemaTypes(t *testing.T) {
 	}
 }
 
+func TestPortableORMComparisonWhereUsesSchemaTypes(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL NOT NULL, discount REAL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	compile := func(source string) ([]*Artifact, error) {
+		return CompileProject([]SourceUnit{{
+			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main", Source: []byte(source),
+		}}, Options{
+			Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+		})
+	}
+	valid := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n\tProduct.where(\"price\", \">=\", 10).all()\nend\n"
+	artifacts, err := compile(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{`[]string{"price"}`, `[]string{">="}`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated comparison query is missing %q:\n%s", expected, output)
+		}
+	}
+	invalid := []struct {
+		source string
+		want   string
+	}{
+		{source: "Product.where(\"missing\", \"=\", 1)", want: `argument 1 to where() must be one of`},
+		{source: "Product.where(\"price\", \"contains\", 1.0)", want: `argument 2 to where() must be one of`},
+		{source: "Product.where(\"price\", \">=\", \"ten\")", want: `has type String, expected Float`},
+		{source: "Product.where(\"discount\", \">=\", nil)", want: `expected Float`},
+	}
+	for _, test := range invalid {
+		source := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n\t" + test.source + "\nend\n"
+		if _, err := compile(source); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("expected comparison diagnostic %q, got %v", test.want, err)
+		}
+	}
+}
+
 func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 	root := t.TempDir()
 	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
