@@ -261,9 +261,9 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		return e.ormResultOK(typ, Value{Type: types.FromName("String"), Data: detail})
 	case "trb.orm.pluck", "trb.orm.query.pluck", "trb.orm.pick", "trb.orm.query.pick", "trb.orm.ids", "trb.orm.query.ids":
 		return e.ormProjectionResult(name, typ, query, remaining)
-	case "trb.orm.association.query.belongs_to", "trb.orm.association.query.has_many":
+	case "trb.orm.association.query.belongs_to", "trb.orm.association.query.has_many", "trb.orm.association.query.has_one":
 		return e.ormAssociationQuery(typ, query.model, arguments[0].Value, call)
-	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many":
+	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many", "trb.orm.association.loaded.has_one":
 		return e.ormLoadedAssociation(typ, arguments[0].Value, call)
 	default:
 		return Value{}, fmt.Errorf("%s is type-checked, but ORM writes and batch iteration are not executable in the REPL yet; use trb run", name)
@@ -913,6 +913,9 @@ func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, name 
 			itemType := types.FromName(target.Name)
 			object.Fields[valueField] = Value{Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{itemType}}, Data: &arrayValue{Items: matches}}
 		} else {
+			if association.Kind == ormintegration.HasOne && len(matches) > 1 {
+				return &ormFailure{kind: "InvalidData", message: "database has_one association returned multiple rows"}
+			}
 			associationType := types.FromName(target.Name)
 			associationType.Nullable = true
 			loaded := Value{Type: associationType}

@@ -24,16 +24,18 @@ type AssociationKind string
 const (
 	BelongsTo AssociationKind = "belongs_to"
 	HasMany   AssociationKind = "has_many"
+	HasOne    AssociationKind = "has_one"
 )
 
 type Association struct {
-	Name         string
-	Kind         AssociationKind
-	TargetModel  string
-	TargetQuery  string
-	SourceColumn string
-	TargetColumn string
-	Preloadable  bool
+	Name                string
+	Kind                AssociationKind
+	TargetModel         string
+	TargetQuery         string
+	SourceColumn        string
+	TargetColumn        string
+	Preloadable         bool
+	CardinalityVerified bool
 }
 
 func (m Model) DraftType() string { return m.Name + "Draft" }

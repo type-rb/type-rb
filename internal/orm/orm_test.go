@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -350,9 +351,19 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	if category.InstanceMembers["products_query"].Return.String() != "ProductQuery" {
 		t.Fatalf("unexpected has_many query declaration: %#v", category.InstanceMembers["products_query"])
 	}
+	if category.InstanceMembers["product"].Return.String() != "Product?" {
+		t.Fatalf("unexpected has_one declaration: %#v", category.InstanceMembers["product"])
+	}
+	if category.InstanceMembers["product_query"].Return.String() != "ProductQuery" {
+		t.Fatalf("unexpected has_one query declaration: %#v", category.InstanceMembers["product_query"])
+	}
 	preload := productQueryMember(t, catalog, "ProductQuery", "preload")
 	if len(preload.Parameters) != 1 || len(preload.Parameters[0].LiteralValues) != 1 || preload.Parameters[0].LiteralValues[0] != "category" {
 		t.Fatalf("unexpected ProductQuery.preload declaration: %#v", preload)
+	}
+	categoryPreload := productQueryMember(t, catalog, "CategoryQuery", "preload")
+	if len(categoryPreload.Parameters) != 1 || !reflect.DeepEqual(categoryPreload.Parameters[0].LiteralValues, []string{"product", "products"}) {
+		t.Fatalf("unexpected CategoryQuery.preload declaration: %#v", categoryPreload)
 	}
 	manifest, err := Analyze([]*ast.Program{program}, root, options)
 	if err != nil {
@@ -367,6 +378,47 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	hasMany, ok := categoryModel.Association("products")
 	if !ok || hasMany.SourceColumn != "id" || hasMany.TargetColumn != "category_id" {
 		t.Fatalf("unexpected has_many association: %#v", hasMany)
+	}
+	hasOne, ok := categoryModel.Association("product")
+	if !ok || hasOne.SourceColumn != "id" || hasOne.TargetColumn != "category_id" || hasOne.CardinalityVerified {
+		t.Fatalf("unexpected unverified has_one association: %#v", hasOne)
+	}
+}
+
+func TestSQLiteHasOneRecognizesUniqueForeignKey(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE products (
+			id INTEGER PRIMARY KEY,
+			category_id INTEGER NOT NULL UNIQUE,
+			name TEXT NOT NULL,
+			FOREIGN KEY (category_id) REFERENCES categories(id)
+		);
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(Config{Adapter: "sqlite", Database: filepath.Base(databasePath)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, map[string][]byte{PackageName: encoded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	category, _ := manifest.Model("Category")
+	hasOne, ok := category.Association("product")
+	if !ok || !hasOne.CardinalityVerified {
+		t.Fatalf("has_one did not recognize the unique foreign key: %#v", hasOne)
 	}
 }
 
@@ -492,10 +544,11 @@ func parseModel(t *testing.T) *ast.Program {
 
 func parseAssociationModels(t *testing.T) *ast.Program {
 	t.Helper()
-	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many } from trb/orm
+	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many, has_one } from trb/orm
 
 class Category < Model
 	has_many(Product)
+	has_one(Product)
 end
 
 class Product < Model

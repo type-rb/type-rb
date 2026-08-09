@@ -319,9 +319,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormQueryTerminal(call, arguments, goORMExplain)
 	case "trb.orm.query.preload":
 		return g.ormPreload(call, arguments)
-	case "trb.orm.association.query.belongs_to", "trb.orm.association.query.has_many":
+	case "trb.orm.association.query.belongs_to", "trb.orm.association.query.has_many", "trb.orm.association.query.has_one":
 		return g.ormAssociationQuery(call)
-	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many":
+	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many", "trb.orm.association.loaded.has_one":
 		return g.ormLoadedAssociation(call)
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")

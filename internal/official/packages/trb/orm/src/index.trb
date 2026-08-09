@@ -26,3 +26,7 @@ end
 def has_many(model: Any)
 	return
 end
+
+def has_one(model: Any)
+	return
+end

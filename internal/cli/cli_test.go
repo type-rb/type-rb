@@ -319,6 +319,66 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	}
 }
 
+func TestReplRejectsDuplicateHasOnePreload(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE products (
+			id INTEGER PRIMARY KEY,
+			category_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			FOREIGN KEY (category_id) REFERENCES categories(id)
+		);
+		INSERT INTO categories (id, name) VALUES (1, 'Featured');
+		INSERT INTO products (category_id, name) VALUES (1, 'First'), (1, 'Second');
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-orm-has-one-test"
+	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"sqlite","database":"application.sqlite3"}`)
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { Model, belongs_to, has_one } from trb/orm
+
+class Category < Model
+	has_one(Product)
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "import { Category } from main\nCategory.where().preload(:product).all()\n:quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: \"database has_one association returned multiple rows\")) : DbResult<Array<Category>>\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected has_one REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplRejectsValueReturningFunctionThatFallsThrough(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

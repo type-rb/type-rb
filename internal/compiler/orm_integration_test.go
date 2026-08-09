@@ -652,10 +652,11 @@ func TestPortableORMAssociationsReturnTypedQueries(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	source := []byte(`import { DbResult, Model, belongs_to, has_many } from trb/orm
+	source := []byte(`import { DbResult, Model, belongs_to, has_many, has_one } from trb/orm
 
 class Category < Model
 	has_many(Product)
+	has_one(Product)
 end
 
 class Product < Model
@@ -681,6 +682,15 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
+	case Category.where().preload(:product).all()
+	when DbResult::Ok(categories)
+		categories.each do |category|
+			puts(category.product())
+			puts(category.product_query().count())
+		end
+	when DbResult::Err(error)
+		puts(error.message)
+	end
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -697,6 +707,7 @@ end
 		`TrbOrmCategoryWhere([]string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
 		`TrbOrmProductWhere([]string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
 		`TrbOrmProductPreload`, `trbOrmPreloadProductCategory`, `trbOrmPreloadCategoryProducts`,
+		`trbOrmPreloadCategoryProduct`, `database has_one association returned multiple rows`,
 		`TrbOrmAssociationCategory`, `TrbOrmAssociationProducts`,
 	} {
 		if !strings.Contains(output, expected) {

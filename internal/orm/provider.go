@@ -511,7 +511,7 @@ func discoverAssociations(source Model, class *ast.ClassStatement, models map[st
 			continue
 		}
 		callee, ok := call.Callee.(*ast.Identifier)
-		if !ok || callee.Name != string(BelongsTo) && callee.Name != string(HasMany) {
+		if !ok || callee.Name != string(BelongsTo) && callee.Name != string(HasMany) && callee.Name != string(HasOne) {
 			continue
 		}
 		if len(call.Arguments) != 1 || call.Arguments[0].Name != "" {
@@ -563,6 +563,14 @@ func buildAssociation(source, target Model, kind AssociationKind, schema *Schema
 		foreignKeys = targetTable.ForeignKeys
 		foreignTable, foreignColumn = target.Table, association.TargetColumn
 		referencedTable, referencedColumn = source.Table, association.SourceColumn
+	case HasOne:
+		association.Name = modelBaseName(target.Name)
+		association.SourceColumn = sourceKey.Name
+		association.TargetColumn = modelBaseName(source.Name) + "_id"
+		foreignKeys = targetTable.ForeignKeys
+		foreignTable, foreignColumn = target.Table, association.TargetColumn
+		referencedTable, referencedColumn = source.Table, association.SourceColumn
+		association.CardinalityVerified = hasExactUniqueConstraint(targetTable, association.TargetColumn)
 	default:
 		return Association{}, fmt.Errorf("unsupported trb/orm association %q", kind)
 	}
@@ -575,7 +583,7 @@ func buildAssociation(source, target Model, kind AssociationKind, schema *Schema
 			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
-		if kind == HasMany && foreignKey.Column == association.TargetColumn && foreignKey.ReferencedTable == source.Table && referencedColumn == association.SourceColumn {
+		if (kind == HasMany || kind == HasOne) && foreignKey.Column == association.TargetColumn && foreignKey.ReferencedTable == source.Table && referencedColumn == association.SourceColumn {
 			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
@@ -585,6 +593,15 @@ func buildAssociation(source, target Model, kind AssociationKind, schema *Schema
 		source.Name, association.Name,
 		foreignTable, foreignColumn, referencedTable, referencedColumn,
 	)
+}
+
+func hasExactUniqueConstraint(table Table, column string) bool {
+	for _, constraint := range table.UniqueConstraints {
+		if len(constraint.Columns) == 1 && constraint.Columns[0] == column {
+			return true
+		}
+	}
+	return false
 }
 
 func preloadKeyCompatible(source, target Model, association Association) bool {

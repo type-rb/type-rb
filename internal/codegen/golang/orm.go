@@ -1215,7 +1215,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 		return
 	}
 	keyColumn := targetColumn
-	if association.Kind == ormintegration.HasMany {
+	if association.Kind == ormintegration.HasMany || association.Kind == ormintegration.HasOne {
 		keyColumn = sourceColumn
 	}
 	keyType := keyColumn.Type
@@ -1262,10 +1262,10 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	g.line("rows, err := database.Query(statement, arguments...)")
 	g.line("if err != nil { databaseError := trbOrmError(err, " + g.ormErrorKind("Query") + ", \"database preload failed\"); return &databaseError }")
 	g.line("defer rows.Close()")
-	if association.Kind == ormintegration.BelongsTo {
-		g.line("related := map[" + g.goType(keyType) + "]" + targetType + "{}")
-	} else {
+	if association.Kind == ormintegration.HasMany {
 		g.line("related := map[" + g.goType(keyType) + "][]" + targetType + "{}")
+	} else {
+		g.line("related := map[" + g.goType(keyType) + "]" + targetType + "{}")
 	}
 	g.line("for rows.Next() {")
 	g.indent++
@@ -1273,6 +1273,20 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	g.line("if err := rows.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { databaseError := trbOrmError(err, " + g.ormErrorKind("InvalidData") + ", \"database preload row was invalid\"); return &databaseError }")
 	if association.Kind == ormintegration.BelongsTo {
 		g.line("related[relatedValue." + goFieldName(targetColumn.Name) + "] = relatedValue")
+	} else if association.Kind == ormintegration.HasOne {
+		if targetColumn.Nullable {
+			g.line("if relatedValue." + goFieldName(targetColumn.Name) + " != nil {")
+			g.indent++
+			g.line("key := *relatedValue." + goFieldName(targetColumn.Name))
+			g.line("if related[key] != nil { databaseError := " + g.ormErrorValue("InvalidData", "database has_one association returned multiple rows") + "; return &databaseError }")
+			g.line("related[key] = relatedValue")
+			g.indent--
+			g.line("}")
+		} else {
+			g.line("key := relatedValue." + goFieldName(targetColumn.Name))
+			g.line("if related[key] != nil { databaseError := " + g.ormErrorValue("InvalidData", "database has_one association returned multiple rows") + "; return &databaseError }")
+			g.line("related[key] = relatedValue")
+		}
 	} else if targetColumn.Nullable {
 		g.line("if relatedValue." + goFieldName(targetColumn.Name) + " != nil { key := *relatedValue." + goFieldName(targetColumn.Name) + "; related[key] = append(related[key], relatedValue) }")
 	} else {
@@ -1285,6 +1299,12 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	g.line("for _, value := range values {")
 	g.indent++
 	if association.Kind == ormintegration.BelongsTo {
+		if sourceColumn.Nullable {
+			g.line("if value." + goFieldName(sourceColumn.Name) + " != nil { value." + valueField + " = related[*value." + goFieldName(sourceColumn.Name) + "] }")
+		} else {
+			g.line("value." + valueField + " = related[value." + goFieldName(sourceColumn.Name) + "]")
+		}
+	} else if association.Kind == ormintegration.HasOne {
 		if sourceColumn.Nullable {
 			g.line("if value." + goFieldName(sourceColumn.Name) + " != nil { value." + valueField + " = related[*value." + goFieldName(sourceColumn.Name) + "] }")
 		} else {
