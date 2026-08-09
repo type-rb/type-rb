@@ -144,6 +144,14 @@ func (g *generator) ormPackageAlias() string {
 	return "orm"
 }
 
+func (g *generator) ormLifecycleAlias() string {
+	alias := g.ormPackageAlias()
+	if alias == "orm" {
+		g.requireImport(pathpkg.Join(g.goModule, "trb/orm"), alias)
+	}
+	return alias
+}
+
 func (g *generator) ormAssociationQuery(call *ir.Call) string {
 	member, ok := call.Callee.(*ir.Member)
 	if !ok {
@@ -365,22 +373,27 @@ func ormBatchBodyBreaks(statements []ir.Statement) bool {
 }
 
 func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
-	models := manifest.ModelsForModule(g.modulePath)
-	if len(models) == 0 {
-		return
-	}
 	adapter, err := ormintegration.AdapterFor(manifest.Adapter)
 	if err != nil {
 		return
 	}
-	g.requireImport("database/sql", "sql")
+	if g.modulePath == "trb/orm/index" {
+		g.ormPoolRuntime(manifest, adapter)
+		return
+	}
+	models := manifest.ModelsForModule(g.modulePath)
+	if len(models) == 0 {
+		return
+	}
 	g.requireImport("database/sql/driver", "driver")
-	g.requireImport(adapter.GoDriverImport, "_")
 	g.requireImport("context", "")
 	g.requireImport("errors", "")
 	g.requireImport("net", "")
 	g.requireImport("reflect", "")
 	g.requireImport("strings", "")
+	if ormModelsPreload(models) {
+		g.requireImport("database/sql", "sql")
+	}
 	if adapter.NumberedBinds {
 		g.requireImport("strconv", "")
 	}
@@ -388,6 +401,47 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	for _, model := range models {
 		g.ormModelRuntime(manifest, adapter, model)
 	}
+}
+
+func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter ormintegration.Adapter) {
+	g.requireImport("database/sql", "sql")
+	g.requireImport(adapter.GoDriverImport, "_")
+	g.requireImport("sync", "")
+	g.line("var trbOrmDatabaseOnce sync.Once")
+	g.line("var trbOrmDatabase *sql.DB")
+	g.line("var trbOrmDatabaseError error")
+	g.b.WriteByte('\n')
+	g.line("func TrbOrmDatabase() (*sql.DB, error) {")
+	g.indent++
+	g.line("trbOrmDatabaseOnce.Do(func() {")
+	g.indent++
+	g.line("trbOrmDatabase, trbOrmDatabaseError = sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("if trbOrmDatabaseError == nil { trbOrmDatabaseError = trbOrmDatabase.Ping() }")
+	g.line("if trbOrmDatabaseError != nil && trbOrmDatabase != nil { _ = trbOrmDatabase.Close(); trbOrmDatabase = nil }")
+	g.indent--
+	g.line("})")
+	g.line("return trbOrmDatabase, trbOrmDatabaseError")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func TrbOrmCloseDatabase() error {")
+	g.indent++
+	g.line("if trbOrmDatabase == nil { return nil }")
+	g.line("return trbOrmDatabase.Close()")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+}
+
+func ormModelsPreload(models []ormintegration.Model) bool {
+	for _, model := range models {
+		for _, association := range model.Associations {
+			if association.Preloadable {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
@@ -618,9 +672,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	stringType := types.FromName("String")
 	g.line("func " + goORMExplain(model) + "(query " + queryType + ") " + g.ormResultType(stringType) + " {")
 	g.indent++
-	g.line("database, err := sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
 	g.line("if err != nil { return " + g.ormResultErr(stringType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
-	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
 	explainPrefix := "EXPLAIN QUERY PLAN "
 	if adapter.ExplainStyle == ormintegration.ExplainText {
@@ -661,9 +714,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	modelsType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{modelType}}
 	g.line("func " + goORMLoader(model) + "(query " + queryType + ") " + g.ormResultType(modelsType) + " {")
 	g.indent++
-	g.line("database, err := sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
 	g.line("if err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
-	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
 	g.line("rows, err := database.Query(statement, arguments...)")
 	g.line("if err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database query failed\")") + " }")
@@ -737,9 +789,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	integerType := types.FromName("Integer")
 	g.line("func " + goORMCount(model) + "(query " + queryType + ") " + g.ormResultType(integerType) + " {")
 	g.indent++
-	g.line("database, err := sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
 	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
-	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, \"1\")")
 	g.line("row := database.QueryRow(\"SELECT COUNT(*) FROM (\"+statement+\") AS trb_count\", arguments...)")
 	g.line("var count int")

@@ -809,6 +809,9 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
 	g.indent++
 	g.parameterDefaults(method.Parameters)
+	if method.Name == "main" && g.orm != nil && len(g.orm.Models) > 0 {
+		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
+	}
 	g.functionDepth++
 	g.statements(method.Body)
 	g.functionDepth--

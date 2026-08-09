@@ -12,19 +12,22 @@ import (
 func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 	for _, test := range []struct {
 		adapter string
+		driver  string
 		want    []string
 	}{
 		{
 			adapter: "postgresql",
+			driver:  `_ "github.com/jackc/pgx/v5/stdlib"`,
 			want: []string{
-				`_ "github.com/jackc/pgx/v5/stdlib"`, `return "$" + strconv.Itoa(position)`,
+				`return "$" + strconv.Itoa(position)`,
 				`mark := "\""`, `database.Query("EXPLAIN "+statement`,
 			},
 		},
 		{
 			adapter: "mysql",
+			driver:  `_ "github.com/go-sql-driver/mysql"`,
 			want: []string{
-				`_ "github.com/go-sql-driver/mysql"`, `return "?"`, `mark := "` + "`" + `"`,
+				`return "?"`, `mark := "` + "`" + `"`,
 				`column := trbOrmQuoteIdentifier(condition.column)`,
 				`column := trbOrmQuoteIdentifier(order.column)`,
 				`database.Query("EXPLAIN FORMAT=JSON "+statement`,
@@ -58,7 +61,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			}
 			for _, want := range []string{
 				`"example.com/orm/trb/orm"`, `orm.DbResult[[]*Product]`, `orm.NewDbResultErr[[]*Product]`,
-				`trbOrmError(err, orm.DbErrorKindQuery, "database query failed")`,
+				`trbOrmError(err, orm.DbErrorKindQuery, "database query failed")`, `database, err := orm.TrbOrmDatabase()`,
 			} {
 				if !strings.Contains(output, want) {
 					t.Fatalf("generated %s ORM Result runtime is missing %q:\n%s", test.adapter, want, output)
@@ -66,6 +69,18 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			}
 			if strings.Contains(output, "panic(err)") {
 				t.Fatalf("generated %s ORM runtime still exposes database errors through panic:\n%s", test.adapter, output)
+			}
+			pool := Generate(&ir.Program{
+				Mode: "go", Package: "orm", ModulePath: "trb/orm/index", GoModule: "example.com/orm",
+				Extensions: []ir.Extension{manifest},
+			})
+			for _, want := range []string{
+				test.driver, "var trbOrmDatabaseOnce sync.Once", "func TrbOrmDatabase() (*sql.DB, error)",
+				`sql.Open(`, "trbOrmDatabase.Ping()", "func TrbOrmCloseDatabase() error",
+			} {
+				if !strings.Contains(pool, want) {
+					t.Fatalf("generated %s ORM pool runtime is missing %q:\n%s", test.adapter, want, pool)
+				}
 			}
 		})
 	}

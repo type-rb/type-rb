@@ -58,13 +58,14 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	var output string
+	var output, ormOutput string
 	programs := make([]*ir.Program, 0, len(artifacts))
 	for _, artifact := range artifacts {
 		programs = append(programs, artifact.IR)
 		if artifact.AST.ModulePath == "src/main" {
 			output = string(artifact.Output)
-			break
+		} else if artifact.AST.ModulePath == "trb/orm/index" {
+			ormOutput = string(artifact.Output)
 		}
 	}
 	if output == "" {
@@ -73,11 +74,16 @@ end
 	for _, expected := range []string{
 		"type Product struct", "type TrbOrmProductQuery struct",
 		`trbOrmProductStatement(query, "\"id\", \"name\", \"price\", \"active\"")`,
-		"modernc.org/sqlite", "TrbOrmLoadProduct", "type ProductList = []*Product", "orm.DbResult[[]*Product]",
+		"TrbOrmLoadProduct", "type ProductList = []*Product", "orm.DbResult[[]*Product]", "defer orm.TrbOrmCloseDatabase()",
 		"orm.NewDbResultErr[[]*Product]", `"database query failed"`,
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
+		}
+	}
+	for _, expected := range []string{"modernc.org/sqlite", "func TrbOrmDatabase() (*sql.DB, error)", "trbOrmDatabase.Ping()"} {
+		if !strings.Contains(ormOutput, expected) {
+			t.Fatalf("generated ORM pool is missing %q:\n%s", expected, ormOutput)
 		}
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
