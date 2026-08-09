@@ -289,16 +289,45 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	if len(models) == 0 {
 		return
 	}
+	adapter, err := ormintegration.AdapterFor(manifest.Adapter)
+	if err != nil {
+		return
+	}
 	g.requireImport("database/sql", "sql")
-	g.requireImport("modernc.org/sqlite", "_")
+	g.requireImport(adapter.GoDriverImport, "_")
 	g.requireImport("reflect", "")
 	g.requireImport("strings", "")
+	if adapter.NumberedBinds {
+		g.requireImport("strconv", "")
+	}
+	g.ormDialectRuntime(adapter)
 	for _, model := range models {
-		g.ormModelRuntime(manifest, model)
+		g.ormModelRuntime(manifest, adapter, model)
 	}
 }
 
-func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model ormintegration.Model) {
+func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
+	g.line("func trbOrmPlaceholder(position int) string {")
+	g.indent++
+	if adapter.NumberedBinds {
+		g.line("return \"$\" + strconv.Itoa(position)")
+	} else {
+		g.line("return \"?\"")
+	}
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func trbOrmPlaceholders(count int) string {")
+	g.indent++
+	g.line("values := make([]string, count)")
+	g.line("for index := range values { values[index] = trbOrmPlaceholder(index + 1) }")
+	g.line("return strings.Join(values, \",\")")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+}
+
+func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter ormintegration.Adapter, model ormintegration.Model) {
 	conditionType := goORMConditionType(model)
 	orderType := goORMOrderType(model)
 	queryType := goORMQueryType(model)
@@ -390,7 +419,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	columns := make([]string, len(model.Columns))
 	scanTargets := make([]string, len(model.Columns))
 	for index, column := range model.Columns {
-		columns[index] = quoteORMIdentifier(column.Name)
+		columns[index] = adapter.QuoteIdentifier(column.Name)
 		scanTargets[index] = "&value." + goFieldName(column.Name)
 		g.line("func (self *" + goIdentifier(model.Name, true) + ") " + goORMColumnGetter(column.Name) + "() " + g.goType(column.Type) + " {")
 		g.indent++
@@ -410,7 +439,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 		g.line("}")
 		g.b.WriteByte('\n')
 	}
-	statement := " FROM " + quoteORMIdentifier(model.Table)
+	statement := " FROM " + adapter.QuoteIdentifier(model.Table)
 	g.line("func " + goORMStatement(model) + "(query " + queryType + ", projection string) (string, []any) {")
 	g.indent++
 	g.line("statement := \"SELECT \" + projection + " + strconv.Quote(statement))
@@ -434,7 +463,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.indent--
 	g.line("} else {")
 	g.indent++
-	g.line("clauses = append(clauses, column+\" \"+condition.operator+\" ?\")")
+	g.line("clauses = append(clauses, column+\" \"+condition.operator+\" \"+trbOrmPlaceholder(len(arguments)+1))")
 	g.line("arguments = append(arguments, condition.value)")
 	g.indent--
 	g.line("}")
@@ -456,8 +485,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.line("statement += \" ORDER BY \" + strings.Join(orders, \", \")")
 	g.indent--
 	g.line("}")
-	g.line("if query.limit != nil { statement += \" LIMIT ?\"; arguments = append(arguments, *query.limit) } else if query.offset != nil { statement += \" LIMIT -1\" }")
-	g.line("if query.offset != nil { statement += \" OFFSET ?\"; arguments = append(arguments, *query.offset) }")
+	g.line("if query.limit != nil { statement += \" LIMIT \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *query.limit) } else if query.offset != nil { statement += \" LIMIT -1\" }")
+	g.line("if query.offset != nil { statement += \" OFFSET \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *query.offset) }")
 	g.line("return statement, arguments")
 	g.indent--
 	g.line("}")
@@ -473,7 +502,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 
 	g.line("func " + goORMExplain(model) + "(query " + queryType + ") string {")
 	g.indent++
-	g.line("database, err := sql.Open(" + strconv.Quote(manifest.Adapter) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("database, err := sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
 	g.line("if err != nil { panic(err) }")
 	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
@@ -496,13 +525,13 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.b.WriteByte('\n')
 	for _, association := range model.Associations {
 		if association.Preloadable {
-			g.ormAssociationPreloader(manifest, model, association)
+			g.ormAssociationPreloader(manifest, adapter, model, association)
 		}
 	}
 
 	g.line("func " + goORMLoader(model) + "(query " + queryType + ") []*" + goIdentifier(model.Name, true) + " {")
 	g.indent++
-	g.line("database, err := sql.Open(" + strconv.Quote(manifest.Adapter) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("database, err := sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
 	g.line("if err != nil { panic(err) }")
 	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
@@ -574,7 +603,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 
 	g.line("func " + goORMCount(model) + "(query " + queryType + ") int {")
 	g.indent++
-	g.line("database, err := sql.Open(" + strconv.Quote(manifest.Adapter) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("database, err := sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
 	g.line("if err != nil { panic(err) }")
 	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, \"1\")")
@@ -587,7 +616,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, model ormintegration.Model, association ormintegration.Association) {
+func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, adapter ormintegration.Adapter, model ormintegration.Model, association ormintegration.Association) {
 	target, ok := manifest.Model(association.TargetModel)
 	if !ok {
 		return
@@ -606,7 +635,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, m
 	targetColumns := make([]string, len(target.Columns))
 	scanTargets := make([]string, len(target.Columns))
 	for index, column := range target.Columns {
-		targetColumns[index] = quoteORMIdentifier(column.Name)
+		targetColumns[index] = adapter.QuoteIdentifier(column.Name)
 		scanTargets[index] = "&relatedValue." + goFieldName(column.Name)
 	}
 	function := goORMAssociationPreloader(model, association)
@@ -640,8 +669,8 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, m
 	g.line("return")
 	g.indent--
 	g.line("}")
-	statement := "SELECT " + strings.Join(targetColumns, ", ") + " FROM " + quoteORMIdentifier(target.Table) + " WHERE " + quoteORMIdentifier(association.TargetColumn) + " IN ("
-	g.line("statement := " + strconv.Quote(statement) + " + strings.TrimSuffix(strings.Repeat(\"?,\", len(arguments)), \",\") + \")\"")
+	statement := "SELECT " + strings.Join(targetColumns, ", ") + " FROM " + adapter.QuoteIdentifier(target.Table) + " WHERE " + adapter.QuoteIdentifier(association.TargetColumn) + " IN ("
+	g.line("statement := " + strconv.Quote(statement) + " + trbOrmPlaceholders(len(arguments)) + \")\"")
 	g.line("rows, err := database.Query(statement, arguments...)")
 	g.line("if err != nil { panic(err) }")
 	g.line("defer rows.Close()")
@@ -791,8 +820,4 @@ func (g *generator) ormModelQualifier(model ormintegration.Model) string {
 		g.requireImport(importPath, alias)
 	}
 	return goImportAlias(alias) + "."
-}
-
-func quoteORMIdentifier(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }

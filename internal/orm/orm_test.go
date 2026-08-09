@@ -74,6 +74,22 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 }
 
+func TestSQLiteAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
+	adapter, err := AdapterFor("sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter.DriverName != "sqlite" || adapter.GoDriverImport != "modernc.org/sqlite" {
+		t.Fatalf("unexpected SQLite driver definition: %#v", adapter)
+	}
+	if got := adapter.QuoteIdentifier(`product"names`); got != `"product""names"` {
+		t.Fatalf("QuoteIdentifier() = %q", got)
+	}
+	if got := adapter.Placeholder(3); got != "?" {
+		t.Fatalf("Placeholder() = %q", got)
+	}
+}
+
 func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	root, options := sqliteFixture(t)
 	program := parseModel(t)
