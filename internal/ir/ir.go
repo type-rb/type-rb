@@ -150,12 +150,19 @@ type Field struct {
 func (*Field) irStatement() {}
 
 type Parameter struct {
-	Name        string
-	Type        types.Type
-	Default     Expression
-	Keyword     bool
-	Rest        bool
-	KeywordRest bool
+	Name          string
+	Type          types.Type
+	Default       Expression
+	Keyword       bool
+	Rest          bool
+	KeywordRest   bool
+	LiteralValues []string
+}
+
+type MethodSignature struct {
+	Parameters []Parameter
+	ReturnType types.Type
+	Variadic   bool
 }
 
 type Method struct {
@@ -165,6 +172,7 @@ type Method struct {
 	TargetName     string
 	TypeParameters []string
 	Parameters     []Parameter
+	Alternatives   []MethodSignature
 	ReturnType     types.Type
 	Body           []Statement
 	Class          bool

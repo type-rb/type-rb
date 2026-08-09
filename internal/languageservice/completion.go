@@ -2,6 +2,7 @@ package languageservice
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -52,6 +53,9 @@ func Complete(request CompletionRequest) []CompletionItem {
 	if request.Cursor < 0 || request.Cursor > len(request.Source) {
 		return nil
 	}
+	if items, ok := completeCallArgumentLiterals(request); ok {
+		return items
+	}
 	replacement := completionRange(request.Source, request.Cursor)
 	prefix := request.Source[replacement.Start:request.Cursor]
 
@@ -82,6 +86,253 @@ func Complete(request CompletionRequest) []CompletionItem {
 		items = append(items, completionFromSymbol(symbol, replacement))
 	}
 	return filterCompletions(items, prefix)
+}
+
+func completeCallArgumentLiterals(request CompletionRequest) ([]CompletionItem, bool) {
+	tokens, _ := lexer.Lex([]byte(request.Source[:request.Cursor]))
+	significant := completionTokens(tokens)
+	open := innermostOpenCall(significant)
+	if open < 1 {
+		return nil, false
+	}
+	call, ok := completionCallSymbol(significant, open, request)
+	if !ok || call.Call == nil {
+		return nil, false
+	}
+	arguments := splitCompletionArguments(significant[open+1:])
+	position := len(arguments) - 1
+	current := arguments[position]
+	keyword, valueTokens := completionKeywordArgument(current)
+	values := callLiteralValues(call.Call, position, keyword, arguments[:position])
+	if len(values) == 0 {
+		return nil, false
+	}
+	prefix, replacement, before, after, active := literalCompletionContext(request.Source, request.Cursor, valueTokens, keyword != "")
+	if !active {
+		return nil, false
+	}
+	items := make([]CompletionItem, 0, len(values))
+	for _, value := range values {
+		items = append(items, CompletionItem{
+			Label: value, InsertText: before + value + after, Kind: CompletionValue,
+			Detail: call.Name + "() literal", Replacement: replacement,
+		})
+	}
+	return filterCompletions(items, prefix), true
+}
+
+func completionTokens(tokens []token.Token) []token.Token {
+	result := make([]token.Token, 0, len(tokens))
+	for _, item := range tokens {
+		if item.Kind == token.Comment || item.Kind == token.Newline || item.Kind == token.EOF {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func innermostOpenCall(tokens []token.Token) int {
+	type opening struct {
+		index  int
+		lexeme string
+	}
+	stack := []opening{}
+	for index, item := range tokens {
+		switch item.Lexeme {
+		case "(", "[", "{":
+			stack = append(stack, opening{index: index, lexeme: item.Lexeme})
+		case ")", "]", "}":
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	for index := len(stack) - 1; index >= 0; index-- {
+		if stack[index].lexeme == "(" {
+			return stack[index].index
+		}
+	}
+	return -1
+}
+
+func completionCallSymbol(tokens []token.Token, open int, request CompletionRequest) (Symbol, bool) {
+	callee := tokens[open-1]
+	if callee.Kind != token.Identifier {
+		return Symbol{}, false
+	}
+	symbols := lexicalSymbols(request.Source, request.Cursor, request.Context)
+	lookup := func(name string) (Symbol, bool) {
+		for index := len(symbols) - 1; index >= 0; index-- {
+			if symbols[index].Name == name {
+				return symbols[index], true
+			}
+		}
+		for _, symbol := range request.Context.Symbols {
+			if symbol.Name == name {
+				return symbol, true
+			}
+		}
+		return Symbol{}, false
+	}
+	if open < 3 || tokens[open-2].Lexeme != "." && tokens[open-2].Lexeme != "&." {
+		return lookup(callee.Lexeme)
+	}
+	receiverEnd := tokens[open-2].Span.Start.Offset
+	receiverStart := receiverStart(request.Source, receiverEnd, ".")
+	receiver, ok := resolveCompletionExpression(request.Source[receiverStart:receiverEnd], lookup, request.Context)
+	if !ok {
+		return Symbol{}, false
+	}
+	return completionMember(receiver, callee.Lexeme, request.Context)
+}
+
+func splitCompletionArguments(tokens []token.Token) [][]token.Token {
+	result := [][]token.Token{{}}
+	depth := 0
+	for _, item := range tokens {
+		switch item.Lexeme {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			if depth > 0 {
+				depth--
+			}
+		case ",":
+			if depth == 0 {
+				result = append(result, []token.Token{})
+				continue
+			}
+		}
+		result[len(result)-1] = append(result[len(result)-1], item)
+	}
+	return result
+}
+
+func completionKeywordArgument(tokens []token.Token) (string, []token.Token) {
+	if len(tokens) >= 2 && tokens[0].Kind == token.Identifier && tokens[1].Lexeme == ":" {
+		return tokens[0].Lexeme, tokens[2:]
+	}
+	return "", tokens
+}
+
+func callLiteralValues(call *CallInfo, position int, keyword string, previous [][]token.Token) []string {
+	allowed := map[string]bool{}
+	if keyword != "" {
+		for _, parameter := range call.Parameters {
+			if parameter.Keyword && parameter.Name == keyword {
+				for _, value := range parameter.LiteralValues {
+					allowed[value] = true
+				}
+			}
+		}
+	} else if len(call.Alternatives) > 0 {
+		for _, signature := range call.Alternatives {
+			if position >= len(signature.Parameters) || !completionSignatureMatches(signature, previous) {
+				continue
+			}
+			for _, value := range signature.Parameters[position].LiteralValues {
+				allowed[value] = true
+			}
+		}
+	} else {
+		positional := 0
+		for _, parameter := range call.Parameters {
+			if parameter.Keyword {
+				continue
+			}
+			if positional == position {
+				for _, value := range parameter.LiteralValues {
+					allowed[value] = true
+				}
+				break
+			}
+			positional++
+		}
+	}
+	values := make([]string, 0, len(allowed))
+	for value := range allowed {
+		values = append(values, value)
+	}
+	sort.Strings(values)
+	return values
+}
+
+func completionSignatureMatches(signature CallSignature, previous [][]token.Token) bool {
+	for index, argument := range previous {
+		if index >= len(signature.Parameters) {
+			return false
+		}
+		constraints := signature.Parameters[index].LiteralValues
+		if len(constraints) == 0 {
+			continue
+		}
+		value, ok := completionArgumentLiteral(argument)
+		if !ok {
+			continue
+		}
+		matched := false
+		for _, candidate := range constraints {
+			matched = matched || candidate == value
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func completionArgumentLiteral(tokens []token.Token) (string, bool) {
+	_, tokens = completionKeywordArgument(tokens)
+	if len(tokens) == 1 && tokens[0].Kind == token.String {
+		value, err := strconv.Unquote(tokens[0].Lexeme)
+		return value, err == nil
+	}
+	if len(tokens) == 2 && tokens[0].Lexeme == ":" && tokens[1].Kind == token.Identifier {
+		return tokens[1].Lexeme, true
+	}
+	return "", false
+}
+
+func literalCompletionContext(source string, cursor int, tokens []token.Token, keyword bool) (string, OffsetRange, string, string, bool) {
+	if len(tokens) == 0 {
+		if keyword {
+			return "", OffsetRange{Start: cursor, End: cursor}, ":", "", true
+		}
+		return "", OffsetRange{Start: cursor, End: cursor}, "\"", "\"", true
+	}
+	first := tokens[0]
+	if first.Kind == token.String && len(first.Lexeme) > 0 {
+		quote := first.Lexeme[0]
+		if len(first.Lexeme) >= 2 && first.Lexeme[len(first.Lexeme)-1] == quote {
+			return "", OffsetRange{}, "", "", false
+		}
+		start := first.Span.Start.Offset + 1
+		end := cursor
+		for end < len(source) && source[end] != quote {
+			end++
+		}
+		after := string(quote)
+		if end < len(source) && source[end] == quote {
+			after = ""
+		}
+		return source[start:cursor], OffsetRange{Start: start, End: end}, "", after, true
+	}
+	if first.Lexeme == ":" {
+		start := cursor
+		if len(tokens) > 1 && tokens[1].Kind == token.Identifier {
+			start = tokens[1].Span.Start.Offset
+		}
+		end := completionRange(source, cursor).End
+		return source[start:cursor], OffsetRange{Start: start, End: end}, "", "", true
+	}
+	start := first.Span.Start.Offset
+	end := completionRange(source, cursor).End
+	before, after := "\"", "\""
+	if keyword {
+		before, after = ":", ""
+	}
+	return source[start:cursor], OffsetRange{Start: start, End: end}, before, after, true
 }
 
 func completeMembers(receiver, marker string, request CompletionRequest, replacement OffsetRange) []CompletionItem {
@@ -124,6 +375,81 @@ func completeMembers(receiver, marker string, request CompletionRequest, replace
 		return completionItems(receiverMembers(typ, request.Context), replacement)
 	}
 	return nil
+}
+
+func resolveCompletionExpression(source string, lookup func(string) (Symbol, bool), context Context) (Symbol, bool) {
+	tokens, _ := lexer.Lex([]byte(source))
+	return resolveCompletionTokens(completionTokens(tokens), lookup, context)
+}
+
+func resolveCompletionTokens(tokens []token.Token, lookup func(string) (Symbol, bool), context Context) (Symbol, bool) {
+	if len(tokens) == 0 {
+		return Symbol{}, false
+	}
+	var current Symbol
+	var ok bool
+	first := tokens[0]
+	if first.Kind == token.Identifier {
+		current, ok = lookup(first.Lexeme)
+	} else if typ, literal := literalReceiverType(first.Lexeme); literal {
+		current, ok = Symbol{Name: first.Lexeme, Type: typ}, true
+	}
+	if !ok {
+		return Symbol{}, false
+	}
+	for index := 1; index < len(tokens); {
+		if tokens[index].Lexeme == "(" {
+			next := completionMatchingClose(tokens, index)
+			if next < 0 {
+				return current, true
+			}
+			index = next + 1
+			continue
+		}
+		if tokens[index].Lexeme != "." && tokens[index].Lexeme != "&." && tokens[index].Lexeme != "::" || index+1 >= len(tokens) || tokens[index+1].Kind != token.Identifier {
+			break
+		}
+		current, ok = completionMember(current, tokens[index+1].Lexeme, context)
+		if !ok {
+			return Symbol{}, false
+		}
+		index += 2
+	}
+	return current, true
+}
+
+func completionMatchingClose(tokens []token.Token, open int) int {
+	depth := 0
+	for index := open; index < len(tokens); index++ {
+		switch tokens[index].Lexeme {
+		case "(":
+			depth++
+		case ")":
+			depth--
+			if depth == 0 {
+				return index
+			}
+		}
+	}
+	return -1
+}
+
+func completionMember(receiver Symbol, name string, context Context) (Symbol, bool) {
+	if receiver.Kind == CompletionModule || receiver.Kind == CompletionType && len(receiver.Members) > 0 {
+		for _, member := range receiver.Members {
+			if member.Name == name {
+				return member, true
+			}
+		}
+	}
+	if receiver.Type.Kind != "" {
+		for _, member := range receiverMembers(receiver.Type, context) {
+			if member.Name == name {
+				return member, true
+			}
+		}
+	}
+	return Symbol{}, false
 }
 
 func resolveNamespace(receiver string, lookup func(string) (Symbol, bool)) (Symbol, bool) {
@@ -350,7 +676,7 @@ func lexicalSymbols(source string, cursor int, context Context) []Symbol {
 		case "import":
 			collectImportedNames(significant, index+1, known)
 		default:
-			collectVariable(significant, index, known)
+			collectVariable(significant, index, known, context)
 		}
 	}
 	result := make([]Symbol, 0, len(known))
@@ -392,7 +718,7 @@ func collectImportedNames(tokens []token.Token, start int, symbols map[string]Sy
 	}
 }
 
-func collectVariable(tokens []token.Token, index int, symbols map[string]Symbol) {
+func collectVariable(tokens []token.Token, index int, symbols map[string]Symbol, context Context) {
 	name := tokens[index].Lexeme
 	if _, keyword := keywordDetails[name]; keyword || index > 0 && tokens[index-1].Lexeme == "def" {
 		return
@@ -407,7 +733,7 @@ func collectVariable(tokens []token.Token, index int, symbols map[string]Symbol)
 		return
 	}
 	if typ.Kind == "" {
-		typ = inferLexicalValue(tokens, declaration+1, symbols)
+		typ = inferLexicalValue(tokens, declaration+1, symbols, context)
 	}
 	kind := CompletionVariable
 	if isConstantName(name) {
@@ -416,7 +742,7 @@ func collectVariable(tokens []token.Token, index int, symbols map[string]Symbol)
 	symbols[name] = Symbol{Name: name, Kind: kind, Detail: typ.String(), Type: typ}
 }
 
-func inferLexicalValue(tokens []token.Token, start int, symbols map[string]Symbol) types.Type {
+func inferLexicalValue(tokens []token.Token, start int, symbols map[string]Symbol, context Context) types.Type {
 	if start >= len(tokens) {
 		return types.FromName("Any")
 	}
@@ -432,6 +758,13 @@ func inferLexicalValue(tokens []token.Token, start int, symbols map[string]Symbo
 	case token.Identifier:
 		if item.Lexeme == "true" || item.Lexeme == "false" {
 			return types.FromName("Boolean")
+		}
+		lookup := func(name string) (Symbol, bool) {
+			value, ok := symbols[name]
+			return value, ok
+		}
+		if resolved, ok := resolveCompletionTokens(tokens[start:], lookup, context); ok && resolved.Type.Kind != "" {
+			return resolved.Type
 		}
 		if start+2 < len(tokens) && tokens[start+1].Lexeme == "." && tokens[start+2].Lexeme == "new" {
 			return types.FromName(item.Lexeme)

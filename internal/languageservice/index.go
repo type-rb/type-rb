@@ -281,9 +281,27 @@ func methodSignature(method *ir.Method) string {
 }
 
 func methodCallInfo(method *ir.Method) *CallInfo {
-	return &CallInfo{
+	result := &CallInfo{
 		ParameterCount:        len(method.Parameters),
 		ExplicitTypeArguments: len(method.TypeParameters) > 0,
+	}
+	for _, parameter := range method.Parameters {
+		result.Parameters = append(result.Parameters, callParameter(parameter))
+	}
+	for _, alternative := range method.Alternatives {
+		signature := CallSignature{}
+		for _, parameter := range alternative.Parameters {
+			signature.Parameters = append(signature.Parameters, callParameter(parameter))
+		}
+		result.Alternatives = append(result.Alternatives, signature)
+	}
+	return result
+}
+
+func callParameter(parameter ir.Parameter) CallParameter {
+	return CallParameter{
+		Name: parameter.Name, Keyword: parameter.Keyword,
+		LiteralValues: append([]string(nil), parameter.LiteralValues...),
 	}
 }
 
@@ -322,7 +340,7 @@ func completionPriority(kind CompletionKind) int {
 		return 0
 	case CompletionField, CompletionMethod, CompletionFunction:
 		return 1
-	case CompletionConstant, CompletionType, CompletionEnumMember, CompletionModule:
+	case CompletionConstant, CompletionType, CompletionEnumMember, CompletionModule, CompletionValue:
 		return 2
 	case CompletionKeyword:
 		return 3

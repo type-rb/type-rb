@@ -20,7 +20,7 @@ func TestPortableORMCompilesLiveSQLiteQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL, active BOOLEAN NOT NULL)`); err != nil {
 		database.Close()
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ end
 	if output == "" {
 		t.Fatal("main artifact was not generated")
 	}
-	for _, expected := range []string{"type Product struct", "type TrbOrmProductQuery struct", `trbOrmProductStatement(query, "\"id\", \"name\", \"price\"")`, "modernc.org/sqlite", "TrbOrmLoadProduct"} {
+	for _, expected := range []string{"type Product struct", "type TrbOrmProductQuery struct", `trbOrmProductStatement(query, "\"id\", \"name\", \"price\", \"active\"")`, "modernc.org/sqlite", "TrbOrmLoadProduct"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
 		}
@@ -70,6 +70,7 @@ end
 	}
 	context := languageservice.BuildContext(programs, "src/main")
 	assertORMCompletionContext(t, context)
+	assertORMLiteralCompletions(t, context)
 }
 
 func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
@@ -111,6 +112,49 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	for _, name := range []string{"where", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
 		if !queryMethods[name] {
 			t.Fatalf("ProductQuery.%s is missing from completion context: %#v", name, context.TypeMembers["ProductQuery"])
+		}
+	}
+}
+
+func assertORMLiteralCompletions(t *testing.T, context languageservice.Context) {
+	t.Helper()
+	complete := func(source string) []languageservice.CompletionItem {
+		return languageservice.Complete(languageservice.CompletionRequest{Source: source, Cursor: len(source), Mode: "go", Context: context})
+	}
+	find := func(items []languageservice.CompletionItem, label string) (languageservice.CompletionItem, bool) {
+		for _, item := range items {
+			if item.Label == label {
+				return item, true
+			}
+		}
+		return languageservice.CompletionItem{}, false
+	}
+	for _, test := range []struct {
+		source, label, insert string
+	}{
+		{source: `Product.where("pr`, label: "price", insert: `price"`},
+		{source: `Product.where("price", ">`, label: ">=", insert: `>="`},
+		{source: `Product.where().order(price: :d`, label: "desc", insert: "desc"},
+		{source: "query := Product.where(name: \"Widget\")\nquery.where(\"na", label: "name", insert: `name"`},
+	} {
+		items := complete(test.source)
+		item, ok := find(items, test.label)
+		if !ok {
+			t.Fatalf("ORM completion for %q is missing %q: %#v", test.source, test.label, items)
+		}
+		if item.InsertText != test.insert || item.Kind != languageservice.CompletionValue {
+			t.Fatalf("ORM completion for %q is %#v, want insert %q", test.source, item, test.insert)
+		}
+	}
+	active := complete(`Product.where("active", "`)
+	for _, label := range []string{"=", "!="} {
+		if _, ok := find(active, label); !ok {
+			t.Fatalf("Boolean comparison completion is missing %q: %#v", label, active)
+		}
+	}
+	for _, label := range []string{"<", "<=", ">", ">="} {
+		if _, ok := find(active, label); ok {
+			t.Fatalf("Boolean comparison completion unexpectedly includes %q: %#v", label, active)
 		}
 	}
 }

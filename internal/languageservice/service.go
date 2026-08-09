@@ -22,6 +22,7 @@ const (
 	CompletionType       CompletionKind = "type"
 	CompletionEnumMember CompletionKind = "enum_member"
 	CompletionModule     CompletionKind = "module"
+	CompletionValue      CompletionKind = "value"
 	CompletionCommand    CompletionKind = "command"
 )
 
@@ -47,6 +48,18 @@ type CompletionItem struct {
 type CallInfo struct {
 	ParameterCount        int
 	ExplicitTypeArguments bool
+	Parameters            []CallParameter
+	Alternatives          []CallSignature
+}
+
+type CallParameter struct {
+	Name          string
+	Keyword       bool
+	LiteralValues []string
+}
+
+type CallSignature struct {
+	Parameters []CallParameter
 }
 
 // Symbol is the UI-independent semantic shape consumed by completion.

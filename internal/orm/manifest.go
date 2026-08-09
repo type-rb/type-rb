@@ -95,11 +95,7 @@ func (m *Manifest) Augment(program *ir.Program) {
 				}
 			}
 			if !existing["where"] {
-				method := &ir.Method{Name: "where", External: true, Class: true, ReturnType: namedType(model.QueryType)}
-				for _, column := range model.Columns {
-					method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
-				}
-				class.Body = append(class.Body, method)
+				class.Body = append(class.Body, whereIRMethod(model, true))
 			}
 			if primaryKey, ok := model.PrimaryKey(); ok {
 				keyType := primaryKey.Type
@@ -126,11 +122,13 @@ func (m *Manifest) Augment(program *ir.Program) {
 }
 
 func queryIRMethods(model Model) []ir.Statement {
-	where := &ir.Method{Name: "where", External: true, ReturnType: namedType(model.QueryType)}
+	where := whereIRMethod(model, false)
 	order := &ir.Method{Name: "order", External: true, ReturnType: namedType(model.QueryType)}
 	for _, column := range model.Columns {
-		where.Parameters = append(where.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
-		order.Parameters = append(order.Parameters, ir.Parameter{Name: column.Name, Type: types.FromName("String"), Keyword: true})
+		order.Parameters = append(order.Parameters, ir.Parameter{
+			Name: column.Name, Type: types.FromName("String"), Keyword: true,
+			LiteralValues: []string{"asc", "desc"},
+		})
 	}
 	firstType := namedType(model.Name)
 	firstType.Nullable = true
@@ -149,6 +147,24 @@ func queryIRMethods(model Model) []ir.Statement {
 		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))
 	}
 	return methods
+}
+
+func whereIRMethod(model Model, class bool) *ir.Method {
+	method := &ir.Method{Name: "where", External: true, Class: class, ReturnType: namedType(model.QueryType)}
+	for _, column := range model.Columns {
+		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+		for _, signature := range comparisonSignatures(column, model.QueryType) {
+			alternative := ir.MethodSignature{ReturnType: signature.Return, Variadic: signature.Variadic}
+			for _, parameter := range signature.Parameters {
+				alternative.Parameters = append(alternative.Parameters, ir.Parameter{
+					Name: parameter.Name, Type: parameter.Type, Keyword: parameter.Keyword,
+					LiteralValues: append([]string(nil), parameter.LiteralValues...),
+				})
+			}
+			method.Alternatives = append(method.Alternatives, alternative)
+		}
+	}
+	return method
 }
 
 func batchIRMethod(name string, class bool) *ir.Method {
