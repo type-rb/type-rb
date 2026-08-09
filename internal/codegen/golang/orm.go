@@ -1010,6 +1010,9 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	}
 	g.ormCreateRuntime(adapter, model, columns, scanTargets)
 	g.ormRelationWriteRuntime(adapter, model)
+	for _, column := range model.Columns {
+		g.ormProjectionRuntime(adapter, model, column)
+	}
 	for _, association := range model.Associations {
 		if !association.Preloadable {
 			continue

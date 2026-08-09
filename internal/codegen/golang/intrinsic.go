@@ -257,6 +257,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormFindBy(call)
 	case "trb.orm.exists":
 		return g.ormExists(call)
+	case "trb.orm.pluck", "trb.orm.query.pluck":
+		return g.ormProjection(call, arguments, "pluck")
+	case "trb.orm.pick", "trb.orm.query.pick":
+		return g.ormProjection(call, arguments, "pick")
+	case "trb.orm.ids", "trb.orm.query.ids":
+		return g.ormProjection(call, arguments, "ids")
 	case "trb.orm.find":
 		return g.ormFind(call)
 	case "trb.orm.build":

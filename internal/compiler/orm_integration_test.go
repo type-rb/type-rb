@@ -170,7 +170,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	for _, member := range product.Members {
 		classMethods[member.Name] = true
 	}
-	for _, name := range []string{"where", "not", "find_by", "exists?", "find", "build", "create", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "not", "find_by", "exists?", "pluck", "pick", "ids", "find", "build", "create", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !classMethods[name] {
 			t.Fatalf("Product.%s is missing from completion context: %#v", name, product.Members)
 		}
@@ -199,7 +199,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 			queryMethods[member.Name] = true
 		}
 	}
-	for _, name := range []string{"where", "not", "or", "find_by", "exists?", "update_all", "delete_all", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "not", "or", "find_by", "exists?", "update_all", "delete_all", "pluck", "pick", "ids", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
 		if !queryMethods[name] {
 			t.Fatalf("ProductQuery.%s is missing from completion context: %#v", name, context.TypeMembers["ProductQuery"])
 		}
@@ -491,7 +491,7 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	compile := func(body string) ([]*Artifact, error) {
 		return compileSource("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n")
 	}
-	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).not(name: \"Deleted\").or(Product.where(name: \"Widget\")).order(price: :desc).limit(5).offset(1)\n\tputs(Product.not(name: \"Deleted\").to_sql())\n\tputs(Product.exists?(name: \"Widget\"))\n\tputs(Product.find_by(name: \"Widget\"))\n\tputs(Product.where(\"price\", \">=\", 10).exists?())\n\tputs(Product.where(\"price\", \">=\", 10).find_by(name: \"Widget\"))\n\tputs(Product.where(name: \"Widget\").update_all(price: 20.0))\n\tputs(Product.where(name: \"Deleted\").delete_all())\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
+	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).not(name: \"Deleted\").or(Product.where(name: \"Widget\")).order(price: :desc).limit(5).offset(1)\n\tputs(Product.not(name: \"Deleted\").to_sql())\n\tputs(Product.exists?(name: \"Widget\"))\n\tputs(Product.find_by(name: \"Widget\"))\n\tputs(Product.pluck(:name))\n\tputs(Product.pick(:price))\n\tputs(Product.ids())\n\tputs(Product.where(\"price\", \">=\", 10).exists?())\n\tputs(Product.where(\"price\", \">=\", 10).find_by(name: \"Widget\"))\n\tputs(Product.where(\"price\", \">=\", 10).pluck(:name))\n\tputs(Product.where(\"price\", \">=\", 10).pick(:price))\n\tputs(Product.where(\"price\", \">=\", 10).ids())\n\tputs(Product.where(name: \"Widget\").update_all(price: 20.0))\n\tputs(Product.where(name: \"Deleted\").delete_all())\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,6 +500,7 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 		"TrbOrmProductQueryWhere", "TrbOrmProductNot", "TrbOrmProductQueryNot", "TrbOrmProductQueryOr",
 		"TrbOrmFirstProduct", "TrbOrmExistsProduct", "trbOrmProductPredicateSQL",
 		"TrbOrmUpdateAllProduct", "TrbOrmDeleteAllProduct", "database bulk update failed", "database bulk delete failed",
+		"TrbOrmPluckProductName", "TrbOrmPickProductPrice", "database projection query failed",
 		"TrbOrmProductOrder", "TrbOrmProductLimit", "TrbOrmProductOffset",
 		"TrbOrmToSQLProduct", "TrbOrmExplainProduct", "EXPLAIN QUERY PLAN", "TrbOrmCountProduct", "TrbOrmFirstProduct", `statement += " ORDER BY "`,
 	} {
@@ -545,6 +546,9 @@ end
 		{body: "\tProduct.where(name: \"Widget\").find_by()", want: "find_by() expects at least 1 argument(s), got 0"},
 		{body: "\tProduct.where(name: \"Widget\").update_all()", want: "update_all() expects at least 1 argument(s), got 0"},
 		{body: "\tProduct.where(name: \"Widget\").update_all(price: \"twenty\")", want: "has type String, expected Float"},
+		{body: "\tProduct.pluck(:missing)", want: "must be one of"},
+		{body: "\tProduct.pick(:missing)", want: "must be one of"},
+		{body: "\tProduct.ids(1)", want: "ids() expects at most 0 arguments, got 1"},
 	}
 	for _, test := range invalid {
 		if _, err := compile(test.body); err == nil || !strings.Contains(err.Error(), test.want) {
@@ -724,7 +728,7 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		},
 		{
 			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
-			Source: []byte("import { DbResult } from trb/orm\nimport { Product } from models/product\n\ndef load_products(): DbResult<Array<Product>>\n\treturn Product.where(name: \"Widget\").all()\nend\n\ndef main()\n\tputs(load_products())\n\tputs(Product.insert_all([Product.build(name: \"First\"), Product.build(name: \"Second\")]))\nend\n"),
+			Source: []byte("import { DbResult } from trb/orm\nimport { Product } from models/product\n\ndef load_products(): DbResult<Array<Product>>\n\treturn Product.where(name: \"Widget\").all()\nend\n\ndef main()\n\tputs(load_products())\n\tputs(Product.pluck(:name))\n\tputs(Product.pick(:name))\n\tputs(Product.ids())\n\tputs(Product.insert_all([Product.build(name: \"First\"), Product.build(name: \"Second\")]))\nend\n"),
 		},
 	}, Options{
 		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
@@ -739,13 +743,14 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 	}
 	modelOutput := outputs["models/product"]
 	mainOutput := outputs["main"]
-	for _, expected := range []string{"type TrbOrmProductQuery struct", "func TrbOrmProductWhere", "func TrbOrmLoadProduct", "func (self *Product) TrbOrmColumnName() string"} {
+	for _, expected := range []string{"type TrbOrmProductQuery struct", "func TrbOrmProductWhere", "func TrbOrmLoadProduct", "func TrbOrmPluckProductName", "func TrbOrmPickProductName", "func (self *Product) TrbOrmColumnName() string"} {
 		if !strings.Contains(modelOutput, expected) {
 			t.Fatalf("generated model module is missing %q:\n%s", expected, modelOutput)
 		}
 	}
 	for _, expected := range []string{
 		"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "orm.DbResult[[]*models.Product]",
+		"models.TrbOrmPluckProductName", "models.TrbOrmPickProductName", "models.TrbOrmPluckProductId",
 		"models.TrbOrmInsertAllProduct([]*models.ProductDraft{models.TrbOrmBuildProduct",
 	} {
 		if !strings.Contains(mainOutput, expected) {

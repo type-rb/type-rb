@@ -53,8 +53,11 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		declared.ClassMembers["not"] = notDeclaration(model, "trb.orm.not", true)
 		declared.ClassMembers["find_by"] = findByDeclaration(model, "trb.orm.find_by", true)
 		declared.ClassMembers["exists?"] = existsDeclaration(model, "trb.orm.exists", true)
+		declared.ClassMembers["pluck"] = projectionDeclaration(model, "pluck", "trb.orm.pluck", true, false)
+		declared.ClassMembers["pick"] = projectionDeclaration(model, "pick", "trb.orm.pick", true, true)
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
+			declared.ClassMembers["ids"] = idsDeclaration(model, "trb.orm.ids", true, primaryKey)
 			declared.ClassMembers["build"] = buildDeclaration(model, schema.Adapter)
 			declared.ClassMembers["create"] = createDeclaration(model, schema.Adapter)
 			declared.ClassMembers["insert_all"] = declaration.Member{
@@ -117,6 +120,11 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		query.InstanceMembers["delete_all"] = declaration.Member{
 			Name: "delete_all", Kind: declaration.Method, Intrinsic: "trb.orm.query.delete_all",
 			Return: dbResult(types.FromName("Integer")), Provider: PackageName,
+		}
+		query.InstanceMembers["pluck"] = projectionDeclaration(model, "pluck", "trb.orm.query.pluck", false, false)
+		query.InstanceMembers["pick"] = projectionDeclaration(model, "pick", "trb.orm.query.pick", false, true)
+		if primaryKey, ok := model.PrimaryKey(); ok {
+			query.InstanceMembers["ids"] = idsDeclaration(model, "trb.orm.query.ids", false, primaryKey)
 		}
 		query.InstanceMembers["order"] = orderDeclaration(model)
 		query.InstanceMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.query.limit", model.QueryType)
@@ -332,6 +340,39 @@ func existsDeclaration(model Model, intrinsic string, class bool) declaration.Me
 	member := predicateDeclaration(model, "exists?", intrinsic, class, 0, 0)
 	member.Return = dbResult(types.FromName("Boolean"))
 	return member
+}
+
+func projectionDeclaration(model Model, name, intrinsic string, class, pick bool) declaration.Member {
+	values := make([]string, 0, len(model.Columns))
+	alternatives := make([]declaration.Signature, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		values = append(values, column.Name)
+		result := column.Type
+		if pick {
+			result.Nullable = true
+		} else {
+			result = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{result}}
+		}
+		alternatives = append(alternatives, declaration.Signature{
+			Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}},
+			Return:     dbResult(result),
+		})
+	}
+	return declaration.Member{
+		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
+		Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: values}},
+		Return:     alternatives[0].Return, Class: class, Provider: PackageName, Alternatives: alternatives,
+	}
+}
+
+func idsDeclaration(model Model, intrinsic string, class bool, primaryKey Column) declaration.Member {
+	keyType := primaryKey.Type
+	keyType.Nullable = false
+	return declaration.Member{
+		Name: "ids", Kind: declaration.Method, Intrinsic: intrinsic,
+		Return: dbResult(types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{keyType}}),
+		Class:  class, Provider: PackageName,
+	}
 }
 
 func predicateValueType(column Column) types.Type {
