@@ -1381,6 +1381,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	for _, column := range model.Columns {
 		g.ormProjectionRuntime(adapter, model, column)
 		g.ormSubqueryRuntime(adapter, model, column)
+		g.ormGroupRuntime(adapter, model, column)
 		for _, operation := range ormintegration.AggregateOperations() {
 			if resultType, ok := ormintegration.AggregateResultType(operation, column); ok {
 				g.ormAggregateRuntime(adapter, model, column, operation, resultType)

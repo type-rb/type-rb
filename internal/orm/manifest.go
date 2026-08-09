@@ -44,6 +44,16 @@ func (m Model) ChangesType() string { return m.Name + "Changes" }
 
 func (m Model) ScopeType() string { return m.Name + "Scope" }
 
+func (m Model) GroupType(column Column) string {
+	name := ""
+	for _, part := range strings.Split(column.Name, "_") {
+		if part != "" {
+			name += strings.ToUpper(part[:1]) + part[1:]
+		}
+	}
+	return m.Name + "GroupedBy" + name + "Query"
+}
+
 func (m Model) PrimaryKey() (Column, bool) {
 	var result Column
 	found := false
@@ -226,6 +236,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["select"] {
 				class.Body = append(class.Body, selectIRMethod(model, true))
 			}
+			if !existing["group"] {
+				class.Body = append(class.Body, groupIRMethod(model, true))
+			}
 			if !existing["join"] {
 				if join := joinIRMethod(model, "join", true); join != nil {
 					class.Body = append(class.Body, join)
@@ -349,6 +362,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 				Body: []ir.Statement{&ir.Method{Name: "save", External: true, ReturnType: dbResult(namedType(model.Name))}},
 			})
 		}
+		for _, column := range model.Columns {
+			program.Statements = append(program.Statements, &ir.Class{Name: model.GroupType(column), External: true, Body: groupedIRMethods(model, column)})
+		}
 	}
 }
 
@@ -468,6 +484,7 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "explain", External: true, ReturnType: dbResult(types.FromName("String"))},
 	}
 	methods = append(methods, selectIRMethod(model, false))
+	methods = append(methods, groupIRMethod(model, false))
 	if join := joinIRMethod(model, "join", false); join != nil {
 		methods = append(methods, join)
 	}
@@ -495,6 +512,23 @@ func queryIRMethods(model Model) []ir.Statement {
 		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))
 	}
 	return methods
+}
+
+func groupIRMethod(model Model, class bool) *ir.Method {
+	method := &ir.Method{Name: "group", External: true, Class: class}
+	for _, column := range model.Columns {
+		method.Alternatives = append(method.Alternatives, ir.MethodSignature{Parameters: []ir.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}}, ReturnType: namedType(model.GroupType(column))})
+	}
+	method.ReturnType = method.Alternatives[0].ReturnType
+	return method
+}
+
+func groupedIRMethods(model Model, column Column) []ir.Statement {
+	key := column.Type
+	return []ir.Statement{
+		&ir.Method{Name: "having", External: true, Parameters: []ir.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{"count"}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: types.FromName("Integer")}}, ReturnType: namedType(model.GroupType(column))},
+		&ir.Method{Name: "count", External: true, ReturnType: dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{key, types.FromName("Integer")}})},
+	}
 }
 
 func joinIRMethod(model Model, name string, class bool) *ir.Method {
@@ -731,6 +765,20 @@ func (m *Manifest) QueryModel(name string) (Model, bool) {
 		}
 	}
 	return Model{}, false
+}
+
+func (m *Manifest) GroupModel(name string) (Model, Column, bool) {
+	if m == nil {
+		return Model{}, Column{}, false
+	}
+	for _, model := range m.Models {
+		for _, column := range model.Columns {
+			if model.GroupType(column) == name {
+				return model, column, true
+			}
+		}
+	}
+	return Model{}, Column{}, false
 }
 
 func (m *Manifest) DraftModel(name string) (Model, bool) {

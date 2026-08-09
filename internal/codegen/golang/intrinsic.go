@@ -253,6 +253,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormWhere(call)
 	case "trb.orm.select", "trb.orm.query.select":
 		return g.ormSelect(call)
+	case "trb.orm.group", "trb.orm.query.group":
+		return g.ormGroup(call)
+	case "trb.orm.group.having":
+		return g.ormGroupHaving(call, arguments)
+	case "trb.orm.group.count":
+		return g.ormGroupCount(call, arguments)
 	case "trb.orm.join":
 		return g.ormJoin(call, "INNER JOIN")
 	case "trb.orm.left_join":

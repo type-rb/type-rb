@@ -814,6 +814,8 @@ def main()
 	puts(Product.where("category_id", "!=", Category.select(:id)).all())
 	puts(Product.where_exists(:category, Category.where(name: "Books")).all())
 	puts(Product.where_not_exists(:category, Category.where(name: "Missing")).all())
+	puts(Product.group(:category_id).count())
+	puts(Product.where(name: "TypeRB").group(:category_id).having(:count, ">=", 1).count())
 	case Product.where().preload(:category).all()
 	when DbResult::Ok(products)
 		products.each do |product|
@@ -860,6 +862,8 @@ end
 		`TrbOrmSelectCategoryId(TrbOrmCategoryWhere`, `*orm.TrbOrmSubquery[int]`,
 		`condition.operator == "IN" || condition.operator == "NOT_IN"`, `operator = " NOT IN "`,
 		`TrbOrmProductWhereExists(TrbOrmProductWhere`, `operator := "EXISTS"`, `operator = "NOT EXISTS"`,
+		`TrbOrmGroupProductCategoryId(TrbOrmProductWhere`, `TrbOrmHavingProductCategoryId`, `TrbOrmCountGroupedProductCategoryId`,
+		`GROUP BY`, `HAVING COUNT(*)`, `map[int]int`,
 		`trbOrmQuoteIdentifier("products")`, `TrbOrmCategoryAssociationPredicate(TrbOrmCategoryWhere`,
 		`TrbOrmCategoryQueryWhere(TrbOrmCategoryUsing(product.TrbOrmTransaction()), []string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
 		`TrbOrmProductQueryWhere(TrbOrmProductUsing(category.TrbOrmTransaction()), []string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
@@ -905,6 +909,8 @@ end
 		{expression: `Product.join(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
 		{expression: `Product.where_exists(:missing)`, want: `argument 1 to where_exists() must be one of "category"`},
 		{expression: `Product.where_exists(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
+		{expression: `Product.group(:missing)`, want: `argument 1 to group() must be one of`},
+		{expression: `Product.group(:category_id).having(:sum, ">", 1)`, want: `argument 1 to having() must be one of "count"`},
 		{expression: `Product.where(category_id: Product.select(:name))`, want: `has type Subquery<String>`},
 	} {
 		if err := compileInvalidJoin(invalid.expression); err == nil || !strings.Contains(err.Error(), invalid.want) {

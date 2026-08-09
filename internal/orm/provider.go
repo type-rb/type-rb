@@ -57,6 +57,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
 		declared.ClassMembers["select"] = selectDeclaration(model, "trb.orm.select", true)
+		declared.ClassMembers["group"] = groupDeclaration(model, "trb.orm.group", true)
 		if join := joinDeclaration(model, "join", "trb.orm.join", true); join.Name != "" {
 			declared.ClassMembers["join"] = join
 		}
@@ -135,6 +136,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		query := declaration.NewType(model.QueryType, "")
 		query.InstanceMembers["where"] = whereDeclaration(model, "trb.orm.query.where", false)
 		query.InstanceMembers["select"] = selectDeclaration(model, "trb.orm.query.select", false)
+		query.InstanceMembers["group"] = groupDeclaration(model, "trb.orm.query.group", false)
 		if join := joinDeclaration(model, "join", "trb.orm.query.join", false); join.Name != "" {
 			query.InstanceMembers["join"] = join
 		}
@@ -202,6 +204,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			query.InstanceMembers["find_in_batches"] = batchDeclaration(model, "find_in_batches", false, true)
 		}
 		catalog.Types[model.QueryType] = query
+		for _, column := range model.Columns {
+			grouped := declaration.NewType(model.GroupType(column), "")
+			grouped.InstanceMembers["having"] = declaration.Member{Name: "having", Kind: declaration.Method, Intrinsic: "trb.orm.group.having", Parameters: []declaration.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{"count"}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: types.FromName("Integer")}}, Return: types.FromName(model.GroupType(column)), Provider: PackageName}
+			grouped.InstanceMembers["count"] = declaration.Member{Name: "count", Kind: declaration.Method, Intrinsic: "trb.orm.group.count", Return: dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{column.Type, types.FromName("Integer")}}), Provider: PackageName}
+			catalog.Types[model.GroupType(column)] = grouped
+		}
 		scope := declaration.NewType(model.ScopeType(), "")
 		for name, member := range query.InstanceMembers {
 			scope.InstanceMembers[name] = member
@@ -214,6 +222,15 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.ScopeType()] = scope
 	}
 	return catalog, nil
+}
+
+func groupDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	member := declaration.Member{Name: "group", Kind: declaration.Method, Intrinsic: intrinsic, Class: class, Provider: PackageName}
+	for _, column := range model.Columns {
+		member.Alternatives = append(member.Alternatives, declaration.Signature{Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}}, Return: types.FromName(model.GroupType(column))})
+	}
+	member.Return = member.Alternatives[0].Return
+	return member
 }
 
 func transactionDeclaration(class bool) declaration.Member {

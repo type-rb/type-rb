@@ -49,6 +49,13 @@ type ormSubqueryValue struct {
 	column ormintegration.Column
 }
 
+type ormGroupedValue struct {
+	query          *ormQueryValue
+	column         ormintegration.Column
+	havingOperator string
+	havingValue    *int64
+}
+
 type ormTransactionValue struct {
 	transaction   *sql.Tx
 	connection    *sql.Conn
@@ -328,6 +335,9 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		}
 		return e.ormColumn(arguments[0].Value, memberName)
 	}
+	if name == "trb.orm.group.having" || name == "trb.orm.group.count" {
+		return e.ormGroupedIntrinsic(name, arguments, typ)
+	}
 	query, remaining, err := e.ormQueryReceiver(arguments)
 	if err != nil {
 		return Value{}, err
@@ -369,6 +379,19 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			return Value{}, errors.New("ORM select subquery does not accept lock or preload")
 		}
 		return Value{Type: typ, Data: &ormSubqueryValue{query: query, column: column}}, nil
+	case "trb.orm.group", "trb.orm.query.group":
+		if len(remaining) != 1 {
+			return Value{}, errors.New("ORM group requires one column")
+		}
+		columnName, _ := remaining[0].Value.Data.(string)
+		column, ok := query.model.Column(columnName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no column %s", query.model.Name, columnName)
+		}
+		if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 {
+			return Value{}, errors.New("ORM group currently accepts predicates and joins, but not order, limit, offset, lock, or preload")
+		}
+		return Value{Type: typ, Data: &ormGroupedValue{query: query, column: column}}, nil
 	case "trb.orm.join", "trb.orm.left_join", "trb.orm.query.join", "trb.orm.query.left_join":
 		if len(remaining) < 1 || len(remaining) > 2 {
 			return Value{}, errors.New("ORM join requires an association and optional predicate query")
@@ -593,6 +616,62 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 	default:
 		return Value{}, fmt.Errorf("%s is type-checked, but ORM writes and batch iteration are not executable in the REPL yet; use trb run", name)
 	}
+}
+
+func (e *Evaluator) ormGroupedIntrinsic(name string, arguments []evaluatedArgument, typ types.Type) (Value, error) {
+	if len(arguments) == 0 {
+		return Value{}, errors.New("ORM grouped operation is missing its receiver")
+	}
+	grouped, ok := arguments[0].Value.Data.(*ormGroupedValue)
+	if !ok {
+		return Value{}, errors.New("ORM grouped operation requires a grouped query")
+	}
+	copy := *grouped
+	if name == "trb.orm.group.having" {
+		if len(arguments) != 4 {
+			return Value{}, errors.New("ORM having requires aggregate, operator, and value")
+		}
+		op, _ := arguments[2].Value.Data.(string)
+		value, _ := arguments[3].Value.Data.(int64)
+		copy.havingOperator = op
+		copy.havingValue = &value
+		return Value{Type: typ, Data: &copy}, nil
+	}
+	statement, queryArguments, err := e.ormStatement(copy.query, e.ormRuntime().adapter.QuoteIdentifier(copy.column.Name)+" AS "+e.ormRuntime().adapter.QuoteIdentifier("trb_group"))
+	if err != nil {
+		return Value{}, err
+	}
+	statement = "SELECT " + e.ormRuntime().adapter.QuoteIdentifier("trb_group") + ", COUNT(*) FROM (" + statement + ") AS trb_grouped GROUP BY " + e.ormRuntime().adapter.QuoteIdentifier("trb_group")
+	if copy.havingValue != nil {
+		statement += " HAVING COUNT(*) " + copy.havingOperator + " " + e.ormRuntime().adapter.Placeholder(len(queryArguments)+1)
+		queryArguments = append(queryArguments, *copy.havingValue)
+	}
+	database, failure := e.ormQueryExecutor(copy.query)
+	if failure != nil {
+		return e.ormResultErr(typ, failure.kind, failure.message)
+	}
+	rows, err := database.QueryContext(e.context, statement, queryArguments...)
+	if err != nil {
+		return e.ormResultErr(typ, "Query", "database grouped count query failed")
+	}
+	defer rows.Close()
+	entries := []hashEntry{}
+	for rows.Next() {
+		var raw any
+		var count int64
+		if err := rows.Scan(&raw, &count); err != nil {
+			return e.ormResultErr(typ, "InvalidData", "database grouped count row was invalid")
+		}
+		key, err := ormColumnValue(copy.column.Type, raw)
+		if err != nil {
+			return e.ormResultErr(typ, "InvalidData", "database grouped count row was invalid")
+		}
+		entries = append(entries, hashEntry{Key: key, Value: Value{Type: types.FromName("Integer"), Data: count}})
+	}
+	if err := rows.Err(); err != nil {
+		return e.ormResultErr(typ, "Query", "database grouped count query failed")
+	}
+	return e.ormResultOK(typ, Value{Type: ormResultValueType(typ), Data: &hashValue{Entries: entries}})
 }
 
 func (e *Evaluator) ormQueryReceiver(arguments []evaluatedArgument) (*ormQueryValue, []evaluatedArgument, error) {

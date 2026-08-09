@@ -1816,6 +1816,8 @@ func (g *generator) goType(t types.Type) string {
 			result = g.ormModelQualifier(model) + goORMQueryType(model)
 		} else if model, ok := g.orm.ScopeModel(t.Name); ok {
 			result = g.ormModelQualifier(model) + goORMQueryType(model)
+		} else if model, column, ok := g.orm.GroupModel(t.Name); ok {
+			result = g.ormModelQualifier(model) + goORMGroupType(model, column)
 		} else if model, ok := g.orm.DraftModel(t.Name); ok {
 			result = "*" + g.ormModelQualifier(model) + goIdentifier(model.DraftType(), true)
 		} else if model, ok := g.orm.ChangesModel(t.Name); ok {
