@@ -291,6 +291,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormQueryFindBy(call, arguments)
 	case "trb.orm.query.exists":
 		return g.ormQueryTerminal(call, arguments, goORMExists)
+	case "trb.orm.query.update_all":
+		return g.ormQueryUpdateAll(call, arguments)
+	case "trb.orm.query.delete_all":
+		return g.ormQueryTerminal(call, arguments, goORMDeleteAll)
 	case "trb.orm.query.order":
 		return g.ormOrder(call, arguments)
 	case "trb.orm.query.limit":

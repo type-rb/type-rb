@@ -199,7 +199,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 			queryMethods[member.Name] = true
 		}
 	}
-	for _, name := range []string{"where", "not", "or", "find_by", "exists?", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "not", "or", "find_by", "exists?", "update_all", "delete_all", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
 		if !queryMethods[name] {
 			t.Fatalf("ProductQuery.%s is missing from completion context: %#v", name, context.TypeMembers["ProductQuery"])
 		}
@@ -491,7 +491,7 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	compile := func(body string) ([]*Artifact, error) {
 		return compileSource("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n")
 	}
-	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).not(name: \"Deleted\").or(Product.where(name: \"Widget\")).order(price: :desc).limit(5).offset(1)\n\tputs(Product.not(name: \"Deleted\").to_sql())\n\tputs(Product.exists?(name: \"Widget\"))\n\tputs(Product.find_by(name: \"Widget\"))\n\tputs(Product.where(\"price\", \">=\", 10).exists?())\n\tputs(Product.where(\"price\", \">=\", 10).find_by(name: \"Widget\"))\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
+	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).not(name: \"Deleted\").or(Product.where(name: \"Widget\")).order(price: :desc).limit(5).offset(1)\n\tputs(Product.not(name: \"Deleted\").to_sql())\n\tputs(Product.exists?(name: \"Widget\"))\n\tputs(Product.find_by(name: \"Widget\"))\n\tputs(Product.where(\"price\", \">=\", 10).exists?())\n\tputs(Product.where(\"price\", \">=\", 10).find_by(name: \"Widget\"))\n\tputs(Product.where(name: \"Widget\").update_all(price: 20.0))\n\tputs(Product.where(name: \"Deleted\").delete_all())\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,6 +499,7 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	for _, expected := range []string{
 		"TrbOrmProductQueryWhere", "TrbOrmProductNot", "TrbOrmProductQueryNot", "TrbOrmProductQueryOr",
 		"TrbOrmFirstProduct", "TrbOrmExistsProduct", "trbOrmProductPredicateSQL",
+		"TrbOrmUpdateAllProduct", "TrbOrmDeleteAllProduct", "database bulk update failed", "database bulk delete failed",
 		"TrbOrmProductOrder", "TrbOrmProductLimit", "TrbOrmProductOffset",
 		"TrbOrmToSQLProduct", "TrbOrmExplainProduct", "EXPLAIN QUERY PLAN", "TrbOrmCountProduct", "TrbOrmFirstProduct", `statement += " ORDER BY "`,
 	} {
@@ -542,6 +543,8 @@ end
 		{body: "\tProduct.not(name: \"Deleted\", price: 1.0)", want: "not() expects at most 1 argument(s), got 2"},
 		{body: "\tProduct.find_by()", want: "find_by() expects at least 1 argument(s), got 0"},
 		{body: "\tProduct.where(name: \"Widget\").find_by()", want: "find_by() expects at least 1 argument(s), got 0"},
+		{body: "\tProduct.where(name: \"Widget\").update_all()", want: "update_all() expects at least 1 argument(s), got 0"},
+		{body: "\tProduct.where(name: \"Widget\").update_all(price: \"twenty\")", want: "has type String, expected Float"},
 	}
 	for _, test := range invalid {
 		if _, err := compile(test.body); err == nil || !strings.Contains(err.Error(), test.want) {

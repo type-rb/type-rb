@@ -373,6 +373,22 @@ func (g *generator) ormQueryFindBy(call *ir.Call, arguments []string) string {
 	return qualifier + goORMFirst(model) + "(" + filtered + ")"
 }
 
+func (g *generator) ormQueryUpdateAll(call *ir.Call, arguments []string) string {
+	model, query, ok := g.ormQueryModel(call, arguments)
+	if !ok {
+		return "nil"
+	}
+	columns := make([]string, 0, len(call.Arguments))
+	values := make([]string, 0, len(call.Arguments))
+	for _, argument := range call.Arguments {
+		if argument.Name != "" {
+			columns = append(columns, strconv.Quote(argument.Name))
+			values = append(values, g.expr(argument.Value))
+		}
+	}
+	return g.ormModelQualifier(model) + goORMUpdateAll(model) + "(" + query + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
 func (g *generator) ormOrder(call *ir.Call, arguments []string) string {
 	model, query, ok := g.ormQueryModel(call, arguments)
 	if !ok {
@@ -993,6 +1009,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.b.WriteByte('\n')
 	}
 	g.ormCreateRuntime(adapter, model, columns, scanTargets)
+	g.ormRelationWriteRuntime(adapter, model)
 	for _, association := range model.Associations {
 		if !association.Preloadable {
 			continue
@@ -1414,6 +1431,14 @@ func goORMChangesSave(model ormintegration.Model) string {
 
 func goORMDelete(model ormintegration.Model) string {
 	return "TrbOrmDelete" + goIdentifier(model.Name, true)
+}
+
+func goORMUpdateAll(model ormintegration.Model) string {
+	return "TrbOrmUpdateAll" + goIdentifier(model.Name, true)
+}
+
+func goORMDeleteAll(model ormintegration.Model) string {
+	return "TrbOrmDeleteAll" + goIdentifier(model.Name, true)
 }
 
 func goORMCount(model ormintegration.Model) string {

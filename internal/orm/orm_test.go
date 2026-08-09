@@ -136,6 +136,9 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if query.InstanceMembers["find_by"].Return.String() != "DbResult<Product?>" || query.InstanceMembers["exists?"].Return.String() != "DbResult<Boolean>" {
 		t.Fatalf("unexpected query predicate terminals: %#v", query.InstanceMembers)
 	}
+	if query.InstanceMembers["update_all"].Return.String() != "DbResult<Integer>" || query.InstanceMembers["update_all"].MinimumArguments != 1 || query.InstanceMembers["delete_all"].Return.String() != "DbResult<Integer>" {
+		t.Fatalf("unexpected relation bulk write declarations: %#v", query.InstanceMembers)
+	}
 	for name, expected := range map[string]string{
 		"first": "DbResult<Product?>", "count": "DbResult<Integer>", "explain": "DbResult<String>",
 	} {
@@ -285,7 +288,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 			queryMethods[method.Name] = true
 		}
 	}
-	for _, name := range []string{"not", "or", "find_by", "exists?", "to_sql", "explain"} {
+	for _, name := range []string{"not", "or", "find_by", "exists?", "update_all", "delete_all", "to_sql", "explain"} {
 		if !queryMethods[name] {
 			t.Fatalf("missing generated ORM query method %s: %#v", name, query.Body)
 		}

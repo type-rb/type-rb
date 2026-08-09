@@ -310,6 +310,16 @@ func modelChangeIRMethod(model Model, name string, returnType types.Type) *ir.Me
 	return method
 }
 
+func relationUpdateAllIRMethod(model Model) *ir.Method {
+	method := &ir.Method{Name: "update_all", External: true, ReturnType: dbResult(types.FromName("Integer"))}
+	for _, column := range model.Columns {
+		if !column.PrimaryKey && !column.Generated {
+			method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+		}
+	}
+	return method
+}
+
 func queryIRMethods(model Model) []ir.Statement {
 	where := whereIRMethod(model, false)
 	not := notIRMethod(model, false)
@@ -328,6 +338,8 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "or", External: true, Parameters: []ir.Parameter{{Name: "other", Type: namedType(model.QueryType)}}, ReturnType: namedType(model.QueryType)},
 		findByIRMethod(model, false),
 		&ir.Method{Name: "exists?", External: true, ReturnType: dbResult(types.FromName("Boolean"))},
+		relationUpdateAllIRMethod(model),
+		&ir.Method{Name: "delete_all", External: true, ReturnType: dbResult(types.FromName("Integer"))},
 		order,
 		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "offset", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},

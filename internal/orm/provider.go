@@ -113,6 +113,11 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			Name: "exists?", Kind: declaration.Method, Intrinsic: "trb.orm.query.exists",
 			Return: dbResult(types.FromName("Boolean")), Provider: PackageName,
 		}
+		query.InstanceMembers["update_all"] = relationUpdateAllDeclaration(model)
+		query.InstanceMembers["delete_all"] = declaration.Member{
+			Name: "delete_all", Kind: declaration.Method, Intrinsic: "trb.orm.query.delete_all",
+			Return: dbResult(types.FromName("Integer")), Provider: PackageName,
+		}
 		query.InstanceMembers["order"] = orderDeclaration(model)
 		query.InstanceMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.query.limit", model.QueryType)
 		query.InstanceMembers["offset"] = integerQueryDeclaration("offset", "trb.orm.query.offset", model.QueryType)
@@ -194,6 +199,23 @@ func updateParameters(model Model) []declaration.Parameter {
 		})
 	}
 	return parameters
+}
+
+func relationUpdateAllDeclaration(model Model) declaration.Member {
+	parameters := make([]declaration.Parameter, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		if column.PrimaryKey || column.Generated {
+			continue
+		}
+		parameters = append(parameters, declaration.Parameter{
+			Name: column.Name, Type: column.Type, Keyword: true, Optional: true,
+		})
+	}
+	return declaration.Member{
+		Name: "update_all", Kind: declaration.Method, Intrinsic: "trb.orm.query.update_all",
+		Parameters: parameters, MinimumArguments: 1,
+		Return: dbResult(types.FromName("Integer")), Provider: PackageName,
+	}
 }
 
 func buildDeclaration(model Model, adapter string) declaration.Member {
