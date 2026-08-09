@@ -4,6 +4,7 @@ package lower
 
 import (
 	"sort"
+	"strconv"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
@@ -12,7 +13,10 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-type lowerer struct{ checked checker.Result }
+type lowerer struct {
+	checked   checker.Result
+	temporary int
+}
 
 func Program(checked checker.Result) *ir.Program {
 	l := &lowerer{checked: checked}
@@ -351,6 +355,8 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		return &ir.Binary{ExprBase: base, Left: l.expression(n.Left), Operator: n.Operator, Right: l.expression(n.Right)}
 	case *ast.RangeExpression:
 		return &ir.Range{ExprBase: base, Start: l.expression(n.Start), End: l.expression(n.End), Exclusive: n.Exclusive}
+	case *ast.PropagateExpression:
+		return l.propagation(n)
 	case *ast.IterationExpression:
 		result := &ir.Transform{
 			ExprBase:  base,
@@ -573,6 +579,73 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 		result.ExportKind = string(binding.Member.Kind)
 	}
 	return result
+}
+
+func referenceFromBinding(binding *resolver.Binding) *ir.Reference {
+	if binding == nil || binding.Import == nil {
+		return nil
+	}
+	result := &ir.Reference{Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name}
+	if binding.Export != nil {
+		result.ExportKind = string(binding.Export.Kind)
+	}
+	if binding.Member != nil {
+		result.ExportKind = string(binding.Member.Kind)
+	}
+	return result
+}
+
+func (l *lowerer) propagation(node *ast.PropagateExpression) ir.Expression {
+	semantic, ok := l.checked.Propagations[node]
+	if !ok {
+		return l.expression(node.Value)
+	}
+	l.temporary++
+	suffix := strconv.Itoa(l.temporary)
+	valueName := "__trbPropagateValue" + suffix
+	errorName := "__trbPropagateError" + suffix
+	resultType := l.checked.Expressions[node.Value]
+
+	pattern := func(variant checker.EnumVariant) ir.Expression {
+		reference := referenceFromBinding(variant.Reference)
+		receiver := &ir.Identifier{ExprBase: ir.NewExprBase(node.Span(), resultType), Name: variant.EnumName, Reference: reference}
+		return &ir.Member{ExprBase: ir.NewExprBase(node.Span(), resultType), Receiver: receiver, Name: variant.Name, Namespace: true, Reference: reference}
+	}
+
+	valueIdentifier := &ir.Identifier{ExprBase: ir.NewExprBase(node.Span(), semantic.SuccessType), Name: valueName, Lexical: true, Generated: true}
+	errorIdentifier := &ir.Identifier{ExprBase: ir.NewExprBase(node.Span(), semantic.ErrorType), Name: errorName, Lexical: true, Generated: true}
+	returnedError := &ir.EnumConstruct{
+		ExprBase:      ir.NewExprBase(node.Span(), semantic.ReturnType),
+		EnumName:      semantic.ReturnFailure.EnumName,
+		Member:        semantic.ReturnFailure.Name,
+		TypeArguments: append([]types.Type(nil), semantic.ReturnFailure.TypeArguments...),
+		Arguments:     []ir.Expression{errorIdentifier},
+		Reference:     referenceFromBinding(semantic.ReturnFailure.Reference),
+	}
+
+	return &ir.Case{
+		ExprBase: ir.NewExprBase(node.Span(), semantic.SuccessType),
+		Value:    l.expression(node.Value),
+		Branches: []ir.CaseBranch{
+			{
+				Value:       pattern(semantic.Success),
+				EnumName:    semantic.Success.EnumName,
+				Member:      semantic.Success.Name,
+				Bindings:    []ir.CaseBinding{{Name: valueName, Field: semantic.Success.Fields[0].Name, Type: semantic.SuccessType, Generated: true}},
+				PayloadEnum: true,
+				Result:      valueIdentifier,
+			},
+			{
+				Value:       pattern(semantic.Failure),
+				EnumName:    semantic.Failure.EnumName,
+				Member:      semantic.Failure.Name,
+				Bindings:    []ir.CaseBinding{{Name: errorName, Field: semantic.Failure.Fields[0].Name, Type: semantic.ErrorType, Generated: true}},
+				PayloadEnum: true,
+				Body:        []ir.Statement{&ir.Return{Value: returnedError}},
+				Diverges:    true,
+			},
+		},
+	}
 }
 
 func lowerType(ref ast.TypeRef) types.Type {

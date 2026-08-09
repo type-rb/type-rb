@@ -280,7 +280,7 @@ func (g *generator) statement(statement ir.Statement) {
 					continue
 				}
 				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
-				name := goBindingIdentifier(binding.Name)
+				name := goCaseBindingIdentifier(binding)
 				g.line(name + " := " + value + "." + field)
 				if namedUnusedBinding(binding.Name) {
 					g.line("_ = " + name)
@@ -338,7 +338,7 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 			if binding.Name == "_" {
 				continue
 			}
-			name := goBindingIdentifier(binding.Name)
+			name := goCaseBindingIdentifier(binding)
 			g.line(name + " := " + typed)
 			if namedUnusedBinding(binding.Name) {
 				g.line("_ = " + name)
@@ -1209,7 +1209,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 				if binding.Name == "_" {
 					continue
 				}
-				name := goBindingIdentifier(binding.Name)
+				name := goCaseBindingIdentifier(binding)
 				child.line(name + " := " + typed)
 				if namedUnusedBinding(binding.Name) {
 					child.line("_ = " + name)
@@ -1252,7 +1252,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 					continue
 				}
 				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
-				name := goBindingIdentifier(binding.Name)
+				name := goCaseBindingIdentifier(binding)
 				child.line(name + " := " + value + "." + field)
 				if namedUnusedBinding(binding.Name) {
 					child.line("_ = " + name)
@@ -1342,6 +1342,13 @@ func (g *generator) transform(transform *ir.Transform) string {
 
 func namedUnusedBinding(name string) bool {
 	return name != "_" && strings.HasPrefix(name, "_")
+}
+
+func goCaseBindingIdentifier(binding ir.CaseBinding) string {
+	if binding.Generated {
+		return binding.Name
+	}
+	return goBindingIdentifier(binding.Name)
 }
 
 func goBindingIdentifier(name string) string {

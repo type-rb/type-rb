@@ -281,9 +281,10 @@ type CaseBranch struct {
 }
 
 type CaseBinding struct {
-	Name  string
-	Field string
-	Type  types.Type
+	Name      string
+	Field     string
+	Type      types.Type
+	Generated bool
 }
 
 type Case struct {

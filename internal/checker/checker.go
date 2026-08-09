@@ -35,6 +35,7 @@ type Result struct {
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
 	TypeAliases         map[*ast.TypeAliasStatement]TypeAlias
+	Propagations        map[*ast.PropagateExpression]Propagation
 	ExternalMembers     map[ast.Expression]declaration.Member
 	RuntimeDependencies map[string]*stdlib.Package
 	ImportUses          map[*ast.ImportStatement]map[string]bool
@@ -48,6 +49,15 @@ type CodecApplication struct {
 type TypeAlias struct {
 	Target   types.Type
 	Variants []EnumVariant
+}
+
+type Propagation struct {
+	Success       EnumVariant
+	Failure       EnumVariant
+	ReturnFailure EnumVariant
+	SuccessType   types.Type
+	ErrorType     types.Type
+	ReturnType    types.Type
 }
 
 type CodecSchema struct {
@@ -202,6 +212,7 @@ type Checker struct {
 	moduleDepth        int
 	interfaceDepth     int
 	returns            []types.Type
+	returnSources      []types.Type
 	resolution         resolver.Result
 	external           map[ast.Expression]declaration.Member
 	declaredTypes      map[string]typeDeclaration
@@ -242,6 +253,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
 			TypeAliases:         map[*ast.TypeAliasStatement]TypeAlias{},
+			Propagations:        map[*ast.PropagateExpression]Propagation{},
 			ExternalMembers:     map[ast.Expression]declaration.Member{},
 			RuntimeDependencies: map[string]*stdlib.Package{},
 			ImportUses:          importUses,
@@ -380,6 +392,8 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression) {
 	case *ast.RangeExpression:
 		c.validateExpressionTypeReferences(node.Start)
 		c.validateExpressionTypeReferences(node.End)
+	case *ast.PropagateExpression:
+		c.validateExpressionTypeReferences(node.Value)
 	case *ast.CallExpression:
 		c.validateExpressionTypeReferences(node.Callee)
 		for _, argument := range node.Arguments {
@@ -2006,10 +2020,13 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		methodScope.values[parameter.Name] = symbol{typ: typ, mutable: true, span: parameter.Span()}
 	}
 	returnType := c.typeFromRef(method.ReturnType)
+	returnSource := fromTypeRef(method.ReturnType)
 	if method.ReturnType.Empty() {
 		returnType = types.Type{Kind: types.Void, Name: "Void"}
+		returnSource = returnType
 	}
 	c.returns = append(c.returns, returnType)
+	c.returnSources = append(c.returnSources, returnSource)
 	previousLoopDepth := c.loopDepth
 	c.loopDepth = 0
 	if method.Name == "initialize" && c.current != nil {
@@ -2024,6 +2041,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	}
 	c.loopDepth = previousLoopDepth
 	c.returns = c.returns[:len(c.returns)-1]
+	c.returnSources = c.returnSources[:len(c.returnSources)-1]
 	c.classMethod = previousClassMethod
 }
 
@@ -2594,6 +2612,47 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else {
 			typ = types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}
 		}
+	case *ast.PropagateExpression:
+		resultType := c.checkExpression(n.Value, sc)
+		expanded := c.expandAlias(resultType, map[string]bool{})
+		typ = invalidType()
+		if expanded.Name != "Result" || len(expanded.Args) != 2 || expanded.Nullable {
+			c.error(n.Value.Span(), fmt.Sprintf("postfix ? requires Result<T, E>, got %s", resultType))
+			break
+		}
+		if len(c.returns) == 0 {
+			c.error(n.Span(), "postfix ? is only valid inside a function or method")
+			break
+		}
+		returnType := c.returns[len(c.returns)-1]
+		expandedReturn := c.expandAlias(returnType, map[string]bool{})
+		if expandedReturn.Name != "Result" || len(expandedReturn.Args) != 2 || expandedReturn.Nullable {
+			c.error(n.Span(), fmt.Sprintf("postfix ? requires the enclosing function to return Result<T, E>, got %s", returnType))
+			break
+		}
+		if !c.typesAssignable(expandedReturn.Args[1], expanded.Args[1]) {
+			c.error(n.Span(), fmt.Sprintf("postfix ? cannot propagate %s through Result error type %s", expanded.Args[1], expandedReturn.Args[1]))
+			break
+		}
+		variants, resultEnum := c.enumVariants(resultType)
+		success, hasSuccess := enumVariantNamed(variants, "Ok")
+		failure, hasFailure := enumVariantNamed(variants, "Err")
+		returnSource := c.returnSources[len(c.returnSources)-1]
+		returnVariants, returnEnum := c.enumVariants(returnSource)
+		returnFailure, hasReturnFailure := enumVariantNamed(returnVariants, "Err")
+		if !resultEnum || !returnEnum || !hasSuccess || !hasFailure || !hasReturnFailure || len(success.Fields) != 1 || len(failure.Fields) != 1 || len(returnFailure.Fields) != 1 {
+			c.error(n.Span(), "postfix ? requires the standard Result Ok(value) and Err(error) variants")
+			break
+		}
+		c.result.Propagations[n] = Propagation{
+			Success:       success,
+			Failure:       failure,
+			ReturnFailure: returnFailure,
+			SuccessType:   expanded.Args[0],
+			ErrorType:     expanded.Args[1],
+			ReturnType:    expandedReturn,
+		}
+		typ = expanded.Args[0]
 	case *ast.IterationExpression:
 		sourceType := c.checkExpression(n.Source, sc)
 		if sourceType.Kind == types.Never {

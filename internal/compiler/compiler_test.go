@@ -2383,6 +2383,128 @@ end
 	}
 }
 
+func TestPostfixResultPropagationAcrossModes(t *testing.T) {
+	source := []byte(`enum Result<T, E>
+	Ok(value: T)
+	Err(error: E)
+end
+
+record DbError
+	message: String
+end
+
+type DbResult<T> = Result<T, DbError>
+
+def source(success: Boolean): DbResult<Integer>
+	if success
+		return DbResult<Integer>::Ok(7)
+	end
+	return DbResult<Integer>::Err(DbError.new(message: "failed"))
+end
+
+def increment(success: Boolean): DbResult<Integer>
+	value := source(success)?
+	return DbResult<Integer>::Ok(value + 1)
+end
+
+def relay(result: DbResult<Integer>): DbResult<Integer>
+	value := (result)?
+	return DbResult<Integer>::Ok(value)
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("propagate.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected postfix Result propagation: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	for _, want := range []string{
+		"value := __trbValue",
+		"__trbPropagateValue1 := __trbCase",
+		"return NewDbResultErr[int](__trbPropagateError1)",
+		"return NewDbResultOk[int](value + 1)",
+	} {
+		if !strings.Contains(goOutput, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "propagate.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated propagation Go: %v\n%s", err, goOutput)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated propagation Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	rubyOutput := string(artifacts["ruby"].Output)
+	for _, want := range []string{"value = begin", "return DbResult::Err.new(__trbPropagateError1)", "DbResult::Ok.new(value + 1)"} {
+		if !strings.Contains(rubyOutput, want) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
+		}
+	}
+
+	typescriptOutput := string(artifacts["typescript"].Output)
+	for _, want := range []string{"const value: number = __trbValue", "return DbResult.Err<number>(__trbPropagateError1);", "return DbResult.Ok<number>(value + 1);"} {
+		if !strings.Contains(typescriptOutput, want) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
+		}
+	}
+}
+
+func TestPostfixResultPropagationDiagnosticsAreModeIndependent(t *testing.T) {
+	result := "enum Result<T, E>\n\tOk(value: T)\n\tErr(error: E)\nend\n\n"
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "non Result operand",
+			source: result + "def bad(): Result<Integer, String>\n\tvalue := 1?\n\treturn Result<Integer, String>::Ok(value)\nend\n",
+			want:   "postfix ? requires Result<T, E>, got Integer",
+		},
+		{
+			name:   "non Result return",
+			source: result + "def bad(): Integer\n\treturn Result<Integer, String>::Ok(1)?\nend\n",
+			want:   "postfix ? requires the enclosing function to return Result<T, E>",
+		},
+		{
+			name: "incompatible error",
+			source: result + `record SourceError
+	message: String
+end
+record TargetError
+	message: String
+end
+def source(): Result<Integer, SourceError>
+	return Result<Integer, SourceError>::Err(SourceError.new(message: "source"))
+end
+def bad(): Result<Integer, TargetError>
+	value := source()?
+	return Result<Integer, TargetError>::Ok(value)
+end
+`,
+			want: "postfix ? cannot propagate SourceError through Result error type TargetError",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_propagation.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestInitialUserGenericDiagnosticsAreModeIndependent(t *testing.T) {
 	tests := []struct {
 		name   string

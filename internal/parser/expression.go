@@ -53,6 +53,11 @@ func (p *exprParser) parse(min int) ast.Expression {
 	}
 	for p.pos < len(p.tokens) {
 		tok := p.tokens[p.pos]
+		if tok.Lexeme == "?" {
+			left = &ast.PropagateExpression{Base: ast.Base{SourceSpan: token.Span{Start: left.Span().Start, End: tok.Span.End}}, Value: left}
+			p.pos++
+			continue
+		}
 		if tok.Lexeme == "<" {
 			if applied := p.parseGenericApplication(left); applied != nil {
 				left = applied

@@ -316,7 +316,10 @@ func needsSpace(beforePrevious *token.Token, previous, current token.Token, next
 		return !isSymbolColon(beforePrevious, previous, current.Lexeme)
 	}
 	if current.Lexeme == "(" {
-		return previous.Lexeme == "if" || previous.Lexeme == "while" || previous.Lexeme == "unless" || previous.Lexeme == "until"
+		if (previous.Lexeme == ">" || previous.Lexeme == ">>") && beforePrevious != nil && startsUpper(beforePrevious.Lexeme) {
+			return false
+		}
+		return previous.Lexeme == "if" || previous.Lexeme == "while" || previous.Lexeme == "unless" || previous.Lexeme == "until" || previous.Lexeme == "return" || previous.Lexeme == "," || isOperator(previous.Lexeme)
 	}
 	if current.Lexeme == "{" {
 		return previous.Lexeme != "(" && previous.Lexeme != "["
