@@ -33,6 +33,7 @@ type generator struct {
 	modulePath    string
 	goModule      string
 	temporary     int
+	breakTarget   string
 	orm           *ormintegration.Manifest
 }
 
@@ -223,7 +224,11 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line("return " + g.expr(n.Value))
 		}
 	case *ir.Break:
-		g.line("break")
+		if g.breakTarget != "" {
+			g.line("break " + g.breakTarget)
+		} else {
+			g.line("break")
+		}
 	case *ir.Next:
 		g.line("continue")
 	case *ir.ExpressionStatement:
@@ -301,7 +306,10 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.While:
 		g.line("for " + g.expr(n.Condition) + " {")
 		g.indent++
+		previousBreakTarget := g.breakTarget
+		g.breakTarget = ""
 		g.statements(n.Body)
+		g.breakTarget = previousBreakTarget
 		g.indent--
 		g.line("}")
 	case *ir.Iterate:
@@ -351,6 +359,13 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 }
 
 func (g *generator) iterate(iteration *ir.Iterate) {
+	previousBreakTarget := g.breakTarget
+	g.breakTarget = ""
+	defer func() { g.breakTarget = previousBreakTarget }()
+	if iteration.Operation == "find_each" || iteration.Operation == "find_in_batches" {
+		g.ormBatchIterate(iteration)
+		return
+	}
 	binding := func(index int) ir.IterationBinding {
 		if index < len(iteration.Bindings) {
 			return iteration.Bindings[index]

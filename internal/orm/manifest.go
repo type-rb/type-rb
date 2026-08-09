@@ -17,6 +17,36 @@ type Model struct {
 	Columns    []Column
 }
 
+func (m Model) PrimaryKey() (Column, bool) {
+	var result Column
+	found := false
+	for _, column := range m.Columns {
+		if !column.PrimaryKey {
+			continue
+		}
+		if found {
+			return Column{}, false
+		}
+		result = column
+		found = true
+	}
+	return result, found
+}
+
+func (m Model) BatchKey() (Column, bool) {
+	primaryKey, ok := m.PrimaryKey()
+	if !ok {
+		return Column{}, false
+	}
+	switch primaryKey.Type.Kind {
+	case types.Int, types.Float, types.String:
+		primaryKey.Type.Nullable = false
+		return primaryKey, true
+	default:
+		return Column{}, false
+	}
+}
+
 type Manifest struct {
 	Adapter  string
 	Database string
@@ -71,6 +101,25 @@ func (m *Manifest) Augment(program *ir.Program) {
 				}
 				class.Body = append(class.Body, method)
 			}
+			if primaryKey, ok := model.PrimaryKey(); ok {
+				keyType := primaryKey.Type
+				keyType.Nullable = false
+				findType := namedType(model.Name)
+				findType.Nullable = true
+				if !existing["find"] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: "find", External: true, Class: true,
+						Parameters: []ir.Parameter{{Name: primaryKey.Name, Type: keyType}}, ReturnType: findType,
+					})
+				}
+			}
+			if _, ok := model.BatchKey(); ok {
+				for _, name := range []string{"find_each", "find_in_batches"} {
+					if !existing[name] {
+						class.Body = append(class.Body, batchIRMethod(name, true))
+					}
+				}
+			}
 		}
 		program.Statements = append(program.Statements, &ir.Class{Name: model.QueryType, External: true, Body: queryIRMethods(model)})
 	}
@@ -85,7 +134,7 @@ func queryIRMethods(model Model) []ir.Statement {
 	}
 	firstType := namedType(model.Name)
 	firstType.Nullable = true
-	return []ir.Statement{
+	methods := []ir.Statement{
 		where,
 		order,
 		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
@@ -93,6 +142,18 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "all", External: true, ReturnType: arrayOf(model.Name)},
 		&ir.Method{Name: "first", External: true, ReturnType: firstType},
 		&ir.Method{Name: "count", External: true, ReturnType: types.FromName("Integer")},
+	}
+	if _, ok := model.BatchKey(); ok {
+		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))
+	}
+	return methods
+}
+
+func batchIRMethod(name string, class bool) *ir.Method {
+	return &ir.Method{
+		Name: name, External: true, Class: class,
+		Parameters: []ir.Parameter{{Name: "batch_size", Type: types.FromName("Integer"), Keyword: true}},
+		ReturnType: types.FromName("Void"),
 	}
 }
 

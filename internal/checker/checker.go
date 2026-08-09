@@ -2828,6 +2828,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if member, ok := c.external[n.Callee]; ok {
 			typ = c.checkDeclarationArguments(n.Span(), member, n.Arguments, argumentTypes)
+			c.checkDeclarationBlock(n, member, sc)
 		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Name == "new" {
 			if identifier, ok := member.Receiver.(*ast.Identifier); ok {
@@ -2876,6 +2877,15 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(identifier.Span(), fmt.Sprintf("function %s is not declared or imported", identifier.Name))
 			} else if !c.resolution.NativeSyntax {
 				c.error(identifier.Span(), fmt.Sprintf("Ruby function %s requires an explicit platform import", identifier.Name))
+			}
+		}
+		if n.Block != nil {
+			if _, declared := c.external[n.Callee]; !declared {
+				if c.mode == "ruby" && c.resolution.NativeSyntax {
+					c.checkNativeCallBlock(n.Block, sc)
+				} else {
+					c.error(n.Block.Span(), "call blocks require a block-accepting package declaration")
+				}
 			}
 		}
 	case *ast.IndexExpression:
@@ -3460,6 +3470,59 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 		}
 	}
 	return instantiateDeclarationType(member.Return, bindings)
+}
+
+func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declaration.Member, sc *scope) {
+	if member.Block == nil {
+		if call.Block != nil {
+			c.error(call.Block.Span(), fmt.Sprintf("%s() does not accept a block", member.Name))
+		}
+		return
+	}
+	if call.Block == nil {
+		c.error(call.Span(), fmt.Sprintf("%s() requires a block", member.Name))
+		return
+	}
+	if len(call.Block.Parameters) != len(member.Block.Parameters) {
+		c.error(call.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", member.Name, len(member.Block.Parameters), len(call.Block.Parameters)))
+	}
+	blockScope := &scope{parent: sc, values: map[string]symbol{}}
+	for index, name := range call.Block.Parameters {
+		parameterType := types.Type{Kind: types.Any, Name: "Any"}
+		if index < len(member.Block.Parameters) {
+			parameterType = member.Block.Parameters[index]
+		}
+		if _, duplicate := blockScope.values[name]; duplicate {
+			c.error(call.Block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
+			continue
+		}
+		declared := symbol{typ: parameterType, mutable: true, span: call.Block.Span()}
+		if tracksUnusedBinding(name) {
+			used := false
+			declared.used = &used
+			declared.useKind = "block parameter"
+		}
+		blockScope.values[name] = declared
+	}
+	c.loopDepth++
+	c.checkStatements(call.Block.Body, blockScope)
+	c.loopDepth--
+	c.result.Expressions[call.Block] = types.Type{Kind: types.Void, Name: "Void"}
+}
+
+func (c *Checker) checkNativeCallBlock(block *ast.BlockExpression, sc *scope) {
+	blockScope := &scope{parent: sc, values: map[string]symbol{}}
+	for _, name := range block.Parameters {
+		if _, duplicate := blockScope.values[name]; duplicate {
+			c.error(block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
+			continue
+		}
+		blockScope.values[name] = symbol{typ: types.Type{Kind: types.Any, Name: "Any"}, mutable: true, span: block.Span()}
+	}
+	c.loopDepth++
+	c.checkStatements(block.Body, blockScope)
+	c.loopDepth--
+	c.result.Expressions[block] = types.Type{Kind: types.Void, Name: "Void"}
 }
 
 func (c *Checker) checkDeclarationAlternativeArguments(span token.Span, member declaration.Member, arguments []ast.CallArgument, actual []types.Type) types.Type {

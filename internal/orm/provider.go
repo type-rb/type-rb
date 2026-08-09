@@ -27,6 +27,13 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
+		if primaryKey, ok := model.PrimaryKey(); ok {
+			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
+		}
+		if _, ok := model.BatchKey(); ok {
+			declared.ClassMembers["find_each"] = batchDeclaration(model, "find_each", true, false)
+			declared.ClassMembers["find_in_batches"] = batchDeclaration(model, "find_in_batches", true, true)
+		}
 		catalog.Types[model.Name] = declared
 		query := declaration.NewType(model.QueryType, "")
 		query.InstanceMembers["where"] = whereDeclaration(model, "trb.orm.query.where", false)
@@ -45,9 +52,38 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		query.InstanceMembers["count"] = declaration.Member{
 			Name: "count", Kind: declaration.Method, Intrinsic: "trb.orm.query.count", Return: types.FromName("Integer"), Provider: PackageName,
 		}
+		if _, ok := model.BatchKey(); ok {
+			query.InstanceMembers["find_each"] = batchDeclaration(model, "find_each", false, false)
+			query.InstanceMembers["find_in_batches"] = batchDeclaration(model, "find_in_batches", false, true)
+		}
 		catalog.Types[model.QueryType] = query
 	}
 	return catalog, nil
+}
+
+func findDeclaration(model Model, primaryKey Column) declaration.Member {
+	result := types.FromName(model.Name)
+	result.Nullable = true
+	keyType := primaryKey.Type
+	keyType.Nullable = false
+	return declaration.Member{
+		Name: "find", Kind: declaration.Method, Intrinsic: "trb.orm.find",
+		Parameters: []declaration.Parameter{{Name: primaryKey.Name, Type: keyType}},
+		Return:     result, Class: true, Provider: PackageName,
+	}
+}
+
+func batchDeclaration(model Model, name string, class, batches bool) declaration.Member {
+	parameterType := types.FromName(model.Name)
+	if batches {
+		parameterType = arrayOf(model.Name)
+	}
+	return declaration.Member{
+		Name: name, Kind: declaration.Method, Intrinsic: "trb.orm.query." + name,
+		Parameters: []declaration.Parameter{{Name: "batch_size", Type: types.FromName("Integer"), Keyword: true, Optional: true}},
+		Return:     types.FromName("Void"), Class: class, Provider: PackageName,
+		Block: &declaration.Block{Parameters: []types.Type{parameterType}},
+	}
 }
 
 func whereDeclaration(model Model, intrinsic string, class bool) declaration.Member {

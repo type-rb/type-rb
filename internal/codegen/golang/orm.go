@@ -7,6 +7,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 func (g *generator) ormWhere(call *ir.Call) string {
@@ -23,6 +24,28 @@ func (g *generator) ormWhere(call *ir.Call) string {
 		return "nil"
 	}
 	return g.ormModelQualifier(model) + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
+}
+
+func (g *generator) ormFind(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok || len(call.Arguments) != 1 {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	primaryKey, exists := model.PrimaryKey()
+	if !exists {
+		return "nil"
+	}
+	qualifier := g.ormModelQualifier(model)
+	query := qualifier + goORMWhere(model) + "([]string{" + strconv.Quote(primaryKey.Name) + "}, []string{\"=\"}, []any{" + g.expr(call.Arguments[0].Value) + "})"
+	return qualifier + goORMFirst(model) + "(" + query + ")"
 }
 
 func (g *generator) ormPredicateArguments(call *ir.Call) string {
@@ -92,6 +115,126 @@ func (g *generator) ormQueryTerminal(call *ir.Call, arguments []string, operatio
 		return "nil"
 	}
 	return g.ormModelQualifier(model) + operation(model) + "(" + query + ")"
+}
+
+func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
+	model, ok := g.orm.QueryModel(iteration.Source.ExprType().Name)
+	querySource := ""
+	if ok {
+		querySource = g.expr(iteration.Source)
+	} else {
+		model, ok = g.orm.Model(iteration.Source.ExprType().Name)
+		if !ok {
+			return
+		}
+		qualifier := g.ormModelQualifier(model)
+		querySource = qualifier + goORMWhere(model) + "([]string{}, []string{}, []any{})"
+	}
+	batchKey, ok := model.BatchKey()
+	if !ok {
+		return
+	}
+	qualifier := g.ormModelQualifier(model)
+	batchSize := "1000"
+	if iteration.SliceSize != nil {
+		batchSize = g.expr(iteration.SliceSize)
+	}
+	g.temporary++
+	suffix := strconv.Itoa(g.temporary)
+	query := "__trbBatchQuery" + suffix
+	size := "__trbBatchSize" + suffix
+	after := "__trbBatchAfter" + suffix
+	done := "__trbBatchDone" + suffix
+	batch := "__trbBatch" + suffix
+	last := "__trbBatchLast" + suffix
+	label := "__trbBatchLoop" + suffix
+	breakTarget := ""
+	if ormBatchBodyBreaks(iteration.Body) {
+		breakTarget = label
+	}
+	keyType := batchKey.Type
+	keyType.Nullable = false
+	binding := ir.IterationBinding{Name: "_", Type: types.Type{Kind: types.Any, Name: "Any"}}
+	if len(iteration.Bindings) > 0 {
+		binding = iteration.Bindings[0]
+	}
+
+	g.line("{")
+	g.indent++
+	g.line(query + " := " + querySource)
+	g.line(size + " := " + batchSize)
+	g.line("if " + size + " <= 0 { panic(\"ORM batch size must be greater than zero\") }")
+	g.line("var " + after + " *" + g.goType(keyType))
+	g.line(done + " := false")
+	if breakTarget != "" {
+		g.line(label + ":")
+	}
+	g.line("for {")
+	g.indent++
+	g.line("if " + done + " { break }")
+	g.line(batch + " := " + qualifier + goORMBatchLoader(model) + "(" + query + ", " + after + ", " + size + ")")
+	g.line("if len(" + batch + ") == 0 { break }")
+	g.line(done + " = len(" + batch + ") < " + size)
+	g.line(last + " := " + batch + "[len(" + batch + ")-1]." + goORMColumnGetter(batchKey.Name) + "()")
+	g.line(after + " = &" + last)
+	if iteration.Operation == "find_each" {
+		if binding.Name == "_" {
+			g.line("for range " + batch + " {")
+		} else {
+			g.line("for _, " + goBindingIdentifier(binding.Name) + " := range " + batch + " {")
+		}
+		g.indent++
+		if binding.Name != "_" {
+			g.line("_ = " + goBindingIdentifier(binding.Name))
+		}
+		previousBreakTarget := g.breakTarget
+		g.breakTarget = breakTarget
+		g.statements(iteration.Body)
+		g.breakTarget = previousBreakTarget
+		g.indent--
+		g.line("}")
+	} else {
+		if binding.Name != "_" {
+			g.line(goBindingIdentifier(binding.Name) + " := " + batch)
+			g.line("_ = " + goBindingIdentifier(binding.Name))
+		}
+		previousBreakTarget := g.breakTarget
+		g.breakTarget = breakTarget
+		g.statements(iteration.Body)
+		g.breakTarget = previousBreakTarget
+	}
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+}
+
+func ormBatchBodyBreaks(statements []ir.Statement) bool {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Break:
+			return true
+		case *ir.If:
+			if ormBatchBodyBreaks(node.Then) || ormBatchBodyBreaks(node.Else) {
+				return true
+			}
+			for _, branch := range node.ElseIf {
+				if ormBatchBodyBreaks(branch.Body) {
+					return true
+				}
+			}
+		case *ir.Case:
+			if ormBatchBodyBreaks(node.Leading) || ormBatchBodyBreaks(node.Else) {
+				return true
+			}
+			for _, branch := range node.Branches {
+				if ormBatchBodyBreaks(branch.Body) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
@@ -284,6 +427,26 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.line("}")
 	g.b.WriteByte('\n')
 
+	if batchKey, ok := model.BatchKey(); ok {
+		keyType := batchKey.Type
+		keyType.Nullable = false
+		g.line("func " + goORMBatchLoader(model) + "(query " + queryType + ", after *" + g.goType(keyType) + ", size int) []*" + goIdentifier(model.Name, true) + " {")
+		g.indent++
+		g.line("if size <= 0 { panic(\"ORM batch size must be greater than zero\") }")
+		g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil { panic(\"ORM batch queries do not accept order, limit, or offset\") }")
+		g.line("if after != nil {")
+		g.indent++
+		g.line("query = " + goORMQueryWhere(model) + "(query, []string{" + strconv.Quote(batchKey.Name) + "}, []string{\">\"}, []any{*after})")
+		g.indent--
+		g.line("}")
+		g.line("query.orders = []" + orderType + "{{column: " + strconv.Quote(batchKey.Name) + ", direction: \"asc\"}}")
+		g.line("query.limit = &size")
+		g.line("return " + goORMLoader(model) + "(query)")
+		g.indent--
+		g.line("}")
+		g.b.WriteByte('\n')
+	}
+
 	g.line("func " + goORMCount(model) + "(query " + queryType + ") int {")
 	g.indent++
 	g.line("database, err := sql.Open(" + strconv.Quote(manifest.Adapter) + ", " + strconv.Quote(manifest.Database) + ")")
@@ -341,6 +504,10 @@ func goORMFirst(model ormintegration.Model) string {
 
 func goORMCount(model ormintegration.Model) string {
 	return "TrbOrmCount" + goIdentifier(model.Name, true)
+}
+
+func goORMBatchLoader(model ormintegration.Model) string {
+	return "TrbOrmBatch" + goIdentifier(model.Name, true)
 }
 
 func goORMStatement(model ormintegration.Model) string {

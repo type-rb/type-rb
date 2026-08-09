@@ -50,9 +50,20 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if len(where.Alternatives) < 5 || where.Alternatives[0].Parameters[0].LiteralValues[0] != "id" {
 		t.Fatalf("comparison where signatures are missing: %#v", where.Alternatives)
 	}
+	if product.ClassMembers["find"].Return.String() != "Product?" {
+		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
+	}
+	findEach := product.ClassMembers["find_each"]
+	if findEach.Block == nil || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
+		t.Fatalf("unexpected find_each declaration: %#v", findEach)
+	}
 	query, exists := catalog.Type("ProductQuery")
 	if !exists || query.InstanceMembers["all"].Return.String() != "Array<Product>" {
 		t.Fatalf("unexpected query declaration: %#v", query)
+	}
+	findInBatches := query.InstanceMembers["find_in_batches"]
+	if findInBatches.Block == nil || findInBatches.Block.Parameters[0].String() != "Array<Product>" {
+		t.Fatalf("unexpected find_in_batches declaration: %#v", findInBatches)
 	}
 }
 
@@ -66,8 +77,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 6 {
-		t.Fatalf("expected five fields and where(), got %#v", product.Body)
+	if len(product.Body) != 9 {
+		t.Fatalf("expected five fields and four ORM class methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -76,6 +87,18 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	where, ok := product.Body[5].(*ir.Method)
 	if !ok || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", product.Body[5])
+	}
+	methods := map[string]bool{}
+	for _, statement := range product.Body[5:] {
+		method, ok := statement.(*ir.Method)
+		if ok && method.External && method.Class {
+			methods[method.Name] = true
+		}
+	}
+	for _, name := range []string{"where", "find", "find_each", "find_in_batches"} {
+		if !methods[name] {
+			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
+		}
 	}
 	query, ok := lowered.Statements[1].(*ir.Class)
 	if !ok || !query.External || query.Name != "ProductQuery" {

@@ -172,6 +172,10 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Next:
 		g.line("next", n.TrailingComment)
 	case *ir.ExpressionStatement:
+		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil {
+			g.callBlock(call, n.TrailingComment)
+			break
+		}
 		g.line(g.expr(n.Expression), n.TrailingComment)
 	case *ir.If:
 		g.line("if "+g.expr(n.Condition), n.TrailingComment)
@@ -273,6 +277,20 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line(closer, "")
 	}
+}
+
+func (g *generator) callBlock(call *ir.Call, trailingComment string) {
+	withoutBlock := *call
+	withoutBlock.Block = nil
+	header := g.expr(&withoutBlock) + " do"
+	if len(call.Block.Parameters) > 0 {
+		header += " |" + strings.Join(call.Block.Parameters, ", ") + "|"
+	}
+	g.line(header, trailingComment)
+	g.indent++
+	g.statements(call.Block.Body)
+	g.indent--
+	g.line("end", "")
 }
 
 func (g *generator) typeUnionCase(node *ir.Case) {

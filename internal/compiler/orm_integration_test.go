@@ -84,12 +84,14 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	if product == nil {
 		t.Fatal("Product is missing from completion context")
 	}
-	foundWhere := false
+	classMethods := map[string]bool{}
 	for _, member := range product.Members {
-		foundWhere = foundWhere || member.Name == "where"
+		classMethods[member.Name] = true
 	}
-	if !foundWhere {
-		t.Fatalf("Product.where is missing from completion context: %#v", product.Members)
+	for _, name := range []string{"where", "find", "find_each", "find_in_batches"} {
+		if !classMethods[name] {
+			t.Fatalf("Product.%s is missing from completion context: %#v", name, product.Members)
+		}
 	}
 	fields := map[string]bool{}
 	for _, member := range context.TypeMembers["Product"] {
@@ -106,7 +108,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 			queryMethods[member.Name] = true
 		}
 	}
-	for _, name := range []string{"where", "order", "limit", "offset", "all", "first", "count"} {
+	for _, name := range []string{"where", "order", "limit", "offset", "all", "first", "count", "find_each", "find_in_batches"} {
 		if !queryMethods[name] {
 			t.Fatalf("ProductQuery.%s is missing from completion context: %#v", name, context.TypeMembers["ProductQuery"])
 		}
@@ -230,6 +232,67 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	for _, test := range invalid {
 		if _, err := compile(test.body); err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Fatalf("expected query composition diagnostic %q, got %v", test.want, err)
+		}
+	}
+}
+
+func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	compile := func(body string) ([]*Artifact, error) {
+		source := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n"
+		return CompileProject([]SourceUnit{{
+			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main", Source: []byte(source),
+		}}, Options{
+			Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+		})
+	}
+	valid := `	found := Product.find(2)
+	puts(found)
+	Product.find_each(batch_size: 2) do |product|
+		puts(product.name)
+		break
+	end
+	Product.where("id", ">", 0).find_in_batches(batch_size: 2) do |products|
+		puts(products.size())
+	end
+	Product.where(name: "Widget").find_each(batch_size: 2) { |product| puts(product.name) }`
+	artifacts, err := compile(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		"TrbOrmFirstProduct(TrbOrmProductWhere", "func TrbOrmBatchProduct", "__trbBatchLoop", "break __trbBatchLoop", "TrbOrmBatchProduct",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated batch query is missing %q:\n%s", expected, output)
+		}
+	}
+	invalid := []struct {
+		body string
+		want string
+	}{
+		{body: "\tProduct.find(\"two\")", want: "has type String, expected Integer"},
+		{body: "\tProduct.find_each(batch_size: 2)", want: "find_each() requires a block"},
+		{body: "\tProduct.find_each(batch_size: 1.5) do |product|\n\t\tputs(product.name)\n\tend", want: "has type Float, expected Integer"},
+		{body: "\tProduct.find_each() do |product|\n\t\tputs(1)\n\tend", want: "block parameter product is not used"},
+		{body: "\tProduct.find_in_batches() do |left, right|\n\t\tputs(left)\n\t\tputs(right)\n\tend", want: "find_in_batches block expects 1 parameter(s), got 2"},
+	}
+	for _, test := range invalid {
+		if _, err := compile(test.body); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("expected batch diagnostic %q, got %v", test.want, err)
 		}
 	}
 }

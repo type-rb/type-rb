@@ -28,6 +28,10 @@ type Signature struct {
 	Variadic   bool
 }
 
+type Block struct {
+	Parameters []types.Type
+}
+
 type Member struct {
 	Name           string
 	Kind           MemberKind
@@ -39,6 +43,7 @@ type Member struct {
 	TypeParameters []string
 	Provider       string
 	Alternatives   []Signature
+	Block          *Block
 }
 
 type Type struct {

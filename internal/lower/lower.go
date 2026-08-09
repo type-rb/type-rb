@@ -211,6 +211,29 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 	case *ast.NextStatement:
 		return &ir.Next{Base: base(n.Base)}
 	case *ast.ExpressionStatement:
+		if call, ok := n.Expression.(*ast.CallExpression); ok && call.Block != nil {
+			member, external := l.checked.ExternalMembers[call.Callee]
+			callee, method := call.Callee.(*ast.MemberExpression)
+			batch := member.Intrinsic == "trb.orm.query.find_each" || member.Intrinsic == "trb.orm.query.find_in_batches"
+			if external && method && batch {
+				result := &ir.Iterate{Base: base(n.Base), Source: l.expression(callee.Receiver), Operation: callee.Name}
+				for _, argument := range call.Arguments {
+					if argument.Name == "batch_size" || argument.Name == "" {
+						result.SliceSize = l.expression(argument.Value)
+						break
+					}
+				}
+				for index, name := range call.Block.Parameters {
+					typ := types.Type{Kind: types.Any, Name: "Any"}
+					if member.Block != nil && index < len(member.Block.Parameters) {
+						typ = member.Block.Parameters[index]
+					}
+					result.Bindings = append(result.Bindings, ir.IterationBinding{Name: name, Type: typ})
+				}
+				result.Body = l.statements(call.Block.Body)
+				return result
+			}
+		}
 		if iteration, ok := n.Expression.(*ast.IterationExpression); ok {
 			if iteration.Operation == "map" || iteration.Operation == "select" || iteration.Operation == "reduce" {
 				return &ir.ExpressionStatement{Base: base(n.Base), Expression: l.expression(iteration)}
