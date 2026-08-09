@@ -73,6 +73,39 @@ func (g *generator) ormCreate(call *ir.Call) string {
 	return g.ormModelQualifier(model) + goORMCreate(model) + "([]string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
 }
 
+func (g *generator) ormUpdate(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	model, exists := g.orm.Model(member.Receiver.ExprType().Name)
+	if !exists {
+		return "nil"
+	}
+	columns := make([]string, 0, len(call.Arguments))
+	values := make([]string, 0, len(call.Arguments))
+	for _, argument := range call.Arguments {
+		if argument.Name == "" {
+			continue
+		}
+		columns = append(columns, strconv.Quote(argument.Name))
+		values = append(values, g.expr(argument.Value))
+	}
+	return g.ormModelQualifier(model) + goORMUpdate(model) + "(" + g.expr(member.Receiver) + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
+func (g *generator) ormDelete(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	model, exists := g.orm.Model(member.Receiver.ExprType().Name)
+	if !exists {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMDelete(model) + "(" + g.expr(member.Receiver) + ")"
+}
+
 func (g *generator) ormPredicateArguments(call *ir.Call) string {
 	predicates := ormintegration.Predicates(call)
 	columns := make([]string, len(predicates))
@@ -416,7 +449,7 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	g.requireImport("net", "")
 	g.requireImport("reflect", "")
 	g.requireImport("strings", "")
-	if ormModelsPreload(models) {
+	if adapter.InsertReturning || ormModelsPreload(models) {
 		g.requireImport("database/sql", "sql")
 	}
 	if adapter.NumberedBinds {
@@ -983,6 +1016,14 @@ func goORMFirst(model ormintegration.Model) string {
 
 func goORMCreate(model ormintegration.Model) string {
 	return "TrbOrmCreate" + goIdentifier(model.Name, true)
+}
+
+func goORMUpdate(model ormintegration.Model) string {
+	return "TrbOrmUpdate" + goIdentifier(model.Name, true)
+}
+
+func goORMDelete(model ormintegration.Model) string {
+	return "TrbOrmDelete" + goIdentifier(model.Name, true)
 }
 
 func goORMCount(model ormintegration.Model) string {

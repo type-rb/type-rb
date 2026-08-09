@@ -143,6 +143,16 @@ func (m *Manifest) Augment(program *ir.Program) {
 					class.Body = append(class.Body, &ir.Field{Name: "@" + column.Name, Type: column.Type})
 				}
 			}
+			if _, ok := model.PrimaryKey(); ok {
+				if !existing["update"] {
+					class.Body = append(class.Body, updateIRMethod(model))
+				}
+				if !existing["delete"] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: "delete", External: true, ReturnType: dbResult(types.FromName("Boolean")),
+					})
+				}
+			}
 			for _, association := range model.Associations {
 				if association.Preloadable && !existing[association.Name] {
 					class.Body = append(class.Body,
@@ -192,6 +202,16 @@ func createIRMethod(model Model) *ir.Method {
 	method := &ir.Method{Name: "create", External: true, Class: true, ReturnType: dbResult(namedType(model.Name))}
 	for _, column := range model.Columns {
 		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+	}
+	return method
+}
+
+func updateIRMethod(model Model) *ir.Method {
+	method := &ir.Method{Name: "update", External: true, ReturnType: dbResult(namedType(model.Name))}
+	for _, column := range model.Columns {
+		if !column.PrimaryKey {
+			method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+		}
 	}
 	return method
 }

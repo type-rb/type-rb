@@ -27,6 +27,13 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 				Name: column.Name, Kind: declaration.Property, Intrinsic: "trb.orm.column", Return: column.Type, Provider: PackageName,
 			}
 		}
+		if _, ok := model.PrimaryKey(); ok {
+			declared.InstanceMembers["update"] = updateDeclaration(model)
+			declared.InstanceMembers["delete"] = declaration.Member{
+				Name: "delete", Kind: declaration.Method, Intrinsic: "trb.orm.delete",
+				Return: dbResult(types.FromName("Boolean")), Provider: PackageName,
+			}
+		}
 		for _, association := range model.Associations {
 			if association.Preloadable {
 				declared.InstanceMembers[association.Name] = declaration.Member{
@@ -80,6 +87,22 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.QueryType] = query
 	}
 	return catalog, nil
+}
+
+func updateDeclaration(model Model) declaration.Member {
+	parameters := make([]declaration.Parameter, 0, len(model.Columns)-1)
+	for _, column := range model.Columns {
+		if column.PrimaryKey {
+			continue
+		}
+		parameters = append(parameters, declaration.Parameter{
+			Name: column.Name, Type: column.Type, Keyword: true, Optional: true,
+		})
+	}
+	return declaration.Member{
+		Name: "update", Kind: declaration.Method, Intrinsic: "trb.orm.update", Parameters: parameters,
+		Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
+	}
 }
 
 func createDeclaration(model Model, adapter string) declaration.Member {

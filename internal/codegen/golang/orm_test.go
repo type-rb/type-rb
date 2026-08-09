@@ -64,6 +64,8 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				`"example.com/orm/trb/orm"`, `orm.DbResult[[]*Product]`, `orm.NewDbResultErr[[]*Product]`,
 				`trbOrmError(err, orm.DbErrorKindQuery, "database query failed")`, `database, err := orm.TrbOrmDatabase()`,
 				`func TrbOrmCreateProduct(columns []string, values []any) orm.DbResult[*Product]`,
+				`func TrbOrmUpdateProduct(value *Product, columns []string, values []any) orm.DbResult[*Product]`,
+				`func TrbOrmDeleteProduct(value *Product) orm.DbResult[bool]`,
 			} {
 				if !strings.Contains(output, want) {
 					t.Fatalf("generated %s ORM Result runtime is missing %q:\n%s", test.adapter, want, output)

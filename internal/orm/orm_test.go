@@ -62,6 +62,13 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if create.Return.String() != "DbResult<Product>" || !create.Parameters[0].Optional || create.Parameters[1].Optional || !create.Parameters[2].Optional || !create.Parameters[3].Optional {
 		t.Fatalf("unexpected create declaration: %#v", create)
 	}
+	update := product.InstanceMembers["update"]
+	if update.Return.String() != "DbResult<Product>" || len(update.Parameters) != 4 || !update.Parameters[0].Optional {
+		t.Fatalf("unexpected update declaration: %#v", update)
+	}
+	if product.InstanceMembers["delete"].Return.String() != "DbResult<Boolean>" {
+		t.Fatalf("unexpected delete declaration: %#v", product.InstanceMembers["delete"])
+	}
 	findEach := product.ClassMembers["find_each"]
 	if findEach.Return.String() != "DbResult<Integer>" || findEach.Block == nil || !findEach.Block.Structured || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
 		t.Fatalf("unexpected find_each declaration: %#v", findEach)
@@ -189,23 +196,26 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 10 {
-		t.Fatalf("expected five fields and five ORM class methods, got %#v", product.Body)
+	if len(product.Body) != 12 {
+		t.Fatalf("expected five fields and seven ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
 		t.Fatalf("unexpected first field: %#v", product.Body[0])
 	}
-	where, ok := product.Body[5].(*ir.Method)
-	if !ok || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
-		t.Fatalf("unexpected where method: %#v", product.Body[5])
-	}
 	methods := map[string]bool{}
+	var where *ir.Method
 	for _, statement := range product.Body[5:] {
 		method, ok := statement.(*ir.Method)
+		if ok && method.Name == "where" {
+			where = method
+		}
 		if ok && method.External && method.Class {
 			methods[method.Name] = true
 		}
+	}
+	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
+		t.Fatalf("unexpected where method: %#v", where)
 	}
 	for _, name := range []string{"where", "find", "create", "find_each", "find_in_batches"} {
 		if !methods[name] {

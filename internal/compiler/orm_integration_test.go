@@ -39,6 +39,14 @@ def create_product(): DbResult<Product>
 	return Product.create(name: "Created", active: true)
 end
 
+def update_product(product: Product): DbResult<Product>
+	return product.update(name: "Updated")
+end
+
+def delete_product(product: Product): DbResult<Boolean>
+	return product.delete()
+end
+
 def load_products(): DbResult<ProductList>
 	return Product.where(name: "Widget").all()
 end
@@ -82,7 +90,7 @@ end
 		"type Product struct", "type TrbOrmProductQuery struct",
 		`trbOrmProductStatement(query, "\"id\", \"name\", \"price\", \"active\"")`,
 		"TrbOrmLoadProduct", "type ProductList = []*Product", "orm.DbResult[[]*Product]", "defer orm.TrbOrmCloseDatabase()",
-		"orm.NewDbResultErr[[]*Product]", `"database query failed"`, "TrbOrmCreateProduct",
+		"orm.NewDbResultErr[[]*Product]", `"database query failed"`, "TrbOrmCreateProduct", "TrbOrmUpdateProduct", "TrbOrmDeleteProduct",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
