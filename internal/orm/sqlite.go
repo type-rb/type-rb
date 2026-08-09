@@ -72,6 +72,7 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 			return Table{}, fmt.Errorf("table %s column %s: %w", name, columnName, err)
 		}
 		nullable := notNull == 0 && primaryKey == 0
+		generated := primaryKey != 0 && strings.EqualFold(strings.TrimSpace(databaseType), "integer")
 		typ.Nullable = nullable
 		table.Columns = append(table.Columns, Column{
 			Name:         columnName,
@@ -79,6 +80,8 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 			Type:         typ,
 			Nullable:     nullable,
 			PrimaryKey:   primaryKey != 0,
+			HasDefault:   defaultValue != nil || generated,
+			Generated:    generated,
 			Position:     position,
 		})
 	}

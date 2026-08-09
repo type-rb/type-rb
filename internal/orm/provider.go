@@ -44,6 +44,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
+			declared.ClassMembers["create"] = createDeclaration(model, schema.Adapter)
 		}
 		if _, ok := model.BatchKey(); ok {
 			declared.ClassMembers["find_each"] = batchDeclaration(model, "find_each", true, false)
@@ -79,6 +80,24 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.QueryType] = query
 	}
 	return catalog, nil
+}
+
+func createDeclaration(model Model, adapter string) declaration.Member {
+	parameters := make([]declaration.Parameter, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		optional := column.Nullable || column.Generated || column.HasDefault
+		if adapter == "mysql" && column.PrimaryKey && !column.Generated {
+			optional = column.Nullable
+		}
+		parameters = append(parameters, declaration.Parameter{
+			Name: column.Name, Type: column.Type, Keyword: true,
+			Optional: optional,
+		})
+	}
+	return declaration.Member{
+		Name: "create", Kind: declaration.Method, Intrinsic: "trb.orm.create", Parameters: parameters,
+		Return: dbResult(types.FromName(model.Name)), Class: true, Provider: PackageName,
+	}
 }
 
 func preloadDeclaration(model Model) declaration.Member {

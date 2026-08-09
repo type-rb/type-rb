@@ -250,6 +250,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormWhere(call)
 	case "trb.orm.find":
 		return g.ormFind(call)
+	case "trb.orm.create":
+		return g.ormCreate(call)
 	case "trb.orm.query.where":
 		return g.ormQueryWhere(call, arguments)
 	case "trb.orm.query.order":

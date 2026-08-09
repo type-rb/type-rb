@@ -32,6 +32,9 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	assertColumn(t, products.Columns[2], "price", types.Float, true, false)
 	assertColumn(t, products.Columns[3], "active", types.Bool, false, false)
 	assertColumn(t, products.Columns[4], "payload", types.Bytes, true, false)
+	if !products.Columns[0].Generated || !products.Columns[0].HasDefault || !products.Columns[3].HasDefault {
+		t.Fatalf("SQLite generated/default metadata is missing: %#v", products.Columns)
+	}
 
 	program := parseModel(t)
 	catalog, err := Declarations([]*ast.Program{program}, root, options)
@@ -54,6 +57,10 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 	if product.ClassMembers["find"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
+	}
+	create := product.ClassMembers["create"]
+	if create.Return.String() != "DbResult<Product>" || !create.Parameters[0].Optional || create.Parameters[1].Optional || !create.Parameters[2].Optional || !create.Parameters[3].Optional {
+		t.Fatalf("unexpected create declaration: %#v", create)
 	}
 	findEach := product.ClassMembers["find_each"]
 	if findEach.Return.String() != "DbResult<Integer>" || findEach.Block == nil || !findEach.Block.Structured || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
@@ -182,8 +189,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 9 {
-		t.Fatalf("expected five fields and four ORM class methods, got %#v", product.Body)
+	if len(product.Body) != 10 {
+		t.Fatalf("expected five fields and five ORM class methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -200,7 +207,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 			methods[method.Name] = true
 		}
 	}
-	for _, name := range []string{"where", "find", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "find", "create", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}
@@ -335,7 +342,7 @@ func sqliteFixture(t *testing.T) (string, map[string][]byte) {
 		id INTEGER PRIMARY KEY,
 		name TEXT NOT NULL,
 		price REAL,
-		active BOOLEAN NOT NULL,
+		active BOOLEAN NOT NULL DEFAULT TRUE,
 		payload BLOB
 	)`); err != nil {
 		database.Close()

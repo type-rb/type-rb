@@ -64,6 +64,7 @@ func (postgresqlIntrospector) Inspect(config Config) (*Schema, error) {
 func inspectPostgreSQLTable(database *sql.DB, name string) (Table, error) {
 	rows, err := database.Query(`
 		SELECT c.ordinal_position, c.column_name, c.data_type, c.udt_name, c.is_nullable,
+		       c.column_default, c.is_identity,
 		       EXISTS (
 		         SELECT 1
 		         FROM information_schema.table_constraints tc
@@ -85,9 +86,10 @@ func inspectPostgreSQLTable(database *sql.DB, name string) (Table, error) {
 	table := Table{Name: name}
 	for rows.Next() {
 		var position int
-		var columnName, dataType, databaseType, nullableText string
+		var columnName, dataType, databaseType, nullableText, identityText string
+		var defaultValue sql.NullString
 		var primaryKey bool
-		if err := rows.Scan(&position, &columnName, &dataType, &databaseType, &nullableText, &primaryKey); err != nil {
+		if err := rows.Scan(&position, &columnName, &dataType, &databaseType, &nullableText, &defaultValue, &identityText, &primaryKey); err != nil {
 			rows.Close()
 			return Table{}, err
 		}
@@ -97,10 +99,11 @@ func inspectPostgreSQLTable(database *sql.DB, name string) (Table, error) {
 			return Table{}, fmt.Errorf("table %s column %s: %w", name, columnName, err)
 		}
 		nullable := nullableText == "YES" && !primaryKey
+		generated := identityText == "YES" || defaultValue.Valid && strings.HasPrefix(strings.ToLower(defaultValue.String), "nextval(")
 		typ.Nullable = nullable
 		table.Columns = append(table.Columns, Column{
 			Name: columnName, DatabaseType: databaseType, Type: typ, Nullable: nullable,
-			PrimaryKey: primaryKey, Position: position - 1,
+			PrimaryKey: primaryKey, HasDefault: defaultValue.Valid || generated, Generated: generated, Position: position - 1,
 		})
 	}
 	if err := rows.Err(); err != nil {

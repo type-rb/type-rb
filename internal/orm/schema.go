@@ -53,6 +53,8 @@ type Column struct {
 	Type         types.Type
 	Nullable     bool
 	PrimaryKey   bool
+	HasDefault   bool
+	Generated    bool
 	Position     int
 }
 

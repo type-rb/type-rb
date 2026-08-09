@@ -48,6 +48,31 @@ func (g *generator) ormFind(call *ir.Call) string {
 	return qualifier + goORMFirst(model) + "(" + query + ")"
 }
 
+func (g *generator) ormCreate(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	columns := make([]string, 0, len(call.Arguments))
+	values := make([]string, 0, len(call.Arguments))
+	for _, argument := range call.Arguments {
+		if argument.Name == "" {
+			continue
+		}
+		columns = append(columns, strconv.Quote(argument.Name))
+		values = append(values, g.expr(argument.Value))
+	}
+	return g.ormModelQualifier(model) + goORMCreate(model) + "([]string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
 func (g *generator) ormPredicateArguments(call *ir.Call) string {
 	predicates := ormintegration.Predicates(call)
 	columns := make([]string, len(predicates))
@@ -607,6 +632,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.line("}")
 		g.b.WriteByte('\n')
 	}
+	g.ormCreateRuntime(adapter, model, columns, scanTargets)
 	for _, association := range model.Associations {
 		if !association.Preloadable {
 			continue
@@ -953,6 +979,10 @@ func goORMLoader(model ormintegration.Model) string {
 
 func goORMFirst(model ormintegration.Model) string {
 	return "TrbOrmFirst" + goIdentifier(model.Name, true)
+}
+
+func goORMCreate(model ormintegration.Model) string {
+	return "TrbOrmCreate" + goIdentifier(model.Name, true)
 }
 
 func goORMCount(model ormintegration.Model) string {

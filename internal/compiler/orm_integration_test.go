@@ -35,6 +35,10 @@ end
 
 type ProductList = Array<Product>
 
+def create_product(): DbResult<Product>
+	return Product.create(name: "Created", active: true)
+end
+
 def load_products(): DbResult<ProductList>
 	return Product.where(name: "Widget").all()
 end
@@ -78,7 +82,7 @@ end
 		"type Product struct", "type TrbOrmProductQuery struct",
 		`trbOrmProductStatement(query, "\"id\", \"name\", \"price\", \"active\"")`,
 		"TrbOrmLoadProduct", "type ProductList = []*Product", "orm.DbResult[[]*Product]", "defer orm.TrbOrmCloseDatabase()",
-		"orm.NewDbResultErr[[]*Product]", `"database query failed"`,
+		"orm.NewDbResultErr[[]*Product]", `"database query failed"`, "TrbOrmCreateProduct",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
@@ -119,7 +123,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	for _, member := range product.Members {
 		classMethods[member.Name] = true
 	}
-	for _, name := range []string{"where", "find", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "find", "create", "find_each", "find_in_batches"} {
 		if !classMethods[name] {
 			t.Fatalf("Product.%s is missing from completion context: %#v", name, product.Members)
 		}
@@ -209,6 +213,54 @@ func TestPortableORMWhereUsesSchemaTypes(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "expected Integer") {
 		t.Fatalf("expected schema type error, got %v", err)
+	}
+}
+
+func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (
+		id INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		price REAL,
+		active BOOLEAN NOT NULL DEFAULT TRUE
+	)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	compile := func(call string) ([]*Artifact, error) {
+		return CompileProject([]SourceUnit{{
+			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "src/main", Package: "main",
+			Source: []byte("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n\t" + call + "\nend\n"),
+		}}, Options{
+			Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+		})
+	}
+	artifacts, err := compile(`Product.create(name: "Widget")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output := string(artifacts[0].Output); !strings.Contains(output, `TrbOrmCreateProduct([]string{"name"}, []any{"Widget"})`) {
+		t.Fatalf("generated create call does not preserve schema keywords:\n%s", output)
+	}
+	for _, test := range []struct {
+		call string
+		want string
+	}{
+		{call: `Product.create(price: 10.0)`, want: "create() is missing required argument name"},
+		{call: `Product.create(name: "Widget", price: "wrong")`, want: "has type String, expected Float?"},
+		{call: `Product.create(name: "Widget", missing: true)`, want: "create() has no keyword argument missing"},
+	} {
+		if _, err := compile(test.call); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("expected create diagnostic %q, got %v", test.want, err)
+		}
 	}
 }
 

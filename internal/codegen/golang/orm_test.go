@@ -20,7 +20,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			driver:  `_ "github.com/jackc/pgx/v5/stdlib"`,
 			want: []string{
 				`return "$" + strconv.Itoa(position)`,
-				`mark := "\""`, `database.Query("EXPLAIN "+statement`,
+				`mark := "\""`, `database.Query("EXPLAIN "+statement`, `statement+" RETURNING \"id\""`,
 			},
 		},
 		{
@@ -31,6 +31,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				`column := trbOrmQuoteIdentifier(condition.column)`,
 				`column := trbOrmQuoteIdentifier(order.column)`,
 				`database.Query("EXPLAIN FORMAT=JSON "+statement`,
+				`written.LastInsertId()`,
 			},
 		},
 	} {
@@ -39,7 +40,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				Adapter: test.adapter, Database: "database",
 				Models: []ormintegration.Model{{
 					Name: "Product", QueryType: "ProductQuery", Table: "products", ModulePath: "main",
-					Columns: []ormintegration.Column{{Name: "id", Type: types.FromName("Integer"), PrimaryKey: true}},
+					Columns: []ormintegration.Column{{Name: "id", Type: types.FromName("Integer"), PrimaryKey: true, HasDefault: true, Generated: true}},
 				}},
 			}
 			program := &ir.Program{
@@ -62,6 +63,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			for _, want := range []string{
 				`"example.com/orm/trb/orm"`, `orm.DbResult[[]*Product]`, `orm.NewDbResultErr[[]*Product]`,
 				`trbOrmError(err, orm.DbErrorKindQuery, "database query failed")`, `database, err := orm.TrbOrmDatabase()`,
+				`func TrbOrmCreateProduct(columns []string, values []any) orm.DbResult[*Product]`,
 			} {
 				if !strings.Contains(output, want) {
 					t.Fatalf("generated %s ORM Result runtime is missing %q:\n%s", test.adapter, want, output)
@@ -104,5 +106,34 @@ func TestORMPoolResolvesRuntimeDatabaseFromEnvironment(t *testing.T) {
 	}
 	if strings.Contains(output, "compile-time-secret") {
 		t.Fatalf("generated ORM pool exposes the compile-time database value:\n%s", output)
+	}
+}
+
+func TestMySQLORMCreateUsesApplicationPrimaryKeyWhenNotGenerated(t *testing.T) {
+	manifest := &ormintegration.Manifest{
+		Adapter: "mysql", Database: "database",
+		Models: []ormintegration.Model{{
+			Name: "Product", QueryType: "ProductQuery", Table: "products", ModulePath: "main",
+			Columns: []ormintegration.Column{{Name: "id", Type: types.FromName("String"), PrimaryKey: true}},
+		}},
+	}
+	program := &ir.Program{
+		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/orm",
+		Extensions: []ir.Extension{manifest}, Statements: []ir.Statement{
+			&ir.Import{Path: "trb/orm/index", Official: true, Runtime: true},
+			&ir.Class{Name: "Product"},
+		},
+	}
+	manifest.Augment(program)
+	output := Generate(program)
+	for _, want := range []string{
+		`_, err = database.Exec(statement, values...)`, `if column == "id" {`, `primaryKeyValue = values[index]`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("generated MySQL application-key create is missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "written.LastInsertId") {
+		t.Fatalf("generated MySQL application-key create requests a generated key:\n%s", output)
 	}
 }

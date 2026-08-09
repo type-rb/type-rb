@@ -17,13 +17,15 @@ const (
 // Adapter describes the database-specific behavior shared by schema
 // introspection and backend runtime generation.
 type Adapter struct {
-	Name           string
-	DriverName     string
-	GoDriverImport string
-	IdentifierMark string
-	NumberedBinds  bool
-	ExplainStyle   ExplainStyle
-	OffsetNoLimit  string
+	Name            string
+	DriverName      string
+	GoDriverImport  string
+	IdentifierMark  string
+	NumberedBinds   bool
+	ExplainStyle    ExplainStyle
+	OffsetNoLimit   string
+	InsertReturning bool
+	DefaultInsert   string
 }
 
 func (a Adapter) QuoteIdentifier(name string) string {
@@ -57,6 +59,7 @@ func adapterDefinitionFor(name string) (adapterDefinition, bool) {
 			Adapter: Adapter{
 				Name: "sqlite", DriverName: "sqlite", GoDriverImport: "modernc.org/sqlite",
 				IdentifierMark: `"`, ExplainStyle: ExplainSQLite, OffsetNoLimit: " LIMIT -1",
+				InsertReturning: true, DefaultInsert: " DEFAULT VALUES",
 			},
 			Introspector: sqliteIntrospector{},
 		}, true
@@ -65,6 +68,7 @@ func adapterDefinitionFor(name string) (adapterDefinition, bool) {
 			Adapter: Adapter{
 				Name: "postgresql", DriverName: "pgx", GoDriverImport: "github.com/jackc/pgx/v5/stdlib",
 				IdentifierMark: `"`, NumberedBinds: true, ExplainStyle: ExplainText,
+				InsertReturning: true, DefaultInsert: " DEFAULT VALUES",
 			},
 			Introspector: postgresqlIntrospector{},
 		}, true
@@ -73,6 +77,7 @@ func adapterDefinitionFor(name string) (adapterDefinition, bool) {
 			Adapter: Adapter{
 				Name: "mysql", DriverName: "mysql", GoDriverImport: "github.com/go-sql-driver/mysql",
 				IdentifierMark: "`", ExplainStyle: ExplainJSON, OffsetNoLimit: " LIMIT 18446744073709551615",
+				DefaultInsert: " () VALUES ()",
 			},
 			Introspector: mysqlIntrospector{},
 		}, true

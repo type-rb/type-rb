@@ -172,6 +172,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 						Parameters: []ir.Parameter{{Name: primaryKey.Name, Type: keyType}}, ReturnType: dbResult(findType),
 					})
 				}
+				if !existing["create"] {
+					class.Body = append(class.Body, createIRMethod(model))
+				}
 			}
 			if _, ok := model.BatchKey(); ok {
 				for _, name := range []string{"find_each", "find_in_batches"} {
@@ -183,6 +186,14 @@ func (m *Manifest) Augment(program *ir.Program) {
 		}
 		program.Statements = append(program.Statements, &ir.Class{Name: model.QueryType, External: true, Body: queryIRMethods(model)})
 	}
+}
+
+func createIRMethod(model Model) *ir.Method {
+	method := &ir.Method{Name: "create", External: true, Class: true, ReturnType: dbResult(namedType(model.Name))}
+	for _, column := range model.Columns {
+		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+	}
+	return method
 }
 
 func queryIRMethods(model Model) []ir.Statement {
