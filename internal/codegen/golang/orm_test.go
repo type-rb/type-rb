@@ -85,3 +85,24 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 		})
 	}
 }
+
+func TestORMPoolResolvesRuntimeDatabaseFromEnvironment(t *testing.T) {
+	manifest := &ormintegration.Manifest{
+		Adapter: "postgresql", Database: "compile-time-secret", DatabaseEnvironment: "DATABASE_URL",
+	}
+	output := Generate(&ir.Program{
+		Mode: "go", Package: "orm", ModulePath: "trb/orm/index", GoModule: "example.com/orm",
+		Extensions: []ir.Extension{manifest},
+	})
+	for _, want := range []string{
+		`os.LookupEnv("DATABASE_URL")`, `sql.Open("pgx", databaseSource)`,
+		`errors.New("database environment variable is not set or empty")`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("generated ORM environment pool is missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "compile-time-secret") {
+		t.Fatalf("generated ORM pool exposes the compile-time database value:\n%s", output)
+	}
+}

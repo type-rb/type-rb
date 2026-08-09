@@ -407,6 +407,10 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.requireImport("database/sql", "sql")
 	g.requireImport(adapter.GoDriverImport, "_")
 	g.requireImport("sync", "")
+	if manifest.DatabaseEnvironment != "" {
+		g.requireImport("errors", "")
+		g.requireImport("os", "")
+	}
 	g.line("var trbOrmDatabaseOnce sync.Once")
 	g.line("var trbOrmDatabase *sql.DB")
 	g.line("var trbOrmDatabaseError error")
@@ -415,7 +419,13 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.indent++
 	g.line("trbOrmDatabaseOnce.Do(func() {")
 	g.indent++
-	g.line("trbOrmDatabase, trbOrmDatabaseError = sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
+	database := strconv.Quote(manifest.Database)
+	if manifest.DatabaseEnvironment != "" {
+		g.line("databaseSource, found := os.LookupEnv(" + strconv.Quote(manifest.DatabaseEnvironment) + ")")
+		g.line("if !found || databaseSource == \"\" { trbOrmDatabaseError = errors.New(\"database environment variable is not set or empty\"); return }")
+		database = "databaseSource"
+	}
+	g.line("trbOrmDatabase, trbOrmDatabaseError = sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + database + ")")
 	g.line("if trbOrmDatabaseError == nil { trbOrmDatabaseError = trbOrmDatabase.Ping() }")
 	g.line("if trbOrmDatabaseError != nil && trbOrmDatabase != nil { _ = trbOrmDatabase.Close(); trbOrmDatabase = nil }")
 	g.indent--

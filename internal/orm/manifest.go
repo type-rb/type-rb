@@ -93,9 +93,10 @@ func associationValueType(association Association) types.Type {
 }
 
 type Manifest struct {
-	Adapter  string
-	Database string
-	Models   []Model
+	Adapter             string
+	Database            string
+	DatabaseEnvironment string
+	Models              []Model
 }
 
 func Analyze(programs []*ast.Program, projectRoot string, options map[string][]byte) (*Manifest, error) {
@@ -107,7 +108,9 @@ func Analyze(programs []*ast.Program, projectRoot string, options map[string][]b
 	if err != nil {
 		return nil, err
 	}
-	return &Manifest{Adapter: schema.Adapter, Database: schema.Database, Models: models}, nil
+	return &Manifest{
+		Adapter: schema.Adapter, Database: schema.Database, DatabaseEnvironment: schema.DatabaseEnvironment, Models: models,
+	}, nil
 }
 
 func (*Manifest) ExtensionName() string { return ProjectProvider }

@@ -289,6 +289,40 @@ func TestSQLiteAssociationRejectsMissingForeignKey(t *testing.T) {
 	}
 }
 
+func TestSQLiteDatabaseEnvironmentIsResolvedWithoutEmbeddingItsValue(t *testing.T) {
+	root, _ := sqliteFixture(t)
+	databasePath := filepath.Join(root, "application.sqlite3")
+	t.Setenv("TRB_TEST_DATABASE_URL", databasePath)
+	schema, err := LoadSchema(root, map[string][]byte{
+		PackageName: []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_DATABASE_URL"}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.Database != databasePath || schema.DatabaseEnvironment != "TRB_TEST_DATABASE_URL" {
+		t.Fatalf("unexpected database source: %#v", schema)
+	}
+	manifest, err := Analyze([]*ast.Program{parseModel(t)}, root, map[string][]byte{
+		PackageName: []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_DATABASE_URL"}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.DatabaseEnvironment != "TRB_TEST_DATABASE_URL" {
+		t.Fatalf("manifest database environment = %q", manifest.DatabaseEnvironment)
+	}
+}
+
+func TestDatabaseEnvironmentMustBePresent(t *testing.T) {
+	t.Setenv("TRB_TEST_MISSING_DATABASE_URL", "")
+	_, err := LoadSchema(t.TempDir(), map[string][]byte{
+		PackageName: []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_MISSING_DATABASE_URL"}}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), `database.environment "TRB_TEST_MISSING_DATABASE_URL" is not set or empty`) {
+		t.Fatalf("expected missing database environment diagnostic, got %v", err)
+	}
+}
+
 func sqliteFixture(t *testing.T) (string, map[string][]byte) {
 	t.Helper()
 	root := t.TempDir()

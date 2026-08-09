@@ -27,6 +27,7 @@ func TestPortableORMCompilesLiveSQLiteQuery(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("TRB_TEST_DATABASE_URL", databasePath)
 	source := []byte(`import { DbResult, Model } from trb/orm
 
 class Product < Model
@@ -53,7 +54,9 @@ end
 		Filename: filepath.Join(root, "src", "main.trb"), Source: source, ModulePath: "src/main", Package: "main",
 	}}, Options{
 		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
-		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+		PackageOptions: map[string][]byte{
+			"trb/orm": []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_DATABASE_URL"}}`),
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -81,10 +84,16 @@ end
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
 		}
 	}
-	for _, expected := range []string{"modernc.org/sqlite", "func TrbOrmDatabase() (*sql.DB, error)", "trbOrmDatabase.Ping()"} {
+	for _, expected := range []string{
+		"modernc.org/sqlite", "func TrbOrmDatabase() (*sql.DB, error)", "trbOrmDatabase.Ping()",
+		`os.LookupEnv("TRB_TEST_DATABASE_URL")`,
+	} {
 		if !strings.Contains(ormOutput, expected) {
 			t.Fatalf("generated ORM pool is missing %q:\n%s", expected, ormOutput)
 		}
+	}
+	if strings.Contains(ormOutput, databasePath) {
+		t.Fatalf("generated ORM pool exposes the compile-time database value:\n%s", ormOutput)
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
 		t.Fatalf("generated invalid Go: %v\n%s", err, output)
