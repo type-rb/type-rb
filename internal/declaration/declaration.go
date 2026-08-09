@@ -15,11 +15,11 @@ const (
 )
 
 type Parameter struct {
-	Name         string
-	Type         types.Type
-	Keyword      bool
-	Optional     bool
-	StringValues []string
+	Name          string
+	Type          types.Type
+	Keyword       bool
+	Optional      bool
+	LiteralValues []string
 }
 
 type Signature struct {

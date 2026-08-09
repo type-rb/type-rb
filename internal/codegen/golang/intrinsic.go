@@ -248,8 +248,20 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webLogger(call, arguments)
 	case "trb.orm.where":
 		return g.ormWhere(call)
+	case "trb.orm.query.where":
+		return g.ormQueryWhere(call, arguments)
+	case "trb.orm.query.order":
+		return g.ormOrder(call, arguments)
+	case "trb.orm.query.limit":
+		return g.ormQueryInteger(call, arguments, goORMLimit)
+	case "trb.orm.query.offset":
+		return g.ormQueryInteger(call, arguments, goORMOffset)
 	case "trb.orm.query.all":
-		return g.ormAll(call, arguments)
+		return g.ormQueryTerminal(call, arguments, goORMLoader)
+	case "trb.orm.query.first":
+		return g.ormQueryTerminal(call, arguments, goORMFirst)
+	case "trb.orm.query.count":
+		return g.ormQueryTerminal(call, arguments, goORMCount)
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"

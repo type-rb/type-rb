@@ -72,10 +72,27 @@ func (m *Manifest) Augment(program *ir.Program) {
 				class.Body = append(class.Body, method)
 			}
 		}
-		program.Statements = append(program.Statements, &ir.Class{
-			Name: model.QueryType, External: true,
-			Body: []ir.Statement{&ir.Method{Name: "all", External: true, ReturnType: arrayOf(model.Name)}},
-		})
+		program.Statements = append(program.Statements, &ir.Class{Name: model.QueryType, External: true, Body: queryIRMethods(model)})
+	}
+}
+
+func queryIRMethods(model Model) []ir.Statement {
+	where := &ir.Method{Name: "where", External: true, ReturnType: namedType(model.QueryType)}
+	order := &ir.Method{Name: "order", External: true, ReturnType: namedType(model.QueryType)}
+	for _, column := range model.Columns {
+		where.Parameters = append(where.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+		order.Parameters = append(order.Parameters, ir.Parameter{Name: column.Name, Type: types.FromName("String"), Keyword: true})
+	}
+	firstType := namedType(model.Name)
+	firstType.Nullable = true
+	return []ir.Statement{
+		where,
+		order,
+		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
+		&ir.Method{Name: "offset", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
+		&ir.Method{Name: "all", External: true, ReturnType: arrayOf(model.Name)},
+		&ir.Method{Name: "first", External: true, ReturnType: firstType},
+		&ir.Method{Name: "count", External: true, ReturnType: types.FromName("Integer")},
 	}
 }
 

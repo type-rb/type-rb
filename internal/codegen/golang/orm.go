@@ -22,6 +22,10 @@ func (g *generator) ormWhere(call *ir.Call) string {
 	if !exists {
 		return "nil"
 	}
+	return g.ormModelQualifier(model) + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
+}
+
+func (g *generator) ormPredicateArguments(call *ir.Call) string {
 	predicates := ormintegration.Predicates(call)
 	columns := make([]string, len(predicates))
 	operators := make([]string, len(predicates))
@@ -31,22 +35,63 @@ func (g *generator) ormWhere(call *ir.Call) string {
 		operators[index] = strconv.Quote(string(predicate.Operator))
 		values[index] = g.expr(predicate.Value)
 	}
-	return g.ormModelQualifier(model) + goORMWhere(model) + "([]string{" + strings.Join(columns, ", ") + "}, []string{" + strings.Join(operators, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+	return "[]string{" + strings.Join(columns, ", ") + "}, []string{" + strings.Join(operators, ", ") + "}, []any{" + strings.Join(values, ", ") + "}"
 }
 
-func (g *generator) ormAll(call *ir.Call, arguments []string) string {
+func (g *generator) ormQueryModel(call *ir.Call, arguments []string) (ormintegration.Model, string, bool) {
 	if len(arguments) == 0 {
-		return "nil"
+		return ormintegration.Model{}, "", false
 	}
 	member, ok := call.Callee.(*ir.Member)
 	if !ok {
-		return "nil"
+		return ormintegration.Model{}, "", false
 	}
 	model, exists := g.orm.QueryModel(member.Receiver.ExprType().Name)
 	if !exists {
+		return ormintegration.Model{}, "", false
+	}
+	return model, arguments[0], true
+}
+
+func (g *generator) ormQueryWhere(call *ir.Call, arguments []string) string {
+	model, query, ok := g.ormQueryModel(call, arguments)
+	if !ok {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMLoader(model) + "(" + arguments[0] + ")"
+	return g.ormModelQualifier(model) + goORMQueryWhere(model) + "(" + query + ", " + g.ormPredicateArguments(call) + ")"
+}
+
+func (g *generator) ormOrder(call *ir.Call, arguments []string) string {
+	model, query, ok := g.ormQueryModel(call, arguments)
+	if !ok {
+		return "nil"
+	}
+	columns := make([]string, 0, len(call.Arguments))
+	directions := make([]string, 0, len(call.Arguments))
+	for _, argument := range call.Arguments {
+		if argument.Name == "" {
+			continue
+		}
+		columns = append(columns, strconv.Quote(argument.Name))
+		directions = append(directions, g.expr(argument.Value))
+	}
+	return g.ormModelQualifier(model) + goORMOrder(model) + "(" + query + ", []string{" + strings.Join(columns, ", ") + "}, []string{" + strings.Join(directions, ", ") + "})"
+}
+
+func (g *generator) ormQueryInteger(call *ir.Call, arguments []string, operation func(ormintegration.Model) string) string {
+	model, query, ok := g.ormQueryModel(call, arguments)
+	if !ok || len(arguments) < 2 {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + operation(model) + "(" + query + ", " + arguments[1] + ")"
+}
+
+func (g *generator) ormQueryTerminal(call *ir.Call, arguments []string, operation func(ormintegration.Model) string) string {
+	model, query, ok := g.ormQueryModel(call, arguments)
+	if !ok {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + operation(model) + "(" + query + ")"
 }
 
 func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
@@ -65,6 +110,7 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 
 func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model ormintegration.Model) {
 	conditionType := goORMConditionType(model)
+	orderType := goORMOrderType(model)
 	queryType := goORMQueryType(model)
 	g.line("type " + conditionType + " struct {")
 	g.indent++
@@ -74,21 +120,67 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.line("type " + orderType + " struct {")
+	g.indent++
+	g.line("column string")
+	g.line("direction string")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 
 	g.line("type " + queryType + " struct {")
 	g.indent++
 	g.line("conditions []" + conditionType)
+	g.line("orders []" + orderType)
+	g.line("limit *int")
+	g.line("offset *int")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.line("func " + goORMWhere(model) + "(columns []string, operators []string, values []any) " + queryType + " {")
 	g.indent++
-	g.line("query := " + queryType + "{conditions: make([]" + conditionType + ", 0, len(columns))}")
-	g.line("for index, column := range columns {")
-	g.indent++
-	g.line("query.conditions = append(query.conditions, " + conditionType + "{column: column, operator: operators[index], value: values[index]})")
+	g.line("return " + goORMQueryWhere(model) + "(" + queryType + "{}, columns, operators, values)")
 	g.indent--
 	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMQueryWhere(model) + "(query " + queryType + ", columns []string, operators []string, values []any) " + queryType + " {")
+	g.indent++
+	g.line("result := query")
+	g.line("result.conditions = append([]" + conditionType + "(nil), query.conditions...)")
+	g.line("for index, column := range columns {")
+	g.indent++
+	g.line("result.conditions = append(result.conditions, " + conditionType + "{column: column, operator: operators[index], value: values[index]})")
+	g.indent--
+	g.line("}")
+	g.line("return result")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMOrder(model) + "(query " + queryType + ", columns []string, directions []string) " + queryType + " {")
+	g.indent++
+	g.line("result := query")
+	g.line("result.orders = append([]" + orderType + "(nil), query.orders...)")
+	g.line("for index, column := range columns {")
+	g.indent++
+	g.line("result.orders = append(result.orders, " + orderType + "{column: column, direction: directions[index]})")
+	g.indent--
+	g.line("}")
+	g.line("return result")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMLimit(model) + "(query " + queryType + ", count int) " + queryType + " {")
+	g.indent++
+	g.line("if count < 0 { panic(\"ORM limit must be non-negative\") }")
+	g.line("query.limit = &count")
+	g.line("return query")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMOffset(model) + "(query " + queryType + ", count int) " + queryType + " {")
+	g.indent++
+	g.line("if count < 0 { panic(\"ORM offset must be non-negative\") }")
+	g.line("query.offset = &count")
 	g.line("return query")
 	g.indent--
 	g.line("}")
@@ -106,13 +198,10 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 		g.line("}")
 		g.b.WriteByte('\n')
 	}
-	statement := "SELECT " + strings.Join(columns, ", ") + " FROM " + quoteORMIdentifier(model.Table)
-	g.line("func " + goORMLoader(model) + "(query " + queryType + ") []*" + goIdentifier(model.Name, true) + " {")
+	statement := " FROM " + quoteORMIdentifier(model.Table)
+	g.line("func " + goORMStatement(model) + "(query " + queryType + ", projection string) (string, []any) {")
 	g.indent++
-	g.line("database, err := sql.Open(" + strconv.Quote(manifest.Adapter) + ", " + strconv.Quote(manifest.Database) + ")")
-	g.line("if err != nil { panic(err) }")
-	g.line("defer database.Close()")
-	g.line("statement := " + strconv.Quote(statement))
+	g.line("statement := \"SELECT \" + projection + " + strconv.Quote(statement))
 	g.line("arguments := []any{}")
 	g.line("if len(query.conditions) > 0 {")
 	g.indent++
@@ -142,6 +231,32 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.line("statement += \" WHERE \" + strings.Join(clauses, \" AND \")")
 	g.indent--
 	g.line("}")
+	g.line("if len(query.orders) > 0 {")
+	g.indent++
+	g.line("orders := make([]string, 0, len(query.orders))")
+	g.line("for _, order := range query.orders {")
+	g.indent++
+	g.line("switch order.direction { case \"asc\", \"desc\": default: panic(\"unsupported ORM order direction\") }")
+	g.line("column := \"\\\"\" + strings.ReplaceAll(order.column, \"\\\"\", \"\\\"\\\"\") + \"\\\"\"")
+	g.line("orders = append(orders, column+\" \"+strings.ToUpper(order.direction))")
+	g.indent--
+	g.line("}")
+	g.line("statement += \" ORDER BY \" + strings.Join(orders, \", \")")
+	g.indent--
+	g.line("}")
+	g.line("if query.limit != nil { statement += \" LIMIT ?\"; arguments = append(arguments, *query.limit) } else if query.offset != nil { statement += \" LIMIT -1\" }")
+	g.line("if query.offset != nil { statement += \" OFFSET ?\"; arguments = append(arguments, *query.offset) }")
+	g.line("return statement, arguments")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+
+	g.line("func " + goORMLoader(model) + "(query " + queryType + ") []*" + goIdentifier(model.Name, true) + " {")
+	g.indent++
+	g.line("database, err := sql.Open(" + strconv.Quote(manifest.Adapter) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("if err != nil { panic(err) }")
+	g.line("defer database.Close()")
+	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
 	g.line("rows, err := database.Query(statement, arguments...)")
 	g.line("if err != nil { panic(err) }")
 	g.line("defer rows.Close()")
@@ -158,6 +273,30 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+
+	g.line("func " + goORMFirst(model) + "(query " + queryType + ") *" + goIdentifier(model.Name, true) + " {")
+	g.indent++
+	g.line("if query.limit == nil || *query.limit > 1 { count := 1; query.limit = &count }")
+	g.line("values := " + goORMLoader(model) + "(query)")
+	g.line("if len(values) == 0 { return nil }")
+	g.line("return values[0]")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+
+	g.line("func " + goORMCount(model) + "(query " + queryType + ") int {")
+	g.indent++
+	g.line("database, err := sql.Open(" + strconv.Quote(manifest.Adapter) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("if err != nil { panic(err) }")
+	g.line("defer database.Close()")
+	g.line("statement, arguments := " + goORMStatement(model) + "(query, \"1\")")
+	g.line("row := database.QueryRow(\"SELECT COUNT(*) FROM (\"+statement+\") AS trb_count\", arguments...)")
+	g.line("var count int")
+	g.line("if err := row.Scan(&count); err != nil { panic(err) }")
+	g.line("return count")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 }
 
 func goORMQueryType(model ormintegration.Model) string {
@@ -168,12 +307,44 @@ func goORMConditionType(model ormintegration.Model) string {
 	return "trbOrm" + goIdentifier(model.Name, true) + "Condition"
 }
 
+func goORMOrderType(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "Order"
+}
+
 func goORMWhere(model ormintegration.Model) string {
 	return "TrbOrm" + goIdentifier(model.Name, true) + "Where"
 }
 
+func goORMQueryWhere(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "QueryWhere"
+}
+
+func goORMOrder(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "Order"
+}
+
+func goORMLimit(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "Limit"
+}
+
+func goORMOffset(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "Offset"
+}
+
 func goORMLoader(model ormintegration.Model) string {
 	return "TrbOrmLoad" + goIdentifier(model.Name, true)
+}
+
+func goORMFirst(model ormintegration.Model) string {
+	return "TrbOrmFirst" + goIdentifier(model.Name, true)
+}
+
+func goORMCount(model ormintegration.Model) string {
+	return "TrbOrmCount" + goIdentifier(model.Name, true)
+}
+
+func goORMStatement(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "Statement"
 }
 
 func goORMColumnGetter(column string) string {

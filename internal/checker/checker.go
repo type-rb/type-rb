@@ -3443,8 +3443,8 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 			}
 			continue
 		}
-		if len(parameter.StringValues) > 0 && !declarationStringValueAccepted(argument.Value, parameter.StringValues) {
-			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be one of %s", index+1, member.Name, quotedDeclarationValues(parameter.StringValues)))
+		if len(parameter.LiteralValues) > 0 && !declarationLiteralValueAccepted(argument.Value, parameter.LiteralValues) {
+			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be one of %s", index+1, member.Name, quotedDeclarationValues(parameter.LiteralValues)))
 			continue
 		}
 		bindDeclarationType(parameter.Type, actual[index], typeParameters, bindings)
@@ -3478,11 +3478,11 @@ func (c *Checker) checkDeclarationAlternativeArguments(span token.Span, member d
 		constrained := true
 		for _, signature := range candidates {
 			parameter := declarationSignatureParameter(signature, index)
-			if len(parameter.StringValues) == 0 {
+			if len(parameter.LiteralValues) == 0 {
 				constrained = false
 				break
 			}
-			for _, value := range parameter.StringValues {
+			for _, value := range parameter.LiteralValues {
 				allowed[value] = true
 			}
 		}
@@ -3490,13 +3490,13 @@ func (c *Checker) checkDeclarationAlternativeArguments(span token.Span, member d
 			continue
 		}
 		values := sortedDeclarationValues(allowed)
-		if !declarationStringValueAccepted(argument.Value, values) {
+		if !declarationLiteralValueAccepted(argument.Value, values) {
 			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be one of %s", index+1, member.Name, quotedDeclarationValues(values)))
 			return member.Return
 		}
 		filtered := candidates[:0]
 		for _, signature := range candidates {
-			if declarationStringValueAccepted(argument.Value, declarationSignatureParameter(signature, index).StringValues) {
+			if declarationLiteralValueAccepted(argument.Value, declarationSignatureParameter(signature, index).LiteralValues) {
 				filtered = append(filtered, signature)
 			}
 		}
@@ -3536,20 +3536,26 @@ func declarationSignatureParameter(signature declaration.Signature, index int) d
 	return signature.Parameters[len(signature.Parameters)-1]
 }
 
-func declarationStringValueAccepted(expression ast.Expression, allowed []string) bool {
-	value, ok := declarationStringLiteral(expression)
+func declarationLiteralValueAccepted(expression ast.Expression, allowed []string) bool {
+	value, ok := declarationLiteralValue(expression)
 	return ok && slices.Contains(allowed, value)
 }
 
-func declarationStringLiteral(expression ast.Expression) (string, bool) {
-	literal, ok := expression.(*ast.Literal)
-	if !ok || literal.Kind != ast.StringLiteral {
+func declarationLiteralValue(expression ast.Expression) (string, bool) {
+	switch literal := expression.(type) {
+	case *ast.Literal:
+		if literal.Kind != ast.StringLiteral {
+			return "", false
+		}
+		if value, err := strconv.Unquote(literal.Raw); err == nil {
+			return value, true
+		}
+		return strings.Trim(literal.Raw, "'\""), true
+	case *ast.SymbolLiteral:
+		return literal.Name, true
+	default:
 		return "", false
 	}
-	if value, err := strconv.Unquote(literal.Raw); err == nil {
-		return value, true
-	}
-	return strings.Trim(literal.Raw, "'\""), true
 }
 
 func sortedDeclarationValues(values map[string]bool) []string {

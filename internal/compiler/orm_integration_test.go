@@ -60,7 +60,7 @@ end
 	if output == "" {
 		t.Fatal("main artifact was not generated")
 	}
-	for _, expected := range []string{"type Product struct", "type TrbOrmProductQuery struct", `SELECT \"id\", \"name\", \"price\" FROM \"products\"`, "modernc.org/sqlite", "TrbOrmLoadProduct"} {
+	for _, expected := range []string{"type Product struct", "type TrbOrmProductQuery struct", `trbOrmProductStatement(query, "\"id\", \"name\", \"price\"")`, "modernc.org/sqlite", "TrbOrmLoadProduct"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
 		}
@@ -99,6 +99,17 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	}
 	if !fields["id"] || !fields["name"] || !fields["price"] {
 		t.Fatalf("schema fields are missing from completion context: %#v", context.TypeMembers["Product"])
+	}
+	queryMethods := map[string]bool{}
+	for _, member := range context.TypeMembers["ProductQuery"] {
+		if member.Kind == languageservice.CompletionMethod {
+			queryMethods[member.Name] = true
+		}
+	}
+	for _, name := range []string{"where", "order", "limit", "offset", "all", "first", "count"} {
+		if !queryMethods[name] {
+			t.Fatalf("ProductQuery.%s is missing from completion context: %#v", name, context.TypeMembers["ProductQuery"])
+		}
 	}
 }
 
@@ -170,6 +181,55 @@ func TestPortableORMComparisonWhereUsesSchemaTypes(t *testing.T) {
 		source := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n\t" + test.source + "\nend\n"
 		if _, err := compile(source); err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Fatalf("expected comparison diagnostic %q, got %v", test.want, err)
+		}
+	}
+}
+
+func TestPortableORMComposesTypedQueries(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	compile := func(body string) ([]*Artifact, error) {
+		source := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n"
+		return CompileProject([]SourceUnit{{
+			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main", Source: []byte(source),
+		}}, Options{
+			Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+		})
+	}
+	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).where(name: \"Widget\").order(price: :desc).limit(5).offset(1)\n\tputs(query.count())\n\tputs(query.first())\n\tquery.all()")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		"TrbOrmProductQueryWhere", "TrbOrmProductOrder", "TrbOrmProductLimit", "TrbOrmProductOffset",
+		"TrbOrmCountProduct", "TrbOrmFirstProduct", `statement += " ORDER BY "`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated composed query is missing %q:\n%s", expected, output)
+		}
+	}
+	invalid := []struct {
+		body string
+		want string
+	}{
+		{body: "\tProduct.where().order(price: :sideways)", want: `must be one of "asc", "desc"`},
+		{body: "\tProduct.where().limit(1.5)", want: "has type Float, expected Integer"},
+	}
+	for _, test := range invalid {
+		if _, err := compile(test.body); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("expected query composition diagnostic %q, got %v", test.want, err)
 		}
 	}
 }

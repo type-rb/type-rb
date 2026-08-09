@@ -47,7 +47,7 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if where.Intrinsic != "trb.orm.where" || len(where.Parameters) != 5 || !where.Parameters[0].Keyword || !where.Parameters[0].Optional {
 		t.Fatalf("unexpected where declaration: %#v", where)
 	}
-	if len(where.Alternatives) < 5 || where.Alternatives[0].Parameters[0].StringValues[0] != "id" {
+	if len(where.Alternatives) < 5 || where.Alternatives[0].Parameters[0].LiteralValues[0] != "id" {
 		t.Fatalf("comparison where signatures are missing: %#v", where.Alternatives)
 	}
 	query, exists := catalog.Type("ProductQuery")
