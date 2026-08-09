@@ -33,6 +33,15 @@ type ormQueryValue struct {
 	offset      *int64
 	lock        bool
 	preloads    []string
+	joins       []ormJoin
+}
+
+type ormJoin struct {
+	kind         string
+	table        string
+	sourceColumn string
+	targetColumn string
+	predicate    *ormPredicate
 }
 
 type ormTransactionValue struct {
@@ -326,6 +335,46 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		}
 		query.predicate = ormCombinePredicates("and", query.predicate, predicate)
 		return ormQueryResult(typ, query), nil
+	case "trb.orm.join", "trb.orm.left_join", "trb.orm.query.join", "trb.orm.query.left_join":
+		if len(remaining) < 1 || len(remaining) > 2 {
+			return Value{}, errors.New("ORM join requires an association and optional predicate query")
+		}
+		associationName, ok := remaining[0].Value.Data.(string)
+		if !ok {
+			return Value{}, errors.New("ORM join association must be a literal name")
+		}
+		association, ok := query.model.Association(associationName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no association %s", query.model.Name, associationName)
+		}
+		target, ok := e.ormRuntime().manifest.Model(association.TargetModel)
+		if !ok {
+			return Value{}, errors.New("ORM join target is not available")
+		}
+		var predicate *ormPredicate
+		if len(remaining) == 2 {
+			targetQuery, ok := remaining[1].Value.Data.(*ormQueryValue)
+			if !ok || targetQuery.model.Name != target.Name {
+				return Value{}, fmt.Errorf("ORM join %s requires a %s query", associationName, target.Name)
+			}
+			if targetQuery.transaction != nil {
+				return Value{}, errors.New("ORM join predicate query must not have a transaction scope; scope the base query instead")
+			}
+			if ormQueryModified(targetQuery) {
+				return Value{}, errors.New("ORM join predicate query accepts only where, not, and or")
+			}
+			predicate = targetQuery.predicate
+		}
+		kind := "INNER JOIN"
+		if name == "trb.orm.left_join" || name == "trb.orm.query.left_join" {
+			kind = "LEFT JOIN"
+		}
+		query.joins = append(query.joins, ormJoin{
+			kind: kind, table: target.Table,
+			sourceColumn: association.SourceColumn, targetColumn: association.TargetColumn,
+			predicate: predicate,
+		})
+		return ormQueryResult(typ, query), nil
 	case "trb.orm.not", "trb.orm.query.not":
 		predicate, err := ormPredicateFromArguments(remaining)
 		if err != nil {
@@ -348,7 +397,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			return Value{}, errors.New("ORM or requires conditions on both queries")
 		}
 		if ormQueryModified(query) || ormQueryModified(other) {
-			return Value{}, errors.New("ORM or requires unmodified predicate queries; apply order, limit, offset, lock, and preload after or")
+			return Value{}, errors.New("ORM or requires unmodified predicate queries; apply joins, order, limit, offset, lock, and preload after or")
 		}
 		if query.transaction != other.transaction {
 			return Value{}, errors.New("ORM or requires queries from the same transaction scope")
@@ -495,6 +544,7 @@ func cloneORMQuery(query *ormQueryValue) *ormQueryValue {
 	result := *query
 	result.orders = append([]ormOrder(nil), query.orders...)
 	result.preloads = append([]string(nil), query.preloads...)
+	result.joins = append([]ormJoin(nil), query.joins...)
 	return &result
 }
 
@@ -503,7 +553,7 @@ func ormQueryResult(typ types.Type, query *ormQueryValue) Value {
 }
 
 func ormQueryModified(query *ormQueryValue) bool {
-	return len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0
+	return len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 || len(query.joins) > 0
 }
 
 func ormPredicateFromArguments(arguments []evaluatedArgument) (*ormPredicate, error) {
@@ -563,6 +613,27 @@ func (e *Evaluator) ormStatement(query *ormQueryValue, projection string) (strin
 	runtime := e.ormRuntime()
 	statement := "SELECT " + projection + " FROM " + runtime.adapter.QuoteIdentifier(query.model.Table)
 	arguments := []any{}
+	for index, join := range query.joins {
+		if join.kind != "INNER JOIN" && join.kind != "LEFT JOIN" {
+			return "", nil, errors.New("unsupported ORM join kind")
+		}
+		alias := "__trb_join_" + strconv.Itoa(index)
+		key := "__trb_join_key"
+		subquery := "SELECT " + runtime.adapter.QuoteIdentifier(join.targetColumn) + " AS " + runtime.adapter.QuoteIdentifier(key) +
+			" FROM " + runtime.adapter.QuoteIdentifier(join.table)
+		if join.predicate != nil {
+			predicate, err := e.ormPredicateSQL(join.predicate, &arguments)
+			if err != nil {
+				return "", nil, err
+			}
+			if predicate != "" {
+				subquery += " WHERE " + predicate
+			}
+		}
+		statement += " " + join.kind + " (" + subquery + ") AS " + runtime.adapter.QuoteIdentifier(alias) +
+			" ON " + runtime.adapter.QuoteIdentifier(join.sourceColumn) + " = " + runtime.adapter.QuoteIdentifier(alias) +
+			"." + runtime.adapter.QuoteIdentifier(key)
+	}
 	if query.predicate != nil {
 		predicate, err := e.ormPredicateSQL(query.predicate, &arguments)
 		if err != nil {

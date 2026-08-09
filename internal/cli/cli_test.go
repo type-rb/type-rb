@@ -265,8 +265,10 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`
-		CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL, active BOOLEAN NOT NULL);
-		INSERT INTO products (name, price, active) VALUES ('Priority', 10.5, TRUE), ('Archive', NULL, FALSE);
+		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE products (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, name TEXT NOT NULL, price REAL, active BOOLEAN NOT NULL, FOREIGN KEY (category_id) REFERENCES categories(id));
+		INSERT INTO categories (id, name) VALUES (1, 'Featured'), (2, 'Archived');
+		INSERT INTO products (category_id, name, price, active) VALUES (1, 'Priority', 10.5, TRUE), (2, 'Archive', NULL, FALSE);
 	`); err != nil {
 		database.Close()
 		t.Fatal(err)
@@ -284,14 +286,17 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model } from trb/orm\n\nclass Product < Model\nend\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model, belongs_to } from trb/orm\n\nclass Category < Model\nend\n\nclass Product < Model\n\tbelongs_to(Category)\nend\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	input := strings.Join([]string{
-		"import { Product } from main",
+		"import { Category, Product } from main",
 		"import { Database, DbResult } from trb/orm",
 		"Product.where(id: [1, 2]).to_sql()",
+		`Product.join(:category, Category.where(name: "Featured")).to_sql()`,
+		`Product.join(:category, Category.where(name: "Featured")).count()`,
+		`Product.left_join(:category, Category.where(name: "Missing")).count()`,
 		`Product.exists?(name: "Priority")`,
 		"Product.where().order(id: :asc).pluck(:name)",
 		"Product.where(active: true).first()",
@@ -319,10 +324,13 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
 	want := strings.Join([]string{
-		`"SELECT \"id\", \"name\", \"price\", \"active\" FROM \"products\" WHERE \"id\" IN (?, ?)" : String`,
+		`"SELECT \"id\", \"category_id\", \"name\", \"price\", \"active\" FROM \"products\" WHERE \"id\" IN (?, ?)" : String`,
+		`"SELECT \"id\", \"category_id\", \"name\", \"price\", \"active\" FROM \"products\" INNER JOIN (SELECT \"id\" AS \"__trb_join_key\" FROM \"categories\" WHERE \"name\" = ?) AS \"__trb_join_0\" ON \"category_id\" = \"__trb_join_0\".\"__trb_join_key\"" : String`,
+		`DbResult::Ok(value: 1) : DbResult<Integer>`,
+		`DbResult::Ok(value: 2) : DbResult<Integer>`,
 		`DbResult::Ok(value: true) : DbResult<Boolean>`,
 		`DbResult::Ok(value: ["Priority", "Archive"]) : DbResult<Array<String>>`,
-		`DbResult::Ok(value: #<Product active: true, id: 1, name: "Priority", price: 10.5>) : DbResult<Product?>`,
+		`DbResult::Ok(value: #<Product active: true, category_id: 1, id: 1, name: "Priority", price: 10.5>) : DbResult<Product?>`,
 		`DbResult::Ok(value: 2) : DbResult<Integer>`,
 		`DbResult::Ok(value: 3) : DbResult<Integer>`,
 		`DbResult::Ok(value: 2) : DbResult<Integer>`,

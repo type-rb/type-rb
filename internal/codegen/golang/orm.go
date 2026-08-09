@@ -864,6 +864,18 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.line("type TrbOrmJoinPredicate func(arguments *[]any) string")
+	g.b.WriteByte('\n')
+	g.line("type TrbOrmJoin struct {")
+	g.indent++
+	g.line("Kind string")
+	g.line("Table string")
+	g.line("SourceColumn string")
+	g.line("TargetColumn string")
+	g.line("Predicate TrbOrmJoinPredicate")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 	g.line("func TrbOrmBeginTransaction() (*TrbOrmTransaction, *DbError) {")
 	g.indent++
 	g.line("database, err := TrbOrmDatabase()")
@@ -1051,6 +1063,7 @@ func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
 }
 
 func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter ormintegration.Adapter, model ormintegration.Model) {
+	g.requireImport("strconv", "")
 	conditionType := goORMConditionType(model)
 	predicateType := goORMPredicateType(model)
 	orderType := goORMOrderType(model)
@@ -1088,6 +1101,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("offset *int")
 	g.line("lock bool")
 	g.line("preloads []string")
+	g.line("joins []" + g.ormLifecycleAlias() + ".TrbOrmJoin")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1153,10 +1167,20 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("func " + goORMQueryOr(model) + "(left " + queryType + ", right " + queryType + ") " + queryType + " {")
 	g.indent++
 	g.line("if left.predicate == nil || right.predicate == nil { panic(\"ORM or requires conditions on both queries\") }")
-	g.line("if len(left.orders) > 0 || left.limit != nil || left.offset != nil || left.lock || len(left.preloads) > 0 || len(right.orders) > 0 || right.limit != nil || right.offset != nil || right.lock || len(right.preloads) > 0 { panic(\"ORM or requires unmodified predicate queries; apply order, limit, offset, lock, and preload after or\") }")
+	g.line("if len(left.orders) > 0 || left.limit != nil || left.offset != nil || left.lock || len(left.preloads) > 0 || len(left.joins) > 0 || len(right.orders) > 0 || right.limit != nil || right.offset != nil || right.lock || len(right.preloads) > 0 || len(right.joins) > 0 { panic(\"ORM or requires unmodified predicate queries; apply joins, order, limit, offset, lock, and preload after or\") }")
 	g.line("if left.transaction != right.transaction { panic(\"ORM or requires queries from the same transaction scope\") }")
 	g.line("left.predicate = " + goORMCombinePredicates(model) + "(\"or\", left.predicate, right.predicate)")
 	g.line("return left")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMJoin(model) + "(query " + queryType + ", join " + g.ormLifecycleAlias() + ".TrbOrmJoin) " + queryType + " {")
+	g.indent++
+	g.line("switch join.Kind { case \"INNER JOIN\", \"LEFT JOIN\": default: panic(\"unsupported ORM join kind\") }")
+	g.line("result := query")
+	g.line("result.joins = append([]" + g.ormLifecycleAlias() + ".TrbOrmJoin(nil), query.joins...)")
+	g.line("result.joins = append(result.joins, join)")
+	g.line("return result")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1213,6 +1237,14 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("panic(\"unsupported ORM predicate\")")
 	g.indent--
 	g.line("}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMJoinPredicate(model) + "(query " + queryType + ") " + g.ormLifecycleAlias() + ".TrbOrmJoinPredicate {")
+	g.indent++
+	g.line("if query.transaction != nil { panic(\"ORM join predicate query must not have a transaction scope; scope the base query instead\") }")
+	g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 || len(query.joins) > 0 { panic(\"ORM join predicate query accepts only where, not, and or\") }")
+	g.line("return func(arguments *[]any) string { return " + goORMPredicateSQL(model) + "(query.predicate, arguments) }")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1303,6 +1335,16 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent++
 	g.line("statement := \"SELECT \" + projection + " + strconv.Quote(statement))
 	g.line("arguments := []any{}")
+	g.line("for index, join := range query.joins {")
+	g.indent++
+	g.line("switch join.Kind { case \"INNER JOIN\", \"LEFT JOIN\": default: panic(\"unsupported ORM join kind\") }")
+	g.line("alias := \"__trb_join_\" + strconv.Itoa(index)")
+	g.line("key := \"__trb_join_key\"")
+	g.line("subquery := \"SELECT \" + trbOrmQuoteIdentifier(join.TargetColumn) + \" AS \" + trbOrmQuoteIdentifier(key) + \" FROM \" + trbOrmQuoteIdentifier(join.Table)")
+	g.line("if join.Predicate != nil { if predicate := join.Predicate(&arguments); predicate != \"\" { subquery += \" WHERE \" + predicate } }")
+	g.line("statement += \" \" + join.Kind + \" (\" + subquery + \") AS \" + trbOrmQuoteIdentifier(alias) + \" ON \" + trbOrmQuoteIdentifier(join.SourceColumn) + \" = \" + trbOrmQuoteIdentifier(alias) + \".\" + trbOrmQuoteIdentifier(key)")
+	g.indent--
+	g.line("}")
 	g.line("if query.predicate != nil { statement += \" WHERE \" + " + goORMPredicateSQL(model) + "(query.predicate, &arguments) }")
 	g.line("if len(query.orders) > 0 {")
 	g.indent++
@@ -1439,7 +1481,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.line("func " + goORMBatchLoader(model) + "(query " + queryType + ", after *" + g.goType(keyType) + ", size int) " + g.ormResultType(modelsType) + " {")
 		g.indent++
 		g.line("if size <= 0 { return " + g.ormResultErr(modelsType, g.ormErrorValue("InvalidData", "batch size must be greater than zero")) + " }")
-		g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock { return " + g.ormResultErr(modelsType, g.ormErrorValue("InvalidData", "batch queries do not accept order, limit, offset, or lock")) + " }")
+		g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.joins) > 0 { return " + g.ormResultErr(modelsType, g.ormErrorValue("InvalidData", "batch queries do not accept joins, order, limit, offset, or lock")) + " }")
 		g.line("if after != nil {")
 		g.indent++
 		g.line("query = " + goORMQueryWhere(model) + "(query, []string{" + strconv.Quote(batchKey.Name) + "}, []string{\">\"}, []any{*after})")

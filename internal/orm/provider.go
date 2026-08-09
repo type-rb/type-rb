@@ -56,6 +56,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
+		if join := joinDeclaration(model, "join", "trb.orm.join", true); join.Name != "" {
+			declared.ClassMembers["join"] = join
+		}
+		if join := joinDeclaration(model, "left_join", "trb.orm.left_join", true); join.Name != "" {
+			declared.ClassMembers["left_join"] = join
+		}
 		declared.ClassMembers["using"] = declaration.Member{
 			Name: "using", Kind: declaration.Method, Intrinsic: "trb.orm.using",
 			Parameters: []declaration.Parameter{{Name: "transaction", Type: types.FromName("Transaction")}},
@@ -121,6 +127,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.Name] = declared
 		query := declaration.NewType(model.QueryType, "")
 		query.InstanceMembers["where"] = whereDeclaration(model, "trb.orm.query.where", false)
+		if join := joinDeclaration(model, "join", "trb.orm.query.join", false); join.Name != "" {
+			query.InstanceMembers["join"] = join
+		}
+		if join := joinDeclaration(model, "left_join", "trb.orm.query.left_join", false); join.Name != "" {
+			query.InstanceMembers["left_join"] = join
+		}
 		query.InstanceMembers["not"] = notDeclaration(model, "trb.orm.query.not", false)
 		query.InstanceMembers["or"] = declaration.Member{
 			Name: "or", Kind: declaration.Method, Intrinsic: "trb.orm.query.or",
@@ -201,6 +213,35 @@ func transactionDeclaration(class bool) declaration.Member {
 			Return:     result, Structured: true,
 		},
 	}
+}
+
+func joinDeclaration(model Model, name, intrinsic string, class bool) declaration.Member {
+	member := declaration.Member{
+		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
+		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
+	}
+	for _, association := range model.Associations {
+		associationParameter := declaration.Parameter{
+			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
+		}
+		member.Alternatives = append(member.Alternatives,
+			declaration.Signature{
+				Parameters: []declaration.Parameter{associationParameter},
+				Return:     types.FromName(model.QueryType),
+			},
+			declaration.Signature{
+				Parameters: []declaration.Parameter{
+					associationParameter,
+					{Name: "query", Type: types.FromName(association.TargetQuery)},
+				},
+				Return: types.FromName(model.QueryType),
+			},
+		)
+	}
+	if len(member.Alternatives) == 0 {
+		return declaration.Member{}
+	}
+	return member
 }
 
 func scopeFindDeclaration(model Model, primaryKey Column) declaration.Member {

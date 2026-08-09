@@ -223,6 +223,16 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["where"] {
 				class.Body = append(class.Body, whereIRMethod(model, true))
 			}
+			if !existing["join"] {
+				if join := joinIRMethod(model, "join", true); join != nil {
+					class.Body = append(class.Body, join)
+				}
+			}
+			if !existing["left_join"] {
+				if join := joinIRMethod(model, "left_join", true); join != nil {
+					class.Body = append(class.Body, join)
+				}
+			}
 			if !existing["using"] {
 				class.Body = append(class.Body, &ir.Method{
 					Name: "using", External: true, Class: true,
@@ -444,6 +454,12 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "to_sql", External: true, ReturnType: types.FromName("String")},
 		&ir.Method{Name: "explain", External: true, ReturnType: dbResult(types.FromName("String"))},
 	}
+	if join := joinIRMethod(model, "join", false); join != nil {
+		methods = append(methods, join)
+	}
+	if join := joinIRMethod(model, "left_join", false); join != nil {
+		methods = append(methods, join)
+	}
 	for _, operation := range AggregateOperations() {
 		if aggregate := aggregateIRMethod(model, operation, false); aggregate != nil {
 			methods = append(methods, aggregate)
@@ -459,6 +475,31 @@ func queryIRMethods(model Model) []ir.Statement {
 		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))
 	}
 	return methods
+}
+
+func joinIRMethod(model Model, name string, class bool) *ir.Method {
+	method := &ir.Method{Name: name, External: true, Class: class, ReturnType: namedType(model.QueryType)}
+	for _, association := range model.Associations {
+		associationParameter := ir.Parameter{
+			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
+		}
+		method.Alternatives = append(method.Alternatives,
+			ir.MethodSignature{
+				Parameters: []ir.Parameter{associationParameter}, ReturnType: namedType(model.QueryType),
+			},
+			ir.MethodSignature{
+				Parameters: []ir.Parameter{
+					associationParameter,
+					{Name: "query", Type: types.FromName(association.TargetQuery)},
+				},
+				ReturnType: namedType(model.QueryType),
+			},
+		)
+	}
+	if len(method.Alternatives) == 0 {
+		return nil
+	}
+	return method
 }
 
 func ensureRuntimeTypes(program *ir.Program) {

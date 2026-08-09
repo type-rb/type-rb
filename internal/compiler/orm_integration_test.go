@@ -746,7 +746,7 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	for _, expected := range []string{
 		"TrbOrmFirstProduct(TrbOrmProductWhere", "func TrbOrmBatchProduct", "__trbBatchLoop", "break __trbBatchLoop", "TrbOrmBatchProduct",
 		"orm.DbResult[int]", "orm.NewDbResultOk[int]", "orm.NewDbResultErr[int]", "__trbBatchProcessed",
-		`"batch queries do not accept order, limit, offset, or lock"`, "reassigned = orm.NewDbResultOk[int]",
+		`"batch queries do not accept joins, order, limit, offset, or lock"`, "reassigned = orm.NewDbResultOk[int]",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated batch query is missing %q:\n%s", expected, output)
@@ -807,6 +807,8 @@ class Product < Model
 end
 
 def main()
+	puts(Product.join(:category, Category.where(name: "Books")).where(name: "TypeRB").all())
+	puts(Product.where(name: "TypeRB").left_join(:category).all())
 	case Product.where().preload(:category).all()
 	when DbResult::Ok(products)
 		products.each do |product|
@@ -847,6 +849,9 @@ end
 	}
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
+		`TrbOrmProductJoin(TrbOrmProductWhere`, `Kind: "INNER JOIN"`, `Kind: "LEFT JOIN"`,
+		`Table: "categories"`, `SourceColumn: "category_id"`, `TargetColumn: "id"`,
+		`TrbOrmCategoryJoinPredicate(TrbOrmCategoryWhere`, `__trb_join_key`,
 		`TrbOrmCategoryQueryWhere(TrbOrmCategoryUsing(product.TrbOrmTransaction()), []string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
 		`TrbOrmProductQueryWhere(TrbOrmProductUsing(category.TrbOrmTransaction()), []string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
 		`TrbOrmProductPreload`, `trbOrmPreloadProductCategory`, `trbOrmPreloadCategoryProducts`,
@@ -859,6 +864,40 @@ end
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
 		t.Fatalf("generated invalid association Go: %v\n%s", err, output)
+	}
+	compileInvalidJoin := func(expression string) error {
+		invalidSource := []byte(`import { Model, belongs_to } from trb/orm
+
+class Category < Model
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+
+def main()
+	query := ` + expression + `
+	puts(query.to_sql())
+end
+`)
+		_, err := CompileProject([]SourceUnit{{
+			Filename: filepath.Join(root, "src", "invalid.trb"), ModulePath: "invalid", Package: "main", Source: invalidSource,
+		}}, Options{
+			Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+		})
+		return err
+	}
+	for _, invalid := range []struct {
+		expression string
+		want       string
+	}{
+		{expression: `Product.join(:missing)`, want: `argument 1 to join() must be one of "category"`},
+		{expression: `Product.join(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
+	} {
+		if err := compileInvalidJoin(invalid.expression); err == nil || !strings.Contains(err.Error(), invalid.want) {
+			t.Fatalf("expected join diagnostic %q, got %v", invalid.want, err)
+		}
 	}
 }
 

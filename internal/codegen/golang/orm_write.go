@@ -425,7 +425,7 @@ func (g *generator) ormDeleteRuntime(adapter ormintegration.Adapter, model ormin
 func (g *generator) ormRelationWriteRuntime(adapter ormintegration.Adapter, model ormintegration.Model) {
 	integerType := types.FromName("Integer")
 	queryType := goORMQueryType(model)
-	invalidModifiers := "len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0"
+	invalidModifiers := "len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 || len(query.joins) > 0"
 	g.line("func " + goORMUpdateAll(model) + "(query " + queryType + ", columns []string, values []any) " + g.ormResultType(integerType) + " {")
 	g.indent++
 	g.line("if len(columns) == 0 { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update requires at least one value")) + " }")
