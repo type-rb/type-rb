@@ -63,6 +63,9 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if where.Parameters[0].Type.String() != "Array<Integer> | Integer | Range<Integer>" || where.Parameters[1].Type.String() != "Array<String> | String" {
 		t.Fatalf("where predicate input types do not include collections and ranges: %#v", where.Parameters)
 	}
+	if product.ClassMembers["find_by"].Return.String() != "DbResult<Product?>" || product.ClassMembers["exists?"].Return.String() != "DbResult<Boolean>" {
+		t.Fatalf("unexpected predicate terminal declarations: %#v", product.ClassMembers)
+	}
 	if product.ClassMembers["find"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
 	}
@@ -129,6 +132,9 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 	if query.InstanceMembers["not"].Intrinsic != "trb.orm.query.not" || query.InstanceMembers["or"].Parameters[0].Type.String() != "ProductQuery" {
 		t.Fatalf("unexpected predicate composition declarations: %#v", query.InstanceMembers)
+	}
+	if query.InstanceMembers["find_by"].Return.String() != "DbResult<Product?>" || query.InstanceMembers["exists?"].Return.String() != "DbResult<Boolean>" {
+		t.Fatalf("unexpected query predicate terminals: %#v", query.InstanceMembers)
 	}
 	for name, expected := range map[string]string{
 		"first": "DbResult<Product?>", "count": "DbResult<Integer>", "explain": "DbResult<String>",
@@ -242,8 +248,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 18 {
-		t.Fatalf("expected five fields and thirteen ORM methods, got %#v", product.Body)
+	if len(product.Body) != 20 {
+		t.Fatalf("expected five fields and fifteen ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -263,7 +269,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "not", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "not", "find_by", "exists?", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}
@@ -279,7 +285,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 			queryMethods[method.Name] = true
 		}
 	}
-	for _, name := range []string{"not", "or", "to_sql", "explain"} {
+	for _, name := range []string{"not", "or", "find_by", "exists?", "to_sql", "explain"} {
 		if !queryMethods[name] {
 			t.Fatalf("missing generated ORM query method %s: %#v", name, query.Body)
 		}

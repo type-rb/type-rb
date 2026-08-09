@@ -253,6 +253,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormWhere(call)
 	case "trb.orm.not":
 		return g.ormNot(call)
+	case "trb.orm.find_by":
+		return g.ormFindBy(call)
+	case "trb.orm.exists":
+		return g.ormExists(call)
 	case "trb.orm.find":
 		return g.ormFind(call)
 	case "trb.orm.build":
@@ -283,6 +287,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormQueryNot(call, arguments)
 	case "trb.orm.query.or":
 		return g.ormQueryOr(call, arguments)
+	case "trb.orm.query.find_by":
+		return g.ormQueryFindBy(call, arguments)
+	case "trb.orm.query.exists":
+		return g.ormQueryTerminal(call, arguments, goORMExists)
 	case "trb.orm.query.order":
 		return g.ormOrder(call, arguments)
 	case "trb.orm.query.limit":

@@ -51,6 +51,8 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
 		declared.ClassMembers["not"] = notDeclaration(model, "trb.orm.not", true)
+		declared.ClassMembers["find_by"] = findByDeclaration(model, "trb.orm.find_by", true)
+		declared.ClassMembers["exists?"] = existsDeclaration(model, "trb.orm.exists", true)
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
 			declared.ClassMembers["build"] = buildDeclaration(model, schema.Adapter)
@@ -105,6 +107,11 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			Name: "or", Kind: declaration.Method, Intrinsic: "trb.orm.query.or",
 			Parameters: []declaration.Parameter{{Name: "other", Type: types.FromName(model.QueryType)}},
 			Return:     types.FromName(model.QueryType), Provider: PackageName,
+		}
+		query.InstanceMembers["find_by"] = findByDeclaration(model, "trb.orm.query.find_by", false)
+		query.InstanceMembers["exists?"] = declaration.Member{
+			Name: "exists?", Kind: declaration.Method, Intrinsic: "trb.orm.query.exists",
+			Return: dbResult(types.FromName("Boolean")), Provider: PackageName,
 		}
 		query.InstanceMembers["order"] = orderDeclaration(model)
 		query.InstanceMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.query.limit", model.QueryType)
@@ -276,15 +283,33 @@ func whereDeclaration(model Model, intrinsic string, class bool) declaration.Mem
 }
 
 func notDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	return predicateDeclaration(model, "not", intrinsic, class, 1, 1)
+}
+
+func predicateDeclaration(model Model, name, intrinsic string, class bool, minimum, maximum int) declaration.Member {
 	parameters := make([]declaration.Parameter, 0, len(model.Columns))
 	for _, column := range model.Columns {
 		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true, Optional: true})
 	}
 	return declaration.Member{
-		Name: "not", Kind: declaration.Method, Intrinsic: intrinsic, Parameters: parameters,
-		MinimumArguments: 1, MaximumArguments: 1,
+		Name: name, Kind: declaration.Method, Intrinsic: intrinsic, Parameters: parameters,
+		MinimumArguments: minimum, MaximumArguments: maximum,
 		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
 	}
+}
+
+func findByDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	member := predicateDeclaration(model, "find_by", intrinsic, class, 1, 0)
+	result := types.FromName(model.Name)
+	result.Nullable = true
+	member.Return = dbResult(result)
+	return member
+}
+
+func existsDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	member := predicateDeclaration(model, "exists?", intrinsic, class, 0, 0)
+	member.Return = dbResult(types.FromName("Boolean"))
+	return member
 }
 
 func predicateValueType(column Column) types.Type {

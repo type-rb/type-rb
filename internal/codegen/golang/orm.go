@@ -42,6 +42,42 @@ func (g *generator) ormNot(call *ir.Call) string {
 	return g.ormModelQualifier(model) + goORMNot(model) + "(" + g.ormPredicateArguments(call) + ")"
 }
 
+func (g *generator) ormFindBy(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	qualifier := g.ormModelQualifier(model)
+	query := qualifier + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
+	return qualifier + goORMFirst(model) + "(" + query + ")"
+}
+
+func (g *generator) ormExists(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	qualifier := g.ormModelQualifier(model)
+	query := qualifier + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
+	return qualifier + goORMExists(model) + "(" + query + ")"
+}
+
 func (g *generator) ormFind(call *ir.Call) string {
 	member, ok := call.Callee.(*ir.Member)
 	if !ok || len(call.Arguments) != 1 {
@@ -325,6 +361,16 @@ func (g *generator) ormQueryOr(call *ir.Call, arguments []string) string {
 		return "nil"
 	}
 	return g.ormModelQualifier(model) + goORMQueryOr(model) + "(" + query + ", " + arguments[1] + ")"
+}
+
+func (g *generator) ormQueryFindBy(call *ir.Call, arguments []string) string {
+	model, query, ok := g.ormQueryModel(call, arguments)
+	if !ok {
+		return "nil"
+	}
+	qualifier := g.ormModelQualifier(model)
+	filtered := qualifier + goORMQueryWhere(model) + "(" + query + ", " + g.ormPredicateArguments(call) + ")"
+	return qualifier + goORMFirst(model) + "(" + filtered + ")"
 }
 
 func (g *generator) ormOrder(call *ir.Call, arguments []string) string {
@@ -1122,6 +1168,20 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+
+	booleanType := types.FromName("Boolean")
+	g.line("func " + goORMExists(model) + "(query " + queryType + ") " + g.ormResultType(booleanType) + " {")
+	g.indent++
+	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
+	g.line("if err != nil { return " + g.ormResultErr(booleanType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("statement, arguments := " + goORMStatement(model) + "(query, \"1\")")
+	g.line("row := database.QueryRow(\"SELECT EXISTS(\"+statement+\")\", arguments...)")
+	g.line("var exists bool")
+	g.line("if err := row.Scan(&exists); err != nil { return " + g.ormResultErr(booleanType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database existence query failed\")") + " }")
+	g.line("return " + g.ormResultOK(booleanType, "exists"))
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 }
 
 func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, adapter ormintegration.Adapter, model ormintegration.Model, association ormintegration.Association) {
@@ -1358,6 +1418,10 @@ func goORMDelete(model ormintegration.Model) string {
 
 func goORMCount(model ormintegration.Model) string {
 	return "TrbOrmCount" + goIdentifier(model.Name, true)
+}
+
+func goORMExists(model ormintegration.Model) string {
+	return "TrbOrmExists" + goIdentifier(model.Name, true)
 }
 
 func goORMToSQL(model ormintegration.Model) string {

@@ -182,6 +182,12 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["not"] {
 				class.Body = append(class.Body, notIRMethod(model, true))
 			}
+			if !existing["find_by"] {
+				class.Body = append(class.Body, findByIRMethod(model, true))
+			}
+			if !existing["exists?"] {
+				class.Body = append(class.Body, existsIRMethod(model, true))
+			}
 			if primaryKey, ok := model.PrimaryKey(); ok {
 				keyType := primaryKey.Type
 				keyType.Nullable = false
@@ -320,6 +326,8 @@ func queryIRMethods(model Model) []ir.Statement {
 		where,
 		not,
 		&ir.Method{Name: "or", External: true, Parameters: []ir.Parameter{{Name: "other", Type: namedType(model.QueryType)}}, ReturnType: namedType(model.QueryType)},
+		findByIRMethod(model, false),
+		&ir.Method{Name: "exists?", External: true, ReturnType: dbResult(types.FromName("Boolean"))},
 		order,
 		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "offset", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
@@ -410,7 +418,21 @@ func whereIRMethod(model Model, class bool) *ir.Method {
 }
 
 func notIRMethod(model Model, class bool) *ir.Method {
-	method := &ir.Method{Name: "not", External: true, Class: class, ReturnType: namedType(model.QueryType)}
+	return predicateIRMethod(model, "not", class, namedType(model.QueryType))
+}
+
+func findByIRMethod(model Model, class bool) *ir.Method {
+	result := namedType(model.Name)
+	result.Nullable = true
+	return predicateIRMethod(model, "find_by", class, dbResult(result))
+}
+
+func existsIRMethod(model Model, class bool) *ir.Method {
+	return predicateIRMethod(model, "exists?", class, dbResult(types.FromName("Boolean")))
+}
+
+func predicateIRMethod(model Model, name string, class bool, result types.Type) *ir.Method {
+	method := &ir.Method{Name: name, External: true, Class: class, ReturnType: result}
 	for _, column := range model.Columns {
 		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true})
 	}
