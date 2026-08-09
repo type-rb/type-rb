@@ -290,11 +290,14 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 
 	input := strings.Join([]string{
 		"import { Product } from main",
+		"import { DbResult } from trb/orm",
 		"Product.where(id: [1, 2]).to_sql()",
 		`Product.exists?(name: "Priority")`,
 		"Product.where().order(id: :asc).pluck(:name)",
 		"Product.where(active: true).first()",
 		"Product.where().count()",
+		"def first_product_name(): DbResult<String>\n\tproducts := Product.where(id: 1).all()?\n\treturn DbResult<String>::Ok(products[0].name)\nend",
+		"first_product_name()",
 		":quit",
 	}, "\n") + "\n"
 	var stdout, stderr bytes.Buffer
@@ -308,6 +311,7 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`DbResult::Ok(value: ["Priority", "Archive"]) : DbResult<Array<String>>`,
 		`DbResult::Ok(value: #<Product active: true, id: 1, name: "Priority", price: 10.5>) : DbResult<Product?>`,
 		`DbResult::Ok(value: 2) : DbResult<Integer>`,
+		`DbResult::Ok(value: "Priority") : DbResult<String>`,
 		"",
 	}, "\n")
 	if stdout.String() != want || stderr.Len() != 0 {

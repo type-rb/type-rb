@@ -123,28 +123,29 @@ func (s *scope) assign(name string, value Value) bool {
 }
 
 type Evaluator struct {
-	stdout      io.Writer
-	mode        string
-	context     context.Context
-	global      *scope
-	definitions map[string]any
-	moduleValue map[string]Value
-	orm         *ormRuntime
+	stdout           io.Writer
+	mode             string
+	context          context.Context
+	global           *scope
+	definitions      map[string]any
+	moduleValue      map[string]Value
+	runtimeProviders []runtimeProvider
 }
 
 func NewEvaluator(stdout io.Writer, mode string) *Evaluator {
 	return &Evaluator{
-		stdout:      stdout,
-		mode:        mode,
-		context:     context.Background(),
-		global:      &scope{values: map[string]Value{}},
-		definitions: map[string]any{},
-		moduleValue: map[string]Value{},
+		stdout:           stdout,
+		mode:             mode,
+		context:          context.Background(),
+		global:           &scope{values: map[string]Value{}},
+		definitions:      map[string]any{},
+		moduleValue:      map[string]Value{},
+		runtimeProviders: newRuntimeProviders(),
 	}
 }
 
 func (e *Evaluator) LoadProject(programs []*ir.Program, sessionModule string) error {
-	if err := e.loadORMRuntime(programs); err != nil {
+	if err := e.configureRuntimeProviders(programs); err != nil {
 		return err
 	}
 	for _, program := range programs {
@@ -737,12 +738,18 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		}
 		return Value{Type: node.ExprType(), Data: &rangeValue{Start: startValue, End: endValue, Exclusive: node.Exclusive}}, nil
 	case *ir.Member:
-		if node.Reference != nil && node.Reference.Intrinsic == "trb.orm.column" {
+		if node.Reference != nil && node.Reference.Intrinsic != "" && node.Reference.ExportKind == "property" {
 			receiver, err := e.expression(node.Receiver, module, sc)
 			if err != nil {
 				return Value{}, err
 			}
-			return e.ormColumn(receiver, node.Name)
+			value, handled, err := e.runtimeCall(runtimeInvocation{
+				Name: node.Reference.Intrinsic, Arguments: []evaluatedArgument{{Value: receiver}},
+				Type: node.ExprType(), MemberName: node.Name,
+			})
+			if handled {
+				return value, err
+			}
 		}
 		if node.Reference != nil && node.Reference.Intrinsic != "" {
 			return Value{Type: node.ExprType(), Data: &callable{Intrinsic: node.Reference.Intrinsic, Module: module}}, nil

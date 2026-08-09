@@ -1,0 +1,63 @@
+package repl
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/types"
+)
+
+type testRuntimeProvider struct {
+	configured bool
+	closed     bool
+	invocation runtimeInvocation
+}
+
+func (*testRuntimeProvider) Name() string { return "test" }
+
+func (*testRuntimeProvider) Handles(intrinsic string) bool { return intrinsic == "test.echo" }
+
+func (provider *testRuntimeProvider) Configure(_ []*ir.Program) error {
+	provider.configured = true
+	return nil
+}
+
+func (provider *testRuntimeProvider) Call(_ *Evaluator, invocation runtimeInvocation) (Value, error) {
+	provider.invocation = invocation
+	if len(invocation.Arguments) != 1 {
+		return Value{}, errors.New("test.echo expects one argument")
+	}
+	return invocation.Arguments[0].Value, nil
+}
+
+func (provider *testRuntimeProvider) Close() error {
+	provider.closed = true
+	return nil
+}
+
+func TestRuntimeProviderOwnsConfigurationInvocationAndLifecycle(t *testing.T) {
+	provider := &testRuntimeProvider{}
+	evaluator := NewEvaluator(nil, "go")
+	evaluator.runtimeProviders = []runtimeProvider{provider}
+	if err := evaluator.configureRuntimeProviders([]*ir.Program{{Mode: "go"}}); err != nil {
+		t.Fatal(err)
+	}
+	argument := Value{Type: types.FromName("String"), Data: "value"}
+	value, handled, err := evaluator.runtimeCall(runtimeInvocation{
+		Name: "test.echo", Arguments: []evaluatedArgument{{Value: argument}},
+		Type: types.FromName("String"), MemberName: "echo",
+	})
+	if err != nil || !handled || value.Data != "value" {
+		t.Fatalf("runtime call=(%#v, %t, %v)", value, handled, err)
+	}
+	if !provider.configured || provider.invocation.MemberName != "echo" {
+		t.Fatalf("provider did not receive its configuration and invocation: %#v", provider)
+	}
+	if err := evaluator.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !provider.closed {
+		t.Fatal("provider was not closed")
+	}
+}

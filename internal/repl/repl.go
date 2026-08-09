@@ -139,7 +139,7 @@ func Run(options Options) error {
 				evaluator.LoadDefinitions(program)
 			}
 		}
-		if err := evaluator.loadORMRuntime(next.Programs); err != nil {
+		if err := evaluator.configureRuntimeProviders(next.Programs); err != nil {
 			printReplError(options.Stderr, options.Interactive, err.Error())
 			continue
 		}

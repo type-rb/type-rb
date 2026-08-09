@@ -56,7 +56,21 @@ type ormFailure struct {
 
 func (failure *ormFailure) Error() string { return failure.message }
 
-func (e *Evaluator) loadORMRuntime(programs []*ir.Program) error {
+type ormRuntimeProvider struct {
+	runtime *ormRuntime
+}
+
+func init() {
+	registerRuntimeProvider(func() runtimeProvider { return &ormRuntimeProvider{} })
+}
+
+func (*ormRuntimeProvider) Name() string { return "trb/orm" }
+
+func (*ormRuntimeProvider) Handles(intrinsic string) bool {
+	return strings.HasPrefix(intrinsic, "trb.orm.")
+}
+
+func (provider *ormRuntimeProvider) Configure(programs []*ir.Program) error {
 	var manifest *ormintegration.Manifest
 	for _, program := range programs {
 		if current := ormintegration.ManifestFrom(program.Extensions); current != nil {
@@ -71,32 +85,50 @@ func (e *Evaluator) loadORMRuntime(programs []*ir.Program) error {
 	if err != nil {
 		return err
 	}
-	if e.orm != nil && e.orm.manifest.Adapter == manifest.Adapter &&
-		e.orm.manifest.Database == manifest.Database &&
-		e.orm.manifest.DatabaseEnvironment == manifest.DatabaseEnvironment {
-		e.orm.manifest = manifest
-		e.orm.adapter = adapter
+	if provider.runtime != nil && provider.runtime.manifest.Adapter == manifest.Adapter &&
+		provider.runtime.manifest.Database == manifest.Database &&
+		provider.runtime.manifest.DatabaseEnvironment == manifest.DatabaseEnvironment {
+		provider.runtime.manifest = manifest
+		provider.runtime.adapter = adapter
 		return nil
 	}
-	if e.orm != nil && e.orm.database != nil {
-		_ = e.orm.database.Close()
+	if provider.runtime != nil && provider.runtime.database != nil {
+		_ = provider.runtime.database.Close()
 	}
-	e.orm = &ormRuntime{manifest: manifest, adapter: adapter}
+	provider.runtime = &ormRuntime{manifest: manifest, adapter: adapter}
 	return nil
 }
 
-func (e *Evaluator) Close() error {
-	if e.orm == nil || e.orm.database == nil {
+func (provider *ormRuntimeProvider) Call(evaluator *Evaluator, invocation runtimeInvocation) (Value, error) {
+	return evaluator.ormIntrinsic(invocation.Name, invocation.Arguments, invocation.Type, invocation.Call, invocation.MemberName)
+}
+
+func (provider *ormRuntimeProvider) Close() error {
+	if provider.runtime == nil || provider.runtime.database == nil {
 		return nil
 	}
-	err := e.orm.database.Close()
-	e.orm.database = nil
+	err := provider.runtime.database.Close()
+	provider.runtime.database = nil
 	return err
 }
 
-func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ types.Type, call *ir.Call) (Value, error) {
-	if e.orm == nil {
+func (e *Evaluator) ormRuntime() *ormRuntime {
+	provider, _ := e.runtimeProvider("trb/orm").(*ormRuntimeProvider)
+	if provider == nil {
+		return nil
+	}
+	return provider.runtime
+}
+
+func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ types.Type, call *ir.Call, memberName string) (Value, error) {
+	if e.ormRuntime() == nil {
 		return Value{}, errors.New("trb/orm is not configured for this REPL project")
+	}
+	if name == "trb.orm.column" {
+		if len(arguments) != 1 {
+			return Value{}, errors.New("ORM column access requires a model value")
+		}
+		return e.ormColumn(arguments[0].Value, memberName)
 	}
 	query, remaining, err := e.ormQueryReceiver(arguments)
 	if err != nil {
@@ -233,8 +265,6 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		return e.ormAssociationQuery(typ, query.model, arguments[0].Value, call)
 	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many":
 		return e.ormLoadedAssociation(typ, arguments[0].Value, call)
-	case "trb.orm.column":
-		return Value{}, errors.New("ORM columns are values, not callable methods")
 	default:
 		return Value{}, fmt.Errorf("%s is type-checked, but ORM writes and batch iteration are not executable in the REPL yet; use trb run", name)
 	}
@@ -244,12 +274,13 @@ func (e *Evaluator) ormQueryReceiver(arguments []evaluatedArgument) (*ormQueryVa
 	if len(arguments) == 0 {
 		return nil, nil, errors.New("ORM operation is missing its receiver")
 	}
+	runtime := e.ormRuntime()
 	switch receiver := arguments[0].Value.Data.(type) {
 	case *typeValue:
 		if receiver.Class == nil {
 			return nil, nil, errors.New("ORM operation requires a model class")
 		}
-		model, ok := e.orm.manifest.Model(receiver.Class.Node.Name)
+		model, ok := runtime.manifest.Model(receiver.Class.Node.Name)
 		if !ok {
 			return nil, nil, fmt.Errorf("ORM model %s is not available", receiver.Class.Node.Name)
 		}
@@ -257,7 +288,7 @@ func (e *Evaluator) ormQueryReceiver(arguments []evaluatedArgument) (*ormQueryVa
 	case *ormQueryValue:
 		return cloneORMQuery(receiver), arguments[1:], nil
 	case *objectInstance:
-		model, ok := e.orm.manifest.Model(receiver.Definition.Node.Name)
+		model, ok := runtime.manifest.Model(receiver.Definition.Node.Name)
 		if !ok {
 			return nil, nil, fmt.Errorf("ORM model %s is not available", receiver.Definition.Node.Name)
 		}
@@ -336,7 +367,8 @@ func ormCombinePredicates(kind string, left, right *ormPredicate) *ormPredicate 
 }
 
 func (e *Evaluator) ormStatement(query *ormQueryValue, projection string) (string, []any, error) {
-	statement := "SELECT " + projection + " FROM " + e.orm.adapter.QuoteIdentifier(query.model.Table)
+	runtime := e.ormRuntime()
+	statement := "SELECT " + projection + " FROM " + runtime.adapter.QuoteIdentifier(query.model.Table)
 	arguments := []any{}
 	if query.predicate != nil {
 		predicate, err := e.ormPredicateSQL(query.predicate, &arguments)
@@ -348,18 +380,18 @@ func (e *Evaluator) ormStatement(query *ormQueryValue, projection string) (strin
 	if len(query.orders) > 0 {
 		orders := make([]string, len(query.orders))
 		for index, order := range query.orders {
-			orders[index] = e.orm.adapter.QuoteIdentifier(order.column) + " " + strings.ToUpper(order.direction)
+			orders[index] = runtime.adapter.QuoteIdentifier(order.column) + " " + strings.ToUpper(order.direction)
 		}
 		statement += " ORDER BY " + strings.Join(orders, ", ")
 	}
 	if query.limit != nil {
-		statement += " LIMIT " + e.orm.adapter.Placeholder(len(arguments)+1)
+		statement += " LIMIT " + runtime.adapter.Placeholder(len(arguments)+1)
 		arguments = append(arguments, *query.limit)
 	} else if query.offset != nil {
-		statement += e.orm.adapter.OffsetNoLimit
+		statement += runtime.adapter.OffsetNoLimit
 	}
 	if query.offset != nil {
-		statement += " OFFSET " + e.orm.adapter.Placeholder(len(arguments)+1)
+		statement += " OFFSET " + runtime.adapter.Placeholder(len(arguments)+1)
 		arguments = append(arguments, *query.offset)
 	}
 	return statement, arguments, nil
@@ -369,10 +401,11 @@ func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (
 	if predicate == nil {
 		return "", nil
 	}
+	runtime := e.ormRuntime()
 	switch predicate.kind {
 	case "atom":
 		condition := predicate.condition
-		column := e.orm.adapter.QuoteIdentifier(condition.column)
+		column := runtime.adapter.QuoteIdentifier(condition.column)
 		switch condition.operator {
 		case "IN":
 			array, ok := condition.value.Data.(*arrayValue)
@@ -384,7 +417,7 @@ func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (
 			}
 			placeholders := make([]string, len(array.Items))
 			for index, item := range array.Items {
-				placeholders[index] = e.orm.adapter.Placeholder(len(*arguments) + 1)
+				placeholders[index] = runtime.adapter.Placeholder(len(*arguments) + 1)
 				*arguments = append(*arguments, ormDatabaseValue(item))
 			}
 			return column + " IN (" + strings.Join(placeholders, ", ") + ")", nil
@@ -393,9 +426,9 @@ func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (
 			if !ok {
 				return "", errors.New("ORM range predicate requires a Range")
 			}
-			lower := e.orm.adapter.Placeholder(len(*arguments) + 1)
+			lower := runtime.adapter.Placeholder(len(*arguments) + 1)
 			*arguments = append(*arguments, bounds.Start)
-			upper := e.orm.adapter.Placeholder(len(*arguments) + 1)
+			upper := runtime.adapter.Placeholder(len(*arguments) + 1)
 			*arguments = append(*arguments, bounds.End)
 			upperOperator := "<="
 			if condition.operator == "RANGE_EXCLUSIVE" {
@@ -412,7 +445,7 @@ func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (
 		if condition.value.Data == nil && condition.operator == "!=" {
 			return column + " IS NOT NULL", nil
 		}
-		placeholder := e.orm.adapter.Placeholder(len(*arguments) + 1)
+		placeholder := runtime.adapter.Placeholder(len(*arguments) + 1)
 		*arguments = append(*arguments, ormDatabaseValue(condition.value))
 		return column + " " + condition.operator + " " + placeholder, nil
 	case "and", "or":
@@ -453,18 +486,19 @@ func ormDatabaseValue(value Value) any {
 }
 
 func (e *Evaluator) ormDatabase() (*sql.DB, *ormFailure) {
-	if e.orm.database != nil {
-		return e.orm.database, nil
+	runtime := e.ormRuntime()
+	if runtime.database != nil {
+		return runtime.database, nil
 	}
-	databaseSource := e.orm.manifest.Database
-	if environment := e.orm.manifest.DatabaseEnvironment; environment != "" {
+	databaseSource := runtime.manifest.Database
+	if environment := runtime.manifest.DatabaseEnvironment; environment != "" {
 		value, found := os.LookupEnv(environment)
 		if !found || strings.TrimSpace(value) == "" {
 			return nil, &ormFailure{kind: "Connection", message: "database environment variable is not set or empty"}
 		}
 		databaseSource = value
 	}
-	database, err := sql.Open(e.orm.adapter.DriverName, databaseSource)
+	database, err := sql.Open(runtime.adapter.DriverName, databaseSource)
 	if err == nil {
 		err = database.PingContext(e.context)
 	}
@@ -474,7 +508,7 @@ func (e *Evaluator) ormDatabase() (*sql.DB, *ormFailure) {
 		}
 		return nil, &ormFailure{kind: "Connection", message: "database connection failed"}
 	}
-	e.orm.database = database
+	runtime.database = database
 	return database, nil
 }
 
@@ -747,7 +781,7 @@ func (e *Evaluator) ormLoadProjection(query *ormQueryValue, column ormintegratio
 	if failure != nil {
 		return nil, failure
 	}
-	statement, arguments, err := e.ormStatement(query, e.orm.adapter.QuoteIdentifier(column.Name))
+	statement, arguments, err := e.ormStatement(query, e.ormRuntime().adapter.QuoteIdentifier(column.Name))
 	if err != nil {
 		return nil, &ormFailure{kind: "InvalidData", message: err.Error()}
 	}
@@ -780,7 +814,8 @@ func (e *Evaluator) ormExplain(query *ormQueryValue) (string, *ormFailure) {
 		return "", &ormFailure{kind: "InvalidData", message: err.Error()}
 	}
 	prefix := "EXPLAIN QUERY PLAN "
-	switch e.orm.adapter.ExplainStyle {
+	runtime := e.ormRuntime()
+	switch runtime.adapter.ExplainStyle {
 	case ormintegration.ExplainText:
 		prefix = "EXPLAIN "
 	case ormintegration.ExplainJSON:
@@ -809,7 +844,7 @@ func (e *Evaluator) ormExplain(query *ormQueryValue) (string, *ormFailure) {
 		if err := rows.Scan(targets...); err != nil {
 			return "", &ormFailure{kind: "InvalidData", message: "database explain result was invalid"}
 		}
-		if e.orm.adapter.ExplainStyle == ormintegration.ExplainSQLite && len(raw) >= 4 {
+		if runtime.adapter.ExplainStyle == ormintegration.ExplainSQLite && len(raw) >= 4 {
 			details = append(details, ormExplainText(raw[3]))
 			continue
 		}
@@ -837,7 +872,7 @@ func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, name 
 	if !ok || !association.Preloadable {
 		return &ormFailure{kind: "InvalidData", message: "unsupported ORM preload " + name}
 	}
-	target, ok := e.orm.manifest.Model(association.TargetModel)
+	target, ok := e.ormRuntime().manifest.Model(association.TargetModel)
 	if !ok {
 		return &ormFailure{kind: "InvalidData", message: "ORM association target is not available"}
 	}
@@ -912,7 +947,7 @@ func (e *Evaluator) ormAssociationQuery(typ types.Type, model ormintegration.Mod
 	if !ok {
 		return Value{}, fmt.Errorf("ORM model %s has no association %s", model.Name, name)
 	}
-	target, ok := e.orm.manifest.Model(association.TargetModel)
+	target, ok := e.ormRuntime().manifest.Model(association.TargetModel)
 	if !ok {
 		return Value{}, errors.New("ORM association target is not available")
 	}
@@ -961,7 +996,7 @@ func (e *Evaluator) ormColumn(receiver Value, name string) (Value, error) {
 func (e *Evaluator) ormModelProjection(model ormintegration.Model) string {
 	columns := make([]string, len(model.Columns))
 	for index, column := range model.Columns {
-		columns[index] = e.orm.adapter.QuoteIdentifier(column.Name)
+		columns[index] = e.ormRuntime().adapter.QuoteIdentifier(column.Name)
 	}
 	return strings.Join(columns, ", ")
 }

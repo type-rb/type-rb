@@ -33,8 +33,10 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 }
 
 func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, typ types.Type, codec *ir.CodecSchema, call *ir.Call) (Value, error) {
-	if strings.HasPrefix(name, "trb.orm.") {
-		return e.ormIntrinsic(name, arguments, typ, call)
+	if value, handled, err := e.runtimeCall(runtimeInvocation{
+		Name: name, Arguments: arguments, Type: typ, Codec: codec, Call: call,
+	}); handled {
+		return value, err
 	}
 	values := func() []Value {
 		result := make([]Value, len(arguments))
