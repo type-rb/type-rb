@@ -142,6 +142,8 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "all", External: true, ReturnType: arrayOf(model.Name)},
 		&ir.Method{Name: "first", External: true, ReturnType: firstType},
 		&ir.Method{Name: "count", External: true, ReturnType: types.FromName("Integer")},
+		&ir.Method{Name: "to_sql", External: true, ReturnType: types.FromName("String")},
+		&ir.Method{Name: "explain", External: true, ReturnType: types.FromName("String")},
 	}
 	if _, ok := model.BatchKey(); ok {
 		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))

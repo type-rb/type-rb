@@ -264,6 +264,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormQueryTerminal(call, arguments, goORMFirst)
 	case "trb.orm.query.count":
 		return g.ormQueryTerminal(call, arguments, goORMCount)
+	case "trb.orm.query.to_sql":
+		return g.ormQueryTerminal(call, arguments, goORMToSQL)
+	case "trb.orm.query.explain":
+		return g.ormQueryTerminal(call, arguments, goORMExplain)
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"

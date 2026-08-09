@@ -394,6 +394,38 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, model orm
 	g.line("}")
 	g.b.WriteByte('\n')
 
+	g.line("func " + goORMToSQL(model) + "(query " + queryType + ") string {")
+	g.indent++
+	g.line("statement, _ := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
+	g.line("return statement")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+
+	g.line("func " + goORMExplain(model) + "(query " + queryType + ") string {")
+	g.indent++
+	g.line("database, err := sql.Open(" + strconv.Quote(manifest.Adapter) + ", " + strconv.Quote(manifest.Database) + ")")
+	g.line("if err != nil { panic(err) }")
+	g.line("defer database.Close()")
+	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
+	g.line("rows, err := database.Query(\"EXPLAIN QUERY PLAN \"+statement, arguments...)")
+	g.line("if err != nil { panic(err) }")
+	g.line("defer rows.Close()")
+	g.line("details := []string{}")
+	g.line("for rows.Next() {")
+	g.indent++
+	g.line("var id, parent, unused int")
+	g.line("var detail string")
+	g.line("if err := rows.Scan(&id, &parent, &unused, &detail); err != nil { panic(err) }")
+	g.line("details = append(details, detail)")
+	g.indent--
+	g.line("}")
+	g.line("if err := rows.Err(); err != nil { panic(err) }")
+	g.line("return strings.Join(details, \"\\n\")")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+
 	g.line("func " + goORMLoader(model) + "(query " + queryType + ") []*" + goIdentifier(model.Name, true) + " {")
 	g.indent++
 	g.line("database, err := sql.Open(" + strconv.Quote(manifest.Adapter) + ", " + strconv.Quote(manifest.Database) + ")")
@@ -504,6 +536,14 @@ func goORMFirst(model ormintegration.Model) string {
 
 func goORMCount(model ormintegration.Model) string {
 	return "TrbOrmCount" + goIdentifier(model.Name, true)
+}
+
+func goORMToSQL(model ormintegration.Model) string {
+	return "TrbOrmToSQL" + goIdentifier(model.Name, true)
+}
+
+func goORMExplain(model ormintegration.Model) string {
+	return "TrbOrmExplain" + goIdentifier(model.Name, true)
 }
 
 func goORMBatchLoader(model ormintegration.Model) string {

@@ -65,6 +65,11 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if findInBatches.Block == nil || findInBatches.Block.Parameters[0].String() != "Array<Product>" {
 		t.Fatalf("unexpected find_in_batches declaration: %#v", findInBatches)
 	}
+	for _, name := range []string{"to_sql", "explain"} {
+		if query.InstanceMembers[name].Return.String() != "String" {
+			t.Fatalf("unexpected %s declaration: %#v", name, query.InstanceMembers[name])
+		}
+	}
 }
 
 func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
@@ -103,6 +108,18 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	query, ok := lowered.Statements[1].(*ir.Class)
 	if !ok || !query.External || query.Name != "ProductQuery" {
 		t.Fatalf("unexpected query class: %#v", lowered.Statements[1])
+	}
+	queryMethods := map[string]bool{}
+	for _, statement := range query.Body {
+		method, ok := statement.(*ir.Method)
+		if ok {
+			queryMethods[method.Name] = true
+		}
+	}
+	for _, name := range []string{"to_sql", "explain"} {
+		if !queryMethods[name] {
+			t.Fatalf("missing generated ORM query method %s: %#v", name, query.Body)
+		}
 	}
 }
 

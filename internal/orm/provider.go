@@ -52,6 +52,8 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		query.InstanceMembers["count"] = declaration.Member{
 			Name: "count", Kind: declaration.Method, Intrinsic: "trb.orm.query.count", Return: types.FromName("Integer"), Provider: PackageName,
 		}
+		query.InstanceMembers["to_sql"] = stringQueryDeclaration("to_sql", "trb.orm.query.to_sql")
+		query.InstanceMembers["explain"] = stringQueryDeclaration("explain", "trb.orm.query.explain")
 		if _, ok := model.BatchKey(); ok {
 			query.InstanceMembers["find_each"] = batchDeclaration(model, "find_each", false, false)
 			query.InstanceMembers["find_in_batches"] = batchDeclaration(model, "find_in_batches", false, true)
@@ -117,6 +119,13 @@ func integerQueryDeclaration(name, intrinsic, queryType string) declaration.Memb
 		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
 		Parameters: []declaration.Parameter{{Name: "count", Type: types.FromName("Integer")}},
 		Return:     types.FromName(queryType), Provider: PackageName,
+	}
+}
+
+func stringQueryDeclaration(name, intrinsic string) declaration.Member {
+	return declaration.Member{
+		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
+		Return: types.FromName("String"), Provider: PackageName,
 	}
 }
 

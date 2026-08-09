@@ -108,7 +108,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 			queryMethods[member.Name] = true
 		}
 	}
-	for _, name := range []string{"where", "order", "limit", "offset", "all", "first", "count", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
 		if !queryMethods[name] {
 			t.Fatalf("ProductQuery.%s is missing from completion context: %#v", name, context.TypeMembers["ProductQuery"])
 		}
@@ -209,14 +209,14 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
 		})
 	}
-	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).where(name: \"Widget\").order(price: :desc).limit(5).offset(1)\n\tputs(query.count())\n\tputs(query.first())\n\tquery.all()")
+	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).where(name: \"Widget\").order(price: :desc).limit(5).offset(1)\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tquery.all()")
 	if err != nil {
 		t.Fatal(err)
 	}
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
 		"TrbOrmProductQueryWhere", "TrbOrmProductOrder", "TrbOrmProductLimit", "TrbOrmProductOffset",
-		"TrbOrmCountProduct", "TrbOrmFirstProduct", `statement += " ORDER BY "`,
+		"TrbOrmToSQLProduct", "TrbOrmExplainProduct", "EXPLAIN QUERY PLAN", "TrbOrmCountProduct", "TrbOrmFirstProduct", `statement += " ORDER BY "`,
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated composed query is missing %q:\n%s", expected, output)
@@ -228,6 +228,8 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	}{
 		{body: "\tProduct.where().order(price: :sideways)", want: `must be one of "asc", "desc"`},
 		{body: "\tProduct.where().limit(1.5)", want: "has type Float, expected Integer"},
+		{body: "\tProduct.where().to_sql(1)", want: "to_sql() expects at most 0 arguments, got 1"},
+		{body: "\tProduct.where().explain(1)", want: "explain() expects at most 0 arguments, got 1"},
 	}
 	for _, test := range invalid {
 		if _, err := compile(test.body); err == nil || !strings.Contains(err.Error(), test.want) {
