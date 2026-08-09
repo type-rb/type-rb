@@ -52,6 +52,9 @@ type ormSubqueryValue struct {
 type ormGroupedValue struct {
 	query            *ormQueryValue
 	column           ormintegration.Column
+	orders           []ormOrder
+	limit            *int64
+	offset           *int64
 	havingExpression string
 	havingOperator   string
 	havingValue      Value
@@ -389,10 +392,19 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		if !ok {
 			return Value{}, fmt.Errorf("ORM model %s has no column %s", query.model.Name, columnName)
 		}
-		if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 {
-			return Value{}, errors.New("ORM group currently accepts predicates and joins, but not order, limit, offset, lock, or preload")
+		if query.lock || len(query.preloads) > 0 {
+			return Value{}, errors.New("ORM group does not accept lock or preload")
 		}
-		return Value{Type: typ, Data: &ormGroupedValue{query: query, column: column}}, nil
+		for _, order := range query.orders {
+			if order.column != column.Name {
+				return Value{}, errors.New("ORM grouped order must use the group key")
+			}
+		}
+		grouped := &ormGroupedValue{query: query, column: column, orders: append([]ormOrder(nil), query.orders...), limit: query.limit, offset: query.offset}
+		grouped.query.orders = nil
+		grouped.query.limit = nil
+		grouped.query.offset = nil
+		return Value{Type: typ, Data: grouped}, nil
 	case "trb.orm.join", "trb.orm.left_join", "trb.orm.query.join", "trb.orm.query.left_join":
 		if len(remaining) < 1 || len(remaining) > 2 {
 			return Value{}, errors.New("ORM join requires an association and optional predicate query")
@@ -672,6 +684,23 @@ func (e *Evaluator) ormGroupedIntrinsic(name string, arguments []evaluatedArgume
 	if copy.havingExpression != "" {
 		statement += " HAVING " + copy.havingExpression + " " + copy.havingOperator + " " + e.ormRuntime().adapter.Placeholder(len(queryArguments)+1)
 		queryArguments = append(queryArguments, copy.havingValue.Data)
+	}
+	if len(copy.orders) > 0 {
+		orders := make([]string, len(copy.orders))
+		for index, order := range copy.orders {
+			orders[index] = e.ormRuntime().adapter.QuoteIdentifier("trb_group") + " " + strings.ToUpper(order.direction)
+		}
+		statement += " ORDER BY " + strings.Join(orders, ", ")
+	}
+	if copy.limit != nil {
+		statement += " LIMIT " + e.ormRuntime().adapter.Placeholder(len(queryArguments)+1)
+		queryArguments = append(queryArguments, *copy.limit)
+	} else if copy.offset != nil {
+		statement += e.ormRuntime().adapter.OffsetNoLimit
+	}
+	if copy.offset != nil {
+		statement += " OFFSET " + e.ormRuntime().adapter.Placeholder(len(queryArguments)+1)
+		queryArguments = append(queryArguments, *copy.offset)
 	}
 	database, failure := e.ormQueryExecutor(copy.query)
 	if failure != nil {

@@ -98,12 +98,14 @@ func (g *generator) ormGroupAggregate(call *ir.Call, arguments []string, operati
 func (g *generator) ormGroupRuntime(adapter ormintegration.Adapter, model ormintegration.Model, groupColumn ormintegration.Column) {
 	groupType := goORMGroupType(model, groupColumn)
 	queryType := goORMQueryType(model)
-	g.line("type " + groupType + " struct { query " + queryType + "; havingExpression string; havingOperator string; havingValue any }")
+	g.line("type " + groupType + " struct { query " + queryType + "; orders []" + goORMOrderType(model) + "; limit *int; offset *int; havingExpression string; havingOperator string; havingValue any }")
 	g.b.WriteByte('\n')
 	g.line("func " + goORMGroup(model, groupColumn) + "(query " + queryType + ") " + groupType + " {")
 	g.indent++
-	g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 { panic(\"ORM group currently accepts predicates and joins, but not order, limit, offset, lock, or preload\") }")
-	g.line("return " + groupType + "{query: query}")
+	g.line("if query.lock || len(query.preloads) > 0 { panic(\"ORM group does not accept lock or preload\") }")
+	g.line("for _, order := range query.orders { if order.column != " + strconv.Quote(groupColumn.Name) + " { panic(\"ORM grouped order must use the group key\") } }")
+	g.line("grouped := " + groupType + "{query: query, orders: append([]" + goORMOrderType(model) + "(nil), query.orders...), limit: query.limit, offset: query.offset}")
+	g.line("grouped.query.orders = nil; grouped.query.limit = nil; grouped.query.offset = nil; return grouped")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -140,6 +142,9 @@ func (g *generator) ormGroupedAggregateRuntime(adapter ormintegration.Adapter, m
 	g.line("statement, arguments := " + goORMStatement(model) + "(grouped.query, projection)")
 	g.line("statement = \"SELECT \" + trbOrmQuoteIdentifier(\"trb_group\") + \", " + expression + " FROM (\" + statement + \") AS trb_grouped GROUP BY \" + trbOrmQuoteIdentifier(\"trb_group\")")
 	g.line("if grouped.havingExpression != \"\" { statement += \" HAVING \" + grouped.havingExpression + \" \" + grouped.havingOperator + \" \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, grouped.havingValue) }")
+	g.line("if len(grouped.orders) > 0 { orders := make([]string, len(grouped.orders)); for index, order := range grouped.orders { orders[index] = trbOrmQuoteIdentifier(\"trb_group\") + \" \" + strings.ToUpper(order.direction) }; statement += \" ORDER BY \" + strings.Join(orders, \", \") }")
+	g.line("if grouped.limit != nil { statement += \" LIMIT \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *grouped.limit) } else if grouped.offset != nil { statement += " + strconv.Quote(adapter.OffsetNoLimit) + " }")
+	g.line("if grouped.offset != nil { statement += \" OFFSET \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *grouped.offset) }")
 	g.line("rows, err := database.Query(statement, arguments...); if err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database grouped "+label+" query failed\")") + " }; defer rows.Close()")
 	g.line("values := make(" + g.goType(resultType) + ")")
 	g.line("for rows.Next() { var key " + g.goType(groupColumn.Type) + "; var value " + g.goType(valueType) + "; if err := rows.Scan(&key, &value); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }; values[key] = value }")

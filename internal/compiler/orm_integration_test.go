@@ -818,6 +818,7 @@ def main()
 	puts(Product.where(name: "TypeRB").group(:category_id).having(:count, ">=", 1).count())
 	puts(Product.group(:category_id).sum(:id))
 	puts(Product.group(:category_id).having(:sum, :id, ">=", 1).sum(:id))
+	puts(Product.where().order(category_id: :desc).limit(1).group(:category_id).count())
 	case Product.where().preload(:category).all()
 	when DbResult::Ok(products)
 		products.each do |product|
@@ -866,6 +867,7 @@ end
 		`TrbOrmProductWhereExists(TrbOrmProductWhere`, `operator := "EXISTS"`, `operator = "NOT EXISTS"`,
 		`TrbOrmGroupProductCategoryId(TrbOrmProductWhere`, `TrbOrmHavingProductCategoryId`, `TrbOrmCountGroupedProductCategoryId`,
 		`TrbOrmSumGroupedProductCategoryIdId`, `COALESCE(SUM(trb_value), 0)`,
+		`grouped.query.orders = nil`, `ORDER BY`, `grouped.limit`,
 		`GROUP BY`, `grouped.havingExpression`, `map[int]int`,
 		`trbOrmQuoteIdentifier("products")`, `TrbOrmCategoryAssociationPredicate(TrbOrmCategoryWhere`,
 		`TrbOrmCategoryQueryWhere(TrbOrmCategoryUsing(product.TrbOrmTransaction()), []string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
