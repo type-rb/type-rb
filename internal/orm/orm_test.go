@@ -35,6 +35,7 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if !products.Columns[0].Generated || !products.Columns[0].HasDefault || !products.Columns[3].HasDefault {
 		t.Fatalf("SQLite generated/default metadata is missing: %#v", products.Columns)
 	}
+	assertUniqueConstraints(t, products.UniqueConstraints, []string{"id"}, []string{"name", "active"})
 
 	program := parseModel(t)
 	catalog, err := Declarations([]*ast.Program{program}, root, options)
@@ -389,7 +390,8 @@ func sqliteFixture(t *testing.T) (string, map[string][]byte) {
 		name TEXT NOT NULL,
 		price REAL,
 		active BOOLEAN NOT NULL DEFAULT TRUE,
-		payload BLOB
+		payload BLOB,
+		UNIQUE (name, active)
 	)`); err != nil {
 		database.Close()
 		t.Fatal(err)
@@ -467,5 +469,20 @@ func assertColumn(t *testing.T, column Column, name string, kind types.Kind, nul
 	t.Helper()
 	if column.Name != name || column.Type.Kind != kind || column.Nullable != nullable || column.PrimaryKey != primary {
 		t.Fatalf("unexpected column: %#v", column)
+	}
+}
+
+func assertUniqueConstraints(t *testing.T, constraints []UniqueConstraint, expected ...[]string) {
+	t.Helper()
+	if len(constraints) != len(expected) {
+		t.Fatalf("unique constraints = %#v, want columns %#v", constraints, expected)
+	}
+	for index, columns := range expected {
+		if strings.Join(constraints[index].Columns, ",") != strings.Join(columns, ",") {
+			t.Fatalf("unique constraint %d = %#v, want columns %#v", index, constraints[index], columns)
+		}
+	}
+	if len(constraints) > 0 && !constraints[0].Primary {
+		t.Fatalf("first unique constraint is not primary: %#v", constraints)
 	}
 }

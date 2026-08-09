@@ -53,6 +53,7 @@ func TestMySQLLiveIntrospection(t *testing.T) {
 			price DOUBLE,
 			active BOOLEAN NOT NULL,
 			payload BLOB,
+			UNIQUE (name, active),
 			CONSTRAINT products_category_fk FOREIGN KEY (category_id) REFERENCES categories(id)
 		)`,
 	} {
@@ -83,4 +84,5 @@ func TestMySQLLiveIntrospection(t *testing.T) {
 	if len(products.ForeignKeys) != 1 || products.ForeignKeys[0].Column != "category_id" || products.ForeignKeys[0].ReferencedTable != "categories" || products.ForeignKeys[0].ReferencedColumn != "id" {
 		t.Fatalf("unexpected MySQL foreign keys: %#v", products.ForeignKeys)
 	}
+	assertUniqueConstraints(t, products.UniqueConstraints, []string{"id"}, []string{"name", "active"})
 }

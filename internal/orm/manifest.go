@@ -10,12 +10,13 @@ import (
 )
 
 type Model struct {
-	Name         string
-	QueryType    string
-	Table        string
-	ModulePath   string
-	Columns      []Column
-	Associations []Association
+	Name              string
+	QueryType         string
+	Table             string
+	ModulePath        string
+	Columns           []Column
+	Associations      []Association
+	UniqueConstraints []UniqueConstraint
 }
 
 type AssociationKind string

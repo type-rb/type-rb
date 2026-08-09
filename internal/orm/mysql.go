@@ -106,7 +106,59 @@ func inspectMySQLTable(database *sql.DB, name string) (Table, error) {
 		return Table{}, err
 	}
 	table.ForeignKeys = foreignKeys
+	uniqueConstraints, err := inspectMySQLUniqueConstraints(database, name)
+	if err != nil {
+		return Table{}, err
+	}
+	table.UniqueConstraints = uniqueConstraints
+	completeUniqueConstraints(&table)
 	return table, nil
+}
+
+func inspectMySQLUniqueConstraints(database *sql.DB, name string) ([]UniqueConstraint, error) {
+	rows, err := database.Query(`
+		SELECT index_name, seq_in_index, column_name
+		FROM information_schema.statistics
+		WHERE table_schema = DATABASE()
+		  AND table_name = ?
+		  AND non_unique = 0
+		ORDER BY index_name, seq_in_index`, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byName := map[string]int{}
+	unsupported := map[string]bool{}
+	var result []UniqueConstraint
+	for rows.Next() {
+		var indexName string
+		var position int
+		var column sql.NullString
+		if err := rows.Scan(&indexName, &position, &column); err != nil {
+			return nil, err
+		}
+		index, ok := byName[indexName]
+		if !ok {
+			index = len(result)
+			byName[indexName] = index
+			result = append(result, UniqueConstraint{Name: indexName, Primary: indexName == "PRIMARY"})
+		}
+		if !column.Valid {
+			unsupported[indexName] = true
+			continue
+		}
+		result[index].Columns = append(result[index].Columns, column.String)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	filtered := result[:0]
+	for _, constraint := range result {
+		if !unsupported[constraint.Name] {
+			filtered = append(filtered, constraint)
+		}
+	}
+	return filtered, nil
 }
 
 func inspectMySQLForeignKeys(database *sql.DB, name string) ([]ForeignKey, error) {

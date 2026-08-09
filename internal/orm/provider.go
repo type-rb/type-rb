@@ -307,6 +307,7 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 			models = append(models, Model{
 				Name: class.Name, QueryType: class.Name + "Query", Table: table.Name,
 				ModulePath: program.ModulePath, Columns: append([]Column(nil), table.Columns...),
+				UniqueConstraints: append([]UniqueConstraint(nil), table.UniqueConstraints...),
 			})
 		}
 	}
