@@ -117,6 +117,29 @@ func (g *generator) ormQueryTerminal(call *ir.Call, arguments []string, operatio
 	return g.ormModelQualifier(model) + operation(model) + "(" + query + ")"
 }
 
+func (g *generator) ormResultType(value types.Type) string {
+	return g.goType(types.Type{Kind: types.Named, Name: "DbResult", Args: []types.Type{value}})
+}
+
+func (g *generator) ormResultOK(valueType types.Type, value string) string {
+	return g.ormPackageAlias() + ".NewDbResultOk[" + g.goType(valueType) + "](" + value + ")"
+}
+
+func (g *generator) ormResultErr(valueType types.Type, value string) string {
+	return g.ormPackageAlias() + ".NewDbResultErr[" + g.goType(valueType) + "](" + value + ")"
+}
+
+func (g *generator) ormErrorKind(name string) string {
+	return g.ormPackageAlias() + "." + goConstantIdentifier("DbErrorKind", name)
+}
+
+func (g *generator) ormPackageAlias() string {
+	if alias := g.typeAliases["DbResult"]; alias != "" {
+		return alias
+	}
+	return "orm"
+}
+
 func (g *generator) ormAssociationQuery(call *ir.Call) string {
 	member, ok := call.Callee.(*ir.Member)
 	if !ok {
@@ -294,7 +317,11 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 		return
 	}
 	g.requireImport("database/sql", "sql")
+	g.requireImport("database/sql/driver", "driver")
 	g.requireImport(adapter.GoDriverImport, "_")
+	g.requireImport("context", "")
+	g.requireImport("errors", "")
+	g.requireImport("net", "")
 	g.requireImport("reflect", "")
 	g.requireImport("strings", "")
 	if adapter.NumberedBinds {
@@ -307,6 +334,30 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 }
 
 func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
+	errorKind := g.goType(types.FromName("DbErrorKind"))
+	errorType := g.goType(types.FromName("DbError"))
+	g.line("func trbOrmError(err error, fallback " + errorKind + ", message string) " + errorType + " {")
+	g.indent++
+	g.line("kind := fallback")
+	g.line("if errors.Is(err, context.DeadlineExceeded) {")
+	g.indent++
+	g.line("kind = " + g.ormErrorKind("Timeout"))
+	g.indent--
+	g.line("} else if errors.Is(err, driver.ErrBadConn) {")
+	g.indent++
+	g.line("kind = " + g.ormErrorKind("Connection"))
+	g.indent--
+	g.line("} else {")
+	g.indent++
+	g.line("var networkError net.Error")
+	g.line("if errors.As(err, &networkError) { if networkError.Timeout() { kind = " + g.ormErrorKind("Timeout") + " } else { kind = " + g.ormErrorKind("Connection") + " } }")
+	g.indent--
+	g.line("}")
+	g.line("return " + errorType + "{Kind: kind, Message: message}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+
 	g.line("func trbOrmPlaceholder(position int) string {")
 	g.indent++
 	if adapter.NumberedBinds {
@@ -507,10 +558,11 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("}")
 	g.b.WriteByte('\n')
 
-	g.line("func " + goORMExplain(model) + "(query " + queryType + ") string {")
+	stringType := types.FromName("String")
+	g.line("func " + goORMExplain(model) + "(query " + queryType + ") " + g.ormResultType(stringType) + " {")
 	g.indent++
 	g.line("database, err := sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
-	g.line("if err != nil { panic(err) }")
+	g.line("if err != nil { return " + g.ormResultErr(stringType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
 	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
 	explainPrefix := "EXPLAIN QUERY PLAN "
@@ -520,7 +572,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		explainPrefix = "EXPLAIN FORMAT=JSON "
 	}
 	g.line("rows, err := database.Query(" + strconv.Quote(explainPrefix) + "+statement, arguments...)")
-	g.line("if err != nil { panic(err) }")
+	g.line("if err != nil { return " + g.ormResultErr(stringType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database explain failed\")") + " }")
 	g.line("defer rows.Close()")
 	g.line("details := []string{}")
 	g.line("for rows.Next() {")
@@ -528,17 +580,17 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	if adapter.ExplainStyle == ormintegration.ExplainSQLite {
 		g.line("var id, parent, unused int")
 		g.line("var detail string")
-		g.line("if err := rows.Scan(&id, &parent, &unused, &detail); err != nil { panic(err) }")
+		g.line("if err := rows.Scan(&id, &parent, &unused, &detail); err != nil { return " + g.ormResultErr(stringType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database explain result was invalid\")") + " }")
 		g.line("details = append(details, detail)")
 	} else {
 		g.line("var detail string")
-		g.line("if err := rows.Scan(&detail); err != nil { panic(err) }")
+		g.line("if err := rows.Scan(&detail); err != nil { return " + g.ormResultErr(stringType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database explain result was invalid\")") + " }")
 		g.line("details = append(details, detail)")
 	}
 	g.indent--
 	g.line("}")
-	g.line("if err := rows.Err(); err != nil { panic(err) }")
-	g.line("return strings.Join(details, \"\\n\")")
+	g.line("if err := rows.Err(); err != nil { return " + g.ormResultErr(stringType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database explain failed\")") + " }")
+	g.line("return " + g.ormResultOK(stringType, "strings.Join(details, \"\\n\")"))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -548,25 +600,27 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		}
 	}
 
-	g.line("func " + goORMLoader(model) + "(query " + queryType + ") []*" + goIdentifier(model.Name, true) + " {")
+	modelType := types.FromName(model.Name)
+	modelsType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{modelType}}
+	g.line("func " + goORMLoader(model) + "(query " + queryType + ") " + g.ormResultType(modelsType) + " {")
 	g.indent++
 	g.line("database, err := sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
-	g.line("if err != nil { panic(err) }")
+	g.line("if err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
 	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
 	g.line("rows, err := database.Query(statement, arguments...)")
-	g.line("if err != nil { panic(err) }")
+	g.line("if err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database query failed\")") + " }")
 	g.line("defer rows.Close()")
 	g.line("result := []*" + goIdentifier(model.Name, true) + "{}")
 	g.line("for rows.Next() {")
 	g.indent++
 	g.line("value := &" + goIdentifier(model.Name, true) + "{}")
-	g.line("if err := rows.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { panic(err) }")
+	g.line("if err := rows.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database row was invalid\")") + " }")
 	g.line("result = append(result, value)")
 	g.indent--
 	g.line("}")
-	g.line("if err := rows.Err(); err != nil { panic(err) }")
-	g.line("if err := rows.Close(); err != nil { panic(err) }")
+	g.line("if err := rows.Err(); err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database query failed\")") + " }")
+	g.line("if err := rows.Close(); err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database query failed\")") + " }")
 	g.line("for _, preload := range query.preloads {")
 	g.indent++
 	g.line("switch preload {")
@@ -574,7 +628,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		if association.Preloadable {
 			g.line("case " + strconv.Quote(association.Name) + ":")
 			g.indent++
-			g.line(goORMAssociationPreloader(model, association) + "(database, result)")
+			g.line("if preloadError := " + goORMAssociationPreloader(model, association) + "(database, result); preloadError != nil { return " + g.ormResultErr(modelsType, "*preloadError") + " }")
 			g.indent--
 		}
 	}
@@ -585,17 +639,20 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("}")
 	g.indent--
 	g.line("}")
-	g.line("return result")
+	g.line("return " + g.ormResultOK(modelsType, "result"))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 
-	g.line("func " + goORMFirst(model) + "(query " + queryType + ") *" + goIdentifier(model.Name, true) + " {")
+	firstType := modelType
+	firstType.Nullable = true
+	g.line("func " + goORMFirst(model) + "(query " + queryType + ") " + g.ormResultType(firstType) + " {")
 	g.indent++
 	g.line("if query.limit == nil || *query.limit > 1 { count := 1; query.limit = &count }")
-	g.line("values := " + goORMLoader(model) + "(query)")
-	g.line("if len(values) == 0 { return nil }")
-	g.line("return values[0]")
+	g.line("loaded := " + goORMLoader(model) + "(query)")
+	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(firstType, "loaded.ErrError") + " }")
+	g.line("if len(loaded.OkValue) == 0 { return " + g.ormResultOK(firstType, "nil") + " }")
+	g.line("return " + g.ormResultOK(firstType, "loaded.OkValue[0]"))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -614,22 +671,25 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.line("}")
 		g.line("query.orders = []" + orderType + "{{column: " + strconv.Quote(batchKey.Name) + ", direction: \"asc\"}}")
 		g.line("query.limit = &size")
-		g.line("return " + goORMLoader(model) + "(query)")
+		g.line("loaded := " + goORMLoader(model) + "(query)")
+		g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { panic(loaded.ErrError.Message) }")
+		g.line("return loaded.OkValue")
 		g.indent--
 		g.line("}")
 		g.b.WriteByte('\n')
 	}
 
-	g.line("func " + goORMCount(model) + "(query " + queryType + ") int {")
+	integerType := types.FromName("Integer")
+	g.line("func " + goORMCount(model) + "(query " + queryType + ") " + g.ormResultType(integerType) + " {")
 	g.indent++
 	g.line("database, err := sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + strconv.Quote(manifest.Database) + ")")
-	g.line("if err != nil { panic(err) }")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
 	g.line("defer database.Close()")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, \"1\")")
 	g.line("row := database.QueryRow(\"SELECT COUNT(*) FROM (\"+statement+\") AS trb_count\", arguments...)")
 	g.line("var count int")
-	g.line("if err := row.Scan(&count); err != nil { panic(err) }")
-	g.line("return count")
+	g.line("if err := row.Scan(&count); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database count failed\")") + " }")
+	g.line("return " + g.ormResultOK(integerType, "count"))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -663,7 +723,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	valueField := goORMAssociationValueField(association.Name)
 	loadedField := goORMAssociationLoadedField(association.Name)
 
-	g.line("func " + function + "(database *sql.DB, values []" + sourceType + ") {")
+	g.line("func " + function + "(database *sql.DB, values []" + sourceType + ") *" + g.goType(types.FromName("DbError")) + " {")
 	g.indent++
 	g.line("arguments := []any{}")
 	g.line("for _, value := range values {")
@@ -685,13 +745,13 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	g.line("value." + loadedField + " = true")
 	g.indent--
 	g.line("}")
-	g.line("return")
+	g.line("return nil")
 	g.indent--
 	g.line("}")
 	statement := "SELECT " + strings.Join(targetColumns, ", ") + " FROM " + adapter.QuoteIdentifier(target.Table) + " WHERE " + adapter.QuoteIdentifier(association.TargetColumn) + " IN ("
 	g.line("statement := " + strconv.Quote(statement) + " + trbOrmPlaceholders(len(arguments)) + \")\"")
 	g.line("rows, err := database.Query(statement, arguments...)")
-	g.line("if err != nil { panic(err) }")
+	g.line("if err != nil { databaseError := trbOrmError(err, " + g.ormErrorKind("Query") + ", \"database preload failed\"); return &databaseError }")
 	g.line("defer rows.Close()")
 	if association.Kind == ormintegration.BelongsTo {
 		g.line("related := map[" + g.goType(keyType) + "]" + targetType + "{}")
@@ -701,7 +761,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	g.line("for rows.Next() {")
 	g.indent++
 	g.line("relatedValue := &" + goIdentifier(target.Name, true) + "{}")
-	g.line("if err := rows.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { panic(err) }")
+	g.line("if err := rows.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { databaseError := trbOrmError(err, " + g.ormErrorKind("InvalidData") + ", \"database preload row was invalid\"); return &databaseError }")
 	if association.Kind == ormintegration.BelongsTo {
 		g.line("related[relatedValue." + goFieldName(targetColumn.Name) + "] = relatedValue")
 	} else if targetColumn.Nullable {
@@ -712,7 +772,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	}
 	g.indent--
 	g.line("}")
-	g.line("if err := rows.Err(); err != nil { panic(err) }")
+	g.line("if err := rows.Err(); err != nil { databaseError := trbOrmError(err, " + g.ormErrorKind("Query") + ", \"database preload failed\"); return &databaseError }")
 	g.line("for _, value := range values {")
 	g.indent++
 	if association.Kind == ormintegration.BelongsTo {
@@ -729,6 +789,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	g.line("value." + loadedField + " = true")
 	g.indent--
 	g.line("}")
+	g.line("return nil")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')

@@ -52,7 +52,7 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if len(where.Alternatives) < 5 || where.Alternatives[0].Parameters[0].LiteralValues[0] != "id" {
 		t.Fatalf("comparison where signatures are missing: %#v", where.Alternatives)
 	}
-	if product.ClassMembers["find"].Return.String() != "Product?" {
+	if product.ClassMembers["find"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
 	}
 	findEach := product.ClassMembers["find_each"]
@@ -60,15 +60,20 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 		t.Fatalf("unexpected find_each declaration: %#v", findEach)
 	}
 	query, exists := catalog.Type("ProductQuery")
-	if !exists || query.InstanceMembers["all"].Return.String() != "Array<Product>" {
+	if !exists || query.InstanceMembers["all"].Return.String() != "DbResult<Array<Product>>" {
 		t.Fatalf("unexpected query declaration: %#v", query)
 	}
 	findInBatches := query.InstanceMembers["find_in_batches"]
 	if findInBatches.Block == nil || findInBatches.Block.Parameters[0].String() != "Array<Product>" {
 		t.Fatalf("unexpected find_in_batches declaration: %#v", findInBatches)
 	}
-	for _, name := range []string{"to_sql", "explain"} {
-		if query.InstanceMembers[name].Return.String() != "String" {
+	if query.InstanceMembers["to_sql"].Return.String() != "String" {
+		t.Fatalf("unexpected to_sql declaration: %#v", query.InstanceMembers["to_sql"])
+	}
+	for name, expected := range map[string]string{
+		"first": "DbResult<Product?>", "count": "DbResult<Integer>", "explain": "DbResult<String>",
+	} {
+		if query.InstanceMembers[name].Return.String() != expected {
 			t.Fatalf("unexpected %s declaration: %#v", name, query.InstanceMembers[name])
 		}
 	}

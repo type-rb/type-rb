@@ -41,7 +41,13 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			}
 			program := &ir.Program{
 				Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/orm",
-				Extensions: []ir.Extension{manifest}, Statements: []ir.Statement{&ir.Class{Name: "Product"}},
+				Extensions: []ir.Extension{manifest}, Statements: []ir.Statement{
+					&ir.Import{
+						Path: "trb/orm/index", Official: true, Runtime: true,
+						SymbolKinds: map[string]string{"DbError": "record", "DbErrorKind": "enum", "DbResult": "enum_alias"},
+					},
+					&ir.Class{Name: "Product"},
+				},
 			}
 			manifest.Augment(program)
 			output := Generate(program)
@@ -49,6 +55,17 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				if !strings.Contains(output, want) {
 					t.Fatalf("generated %s ORM runtime is missing %q:\n%s", test.adapter, want, output)
 				}
+			}
+			for _, want := range []string{
+				`"example.com/orm/trb/orm"`, `orm.DbResult[[]*Product]`, `orm.NewDbResultErr[[]*Product]`,
+				`trbOrmError(err, orm.DbErrorKindQuery, "database query failed")`,
+			} {
+				if !strings.Contains(output, want) {
+					t.Fatalf("generated %s ORM Result runtime is missing %q:\n%s", test.adapter, want, output)
+				}
+			}
+			if strings.Contains(output, "panic(err)") {
+				t.Fatalf("generated %s ORM runtime still exposes database errors through panic:\n%s", test.adapter, output)
 			}
 		})
 	}
