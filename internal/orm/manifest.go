@@ -233,6 +233,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["where"] {
 				class.Body = append(class.Body, whereIRMethod(model, true))
 			}
+			if !existing["distinct"] {
+				class.Body = append(class.Body, distinctIRMethod(model, true))
+			}
 			if !existing["select"] {
 				class.Body = append(class.Body, selectIRMethod(model, true))
 			}
@@ -465,6 +468,7 @@ func queryIRMethods(model Model) []ir.Statement {
 	firstType.Nullable = true
 	methods := []ir.Statement{
 		where,
+		distinctIRMethod(model, false),
 		not,
 		&ir.Method{Name: "or", External: true, Parameters: []ir.Parameter{{Name: "other", Type: namedType(model.QueryType)}}, ReturnType: namedType(model.QueryType)},
 		findByIRMethod(model, false),
@@ -512,6 +516,10 @@ func queryIRMethods(model Model) []ir.Statement {
 		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))
 	}
 	return methods
+}
+
+func distinctIRMethod(model Model, class bool) *ir.Method {
+	return &ir.Method{Name: "distinct", External: true, Class: class, ReturnType: namedType(model.QueryType)}
 }
 
 func groupIRMethod(model Model, class bool) *ir.Method {

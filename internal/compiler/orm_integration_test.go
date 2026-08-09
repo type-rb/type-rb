@@ -809,6 +809,7 @@ end
 def main()
 	puts(Product.join(:category, Category.where(name: "Books")).where(name: "TypeRB").all())
 	puts(Product.where(name: "TypeRB").left_join(:category).all())
+	puts(Category.join(:products).distinct().all())
 	category_ids := Category.where(name: "Books").select(:id)
 	puts(Product.where(category_id: category_ids).all())
 	puts(Product.where("category_id", "!=", Category.select(:id)).all())
@@ -870,6 +871,7 @@ end
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
 		`TrbOrmProductJoin(TrbOrmProductWhere`, `Kind: "INNER JOIN"`, `Kind: "LEFT JOIN"`,
+		`TrbOrmCategoryDistinct(TrbOrmCategoryJoin`, `prefix += "DISTINCT "`,
 		`Table: "categories"`, `SourceColumn: "category_id"`, `TargetColumn: "id"`,
 		`TrbOrmCategoryAssociationPredicate(TrbOrmCategoryWhere`, `__trb_join_key`,
 		`TrbOrmSelectCategoryId(TrbOrmCategoryWhere`, `*orm.TrbOrmSubquery[int]`,

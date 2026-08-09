@@ -375,6 +375,60 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	}
 }
 
+func TestReplExecutesORMDistinct(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		INSERT INTO products (id, name) VALUES (1, 'Same'), (2, 'Same'), (3, 'Other');
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-orm-distinct-test"
+	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"sqlite","database":"application.sqlite3"}`)
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model } from trb/orm\n\nclass Product < Model\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	input := strings.Join([]string{
+		"import { Product } from main",
+		"Product.distinct().to_sql()",
+		"Product.where().order(name: :asc).distinct().pluck(:name)",
+		"Product.where().distinct().count()",
+		":quit",
+	}, "\n") + "\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := strings.Join([]string{
+		`"SELECT DISTINCT \"id\", \"name\" FROM \"products\"" : String`,
+		`DbResult::Ok(value: ["Other", "Same"]) : DbResult<Array<String>>`,
+		`DbResult::Ok(value: 3) : DbResult<Integer>`,
+		"",
+	}, "\n")
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected distinct REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplRejectsDuplicateHasOnePreload(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "application.sqlite3")

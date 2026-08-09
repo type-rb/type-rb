@@ -31,6 +31,33 @@ func (g *generator) ormWhere(call *ir.Call) string {
 	return g.ormModelQualifier(model) + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
 }
 
+func (g *generator) ormDistinct(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	model, queryReceiver := g.orm.QueryModel(modelName)
+	query := ""
+	if queryReceiver {
+		query = g.expr(member.Receiver)
+	} else if scopedModel, scope := g.orm.ScopeModel(modelName); scope {
+		model = scopedModel
+		query = g.expr(member.Receiver)
+	} else {
+		if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+			modelName = identifier.Name
+		}
+		var exists bool
+		model, exists = g.orm.Model(modelName)
+		if !exists {
+			return "nil"
+		}
+		query = g.ormModelQualifier(model) + goORMWhere(model) + "([]string{}, []string{}, []any{})"
+	}
+	return g.ormModelQualifier(model) + goORMDistinct(model) + "(" + query + ")"
+}
+
 func (g *generator) ormUsing(call *ir.Call, arguments []string) string {
 	member, ok := call.Callee.(*ir.Member)
 	if !ok || len(arguments) != 1 {
@@ -1145,6 +1172,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("limit *int")
 	g.line("offset *int")
 	g.line("lock bool")
+	g.line("distinct bool")
 	g.line("preloads []" + preloadType)
 	g.line("joins []" + g.ormLifecycleAlias() + ".TrbOrmJoin")
 	g.indent--
@@ -1226,7 +1254,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("func " + goORMQueryOr(model) + "(left " + queryType + ", right " + queryType + ") " + queryType + " {")
 	g.indent++
 	g.line("if left.predicate == nil || right.predicate == nil { panic(\"ORM or requires conditions on both queries\") }")
-	g.line("if len(left.orders) > 0 || left.limit != nil || left.offset != nil || left.lock || len(left.preloads) > 0 || len(left.joins) > 0 || len(right.orders) > 0 || right.limit != nil || right.offset != nil || right.lock || len(right.preloads) > 0 || len(right.joins) > 0 { panic(\"ORM or requires unmodified predicate queries; apply joins, order, limit, offset, lock, and preload after or\") }")
+	g.line("if len(left.orders) > 0 || left.limit != nil || left.offset != nil || left.lock || left.distinct || len(left.preloads) > 0 || len(left.joins) > 0 || len(right.orders) > 0 || right.limit != nil || right.offset != nil || right.lock || right.distinct || len(right.preloads) > 0 || len(right.joins) > 0 { panic(\"ORM or requires unmodified predicate queries; apply distinct, joins, order, limit, offset, lock, and preload after or\") }")
 	g.line("if left.transaction != right.transaction { panic(\"ORM or requires queries from the same transaction scope\") }")
 	g.line("left.predicate = " + goORMCombinePredicates(model) + "(\"or\", left.predicate, right.predicate)")
 	g.line("return left")
@@ -1334,7 +1362,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("func " + goORMAssociationPredicate(model) + "(query " + queryType + ") " + g.ormLifecycleAlias() + ".TrbOrmAssociationPredicate {")
 	g.indent++
 	g.line("if query.transaction != nil { panic(\"ORM association predicate query must not have a transaction scope; scope the base query instead\") }")
-	g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 || len(query.joins) > 0 || " + goORMPredicateContainsExists(model) + "(query.predicate) { panic(\"ORM association predicate query accepts only where, not, and or\") }")
+	g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || query.distinct || len(query.preloads) > 0 || len(query.joins) > 0 || " + goORMPredicateContainsExists(model) + "(query.predicate) { panic(\"ORM association predicate query accepts only where, not, and or\") }")
 	g.line("return func(arguments *[]any) string { return " + goORMPredicateSQL(model) + "(query.predicate, arguments) }")
 	g.indent--
 	g.line("}")
@@ -1374,6 +1402,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("return query")
 	g.indent--
 	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMDistinct(model) + "(query " + queryType + ") " + queryType + " { query.distinct = true; return query }")
 	g.b.WriteByte('\n')
 	g.line("func " + goORMPreload(model) + "(query " + queryType + ", association string, load func(*" + g.ormLifecycleAlias() + ".TrbOrmTransaction, []*" + goIdentifier(model.Name, true) + ") *" + g.goType(types.FromName("DbError")) + ") " + queryType + " {")
 	g.indent++
@@ -1435,7 +1465,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.b.WriteByte('\n')
 	g.line("func " + goORMStatementAppend(model) + "(query " + queryType + ", projection string, arguments *[]any) string {")
 	g.indent++
-	g.line("statement := \"SELECT \" + projection + " + strconv.Quote(statement))
+	g.line("prefix := \"SELECT \"; if query.distinct { prefix += \"DISTINCT \" }; statement := prefix + projection + " + strconv.Quote(statement))
 	g.line("for index, join := range query.joins {")
 	g.indent++
 	g.line("switch join.Kind { case \"INNER JOIN\", \"LEFT JOIN\": default: panic(\"unsupported ORM join kind\") }")
@@ -1589,7 +1619,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent++
 	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
-	g.line("statement, arguments := " + goORMStatement(model) + "(query, \"1\")")
+	g.line("projection := \"1\"; if query.distinct { projection = " + strconv.Quote(strings.Join(columns, ", ")) + " }")
+	g.line("statement, arguments := " + goORMStatement(model) + "(query, projection)")
 	g.line("row := database.QueryRow(\"SELECT COUNT(*) FROM (\"+statement+\") AS trb_count\", arguments...)")
 	g.line("var count int")
 	g.line("if err := row.Scan(&count); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database count failed\")") + " }")
@@ -1754,6 +1785,10 @@ func goORMOrderType(model ormintegration.Model) string {
 
 func goORMPreloadType(model ormintegration.Model) string {
 	return "trbOrm" + goIdentifier(model.Name, true) + "Preload"
+}
+
+func goORMDistinct(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "Distinct"
 }
 
 func goORMTypedPreload(model ormintegration.Model, association ormintegration.Association) string {

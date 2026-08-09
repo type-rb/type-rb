@@ -32,6 +32,7 @@ type ormQueryValue struct {
 	limit       *int64
 	offset      *int64
 	lock        bool
+	distinct    bool
 	preloads    []ormPreload
 	joins       []ormJoin
 }
@@ -397,8 +398,8 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		if !ok {
 			return Value{}, fmt.Errorf("ORM model %s has no column %s", query.model.Name, columnName)
 		}
-		if query.lock || len(query.preloads) > 0 {
-			return Value{}, errors.New("ORM group does not accept lock or preload")
+		if query.lock || query.distinct || len(query.preloads) > 0 {
+			return Value{}, errors.New("ORM group does not accept distinct, lock, or preload")
 		}
 		for _, order := range query.orders {
 			if order.column != column.Name {
@@ -515,7 +516,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			return Value{}, errors.New("ORM or requires conditions on both queries")
 		}
 		if ormQueryModified(query) || ormQueryModified(other) {
-			return Value{}, errors.New("ORM or requires unmodified predicate queries; apply joins, order, limit, offset, lock, and preload after or")
+			return Value{}, errors.New("ORM or requires unmodified predicate queries; apply distinct, joins, order, limit, offset, lock, and preload after or")
 		}
 		if query.transaction != other.transaction {
 			return Value{}, errors.New("ORM or requires queries from the same transaction scope")
@@ -547,6 +548,9 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		return ormQueryResult(typ, query), nil
 	case "trb.orm.query.lock":
 		query.lock = true
+		return ormQueryResult(typ, query), nil
+	case "trb.orm.distinct", "trb.orm.query.distinct":
+		query.distinct = true
 		return ormQueryResult(typ, query), nil
 	case "trb.orm.query.preload":
 		if len(remaining) < 1 || len(remaining) > 2 {
@@ -815,7 +819,7 @@ func ormQueryResult(typ types.Type, query *ormQueryValue) Value {
 }
 
 func ormQueryModified(query *ormQueryValue) bool {
-	return len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 || len(query.joins) > 0
+	return len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || query.distinct || len(query.preloads) > 0 || len(query.joins) > 0
 }
 
 func ormPredicateContainsExists(predicate *ormPredicate) bool {
@@ -923,7 +927,11 @@ func (e *Evaluator) ormStatement(query *ormQueryValue, projection string) (strin
 
 func (e *Evaluator) ormStatementAppend(query *ormQueryValue, projection string, arguments *[]any) (string, error) {
 	runtime := e.ormRuntime()
-	statement := "SELECT " + projection + " FROM " + runtime.adapter.QuoteIdentifier(query.model.Table)
+	statement := "SELECT "
+	if query.distinct {
+		statement += "DISTINCT "
+	}
+	statement += projection + " FROM " + runtime.adapter.QuoteIdentifier(query.model.Table)
 	for index, join := range query.joins {
 		if join.kind != "INNER JOIN" && join.kind != "LEFT JOIN" {
 			return "", errors.New("unsupported ORM join kind")
@@ -1345,7 +1353,11 @@ func (e *Evaluator) ormExists(query *ormQueryValue) (bool, *ormFailure) {
 }
 
 func (e *Evaluator) ormCount(query *ormQueryValue) (int64, *ormFailure) {
-	statement, arguments, err := e.ormStatement(query, "1")
+	projection := "1"
+	if query.distinct {
+		projection = e.ormModelProjection(query.model)
+	}
+	statement, arguments, err := e.ormStatement(query, projection)
 	if err != nil {
 		return 0, &ormFailure{kind: "InvalidData", message: err.Error()}
 	}

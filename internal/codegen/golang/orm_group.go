@@ -102,7 +102,7 @@ func (g *generator) ormGroupRuntime(adapter ormintegration.Adapter, model ormint
 	g.b.WriteByte('\n')
 	g.line("func " + goORMGroup(model, groupColumn) + "(query " + queryType + ") " + groupType + " {")
 	g.indent++
-	g.line("if query.lock || len(query.preloads) > 0 { panic(\"ORM group does not accept lock or preload\") }")
+	g.line("if query.lock || query.distinct || len(query.preloads) > 0 { panic(\"ORM group does not accept distinct, lock, or preload\") }")
 	g.line("for _, order := range query.orders { if order.column != " + strconv.Quote(groupColumn.Name) + " { panic(\"ORM grouped order must use the group key\") } }")
 	g.line("grouped := " + groupType + "{query: query, orders: append([]" + goORMOrderType(model) + "(nil), query.orders...), limit: query.limit, offset: query.offset}")
 	g.line("grouped.query.orders = nil; grouped.query.limit = nil; grouped.query.offset = nil; return grouped")

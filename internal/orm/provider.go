@@ -56,6 +56,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
+		declared.ClassMembers["distinct"] = distinctDeclaration(model, "trb.orm.distinct", true)
 		declared.ClassMembers["select"] = selectDeclaration(model, "trb.orm.select", true)
 		declared.ClassMembers["group"] = groupDeclaration(model, "trb.orm.group", true)
 		if join := joinDeclaration(model, "join", "trb.orm.join", true); join.Name != "" {
@@ -135,6 +136,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.Name] = declared
 		query := declaration.NewType(model.QueryType, "")
 		query.InstanceMembers["where"] = whereDeclaration(model, "trb.orm.query.where", false)
+		query.InstanceMembers["distinct"] = distinctDeclaration(model, "trb.orm.query.distinct", false)
 		query.InstanceMembers["select"] = selectDeclaration(model, "trb.orm.query.select", false)
 		query.InstanceMembers["group"] = groupDeclaration(model, "trb.orm.query.group", false)
 		if join := joinDeclaration(model, "join", "trb.orm.query.join", false); join.Name != "" {
@@ -254,6 +256,13 @@ func groupDeclaration(model Model, intrinsic string, class bool) declaration.Mem
 	}
 	member.Return = member.Alternatives[0].Return
 	return member
+}
+
+func distinctDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	return declaration.Member{
+		Name: "distinct", Kind: declaration.Method, Intrinsic: intrinsic,
+		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
+	}
 }
 
 func transactionDeclaration(class bool) declaration.Member {

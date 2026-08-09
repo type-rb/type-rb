@@ -95,6 +95,8 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				`func TrbOrmUpdateProduct(value *Product, columns []string, values []any) orm.DbResult[*Product]`,
 				`func TrbOrmDeleteProduct(value *Product) orm.DbResult[bool]`,
 				`func TrbOrmSelectProductId(query TrbOrmProductQuery) *orm.TrbOrmSubquery[int]`,
+				`func TrbOrmProductDistinct(query TrbOrmProductQuery) TrbOrmProductQuery`,
+				`prefix += "DISTINCT "`,
 				`func trbOrmProductStatementAppend(query TrbOrmProductQuery, projection string, arguments *[]any) string`,
 				`func TrbOrmProductWhereExists(query TrbOrmProductQuery`,
 			} {
