@@ -30,6 +30,10 @@ type Signature struct {
 
 type Block struct {
 	Parameters []types.Type
+	// Structured keeps the block in typed IR instead of lowering it to a
+	// backend callback. Structured blocks may be assigned or returned while
+	// preserving return, break, and next in their lexical owner.
+	Structured bool
 }
 
 type Member struct {

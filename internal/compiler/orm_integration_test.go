@@ -259,14 +259,16 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	compile := func(body string) ([]*Artifact, error) {
-		source := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n"
+	compileSource := func(source string) ([]*Artifact, error) {
 		return CompileProject([]SourceUnit{{
 			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main", Source: []byte(source),
 		}}, Options{
 			Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
 			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
 		})
+	}
+	compile := func(body string) ([]*Artifact, error) {
+		return compileSource("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n")
 	}
 	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).where(name: \"Widget\").order(price: :desc).limit(5).offset(1)\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
 	if err != nil {
@@ -279,6 +281,30 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated composed query is missing %q:\n%s", expected, output)
+		}
+	}
+	direct, err := compileSource(`import { DbResult, Model } from trb/orm
+
+class Product < Model
+end
+
+def process_products(): DbResult<Integer>
+	return Product.find_each(batch_size: 2) do |product|
+		puts(product.name)
+	end
+end
+
+def main()
+	puts(process_products())
+end
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directOutput := string(direct[0].Output)
+	for _, expected := range []string{"func ProcessProducts() orm.DbResult[int]", "return orm.NewDbResultErr[int]", "return orm.NewDbResultOk[int]"} {
+		if !strings.Contains(directOutput, expected) {
+			t.Fatalf("generated direct-return batch query is missing %q:\n%s", expected, directOutput)
 		}
 	}
 	invalid := []struct {
@@ -321,14 +347,20 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	}
 	valid := `	found := Product.find(2)
 	puts(found)
-	Product.find_each(batch_size: 2) do |product|
+	each_result := Product.find_each(batch_size: 2) do |product|
 		puts(product.name)
 		break
 	end
-	Product.where("id", ">", 0).find_in_batches(batch_size: 2) do |products|
+	puts(each_result)
+	batch_result := Product.where("id", ">", 0).find_in_batches(batch_size: 2) do |products|
 		puts(products.size())
 	end
-	Product.where(name: "Widget").find_each(batch_size: 2) { |product| puts(product.name) }`
+	puts(batch_result)
+	inline_result := Product.where(name: "Widget").find_each(batch_size: 2) { |product| puts(product.name) }
+	puts(inline_result)
+	mut reassigned := Product.where(name: "Widget").find_each(batch_size: 2) { |product| puts(product.name) }
+	reassigned = Product.where(name: "Widget").find_each(batch_size: 2) { |product| puts(product.name) }
+	puts(reassigned)`
 	artifacts, err := compile(valid)
 	if err != nil {
 		t.Fatal(err)
@@ -336,10 +368,15 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
 		"TrbOrmFirstProduct(TrbOrmProductWhere", "func TrbOrmBatchProduct", "__trbBatchLoop", "break __trbBatchLoop", "TrbOrmBatchProduct",
+		"orm.DbResult[int]", "orm.NewDbResultOk[int]", "orm.NewDbResultErr[int]", "__trbBatchProcessed",
+		`"batch queries do not accept order, limit, or offset"`, "reassigned = orm.NewDbResultOk[int]",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated batch query is missing %q:\n%s", expected, output)
 		}
+	}
+	if strings.Contains(output, "panic(loaded.ErrError") {
+		t.Fatalf("generated batch query still exposes database failures through panic:\n%s", output)
 	}
 	invalid := []struct {
 		body string
@@ -350,6 +387,7 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 		{body: "\tProduct.find_each(batch_size: 1.5) do |product|\n\t\tputs(product.name)\n\tend", want: "has type Float, expected Integer"},
 		{body: "\tProduct.find_each() do |product|\n\t\tputs(1)\n\tend", want: "block parameter product is not used"},
 		{body: "\tProduct.find_in_batches() do |left, right|\n\t\tputs(left)\n\t\tputs(right)\n\tend", want: "find_in_batches block expects 1 parameter(s), got 2"},
+		{body: "\tProduct.find_each() do |product|\n\t\tputs(product.name)\n\tend", want: "result of find_each() must be assigned or returned"},
 	}
 	for _, test := range invalid {
 		if _, err := compile(test.body); err == nil || !strings.Contains(err.Error(), test.want) {

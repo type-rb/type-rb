@@ -286,7 +286,7 @@ func batchIRMethod(name string, class bool) *ir.Method {
 	return &ir.Method{
 		Name: name, External: true, Class: class,
 		Parameters: []ir.Parameter{{Name: "batch_size", Type: types.FromName("Integer"), Keyword: true}},
-		ReturnType: types.FromName("Void"),
+		ReturnType: dbResult(types.FromName("Integer")),
 	}
 }
 

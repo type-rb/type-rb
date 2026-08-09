@@ -133,6 +133,10 @@ func (g *generator) ormErrorKind(name string) string {
 	return g.ormPackageAlias() + "." + goConstantIdentifier("DbErrorKind", name)
 }
 
+func (g *generator) ormErrorValue(kind, message string) string {
+	return g.goType(types.FromName("DbError")) + "{Kind: " + g.ormErrorKind(kind) + ", Message: " + strconv.Quote(message) + "}"
+}
+
 func (g *generator) ormPackageAlias() string {
 	if alias := g.typeAliases["DbResult"]; alias != "" {
 		return alias
@@ -215,13 +219,12 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	size := "__trbBatchSize" + suffix
 	after := "__trbBatchAfter" + suffix
 	done := "__trbBatchDone" + suffix
+	loaded := "__trbBatchLoaded" + suffix
 	batch := "__trbBatch" + suffix
 	last := "__trbBatchLast" + suffix
+	processed := "__trbBatchProcessed" + suffix
+	failed := "__trbBatchFailed" + suffix
 	label := "__trbBatchLoop" + suffix
-	breakTarget := ""
-	if ormBatchBodyBreaks(iteration.Body) {
-		breakTarget = label
-	}
 	keyType := batchKey.Type
 	keyType.Nullable = false
 	binding := ir.IterationBinding{Name: "_", Type: types.Type{Kind: types.Any, Name: "Any"}}
@@ -229,11 +232,46 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		binding = iteration.Bindings[0]
 	}
 
+	resultTarget := ""
+	returnResult := iteration.Result != nil && iteration.Result.Return
+	breakTarget := ""
+	if !returnResult || ormBatchBodyBreaks(iteration.Body) {
+		breakTarget = label
+	}
+	if iteration.Result != nil && iteration.Result.Variable != nil {
+		resultTarget = goBindingIdentifier(iteration.Result.Variable.Name)
+		g.line("var " + resultTarget + " " + g.goType(iteration.Result.Type))
+	} else if iteration.Result != nil && iteration.Result.Target != nil {
+		resultTarget = g.assignmentTarget(iteration.Result.Target)
+	}
+	integerType := types.FromName("Integer")
+	success := func(value string) string { return g.ormResultOK(integerType, value) }
+	failure := func(value string) string { return g.ormResultErr(integerType, value) }
+	assignResult := func(value string) {
+		if returnResult {
+			g.line("return " + value)
+		} else if resultTarget != "" {
+			g.line(resultTarget + " = " + value)
+		}
+	}
+
 	g.line("{")
 	g.indent++
 	g.line(query + " := " + querySource)
 	g.line(size + " := " + batchSize)
-	g.line("if " + size + " <= 0 { panic(\"ORM batch size must be greater than zero\") }")
+	g.line(processed + " := 0")
+	if !returnResult {
+		g.line(failed + " := false")
+	}
+	g.line("if " + size + " <= 0 {")
+	g.indent++
+	assignResult(failure(g.ormErrorValue("InvalidData", "batch size must be greater than zero")))
+	if !returnResult {
+		g.line(failed + " = true")
+	}
+	g.indent--
+	g.line("} else {")
+	g.indent++
 	g.line("var " + after + " *" + g.goType(keyType))
 	g.line(done + " := false")
 	if breakTarget != "" {
@@ -242,7 +280,17 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	g.line("for {")
 	g.indent++
 	g.line("if " + done + " { break }")
-	g.line(batch + " := " + qualifier + goORMBatchLoader(model) + "(" + query + ", " + after + ", " + size + ")")
+	g.line(loaded + " := " + qualifier + goORMBatchLoader(model) + "(" + query + ", " + after + ", " + size + ")")
+	g.line("if " + loaded + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag {")
+	g.indent++
+	assignResult(failure(loaded + ".ErrError"))
+	if !returnResult {
+		g.line(failed + " = true")
+		g.line("break " + label)
+	}
+	g.indent--
+	g.line("}")
+	g.line(batch + " := " + loaded + ".OkValue")
 	g.line("if len(" + batch + ") == 0 { break }")
 	g.line(done + " = len(" + batch + ") < " + size)
 	g.line(last + " := " + batch + "[len(" + batch + ")-1]." + goORMColumnGetter(batchKey.Name) + "()")
@@ -254,6 +302,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 			g.line("for _, " + goBindingIdentifier(binding.Name) + " := range " + batch + " {")
 		}
 		g.indent++
+		g.line(processed + "++")
 		if binding.Name != "_" {
 			g.line("_ = " + goBindingIdentifier(binding.Name))
 		}
@@ -264,6 +313,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		g.indent--
 		g.line("}")
 	} else {
+		g.line(processed + " += len(" + batch + ")")
 		if binding.Name != "_" {
 			g.line(goBindingIdentifier(binding.Name) + " := " + batch)
 			g.line("_ = " + goBindingIdentifier(binding.Name))
@@ -275,6 +325,13 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	}
 	g.indent--
 	g.line("}")
+	g.indent--
+	g.line("}")
+	if returnResult {
+		g.line("return " + success(processed))
+	} else if resultTarget != "" {
+		g.line("if !" + failed + " { " + resultTarget + " = " + success(processed) + " }")
+	}
 	g.indent--
 	g.line("}")
 }
@@ -660,10 +717,10 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	if batchKey, ok := model.BatchKey(); ok {
 		keyType := batchKey.Type
 		keyType.Nullable = false
-		g.line("func " + goORMBatchLoader(model) + "(query " + queryType + ", after *" + g.goType(keyType) + ", size int) []*" + goIdentifier(model.Name, true) + " {")
+		g.line("func " + goORMBatchLoader(model) + "(query " + queryType + ", after *" + g.goType(keyType) + ", size int) " + g.ormResultType(modelsType) + " {")
 		g.indent++
-		g.line("if size <= 0 { panic(\"ORM batch size must be greater than zero\") }")
-		g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil { panic(\"ORM batch queries do not accept order, limit, or offset\") }")
+		g.line("if size <= 0 { return " + g.ormResultErr(modelsType, g.ormErrorValue("InvalidData", "batch size must be greater than zero")) + " }")
+		g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil { return " + g.ormResultErr(modelsType, g.ormErrorValue("InvalidData", "batch queries do not accept order, limit, or offset")) + " }")
 		g.line("if after != nil {")
 		g.indent++
 		g.line("query = " + goORMQueryWhere(model) + "(query, []string{" + strconv.Quote(batchKey.Name) + "}, []string{\">\"}, []any{*after})")
@@ -671,9 +728,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.line("}")
 		g.line("query.orders = []" + orderType + "{{column: " + strconv.Quote(batchKey.Name) + ", direction: \"asc\"}}")
 		g.line("query.limit = &size")
-		g.line("loaded := " + goORMLoader(model) + "(query)")
-		g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { panic(loaded.ErrError.Message) }")
-		g.line("return loaded.OkValue")
+		g.line("return " + goORMLoader(model) + "(query)")
 		g.indent--
 		g.line("}")
 		g.b.WriteByte('\n')

@@ -75,6 +75,9 @@ func (n *controlFlowNormalizer) reserveStatements(statements []ir.Statement) {
 		case *ir.While:
 			n.reserveStatements(node.Body)
 		case *ir.Iterate:
+			if node.Result != nil && node.Result.Variable != nil {
+				n.reserved[node.Result.Variable.Name] = true
+			}
 			for _, binding := range node.Bindings {
 				n.reserved[binding.Name] = true
 			}
@@ -185,6 +188,16 @@ func (n *controlFlowNormalizer) statement(statement ir.Statement) []ir.Statement
 		copy.Source = source
 		copy.SliceSize = size
 		copy.Body = n.statements(node.Body)
+		if node.Result != nil && node.Result.Target != nil {
+			resultPrefix, target := n.expression(node.Result.Target)
+			prefix = append(prefix, resultPrefix...)
+			if target == nil {
+				return prefix
+			}
+			result := *node.Result
+			result.Target = target
+			copy.Result = &result
+		}
 		return append(prefix, &copy)
 	case *ir.NativeBlock:
 		copy := *node

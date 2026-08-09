@@ -723,6 +723,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.checkMethod(n, sc)
 		case *ast.VariableStatement:
 			valueType := c.checkExpression(n.Value, sc)
+			c.checkStructuredBlockValue(n.Value)
 			variableType := valueType
 			if n.Name == "_" {
 				c.error(n.Span(), "blank binding _ is only valid as a parameter or pattern binding")
@@ -769,6 +770,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 		case *ast.AssignmentStatement:
 			leftType := c.checkExpression(n.Target, sc)
 			rightType := c.checkExpression(n.Value, sc)
+			c.checkStructuredBlockValue(n.Value)
 			rightType = c.contextualizeCollectionLiteral(n.Value, leftType, rightType)
 			if identifier, ok := n.Target.(*ast.Identifier); ok && !strings.HasPrefix(identifier.Name, "@") {
 				if _, exists := sc.lookup(identifier.Name); !exists {
@@ -810,6 +812,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			actual := types.Type{Kind: types.Void, Name: "Void"}
 			if n.Value != nil {
 				actual = c.checkExpression(n.Value, sc)
+				c.checkStructuredBlockValue(n.Value)
 			}
 			if len(c.returns) == 0 {
 				c.error(n.Span(), "return is only valid inside a function or method")
@@ -830,6 +833,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 		case *ast.ExpressionStatement:
 			c.checkExpression(n.Expression, sc)
+			if call, member, ok := c.structuredBlockCall(n.Expression); ok && member.Block.Structured {
+				c.error(call.Span(), fmt.Sprintf("result of %s() must be assigned or returned", member.Name))
+			}
 		case *ast.IfStatement:
 			c.checkIf(n, sc, false)
 		case *ast.CaseStatement:
@@ -3653,6 +3659,9 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		c.error(call.Span(), fmt.Sprintf("%s() requires a block", member.Name))
 		return
 	}
+	if member.Block.Structured && len(c.returns) == 0 {
+		c.error(call.Span(), fmt.Sprintf("structured block %s() is only valid inside a function or method", member.Name))
+	}
 	if len(call.Block.Parameters) != len(member.Block.Parameters) {
 		c.error(call.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", member.Name, len(member.Block.Parameters), len(call.Block.Parameters)))
 	}
@@ -3678,6 +3687,28 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 	c.checkStatements(call.Block.Body, blockScope)
 	c.loopDepth--
 	c.result.Expressions[call.Block] = types.Type{Kind: types.Void, Name: "Void"}
+}
+
+func (c *Checker) structuredBlockCall(expression ast.Expression) (*ast.CallExpression, declaration.Member, bool) {
+	call, ok := expression.(*ast.CallExpression)
+	if !ok || call.Block == nil {
+		return nil, declaration.Member{}, false
+	}
+	member, ok := c.result.ExternalMembers[call.Callee]
+	return call, member, ok && member.Block != nil
+}
+
+func (c *Checker) checkStructuredBlockValue(expression ast.Expression) {
+	call, member, ok := c.structuredBlockCall(expression)
+	if !ok {
+		if call, isCall := expression.(*ast.CallExpression); isCall && call.Block != nil {
+			c.error(call.Span(), "call block cannot be used as a value without a structured package declaration")
+		}
+		return
+	}
+	if !member.Block.Structured {
+		c.error(call.Span(), fmt.Sprintf("block call %s() cannot be used as a value", member.Name))
+	}
 }
 
 func (c *Checker) checkNativeCallBlock(block *ast.BlockExpression, sc *scope) {

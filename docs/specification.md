@@ -253,6 +253,23 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
 - `return` remains distinct: it exits the enclosing method, including when it
   appears inside an iteration block.
 
+Compiler-owned package declarations may mark a block operation as structured.
+Unlike a target-language callback, a structured block remains in typed IR and
+may produce the declared call result without changing lexical control flow. A
+whole structured block call can be used as an initializer, assignment value,
+or return value:
+
+```trb
+result := records.process_each() do |record|
+	puts(record)
+end
+```
+
+The result must be assigned or returned; silently discarding it is an error.
+`return`, `break`, and `next` inside the block retain the same owners as an
+ordinary portable iteration. Ordinary call blocks are not value-producing
+unless their package declaration explicitly provides structured lowering.
+
 ### 3.12 Hashes
 
 - A portable hash type is written `Hash<K, V>` with exactly two type

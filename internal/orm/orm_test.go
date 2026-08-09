@@ -56,7 +56,7 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
 	}
 	findEach := product.ClassMembers["find_each"]
-	if findEach.Block == nil || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
+	if findEach.Return.String() != "DbResult<Integer>" || findEach.Block == nil || !findEach.Block.Structured || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
 		t.Fatalf("unexpected find_each declaration: %#v", findEach)
 	}
 	query, exists := catalog.Type("ProductQuery")
@@ -64,7 +64,7 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 		t.Fatalf("unexpected query declaration: %#v", query)
 	}
 	findInBatches := query.InstanceMembers["find_in_batches"]
-	if findInBatches.Block == nil || findInBatches.Block.Parameters[0].String() != "Array<Product>" {
+	if findInBatches.Return.String() != "DbResult<Integer>" || findInBatches.Block == nil || !findInBatches.Block.Structured || findInBatches.Block.Parameters[0].String() != "Array<Product>" {
 		t.Fatalf("unexpected find_in_batches declaration: %#v", findInBatches)
 	}
 	if query.InstanceMembers["to_sql"].Return.String() != "String" {

@@ -364,7 +364,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	previousBreakTarget := g.breakTarget
 	g.breakTarget = ""
 	defer func() { g.breakTarget = previousBreakTarget }()
-	if iteration.Operation == "find_each" || iteration.Operation == "find_in_batches" {
+	if iteration.Intrinsic == "trb.orm.query.find_each" || iteration.Intrinsic == "trb.orm.query.find_in_batches" {
 		g.ormBatchIterate(iteration)
 		return
 	}

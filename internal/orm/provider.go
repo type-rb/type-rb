@@ -118,8 +118,8 @@ func batchDeclaration(model Model, name string, class, batches bool) declaration
 	return declaration.Member{
 		Name: name, Kind: declaration.Method, Intrinsic: "trb.orm.query." + name,
 		Parameters: []declaration.Parameter{{Name: "batch_size", Type: types.FromName("Integer"), Keyword: true, Optional: true}},
-		Return:     types.FromName("Void"), Class: class, Provider: PackageName,
-		Block: &declaration.Block{Parameters: []types.Type{parameterType}},
+		Return:     dbResult(types.FromName("Integer")), Class: class, Provider: PackageName,
+		Block: &declaration.Block{Parameters: []types.Type{parameterType}, Structured: true},
 	}
 }
 

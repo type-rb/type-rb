@@ -134,6 +134,23 @@ func TestFormatPortableIterationAndRanges(t *testing.T) {
 	}
 }
 
+func TestFormatStructuredBlockValues(t *testing.T) {
+	source := []byte("def process()\nresult:=Product.find_each(batch_size:100) do |product| # batch\nputs(product)\nend\nreturn Product.find_in_batches() do |products|\nputs(products)\nend\nend\n")
+	want := "def process()\n\tresult := Product.find_each(batch_size: 100) do |product| # batch\n\t\tputs(product)\n\tend\n\treturn Product.find_in_batches() do |products|\n\t\tputs(products)\n\tend\nend\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected structured block formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("structured block formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatPortableCollectionTransformations(t *testing.T) {
 	source := []byte("def values():Array<Integer>\nmapped := [1,2].map do |value| # map\nvalue*2 # result\nend\nreturn mapped.select.with_index{|value,index| value>index}\nend\n")
 	formatted, diagnostics := Format(source)

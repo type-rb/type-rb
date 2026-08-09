@@ -123,6 +123,9 @@ func (p *Parser) parseStatement() ast.Statement {
 	if blockOperation := p.tryIterationStatement(line, next, base); blockOperation != nil {
 		return blockOperation
 	}
+	if callBlock := p.tryCallBlockStatement(line, next, base); callBlock != nil {
+		return callBlock
+	}
 	if word == "return" {
 		return p.parseReturn()
 	}
@@ -138,9 +141,6 @@ func (p *Parser) parseStatement() ast.Statement {
 	if assignment := p.tryAssignment(line, base); assignment != nil {
 		p.pos = next
 		return assignment
-	}
-	if callBlock := p.tryCallBlockStatement(line, next, base); callBlock != nil {
-		return callBlock
 	}
 	if p.opensNativeBlock(line) {
 		return p.parseNativeBlock()
@@ -164,7 +164,20 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 	if blockAt <= 0 {
 		return nil
 	}
-	expression, ok := parseExpressionTokens(line[:blockAt])
+	prefix := line[:blockAt]
+	header := prefix
+	wrapper := "expression"
+	if prefix[0].Lexeme == "return" {
+		wrapper = "return"
+		header = prefix[1:]
+	} else if assign := topLevelIndex(prefix, ":="); assign > 0 {
+		wrapper = "variable"
+		header = prefix[assign+1:]
+	} else if assign := topLevelIndex(prefix, "="); assign > 0 {
+		wrapper = "assignment"
+		header = prefix[assign+1:]
+	}
+	expression, ok := parseExpressionTokens(header)
 	if !ok {
 		return nil
 	}
@@ -185,14 +198,14 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 		call.SourceSpan.End = closeSpan.End
 		call.Block = block
 		base.SourceSpan.End = closeSpan.End
-		return &ast.ExpressionStatement{Base: base, Expression: call}
+		return p.wrapCallBlock(prefix, wrapper, base, call)
 	}
 
 	close := matchingIndex(line, blockAt, "{", "}")
 	if close < 0 {
 		p.errorAt(line[blockAt].Span, "unterminated call block; expected }")
 		p.pos = next
-		return &ast.ExpressionStatement{Base: base, Expression: call}
+		return p.wrapCallBlock(prefix, wrapper, base, call)
 	}
 	firstPipe, secondPipe := -1, -1
 	for index := blockAt + 1; index < close; index++ {
@@ -232,6 +245,26 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 	call.Block = block
 	base.SourceSpan.End = line[close].Span.End
 	p.pos = next
+	return p.wrapCallBlock(prefix, wrapper, base, call)
+}
+
+func (p *Parser) wrapCallBlock(prefix []token.Token, wrapper string, base ast.Base, call *ast.CallExpression) ast.Statement {
+	switch wrapper {
+	case "return":
+		return &ast.ReturnStatement{Base: base, Value: call}
+	case "variable":
+		statement, ok := p.tryVariable(prefix, base).(*ast.VariableStatement)
+		if ok {
+			statement.Value = call
+			return statement
+		}
+	case "assignment":
+		statement, ok := p.tryAssignment(prefix, base).(*ast.AssignmentStatement)
+		if ok {
+			statement.Value = call
+			return statement
+		}
+	}
 	return &ast.ExpressionStatement{Base: base, Expression: call}
 }
 

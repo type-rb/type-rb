@@ -318,14 +318,23 @@ type IterationBinding struct {
 	Type types.Type
 }
 
+type IterationResult struct {
+	Variable *Variable
+	Target   Expression
+	Return   bool
+	Type     types.Type
+}
+
 type Iterate struct {
 	Base
 	Source    Expression
 	Operation string
+	Intrinsic string
 	SliceSize Expression
 	WithIndex bool
 	Bindings  []IterationBinding
 	Body      []Statement
+	Result    *IterationResult
 }
 
 func (*Iterate) irStatement() {}
