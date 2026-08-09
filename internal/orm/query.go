@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 type Operator string
@@ -16,6 +17,9 @@ const (
 	LessThanOrEqual    Operator = "<="
 	GreaterThan        Operator = ">"
 	GreaterThanOrEqual Operator = ">="
+	In                 Operator = "IN"
+	RangeInclusive     Operator = "RANGE_INCLUSIVE"
+	RangeExclusive     Operator = "RANGE_EXCLUSIVE"
 )
 
 type Predicate struct {
@@ -33,7 +37,19 @@ func Predicates(call *ir.Call) []Predicate {
 		if argument.Name == "" {
 			continue
 		}
-		predicates = append(predicates, Predicate{Column: argument.Name, Operator: Equal, Value: argument.Value})
+		operator := Equal
+		switch value := argument.Value.(type) {
+		case *ir.Range:
+			operator = RangeInclusive
+			if value.Exclusive {
+				operator = RangeExclusive
+			}
+		default:
+			if argument.Value.ExprType().Kind == types.Array {
+				operator = In
+			}
+		}
+		predicates = append(predicates, Predicate{Column: argument.Name, Operator: operator, Value: argument.Value})
 	}
 	if len(predicates) > 0 || len(call.Arguments) != 3 {
 		return predicates

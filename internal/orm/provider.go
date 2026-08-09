@@ -266,7 +266,7 @@ func whereDeclaration(model Model, intrinsic string, class bool) declaration.Mem
 	parameters := make([]declaration.Parameter, 0, len(model.Columns))
 	var alternatives []declaration.Signature
 	for _, column := range model.Columns {
-		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: column.Type, Keyword: true, Optional: true})
+		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true, Optional: true})
 		alternatives = append(alternatives, comparisonSignatures(column, model.QueryType)...)
 	}
 	return declaration.Member{
@@ -278,13 +278,23 @@ func whereDeclaration(model Model, intrinsic string, class bool) declaration.Mem
 func notDeclaration(model Model, intrinsic string, class bool) declaration.Member {
 	parameters := make([]declaration.Parameter, 0, len(model.Columns))
 	for _, column := range model.Columns {
-		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: column.Type, Keyword: true, Optional: true})
+		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true, Optional: true})
 	}
 	return declaration.Member{
 		Name: "not", Kind: declaration.Method, Intrinsic: intrinsic, Parameters: parameters,
 		MinimumArguments: 1, MaximumArguments: 1,
 		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
 	}
+}
+
+func predicateValueType(column Column) types.Type {
+	element := column.Type
+	element.Nullable = false
+	alternatives := []types.Type{column.Type, {Kind: types.Array, Name: "Array", Args: []types.Type{element}}}
+	if element.Kind == types.Int {
+		alternatives = append(alternatives, types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{element}})
+	}
+	return types.UnionOf(alternatives...)
 }
 
 func orderDeclaration(model Model) declaration.Member {

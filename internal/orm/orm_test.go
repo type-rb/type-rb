@@ -60,6 +60,9 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if not.Intrinsic != "trb.orm.not" || not.MinimumArguments != 1 || not.MaximumArguments != 1 || len(not.Parameters) != 5 {
 		t.Fatalf("unexpected not declaration: %#v", not)
 	}
+	if where.Parameters[0].Type.String() != "Array<Integer> | Integer | Range<Integer>" || where.Parameters[1].Type.String() != "Array<String> | String" {
+		t.Fatalf("where predicate input types do not include collections and ranges: %#v", where.Parameters)
+	}
 	if product.ClassMembers["find"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
 	}

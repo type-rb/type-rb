@@ -392,7 +392,7 @@ func associationLoadedField(name string) string {
 func whereIRMethod(model Model, class bool) *ir.Method {
 	method := &ir.Method{Name: "where", External: true, Class: class, ReturnType: namedType(model.QueryType)}
 	for _, column := range model.Columns {
-		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true})
 		for _, signature := range comparisonSignatures(column, model.QueryType) {
 			alternative := ir.MethodSignature{ReturnType: signature.Return, Variadic: signature.Variadic}
 			for _, parameter := range signature.Parameters {
@@ -412,7 +412,7 @@ func whereIRMethod(model Model, class bool) *ir.Method {
 func notIRMethod(model Model, class bool) *ir.Method {
 	method := &ir.Method{Name: "not", External: true, Class: class, ReturnType: namedType(model.QueryType)}
 	for _, column := range model.Columns {
-		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true})
 	}
 	return method
 }

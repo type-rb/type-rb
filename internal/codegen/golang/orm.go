@@ -279,7 +279,11 @@ func (g *generator) ormPredicateArguments(call *ir.Call) string {
 	for index, predicate := range predicates {
 		columns[index] = strconv.Quote(predicate.Column)
 		operators[index] = strconv.Quote(string(predicate.Operator))
-		values[index] = g.expr(predicate.Value)
+		if bounds, ok := predicate.Value.(*ir.Range); ok {
+			values[index] = "trbOrmRange{start: " + g.expr(bounds.Start) + ", end: " + g.expr(bounds.End) + "}"
+		} else {
+			values[index] = g.expr(predicate.Value)
+		}
 	}
 	return "[]string{" + strings.Join(columns, ", ") + "}, []string{" + strings.Join(operators, ", ") + "}, []any{" + strings.Join(values, ", ") + "}"
 }
@@ -634,6 +638,8 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	if adapter.NumberedBinds {
 		g.requireImport("strconv", "")
 	}
+	g.line("type trbOrmRange struct { start any; end any }")
+	g.b.WriteByte('\n')
 	g.ormDialectRuntime(adapter)
 	for _, model := range models {
 		g.ormModelRuntime(manifest, adapter, model)
@@ -839,8 +845,27 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("case \"atom\":")
 	g.indent++
 	g.line("condition := predicate.condition")
-	g.line("switch condition.operator { case \"=\", \"!=\", \"<\", \"<=\", \">\", \">=\": default: panic(\"unsupported ORM comparison operator\") }")
+	g.line("switch condition.operator { case \"=\", \"!=\", \"<\", \"<=\", \">\", \">=\", \"IN\", \"RANGE_INCLUSIVE\", \"RANGE_EXCLUSIVE\": default: panic(\"unsupported ORM comparison operator\") }")
 	g.line("column := trbOrmQuoteIdentifier(condition.column)")
+	g.line("if condition.operator == \"IN\" {")
+	g.indent++
+	g.line("values := reflect.ValueOf(condition.value)")
+	g.line("if values.Kind() != reflect.Array && values.Kind() != reflect.Slice { panic(\"ORM IN predicate requires an Array\") }")
+	g.line("if values.Len() == 0 { return \"1 = 0\" }")
+	g.line("placeholders := make([]string, values.Len())")
+	g.line("for index := 0; index < values.Len(); index++ { placeholders[index] = trbOrmPlaceholder(len(*arguments)+1); *arguments = append(*arguments, values.Index(index).Interface()) }")
+	g.line("return column + \" IN (\" + strings.Join(placeholders, \", \" ) + \")\"")
+	g.indent--
+	g.line("}")
+	g.line("if condition.operator == \"RANGE_INCLUSIVE\" || condition.operator == \"RANGE_EXCLUSIVE\" {")
+	g.indent++
+	g.line("bounds, ok := condition.value.(trbOrmRange); if !ok { panic(\"ORM range predicate requires a Range\") }")
+	g.line("lower := trbOrmPlaceholder(len(*arguments)+1); *arguments = append(*arguments, bounds.start)")
+	g.line("upper := trbOrmPlaceholder(len(*arguments)+1); *arguments = append(*arguments, bounds.end)")
+	g.line("upperOperator := \"<=\"; if condition.operator == \"RANGE_EXCLUSIVE\" { upperOperator = \"<\" }")
+	g.line("return \"(\" + column + \" >= \" + lower + \" AND \" + column + \" \" + upperOperator + \" \" + upper + \")\"")
+	g.indent--
+	g.line("}")
 	g.line("nilValue := condition.value == nil")
 	g.line("if !nilValue { reflected := reflect.ValueOf(condition.value); nilValue = reflected.Kind() == reflect.Ptr && reflected.IsNil() }")
 	g.line("if nilValue && condition.operator == \"=\" { return column + \" IS NULL\" }")

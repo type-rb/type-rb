@@ -294,7 +294,7 @@ func TestPortableORMWhereUsesSchemaTypes(t *testing.T) {
 		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
 		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
 	})
-	if err == nil || !strings.Contains(err.Error(), "expected Integer") {
+	if err == nil || !strings.Contains(err.Error(), "expected Array<Integer>") {
 		t.Fatalf("expected schema type error, got %v", err)
 	}
 }
@@ -426,13 +426,24 @@ func TestPortableORMComparisonWhereUsesSchemaTypes(t *testing.T) {
 			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
 		})
 	}
-	valid := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n\tProduct.where(\"price\", \">=\", 10).all()\nend\n"
+	valid := `import { Model } from trb/orm
+class Product < Model
+end
+def main()
+	ids := [1, 2, 3]
+	Product.where("price", ">=", 10).where(id: ids).not(id: 3...5).where(discount: nil).not(discount: nil).all()
+end
+`
 	artifacts, err := compile(valid)
 	if err != nil {
 		t.Fatal(err)
 	}
 	output := string(artifacts[0].Output)
-	for _, expected := range []string{`[]string{"price"}`, `[]string{">="}`} {
+	for _, expected := range []string{
+		`[]string{"price"}`, `[]string{">="}`, `[]string{"id"}`, `[]string{"IN"}`,
+		`[]string{"RANGE_EXCLUSIVE"}`, `trbOrmRange{start: 3, end: 5}`,
+		`if values.Len() == 0 {`, `return "1 = 0"`,
+	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated comparison query is missing %q:\n%s", expected, output)
 		}
@@ -445,6 +456,8 @@ func TestPortableORMComparisonWhereUsesSchemaTypes(t *testing.T) {
 		{source: "Product.where(\"price\", \"contains\", 1.0)", want: `argument 2 to where() must be one of`},
 		{source: "Product.where(\"price\", \">=\", \"ten\")", want: `has type String, expected Float`},
 		{source: "Product.where(\"discount\", \">=\", nil)", want: `expected Float`},
+		{source: `Product.where(id: ["one", "two"])`, want: `expected Array<Integer>`},
+		{source: `Product.where(price: 1..3)`, want: `expected Array<Float>`},
 	}
 	for _, test := range invalid {
 		source := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n\t" + test.source + "\nend\n"
