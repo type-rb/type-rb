@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -38,17 +37,21 @@ const (
 )
 
 type CLI struct {
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
+	Stdin    io.Reader
+	Stdout   io.Writer
+	Stderr   io.Writer
+	terminal func(io.Reader, io.Writer) bool
 }
 
 func New() *CLI { return &CLI{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr} }
 
 func (c *CLI) Run(args []string) int {
 	if len(args) == 0 {
-		c.usage()
-		return 2
+		if !c.shouldStartREPL() {
+			c.usage()
+			return 2
+		}
+		args = []string{"repl"}
 	}
 	var err error
 	switch args[0] {
@@ -574,39 +577,24 @@ func (c *CLI) runRepl(args []string) error {
 }
 
 func (c *CLI) runPlay(args []string) error {
-	return c.runBrowserTool("play", args, false)
+	return c.runBrowserTool("play", args)
 }
 
 func (c *CLI) runTour(args []string) error {
-	return c.runBrowserTool("tour", args, true)
+	return c.runBrowserTool("tour", args)
 }
 
-func (c *CLI) runBrowserTool(page string, args []string, allowCheck bool) error {
+func (c *CLI) runBrowserTool(page string, args []string) error {
 	flags := flag.NewFlagSet(page, flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	mode := flags.String("mode", "", "initial mode: ruby, go, or typescript")
 	port := flags.Int("port", 0, "local HTTP port; zero chooses an available port")
 	noOpen := flags.Bool("no-open", false, "serve without opening a browser")
-	var check *bool
-	if allowCheck {
-		check = flags.Bool("check", false, "validate every tour lesson without opening a browser")
-	}
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%s does not accept source arguments", page)
-	}
-	if check != nil && *check {
-		if *mode != "" || *port != 0 || *noOpen {
-			return errors.New("tour --check cannot be combined with --mode, --port, or --no-open")
-		}
-		count, err := playground.ValidateTour(context.Background())
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(c.Stdout, "checked %d tour lesson execution(s)\n", count)
-		return nil
 	}
 	initialMode, err := playgroundMode(*mode)
 	if err != nil {
@@ -1132,6 +1120,14 @@ func interactiveTerminal(reader io.Reader, writer io.Writer) bool {
 	return characterDevice(reader) && characterDevice(writer)
 }
 
+func (c *CLI) shouldStartREPL() bool {
+	detect := c.terminal
+	if detect == nil {
+		detect = interactiveTerminal
+	}
+	return detect(c.Stdin, c.Stdout)
+}
+
 func characterDevice(stream any) bool {
 	file, ok := stream.(*os.File)
 	if !ok {
@@ -1249,6 +1245,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "TypeRB compiler and package manager")
 	fmt.Fprintln(c.Stdout, "")
 	fmt.Fprintln(c.Stdout, "Usage:")
+	fmt.Fprintln(c.Stdout, "  trb")
 	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [--template web] [directory]")
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build [--check] [paths...]")
@@ -1257,7 +1254,6 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb play [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb tour [--mode ruby|go|typescript] [--port PORT] [--no-open]")
-	fmt.Fprintln(c.Stdout, "  trb tour --check")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--dev] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb remove PACKAGE")

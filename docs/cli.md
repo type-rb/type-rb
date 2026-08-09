@@ -117,7 +117,11 @@ trb run test.trb
 ## REPL
 
 ```sh
-# Use the nearest project configuration, or a scratch Go session.
+# Start a REPL from an interactive terminal. It uses the nearest project
+# configuration, or a scratch Go session.
+trb
+
+# Start the same REPL explicitly.
 trb repl
 
 # Select the mode for this session.
@@ -155,6 +159,11 @@ Ctrl-D exits.
 Project history is stored in `.trb/repl_history`. Scratch history is stored in
 the user cache and separated by mode.
 
+With no arguments, `trb` starts the REPL only when both standard input and
+standard output are terminals. In a non-interactive environment it prints the
+command usage instead of waiting for input. `trb repl` remains the explicit
+form for scripts and sessions that pass options.
+
 ## Playground and tour
 
 ```sh
@@ -169,9 +178,6 @@ trb play --no-open
 
 # Open the guided language tour.
 trb tour
-
-# Validate every lesson in all three modes without starting a server.
-trb tour --check
 ```
 
 `trb play` and `trb tour` bind only to `127.0.0.1`. A zero or omitted port
@@ -192,5 +198,5 @@ platform packages are rejected during browser execution; they may still be
 type checked and displayed with Transpile.
 
 The tour stores lesson edits and completion progress in the local browser.
-`trb tour --check` is the explicit checkpoint for compiling and evaluating all
-lessons in Go, Ruby, and TypeScript modes.
+The repository test suite compiles and evaluates every lesson in Go, Ruby, and
+TypeScript modes before Pages is published.
