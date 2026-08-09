@@ -66,6 +66,14 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 				},
 				Return: dbResult(types.FromName("Boolean")), Class: true, Provider: PackageName,
 			}
+			declared.ClassMembers["upsert_all"] = declaration.Member{
+				Name: "upsert_all", Kind: declaration.Method, Intrinsic: "trb.orm.upsert_all",
+				Parameters: []declaration.Parameter{
+					{Name: "drafts", Type: arrayOf(model.DraftType())},
+					uniqueByDeclarationParameter(model), updateColumnsDeclarationParameter(model),
+				},
+				Return: dbResult(types.FromName("Integer")), Class: true, Provider: PackageName,
+			}
 			draft := declaration.NewType(model.DraftType(), "")
 			draft.InstanceMembers["save"] = declaration.Member{
 				Name: "save", Kind: declaration.Method, Intrinsic: "trb.orm.draft.save",

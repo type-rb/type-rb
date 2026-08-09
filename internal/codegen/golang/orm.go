@@ -165,6 +165,35 @@ func (g *generator) ormUpsert(call *ir.Call) string {
 	return g.ormModelQualifier(model) + goORMUpsert(model) + "(" + g.expr(member.Receiver) + ", " + uniqueBy + ", " + update + ")"
 }
 
+func (g *generator) ormUpsertAll(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	drafts, uniqueBy, update := "nil", "nil", "nil"
+	for _, argument := range call.Arguments {
+		switch argument.Name {
+		case "unique_by":
+			uniqueBy = g.expr(argument.Value)
+		case "update":
+			update = g.expr(argument.Value)
+		case "":
+			if drafts == "nil" {
+				drafts = g.expr(argument.Value)
+			}
+		}
+	}
+	return g.ormModelQualifier(model) + goORMUpsertAll(model) + "(" + drafts + ", " + uniqueBy + ", " + update + ")"
+}
+
 func (g *generator) ormUpdate(call *ir.Call) string {
 	model, receiver, columns, values, ok := g.ormModelChangeArguments(call)
 	if !ok {
@@ -565,13 +594,11 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	}
 	g.requireImport("database/sql/driver", "driver")
 	g.requireImport("context", "")
+	g.requireImport("database/sql", "sql")
 	g.requireImport("errors", "")
 	g.requireImport("net", "")
 	g.requireImport("reflect", "")
 	g.requireImport("strings", "")
-	if adapter.InsertReturning || ormModelsPreload(models) {
-		g.requireImport("database/sql", "sql")
-	}
 	if adapter.NumberedBinds {
 		g.requireImport("strconv", "")
 	}
@@ -619,17 +646,6 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-}
-
-func ormModelsPreload(models []ormintegration.Model) bool {
-	for _, model := range models {
-		for _, association := range model.Associations {
-			if association.Preloadable {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
@@ -1158,6 +1174,10 @@ func goORMUpsert(model ormintegration.Model) string {
 	return "TrbOrmUpsert" + goIdentifier(model.Name, true)
 }
 
+func goORMUpsertAll(model ormintegration.Model) string {
+	return "TrbOrmUpsertAll" + goIdentifier(model.Name, true)
+}
+
 func goORMDraftColumnValues(model ormintegration.Model) string {
 	return "trbOrm" + goIdentifier(model.Name, true) + "DraftColumnValues"
 }
@@ -1168,6 +1188,10 @@ func goORMUniqueColumns(model ormintegration.Model) string {
 
 func goORMWritableColumn(model ormintegration.Model) string {
 	return "trbOrm" + goIdentifier(model.Name, true) + "WritableColumn"
+}
+
+func goORMValuesContainNil(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "ValuesContainNil"
 }
 
 func goORMUpdate(model ormintegration.Model) string {

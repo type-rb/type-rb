@@ -61,6 +61,13 @@ def upsert_product(): DbResult<Product>
 	return draft.upsert(unique_by: [:name], update: [:price, :active])
 end
 
+def upsert_products(): DbResult<Integer>
+	return Product.upsert_all([
+		Product.build(name: "First", price: 1.0, active: true),
+		Product.build(active: false, name: "Second", price: 2.0)
+	], unique_by: [:name], update: [:price, :active])
+end
+
 def update_product(product: Product): DbResult<Product>
 	return product.update(name: "Updated")
 end
@@ -83,6 +90,7 @@ def main()
 	when DbResult::Ok(products)
 		products.each do |product|
 			puts(product.name)
+			puts(product.price)
 		end
 	when DbResult::Err(error)
 		puts(error.message)
@@ -121,6 +129,7 @@ end
 		"TrbOrmSaveProductDraft", "TrbOrmCreateProduct", "type ProductChanges struct", "TrbOrmWithProduct",
 		"TrbOrmSaveProductChanges", "TrbOrmUpdateProduct", "TrbOrmInsertAllProduct", "TrbOrmDeleteProduct",
 		"TrbOrmInsertProductIfAbsent", "TrbOrmUpsertProduct", "trbOrmProductUniqueColumns",
+		"TrbOrmUpsertAllProduct", "func(value *float64) any", "if value == nil {",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
@@ -161,7 +170,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	for _, member := range product.Members {
 		classMethods[member.Name] = true
 	}
-	for _, name := range []string{"where", "find", "build", "create", "insert_all", "insert_if_absent", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "find", "build", "create", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !classMethods[name] {
 			t.Fatalf("Product.%s is missing from completion context: %#v", name, product.Members)
 		}
@@ -364,6 +373,14 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 	if !strings.Contains(output, `TrbOrmUpsertProduct(TrbOrmBuildProduct`) || !strings.Contains(output, `[]string{"name"}, []string{"price"}`) {
 		t.Fatalf("generated upsert does not preserve conflict and update columns:\n%s", output)
 	}
+	artifacts, err = compile(`puts(Product.upsert_all([Product.build(name: "First", price: 1.0), Product.build(price: 2.0, name: "Second")], unique_by: [:name], update: [:price]))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output = string(artifacts[0].Output)
+	if !strings.Contains(output, `TrbOrmUpsertAllProduct([]*ProductDraft{TrbOrmBuildProduct`) || !strings.Contains(output, `[]string{"name"}, []string{"price"}`) {
+		t.Fatalf("generated upsert_all does not use typed drafts and literal columns:\n%s", output)
+	}
 	for _, test := range []struct {
 		call string
 		want string
@@ -380,6 +397,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		{call: `Product.insert_if_absent(Product.build(name: "Unique"), unique_by: [:price])`, want: "must match one of [:id], [:name]"},
 		{call: `Product.build(name: "Unique").upsert(unique_by: [:name], update: [:id])`, want: "must be a non-empty literal array"},
 		{call: `Product.build(name: "Unique").upsert(unique_by: [:name], update: [:price, :price])`, want: "must be a non-empty literal array"},
+		{call: `Product.upsert_all([Product.new()], unique_by: [:name], update: [:price])`, want: "expected Array<ProductDraft>"},
 	} {
 		if _, err := compile(test.call); err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Fatalf("expected write diagnostic %q, got %v", test.want, err)

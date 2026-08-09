@@ -79,6 +79,7 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	g.b.WriteByte('\n')
 	g.ormInsertAllRuntime(adapter, model)
 	g.ormConflictRuntime(model)
+	g.ormUpsertAllRuntime(adapter, model)
 	g.ormUpdateRuntime(adapter, model, primaryKey, projection, scanTargets)
 	g.ormDeleteRuntime(adapter, model, primaryKey)
 }
@@ -94,6 +95,13 @@ func (g *generator) ormConflictRuntime(model ormintegration.Model) {
 	g.line("values := make([]any, len(columns))")
 	g.line("for index, column := range columns { value, ok := indexed[column]; if !ok { return nil, false }; values[index] = value }")
 	g.line("return values, true")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMValuesContainNil(model) + "(values []any) bool {")
+	g.indent++
+	g.line("for _, value := range values { if value == nil { return true }; reflected := reflect.ValueOf(value); if reflected.Kind() == reflect.Ptr && reflected.IsNil() { return true } }")
+	g.line("return false")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -133,6 +141,7 @@ func (g *generator) ormConflictRuntime(model ormintegration.Model) {
 	g.line("if !ok { return " + g.ormResultErr(booleanType, g.ormErrorValue("InvalidData", "unique_by columns must be present in the draft")) + " }")
 	g.line("created := " + goORMCreate(model) + "(draft.columns, draft.values)")
 	g.line("if created.Kind == " + g.ormPackageAlias() + ".DbResultOkTag { return " + g.ormResultOK(booleanType, "true") + " }")
+	g.line("if " + goORMValuesContainNil(model) + "(uniqueValues) { return " + g.ormResultErr(booleanType, "created.ErrError") + " }")
 	g.line("if created.ErrError.Kind != " + g.ormErrorKind("Constraint") + " { return " + g.ormResultErr(booleanType, "created.ErrError") + " }")
 	g.line("operators := make([]string, len(uniqueColumns)); for index := range operators { operators[index] = \"=\" }")
 	g.line("loaded := " + goORMFirst(model) + "(" + goORMWhere(model) + "(uniqueColumns, operators, uniqueValues))")
@@ -159,6 +168,7 @@ func (g *generator) ormConflictRuntime(model ormintegration.Model) {
 	g.line("if !ok { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "upsert update columns must be present in the draft")) + " }")
 	g.line("created := " + goORMCreate(model) + "(draft.columns, draft.values)")
 	g.line("if created.Kind == " + g.ormPackageAlias() + ".DbResultOkTag || created.ErrError.Kind != " + g.ormErrorKind("Constraint") + " { return created }")
+	g.line("if " + goORMValuesContainNil(model) + "(uniqueValues) { return created }")
 	g.line("operators := make([]string, len(uniqueColumns)); for index := range operators { operators[index] = \"=\" }")
 	g.line("loaded := " + goORMFirst(model) + "(" + goORMWhere(model) + "(uniqueColumns, operators, uniqueValues))")
 	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(modelType, "loaded.ErrError") + " }")
@@ -167,6 +177,92 @@ func (g *generator) ormConflictRuntime(model ormintegration.Model) {
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+}
+
+func (g *generator) ormUpsertAllRuntime(adapter ormintegration.Adapter, model ormintegration.Model) {
+	integerType := types.FromName("Integer")
+	draftType := goIdentifier(model.DraftType(), true)
+	resultType := g.ormResultType(integerType)
+	g.line("func " + goORMUpsertAll(model) + "(drafts []*" + draftType + ", uniqueColumns []string, updateColumns []string) " + resultType + " {")
+	g.indent++
+	g.line("if len(drafts) == 0 { return " + g.ormResultOK(integerType, "0") + " }")
+	g.line("if !" + goORMUniqueColumns(model) + "(uniqueColumns) { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "unique_by must match a primary or unique constraint")) + " }")
+	g.line("if len(updateColumns) == 0 { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "upsert update requires at least one attribute")) + " }")
+	g.line("seenUpdates := map[string]bool{}")
+	g.line("for _, column := range updateColumns {")
+	g.indent++
+	g.line("if !" + goORMWritableColumn(model) + "(column) || seenUpdates[column] { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "upsert update columns must be unique writable attributes")) + " }")
+	g.line("for _, uniqueColumn := range uniqueColumns { if column == uniqueColumn { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "upsert cannot update unique_by columns")) + " } }")
+	g.line("seenUpdates[column] = true")
+	g.indent--
+	g.line("}")
+	g.line("columns := append([]string(nil), drafts[0].columns...)")
+	g.line("rows := make([][]any, len(drafts))")
+	g.line("uniqueRows := make([][]any, len(drafts))")
+	g.line("for rowIndex, draft := range drafts {")
+	g.indent++
+	g.line("if len(draft.columns) != len(columns) { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "bulk upsert drafts must use the same attributes")) + " }")
+	g.line("indexed := make(map[string]any, len(draft.columns))")
+	g.line("for index, column := range draft.columns { indexed[column] = draft.values[index] }")
+	g.line("row := make([]any, len(columns))")
+	g.line("for index, column := range columns { value, ok := indexed[column]; if !ok { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "bulk upsert drafts must use the same attributes")) + " }; row[index] = value }")
+	g.line("rows[rowIndex] = row")
+	g.line("uniqueValues, ok := " + goORMDraftColumnValues(model) + "(draft, uniqueColumns)")
+	g.line("if !ok { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "unique_by columns must be present in every draft")) + " }")
+	g.line("if _, ok := " + goORMDraftColumnValues(model) + "(draft, updateColumns); !ok { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "upsert update columns must be present in every draft")) + " }")
+	g.line("if !" + goORMValuesContainNil(model) + "(uniqueValues) { for previous := 0; previous < rowIndex; previous++ { if reflect.DeepEqual(uniqueRows[previous], uniqueValues) { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "bulk upsert contains duplicate unique_by values")) + " } } }")
+	g.line("uniqueRows[rowIndex] = uniqueValues")
+	g.indent--
+	g.line("}")
+	if adapter.Name == "mysql" {
+		g.ormMySQLUpsertAllBody(adapter, model, integerType)
+	} else {
+		g.ormNativeUpsertAllBody(adapter, model, integerType)
+	}
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+}
+
+func (g *generator) ormNativeUpsertAllBody(adapter ormintegration.Adapter, model ormintegration.Model, integerType types.Type) {
+	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("quotedColumns := make([]string, len(columns)); for index, column := range columns { quotedColumns[index] = trbOrmQuoteIdentifier(column) }")
+	g.line("groups := make([]string, len(rows))")
+	g.line("arguments := make([]any, 0, len(rows)*len(columns))")
+	g.line("for rowIndex, row := range rows { placeholders := make([]string, len(columns)); for index := range columns { placeholders[index] = trbOrmPlaceholder(len(arguments) + 1); arguments = append(arguments, row[index]) }; groups[rowIndex] = \"(\" + strings.Join(placeholders, \", \") + \")\" }")
+	g.line("conflictColumns := make([]string, len(uniqueColumns)); for index, column := range uniqueColumns { conflictColumns[index] = trbOrmQuoteIdentifier(column) }")
+	g.line("assignments := make([]string, len(updateColumns)); for index, column := range updateColumns { quoted := trbOrmQuoteIdentifier(column); assignments[index] = quoted + \" = excluded.\" + quoted }")
+	g.line("statement := " + strconv.Quote("INSERT INTO "+adapter.QuoteIdentifier(model.Table)+" (") + " + strings.Join(quotedColumns, \", \") + \") VALUES \" + strings.Join(groups, \", \") + \" ON CONFLICT (\" + strings.Join(conflictColumns, \", \") + \") DO UPDATE SET \" + strings.Join(assignments, \", \")")
+	g.line("written, err := database.Exec(statement, arguments...)")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk upsert failed\")") + " }")
+	g.line("affected, err := written.RowsAffected(); if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk upsert result was unavailable\")") + " }")
+	g.line("return " + g.ormResultOK(integerType, "int(affected)"))
+}
+
+func (g *generator) ormMySQLUpsertAllBody(adapter ormintegration.Adapter, model ormintegration.Model, integerType types.Type) {
+	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("transaction, err := database.Begin(); if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk upsert failed\")") + " }")
+	g.line("defer transaction.Rollback()")
+	g.line("quotedColumns := make([]string, len(columns)); for index, column := range columns { quotedColumns[index] = trbOrmQuoteIdentifier(column) }")
+	g.line("insertStatement := " + strconv.Quote("INSERT INTO "+adapter.QuoteIdentifier(model.Table)+" (") + " + strings.Join(quotedColumns, \", \") + \") VALUES (\" + trbOrmPlaceholders(len(columns)) + \")\"")
+	g.line("predicates := make([]string, len(uniqueColumns)); for index, column := range uniqueColumns { predicates[index] = trbOrmQuoteIdentifier(column) + \" = ?\" }")
+	g.line("selectStatement := " + strconv.Quote("SELECT 1 FROM "+adapter.QuoteIdentifier(model.Table)+" WHERE ") + " + strings.Join(predicates, \" AND \") + \" LIMIT 1 FOR UPDATE\"")
+	g.line("assignments := make([]string, len(updateColumns)); for index, column := range updateColumns { assignments[index] = trbOrmQuoteIdentifier(column) + \" = ?\" }")
+	g.line("updateStatement := " + strconv.Quote("UPDATE "+adapter.QuoteIdentifier(model.Table)+" SET ") + " + strings.Join(assignments, \", \") + \" WHERE \" + strings.Join(predicates, \" AND \")")
+	g.line("for rowIndex, draft := range drafts {")
+	g.indent++
+	g.line("uniqueValues := uniqueRows[rowIndex]")
+	g.line("updateValues, _ := " + goORMDraftColumnValues(model) + "(draft, updateColumns)")
+	g.line("exists := false")
+	g.line("if !" + goORMValuesContainNil(model) + "(uniqueValues) { var marker int; err := transaction.QueryRow(selectStatement, uniqueValues...).Scan(&marker); if err == nil { exists = true } else if !errors.Is(err, sql.ErrNoRows) { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk upsert failed\")") + " } }")
+	g.line("if exists { arguments := append(append([]any(nil), updateValues...), uniqueValues...); if _, err := transaction.Exec(updateStatement, arguments...); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk upsert failed\")") + " }; continue }")
+	g.line("if _, err := transaction.Exec(insertStatement, rows[rowIndex]...); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk upsert failed\")") + " }")
+	g.indent--
+	g.line("}")
+	g.line("if err := transaction.Commit(); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk upsert failed\")") + " }")
+	g.line("return " + g.ormResultOK(integerType, "len(drafts)"))
 }
 
 func (g *generator) ormInsertAllRuntime(adapter ormintegration.Adapter, model ormintegration.Model) {

@@ -212,6 +212,16 @@ func (m *Manifest) Augment(program *ir.Program) {
 						ReturnType: dbResult(types.FromName("Boolean")),
 					})
 				}
+				if !existing["upsert_all"] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: "upsert_all", External: true, Class: true,
+						Parameters: []ir.Parameter{
+							{Name: "drafts", Type: arrayOf(model.DraftType())},
+							uniqueByIRParameter(model), updateColumnsIRParameter(model),
+						},
+						ReturnType: dbResult(types.FromName("Integer")),
+					})
+				}
 			}
 			if _, ok := model.BatchKey(); ok {
 				for _, name := range []string{"find_each", "find_in_batches"} {

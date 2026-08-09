@@ -79,6 +79,10 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if insertIfAbsent.Return.String() != "DbResult<Boolean>" || len(insertIfAbsent.Parameters) != 2 || len(insertIfAbsent.Parameters[1].LiteralArrays) != 2 {
 		t.Fatalf("unexpected insert_if_absent declaration: %#v", insertIfAbsent)
 	}
+	upsertAll := product.ClassMembers["upsert_all"]
+	if upsertAll.Return.String() != "DbResult<Integer>" || len(upsertAll.Parameters) != 3 || upsertAll.Parameters[0].Type.String() != "Array<ProductDraft>" {
+		t.Fatalf("unexpected upsert_all declaration: %#v", upsertAll)
+	}
 	upsert := draft.InstanceMembers["upsert"]
 	if upsert.Return.String() != "DbResult<Product>" || len(upsert.Parameters) != 2 || len(upsert.Parameters[0].LiteralArrays) != 2 {
 		t.Fatalf("unexpected upsert declaration: %#v", upsert)
@@ -228,8 +232,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 16 {
-		t.Fatalf("expected five fields and eleven ORM methods, got %#v", product.Body)
+	if len(product.Body) != 17 {
+		t.Fatalf("expected five fields and twelve ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -249,7 +253,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "find", "create", "build", "insert_all", "insert_if_absent", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}

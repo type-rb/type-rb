@@ -21,6 +21,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			want: []string{
 				`return "$" + strconv.Itoa(position)`,
 				`mark := "\""`, `database.Query("EXPLAIN "+statement`, `statement+" RETURNING \"id\""`,
+				` ON CONFLICT (`, `excluded.`,
 			},
 		},
 		{
@@ -32,6 +33,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				`column := trbOrmQuoteIdentifier(order.column)`,
 				`database.Query("EXPLAIN FORMAT=JSON "+statement`,
 				`written.LastInsertId()`,
+				`LIMIT 1 FOR UPDATE`, `transaction.Commit()`,
 			},
 		},
 	} {
@@ -55,6 +57,9 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			}
 			manifest.Augment(program)
 			output := Generate(program)
+			if !strings.Contains(output, `import "database/sql"`) {
+				t.Fatalf("generated %s ORM runtime does not import database/sql:\n%s", test.adapter, output)
+			}
 			for _, want := range test.want {
 				if !strings.Contains(output, want) {
 					t.Fatalf("generated %s ORM runtime is missing %q:\n%s", test.adapter, want, output)
@@ -73,6 +78,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				`written, err := database.Exec(statement, arguments...)`,
 				`func TrbOrmInsertProductIfAbsent(draft *ProductDraft, uniqueColumns []string) orm.DbResult[bool]`,
 				`func TrbOrmUpsertProduct(draft *ProductDraft, uniqueColumns []string, updateColumns []string) orm.DbResult[*Product]`,
+				`func TrbOrmUpsertAllProduct(drafts []*ProductDraft, uniqueColumns []string, updateColumns []string) orm.DbResult[int]`,
 				`unique_by must match a primary or unique constraint`,
 				`type ProductChanges struct {`,
 				`func TrbOrmWithProduct(value *Product, columns []string, values []any) *ProductChanges`,
