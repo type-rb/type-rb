@@ -399,6 +399,15 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	if productModelJoin.Intrinsic != "trb.orm.left_join" || !productModelJoin.Class || len(productModelJoin.Alternatives) != 2 {
 		t.Fatalf("unexpected Product.left_join declaration: %#v", productModelJoin)
 	}
+	productExists := productQueryMember(t, catalog, "ProductQuery", "where_exists")
+	if productExists.Intrinsic != "trb.orm.query.where_exists" || len(productExists.Alternatives) != 2 ||
+		productExists.Alternatives[1].Parameters[1].Type.String() != "CategoryQuery" {
+		t.Fatalf("unexpected ProductQuery.where_exists declaration: %#v", productExists)
+	}
+	productNotExists := product.ClassMembers["where_not_exists"]
+	if productNotExists.Intrinsic != "trb.orm.where_not_exists" || !productNotExists.Class || len(productNotExists.Alternatives) != 2 {
+		t.Fatalf("unexpected Product.where_not_exists declaration: %#v", productNotExists)
+	}
 	manifest, err := Analyze([]*ast.Program{program}, root, options)
 	if err != nil {
 		t.Fatal(err)

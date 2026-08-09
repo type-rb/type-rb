@@ -49,7 +49,7 @@ func (g *generator) ormJoin(call *ir.Call, kind string) string {
 	}
 	predicate := "nil"
 	if len(call.Arguments) > 1 {
-		predicate = g.ormModelQualifier(target) + goORMJoinPredicate(target) + "(" + g.expr(call.Arguments[1].Value) + ")"
+		predicate = g.ormModelQualifier(target) + goORMAssociationPredicate(target) + "(" + g.expr(call.Arguments[1].Value) + ")"
 	}
 	join := g.ormLifecycleAlias() + ".TrbOrmJoin{" +
 		"Kind: " + strconv.Quote(kind) +
@@ -82,6 +82,6 @@ func goORMJoin(model ormintegration.Model) string {
 	return "TrbOrm" + goIdentifier(model.Name, true) + "Join"
 }
 
-func goORMJoinPredicate(model ormintegration.Model) string {
-	return "TrbOrm" + goIdentifier(model.Name, true) + "JoinPredicate"
+func goORMAssociationPredicate(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "AssociationPredicate"
 }

@@ -236,6 +236,16 @@ func (m *Manifest) Augment(program *ir.Program) {
 					class.Body = append(class.Body, join)
 				}
 			}
+			if !existing["where_exists"] {
+				if exists := joinIRMethod(model, "where_exists", true); exists != nil {
+					class.Body = append(class.Body, exists)
+				}
+			}
+			if !existing["where_not_exists"] {
+				if exists := joinIRMethod(model, "where_not_exists", true); exists != nil {
+					class.Body = append(class.Body, exists)
+				}
+			}
 			if !existing["using"] {
 				class.Body = append(class.Body, &ir.Method{
 					Name: "using", External: true, Class: true,
@@ -463,6 +473,12 @@ func queryIRMethods(model Model) []ir.Statement {
 	}
 	if join := joinIRMethod(model, "left_join", false); join != nil {
 		methods = append(methods, join)
+	}
+	if exists := joinIRMethod(model, "where_exists", false); exists != nil {
+		methods = append(methods, exists)
+	}
+	if exists := joinIRMethod(model, "where_not_exists", false); exists != nil {
+		methods = append(methods, exists)
 	}
 	for _, operation := range AggregateOperations() {
 		if aggregate := aggregateIRMethod(model, operation, false); aggregate != nil {

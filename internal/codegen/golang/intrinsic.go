@@ -257,6 +257,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormJoin(call, "INNER JOIN")
 	case "trb.orm.left_join":
 		return g.ormJoin(call, "LEFT JOIN")
+	case "trb.orm.where_exists":
+		return g.ormWhereExists(call, false)
+	case "trb.orm.where_not_exists":
+		return g.ormWhereExists(call, true)
 	case "trb.orm.using":
 		return g.ormUsing(call, arguments)
 	case "trb.orm.not":
@@ -315,6 +319,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormJoin(call, "INNER JOIN")
 	case "trb.orm.query.left_join":
 		return g.ormJoin(call, "LEFT JOIN")
+	case "trb.orm.query.where_exists":
+		return g.ormWhereExists(call, false)
+	case "trb.orm.query.where_not_exists":
+		return g.ormWhereExists(call, true)
 	case "trb.orm.query.not":
 		return g.ormQueryNot(call, arguments)
 	case "trb.orm.query.or":

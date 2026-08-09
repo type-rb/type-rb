@@ -63,6 +63,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		if join := joinDeclaration(model, "left_join", "trb.orm.left_join", true); join.Name != "" {
 			declared.ClassMembers["left_join"] = join
 		}
+		if exists := joinDeclaration(model, "where_exists", "trb.orm.where_exists", true); exists.Name != "" {
+			declared.ClassMembers["where_exists"] = exists
+		}
+		if exists := joinDeclaration(model, "where_not_exists", "trb.orm.where_not_exists", true); exists.Name != "" {
+			declared.ClassMembers["where_not_exists"] = exists
+		}
 		declared.ClassMembers["using"] = declaration.Member{
 			Name: "using", Kind: declaration.Method, Intrinsic: "trb.orm.using",
 			Parameters: []declaration.Parameter{{Name: "transaction", Type: types.FromName("Transaction")}},
@@ -134,6 +140,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		if join := joinDeclaration(model, "left_join", "trb.orm.query.left_join", false); join.Name != "" {
 			query.InstanceMembers["left_join"] = join
+		}
+		if exists := joinDeclaration(model, "where_exists", "trb.orm.query.where_exists", false); exists.Name != "" {
+			query.InstanceMembers["where_exists"] = exists
+		}
+		if exists := joinDeclaration(model, "where_not_exists", "trb.orm.query.where_not_exists", false); exists.Name != "" {
+			query.InstanceMembers["where_not_exists"] = exists
 		}
 		query.InstanceMembers["not"] = notDeclaration(model, "trb.orm.query.not", false)
 		query.InstanceMembers["or"] = declaration.Member{

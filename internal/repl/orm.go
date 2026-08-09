@@ -68,6 +68,16 @@ type ormPredicate struct {
 	kind      string
 	condition ormCondition
 	children  []*ormPredicate
+	exists    *ormExistsPredicate
+}
+
+type ormExistsPredicate struct {
+	negated      bool
+	table        string
+	sourceTable  string
+	sourceColumn string
+	targetColumn string
+	predicate    *ormPredicate
 }
 
 type ormCondition struct {
@@ -382,10 +392,10 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 				return Value{}, fmt.Errorf("ORM join %s requires a %s query", associationName, target.Name)
 			}
 			if targetQuery.transaction != nil {
-				return Value{}, errors.New("ORM join predicate query must not have a transaction scope; scope the base query instead")
+				return Value{}, errors.New("ORM association predicate query must not have a transaction scope; scope the base query instead")
 			}
-			if ormQueryModified(targetQuery) {
-				return Value{}, errors.New("ORM join predicate query accepts only where, not, and or")
+			if ormQueryModified(targetQuery) || ormPredicateContainsExists(targetQuery.predicate) {
+				return Value{}, errors.New("ORM association predicate query accepts only where, not, and or")
 			}
 			predicate = targetQuery.predicate
 		}
@@ -397,6 +407,46 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			kind: kind, table: target.Table,
 			sourceColumn: association.SourceColumn, targetColumn: association.TargetColumn,
 			predicate: predicate,
+		})
+		return ormQueryResult(typ, query), nil
+	case "trb.orm.where_exists", "trb.orm.where_not_exists", "trb.orm.query.where_exists", "trb.orm.query.where_not_exists":
+		if len(remaining) < 1 || len(remaining) > 2 {
+			return Value{}, errors.New("ORM where_exists requires an association and optional predicate query")
+		}
+		associationName, ok := remaining[0].Value.Data.(string)
+		if !ok {
+			return Value{}, errors.New("ORM where_exists association must be a literal name")
+		}
+		association, ok := query.model.Association(associationName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no association %s", query.model.Name, associationName)
+		}
+		target, ok := e.ormRuntime().manifest.Model(association.TargetModel)
+		if !ok {
+			return Value{}, errors.New("ORM where_exists target is not available")
+		}
+		var predicate *ormPredicate
+		if len(remaining) == 2 {
+			targetQuery, ok := remaining[1].Value.Data.(*ormQueryValue)
+			if !ok || targetQuery.model.Name != target.Name {
+				return Value{}, fmt.Errorf("ORM where_exists %s requires a %s query", associationName, target.Name)
+			}
+			if targetQuery.transaction != nil {
+				return Value{}, errors.New("ORM where_exists predicate query must not have a transaction scope; scope the base query instead")
+			}
+			if ormQueryModified(targetQuery) || ormPredicateContainsExists(targetQuery.predicate) {
+				return Value{}, errors.New("ORM where_exists predicate query accepts only where, not, and or")
+			}
+			predicate = targetQuery.predicate
+		}
+		negated := name == "trb.orm.where_not_exists" || name == "trb.orm.query.where_not_exists"
+		query.predicate = ormCombinePredicates("and", query.predicate, &ormPredicate{
+			kind: "exists",
+			exists: &ormExistsPredicate{
+				negated: negated, table: target.Table, sourceTable: query.model.Table,
+				sourceColumn: association.SourceColumn, targetColumn: association.TargetColumn,
+				predicate: predicate,
+			},
 		})
 		return ormQueryResult(typ, query), nil
 	case "trb.orm.not", "trb.orm.query.not":
@@ -587,6 +637,21 @@ func ormQueryResult(typ types.Type, query *ormQueryValue) Value {
 
 func ormQueryModified(query *ormQueryValue) bool {
 	return len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 || len(query.joins) > 0
+}
+
+func ormPredicateContainsExists(predicate *ormPredicate) bool {
+	if predicate == nil {
+		return false
+	}
+	if predicate.kind == "exists" {
+		return true
+	}
+	for _, child := range predicate.children {
+		if ormPredicateContainsExists(child) {
+			return true
+		}
+	}
+	return false
 }
 
 func ormPredicateFromArguments(arguments []evaluatedArgument) (*ormPredicate, error) {
@@ -816,6 +881,28 @@ func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (
 			return "", err
 		}
 		return "NOT (" + clause + ")", nil
+	case "exists":
+		if predicate.exists == nil {
+			return "", errors.New("invalid ORM exists predicate")
+		}
+		exists := predicate.exists
+		correlation := runtime.adapter.QuoteIdentifier(exists.table) + "." + runtime.adapter.QuoteIdentifier(exists.targetColumn) +
+			" = " + runtime.adapter.QuoteIdentifier(exists.sourceTable) + "." + runtime.adapter.QuoteIdentifier(exists.sourceColumn)
+		statement := "SELECT 1 FROM " + runtime.adapter.QuoteIdentifier(exists.table) + " WHERE " + correlation
+		if exists.predicate != nil {
+			clause, err := e.ormPredicateSQL(exists.predicate, arguments)
+			if err != nil {
+				return "", err
+			}
+			if clause != "" {
+				statement += " AND (" + clause + ")"
+			}
+		}
+		operator := "EXISTS"
+		if exists.negated {
+			operator = "NOT EXISTS"
+		}
+		return operator + " (" + statement + ")", nil
 	default:
 		return "", errors.New("unsupported ORM predicate")
 	}

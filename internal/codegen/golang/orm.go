@@ -864,7 +864,9 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("type TrbOrmJoinPredicate func(arguments *[]any) string")
+	g.line("type TrbOrmAssociationPredicate func(arguments *[]any) string")
+	g.b.WriteByte('\n')
+	g.line("type TrbOrmExistsPredicate func(arguments *[]any) string")
 	g.b.WriteByte('\n')
 	g.line("type TrbOrmJoin struct {")
 	g.indent++
@@ -872,7 +874,7 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.line("Table string")
 	g.line("SourceColumn string")
 	g.line("TargetColumn string")
-	g.line("Predicate TrbOrmJoinPredicate")
+	g.line("Predicate TrbOrmAssociationPredicate")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1099,6 +1101,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("kind string")
 	g.line("condition " + conditionType)
 	g.line("children []" + predicateType)
+	g.line("exists " + g.ormLifecycleAlias() + ".TrbOrmExistsPredicate")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1206,12 +1209,38 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.line("func " + goORMPredicateContainsExists(model) + "(predicate *" + predicateType + ") bool {")
+	g.indent++
+	g.line("if predicate == nil { return false }")
+	g.line("if predicate.kind == \"exists\" { return true }")
+	g.line("for index := range predicate.children { if " + goORMPredicateContainsExists(model) + "(&predicate.children[index]) { return true } }")
+	g.line("return false")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 	g.line("func " + goORMJoin(model) + "(query " + queryType + ", join " + g.ormLifecycleAlias() + ".TrbOrmJoin) " + queryType + " {")
 	g.indent++
 	g.line("switch join.Kind { case \"INNER JOIN\", \"LEFT JOIN\": default: panic(\"unsupported ORM join kind\") }")
 	g.line("result := query")
 	g.line("result.joins = append([]" + g.ormLifecycleAlias() + ".TrbOrmJoin(nil), query.joins...)")
 	g.line("result.joins = append(result.joins, join)")
+	g.line("return result")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMWhereExists(model) + "(query " + queryType + ", table string, sourceColumn string, targetColumn string, predicate " + g.ormLifecycleAlias() + ".TrbOrmAssociationPredicate, negated bool) " + queryType + " {")
+	g.indent++
+	g.line("exists := " + g.ormLifecycleAlias() + ".TrbOrmExistsPredicate(func(arguments *[]any) string {")
+	g.indent++
+	g.line("correlation := trbOrmQuoteIdentifier(table) + \".\" + trbOrmQuoteIdentifier(targetColumn) + \" = \" + trbOrmQuoteIdentifier(" + strconv.Quote(model.Table) + ") + \".\" + trbOrmQuoteIdentifier(sourceColumn)")
+	g.line("statement := \"SELECT 1 FROM \" + trbOrmQuoteIdentifier(table) + \" WHERE \" + correlation")
+	g.line("if predicate != nil { if clause := predicate(arguments); clause != \"\" { statement += \" AND (\" + clause + \")\" } }")
+	g.line("operator := \"EXISTS\"; if negated { operator = \"NOT EXISTS\" }")
+	g.line("return operator + \" (\" + statement + \")\"")
+	g.indent--
+	g.line("})")
+	g.line("result := query")
+	g.line("result.predicate = " + goORMCombinePredicates(model) + "(\"and\", query.predicate, &" + predicateType + "{kind: \"exists\", exists: exists})")
 	g.line("return result")
 	g.indent--
 	g.line("}")
@@ -1265,6 +1294,11 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("if len(predicate.children) != 1 { panic(\"invalid ORM not predicate\") }")
 	g.line("return \"NOT (\" + " + goORMPredicateSQL(model) + "(&predicate.children[0], arguments) + \")\"")
 	g.indent--
+	g.line("case \"exists\":")
+	g.indent++
+	g.line("if predicate.exists == nil { panic(\"invalid ORM exists predicate\") }")
+	g.line("return predicate.exists(arguments)")
+	g.indent--
 	g.line("default:")
 	g.indent++
 	g.line("panic(\"unsupported ORM predicate\")")
@@ -1273,10 +1307,10 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func " + goORMJoinPredicate(model) + "(query " + queryType + ") " + g.ormLifecycleAlias() + ".TrbOrmJoinPredicate {")
+	g.line("func " + goORMAssociationPredicate(model) + "(query " + queryType + ") " + g.ormLifecycleAlias() + ".TrbOrmAssociationPredicate {")
 	g.indent++
-	g.line("if query.transaction != nil { panic(\"ORM join predicate query must not have a transaction scope; scope the base query instead\") }")
-	g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 || len(query.joins) > 0 { panic(\"ORM join predicate query accepts only where, not, and or\") }")
+	g.line("if query.transaction != nil { panic(\"ORM association predicate query must not have a transaction scope; scope the base query instead\") }")
+	g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0 || len(query.joins) > 0 || " + goORMPredicateContainsExists(model) + "(query.predicate) { panic(\"ORM association predicate query accepts only where, not, and or\") }")
 	g.line("return func(arguments *[]any) string { return " + goORMPredicateSQL(model) + "(query.predicate, arguments) }")
 	g.indent--
 	g.line("}")
@@ -1868,6 +1902,14 @@ func goORMStatementAppend(model ormintegration.Model) string {
 
 func goORMValidateSubqueries(model ormintegration.Model) string {
 	return "trbOrm" + goIdentifier(model.Name, true) + "ValidateSubqueries"
+}
+
+func goORMWhereExists(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "WhereExists"
+}
+
+func goORMPredicateContainsExists(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "PredicateContainsExists"
 }
 
 func goORMAssociationGetter(name string) string {

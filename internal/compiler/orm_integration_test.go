@@ -812,6 +812,8 @@ def main()
 	category_ids := Category.where(name: "Books").select(:id)
 	puts(Product.where(category_id: category_ids).all())
 	puts(Product.where("category_id", "!=", Category.select(:id)).all())
+	puts(Product.where_exists(:category, Category.where(name: "Books")).all())
+	puts(Product.where_not_exists(:category, Category.where(name: "Missing")).all())
 	case Product.where().preload(:category).all()
 	when DbResult::Ok(products)
 		products.each do |product|
@@ -854,9 +856,11 @@ end
 	for _, expected := range []string{
 		`TrbOrmProductJoin(TrbOrmProductWhere`, `Kind: "INNER JOIN"`, `Kind: "LEFT JOIN"`,
 		`Table: "categories"`, `SourceColumn: "category_id"`, `TargetColumn: "id"`,
-		`TrbOrmCategoryJoinPredicate(TrbOrmCategoryWhere`, `__trb_join_key`,
+		`TrbOrmCategoryAssociationPredicate(TrbOrmCategoryWhere`, `__trb_join_key`,
 		`TrbOrmSelectCategoryId(TrbOrmCategoryWhere`, `*orm.TrbOrmSubquery[int]`,
 		`condition.operator == "IN" || condition.operator == "NOT_IN"`, `operator = " NOT IN "`,
+		`TrbOrmProductWhereExists(TrbOrmProductWhere`, `operator := "EXISTS"`, `operator = "NOT EXISTS"`,
+		`trbOrmQuoteIdentifier("products")`, `TrbOrmCategoryAssociationPredicate(TrbOrmCategoryWhere`,
 		`TrbOrmCategoryQueryWhere(TrbOrmCategoryUsing(product.TrbOrmTransaction()), []string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
 		`TrbOrmProductQueryWhere(TrbOrmProductUsing(category.TrbOrmTransaction()), []string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
 		`TrbOrmProductPreload`, `trbOrmPreloadProductCategory`, `trbOrmPreloadCategoryProducts`,
@@ -899,6 +903,8 @@ end
 	}{
 		{expression: `Product.join(:missing)`, want: `argument 1 to join() must be one of "category"`},
 		{expression: `Product.join(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
+		{expression: `Product.where_exists(:missing)`, want: `argument 1 to where_exists() must be one of "category"`},
+		{expression: `Product.where_exists(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
 		{expression: `Product.where(category_id: Product.select(:name))`, want: `has type Subquery<String>`},
 	} {
 		if err := compileInvalidJoin(invalid.expression); err == nil || !strings.Contains(err.Error(), invalid.want) {
