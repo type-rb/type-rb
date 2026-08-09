@@ -44,6 +44,11 @@ type ormJoin struct {
 	predicate    *ormPredicate
 }
 
+type ormSubqueryValue struct {
+	query  *ormQueryValue
+	column ormintegration.Column
+}
+
 type ormTransactionValue struct {
 	transaction   *sql.Tx
 	connection    *sql.Conn
@@ -333,8 +338,27 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		if err != nil {
 			return Value{}, err
 		}
+		if err := ormValidateSubqueryScopes(query, predicate); err != nil {
+			return Value{}, err
+		}
 		query.predicate = ormCombinePredicates("and", query.predicate, predicate)
 		return ormQueryResult(typ, query), nil
+	case "trb.orm.select", "trb.orm.query.select":
+		if len(remaining) != 1 {
+			return Value{}, errors.New("ORM select requires one column")
+		}
+		columnName, ok := remaining[0].Value.Data.(string)
+		if !ok {
+			return Value{}, errors.New("ORM select column must be a literal name")
+		}
+		column, ok := query.model.Column(columnName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no column %s", query.model.Name, columnName)
+		}
+		if query.lock || len(query.preloads) > 0 {
+			return Value{}, errors.New("ORM select subquery does not accept lock or preload")
+		}
+		return Value{Type: typ, Data: &ormSubqueryValue{query: query, column: column}}, nil
 	case "trb.orm.join", "trb.orm.left_join", "trb.orm.query.join", "trb.orm.query.left_join":
 		if len(remaining) < 1 || len(remaining) > 2 {
 			return Value{}, errors.New("ORM join requires an association and optional predicate query")
@@ -382,6 +406,9 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		}
 		if predicate == nil {
 			return Value{}, errors.New("ORM not requires one condition")
+		}
+		if err := ormValidateSubqueryScopes(query, predicate); err != nil {
+			return Value{}, err
 		}
 		query.predicate = ormCombinePredicates("and", query.predicate, &ormPredicate{kind: "not", children: []*ormPredicate{predicate}})
 		return ormQueryResult(typ, query), nil
@@ -457,12 +484,18 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		if err != nil {
 			return Value{}, err
 		}
+		if err := ormValidateSubqueryScopes(query, predicate); err != nil {
+			return Value{}, err
+		}
 		query.predicate = ormCombinePredicates("and", query.predicate, predicate)
 		return e.ormFirstResult(typ, query)
 	case "trb.orm.exists", "trb.orm.query.exists":
 		if name == "trb.orm.exists" {
 			predicate, err := ormPredicateFromArguments(remaining)
 			if err != nil {
+				return Value{}, err
+			}
+			if err := ormValidateSubqueryScopes(query, predicate); err != nil {
 				return Value{}, err
 			}
 			query.predicate = ormCombinePredicates("and", query.predicate, predicate)
@@ -563,6 +596,14 @@ func ormPredicateFromArguments(arguments []evaluatedArgument) (*ormPredicate, er
 		if !columnOK || !operatorOK {
 			return nil, errors.New("ORM comparison requires a column and operator")
 		}
+		if _, subquery := arguments[2].Value.Data.(*ormSubqueryValue); subquery {
+			switch operator {
+			case "=":
+				operator = "IN"
+			case "!=":
+				operator = "NOT_IN"
+			}
+		}
 		return ormPredicateGroup([]ormCondition{{column: column, operator: operator, value: arguments[2].Value}}), nil
 	}
 	conditions := make([]ormCondition, 0, len(arguments))
@@ -574,6 +615,8 @@ func ormPredicateFromArguments(arguments []evaluatedArgument) (*ormPredicate, er
 		switch argument.Value.Data.(type) {
 		case *arrayValue:
 			operator = "IN"
+		case *ormSubqueryValue:
+			operator = "IN"
 		case *rangeValue:
 			operator = "RANGE_INCLUSIVE"
 			if argument.Value.Data.(*rangeValue).Exclusive {
@@ -583,6 +626,25 @@ func ormPredicateFromArguments(arguments []evaluatedArgument) (*ormPredicate, er
 		conditions = append(conditions, ormCondition{column: argument.Name, operator: operator, value: argument.Value})
 	}
 	return ormPredicateGroup(conditions), nil
+}
+
+func ormValidateSubqueryScopes(query *ormQueryValue, predicate *ormPredicate) error {
+	if predicate == nil {
+		return nil
+	}
+	if predicate.kind == "atom" {
+		subquery, ok := predicate.condition.value.Data.(*ormSubqueryValue)
+		if ok && subquery.query.transaction != nil && subquery.query.transaction != query.transaction {
+			return errors.New("ORM subquery transaction scope must match the base query")
+		}
+		return nil
+	}
+	for _, child := range predicate.children {
+		if err := ormValidateSubqueryScopes(query, child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ormPredicateGroup(conditions []ormCondition) *ormPredicate {
@@ -610,21 +672,26 @@ func ormCombinePredicates(kind string, left, right *ormPredicate) *ormPredicate 
 }
 
 func (e *Evaluator) ormStatement(query *ormQueryValue, projection string) (string, []any, error) {
+	arguments := []any{}
+	statement, err := e.ormStatementAppend(query, projection, &arguments)
+	return statement, arguments, err
+}
+
+func (e *Evaluator) ormStatementAppend(query *ormQueryValue, projection string, arguments *[]any) (string, error) {
 	runtime := e.ormRuntime()
 	statement := "SELECT " + projection + " FROM " + runtime.adapter.QuoteIdentifier(query.model.Table)
-	arguments := []any{}
 	for index, join := range query.joins {
 		if join.kind != "INNER JOIN" && join.kind != "LEFT JOIN" {
-			return "", nil, errors.New("unsupported ORM join kind")
+			return "", errors.New("unsupported ORM join kind")
 		}
 		alias := "__trb_join_" + strconv.Itoa(index)
 		key := "__trb_join_key"
 		subquery := "SELECT " + runtime.adapter.QuoteIdentifier(join.targetColumn) + " AS " + runtime.adapter.QuoteIdentifier(key) +
 			" FROM " + runtime.adapter.QuoteIdentifier(join.table)
 		if join.predicate != nil {
-			predicate, err := e.ormPredicateSQL(join.predicate, &arguments)
+			predicate, err := e.ormPredicateSQL(join.predicate, arguments)
 			if err != nil {
-				return "", nil, err
+				return "", err
 			}
 			if predicate != "" {
 				subquery += " WHERE " + predicate
@@ -635,9 +702,9 @@ func (e *Evaluator) ormStatement(query *ormQueryValue, projection string) (strin
 			"." + runtime.adapter.QuoteIdentifier(key)
 	}
 	if query.predicate != nil {
-		predicate, err := e.ormPredicateSQL(query.predicate, &arguments)
+		predicate, err := e.ormPredicateSQL(query.predicate, arguments)
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
 		statement += " WHERE " + predicate
 	}
@@ -649,19 +716,19 @@ func (e *Evaluator) ormStatement(query *ormQueryValue, projection string) (strin
 		statement += " ORDER BY " + strings.Join(orders, ", ")
 	}
 	if query.limit != nil {
-		statement += " LIMIT " + runtime.adapter.Placeholder(len(arguments)+1)
-		arguments = append(arguments, *query.limit)
+		statement += " LIMIT " + runtime.adapter.Placeholder(len(*arguments)+1)
+		*arguments = append(*arguments, *query.limit)
 	} else if query.offset != nil {
 		statement += runtime.adapter.OffsetNoLimit
 	}
 	if query.offset != nil {
-		statement += " OFFSET " + runtime.adapter.Placeholder(len(arguments)+1)
-		arguments = append(arguments, *query.offset)
+		statement += " OFFSET " + runtime.adapter.Placeholder(len(*arguments)+1)
+		*arguments = append(*arguments, *query.offset)
 	}
 	if query.lock && runtime.adapter.Name != "sqlite" {
 		statement += " FOR UPDATE"
 	}
-	return statement, arguments, nil
+	return statement, nil
 }
 
 func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (string, error) {
@@ -674,7 +741,18 @@ func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (
 		condition := predicate.condition
 		column := runtime.adapter.QuoteIdentifier(condition.column)
 		switch condition.operator {
-		case "IN":
+		case "IN", "NOT_IN":
+			if subquery, ok := condition.value.Data.(*ormSubqueryValue); ok {
+				statement, err := e.ormStatementAppend(subquery.query, e.ormRuntime().adapter.QuoteIdentifier(subquery.column.Name), arguments)
+				if err != nil {
+					return "", err
+				}
+				operator := " IN "
+				if condition.operator == "NOT_IN" {
+					operator = " NOT IN "
+				}
+				return column + operator + "(" + statement + ")", nil
+			}
 			array, ok := condition.value.Data.(*arrayValue)
 			if !ok {
 				return "", errors.New("ORM IN predicate requires an Array")

@@ -56,6 +56,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
+		declared.ClassMembers["select"] = selectDeclaration(model, "trb.orm.select", true)
 		if join := joinDeclaration(model, "join", "trb.orm.join", true); join.Name != "" {
 			declared.ClassMembers["join"] = join
 		}
@@ -127,6 +128,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.Name] = declared
 		query := declaration.NewType(model.QueryType, "")
 		query.InstanceMembers["where"] = whereDeclaration(model, "trb.orm.query.where", false)
+		query.InstanceMembers["select"] = selectDeclaration(model, "trb.orm.query.select", false)
 		if join := joinDeclaration(model, "join", "trb.orm.query.join", false); join.Name != "" {
 			query.InstanceMembers["join"] = join
 		}
@@ -468,6 +470,23 @@ func projectionDeclaration(model Model, name, intrinsic string, class, pick bool
 	}
 }
 
+func selectDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	values := make([]string, 0, len(model.Columns))
+	alternatives := make([]declaration.Signature, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		values = append(values, column.Name)
+		alternatives = append(alternatives, declaration.Signature{
+			Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}},
+			Return:     subqueryOf(column.Type),
+		})
+	}
+	return declaration.Member{
+		Name: "select", Kind: declaration.Method, Intrinsic: intrinsic,
+		Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: values}},
+		Return:     alternatives[0].Return, Class: class, Provider: PackageName, Alternatives: alternatives,
+	}
+}
+
 func aggregateDeclaration(model Model, operation, intrinsic string, class bool) (declaration.Member, bool) {
 	values := make([]string, 0, len(model.Columns))
 	alternatives := make([]declaration.Signature, 0, len(model.Columns))
@@ -505,11 +524,16 @@ func idsDeclaration(model Model, intrinsic string, class bool, primaryKey Column
 func predicateValueType(column Column) types.Type {
 	element := column.Type
 	element.Nullable = false
-	alternatives := []types.Type{column.Type, {Kind: types.Array, Name: "Array", Args: []types.Type{element}}}
+	alternatives := []types.Type{column.Type, {Kind: types.Array, Name: "Array", Args: []types.Type{element}}, subqueryOf(element)}
 	if element.Kind == types.Int {
 		alternatives = append(alternatives, types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{element}})
 	}
 	return types.UnionOf(alternatives...)
+}
+
+func subqueryOf(element types.Type) types.Type {
+	element.Nullable = false
+	return types.Type{Kind: types.Named, Name: "Subquery", Args: []types.Type{element}}
 }
 
 func orderDeclaration(model Model) declaration.Member {
@@ -562,7 +586,9 @@ func comparisonSignatures(column Column, queryType string) []declaration.Signatu
 			Return: types.FromName(queryType),
 		}
 	}
-	result := []declaration.Signature{signature([]string{"=", "!="}, column.Type)}
+	result := []declaration.Signature{
+		signature([]string{"=", "!="}, types.UnionOf(column.Type, subqueryOf(column.Type))),
+	}
 	switch column.Type.Kind {
 	case types.Int, types.Float, types.String:
 		orderedType := column.Type

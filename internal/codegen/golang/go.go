@@ -1810,6 +1810,8 @@ func (g *generator) goType(t types.Type) string {
 			result = "any"
 		} else if t.Name == "Transaction" && g.orm != nil {
 			result = "*" + g.ormLifecycleAlias() + ".TrbOrmTransaction"
+		} else if t.Name == "Subquery" && g.orm != nil {
+			result = "*" + g.ormLifecycleAlias() + ".TrbOrmSubquery"
 		} else if model, ok := g.orm.QueryModel(t.Name); ok {
 			result = g.ormModelQualifier(model) + goORMQueryType(model)
 		} else if model, ok := g.orm.ScopeModel(t.Name); ok {

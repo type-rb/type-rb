@@ -251,6 +251,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webLogger(call, arguments)
 	case "trb.orm.where":
 		return g.ormWhere(call)
+	case "trb.orm.select", "trb.orm.query.select":
+		return g.ormSelect(call)
 	case "trb.orm.join":
 		return g.ormJoin(call, "INNER JOIN")
 	case "trb.orm.left_join":

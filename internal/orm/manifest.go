@@ -223,6 +223,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["where"] {
 				class.Body = append(class.Body, whereIRMethod(model, true))
 			}
+			if !existing["select"] {
+				class.Body = append(class.Body, selectIRMethod(model, true))
+			}
 			if !existing["join"] {
 				if join := joinIRMethod(model, "join", true); join != nil {
 					class.Body = append(class.Body, join)
@@ -454,6 +457,7 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "to_sql", External: true, ReturnType: types.FromName("String")},
 		&ir.Method{Name: "explain", External: true, ReturnType: dbResult(types.FromName("String"))},
 	}
+	methods = append(methods, selectIRMethod(model, false))
 	if join := joinIRMethod(model, "join", false); join != nil {
 		methods = append(methods, join)
 	}
@@ -608,6 +612,21 @@ func projectionIRMethod(model Model, name string, class, pick bool) *ir.Method {
 			LiteralValues: append([]string(nil), parameter.LiteralValues...),
 		})
 	}
+	for _, signature := range declared.Alternatives {
+		alternative := ir.MethodSignature{ReturnType: signature.Return}
+		for _, parameter := range signature.Parameters {
+			alternative.Parameters = append(alternative.Parameters, ir.Parameter{
+				Name: parameter.Name, Type: parameter.Type, LiteralValues: append([]string(nil), parameter.LiteralValues...),
+			})
+		}
+		method.Alternatives = append(method.Alternatives, alternative)
+	}
+	return method
+}
+
+func selectIRMethod(model Model, class bool) *ir.Method {
+	declared := selectDeclaration(model, "", class)
+	method := &ir.Method{Name: "select", External: true, Class: class, ReturnType: declared.Return}
 	for _, signature := range declared.Alternatives {
 		alternative := ir.MethodSignature{ReturnType: signature.Return}
 		for _, parameter := range signature.Parameters {

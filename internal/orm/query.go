@@ -20,6 +20,7 @@ const (
 	In                 Operator = "IN"
 	RangeInclusive     Operator = "RANGE_INCLUSIVE"
 	RangeExclusive     Operator = "RANGE_EXCLUSIVE"
+	NotIn              Operator = "NOT_IN"
 )
 
 type Predicate struct {
@@ -45,7 +46,9 @@ func Predicates(call *ir.Call) []Predicate {
 				operator = RangeExclusive
 			}
 		default:
-			if argument.Value.ExprType().Kind == types.Array {
+			if argument.Value.ExprType().Name == "Subquery" {
+				operator = In
+			} else if argument.Value.ExprType().Kind == types.Array {
 				operator = In
 			}
 		}
@@ -59,7 +62,16 @@ func Predicates(call *ir.Call) []Predicate {
 	if !columnOK || !operatorOK {
 		return nil
 	}
-	return []Predicate{{Column: column, Operator: Operator(operator), Value: call.Arguments[2].Value}}
+	resolvedOperator := Operator(operator)
+	if call.Arguments[2].Value.ExprType().Name == "Subquery" {
+		switch resolvedOperator {
+		case Equal:
+			resolvedOperator = In
+		case NotEqual:
+			resolvedOperator = NotIn
+		}
+	}
+	return []Predicate{{Column: column, Operator: resolvedOperator, Value: call.Arguments[2].Value}}
 }
 
 func queryString(expression ir.Expression) (string, bool) {

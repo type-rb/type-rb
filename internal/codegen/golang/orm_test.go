@@ -94,6 +94,8 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				`return TrbOrmUpdateProduct(changes.value, changes.columns, changes.values)`,
 				`func TrbOrmUpdateProduct(value *Product, columns []string, values []any) orm.DbResult[*Product]`,
 				`func TrbOrmDeleteProduct(value *Product) orm.DbResult[bool]`,
+				`func TrbOrmSelectProductId(query TrbOrmProductQuery) *orm.TrbOrmSubquery[int]`,
+				`func trbOrmProductStatementAppend(query TrbOrmProductQuery, projection string, arguments *[]any) string`,
 			} {
 				if !strings.Contains(output, want) {
 					t.Fatalf("generated %s ORM Result runtime is missing %q:\n%s", test.adapter, want, output)
@@ -110,6 +112,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				test.driver, "var trbOrmDatabaseOnce sync.Once", "func TrbOrmDatabase() (*sql.DB, error)",
 				`sql.Open(`, "trbOrmDatabase.Ping()", "func TrbOrmCloseDatabase() error",
 				"func TrbOrmBeginNestedTransaction(parent *TrbOrmTransaction)", `"SAVEPOINT " + savepoint`,
+				"type TrbOrmSubquery[T any] struct", "type TrbOrmSubqueryValue interface", "func NewTrbOrmSubquery[T any]",
 			} {
 				if !strings.Contains(pool, want) {
 					t.Fatalf("generated %s ORM pool runtime is missing %q:\n%s", test.adapter, want, pool)
