@@ -32,8 +32,17 @@ type Schema struct {
 }
 
 type Table struct {
-	Name    string
-	Columns []Column
+	Name        string
+	Columns     []Column
+	ForeignKeys []ForeignKey
+}
+
+type ForeignKey struct {
+	ID               int
+	Sequence         int
+	Column           string
+	ReferencedTable  string
+	ReferencedColumn string
 }
 
 type Column struct {

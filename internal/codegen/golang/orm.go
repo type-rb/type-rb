@@ -117,6 +117,28 @@ func (g *generator) ormQueryTerminal(call *ir.Call, arguments []string, operatio
 	return g.ormModelQualifier(model) + operation(model) + "(" + query + ")"
 }
 
+func (g *generator) ormAssociationQuery(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	source, ok := g.orm.Model(member.Receiver.ExprType().Name)
+	if !ok {
+		return "nil"
+	}
+	association, ok := source.Association(member.Name)
+	if !ok {
+		return "nil"
+	}
+	target, ok := g.orm.Model(association.TargetModel)
+	if !ok {
+		return "nil"
+	}
+	qualifier := g.ormModelQualifier(target)
+	value := g.expr(member.Receiver) + "." + goORMColumnGetter(association.SourceColumn) + "()"
+	return qualifier + goORMWhere(target) + "([]string{" + strconv.Quote(association.TargetColumn) + "}, []string{\"=\"}, []any{" + value + "})"
+}
+
 func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	model, ok := g.orm.QueryModel(iteration.Source.ExprType().Name)
 	querySource := ""

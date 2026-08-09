@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -123,6 +124,53 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	}
 }
 
+func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
+	root, options := sqliteAssociationFixture(t, true)
+	program := parseAssociationModels(t)
+	schema, err := LoadSchema(root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	products, ok := schema.Table("products")
+	if !ok || len(products.ForeignKeys) != 1 || products.ForeignKeys[0].Column != "category_id" || products.ForeignKeys[0].ReferencedTable != "categories" {
+		t.Fatalf("unexpected product foreign keys: %#v", products.ForeignKeys)
+	}
+	catalog, err := Declarations([]*ast.Program{program}, root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	product, _ := catalog.Type("Product")
+	category, _ := catalog.Type("Category")
+	if product.InstanceMembers["category"].Return.String() != "CategoryQuery" {
+		t.Fatalf("unexpected belongs_to declaration: %#v", product.InstanceMembers["category"])
+	}
+	if category.InstanceMembers["products"].Return.String() != "ProductQuery" {
+		t.Fatalf("unexpected has_many declaration: %#v", category.InstanceMembers["products"])
+	}
+	manifest, err := Analyze([]*ast.Program{program}, root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	productModel, _ := manifest.Model("Product")
+	belongsTo, ok := productModel.Association("category")
+	if !ok || belongsTo.SourceColumn != "category_id" || belongsTo.TargetColumn != "id" {
+		t.Fatalf("unexpected belongs_to association: %#v", belongsTo)
+	}
+	categoryModel, _ := manifest.Model("Category")
+	hasMany, ok := categoryModel.Association("products")
+	if !ok || hasMany.SourceColumn != "id" || hasMany.TargetColumn != "category_id" {
+		t.Fatalf("unexpected has_many association: %#v", hasMany)
+	}
+}
+
+func TestSQLiteAssociationRejectsMissingForeignKey(t *testing.T) {
+	root, options := sqliteAssociationFixture(t, false)
+	_, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, options)
+	if err == nil || !strings.Contains(err.Error(), "requires foreign key products.category_id -> categories.id") {
+		t.Fatalf("expected missing foreign key diagnostic, got %v", err)
+	}
+}
+
 func sqliteFixture(t *testing.T) (string, map[string][]byte) {
 	t.Helper()
 	root := t.TempDir()
@@ -151,6 +199,36 @@ func sqliteFixture(t *testing.T) (string, map[string][]byte) {
 	return root, map[string][]byte{PackageName: encoded}
 }
 
+func sqliteAssociationFixture(t *testing.T, foreignKey bool) (string, map[string][]byte) {
+	t.Helper()
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	constraint := ""
+	if foreignKey {
+		constraint = ", FOREIGN KEY (category_id) REFERENCES categories(id)"
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, name TEXT NOT NULL` + constraint + `)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(Config{Adapter: "sqlite", Database: filepath.Base(databasePath)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, map[string][]byte{PackageName: encoded}
+}
+
 func parseModel(t *testing.T) *ast.Program {
 	t.Helper()
 	program, diagnostics := parser.Parse([]byte("import { Model } from trb/orm\n\nclass Product < Model\nend\n"))
@@ -158,6 +236,25 @@ func parseModel(t *testing.T) *ast.Program {
 		t.Fatalf("parse diagnostics: %#v", diagnostics)
 	}
 	program.ModulePath = "src/main"
+	return program
+}
+
+func parseAssociationModels(t *testing.T) *ast.Program {
+	t.Helper()
+	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many } from trb/orm
+
+class Category < Model
+	has_many(Product)
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+`))
+	if len(diagnostics) > 0 {
+		t.Fatalf("parse diagnostics: %#v", diagnostics)
+	}
+	program.ModulePath = "src/models"
 	return program
 }
 

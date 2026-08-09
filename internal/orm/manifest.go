@@ -10,11 +10,28 @@ import (
 )
 
 type Model struct {
-	Name       string
-	QueryType  string
-	Table      string
-	ModulePath string
-	Columns    []Column
+	Name         string
+	QueryType    string
+	Table        string
+	ModulePath   string
+	Columns      []Column
+	Associations []Association
+}
+
+type AssociationKind string
+
+const (
+	BelongsTo AssociationKind = "belongs_to"
+	HasMany   AssociationKind = "has_many"
+)
+
+type Association struct {
+	Name         string
+	Kind         AssociationKind
+	TargetModel  string
+	TargetQuery  string
+	SourceColumn string
+	TargetColumn string
 }
 
 func (m Model) PrimaryKey() (Column, bool) {
@@ -45,6 +62,15 @@ func (m Model) BatchKey() (Column, bool) {
 	default:
 		return Column{}, false
 	}
+}
+
+func (m Model) Association(name string) (Association, bool) {
+	for _, association := range m.Associations {
+		if association.Name == name {
+			return association, true
+		}
+	}
+	return Association{}, false
 }
 
 type Manifest struct {
@@ -92,6 +118,14 @@ func (m *Manifest) Augment(program *ir.Program) {
 			for _, column := range model.Columns {
 				if !existing[column.Name] {
 					class.Body = append(class.Body, &ir.Field{Name: "@" + column.Name, Type: column.Type})
+				}
+			}
+			for _, association := range model.Associations {
+				if !existing[association.Name] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: association.Name, External: true,
+						ReturnType: types.FromName(association.TargetQuery),
+					})
 				}
 			}
 			if !existing["where"] {

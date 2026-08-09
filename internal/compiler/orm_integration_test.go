@@ -343,6 +343,72 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	}
 }
 
+func TestPortableORMAssociationsReturnTypedQueries(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (
+		id INTEGER PRIMARY KEY,
+		category_id INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		FOREIGN KEY (category_id) REFERENCES categories(id)
+	)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`import { Model, belongs_to, has_many } from trb/orm
+
+class Category < Model
+	has_many(Product)
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+
+def main()
+	products := Product.where().all()
+	products.each do |product|
+		puts(product.category().count())
+	end
+	categories := Category.where().all()
+	categories.each do |category|
+		puts(category.products().count())
+	end
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main", Source: source,
+	}}, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		`TrbOrmCategoryWhere([]string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
+		`TrbOrmProductWhere([]string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated association query is missing %q:\n%s", expected, output)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
+		t.Fatalf("generated invalid association Go: %v\n%s", err, output)
+	}
+}
+
 func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 	root := t.TempDir()
 	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))

@@ -3,6 +3,7 @@ package orm
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
@@ -24,6 +25,13 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		for _, column := range model.Columns {
 			declared.InstanceMembers[column.Name] = declaration.Member{
 				Name: column.Name, Kind: declaration.Property, Intrinsic: "trb.orm.column", Return: column.Type, Provider: PackageName,
+			}
+		}
+		for _, association := range model.Associations {
+			declared.InstanceMembers[association.Name] = declaration.Member{
+				Name: association.Name, Kind: declaration.Method,
+				Intrinsic: "trb.orm.association." + string(association.Kind),
+				Return:    types.FromName(association.TargetQuery), Provider: PackageName,
 			}
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
@@ -153,6 +161,7 @@ func comparisonSignatures(column Column, queryType string) []declaration.Signatu
 func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 	var models []Model
 	seen := map[string]bool{}
+	classes := map[string]*ast.ClassStatement{}
 	for _, program := range programs {
 		for _, statement := range program.Statements {
 			class, ok := statement.(*ast.ClassStatement)
@@ -166,6 +175,7 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 				return nil, fmt.Errorf("trb/orm model %s is declared more than once", class.Name)
 			}
 			seen[class.Name] = true
+			classes[class.Name] = class
 			tableName := TableName(class.Name)
 			table, exists := schema.Table(tableName)
 			if !exists {
@@ -177,6 +187,17 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 			})
 		}
 	}
+	byName := map[string]*Model{}
+	for index := range models {
+		byName[models[index].Name] = &models[index]
+	}
+	for index := range models {
+		associations, err := discoverAssociations(models[index], classes[models[index].Name], byName, schema)
+		if err != nil {
+			return nil, err
+		}
+		models[index].Associations = associations
+	}
 	sort.Slice(models, func(i, j int) bool {
 		if models[i].ModulePath != models[j].ModulePath {
 			return models[i].ModulePath < models[j].ModulePath
@@ -184,6 +205,100 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 		return models[i].Name < models[j].Name
 	})
 	return models, nil
+}
+
+func discoverAssociations(source Model, class *ast.ClassStatement, models map[string]*Model, schema *Schema) ([]Association, error) {
+	if class == nil {
+		return nil, nil
+	}
+	var result []Association
+	seen := map[string]bool{}
+	for _, statement := range class.Body {
+		expression, ok := statement.(*ast.ExpressionStatement)
+		if !ok {
+			continue
+		}
+		call, ok := expression.Expression.(*ast.CallExpression)
+		if !ok {
+			continue
+		}
+		callee, ok := call.Callee.(*ast.Identifier)
+		if !ok || callee.Name != string(BelongsTo) && callee.Name != string(HasMany) {
+			continue
+		}
+		if len(call.Arguments) != 1 || call.Arguments[0].Name != "" {
+			return nil, fmt.Errorf("trb/orm %s.%s expects exactly one model type", source.Name, callee.Name)
+		}
+		targetName := expressionName(call.Arguments[0].Value)
+		target := models[targetName]
+		if target == nil {
+			return nil, fmt.Errorf("trb/orm %s.%s references unknown model %s", source.Name, callee.Name, targetName)
+		}
+		association, err := buildAssociation(source, *target, AssociationKind(callee.Name), schema)
+		if err != nil {
+			return nil, err
+		}
+		if seen[association.Name] {
+			return nil, fmt.Errorf("trb/orm model %s declares association %s more than once", source.Name, association.Name)
+		}
+		seen[association.Name] = true
+		result = append(result, association)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
+}
+
+func buildAssociation(source, target Model, kind AssociationKind, schema *Schema) (Association, error) {
+	sourceTable, _ := schema.Table(source.Table)
+	targetTable, _ := schema.Table(target.Table)
+	sourceKey, sourceKeyOK := source.PrimaryKey()
+	targetKey, targetKeyOK := target.PrimaryKey()
+	if !sourceKeyOK || !targetKeyOK {
+		return Association{}, fmt.Errorf("trb/orm association %s to %s requires one primary key on each model", source.Name, target.Name)
+	}
+	association := Association{Kind: kind, TargetModel: target.Name, TargetQuery: target.QueryType}
+	var foreignKeys []ForeignKey
+	foreignTable, foreignColumn := "", ""
+	referencedTable, referencedColumn := "", ""
+	switch kind {
+	case BelongsTo:
+		association.Name = modelBaseName(target.Name)
+		association.SourceColumn = modelBaseName(target.Name) + "_id"
+		association.TargetColumn = targetKey.Name
+		foreignKeys = sourceTable.ForeignKeys
+		foreignTable, foreignColumn = source.Table, association.SourceColumn
+		referencedTable, referencedColumn = target.Table, association.TargetColumn
+	case HasMany:
+		association.Name = target.Table
+		association.SourceColumn = sourceKey.Name
+		association.TargetColumn = modelBaseName(source.Name) + "_id"
+		foreignKeys = targetTable.ForeignKeys
+		foreignTable, foreignColumn = target.Table, association.TargetColumn
+		referencedTable, referencedColumn = source.Table, association.SourceColumn
+	default:
+		return Association{}, fmt.Errorf("unsupported trb/orm association %q", kind)
+	}
+	for _, foreignKey := range foreignKeys {
+		referencedColumn := foreignKey.ReferencedColumn
+		if referencedColumn == "" {
+			referencedColumn = targetKey.Name
+		}
+		if kind == BelongsTo && foreignKey.Column == association.SourceColumn && foreignKey.ReferencedTable == target.Table && referencedColumn == association.TargetColumn {
+			return association, nil
+		}
+		if kind == HasMany && foreignKey.Column == association.TargetColumn && foreignKey.ReferencedTable == source.Table && referencedColumn == association.SourceColumn {
+			return association, nil
+		}
+	}
+	return Association{}, fmt.Errorf(
+		"trb/orm association %s.%s requires foreign key %s.%s -> %s.%s",
+		source.Name, association.Name,
+		foreignTable, foreignColumn, referencedTable, referencedColumn,
+	)
+}
+
+func modelBaseName(model string) string {
+	return strings.Join(splitIdentifier(model), "_")
 }
 
 func expressionName(expression ast.Expression) string {

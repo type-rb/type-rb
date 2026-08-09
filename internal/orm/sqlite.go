@@ -58,7 +58,6 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 	if err != nil {
 		return Table{}, err
 	}
-	defer rows.Close()
 	table := Table{Name: name}
 	for rows.Next() {
 		var position int
@@ -84,9 +83,44 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 		})
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return Table{}, err
 	}
+	if err := rows.Close(); err != nil {
+		return Table{}, err
+	}
+	foreignKeys, err := inspectSQLiteForeignKeys(database, name)
+	if err != nil {
+		return Table{}, err
+	}
+	table.ForeignKeys = foreignKeys
 	return table, nil
+}
+
+func inspectSQLiteForeignKeys(database *sql.DB, name string) ([]ForeignKey, error) {
+	rows, err := database.Query("PRAGMA foreign_key_list(" + quoteSQLiteIdentifier(name) + ")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []ForeignKey
+	for rows.Next() {
+		var foreignKey ForeignKey
+		var referencedColumn sql.NullString
+		var onUpdate, onDelete, match string
+		if err := rows.Scan(
+			&foreignKey.ID, &foreignKey.Sequence, &foreignKey.ReferencedTable,
+			&foreignKey.Column, &referencedColumn, &onUpdate, &onDelete, &match,
+		); err != nil {
+			return nil, err
+		}
+		foreignKey.ReferencedColumn = referencedColumn.String
+		result = append(result, foreignKey)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func sqliteColumnType(databaseType string) (types.Type, error) {
