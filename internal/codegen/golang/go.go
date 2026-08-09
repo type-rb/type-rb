@@ -960,7 +960,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.transform(n)
 	case *ir.Member:
 		if n.Reference != nil && n.Reference.Intrinsic == "trb.orm.column" {
-			return g.expr(n.Receiver) + "." + goFieldName(n.Name)
+			return g.expr(n.Receiver) + "." + goORMColumnGetter(n.Name) + "()"
 		}
 		if n.Namespace && isUpper(n.Name) {
 			owner := n.Receiver.ExprType().Name
@@ -1731,7 +1731,7 @@ func (g *generator) goType(t types.Type) string {
 		if t.Name == "" {
 			result = "any"
 		} else if model, ok := g.orm.QueryModel(t.Name); ok {
-			result = goORMQueryType(model)
+			result = g.ormModelQualifier(model) + goORMQueryType(model)
 		} else if t.Name == "GormDB" {
 			g.requireImport("gorm.io/gorm", "gorm")
 			result = "*gorm.DB"

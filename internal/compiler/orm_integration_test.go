@@ -60,7 +60,7 @@ end
 	if output == "" {
 		t.Fatal("main artifact was not generated")
 	}
-	for _, expected := range []string{"type Product struct", "type trbOrmProductQuery struct", `SELECT \"id\", \"name\", \"price\" FROM \"products\"`, "modernc.org/sqlite", "trbOrmLoadProduct"} {
+	for _, expected := range []string{"type Product struct", "type TrbOrmProductQuery struct", `SELECT \"id\", \"name\", \"price\" FROM \"products\"`, "modernc.org/sqlite", "TrbOrmLoadProduct"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
 		}
@@ -122,5 +122,57 @@ func TestPortableORMWhereUsesSchemaTypes(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "expected Integer") {
 		t.Fatalf("expected schema type error, got %v", err)
+	}
+}
+
+func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := CompileProject([]SourceUnit{
+		{
+			Filename: filepath.Join(root, "src", "models", "product.trb"), ModulePath: "models/product", Package: "models",
+			Source: []byte("import { Model } from trb/orm\n\nclass Product < Model\nend\n"),
+		},
+		{
+			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
+			Source: []byte("import { Product } from models/product\n\ndef main()\n\tproducts := Product.where(name: \"Widget\").all()\n\tproducts.each do |product|\n\t\tputs(product.name)\n\tend\nend\n"),
+		},
+	}, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := map[string]string{}
+	for _, artifact := range artifacts {
+		outputs[artifact.AST.ModulePath] = string(artifact.Output)
+	}
+	modelOutput := outputs["models/product"]
+	mainOutput := outputs["main"]
+	for _, expected := range []string{"type TrbOrmProductQuery struct", "func TrbOrmProductWhere", "func TrbOrmLoadProduct", "func (self *Product) TrbOrmColumnName() string"} {
+		if !strings.Contains(modelOutput, expected) {
+			t.Fatalf("generated model module is missing %q:\n%s", expected, modelOutput)
+		}
+	}
+	for _, expected := range []string{"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "product.TrbOrmColumnName()"} {
+		if !strings.Contains(mainOutput, expected) {
+			t.Fatalf("generated main module is missing %q:\n%s", expected, mainOutput)
+		}
+	}
+	for modulePath, output := range outputs {
+		if _, err := parser.ParseFile(token.NewFileSet(), modulePath+".go", output, parser.AllErrors); err != nil {
+			t.Fatalf("generated invalid Go for %s: %v\n%s", modulePath, err, output)
+		}
 	}
 }
