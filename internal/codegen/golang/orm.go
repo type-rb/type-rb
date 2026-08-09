@@ -101,6 +101,22 @@ func (g *generator) ormDraftSave(call *ir.Call) string {
 	return g.ormModelQualifier(model) + goORMDraftSave(model) + "(" + g.expr(member.Receiver) + ")"
 }
 
+func (g *generator) ormInsertAll(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok || len(call.Arguments) != 1 {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMInsertAll(model) + "(" + g.expr(call.Arguments[0].Value) + ")"
+}
+
 func (g *generator) ormUpdate(call *ir.Call) string {
 	model, receiver, columns, values, ok := g.ormModelChangeArguments(call)
 	if !ok {
@@ -1080,6 +1096,10 @@ func goORMBuild(model ormintegration.Model) string {
 
 func goORMDraftSave(model ormintegration.Model) string {
 	return "TrbOrmSave" + goIdentifier(model.Name, true) + "Draft"
+}
+
+func goORMInsertAll(model ormintegration.Model) string {
+	return "TrbOrmInsertAll" + goIdentifier(model.Name, true)
 }
 
 func goORMUpdate(model ormintegration.Model) string {

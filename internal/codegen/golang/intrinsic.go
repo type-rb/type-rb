@@ -256,6 +256,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormCreate(call)
 	case "trb.orm.draft.save":
 		return g.ormDraftSave(call)
+	case "trb.orm.insert_all":
+		return g.ormInsertAll(call)
 	case "trb.orm.with":
 		return g.ormWith(call)
 	case "trb.orm.update":

@@ -54,6 +54,11 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
 			declared.ClassMembers["build"] = buildDeclaration(model, schema.Adapter)
 			declared.ClassMembers["create"] = createDeclaration(model, schema.Adapter)
+			declared.ClassMembers["insert_all"] = declaration.Member{
+				Name: "insert_all", Kind: declaration.Method, Intrinsic: "trb.orm.insert_all",
+				Parameters: []declaration.Parameter{{Name: "drafts", Type: arrayOf(model.DraftType())}},
+				Return:     dbResult(types.FromName("Integer")), Class: true, Provider: PackageName,
+			}
 			draft := declaration.NewType(model.DraftType(), "")
 			draft.InstanceMembers["save"] = declaration.Member{
 				Name: "save", Kind: declaration.Method, Intrinsic: "trb.orm.draft.save",

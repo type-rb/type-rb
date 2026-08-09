@@ -77,8 +77,61 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.ormInsertAllRuntime(adapter, model)
 	g.ormUpdateRuntime(adapter, model, primaryKey, projection, scanTargets)
 	g.ormDeleteRuntime(adapter, model, primaryKey)
+}
+
+func (g *generator) ormInsertAllRuntime(adapter ormintegration.Adapter, model ormintegration.Model) {
+	integerType := types.FromName("Integer")
+	draftType := goIdentifier(model.DraftType(), true)
+	resultType := g.ormResultType(integerType)
+	g.line("func " + goORMInsertAll(model) + "(drafts []*" + draftType + ") " + resultType + " {")
+	g.indent++
+	g.line("if len(drafts) == 0 { return " + g.ormResultOK(integerType, "0") + " }")
+	g.line("columns := append([]string(nil), drafts[0].columns...)")
+	g.line("rows := make([][]any, len(drafts))")
+	g.line("for rowIndex, draft := range drafts {")
+	g.indent++
+	g.line("if len(draft.columns) != len(columns) { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "bulk insert drafts must use the same attributes")) + " }")
+	g.line("indexed := make(map[string]any, len(draft.columns))")
+	g.line("for index, column := range draft.columns { indexed[column] = draft.values[index] }")
+	g.line("row := make([]any, len(columns))")
+	g.line("for index, column := range columns { value, ok := indexed[column]; if !ok { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "bulk insert drafts must use the same attributes")) + " }; row[index] = value }")
+	g.line("rows[rowIndex] = row")
+	g.indent--
+	g.line("}")
+	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("if len(columns) == 0 {")
+	g.indent++
+	g.line("transaction, err := database.Begin()")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk insert failed\")") + " }")
+	g.line("for range drafts { if _, err := transaction.Exec(" + strconv.Quote("INSERT INTO "+adapter.QuoteIdentifier(model.Table)+adapter.DefaultInsert) + "); err != nil { _ = transaction.Rollback(); return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk insert failed\")") + " } }")
+	g.line("if err := transaction.Commit(); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk insert failed\")") + " }")
+	g.line("return " + g.ormResultOK(integerType, "len(drafts)"))
+	g.indent--
+	g.line("}")
+	g.line("quotedColumns := make([]string, len(columns))")
+	g.line("for index, column := range columns { quotedColumns[index] = trbOrmQuoteIdentifier(column) }")
+	g.line("groups := make([]string, len(rows))")
+	g.line("arguments := make([]any, 0, len(rows)*len(columns))")
+	g.line("for rowIndex, row := range rows {")
+	g.indent++
+	g.line("placeholders := make([]string, len(columns))")
+	g.line("for index := range columns { placeholders[index] = trbOrmPlaceholder(len(arguments) + 1); arguments = append(arguments, row[index]) }")
+	g.line("groups[rowIndex] = \"(\" + strings.Join(placeholders, \", \") + \")\"")
+	g.indent--
+	g.line("}")
+	g.line("statement := " + strconv.Quote("INSERT INTO "+adapter.QuoteIdentifier(model.Table)+" (") + " + strings.Join(quotedColumns, \", \") + \") VALUES \" + strings.Join(groups, \", \")")
+	g.line("written, err := database.Exec(statement, arguments...)")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk insert failed\")") + " }")
+	g.line("affected, err := written.RowsAffected()")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk insert result was unavailable\")") + " }")
+	g.line("return " + g.ormResultOK(integerType, "int(affected)"))
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 }
 
 func (g *generator) ormUpdateRuntime(adapter ormintegration.Adapter, model ormintegration.Model, primaryKey ormintegration.Column, projection, scanTargets []string) {

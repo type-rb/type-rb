@@ -44,6 +44,13 @@ def save_product(): DbResult<Product>
 	return draft.save()
 end
 
+def insert_products(): DbResult<Integer>
+	return Product.insert_all([
+		Product.build(name: "First", active: true),
+		Product.build(active: false, name: "Second")
+	])
+end
+
 def update_product(product: Product): DbResult<Product>
 	return product.update(name: "Updated")
 end
@@ -102,7 +109,7 @@ end
 		"TrbOrmLoadProduct", "type ProductList = []*Product", "orm.DbResult[[]*Product]", "defer orm.TrbOrmCloseDatabase()",
 		"orm.NewDbResultErr[[]*Product]", `"database query failed"`, "type ProductDraft struct", "TrbOrmBuildProduct",
 		"TrbOrmSaveProductDraft", "TrbOrmCreateProduct", "type ProductChanges struct", "TrbOrmWithProduct",
-		"TrbOrmSaveProductChanges", "TrbOrmUpdateProduct", "TrbOrmDeleteProduct",
+		"TrbOrmSaveProductChanges", "TrbOrmUpdateProduct", "TrbOrmInsertAllProduct", "TrbOrmDeleteProduct",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
@@ -143,7 +150,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	for _, member := range product.Members {
 		classMethods[member.Name] = true
 	}
-	for _, name := range []string{"where", "find", "build", "create", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "find", "build", "create", "insert_all", "find_each", "find_in_batches"} {
 		if !classMethods[name] {
 			t.Fatalf("Product.%s is missing from completion context: %#v", name, product.Members)
 		}
@@ -313,6 +320,14 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 	if !strings.Contains(output, `TrbOrmSaveProductChanges(TrbOrmWithProduct(NewProduct(), []string{"name"}, []any{"Updated"}))`) {
 		t.Fatalf("generated changes save does not preserve schema keywords:\n%s", output)
 	}
+	artifacts, err = compile(`puts(Product.insert_all([Product.build(name: "First"), Product.build(name: "Second")]))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output = string(artifacts[0].Output)
+	if !strings.Contains(output, `TrbOrmInsertAllProduct([]*ProductDraft{TrbOrmBuildProduct`) {
+		t.Fatalf("generated strict bulk insert does not use typed drafts:\n%s", output)
+	}
 	for _, test := range []struct {
 		call string
 		want string
@@ -325,6 +340,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		{call: `Product.build(name: "Widget", missing: true)`, want: "build() has no keyword argument missing"},
 		{call: `Product.new().with(id: 2)`, want: "with() has no keyword argument id"},
 		{call: `Product.new().with(price: "wrong")`, want: "has type String, expected Float?"},
+		{call: `Product.insert_all([Product.new()])`, want: "expected Array<ProductDraft>"},
 	} {
 		if _, err := compile(test.call); err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Fatalf("expected write diagnostic %q, got %v", test.want, err)
@@ -629,7 +645,7 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		},
 		{
 			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
-			Source: []byte("import { DbResult } from trb/orm\nimport { Product } from models/product\n\ndef load_products(): DbResult<Array<Product>>\n\treturn Product.where(name: \"Widget\").all()\nend\n\ndef main()\n\tputs(load_products())\nend\n"),
+			Source: []byte("import { DbResult } from trb/orm\nimport { Product } from models/product\n\ndef load_products(): DbResult<Array<Product>>\n\treturn Product.where(name: \"Widget\").all()\nend\n\ndef main()\n\tputs(load_products())\n\tputs(Product.insert_all([Product.build(name: \"First\"), Product.build(name: \"Second\")]))\nend\n"),
 		},
 	}, Options{
 		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
@@ -649,7 +665,10 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 			t.Fatalf("generated model module is missing %q:\n%s", expected, modelOutput)
 		}
 	}
-	for _, expected := range []string{"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "orm.DbResult[[]*models.Product]"} {
+	for _, expected := range []string{
+		"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "orm.DbResult[[]*models.Product]",
+		"models.TrbOrmInsertAllProduct([]*models.ProductDraft{models.TrbOrmBuildProduct",
+	} {
 		if !strings.Contains(mainOutput, expected) {
 			t.Fatalf("generated main module is missing %q:\n%s", expected, mainOutput)
 		}

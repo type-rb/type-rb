@@ -70,6 +70,10 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if !exists || draft.InstanceMembers["save"].Return.String() != "DbResult<Product>" {
 		t.Fatalf("unexpected draft declaration: %#v", draft)
 	}
+	insertAll := product.ClassMembers["insert_all"]
+	if insertAll.Return.String() != "DbResult<Integer>" || len(insertAll.Parameters) != 1 || insertAll.Parameters[0].Type.String() != "Array<ProductDraft>" {
+		t.Fatalf("unexpected insert_all declaration: %#v", insertAll)
+	}
 	update := product.InstanceMembers["update"]
 	if update.Return.String() != "DbResult<Product>" || len(update.Parameters) != 4 || !update.Parameters[0].Optional {
 		t.Fatalf("unexpected update declaration: %#v", update)
@@ -212,8 +216,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 14 {
-		t.Fatalf("expected five fields and nine ORM methods, got %#v", product.Body)
+	if len(product.Body) != 15 {
+		t.Fatalf("expected five fields and ten ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -233,7 +237,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "find", "create", "build", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "find", "create", "build", "insert_all", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}

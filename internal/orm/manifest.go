@@ -195,6 +195,13 @@ func (m *Manifest) Augment(program *ir.Program) {
 				if !existing["build"] {
 					class.Body = append(class.Body, buildIRMethod(model))
 				}
+				if !existing["insert_all"] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: "insert_all", External: true, Class: true,
+						Parameters: []ir.Parameter{{Name: "drafts", Type: arrayOf(model.DraftType())}},
+						ReturnType: dbResult(types.FromName("Integer")),
+					})
+				}
 			}
 			if _, ok := model.BatchKey(); ok {
 				for _, name := range []string{"find_each", "find_in_batches"} {
