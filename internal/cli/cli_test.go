@@ -298,7 +298,7 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 
 	input := strings.Join([]string{
 		"import { Category, Product, Project, User } from main",
-		"import { Database, DbResult } from trb/orm",
+		"import { Database, DbError } from trb/orm",
 		"Product.where(id: [1, 2]).to_sql()",
 		`Product.join(:category, Category.where(name: "Featured")).to_sql()`,
 		`Product.join(:category, Category.where(name: "Featured")).count()`,
@@ -309,23 +309,16 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`Product.where_exists(:category, Category.where(name: "Featured")).to_sql()`,
 		`Product.where_exists(:category, Category.where(name: "Featured")).count()`,
 		`Product.where_not_exists(:category, Category.where(name: "Featured")).count()`,
-		"Product.group(:category_id).count()",
-		"Product.group(:category_id).having(:count, \">=\", 1).count()",
-		"Product.group(:category_id).sum(:id)",
-		"Product.group(:category_id).having(:sum, :id, \">=\", 1).sum(:id)",
-		"Product.group(:category_id).average(:id)",
-		"Product.group(:category_id).minimum(:name)",
-		"Product.group(:category_id).maximum(:price)",
-		"Product.order(category_id: :desc).limit(1).group(:category_id).count()",
-		"Product.order(category_id: :asc).offset(1).group(:category_id).count()",
-		"def nested_preload_count(): DbResult<Integer>\n\tcase Category.preload(:products, Product.where(active: true).preload(:category)).all()\n\twhen DbResult::Ok(categories)\n\t\tproduct := categories[0].products()[0]\n\t\tputs(product.category().name)\n\t\treturn DbResult<Integer>::Ok(categories[0].products().size())\n\twhen DbResult::Err(error)\n\t\treturn DbResult<Integer>::Err(error)\n\tend\nend",
+		"def grouped_product_count(): Integer fails DbError\n\tcounts := Product.group(:category_id).count()\n\tfiltered := Product.group(:category_id).having(:count, \">=\", 1).count()\n\tsums := Product.group(:category_id).sum(:id)\n\tlarge := Product.group(:category_id).having(:sum, :id, \">=\", 1).sum(:id)\n\taverages := Product.group(:category_id).average(:id)\n\tminimums := Product.group(:category_id).minimum(:name)\n\tmaximums := Product.group(:category_id).maximum(:price)\n\tpaged := Product.order(category_id: :desc).limit(1).group(:category_id).count()\n\toffset := Product.order(category_id: :asc).offset(1).group(:category_id).count()\n\treturn counts.size() + filtered.size() + sums.size() + large.size() + averages.size() + minimums.size() + maximums.size() + paged.size() + offset.size()\nend",
+		"grouped_product_count()",
+		"def nested_preload_count(): Integer fails DbError\n\tcategories := Category.preload(:products, Product.where(active: true).preload(:category)).all()\n\tproduct := categories[0].products[0]\n\tputs(product.category.name)\n\treturn categories[0].products.size()\nend",
 		"nested_preload_count()",
-		"def user_project_count(): DbResult<Integer>\n\tcase User.all()\n\twhen DbResult::Ok(users)\n\t\treturn users[0].projects_query().count()\n\twhen DbResult::Err(error)\n\t\treturn DbResult<Integer>::Err(error)\n\tend\nend",
+		"def user_project_count(): Integer fails DbError\n\tusers := User.all()\n\treturn users[0].projects_query().count()\nend",
 		"user_project_count()",
-		"def preloaded_user_project_count(): DbResult<Integer>\n\tcase User.preload(:projects, Project.where(name: \"TypeRB\")).all()\n\twhen DbResult::Ok(users)\n\t\treturn DbResult<Integer>::Ok(users[0].projects().size())\n\twhen DbResult::Err(error)\n\t\treturn DbResult<Integer>::Err(error)\n\tend\nend",
+		"def preloaded_user_project_count(): Integer fails DbError\n\tusers := User.preload(:projects, Project.where(name: \"TypeRB\")).all()\n\treturn users[0].projects.size()\nend",
 		"preloaded_user_project_count()",
 		`User.join(:projects, Project.where(name: "TypeRB")).count()`,
-		"Category.preload(:products, Product.limit(1)).all()",
+		"attempt Category.preload(:products, Product.limit(1)).all()",
 		`Product.exists?(name: "Priority")`,
 		"Product.order(id: :asc).pluck(:name)",
 		"Product.where(active: true).first()",
@@ -338,15 +331,15 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		"Product.maximum(:price)",
 		"Product.where(id: 999).sum(:price)",
 		"Product.where(id: 999).minimum(:price)",
-		"def first_product_name(): DbResult<String>\n\tcase Product.where(id: 1).all()\n\twhen DbResult::Ok(products)\n\t\treturn DbResult<String>::Ok(products[0].name)\n\twhen DbResult::Err(error)\n\t\treturn DbResult<String>::Err(error)\n\tend\nend",
+		"def first_product_name(): String fails DbError\n\tproducts := Product.where(id: 1).all()\n\treturn products[0].name\nend",
 		"first_product_name()",
-		"def locked_product_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tproducts := Product.using(tx)\n\t\tcase products.where().lock().all()\n\t\twhen DbResult::Ok(locked)\n\t\t\tDbResult<Integer>::Ok(locked.size())\n\t\twhen DbResult::Err(error)\n\t\t\tDbResult<Integer>::Err(error)\n\t\tend\n\tend\nend",
+		"def locked_product_count(): Integer fails DbError\n\treturn Database.transaction() do |tx|\n\t\tproducts := Product.using(tx)\n\t\tlocked := products.lock().all()\n\t\tlocked.size()\n\tend\nend",
 		"locked_product_count()",
-		"def nested_product_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tnested_result := tx.transaction() do |nested|\n\t\t\tproducts := Product.using(nested)\n\t\t\tcase products.where().all()\n\t\t\twhen DbResult::Ok(loaded)\n\t\t\t\tDbResult<Integer>::Ok(loaded.size())\n\t\t\twhen DbResult::Err(error)\n\t\t\t\tDbResult<Integer>::Err(error)\n\t\t\tend\n\t\tend\n\t\tnested_result\n\tend\nend",
+		"def nested_product_count(): Integer fails DbError\n\treturn Database.transaction() do |tx|\n\t\tnested_result := tx.transaction() do |nested|\n\t\t\tproducts := Product.using(nested)\n\t\t\tloaded := products.all()\n\t\t\tloaded.size()\n\t\tend\n\t\tnested_result\n\tend\nend",
 		"nested_product_count()",
-		"def scoped_subquery_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tcategory_ids := Category.using(tx).select(:id)\n\t\tcase Product.using(tx).where(category_id: category_ids).count()\n\t\twhen DbResult::Ok(count)\n\t\t\tDbResult<Integer>::Ok(count)\n\t\twhen DbResult::Err(error)\n\t\t\tDbResult<Integer>::Err(error)\n\t\tend\n\tend\nend",
+		"def scoped_subquery_count(): Integer fails DbError\n\treturn Database.transaction() do |tx|\n\t\tcategory_ids := Category.using(tx).select(:id)\n\t\tcount := Product.using(tx).where(category_id: category_ids).count()\n\t\tcount\n\tend\nend",
 		"scoped_subquery_count()",
-		"Product.lock().all()",
+		"attempt Product.lock().all()",
 		":quit",
 	}, "\n") + "\n"
 	var stdout, stderr bytes.Buffer
@@ -357,50 +350,163 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	want := strings.Join([]string{
 		`"SELECT \"id\", \"category_id\", \"name\", \"price\", \"active\" FROM \"products\" WHERE \"id\" IN (?, ?)" : String`,
 		`"SELECT \"id\", \"category_id\", \"name\", \"price\", \"active\" FROM \"products\" INNER JOIN (SELECT \"id\" AS \"__trb_join_key\" FROM \"categories\" WHERE \"name\" = ?) AS \"__trb_join_0\" ON \"category_id\" = \"__trb_join_0\".\"__trb_join_key\"" : String`,
-		`DbResult::Ok(value: 1) : DbResult<Integer>`,
-		`DbResult::Ok(value: 2) : DbResult<Integer>`,
-		`DbResult::Ok(value: 1) : DbResult<Integer>`,
-		`DbResult::Ok(value: 0) : DbResult<Integer>`,
+		`1 : Integer`,
+		`2 : Integer`,
+		`1 : Integer`,
+		`0 : Integer`,
 		`#<Subquery<Integer>> : Subquery<Integer>`,
 		`"SELECT \"id\", \"category_id\", \"name\", \"price\", \"active\" FROM \"products\" WHERE EXISTS (SELECT 1 FROM \"categories\" WHERE \"categories\".\"id\" = \"products\".\"category_id\" AND (\"name\" = ?))" : String`,
-		`DbResult::Ok(value: 1) : DbResult<Integer>`,
-		`DbResult::Ok(value: 1) : DbResult<Integer>`,
-		`DbResult::Ok(value: {1: 1, 2: 1}) : DbResult<Hash<Integer, Integer>>`,
-		`DbResult::Ok(value: {1: 1, 2: 1}) : DbResult<Hash<Integer, Integer>>`,
-		`DbResult::Ok(value: {1: 1, 2: 2}) : DbResult<Hash<Integer, Integer>>`,
-		`DbResult::Ok(value: {1: 1, 2: 2}) : DbResult<Hash<Integer, Integer>>`,
-		`DbResult::Ok(value: {1: 1, 2: 2}) : DbResult<Hash<Integer, Float?>>`,
-		`DbResult::Ok(value: {1: "Priority", 2: "Archive"}) : DbResult<Hash<Integer, String?>>`,
-		`DbResult::Ok(value: {1: 10.5, 2: nil}) : DbResult<Hash<Integer, Float?>>`,
-		`DbResult::Ok(value: {2: 1}) : DbResult<Hash<Integer, Integer>>`,
-		`DbResult::Ok(value: {2: 1}) : DbResult<Hash<Integer, Integer>>`,
+		`1 : Integer`,
+		`1 : Integer`,
+		`1 : Integer`,
+		`16 : Integer`,
 		`Featured`,
-		`DbResult::Ok(value: 1) : DbResult<Integer>`,
-		`DbResult::Ok(value: 1) : DbResult<Integer>`,
-		`DbResult::Ok(value: 1) : DbResult<Integer>`,
-		`DbResult::Ok(value: 1) : DbResult<Integer>`,
-		`DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: "ORM preload query does not accept limit, offset, or lock")) : DbResult<Array<Category>>`,
-		`DbResult::Ok(value: true) : DbResult<Boolean>`,
-		`DbResult::Ok(value: ["Priority", "Archive"]) : DbResult<Array<String>>`,
-		`DbResult::Ok(value: #<Product active: true, category_id: 1, id: 1, name: "Priority", price: 10.5>) : DbResult<Product?>`,
-		`DbResult::Ok(value: 2) : DbResult<Integer>`,
-		`DbResult::Ok(value: 3) : DbResult<Integer>`,
-		`DbResult::Ok(value: 2) : DbResult<Integer>`,
-		`DbResult::Ok(value: 10.5) : DbResult<Float>`,
-		`DbResult::Ok(value: 1.5) : DbResult<Float?>`,
-		`DbResult::Ok(value: "Archive") : DbResult<String?>`,
-		`DbResult::Ok(value: 10.5) : DbResult<Float?>`,
-		`DbResult::Ok(value: 0) : DbResult<Float>`,
-		`DbResult::Ok(value: nil) : DbResult<Float?>`,
-		`DbResult::Ok(value: "Priority") : DbResult<String>`,
-		`DbResult::Ok(value: 2) : DbResult<Integer>`,
-		`DbResult::Ok(value: 2) : DbResult<Integer>`,
-		`DbResult::Ok(value: 2) : DbResult<Integer>`,
-		`DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: "database lock requires an explicit transaction scope")) : DbResult<Array<Product>>`,
+		`1 : Integer`,
+		`1 : Integer`,
+		`1 : Integer`,
+		`1 : Integer`,
+		`Result::Err(error: DbError(kind: DbErrorKind::InvalidData, message: "ORM preload query does not accept limit, offset, or lock")) : Result<Array<Category>, DbError>`,
+		`true : Boolean`,
+		`["Priority", "Archive"] : Array<String>`,
+		`#<Product active: true, category_id: 1, id: 1, name: "Priority", price: 10.5> : Product?`,
+		`2 : Integer`,
+		`3 : Integer`,
+		`2 : Integer`,
+		`10.5 : Float`,
+		`1.5 : Float?`,
+		`"Archive" : String?`,
+		`10.5 : Float?`,
+		`0 : Float`,
+		`nil : Float?`,
+		`"Priority" : String`,
+		`2 : Integer`,
+		`2 : Integer`,
+		`2 : Integer`,
+		`Result::Err(error: DbError(kind: DbErrorKind::InvalidData, message: "database lock requires an explicit transaction scope")) : Result<Array<Product>, DbError>`,
 		"",
 	}, "\n")
 	if stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("unexpected ORM REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
+func TestReplLoadsPortableORMAssociationProperties(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE products (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, name TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES categories(id));
+		INSERT INTO categories (id, name) VALUES (1, 'Featured');
+		INSERT INTO products (id, category_id, name) VALUES (1, 1, 'First'), (2, 1, 'Second');
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-orm-association-test"
+	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"sqlite","database":"application.sqlite3"}`)
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { DbError, Model, belongs_to, has_many } from trb/orm
+import { Result } from trb/std/result
+
+class Category < Model
+	has_many(Product)
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+
+def association_count(): Integer fails DbError
+	product := Product.find(1)
+	puts(product.category.loaded?())
+	puts(product.category.name)
+	puts(product.category.loaded?())
+	category := Category.find(1)
+	puts(category.products.size())
+	return category.products.size()
+end
+
+def batch_count(): Integer fails DbError
+	each_count := Product.find_each(batch_size: 1) do |product|
+		puts(product.name)
+	end
+	batch_count := Product.find_in_batches(batch_size: 1) do |products|
+		puts(products.size())
+	end
+	return each_count + batch_count
+end
+
+def main()
+	case attempt association_count()
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error.message)
+	end
+	case attempt batch_count()
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error.message)
+	end
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	input := strings.Join([]string{
+		"import { Category, Product } from main",
+		"product := Product.find(1)",
+		"product.category.loaded?()",
+		"product.category",
+		"product.category.loaded?()",
+		"product.category.load()",
+		"product.category.reload()",
+		"category := Category.find(1)",
+		"category.products.loaded?()",
+		"category.products",
+		"category.products.loaded?()",
+		":quit",
+	}, "\n") + "\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	for _, expected := range []string{
+		`false : Boolean`,
+		`#<Category id: 1, name: "Featured"> : Category?`,
+		`true : Boolean`,
+		`[#<Product category_id: 1, id: 1, name: "First">, #<Product category_id: 1, id: 2, name: "Second">] : Array<Product>`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("ORM association REPL output is missing %q:\n%s", expected, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("ORM association REPL reported errors:\n%s", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	command = &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+		t.Fatalf("association run status=%d stderr=%s", status, stderr.String())
+	}
+	if want := "false\nFeatured\ntrue\n2\n2\nFirst\nSecond\n1\n1\n4\n"; stdout.String() != want {
+		t.Fatalf("unexpected generated ORM association result: want %q, got %q, stderr=%s", want, stdout.String(), stderr.String())
 	}
 }
 
@@ -445,7 +551,8 @@ func TestRunPortableORMDestroyLifecycle(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { DbErrorKind, DbResult, Model, belongs_to, has_many } from trb/orm
+	source := `import { DbError, DbErrorKind, Model, belongs_to, has_many } from trb/orm
+import { Result } from trb/std/result
 
 class Category < Model
 	has_many(Product, dependent: :destroy)
@@ -479,107 +586,75 @@ class File < Model
 	belongs_to(Folder)
 end
 
-def destroy_category(id: Integer): DbResult<Integer>
-	case Category.find(id)
-	when DbResult::Ok(category)
-		case category.destroy()
-		when DbResult::Ok(destroyed)
-			if destroyed
-				return Product.count()
-			end
-			return DbResult<Integer>::Ok(-1)
-		when DbResult::Err(error)
-			return DbResult<Integer>::Err(error)
-		end
-	when DbResult::Err(error)
-		return DbResult<Integer>::Err(error)
+def destroy_category(id: Integer): Integer fails DbError
+	category := Category.find(id)
+	destroyed := category.destroy()
+	if destroyed
+		return Product.count()
+	end
+	return -1
+end
+
+def destroy_remaining_categories(): Integer fails DbError
+	destroyed := Category.destroy_all()
+	if destroyed >= 0
+		return Product.count()
+	end
+	return -1
+end
+
+def restrict_team(): Boolean fails DbError
+	team := Team.find(1)
+	case attempt team.destroy()
+	when Result::Ok(_)
+		return false
+	when Result::Err(error)
+		return error.kind == DbErrorKind::Constraint
 	end
 end
 
-def destroy_remaining_categories(): DbResult<Integer>
-	case Category.destroy_all()
-	when DbResult::Ok(destroyed)
-		if destroyed >= 0
-			return Product.count()
-		end
-		return DbResult<Integer>::Ok(-1)
-	when DbResult::Err(error)
-		return DbResult<Integer>::Err(error)
+def nullify_articles(): Integer fails DbError
+	author := Author.find(1)
+	destroyed := author.destroy()
+	if destroyed
+		return Article.where(author_id: nil).count()
 	end
+	return -1
 end
 
-def restrict_team(): DbResult<Boolean>
-	case Team.find(1)
-	when DbResult::Ok(team)
-		case team.destroy()
-		when DbResult::Ok(_)
-			return DbResult<Boolean>::Ok(false)
-		when DbResult::Err(error)
-			return DbResult<Boolean>::Ok(error.kind == DbErrorKind::Constraint)
-		end
-	when DbResult::Err(error)
-		return DbResult<Boolean>::Err(error)
+def delete_files(): Integer fails DbError
+	folder := Folder.find(1)
+	destroyed := folder.destroy()
+	if destroyed
+		return File.count()
 	end
+	return -1
 end
 
-def nullify_articles(): DbResult<Integer>
-	case Author.find(1)
-	when DbResult::Ok(author)
-		case author.destroy()
-		when DbResult::Ok(destroyed)
-			if destroyed
-				return Article.where(author_id: nil).count()
-			end
-			return DbResult<Integer>::Ok(-1)
-		when DbResult::Err(error)
-			return DbResult<Integer>::Err(error)
-		end
-	when DbResult::Err(error)
-		return DbResult<Integer>::Err(error)
-	end
-end
-
-def delete_files(): DbResult<Integer>
-	case Folder.find(1)
-	when DbResult::Ok(folder)
-		case folder.destroy()
-		when DbResult::Ok(destroyed)
-			if destroyed
-				return File.count()
-			end
-			return DbResult<Integer>::Ok(-1)
-		when DbResult::Err(error)
-			return DbResult<Integer>::Err(error)
-		end
-	when DbResult::Err(error)
-		return DbResult<Integer>::Err(error)
-	end
-end
-
-def print_integer(result: DbResult<Integer>)
+def print_integer(result: Result<Integer, DbError>)
 	case result
-	when DbResult::Ok(value)
+	when Result::Ok(value)
 		puts(value)
-	when DbResult::Err(error)
+	when Result::Err(error)
 		puts(error.message)
 	end
 end
 
-def print_boolean(result: DbResult<Boolean>)
+def print_boolean(result: Result<Boolean, DbError>)
 	case result
-	when DbResult::Ok(value)
+	when Result::Ok(value)
 		puts(value)
-	when DbResult::Err(error)
+	when Result::Err(error)
 		puts(error.message)
 	end
 end
 
 def main()
-	print_integer(destroy_category(1))
-	print_integer(destroy_remaining_categories())
-	print_boolean(restrict_team())
-	print_integer(nullify_articles())
-	print_integer(delete_files())
+	print_integer(attempt destroy_category(1))
+	print_integer(attempt destroy_remaining_categories())
+	print_boolean(attempt restrict_team())
+	print_integer(attempt nullify_articles())
+	print_integer(attempt delete_files())
 end
 `
 	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
@@ -629,8 +704,8 @@ func TestReplExecutesORMDistinct(t *testing.T) {
 	input := strings.Join([]string{
 		"import { Product } from main",
 		"Product.distinct().to_sql()",
-		"Product.where().order(name: :asc).distinct().pluck(:name)",
-		"Product.where().distinct().count()",
+		"Product.order(name: :asc).distinct().pluck(:name)",
+		"Product.distinct().count()",
 		":quit",
 	}, "\n") + "\n"
 	var stdout, stderr bytes.Buffer
@@ -640,8 +715,8 @@ func TestReplExecutesORMDistinct(t *testing.T) {
 	}
 	want := strings.Join([]string{
 		`"SELECT DISTINCT \"id\", \"name\" FROM \"products\"" : String`,
-		`DbResult::Ok(value: ["Other", "Same"]) : DbResult<Array<String>>`,
-		`DbResult::Ok(value: 3) : DbResult<Integer>`,
+		`["Other", "Same"] : Array<String>`,
+		`3 : Integer`,
 		"",
 	}, "\n")
 	if stdout.String() != want || stderr.Len() != 0 {
@@ -697,13 +772,13 @@ end
 		t.Fatal(err)
 	}
 
-	input := "import { Category } from main\nCategory.where().preload(:product).all()\n:quit\n"
+	input := "import { Category } from main\nattempt Category.preload(:product).all()\n:quit\n"
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	want := "DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: \"database has_one association returned multiple rows\")) : DbResult<Array<Category>>\n"
+	want := "Result::Err(error: DbError(kind: DbErrorKind::InvalidData, message: \"database has_one association returned multiple rows\")) : Result<Array<Category>, DbError>\n"
 	if stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("unexpected has_one REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
 	}

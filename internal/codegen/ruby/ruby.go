@@ -286,7 +286,11 @@ func (g *generator) statement(statement ir.Statement) {
 func (g *generator) callBlock(call *ir.Call, trailingComment string) {
 	withoutBlock := *call
 	withoutBlock.Block = nil
-	header := g.expr(&withoutBlock) + " do"
+	header := g.expr(&withoutBlock)
+	if g.nativeSyntax && len(call.Arguments) == 0 && expressionReference(call.Callee) == nil {
+		header = g.expr(call.Callee)
+	}
+	header += " do"
 	if len(call.Block.Parameters) > 0 {
 		header += " |" + strings.Join(call.Block.Parameters, ", ") + "|"
 	}

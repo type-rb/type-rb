@@ -393,8 +393,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormPreload(call, arguments)
 	case "trb.orm.association.query.belongs_to", "trb.orm.association.query.has_many", "trb.orm.association.query.has_one":
 		return g.ormAssociationQuery(call)
+	case "trb.orm.association.value.belongs_to", "trb.orm.association.value.has_many", "trb.orm.association.value.has_one", "trb.orm.association.load.belongs_to", "trb.orm.association.load.has_many", "trb.orm.association.load.has_one":
+		return g.ormLoadAssociation(call, false)
+	case "trb.orm.association.reload.belongs_to", "trb.orm.association.reload.has_many", "trb.orm.association.reload.has_one":
+		return g.ormLoadAssociation(call, true)
 	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many", "trb.orm.association.loaded.has_one":
-		return g.ormLoadedAssociation(call)
+		return g.ormAssociationLoaded(call)
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")
 		return "utf8.RuneCountInString(" + arguments[0] + ")"

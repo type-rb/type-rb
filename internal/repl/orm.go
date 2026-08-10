@@ -183,12 +183,7 @@ func (provider *ormRuntimeProvider) Block(evaluator *Evaluator, invocation runti
 		_ = evaluator.ormRollbackTransaction(transaction)
 		return Value{}, err
 	}
-	result, ok := value.Data.(*enumValue)
-	if !ok || result.Name != "Ok" && result.Name != "Err" {
-		_ = evaluator.ormRollbackTransaction(transaction)
-		return Value{}, errors.New("ORM transaction block must return DbResult<T>")
-	}
-	if result.Name == "Err" {
+	if result, ok := value.Data.(*enumValue); ok && types.Equivalent(value.Type, invocation.Type) && result.Name == "Err" {
 		if rollbackFailure := evaluator.ormRollbackTransaction(transaction); rollbackFailure != nil {
 			return evaluator.ormResultErr(invocation.Type, rollbackFailure.kind, rollbackFailure.message)
 		}
@@ -198,7 +193,7 @@ func (provider *ormRuntimeProvider) Block(evaluator *Evaluator, invocation runti
 		_ = evaluator.ormRollbackTransaction(transaction)
 		return evaluator.ormResultErr(invocation.Type, commitFailure.kind, commitFailure.message)
 	}
-	return value, nil
+	return evaluator.ormResultOK(invocation.Type, value)
 }
 
 func (provider *ormRuntimeProvider) Close() error {
@@ -710,8 +705,12 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		return e.ormAggregateResult(operation, typ, query, remaining)
 	case "trb.orm.association.query.belongs_to", "trb.orm.association.query.has_many", "trb.orm.association.query.has_one":
 		return e.ormAssociationQuery(typ, query.model, arguments[0].Value, call)
+	case "trb.orm.association.value.belongs_to", "trb.orm.association.value.has_many", "trb.orm.association.value.has_one", "trb.orm.association.load.belongs_to", "trb.orm.association.load.has_many", "trb.orm.association.load.has_one":
+		return e.ormLoadAssociationResult(typ, query.model, arguments[0].Value, call, false)
+	case "trb.orm.association.reload.belongs_to", "trb.orm.association.reload.has_many", "trb.orm.association.reload.has_one":
+		return e.ormLoadAssociationResult(typ, query.model, arguments[0].Value, call, true)
 	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many", "trb.orm.association.loaded.has_one":
-		return e.ormLoadedAssociation(typ, arguments[0].Value, call)
+		return e.ormAssociationLoaded(arguments[0].Value, call)
 	default:
 		return Value{}, fmt.Errorf("%s is type-checked, but ORM writes and batch iteration are not executable in the REPL yet; use trb run", name)
 	}
@@ -1901,19 +1900,63 @@ func (e *Evaluator) ormAssociationScope(query *ormQueryValue, association ormint
 	return cloneORMQuery(scoped), nil
 }
 
-func (e *Evaluator) ormLoadedAssociation(typ types.Type, receiver Value, call *ir.Call) (Value, error) {
+func (e *Evaluator) ormLoadAssociationResult(typ types.Type, model ormintegration.Model, receiver Value, call *ir.Call, reload bool) (Value, error) {
+	object, ok := receiver.Data.(*objectInstance)
+	if !ok {
+		return Value{}, errors.New("ORM association requires a model value")
+	}
+	name := ormCallMemberName(call)
+	association, ok := model.Association(name)
+	if !ok {
+		return Value{}, fmt.Errorf("ORM model %s has no association %s", model.Name, name)
+	}
+	valueType := ormResultValueType(typ)
+	loadedField := "@__trb_association_" + name + "_loaded"
+	valueField := "@__trb_association_" + name
+	if !reload {
+		if loaded, exists := object.Fields[loadedField]; exists && loaded.Data == true {
+			value := object.Fields[valueField]
+			value.Type = valueType
+			return e.ormResultOK(typ, value)
+		}
+	}
+	queryValue, err := e.ormAssociationQuery(types.FromName(association.TargetQuery), model, receiver, call)
+	if err != nil {
+		return Value{}, err
+	}
+	query, ok := queryValue.Data.(*ormQueryValue)
+	if !ok {
+		return Value{}, errors.New("ORM association did not produce a query")
+	}
+	values, failure := e.ormLoad(query)
+	if failure != nil {
+		return e.ormResultErr(typ, failure.kind, failure.message)
+	}
+	value := Value{Type: valueType}
+	if association.Kind == ormintegration.HasMany {
+		value.Data = &arrayValue{Items: values}
+	} else {
+		if association.Kind == ormintegration.HasOne && len(values) > 1 {
+			return e.ormResultErr(typ, "InvalidData", "database has_one association returned multiple rows")
+		}
+		if len(values) > 0 {
+			value = values[0]
+			value.Type = valueType
+		}
+	}
+	object.Fields[valueField] = value
+	object.Fields[loadedField] = Value{Type: types.FromName("Boolean"), Data: true}
+	return e.ormResultOK(typ, value)
+}
+
+func (e *Evaluator) ormAssociationLoaded(receiver Value, call *ir.Call) (Value, error) {
 	object, ok := receiver.Data.(*objectInstance)
 	if !ok {
 		return Value{}, errors.New("ORM association requires a model value")
 	}
 	name := ormCallMemberName(call)
 	loaded, ok := object.Fields["@__trb_association_"+name+"_loaded"]
-	if !ok || loaded.Data != true {
-		return Value{}, fmt.Errorf("ORM association %s.%s was not preloaded", object.Definition.Node.Name, name)
-	}
-	value := object.Fields["@__trb_association_"+name]
-	value.Type = typ
-	return value, nil
+	return Value{Type: types.FromName("Boolean"), Data: ok && loaded.Data == true}, nil
 }
 
 func ormCallMemberName(call *ir.Call) string {
