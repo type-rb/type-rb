@@ -4,9 +4,13 @@
 generated runtime supports Go, Ruby, and TypeScript with SQLite, PostgreSQL,
 and MySQL. TypeScript server applications currently use the Bun runtime.
 
-The compiler reads a live database schema. Migrations remain outside TypeRB;
-use the schema tool that fits the project. The database must be reachable when
-TypeRB checks or builds code, and again when the generated application runs.
+When `db/schema.lock.json` exists, the compiler reads its deterministic type
+contract and does not require a database connection during checks or builds.
+Without a lock, it falls back to live schema introspection. The generated
+application still connects to the database at runtime.
+
+Migrations are not a runtime dependency of `trb/orm`. Use any schema tool, or
+use the optional [`trb db` workflow](database.md) backed by sqldef.
 
 ## Configuration
 
@@ -36,6 +40,11 @@ SQLite environment values must be absolute paths. Adapter names are `sqlite`,
 `postgresql`, and `mysql`. Set `mode` to `ruby` to generate a Ruby application;
 the ORM source and package options stay the same. TypeScript projects must set
 `typescript.runtime` to `"bun"`.
+
+The compiler looks for `db/schema.lock.json` by default. Set the optional
+`schemaLock` package option to another project-relative path. If an explicitly
+configured lock is missing or invalid, compilation fails instead of silently
+using the live database.
 
 ## Models and associations
 

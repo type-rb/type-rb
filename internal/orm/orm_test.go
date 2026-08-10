@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/schemalock"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -193,6 +194,42 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 		if query.InstanceMembers[name].Return.String() != expected {
 			t.Fatalf("unexpected %s declaration: %#v", name, query.InstanceMembers[name])
 		}
+	}
+}
+
+func TestLoadSchemaUsesDefaultLockWithoutLiveDatabase(t *testing.T) {
+	root := t.TempDir()
+	lock, err := schemalock.ParseSQL("sqlite", []byte(`
+CREATE TABLE products (
+	id INTEGER PRIMARY KEY,
+	name TEXT NOT NULL,
+	price REAL
+);
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Write(filepath.Join(root, "db", "schema.lock.json")); err != nil {
+		t.Fatal(err)
+	}
+	options := map[string][]byte{PackageName: []byte(`{
+		"adapter": "sqlite",
+		"database": {"environment": "TRB_TEST_MISSING_DATABASE"}
+	}`)}
+	t.Setenv("TRB_TEST_MISSING_DATABASE", "")
+	schema, err := LoadSchema(root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.Database != "" || schema.DatabaseEnvironment != "TRB_TEST_MISSING_DATABASE" {
+		t.Fatalf("database source=%#v", schema)
+	}
+	products, ok := schema.Table("products")
+	if !ok || len(products.Columns) != 3 || products.Columns[0].Name != "id" || products.Columns[2].Name != "price" {
+		t.Fatalf("products=%#v", products)
+	}
+	if products.Columns[2].Type.String() != "Float?" {
+		t.Fatalf("nullable lock column type=%s, want Float?", products.Columns[2].Type.String())
 	}
 }
 

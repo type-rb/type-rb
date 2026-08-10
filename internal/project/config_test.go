@@ -224,3 +224,59 @@ func TestLoadRejectsUnknownTypeScriptRuntime(t *testing.T) {
 		t.Fatalf("unexpected invalid-runtime result: %v", err)
 	}
 }
+
+func TestDatabaseConfigDefaultsArePortable(t *testing.T) {
+	for _, test := range []struct {
+		adapter, command string
+	}{
+		{adapter: "sqlite", command: "sqlite3def"},
+		{adapter: "postgresql", command: "psqldef"},
+		{adapter: "mysql", command: "mysqldef"},
+	} {
+		t.Run(test.adapter, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, ConfigName)
+			source := `{
+  "name": "database-app",
+  "mode": "ruby",
+  "db": {
+    "adapter": "` + test.adapter + `",
+    "database": {"environment": "DATABASE_URL"}
+  }
+}`
+			if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			config, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.Database.Schema != "db/schema.sql" || config.Database.Lock != "db/schema.lock.json" {
+				t.Fatalf("unexpected schema paths: %#v", config.Database)
+			}
+			if config.Database.Sqldef.Command != test.command || config.Database.Sqldef.Version != DefaultSqldefVersion {
+				t.Fatalf("unexpected sqldef defaults: %#v", config.Database.Sqldef)
+			}
+		})
+	}
+}
+
+func TestDatabaseConfigRejectsEscapingPathsAndUnknownAdapters(t *testing.T) {
+	for name, database := range map[string]string{
+		"adapter": `{"adapter":"oracle"}`,
+		"schema":  `{"adapter":"sqlite","schema":"../schema.sql"}`,
+		"lock":    `{"adapter":"sqlite","lock":"/tmp/schema.lock.json"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, ConfigName)
+			source := `{"name":"invalid-db","mode":"ruby","db":` + database + `}`
+			if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path); err == nil {
+				t.Fatal("invalid database configuration was accepted")
+			}
+		})
+	}
+}

@@ -91,8 +91,9 @@ than detailed syntax.
 - Separate one-shot `trb run` from framework development servers and add a
   coherent `trb dev` and runtime-adapter model for backend and frontend
   development servers.
-- Define database migration/schema workflows without making ordinary compiler
-  commands perform surprising destructive operations.
+- Harden the database schema workflow with compatibility policy, additional
+  schema constructs, and supported-platform release validation while keeping
+  destructive changes explicit.
 
 ## 7. Distribution and long-term operation
 

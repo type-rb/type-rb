@@ -72,6 +72,8 @@ func (c *CLI) Run(args []string) int {
 		err = c.runPlay(args[1:])
 	case "tour":
 		err = c.runTour(args[1:])
+	case "db":
+		err = c.runDatabase(args[1:])
 	case "init":
 		err = c.runInit(args[1:])
 	case "sync":
@@ -1494,6 +1496,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb play [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb tour [--mode ruby|go|typescript] [--port PORT] [--no-open]")
+	fmt.Fprintln(c.Stdout, "  trb db plan|apply|export|lock|check [options]")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--dev] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb remove PACKAGE")

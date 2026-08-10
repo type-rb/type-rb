@@ -9,6 +9,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("TRB_TEST_SQLDEF_HELPER") == "1" {
+		runTestSqldefHelper()
+		return
+	}
 	// Generated project roots remain isolated; only Go's content-addressed caches are shared.
 	cacheRoot, err := os.MkdirTemp("", "trb-cli-test-go-cache-")
 	if err != nil {

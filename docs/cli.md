@@ -179,6 +179,22 @@ standard output are terminals. In a non-interactive environment it prints the
 command usage instead of waiting for input. `trb repl` remains the explicit
 form for scripts and sessions that pass options.
 
+## Database schema
+
+```sh
+trb db plan
+trb db apply [--allow-destructive]
+trb db export [--output PATH]
+trb db lock [--from-db]
+trb db check [--from-db]
+```
+
+`plan`, `apply`, and `export` adapt the configured external sqldef executable.
+`apply` refreshes the deterministic schema lock only after a successful schema
+change. DROP operations remain disabled unless `--allow-destructive` is
+explicit. `lock` and `check` operate offline by default; `--from-db` selects
+live introspection. See the [database schema guide](guides/database.md).
+
 ## Playground and tour
 
 ```sh

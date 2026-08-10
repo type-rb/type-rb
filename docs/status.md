@@ -126,8 +126,11 @@ The repository runs the same application contract across all nine backend and
 database combinations, plus an ORM-backed JSON route across all three backends.
 Database terminals and lazy association access use `fails DbError`; `attempt`
 captures them as ordinary `Result` values. The REPL uses the same schema-backed
-read and write API. Schema caching and production compatibility remain future
-work.
+read and write API. A deterministic portable schema lock now removes the live
+database requirement from compiler checks and builds. Optional `trb db`
+commands provide plan, guarded apply, export, lock, and drift checks around a
+pinned external sqldef executable on SQLite, PostgreSQL, and MySQL. Production
+compatibility policy remains future work.
 
 The compiler pipeline is:
 
