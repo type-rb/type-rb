@@ -146,6 +146,9 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if product.InstanceMembers["delete"].Return.String() != "DbResult<Boolean>" {
 		t.Fatalf("unexpected delete declaration: %#v", product.InstanceMembers["delete"])
 	}
+	if product.InstanceMembers["destroy"].Return.String() != "DbResult<Boolean>" || product.ClassMembers["destroy_all"].Return.String() != "DbResult<Integer>" {
+		t.Fatalf("unexpected destroy declarations: %#v", product)
+	}
 	findEach := product.ClassMembers["find_each"]
 	if findEach.Return.String() != "DbResult<Integer>" || findEach.Block == nil || !findEach.Block.Structured || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
 		t.Fatalf("unexpected find_each declaration: %#v", findEach)
@@ -365,8 +368,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 40 {
-		t.Fatalf("expected six fields and thirty-four ORM methods, got %#v", product.Body)
+	if len(product.Body) != 42 {
+		t.Fatalf("expected six fields and thirty-six ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[1].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -386,7 +389,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "distinct", "select", "using", "not", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "distinct", "select", "using", "not", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "destroy_all", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}

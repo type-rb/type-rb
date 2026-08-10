@@ -404,6 +404,165 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	}
 }
 
+func TestRunPortableORMDestroyLifecycle(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		PRAGMA foreign_keys = ON;
+		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE products (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, name TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES categories(id));
+		CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE members (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, name TEXT NOT NULL, FOREIGN KEY (team_id) REFERENCES teams(id));
+		CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE articles (id INTEGER PRIMARY KEY, author_id INTEGER, title TEXT NOT NULL, FOREIGN KEY (author_id) REFERENCES authors(id));
+		CREATE TABLE folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE files (id INTEGER PRIMARY KEY, folder_id INTEGER NOT NULL, name TEXT NOT NULL, FOREIGN KEY (folder_id) REFERENCES folders(id));
+		INSERT INTO categories (id, name) VALUES (1, 'Featured'), (2, 'Archived');
+		INSERT INTO products (id, category_id, name) VALUES (1, 1, 'TypeRB'), (2, 2, 'Old TypeRB');
+		INSERT INTO teams (id, name) VALUES (1, 'Compiler');
+		INSERT INTO members (id, team_id, name) VALUES (1, 1, 'Ada');
+		INSERT INTO authors (id, name) VALUES (1, 'Matz');
+		INSERT INTO articles (id, author_id, title) VALUES (1, 1, 'Language design');
+		INSERT INTO folders (id, name) VALUES (1, 'Temporary');
+		INSERT INTO files (id, folder_id, name) VALUES (1, 1, 'draft.txt');
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/orm-destroy-test"
+	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"sqlite","database":"application.sqlite3"}`)
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { DbErrorKind, DbResult, Model, belongs_to, has_many } from trb/orm
+
+class Category < Model
+	has_many(Product, dependent: :destroy)
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+
+class Team < Model
+	has_many(Member, dependent: :restrict)
+end
+
+class Member < Model
+	belongs_to(Team)
+end
+
+class Author < Model
+	has_many(Article, dependent: :nullify)
+end
+
+class Article < Model
+	belongs_to(Author)
+end
+
+class Folder < Model
+	has_many(File, dependent: :delete)
+end
+
+class File < Model
+	belongs_to(Folder)
+end
+
+def destroy_category(id: Integer): DbResult<Integer>
+	category := Category.find(id)?
+	destroyed := category.destroy()?
+	if destroyed
+		return Product.count()
+	end
+	return DbResult<Integer>::Ok(-1)
+end
+
+def destroy_remaining_categories(): DbResult<Integer>
+	destroyed := Category.destroy_all()?
+	if destroyed >= 0
+		return Product.count()
+	end
+	return DbResult<Integer>::Ok(-1)
+end
+
+def restrict_team(): DbResult<Boolean>
+	team := Team.find(1)?
+	case team.destroy()
+	when DbResult::Ok(_)
+		return DbResult<Boolean>::Ok(false)
+	when DbResult::Err(error)
+		return DbResult<Boolean>::Ok(error.kind == DbErrorKind::Constraint)
+	end
+end
+
+def nullify_articles(): DbResult<Integer>
+	author := Author.find(1)?
+	destroyed := author.destroy()?
+	if destroyed
+		return Article.where(author_id: nil).count()
+	end
+	return DbResult<Integer>::Ok(-1)
+end
+
+def delete_files(): DbResult<Integer>
+	folder := Folder.find(1)?
+	destroyed := folder.destroy()?
+	if destroyed
+		return File.count()
+	end
+	return DbResult<Integer>::Ok(-1)
+end
+
+def print_integer(result: DbResult<Integer>)
+	case result
+	when DbResult::Ok(value)
+		puts(value)
+	when DbResult::Err(error)
+		puts(error.message)
+	end
+end
+
+def print_boolean(result: DbResult<Boolean>)
+	case result
+	when DbResult::Ok(value)
+		puts(value)
+	when DbResult::Err(error)
+		puts(error.message)
+	end
+end
+
+def main()
+	print_integer(destroy_category(1))
+	print_integer(destroy_remaining_categories())
+	print_boolean(restrict_team())
+	print_integer(nullify_articles())
+	print_integer(delete_files())
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if want := "1\n0\ntrue\n1\n0\n"; stdout.String() != want {
+		t.Fatalf("unexpected ORM destroy result: want %q, got %q, stderr=%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplExecutesORMDistinct(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "application.sqlite3")

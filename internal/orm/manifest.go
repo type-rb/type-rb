@@ -231,6 +231,11 @@ func (m *Manifest) Augment(program *ir.Program) {
 						Name: "delete", External: true, ReturnType: dbResult(types.FromName("Boolean")),
 					})
 				}
+				if !existing["destroy"] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: "destroy", External: true, ReturnType: dbResult(types.FromName("Boolean")),
+					})
+				}
 			}
 			for _, association := range model.Associations {
 				if association.Preloadable && !existing[association.Name] {
@@ -314,6 +319,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 			}
 			if !existing["explain"] {
 				class.Body = append(class.Body, queryTerminalIRMethod(model, "explain", dbResult(types.FromName("String")), true))
+			}
+			if !existing["destroy_all"] {
+				class.Body = append(class.Body, queryTerminalIRMethod(model, "destroy_all", dbResult(types.FromName("Integer")), true))
 			}
 			if !existing["preload"] {
 				if preload := preloadIRMethod(model, true); preload != nil {
@@ -589,6 +597,7 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "exists?", External: true, ReturnType: dbResult(types.FromName("Boolean"))},
 		relationUpdateAllIRMethod(model),
 		&ir.Method{Name: "delete_all", External: true, ReturnType: dbResult(types.FromName("Integer"))},
+		&ir.Method{Name: "destroy_all", External: true, ReturnType: dbResult(types.FromName("Integer"))},
 		projectionIRMethod(model, "pluck", false, false),
 		projectionIRMethod(model, "pick", false, true),
 		orderIRMethod(model, false),

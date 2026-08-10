@@ -47,6 +47,10 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 				Name: "delete", Kind: declaration.Method, Intrinsic: "trb.orm.delete",
 				Return: dbResult(types.FromName("Boolean")), Provider: PackageName,
 			}
+			declared.InstanceMembers["destroy"] = declaration.Member{
+				Name: "destroy", Kind: declaration.Method, Intrinsic: "trb.orm.destroy",
+				Return: dbResult(types.FromName("Boolean")), Provider: PackageName,
+			}
 		}
 		for _, association := range model.Associations {
 			if association.Preloadable {
@@ -94,6 +98,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		declared.ClassMembers["count"] = resultQueryDeclaration("count", "trb.orm.count", types.FromName("Integer"), true)
 		declared.ClassMembers["to_sql"] = stringQueryDeclaration("to_sql", "trb.orm.to_sql", true)
 		declared.ClassMembers["explain"] = resultQueryDeclaration("explain", "trb.orm.explain", types.FromName("String"), true)
+		declared.ClassMembers["destroy_all"] = resultQueryDeclaration("destroy_all", "trb.orm.destroy_all", types.FromName("Integer"), true)
 		if preload := preloadDeclaration(model, "trb.orm.preload", true); preload.Name != "" {
 			declared.ClassMembers["preload"] = preload
 		}
@@ -185,6 +190,10 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		query.InstanceMembers["update_all"] = relationUpdateAllDeclaration(model)
 		query.InstanceMembers["delete_all"] = declaration.Member{
 			Name: "delete_all", Kind: declaration.Method, Intrinsic: "trb.orm.query.delete_all",
+			Return: dbResult(types.FromName("Integer")), Provider: PackageName,
+		}
+		query.InstanceMembers["destroy_all"] = declaration.Member{
+			Name: "destroy_all", Kind: declaration.Method, Intrinsic: "trb.orm.query.destroy_all",
 			Return: dbResult(types.FromName("Integer")), Provider: PackageName,
 		}
 		query.InstanceMembers["pluck"] = projectionDeclaration(model, "pluck", "trb.orm.query.pluck", false, false)
@@ -970,6 +979,15 @@ func buildAssociation(source, target Model, spec associationSpec, schema *Schema
 	default:
 		return Association{}, fmt.Errorf("unsupported trb/orm association %q", spec.Kind)
 	}
+	if spec.Dependent == DependentNullify {
+		if spec.Kind == BelongsTo {
+			return Association{}, fmt.Errorf("trb/orm association %s.%s does not support dependent nullify on belongs_to", source.Name, association.Name)
+		}
+		column, ok := target.Column(association.TargetColumn)
+		if !ok || !column.Nullable {
+			return Association{}, fmt.Errorf("trb/orm association %s.%s dependent nullify requires nullable column %s.%s", source.Name, association.Name, target.Table, association.TargetColumn)
+		}
+	}
 	for _, foreignKey := range foreignKeys {
 		referencedColumn := foreignKey.ReferencedColumn
 		if referencedColumn == "" {
@@ -995,6 +1013,9 @@ func buildAssociation(source, target Model, spec associationSpec, schema *Schema
 }
 
 func buildThroughAssociation(source Model, spec associationSpec, models map[string]*Model) (Association, error) {
+	if spec.Dependent != "" {
+		return Association{}, fmt.Errorf("trb/orm association %s through does not yet support dependent", source.Name)
+	}
 	through, ok := source.Association(spec.Through)
 	if !ok {
 		return Association{}, fmt.Errorf("trb/orm association %s through references unknown association %s", source.Name, spec.Through)

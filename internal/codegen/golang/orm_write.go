@@ -99,6 +99,7 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	g.ormUpsertAllRuntime(adapter, model)
 	g.ormUpdateRuntime(adapter, model, primaryKey, projection, scanTargets)
 	g.ormDeleteRuntime(adapter, model, primaryKey)
+	g.ormDestroyRuntime(model)
 }
 
 func goORMBuildScoped(model ormintegration.Model) string {
@@ -417,6 +418,87 @@ func (g *generator) ormDeleteRuntime(adapter ormintegration.Adapter, model ormin
 	g.line("affected, err := deleted.RowsAffected()")
 	g.line("if err != nil { return " + g.ormResultErr(booleanType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database delete result was unavailable\")") + " }")
 	g.line("return " + g.ormResultOK(booleanType, "affected > 0"))
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+}
+
+func (g *generator) ormDestroyRuntime(model ormintegration.Model) {
+	booleanType := types.FromName("Boolean")
+	integerType := types.FromName("Integer")
+	modelName := goIdentifier(model.Name, true)
+	queryType := goORMQueryType(model)
+	transactionType := "*" + g.ormLifecycleAlias() + ".TrbOrmTransaction"
+	core := goORMDestroy(model) + "InTransaction"
+	g.line("func " + goORMDestroy(model) + "(value *" + modelName + ") " + g.ormResultType(booleanType) + " {")
+	g.indent++
+	g.line("if transaction := value." + goORMQueryScopeField() + ".transaction; transaction != nil { return " + core + "(value, transaction) }")
+	g.line("transaction, databaseError := " + g.ormLifecycleAlias() + ".TrbOrmBeginTransaction()")
+	g.line("if databaseError != nil { return " + g.ormResultErr(booleanType, "*databaseError") + " }")
+	g.line("value." + goORMQueryScopeField() + ".transaction = transaction")
+	g.line("result := " + core + "(value, transaction)")
+	g.line("if result.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { _ = transaction.Rollback(); return result }")
+	g.line("if commitError := transaction.Commit(); commitError != nil { return " + g.ormResultErr(booleanType, "*commitError") + " }")
+	g.line("return result")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+
+	g.line("func " + core + "(value *" + modelName + ", transaction " + transactionType + ") " + g.ormResultType(booleanType) + " {")
+	g.indent++
+	g.line("value." + goORMQueryScopeField() + ".transaction = transaction")
+	for _, association := range model.Associations {
+		if association.Dependent == "" {
+			continue
+		}
+		target, ok := g.orm.Model(association.TargetModel)
+		if !ok {
+			continue
+		}
+		qualifier := g.ormModelQualifier(target)
+		query := qualifier + goORMUsing(target) + "(transaction)"
+		query = qualifier + goORMQueryWhere(target) + "(" + query + ", []string{" + strconv.Quote(association.TargetColumn) + "}, []string{\"=\"}, []any{value." + goORMColumnGetter(association.SourceColumn) + "()})"
+		query = g.ormAssociationScope(association, target, query)
+		variable := "dependent" + goIdentifier(association.Name, true)
+		switch association.Dependent {
+		case ormintegration.DependentRestrict:
+			g.line(variable + " := " + qualifier + goORMExists(target) + "(" + query + ")")
+			g.line("if " + variable + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(booleanType, variable+".ErrError") + " }")
+			g.line("if " + variable + ".OkValue { return " + g.ormResultErr(booleanType, g.ormErrorValue("Constraint", "dependent association "+model.Name+"."+association.Name+" restricts destroy")) + " }")
+		case ormintegration.DependentDelete:
+			g.line(variable + " := " + qualifier + goORMDeleteAll(target) + "(" + query + ")")
+			g.line("if " + variable + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(booleanType, variable+".ErrError") + " }")
+		case ormintegration.DependentNullify:
+			g.line(variable + " := " + qualifier + goORMUpdateAll(target) + "(" + query + ", []string{" + strconv.Quote(association.TargetColumn) + "}, []any{nil})")
+			g.line("if " + variable + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(booleanType, variable+".ErrError") + " }")
+		case ormintegration.DependentDestroy:
+			g.line(variable + " := " + qualifier + goORMLoader(target) + "(" + query + ")")
+			g.line("if " + variable + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(booleanType, variable+".ErrError") + " }")
+			g.line("for _, related := range " + variable + ".OkValue {")
+			g.indent++
+			g.line("destroyed := " + qualifier + goORMDestroy(target) + "(related)")
+			g.line("if destroyed.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(booleanType, "destroyed.ErrError") + " }")
+			g.indent--
+			g.line("}")
+		}
+	}
+	g.line("return " + goORMDelete(model) + "(value)")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+
+	g.line("func " + goORMDestroyAll(model) + "(query " + queryType + ") " + g.ormResultType(integerType) + " {")
+	g.indent++
+	g.line("owned := query.transaction == nil")
+	g.line("transaction := query.transaction")
+	g.line("if owned { var databaseError *" + g.goType(types.FromName("DbError")) + "; transaction, databaseError = " + g.ormLifecycleAlias() + ".TrbOrmBeginTransaction(); if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " } }")
+	g.line("query.transaction = transaction")
+	g.line("loaded := " + goORMLoader(model) + "(query)")
+	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { if owned { _ = transaction.Rollback() }; return " + g.ormResultErr(integerType, "loaded.ErrError") + " }")
+	g.line("count := 0")
+	g.line("for _, value := range loaded.OkValue { destroyed := " + core + "(value, transaction); if destroyed.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { if owned { _ = transaction.Rollback() }; return " + g.ormResultErr(integerType, "destroyed.ErrError") + " }; if destroyed.OkValue { count++ } }")
+	g.line("if owned { if commitError := transaction.Commit(); commitError != nil { return " + g.ormResultErr(integerType, "*commitError") + " } }")
+	g.line("return " + g.ormResultOK(integerType, "count"))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')

@@ -341,6 +341,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormChangesSave(call)
 	case "trb.orm.delete":
 		return g.ormDelete(call)
+	case "trb.orm.destroy":
+		return g.ormDestroy(call)
+	case "trb.orm.destroy_all":
+		return g.ormClassTerminal(call, goORMDestroyAll)
 	case "trb.orm.query.where":
 		return g.ormQueryWhere(call, arguments)
 	case "trb.orm.query.join":
@@ -363,6 +367,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormQueryUpdateAll(call, arguments)
 	case "trb.orm.query.delete_all":
 		return g.ormQueryTerminal(call, arguments, goORMDeleteAll)
+	case "trb.orm.query.destroy_all":
+		return g.ormQueryTerminal(call, arguments, goORMDestroyAll)
 	case "trb.orm.query.order":
 		return g.ormOrder(call, arguments)
 	case "trb.orm.query.limit":

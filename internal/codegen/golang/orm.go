@@ -451,6 +451,18 @@ func (g *generator) ormDelete(call *ir.Call) string {
 	return g.ormModelQualifier(model) + goORMDelete(model) + "(" + g.expr(member.Receiver) + ")"
 }
 
+func (g *generator) ormDestroy(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	model, exists := g.orm.Model(member.Receiver.ExprType().Name)
+	if !exists {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMDestroy(model) + "(" + g.expr(member.Receiver) + ")"
+}
+
 func (g *generator) ormPredicateArguments(call *ir.Call) string {
 	predicates := ormintegration.Predicates(call)
 	columns := make([]string, len(predicates))
@@ -2192,6 +2204,14 @@ func goORMChangesSave(model ormintegration.Model) string {
 
 func goORMDelete(model ormintegration.Model) string {
 	return "TrbOrmDelete" + goIdentifier(model.Name, true)
+}
+
+func goORMDestroy(model ormintegration.Model) string {
+	return "TrbOrmDestroy" + goIdentifier(model.Name, true)
+}
+
+func goORMDestroyAll(model ormintegration.Model) string {
+	return "TrbOrmDestroyAll" + goIdentifier(model.Name, true)
 }
 
 func goORMUpdateAll(model ormintegration.Model) string {
