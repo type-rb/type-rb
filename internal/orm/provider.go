@@ -55,9 +55,9 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		for _, association := range model.Associations {
 			if association.Preloadable {
 				declared.InstanceMembers[association.Name] = declaration.Member{
-					Name: association.Name, Kind: declaration.Method,
-					Intrinsic: "trb.orm.association.loaded." + string(association.Kind),
-					Return:    associationValueType(association), Provider: PackageName,
+					Name: association.Name, Kind: declaration.Property,
+					Intrinsic: "trb.orm.association.value." + string(association.Kind),
+					Return:    associationValueType(association), Fails: types.FromName("DbError"), Provider: PackageName,
 				}
 			}
 			declared.InstanceMembers[association.Name+"_query"] = declaration.Member{
@@ -279,7 +279,41 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		catalog.Types[model.ScopeType()] = scope
 	}
+	applyPortableEffects(catalog)
 	return catalog, nil
+}
+
+func applyPortableEffects(catalog *declaration.Catalog) {
+	for _, declared := range catalog.Types {
+		for name, member := range declared.InstanceMembers {
+			declared.InstanceMembers[name] = portableEffectMember(member)
+		}
+		for name, member := range declared.ClassMembers {
+			declared.ClassMembers[name] = portableEffectMember(member)
+		}
+	}
+}
+
+func portableEffectMember(member declaration.Member) declaration.Member {
+	if success, ok := dbResultSuccess(member.Return); ok {
+		member.Return = success
+		member.Fails = types.FromName("DbError")
+	}
+	for index := range member.Alternatives {
+		if success, ok := dbResultSuccess(member.Alternatives[index].Return); ok {
+			member.Alternatives[index].Return = success
+			member.Alternatives[index].Fails = types.FromName("DbError")
+			member.Fails = types.FromName("DbError")
+		}
+	}
+	return member
+}
+
+func dbResultSuccess(result types.Type) (types.Type, bool) {
+	if result.Name != "DbResult" || len(result.Args) != 1 {
+		return types.Type{}, false
+	}
+	return result.Args[0], true
 }
 
 func groupDeclaration(model Model, intrinsic string, class bool) declaration.Member {
@@ -300,13 +334,12 @@ func distinctDeclaration(model Model, intrinsic string, class bool) declaration.
 
 func transactionDeclaration(class bool) declaration.Member {
 	typeParameter := types.FromName("T")
-	result := dbResult(typeParameter)
 	return declaration.Member{
 		Name: "transaction", Kind: declaration.Method, Intrinsic: "trb.orm.transaction",
-		Return: result, Class: class, TypeParameters: []string{"T"}, Provider: PackageName,
+		Return: typeParameter, Fails: types.FromName("DbError"), Class: class, TypeParameters: []string{"T"}, Provider: PackageName,
 		Block: &declaration.Block{
 			Parameters: []types.Type{types.FromName("Transaction")},
-			Return:     result, Structured: true,
+			Return:     typeParameter, Structured: true,
 		},
 	}
 }

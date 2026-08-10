@@ -2811,6 +2811,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.result.GenericApplications[n] = application
 		typ = application.ReturnType
 	case *ast.MemberExpression:
+		if controlType, handled := c.checkAssociationControlMember(n, sc); handled {
+			typ = controlType
+			break
+		}
 		receiverType := c.checkExpression(n.Receiver, sc)
 		if receiverType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
@@ -2907,6 +2911,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = member.Return
 			c.external[n] = member
 			c.result.ExternalMembers[n] = member
+			if member.Kind == declaration.Property {
+				c.recordEffect(n, member.Fails)
+			}
 		} else if exported, exists := c.resolution.CompilerOwnedType(receiverType.Name); exists {
 			if member, found := exported.Members[n.Name]; found && !member.Class {
 				typ = member.Type
@@ -3108,6 +3115,40 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	}
 	c.result.Expressions[expression] = typ
 	return typ
+}
+
+func (c *Checker) checkAssociationControlMember(node *ast.MemberExpression, sc *scope) (types.Type, bool) {
+	control := node.Name
+	if control != "load" && control != "reload" && control != "loaded?" {
+		return types.Type{}, false
+	}
+	associationNode, ok := node.Receiver.(*ast.MemberExpression)
+	if !ok || associationNode.Namespace || associationNode.Safe {
+		return types.Type{}, false
+	}
+	receiverType := c.checkExpression(associationNode.Receiver, sc)
+	association, ok := c.declarationMember(receiverType.Name, associationNode.Name, false, map[string]bool{})
+	if !ok || !strings.HasPrefix(association.Intrinsic, "trb.orm.association.value.") {
+		return types.Type{}, false
+	}
+	c.external[associationNode] = association
+	c.result.ExternalMembers[associationNode] = association
+	c.result.Expressions[associationNode] = association.Return
+
+	resultType := association.Return
+	fails := types.FromName("DbError")
+	if control == "loaded?" {
+		resultType = types.FromName("Boolean")
+		fails = types.Type{Kind: types.Never, Name: "Never"}
+	}
+	member := declaration.Member{
+		Name: control, Kind: declaration.Method,
+		Intrinsic: strings.Replace(association.Intrinsic, ".value.", "."+strings.TrimSuffix(control, "?")+".", 1),
+		Return:    resultType, Fails: fails, Provider: association.Provider,
+	}
+	c.external[node] = member
+	c.result.ExternalMembers[node] = member
+	return resultType, true
 }
 
 func (c *Checker) callFailureType(call *ast.CallExpression, sc *scope) types.Type {

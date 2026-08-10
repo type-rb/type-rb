@@ -190,6 +190,10 @@ type Method struct {
 	Fails          types.Type
 	Body           []Statement
 	Class          bool
+	// Property exposes an external member without call syntax. Loadable
+	// properties additionally provide load(), reload(), and loaded?() controls.
+	Property bool
+	Loadable bool
 }
 
 func (*Method) irStatement() {}
@@ -331,14 +335,17 @@ type IterationResult struct {
 
 type Iterate struct {
 	Base
-	Source    Expression
-	Operation string
-	Intrinsic string
-	SliceSize Expression
-	WithIndex bool
-	Bindings  []IterationBinding
-	Body      []Statement
-	Result    *IterationResult
+	Source        Expression
+	Operation     string
+	Intrinsic     string
+	SliceSize     Expression
+	WithIndex     bool
+	Bindings      []IterationBinding
+	Body          []Statement
+	Result        *IterationResult
+	Fails         types.Type
+	EffectSuccess types.Type
+	CaptureEffect bool
 }
 
 func (*Iterate) irStatement() {}
@@ -356,12 +363,17 @@ type StructuredBlockResult struct {
 
 type StructuredBlock struct {
 	Base
-	Call      *Call
-	Intrinsic string
-	Bindings  []IterationBinding
-	Body      []Statement
-	Value     Expression
-	Result    *StructuredBlockResult
+	Call             *Call
+	Intrinsic        string
+	Bindings         []IterationBinding
+	Body             []Statement
+	Value            Expression
+	Result           *StructuredBlockResult
+	Fails            types.Type
+	EffectSuccess    types.Type
+	PropagateSuccess types.Type
+	CaptureEffect    bool
+	UnhandledEffect  bool
 }
 
 func (*StructuredBlock) irStatement() {}

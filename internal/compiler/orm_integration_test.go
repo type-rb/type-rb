@@ -28,71 +28,72 @@ func TestPortableORMCompilesLiveSQLiteQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("TRB_TEST_DATABASE_URL", databasePath)
-	source := []byte(`import { DbResult, Model } from trb/orm
+	source := []byte(`import { DbError, Model } from trb/orm
+import { Result } from trb/std/result
 
 class Product < Model
 end
 
 type ProductList = Array<Product>
 
-def create_product(): DbResult<Product>
+def create_product(): Product fails DbError
 	return Product.create(name: "Created", active: true)
 end
 
-def save_product(): DbResult<Product>
+def save_product(): Product fails DbError
 	draft := Product.build(name: "Saved", active: true)
 	return draft.save()
 end
 
-def insert_products(): DbResult<Integer>
+def insert_products(): Integer fails DbError
 	return Product.insert_all([
 		Product.build(name: "First", active: true),
 		Product.build(active: false, name: "Second")
 	])
 end
 
-def insert_product_if_absent(): DbResult<Boolean>
+def insert_product_if_absent(): Boolean fails DbError
 	draft := Product.build(name: "Unique", active: true)
 	return Product.insert_if_absent(draft, unique_by: [:name])
 end
 
-def upsert_product(): DbResult<Product>
+def upsert_product(): Product fails DbError
 	draft := Product.build(name: "Unique", price: 12.5, active: true)
 	return draft.upsert(unique_by: [:name], update: [:price, :active])
 end
 
-def upsert_products(): DbResult<Integer>
+def upsert_products(): Integer fails DbError
 	return Product.upsert_all([
 		Product.build(name: "First", price: 1.0, active: true),
 		Product.build(active: false, name: "Second", price: 2.0)
 	], unique_by: [:name], update: [:price, :active])
 end
 
-def update_product(product: Product): DbResult<Product>
+def update_product(product: Product): Product fails DbError
 	return product.update(name: "Updated")
 end
 
-def save_product_changes(product: Product): DbResult<Product>
+def save_product_changes(product: Product): Product fails DbError
 	changes := product.with(name: "Saved update")
 	return changes.save()
 end
 
-def delete_product(product: Product): DbResult<Boolean>
+def delete_product(product: Product): Boolean fails DbError
 	return product.delete()
 end
 
-def load_products(): DbResult<ProductList>
+def load_products(): ProductList fails DbError
 	return Product.where(name: "Widget").all()
 end
 
 def main()
-	case load_products()
-	when DbResult::Ok(products)
+	case attempt load_products()
+	when Result::Ok(products)
 		products.each do |product|
 			puts(product.name)
 			puts(product.price)
 		end
-	when DbResult::Err(error)
+	when Result::Err(error)
 		puts(error.message)
 	end
 end
@@ -169,47 +170,35 @@ func TestPortableORMCompilesExplicitTransactionScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	source := []byte(`import { Database, DbResult, Model } from trb/orm
+	source := []byte(`import { Database, DbError, Model } from trb/orm
 
 class Product < Model
 end
 
-def create_product(): DbResult<Integer>
+def create_product(): Integer fails DbError
 	return Database.transaction() do |tx|
 		products := Product.using(tx)
-		case products.create(name: "Created")
-		when DbResult::Ok(product)
-			case products.where(id: product.id).lock().all()
-			when DbResult::Ok(locked_products)
-				puts(locked_products.size())
-				DbResult<Integer>::Ok(product.id)
-			when DbResult::Err(error)
-				DbResult<Integer>::Err(error)
-			end
-		when DbResult::Err(error)
-			DbResult<Integer>::Err(error)
-		end
+		product := products.create(name: "Created")
+		locked_products := products.where(id: product.id).lock().all()
+		puts(locked_products.size())
+		product.id
 	end
 end
 
-def create_nested_product(): DbResult<Integer>
+def create_nested_product(): Integer fails DbError
 	return Database.transaction() do |tx|
 		nested_result := tx.transaction() do |nested|
 			products := Product.using(nested)
-			case products.create(name: "Nested")
-			when DbResult::Ok(product)
-				DbResult<Integer>::Ok(product.id)
-			when DbResult::Err(error)
-				DbResult<Integer>::Err(error)
-			end
+			product := products.create(name: "Nested")
+			product.id
 		end
 		nested_result
 	end
 end
 
 def main()
-	puts(create_product())
-	puts(create_nested_product())
+	puts(attempt create_product())
+	puts(attempt create_nested_product())
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -232,7 +221,7 @@ end
 		}
 	}
 	for _, expected := range []string{
-		"func CreateProduct() orm.DbResult[int]", "orm.TrbOrmBeginTransaction()",
+		"func CreateProduct() __trb_result.Result[int, orm.DbError]", "orm.TrbOrmBeginTransaction()",
 		"TrbOrmProductUsing(tx)", "TrbOrmProductCreateScoped(products", "defer func()",
 		"TrbOrmProductLock(TrbOrmProductQueryWhere(products", "trbOrmExecutorForQuery(query.transaction, query.lock)",
 		"orm.TrbOrmBeginNestedTransaction(tx)", "TrbOrmProductUsing(nested)",
@@ -276,9 +265,20 @@ func assertORMTransactionScopeIR(t *testing.T, program *ir.Program) {
 	if !ok {
 		t.Fatalf("unexpected transaction block IR: %#v", method.Body)
 	}
-	result, ok := block.Value.(*ir.Case)
+	var product *ir.Variable
+	for _, statement := range block.Body {
+		candidate, ok := statement.(*ir.Variable)
+		if ok && candidate.Name == "product" {
+			product = candidate
+			break
+		}
+	}
+	if product == nil {
+		t.Fatalf("missing propagated product IR: %#v", block.Body)
+	}
+	result, ok := product.Value.(*ir.Case)
 	if !ok {
-		t.Fatalf("unexpected transaction result IR: %#v", block.Value)
+		t.Fatalf("unexpected propagated product value IR: %#v", product.Value)
 	}
 	call, ok := result.Value.(*ir.Call)
 	if !ok {
@@ -458,7 +458,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 	compile := func(call string) ([]*Artifact, error) {
 		return CompileProject([]SourceUnit{{
 			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "src/main", Package: "main",
-			Source: []byte("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n\t" + call + "\nend\n"),
+			Source: []byte("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n\tresult := attempt " + call + "\n\tputs(result)\nend\n"),
 		}}, Options{
 			Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
 			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
@@ -569,7 +569,7 @@ class Product < Model
 end
 def main()
 	ids := [1, 2, 3]
-	Product.where("price", ">=", 10).where(id: ids).not(id: 3...5).where(discount: nil).not(discount: nil).all()
+	puts(attempt Product.where("price", ">=", 10).where(id: ids).not(id: 3...5).where(discount: nil).not(discount: nil).all())
 end
 `
 	artifacts, err := compile(valid)
@@ -627,7 +627,7 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 		})
 	}
 	compile := func(body string) ([]*Artifact, error) {
-		return compileSource("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n")
+		return compileSource("import { DbError, Model } from trb/orm\nclass Product < Model\nend\ndef run_queries() fails DbError\n" + body + "\n\treturn\nend\ndef main()\n\tputs(attempt run_queries())\nend\n")
 	}
 	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).not(name: \"Deleted\").or(Product.where(name: \"Widget\")).order(price: :desc).limit(5).offset(1)\n\tputs(Product.not(name: \"Deleted\").to_sql())\n\tputs(Product.exists?(name: \"Widget\"))\n\tputs(Product.find_by(name: \"Widget\"))\n\tputs(Product.pluck(:name))\n\tputs(Product.pick(:price))\n\tputs(Product.sum(:price))\n\tputs(Product.average(:price))\n\tputs(Product.minimum(:name))\n\tputs(Product.maximum(:price))\n\tputs(Product.ids())\n\tputs(Product.where(\"price\", \">=\", 10).exists?())\n\tputs(Product.where(\"price\", \">=\", 10).find_by(name: \"Widget\"))\n\tputs(Product.where(\"price\", \">=\", 10).pluck(:name))\n\tputs(Product.where(\"price\", \">=\", 10).pick(:price))\n\tputs(Product.where(\"price\", \">=\", 10).sum(:price))\n\tputs(Product.where(\"price\", \">=\", 10).average(:price))\n\tputs(Product.where(\"price\", \">=\", 10).minimum(:name))\n\tputs(Product.where(\"price\", \">=\", 10).maximum(:price))\n\tputs(Product.where(\"price\", \">=\", 10).ids())\n\tputs(Product.where(name: \"Widget\").update_all(price: 20.0))\n\tputs(Product.where(name: \"Deleted\").delete_all())\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
 	if err != nil {
@@ -648,26 +648,26 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 			t.Fatalf("generated composed query is missing %q:\n%s", expected, output)
 		}
 	}
-	direct, err := compileSource(`import { DbResult, Model } from trb/orm
+	direct, err := compileSource(`import { DbError, Model } from trb/orm
 
 class Product < Model
 end
 
-def process_products(): DbResult<Integer>
+def process_products(): Integer fails DbError
 	return Product.find_each(batch_size: 2) do |product|
 		puts(product.name)
 	end
 end
 
 def main()
-	puts(process_products())
+	puts(attempt process_products())
 end
 `)
 	if err != nil {
 		t.Fatal(err)
 	}
 	directOutput := string(direct[0].Output)
-	for _, expected := range []string{"func ProcessProducts() orm.DbResult[int]", "return orm.NewDbResultErr[int]", "return orm.NewDbResultOk[int]"} {
+	for _, expected := range []string{"func ProcessProducts() __trb_result.Result[int, orm.DbError]", "return __trb_result.NewResultErr[int, orm.DbError]", "return orm.NewDbResultOk[int]"} {
 		if !strings.Contains(directOutput, expected) {
 			t.Fatalf("generated direct-return batch query is missing %q:\n%s", expected, directOutput)
 		}
@@ -714,7 +714,7 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	compile := func(body string) ([]*Artifact, error) {
-		source := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n"
+		source := "import { DbError, Model } from trb/orm\nclass Product < Model\nend\ndef run_batches() fails DbError\n" + body + "\n\treturn\nend\ndef main()\n\tputs(attempt run_batches())\nend\n"
 		return CompileProject([]SourceUnit{{
 			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main", Source: []byte(source),
 		}}, Options{
@@ -746,7 +746,7 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	for _, expected := range []string{
 		"TrbOrmFirstProduct(TrbOrmProductWhere", "func TrbOrmBatchProduct", "__trbBatchLoop", "break __trbBatchLoop", "TrbOrmBatchProduct",
 		"orm.DbResult[int]", "orm.NewDbResultOk[int]", "orm.NewDbResultErr[int]", "__trbBatchProcessed",
-		`"batch queries do not accept joins, order, limit, offset, or lock"`, "reassigned = orm.NewDbResultOk[int]",
+		`"batch queries do not accept joins, order, limit, offset, or lock"`, "reassigned = __trbBatchProcessed",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated batch query is missing %q:\n%s", expected, output)
@@ -795,7 +795,7 @@ func TestPortableORMAssociationsReturnTypedQueries(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	source := []byte(`import { DbResult, Model, belongs_to, has_many, has_one } from trb/orm
+	source := []byte(`import { DbError, Model, belongs_to, has_many, has_one } from trb/orm
 
 class Category < Model
 	has_many(Product)
@@ -806,63 +806,57 @@ class Product < Model
 	belongs_to(Category)
 end
 
-def main()
-	puts(Product.all())
-	puts(Product.first())
-	puts(Product.count())
-	puts(Product.limit(1).offset(0).all())
+def load_associations(): Integer fails DbError
+	all_products := Product.all()
+	first_product := Product.first()
+	product_count := Product.count()
+	limited_products := Product.limit(1).offset(0).all()
+	puts(first_product)
 	puts(Product.to_sql())
 	puts(Product.explain())
-	puts(Product.join(:category, Category.where(name: "Books")).where(name: "TypeRB").all())
-	puts(Product.where(name: "TypeRB").left_join(:category).all())
-	puts(Category.join(:products).distinct().all())
+	joined := Product.join(:category, Category.where(name: "Books")).where(name: "TypeRB").all()
+	left_joined := Product.where(name: "TypeRB").left_join(:category).all()
+	distinct_categories := Category.join(:products).distinct().all()
 	category_ids := Category.where(name: "Books").select(:id)
-	puts(Product.where(category_id: category_ids).all())
-	puts(Product.where("category_id", "!=", Category.select(:id)).all())
-	puts(Product.where_exists(:category, Category.where(name: "Books")).all())
-	puts(Product.where_not_exists(:category, Category.where(name: "Missing")).all())
-	puts(Product.group(:category_id).count())
-	puts(Product.where(name: "TypeRB").group(:category_id).having(:count, ">=", 1).count())
-	puts(Product.group(:category_id).sum(:id))
-	puts(Product.group(:category_id).having(:sum, :id, ">=", 1).sum(:id))
-	puts(Product.order(category_id: :desc).limit(1).group(:category_id).count())
-	case Product.preload(:category).all()
-	when DbResult::Ok(products)
-		products.each do |product|
-			puts(product.category())
-			puts(product.category_query().count())
-		end
-	when DbResult::Err(error)
-		puts(error.message)
+	subquery_products := Product.where(category_id: category_ids).all()
+	excluded_products := Product.where("category_id", "!=", Category.select(:id)).all()
+	existing_products := Product.where_exists(:category, Category.where(name: "Books")).all()
+	missing_products := Product.where_not_exists(:category, Category.where(name: "Missing")).all()
+	group_counts := Product.group(:category_id).count()
+	popular_groups := Product.where(name: "TypeRB").group(:category_id).having(:count, ">=", 1).count()
+	group_sums := Product.group(:category_id).sum(:id)
+	large_groups := Product.group(:category_id).having(:sum, :id, ">=", 1).sum(:id)
+	paged_groups := Product.order(category_id: :desc).limit(1).group(:category_id).count()
+	products := Product.preload(:category).all()
+	products.each do |product|
+		puts(product.category)
+		puts(product.category.loaded?())
+		puts(product.category.load())
+		puts(product.category.reload())
+		puts(product.category_query().count())
 	end
-	case Category.preload(:products).all()
-	when DbResult::Ok(categories)
-		categories.each do |category|
-			puts(category.products().size())
-			puts(category.products_query().count())
-		end
-	when DbResult::Err(error)
-		puts(error.message)
+	categories := Category.preload(:products).all()
+	categories.each do |category|
+		puts(category.products.size())
+		puts(category.products.loaded?())
+		puts(category.products_query().count())
 	end
-	case Category.preload(:product).all()
-	when DbResult::Ok(categories)
-		categories.each do |category|
-			puts(category.product())
-			puts(category.product_query().count())
-		end
-	when DbResult::Err(error)
-		puts(error.message)
+	single_categories := Category.preload(:product).all()
+	single_categories.each do |category|
+		puts(category.product)
+		puts(category.product_query().count())
 	end
-	case Category.preload(:products, Product.where(name: "TypeRB").preload(:category)).all()
-	when DbResult::Ok(categories)
-		categories.each do |category|
-			category.products().each do |product|
-				puts(product.category())
-			end
+	nested_categories := Category.preload(:products, Product.where(name: "TypeRB").preload(:category)).all()
+	nested_categories.each do |category|
+		category.products.each do |product|
+			puts(product.category)
 		end
-	when DbResult::Err(error)
-		puts(error.message)
 	end
+	return all_products.size() + product_count + limited_products.size() + joined.size() + left_joined.size() + distinct_categories.size() + subquery_products.size() + excluded_products.size() + existing_products.size() + missing_products.size() + group_counts.size() + popular_groups.size() + group_sums.size() + large_groups.size() + paged_groups.size() + products.size() + categories.size() + single_categories.size() + nested_categories.size()
+end
+
+def main()
+	puts(attempt load_associations())
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -902,6 +896,35 @@ end
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
 		t.Fatalf("generated invalid association Go: %v\n%s", err, output)
+	}
+	programs := make([]*ir.Program, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		programs = append(programs, artifact.IR)
+	}
+	context := languageservice.BuildContext(programs, "main")
+	complete := func(source string) []languageservice.CompletionItem {
+		return languageservice.Complete(languageservice.CompletionRequest{Source: source, Cursor: len(source), Mode: "go", Context: context})
+	}
+	findCompletion := func(items []languageservice.CompletionItem, name string) (languageservice.CompletionItem, bool) {
+		for _, item := range items {
+			if item.Label == name {
+				return item, true
+			}
+		}
+		return languageservice.CompletionItem{}, false
+	}
+	association, ok := findCompletion(complete("product := Product.find(1)\nproduct.cat"), "category")
+	if !ok || association.Kind != languageservice.CompletionField || association.InsertText != "category" || association.Detail != "category: Category? fails DbError" {
+		t.Fatalf("unexpected association property completion: %#v", association)
+	}
+	for _, name := range []string{"load", "loaded?", "reload", "name"} {
+		if _, ok := findCompletion(complete("product := Product.find(1)\nproduct.category."+name[:1]), name); !ok {
+			t.Fatalf("missing association member completion %s", name)
+		}
+	}
+	all, ok := findCompletion(complete("Product.al"), "all")
+	if !ok || all.Detail != "all(): Array<Product> fails DbError" {
+		t.Fatalf("unexpected ORM effect completion: %#v", all)
 	}
 	compileInvalidJoin := func(expression string) error {
 		invalidSource := []byte(`import { Model, belongs_to } from trb/orm
@@ -965,7 +988,7 @@ func TestPortableORMThroughAssociationCompilesToGo(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	source := []byte(`import { DbResult, Model, belongs_to, has_many } from trb/orm
+	source := []byte(`import { DbError, Model, belongs_to, has_many } from trb/orm
 
 class User < Model
 	has_many(Membership)
@@ -983,23 +1006,15 @@ class Membership < Model
 	belongs_to(Project)
 end
 
-def load_projects(): DbResult<Array<Project>>
-	case User.all()
-	when DbResult::Ok(users)
-		case User.join(:projects, Project.where(name: "TypeRB")).all()
-		when DbResult::Ok(joined_users)
-			puts(joined_users.size())
-			return users[0].projects_query().all()
-		when DbResult::Err(error)
-			return DbResult<Array<Project>>::Err(error)
-		end
-	when DbResult::Err(error)
-		return DbResult<Array<Project>>::Err(error)
-	end
+def load_projects(): Array<Project> fails DbError
+	users := User.all()
+	joined_users := User.join(:projects, Project.where(name: "TypeRB")).all()
+	puts(joined_users.size())
+	return users[0].projects
 end
 
 def main()
-	puts(load_projects())
+	puts(attempt load_projects())
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -1058,7 +1073,7 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		},
 		{
 			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
-			Source: []byte("import { DbResult } from trb/orm\nimport { Product } from models/product\n\ndef load_products(): DbResult<Array<Product>>\n\treturn Product.where(name: \"Widget\").all()\nend\n\ndef main()\n\tputs(load_products())\n\tputs(Product.pluck(:name))\n\tputs(Product.pick(:name))\n\tputs(Product.ids())\n\tputs(Product.insert_all([Product.build(name: \"First\"), Product.build(name: \"Second\")]))\nend\n"),
+			Source: []byte("import { DbError } from trb/orm\nimport { Product } from models/product\n\ndef load_products(): Array<Product> fails DbError\n\treturn Product.where(name: \"Widget\").all()\nend\n\ndef main()\n\tputs(attempt load_products())\n\tputs(attempt Product.pluck(:name))\n\tputs(attempt Product.pick(:name))\n\tputs(attempt Product.ids())\n\tputs(attempt Product.insert_all([Product.build(name: \"First\"), Product.build(name: \"Second\")]))\nend\n"),
 		},
 	}, Options{
 		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
@@ -1079,7 +1094,7 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		}
 	}
 	for _, expected := range []string{
-		"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "orm.DbResult[[]*models.Product]",
+		"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "__trb_result.Result[[]*models.Product, orm.DbError]",
 		"models.TrbOrmPluckProductName", "models.TrbOrmPickProductName", "models.TrbOrmPluckProductId",
 		"models.TrbOrmInsertAllProduct([]*models.ProductDraft{models.TrbOrmBuildProduct",
 	} {

@@ -464,13 +464,15 @@ func completeMembers(receiver, marker string, request CompletionRequest, replace
 		return nil
 	}
 
-	if symbol, ok := lookup(receiver); ok {
+	if symbol, ok := resolveCompletionExpression(receiver, lookup, request.Context); ok {
 		if symbol.Kind == CompletionModule || symbol.Kind == CompletionType && len(symbol.Members) > 0 {
 			return completionItems(symbol.Members, replacement)
 		}
+		members := append([]Symbol(nil), symbol.Members...)
 		if symbol.Type.Kind != "" {
-			return completionItems(receiverMembers(symbol.Type, request.Context), replacement)
+			members = append(members, receiverMembers(symbol.Type, request.Context)...)
 		}
+		return completionItems(members, replacement)
 	}
 	if typ, ok := literalReceiverType(receiver); ok {
 		return completionItems(receiverMembers(typ, request.Context), replacement)
@@ -536,7 +538,7 @@ func completionMatchingClose(tokens []token.Token, open int) int {
 }
 
 func completionMember(receiver Symbol, name string, context Context) (Symbol, bool) {
-	if receiver.Kind == CompletionModule || receiver.Kind == CompletionType && len(receiver.Members) > 0 {
+	if len(receiver.Members) > 0 {
 		for _, member := range receiver.Members {
 			if member.Name == name {
 				return member, true

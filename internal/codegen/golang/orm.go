@@ -735,20 +735,65 @@ func (g *generator) ormPreloadExpression(call *ir.Call, model ormintegration.Mod
 	return g.ormModelQualifier(model) + goORMTypedPreload(model, association) + "(" + query + ", " + targetQuery + ")"
 }
 
-func (g *generator) ormLoadedAssociation(call *ir.Call) string {
+func (g *generator) ormAssociationDefinition(call *ir.Call) (*ir.Member, ormintegration.Model, ormintegration.Association, ormintegration.Model, bool) {
 	member, ok := call.Callee.(*ir.Member)
 	if !ok {
-		return "nil"
+		return nil, ormintegration.Model{}, ormintegration.Association{}, ormintegration.Model{}, false
 	}
 	source, ok := g.orm.Model(member.Receiver.ExprType().Name)
 	if !ok {
+		return nil, ormintegration.Model{}, ormintegration.Association{}, ormintegration.Model{}, false
+	}
+	association, ok := source.Association(member.Name)
+	if !ok {
+		return nil, ormintegration.Model{}, ormintegration.Association{}, ormintegration.Model{}, false
+	}
+	target, ok := g.orm.Model(association.TargetModel)
+	if !ok {
+		return nil, ormintegration.Model{}, ormintegration.Association{}, ormintegration.Model{}, false
+	}
+	return member, source, association, target, true
+}
+
+func (g *generator) ormLoadAssociation(call *ir.Call, reload bool) string {
+	member, source, association, target, ok := g.ormAssociationDefinition(call)
+	if !ok || len(call.ExprType().Args) == 0 {
 		return "nil"
 	}
-	if _, ok := source.Association(member.Name); !ok {
-		return "nil"
-	}
+	valueType := call.ExprType().Args[0]
 	resultType := g.goType(call.ExprType())
-	return "func() " + resultType + " { value, loaded := " + g.expr(member.Receiver) + "." + goORMAssociationGetter(member.Name) + "(); if !loaded { panic(" + strconv.Quote("ORM association "+source.Name+"."+member.Name+" was not preloaded") + ") }; if value == nil { var zero " + resultType + "; return zero }; return value.(" + resultType + ") }()"
+	receiver := g.expr(member.Receiver)
+	getter := receiver + "." + goORMAssociationGetter(association.Name) + "()"
+	setter := receiver + "." + goORMAssociationSetter(association.Name)
+	query := g.ormAssociationQuery(call)
+	qualifier := g.ormModelQualifier(target)
+	load := qualifier + goORMLoader(target) + "(" + query + ")"
+	loadedValue := "loaded.OkValue"
+	if association.Kind == ormintegration.BelongsTo {
+		load = qualifier + goORMFirst(target) + "(" + query + ")"
+	}
+
+	var result strings.Builder
+	result.WriteString("func() " + resultType + " { ")
+	if !reload {
+		result.WriteString("if cached, ok := " + getter + "; ok { value, valid := cached.(" + g.goType(valueType) + "); if !valid { return " + g.ormResultErr(valueType, g.ormErrorValue("InvalidData", "cached ORM association "+source.Name+"."+association.Name+" has an invalid type")) + " }; return " + g.ormResultOK(valueType, "value") + " }; ")
+	}
+	result.WriteString("loaded := " + load + "; if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(valueType, "loaded.ErrError") + " }; ")
+	if association.Kind == ormintegration.HasOne {
+		result.WriteString("if len(loaded.OkValue) > 1 { return " + g.ormResultErr(valueType, g.ormErrorValue("InvalidData", "database has_one association returned multiple rows")) + " }; var value " + g.goType(valueType) + "; if len(loaded.OkValue) == 1 { value = loaded.OkValue[0] }; ")
+	} else {
+		result.WriteString("value := " + loadedValue + "; ")
+	}
+	result.WriteString(setter + "(value); return " + g.ormResultOK(valueType, "value") + " }()")
+	return result.String()
+}
+
+func (g *generator) ormAssociationLoaded(call *ir.Call) string {
+	member, _, association, _, ok := g.ormAssociationDefinition(call)
+	if !ok {
+		return "false"
+	}
+	return "func() bool { _, loaded := " + g.expr(member.Receiver) + "." + goORMAssociationGetter(association.Name) + "(); return loaded }()"
 }
 
 func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
@@ -793,22 +838,44 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	}
 
 	resultTarget := ""
-	returnResult := iteration.Result != nil && iteration.Result.Return
+	sourceReturn := iteration.Result != nil && iteration.Result.Return
+	fallible := iteration.Fails.Kind != "" && iteration.Fails.Kind != types.Never
+	propagateEffect := fallible
+	captureEffect := iteration.CaptureEffect
+	returnResult := sourceReturn || captureEffect
+	needsFailureFlag := !propagateEffect && !returnResult
 	breakTarget := ""
-	if !returnResult || ormBatchBodyBreaks(iteration.Body) {
+	if needsFailureFlag || ormBatchBodyBreaks(iteration.Body) {
 		breakTarget = label
 	}
-	if iteration.Result != nil && iteration.Result.Variable != nil {
+	if captureEffect && iteration.Result != nil {
+		resultType := g.goType(iteration.Result.Type)
+		switch {
+		case iteration.Result.Variable != nil:
+			resultTarget = goBindingIdentifier(iteration.Result.Variable.Name)
+			g.line(resultTarget + " := func() " + resultType + " {")
+		case iteration.Result.Target != nil:
+			resultTarget = g.assignmentTarget(iteration.Result.Target)
+			g.line(resultTarget + " = func() " + resultType + " {")
+		case iteration.Result.Return:
+			g.line("return func() " + resultType + " {")
+		}
+		g.indent++
+	} else if iteration.Result != nil && iteration.Result.Variable != nil {
 		resultTarget = goBindingIdentifier(iteration.Result.Variable.Name)
 		g.line("var " + resultTarget + " " + g.goType(iteration.Result.Type))
 	} else if iteration.Result != nil && iteration.Result.Target != nil {
 		resultTarget = g.assignmentTarget(iteration.Result.Target)
 	}
 	integerType := types.FromName("Integer")
-	success := func(value string) string { return g.ormResultOK(integerType, value) }
-	failure := func(value string) string { return g.ormResultErr(integerType, value) }
-	assignResult := func(value string) {
-		if returnResult {
+	resultValueType := integerType
+	if propagateEffect && iteration.EffectSuccess.Kind != "" {
+		resultValueType = iteration.EffectSuccess
+	}
+	success := func(value string) string { return g.ormResultOK(resultValueType, value) }
+	failure := func(value string) string { return g.ormResultErr(resultValueType, value) }
+	assignFailure := func(value string) {
+		if propagateEffect || returnResult {
 			g.line("return " + value)
 		} else if resultTarget != "" {
 			g.line(resultTarget + " = " + value)
@@ -820,13 +887,13 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	g.line(query + " := " + querySource)
 	g.line(size + " := " + batchSize)
 	g.line(processed + " := 0")
-	if !returnResult {
+	if needsFailureFlag {
 		g.line(failed + " := false")
 	}
 	g.line("if " + size + " <= 0 {")
 	g.indent++
-	assignResult(failure(g.ormErrorValue("InvalidData", "batch size must be greater than zero")))
-	if !returnResult {
+	assignFailure(failure(g.ormErrorValue("InvalidData", "batch size must be greater than zero")))
+	if needsFailureFlag {
 		g.line(failed + " = true")
 	}
 	g.indent--
@@ -843,8 +910,8 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	g.line(loaded + " := " + qualifier + goORMBatchLoader(model) + "(" + query + ", " + after + ", " + size + ")")
 	g.line("if " + loaded + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag {")
 	g.indent++
-	assignResult(failure(loaded + ".ErrError"))
-	if !returnResult {
+	assignFailure(failure(loaded + ".ErrError"))
+	if needsFailureFlag {
 		g.line(failed + " = true")
 		g.line("break " + label)
 	}
@@ -890,10 +957,18 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	if returnResult {
 		g.line("return " + success(processed))
 	} else if resultTarget != "" {
-		g.line("if !" + failed + " { " + resultTarget + " = " + success(processed) + " }")
+		if propagateEffect {
+			g.line(resultTarget + " = " + processed)
+		} else {
+			g.line("if !" + failed + " { " + resultTarget + " = " + success(processed) + " }")
+		}
 	}
 	g.indent--
 	g.line("}")
+	if captureEffect && iteration.Result != nil {
+		g.indent--
+		g.line("}()")
+	}
 }
 
 func ormBatchBodyBreaks(statements []ir.Statement) bool {
@@ -1148,39 +1223,52 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 		return
 	}
 	g.temporary++
-	suffix := strconv.Itoa(g.temporary)
-	transaction := "__trbTransaction" + suffix
-	transactionError := "__trbTransactionError" + suffix
-	committed := "__trbTransactionCommitted" + suffix
-	result := "__trbTransactionResult" + suffix
-	resultType := block.Result.Type
-	valueType := resultType
-	if resultType.Name == "DbResult" && len(resultType.Args) == 1 {
-		valueType = resultType.Args[0]
+	id := strconv.Itoa(g.temporary)
+	transaction := "__trbTransaction" + id
+	transactionError := "__trbTransactionError" + id
+	committed := "__trbTransactionCommitted" + id
+	result := "__trbTransactionResult" + id
+	raw := "__trbTransactionEffect" + id
+	valueType := block.EffectSuccess
+	if valueType.Kind == types.Void {
+		valueType = types.FromName("Unit")
+	}
+	rawType := block.Call.ExprType()
+	fallible := block.Fails.Kind != "" && block.Fails.Kind != types.Never
+	if !fallible {
+		rawType = block.Result.Type
 	}
 	target := ""
-	prefix := ""
-	suffixExpression := ""
 	if block.Result.Variable != nil {
 		target = goBindingIdentifier(block.Result.Variable.Name)
-		prefix = target + " := "
 	} else if block.Result.Target != nil {
 		target = g.assignmentTarget(block.Result.Target)
-		prefix = target + " = "
-	} else if block.Result.Return {
-		prefix = "return "
 	}
 	if target == "" && !block.Result.Return {
 		return
 	}
-	g.line(prefix + "func() " + g.goType(resultType) + " {")
+
+	prefix := ""
+	sourceResult := fallible && !block.CaptureEffect
+	if sourceResult && !block.Result.Return {
+		prefix = raw + " := "
+	} else if block.Result.Variable != nil {
+		prefix = target + " := "
+	} else if block.Result.Target != nil {
+		prefix = target + " = "
+	} else if block.Result.Return {
+		prefix = "return "
+	}
+	g.line(prefix + "func() " + g.goType(rawType) + " {")
 	g.indent++
 	begin := g.ormLifecycleAlias() + ".TrbOrmBeginTransaction()"
 	if member, ok := block.Call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Name == "Transaction" {
 		begin = g.ormLifecycleAlias() + ".TrbOrmBeginNestedTransaction(" + g.expr(member.Receiver) + ")"
 	}
 	g.line(transaction + ", " + transactionError + " := " + begin)
-	g.line("if " + transactionError + " != nil { return " + g.ormResultErr(valueType, "*"+transactionError) + " }")
+	if fallible {
+		g.line("if " + transactionError + " != nil { return " + g.ormResultErr(valueType, "*"+transactionError) + " }")
+	}
 	g.line(committed + " := false")
 	g.line("defer func() { if !" + committed + " { _ = " + transaction + ".Rollback() } }()")
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
@@ -1190,12 +1278,33 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	}
 	g.statements(block.Body)
 	g.line(result + " := " + g.expr(block.Value))
-	g.line("if " + result + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + result + " }")
-	g.line("if " + transactionError + " := " + transaction + ".Commit(); " + transactionError + " != nil { return " + g.ormResultErr(valueType, "*"+transactionError) + " }")
+	if fallible {
+		g.line("if " + transactionError + " := " + transaction + ".Commit(); " + transactionError + " != nil { return " + g.ormResultErr(valueType, "*"+transactionError) + " }")
+	} else {
+		g.line("if " + transactionError + " := " + transaction + ".Commit(); " + transactionError + " != nil { panic(" + transactionError + ".Message) }")
+	}
 	g.line(committed + " = true")
-	g.line("return " + result)
+	if fallible {
+		g.line("return " + g.ormResultOK(valueType, result))
+	} else {
+		g.line("return " + result)
+	}
 	g.indent--
-	g.line("}()" + suffixExpression)
+	g.line("}()")
+
+	if !sourceResult || block.Result.Return {
+		return
+	}
+	outerSuccess := block.PropagateSuccess
+	if outerSuccess.Kind == "" {
+		outerSuccess = valueType
+	}
+	g.line("if " + raw + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(outerSuccess, raw+".ErrError") + " }")
+	if block.Result.Variable != nil {
+		g.line(target + " := " + raw + ".OkValue")
+	} else {
+		g.line(target + " = " + raw + ".OkValue")
+	}
 }
 
 func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
@@ -1583,6 +1692,13 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.line("func (self *" + goIdentifier(model.Name, true) + ") " + goORMAssociationGetter(association.Name) + "() (any, bool) {")
 		g.indent++
 		g.line("return self." + goORMAssociationValueField(association.Name) + ", self." + goORMAssociationLoadedField(association.Name))
+		g.indent--
+		g.line("}")
+		g.b.WriteByte('\n')
+		g.line("func (self *" + goIdentifier(model.Name, true) + ") " + goORMAssociationSetter(association.Name) + "(value any) {")
+		g.indent++
+		g.line("self." + goORMAssociationValueField(association.Name) + " = value")
+		g.line("self." + goORMAssociationLoadedField(association.Name) + " = true")
 		g.indent--
 		g.line("}")
 		g.b.WriteByte('\n')
@@ -2264,6 +2380,10 @@ func goORMPredicateContainsExists(model ormintegration.Model) string {
 
 func goORMAssociationGetter(name string) string {
 	return "TrbOrmAssociation" + goIdentifier(name, true)
+}
+
+func goORMAssociationSetter(name string) string {
+	return "TrbOrmSetAssociation" + goIdentifier(name, true)
 }
 
 func goORMAssociationValueField(name string) string {

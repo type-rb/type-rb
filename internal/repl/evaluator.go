@@ -505,10 +505,7 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 		}
 		return e.expression(node.Value, module, blockScope)
 	}
-	resultType := types.FromName("Void")
-	if node.Result != nil {
-		resultType = node.Result.Type
-	}
+	resultType := node.Call.ExprType()
 	value, handled, err := e.runtimeBlock(runtimeBlockInvocation{
 		Name: reference.Intrinsic, Arguments: arguments, Type: resultType,
 		Block: node, Evaluate: evaluate,
@@ -521,6 +518,34 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 	}
 	if node.Result == nil {
 		return flowResult{}, nil
+	}
+	fallible := node.Fails.Kind != "" && node.Fails.Kind != types.Never
+	if fallible && !node.CaptureEffect {
+		if node.Result.Return {
+			return flowResult{Result: Result{Value: value}, Returned: true}, nil
+		}
+		variant, ok := value.Data.(*enumValue)
+		if !ok {
+			return flowResult{}, errors.New("fallible structured block did not return Result")
+		}
+		if variant.Name == "Err" {
+			if node.UnhandledEffect {
+				errorValue, exists := variant.Payload["error"]
+				if !exists {
+					return flowResult{}, errors.New("fallible structured block returned Err without an error")
+				}
+				return flowResult{}, &unhandledEffect{typ: node.Fails, value: errorValue}
+			}
+			return flowResult{Result: Result{Value: value}, Returned: true}, nil
+		}
+		if variant.Name != "Ok" {
+			return flowResult{}, fmt.Errorf("fallible structured block returned unknown Result variant %s", variant.Name)
+		}
+		var exists bool
+		value, exists = variant.Payload["value"]
+		if !exists {
+			return flowResult{}, errors.New("fallible structured block returned Ok without a value")
+		}
 	}
 	value.Type = node.Result.Type
 	if node.Result.Variable != nil {

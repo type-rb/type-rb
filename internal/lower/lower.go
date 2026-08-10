@@ -5,6 +5,7 @@ package lower
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
@@ -337,7 +338,18 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 }
 
 func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, bool) {
-	call, ok := expression.(*ast.CallExpression)
+	captureEffect := false
+	callExpression := expression
+	var captureBoundary *effectBoundary
+	if attempt, ok := expression.(*ast.AttemptExpression); ok {
+		callExpression = attempt.Value
+		captureEffect = true
+		if semantic, exists := l.checked.Attempts[attempt]; exists {
+			boundary := effectBoundary{success: semantic.SuccessType, fails: semantic.ErrorType, result: semantic.ResultType}
+			captureBoundary = &boundary
+		}
+	}
+	call, ok := callExpression.(*ast.CallExpression)
 	if !ok || call.Block == nil {
 		return nil, false
 	}
@@ -347,10 +359,17 @@ func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, b
 		return nil, false
 	}
 	result := &ir.Iterate{
-		Base:      ir.Base{Span: call.Span()},
-		Source:    l.expression(callee.Receiver),
-		Operation: callee.Name,
-		Intrinsic: member.Intrinsic,
+		Base:          ir.Base{Span: expression.Span()},
+		Source:        l.expression(callee.Receiver),
+		Operation:     callee.Name,
+		Intrinsic:     member.Intrinsic,
+		Fails:         l.checked.ExpressionEffects[call],
+		CaptureEffect: captureEffect,
+	}
+	if captureBoundary != nil {
+		result.EffectSuccess = captureBoundary.success
+	} else if boundary, exists := l.currentEffectBoundary(); exists {
+		result.EffectSuccess = boundary.success
 	}
 	for _, argument := range call.Arguments {
 		if argument.Name == "batch_size" || argument.Name == "" {
@@ -365,11 +384,22 @@ func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, b
 		}
 		result.Bindings = append(result.Bindings, ir.IterationBinding{Name: name, Type: typ})
 	}
+	if captureBoundary != nil {
+		l.effectBoundaries = append(l.effectBoundaries, *captureBoundary)
+	}
 	result.Body = l.statements(call.Block.Body)
+	if captureBoundary != nil {
+		l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
+	}
 	return result, true
 }
 
 func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBlock, bool) {
+	captureEffect := false
+	if attempt, ok := expression.(*ast.AttemptExpression); ok {
+		expression = attempt.Value
+		captureEffect = true
+	}
 	call, ok := expression.(*ast.CallExpression)
 	if !ok || call.Block == nil {
 		return nil, false
@@ -379,9 +409,16 @@ func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBloc
 	if !external || !checked || member.Block == nil || !member.Block.Structured || member.Block.Return.Name == "" {
 		return nil, false
 	}
+	fails := l.checked.ExpressionEffects[call]
+	success := l.checked.Expressions[call]
+	callType := success
+	if fails.Kind != "" && fails.Kind != types.Never {
+		callType = resultType(effectSuccessType(success), fails)
+	}
 	loweredCall := &ir.Call{
-		ExprBase: ir.NewExprBase(call.Span(), l.checked.Expressions[call]),
+		ExprBase: ir.NewExprBase(call.Span(), callType),
 		Callee:   l.expression(call.Callee),
+		Fails:    fails,
 	}
 	if codec, ok := l.checked.CodecApplications[call]; ok {
 		loweredCall.Codec = lowerCodecSchema(codec.Schema)
@@ -396,13 +433,31 @@ func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBloc
 		return nil, false
 	}
 	result := &ir.StructuredBlock{
-		Base:      ir.Base{Span: call.Span()},
-		Call:      loweredCall,
-		Intrinsic: member.Intrinsic,
-		Body:      l.statements(call.Block.Body[:resultIndex]),
-		Value:     l.expression(semantic.Result),
+		Base:            ir.Base{Span: call.Span()},
+		Call:            loweredCall,
+		Intrinsic:       member.Intrinsic,
+		Fails:           fails,
+		EffectSuccess:   success,
+		CaptureEffect:   captureEffect,
+		UnhandledEffect: l.checked.UnhandledEffects[call],
 	}
-	result.Body = append(result.Body, l.statements(call.Block.Body[resultIndex+1:])...)
+	if fails.Kind != "" && fails.Kind != types.Never {
+		if !captureEffect {
+			if outer, ok := l.currentEffectBoundary(); ok {
+				result.PropagateSuccess = outer.success
+			}
+		}
+		boundary := effectBoundary{success: effectSuccessType(success), fails: fails, result: callType}
+		l.effectBoundaries = append(l.effectBoundaries, boundary)
+		result.Body = l.statements(call.Block.Body[:resultIndex])
+		result.Value = l.expression(semantic.Result)
+		result.Body = append(result.Body, l.statements(call.Block.Body[resultIndex+1:])...)
+		l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
+	} else {
+		result.Body = l.statements(call.Block.Body[:resultIndex])
+		result.Value = l.expression(semantic.Result)
+		result.Body = append(result.Body, l.statements(call.Block.Body[resultIndex+1:])...)
+	}
 	for index, name := range call.Block.Parameters {
 		typ := types.Type{Kind: types.Any, Name: "Any"}
 		if index < len(semantic.Parameters) {
@@ -572,7 +627,32 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		return result
 	case *ast.MemberExpression:
-		return &ir.Member{ExprBase: base, Receiver: l.expression(n.Receiver), Name: n.Name, Safe: n.Safe, Namespace: n.Namespace, Reference: l.reference(n)}
+		receiver := n.Receiver
+		name := n.Name
+		reference := l.reference(n)
+		if reference != nil && strings.HasPrefix(reference.Intrinsic, "trb.orm.association.") && !strings.Contains(reference.Intrinsic, ".value.") {
+			if association, ok := n.Receiver.(*ast.MemberExpression); ok {
+				receiver = association.Receiver
+				name = association.Name
+			}
+		}
+		member := &ir.Member{ExprBase: base, Receiver: l.expression(receiver), Name: name, Safe: n.Safe, Namespace: n.Namespace, Reference: reference}
+		fails := l.checked.ExpressionEffects[n]
+		if fails.Kind != "" && fails.Kind != types.Never {
+			raw := &ir.Call{
+				ExprBase: ir.NewExprBase(n.Span(), resultType(effectSuccessType(typ), fails)),
+				Callee:   member,
+				Fails:    fails,
+			}
+			if boundary, ok := l.currentEffectBoundary(); ok {
+				return l.effectPropagation(n.Span(), raw, typ, fails, boundary)
+			}
+			if l.checked.UnhandledEffects[n] {
+				return &ir.UnhandledEffect{ExprBase: base, Value: raw, Fails: fails}
+			}
+			return raw
+		}
+		return member
 	case *ast.GenericExpression:
 		result := &ir.TypeApply{ExprBase: base, Receiver: l.expression(n.Receiver)}
 		for _, argument := range n.Arguments {

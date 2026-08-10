@@ -245,7 +245,8 @@ func (m *Manifest) Augment(program *ir.Program) {
 					)
 					class.Body = append(class.Body, &ir.Method{
 						Name: association.Name, External: true,
-						ReturnType: associationValueType(association),
+						ReturnType: associationValueType(association), SuccessType: associationValueType(association),
+						Fails: types.FromName("DbError"), Property: true, Loadable: true,
 					})
 				}
 				if !existing[association.Name+"_query"] {
@@ -426,6 +427,23 @@ func (m *Manifest) Augment(program *ir.Program) {
 		}
 		for _, column := range model.Columns {
 			program.Statements = append(program.Statements, &ir.Class{Name: model.GroupType(column), External: true, Body: groupedIRMethods(model, column)})
+		}
+	}
+	applyPortableIREffects(program.Statements)
+}
+
+func applyPortableIREffects(statements []ir.Statement) {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Method:
+			if success, ok := dbResultSuccess(node.ReturnType); ok {
+				node.SuccessType = success
+				node.Fails = types.FromName("DbError")
+			}
+		case *ir.Class:
+			applyPortableIREffects(node.Body)
+		case *ir.Module:
+			applyPortableIREffects(node.Body)
 		}
 	}
 }

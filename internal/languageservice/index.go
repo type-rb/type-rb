@@ -150,7 +150,7 @@ func collectSymbols(statements []ir.Statement, owner string, typeMembers map[str
 			if privateName(node.Name) {
 				continue
 			}
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionFunction, Detail: methodSignature(node), Type: methodValueType(node), Call: methodCallInfo(node)})
+			result = append(result, methodSymbol(node, CompletionFunction))
 		case *ir.Class:
 			qualified := qualify(owner, node.Name)
 			instance, namespace := classMembers(node.Body, qualified, typeMembers)
@@ -216,7 +216,7 @@ func classMembers(statements []ir.Statement, owner string, typeMembers map[strin
 			if privateName(node.Name) {
 				continue
 			}
-			symbol := Symbol{Name: node.Name, Kind: CompletionMethod, Detail: methodSignature(node), Type: methodValueType(node), Call: methodCallInfo(node)}
+			symbol := methodSymbol(node, CompletionMethod)
 			if node.Class {
 				namespace = append(namespace, symbol)
 			} else {
@@ -230,6 +230,32 @@ func classMembers(statements []ir.Statement, owner string, typeMembers map[strin
 	sortSymbols(instance)
 	sortSymbols(namespace)
 	return instance, namespace
+}
+
+func methodSymbol(method *ir.Method, kind CompletionKind) Symbol {
+	symbol := Symbol{Name: method.Name, Kind: kind, Detail: methodSignature(method), Type: methodValueType(method), Call: methodCallInfo(method)}
+	if method.Property {
+		symbol.Kind = CompletionField
+		symbol.Call = nil
+	}
+	if method.Loadable {
+		symbol.Members = loadablePropertyMembers(symbol.Type, method.Fails)
+	}
+	return symbol
+}
+
+func loadablePropertyMembers(valueType, failureType types.Type) []Symbol {
+	load := func(name string) Symbol {
+		return Symbol{
+			Name: name, Kind: CompletionMethod, Detail: name + "(): " + valueType.String() + " fails " + failureType.String(),
+			Type: valueType, Call: &CallInfo{},
+		}
+	}
+	return []Symbol{
+		load("load"),
+		{Name: "loaded?", Kind: CompletionMethod, Detail: "loaded?(): Boolean", Type: types.FromName("Boolean"), Call: &CallInfo{}},
+		load("reload"),
+	}
 }
 
 func recordMembers(statements []ir.Statement, owner string) ([]Symbol, []Symbol) {
@@ -281,6 +307,9 @@ func methodSignature(method *ir.Method) string {
 		parameters = append(parameters, text)
 	}
 	result := method.Name + "(" + strings.Join(parameters, ", ") + ")"
+	if method.Property {
+		result = method.Name
+	}
 	valueType := methodValueType(method)
 	if valueType.Kind != types.Void {
 		result += ": " + valueType.String()
