@@ -548,6 +548,22 @@ func (g *generator) ormQueryUpdateAll(call *ir.Call, arguments []string) string 
 	return g.ormModelQualifier(model) + goORMUpdateAll(model) + "(" + query + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
 }
 
+func (g *generator) ormClassUpdateAll(call *ir.Call) string {
+	model, query, ok := g.ormInitialQuery(call)
+	if !ok {
+		return "nil"
+	}
+	columns := make([]string, 0, len(call.Arguments))
+	values := make([]string, 0, len(call.Arguments))
+	for _, argument := range call.Arguments {
+		if argument.Name != "" {
+			columns = append(columns, strconv.Quote(argument.Name))
+			values = append(values, g.expr(argument.Value))
+		}
+	}
+	return g.ormModelQualifier(model) + goORMUpdateAll(model) + "(" + query + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
 func (g *generator) ormOrder(call *ir.Call, arguments []string) string {
 	model, query, ok := g.ormQueryModel(call, arguments)
 	if !ok {

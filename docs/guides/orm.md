@@ -126,9 +126,9 @@ def publish_all(): Integer fails DbError
 end
 ```
 
-`delete()` and `delete_all()` issue direct deletes. `destroy()` and
-`destroy_all()` run the configured `dependent: destroy`, `delete`, `nullify`,
-or `restrict` lifecycle.
+Model classes and filtered relations both support `update_all()`, `delete_all()`,
+and `destroy_all()`. Direct deletes skip lifecycle behavior; destroy operations
+run the configured `dependent: destroy`, `delete`, `nullify`, or `restrict` rule.
 
 ## REPL
 
