@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -16,7 +16,8 @@ executable compilation. Target-specific behavior remains behind explicit
 The implemented language includes functions and classes, modules and
 interfaces, records, payload enums, initial generics, normalized unions,
 immutable and mutable bindings, typed collections and iteration, exhaustive
-pattern matching, and value-producing `if` and `case` expressions. See the
+pattern matching, value-producing `if` and `case` expressions, and explicit
+fallible effects with `fails` and `attempt`. See the
 [language guide](language.md) and [specification](specification.md) for the
 current semantics.
 
@@ -110,6 +111,15 @@ returns a copy with a different status.
 Before a response leaves the portable dispatcher, every backend rejects invalid
 status codes, header names, and CR/LF-bearing header values through the same
 JSON 500 boundary.
+
+The experimental official `trb/orm` package currently targets generated Go.
+It reads SQLite, PostgreSQL, or MySQL schema metadata directly and exposes typed
+models, immutable queries, associations and preload, aggregates, transactions,
+batching, writes, conflict handling, and destroy lifecycles. Database terminals
+and lazy association access use `fails DbError`; `attempt` captures them as
+ordinary `Result` values. The REPL can execute the same read and write API
+against SQLite. Ruby and TypeScript backend adapters, schema caching, and
+production compatibility remain future work.
 
 The compiler pipeline is:
 
