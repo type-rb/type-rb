@@ -3673,12 +3673,7 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 	}
 
 	blockReturn := instantiateDeclarationType(member.Block.Return, bindings)
-	existingPropagations := map[*ast.PropagateExpression]bool{}
-	for expression := range c.result.Propagations {
-		existingPropagations[expression] = true
-	}
 	c.returns = append(c.returns, blockReturn)
-	c.returnSources = append(c.returnSources, member.Block.Return)
 	previousLoopDepth := c.loopDepth
 	c.loopDepth = 0
 	c.checkStatementSequence(call.Block.Body[:resultIndex], blockScope)
@@ -3687,7 +3682,6 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 	c.checkUnusedBindings(blockScope)
 	c.loopDepth = previousLoopDepth
 	c.returns = c.returns[:len(c.returns)-1]
-	c.returnSources = c.returnSources[:len(c.returnSources)-1]
 
 	typeParameters := map[string]bool{}
 	for _, name := range member.TypeParameters {
@@ -3700,18 +3694,6 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		bindings,
 	)
 	blockReturn = instantiateDeclarationType(member.Block.Return, bindings)
-	for expression, propagation := range c.result.Propagations {
-		if existingPropagations[expression] {
-			continue
-		}
-		propagation.Success = instantiateEnumVariant(propagation.Success, bindings)
-		propagation.Failure = instantiateEnumVariant(propagation.Failure, bindings)
-		propagation.ReturnFailure = instantiateEnumVariant(propagation.ReturnFailure, bindings)
-		propagation.SuccessType = instantiateDeclarationType(propagation.SuccessType, bindings)
-		propagation.ErrorType = instantiateDeclarationType(propagation.ErrorType, bindings)
-		propagation.ReturnType = instantiateDeclarationType(propagation.ReturnType, bindings)
-		c.result.Propagations[expression] = propagation
-	}
 	if !c.assignable(resultExpression, blockReturn, actual) {
 		c.error(resultExpression.Span(), fmt.Sprintf("%s block result has type %s, expected %s", member.Name, actual, blockReturn))
 	}
