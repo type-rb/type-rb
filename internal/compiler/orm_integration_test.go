@@ -443,22 +443,25 @@ class Product < Model
 	belongs_to(Category)
 end
 
-def load_associations(): DbResult<Integer>
-	products := Product.where().preload(:category).all()?
-	products.each do |product|
-		puts(product.category())
-		puts(product.category_query().count()?)
-	end
-	categories := Category.where().preload(:products).all()?
-	categories.each do |category|
-		puts(category.products().size())
-		puts(category.products_query().count()?)
-	end
-	return DbResult<Integer>::Ok(products.size() + categories.size())
-end
-
 def main()
-	puts(load_associations())
+	case Product.where().preload(:category).all()
+	when DbResult::Ok(products)
+		products.each do |product|
+			puts(product.category())
+			puts(product.category_query().count())
+		end
+	when DbResult::Err(error)
+		puts(error.message)
+	end
+	case Category.where().preload(:products).all()
+	when DbResult::Ok(categories)
+		categories.each do |category|
+			puts(category.products().size())
+			puts(category.products_query().count())
+		end
+	when DbResult::Err(error)
+		puts(error.message)
+	end
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{

@@ -77,23 +77,6 @@ func TestFormatTransparentGenericTypeAlias(t *testing.T) {
 	}
 }
 
-func TestFormatPostfixResultPropagation(t *testing.T) {
-	source := []byte("def value(result:Result<Integer,String>):Result<Integer,String>\nitem := (result) ?\nreturn Result<Integer,String>::Ok(item)\nend\n")
-	want := "def value(result: Result<Integer, String>): Result<Integer, String>\n\titem := (result)?\n\treturn Result<Integer, String>::Ok(item)\nend\n"
-
-	formatted, diagnostics := Format(source)
-	if len(diagnostics) != 0 {
-		t.Fatalf("unexpected diagnostics: %v", diagnostics)
-	}
-	if string(formatted) != want {
-		t.Fatalf("unexpected propagation formatting\nwant:\n%s\ngot:\n%s", want, formatted)
-	}
-	formattedAgain, diagnostics := Format(formatted)
-	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
-		t.Fatalf("propagation formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
-	}
-}
-
 func TestFormatPreservesRailsRegexAndPercentLiterals(t *testing.T) {
 	source := []byte("class User<ApplicationRecord\nvalidates :code,format:{with:/\\A[a-z#]+\\z/i}\nTAGS=%(alpha beta)\nend\n")
 	formatted, diagnostics := Format(source)

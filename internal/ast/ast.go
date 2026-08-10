@@ -442,16 +442,6 @@ type RangeExpression struct {
 
 func (*RangeExpression) expressionNode() {}
 
-// PropagateExpression unwraps Result::Ok or returns Result::Err from the
-// enclosing function. A dedicated node keeps it distinct from predicate names
-// whose trailing question mark is part of the identifier token.
-type PropagateExpression struct {
-	Base
-	Value Expression
-}
-
-func (*PropagateExpression) expressionNode() {}
-
 type CallArgument struct {
 	Name  string
 	Value Expression

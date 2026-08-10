@@ -66,8 +66,8 @@ mode by itself does not enable them.
   imports, completion, interface checks, and inheritance.
 - A callable suffix is a naming convention only. `?` does not imply a Boolean return
   type, and `!` does not imply mutation, failure, exception behavior, or
-  `Result` propagation. Postfix propagation applies after an expression rather
-  than being part of a callable name.
+  `Result` propagation. Those properties remain explicit in the signature and
+  implementation.
 - Ruby output retains the source spelling. Backends whose ordinary identifiers
   cannot contain the suffix encode the complete UTF-8 source name in a
   compiler-reserved namespace. This makes the lowering deterministic and keeps
@@ -499,13 +499,6 @@ end
   and case patterns—still require an explicit import such as
   `import { Result } from trb/std/result` or
   `import { IndexLookupError } from trb/std/errors`.
-- Postfix `?` unwraps `Ok(value)` and evaluates to `value`. For `Err(error)`, it
-  immediately returns `Err(error)` from the enclosing function. The operand and
-  enclosing return type must both expand to `Result<T, E>`, and the operand's
-  error type must be assignable to the enclosing error type. Typed lowering
-  represents both branches explicitly, so `repository.find(id)?` has identical
-  early-return behavior in every backend and the REPL.
-- Callable names may end in `?`, so a bare binding is parenthesized when it is
-  propagated: `(result)?`. A call already has an unambiguous boundary and uses
-  the ordinary `operation()?` spelling. Postfix `!`, prefix `try`, implicit
-  exceptions, and `unwrap` are not part of this rule.
+- Concise propagation syntax such as postfix `?`, postfix `!`, or prefix `try`
+  remains deliberately unselected in v0.1. Fallible effects and explicit
+  capture are introduced separately from Result value syntax.

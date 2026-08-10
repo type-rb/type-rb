@@ -331,8 +331,7 @@ func (l *Lexer) scanIdentifier(start token.Position) {
 		}
 		l.advanceRune(r)
 	}
-	// Ruby predicate/bang method names are kept in one token. Propagation of a
-	// bare Result binding can be written as `(result)?` to avoid ambiguity.
+	// Ruby predicate/bang method names are kept in one token.
 	if l.offset < len(l.source) && (l.source[l.offset] == '?' || l.source[l.offset] == '!') && !unicode.IsUpper(first) {
 		l.advance()
 	}
