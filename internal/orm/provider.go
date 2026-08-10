@@ -56,6 +56,21 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
+		declared.ClassMembers["distinct"] = distinctDeclaration(model, "trb.orm.distinct", true)
+		declared.ClassMembers["select"] = selectDeclaration(model, "trb.orm.select", true)
+		declared.ClassMembers["group"] = groupDeclaration(model, "trb.orm.group", true)
+		if join := joinDeclaration(model, "join", "trb.orm.join", true); join.Name != "" {
+			declared.ClassMembers["join"] = join
+		}
+		if join := joinDeclaration(model, "left_join", "trb.orm.left_join", true); join.Name != "" {
+			declared.ClassMembers["left_join"] = join
+		}
+		if exists := joinDeclaration(model, "where_exists", "trb.orm.where_exists", true); exists.Name != "" {
+			declared.ClassMembers["where_exists"] = exists
+		}
+		if exists := joinDeclaration(model, "where_not_exists", "trb.orm.where_not_exists", true); exists.Name != "" {
+			declared.ClassMembers["where_not_exists"] = exists
+		}
 		declared.ClassMembers["using"] = declaration.Member{
 			Name: "using", Kind: declaration.Method, Intrinsic: "trb.orm.using",
 			Parameters: []declaration.Parameter{{Name: "transaction", Type: types.FromName("Transaction")}},
@@ -121,6 +136,21 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.Name] = declared
 		query := declaration.NewType(model.QueryType, "")
 		query.InstanceMembers["where"] = whereDeclaration(model, "trb.orm.query.where", false)
+		query.InstanceMembers["distinct"] = distinctDeclaration(model, "trb.orm.query.distinct", false)
+		query.InstanceMembers["select"] = selectDeclaration(model, "trb.orm.query.select", false)
+		query.InstanceMembers["group"] = groupDeclaration(model, "trb.orm.query.group", false)
+		if join := joinDeclaration(model, "join", "trb.orm.query.join", false); join.Name != "" {
+			query.InstanceMembers["join"] = join
+		}
+		if join := joinDeclaration(model, "left_join", "trb.orm.query.left_join", false); join.Name != "" {
+			query.InstanceMembers["left_join"] = join
+		}
+		if exists := joinDeclaration(model, "where_exists", "trb.orm.query.where_exists", false); exists.Name != "" {
+			query.InstanceMembers["where_exists"] = exists
+		}
+		if exists := joinDeclaration(model, "where_not_exists", "trb.orm.query.where_not_exists", false); exists.Name != "" {
+			query.InstanceMembers["where_not_exists"] = exists
+		}
 		query.InstanceMembers["not"] = notDeclaration(model, "trb.orm.query.not", false)
 		query.InstanceMembers["or"] = declaration.Member{
 			Name: "or", Kind: declaration.Method, Intrinsic: "trb.orm.query.or",
@@ -176,6 +206,35 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			query.InstanceMembers["find_in_batches"] = batchDeclaration(model, "find_in_batches", false, true)
 		}
 		catalog.Types[model.QueryType] = query
+		for _, column := range model.Columns {
+			grouped := declaration.NewType(model.GroupType(column), "")
+			having := declaration.Member{Name: "having", Kind: declaration.Method, Intrinsic: "trb.orm.group.having", Return: types.FromName(model.GroupType(column)), Provider: PackageName}
+			having.Alternatives = append(having.Alternatives, declaration.Signature{Parameters: []declaration.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{"count"}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: types.FromName("Integer")}}, Return: having.Return})
+			grouped.InstanceMembers["count"] = declaration.Member{Name: "count", Kind: declaration.Method, Intrinsic: "trb.orm.group.count", Return: dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{column.Type, types.FromName("Integer")}}), Provider: PackageName}
+			for _, operation := range AggregateOperations() {
+				aggregate, ok := aggregateDeclaration(model, operation, "trb.orm.group."+operation, false)
+				if !ok {
+					continue
+				}
+				for index := range aggregate.Alternatives {
+					result := aggregate.Alternatives[index].Return.Args[0]
+					aggregate.Alternatives[index].Return = dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{column.Type, result}})
+				}
+				aggregate.Return = aggregate.Alternatives[0].Return
+				grouped.InstanceMembers[operation] = aggregate
+				for _, target := range model.Columns {
+					result, ok := AggregateResultType(operation, target)
+					if !ok {
+						continue
+					}
+					result.Nullable = false
+					having.Alternatives = append(having.Alternatives, declaration.Signature{Parameters: []declaration.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{operation}}, {Name: "column", Type: types.FromName("String"), LiteralValues: []string{target.Name}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: result}}, Return: having.Return})
+				}
+			}
+			having.Parameters = having.Alternatives[0].Parameters
+			grouped.InstanceMembers["having"] = having
+			catalog.Types[model.GroupType(column)] = grouped
+		}
 		scope := declaration.NewType(model.ScopeType(), "")
 		for name, member := range query.InstanceMembers {
 			scope.InstanceMembers[name] = member
@@ -190,6 +249,22 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 	return catalog, nil
 }
 
+func groupDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	member := declaration.Member{Name: "group", Kind: declaration.Method, Intrinsic: intrinsic, Class: class, Provider: PackageName}
+	for _, column := range model.Columns {
+		member.Alternatives = append(member.Alternatives, declaration.Signature{Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}}, Return: types.FromName(model.GroupType(column))})
+	}
+	member.Return = member.Alternatives[0].Return
+	return member
+}
+
+func distinctDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	return declaration.Member{
+		Name: "distinct", Kind: declaration.Method, Intrinsic: intrinsic,
+		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
+	}
+}
+
 func transactionDeclaration(class bool) declaration.Member {
 	typeParameter := types.FromName("T")
 	result := dbResult(typeParameter)
@@ -201,6 +276,35 @@ func transactionDeclaration(class bool) declaration.Member {
 			Return:     result, Structured: true,
 		},
 	}
+}
+
+func joinDeclaration(model Model, name, intrinsic string, class bool) declaration.Member {
+	member := declaration.Member{
+		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
+		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
+	}
+	for _, association := range model.Associations {
+		associationParameter := declaration.Parameter{
+			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
+		}
+		member.Alternatives = append(member.Alternatives,
+			declaration.Signature{
+				Parameters: []declaration.Parameter{associationParameter},
+				Return:     types.FromName(model.QueryType),
+			},
+			declaration.Signature{
+				Parameters: []declaration.Parameter{
+					associationParameter,
+					{Name: "query", Type: types.FromName(association.TargetQuery)},
+				},
+				Return: types.FromName(model.QueryType),
+			},
+		)
+	}
+	if len(member.Alternatives) == 0 {
+		return declaration.Member{}
+	}
+	return member
 }
 
 func scopeFindDeclaration(model Model, primaryKey Column) declaration.Member {
@@ -320,20 +424,35 @@ func writeParameters(model Model, adapter string) []declaration.Parameter {
 }
 
 func preloadDeclaration(model Model) declaration.Member {
-	var values []string
-	for _, association := range model.Associations {
-		if association.Preloadable {
-			values = append(values, association.Name)
-		}
+	member := declaration.Member{
+		Name: "preload", Kind: declaration.Method, Intrinsic: "trb.orm.query.preload",
+		Return: types.FromName(model.QueryType), Provider: PackageName,
 	}
-	if len(values) == 0 {
+	for _, association := range model.Associations {
+		if !association.Preloadable {
+			continue
+		}
+		associationParameter := declaration.Parameter{
+			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
+		}
+		member.Alternatives = append(member.Alternatives,
+			declaration.Signature{
+				Parameters: []declaration.Parameter{associationParameter},
+				Return:     types.FromName(model.QueryType),
+			},
+			declaration.Signature{
+				Parameters: []declaration.Parameter{
+					associationParameter,
+					{Name: "query", Type: types.FromName(association.TargetQuery)},
+				},
+				Return: types.FromName(model.QueryType),
+			},
+		)
+	}
+	if len(member.Alternatives) == 0 {
 		return declaration.Member{}
 	}
-	return declaration.Member{
-		Name: "preload", Kind: declaration.Method, Intrinsic: "trb.orm.query.preload",
-		Parameters: []declaration.Parameter{{Name: "association", Type: types.FromName("String"), LiteralValues: values}},
-		Return:     types.FromName(model.QueryType), Provider: PackageName,
-	}
+	return member
 }
 
 func findDeclaration(model Model, primaryKey Column) declaration.Member {
@@ -427,6 +546,23 @@ func projectionDeclaration(model Model, name, intrinsic string, class, pick bool
 	}
 }
 
+func selectDeclaration(model Model, intrinsic string, class bool) declaration.Member {
+	values := make([]string, 0, len(model.Columns))
+	alternatives := make([]declaration.Signature, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		values = append(values, column.Name)
+		alternatives = append(alternatives, declaration.Signature{
+			Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}},
+			Return:     subqueryOf(column.Type),
+		})
+	}
+	return declaration.Member{
+		Name: "select", Kind: declaration.Method, Intrinsic: intrinsic,
+		Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: values}},
+		Return:     alternatives[0].Return, Class: class, Provider: PackageName, Alternatives: alternatives,
+	}
+}
+
 func aggregateDeclaration(model Model, operation, intrinsic string, class bool) (declaration.Member, bool) {
 	values := make([]string, 0, len(model.Columns))
 	alternatives := make([]declaration.Signature, 0, len(model.Columns))
@@ -464,11 +600,16 @@ func idsDeclaration(model Model, intrinsic string, class bool, primaryKey Column
 func predicateValueType(column Column) types.Type {
 	element := column.Type
 	element.Nullable = false
-	alternatives := []types.Type{column.Type, {Kind: types.Array, Name: "Array", Args: []types.Type{element}}}
+	alternatives := []types.Type{column.Type, {Kind: types.Array, Name: "Array", Args: []types.Type{element}}, subqueryOf(element)}
 	if element.Kind == types.Int {
 		alternatives = append(alternatives, types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{element}})
 	}
 	return types.UnionOf(alternatives...)
+}
+
+func subqueryOf(element types.Type) types.Type {
+	element.Nullable = false
+	return types.Type{Kind: types.Named, Name: "Subquery", Args: []types.Type{element}}
 }
 
 func orderDeclaration(model Model) declaration.Member {
@@ -521,7 +662,9 @@ func comparisonSignatures(column Column, queryType string) []declaration.Signatu
 			Return: types.FromName(queryType),
 		}
 	}
-	result := []declaration.Signature{signature([]string{"=", "!="}, column.Type)}
+	result := []declaration.Signature{
+		signature([]string{"=", "!="}, types.UnionOf(column.Type, subqueryOf(column.Type))),
+	}
 	switch column.Type.Kind {
 	case types.Int, types.Float, types.String:
 		orderedType := column.Type

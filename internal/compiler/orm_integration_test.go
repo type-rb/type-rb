@@ -746,7 +746,7 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	for _, expected := range []string{
 		"TrbOrmFirstProduct(TrbOrmProductWhere", "func TrbOrmBatchProduct", "__trbBatchLoop", "break __trbBatchLoop", "TrbOrmBatchProduct",
 		"orm.DbResult[int]", "orm.NewDbResultOk[int]", "orm.NewDbResultErr[int]", "__trbBatchProcessed",
-		`"batch queries do not accept order, limit, offset, or lock"`, "reassigned = orm.NewDbResultOk[int]",
+		`"batch queries do not accept joins, order, limit, offset, or lock"`, "reassigned = orm.NewDbResultOk[int]",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated batch query is missing %q:\n%s", expected, output)
@@ -807,6 +807,19 @@ class Product < Model
 end
 
 def main()
+	puts(Product.join(:category, Category.where(name: "Books")).where(name: "TypeRB").all())
+	puts(Product.where(name: "TypeRB").left_join(:category).all())
+	puts(Category.join(:products).distinct().all())
+	category_ids := Category.where(name: "Books").select(:id)
+	puts(Product.where(category_id: category_ids).all())
+	puts(Product.where("category_id", "!=", Category.select(:id)).all())
+	puts(Product.where_exists(:category, Category.where(name: "Books")).all())
+	puts(Product.where_not_exists(:category, Category.where(name: "Missing")).all())
+	puts(Product.group(:category_id).count())
+	puts(Product.where(name: "TypeRB").group(:category_id).having(:count, ">=", 1).count())
+	puts(Product.group(:category_id).sum(:id))
+	puts(Product.group(:category_id).having(:sum, :id, ">=", 1).sum(:id))
+	puts(Product.where().order(category_id: :desc).limit(1).group(:category_id).count())
 	case Product.where().preload(:category).all()
 	when DbResult::Ok(products)
 		products.each do |product|
@@ -834,6 +847,16 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
+	case Category.where().preload(:products, Product.where(name: "TypeRB").preload(:category)).all()
+	when DbResult::Ok(categories)
+		categories.each do |category|
+			category.products().each do |product|
+				puts(product.category())
+			end
+		end
+	when DbResult::Err(error)
+		puts(error.message)
+	end
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -847,9 +870,23 @@ end
 	}
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
+		`TrbOrmProductJoin(TrbOrmProductWhere`, `Kind: "INNER JOIN"`, `Kind: "LEFT JOIN"`,
+		`TrbOrmCategoryDistinct(TrbOrmCategoryJoin`, `prefix += "DISTINCT "`,
+		`Table: "categories"`, `SourceColumn: "category_id"`, `TargetColumn: "id"`,
+		`TrbOrmCategoryAssociationPredicate(TrbOrmCategoryWhere`, `__trb_join_key`,
+		`TrbOrmSelectCategoryId(TrbOrmCategoryWhere`, `*orm.TrbOrmSubquery[int]`,
+		`condition.operator == "IN" || condition.operator == "NOT_IN"`, `operator = " NOT IN "`,
+		`TrbOrmProductWhereExists(TrbOrmProductWhere`, `operator := "EXISTS"`, `operator = "NOT EXISTS"`,
+		`TrbOrmGroupProductCategoryId(TrbOrmProductWhere`, `TrbOrmHavingProductCategoryId`, `TrbOrmCountGroupedProductCategoryId`,
+		`TrbOrmSumGroupedProductCategoryIdId`, `COALESCE(SUM(trb_value), 0)`,
+		`grouped.query.orders = nil`, `ORDER BY`, `grouped.limit`,
+		`GROUP BY`, `grouped.havingExpression`, `map[int]int`,
+		`trbOrmQuoteIdentifier("products")`, `TrbOrmCategoryAssociationPredicate(TrbOrmCategoryWhere`,
 		`TrbOrmCategoryQueryWhere(TrbOrmCategoryUsing(product.TrbOrmTransaction()), []string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
 		`TrbOrmProductQueryWhere(TrbOrmProductUsing(category.TrbOrmTransaction()), []string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
 		`TrbOrmProductPreload`, `trbOrmPreloadProductCategory`, `trbOrmPreloadCategoryProducts`,
+		`TrbOrmCategoryPreloadProducts`, `func(transaction *orm.TrbOrmTransaction, values []*Category) *orm.DbError`,
+		`TrbOrmProductQueryWhere(targetQuery, []string{"category_id"}, []string{"IN"}, []any{arguments})`,
 		`trbOrmPreloadCategoryProduct`, `database has_one association returned multiple rows`,
 		`TrbOrmAssociationCategory`, `TrbOrmAssociationProducts`,
 	} {
@@ -859,6 +896,48 @@ end
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
 		t.Fatalf("generated invalid association Go: %v\n%s", err, output)
+	}
+	compileInvalidJoin := func(expression string) error {
+		invalidSource := []byte(`import { Model, belongs_to } from trb/orm
+
+class Category < Model
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+
+def main()
+	query := ` + expression + `
+	puts(query.to_sql())
+end
+`)
+		_, err := CompileProject([]SourceUnit{{
+			Filename: filepath.Join(root, "src", "invalid.trb"), ModulePath: "invalid", Package: "main", Source: invalidSource,
+		}}, Options{
+			Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+		})
+		return err
+	}
+	for _, invalid := range []struct {
+		expression string
+		want       string
+	}{
+		{expression: `Product.join(:missing)`, want: `argument 1 to join() must be one of "category"`},
+		{expression: `Product.join(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
+		{expression: `Product.where_exists(:missing)`, want: `argument 1 to where_exists() must be one of "category"`},
+		{expression: `Product.where_exists(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
+		{expression: `Product.where().preload(:missing)`, want: `argument 1 to preload() must be one of "category"`},
+		{expression: `Product.where().preload(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
+		{expression: `Product.group(:missing)`, want: `argument 1 to group() must be one of`},
+		{expression: `Product.group(:category_id).having(:sum, ">", 1)`, want: `argument 1 to having() must be one of "count"`},
+		{expression: `Product.group(:category_id).sum(:name)`, want: `argument 1 to sum() must be one of`},
+		{expression: `Product.where(category_id: Product.select(:name))`, want: `has type Subquery<String>`},
+	} {
+		if err := compileInvalidJoin(invalid.expression); err == nil || !strings.Contains(err.Error(), invalid.want) {
+			t.Fatalf("expected join diagnostic %q, got %v", invalid.want, err)
+		}
 	}
 }
 

@@ -31,6 +31,33 @@ func (g *generator) ormWhere(call *ir.Call) string {
 	return g.ormModelQualifier(model) + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
 }
 
+func (g *generator) ormDistinct(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	model, queryReceiver := g.orm.QueryModel(modelName)
+	query := ""
+	if queryReceiver {
+		query = g.expr(member.Receiver)
+	} else if scopedModel, scope := g.orm.ScopeModel(modelName); scope {
+		model = scopedModel
+		query = g.expr(member.Receiver)
+	} else {
+		if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+			modelName = identifier.Name
+		}
+		var exists bool
+		model, exists = g.orm.Model(modelName)
+		if !exists {
+			return "nil"
+		}
+		query = g.ormModelQualifier(model) + goORMWhere(model) + "([]string{}, []string{}, []any{})"
+	}
+	return g.ormModelQualifier(model) + goORMDistinct(model) + "(" + query + ")"
+}
+
 func (g *generator) ormUsing(call *ir.Call, arguments []string) string {
 	member, ok := call.Callee.(*ir.Member)
 	if !ok || len(arguments) != 1 {
@@ -562,10 +589,26 @@ func (g *generator) ormAssociationQuery(call *ir.Call) string {
 
 func (g *generator) ormPreload(call *ir.Call, arguments []string) string {
 	model, query, ok := g.ormQueryModel(call, arguments)
-	if !ok || len(arguments) < 2 {
+	if !ok || len(call.Arguments) == 0 {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMPreload(model) + "(" + query + ", " + arguments[1] + ")"
+	associationName, ok := ormJoinAssociation(call.Arguments[0].Value)
+	if !ok {
+		return "nil"
+	}
+	association, ok := model.Association(associationName)
+	if !ok || !association.Preloadable {
+		return "nil"
+	}
+	target, ok := g.orm.Model(association.TargetModel)
+	if !ok {
+		return "nil"
+	}
+	targetQuery := g.ormModelQualifier(target) + goORMWhere(target) + "([]string{}, []string{}, []any{})"
+	if len(call.Arguments) > 1 {
+		targetQuery = g.expr(call.Arguments[1].Value)
+	}
+	return g.ormModelQualifier(model) + goORMTypedPreload(model, association) + "(" + query + ", " + targetQuery + ")"
 }
 
 func (g *generator) ormLoadedAssociation(call *ir.Call) string {
@@ -864,6 +907,38 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.line("type TrbOrmAssociationPredicate func(arguments *[]any) string")
+	g.b.WriteByte('\n')
+	g.line("type TrbOrmExistsPredicate func(arguments *[]any) string")
+	g.b.WriteByte('\n')
+	g.line("type TrbOrmJoin struct {")
+	g.indent++
+	g.line("Kind string")
+	g.line("Table string")
+	g.line("SourceColumn string")
+	g.line("TargetColumn string")
+	g.line("Predicate TrbOrmAssociationPredicate")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("type TrbOrmSubqueryValue interface {")
+	g.indent++
+	g.line("TrbOrmBuild(arguments *[]any) string")
+	g.line("TrbOrmTransactionScope() *TrbOrmTransaction")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("type TrbOrmSubquery[T any] struct {")
+	g.indent++
+	g.line("transaction *TrbOrmTransaction")
+	g.line("build func(arguments *[]any) string")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func NewTrbOrmSubquery[T any](transaction *TrbOrmTransaction, build func(arguments *[]any) string) *TrbOrmSubquery[T] { return &TrbOrmSubquery[T]{transaction: transaction, build: build} }")
+	g.line("func (subquery *TrbOrmSubquery[T]) TrbOrmBuild(arguments *[]any) string { return subquery.build(arguments) }")
+	g.line("func (subquery *TrbOrmSubquery[T]) TrbOrmTransactionScope() *TrbOrmTransaction { return subquery.transaction }")
+	g.b.WriteByte('\n')
 	g.line("func TrbOrmBeginTransaction() (*TrbOrmTransaction, *DbError) {")
 	g.indent++
 	g.line("database, err := TrbOrmDatabase()")
@@ -1051,6 +1126,7 @@ func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
 }
 
 func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter ormintegration.Adapter, model ormintegration.Model) {
+	g.requireImport("strconv", "")
 	conditionType := goORMConditionType(model)
 	predicateType := goORMPredicateType(model)
 	orderType := goORMOrderType(model)
@@ -1068,6 +1144,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("kind string")
 	g.line("condition " + conditionType)
 	g.line("children []" + predicateType)
+	g.line("exists " + g.ormLifecycleAlias() + ".TrbOrmExistsPredicate")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1075,6 +1152,14 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent++
 	g.line("column string")
 	g.line("direction string")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	preloadType := goORMPreloadType(model)
+	g.line("type " + preloadType + " struct {")
+	g.indent++
+	g.line("name string")
+	g.line("load func(*" + g.ormLifecycleAlias() + ".TrbOrmTransaction, []*" + goIdentifier(model.Name, true) + ") *" + g.goType(types.FromName("DbError")))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1087,7 +1172,9 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("limit *int")
 	g.line("offset *int")
 	g.line("lock bool")
-	g.line("preloads []string")
+	g.line("distinct bool")
+	g.line("preloads []" + preloadType)
+	g.line("joins []" + g.ormLifecycleAlias() + ".TrbOrmJoin")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1127,6 +1214,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.b.WriteByte('\n')
 	g.line("func " + goORMQueryWhere(model) + "(query " + queryType + ", columns []string, operators []string, values []any) " + queryType + " {")
 	g.indent++
+	g.line(goORMValidateSubqueries(model) + "(query, values)")
 	g.line("result := query")
 	g.line("result.predicate = " + goORMCombinePredicates(model) + "(\"and\", query.predicate, " + goORMPredicateGroup(model) + "(columns, operators, values))")
 	g.line("return result")
@@ -1141,6 +1229,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.b.WriteByte('\n')
 	g.line("func " + goORMQueryNot(model) + "(query " + queryType + ", columns []string, operators []string, values []any) " + queryType + " {")
 	g.indent++
+	g.line(goORMValidateSubqueries(model) + "(query, values)")
 	g.line("predicate := " + goORMPredicateGroup(model) + "(columns, operators, values)")
 	g.line("if predicate == nil { panic(\"ORM not requires one condition\") }")
 	g.line("negated := &" + predicateType + "{kind: \"not\", children: []" + predicateType + "{*predicate}}")
@@ -1150,13 +1239,61 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.line("func " + goORMValidateSubqueries(model) + "(query " + queryType + ", values []any) {")
+	g.indent++
+	g.line("for _, value := range values {")
+	g.indent++
+	g.line("subquery, ok := value.(" + g.ormLifecycleAlias() + ".TrbOrmSubqueryValue)")
+	g.line("if !ok { continue }")
+	g.line("if transaction := subquery.TrbOrmTransactionScope(); transaction != nil && transaction != query.transaction { panic(\"ORM subquery transaction scope must match the base query\") }")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 	g.line("func " + goORMQueryOr(model) + "(left " + queryType + ", right " + queryType + ") " + queryType + " {")
 	g.indent++
 	g.line("if left.predicate == nil || right.predicate == nil { panic(\"ORM or requires conditions on both queries\") }")
-	g.line("if len(left.orders) > 0 || left.limit != nil || left.offset != nil || left.lock || len(left.preloads) > 0 || len(right.orders) > 0 || right.limit != nil || right.offset != nil || right.lock || len(right.preloads) > 0 { panic(\"ORM or requires unmodified predicate queries; apply order, limit, offset, lock, and preload after or\") }")
+	g.line("if len(left.orders) > 0 || left.limit != nil || left.offset != nil || left.lock || left.distinct || len(left.preloads) > 0 || len(left.joins) > 0 || len(right.orders) > 0 || right.limit != nil || right.offset != nil || right.lock || right.distinct || len(right.preloads) > 0 || len(right.joins) > 0 { panic(\"ORM or requires unmodified predicate queries; apply distinct, joins, order, limit, offset, lock, and preload after or\") }")
 	g.line("if left.transaction != right.transaction { panic(\"ORM or requires queries from the same transaction scope\") }")
 	g.line("left.predicate = " + goORMCombinePredicates(model) + "(\"or\", left.predicate, right.predicate)")
 	g.line("return left")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMPredicateContainsExists(model) + "(predicate *" + predicateType + ") bool {")
+	g.indent++
+	g.line("if predicate == nil { return false }")
+	g.line("if predicate.kind == \"exists\" { return true }")
+	g.line("for index := range predicate.children { if " + goORMPredicateContainsExists(model) + "(&predicate.children[index]) { return true } }")
+	g.line("return false")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMJoin(model) + "(query " + queryType + ", join " + g.ormLifecycleAlias() + ".TrbOrmJoin) " + queryType + " {")
+	g.indent++
+	g.line("switch join.Kind { case \"INNER JOIN\", \"LEFT JOIN\": default: panic(\"unsupported ORM join kind\") }")
+	g.line("result := query")
+	g.line("result.joins = append([]" + g.ormLifecycleAlias() + ".TrbOrmJoin(nil), query.joins...)")
+	g.line("result.joins = append(result.joins, join)")
+	g.line("return result")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMWhereExists(model) + "(query " + queryType + ", table string, sourceColumn string, targetColumn string, predicate " + g.ormLifecycleAlias() + ".TrbOrmAssociationPredicate, negated bool) " + queryType + " {")
+	g.indent++
+	g.line("exists := " + g.ormLifecycleAlias() + ".TrbOrmExistsPredicate(func(arguments *[]any) string {")
+	g.indent++
+	g.line("correlation := trbOrmQuoteIdentifier(table) + \".\" + trbOrmQuoteIdentifier(targetColumn) + \" = \" + trbOrmQuoteIdentifier(" + strconv.Quote(model.Table) + ") + \".\" + trbOrmQuoteIdentifier(sourceColumn)")
+	g.line("statement := \"SELECT 1 FROM \" + trbOrmQuoteIdentifier(table) + \" WHERE \" + correlation")
+	g.line("if predicate != nil { if clause := predicate(arguments); clause != \"\" { statement += \" AND (\" + clause + \")\" } }")
+	g.line("operator := \"EXISTS\"; if negated { operator = \"NOT EXISTS\" }")
+	g.line("return operator + \" (\" + statement + \")\"")
+	g.indent--
+	g.line("})")
+	g.line("result := query")
+	g.line("result.predicate = " + goORMCombinePredicates(model) + "(\"and\", query.predicate, &" + predicateType + "{kind: \"exists\", exists: exists})")
+	g.line("return result")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1167,10 +1304,11 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("case \"atom\":")
 	g.indent++
 	g.line("condition := predicate.condition")
-	g.line("switch condition.operator { case \"=\", \"!=\", \"<\", \"<=\", \">\", \">=\", \"IN\", \"RANGE_INCLUSIVE\", \"RANGE_EXCLUSIVE\": default: panic(\"unsupported ORM comparison operator\") }")
+	g.line("switch condition.operator { case \"=\", \"!=\", \"<\", \"<=\", \">\", \">=\", \"IN\", \"NOT_IN\", \"RANGE_INCLUSIVE\", \"RANGE_EXCLUSIVE\": default: panic(\"unsupported ORM comparison operator\") }")
 	g.line("column := trbOrmQuoteIdentifier(condition.column)")
-	g.line("if condition.operator == \"IN\" {")
+	g.line("if condition.operator == \"IN\" || condition.operator == \"NOT_IN\" {")
 	g.indent++
+	g.line("if subquery, ok := condition.value.(" + g.ormLifecycleAlias() + ".TrbOrmSubqueryValue); ok { operator := \" IN \"; if condition.operator == \"NOT_IN\" { operator = \" NOT IN \" }; return column + operator + \"(\" + subquery.TrbOrmBuild(arguments) + \")\" }")
 	g.line("values := reflect.ValueOf(condition.value)")
 	g.line("if values.Kind() != reflect.Array && values.Kind() != reflect.Slice { panic(\"ORM IN predicate requires an Array\") }")
 	g.line("if values.Len() == 0 { return \"1 = 0\" }")
@@ -1208,11 +1346,24 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("if len(predicate.children) != 1 { panic(\"invalid ORM not predicate\") }")
 	g.line("return \"NOT (\" + " + goORMPredicateSQL(model) + "(&predicate.children[0], arguments) + \")\"")
 	g.indent--
+	g.line("case \"exists\":")
+	g.indent++
+	g.line("if predicate.exists == nil { panic(\"invalid ORM exists predicate\") }")
+	g.line("return predicate.exists(arguments)")
+	g.indent--
 	g.line("default:")
 	g.indent++
 	g.line("panic(\"unsupported ORM predicate\")")
 	g.indent--
 	g.line("}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMAssociationPredicate(model) + "(query " + queryType + ") " + g.ormLifecycleAlias() + ".TrbOrmAssociationPredicate {")
+	g.indent++
+	g.line("if query.transaction != nil { panic(\"ORM association predicate query must not have a transaction scope; scope the base query instead\") }")
+	g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || query.distinct || len(query.preloads) > 0 || len(query.joins) > 0 || " + goORMPredicateContainsExists(model) + "(query.predicate) { panic(\"ORM association predicate query accepts only where, not, and or\") }")
+	g.line("return func(arguments *[]any) string { return " + goORMPredicateSQL(model) + "(query.predicate, arguments) }")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1252,12 +1403,15 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func " + goORMPreload(model) + "(query " + queryType + ", association string) " + queryType + " {")
+	g.line("func " + goORMDistinct(model) + "(query " + queryType + ") " + queryType + " { query.distinct = true; return query }")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMPreload(model) + "(query " + queryType + ", association string, load func(*" + g.ormLifecycleAlias() + ".TrbOrmTransaction, []*" + goIdentifier(model.Name, true) + ") *" + g.goType(types.FromName("DbError")) + ") " + queryType + " {")
 	g.indent++
 	g.line("result := query")
-	g.line("result.preloads = append([]string(nil), query.preloads...)")
-	g.line("for _, existing := range result.preloads { if existing == association { return result } }")
-	g.line("result.preloads = append(result.preloads, association)")
+	g.line("result.preloads = append([]" + preloadType + "(nil), query.preloads...)")
+	g.line("preload := " + preloadType + "{name: association, load: load}")
+	g.line("for index, existing := range result.preloads { if existing.name == association { result.preloads[index] = preload; return result } }")
+	g.line("result.preloads = append(result.preloads, preload)")
 	g.line("return result")
 	g.indent--
 	g.line("}")
@@ -1281,6 +1435,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.ormRelationWriteRuntime(adapter, model)
 	for _, column := range model.Columns {
 		g.ormProjectionRuntime(adapter, model, column)
+		g.ormSubqueryRuntime(adapter, model, column)
+		g.ormGroupRuntime(adapter, model, column)
 		for _, operation := range ormintegration.AggregateOperations() {
 			if resultType, ok := ormintegration.AggregateResultType(operation, column); ok {
 				g.ormAggregateRuntime(adapter, model, column, operation, resultType)
@@ -1301,9 +1457,26 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	statement := " FROM " + adapter.QuoteIdentifier(model.Table)
 	g.line("func " + goORMStatement(model) + "(query " + queryType + ", projection string) (string, []any) {")
 	g.indent++
-	g.line("statement := \"SELECT \" + projection + " + strconv.Quote(statement))
 	g.line("arguments := []any{}")
-	g.line("if query.predicate != nil { statement += \" WHERE \" + " + goORMPredicateSQL(model) + "(query.predicate, &arguments) }")
+	g.line("statement := " + goORMStatementAppend(model) + "(query, projection, &arguments)")
+	g.line("return statement, arguments")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMStatementAppend(model) + "(query " + queryType + ", projection string, arguments *[]any) string {")
+	g.indent++
+	g.line("prefix := \"SELECT \"; if query.distinct { prefix += \"DISTINCT \" }; statement := prefix + projection + " + strconv.Quote(statement))
+	g.line("for index, join := range query.joins {")
+	g.indent++
+	g.line("switch join.Kind { case \"INNER JOIN\", \"LEFT JOIN\": default: panic(\"unsupported ORM join kind\") }")
+	g.line("alias := \"__trb_join_\" + strconv.Itoa(index)")
+	g.line("key := \"__trb_join_key\"")
+	g.line("subquery := \"SELECT \" + trbOrmQuoteIdentifier(join.TargetColumn) + \" AS \" + trbOrmQuoteIdentifier(key) + \" FROM \" + trbOrmQuoteIdentifier(join.Table)")
+	g.line("if join.Predicate != nil { if predicate := join.Predicate(arguments); predicate != \"\" { subquery += \" WHERE \" + predicate } }")
+	g.line("statement += \" \" + join.Kind + \" (\" + subquery + \") AS \" + trbOrmQuoteIdentifier(alias) + \" ON \" + trbOrmQuoteIdentifier(join.SourceColumn) + \" = \" + trbOrmQuoteIdentifier(alias) + \".\" + trbOrmQuoteIdentifier(key)")
+	g.indent--
+	g.line("}")
+	g.line("if query.predicate != nil { statement += \" WHERE \" + " + goORMPredicateSQL(model) + "(query.predicate, arguments) }")
 	g.line("if len(query.orders) > 0 {")
 	g.indent++
 	g.line("orders := make([]string, 0, len(query.orders))")
@@ -1317,12 +1490,12 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("statement += \" ORDER BY \" + strings.Join(orders, \", \")")
 	g.indent--
 	g.line("}")
-	g.line("if query.limit != nil { statement += \" LIMIT \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *query.limit) } else if query.offset != nil { statement += " + strconv.Quote(adapter.OffsetNoLimit) + " }")
-	g.line("if query.offset != nil { statement += \" OFFSET \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *query.offset) }")
+	g.line("if query.limit != nil { statement += \" LIMIT \" + trbOrmPlaceholder(len(*arguments)+1); *arguments = append(*arguments, *query.limit) } else if query.offset != nil { statement += " + strconv.Quote(adapter.OffsetNoLimit) + " }")
+	g.line("if query.offset != nil { statement += \" OFFSET \" + trbOrmPlaceholder(len(*arguments)+1); *arguments = append(*arguments, *query.offset) }")
 	if adapter.Name != "sqlite" {
 		g.line("if query.lock { statement += \" FOR UPDATE\" }")
 	}
-	g.line("return statement, arguments")
+	g.line("return statement")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1372,7 +1545,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.b.WriteByte('\n')
 	for _, association := range model.Associations {
 		if association.Preloadable {
-			g.ormAssociationPreloader(manifest, adapter, model, association)
+			g.ormAssociationPreloader(manifest, model, association)
 		}
 	}
 
@@ -1399,20 +1572,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("if err := rows.Close(); err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database query failed\")") + " }")
 	g.line("for _, preload := range query.preloads {")
 	g.indent++
-	g.line("switch preload {")
-	for _, association := range model.Associations {
-		if association.Preloadable {
-			g.line("case " + strconv.Quote(association.Name) + ":")
-			g.indent++
-			g.line("if preloadError := " + goORMAssociationPreloader(model, association) + "(database, query.transaction, result); preloadError != nil { return " + g.ormResultErr(modelsType, "*preloadError") + " }")
-			g.indent--
-		}
-	}
-	g.line("default:")
-	g.indent++
-	g.line("panic(\"unsupported ORM preload \" + preload)")
-	g.indent--
-	g.line("}")
+	g.line("if preload.load == nil { panic(\"unsupported ORM preload \" + preload.name) }")
+	g.line("if preloadError := preload.load(query.transaction, result); preloadError != nil { return " + g.ormResultErr(modelsType, "*preloadError") + " }")
 	g.indent--
 	g.line("}")
 	g.line("return " + g.ormResultOK(modelsType, "result"))
@@ -1439,7 +1600,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.line("func " + goORMBatchLoader(model) + "(query " + queryType + ", after *" + g.goType(keyType) + ", size int) " + g.ormResultType(modelsType) + " {")
 		g.indent++
 		g.line("if size <= 0 { return " + g.ormResultErr(modelsType, g.ormErrorValue("InvalidData", "batch size must be greater than zero")) + " }")
-		g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock { return " + g.ormResultErr(modelsType, g.ormErrorValue("InvalidData", "batch queries do not accept order, limit, offset, or lock")) + " }")
+		g.line("if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.joins) > 0 { return " + g.ormResultErr(modelsType, g.ormErrorValue("InvalidData", "batch queries do not accept joins, order, limit, offset, or lock")) + " }")
 		g.line("if after != nil {")
 		g.indent++
 		g.line("query = " + goORMQueryWhere(model) + "(query, []string{" + strconv.Quote(batchKey.Name) + "}, []string{\">\"}, []any{*after})")
@@ -1458,7 +1619,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent++
 	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
-	g.line("statement, arguments := " + goORMStatement(model) + "(query, \"1\")")
+	g.line("projection := \"1\"; if query.distinct { projection = " + strconv.Quote(strings.Join(columns, ", ")) + " }")
+	g.line("statement, arguments := " + goORMStatement(model) + "(query, projection)")
 	g.line("row := database.QueryRow(\"SELECT COUNT(*) FROM (\"+statement+\") AS trb_count\", arguments...)")
 	g.line("var count int")
 	g.line("if err := row.Scan(&count); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database count failed\")") + " }")
@@ -1482,7 +1644,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, adapter ormintegration.Adapter, model ormintegration.Model, association ormintegration.Association) {
+func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, model ormintegration.Model, association ormintegration.Association) {
 	target, ok := manifest.Model(association.TargetModel)
 	if !ok {
 		return
@@ -1498,20 +1660,29 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	}
 	keyType := keyColumn.Type
 	keyType.Nullable = false
-	targetColumns := make([]string, len(target.Columns))
-	scanTargets := make([]string, len(target.Columns))
-	for index, column := range target.Columns {
-		targetColumns[index] = adapter.QuoteIdentifier(column.Name)
-		scanTargets[index] = "&relatedValue." + goFieldName(column.Name)
-	}
 	function := goORMAssociationPreloader(model, association)
 	sourceType := "*" + goIdentifier(model.Name, true)
 	targetType := "*" + goIdentifier(target.Name, true)
+	sourceQueryType := goORMQueryType(model)
+	targetQueryType := g.ormModelQualifier(target) + goORMQueryType(target)
 	valueField := goORMAssociationValueField(association.Name)
 	loadedField := goORMAssociationLoadedField(association.Name)
 
-	g.line("func " + function + "(database trbOrmExecutor, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ") *" + g.goType(types.FromName("DbError")) + " {")
+	g.line("func " + goORMTypedPreload(model, association) + "(query " + sourceQueryType + ", targetQuery " + targetQueryType + ") " + sourceQueryType + " {")
 	g.indent++
+	g.line("return " + goORMPreload(model) + "(query, " + strconv.Quote(association.Name) + ", func(transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ") *" + g.goType(types.FromName("DbError")) + " {")
+	g.indent++
+	g.line("return " + function + "(transaction, values, targetQuery)")
+	g.indent--
+	g.line("})")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+
+	g.line("func " + function + "(transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ", targetQuery " + targetQueryType + ") *" + g.goType(types.FromName("DbError")) + " {")
+	g.indent++
+	g.line("if targetQuery.transaction != nil { databaseError := " + g.ormErrorValue("InvalidData", "ORM preload query must not have a transaction scope; scope the base query instead") + "; return &databaseError }")
+	g.line("if targetQuery.limit != nil || targetQuery.offset != nil || targetQuery.lock { databaseError := " + g.ormErrorValue("InvalidData", "ORM preload query does not accept limit, offset, or lock") + "; return &databaseError }")
 	g.line("arguments := []any{}")
 	g.line("for _, value := range values {")
 	g.indent++
@@ -1535,21 +1706,17 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	g.line("return nil")
 	g.indent--
 	g.line("}")
-	statement := "SELECT " + strings.Join(targetColumns, ", ") + " FROM " + adapter.QuoteIdentifier(target.Table) + " WHERE " + adapter.QuoteIdentifier(association.TargetColumn) + " IN ("
-	g.line("statement := " + strconv.Quote(statement) + " + trbOrmPlaceholders(len(arguments)) + \")\"")
-	g.line("rows, err := database.Query(statement, arguments...)")
-	g.line("if err != nil { databaseError := trbOrmError(err, " + g.ormErrorKind("Query") + ", \"database preload failed\"); return &databaseError }")
-	g.line("defer rows.Close()")
+	g.line("targetQuery.transaction = transaction")
+	g.line("targetQuery = " + g.ormModelQualifier(target) + goORMQueryWhere(target) + "(targetQuery, []string{" + strconv.Quote(association.TargetColumn) + "}, []string{\"IN\"}, []any{arguments})")
+	g.line("loaded := " + g.ormModelQualifier(target) + goORMLoader(target) + "(targetQuery)")
+	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return &loaded.ErrError }")
 	if association.Kind == ormintegration.HasMany {
 		g.line("related := map[" + g.goType(keyType) + "][]" + targetType + "{}")
 	} else {
 		g.line("related := map[" + g.goType(keyType) + "]" + targetType + "{}")
 	}
-	g.line("for rows.Next() {")
+	g.line("for _, relatedValue := range loaded.OkValue {")
 	g.indent++
-	g.line("relatedValue := &" + goIdentifier(target.Name, true) + "{}")
-	g.line("if err := rows.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { databaseError := trbOrmError(err, " + g.ormErrorKind("InvalidData") + ", \"database preload row was invalid\"); return &databaseError }")
-	g.line("relatedValue." + goORMQueryScopeField() + " = " + g.ormModelQualifier(target) + goORMUsing(target) + "(transaction)")
 	if association.Kind == ormintegration.BelongsTo {
 		g.line("related[relatedValue." + goFieldName(targetColumn.Name) + "] = relatedValue")
 	} else if association.Kind == ormintegration.HasOne {
@@ -1574,16 +1741,9 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, a
 	}
 	g.indent--
 	g.line("}")
-	g.line("if err := rows.Err(); err != nil { databaseError := trbOrmError(err, " + g.ormErrorKind("Query") + ", \"database preload failed\"); return &databaseError }")
 	g.line("for _, value := range values {")
 	g.indent++
-	if association.Kind == ormintegration.BelongsTo {
-		if sourceColumn.Nullable {
-			g.line("if value." + goFieldName(sourceColumn.Name) + " != nil { value." + valueField + " = related[*value." + goFieldName(sourceColumn.Name) + "] }")
-		} else {
-			g.line("value." + valueField + " = related[value." + goFieldName(sourceColumn.Name) + "]")
-		}
-	} else if association.Kind == ormintegration.HasOne {
+	if association.Kind == ormintegration.BelongsTo || association.Kind == ormintegration.HasOne {
 		if sourceColumn.Nullable {
 			g.line("if value." + goFieldName(sourceColumn.Name) + " != nil { value." + valueField + " = related[*value." + goFieldName(sourceColumn.Name) + "] }")
 		} else {
@@ -1621,6 +1781,18 @@ func goORMPredicateType(model ormintegration.Model) string {
 
 func goORMOrderType(model ormintegration.Model) string {
 	return "trbOrm" + goIdentifier(model.Name, true) + "Order"
+}
+
+func goORMPreloadType(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "Preload"
+}
+
+func goORMDistinct(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "Distinct"
+}
+
+func goORMTypedPreload(model ormintegration.Model, association ormintegration.Association) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "Preload" + goIdentifier(association.Name, true)
 }
 
 func goORMWhere(model ormintegration.Model) string {
@@ -1777,6 +1949,22 @@ func goORMBatchLoader(model ormintegration.Model) string {
 
 func goORMStatement(model ormintegration.Model) string {
 	return "trbOrm" + goIdentifier(model.Name, true) + "Statement"
+}
+
+func goORMStatementAppend(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "StatementAppend"
+}
+
+func goORMValidateSubqueries(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "ValidateSubqueries"
+}
+
+func goORMWhereExists(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "WhereExists"
+}
+
+func goORMPredicateContainsExists(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "PredicateContainsExists"
 }
 
 func goORMAssociationGetter(name string) string {

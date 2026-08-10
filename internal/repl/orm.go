@@ -32,7 +32,38 @@ type ormQueryValue struct {
 	limit       *int64
 	offset      *int64
 	lock        bool
-	preloads    []string
+	distinct    bool
+	preloads    []ormPreload
+	joins       []ormJoin
+}
+
+type ormPreload struct {
+	name  string
+	query *ormQueryValue
+}
+
+type ormJoin struct {
+	kind         string
+	table        string
+	sourceColumn string
+	targetColumn string
+	predicate    *ormPredicate
+}
+
+type ormSubqueryValue struct {
+	query  *ormQueryValue
+	column ormintegration.Column
+}
+
+type ormGroupedValue struct {
+	query            *ormQueryValue
+	column           ormintegration.Column
+	orders           []ormOrder
+	limit            *int64
+	offset           *int64
+	havingExpression string
+	havingOperator   string
+	havingValue      Value
 }
 
 type ormTransactionValue struct {
@@ -54,6 +85,16 @@ type ormPredicate struct {
 	kind      string
 	condition ormCondition
 	children  []*ormPredicate
+	exists    *ormExistsPredicate
+}
+
+type ormExistsPredicate struct {
+	negated      bool
+	table        string
+	sourceTable  string
+	sourceColumn string
+	targetColumn string
+	predicate    *ormPredicate
 }
 
 type ormCondition struct {
@@ -304,6 +345,9 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		}
 		return e.ormColumn(arguments[0].Value, memberName)
 	}
+	if strings.HasPrefix(name, "trb.orm.group.") {
+		return e.ormGroupedIntrinsic(name, arguments, typ)
+	}
 	query, remaining, err := e.ormQueryReceiver(arguments)
 	if err != nil {
 		return Value{}, err
@@ -324,7 +368,128 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		if err != nil {
 			return Value{}, err
 		}
+		if err := ormValidateSubqueryScopes(query, predicate); err != nil {
+			return Value{}, err
+		}
 		query.predicate = ormCombinePredicates("and", query.predicate, predicate)
+		return ormQueryResult(typ, query), nil
+	case "trb.orm.select", "trb.orm.query.select":
+		if len(remaining) != 1 {
+			return Value{}, errors.New("ORM select requires one column")
+		}
+		columnName, ok := remaining[0].Value.Data.(string)
+		if !ok {
+			return Value{}, errors.New("ORM select column must be a literal name")
+		}
+		column, ok := query.model.Column(columnName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no column %s", query.model.Name, columnName)
+		}
+		if query.lock || len(query.preloads) > 0 {
+			return Value{}, errors.New("ORM select subquery does not accept lock or preload")
+		}
+		return Value{Type: typ, Data: &ormSubqueryValue{query: query, column: column}}, nil
+	case "trb.orm.group", "trb.orm.query.group":
+		if len(remaining) != 1 {
+			return Value{}, errors.New("ORM group requires one column")
+		}
+		columnName, _ := remaining[0].Value.Data.(string)
+		column, ok := query.model.Column(columnName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no column %s", query.model.Name, columnName)
+		}
+		if query.lock || query.distinct || len(query.preloads) > 0 {
+			return Value{}, errors.New("ORM group does not accept distinct, lock, or preload")
+		}
+		for _, order := range query.orders {
+			if order.column != column.Name {
+				return Value{}, errors.New("ORM grouped order must use the group key")
+			}
+		}
+		grouped := &ormGroupedValue{query: query, column: column, orders: append([]ormOrder(nil), query.orders...), limit: query.limit, offset: query.offset}
+		grouped.query.orders = nil
+		grouped.query.limit = nil
+		grouped.query.offset = nil
+		return Value{Type: typ, Data: grouped}, nil
+	case "trb.orm.join", "trb.orm.left_join", "trb.orm.query.join", "trb.orm.query.left_join":
+		if len(remaining) < 1 || len(remaining) > 2 {
+			return Value{}, errors.New("ORM join requires an association and optional predicate query")
+		}
+		associationName, ok := remaining[0].Value.Data.(string)
+		if !ok {
+			return Value{}, errors.New("ORM join association must be a literal name")
+		}
+		association, ok := query.model.Association(associationName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no association %s", query.model.Name, associationName)
+		}
+		target, ok := e.ormRuntime().manifest.Model(association.TargetModel)
+		if !ok {
+			return Value{}, errors.New("ORM join target is not available")
+		}
+		var predicate *ormPredicate
+		if len(remaining) == 2 {
+			targetQuery, ok := remaining[1].Value.Data.(*ormQueryValue)
+			if !ok || targetQuery.model.Name != target.Name {
+				return Value{}, fmt.Errorf("ORM join %s requires a %s query", associationName, target.Name)
+			}
+			if targetQuery.transaction != nil {
+				return Value{}, errors.New("ORM association predicate query must not have a transaction scope; scope the base query instead")
+			}
+			if ormQueryModified(targetQuery) || ormPredicateContainsExists(targetQuery.predicate) {
+				return Value{}, errors.New("ORM association predicate query accepts only where, not, and or")
+			}
+			predicate = targetQuery.predicate
+		}
+		kind := "INNER JOIN"
+		if name == "trb.orm.left_join" || name == "trb.orm.query.left_join" {
+			kind = "LEFT JOIN"
+		}
+		query.joins = append(query.joins, ormJoin{
+			kind: kind, table: target.Table,
+			sourceColumn: association.SourceColumn, targetColumn: association.TargetColumn,
+			predicate: predicate,
+		})
+		return ormQueryResult(typ, query), nil
+	case "trb.orm.where_exists", "trb.orm.where_not_exists", "trb.orm.query.where_exists", "trb.orm.query.where_not_exists":
+		if len(remaining) < 1 || len(remaining) > 2 {
+			return Value{}, errors.New("ORM where_exists requires an association and optional predicate query")
+		}
+		associationName, ok := remaining[0].Value.Data.(string)
+		if !ok {
+			return Value{}, errors.New("ORM where_exists association must be a literal name")
+		}
+		association, ok := query.model.Association(associationName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no association %s", query.model.Name, associationName)
+		}
+		target, ok := e.ormRuntime().manifest.Model(association.TargetModel)
+		if !ok {
+			return Value{}, errors.New("ORM where_exists target is not available")
+		}
+		var predicate *ormPredicate
+		if len(remaining) == 2 {
+			targetQuery, ok := remaining[1].Value.Data.(*ormQueryValue)
+			if !ok || targetQuery.model.Name != target.Name {
+				return Value{}, fmt.Errorf("ORM where_exists %s requires a %s query", associationName, target.Name)
+			}
+			if targetQuery.transaction != nil {
+				return Value{}, errors.New("ORM where_exists predicate query must not have a transaction scope; scope the base query instead")
+			}
+			if ormQueryModified(targetQuery) || ormPredicateContainsExists(targetQuery.predicate) {
+				return Value{}, errors.New("ORM where_exists predicate query accepts only where, not, and or")
+			}
+			predicate = targetQuery.predicate
+		}
+		negated := name == "trb.orm.where_not_exists" || name == "trb.orm.query.where_not_exists"
+		query.predicate = ormCombinePredicates("and", query.predicate, &ormPredicate{
+			kind: "exists",
+			exists: &ormExistsPredicate{
+				negated: negated, table: target.Table, sourceTable: query.model.Table,
+				sourceColumn: association.SourceColumn, targetColumn: association.TargetColumn,
+				predicate: predicate,
+			},
+		})
 		return ormQueryResult(typ, query), nil
 	case "trb.orm.not", "trb.orm.query.not":
 		predicate, err := ormPredicateFromArguments(remaining)
@@ -333,6 +498,9 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		}
 		if predicate == nil {
 			return Value{}, errors.New("ORM not requires one condition")
+		}
+		if err := ormValidateSubqueryScopes(query, predicate); err != nil {
+			return Value{}, err
 		}
 		query.predicate = ormCombinePredicates("and", query.predicate, &ormPredicate{kind: "not", children: []*ormPredicate{predicate}})
 		return ormQueryResult(typ, query), nil
@@ -348,7 +516,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			return Value{}, errors.New("ORM or requires conditions on both queries")
 		}
 		if ormQueryModified(query) || ormQueryModified(other) {
-			return Value{}, errors.New("ORM or requires unmodified predicate queries; apply order, limit, offset, lock, and preload after or")
+			return Value{}, errors.New("ORM or requires unmodified predicate queries; apply distinct, joins, order, limit, offset, lock, and preload after or")
 		}
 		if query.transaction != other.transaction {
 			return Value{}, errors.New("ORM or requires queries from the same transaction scope")
@@ -381,20 +549,41 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 	case "trb.orm.query.lock":
 		query.lock = true
 		return ormQueryResult(typ, query), nil
+	case "trb.orm.distinct", "trb.orm.query.distinct":
+		query.distinct = true
+		return ormQueryResult(typ, query), nil
 	case "trb.orm.query.preload":
-		if len(remaining) != 1 {
-			return Value{}, errors.New("ORM preload requires one association")
+		if len(remaining) < 1 || len(remaining) > 2 {
+			return Value{}, errors.New("ORM preload requires an association and optional query")
 		}
 		association, ok := remaining[0].Value.Data.(string)
 		if !ok {
 			return Value{}, errors.New("ORM preload association must be a literal name")
 		}
-		for _, existing := range query.preloads {
-			if existing == association {
+		definition, ok := query.model.Association(association)
+		if !ok || !definition.Preloadable {
+			return Value{}, fmt.Errorf("ORM model %s has no preloadable association %s", query.model.Name, association)
+		}
+		target, ok := e.ormRuntime().manifest.Model(definition.TargetModel)
+		if !ok {
+			return Value{}, errors.New("ORM preload target is not available")
+		}
+		targetQuery := &ormQueryValue{model: target}
+		if len(remaining) == 2 {
+			provided, ok := remaining[1].Value.Data.(*ormQueryValue)
+			if !ok || provided.model.Name != target.Name {
+				return Value{}, fmt.Errorf("ORM preload %s requires a %s query", association, target.Name)
+			}
+			targetQuery = cloneORMQuery(provided)
+		}
+		preload := ormPreload{name: association, query: targetQuery}
+		for index, existing := range query.preloads {
+			if existing.name == association {
+				query.preloads[index] = preload
 				return ormQueryResult(typ, query), nil
 			}
 		}
-		query.preloads = append(query.preloads, association)
+		query.preloads = append(query.preloads, preload)
 		return ormQueryResult(typ, query), nil
 	case "trb.orm.find", "trb.orm.scope.find":
 		primaryKey, ok := query.model.PrimaryKey()
@@ -408,12 +597,18 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		if err != nil {
 			return Value{}, err
 		}
+		if err := ormValidateSubqueryScopes(query, predicate); err != nil {
+			return Value{}, err
+		}
 		query.predicate = ormCombinePredicates("and", query.predicate, predicate)
 		return e.ormFirstResult(typ, query)
 	case "trb.orm.exists", "trb.orm.query.exists":
 		if name == "trb.orm.exists" {
 			predicate, err := ormPredicateFromArguments(remaining)
 			if err != nil {
+				return Value{}, err
+			}
+			if err := ormValidateSubqueryScopes(query, predicate); err != nil {
 				return Value{}, err
 			}
 			query.predicate = ormCombinePredicates("and", query.predicate, predicate)
@@ -463,6 +658,126 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 	}
 }
 
+func (e *Evaluator) ormGroupedIntrinsic(name string, arguments []evaluatedArgument, typ types.Type) (Value, error) {
+	if len(arguments) == 0 {
+		return Value{}, errors.New("ORM grouped operation is missing its receiver")
+	}
+	grouped, ok := arguments[0].Value.Data.(*ormGroupedValue)
+	if !ok {
+		return Value{}, errors.New("ORM grouped operation requires a grouped query")
+	}
+	copy := *grouped
+	if name == "trb.orm.group.having" {
+		if len(arguments) < 4 || len(arguments) > 5 {
+			return Value{}, errors.New("ORM having requires aggregate, operator, and value")
+		}
+		expression, operatorIndex, valueIndex := "COUNT(*)", 2, 3
+		if len(arguments) == 5 {
+			operation, _ := arguments[1].Value.Data.(string)
+			expression, operatorIndex, valueIndex = groupedAggregateExpression(operation, "trb_value"), 3, 4
+		}
+		op, _ := arguments[operatorIndex].Value.Data.(string)
+		copy.havingExpression = expression
+		copy.havingOperator = op
+		copy.havingValue = arguments[valueIndex].Value
+		return Value{Type: typ, Data: &copy}, nil
+	}
+	operation := name[strings.LastIndex(name, ".")+1:]
+	valueType := types.FromName("Integer")
+	projection := e.ormRuntime().adapter.QuoteIdentifier(copy.column.Name) + " AS " + e.ormRuntime().adapter.QuoteIdentifier("trb_group")
+	expression := "COUNT(*)"
+	if operation != "count" {
+		if len(arguments) != 2 {
+			return Value{}, errors.New("ORM grouped aggregate requires one column")
+		}
+		columnName, _ := arguments[1].Value.Data.(string)
+		target, ok := copy.query.model.Column(columnName)
+		if !ok {
+			return Value{}, fmt.Errorf("ORM model %s has no column %s", copy.query.model.Name, columnName)
+		}
+		var supported bool
+		valueType, supported = ormintegration.AggregateResultType(operation, target)
+		if !supported {
+			return Value{}, fmt.Errorf("ORM %s does not support column %s", operation, columnName)
+		}
+		projection += ", " + e.ormRuntime().adapter.QuoteIdentifier(target.Name) + " AS " + e.ormRuntime().adapter.QuoteIdentifier("trb_value")
+		expression = groupedAggregateExpression(operation, "trb_value")
+	}
+	statement, queryArguments, err := e.ormStatement(copy.query, projection)
+	if err != nil {
+		return Value{}, err
+	}
+	statement = "SELECT " + e.ormRuntime().adapter.QuoteIdentifier("trb_group") + ", " + expression + " FROM (" + statement + ") AS trb_grouped GROUP BY " + e.ormRuntime().adapter.QuoteIdentifier("trb_group")
+	if copy.havingExpression != "" {
+		statement += " HAVING " + copy.havingExpression + " " + copy.havingOperator + " " + e.ormRuntime().adapter.Placeholder(len(queryArguments)+1)
+		queryArguments = append(queryArguments, copy.havingValue.Data)
+	}
+	if len(copy.orders) > 0 {
+		orders := make([]string, len(copy.orders))
+		for index, order := range copy.orders {
+			orders[index] = e.ormRuntime().adapter.QuoteIdentifier("trb_group") + " " + strings.ToUpper(order.direction)
+		}
+		statement += " ORDER BY " + strings.Join(orders, ", ")
+	}
+	if copy.limit != nil {
+		statement += " LIMIT " + e.ormRuntime().adapter.Placeholder(len(queryArguments)+1)
+		queryArguments = append(queryArguments, *copy.limit)
+	} else if copy.offset != nil {
+		statement += e.ormRuntime().adapter.OffsetNoLimit
+	}
+	if copy.offset != nil {
+		statement += " OFFSET " + e.ormRuntime().adapter.Placeholder(len(queryArguments)+1)
+		queryArguments = append(queryArguments, *copy.offset)
+	}
+	database, failure := e.ormQueryExecutor(copy.query)
+	if failure != nil {
+		return e.ormResultErr(typ, failure.kind, failure.message)
+	}
+	rows, err := database.QueryContext(e.context, statement, queryArguments...)
+	if err != nil {
+		return e.ormResultErr(typ, "Query", "database grouped count query failed")
+	}
+	defer rows.Close()
+	entries := []hashEntry{}
+	for rows.Next() {
+		var raw any
+		var rawValue any
+		if err := rows.Scan(&raw, &rawValue); err != nil {
+			return e.ormResultErr(typ, "InvalidData", "database grouped count row was invalid")
+		}
+		key, err := ormColumnValue(copy.column.Type, raw)
+		if err != nil {
+			return e.ormResultErr(typ, "InvalidData", "database grouped count row was invalid")
+		}
+		value, err := ormColumnValue(valueType, rawValue)
+		if err != nil {
+			return e.ormResultErr(typ, "InvalidData", "database grouped aggregate row was invalid")
+		}
+		entries = append(entries, hashEntry{Key: key, Value: value})
+	}
+	if err := rows.Err(); err != nil {
+		return e.ormResultErr(typ, "Query", "database grouped count query failed")
+	}
+	return e.ormResultOK(typ, Value{Type: ormResultValueType(typ), Data: &hashValue{Entries: entries}})
+}
+
+func groupedAggregateExpression(operation, column string) string {
+	function := strings.ToUpper(operation)
+	switch operation {
+	case "average":
+		function = "AVG"
+	case "minimum":
+		function = "MIN"
+	case "maximum":
+		function = "MAX"
+	}
+	expression := function + "(" + column + ")"
+	if operation == "sum" {
+		expression = "COALESCE(" + expression + ", 0)"
+	}
+	return expression
+}
+
 func (e *Evaluator) ormQueryReceiver(arguments []evaluatedArgument) (*ormQueryValue, []evaluatedArgument, error) {
 	if len(arguments) == 0 {
 		return nil, nil, errors.New("ORM operation is missing its receiver")
@@ -494,7 +809,8 @@ func (e *Evaluator) ormQueryReceiver(arguments []evaluatedArgument) (*ormQueryVa
 func cloneORMQuery(query *ormQueryValue) *ormQueryValue {
 	result := *query
 	result.orders = append([]ormOrder(nil), query.orders...)
-	result.preloads = append([]string(nil), query.preloads...)
+	result.preloads = append([]ormPreload(nil), query.preloads...)
+	result.joins = append([]ormJoin(nil), query.joins...)
 	return &result
 }
 
@@ -503,7 +819,22 @@ func ormQueryResult(typ types.Type, query *ormQueryValue) Value {
 }
 
 func ormQueryModified(query *ormQueryValue) bool {
-	return len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0
+	return len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || query.distinct || len(query.preloads) > 0 || len(query.joins) > 0
+}
+
+func ormPredicateContainsExists(predicate *ormPredicate) bool {
+	if predicate == nil {
+		return false
+	}
+	if predicate.kind == "exists" {
+		return true
+	}
+	for _, child := range predicate.children {
+		if ormPredicateContainsExists(child) {
+			return true
+		}
+	}
+	return false
 }
 
 func ormPredicateFromArguments(arguments []evaluatedArgument) (*ormPredicate, error) {
@@ -512,6 +843,14 @@ func ormPredicateFromArguments(arguments []evaluatedArgument) (*ormPredicate, er
 		operator, operatorOK := arguments[1].Value.Data.(string)
 		if !columnOK || !operatorOK {
 			return nil, errors.New("ORM comparison requires a column and operator")
+		}
+		if _, subquery := arguments[2].Value.Data.(*ormSubqueryValue); subquery {
+			switch operator {
+			case "=":
+				operator = "IN"
+			case "!=":
+				operator = "NOT_IN"
+			}
 		}
 		return ormPredicateGroup([]ormCondition{{column: column, operator: operator, value: arguments[2].Value}}), nil
 	}
@@ -524,6 +863,8 @@ func ormPredicateFromArguments(arguments []evaluatedArgument) (*ormPredicate, er
 		switch argument.Value.Data.(type) {
 		case *arrayValue:
 			operator = "IN"
+		case *ormSubqueryValue:
+			operator = "IN"
 		case *rangeValue:
 			operator = "RANGE_INCLUSIVE"
 			if argument.Value.Data.(*rangeValue).Exclusive {
@@ -533,6 +874,25 @@ func ormPredicateFromArguments(arguments []evaluatedArgument) (*ormPredicate, er
 		conditions = append(conditions, ormCondition{column: argument.Name, operator: operator, value: argument.Value})
 	}
 	return ormPredicateGroup(conditions), nil
+}
+
+func ormValidateSubqueryScopes(query *ormQueryValue, predicate *ormPredicate) error {
+	if predicate == nil {
+		return nil
+	}
+	if predicate.kind == "atom" {
+		subquery, ok := predicate.condition.value.Data.(*ormSubqueryValue)
+		if ok && subquery.query.transaction != nil && subquery.query.transaction != query.transaction {
+			return errors.New("ORM subquery transaction scope must match the base query")
+		}
+		return nil
+	}
+	for _, child := range predicate.children {
+		if err := ormValidateSubqueryScopes(query, child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ormPredicateGroup(conditions []ormCondition) *ormPredicate {
@@ -560,13 +920,43 @@ func ormCombinePredicates(kind string, left, right *ormPredicate) *ormPredicate 
 }
 
 func (e *Evaluator) ormStatement(query *ormQueryValue, projection string) (string, []any, error) {
-	runtime := e.ormRuntime()
-	statement := "SELECT " + projection + " FROM " + runtime.adapter.QuoteIdentifier(query.model.Table)
 	arguments := []any{}
+	statement, err := e.ormStatementAppend(query, projection, &arguments)
+	return statement, arguments, err
+}
+
+func (e *Evaluator) ormStatementAppend(query *ormQueryValue, projection string, arguments *[]any) (string, error) {
+	runtime := e.ormRuntime()
+	statement := "SELECT "
+	if query.distinct {
+		statement += "DISTINCT "
+	}
+	statement += projection + " FROM " + runtime.adapter.QuoteIdentifier(query.model.Table)
+	for index, join := range query.joins {
+		if join.kind != "INNER JOIN" && join.kind != "LEFT JOIN" {
+			return "", errors.New("unsupported ORM join kind")
+		}
+		alias := "__trb_join_" + strconv.Itoa(index)
+		key := "__trb_join_key"
+		subquery := "SELECT " + runtime.adapter.QuoteIdentifier(join.targetColumn) + " AS " + runtime.adapter.QuoteIdentifier(key) +
+			" FROM " + runtime.adapter.QuoteIdentifier(join.table)
+		if join.predicate != nil {
+			predicate, err := e.ormPredicateSQL(join.predicate, arguments)
+			if err != nil {
+				return "", err
+			}
+			if predicate != "" {
+				subquery += " WHERE " + predicate
+			}
+		}
+		statement += " " + join.kind + " (" + subquery + ") AS " + runtime.adapter.QuoteIdentifier(alias) +
+			" ON " + runtime.adapter.QuoteIdentifier(join.sourceColumn) + " = " + runtime.adapter.QuoteIdentifier(alias) +
+			"." + runtime.adapter.QuoteIdentifier(key)
+	}
 	if query.predicate != nil {
-		predicate, err := e.ormPredicateSQL(query.predicate, &arguments)
+		predicate, err := e.ormPredicateSQL(query.predicate, arguments)
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
 		statement += " WHERE " + predicate
 	}
@@ -578,19 +968,19 @@ func (e *Evaluator) ormStatement(query *ormQueryValue, projection string) (strin
 		statement += " ORDER BY " + strings.Join(orders, ", ")
 	}
 	if query.limit != nil {
-		statement += " LIMIT " + runtime.adapter.Placeholder(len(arguments)+1)
-		arguments = append(arguments, *query.limit)
+		statement += " LIMIT " + runtime.adapter.Placeholder(len(*arguments)+1)
+		*arguments = append(*arguments, *query.limit)
 	} else if query.offset != nil {
 		statement += runtime.adapter.OffsetNoLimit
 	}
 	if query.offset != nil {
-		statement += " OFFSET " + runtime.adapter.Placeholder(len(arguments)+1)
-		arguments = append(arguments, *query.offset)
+		statement += " OFFSET " + runtime.adapter.Placeholder(len(*arguments)+1)
+		*arguments = append(*arguments, *query.offset)
 	}
 	if query.lock && runtime.adapter.Name != "sqlite" {
 		statement += " FOR UPDATE"
 	}
-	return statement, arguments, nil
+	return statement, nil
 }
 
 func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (string, error) {
@@ -603,7 +993,18 @@ func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (
 		condition := predicate.condition
 		column := runtime.adapter.QuoteIdentifier(condition.column)
 		switch condition.operator {
-		case "IN":
+		case "IN", "NOT_IN":
+			if subquery, ok := condition.value.Data.(*ormSubqueryValue); ok {
+				statement, err := e.ormStatementAppend(subquery.query, e.ormRuntime().adapter.QuoteIdentifier(subquery.column.Name), arguments)
+				if err != nil {
+					return "", err
+				}
+				operator := " IN "
+				if condition.operator == "NOT_IN" {
+					operator = " NOT IN "
+				}
+				return column + operator + "(" + statement + ")", nil
+			}
 			array, ok := condition.value.Data.(*arrayValue)
 			if !ok {
 				return "", errors.New("ORM IN predicate requires an Array")
@@ -667,6 +1068,28 @@ func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (
 			return "", err
 		}
 		return "NOT (" + clause + ")", nil
+	case "exists":
+		if predicate.exists == nil {
+			return "", errors.New("invalid ORM exists predicate")
+		}
+		exists := predicate.exists
+		correlation := runtime.adapter.QuoteIdentifier(exists.table) + "." + runtime.adapter.QuoteIdentifier(exists.targetColumn) +
+			" = " + runtime.adapter.QuoteIdentifier(exists.sourceTable) + "." + runtime.adapter.QuoteIdentifier(exists.sourceColumn)
+		statement := "SELECT 1 FROM " + runtime.adapter.QuoteIdentifier(exists.table) + " WHERE " + correlation
+		if exists.predicate != nil {
+			clause, err := e.ormPredicateSQL(exists.predicate, arguments)
+			if err != nil {
+				return "", err
+			}
+			if clause != "" {
+				statement += " AND (" + clause + ")"
+			}
+		}
+		operator := "EXISTS"
+		if exists.negated {
+			operator = "NOT EXISTS"
+		}
+		return operator + " (" + statement + ")", nil
 	default:
 		return "", errors.New("unsupported ORM predicate")
 	}
@@ -930,7 +1353,11 @@ func (e *Evaluator) ormExists(query *ormQueryValue) (bool, *ormFailure) {
 }
 
 func (e *Evaluator) ormCount(query *ormQueryValue) (int64, *ormFailure) {
-	statement, arguments, err := e.ormStatement(query, "1")
+	projection := "1"
+	if query.distinct {
+		projection = e.ormModelProjection(query.model)
+	}
+	statement, arguments, err := e.ormStatement(query, projection)
 	if err != nil {
 		return 0, &ormFailure{kind: "InvalidData", message: err.Error()}
 	}
@@ -1140,10 +1567,16 @@ func ormExplainText(value any) string {
 	return fmt.Sprint(value)
 }
 
-func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, name string) *ormFailure {
-	association, ok := model.Association(name)
+func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, preload ormPreload) *ormFailure {
+	if preload.query.transaction != nil {
+		return &ormFailure{kind: "InvalidData", message: "ORM preload query must not have a transaction scope; scope the base query instead"}
+	}
+	if preload.query.limit != nil || preload.query.offset != nil || preload.query.lock {
+		return &ormFailure{kind: "InvalidData", message: "ORM preload query does not accept limit, offset, or lock"}
+	}
+	association, ok := model.Association(preload.name)
 	if !ok || !association.Preloadable {
-		return &ormFailure{kind: "InvalidData", message: "unsupported ORM preload " + name}
+		return &ormFailure{kind: "InvalidData", message: "unsupported ORM preload " + preload.name}
 	}
 	target, ok := e.ormRuntime().manifest.Model(association.TargetModel)
 	if !ok {
@@ -1164,7 +1597,8 @@ func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, name 
 		}
 	}
 	condition := Value{Type: types.Type{Kind: types.Array, Name: "Array"}, Data: &arrayValue{Items: items}}
-	query := &ormQueryValue{model: target, predicate: ormPredicateGroup([]ormCondition{{column: association.TargetColumn, operator: "IN", value: condition}})}
+	query := cloneORMQuery(preload.query)
+	query.predicate = ormCombinePredicates("and", query.predicate, ormPredicateGroup([]ormCondition{{column: association.TargetColumn, operator: "IN", value: condition}}))
 	if len(values) > 0 {
 		if source, ok := values[0].Data.(*objectInstance); ok {
 			if scope, ok := source.Fields["@__trb_orm_query_scope"].Data.(*ormQueryValue); ok {
@@ -1186,8 +1620,8 @@ func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, name 
 		object := value.Data.(*objectInstance)
 		key := object.Fields["@"+association.SourceColumn]
 		matches := grouped[ormValueKey(key)]
-		loadedField := "@__trb_association_" + name + "_loaded"
-		valueField := "@__trb_association_" + name
+		loadedField := "@__trb_association_" + preload.name + "_loaded"
+		valueField := "@__trb_association_" + preload.name
 		object.Fields[loadedField] = Value{Type: types.FromName("Boolean"), Data: true}
 		if association.Kind == ormintegration.HasMany {
 			itemType := types.FromName(target.Name)

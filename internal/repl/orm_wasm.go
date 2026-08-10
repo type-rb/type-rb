@@ -15,6 +15,8 @@ type ormQueryValue struct {
 	model struct{ QueryType string }
 }
 
+type ormSubqueryValue struct{}
+
 type ormWASMRuntimeProvider struct{}
 
 func init() {

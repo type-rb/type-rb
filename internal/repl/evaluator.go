@@ -2591,6 +2591,8 @@ func Inspect(value Value) string {
 		return "#<" + item.Definition.Node.Name + " " + strings.Join(parts, ", ") + ">"
 	case *ormQueryValue:
 		return "#<" + item.model.QueryType + ">"
+	case *ormSubqueryValue:
+		return "#<" + value.Type.String() + ">"
 	case *typeValue:
 		if item.Record != nil {
 			return item.Record.Node.Name

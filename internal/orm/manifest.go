@@ -44,6 +44,16 @@ func (m Model) ChangesType() string { return m.Name + "Changes" }
 
 func (m Model) ScopeType() string { return m.Name + "Scope" }
 
+func (m Model) GroupType(column Column) string {
+	name := ""
+	for _, part := range strings.Split(column.Name, "_") {
+		if part != "" {
+			name += strings.ToUpper(part[:1]) + part[1:]
+		}
+	}
+	return m.Name + "GroupedBy" + name + "Query"
+}
+
 func (m Model) PrimaryKey() (Column, bool) {
 	var result Column
 	found := false
@@ -223,6 +233,35 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["where"] {
 				class.Body = append(class.Body, whereIRMethod(model, true))
 			}
+			if !existing["distinct"] {
+				class.Body = append(class.Body, distinctIRMethod(model, true))
+			}
+			if !existing["select"] {
+				class.Body = append(class.Body, selectIRMethod(model, true))
+			}
+			if !existing["group"] {
+				class.Body = append(class.Body, groupIRMethod(model, true))
+			}
+			if !existing["join"] {
+				if join := joinIRMethod(model, "join", true); join != nil {
+					class.Body = append(class.Body, join)
+				}
+			}
+			if !existing["left_join"] {
+				if join := joinIRMethod(model, "left_join", true); join != nil {
+					class.Body = append(class.Body, join)
+				}
+			}
+			if !existing["where_exists"] {
+				if exists := joinIRMethod(model, "where_exists", true); exists != nil {
+					class.Body = append(class.Body, exists)
+				}
+			}
+			if !existing["where_not_exists"] {
+				if exists := joinIRMethod(model, "where_not_exists", true); exists != nil {
+					class.Body = append(class.Body, exists)
+				}
+			}
 			if !existing["using"] {
 				class.Body = append(class.Body, &ir.Method{
 					Name: "using", External: true, Class: true,
@@ -326,6 +365,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 				Body: []ir.Statement{&ir.Method{Name: "save", External: true, ReturnType: dbResult(namedType(model.Name))}},
 			})
 		}
+		for _, column := range model.Columns {
+			program.Statements = append(program.Statements, &ir.Class{Name: model.GroupType(column), External: true, Body: groupedIRMethods(model, column)})
+		}
 	}
 }
 
@@ -426,6 +468,7 @@ func queryIRMethods(model Model) []ir.Statement {
 	firstType.Nullable = true
 	methods := []ir.Statement{
 		where,
+		distinctIRMethod(model, false),
 		not,
 		&ir.Method{Name: "or", External: true, Parameters: []ir.Parameter{{Name: "other", Type: namedType(model.QueryType)}}, ReturnType: namedType(model.QueryType)},
 		findByIRMethod(model, false),
@@ -444,6 +487,20 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "to_sql", External: true, ReturnType: types.FromName("String")},
 		&ir.Method{Name: "explain", External: true, ReturnType: dbResult(types.FromName("String"))},
 	}
+	methods = append(methods, selectIRMethod(model, false))
+	methods = append(methods, groupIRMethod(model, false))
+	if join := joinIRMethod(model, "join", false); join != nil {
+		methods = append(methods, join)
+	}
+	if join := joinIRMethod(model, "left_join", false); join != nil {
+		methods = append(methods, join)
+	}
+	if exists := joinIRMethod(model, "where_exists", false); exists != nil {
+		methods = append(methods, exists)
+	}
+	if exists := joinIRMethod(model, "where_not_exists", false); exists != nil {
+		methods = append(methods, exists)
+	}
 	for _, operation := range AggregateOperations() {
 		if aggregate := aggregateIRMethod(model, operation, false); aggregate != nil {
 			methods = append(methods, aggregate)
@@ -459,6 +516,83 @@ func queryIRMethods(model Model) []ir.Statement {
 		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))
 	}
 	return methods
+}
+
+func distinctIRMethod(model Model, class bool) *ir.Method {
+	return &ir.Method{Name: "distinct", External: true, Class: class, ReturnType: namedType(model.QueryType)}
+}
+
+func groupIRMethod(model Model, class bool) *ir.Method {
+	method := &ir.Method{Name: "group", External: true, Class: class}
+	for _, column := range model.Columns {
+		method.Alternatives = append(method.Alternatives, ir.MethodSignature{Parameters: []ir.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}}, ReturnType: namedType(model.GroupType(column))})
+	}
+	method.ReturnType = method.Alternatives[0].ReturnType
+	return method
+}
+
+func groupedIRMethods(model Model, column Column) []ir.Statement {
+	key := column.Type
+	having := &ir.Method{Name: "having", External: true, ReturnType: namedType(model.GroupType(column))}
+	having.Alternatives = append(having.Alternatives, ir.MethodSignature{Parameters: []ir.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{"count"}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: types.FromName("Integer")}}, ReturnType: namedType(model.GroupType(column))})
+	methods := []ir.Statement{having,
+		&ir.Method{Name: "count", External: true, ReturnType: dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{key, types.FromName("Integer")}})},
+	}
+	for _, operation := range AggregateOperations() {
+		declared, ok := aggregateDeclaration(model, operation, "", false)
+		if !ok {
+			continue
+		}
+		aggregate := &ir.Method{Name: operation, External: true}
+		for _, signature := range declared.Alternatives {
+			result := signature.Return.Args[0]
+			parameters := []ir.Parameter{}
+			for _, parameter := range signature.Parameters {
+				parameters = append(parameters, ir.Parameter{Name: parameter.Name, Type: parameter.Type, LiteralValues: append([]string(nil), parameter.LiteralValues...)})
+			}
+			returnType := dbResult(types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{key, result}})
+			aggregate.Alternatives = append(aggregate.Alternatives, ir.MethodSignature{Parameters: parameters, ReturnType: returnType})
+		}
+		aggregate.Parameters = aggregate.Alternatives[0].Parameters
+		aggregate.ReturnType = aggregate.Alternatives[0].ReturnType
+		methods = append(methods, aggregate)
+		for _, target := range model.Columns {
+			result, ok := AggregateResultType(operation, target)
+			if !ok {
+				continue
+			}
+			valueType := result
+			valueType.Nullable = false
+			having.Alternatives = append(having.Alternatives, ir.MethodSignature{Parameters: []ir.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{operation}}, {Name: "column", Type: types.FromName("String"), LiteralValues: []string{target.Name}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: valueType}}, ReturnType: namedType(model.GroupType(column))})
+		}
+	}
+	having.Parameters = having.Alternatives[0].Parameters
+	return methods
+}
+
+func joinIRMethod(model Model, name string, class bool) *ir.Method {
+	method := &ir.Method{Name: name, External: true, Class: class, ReturnType: namedType(model.QueryType)}
+	for _, association := range model.Associations {
+		associationParameter := ir.Parameter{
+			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
+		}
+		method.Alternatives = append(method.Alternatives,
+			ir.MethodSignature{
+				Parameters: []ir.Parameter{associationParameter}, ReturnType: namedType(model.QueryType),
+			},
+			ir.MethodSignature{
+				Parameters: []ir.Parameter{
+					associationParameter,
+					{Name: "query", Type: types.FromName(association.TargetQuery)},
+				},
+				ReturnType: namedType(model.QueryType),
+			},
+		)
+	}
+	if len(method.Alternatives) == 0 {
+		return nil
+	}
+	return method
 }
 
 func ensureRuntimeTypes(program *ir.Program) {
@@ -487,21 +621,31 @@ func contains(values []string, expected string) bool {
 }
 
 func preloadIRMethod(model Model) *ir.Method {
-	var values []string
+	method := &ir.Method{Name: "preload", External: true, ReturnType: namedType(model.QueryType)}
 	for _, association := range model.Associations {
-		if association.Preloadable {
-			values = append(values, association.Name)
+		if !association.Preloadable {
+			continue
 		}
+		associationParameter := ir.Parameter{
+			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
+		}
+		method.Alternatives = append(method.Alternatives,
+			ir.MethodSignature{
+				Parameters: []ir.Parameter{associationParameter}, ReturnType: namedType(model.QueryType),
+			},
+			ir.MethodSignature{
+				Parameters: []ir.Parameter{
+					associationParameter,
+					{Name: "query", Type: types.FromName(association.TargetQuery)},
+				},
+				ReturnType: namedType(model.QueryType),
+			},
+		)
 	}
-	if len(values) == 0 {
+	if len(method.Alternatives) == 0 {
 		return nil
 	}
-	return &ir.Method{
-		Name: "preload", External: true, ReturnType: namedType(model.QueryType),
-		Parameters: []ir.Parameter{{
-			Name: "association", Type: types.FromName("String"), LiteralValues: values,
-		}},
-	}
+	return method
 }
 
 func associationValueField(name string) string {
@@ -567,6 +711,21 @@ func projectionIRMethod(model Model, name string, class, pick bool) *ir.Method {
 			LiteralValues: append([]string(nil), parameter.LiteralValues...),
 		})
 	}
+	for _, signature := range declared.Alternatives {
+		alternative := ir.MethodSignature{ReturnType: signature.Return}
+		for _, parameter := range signature.Parameters {
+			alternative.Parameters = append(alternative.Parameters, ir.Parameter{
+				Name: parameter.Name, Type: parameter.Type, LiteralValues: append([]string(nil), parameter.LiteralValues...),
+			})
+		}
+		method.Alternatives = append(method.Alternatives, alternative)
+	}
+	return method
+}
+
+func selectIRMethod(model Model, class bool) *ir.Method {
+	declared := selectDeclaration(model, "", class)
+	method := &ir.Method{Name: "select", External: true, Class: class, ReturnType: declared.Return}
 	for _, signature := range declared.Alternatives {
 		alternative := ir.MethodSignature{ReturnType: signature.Return}
 		for _, parameter := range signature.Parameters {
@@ -655,6 +814,20 @@ func (m *Manifest) QueryModel(name string) (Model, bool) {
 		}
 	}
 	return Model{}, false
+}
+
+func (m *Manifest) GroupModel(name string) (Model, Column, bool) {
+	if m == nil {
+		return Model{}, Column{}, false
+	}
+	for _, model := range m.Models {
+		for _, column := range model.Columns {
+			if model.GroupType(column) == name {
+				return model, column, true
+			}
+		}
+	}
+	return Model{}, Column{}, false
 }
 
 func (m *Manifest) DraftModel(name string) (Model, bool) {

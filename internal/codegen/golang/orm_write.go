@@ -425,11 +425,11 @@ func (g *generator) ormDeleteRuntime(adapter ormintegration.Adapter, model ormin
 func (g *generator) ormRelationWriteRuntime(adapter ormintegration.Adapter, model ormintegration.Model) {
 	integerType := types.FromName("Integer")
 	queryType := goORMQueryType(model)
-	invalidModifiers := "len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0"
+	invalidModifiers := "len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || query.distinct || len(query.preloads) > 0 || len(query.joins) > 0"
 	g.line("func " + goORMUpdateAll(model) + "(query " + queryType + ", columns []string, values []any) " + g.ormResultType(integerType) + " {")
 	g.indent++
 	g.line("if len(columns) == 0 { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update requires at least one value")) + " }")
-	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update does not accept order, limit, offset, lock, or preload")) + " }")
+	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update does not accept distinct, joins, order, limit, offset, lock, or preload")) + " }")
 	g.line("database, databaseError := trbOrmExecutorForTransaction(query.transaction)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
 	g.line("assignments := make([]string, len(columns))")
@@ -447,7 +447,7 @@ func (g *generator) ormRelationWriteRuntime(adapter ormintegration.Adapter, mode
 	g.b.WriteByte('\n')
 	g.line("func " + goORMDeleteAll(model) + "(query " + queryType + ") " + g.ormResultType(integerType) + " {")
 	g.indent++
-	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk delete does not accept order, limit, offset, lock, or preload")) + " }")
+	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk delete does not accept distinct, joins, order, limit, offset, lock, or preload")) + " }")
 	g.line("database, databaseError := trbOrmExecutorForTransaction(query.transaction)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
 	g.line("arguments := []any{}")
