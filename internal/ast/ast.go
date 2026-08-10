@@ -22,13 +22,14 @@ func (b Base) Span() token.Span { return b.SourceSpan }
 
 type Program struct {
 	Base
-	Mode       string
-	Package    string
-	ModulePath string
-	GoModule   string
-	RubyLoader string
-	Statements []Statement
-	Tokens     []token.Token
+	Mode              string
+	Package           string
+	ModulePath        string
+	GoModule          string
+	RubyLoader        string
+	TypeScriptRuntime string
+	Statements        []Statement
+	Tokens            []token.Token
 }
 
 type Statement interface {

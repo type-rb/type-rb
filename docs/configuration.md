@@ -59,7 +59,8 @@ New managed TypeScript projects use ESM, npm, and the latest TypeScript release:
   },
   "typescript": {
     "packageManager": "npm",
-    "moduleType": "module"
+    "moduleType": "module",
+    "runtime": "node"
   }
 }
 ```
@@ -67,6 +68,27 @@ New managed TypeScript projects use ESM, npm, and the latest TypeScript release:
 TypeRB targets the current TypeScript release without legacy code-generation
 branches. Browser applications are the primary TypeScript use case; APIs tied
 to a particular runtime remain explicit platform packages.
+
+`typescript.runtime` selects `browser`, `bun`, or `node`. Existing projects
+that omit it retain the previous Node execution behavior. `browser` projects
+compile source for a browser application or bundler and cannot use `trb run`
+as a process entrypoint. Bun server projects can select both runtime and
+package manager without additional manifest files:
+
+```jsonc
+{
+  "mode": "typescript",
+  "typescript": {
+    "runtime": "bun",
+    "packageManager": "bun",
+    "moduleType": "module"
+  }
+}
+```
+
+When `packageManager` is omitted, Bun runtime projects default to `bun`; other
+TypeScript projects default to `npm`. The two settings remain independent, so
+an explicitly configured npm installation can still be executed by Bun.
 
 ## Package management
 

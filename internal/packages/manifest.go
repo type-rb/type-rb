@@ -78,23 +78,35 @@ func InstallWithDependencies(config *project.Config, packageDependencies map[str
 	if _, err := SyncWithDependencies(config, packageDependencies); err != nil {
 		return err
 	}
-	var command *exec.Cmd
-	switch config.Mode {
-	case "ruby":
-		command = exec.Command("bundle", "install")
-	case "go":
-		command = exec.Command("go", "mod", "download", "all")
-	case "typescript":
-		if config.TypeScript.PackageManager != "npm" {
-			return fmt.Errorf("v0.1 supports npm package management; got %q", config.TypeScript.PackageManager)
-		}
-		command = exec.Command("npm", "install")
+	command, err := installCommand(config)
+	if err != nil {
+		return err
 	}
 	command.Dir = config.Root
 	command.Stdout = stdout
 	command.Stderr = stderr
 	command.Stdin = stdin
 	return command.Run()
+}
+
+func installCommand(config *project.Config) (*exec.Cmd, error) {
+	switch config.Mode {
+	case "ruby":
+		return exec.Command("bundle", "install"), nil
+	case "go":
+		return exec.Command("go", "mod", "download", "all"), nil
+	case "typescript":
+		switch config.TypeScript.PackageManager {
+		case "bun":
+			return exec.Command("bun", "install"), nil
+		case "npm":
+			return exec.Command("npm", "install"), nil
+		default:
+			return nil, fmt.Errorf("unsupported TypeScript package manager %q", config.TypeScript.PackageManager)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported mode %q", config.Mode)
+	}
 }
 
 func rubyManifest(config *project.Config, packageDependencies map[string]string) ([]byte, error) {

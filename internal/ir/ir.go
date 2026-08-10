@@ -14,13 +14,14 @@ type Base struct {
 }
 
 type Program struct {
-	Mode       string
-	Package    string
-	ModulePath string
-	GoModule   string
-	RubyLoader string
-	Extensions []Extension
-	Statements []Statement
+	Mode              string
+	Package           string
+	ModulePath        string
+	GoModule          string
+	RubyLoader        string
+	TypeScriptRuntime string
+	Extensions        []Extension
+	Statements        []Statement
 }
 
 // Extension is typed compile-time data contributed by a package integration.

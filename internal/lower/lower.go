@@ -32,12 +32,13 @@ func Program(checked checker.Result) *ir.Program {
 	statements := l.statements(checked.Program.Statements)
 	statements = append(l.runtimeImports(statements), statements...)
 	return &ir.Program{
-		Mode:       checked.Program.Mode,
-		Package:    checked.Program.Package,
-		ModulePath: checked.Program.ModulePath,
-		GoModule:   checked.Program.GoModule,
-		RubyLoader: checked.Program.RubyLoader,
-		Statements: statements,
+		Mode:              checked.Program.Mode,
+		Package:           checked.Program.Package,
+		ModulePath:        checked.Program.ModulePath,
+		GoModule:          checked.Program.GoModule,
+		RubyLoader:        checked.Program.RubyLoader,
+		TypeScriptRuntime: checked.Program.TypeScriptRuntime,
+		Statements:        statements,
 	}
 }
 

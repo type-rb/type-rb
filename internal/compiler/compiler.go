@@ -51,6 +51,7 @@ type Options struct {
 	ModulePath         string
 	GoModule           string
 	RubyLoader         string
+	TypeScriptRuntime  string
 	SourceRoot         string
 	ProjectRoot        string
 	PackageOptions     map[string][]byte
@@ -366,6 +367,7 @@ func configureProgram(program *ast.Program, options Options, modulePath, package
 	program.ModulePath = modulePath
 	program.GoModule = options.GoModule
 	program.RubyLoader = options.RubyLoader
+	program.TypeScriptRuntime = options.TypeScriptRuntime
 }
 
 func modeDiagnostics(program *ast.Program, mode string) []diagnostic.Diagnostic {

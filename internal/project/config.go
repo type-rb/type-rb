@@ -19,12 +19,20 @@ const DefaultRubyVersion = "4.0.6"
 // DefaultTypeScriptVersion tracks the current TypeScript release.
 const DefaultTypeScriptVersion = "latest"
 
+// DefaultTypeScriptRuntime preserves the runtime used by TypeScript projects
+// created before runtime selection became explicit.
+const DefaultTypeScriptRuntime = TypeScriptRuntimeNode
+
 // ErrConfigNotFound reports that discovery reached the filesystem root.
 var ErrConfigNotFound = errors.New(ConfigName + " not found")
 
 const (
 	ManagedPackages  = "managed"
 	ExternalPackages = "external"
+
+	TypeScriptRuntimeBrowser = "browser"
+	TypeScriptRuntimeBun     = "bun"
+	TypeScriptRuntimeNode    = "node"
 )
 
 type Config struct {
@@ -71,6 +79,7 @@ type SqldefConfig struct {
 type TypeScriptConfig struct {
 	PackageManager string            `json:"packageManager,omitempty"`
 	ModuleType     string            `json:"moduleType,omitempty"`
+	Runtime        string            `json:"runtime,omitempty"`
 	Scripts        map[string]string `json:"scripts,omitempty"`
 }
 
@@ -187,6 +196,15 @@ func (c *Config) Validate() error {
 	if c.Ruby != nil && c.Ruby.Loader != "" && c.Ruby.Loader != "require_relative" && c.Ruby.Loader != "zeitwerk" {
 		return fmt.Errorf("ruby.loader must be require_relative or zeitwerk; got %q", c.Ruby.Loader)
 	}
+	if c.TypeScript != nil {
+		if c.TypeScript.Runtime != "" {
+			switch c.TypeScript.Runtime {
+			case TypeScriptRuntimeBrowser, TypeScriptRuntimeBun, TypeScriptRuntimeNode:
+			default:
+				return fmt.Errorf("typescript.runtime must be browser, bun, or node; got %q", c.TypeScript.Runtime)
+			}
+		}
+	}
 	return nil
 }
 
@@ -266,8 +284,15 @@ func (c *Config) applyDefaults() {
 		if c.TypeScript == nil {
 			c.TypeScript = &TypeScriptConfig{}
 		}
+		if c.TypeScript.Runtime == "" {
+			c.TypeScript.Runtime = DefaultTypeScriptRuntime
+		}
 		if c.TypeScript.PackageManager == "" {
-			c.TypeScript.PackageManager = "npm"
+			if c.TypeScript.Runtime == TypeScriptRuntimeBun {
+				c.TypeScript.PackageManager = "bun"
+			} else {
+				c.TypeScript.PackageManager = "npm"
+			}
 		}
 		if c.TypeScript.ModuleType == "" {
 			c.TypeScript.ModuleType = "module"
