@@ -275,6 +275,24 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormUsing(call, arguments)
 	case "trb.orm.not":
 		return g.ormNot(call)
+	case "trb.orm.order":
+		return g.ormClassOrder(call)
+	case "trb.orm.limit":
+		return g.ormClassInteger(call, goORMLimit)
+	case "trb.orm.offset":
+		return g.ormClassInteger(call, goORMOffset)
+	case "trb.orm.all":
+		return g.ormClassTerminal(call, goORMLoader)
+	case "trb.orm.first":
+		return g.ormClassTerminal(call, goORMFirst)
+	case "trb.orm.count":
+		return g.ormClassTerminal(call, goORMCount)
+	case "trb.orm.to_sql":
+		return g.ormClassTerminal(call, goORMToSQL)
+	case "trb.orm.explain":
+		return g.ormClassTerminal(call, goORMExplain)
+	case "trb.orm.preload":
+		return g.ormClassPreload(call)
 	case "trb.orm.find_by":
 		return g.ormFindBy(call)
 	case "trb.orm.exists":

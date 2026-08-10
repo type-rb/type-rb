@@ -77,6 +77,19 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			Return:     types.FromName(model.ScopeType()), Class: true, Provider: PackageName,
 		}
 		declared.ClassMembers["not"] = notDeclaration(model, "trb.orm.not", true)
+		declared.ClassMembers["order"] = orderDeclaration(model, "trb.orm.order", true)
+		declared.ClassMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.limit", model.QueryType, true)
+		declared.ClassMembers["offset"] = integerQueryDeclaration("offset", "trb.orm.offset", model.QueryType, true)
+		declared.ClassMembers["all"] = resultQueryDeclaration("all", "trb.orm.all", arrayOf(model.Name), true)
+		firstType := types.FromName(model.Name)
+		firstType.Nullable = true
+		declared.ClassMembers["first"] = resultQueryDeclaration("first", "trb.orm.first", firstType, true)
+		declared.ClassMembers["count"] = resultQueryDeclaration("count", "trb.orm.count", types.FromName("Integer"), true)
+		declared.ClassMembers["to_sql"] = stringQueryDeclaration("to_sql", "trb.orm.to_sql", true)
+		declared.ClassMembers["explain"] = resultQueryDeclaration("explain", "trb.orm.explain", types.FromName("String"), true)
+		if preload := preloadDeclaration(model, "trb.orm.preload", true); preload.Name != "" {
+			declared.ClassMembers["preload"] = preload
+		}
 		declared.ClassMembers["find_by"] = findByDeclaration(model, "trb.orm.find_by", true)
 		declared.ClassMembers["exists?"] = existsDeclaration(model, "trb.orm.exists", true)
 		declared.ClassMembers["pluck"] = projectionDeclaration(model, "pluck", "trb.orm.pluck", true, false)
@@ -177,9 +190,9 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			query.InstanceMembers["ids"] = idsDeclaration(model, "trb.orm.query.ids", false, primaryKey)
 		}
-		query.InstanceMembers["order"] = orderDeclaration(model)
-		query.InstanceMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.query.limit", model.QueryType)
-		query.InstanceMembers["offset"] = integerQueryDeclaration("offset", "trb.orm.query.offset", model.QueryType)
+		query.InstanceMembers["order"] = orderDeclaration(model, "trb.orm.query.order", false)
+		query.InstanceMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.query.limit", model.QueryType, false)
+		query.InstanceMembers["offset"] = integerQueryDeclaration("offset", "trb.orm.query.offset", model.QueryType, false)
 		query.InstanceMembers["lock"] = declaration.Member{
 			Name: "lock", Kind: declaration.Method, Intrinsic: "trb.orm.query.lock",
 			Return: types.FromName(model.QueryType), Provider: PackageName,
@@ -188,17 +201,17 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			Name: "all", Kind: declaration.Method, Intrinsic: "trb.orm.query.all",
 			Return: dbResult(arrayOf(model.Name)), Provider: PackageName,
 		}
-		firstType := types.FromName(model.Name)
-		firstType.Nullable = true
+		queryFirstType := types.FromName(model.Name)
+		queryFirstType.Nullable = true
 		query.InstanceMembers["first"] = declaration.Member{
-			Name: "first", Kind: declaration.Method, Intrinsic: "trb.orm.query.first", Return: dbResult(firstType), Provider: PackageName,
+			Name: "first", Kind: declaration.Method, Intrinsic: "trb.orm.query.first", Return: dbResult(queryFirstType), Provider: PackageName,
 		}
 		query.InstanceMembers["count"] = declaration.Member{
 			Name: "count", Kind: declaration.Method, Intrinsic: "trb.orm.query.count", Return: dbResult(types.FromName("Integer")), Provider: PackageName,
 		}
-		query.InstanceMembers["to_sql"] = stringQueryDeclaration("to_sql", "trb.orm.query.to_sql")
-		query.InstanceMembers["explain"] = resultQueryDeclaration("explain", "trb.orm.query.explain", types.FromName("String"))
-		if preload := preloadDeclaration(model); preload.Name != "" {
+		query.InstanceMembers["to_sql"] = stringQueryDeclaration("to_sql", "trb.orm.query.to_sql", false)
+		query.InstanceMembers["explain"] = resultQueryDeclaration("explain", "trb.orm.query.explain", types.FromName("String"), false)
+		if preload := preloadDeclaration(model, "trb.orm.query.preload", false); preload.Name != "" {
 			query.InstanceMembers["preload"] = preload
 		}
 		if _, ok := model.BatchKey(); ok {
@@ -423,10 +436,10 @@ func writeParameters(model Model, adapter string) []declaration.Parameter {
 	return parameters
 }
 
-func preloadDeclaration(model Model) declaration.Member {
+func preloadDeclaration(model Model, intrinsic string, class bool) declaration.Member {
 	member := declaration.Member{
-		Name: "preload", Kind: declaration.Method, Intrinsic: "trb.orm.query.preload",
-		Return: types.FromName(model.QueryType), Provider: PackageName,
+		Name: "preload", Kind: declaration.Method, Intrinsic: intrinsic,
+		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
 	}
 	for _, association := range model.Associations {
 		if !association.Preloadable {
@@ -612,7 +625,7 @@ func subqueryOf(element types.Type) types.Type {
 	return types.Type{Kind: types.Named, Name: "Subquery", Args: []types.Type{element}}
 }
 
-func orderDeclaration(model Model) declaration.Member {
+func orderDeclaration(model Model, intrinsic string, class bool) declaration.Member {
 	parameters := make([]declaration.Parameter, 0, len(model.Columns))
 	for _, column := range model.Columns {
 		parameters = append(parameters, declaration.Parameter{
@@ -620,30 +633,30 @@ func orderDeclaration(model Model) declaration.Member {
 		})
 	}
 	return declaration.Member{
-		Name: "order", Kind: declaration.Method, Intrinsic: "trb.orm.query.order", Parameters: parameters,
-		Return: types.FromName(model.QueryType), Provider: PackageName,
+		Name: "order", Kind: declaration.Method, Intrinsic: intrinsic, Parameters: parameters,
+		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
 	}
 }
 
-func integerQueryDeclaration(name, intrinsic, queryType string) declaration.Member {
+func integerQueryDeclaration(name, intrinsic, queryType string, class bool) declaration.Member {
 	return declaration.Member{
 		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
 		Parameters: []declaration.Parameter{{Name: "count", Type: types.FromName("Integer")}},
-		Return:     types.FromName(queryType), Provider: PackageName,
+		Return:     types.FromName(queryType), Class: class, Provider: PackageName,
 	}
 }
 
-func stringQueryDeclaration(name, intrinsic string) declaration.Member {
+func stringQueryDeclaration(name, intrinsic string, class bool) declaration.Member {
 	return declaration.Member{
 		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
-		Return: types.FromName("String"), Provider: PackageName,
+		Return: types.FromName("String"), Class: class, Provider: PackageName,
 	}
 }
 
-func resultQueryDeclaration(name, intrinsic string, result types.Type) declaration.Member {
+func resultQueryDeclaration(name, intrinsic string, result types.Type, class bool) declaration.Member {
 	return declaration.Member{
 		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
-		Return: dbResult(result), Provider: PackageName,
+		Return: dbResult(result), Class: class, Provider: PackageName,
 	}
 }
 

@@ -31,6 +31,47 @@ func (g *generator) ormWhere(call *ir.Call) string {
 	return g.ormModelQualifier(model) + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
 }
 
+func (g *generator) ormInitialQuery(call *ir.Call) (ormintegration.Model, string, bool) {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return ormintegration.Model{}, "", false
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return ormintegration.Model{}, "", false
+	}
+	query := g.ormModelQualifier(model) + goORMWhere(model) + "([]string{}, []string{}, []any{})"
+	return model, query, true
+}
+
+func (g *generator) ormClassOrder(call *ir.Call) string {
+	model, query, ok := g.ormInitialQuery(call)
+	if !ok {
+		return "nil"
+	}
+	return g.ormOrderExpression(model, query, call)
+}
+
+func (g *generator) ormClassInteger(call *ir.Call, operation func(ormintegration.Model) string) string {
+	model, query, ok := g.ormInitialQuery(call)
+	if !ok || len(call.Arguments) != 1 {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + operation(model) + "(" + query + ", " + g.expr(call.Arguments[0].Value) + ")"
+}
+
+func (g *generator) ormClassTerminal(call *ir.Call, operation func(ormintegration.Model) string) string {
+	model, query, ok := g.ormInitialQuery(call)
+	if !ok {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + operation(model) + "(" + query + ")"
+}
+
 func (g *generator) ormDistinct(call *ir.Call) string {
 	member, ok := call.Callee.(*ir.Member)
 	if !ok {
@@ -500,6 +541,10 @@ func (g *generator) ormOrder(call *ir.Call, arguments []string) string {
 	if !ok {
 		return "nil"
 	}
+	return g.ormOrderExpression(model, query, call)
+}
+
+func (g *generator) ormOrderExpression(model ormintegration.Model, query string, call *ir.Call) string {
 	columns := make([]string, 0, len(call.Arguments))
 	directions := make([]string, 0, len(call.Arguments))
 	for _, argument := range call.Arguments {
@@ -589,7 +634,22 @@ func (g *generator) ormAssociationQuery(call *ir.Call) string {
 
 func (g *generator) ormPreload(call *ir.Call, arguments []string) string {
 	model, query, ok := g.ormQueryModel(call, arguments)
-	if !ok || len(call.Arguments) == 0 {
+	if !ok {
+		return "nil"
+	}
+	return g.ormPreloadExpression(call, model, query)
+}
+
+func (g *generator) ormClassPreload(call *ir.Call) string {
+	model, query, ok := g.ormInitialQuery(call)
+	if !ok {
+		return "nil"
+	}
+	return g.ormPreloadExpression(call, model, query)
+}
+
+func (g *generator) ormPreloadExpression(call *ir.Call, model ormintegration.Model, query string) string {
+	if len(call.Arguments) == 0 {
 		return "nil"
 	}
 	associationName, ok := ormJoinAssociation(call.Arguments[0].Value)

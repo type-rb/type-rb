@@ -807,6 +807,12 @@ class Product < Model
 end
 
 def main()
+	puts(Product.all())
+	puts(Product.first())
+	puts(Product.count())
+	puts(Product.limit(1).offset(0).all())
+	puts(Product.to_sql())
+	puts(Product.explain())
 	puts(Product.join(:category, Category.where(name: "Books")).where(name: "TypeRB").all())
 	puts(Product.where(name: "TypeRB").left_join(:category).all())
 	puts(Category.join(:products).distinct().all())
@@ -819,8 +825,8 @@ def main()
 	puts(Product.where(name: "TypeRB").group(:category_id).having(:count, ">=", 1).count())
 	puts(Product.group(:category_id).sum(:id))
 	puts(Product.group(:category_id).having(:sum, :id, ">=", 1).sum(:id))
-	puts(Product.where().order(category_id: :desc).limit(1).group(:category_id).count())
-	case Product.where().preload(:category).all()
+	puts(Product.order(category_id: :desc).limit(1).group(:category_id).count())
+	case Product.preload(:category).all()
 	when DbResult::Ok(products)
 		products.each do |product|
 			puts(product.category())
@@ -829,7 +835,7 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
-	case Category.where().preload(:products).all()
+	case Category.preload(:products).all()
 	when DbResult::Ok(categories)
 		categories.each do |category|
 			puts(category.products().size())
@@ -838,7 +844,7 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
-	case Category.where().preload(:product).all()
+	case Category.preload(:product).all()
 	when DbResult::Ok(categories)
 		categories.each do |category|
 			puts(category.product())
@@ -847,7 +853,7 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
-	case Category.where().preload(:products, Product.where(name: "TypeRB").preload(:category)).all()
+	case Category.preload(:products, Product.where(name: "TypeRB").preload(:category)).all()
 	when DbResult::Ok(categories)
 		categories.each do |category|
 			category.products().each do |product|
@@ -928,7 +934,7 @@ end
 		{expression: `Product.join(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
 		{expression: `Product.where_exists(:missing)`, want: `argument 1 to where_exists() must be one of "category"`},
 		{expression: `Product.where_exists(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
-		{expression: `Product.where().preload(:missing)`, want: `argument 1 to preload() must be one of "category"`},
+		{expression: `Product.preload(:missing)`, want: `argument 1 to preload() must be one of "category"`},
 		{expression: `Product.where().preload(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
 		{expression: `Product.group(:missing)`, want: `argument 1 to group() must be one of`},
 		{expression: `Product.group(:category_id).having(:sum, ">", 1)`, want: `argument 1 to having() must be one of "count"`},

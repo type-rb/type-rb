@@ -523,7 +523,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		}
 		query.predicate = ormCombinePredicates("or", query.predicate, other.predicate)
 		return ormQueryResult(typ, query), nil
-	case "trb.orm.query.order":
+	case "trb.orm.order", "trb.orm.query.order":
 		for _, argument := range remaining {
 			direction, ok := argument.Value.Data.(string)
 			if !ok || direction != "asc" && direction != "desc" {
@@ -532,15 +532,16 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			query.orders = append(query.orders, ormOrder{column: argument.Name, direction: direction})
 		}
 		return ormQueryResult(typ, query), nil
-	case "trb.orm.query.limit", "trb.orm.query.offset":
+	case "trb.orm.limit", "trb.orm.offset", "trb.orm.query.limit", "trb.orm.query.offset":
+		operation := name[strings.LastIndex(name, ".")+1:]
 		if len(remaining) != 1 {
-			return Value{}, fmt.Errorf("%s requires one count", strings.TrimPrefix(name, "trb.orm.query."))
+			return Value{}, fmt.Errorf("%s requires one count", operation)
 		}
 		count, ok := remaining[0].Value.Data.(int64)
 		if !ok || count < 0 {
-			return Value{}, fmt.Errorf("ORM %s must be non-negative", strings.TrimPrefix(name, "trb.orm.query."))
+			return Value{}, fmt.Errorf("ORM %s must be non-negative", operation)
 		}
-		if name == "trb.orm.query.limit" {
+		if operation == "limit" {
 			query.limit = &count
 		} else {
 			query.offset = &count
@@ -552,7 +553,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 	case "trb.orm.distinct", "trb.orm.query.distinct":
 		query.distinct = true
 		return ormQueryResult(typ, query), nil
-	case "trb.orm.query.preload":
+	case "trb.orm.preload", "trb.orm.query.preload":
 		if len(remaining) < 1 || len(remaining) > 2 {
 			return Value{}, errors.New("ORM preload requires an association and optional query")
 		}
@@ -618,27 +619,27 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			return e.ormResultErr(typ, failure.kind, failure.message)
 		}
 		return e.ormResultOK(typ, Value{Type: types.FromName("Boolean"), Data: exists})
-	case "trb.orm.query.all":
+	case "trb.orm.all", "trb.orm.query.all":
 		values, failure := e.ormLoad(query)
 		if failure != nil {
 			return e.ormResultErr(typ, failure.kind, failure.message)
 		}
 		return e.ormResultOK(typ, Value{Type: ormResultValueType(typ), Data: &arrayValue{Items: values}})
-	case "trb.orm.query.first":
+	case "trb.orm.first", "trb.orm.query.first":
 		return e.ormFirstResult(typ, query)
-	case "trb.orm.query.count":
+	case "trb.orm.count", "trb.orm.query.count":
 		count, failure := e.ormCount(query)
 		if failure != nil {
 			return e.ormResultErr(typ, failure.kind, failure.message)
 		}
 		return e.ormResultOK(typ, Value{Type: types.FromName("Integer"), Data: count})
-	case "trb.orm.query.to_sql":
+	case "trb.orm.to_sql", "trb.orm.query.to_sql":
 		statement, _, err := e.ormStatement(query, e.ormModelProjection(query.model))
 		if err != nil {
 			return Value{}, err
 		}
 		return Value{Type: typ, Data: statement}, nil
-	case "trb.orm.query.explain":
+	case "trb.orm.explain", "trb.orm.query.explain":
 		detail, failure := e.ormExplain(query)
 		if failure != nil {
 			return e.ormResultErr(typ, failure.kind, failure.message)

@@ -70,6 +70,15 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if product.ClassMembers["find_by"].Return.String() != "DbResult<Product?>" || product.ClassMembers["exists?"].Return.String() != "DbResult<Boolean>" {
 		t.Fatalf("unexpected predicate terminal declarations: %#v", product.ClassMembers)
 	}
+	if product.ClassMembers["order"].Return.String() != "ProductQuery" || product.ClassMembers["limit"].Return.String() != "ProductQuery" || product.ClassMembers["offset"].Return.String() != "ProductQuery" {
+		t.Fatalf("unexpected model query-root declarations: %#v", product.ClassMembers)
+	}
+	if product.ClassMembers["all"].Return.String() != "DbResult<Array<Product>>" || product.ClassMembers["first"].Return.String() != "DbResult<Product?>" || product.ClassMembers["count"].Return.String() != "DbResult<Integer>" {
+		t.Fatalf("unexpected model terminal declarations: %#v", product.ClassMembers)
+	}
+	if product.ClassMembers["to_sql"].Return.String() != "String" || product.ClassMembers["explain"].Return.String() != "DbResult<String>" {
+		t.Fatalf("unexpected model diagnostic declarations: %#v", product.ClassMembers)
+	}
 	if product.ClassMembers["pluck"].Alternatives[1].Return.String() != "DbResult<Array<String>>" || product.ClassMembers["pick"].Alternatives[2].Return.String() != "DbResult<Float?>" || product.ClassMembers["ids"].Return.String() != "DbResult<Array<Integer>>" {
 		t.Fatalf("unexpected projection declarations: %#v", product.ClassMembers)
 	}
@@ -284,8 +293,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 32 {
-		t.Fatalf("expected six fields and twenty-six ORM methods, got %#v", product.Body)
+	if len(product.Body) != 40 {
+		t.Fatalf("expected six fields and thirty-four ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[1].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -305,7 +314,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "distinct", "select", "using", "not", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "distinct", "select", "using", "not", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}
@@ -392,6 +401,11 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 		!reflect.DeepEqual(preload.Alternatives[0].Parameters[0].LiteralValues, []string{"category"}) ||
 		len(preload.Alternatives[1].Parameters) != 2 || preload.Alternatives[1].Parameters[1].Type.String() != "CategoryQuery" {
 		t.Fatalf("unexpected ProductQuery.preload declaration: %#v", preload)
+	}
+	modelPreload := product.ClassMembers["preload"]
+	if modelPreload.Intrinsic != "trb.orm.preload" || !modelPreload.Class || len(modelPreload.Alternatives) != 2 ||
+		!reflect.DeepEqual(modelPreload.Alternatives[0].Parameters[0].LiteralValues, []string{"category"}) {
+		t.Fatalf("unexpected Product.preload declaration: %#v", modelPreload)
 	}
 	categoryPreload := productQueryMember(t, catalog, "CategoryQuery", "preload")
 	if len(categoryPreload.Alternatives) != 4 ||

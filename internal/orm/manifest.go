@@ -272,6 +272,37 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["not"] {
 				class.Body = append(class.Body, notIRMethod(model, true))
 			}
+			if !existing["order"] {
+				class.Body = append(class.Body, orderIRMethod(model, true))
+			}
+			if !existing["limit"] {
+				class.Body = append(class.Body, integerQueryIRMethod(model, "limit", true))
+			}
+			if !existing["offset"] {
+				class.Body = append(class.Body, integerQueryIRMethod(model, "offset", true))
+			}
+			if !existing["all"] {
+				class.Body = append(class.Body, queryTerminalIRMethod(model, "all", dbResult(arrayOf(model.Name)), true))
+			}
+			firstType := namedType(model.Name)
+			firstType.Nullable = true
+			if !existing["first"] {
+				class.Body = append(class.Body, queryTerminalIRMethod(model, "first", dbResult(firstType), true))
+			}
+			if !existing["count"] {
+				class.Body = append(class.Body, queryTerminalIRMethod(model, "count", dbResult(types.FromName("Integer")), true))
+			}
+			if !existing["to_sql"] {
+				class.Body = append(class.Body, queryTerminalIRMethod(model, "to_sql", types.FromName("String"), true))
+			}
+			if !existing["explain"] {
+				class.Body = append(class.Body, queryTerminalIRMethod(model, "explain", dbResult(types.FromName("String")), true))
+			}
+			if !existing["preload"] {
+				if preload := preloadIRMethod(model, true); preload != nil {
+					class.Body = append(class.Body, preload)
+				}
+			}
 			if !existing["find_by"] {
 				class.Body = append(class.Body, findByIRMethod(model, true))
 			}
@@ -457,13 +488,6 @@ func relationUpdateAllIRMethod(model Model) *ir.Method {
 func queryIRMethods(model Model) []ir.Statement {
 	where := whereIRMethod(model, false)
 	not := notIRMethod(model, false)
-	order := &ir.Method{Name: "order", External: true, ReturnType: namedType(model.QueryType)}
-	for _, column := range model.Columns {
-		order.Parameters = append(order.Parameters, ir.Parameter{
-			Name: column.Name, Type: types.FromName("String"), Keyword: true,
-			LiteralValues: []string{"asc", "desc"},
-		})
-	}
 	firstType := namedType(model.Name)
 	firstType.Nullable = true
 	methods := []ir.Statement{
@@ -477,9 +501,9 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "delete_all", External: true, ReturnType: dbResult(types.FromName("Integer"))},
 		projectionIRMethod(model, "pluck", false, false),
 		projectionIRMethod(model, "pick", false, true),
-		order,
-		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
-		&ir.Method{Name: "offset", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
+		orderIRMethod(model, false),
+		integerQueryIRMethod(model, "limit", false),
+		integerQueryIRMethod(model, "offset", false),
 		&ir.Method{Name: "lock", External: true, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "all", External: true, ReturnType: dbResult(arrayOf(model.Name))},
 		&ir.Method{Name: "first", External: true, ReturnType: dbResult(firstType)},
@@ -506,7 +530,7 @@ func queryIRMethods(model Model) []ir.Statement {
 			methods = append(methods, aggregate)
 		}
 	}
-	if preload := preloadIRMethod(model); preload != nil {
+	if preload := preloadIRMethod(model, false); preload != nil {
 		methods = append(methods, preload)
 	}
 	if primaryKey, ok := model.PrimaryKey(); ok {
@@ -620,8 +644,8 @@ func contains(values []string, expected string) bool {
 	return false
 }
 
-func preloadIRMethod(model Model) *ir.Method {
-	method := &ir.Method{Name: "preload", External: true, ReturnType: namedType(model.QueryType)}
+func preloadIRMethod(model Model, class bool) *ir.Method {
+	method := &ir.Method{Name: "preload", External: true, Class: class, ReturnType: namedType(model.QueryType)}
 	for _, association := range model.Associations {
 		if !association.Preloadable {
 			continue
@@ -646,6 +670,29 @@ func preloadIRMethod(model Model) *ir.Method {
 		return nil
 	}
 	return method
+}
+
+func orderIRMethod(model Model, class bool) *ir.Method {
+	method := &ir.Method{Name: "order", External: true, Class: class, ReturnType: namedType(model.QueryType)}
+	for _, column := range model.Columns {
+		method.Parameters = append(method.Parameters, ir.Parameter{
+			Name: column.Name, Type: types.FromName("String"), Keyword: true,
+			LiteralValues: []string{"asc", "desc"},
+		})
+	}
+	return method
+}
+
+func integerQueryIRMethod(model Model, name string, class bool) *ir.Method {
+	return &ir.Method{
+		Name: name, External: true, Class: class,
+		Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}},
+		ReturnType: namedType(model.QueryType),
+	}
+}
+
+func queryTerminalIRMethod(_ Model, name string, result types.Type, class bool) *ir.Method {
+	return &ir.Method{Name: name, External: true, Class: class, ReturnType: result}
 }
 
 func associationValueField(name string) string {
