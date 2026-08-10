@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -253,6 +254,68 @@ func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "cannot assign Integer to String") {
 		t.Fatalf("REPL did not report and recover from the type error:\n%s", stderr.String())
+	}
+}
+
+func TestReplExecutesPortableORMReads(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL, active BOOLEAN NOT NULL);
+		INSERT INTO products (name, price, active) VALUES ('Priority', 10.5, TRUE), ('Archive', NULL, FALSE);
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-orm-test"
+	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"sqlite","database":"application.sqlite3"}`)
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model } from trb/orm\n\nclass Product < Model\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	input := strings.Join([]string{
+		"import { Product } from main",
+		"import { DbResult } from trb/orm",
+		"Product.where(id: [1, 2]).to_sql()",
+		`Product.exists?(name: "Priority")`,
+		"Product.where().order(id: :asc).pluck(:name)",
+		"Product.where(active: true).first()",
+		"Product.where().count()",
+		"def first_product_name(): DbResult<String>\n\tcase Product.where(id: 1).all()\n\twhen DbResult::Ok(products)\n\t\treturn DbResult<String>::Ok(products[0].name)\n\twhen DbResult::Err(error)\n\t\treturn DbResult<String>::Err(error)\n\tend\nend",
+		"first_product_name()",
+		":quit",
+	}, "\n") + "\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := strings.Join([]string{
+		`"SELECT \"id\", \"name\", \"price\", \"active\" FROM \"products\" WHERE \"id\" IN (?, ?)" : String`,
+		`DbResult::Ok(value: true) : DbResult<Boolean>`,
+		`DbResult::Ok(value: ["Priority", "Archive"]) : DbResult<Array<String>>`,
+		`DbResult::Ok(value: #<Product active: true, id: 1, name: "Priority", price: 10.5>) : DbResult<Product?>`,
+		`DbResult::Ok(value: 2) : DbResult<Integer>`,
+		`DbResult::Ok(value: "Priority") : DbResult<String>`,
+		"",
+	}, "\n")
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected ORM REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
 	}
 }
 

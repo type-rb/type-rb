@@ -179,6 +179,21 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["where"] {
 				class.Body = append(class.Body, whereIRMethod(model, true))
 			}
+			if !existing["not"] {
+				class.Body = append(class.Body, notIRMethod(model, true))
+			}
+			if !existing["find_by"] {
+				class.Body = append(class.Body, findByIRMethod(model, true))
+			}
+			if !existing["exists?"] {
+				class.Body = append(class.Body, existsIRMethod(model, true))
+			}
+			if !existing["pluck"] {
+				class.Body = append(class.Body, projectionIRMethod(model, "pluck", true, false))
+			}
+			if !existing["pick"] {
+				class.Body = append(class.Body, projectionIRMethod(model, "pick", true, true))
+			}
 			if primaryKey, ok := model.PrimaryKey(); ok {
 				keyType := primaryKey.Type
 				keyType.Nullable = false
@@ -189,6 +204,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 						Name: "find", External: true, Class: true,
 						Parameters: []ir.Parameter{{Name: primaryKey.Name, Type: keyType}}, ReturnType: dbResult(findType),
 					})
+				}
+				if !existing["ids"] {
+					class.Body = append(class.Body, idsIRMethod(model, true, primaryKey))
 				}
 				if !existing["create"] {
 					class.Body = append(class.Body, createIRMethod(model))
@@ -301,8 +319,19 @@ func modelChangeIRMethod(model Model, name string, returnType types.Type) *ir.Me
 	return method
 }
 
+func relationUpdateAllIRMethod(model Model) *ir.Method {
+	method := &ir.Method{Name: "update_all", External: true, ReturnType: dbResult(types.FromName("Integer"))}
+	for _, column := range model.Columns {
+		if !column.PrimaryKey && !column.Generated {
+			method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+		}
+	}
+	return method
+}
+
 func queryIRMethods(model Model) []ir.Statement {
 	where := whereIRMethod(model, false)
+	not := notIRMethod(model, false)
 	order := &ir.Method{Name: "order", External: true, ReturnType: namedType(model.QueryType)}
 	for _, column := range model.Columns {
 		order.Parameters = append(order.Parameters, ir.Parameter{
@@ -314,6 +343,14 @@ func queryIRMethods(model Model) []ir.Statement {
 	firstType.Nullable = true
 	methods := []ir.Statement{
 		where,
+		not,
+		&ir.Method{Name: "or", External: true, Parameters: []ir.Parameter{{Name: "other", Type: namedType(model.QueryType)}}, ReturnType: namedType(model.QueryType)},
+		findByIRMethod(model, false),
+		&ir.Method{Name: "exists?", External: true, ReturnType: dbResult(types.FromName("Boolean"))},
+		relationUpdateAllIRMethod(model),
+		&ir.Method{Name: "delete_all", External: true, ReturnType: dbResult(types.FromName("Integer"))},
+		projectionIRMethod(model, "pluck", false, false),
+		projectionIRMethod(model, "pick", false, true),
 		order,
 		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "offset", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
@@ -325,6 +362,9 @@ func queryIRMethods(model Model) []ir.Statement {
 	}
 	if preload := preloadIRMethod(model); preload != nil {
 		methods = append(methods, preload)
+	}
+	if primaryKey, ok := model.PrimaryKey(); ok {
+		methods = append(methods, idsIRMethod(model, false, primaryKey))
 	}
 	if _, ok := model.BatchKey(); ok {
 		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))
@@ -386,7 +426,7 @@ func associationLoadedField(name string) string {
 func whereIRMethod(model Model, class bool) *ir.Method {
 	method := &ir.Method{Name: "where", External: true, Class: class, ReturnType: namedType(model.QueryType)}
 	for _, column := range model.Columns {
-		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true})
 		for _, signature := range comparisonSignatures(column, model.QueryType) {
 			alternative := ir.MethodSignature{ReturnType: signature.Return, Variadic: signature.Variadic}
 			for _, parameter := range signature.Parameters {
@@ -401,6 +441,54 @@ func whereIRMethod(model Model, class bool) *ir.Method {
 		}
 	}
 	return method
+}
+
+func notIRMethod(model Model, class bool) *ir.Method {
+	return predicateIRMethod(model, "not", class, namedType(model.QueryType))
+}
+
+func findByIRMethod(model Model, class bool) *ir.Method {
+	result := namedType(model.Name)
+	result.Nullable = true
+	return predicateIRMethod(model, "find_by", class, dbResult(result))
+}
+
+func existsIRMethod(model Model, class bool) *ir.Method {
+	return predicateIRMethod(model, "exists?", class, dbResult(types.FromName("Boolean")))
+}
+
+func predicateIRMethod(model Model, name string, class bool, result types.Type) *ir.Method {
+	method := &ir.Method{Name: name, External: true, Class: class, ReturnType: result}
+	for _, column := range model.Columns {
+		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true})
+	}
+	return method
+}
+
+func projectionIRMethod(model Model, name string, class, pick bool) *ir.Method {
+	declared := projectionDeclaration(model, name, "", class, pick)
+	method := &ir.Method{Name: name, External: true, Class: class, ReturnType: declared.Return}
+	for _, parameter := range declared.Parameters {
+		method.Parameters = append(method.Parameters, ir.Parameter{
+			Name: parameter.Name, Type: parameter.Type, Keyword: parameter.Keyword,
+			LiteralValues: append([]string(nil), parameter.LiteralValues...),
+		})
+	}
+	for _, signature := range declared.Alternatives {
+		alternative := ir.MethodSignature{ReturnType: signature.Return}
+		for _, parameter := range signature.Parameters {
+			alternative.Parameters = append(alternative.Parameters, ir.Parameter{
+				Name: parameter.Name, Type: parameter.Type, LiteralValues: append([]string(nil), parameter.LiteralValues...),
+			})
+		}
+		method.Alternatives = append(method.Alternatives, alternative)
+	}
+	return method
+}
+
+func idsIRMethod(model Model, class bool, primaryKey Column) *ir.Method {
+	declared := idsDeclaration(model, "", class, primaryKey)
+	return &ir.Method{Name: "ids", External: true, Class: class, ReturnType: declared.Return}
 }
 
 func copyUniqueColumns(values [][]string) [][]string {

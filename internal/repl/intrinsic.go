@@ -29,6 +29,15 @@ import (
 )
 
 func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ types.Type, codec *ir.CodecSchema) (Value, error) {
+	return e.intrinsicCall(name, arguments, typ, codec, nil)
+}
+
+func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, typ types.Type, codec *ir.CodecSchema, call *ir.Call) (Value, error) {
+	if value, handled, err := e.runtimeCall(runtimeInvocation{
+		Name: name, Arguments: arguments, Type: typ, Codec: codec, Call: call,
+	}); handled {
+		return value, err
+	}
 	values := func() []Value {
 		result := make([]Value, len(arguments))
 		for index, argument := range arguments {

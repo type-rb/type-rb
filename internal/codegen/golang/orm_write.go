@@ -396,6 +396,47 @@ func (g *generator) ormDeleteRuntime(adapter ormintegration.Adapter, model ormin
 	g.b.WriteByte('\n')
 }
 
+func (g *generator) ormRelationWriteRuntime(adapter ormintegration.Adapter, model ormintegration.Model) {
+	integerType := types.FromName("Integer")
+	queryType := goORMQueryType(model)
+	invalidModifiers := "len(query.orders) > 0 || query.limit != nil || query.offset != nil || len(query.preloads) > 0"
+	g.line("func " + goORMUpdateAll(model) + "(query " + queryType + ", columns []string, values []any) " + g.ormResultType(integerType) + " {")
+	g.indent++
+	g.line("if len(columns) == 0 { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update requires at least one value")) + " }")
+	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update does not accept order, limit, offset, or preload")) + " }")
+	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("assignments := make([]string, len(columns))")
+	g.line("for index, column := range columns { assignments[index] = trbOrmQuoteIdentifier(column) + \" = \" + trbOrmPlaceholder(index + 1) }")
+	g.line("arguments := append([]any(nil), values...)")
+	g.line("statement := " + strconv.Quote("UPDATE "+adapter.QuoteIdentifier(model.Table)+" SET ") + " + strings.Join(assignments, \", \")")
+	g.line("if query.predicate != nil { statement += \" WHERE \" + " + goORMPredicateSQL(model) + "(query.predicate, &arguments) }")
+	g.line("updated, err := database.Exec(statement, arguments...)")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk update failed\")") + " }")
+	g.line("affected, err := updated.RowsAffected()")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk update result was unavailable\")") + " }")
+	g.line("return " + g.ormResultOK(integerType, "int(affected)"))
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMDeleteAll(model) + "(query " + queryType + ") " + g.ormResultType(integerType) + " {")
+	g.indent++
+	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk delete does not accept order, limit, offset, or preload")) + " }")
+	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("arguments := []any{}")
+	g.line("statement := " + strconv.Quote("DELETE FROM "+adapter.QuoteIdentifier(model.Table)))
+	g.line("if query.predicate != nil { statement += \" WHERE \" + " + goORMPredicateSQL(model) + "(query.predicate, &arguments) }")
+	g.line("deleted, err := database.Exec(statement, arguments...)")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk delete failed\")") + " }")
+	g.line("affected, err := deleted.RowsAffected()")
+	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk delete result was unavailable\")") + " }")
+	g.line("return " + g.ormResultOK(integerType, "int(affected)"))
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+}
+
 func replaceScanReceiver(targets []string, from, to string) []string {
 	result := make([]string, len(targets))
 	for index, target := range targets {

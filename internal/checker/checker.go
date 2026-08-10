@@ -3530,6 +3530,12 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 	if len(member.Alternatives) > 0 && declarationCallUsesPositionalArguments(arguments) {
 		return c.checkDeclarationAlternativeArguments(span, member, arguments, actual)
 	}
+	if member.MinimumArguments > 0 && len(arguments) < member.MinimumArguments {
+		c.error(span, fmt.Sprintf("%s() expects at least %d argument(s), got %d", member.Name, member.MinimumArguments, len(arguments)))
+	}
+	if member.MaximumArguments > 0 && len(arguments) > member.MaximumArguments {
+		c.error(span, fmt.Sprintf("%s() expects at most %d argument(s), got %d", member.Name, member.MaximumArguments, len(arguments)))
+	}
 	bindings := map[string]types.Type{}
 	typeParameters := map[string]bool{}
 	for _, name := range member.TypeParameters {

@@ -39,17 +39,19 @@ type Block struct {
 }
 
 type Member struct {
-	Name           string
-	Kind           MemberKind
-	Intrinsic      string
-	Parameters     []Parameter
-	Return         types.Type
-	Variadic       bool
-	Class          bool
-	TypeParameters []string
-	Provider       string
-	Alternatives   []Signature
-	Block          *Block
+	Name             string
+	Kind             MemberKind
+	Intrinsic        string
+	Parameters       []Parameter
+	MinimumArguments int
+	MaximumArguments int
+	Return           types.Type
+	Variadic         bool
+	Class            bool
+	TypeParameters   []string
+	Provider         string
+	Alternatives     []Signature
+	Block            *Block
 }
 
 type Type struct {

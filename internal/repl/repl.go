@@ -49,6 +49,7 @@ func Run(options Options) error {
 		return err
 	}
 	evaluator := NewEvaluator(options.Stdout, options.Mode)
+	defer func() { _ = evaluator.Close() }()
 	if err := evaluator.LoadProject(compilation.Programs, compilation.Session.IR.ModulePath); err != nil {
 		return err
 	}
@@ -98,11 +99,13 @@ func Run(options Options) error {
 			if nextCompilation != nil {
 				nextEvaluator := NewEvaluator(options.Stdout, options.Mode)
 				if err := nextEvaluator.LoadProject(nextCompilation.Programs, nextCompilation.Session.IR.ModulePath); err != nil {
+					_ = nextEvaluator.Close()
 					printReplError(options.Stderr, options.Interactive, err.Error())
 					continue
 				}
 				nextEvaluator.LoadDefinitions(nextCompilation.Session.IR)
 				if _, err := evaluateInterruptibly(nextEvaluator, nextCompilation.Session.IR.Statements, nextCompilation.Session.IR.ModulePath); err != nil {
+					_ = nextEvaluator.Close()
 					if errors.Is(err, context.Canceled) {
 						printEvaluationInterrupted(options.Stdout, options.Interactive)
 						continue
@@ -113,6 +116,7 @@ func Run(options Options) error {
 				source = replacement
 				compilation = nextCompilation
 				statementCount = len(compilation.Session.IR.Statements)
+				_ = evaluator.Close()
 				evaluator = nextEvaluator
 				options.language.Update(compilation.Programs, compilation.Session.IR.ModulePath)
 			}
@@ -134,6 +138,10 @@ func Run(options Options) error {
 			if program.ModulePath != next.Session.IR.ModulePath {
 				evaluator.LoadDefinitions(program)
 			}
+		}
+		if err := evaluator.configureRuntimeProviders(next.Programs); err != nil {
+			printReplError(options.Stderr, options.Interactive, err.Error())
+			continue
 		}
 		evaluator.LoadDefinitions(next.Session.IR)
 		result, runtimeErr := evaluateInterruptibly(evaluator, next.Session.IR.Statements[statementCount:], next.Session.IR.ModulePath)
