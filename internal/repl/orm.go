@@ -196,6 +196,87 @@ func (provider *ormRuntimeProvider) Block(evaluator *Evaluator, invocation runti
 	return evaluator.ormResultOK(invocation.Type, value)
 }
 
+func (provider *ormRuntimeProvider) Iterate(evaluator *Evaluator, invocation runtimeIterationInvocation) (Value, flowResult, error) {
+	query, _, err := evaluator.ormQueryReceiver([]evaluatedArgument{{Value: invocation.Source}})
+	if err != nil {
+		return Value{}, flowResult{}, err
+	}
+	failureResult := func(kind, message string) (Value, flowResult, error) {
+		value, resultErr := evaluator.ormResultErr(invocation.Type, kind, message)
+		return value, flowResult{}, resultErr
+	}
+	if invocation.BatchSize <= 0 {
+		return failureResult("InvalidData", "batch size must be greater than zero")
+	}
+	if len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.joins) > 0 {
+		return failureResult("InvalidData", "batch queries do not accept joins, order, limit, offset, or lock")
+	}
+	batchKey, ok := query.model.BatchKey()
+	if !ok {
+		return failureResult("InvalidData", "ORM model does not have a portable batch key")
+	}
+	processed := int64(0)
+	var after *Value
+	for {
+		batchQuery := cloneORMQuery(query)
+		if after != nil {
+			predicate := &ormPredicate{kind: "atom", condition: ormCondition{column: batchKey.Name, operator: ">", value: *after}}
+			batchQuery.predicate = ormCombinePredicates("and", batchQuery.predicate, predicate)
+		}
+		batchQuery.orders = []ormOrder{{column: batchKey.Name, direction: "asc"}}
+		limit := invocation.BatchSize
+		batchQuery.limit = &limit
+		values, failure := evaluator.ormLoad(batchQuery)
+		if failure != nil {
+			return failureResult(failure.kind, failure.message)
+		}
+		if len(values) == 0 {
+			break
+		}
+		if invocation.Iteration.Operation == "find_each" {
+			for _, value := range values {
+				processed++
+				flow, evaluateErr := invocation.Evaluate(value)
+				if evaluateErr != nil || flow.Returned {
+					return Value{}, flow, evaluateErr
+				}
+				switch flow.Loop {
+				case loopBreak:
+					result, resultErr := evaluator.ormResultOK(invocation.Type, Value{Type: types.FromName("Integer"), Data: processed})
+					return result, flowResult{}, resultErr
+				case loopNext:
+					continue
+				}
+			}
+		} else {
+			processed += int64(len(values))
+			valueType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName(query.model.Name)}}
+			flow, evaluateErr := invocation.Evaluate(Value{Type: valueType, Data: &arrayValue{Items: values}})
+			if evaluateErr != nil || flow.Returned {
+				return Value{}, flow, evaluateErr
+			}
+			if flow.Loop == loopBreak {
+				result, resultErr := evaluator.ormResultOK(invocation.Type, Value{Type: types.FromName("Integer"), Data: processed})
+				return result, flowResult{}, resultErr
+			}
+		}
+		last, ok := values[len(values)-1].Data.(*objectInstance)
+		if !ok {
+			return failureResult("InvalidData", "database batch row was invalid")
+		}
+		key, ok := last.Fields["@"+batchKey.Name]
+		if !ok || key.Data == nil {
+			return failureResult("InvalidData", "database batch key was invalid")
+		}
+		after = &key
+		if int64(len(values)) < invocation.BatchSize {
+			break
+		}
+	}
+	result, resultErr := evaluator.ormResultOK(invocation.Type, Value{Type: types.FromName("Integer"), Data: processed})
+	return result, flowResult{}, resultErr
+}
+
 func (provider *ormRuntimeProvider) Close() error {
 	if provider.runtime == nil || provider.runtime.database == nil {
 		return nil
@@ -343,6 +424,9 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 	}
 	if strings.HasPrefix(name, "trb.orm.group.") {
 		return e.ormGroupedIntrinsic(name, arguments, typ)
+	}
+	if value, handled, err := e.ormWriteIntrinsic(name, arguments, typ); handled {
+		return value, err
 	}
 	query, remaining, err := e.ormQueryReceiver(arguments)
 	if err != nil {
@@ -712,7 +796,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many", "trb.orm.association.loaded.has_one":
 		return e.ormAssociationLoaded(arguments[0].Value, call)
 	default:
-		return Value{}, fmt.Errorf("%s is type-checked, but ORM writes and batch iteration are not executable in the REPL yet; use trb run", name)
+		return Value{}, fmt.Errorf("ORM runtime intrinsic %s is not executable in the REPL", name)
 	}
 }
 

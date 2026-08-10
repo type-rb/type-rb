@@ -1086,6 +1086,9 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 	if err != nil {
 		return flowResult{}, err
 	}
+	if node.Intrinsic != "" && e.runtimeHandles(node.Intrinsic) {
+		return e.runtimeIterate(node, source, module, sc)
+	}
 	if hash, ok := source.Data.(*hashValue); ok {
 		entries := append([]hashEntry(nil), hash.Entries...)
 		for _, entry := range entries {
@@ -1167,6 +1170,92 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 			continue
 		}
 		iterationIndex++
+	}
+	return flowResult{}, nil
+}
+
+func (e *Evaluator) runtimeIterate(node *ir.Iterate, source Value, module string, sc *scope) (flowResult, error) {
+	batchSize := int64(1000)
+	if node.SliceSize != nil {
+		value, err := e.expression(node.SliceSize, module, sc)
+		if err != nil {
+			return flowResult{}, err
+		}
+		var ok bool
+		batchSize, ok = value.Data.(int64)
+		if !ok {
+			return flowResult{}, errors.New("structured iteration batch size must be an Integer")
+		}
+	}
+	evaluate := func(value Value) (flowResult, error) {
+		iterationScope := &scope{parent: sc, values: map[string]Value{}}
+		if len(node.Bindings) > 0 && node.Bindings[0].Name != "_" {
+			value.Type = node.Bindings[0].Type
+			iterationScope.values[node.Bindings[0].Name] = value
+		}
+		return e.evaluate(node.Body, module, iterationScope)
+	}
+	successType := types.FromName("Integer")
+	if node.EffectSuccess.Kind != "" {
+		successType = node.EffectSuccess
+	}
+	rawType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{successType, node.Fails}}
+	value, escaped, handled, err := e.runtimeIteration(runtimeIterationInvocation{
+		Name: node.Intrinsic, Source: source, BatchSize: batchSize, Type: rawType, Iteration: node, Evaluate: evaluate,
+	})
+	if err != nil || !handled {
+		if err == nil {
+			err = fmt.Errorf("runtime intrinsic %s is not executable in the REPL", node.Intrinsic)
+		}
+		return flowResult{}, err
+	}
+	if escaped.Returned {
+		return escaped, nil
+	}
+	if node.Result == nil {
+		return flowResult{}, nil
+	}
+	if node.CaptureEffect {
+		value.Type = node.Result.Type
+	} else {
+		variant, ok := value.Data.(*enumValue)
+		if !ok {
+			return flowResult{}, errors.New("fallible structured iteration did not return Result")
+		}
+		if variant.Name == "Err" {
+			if node.UnhandledEffect {
+				errorValue, exists := variant.Payload["error"]
+				if !exists {
+					return flowResult{}, errors.New("fallible structured iteration returned Err without an error")
+				}
+				return flowResult{}, &unhandledEffect{typ: node.Fails, value: errorValue}
+			}
+			return flowResult{Result: Result{Value: value}, Returned: true}, nil
+		}
+		if variant.Name != "Ok" {
+			return flowResult{}, fmt.Errorf("fallible structured iteration returned unknown Result variant %s", variant.Name)
+		}
+		var exists bool
+		value, exists = variant.Payload["value"]
+		if !exists {
+			return flowResult{}, errors.New("fallible structured iteration returned Ok without a value")
+		}
+		value.Type = node.Result.Type
+	}
+	if node.Result.Variable != nil {
+		variable := node.Result.Variable
+		sc.values[variable.Name] = value
+		e.moduleValue[symbolKey(module, ownedName(variable.Owner, variable.Name))] = value
+		return flowResult{Result: Result{Value: value, Display: true}}, nil
+	}
+	if node.Result.Target != nil {
+		if err := e.assign(node.Result.Target, value, module, sc); err != nil {
+			return flowResult{}, err
+		}
+		return flowResult{Result: Result{Value: value, Display: true}}, nil
+	}
+	if node.Result.Return {
+		return flowResult{Result: Result{Value: value}, Returned: true}, nil
 	}
 	return flowResult{}, nil
 }

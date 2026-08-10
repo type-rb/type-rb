@@ -359,12 +359,13 @@ func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, b
 		return nil, false
 	}
 	result := &ir.Iterate{
-		Base:          ir.Base{Span: expression.Span()},
-		Source:        l.expression(callee.Receiver),
-		Operation:     callee.Name,
-		Intrinsic:     member.Intrinsic,
-		Fails:         l.checked.ExpressionEffects[call],
-		CaptureEffect: captureEffect,
+		Base:            ir.Base{Span: expression.Span()},
+		Source:          l.expression(callee.Receiver),
+		Operation:       callee.Name,
+		Intrinsic:       member.Intrinsic,
+		Fails:           l.checked.ExpressionEffects[call],
+		CaptureEffect:   captureEffect,
+		UnhandledEffect: l.checked.UnhandledEffects[call],
 	}
 	if captureBoundary != nil {
 		result.EffectSuccess = captureBoundary.success
