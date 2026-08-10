@@ -79,6 +79,9 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if product.ClassMembers["to_sql"].Return.String() != "String" || product.ClassMembers["explain"].Return.String() != "String" {
 		t.Fatalf("unexpected model diagnostic declarations: %#v", product.ClassMembers)
 	}
+	if product.ClassMembers["update_all"].Intrinsic != "trb.orm.update_all" || product.ClassMembers["delete_all"].Intrinsic != "trb.orm.delete_all" {
+		t.Fatalf("unexpected model bulk write declarations: %#v", product.ClassMembers)
+	}
 	if product.ClassMembers["pluck"].Alternatives[1].Return.String() != "Array<String>" || product.ClassMembers["pick"].Alternatives[2].Return.String() != "Float?" || product.ClassMembers["ids"].Return.String() != "Array<Integer>" {
 		t.Fatalf("unexpected projection declarations: %#v", product.ClassMembers)
 	}

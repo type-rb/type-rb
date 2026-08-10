@@ -530,13 +530,21 @@ func TestReplExecutesORMThroughSharedHostRuntimeInEveryMode(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			command := &CLI{
-				Stdin:  strings.NewReader("import { Product } from main\nProduct.count()\n:quit\n"),
+				Stdin: strings.NewReader(strings.Join([]string{
+					"import { Product } from main",
+					"Product.count()",
+					`Product.update_all(name: "Updated")`,
+					`Product.where(name: "Updated").count()`,
+					"Product.delete_all()",
+					"Product.count()",
+					":quit",
+				}, "\n") + "\n"),
 				Stdout: &stdout, Stderr: &stderr,
 			}
 			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 				t.Fatalf("status=%d stderr=%s", status, stderr.String())
 			}
-			if stdout.String() != "1 : Integer\n" || stderr.Len() != 0 {
+			if stdout.String() != "1 : Integer\n1 : Integer\n1 : Integer\n1 : Integer\n0 : Integer\n" || stderr.Len() != 0 {
 				t.Fatalf("unexpected %s ORM REPL output: stdout=%q stderr=%q", mode, stdout.String(), stderr.String())
 			}
 		})

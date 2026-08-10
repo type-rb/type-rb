@@ -82,6 +82,14 @@ def delete_product(product: Product): Boolean fails DbError
 	return product.delete()
 end
 
+def update_all_products(): Integer fails DbError
+	return Product.update_all(name: "Updated")
+end
+
+def delete_all_products(): Integer fails DbError
+	return Product.delete_all()
+end
+
 def load_products(): ProductList fails DbError
 	return Product.where(name: "Widget").all()
 end
@@ -129,6 +137,8 @@ end
 		"orm.NewDbResultErr[[]*Product]", `"database query failed"`, "type ProductDraft struct", "TrbOrmBuildProduct",
 		"TrbOrmSaveProductDraft", "TrbOrmCreateProduct", "type ProductChanges struct", "TrbOrmWithProduct",
 		"TrbOrmSaveProductChanges", "TrbOrmUpdateProduct", "TrbOrmInsertAllProduct", "TrbOrmDeleteProduct",
+		`TrbOrmUpdateAllProduct(TrbOrmProductWhere([]string{}, []string{}, []any{}), []string{"name"}, []any{"Updated"})`,
+		`TrbOrmDeleteAllProduct(TrbOrmProductWhere([]string{}, []string{}, []any{}))`,
 		"TrbOrmInsertProductIfAbsent", "TrbOrmUpsertProduct", "trbOrmProductUniqueColumns",
 		"TrbOrmUpsertAllProduct", "func(value *float64) any", "if value == nil {",
 	} {

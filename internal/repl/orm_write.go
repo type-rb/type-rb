@@ -75,14 +75,14 @@ func (e *Evaluator) ormWriteIntrinsic(name string, arguments []evaluatedArgument
 		}
 		value, err := e.ormDestroyModel(typ, arguments[0].Value)
 		return value, true, err
-	case "trb.orm.query.update_all":
+	case "trb.orm.update_all", "trb.orm.query.update_all":
 		query, remaining, err := e.ormQueryReceiver(arguments)
 		if err != nil {
 			return Value{}, true, err
 		}
 		value, err := e.ormUpdateAll(typ, query, remaining)
 		return value, true, err
-	case "trb.orm.query.delete_all":
+	case "trb.orm.delete_all", "trb.orm.query.delete_all":
 		query, _, err := e.ormQueryReceiver(arguments)
 		if err != nil {
 			return Value{}, true, err

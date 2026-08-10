@@ -345,6 +345,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormDelete(call)
 	case "trb.orm.destroy":
 		return g.ormDestroy(call)
+	case "trb.orm.update_all":
+		return g.ormClassUpdateAll(call)
+	case "trb.orm.delete_all":
+		return g.ormClassTerminal(call, goORMDeleteAll)
 	case "trb.orm.destroy_all":
 		return g.ormClassTerminal(call, goORMDestroyAll)
 	case "trb.orm.query.where":

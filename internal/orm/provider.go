@@ -102,6 +102,11 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		declared.ClassMembers["count"] = resultQueryDeclaration("count", "trb.orm.count", types.FromName("Integer"), true)
 		declared.ClassMembers["to_sql"] = stringQueryDeclaration("to_sql", "trb.orm.to_sql", true)
 		declared.ClassMembers["explain"] = resultQueryDeclaration("explain", "trb.orm.explain", types.FromName("String"), true)
+		updateAll := relationUpdateAllDeclaration(model)
+		updateAll.Intrinsic = "trb.orm.update_all"
+		updateAll.Class = true
+		declared.ClassMembers["update_all"] = updateAll
+		declared.ClassMembers["delete_all"] = resultQueryDeclaration("delete_all", "trb.orm.delete_all", types.FromName("Integer"), true)
 		declared.ClassMembers["destroy_all"] = resultQueryDeclaration("destroy_all", "trb.orm.destroy_all", types.FromName("Integer"), true)
 		if preload := preloadDeclaration(model, "trb.orm.preload", true); preload.Name != "" {
 			declared.ClassMembers["preload"] = preload
