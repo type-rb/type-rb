@@ -32,8 +32,17 @@ type Schema struct {
 }
 
 type Table struct {
-	Name    string
-	Columns []Column
+	Name        string
+	Columns     []Column
+	ForeignKeys []ForeignKey
+}
+
+type ForeignKey struct {
+	ID               int
+	Sequence         int
+	Column           string
+	ReferencedTable  string
+	ReferencedColumn string
 }
 
 type Column struct {
@@ -72,16 +81,11 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 		config.Database = filepath.Join(projectRoot, config.Database)
 	}
 
-	var introspector Introspector
-	switch config.Adapter {
-	case "sqlite":
-		introspector = sqliteIntrospector{}
-	case "postgresql", "mysql":
-		return nil, fmt.Errorf("trb/orm adapter %s is not implemented yet", config.Adapter)
-	default:
+	definition, ok := adapterDefinitionFor(config.Adapter)
+	if !ok {
 		return nil, fmt.Errorf("unsupported trb/orm adapter %q", config.Adapter)
 	}
-	schema, err := introspector.Inspect(config)
+	schema, err := definition.Introspector.Inspect(config)
 	if err != nil {
 		return nil, fmt.Errorf("inspect %s database: %w", config.Adapter, err)
 	}

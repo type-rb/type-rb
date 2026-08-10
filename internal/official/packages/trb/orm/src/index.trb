@@ -1,2 +1,10 @@
 class Model
 end
+
+def belongs_to(model: Any)
+	return
+end
+
+def has_many(model: Any)
+	return
+end

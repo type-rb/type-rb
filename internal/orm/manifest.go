@@ -10,11 +10,29 @@ import (
 )
 
 type Model struct {
-	Name       string
-	QueryType  string
-	Table      string
-	ModulePath string
-	Columns    []Column
+	Name         string
+	QueryType    string
+	Table        string
+	ModulePath   string
+	Columns      []Column
+	Associations []Association
+}
+
+type AssociationKind string
+
+const (
+	BelongsTo AssociationKind = "belongs_to"
+	HasMany   AssociationKind = "has_many"
+)
+
+type Association struct {
+	Name         string
+	Kind         AssociationKind
+	TargetModel  string
+	TargetQuery  string
+	SourceColumn string
+	TargetColumn string
+	Preloadable  bool
 }
 
 func (m Model) PrimaryKey() (Column, bool) {
@@ -45,6 +63,33 @@ func (m Model) BatchKey() (Column, bool) {
 	default:
 		return Column{}, false
 	}
+}
+
+func (m Model) Association(name string) (Association, bool) {
+	for _, association := range m.Associations {
+		if association.Name == name {
+			return association, true
+		}
+	}
+	return Association{}, false
+}
+
+func (m Model) Column(name string) (Column, bool) {
+	for _, column := range m.Columns {
+		if column.Name == name {
+			return column, true
+		}
+	}
+	return Column{}, false
+}
+
+func associationValueType(association Association) types.Type {
+	if association.Kind == HasMany {
+		return arrayOf(association.TargetModel)
+	}
+	result := types.FromName(association.TargetModel)
+	result.Nullable = true
+	return result
 }
 
 type Manifest struct {
@@ -92,6 +137,21 @@ func (m *Manifest) Augment(program *ir.Program) {
 			for _, column := range model.Columns {
 				if !existing[column.Name] {
 					class.Body = append(class.Body, &ir.Field{Name: "@" + column.Name, Type: column.Type})
+				}
+			}
+			for _, association := range model.Associations {
+				if association.Preloadable && !existing[association.Name] {
+					class.Body = append(class.Body,
+						&ir.Field{Name: associationValueField(association.Name), Type: types.FromName("Any")},
+						&ir.Field{Name: associationLoadedField(association.Name), Type: types.FromName("Boolean")},
+					)
+					class.Body = append(class.Body, &ir.Method{
+						Name: association.Name, External: true,
+						ReturnType: associationValueType(association),
+					})
+				}
+				if !existing[association.Name+"_query"] {
+					class.Body = append(class.Body, &ir.Method{Name: association.Name + "_query", External: true, ReturnType: types.FromName(association.TargetQuery)})
 				}
 			}
 			if !existing["where"] {
@@ -143,10 +203,39 @@ func queryIRMethods(model Model) []ir.Statement {
 		&ir.Method{Name: "to_sql", External: true, ReturnType: types.FromName("String")},
 		&ir.Method{Name: "explain", External: true, ReturnType: types.FromName("String")},
 	}
+	if preload := preloadIRMethod(model); preload != nil {
+		methods = append(methods, preload)
+	}
 	if _, ok := model.BatchKey(); ok {
 		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))
 	}
 	return methods
+}
+
+func preloadIRMethod(model Model) *ir.Method {
+	var values []string
+	for _, association := range model.Associations {
+		if association.Preloadable {
+			values = append(values, association.Name)
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return &ir.Method{
+		Name: "preload", External: true, ReturnType: namedType(model.QueryType),
+		Parameters: []ir.Parameter{{
+			Name: "association", Type: types.FromName("String"), LiteralValues: values,
+		}},
+	}
+}
+
+func associationValueField(name string) string {
+	return "@__trb_association_" + name
+}
+
+func associationLoadedField(name string) string {
+	return "@__trb_association_" + name + "_loaded"
 }
 
 func whereIRMethod(model Model, class bool) *ir.Method {

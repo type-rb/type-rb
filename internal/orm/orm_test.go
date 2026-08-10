@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/types"
@@ -72,6 +74,99 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 }
 
+func TestSQLiteAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
+	adapter, err := AdapterFor("sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter.DriverName != "sqlite" || adapter.GoDriverImport != "modernc.org/sqlite" {
+		t.Fatalf("unexpected SQLite driver definition: %#v", adapter)
+	}
+	if got := adapter.QuoteIdentifier(`product"names`); got != `"product""names"` {
+		t.Fatalf("QuoteIdentifier() = %q", got)
+	}
+	if got := adapter.Placeholder(3); got != "?" {
+		t.Fatalf("Placeholder() = %q", got)
+	}
+}
+
+func TestPostgreSQLAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
+	adapter, err := AdapterFor("postgresql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter.DriverName != "pgx" || adapter.GoDriverImport != "github.com/jackc/pgx/v5/stdlib" {
+		t.Fatalf("unexpected PostgreSQL driver definition: %#v", adapter)
+	}
+	if got := adapter.QuoteIdentifier(`product"names`); got != `"product""names"` {
+		t.Fatalf("QuoteIdentifier() = %q", got)
+	}
+	if got := adapter.Placeholder(3); got != "$3" {
+		t.Fatalf("Placeholder() = %q", got)
+	}
+}
+
+func TestPostgreSQLColumnTypes(t *testing.T) {
+	tests := map[string]types.Kind{
+		"int8": types.Int, "float8": types.Float, "text": types.String,
+		"uuid": types.String, "jsonb": types.String, "bool": types.Bool, "bytea": types.Bytes,
+	}
+	for databaseType, want := range tests {
+		got, err := postgresqlColumnType(databaseType, databaseType)
+		if err != nil {
+			t.Fatalf("postgresqlColumnType(%q): %v", databaseType, err)
+		}
+		if got.Kind != want {
+			t.Fatalf("postgresqlColumnType(%q) = %s, want %s", databaseType, got.Kind, want)
+		}
+	}
+	if _, err := postgresqlColumnType("timestamp without time zone", "timestamp"); err == nil {
+		t.Fatal("timestamp should remain unsupported until portable time types are defined")
+	}
+}
+
+func TestMySQLAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
+	adapter, err := AdapterFor("mysql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter.DriverName != "mysql" || adapter.GoDriverImport != "github.com/go-sql-driver/mysql" {
+		t.Fatalf("unexpected MySQL driver definition: %#v", adapter)
+	}
+	if got := adapter.QuoteIdentifier("product`names"); got != "`product``names`" {
+		t.Fatalf("QuoteIdentifier() = %q", got)
+	}
+	if got := adapter.Placeholder(3); got != "?" {
+		t.Fatalf("Placeholder() = %q", got)
+	}
+}
+
+func TestMySQLColumnTypes(t *testing.T) {
+	tests := []struct {
+		dataType, databaseType string
+		want                   types.Kind
+	}{
+		{dataType: "bigint", databaseType: "bigint", want: types.Int},
+		{dataType: "double", databaseType: "double", want: types.Float},
+		{dataType: "varchar", databaseType: "varchar(255)", want: types.String},
+		{dataType: "json", databaseType: "json", want: types.String},
+		{dataType: "tinyint", databaseType: "tinyint(1)", want: types.Bool},
+		{dataType: "blob", databaseType: "blob", want: types.Bytes},
+	}
+	for _, test := range tests {
+		got, err := mysqlColumnType(test.dataType, test.databaseType)
+		if err != nil {
+			t.Fatalf("mysqlColumnType(%q): %v", test.databaseType, err)
+		}
+		if got.Kind != test.want {
+			t.Fatalf("mysqlColumnType(%q) = %s, want %s", test.databaseType, got.Kind, test.want)
+		}
+	}
+	if _, err := mysqlColumnType("timestamp", "timestamp"); err == nil {
+		t.Fatal("timestamp should remain unsupported until portable time types are defined")
+	}
+}
+
 func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	root, options := sqliteFixture(t)
 	program := parseModel(t)
@@ -123,6 +218,72 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	}
 }
 
+func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
+	root, options := sqliteAssociationFixture(t, true)
+	program := parseAssociationModels(t)
+	schema, err := LoadSchema(root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	products, ok := schema.Table("products")
+	if !ok || len(products.ForeignKeys) != 1 || products.ForeignKeys[0].Column != "category_id" || products.ForeignKeys[0].ReferencedTable != "categories" {
+		t.Fatalf("unexpected product foreign keys: %#v", products.ForeignKeys)
+	}
+	catalog, err := Declarations([]*ast.Program{program}, root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	product, _ := catalog.Type("Product")
+	category, _ := catalog.Type("Category")
+	if product.InstanceMembers["category"].Return.String() != "Category?" {
+		t.Fatalf("unexpected belongs_to declaration: %#v", product.InstanceMembers["category"])
+	}
+	if product.InstanceMembers["category_query"].Return.String() != "CategoryQuery" {
+		t.Fatalf("unexpected belongs_to query declaration: %#v", product.InstanceMembers["category_query"])
+	}
+	if category.InstanceMembers["products"].Return.String() != "Array<Product>" {
+		t.Fatalf("unexpected has_many declaration: %#v", category.InstanceMembers["products"])
+	}
+	if category.InstanceMembers["products_query"].Return.String() != "ProductQuery" {
+		t.Fatalf("unexpected has_many query declaration: %#v", category.InstanceMembers["products_query"])
+	}
+	preload := productQueryMember(t, catalog, "ProductQuery", "preload")
+	if len(preload.Parameters) != 1 || len(preload.Parameters[0].LiteralValues) != 1 || preload.Parameters[0].LiteralValues[0] != "category" {
+		t.Fatalf("unexpected ProductQuery.preload declaration: %#v", preload)
+	}
+	manifest, err := Analyze([]*ast.Program{program}, root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	productModel, _ := manifest.Model("Product")
+	belongsTo, ok := productModel.Association("category")
+	if !ok || belongsTo.SourceColumn != "category_id" || belongsTo.TargetColumn != "id" {
+		t.Fatalf("unexpected belongs_to association: %#v", belongsTo)
+	}
+	categoryModel, _ := manifest.Model("Category")
+	hasMany, ok := categoryModel.Association("products")
+	if !ok || hasMany.SourceColumn != "id" || hasMany.TargetColumn != "category_id" {
+		t.Fatalf("unexpected has_many association: %#v", hasMany)
+	}
+}
+
+func productQueryMember(t *testing.T, catalog *declaration.Catalog, typeName, name string) declaration.Member {
+	t.Helper()
+	query, ok := catalog.Type(typeName)
+	if !ok {
+		t.Fatalf("missing query type %s", typeName)
+	}
+	return query.InstanceMembers[name]
+}
+
+func TestSQLiteAssociationRejectsMissingForeignKey(t *testing.T) {
+	root, options := sqliteAssociationFixture(t, false)
+	_, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, options)
+	if err == nil || !strings.Contains(err.Error(), "requires foreign key products.category_id -> categories.id") {
+		t.Fatalf("expected missing foreign key diagnostic, got %v", err)
+	}
+}
+
 func sqliteFixture(t *testing.T) (string, map[string][]byte) {
 	t.Helper()
 	root := t.TempDir()
@@ -151,6 +312,36 @@ func sqliteFixture(t *testing.T) (string, map[string][]byte) {
 	return root, map[string][]byte{PackageName: encoded}
 }
 
+func sqliteAssociationFixture(t *testing.T, foreignKey bool) (string, map[string][]byte) {
+	t.Helper()
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	constraint := ""
+	if foreignKey {
+		constraint = ", FOREIGN KEY (category_id) REFERENCES categories(id)"
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, name TEXT NOT NULL` + constraint + `)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(Config{Adapter: "sqlite", Database: filepath.Base(databasePath)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, map[string][]byte{PackageName: encoded}
+}
+
 func parseModel(t *testing.T) *ast.Program {
 	t.Helper()
 	program, diagnostics := parser.Parse([]byte("import { Model } from trb/orm\n\nclass Product < Model\nend\n"))
@@ -158,6 +349,25 @@ func parseModel(t *testing.T) *ast.Program {
 		t.Fatalf("parse diagnostics: %#v", diagnostics)
 	}
 	program.ModulePath = "src/main"
+	return program
+}
+
+func parseAssociationModels(t *testing.T) *ast.Program {
+	t.Helper()
+	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many } from trb/orm
+
+class Category < Model
+	has_many(Product)
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+`))
+	if len(diagnostics) > 0 {
+		t.Fatalf("parse diagnostics: %#v", diagnostics)
+	}
+	program.ModulePath = "src/models"
 	return program
 }
 
