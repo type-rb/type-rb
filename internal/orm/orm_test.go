@@ -193,6 +193,24 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 }
 
+func TestModelDeclarationsArePortableAcrossModes(t *testing.T) {
+	root, options := sqliteFixture(t)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			program := parseModel(t)
+			program.Mode = mode
+			catalog, err := Declarations([]*ast.Program{program}, root, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			product, ok := catalog.Type("Product")
+			if !ok || product.ClassMembers["all"].Return.String() != "Array<Product>" || product.ClassMembers["all"].Fails.String() != "DbError" {
+				t.Fatalf("unexpected Product declaration in mode %s: %#v", mode, product)
+			}
+		})
+	}
+}
+
 func TestAssociationOptionsAndThroughMetadata(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "application.sqlite3")

@@ -753,9 +753,6 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 			if !ok || expressionName(class.Superclass) != "Model" {
 				continue
 			}
-			if program.Mode != "" && program.Mode != "go" {
-				return nil, fmt.Errorf("trb/orm currently supports mode go; got mode %s", program.Mode)
-			}
 			if seen[class.Name] {
 				return nil, fmt.Errorf("trb/orm model %s is declared more than once", class.Name)
 			}
