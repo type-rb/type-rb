@@ -33,6 +33,7 @@ func TestORMRuntimeKeepsSequelBehindTypeRBOwnedQueryBoundary(t *testing.T) {
 				"def association_query", "def destroy_model_result", "def transaction_result",
 				`options[:mode] = :immediate if @adapter == "sqlite" && parent.nil?`,
 				`sql += " FOR UPDATE" unless @adapter == "sqlite"`,
+				`table_alias = "__trb_join_" + index.to_s`,
 				`TrbOrmRuntime.configure(adapter: "` + adapter + `"`,
 			} {
 				if !strings.Contains(pool, expected) {

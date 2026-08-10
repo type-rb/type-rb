@@ -2895,6 +2895,20 @@ func TestPutsPreludeLowersWithoutImportAcrossBackends(t *testing.T) {
 	}
 }
 
+func TestGoPutsDereferencesNullableValues(t *testing.T) {
+	source := []byte("def print_name(name: String?)\n\tputs(name)\n\treturn\nend\n")
+	artifact, err := CompileWithOptions("main.trb", source, Options{Mode: "go", Package: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	for _, want := range []string{"fmt.Println(func(value *string) any", "if value == nil", "return *value", "}(name))"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("generated Go does not print the nullable String value; missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestPortableStringLengthUsesUnicodeCodePoints(t *testing.T) {
 	source := []byte("import trb/std/strings\n\ndef count(): Integer\n  return strings.length(\"😀a\")\nend\n")
 	tests := []struct {

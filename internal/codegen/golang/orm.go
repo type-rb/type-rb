@@ -784,19 +784,21 @@ func (g *generator) ormLoadAssociation(call *ir.Call, reload bool) string {
 	query := g.ormAssociationQuery(call)
 	qualifier := g.ormModelQualifier(target)
 	load := qualifier + goORMLoader(target) + "(" + query + ")"
-	loadedValue := "loaded.OkValue"
 	if association.Kind == ormintegration.BelongsTo {
 		load = qualifier + goORMFirst(target) + "(" + query + ")"
 	}
 
 	var result strings.Builder
+	g.temporary++
+	rawLoaded := "__trbOrmLoaded" + strconv.Itoa(g.temporary)
+	loadedValue := rawLoaded + ".OkValue"
 	result.WriteString("func() " + resultType + " { ")
 	if !reload {
 		result.WriteString("if cached, ok := " + getter + "; ok { value, valid := cached.(" + g.goType(valueType) + "); if !valid { return " + g.ormResultErr(valueType, g.ormErrorValue("InvalidData", "cached ORM association "+source.Name+"."+association.Name+" has an invalid type")) + " }; return " + g.ormResultOK(valueType, "value") + " }; ")
 	}
-	result.WriteString("loaded := " + load + "; if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(valueType, "loaded.ErrError") + " }; ")
+	result.WriteString(rawLoaded + " := " + load + "; if " + rawLoaded + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(valueType, rawLoaded+".ErrError") + " }; ")
 	if association.Kind == ormintegration.HasOne {
-		result.WriteString("if len(loaded.OkValue) > 1 { return " + g.ormResultErr(valueType, g.ormErrorValue("InvalidData", "database has_one association returned multiple rows")) + " }; var value " + g.goType(valueType) + "; if len(loaded.OkValue) == 1 { value = loaded.OkValue[0] }; ")
+		result.WriteString("if len(" + loadedValue + ") > 1 { return " + g.ormResultErr(valueType, g.ormErrorValue("InvalidData", "database has_one association returned multiple rows")) + " }; var value " + g.goType(valueType) + "; if len(" + loadedValue + ") == 1 { value = " + loadedValue + "[0] }; ")
 	} else {
 		result.WriteString("value := " + loadedValue + "; ")
 	}

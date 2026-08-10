@@ -121,6 +121,8 @@ Go, Ruby, and TypeScript; TypeScript server applications currently select Bun.
 It reads SQLite, PostgreSQL, or MySQL schema metadata directly and exposes typed
 models, immutable queries, associations and preload, aggregates, transactions,
 batching, writes, conflict handling, and destroy lifecycles.
+The repository runs the same application contract across all nine backend and
+database combinations, plus an ORM-backed JSON route across all three backends.
 Database terminals and lazy association access use `fails DbError`; `attempt`
 captures them as ordinary `Result` values. The REPL uses the same schema-backed
 read and write API. Schema caching and production compatibility remain future

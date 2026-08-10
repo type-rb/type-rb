@@ -130,7 +130,16 @@ func (g *generator) ormBaseQuery(call *ir.Call) (ormintegration.Model, string, b
 	if member.Receiver.ExprType().Name == model.QueryType || member.Receiver.ExprType().Name == model.ScopeType() {
 		return model, g.expr(member.Receiver), true
 	}
-	return model, "__trbOrm.query(" + strconv.Quote(model.Name) + ")", true
+	return model, "__trbOrm.query(" + g.ormModelName(call, model) + ")", true
+}
+
+func (g *generator) ormModelName(call *ir.Call, model ormintegration.Model) string {
+	name := strconv.Quote(model.Name)
+	member, ok := call.Callee.(*ir.Member)
+	if !ok || member.Receiver.ExprType().Name != model.Name {
+		return name
+	}
+	return "__trbOrm.modelName(" + name + ", " + g.expr(member.Receiver) + ")"
 }
 
 func (g *generator) ormPredicate(call *ir.Call) string {
@@ -183,7 +192,7 @@ func (g *generator) ormIntrinsic(name string, call *ir.Call, arguments []string)
 	model, hasModel := g.ormModelForCall(call)
 	modelName := ""
 	if hasModel {
-		modelName = strconv.Quote(model.Name)
+		modelName = g.ormModelName(call, model)
 	}
 	baseModel, base, _ := g.ormBaseQuery(call)
 	_ = baseModel
@@ -397,7 +406,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		if !ok {
 			return
 		}
-		source = "__trbOrm.query(" + strconv.Quote(model.Name) + ")"
+		source = "__trbOrm.query(__trbOrm.modelName(" + strconv.Quote(model.Name) + ", " + g.expr(iteration.Source) + "))"
 	}
 	primary, ok := model.BatchKey()
 	if !ok {
@@ -588,6 +597,7 @@ function cloneQuery(value: TrbOrmQuery): TrbOrmQuery {
 export function query(name: string): TrbOrmQuery {
   return { model: name, transaction: null, predicate: null, joins: [], orders: [], limit: null, offset: null, lock: false, distinct: false, preloads: [] };
 }
+export function modelName(name: string, constructor: Function): string { void constructor; return name; }
 export function using(name: string, transaction: Transaction): TrbOrmQuery { return { ...query(name), transaction }; }
 function combine(kind: "and" | "or", left: TrbOrmPredicate | null, right: TrbOrmPredicate | null): TrbOrmPredicate | null {
   if (left === null) return right;

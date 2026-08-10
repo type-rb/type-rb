@@ -234,7 +234,11 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Next:
 		g.line("continue")
 	case *ir.ExpressionStatement:
-		g.line(g.expr(n.Expression))
+		if identifier, ok := n.Expression.(*ir.Identifier); ok && identifier.Generated {
+			g.line("_ = " + g.expr(identifier))
+		} else {
+			g.line(g.expr(n.Expression))
+		}
 	case *ir.If:
 		g.line("if " + g.expr(n.Condition) + " {")
 		g.indent++
@@ -1847,6 +1851,12 @@ func (g *generator) goType(t types.Type) string {
 	default:
 		if t.Name == "" {
 			result = "any"
+		} else if t.Name == "DbError" && g.orm != nil && g.modulePath != "trb/orm/index" && g.typeAliases[t.Name] == "" {
+			result = g.ormLifecycleAlias() + ".DbError"
+		} else if t.Name == "DbErrorKind" && g.orm != nil && g.modulePath != "trb/orm/index" && g.typeAliases[t.Name] == "" {
+			result = g.ormLifecycleAlias() + ".DbErrorKind"
+		} else if t.Name == "DbResult" && g.orm != nil && g.modulePath != "trb/orm/index" && g.typeAliases[t.Name] == "" {
+			result = g.ormLifecycleAlias() + ".DbResult"
 		} else if t.Name == "Transaction" && g.orm != nil {
 			result = "*" + g.ormLifecycleAlias() + ".TrbOrmTransaction"
 		} else if t.Name == "Subquery" && g.orm != nil {
