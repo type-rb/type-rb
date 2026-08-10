@@ -4,6 +4,7 @@ package repl
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
@@ -82,9 +83,308 @@ func (e *Evaluator) ormWriteIntrinsic(name string, arguments []evaluatedArgument
 		}
 		value, err := e.ormDeleteAll(typ, query)
 		return value, true, err
+	case "trb.orm.insert_all":
+		query, remaining, err := e.ormQueryReceiver(arguments)
+		if err != nil {
+			return Value{}, true, err
+		}
+		value, err := e.ormInsertAll(typ, query.model, remaining)
+		return value, true, err
+	case "trb.orm.insert_if_absent":
+		query, remaining, err := e.ormQueryReceiver(arguments)
+		if err != nil {
+			return Value{}, true, err
+		}
+		value, err := e.ormInsertIfAbsent(typ, query, remaining)
+		return value, true, err
+	case "trb.orm.draft.upsert":
+		if len(arguments) < 1 {
+			return Value{}, true, errors.New("ORM upsert requires a draft receiver")
+		}
+		value, err := e.ormUpsertDraft(typ, arguments[0].Value, arguments[1:])
+		return value, true, err
+	case "trb.orm.upsert_all":
+		query, remaining, err := e.ormQueryReceiver(arguments)
+		if err != nil {
+			return Value{}, true, err
+		}
+		value, err := e.ormUpsertAll(typ, query.model, remaining)
+		return value, true, err
 	default:
 		return Value{}, false, nil
 	}
+}
+
+func (e *Evaluator) ormInsertAll(resultType types.Type, model ormintegration.Model, arguments []evaluatedArgument) (Value, error) {
+	drafts, _, _, err := ormBulkArguments(model, arguments)
+	if err != nil {
+		return Value{}, err
+	}
+	transaction, failure := e.ormBeginTransaction(nil)
+	if failure != nil {
+		return e.ormResultErr(resultType, failure.kind, failure.message)
+	}
+	for _, draft := range drafts {
+		statement, values, buildErr := e.ormInsertStatement(model, draft, nil, nil, false)
+		if buildErr != nil {
+			_ = e.ormRollbackTransaction(transaction)
+			return Value{}, buildErr
+		}
+		if _, execErr := transaction.executor().ExecContext(e.context, statement, values...); execErr != nil {
+			_ = e.ormRollbackTransaction(transaction)
+			return e.ormResultErr(resultType, "Constraint", "database bulk insert failed")
+		}
+	}
+	if failure := e.ormCommitTransaction(transaction); failure != nil {
+		_ = e.ormRollbackTransaction(transaction)
+		return e.ormResultErr(resultType, failure.kind, failure.message)
+	}
+	return e.ormResultOK(resultType, Value{Type: types.FromName("Integer"), Data: int64(len(drafts))})
+}
+
+func (e *Evaluator) ormInsertIfAbsent(resultType types.Type, query *ormQueryValue, arguments []evaluatedArgument) (Value, error) {
+	if len(arguments) != 2 {
+		return Value{}, errors.New("ORM insert_if_absent requires a draft and unique_by")
+	}
+	draft, ok := arguments[0].Value.Data.(*objectInstance)
+	if !ok {
+		return Value{}, errors.New("ORM insert_if_absent requires a draft")
+	}
+	unique, err := ormColumnList(arguments[1].Value)
+	if err != nil {
+		return Value{}, err
+	}
+	statement, values, err := e.ormInsertStatement(query.model, draft, unique, nil, true)
+	if err != nil {
+		return Value{}, err
+	}
+	executor, failure := e.ormQueryExecutor(query)
+	if failure != nil {
+		return e.ormResultErr(resultType, failure.kind, failure.message)
+	}
+	result, execErr := executor.ExecContext(e.context, statement, values...)
+	if execErr != nil {
+		return e.ormResultErr(resultType, "Constraint", "database conflict insert failed")
+	}
+	affected, affectedErr := result.RowsAffected()
+	if affectedErr != nil {
+		return e.ormResultErr(resultType, "Query", "database conflict insert result was invalid")
+	}
+	inserted := affected > 0
+	if !inserted && e.ormRuntime().adapter.Name == "mysql" {
+		exists, failure := e.ormDraftExistsByColumns(query, draft, unique)
+		if failure != nil {
+			return e.ormResultErr(resultType, failure.kind, failure.message)
+		}
+		if !exists {
+			return e.ormResultErr(resultType, "Constraint", "database row conflicted with a different unique constraint")
+		}
+	}
+	return e.ormResultOK(resultType, Value{Type: types.FromName("Boolean"), Data: inserted})
+}
+
+func (e *Evaluator) ormUpsertDraft(resultType types.Type, draftValue Value, arguments []evaluatedArgument) (Value, error) {
+	draft, ok := draftValue.Data.(*objectInstance)
+	if !ok {
+		return Value{}, errors.New("ORM upsert requires a draft")
+	}
+	model, query, ok := e.ormDraftModelAndQuery(draft)
+	if !ok {
+		return Value{}, errors.New("ORM draft is missing its model scope")
+	}
+	unique, update, err := ormConflictArguments(arguments)
+	if err != nil {
+		return Value{}, err
+	}
+	statement, values, err := e.ormInsertStatement(model, draft, unique, update, false)
+	if err != nil {
+		return Value{}, err
+	}
+	executor, failure := e.ormQueryExecutor(query)
+	if failure != nil {
+		return e.ormResultErr(resultType, failure.kind, failure.message)
+	}
+	if _, execErr := executor.ExecContext(e.context, statement, values...); execErr != nil {
+		return e.ormResultErr(resultType, "Constraint", "database upsert failed")
+	}
+	return e.ormReloadDraftByColumns(resultType, query, draft, unique)
+}
+
+func (e *Evaluator) ormUpsertAll(resultType types.Type, model ormintegration.Model, arguments []evaluatedArgument) (Value, error) {
+	drafts, unique, update, err := ormBulkArguments(model, arguments)
+	if err != nil {
+		return Value{}, err
+	}
+	transaction, failure := e.ormBeginTransaction(nil)
+	if failure != nil {
+		return e.ormResultErr(resultType, failure.kind, failure.message)
+	}
+	for _, draft := range drafts {
+		statement, values, buildErr := e.ormInsertStatement(model, draft, unique, update, false)
+		if buildErr != nil {
+			_ = e.ormRollbackTransaction(transaction)
+			return Value{}, buildErr
+		}
+		if _, execErr := transaction.executor().ExecContext(e.context, statement, values...); execErr != nil {
+			_ = e.ormRollbackTransaction(transaction)
+			return e.ormResultErr(resultType, "Constraint", "database bulk upsert failed")
+		}
+	}
+	if failure := e.ormCommitTransaction(transaction); failure != nil {
+		_ = e.ormRollbackTransaction(transaction)
+		return e.ormResultErr(resultType, failure.kind, failure.message)
+	}
+	return e.ormResultOK(resultType, Value{Type: types.FromName("Integer"), Data: int64(len(drafts))})
+}
+
+func (e *Evaluator) ormInsertStatement(model ormintegration.Model, draft *objectInstance, unique, update []string, ignore bool) (string, []any, error) {
+	columns, sourceValues := ormWriteValues(model, draft.Fields)
+	adapter := e.ormRuntime().adapter
+	statement := "INSERT INTO " + adapter.QuoteIdentifier(model.Table)
+	values := make([]any, len(sourceValues))
+	if len(columns) == 0 {
+		statement += adapter.DefaultInsert
+	} else {
+		quoted := make([]string, len(columns))
+		placeholders := make([]string, len(columns))
+		for index, column := range columns {
+			quoted[index] = adapter.QuoteIdentifier(column)
+			placeholders[index] = adapter.Placeholder(index + 1)
+			values[index] = ormDatabaseValue(sourceValues[index])
+		}
+		statement += " (" + strings.Join(quoted, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
+	}
+	if len(unique) == 0 {
+		return statement, values, nil
+	}
+	if adapter.Name == "mysql" {
+		assignments := []string{}
+		if ignore {
+			column := adapter.QuoteIdentifier(unique[0])
+			assignments = append(assignments, column+" = "+column)
+		} else {
+			for _, column := range update {
+				quoted := adapter.QuoteIdentifier(column)
+				assignments = append(assignments, quoted+" = VALUES("+quoted+")")
+			}
+			if len(assignments) == 0 {
+				column := adapter.QuoteIdentifier(unique[0])
+				assignments = append(assignments, column+" = "+column)
+			}
+		}
+		return statement + " ON DUPLICATE KEY UPDATE " + strings.Join(assignments, ", "), values, nil
+	}
+	quotedUnique := make([]string, len(unique))
+	for index, column := range unique {
+		quotedUnique[index] = adapter.QuoteIdentifier(column)
+	}
+	statement += " ON CONFLICT (" + strings.Join(quotedUnique, ", ") + ")"
+	if ignore || len(update) == 0 {
+		return statement + " DO NOTHING", values, nil
+	}
+	assignments := make([]string, len(update))
+	for index, column := range update {
+		quoted := adapter.QuoteIdentifier(column)
+		assignments[index] = quoted + " = excluded." + quoted
+	}
+	return statement + " DO UPDATE SET " + strings.Join(assignments, ", "), values, nil
+}
+
+func (e *Evaluator) ormReloadDraftByColumns(resultType types.Type, query *ormQueryValue, draft *objectInstance, columns []string) (Value, error) {
+	loaded := cloneORMQuery(query)
+	conditions := make([]ormCondition, 0, len(columns))
+	for _, column := range columns {
+		value, ok := draft.Fields["@"+column]
+		if !ok {
+			return e.ormResultErr(resultType, "InvalidData", "ORM conflict key is missing from the draft")
+		}
+		conditions = append(conditions, ormCondition{column: column, operator: "=", value: value})
+	}
+	loaded.predicate = ormPredicateGroup(conditions)
+	loaded.orders = nil
+	loaded.limit = nil
+	loaded.offset = nil
+	values, failure := e.ormLoad(loaded)
+	if failure != nil {
+		return e.ormResultErr(resultType, failure.kind, failure.message)
+	}
+	if len(values) != 1 {
+		return e.ormResultErr(resultType, "InvalidData", "database upsert could not reload one row")
+	}
+	return e.ormResultOK(resultType, values[0])
+}
+
+func (e *Evaluator) ormDraftExistsByColumns(query *ormQueryValue, draft *objectInstance, columns []string) (bool, *ormFailure) {
+	conditions := make([]ormCondition, 0, len(columns))
+	for _, column := range columns {
+		value, ok := draft.Fields["@"+column]
+		if !ok {
+			return false, &ormFailure{kind: "InvalidData", message: "ORM conflict key is missing from the draft"}
+		}
+		conditions = append(conditions, ormCondition{column: column, operator: "=", value: value})
+	}
+	lookup := cloneORMQuery(query)
+	lookup.predicate = ormPredicateGroup(conditions)
+	return e.ormExists(lookup)
+}
+
+func ormBulkArguments(model ormintegration.Model, arguments []evaluatedArgument) ([]*objectInstance, []string, []string, error) {
+	if len(arguments) == 0 {
+		return nil, nil, nil, errors.New("ORM bulk write requires an Array of drafts")
+	}
+	array, ok := arguments[0].Value.Data.(*arrayValue)
+	if !ok {
+		return nil, nil, nil, errors.New("ORM bulk write requires an Array of drafts")
+	}
+	drafts := make([]*objectInstance, len(array.Items))
+	for index, item := range array.Items {
+		draft, ok := item.Data.(*objectInstance)
+		if !ok || draft.Definition.Node.Name != model.DraftType() {
+			return nil, nil, nil, fmt.Errorf("ORM bulk write requires %s values", model.DraftType())
+		}
+		drafts[index] = draft
+	}
+	if len(arguments) == 1 {
+		return drafts, nil, nil, nil
+	}
+	unique, update, err := ormConflictArguments(arguments[1:])
+	return drafts, unique, update, err
+}
+
+func ormConflictArguments(arguments []evaluatedArgument) ([]string, []string, error) {
+	var unique, update []string
+	for _, argument := range arguments {
+		columns, err := ormColumnList(argument.Value)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch argument.Name {
+		case "unique_by":
+			unique = columns
+		case "update":
+			update = columns
+		}
+	}
+	if len(unique) == 0 {
+		return nil, nil, errors.New("ORM upsert requires unique_by")
+	}
+	return unique, update, nil
+}
+
+func ormColumnList(value Value) ([]string, error) {
+	array, ok := value.Data.(*arrayValue)
+	if !ok || len(array.Items) == 0 {
+		return nil, errors.New("ORM column option must be a non-empty literal Array")
+	}
+	result := make([]string, len(array.Items))
+	for index, item := range array.Items {
+		column, ok := item.Data.(string)
+		if !ok {
+			return nil, errors.New("ORM column option must contain literal column names")
+		}
+		result[index] = column
+	}
+	return result, nil
 }
 
 func (e *Evaluator) ormBuildDraft(typ types.Type, query *ormQueryValue, arguments []evaluatedArgument) (Value, error) {

@@ -398,7 +398,7 @@ func TestReplLoadsPortableORMAssociationProperties(t *testing.T) {
 	}
 	if _, err := database.Exec(`
 		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-		CREATE TABLE products (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, name TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES categories(id));
+		CREATE TABLE products (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, name TEXT NOT NULL UNIQUE, FOREIGN KEY (category_id) REFERENCES categories(id));
 		INSERT INTO categories (id, name) VALUES (1, 'Featured');
 		INSERT INTO products (id, category_id, name) VALUES (1, 1, 'First'), (2, 1, 'Second');
 	`); err != nil {
@@ -458,10 +458,30 @@ def write_products(): Integer fails DbError
 	direct := Product.create(category_id: 1, name: "Direct")
 	updated := direct.update(name: "Updated")
 	puts(updated.name)
-	updated_count := Product.where(id: [saved.id, updated.id]).update_all(name: "Bulk")
+	updated_count := Product.where(id: saved.id).update_all(name: "Bulk")
 	puts(updated_count)
 	puts(saved.delete())
 	puts(Product.where(id: updated.id).delete_all())
+	return Product.count()
+end
+
+def write_conflicts(): Integer fails DbError
+	bulk_count := Product.insert_all([
+		Product.build(category_id: 1, name: "Bulk A"),
+		Product.build(category_id: 1, name: "Bulk B")
+	])
+	puts(bulk_count)
+	absent := Product.build(category_id: 1, name: "Absent")
+	puts(Product.insert_if_absent(absent, unique_by: [:name]))
+	puts(Product.insert_if_absent(absent, unique_by: [:name]))
+	upserted := Product.build(category_id: 1, name: "Upsert").upsert(unique_by: [:name], update: [:category_id])
+	puts(upserted.name)
+	upsert_count := Product.upsert_all([
+		Product.build(category_id: 1, name: "Upsert A"),
+		Product.build(category_id: 1, name: "Upsert B")
+	], unique_by: [:name], update: [:category_id])
+	puts(upsert_count)
+	puts(Product.where(name: ["Bulk A", "Bulk B", "Absent", "Upsert", "Upsert A", "Upsert B"]).delete_all())
 	return Product.count()
 end
 
@@ -484,7 +504,7 @@ end
 		t.Fatal(err)
 	}
 	input := strings.Join([]string{
-		"import { Category, Product, batch_count, write_products } from main",
+		"import { Category, Product, batch_count, write_conflicts, write_products } from main",
 		"product := Product.find(1)",
 		"product.category.loaded?()",
 		"product.category",
@@ -497,6 +517,7 @@ end
 		"category.products.loaded?()",
 		"batch_count()",
 		"write_products()",
+		"write_conflicts()",
 		":quit",
 	}, "\n") + "\n"
 	var stdout, stderr bytes.Buffer
@@ -514,9 +535,12 @@ end
 		`Saved`,
 		`Updated`,
 		`2 : Integer`,
+		`true`,
+		`false`,
+		`Upsert`,
 	} {
 		if !strings.Contains(stdout.String(), expected) {
-			t.Fatalf("ORM association REPL output is missing %q:\n%s", expected, stdout.String())
+			t.Fatalf("ORM association REPL output is missing %q:\n%s\nstderr:\n%s", expected, stdout.String(), stderr.String())
 		}
 	}
 	if stderr.Len() != 0 {
