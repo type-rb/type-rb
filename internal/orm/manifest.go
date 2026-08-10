@@ -10,12 +10,13 @@ import (
 )
 
 type Model struct {
-	Name         string
-	QueryType    string
-	Table        string
-	ModulePath   string
-	Columns      []Column
-	Associations []Association
+	Name              string
+	QueryType         string
+	Table             string
+	ModulePath        string
+	Columns           []Column
+	Associations      []Association
+	UniqueConstraints []UniqueConstraint
 }
 
 type AssociationKind string
@@ -34,6 +35,10 @@ type Association struct {
 	TargetColumn string
 	Preloadable  bool
 }
+
+func (m Model) DraftType() string { return m.Name + "Draft" }
+
+func (m Model) ChangesType() string { return m.Name + "Changes" }
 
 func (m Model) PrimaryKey() (Column, bool) {
 	var result Column
@@ -143,6 +148,19 @@ func (m *Manifest) Augment(program *ir.Program) {
 					class.Body = append(class.Body, &ir.Field{Name: "@" + column.Name, Type: column.Type})
 				}
 			}
+			if _, ok := model.PrimaryKey(); ok {
+				if !existing["with"] {
+					class.Body = append(class.Body, withIRMethod(model))
+				}
+				if !existing["update"] {
+					class.Body = append(class.Body, updateIRMethod(model))
+				}
+				if !existing["delete"] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: "delete", External: true, ReturnType: dbResult(types.FromName("Boolean")),
+					})
+				}
+			}
 			for _, association := range model.Associations {
 				if association.Preloadable && !existing[association.Name] {
 					class.Body = append(class.Body,
@@ -172,6 +190,38 @@ func (m *Manifest) Augment(program *ir.Program) {
 						Parameters: []ir.Parameter{{Name: primaryKey.Name, Type: keyType}}, ReturnType: dbResult(findType),
 					})
 				}
+				if !existing["create"] {
+					class.Body = append(class.Body, createIRMethod(model))
+				}
+				if !existing["build"] {
+					class.Body = append(class.Body, buildIRMethod(model))
+				}
+				if !existing["insert_all"] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: "insert_all", External: true, Class: true,
+						Parameters: []ir.Parameter{{Name: "drafts", Type: arrayOf(model.DraftType())}},
+						ReturnType: dbResult(types.FromName("Integer")),
+					})
+				}
+				if !existing["insert_if_absent"] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: "insert_if_absent", External: true, Class: true,
+						Parameters: []ir.Parameter{
+							{Name: "draft", Type: namedType(model.DraftType())}, uniqueByIRParameter(model),
+						},
+						ReturnType: dbResult(types.FromName("Boolean")),
+					})
+				}
+				if !existing["upsert_all"] {
+					class.Body = append(class.Body, &ir.Method{
+						Name: "upsert_all", External: true, Class: true,
+						Parameters: []ir.Parameter{
+							{Name: "drafts", Type: arrayOf(model.DraftType())},
+							uniqueByIRParameter(model), updateColumnsIRParameter(model),
+						},
+						ReturnType: dbResult(types.FromName("Integer")),
+					})
+				}
 			}
 			if _, ok := model.BatchKey(); ok {
 				for _, name := range []string{"find_each", "find_in_batches"} {
@@ -182,7 +232,73 @@ func (m *Manifest) Augment(program *ir.Program) {
 			}
 		}
 		program.Statements = append(program.Statements, &ir.Class{Name: model.QueryType, External: true, Body: queryIRMethods(model)})
+		if _, ok := model.PrimaryKey(); ok {
+			program.Statements = append(program.Statements, &ir.Class{
+				Name: model.DraftType(), External: true,
+				Body: []ir.Statement{
+					&ir.Method{Name: "save", External: true, ReturnType: dbResult(namedType(model.Name))},
+					&ir.Method{
+						Name: "upsert", External: true,
+						Parameters: []ir.Parameter{uniqueByIRParameter(model), updateColumnsIRParameter(model)},
+						ReturnType: dbResult(namedType(model.Name)),
+					},
+				},
+			})
+			program.Statements = append(program.Statements, &ir.Class{
+				Name: model.ChangesType(), External: true,
+				Body: []ir.Statement{&ir.Method{Name: "save", External: true, ReturnType: dbResult(namedType(model.Name))}},
+			})
+		}
 	}
+}
+
+func uniqueByIRParameter(model Model) ir.Parameter {
+	return ir.Parameter{
+		Name: "unique_by", Type: arrayOf("String"), Keyword: true,
+		LiteralArrays: copyUniqueColumns(uniqueColumnSets(model)),
+	}
+}
+
+func updateColumnsIRParameter(model Model) ir.Parameter {
+	declared := updateColumnsDeclarationParameter(model)
+	return ir.Parameter{
+		Name: "update", Type: declared.Type, Keyword: true,
+		LiteralArrayElements: append([]string(nil), declared.LiteralArrayElements...),
+	}
+}
+
+func createIRMethod(model Model) *ir.Method {
+	return writeIRMethod(model, "create", dbResult(namedType(model.Name)))
+}
+
+func buildIRMethod(model Model) *ir.Method {
+	return writeIRMethod(model, "build", namedType(model.DraftType()))
+}
+
+func writeIRMethod(model Model, name string, returnType types.Type) *ir.Method {
+	method := &ir.Method{Name: name, External: true, Class: true, ReturnType: returnType}
+	for _, column := range model.Columns {
+		method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+	}
+	return method
+}
+
+func updateIRMethod(model Model) *ir.Method {
+	return modelChangeIRMethod(model, "update", dbResult(namedType(model.Name)))
+}
+
+func withIRMethod(model Model) *ir.Method {
+	return modelChangeIRMethod(model, "with", namedType(model.ChangesType()))
+}
+
+func modelChangeIRMethod(model Model, name string, returnType types.Type) *ir.Method {
+	method := &ir.Method{Name: name, External: true, ReturnType: returnType}
+	for _, column := range model.Columns {
+		if !column.PrimaryKey {
+			method.Parameters = append(method.Parameters, ir.Parameter{Name: column.Name, Type: column.Type, Keyword: true})
+		}
+	}
+	return method
 }
 
 func queryIRMethods(model Model) []ir.Statement {
@@ -276,13 +392,23 @@ func whereIRMethod(model Model, class bool) *ir.Method {
 			for _, parameter := range signature.Parameters {
 				alternative.Parameters = append(alternative.Parameters, ir.Parameter{
 					Name: parameter.Name, Type: parameter.Type, Keyword: parameter.Keyword,
-					LiteralValues: append([]string(nil), parameter.LiteralValues...),
+					LiteralValues:        append([]string(nil), parameter.LiteralValues...),
+					LiteralArrays:        copyUniqueColumns(parameter.LiteralArrays),
+					LiteralArrayElements: append([]string(nil), parameter.LiteralArrayElements...),
 				})
 			}
 			method.Alternatives = append(method.Alternatives, alternative)
 		}
 	}
 	return method
+}
+
+func copyUniqueColumns(values [][]string) [][]string {
+	result := make([][]string, len(values))
+	for index, value := range values {
+		result[index] = append([]string(nil), value...)
+	}
+	return result
 }
 
 func batchIRMethod(name string, class bool) *ir.Method {
@@ -320,6 +446,30 @@ func (m *Manifest) QueryModel(name string) (Model, bool) {
 	}
 	for _, model := range m.Models {
 		if model.QueryType == name {
+			return model, true
+		}
+	}
+	return Model{}, false
+}
+
+func (m *Manifest) DraftModel(name string) (Model, bool) {
+	if m == nil {
+		return Model{}, false
+	}
+	for _, model := range m.Models {
+		if model.DraftType() == name {
+			return model, true
+		}
+	}
+	return Model{}, false
+}
+
+func (m *Manifest) ChangesModel(name string) (Model, bool) {
+	if m == nil {
+		return Model{}, false
+	}
+	for _, model := range m.Models {
+		if model.ChangesType() == name {
 			return model, true
 		}
 	}

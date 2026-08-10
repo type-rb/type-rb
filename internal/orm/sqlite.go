@@ -72,6 +72,7 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 			return Table{}, fmt.Errorf("table %s column %s: %w", name, columnName, err)
 		}
 		nullable := notNull == 0 && primaryKey == 0
+		generated := primaryKey != 0 && strings.EqualFold(strings.TrimSpace(databaseType), "integer")
 		typ.Nullable = nullable
 		table.Columns = append(table.Columns, Column{
 			Name:         columnName,
@@ -79,6 +80,8 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 			Type:         typ,
 			Nullable:     nullable,
 			PrimaryKey:   primaryKey != 0,
+			HasDefault:   defaultValue != nil || generated,
+			Generated:    generated,
 			Position:     position,
 		})
 	}
@@ -94,7 +97,78 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 		return Table{}, err
 	}
 	table.ForeignKeys = foreignKeys
+	uniqueConstraints, err := inspectSQLiteUniqueConstraints(database, name)
+	if err != nil {
+		return Table{}, err
+	}
+	table.UniqueConstraints = uniqueConstraints
+	completeUniqueConstraints(&table)
 	return table, nil
+}
+
+func inspectSQLiteUniqueConstraints(database *sql.DB, name string) ([]UniqueConstraint, error) {
+	rows, err := database.Query("PRAGMA index_list(" + quoteSQLiteIdentifier(name) + ")")
+	if err != nil {
+		return nil, err
+	}
+	type index struct {
+		name    string
+		primary bool
+	}
+	var indexes []index
+	for rows.Next() {
+		var sequence, unique, partial int
+		var indexName, origin string
+		if err := rows.Scan(&sequence, &indexName, &unique, &origin, &partial); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if unique != 0 && partial == 0 {
+			indexes = append(indexes, index{name: indexName, primary: origin == "pk"})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	var result []UniqueConstraint
+	for _, current := range indexes {
+		columns, supported, err := inspectSQLiteIndexColumns(database, current.name)
+		if err != nil {
+			return nil, err
+		}
+		if supported {
+			result = append(result, UniqueConstraint{Name: current.name, Columns: columns, Primary: current.primary})
+		}
+	}
+	return result, nil
+}
+
+func inspectSQLiteIndexColumns(database *sql.DB, name string) ([]string, bool, error) {
+	rows, err := database.Query("PRAGMA index_info(" + quoteSQLiteIdentifier(name) + ")")
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	var columns []string
+	for rows.Next() {
+		var sequence, columnID int
+		var columnName sql.NullString
+		if err := rows.Scan(&sequence, &columnID, &columnName); err != nil {
+			return nil, false, err
+		}
+		if columnID < 0 || !columnName.Valid {
+			return nil, false, nil
+		}
+		columns = append(columns, columnName.String)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	return columns, len(columns) > 0, nil
 }
 
 func inspectSQLiteForeignKeys(database *sql.DB, name string) ([]ForeignKey, error) {

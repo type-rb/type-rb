@@ -48,6 +48,213 @@ func (g *generator) ormFind(call *ir.Call) string {
 	return qualifier + goORMFirst(model) + "(" + query + ")"
 }
 
+func (g *generator) ormCreate(call *ir.Call) string {
+	model, columns, values, ok := g.ormModelWriteArguments(call)
+	if !ok {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMCreate(model) + "([]string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
+func (g *generator) ormBuild(call *ir.Call) string {
+	model, columns, values, ok := g.ormModelWriteArguments(call)
+	if !ok {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMBuild(model) + "([]string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
+func (g *generator) ormModelWriteArguments(call *ir.Call) (ormintegration.Model, []string, []string, bool) {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return ormintegration.Model{}, nil, nil, false
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return ormintegration.Model{}, nil, nil, false
+	}
+	columns := make([]string, 0, len(call.Arguments))
+	values := make([]string, 0, len(call.Arguments))
+	for _, argument := range call.Arguments {
+		if argument.Name == "" {
+			continue
+		}
+		columns = append(columns, strconv.Quote(argument.Name))
+		values = append(values, g.expr(argument.Value))
+	}
+	return model, columns, values, true
+}
+
+func (g *generator) ormDraftSave(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	model, exists := g.orm.DraftModel(member.Receiver.ExprType().Name)
+	if !exists {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMDraftSave(model) + "(" + g.expr(member.Receiver) + ")"
+}
+
+func (g *generator) ormInsertAll(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok || len(call.Arguments) != 1 {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMInsertAll(model) + "(" + g.expr(call.Arguments[0].Value) + ")"
+}
+
+func (g *generator) ormInsertIfAbsent(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	draft, uniqueBy := "nil", "nil"
+	for _, argument := range call.Arguments {
+		switch argument.Name {
+		case "unique_by":
+			uniqueBy = g.expr(argument.Value)
+		case "":
+			if draft == "nil" {
+				draft = g.expr(argument.Value)
+			}
+		}
+	}
+	return g.ormModelQualifier(model) + goORMInsertIfAbsent(model) + "(" + draft + ", " + uniqueBy + ")"
+}
+
+func (g *generator) ormUpsert(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	model, exists := g.orm.DraftModel(member.Receiver.ExprType().Name)
+	if !exists {
+		return "nil"
+	}
+	uniqueBy, update := "nil", "nil"
+	for _, argument := range call.Arguments {
+		switch argument.Name {
+		case "unique_by":
+			uniqueBy = g.expr(argument.Value)
+		case "update":
+			update = g.expr(argument.Value)
+		}
+	}
+	return g.ormModelQualifier(model) + goORMUpsert(model) + "(" + g.expr(member.Receiver) + ", " + uniqueBy + ", " + update + ")"
+}
+
+func (g *generator) ormUpsertAll(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	modelName := member.Receiver.ExprType().Name
+	if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
+		modelName = identifier.Name
+	}
+	model, exists := g.orm.Model(modelName)
+	if !exists {
+		return "nil"
+	}
+	drafts, uniqueBy, update := "nil", "nil", "nil"
+	for _, argument := range call.Arguments {
+		switch argument.Name {
+		case "unique_by":
+			uniqueBy = g.expr(argument.Value)
+		case "update":
+			update = g.expr(argument.Value)
+		case "":
+			if drafts == "nil" {
+				drafts = g.expr(argument.Value)
+			}
+		}
+	}
+	return g.ormModelQualifier(model) + goORMUpsertAll(model) + "(" + drafts + ", " + uniqueBy + ", " + update + ")"
+}
+
+func (g *generator) ormUpdate(call *ir.Call) string {
+	model, receiver, columns, values, ok := g.ormModelChangeArguments(call)
+	if !ok {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMUpdate(model) + "(" + receiver + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
+func (g *generator) ormWith(call *ir.Call) string {
+	model, receiver, columns, values, ok := g.ormModelChangeArguments(call)
+	if !ok {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMWith(model) + "(" + receiver + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+}
+
+func (g *generator) ormModelChangeArguments(call *ir.Call) (ormintegration.Model, string, []string, []string, bool) {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return ormintegration.Model{}, "", nil, nil, false
+	}
+	model, exists := g.orm.Model(member.Receiver.ExprType().Name)
+	if !exists {
+		return ormintegration.Model{}, "", nil, nil, false
+	}
+	columns := make([]string, 0, len(call.Arguments))
+	values := make([]string, 0, len(call.Arguments))
+	for _, argument := range call.Arguments {
+		if argument.Name == "" {
+			continue
+		}
+		columns = append(columns, strconv.Quote(argument.Name))
+		values = append(values, g.expr(argument.Value))
+	}
+	return model, g.expr(member.Receiver), columns, values, true
+}
+
+func (g *generator) ormChangesSave(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	model, exists := g.orm.ChangesModel(member.Receiver.ExprType().Name)
+	if !exists {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMChangesSave(model) + "(" + g.expr(member.Receiver) + ")"
+}
+
+func (g *generator) ormDelete(call *ir.Call) string {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return "nil"
+	}
+	model, exists := g.orm.Model(member.Receiver.ExprType().Name)
+	if !exists {
+		return "nil"
+	}
+	return g.ormModelQualifier(model) + goORMDelete(model) + "(" + g.expr(member.Receiver) + ")"
+}
+
 func (g *generator) ormPredicateArguments(call *ir.Call) string {
 	predicates := ormintegration.Predicates(call)
 	columns := make([]string, len(predicates))
@@ -387,13 +594,11 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	}
 	g.requireImport("database/sql/driver", "driver")
 	g.requireImport("context", "")
+	g.requireImport("database/sql", "sql")
 	g.requireImport("errors", "")
 	g.requireImport("net", "")
 	g.requireImport("reflect", "")
 	g.requireImport("strings", "")
-	if ormModelsPreload(models) {
-		g.requireImport("database/sql", "sql")
-	}
 	if adapter.NumberedBinds {
 		g.requireImport("strconv", "")
 	}
@@ -441,17 +646,6 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-}
-
-func ormModelsPreload(models []ormintegration.Model) bool {
-	for _, model := range models {
-		for _, association := range model.Associations {
-			if association.Preloadable {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
@@ -607,6 +801,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.line("}")
 		g.b.WriteByte('\n')
 	}
+	g.ormCreateRuntime(adapter, model, columns, scanTargets)
 	for _, association := range model.Associations {
 		if !association.Preloadable {
 			continue
@@ -953,6 +1148,66 @@ func goORMLoader(model ormintegration.Model) string {
 
 func goORMFirst(model ormintegration.Model) string {
 	return "TrbOrmFirst" + goIdentifier(model.Name, true)
+}
+
+func goORMCreate(model ormintegration.Model) string {
+	return "TrbOrmCreate" + goIdentifier(model.Name, true)
+}
+
+func goORMBuild(model ormintegration.Model) string {
+	return "TrbOrmBuild" + goIdentifier(model.Name, true)
+}
+
+func goORMDraftSave(model ormintegration.Model) string {
+	return "TrbOrmSave" + goIdentifier(model.Name, true) + "Draft"
+}
+
+func goORMInsertAll(model ormintegration.Model) string {
+	return "TrbOrmInsertAll" + goIdentifier(model.Name, true)
+}
+
+func goORMInsertIfAbsent(model ormintegration.Model) string {
+	return "TrbOrmInsert" + goIdentifier(model.Name, true) + "IfAbsent"
+}
+
+func goORMUpsert(model ormintegration.Model) string {
+	return "TrbOrmUpsert" + goIdentifier(model.Name, true)
+}
+
+func goORMUpsertAll(model ormintegration.Model) string {
+	return "TrbOrmUpsertAll" + goIdentifier(model.Name, true)
+}
+
+func goORMDraftColumnValues(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "DraftColumnValues"
+}
+
+func goORMUniqueColumns(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "UniqueColumns"
+}
+
+func goORMWritableColumn(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "WritableColumn"
+}
+
+func goORMValuesContainNil(model ormintegration.Model) string {
+	return "trbOrm" + goIdentifier(model.Name, true) + "ValuesContainNil"
+}
+
+func goORMUpdate(model ormintegration.Model) string {
+	return "TrbOrmUpdate" + goIdentifier(model.Name, true)
+}
+
+func goORMWith(model ormintegration.Model) string {
+	return "TrbOrmWith" + goIdentifier(model.Name, true)
+}
+
+func goORMChangesSave(model ormintegration.Model) string {
+	return "TrbOrmSave" + goIdentifier(model.Name, true) + "Changes"
+}
+
+func goORMDelete(model ormintegration.Model) string {
+	return "TrbOrmDelete" + goIdentifier(model.Name, true)
 }
 
 func goORMCount(model ormintegration.Model) string {

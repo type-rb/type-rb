@@ -32,6 +32,10 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	assertColumn(t, products.Columns[2], "price", types.Float, true, false)
 	assertColumn(t, products.Columns[3], "active", types.Bool, false, false)
 	assertColumn(t, products.Columns[4], "payload", types.Bytes, true, false)
+	if !products.Columns[0].Generated || !products.Columns[0].HasDefault || !products.Columns[3].HasDefault {
+		t.Fatalf("SQLite generated/default metadata is missing: %#v", products.Columns)
+	}
+	assertUniqueConstraints(t, products.UniqueConstraints, []string{"id"}, []string{"name", "active"})
 
 	program := parseModel(t)
 	catalog, err := Declarations([]*ast.Program{program}, root, options)
@@ -54,6 +58,52 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 	if product.ClassMembers["find"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
+	}
+	create := product.ClassMembers["create"]
+	if create.Return.String() != "DbResult<Product>" || !create.Parameters[0].Optional || create.Parameters[1].Optional || !create.Parameters[2].Optional || !create.Parameters[3].Optional {
+		t.Fatalf("unexpected create declaration: %#v", create)
+	}
+	build := product.ClassMembers["build"]
+	if build.Return.String() != "ProductDraft" || !build.Parameters[0].Optional || build.Parameters[1].Optional || !build.Parameters[2].Optional || !build.Parameters[3].Optional {
+		t.Fatalf("unexpected build declaration: %#v", build)
+	}
+	draft, exists := catalog.Type("ProductDraft")
+	if !exists || draft.InstanceMembers["save"].Return.String() != "DbResult<Product>" {
+		t.Fatalf("unexpected draft declaration: %#v", draft)
+	}
+	insertAll := product.ClassMembers["insert_all"]
+	if insertAll.Return.String() != "DbResult<Integer>" || len(insertAll.Parameters) != 1 || insertAll.Parameters[0].Type.String() != "Array<ProductDraft>" {
+		t.Fatalf("unexpected insert_all declaration: %#v", insertAll)
+	}
+	insertIfAbsent := product.ClassMembers["insert_if_absent"]
+	if insertIfAbsent.Return.String() != "DbResult<Boolean>" || len(insertIfAbsent.Parameters) != 2 || len(insertIfAbsent.Parameters[1].LiteralArrays) != 2 {
+		t.Fatalf("unexpected insert_if_absent declaration: %#v", insertIfAbsent)
+	}
+	upsertAll := product.ClassMembers["upsert_all"]
+	if upsertAll.Return.String() != "DbResult<Integer>" || len(upsertAll.Parameters) != 3 || upsertAll.Parameters[0].Type.String() != "Array<ProductDraft>" {
+		t.Fatalf("unexpected upsert_all declaration: %#v", upsertAll)
+	}
+	upsert := draft.InstanceMembers["upsert"]
+	if upsert.Return.String() != "DbResult<Product>" || len(upsert.Parameters) != 2 || len(upsert.Parameters[0].LiteralArrays) != 2 {
+		t.Fatalf("unexpected upsert declaration: %#v", upsert)
+	}
+	if got := strings.Join(upsert.Parameters[1].LiteralArrayElements, ","); got != "name,price,active,payload" {
+		t.Fatalf("unexpected upsert update columns: %q", got)
+	}
+	update := product.InstanceMembers["update"]
+	if update.Return.String() != "DbResult<Product>" || len(update.Parameters) != 4 || !update.Parameters[0].Optional {
+		t.Fatalf("unexpected update declaration: %#v", update)
+	}
+	with := product.InstanceMembers["with"]
+	if with.Return.String() != "ProductChanges" || len(with.Parameters) != 4 || !with.Parameters[0].Optional {
+		t.Fatalf("unexpected with declaration: %#v", with)
+	}
+	changes, exists := catalog.Type("ProductChanges")
+	if !exists || changes.InstanceMembers["save"].Return.String() != "DbResult<Product>" {
+		t.Fatalf("unexpected changes declaration: %#v", changes)
+	}
+	if product.InstanceMembers["delete"].Return.String() != "DbResult<Boolean>" {
+		t.Fatalf("unexpected delete declaration: %#v", product.InstanceMembers["delete"])
 	}
 	findEach := product.ClassMembers["find_each"]
 	if findEach.Return.String() != "DbResult<Integer>" || findEach.Block == nil || !findEach.Block.Structured || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
@@ -182,25 +232,28 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 9 {
-		t.Fatalf("expected five fields and four ORM class methods, got %#v", product.Body)
+	if len(product.Body) != 17 {
+		t.Fatalf("expected five fields and twelve ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[0].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
 		t.Fatalf("unexpected first field: %#v", product.Body[0])
 	}
-	where, ok := product.Body[5].(*ir.Method)
-	if !ok || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
-		t.Fatalf("unexpected where method: %#v", product.Body[5])
-	}
 	methods := map[string]bool{}
+	var where *ir.Method
 	for _, statement := range product.Body[5:] {
 		method, ok := statement.(*ir.Method)
+		if ok && method.Name == "where" {
+			where = method
+		}
 		if ok && method.External && method.Class {
 			methods[method.Name] = true
 		}
 	}
-	for _, name := range []string{"where", "find", "find_each", "find_in_batches"} {
+	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
+		t.Fatalf("unexpected where method: %#v", where)
+	}
+	for _, name := range []string{"where", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}
@@ -220,6 +273,26 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 		if !queryMethods[name] {
 			t.Fatalf("missing generated ORM query method %s: %#v", name, query.Body)
 		}
+	}
+	draft, ok := lowered.Statements[2].(*ir.Class)
+	if !ok || !draft.External || draft.Name != "ProductDraft" || len(draft.Body) != 2 {
+		t.Fatalf("unexpected draft class: %#v", lowered.Statements[2])
+	}
+	save, ok := draft.Body[0].(*ir.Method)
+	if !ok || !save.External || save.Name != "save" || save.ReturnType.String() != "DbResult<Product>" {
+		t.Fatalf("unexpected draft save method: %#v", draft.Body[0])
+	}
+	upsert, ok := draft.Body[1].(*ir.Method)
+	if !ok || !upsert.External || upsert.Name != "upsert" || upsert.ReturnType.String() != "DbResult<Product>" || len(upsert.Parameters[0].LiteralArrays) != 2 {
+		t.Fatalf("unexpected draft upsert method: %#v", draft.Body[1])
+	}
+	changes, ok := lowered.Statements[3].(*ir.Class)
+	if !ok || !changes.External || changes.Name != "ProductChanges" || len(changes.Body) != 1 {
+		t.Fatalf("unexpected changes class: %#v", lowered.Statements[3])
+	}
+	changeSave, ok := changes.Body[0].(*ir.Method)
+	if !ok || !changeSave.External || changeSave.Name != "save" || changeSave.ReturnType.String() != "DbResult<Product>" {
+		t.Fatalf("unexpected changes save method: %#v", changes.Body[0])
 	}
 }
 
@@ -335,8 +408,9 @@ func sqliteFixture(t *testing.T) (string, map[string][]byte) {
 		id INTEGER PRIMARY KEY,
 		name TEXT NOT NULL,
 		price REAL,
-		active BOOLEAN NOT NULL,
-		payload BLOB
+		active BOOLEAN NOT NULL DEFAULT TRUE,
+		payload BLOB,
+		UNIQUE (name, active)
 	)`); err != nil {
 		database.Close()
 		t.Fatal(err)
@@ -414,5 +488,20 @@ func assertColumn(t *testing.T, column Column, name string, kind types.Kind, nul
 	t.Helper()
 	if column.Name != name || column.Type.Kind != kind || column.Nullable != nullable || column.PrimaryKey != primary {
 		t.Fatalf("unexpected column: %#v", column)
+	}
+}
+
+func assertUniqueConstraints(t *testing.T, constraints []UniqueConstraint, expected ...[]string) {
+	t.Helper()
+	if len(constraints) != len(expected) {
+		t.Fatalf("unique constraints = %#v, want columns %#v", constraints, expected)
+	}
+	for index, columns := range expected {
+		if strings.Join(constraints[index].Columns, ",") != strings.Join(columns, ",") {
+			t.Fatalf("unique constraint %d = %#v, want columns %#v", index, constraints[index], columns)
+		}
+	}
+	if len(constraints) > 0 && !constraints[0].Primary {
+		t.Fatalf("first unique constraint is not primary: %#v", constraints)
 	}
 }

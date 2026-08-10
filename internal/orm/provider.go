@@ -27,6 +27,14 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 				Name: column.Name, Kind: declaration.Property, Intrinsic: "trb.orm.column", Return: column.Type, Provider: PackageName,
 			}
 		}
+		if _, ok := model.PrimaryKey(); ok {
+			declared.InstanceMembers["with"] = withDeclaration(model)
+			declared.InstanceMembers["update"] = updateDeclaration(model)
+			declared.InstanceMembers["delete"] = declaration.Member{
+				Name: "delete", Kind: declaration.Method, Intrinsic: "trb.orm.delete",
+				Return: dbResult(types.FromName("Boolean")), Provider: PackageName,
+			}
+		}
 		for _, association := range model.Associations {
 			if association.Preloadable {
 				declared.InstanceMembers[association.Name] = declaration.Member{
@@ -44,6 +52,45 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
+			declared.ClassMembers["build"] = buildDeclaration(model, schema.Adapter)
+			declared.ClassMembers["create"] = createDeclaration(model, schema.Adapter)
+			declared.ClassMembers["insert_all"] = declaration.Member{
+				Name: "insert_all", Kind: declaration.Method, Intrinsic: "trb.orm.insert_all",
+				Parameters: []declaration.Parameter{{Name: "drafts", Type: arrayOf(model.DraftType())}},
+				Return:     dbResult(types.FromName("Integer")), Class: true, Provider: PackageName,
+			}
+			declared.ClassMembers["insert_if_absent"] = declaration.Member{
+				Name: "insert_if_absent", Kind: declaration.Method, Intrinsic: "trb.orm.insert_if_absent",
+				Parameters: []declaration.Parameter{
+					{Name: "draft", Type: types.FromName(model.DraftType())}, uniqueByDeclarationParameter(model),
+				},
+				Return: dbResult(types.FromName("Boolean")), Class: true, Provider: PackageName,
+			}
+			declared.ClassMembers["upsert_all"] = declaration.Member{
+				Name: "upsert_all", Kind: declaration.Method, Intrinsic: "trb.orm.upsert_all",
+				Parameters: []declaration.Parameter{
+					{Name: "drafts", Type: arrayOf(model.DraftType())},
+					uniqueByDeclarationParameter(model), updateColumnsDeclarationParameter(model),
+				},
+				Return: dbResult(types.FromName("Integer")), Class: true, Provider: PackageName,
+			}
+			draft := declaration.NewType(model.DraftType(), "")
+			draft.InstanceMembers["save"] = declaration.Member{
+				Name: "save", Kind: declaration.Method, Intrinsic: "trb.orm.draft.save",
+				Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
+			}
+			draft.InstanceMembers["upsert"] = declaration.Member{
+				Name: "upsert", Kind: declaration.Method, Intrinsic: "trb.orm.draft.upsert",
+				Parameters: []declaration.Parameter{uniqueByDeclarationParameter(model), updateColumnsDeclarationParameter(model)},
+				Return:     dbResult(types.FromName(model.Name)), Provider: PackageName,
+			}
+			catalog.Types[model.DraftType()] = draft
+			changes := declaration.NewType(model.ChangesType(), "")
+			changes.InstanceMembers["save"] = declaration.Member{
+				Name: "save", Kind: declaration.Method, Intrinsic: "trb.orm.changes.save",
+				Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
+			}
+			catalog.Types[model.ChangesType()] = changes
 		}
 		if _, ok := model.BatchKey(); ok {
 			declared.ClassMembers["find_each"] = batchDeclaration(model, "find_each", true, false)
@@ -79,6 +126,91 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		catalog.Types[model.QueryType] = query
 	}
 	return catalog, nil
+}
+
+func uniqueByDeclarationParameter(model Model) declaration.Parameter {
+	return declaration.Parameter{
+		Name: "unique_by", Type: arrayOf("String"), Keyword: true,
+		LiteralArrays: uniqueColumnSets(model),
+	}
+}
+
+func updateColumnsDeclarationParameter(model Model) declaration.Parameter {
+	var values []string
+	for _, column := range model.Columns {
+		if !column.PrimaryKey && !column.Generated {
+			values = append(values, column.Name)
+		}
+	}
+	return declaration.Parameter{
+		Name: "update", Type: arrayOf("String"), Keyword: true, LiteralArrayElements: values,
+	}
+}
+
+func uniqueColumnSets(model Model) [][]string {
+	values := make([][]string, len(model.UniqueConstraints))
+	for index, constraint := range model.UniqueConstraints {
+		values[index] = append([]string(nil), constraint.Columns...)
+	}
+	return values
+}
+
+func updateDeclaration(model Model) declaration.Member {
+	return declaration.Member{
+		Name: "update", Kind: declaration.Method, Intrinsic: "trb.orm.update",
+		Parameters: updateParameters(model), Return: dbResult(types.FromName(model.Name)), Provider: PackageName,
+	}
+}
+
+func withDeclaration(model Model) declaration.Member {
+	return declaration.Member{
+		Name: "with", Kind: declaration.Method, Intrinsic: "trb.orm.with",
+		Parameters: updateParameters(model), Return: types.FromName(model.ChangesType()), Provider: PackageName,
+	}
+}
+
+func updateParameters(model Model) []declaration.Parameter {
+	parameters := make([]declaration.Parameter, 0, len(model.Columns)-1)
+	for _, column := range model.Columns {
+		if column.PrimaryKey {
+			continue
+		}
+		parameters = append(parameters, declaration.Parameter{
+			Name: column.Name, Type: column.Type, Keyword: true, Optional: true,
+		})
+	}
+	return parameters
+}
+
+func buildDeclaration(model Model, adapter string) declaration.Member {
+	return declaration.Member{
+		Name: "build", Kind: declaration.Method, Intrinsic: "trb.orm.build",
+		Parameters: writeParameters(model, adapter), Return: types.FromName(model.DraftType()),
+		Class: true, Provider: PackageName,
+	}
+}
+
+func createDeclaration(model Model, adapter string) declaration.Member {
+	return declaration.Member{
+		Name: "create", Kind: declaration.Method, Intrinsic: "trb.orm.create",
+		Parameters: writeParameters(model, adapter), Return: dbResult(types.FromName(model.Name)),
+		Class: true, Provider: PackageName,
+	}
+}
+
+func writeParameters(model Model, adapter string) []declaration.Parameter {
+	parameters := make([]declaration.Parameter, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		optional := column.Nullable || column.Generated || column.HasDefault
+		if adapter == "mysql" && column.PrimaryKey && !column.Generated {
+			optional = column.Nullable
+		}
+		parameters = append(parameters, declaration.Parameter{
+			Name: column.Name, Type: column.Type, Keyword: true,
+			Optional: optional,
+		})
+	}
+	return parameters
 }
 
 func preloadDeclaration(model Model) declaration.Member {
@@ -222,6 +354,7 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 			models = append(models, Model{
 				Name: class.Name, QueryType: class.Name + "Query", Table: table.Name,
 				ModulePath: program.ModulePath, Columns: append([]Column(nil), table.Columns...),
+				UniqueConstraints: append([]UniqueConstraint(nil), table.UniqueConstraints...),
 			})
 		}
 	}

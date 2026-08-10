@@ -1,6 +1,7 @@
 package languageservice
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,6 +106,13 @@ func completeCallArgumentLiterals(request CompletionRequest) ([]CompletionItem, 
 	current := arguments[position]
 	keyword, valueTokens := completionKeywordArgument(current)
 	values := callLiteralValues(call.Call, position, keyword, arguments[:position])
+	literalArrays, literalArrayElements := callLiteralArrayValues(call.Call, position, keyword)
+	if len(values) == 0 && (len(literalArrays) > 0 || len(literalArrayElements) > 0) {
+		items, active := completeLiteralArrayArgument(request, call.Name, valueTokens, literalArrays, literalArrayElements)
+		if active {
+			return items, true
+		}
+	}
 	if len(values) == 0 {
 		return nil, false
 	}
@@ -117,6 +125,96 @@ func completeCallArgumentLiterals(request CompletionRequest) ([]CompletionItem, 
 		items = append(items, CompletionItem{
 			Label: value, InsertText: before + value + after, Kind: CompletionValue,
 			Detail: call.Name + "() literal", Replacement: replacement,
+		})
+	}
+	return filterCompletions(items, prefix), true
+}
+
+func callLiteralArrayValues(call *CallInfo, position int, keyword string) ([][]string, []string) {
+	if keyword != "" {
+		for _, parameter := range call.Parameters {
+			if parameter.Keyword && parameter.Name == keyword {
+				return parameter.LiteralArrays, parameter.LiteralArrayElements
+			}
+		}
+		return nil, nil
+	}
+	positional := 0
+	for _, parameter := range call.Parameters {
+		if parameter.Keyword {
+			continue
+		}
+		if positional == position {
+			return parameter.LiteralArrays, parameter.LiteralArrayElements
+		}
+		positional++
+	}
+	return nil, nil
+}
+
+func completeLiteralArrayArgument(request CompletionRequest, callName string, tokens []token.Token, exact [][]string, elements []string) ([]CompletionItem, bool) {
+	if len(tokens) == 0 {
+		arrays := exact
+		if len(arrays) == 0 {
+			arrays = make([][]string, len(elements))
+			for index, element := range elements {
+				arrays[index] = []string{element}
+			}
+		}
+		items := make([]CompletionItem, 0, len(arrays))
+		for _, array := range arrays {
+			labels := make([]string, len(array))
+			for index, value := range array {
+				labels[index] = ":" + value
+			}
+			value := "[" + strings.Join(labels, ", ") + "]"
+			items = append(items, CompletionItem{
+				Label: value, InsertText: value, Kind: CompletionValue, Detail: callName + "() literal array",
+				Replacement: OffsetRange{Start: request.Cursor, End: request.Cursor},
+			})
+		}
+		return items, true
+	}
+	if tokens[0].Lexeme != "[" {
+		return nil, false
+	}
+	parts := splitCompletionArguments(tokens[1:])
+	current := parts[len(parts)-1]
+	completed := make([]string, 0, len(parts)-1)
+	for _, part := range parts[:len(parts)-1] {
+		value, ok := completionArgumentLiteral(part)
+		if !ok {
+			return nil, false
+		}
+		completed = append(completed, value)
+	}
+	allowed := map[string]bool{}
+	if len(exact) > 0 {
+		for _, candidate := range exact {
+			if len(candidate) <= len(completed) || !slices.Equal(candidate[:len(completed)], completed) {
+				continue
+			}
+			allowed[candidate[len(completed)]] = true
+		}
+	} else {
+		for _, candidate := range elements {
+			if !slices.Contains(completed, candidate) {
+				allowed[candidate] = true
+			}
+		}
+	}
+	if len(allowed) == 0 {
+		return nil, false
+	}
+	prefix, replacement, before, after, active := literalCompletionContext(request.Source, request.Cursor, current, true)
+	if !active {
+		return nil, false
+	}
+	items := make([]CompletionItem, 0, len(allowed))
+	for value := range allowed {
+		items = append(items, CompletionItem{
+			Label: value, InsertText: before + value + after, Kind: CompletionValue,
+			Detail: callName + "() literal array element", Replacement: replacement,
 		})
 	}
 	return filterCompletions(items, prefix), true

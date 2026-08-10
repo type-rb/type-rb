@@ -63,7 +63,8 @@ func (mysqlIntrospector) Inspect(config Config) (*Schema, error) {
 
 func inspectMySQLTable(database *sql.DB, name string) (Table, error) {
 	rows, err := database.Query(`
-		SELECT ordinal_position, column_name, data_type, column_type, is_nullable, column_key
+		SELECT ordinal_position, column_name, data_type, column_type, is_nullable, column_key,
+		       column_default, extra
 		FROM information_schema.columns
 		WHERE table_schema = DATABASE() AND table_name = ?
 		ORDER BY ordinal_position`, name)
@@ -73,8 +74,9 @@ func inspectMySQLTable(database *sql.DB, name string) (Table, error) {
 	table := Table{Name: name}
 	for rows.Next() {
 		var position int
-		var columnName, dataType, databaseType, nullableText, columnKey string
-		if err := rows.Scan(&position, &columnName, &dataType, &databaseType, &nullableText, &columnKey); err != nil {
+		var columnName, dataType, databaseType, nullableText, columnKey, extra string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&position, &columnName, &dataType, &databaseType, &nullableText, &columnKey, &defaultValue, &extra); err != nil {
 			rows.Close()
 			return Table{}, err
 		}
@@ -84,11 +86,12 @@ func inspectMySQLTable(database *sql.DB, name string) (Table, error) {
 			return Table{}, fmt.Errorf("table %s column %s: %w", name, columnName, err)
 		}
 		primaryKey := columnKey == "PRI"
+		generated := strings.Contains(strings.ToLower(extra), "auto_increment")
 		nullable := nullableText == "YES" && !primaryKey
 		typ.Nullable = nullable
 		table.Columns = append(table.Columns, Column{
 			Name: columnName, DatabaseType: databaseType, Type: typ, Nullable: nullable,
-			PrimaryKey: primaryKey, Position: position - 1,
+			PrimaryKey: primaryKey, HasDefault: defaultValue.Valid || generated, Generated: generated, Position: position - 1,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -103,7 +106,59 @@ func inspectMySQLTable(database *sql.DB, name string) (Table, error) {
 		return Table{}, err
 	}
 	table.ForeignKeys = foreignKeys
+	uniqueConstraints, err := inspectMySQLUniqueConstraints(database, name)
+	if err != nil {
+		return Table{}, err
+	}
+	table.UniqueConstraints = uniqueConstraints
+	completeUniqueConstraints(&table)
 	return table, nil
+}
+
+func inspectMySQLUniqueConstraints(database *sql.DB, name string) ([]UniqueConstraint, error) {
+	rows, err := database.Query(`
+		SELECT index_name, seq_in_index, column_name
+		FROM information_schema.statistics
+		WHERE table_schema = DATABASE()
+		  AND table_name = ?
+		  AND non_unique = 0
+		ORDER BY index_name, seq_in_index`, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byName := map[string]int{}
+	unsupported := map[string]bool{}
+	var result []UniqueConstraint
+	for rows.Next() {
+		var indexName string
+		var position int
+		var column sql.NullString
+		if err := rows.Scan(&indexName, &position, &column); err != nil {
+			return nil, err
+		}
+		index, ok := byName[indexName]
+		if !ok {
+			index = len(result)
+			byName[indexName] = index
+			result = append(result, UniqueConstraint{Name: indexName, Primary: indexName == "PRIMARY"})
+		}
+		if !column.Valid {
+			unsupported[indexName] = true
+			continue
+		}
+		result[index].Columns = append(result[index].Columns, column.String)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	filtered := result[:0]
+	for _, constraint := range result {
+		if !unsupported[constraint.Name] {
+			filtered = append(filtered, constraint)
+		}
+	}
+	return filtered, nil
 }
 
 func inspectMySQLForeignKeys(database *sql.DB, name string) ([]ForeignKey, error) {

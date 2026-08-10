@@ -117,6 +117,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.io.puts":
 		g.requireImport("fmt", "")
 		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Float {
+			if call.Arguments[0].Value.ExprType().Nullable {
+				return "fmt.Println(func(value *float64) any { if value == nil { return nil }; return " + g.portableFloatString("*value") + " }(" + arguments[0] + "))"
+			}
 			return "fmt.Println(" + g.portableFloatString(arguments[0]) + ")"
 		}
 		return "fmt.Println(" + strings.Join(arguments, ", ") + ")"
@@ -250,6 +253,28 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormWhere(call)
 	case "trb.orm.find":
 		return g.ormFind(call)
+	case "trb.orm.build":
+		return g.ormBuild(call)
+	case "trb.orm.create":
+		return g.ormCreate(call)
+	case "trb.orm.draft.save":
+		return g.ormDraftSave(call)
+	case "trb.orm.insert_all":
+		return g.ormInsertAll(call)
+	case "trb.orm.insert_if_absent":
+		return g.ormInsertIfAbsent(call)
+	case "trb.orm.draft.upsert":
+		return g.ormUpsert(call)
+	case "trb.orm.upsert_all":
+		return g.ormUpsertAll(call)
+	case "trb.orm.with":
+		return g.ormWith(call)
+	case "trb.orm.update":
+		return g.ormUpdate(call)
+	case "trb.orm.changes.save":
+		return g.ormChangesSave(call)
+	case "trb.orm.delete":
+		return g.ormDelete(call)
 	case "trb.orm.query.where":
 		return g.ormQueryWhere(call, arguments)
 	case "trb.orm.query.order":

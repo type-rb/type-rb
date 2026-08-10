@@ -34,9 +34,16 @@ type Schema struct {
 }
 
 type Table struct {
-	Name        string
-	Columns     []Column
-	ForeignKeys []ForeignKey
+	Name              string
+	Columns           []Column
+	ForeignKeys       []ForeignKey
+	UniqueConstraints []UniqueConstraint
+}
+
+type UniqueConstraint struct {
+	Name    string
+	Columns []string
+	Primary bool
 }
 
 type ForeignKey struct {
@@ -53,6 +60,8 @@ type Column struct {
 	Type         types.Type
 	Nullable     bool
 	PrimaryKey   bool
+	HasDefault   bool
+	Generated    bool
 	Position     int
 }
 
@@ -118,6 +127,13 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 	for index := range schema.Tables {
 		sort.Slice(schema.Tables[index].Columns, func(i, j int) bool {
 			return schema.Tables[index].Columns[i].Position < schema.Tables[index].Columns[j].Position
+		})
+		sort.Slice(schema.Tables[index].UniqueConstraints, func(i, j int) bool {
+			left, right := schema.Tables[index].UniqueConstraints[i], schema.Tables[index].UniqueConstraints[j]
+			if left.Primary != right.Primary {
+				return left.Primary
+			}
+			return left.Name < right.Name
 		})
 	}
 	return schema, nil
@@ -200,4 +216,47 @@ func validateSchema(schema *Schema) error {
 		return errors.New("database has no application tables")
 	}
 	return nil
+}
+
+func completeUniqueConstraints(table *Table) {
+	if table == nil {
+		return
+	}
+	var primaryColumns []string
+	for _, column := range table.Columns {
+		if column.PrimaryKey {
+			primaryColumns = append(primaryColumns, column.Name)
+		}
+	}
+	if len(primaryColumns) > 0 {
+		found := false
+		for index := range table.UniqueConstraints {
+			if table.UniqueConstraints[index].Primary {
+				found = true
+				break
+			}
+		}
+		if !found {
+			table.UniqueConstraints = append(table.UniqueConstraints, UniqueConstraint{
+				Name: "primary", Columns: primaryColumns, Primary: true,
+			})
+		}
+	}
+	sort.SliceStable(table.UniqueConstraints, func(i, j int) bool {
+		return table.UniqueConstraints[i].Primary && !table.UniqueConstraints[j].Primary
+	})
+	seen := map[string]bool{}
+	result := make([]UniqueConstraint, 0, len(table.UniqueConstraints))
+	for _, constraint := range table.UniqueConstraints {
+		if len(constraint.Columns) == 0 {
+			continue
+		}
+		key := strings.Join(constraint.Columns, "\x00")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, constraint)
+	}
+	table.UniqueConstraints = result
 }

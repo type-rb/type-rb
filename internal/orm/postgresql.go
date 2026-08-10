@@ -64,6 +64,7 @@ func (postgresqlIntrospector) Inspect(config Config) (*Schema, error) {
 func inspectPostgreSQLTable(database *sql.DB, name string) (Table, error) {
 	rows, err := database.Query(`
 		SELECT c.ordinal_position, c.column_name, c.data_type, c.udt_name, c.is_nullable,
+		       c.column_default, c.is_identity,
 		       EXISTS (
 		         SELECT 1
 		         FROM information_schema.table_constraints tc
@@ -85,9 +86,10 @@ func inspectPostgreSQLTable(database *sql.DB, name string) (Table, error) {
 	table := Table{Name: name}
 	for rows.Next() {
 		var position int
-		var columnName, dataType, databaseType, nullableText string
+		var columnName, dataType, databaseType, nullableText, identityText string
+		var defaultValue sql.NullString
 		var primaryKey bool
-		if err := rows.Scan(&position, &columnName, &dataType, &databaseType, &nullableText, &primaryKey); err != nil {
+		if err := rows.Scan(&position, &columnName, &dataType, &databaseType, &nullableText, &defaultValue, &identityText, &primaryKey); err != nil {
 			rows.Close()
 			return Table{}, err
 		}
@@ -97,10 +99,11 @@ func inspectPostgreSQLTable(database *sql.DB, name string) (Table, error) {
 			return Table{}, fmt.Errorf("table %s column %s: %w", name, columnName, err)
 		}
 		nullable := nullableText == "YES" && !primaryKey
+		generated := identityText == "YES" || defaultValue.Valid && strings.HasPrefix(strings.ToLower(defaultValue.String), "nextval(")
 		typ.Nullable = nullable
 		table.Columns = append(table.Columns, Column{
 			Name: columnName, DatabaseType: databaseType, Type: typ, Nullable: nullable,
-			PrimaryKey: primaryKey, Position: position - 1,
+			PrimaryKey: primaryKey, HasDefault: defaultValue.Valid || generated, Generated: generated, Position: position - 1,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -115,7 +118,56 @@ func inspectPostgreSQLTable(database *sql.DB, name string) (Table, error) {
 		return Table{}, err
 	}
 	table.ForeignKeys = foreignKeys
+	uniqueConstraints, err := inspectPostgreSQLUniqueConstraints(database, name)
+	if err != nil {
+		return Table{}, err
+	}
+	table.UniqueConstraints = uniqueConstraints
+	completeUniqueConstraints(&table)
 	return table, nil
+}
+
+func inspectPostgreSQLUniqueConstraints(database *sql.DB, name string) ([]UniqueConstraint, error) {
+	rows, err := database.Query(`
+		SELECT index_class.relname, index.indisprimary, attribute.attname, key.ordinality
+		FROM pg_catalog.pg_class table_class
+		JOIN pg_catalog.pg_namespace namespace ON namespace.oid = table_class.relnamespace
+		JOIN pg_catalog.pg_index index ON index.indrelid = table_class.oid
+		JOIN pg_catalog.pg_class index_class ON index_class.oid = index.indexrelid
+		JOIN LATERAL unnest(index.indkey) WITH ORDINALITY key(attribute_number, ordinality) ON TRUE
+		JOIN pg_catalog.pg_attribute attribute
+		  ON attribute.attrelid = table_class.oid AND attribute.attnum = key.attribute_number
+		WHERE namespace.nspname = current_schema()
+		  AND table_class.relname = $1
+		  AND index.indisunique
+		  AND index.indpred IS NULL
+		  AND index.indexprs IS NULL
+		ORDER BY index_class.relname, key.ordinality`, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byName := map[string]int{}
+	var result []UniqueConstraint
+	for rows.Next() {
+		var name, column string
+		var primary bool
+		var position int
+		if err := rows.Scan(&name, &primary, &column, &position); err != nil {
+			return nil, err
+		}
+		index, ok := byName[name]
+		if !ok {
+			index = len(result)
+			byName[name] = index
+			result = append(result, UniqueConstraint{Name: name, Primary: primary})
+		}
+		result[index].Columns = append(result[index].Columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func inspectPostgreSQLForeignKeys(database *sql.DB, name string) ([]ForeignKey, error) {

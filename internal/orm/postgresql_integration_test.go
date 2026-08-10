@@ -51,7 +51,8 @@ func TestPostgreSQLLiveIntrospection(t *testing.T) {
 			name TEXT NOT NULL,
 			price DOUBLE PRECISION,
 			active BOOLEAN NOT NULL,
-			payload BYTEA
+			payload BYTEA,
+			UNIQUE (name, active)
 		)`); err != nil {
 		testDatabase.Close()
 		t.Fatal(err)
@@ -78,4 +79,5 @@ func TestPostgreSQLLiveIntrospection(t *testing.T) {
 	if len(products.ForeignKeys) != 1 || products.ForeignKeys[0].Column != "category_id" || products.ForeignKeys[0].ReferencedTable != "categories" || products.ForeignKeys[0].ReferencedColumn != "id" {
 		t.Fatalf("unexpected PostgreSQL foreign keys: %#v", products.ForeignKeys)
 	}
+	assertUniqueConstraints(t, products.UniqueConstraints, []string{"id"}, []string{"name", "active"})
 }
