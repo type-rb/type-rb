@@ -1047,6 +1047,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return name
 		}
+		if n.ClassField {
+			return g.expr(n.Receiver) + "." + goFieldName(n.Name)
+		}
 		return g.expr(n.Receiver) + "." + goMethodName(n.Name)
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
@@ -1920,8 +1923,10 @@ func (g *generator) goReturn(t types.Type) string {
 
 func goFieldName(name string) string {
 	name = strings.TrimPrefix(name, "@")
-	name = strings.TrimPrefix(name, "_")
-	return "trb" + goIdentifier(name, true)
+	if strings.HasPrefix(name, "_") {
+		return "trbField" + goIdentifier(strings.TrimPrefix(name, "_"), true)
+	}
+	return "TrbField" + goIdentifier(name, true)
 }
 
 func goMethodName(name string) string {

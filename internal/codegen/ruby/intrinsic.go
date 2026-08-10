@@ -64,6 +64,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	}
 	switch name {
 	case "trb.std.io.puts":
+		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Array {
+			return "$stdout.puts((" + arguments[0] + ").inspect)"
+		}
 		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Float {
 			return "$stdout.puts(" + portableFloatString(arguments[0]) + ")"
 		}

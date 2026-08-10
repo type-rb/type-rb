@@ -118,6 +118,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("fmt", "")
 		if len(call.Arguments) == 1 {
 			argumentType := call.Arguments[0].Value.ExprType()
+			if argumentType.Kind == types.Array {
+				return "fmt.Println(" + g.portableArrayString(arguments[0], argumentType) + ")"
+			}
 			if argumentType.Kind == types.Float && argumentType.Nullable {
 				return "fmt.Println(func(value *float64) any { if value == nil { return nil }; return " + g.portableFloatString("*value") + " }(" + arguments[0] + "))"
 			}
@@ -777,6 +780,33 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) portableArrayString(value string, typ types.Type) string {
+	g.requireImport("strings", "")
+	elementType := types.Type{Kind: types.Any, Name: "Any"}
+	if len(typ.Args) > 0 {
+		elementType = typ.Args[0]
+	}
+	element := "fmt.Sprint(item)"
+	switch elementType.Kind {
+	case types.String:
+		g.requireImport("strconv", "")
+		element = "strconv.Quote(item)"
+	case types.Int:
+		g.requireImport("strconv", "")
+		element = "strconv.Itoa(item)"
+	case types.Float:
+		element = g.portableFloatString("item")
+	case types.Bool:
+		g.requireImport("strconv", "")
+		element = "strconv.FormatBool(item)"
+	case types.Array:
+		element = g.portableArrayString("item", elementType)
+	default:
+		g.requireImport("fmt", "")
+	}
+	return "func(values " + g.goType(typ) + ") string { parts := make([]string, len(values)); for index, item := range values { parts[index] = " + element + " }; return \"[\" + strings.Join(parts, \", \") + \"]\" }(" + value + ")"
 }
 
 func (g *generator) webLogger(call *ir.Call, arguments []string) string {

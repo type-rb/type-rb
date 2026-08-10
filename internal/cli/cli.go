@@ -480,7 +480,7 @@ func (c *CLI) runProgram(args []string) error {
 	var command *exec.Cmd
 	switch config.Mode {
 	case "ruby":
-		command = exec.Command("bundle", append([]string{"exec", "ruby", target}, programArgs...)...)
+		command = rubyRunCommand(target, programArgs)
 	case "go":
 		command = exec.Command("go", append([]string{"run", "-mod=mod", "."}, programArgs...)...)
 		if config.Go.Sqldef != nil {
@@ -504,6 +504,10 @@ func (c *CLI) runProgram(args []string) error {
 	command.Stdout = c.Stdout
 	command.Stderr = c.Stderr
 	return command.Run()
+}
+
+func rubyRunCommand(target string, programArgs []string) *exec.Cmd {
+	return exec.Command("ruby", append([]string{"-rbundler/setup", target}, programArgs...)...)
 }
 
 func typeScriptRunCommand(runtimeName, target string, programArgs []string) (*exec.Cmd, error) {

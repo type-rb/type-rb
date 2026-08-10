@@ -40,6 +40,7 @@ type Result struct {
 	UnhandledEffects    map[ast.Expression]bool
 	StructuredBlocks    map[*ast.CallExpression]StructuredBlock
 	ExternalMembers     map[ast.Expression]declaration.Member
+	ClassFieldAccesses  map[*ast.MemberExpression]bool
 	RuntimeDependencies map[string]*stdlib.Package
 	ImportUses          map[*ast.ImportStatement]map[string]bool
 }
@@ -273,6 +274,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			UnhandledEffects:    map[ast.Expression]bool{},
 			StructuredBlocks:    map[*ast.CallExpression]StructuredBlock{},
 			ExternalMembers:     map[ast.Expression]declaration.Member{},
+			ClassFieldAccesses:  map[*ast.MemberExpression]bool{},
 			RuntimeDependencies: map[string]*stdlib.Package{},
 			ImportUses:          importUses,
 		},
@@ -2903,8 +2905,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = c.typeFromRef(record.byName[n.Name].Type)
 		} else if member, found := c.localMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); found {
 			typ = member.typ
+			c.result.ClassFieldAccesses[n] = member.field != nil
 		} else if binding, exists := c.importedAncestorMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = binding.Type()
+			classType := c.classes[receiverType.Name] != nil
+			if imported, found := c.resolution.ImportedType(receiverType.Name); found && imported.Export != nil {
+				classType = classType || imported.Export.Kind == resolver.ClassExport
+			}
+			c.result.ClassFieldAccesses[n] = classType && binding.Member != nil && binding.Member.Kind == resolver.ValueExport
 			c.markImportedSymbolUsed(receiverType.Name)
 			c.recordReference(n, binding)
 		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {

@@ -143,6 +143,17 @@ func TestInstallCommandUsesConfiguredTypeScriptPackageManager(t *testing.T) {
 	}
 }
 
+func TestInstallCommandRunsBundlerThroughRuby(t *testing.T) {
+	command, err := installCommand(project.New(t.TempDir(), "ruby"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ruby", "-e", `load Gem.bin_path("bundler", "bundle")`, "--", "install"}
+	if strings.Join(command.Args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("unexpected Ruby install command: want %#v, got %#v", want, command.Args)
+	}
+}
+
 func TestExternalPackageManagementDoesNotWriteManifest(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "ruby")

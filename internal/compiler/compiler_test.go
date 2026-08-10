@@ -274,6 +274,88 @@ end
 	}
 }
 
+func TestGoClassFieldAccessUsesClassStorage(t *testing.T) {
+	source := []byte(`class Probe
+	@count: Integer
+	readonly @label: String
+
+	def initialize(label: String)
+		@count = 1
+		@label = label
+		return
+	end
+
+	def increment(): Integer
+		@count += 1
+		return @count
+	end
+end
+
+def main()
+	mut probe := Probe.new("items")
+	probe.count += 1
+	puts(probe.label)
+	puts(probe.count)
+	puts(probe.increment())
+	return
+end
+`)
+	artifact, err := Compile("class_fields.trb", source, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	for _, expected := range []string{"probe.TrbFieldCount += 1", "fmt.Println(probe.TrbFieldLabel)", "fmt.Println(probe.TrbFieldCount)", "fmt.Println(probe.Increment())"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "class_fields.go", artifact.Output, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated class field Go did not type-check: %v\n%s", err, output)
+	}
+
+	ruby, err := Compile("class_fields.trb", source, "ruby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rubyOutput := string(ruby.Output)
+	for _, expected := range []string{
+		"def __trb_field_label; @label; end",
+		"def __trb_field_count=(value); @count = value; end",
+		"probe.__trb_field_count += 1",
+		"$stdout.puts(probe.__trb_field_label)",
+		"$stdout.puts(probe.increment())",
+	} {
+		if !strings.Contains(rubyOutput, expected) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", expected, rubyOutput)
+		}
+	}
+	if strings.Contains(rubyOutput, "def __trb_field_label=(value)") {
+		t.Fatalf("generated Ruby exposed a writer for a readonly field:\n%s", rubyOutput)
+	}
+
+	typeScript, err := Compile("class_fields.trb", source, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	typeScriptOutput := string(typeScript.Output)
+	for _, expected := range []string{
+		"probe.__trb_count += 1;",
+		"console.log(probe.__trb_label);",
+		"console.log(probe.__trb_count);",
+		"console.log(probe.increment());",
+	} {
+		if !strings.Contains(typeScriptOutput, expected) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", expected, typeScriptOutput)
+		}
+	}
+}
+
 func TestPortableIterationAndRangesLowerAcrossBackends(t *testing.T) {
 	source := []byte(`def total(): Integer
   mut result := 0

@@ -91,6 +91,17 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line(header, n.TrailingComment)
 		g.indent++
 		fields := classFields(n.Body)
+		for _, field := range fields {
+			name := strings.TrimPrefix(field.Name, "@")
+			if strings.HasPrefix(name, "_") {
+				continue
+			}
+			accessor := "__trb_field_" + name
+			g.line("def "+accessor+"; @"+name+"; end", "")
+			if !field.ReadOnly {
+				g.line("def "+accessor+"=(value); @"+name+" = value; end", "")
+			}
+		}
 		foundInitialize := false
 		for _, member := range n.Body {
 			if method, ok := member.(*ir.Method); ok && method.Name == "initialize" {
@@ -548,6 +559,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			op = "::"
 		} else if n.Safe {
 			op = "&."
+		}
+		if n.ClassField {
+			return g.expr(n.Receiver) + op + "__trb_field_" + n.Name
 		}
 		return g.expr(n.Receiver) + op + n.Name
 	case *ir.Call:

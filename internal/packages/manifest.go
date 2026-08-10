@@ -92,7 +92,7 @@ func InstallWithDependencies(config *project.Config, packageDependencies map[str
 func installCommand(config *project.Config) (*exec.Cmd, error) {
 	switch config.Mode {
 	case "ruby":
-		return exec.Command("bundle", "install"), nil
+		return exec.Command("ruby", "-e", `load Gem.bin_path("bundler", "bundle")`, "--", "install"), nil
 	case "go":
 		return exec.Command("go", "mod", "download", "all"), nil
 	case "typescript":

@@ -638,7 +638,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				name = association.Name
 			}
 		}
-		member := &ir.Member{ExprBase: base, Receiver: l.expression(receiver), Name: name, Safe: n.Safe, Namespace: n.Namespace, Reference: reference}
+		member := &ir.Member{ExprBase: base, Receiver: l.expression(receiver), Name: name, Safe: n.Safe, Namespace: n.Namespace, ClassField: l.checked.ClassFieldAccesses[n], Reference: reference}
 		fails := l.checked.ExpressionEffects[n]
 		if fails.Kind != "" && fails.Kind != types.Never {
 			raw := &ir.Call{

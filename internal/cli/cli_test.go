@@ -228,6 +228,15 @@ func TestTypeScriptRunCommandUsesConfiguredRuntime(t *testing.T) {
 	}
 }
 
+func TestRubyRunCommandUsesOneInterpreterForBundler(t *testing.T) {
+	target := "/project/main.rb"
+	command := rubyRunCommand(target, []string{"one"})
+	want := []string{"ruby", "-rbundler/setup", target, "one"}
+	if strings.Join(command.Args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("unexpected Ruby run command: want %#v, got %#v", want, command.Args)
+	}
+}
+
 func TestRunTypeScriptProjectWithBunRuntime(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test executable uses a POSIX shell")
