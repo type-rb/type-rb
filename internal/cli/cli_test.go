@@ -449,6 +449,22 @@ def batch_count(): Integer fails DbError
 	return each_count + batch_count
 end
 
+def write_products(): Integer fails DbError
+	draft := Product.build(category_id: 1, name: "Draft")
+	created := draft.save()
+	puts(created.name)
+	saved := created.with(name: "Saved").save()
+	puts(saved.name)
+	direct := Product.create(category_id: 1, name: "Direct")
+	updated := direct.update(name: "Updated")
+	puts(updated.name)
+	updated_count := Product.where(id: [saved.id, updated.id]).update_all(name: "Bulk")
+	puts(updated_count)
+	puts(saved.delete())
+	puts(Product.where(id: updated.id).delete_all())
+	return Product.count()
+end
+
 def main()
 	case attempt association_count()
 	when Result::Ok(value)
@@ -468,7 +484,7 @@ end
 		t.Fatal(err)
 	}
 	input := strings.Join([]string{
-		"import { Category, Product } from main",
+		"import { Category, Product, batch_count, write_products } from main",
 		"product := Product.find(1)",
 		"product.category.loaded?()",
 		"product.category",
@@ -479,6 +495,8 @@ end
 		"category.products.loaded?()",
 		"category.products",
 		"category.products.loaded?()",
+		"batch_count()",
+		"write_products()",
 		":quit",
 	}, "\n") + "\n"
 	var stdout, stderr bytes.Buffer
@@ -491,6 +509,11 @@ end
 		`#<Category id: 1, name: "Featured"> : Category?`,
 		`true : Boolean`,
 		`[#<Product category_id: 1, id: 1, name: "First">, #<Product category_id: 1, id: 2, name: "Second">] : Array<Product>`,
+		`4 : Integer`,
+		`Draft`,
+		`Saved`,
+		`Updated`,
+		`2 : Integer`,
 	} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("ORM association REPL output is missing %q:\n%s", expected, stdout.String())

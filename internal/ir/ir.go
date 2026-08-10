@@ -335,17 +335,18 @@ type IterationResult struct {
 
 type Iterate struct {
 	Base
-	Source        Expression
-	Operation     string
-	Intrinsic     string
-	SliceSize     Expression
-	WithIndex     bool
-	Bindings      []IterationBinding
-	Body          []Statement
-	Result        *IterationResult
-	Fails         types.Type
-	EffectSuccess types.Type
-	CaptureEffect bool
+	Source          Expression
+	Operation       string
+	Intrinsic       string
+	SliceSize       Expression
+	WithIndex       bool
+	Bindings        []IterationBinding
+	Body            []Statement
+	Result          *IterationResult
+	Fails           types.Type
+	EffectSuccess   types.Type
+	CaptureEffect   bool
+	UnhandledEffect bool
 }
 
 func (*Iterate) irStatement() {}
