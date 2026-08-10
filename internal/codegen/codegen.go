@@ -30,6 +30,21 @@ func Generate(program *ir.Program) ([]byte, error) {
 // analysis without leaking backend-specific concerns into parsing, checking,
 // or the shared IR.
 func GenerateProject(programs []*ir.Program) ([][]byte, error) {
+	if len(programs) > 0 && programs[0].Mode == "typescript" {
+		normalized := make([]*ir.Program, len(programs))
+		for index, program := range programs {
+			normalized[index] = normalizeDivergingControlFlow(program)
+		}
+		generated, err := typescript.GenerateProject(normalized)
+		if err != nil {
+			return nil, err
+		}
+		outputs := make([][]byte, len(generated))
+		for index, output := range generated {
+			outputs[index] = []byte(output)
+		}
+		return outputs, nil
+	}
 	outputs := make([][]byte, len(programs))
 	for index, program := range programs {
 		output, err := Generate(program)

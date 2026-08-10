@@ -1,0 +1,335 @@
+package typescript
+
+import (
+	"strings"
+
+	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/types"
+)
+
+// SuspensionPlan is backend-owned analysis data. It deliberately does not
+// make suspension part of TypeRB syntax, checking, or shared semantics.
+// TypeScript generation uses it to preserve sequential TypeRB evaluation over
+// Promise-based native APIs.
+type SuspensionPlan struct {
+	Methods          map[*ir.Method]bool
+	Calls            map[*ir.Call]bool
+	Expressions      map[ir.Expression]bool
+	Iterations       map[*ir.Iterate]bool
+	StructuredBlocks map[*ir.StructuredBlock]bool
+}
+
+type suspensionMethod struct {
+	module string
+	owner  string
+	method *ir.Method
+}
+
+type suspensionClass struct {
+	name       string
+	implements []string
+}
+
+type suspensionAnalyzer struct {
+	programs         []*ir.Program
+	plan             *SuspensionPlan
+	methods          []suspensionMethod
+	methodInfo       map[*ir.Method]suspensionMethod
+	topMethods       map[string][]*ir.Method
+	memberMethods    map[string][]*ir.Method
+	interfaceMethods map[string][]*ir.Method
+	classes          []suspensionClass
+}
+
+func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
+	plan := &SuspensionPlan{
+		Methods:          map[*ir.Method]bool{},
+		Calls:            map[*ir.Call]bool{},
+		Expressions:      map[ir.Expression]bool{},
+		Iterations:       map[*ir.Iterate]bool{},
+		StructuredBlocks: map[*ir.StructuredBlock]bool{},
+	}
+	analyzer := &suspensionAnalyzer{
+		programs: programs, plan: plan, methodInfo: map[*ir.Method]suspensionMethod{},
+		topMethods: map[string][]*ir.Method{}, memberMethods: map[string][]*ir.Method{},
+		interfaceMethods: map[string][]*ir.Method{},
+	}
+	for _, program := range programs {
+		analyzer.collect(program.ModulePath, "", program.Statements, false)
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for _, method := range analyzer.methods {
+			if plan.Methods[method.method] || !analyzer.statementsSuspend(method.method.Body, method, false) {
+				continue
+			}
+			plan.Methods[method.method] = true
+			changed = true
+		}
+		if analyzer.propagateInterfaces() {
+			changed = true
+		}
+	}
+
+	for _, method := range analyzer.methods {
+		analyzer.statementsSuspend(method.method.Body, method, true)
+	}
+	for _, program := range programs {
+		analyzer.statementsSuspend(program.Statements, suspensionMethod{module: program.ModulePath}, true)
+	}
+	return plan, nil
+}
+
+func (a *suspensionAnalyzer) collect(module, owner string, statements []ir.Statement, interfaceOwner bool) {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Class:
+			a.classes = append(a.classes, suspensionClass{name: node.Name, implements: append([]string(nil), node.Implements...)})
+			a.collect(module, node.Name, node.Body, false)
+		case *ir.Interface:
+			for _, method := range node.Methods {
+				a.addMethod(suspensionMethod{module: module, owner: node.Name, method: method}, true)
+			}
+		case *ir.Module:
+			a.collect(module, owner, node.Body, interfaceOwner)
+		case *ir.Method:
+			a.addMethod(suspensionMethod{module: module, owner: owner, method: node}, interfaceOwner)
+		}
+	}
+}
+
+func (a *suspensionAnalyzer) addMethod(method suspensionMethod, interfaceMethod bool) {
+	a.methods = append(a.methods, method)
+	a.methodInfo[method.method] = method
+	if method.owner == "" {
+		key := callableKey(method.module, method.method.Name)
+		a.topMethods[key] = append(a.topMethods[key], method.method)
+		return
+	}
+	key := memberKey(method.owner, method.method.Name)
+	a.memberMethods[key] = append(a.memberMethods[key], method.method)
+	if interfaceMethod {
+		a.interfaceMethods[key] = append(a.interfaceMethods[key], method.method)
+	}
+}
+
+func (a *suspensionAnalyzer) propagateInterfaces() bool {
+	changed := false
+	for _, class := range a.classes {
+		for _, interfaceName := range class.implements {
+			for key, declarations := range a.interfaceMethods {
+				prefix := interfaceName + "\x00"
+				if !strings.HasPrefix(key, prefix) {
+					continue
+				}
+				name := strings.TrimPrefix(key, prefix)
+				implementations := a.memberMethods[memberKey(class.name, name)]
+				maySuspend := anySuspending(a.plan.Methods, declarations) || anySuspending(a.plan.Methods, implementations)
+				if !maySuspend {
+					continue
+				}
+				for _, method := range append(append([]*ir.Method(nil), declarations...), implementations...) {
+					if !a.plan.Methods[method] {
+						a.plan.Methods[method] = true
+						changed = true
+					}
+				}
+			}
+		}
+	}
+	return changed
+}
+
+func anySuspending(methods map[*ir.Method]bool, candidates []*ir.Method) bool {
+	for _, method := range candidates {
+		if methods[method] {
+			return true
+		}
+	}
+	return false
+}
+
+func callableKey(module, name string) string { return module + "\x00" + name }
+func memberKey(owner, name string) string    { return owner + "\x00" + name }
+
+func (a *suspensionAnalyzer) statementsSuspend(statements []ir.Statement, context suspensionMethod, record bool) bool {
+	suspends := false
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Field:
+			suspends = a.expressionSuspends(node.Value, context, record) || suspends
+		case *ir.Variable:
+			suspends = a.expressionSuspends(node.Value, context, record) || suspends
+		case *ir.Assignment:
+			suspends = a.expressionSuspends(node.Target, context, record) || a.expressionSuspends(node.Value, context, record) || suspends
+		case *ir.Return:
+			suspends = a.expressionSuspends(node.Value, context, record) || suspends
+		case *ir.ExpressionStatement:
+			suspends = a.expressionSuspends(node.Expression, context, record) || suspends
+		case *ir.If:
+			branchSuspends := a.expressionSuspends(node.Condition, context, record) || a.statementsSuspend(node.Then, context, record) || a.expressionSuspends(node.ThenResult, context, record)
+			for _, branch := range node.ElseIf {
+				branchSuspends = a.expressionSuspends(branch.Condition, context, record) || a.statementsSuspend(branch.Body, context, record) || a.expressionSuspends(branch.Result, context, record) || branchSuspends
+			}
+			branchSuspends = a.statementsSuspend(node.Else, context, record) || a.expressionSuspends(node.ElseResult, context, record) || branchSuspends
+			if record && branchSuspends {
+				a.plan.Expressions[node] = true
+			}
+			suspends = branchSuspends || suspends
+		case *ir.Case:
+			branchSuspends := a.statementsSuspend(node.Leading, context, record) || a.expressionSuspends(node.Value, context, record)
+			for _, branch := range node.Branches {
+				branchSuspends = a.expressionSuspends(branch.Value, context, record) || a.statementsSuspend(branch.Body, context, record) || a.expressionSuspends(branch.Result, context, record) || branchSuspends
+			}
+			branchSuspends = a.statementsSuspend(node.Else, context, record) || a.expressionSuspends(node.ElseResult, context, record) || branchSuspends
+			if record && branchSuspends {
+				a.plan.Expressions[node] = true
+			}
+			suspends = branchSuspends || suspends
+		case *ir.While:
+			suspends = a.expressionSuspends(node.Condition, context, record) || a.statementsSuspend(node.Body, context, record) || suspends
+		case *ir.Iterate:
+			iterationSuspends := isSuspendingORM(node.Intrinsic, node.Fails) || a.expressionSuspends(node.Source, context, record) || a.expressionSuspends(node.SliceSize, context, record) || a.statementsSuspend(node.Body, context, record)
+			if record && iterationSuspends {
+				a.plan.Iterations[node] = true
+			}
+			suspends = iterationSuspends || suspends
+		case *ir.StructuredBlock:
+			blockSuspends := isSuspendingORM(node.Intrinsic, node.Fails) || a.expressionSuspends(node.Call, context, record) || a.statementsSuspend(node.Body, context, record) || a.expressionSuspends(node.Value, context, record)
+			if record && blockSuspends {
+				a.plan.StructuredBlocks[node] = true
+			}
+			suspends = blockSuspends || suspends
+		case *ir.NativeBlock:
+			suspends = a.statementsSuspend(node.Body, context, record) || suspends
+		}
+	}
+	return suspends
+}
+
+func (a *suspensionAnalyzer) expressionSuspends(expression ir.Expression, context suspensionMethod, record bool) bool {
+	if expression == nil {
+		return false
+	}
+	suspends := false
+	switch node := expression.(type) {
+	case *ir.InterpolatedString:
+		for _, part := range node.Parts {
+			suspends = a.expressionSuspends(part.Expression, context, record) || suspends
+		}
+	case *ir.Array:
+		for _, element := range node.Elements {
+			suspends = a.expressionSuspends(element, context, record) || suspends
+		}
+	case *ir.Hash:
+		for _, entry := range node.Entries {
+			suspends = a.expressionSuspends(entry.Key, context, record) || a.expressionSuspends(entry.Value, context, record) || suspends
+		}
+	case *ir.Unary:
+		suspends = a.expressionSuspends(node.Operand, context, record)
+	case *ir.Conversion:
+		suspends = a.expressionSuspends(node.Value, context, record)
+	case *ir.Binary:
+		suspends = a.expressionSuspends(node.Left, context, record) || a.expressionSuspends(node.Right, context, record)
+	case *ir.Range:
+		suspends = a.expressionSuspends(node.Start, context, record) || a.expressionSuspends(node.End, context, record)
+	case *ir.Transform:
+		suspends = a.expressionSuspends(node.Source, context, record) || a.expressionSuspends(node.Initial, context, record) || a.statementsSuspend(node.Body, context, record) || a.expressionSuspends(node.Result, context, record)
+	case *ir.Call:
+		suspends = a.expressionSuspends(node.Callee, context, record)
+		for _, argument := range node.Arguments {
+			suspends = a.expressionSuspends(argument.Value, context, record) || suspends
+		}
+		if node.Block != nil {
+			suspends = a.statementsSuspend(node.Block.Body, context, record) || suspends
+		}
+		callSuspends := isSuspendingIntrinsic(referenceIntrinsic(node.Callee), node.Fails) || isWebNextCall(node.Callee) || a.callTargetSuspends(node.Callee, context)
+		if record && callSuspends {
+			a.plan.Calls[node] = true
+		}
+		suspends = callSuspends || suspends
+	case *ir.Attempt:
+		suspends = a.expressionSuspends(node.Value, context, record) || a.statementsSuspend(node.Body, context, record) || a.expressionSuspends(node.BodyResult, context, record)
+	case *ir.UnhandledEffect:
+		suspends = a.expressionSuspends(node.Value, context, record)
+	case *ir.EnumConstruct:
+		for _, argument := range node.Arguments {
+			suspends = a.expressionSuspends(argument, context, record) || suspends
+		}
+	case *ir.TypeApply:
+		suspends = a.expressionSuspends(node.Receiver, context, record)
+	case *ir.Member:
+		suspends = a.expressionSuspends(node.Receiver, context, record)
+	case *ir.Index:
+		suspends = a.expressionSuspends(node.Receiver, context, record) || a.expressionSuspends(node.Index, context, record)
+	case *ir.Block:
+		suspends = a.statementsSuspend(node.Body, context, record)
+	case *ir.If:
+		suspends = a.statementsSuspend([]ir.Statement{node}, context, record)
+	case *ir.Case:
+		suspends = a.statementsSuspend([]ir.Statement{node}, context, record)
+	}
+	if record && suspends {
+		a.plan.Expressions[expression] = true
+	}
+	return suspends
+}
+
+func (a *suspensionAnalyzer) callTargetSuspends(callee ir.Expression, context suspensionMethod) bool {
+	switch node := callee.(type) {
+	case *ir.TypeApply:
+		return a.callTargetSuspends(node.Receiver, context)
+	case *ir.Identifier:
+		if node.Reference != nil && node.Reference.Package != "" {
+			return anySuspending(a.plan.Methods, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
+		}
+		if context.owner != "" && anySuspending(a.plan.Methods, a.memberMethods[memberKey(context.owner, node.Name)]) {
+			return true
+		}
+		return anySuspending(a.plan.Methods, a.topMethods[callableKey(context.module, node.Name)])
+	case *ir.Member:
+		if node.Reference != nil && node.Reference.Intrinsic != "" {
+			return false
+		}
+		if member, ok := node.Receiver.(*ir.Identifier); ok && member.Reference != nil && member.Reference.Package != "" && node.Reference != nil && node.Reference.ExportKind == "function" {
+			return anySuspending(a.plan.Methods, a.topMethods[callableKey(member.Reference.Package, node.Name)])
+		}
+		owner := node.Receiver.ExprType().Name
+		if owner == "" {
+			return false
+		}
+		return anySuspending(a.plan.Methods, a.memberMethods[memberKey(owner, node.Name)])
+	default:
+		return false
+	}
+}
+
+func referenceIntrinsic(expression ir.Expression) string {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		if node.Reference != nil {
+			return node.Reference.Intrinsic
+		}
+	case *ir.Member:
+		if node.Reference != nil {
+			return node.Reference.Intrinsic
+		}
+	case *ir.TypeApply:
+		return referenceIntrinsic(node.Receiver)
+	}
+	return ""
+}
+
+func isSuspendingORM(intrinsic string, fails types.Type) bool {
+	return strings.HasPrefix(intrinsic, "trb.orm.") && fails.Kind != "" && fails.Kind != types.Never
+}
+
+func isSuspendingIntrinsic(intrinsic string, fails types.Type) bool {
+	return isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call"
+}
+
+func isWebNextCall(callee ir.Expression) bool {
+	member, ok := callee.(*ir.Member)
+	return ok && member.Name == "call" && member.Receiver.ExprType().Name == "Next"
+}
