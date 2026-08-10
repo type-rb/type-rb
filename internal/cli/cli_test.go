@@ -493,6 +493,56 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	}
 }
 
+func TestReplExecutesORMThroughSharedHostRuntimeInEveryMode(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.Exec(`
+				CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+				INSERT INTO products (id, name) VALUES (1, 'Portable');
+			`); err != nil {
+				database.Close()
+				t.Fatal(err)
+			}
+			if err := database.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/repl-orm-portable-test"
+			}
+			config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"sqlite","database":"application.sqlite3"}`)
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model } from trb/orm\n\nclass Product < Model\nend\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{
+				Stdin:  strings.NewReader("import { Product } from main\nProduct.count()\n:quit\n"),
+				Stdout: &stdout, Stderr: &stderr,
+			}
+			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			if stdout.String() != "1 : Integer\n" || stderr.Len() != 0 {
+				t.Fatalf("unexpected %s ORM REPL output: stdout=%q stderr=%q", mode, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestReplLoadsPortableORMAssociationProperties(t *testing.T) {
 	root := t.TempDir()
 	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
