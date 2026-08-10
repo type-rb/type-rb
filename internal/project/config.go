@@ -51,8 +51,78 @@ type Config struct {
 	Ruby              *RubyConfig                `json:"ruby,omitempty"`
 	Go                *GoConfig                  `json:"go,omitempty"`
 	TypeScript        *TypeScriptConfig          `json:"typescript,omitempty"`
+	Database          *DatabaseConfig            `json:"db,omitempty"`
 	Root              string                     `json:"-"`
 	Path              string                     `json:"-"`
+}
+
+const DefaultSqldefVersion = "3.11.19"
+
+type DatabaseConfig struct {
+	Adapter  string          `json:"adapter"`
+	Database *DatabaseSource `json:"database,omitempty"`
+	Schema   string          `json:"schema,omitempty"`
+	Lock     string          `json:"lock,omitempty"`
+	Sqldef   *DBSqldefConfig `json:"sqldef,omitempty"`
+}
+
+type DatabaseSource struct {
+	Value       string
+	Environment string
+}
+
+func (s *DatabaseSource) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil
+	}
+	if trimmed[0] == '"' {
+		return json.Unmarshal(trimmed, &s.Value)
+	}
+	var encoded struct {
+		Environment string `json:"environment"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&encoded); err != nil {
+		return errors.New("must be a string or an environment source")
+	}
+	s.Environment = encoded.Environment
+	return nil
+}
+
+func (s DatabaseSource) MarshalJSON() ([]byte, error) {
+	if strings.TrimSpace(s.Environment) != "" {
+		return json.Marshal(struct {
+			Environment string `json:"environment"`
+		}{Environment: s.Environment})
+	}
+	return json.Marshal(s.Value)
+}
+
+func (s DatabaseSource) Resolve(root, adapter string) (string, error) {
+	value := strings.TrimSpace(s.Value)
+	if environment := strings.TrimSpace(s.Environment); environment != "" {
+		var found bool
+		value, found = os.LookupEnv(environment)
+		if !found || strings.TrimSpace(value) == "" {
+			return "", fmt.Errorf("database environment %q is not set or empty", environment)
+		}
+		value = strings.TrimSpace(value)
+	}
+	if value == "" {
+		return "", errors.New("db.database is required for this command")
+	}
+	if adapter == "sqlite" && !filepath.IsAbs(value) {
+		value = filepath.Join(root, value)
+	}
+	return value, nil
+}
+
+type DBSqldefConfig struct {
+	Command   string   `json:"command,omitempty"`
+	Version   string   `json:"version,omitempty"`
+	Arguments []string `json:"arguments,omitempty"`
 }
 
 type RubyConfig struct {
@@ -193,6 +263,26 @@ func (c *Config) Validate() error {
 			return errors.New("go.sqldef database and schema must stay below the project root")
 		}
 	}
+	if c.Database != nil {
+		database := c.Database
+		database.Adapter = strings.ToLower(strings.TrimSpace(database.Adapter))
+		switch database.Adapter {
+		case "sqlite", "postgresql", "mysql":
+		default:
+			return fmt.Errorf("db.adapter must be sqlite, postgresql, or mysql; got %q", database.Adapter)
+		}
+		for name, path := range map[string]string{"schema": database.Schema, "lock": database.Lock} {
+			if filepath.IsAbs(path) || escapesRoot(path) {
+				return fmt.Errorf("db.%s must stay below the project root", name)
+			}
+		}
+		if database.Database != nil && strings.TrimSpace(database.Database.Value) != "" && strings.TrimSpace(database.Database.Environment) != "" {
+			return errors.New("db.database cannot contain both a value and environment")
+		}
+		if database.Database != nil && strings.TrimSpace(database.Database.Value) == "" && strings.TrimSpace(database.Database.Environment) == "" {
+			return errors.New("db.database must be a non-empty string or environment source")
+		}
+	}
 	if c.Ruby != nil && c.Ruby.Loader != "" && c.Ruby.Loader != "require_relative" && c.Ruby.Loader != "zeitwerk" {
 		return fmt.Errorf("ruby.loader must be require_relative or zeitwerk; got %q", c.Ruby.Loader)
 	}
@@ -252,6 +342,31 @@ func (c *Config) applyDefaults() {
 	}
 	if c.PackageOptions == nil {
 		c.PackageOptions = map[string]json.RawMessage{}
+	}
+	if c.Database != nil {
+		c.Database.Adapter = strings.ToLower(strings.TrimSpace(c.Database.Adapter))
+		if c.Database.Schema == "" {
+			c.Database.Schema = "db/schema.sql"
+		}
+		if c.Database.Lock == "" {
+			c.Database.Lock = "db/schema.lock.json"
+		}
+		if c.Database.Sqldef == nil {
+			c.Database.Sqldef = &DBSqldefConfig{}
+		}
+		if c.Database.Sqldef.Command == "" {
+			switch c.Database.Adapter {
+			case "sqlite":
+				c.Database.Sqldef.Command = "sqlite3def"
+			case "postgresql":
+				c.Database.Sqldef.Command = "psqldef"
+			case "mysql":
+				c.Database.Sqldef.Command = "mysqldef"
+			}
+		}
+		if c.Database.Sqldef.Version == "" {
+			c.Database.Sqldef.Version = DefaultSqldefVersion
+		}
 	}
 	switch c.Mode {
 	case "ruby":

@@ -106,6 +106,30 @@ When TypeRB is embedded in an application that already owns its manifest, set:
 `trb build` then generates source without reading or modifying the host
 manifest. `trb sync`, `add`, `remove`, and `install` are disabled in this mode.
 
+## Database schema workflow
+
+The optional `db` section configures mode-independent schema commands:
+
+```jsonc
+{
+  "db": {
+    "adapter": "sqlite",
+    "database": "db/development.sqlite3",
+    "schema": "db/schema.sql",
+    "lock": "db/schema.lock.json",
+    "sqldef": {
+      "command": "sqlite3def",
+      "version": "3.11.19"
+    }
+  }
+}
+```
+
+`database` may instead be `{ "environment": "DATABASE_URL" }`. Adapter
+defaults select `sqlite3def`, `psqldef`, or `mysqldef` and the sqldef version
+supported by the current TypeRB release. `sqldef.arguments` adds project-owned
+command options. See the [database schema guide](guides/database.md).
+
 ## Project entrypoint
 
 A runnable project defines exactly one top-level `def main()`. `main` is a

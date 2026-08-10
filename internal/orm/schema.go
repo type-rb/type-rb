@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/schemalock"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -77,8 +78,9 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	var encoded struct {
-		Adapter  string          `json:"adapter"`
-		Database json.RawMessage `json:"database"`
+		Adapter    string          `json:"adapter"`
+		Database   json.RawMessage `json:"database"`
+		SchemaLock string          `json:"schemaLock,omitempty"`
 	}
 	if err := decoder.Decode(&encoded); err != nil {
 		return nil, fmt.Errorf("packageOptions.%q: %w", PackageName, err)
@@ -94,26 +96,56 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 		}
 	} else {
 		value, found := os.LookupEnv(databaseEnvironment)
-		if !found || strings.TrimSpace(value) == "" {
-			return nil, fmt.Errorf("packageOptions.%q.database.environment %q is not set or empty", PackageName, databaseEnvironment)
+		if found {
+			config.Database = value
 		}
-		config.Database = value
 	}
 	config.Adapter = strings.ToLower(strings.TrimSpace(config.Adapter))
 	config.Database = strings.TrimSpace(config.Database)
 	if config.Adapter == "" {
 		return nil, fmt.Errorf("packageOptions.%q.adapter is required", PackageName)
 	}
-	if config.Database == "" {
-		return nil, fmt.Errorf("packageOptions.%q.database is required", PackageName)
-	}
-	if config.Adapter == "sqlite" && !filepath.IsAbs(config.Database) {
+	if config.Adapter == "sqlite" && config.Database != "" && !filepath.IsAbs(config.Database) {
 		if databaseEnvironment != "" {
 			return nil, fmt.Errorf("packageOptions.%q.database.environment %q must contain an absolute SQLite path", PackageName, databaseEnvironment)
 		}
 		config.Database = filepath.Join(projectRoot, config.Database)
 	}
+	lockPath, lockExplicit, err := schemaLockPath(projectRoot, encoded.SchemaLock)
+	if err != nil {
+		return nil, fmt.Errorf("packageOptions.%q.schemaLock: %w", PackageName, err)
+	}
+	if lockPath != "" {
+		lock, lockErr := schemalock.Read(lockPath)
+		if lockErr != nil {
+			if lockExplicit || !errors.Is(lockErr, os.ErrNotExist) {
+				return nil, fmt.Errorf("load ORM schema lock: %w", lockErr)
+			}
+		} else {
+			if lock.Adapter != config.Adapter {
+				return nil, fmt.Errorf("ORM schema lock adapter is %s, expected %s", lock.Adapter, config.Adapter)
+			}
+			schema := schemaFromLock(lock)
+			schema.Database = config.Database
+			schema.DatabaseEnvironment = databaseEnvironment
+			return schema, nil
+		}
+	}
+	if config.Database == "" {
+		if databaseEnvironment != "" {
+			return nil, fmt.Errorf("packageOptions.%q.database.environment %q is not set or empty", PackageName, databaseEnvironment)
+		}
+		return nil, fmt.Errorf("packageOptions.%q.database is required", PackageName)
+	}
+	schema, err := InspectSchema(config)
+	if err != nil {
+		return nil, err
+	}
+	schema.DatabaseEnvironment = databaseEnvironment
+	return schema, nil
+}
 
+func InspectSchema(config Config) (*Schema, error) {
 	definition, ok := adapterDefinitionFor(config.Adapter)
 	if !ok {
 		return nil, fmt.Errorf("unsupported trb/orm adapter %q", config.Adapter)
@@ -122,7 +154,6 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 	if err != nil {
 		return nil, fmt.Errorf("inspect %s database: %w", config.Adapter, err)
 	}
-	schema.DatabaseEnvironment = databaseEnvironment
 	sort.Slice(schema.Tables, func(i, j int) bool { return schema.Tables[i].Name < schema.Tables[j].Name })
 	for index := range schema.Tables {
 		sort.Slice(schema.Tables[index].Columns, func(i, j int) bool {
@@ -137,6 +168,70 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 		})
 	}
 	return schema, nil
+}
+
+func schemaLockPath(projectRoot, configured string) (string, bool, error) {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return filepath.Join(projectRoot, "db", "schema.lock.json"), false, nil
+	}
+	if filepath.IsAbs(configured) {
+		return "", true, errors.New("must be relative to the project root")
+	}
+	clean := filepath.Clean(configured)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", true, errors.New("cannot escape the project root")
+	}
+	return filepath.Join(projectRoot, clean), true, nil
+}
+
+func schemaFromLock(lock *schemalock.Lock) *Schema {
+	schema := &Schema{Adapter: lock.Adapter}
+	tableNames := make([]string, 0, len(lock.Tables))
+	for name := range lock.Tables {
+		tableNames = append(tableNames, name)
+	}
+	sort.Strings(tableNames)
+	for _, tableName := range tableNames {
+		locked := lock.Tables[tableName]
+		table := Table{Name: tableName}
+		columnNames := make([]string, 0, len(locked.Columns))
+		for name := range locked.Columns {
+			columnNames = append(columnNames, name)
+		}
+		sort.Strings(columnNames)
+		for position, name := range columnNames {
+			column := locked.Columns[name]
+			typeFromLock := types.FromName(column.Type)
+			typeFromLock.Nullable = column.Nullable
+			table.Columns = append(table.Columns, Column{
+				Name: name, DatabaseType: column.Type, Type: typeFromLock, Nullable: column.Nullable,
+				PrimaryKey: column.PrimaryKey, HasDefault: column.HasDefault, Generated: column.Generated, Position: position,
+			})
+		}
+		foreignKeyNames := make([]string, 0, len(locked.ForeignKeys))
+		for name := range locked.ForeignKeys {
+			foreignKeyNames = append(foreignKeyNames, name)
+		}
+		sort.Strings(foreignKeyNames)
+		for id, name := range foreignKeyNames {
+			foreignKey := locked.ForeignKeys[name]
+			table.ForeignKeys = append(table.ForeignKeys, ForeignKey{
+				ID: id, Column: foreignKey.Column, ReferencedTable: foreignKey.ReferencedTable, ReferencedColumn: foreignKey.ReferencedColumn,
+			})
+		}
+		constraintNames := make([]string, 0, len(locked.UniqueConstraints))
+		for name := range locked.UniqueConstraints {
+			constraintNames = append(constraintNames, name)
+		}
+		sort.Strings(constraintNames)
+		for _, name := range constraintNames {
+			constraint := locked.UniqueConstraints[name]
+			table.UniqueConstraints = append(table.UniqueConstraints, UniqueConstraint{Name: name, Columns: append([]string(nil), constraint.Columns...), Primary: constraint.Primary})
+		}
+		schema.Tables = append(schema.Tables, table)
+	}
+	return schema
 }
 
 func decodeDatabaseSource(raw json.RawMessage) (string, error) {

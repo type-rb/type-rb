@@ -15,6 +15,7 @@ larger applications.
 - [Language specification](specification.md)
 - [Standard library](standard-library.md)
 - [Syntax highlighting](syntax-highlighting.md)
+- [Database schema workflow](guides/database.md)
 - [`trb/orm` guide](guides/orm.md)
 - [Rails guide](guides/rails.md)
 
