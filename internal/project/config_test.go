@@ -158,4 +158,69 @@ func TestNewTypeScriptProjectUsesLatestCompiler(t *testing.T) {
 	if got := config.DevDependencies["typescript"]; got != DefaultTypeScriptVersion {
 		t.Fatalf("unexpected TypeScript version: %q", got)
 	}
+	if config.TypeScript.Runtime != TypeScriptRuntimeNode || config.TypeScript.PackageManager != "npm" {
+		t.Fatalf("unexpected default TypeScript toolchain: %#v", config.TypeScript)
+	}
+}
+
+func TestLoadLegacyTypeScriptConfigDefaultsToNodeAndNpm(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ConfigName)
+	source := `{
+  "name": "legacy-app",
+  "mode": "typescript",
+  "typescript": {
+    "moduleType": "module"
+  }
+}`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.TypeScript.Runtime != TypeScriptRuntimeNode || config.TypeScript.PackageManager != "npm" {
+		t.Fatalf("unexpected legacy defaults: %#v", config.TypeScript)
+	}
+}
+
+func TestLoadBunRuntimeDefaultsToBunPackageManager(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ConfigName)
+	source := `{
+  "name": "bun-api",
+  "mode": "typescript",
+  "typescript": {
+    "runtime": "bun"
+  }
+}`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.TypeScript.Runtime != TypeScriptRuntimeBun || config.TypeScript.PackageManager != "bun" {
+		t.Fatalf("unexpected Bun defaults: %#v", config.TypeScript)
+	}
+}
+
+func TestLoadRejectsUnknownTypeScriptRuntime(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ConfigName)
+	source := `{
+  "name": "deno-app",
+  "mode": "typescript",
+  "typescript": {
+    "runtime": "deno"
+  }
+}`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "typescript.runtime must be browser, bun, or node") {
+		t.Fatalf("unexpected invalid-runtime result: %v", err)
+	}
 }

@@ -14,6 +14,19 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
+func TestCompileCarriesTypeScriptRuntimeToTypedIR(t *testing.T) {
+	artifact, err := CompileWithOptions("main.trb", []byte("def main()\n\treturn\nend\n"), Options{
+		Mode:              "typescript",
+		TypeScriptRuntime: "bun",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.IR.TypeScriptRuntime != "bun" {
+		t.Fatalf("TypeScript runtime was not carried to typed IR: %#v", artifact.IR)
+	}
+}
+
 func TestCompileRubyRailsKeepsNativeDSLAndLowersTypedCore(t *testing.T) {
 	source := []byte(`import trb/platform/ruby/rails
 

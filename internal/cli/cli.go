@@ -488,7 +488,10 @@ func (c *CLI) runProgram(args []string) error {
 			command.Env = append(os.Environ(), "TRB_DATABASE="+database)
 		}
 	case "typescript":
-		command = exec.Command("node", append([]string{"--experimental-strip-types", target}, programArgs...)...)
+		command, err = typeScriptRunCommand(config.TypeScript.Runtime, target, programArgs)
+		if err != nil {
+			return err
+		}
 	}
 	command.Dir = runRoot
 	if config.Mode == "go" {
@@ -501,6 +504,19 @@ func (c *CLI) runProgram(args []string) error {
 	command.Stdout = c.Stdout
 	command.Stderr = c.Stderr
 	return command.Run()
+}
+
+func typeScriptRunCommand(runtimeName, target string, programArgs []string) (*exec.Cmd, error) {
+	switch runtimeName {
+	case "", project.TypeScriptRuntimeNode:
+		return exec.Command("node", append([]string{"--experimental-strip-types", target}, programArgs...)...), nil
+	case project.TypeScriptRuntimeBun:
+		return exec.Command("bun", append([]string{"run", target}, programArgs...)...), nil
+	case project.TypeScriptRuntimeBrowser:
+		return nil, errors.New("trb run is unavailable for typescript.runtime browser; use a browser application entrypoint")
+	default:
+		return nil, fmt.Errorf("unsupported TypeScript runtime %q", runtimeName)
+	}
 }
 
 func (c *CLI) runRepl(args []string) error {
@@ -685,7 +701,7 @@ func replConfigForMode(base *project.Config, mode string) *project.Config {
 			}
 		}
 	case "typescript":
-		config.TypeScript = &project.TypeScriptConfig{PackageManager: "npm", ModuleType: "module", Scripts: map[string]string{}}
+		config.TypeScript = &project.TypeScriptConfig{PackageManager: "npm", ModuleType: "module", Runtime: project.DefaultTypeScriptRuntime, Scripts: map[string]string{}}
 		if base.TypeScript != nil {
 			clone := *base.TypeScript
 			config.TypeScript = &clone
@@ -719,6 +735,7 @@ func (c *CLI) runInit(args []string) error {
 	flags.SetOutput(c.Stderr)
 	mode := flags.String("mode", "", "ruby, go, or typescript")
 	module := flags.String("module", "", "Go module path")
+	typeScriptRuntime := flags.String("runtime", "", "TypeScript runtime: browser, bun, or node")
 	template := flags.String("template", "", "project template (web)")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -733,6 +750,9 @@ func (c *CLI) runInit(args []string) error {
 	if *mode == "" {
 		return errors.New("init requires --mode ruby, --mode go, or --mode typescript")
 	}
+	if *typeScriptRuntime != "" && *mode != "typescript" {
+		return errors.New("init --runtime is supported only for mode typescript")
+	}
 	if *template != "" && *template != "web" {
 		return fmt.Errorf("unknown project template %q; available template: web", *template)
 	}
@@ -740,6 +760,12 @@ func (c *CLI) runInit(args []string) error {
 		return err
 	}
 	config := project.New(root, *mode)
+	if *typeScriptRuntime != "" {
+		config.TypeScript.Runtime = *typeScriptRuntime
+		if *typeScriptRuntime == project.TypeScriptRuntimeBun {
+			config.TypeScript.PackageManager = "bun"
+		}
+	}
 	if *template == "web" {
 		config.SourceDir = "src"
 	}
@@ -1127,6 +1153,9 @@ func compilerOptions(config *project.Config) compiler.Options {
 	if config.Go != nil {
 		options.GoModule = config.Go.Module
 	}
+	if config.TypeScript != nil {
+		options.TypeScriptRuntime = config.TypeScript.Runtime
+	}
 	return options
 }
 
@@ -1331,7 +1360,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "")
 	fmt.Fprintln(c.Stdout, "Usage:")
 	fmt.Fprintln(c.Stdout, "  trb")
-	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [--template web] [directory]")
+	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [--runtime browser|bun|node] [--template web] [directory]")
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--outfile FILE]")

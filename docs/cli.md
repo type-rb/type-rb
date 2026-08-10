@@ -10,6 +10,7 @@ explicitly supports a standalone file or scratch session.
 trb init --mode go --module example.com/acme/app .
 trb init --mode ruby .
 trb init --mode typescript .
+trb init --mode typescript --runtime bun .
 
 # Generate a portable JSON API project for any target.
 trb init --mode go --module example.com/acme/api --template web .
@@ -22,7 +23,7 @@ trb add PACKAGE VERSION
 trb add --dev PACKAGE VERSION
 trb remove PACKAGE
 
-# Run go mod download, bundle install, or npm install.
+# Run go mod download, bundle install, npm install, or bun install.
 trb install
 ```
 
@@ -81,6 +82,11 @@ trb run test.trb
 A runnable project defines exactly one top-level `def main()`. `trb run`
 compiles before every execution, so a separate build step is unnecessary.
 Library projects may omit `main`, but cannot be run directly.
+
+TypeScript projects execute with the configured `typescript.runtime`. Node is
+the compatibility default; Bun projects use `bun run`. Browser projects are
+compiled for their application or bundler and report that `trb run` has no
+process entrypoint.
 
 `trb build` compiles every input before writing generated files. Directory
 builds copy non-`.trb` files by default, producing a runnable project tree. Use

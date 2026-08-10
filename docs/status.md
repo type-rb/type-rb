@@ -13,6 +13,10 @@ project-wide checking, source generation, temporary build-and-run, and Go
 executable compilation. Target-specific behavior remains behind explicit
 `trb/platform/<mode>/*` imports.
 
+TypeScript projects select a browser, Bun, or Node runtime independently from
+their npm or Bun package manager. Node remains the compatibility default, while
+Bun can be selected explicitly for server packages.
+
 The implemented language includes functions and classes, modules and
 interfaces, records, payload enums, initial generics, normalized unions,
 immutable and mutable bindings, typed collections and iteration, exhaustive

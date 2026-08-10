@@ -104,6 +104,45 @@ func TestSyncNpmPackage(t *testing.T) {
 	}
 }
 
+func TestSyncBunPackage(t *testing.T) {
+	config := project.New(t.TempDir(), "typescript")
+	config.TypeScript.Runtime = project.TypeScriptRuntimeBun
+	config.TypeScript.PackageManager = "bun"
+	path, err := Sync(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		PackageManager string `json:"packageManager"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.PackageManager != "bun" {
+		t.Fatalf("unexpected Bun package.json: %s", data)
+	}
+}
+
+func TestInstallCommandUsesConfiguredTypeScriptPackageManager(t *testing.T) {
+	for _, name := range []string{"bun", "npm"} {
+		t.Run(name, func(t *testing.T) {
+			config := project.New(t.TempDir(), "typescript")
+			config.TypeScript.PackageManager = name
+			command, err := installCommand(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(command.Args) != 2 || command.Args[0] != name || command.Args[1] != "install" {
+				t.Fatalf("unexpected install command: %#v", command.Args)
+			}
+		})
+	}
+}
+
 func TestExternalPackageManagementDoesNotWriteManifest(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "ruby")

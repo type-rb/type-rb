@@ -159,6 +159,109 @@ func TestInitWebTemplateBuildsAcrossModes(t *testing.T) {
 	}
 }
 
+func TestInitTypeScriptBunRuntime(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "bun-api")
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"init", "--mode", "typescript", "--runtime", "bun", root}); status != 0 {
+		t.Fatalf("init status=%d stderr=%s", status, stderr.String())
+	}
+	config, err := project.Load(filepath.Join(root, project.ConfigName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.TypeScript.Runtime != project.TypeScriptRuntimeBun || config.TypeScript.PackageManager != "bun" {
+		t.Fatalf("unexpected Bun config: %#v", config.TypeScript)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"packageManager": "bun"`) {
+		t.Fatalf("package.json does not select Bun:\n%s", data)
+	}
+}
+
+func TestInitRejectsInvalidTypeScriptRuntimeSelection(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "unknown", args: []string{"init", "--mode", "typescript", "--runtime", "deno"}, want: "typescript.runtime must be browser, bun, or node"},
+		{name: "other-mode", args: []string{"init", "--mode", "ruby", "--runtime", "bun"}, want: "--runtime is supported only for mode typescript"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "app")
+			args := append(append([]string(nil), test.args...), root)
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run(args); status != 1 || !strings.Contains(stderr.String(), test.want) {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+		})
+	}
+}
+
+func TestTypeScriptRunCommandUsesConfiguredRuntime(t *testing.T) {
+	target := "/project/main.ts"
+	tests := []struct {
+		runtime string
+		want    []string
+	}{
+		{runtime: project.TypeScriptRuntimeNode, want: []string{"node", "--experimental-strip-types", target, "one"}},
+		{runtime: project.TypeScriptRuntimeBun, want: []string{"bun", "run", target, "one"}},
+	}
+	for _, test := range tests {
+		t.Run(test.runtime, func(t *testing.T) {
+			command, err := typeScriptRunCommand(test.runtime, target, []string{"one"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(command.Args, "\x00") != strings.Join(test.want, "\x00") {
+				t.Fatalf("unexpected command: %#v", command.Args)
+			}
+		})
+	}
+	if _, err := typeScriptRunCommand(project.TypeScriptRuntimeBrowser, target, nil); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("unexpected browser runtime result: %v", err)
+	}
+}
+
+func TestRunTypeScriptProjectWithBunRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test executable uses a POSIX shell")
+	}
+	bin := t.TempDir()
+	bun := filepath.Join(bin, "bun")
+	if err := os.WriteFile(bun, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	root := t.TempDir()
+	config := project.New(root, "typescript")
+	config.TypeScript.Runtime = project.TypeScriptRuntimeBun
+	config.TypeScript.PackageManager = "bun"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	source := "def main()\n\tputs(\"ignored by fake Bun\")\n\treturn\nend\n"
+	if err := os.WriteFile(filepath.Join(root, "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "argument"}); status != 0 {
+		t.Fatalf("run status=%d stderr=%s", status, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.HasPrefix(output, "run\n") || !strings.Contains(output, ".ts\nargument\n") {
+		t.Fatalf("unexpected Bun invocation:\n%s", output)
+	}
+}
+
 func TestInitWebTemplateDoesNotOverwriteSourceFiles(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "src", "routes", "index.trb")
