@@ -23,7 +23,6 @@ type generator struct {
 	inConstructor bool
 	methods       map[string]bool
 	topMethods    map[string]bool
-	topTargets    map[string]string
 	staticMethods map[string]map[string]bool
 	records       map[string]bool
 	classes       map[string]bool
@@ -35,12 +34,25 @@ type generator struct {
 	temporary     int
 	breakTarget   string
 	orm           *ormintegration.Manifest
+	projectNames  *goProjectNames
 }
 
 func Generate(program *ir.Program) string {
+	return GenerateProject([]*ir.Program{program})[0]
+}
+
+func GenerateProject(programs []*ir.Program) []string {
+	projectNames := analyzeGoProjectNames(programs)
+	result := make([]string, len(programs))
+	for index, program := range programs {
+		result[index] = generate(program, projectNames)
+	}
+	return result
+}
+
+func generate(program *ir.Program, projectNames *goProjectNames) string {
 	g := &generator{
 		topMethods:    map[string]bool{},
-		topTargets:    map[string]string{},
 		staticMethods: map[string]map[string]bool{},
 		records:       map[string]bool{},
 		classes:       map[string]bool{},
@@ -50,14 +62,12 @@ func Generate(program *ir.Program) string {
 		modulePath:    program.ModulePath,
 		goModule:      program.GoModule,
 		orm:           ormintegration.ManifestFrom(program.Extensions),
+		projectNames:  projectNames,
 	}
 	for _, statement := range program.Statements {
 		switch n := statement.(type) {
 		case *ir.Method:
 			g.topMethods[n.Name] = true
-			if n.TargetName != "" {
-				g.topTargets[n.Name] = n.TargetName
-			}
 		case *ir.Class:
 			g.classes[n.Name] = true
 			for _, member := range n.Body {
@@ -804,14 +814,7 @@ func (g *generator) classMethod(className string, method *ir.Method) {
 }
 
 func (g *generator) topLevelMethod(method *ir.Method) {
-	name := method.Name
-	if method.TargetName != "" {
-		name = method.TargetName
-	}
-	name = goMethodName(name)
-	if method.Name == "main" {
-		name = "main"
-	}
+	name := g.projectFunctionName(g.modulePath, method.Name)
 	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
 	g.indent++
 	g.parameterDefaults(method.Parameters)
@@ -926,10 +929,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.Package != "" {
 			if alias := g.referenceAlias(n.Reference); alias != "" {
-				return alias + "." + goImportedName(n.Name, n.Reference.ExportKind)
+				return alias + "." + g.goImportedName(n.Name, n.Reference)
 			}
 			if n.Reference.ExportKind == "function" {
-				return goMethodName(n.Name)
+				return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
 			}
 		}
 		if n.Owner != "" {
@@ -1087,14 +1090,7 @@ func (g *generator) expr(expression ir.Expression) string {
 				return g.receiver + "." + goMethodName(identifier.Name) + "(" + args + ")"
 			}
 			if g.topMethods[identifier.Name] {
-				name := identifier.Name
-				if target := g.topTargets[identifier.Name]; target != "" {
-					name = target
-				}
-				name = goMethodName(name)
-				if identifier.Name == "main" {
-					name = "main"
-				}
+				name := g.projectFunctionName(g.modulePath, identifier.Name)
 				return name + "(" + args + ")"
 			}
 		}
@@ -1123,11 +1119,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		name := g.expr(n.Receiver)
 		if identifier, ok := n.Receiver.(*ir.Identifier); ok && g.topMethods[identifier.Name] {
-			name = identifier.Name
-			if target := g.topTargets[identifier.Name]; target != "" {
-				name = target
-			}
-			name = goMethodName(name)
+			name = g.projectFunctionName(g.modulePath, identifier.Name)
 		}
 		return name + "[" + strings.Join(arguments, ", ") + "]"
 	case *ir.Index:
@@ -1150,7 +1142,6 @@ func (g *generator) ifExpression(node *ir.If) string {
 		inConstructor: g.inConstructor,
 		methods:       g.methods,
 		topMethods:    g.topMethods,
-		topTargets:    g.topTargets,
 		staticMethods: g.staticMethods,
 		records:       g.records,
 		classes:       g.classes,
@@ -1162,6 +1153,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 		temporary:     g.temporary,
 		breakTarget:   g.breakTarget,
 		orm:           g.orm,
+		projectNames:  g.projectNames,
 	}
 	child.line("func() " + child.goType(node.ExprType()) + " {")
 	child.indent++
@@ -1202,7 +1194,6 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		inConstructor: g.inConstructor,
 		methods:       g.methods,
 		topMethods:    g.topMethods,
-		topTargets:    g.topTargets,
 		staticMethods: g.staticMethods,
 		records:       g.records,
 		classes:       g.classes,
@@ -1214,6 +1205,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		temporary:     g.temporary,
 		breakTarget:   g.breakTarget,
 		orm:           g.orm,
+		projectNames:  g.projectNames,
 	}
 	child.line("func() " + child.goType(node.ExprType()) + " {")
 	child.indent++
@@ -1313,7 +1305,6 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		inConstructor: g.inConstructor,
 		methods:       g.methods,
 		topMethods:    g.topMethods,
-		topTargets:    g.topTargets,
 		staticMethods: g.staticMethods,
 		records:       g.records,
 		classes:       g.classes,
@@ -1325,6 +1316,7 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		temporary:     g.temporary,
 		breakTarget:   g.breakTarget,
 		orm:           g.orm,
+		projectNames:  g.projectNames,
 	}
 	child.line("func() " + child.goType(node.ExprType()) + " {")
 	child.indent++
@@ -1801,11 +1793,11 @@ func goImportAlias(name string) string {
 	return goIdentifier(name, false)
 }
 
-func goImportedName(name, kind string) string {
-	if kind == "function" {
-		return goMethodName(name)
+func (g *generator) goImportedName(name string, reference *ir.Reference) string {
+	if reference != nil && reference.ExportKind == "function" {
+		return g.projectFunctionName(reference.Package, reference.Symbol)
 	}
-	if kind == "value" && isUpper(name) {
+	if reference != nil && reference.ExportKind == "value" && isUpper(name) {
 		return goConstantIdentifier("", name)
 	}
 	return goIdentifier(name, true)
@@ -1864,6 +1856,8 @@ func (g *generator) goType(t types.Type) string {
 			result = "*" + g.ormLifecycleAlias() + ".TrbOrmTransaction"
 		} else if t.Name == "Subquery" && g.orm != nil {
 			result = "*" + g.ormLifecycleAlias() + ".TrbOrmSubquery"
+		} else if model, ok := g.orm.Model(t.Name); ok {
+			result = "*" + g.ormModelQualifier(model) + goIdentifier(model.Name, true)
 		} else if model, ok := g.orm.QueryModel(t.Name); ok {
 			result = g.ormModelQualifier(model) + goORMQueryType(model)
 		} else if model, ok := g.orm.ScopeModel(t.Name); ok {
@@ -1912,6 +1906,20 @@ func (g *generator) goType(t types.Type) string {
 		return "*" + result
 	}
 	return result
+}
+
+func (g *generator) projectFunctionName(modulePath, sourceName string) string {
+	if g.projectNames != nil {
+		if names := g.projectNames.functions[modulePath]; names != nil {
+			if name := names[sourceName]; name != "" {
+				return name
+			}
+		}
+	}
+	if sourceName == "main" {
+		return "main"
+	}
+	return goMethodName(sourceName)
 }
 
 func (g *generator) goReturn(t types.Type) string {

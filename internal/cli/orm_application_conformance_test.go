@@ -81,8 +81,10 @@ func TestRunORMBackedWebJSONAcrossBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := database.Exec(`
-				CREATE TABLE web_conformance_products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
-				INSERT INTO web_conformance_products (name) VALUES ('first'), ('second');
+				CREATE TABLE web_conformance_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
+				CREATE TABLE web_conformance_products (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, name TEXT NOT NULL UNIQUE, FOREIGN KEY (category_id) REFERENCES web_conformance_categories(id));
+				INSERT INTO web_conformance_categories (name) VALUES ('books');
+				INSERT INTO web_conformance_products (category_id, name) VALUES (1, 'first'), (1, 'second');
 			`); err != nil {
 				database.Close()
 				t.Fatal(err)
@@ -116,16 +118,23 @@ def main()
 	return
 end
 `,
-				"models/product.trb": `import { Model } from trb/orm
+				"models/product.trb": `import { Model, belongs_to, has_many } from trb/orm
+
+class WebConformanceCategory < Model
+	has_many(WebConformanceProduct, foreign_key: :category_id)
+end
 
 class WebConformanceProduct < Model
+	belongs_to(WebConformanceCategory, name: :category, foreign_key: :category_id)
 end
 `,
 				"routes/products.trb": `import { WebConformanceProduct } from models/product
 import { Context, Response, json } from trb/web
+import { DbError } from trb/orm
 import { Result } from trb/std/result
 
 record WebProductResponse
+	category: String
 	id: Integer
 	name: String
 end
@@ -134,13 +143,23 @@ record WebDatabaseError
 	message: String
 end
 
+def web_product_response(product: WebConformanceProduct): WebProductResponse fails DbError
+	return WebProductResponse.new(id: product.id, name: product.name, category: product.category.name)
+end
+
+def load_web_product_responses(): Array<WebProductResponse> fails DbError
+	products := WebConformanceProduct.preload(:category).order(id: :asc).all()
+	mut responses: Array<WebProductResponse> := []
+	products.each do |product|
+		responses.push(web_product_response(product))
+	end
+	return responses
+end
+
 def get(_context: Context): Response
-	case attempt WebConformanceProduct.order(id: :asc).all()
+	case attempt load_web_product_responses()
 	when Result::Ok(products)
-		payload := products.map do |product|
-			WebProductResponse.new(id: product.id, name: product.name)
-		end
-		return json(payload)
+		return json(products)
 	when Result::Err(error)
 		return json(WebDatabaseError.new(message: error.message), 500)
 	end
@@ -162,7 +181,7 @@ end
 			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 				t.Fatalf("run status=%d stderr=%s", status, stderr.String())
 			}
-			const want = "200\n[{\"id\":1,\"name\":\"first\"},{\"id\":2,\"name\":\"second\"}]\n"
+			const want = "200\n[{\"category\":\"books\",\"id\":1,\"name\":\"first\"},{\"category\":\"books\",\"id\":2,\"name\":\"second\"}]\n"
 			unexpectedStderr := mode != "go" && stderr.Len() != 0
 			if stdout.String() != want || unexpectedStderr {
 				t.Fatalf("unexpected %s ORM-backed web output: want %q, got %q, stderr=%q", mode, want, stdout.String(), stderr.String())

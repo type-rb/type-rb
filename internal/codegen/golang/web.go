@@ -332,7 +332,7 @@ func (g *generator) webProtocolResponses() {
 }
 
 func (g *generator) webCallee(modulePath, target string, directories map[string]string) string {
-	callee := goMethodName(target)
+	callee := g.projectFunctionName(modulePath, target)
 	if alias := directories[pathpkg.Dir(modulePath)]; alias != "" {
 		callee = goImportAlias(alias) + "." + callee
 	}

@@ -45,6 +45,18 @@ func GenerateProject(programs []*ir.Program) ([][]byte, error) {
 		}
 		return outputs, nil
 	}
+	if len(programs) > 0 && programs[0].Mode == "go" {
+		normalized := make([]*ir.Program, len(programs))
+		for index, program := range programs {
+			normalized[index] = normalizeDivergingControlFlow(program)
+		}
+		generated := golang.GenerateProject(normalized)
+		outputs := make([][]byte, len(generated))
+		for index, output := range generated {
+			outputs[index] = []byte(output)
+		}
+		return outputs, nil
+	}
 	outputs := make([][]byte, len(programs))
 	for index, program := range programs {
 		output, err := Generate(program)

@@ -3101,6 +3101,50 @@ end
 	}
 }
 
+func TestGoProjectKeepsTypeAndFunctionExportsDistinct(t *testing.T) {
+	view := SourceUnit{
+		Filename:   "/project/models/view.trb",
+		ModulePath: "models/view",
+		Package:    "models",
+		Source: []byte(`record TodoResponse
+	message: String
+end
+
+def todo_response(): TodoResponse
+	return TodoResponse.new(message: "ok")
+end
+`),
+	}
+	main := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { todo_response } from models/view
+
+def main()
+	puts(todo_response().message)
+	return
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{main, view}, Options{Mode: "go", GoModule: "example.com/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := map[string]string{}
+	for _, artifact := range artifacts {
+		outputs[artifact.AST.ModulePath] = string(artifact.Output)
+	}
+	modelOutput := outputs["models/view"]
+	mainOutput := outputs["main"]
+	if !strings.Contains(modelOutput, "type TodoResponse struct") || !strings.Contains(modelOutput, "func TrbFunction_") {
+		t.Fatalf("generated model did not disambiguate the type and function:\n%s", modelOutput)
+	}
+	if !strings.Contains(mainOutput, "models.TrbFunction_") {
+		t.Fatalf("generated importer did not use the disambiguated function name:\n%s", mainOutput)
+	}
+}
+
 func TestProjectCompilerExportsTopModuleAndClassConstants(t *testing.T) {
 	constants := SourceUnit{
 		Filename:   "/project/config/constants.trb",
