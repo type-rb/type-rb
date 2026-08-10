@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,9 +33,24 @@ func TestMain(m *testing.M) {
 	}
 
 	status := m.Run()
-	if err := os.RemoveAll(cacheRoot); err != nil && status == 0 {
+	if err := removeTestCache(cacheRoot); err != nil && status == 0 {
 		fmt.Fprintf(os.Stderr, "remove shared CLI test cache: %v\n", err)
 		status = 1
 	}
 	os.Exit(status)
+}
+
+func removeTestCache(root string) error {
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.Chmod(path, 0o700)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return os.RemoveAll(root)
 }
