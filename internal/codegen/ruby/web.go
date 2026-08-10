@@ -10,6 +10,9 @@ import (
 )
 
 func (g *generator) integrations(extensions []ir.Extension) {
+	if g.orm != nil {
+		g.ormRuntime()
+	}
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
 		g.webDispatcher(manifest)
 		g.webServer()

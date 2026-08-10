@@ -1,8 +1,8 @@
 # `trb/orm`
 
 `trb/orm` is an experimental official package for typed database access. Its
-generated runtime currently supports Go with SQLite, PostgreSQL, and MySQL.
-Ruby and TypeScript runtime adapters are not implemented yet.
+generated runtime supports Go and Ruby with SQLite, PostgreSQL, and MySQL.
+The TypeScript runtime adapter is not implemented yet.
 
 The compiler reads a live database schema. Migrations remain outside TypeRB;
 use the schema tool that fits the project. The database must be reachable when
@@ -33,7 +33,8 @@ variable avoids embedding a database location in source or generated code:
 ```
 
 SQLite environment values must be absolute paths. Adapter names are `sqlite`,
-`postgresql`, and `mysql`.
+`postgresql`, and `mysql`. Set `mode` to `ruby` to generate a Ruby application;
+the ORM source and package options stay the same.
 
 ## Models and associations
 

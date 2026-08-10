@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -18,10 +19,16 @@ type generator struct {
 	topTargets   map[string]string
 	nativeSyntax bool
 	temporary    int
+	orm          *ormintegration.Manifest
+	breakTarget  string
 }
 
 func Generate(program *ir.Program) string {
-	g := &generator{loader: program.RubyLoader, modulePath: program.ModulePath, topFunctions: map[string]bool{}, topTargets: map[string]string{}}
+	g := &generator{
+		loader: program.RubyLoader, modulePath: program.ModulePath,
+		topFunctions: map[string]bool{}, topTargets: map[string]string{},
+		orm: ormintegration.ManifestFrom(program.Extensions),
+	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -172,12 +179,22 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line(text, n.TrailingComment)
 	case *ir.Break:
-		g.line("break", n.TrailingComment)
+		if g.breakTarget != "" {
+			g.line("throw "+strconv.Quote(g.breakTarget), n.TrailingComment)
+		} else {
+			g.line("break", n.TrailingComment)
+		}
 	case *ir.Next:
 		g.line("next", n.TrailingComment)
 	case *ir.ExpressionStatement:
 		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil {
+			if g.ormAssociationDeclaration(call) {
+				break
+			}
 			g.callBlock(call, n.TrailingComment)
+			break
+		}
+		if call, ok := n.Expression.(*ir.Call); ok && g.ormAssociationDeclaration(call) {
 			break
 		}
 		g.line(g.expr(n.Expression), n.TrailingComment)
@@ -245,6 +262,10 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("end", "")
 	case *ir.Iterate:
+		if strings.HasPrefix(n.Intrinsic, "trb.orm.") {
+			g.ormBatchIterate(n)
+			break
+		}
 		source := g.expr(n.Source)
 		if _, rangeSource := n.Source.(*ir.Range); rangeSource {
 			source = "(" + source + ")"
@@ -280,6 +301,8 @@ func (g *generator) statement(statement ir.Statement) {
 			closer = "end"
 		}
 		g.line(closer, "")
+	case *ir.StructuredBlock:
+		g.ormStructuredBlock(n)
 	}
 }
 
@@ -575,6 +598,8 @@ func (g *generator) ifExpression(node *ir.If) string {
 		topFunctions: g.topFunctions,
 		nativeSyntax: g.nativeSyntax,
 		temporary:    g.temporary,
+		orm:          g.orm,
+		breakTarget:  g.breakTarget,
 	}
 	child.line("begin", "")
 	child.indent++
@@ -616,6 +641,8 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		topTargets:   g.topTargets,
 		nativeSyntax: g.nativeSyntax,
 		temporary:    g.temporary,
+		orm:          g.orm,
+		breakTarget:  g.breakTarget,
 	}
 	child.line("-> do", "")
 	child.indent++
@@ -638,6 +665,8 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		topFunctions: g.topFunctions,
 		nativeSyntax: g.nativeSyntax,
 		temporary:    g.temporary,
+		orm:          g.orm,
+		breakTarget:  g.breakTarget,
 	}
 	child.line("begin", "")
 	child.indent++

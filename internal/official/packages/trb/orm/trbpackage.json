@@ -6,6 +6,22 @@
   "typeProvider": "trb.orm",
   "projectProvider": "trb.orm.schema",
   "nativeDependenciesByOption": {
+    "ruby": {
+      "adapter": {
+        "sqlite": {
+          "sequel": "latest",
+          "sqlite3": "latest"
+        },
+        "postgresql": {
+          "pg": "latest",
+          "sequel": "latest"
+        },
+        "mysql": {
+          "mysql2": "latest",
+          "sequel": "latest"
+        }
+      }
+    },
     "go": {
       "adapter": {
         "sqlite": {
