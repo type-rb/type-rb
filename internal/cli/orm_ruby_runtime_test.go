@@ -100,7 +100,7 @@ func TestRubyProjectREPLUsesPortableORMSchema(t *testing.T) {
 	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	const want = "Tools\nCompiler 2\n2\ntrue\nfalse\n3\n3\n3\n3\n1\n0\nPrimary\n2\n3\n7\n4\n4\n1\n0 : Integer\n"
+	const want = "Tools\nCompiler 2\n2\ntrue\nfalse\n3\n3\n3\n3\n1\n0\nPrimary\n2\n3\ntrue\n7\n4\n4\n1\n0 : Integer\n"
 	if stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("unexpected Ruby project ORM REPL result: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
@@ -124,7 +124,7 @@ func runRubyORMApplication(t *testing.T, root, adapter, databaseSource string) {
 	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 		t.Fatalf("%s status=%d stdout=%s stderr=%s", adapter, status, stdout.String(), stderr.String())
 	}
-	const want = "Tools\nCompiler 2\n2\ntrue\nfalse\n3\n3\n3\n3\n1\n0\nPrimary\n2\n3\n7\n4\n4\n1\n0\n"
+	const want = "Tools\nCompiler 2\n2\ntrue\nfalse\n3\n3\n3\n3\n1\n0\nPrimary\n2\n3\ntrue\n7\n4\n4\n1\n0\n"
 	if stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("unexpected %s Ruby ORM application result: want %q, got %q, stderr=%q", adapter, want, stdout.String(), stderr.String())
 	}
@@ -277,6 +277,8 @@ def exercise(): Integer fails DbError
 	puts(TrbRubyTestCategory.preload(:trb_ruby_test_products).first().trb_ruby_test_products.size())
 	transaction_count := Database.transaction() do |tx|
 		inside := TrbRubyTestProduct.using(tx).count()
+		locked := TrbRubyTestProduct.using(tx).lock().first()
+		puts(locked.id > 0)
 		nested_count := tx.transaction() do |nested|
 			TrbRubyTestProduct.using(nested).where(active: true).count()
 		end

@@ -474,7 +474,9 @@ module TrbOrmRuntime
 			transaction = Transaction.new(parent)
 			value = nil
 			begin
-				database.transaction(savepoint: !parent.nil?) do
+				options = { savepoint: !parent.nil? }
+				options[:mode] = :immediate if @adapter == "sqlite" && parent.nil?
+				database.transaction(**options) do
 					value = yield transaction
 					raise TransactionAbort.new(value) if value.is_a?(Result::Err)
 				end
@@ -599,7 +601,7 @@ module TrbOrmRuntime
 			sql += " OFFSET " + query.row_offset.to_i.to_s unless query.row_offset.nil?
 			if query.instance_variable_get(:@lock)
 				invalid!("database lock requires an explicit transaction scope") unless query.transaction&.active?
-				sql += " FOR UPDATE"
+				sql += " FOR UPDATE" unless @adapter == "sqlite"
 			end
 			[sql, arguments]
 		end
