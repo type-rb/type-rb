@@ -154,6 +154,142 @@ end
 	assertORMLiteralCompletions(t, context)
 }
 
+func TestPortableORMCompilesExplicitTransactionScope(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	source := []byte(`import { Database, DbResult, Model } from trb/orm
+
+class Product < Model
+end
+
+def create_product(): DbResult<Integer>
+	return Database.transaction() do |tx|
+		products := Product.using(tx)
+		case products.create(name: "Created")
+		when DbResult::Ok(product)
+			case products.where(id: product.id).lock().all()
+			when DbResult::Ok(locked_products)
+				puts(locked_products.size())
+				DbResult<Integer>::Ok(product.id)
+			when DbResult::Err(error)
+				DbResult<Integer>::Err(error)
+			end
+		when DbResult::Err(error)
+			DbResult<Integer>::Err(error)
+		end
+	end
+end
+
+def create_nested_product(): DbResult<Integer>
+	return Database.transaction() do |tx|
+		nested_result := tx.transaction() do |nested|
+			products := Product.using(nested)
+			case products.create(name: "Nested")
+			when DbResult::Ok(product)
+				DbResult<Integer>::Ok(product.id)
+			when DbResult::Err(error)
+				DbResult<Integer>::Err(error)
+			end
+		end
+		nested_result
+	end
+end
+
+def main()
+	puts(create_product())
+	puts(create_nested_product())
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename: filepath.Join(root, "src", "main.trb"), Source: source, ModulePath: "src/main", Package: "main",
+	}}, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output, ormOutput string
+	for _, artifact := range artifacts {
+		switch artifact.AST.ModulePath {
+		case "src/main":
+			assertORMTransactionScopeIR(t, artifact.IR)
+			output = string(artifact.Output)
+		case "trb/orm/index":
+			ormOutput = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		"func CreateProduct() orm.DbResult[int]", "orm.TrbOrmBeginTransaction()",
+		"TrbOrmProductUsing(tx)", "TrbOrmProductCreateScoped(products", "defer func()",
+		"TrbOrmProductLock(TrbOrmProductQueryWhere(products", "trbOrmExecutorForQuery(query.transaction, query.lock)",
+		"orm.TrbOrmBeginNestedTransaction(tx)", "TrbOrmProductUsing(nested)",
+		".Rollback()", ".Commit()", "orm.DbResultErrTag",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated transaction is missing %q:\n%s", expected, output)
+		}
+	}
+	for _, expected := range []string{
+		"type TrbOrmTransaction struct", "func TrbOrmBeginTransaction()", `"BEGIN IMMEDIATE"`, "func TrbOrmBeginNestedTransaction(parent *TrbOrmTransaction)",
+		`"SAVEPOINT " + savepoint`, `"ROLLBACK TO SAVEPOINT " + transaction.savepoint`, `"RELEASE SAVEPOINT " + transaction.savepoint`,
+		"func (transaction *TrbOrmTransaction) Commit()", "func (transaction *TrbOrmTransaction) Rollback()",
+	} {
+		if !strings.Contains(ormOutput, expected) {
+			t.Fatalf("generated transaction runtime is missing %q:\n%s", expected, ormOutput)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
+		t.Fatalf("generated invalid transaction Go: %v\n%s", err, output)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "orm.go", ormOutput, parser.AllErrors); err != nil {
+		t.Fatalf("generated invalid ORM transaction Go: %v\n%s", err, ormOutput)
+	}
+}
+
+func assertORMTransactionScopeIR(t *testing.T, program *ir.Program) {
+	t.Helper()
+	var method *ir.Method
+	for _, statement := range program.Statements {
+		candidate, ok := statement.(*ir.Method)
+		if ok && candidate.Name == "create_product" {
+			method = candidate
+			break
+		}
+	}
+	if method == nil || len(method.Body) != 1 {
+		t.Fatalf("unexpected transaction method IR: %#v", program.Statements)
+	}
+	block, ok := method.Body[0].(*ir.StructuredBlock)
+	if !ok {
+		t.Fatalf("unexpected transaction block IR: %#v", method.Body)
+	}
+	result, ok := block.Value.(*ir.Case)
+	if !ok {
+		t.Fatalf("unexpected transaction result IR: %#v", block.Value)
+	}
+	call, ok := result.Value.(*ir.Call)
+	if !ok {
+		t.Fatalf("unexpected propagated call IR: %#v", result.Value)
+	}
+	member, ok := call.Callee.(*ir.Member)
+	if !ok || member.Reference == nil || member.Reference.Intrinsic != "trb.orm.scope.create" || member.Receiver.ExprType().Name != "ProductScope" {
+		t.Fatalf("unexpected scoped create IR: %#v", call.Callee)
+	}
+}
+
 func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	t.Helper()
 	var product *languageservice.Symbol
@@ -170,7 +306,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 	for _, member := range product.Members {
 		classMethods[member.Name] = true
 	}
-	for _, name := range []string{"where", "not", "find_by", "exists?", "pluck", "pick", "ids", "find", "build", "create", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "not", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "build", "create", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !classMethods[name] {
 			t.Fatalf("Product.%s is missing from completion context: %#v", name, product.Members)
 		}
@@ -199,7 +335,7 @@ func assertORMCompletionContext(t *testing.T, context languageservice.Context) {
 			queryMethods[member.Name] = true
 		}
 	}
-	for _, name := range []string{"where", "not", "or", "find_by", "exists?", "update_all", "delete_all", "pluck", "pick", "ids", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "not", "or", "find_by", "exists?", "update_all", "delete_all", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "order", "limit", "offset", "all", "first", "count", "to_sql", "explain", "find_each", "find_in_batches"} {
 		if !queryMethods[name] {
 			t.Fatalf("ProductQuery.%s is missing from completion context: %#v", name, context.TypeMembers["ProductQuery"])
 		}
@@ -243,6 +379,8 @@ func assertORMLiteralCompletions(t *testing.T, context languageservice.Context) 
 		{source: `Product.where("pr`, label: "price", insert: `price"`},
 		{source: `Product.where("price", ">`, label: ">=", insert: `>="`},
 		{source: `Product.where().order(price: :d`, label: "desc", insert: "desc"},
+		{source: `Product.sum(:pr`, label: "price", insert: "price"},
+		{source: `Product.minimum(:na`, label: "name", insert: "name"},
 		{source: "query := Product.where(name: \"Widget\")\nquery.where(\"na", label: "name", insert: `name"`},
 		{source: `Product.insert_if_absent(Product.build(name: "Widget", active: true), unique_by: [:na`, label: "name", insert: "name"},
 		{source: `Product.build(name: "Widget", active: true).upsert(unique_by: [:name], update: [:pr`, label: "price", insert: "price"},
@@ -491,7 +629,7 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	compile := func(body string) ([]*Artifact, error) {
 		return compileSource("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n")
 	}
-	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).not(name: \"Deleted\").or(Product.where(name: \"Widget\")).order(price: :desc).limit(5).offset(1)\n\tputs(Product.not(name: \"Deleted\").to_sql())\n\tputs(Product.exists?(name: \"Widget\"))\n\tputs(Product.find_by(name: \"Widget\"))\n\tputs(Product.pluck(:name))\n\tputs(Product.pick(:price))\n\tputs(Product.ids())\n\tputs(Product.where(\"price\", \">=\", 10).exists?())\n\tputs(Product.where(\"price\", \">=\", 10).find_by(name: \"Widget\"))\n\tputs(Product.where(\"price\", \">=\", 10).pluck(:name))\n\tputs(Product.where(\"price\", \">=\", 10).pick(:price))\n\tputs(Product.where(\"price\", \">=\", 10).ids())\n\tputs(Product.where(name: \"Widget\").update_all(price: 20.0))\n\tputs(Product.where(name: \"Deleted\").delete_all())\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
+	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).not(name: \"Deleted\").or(Product.where(name: \"Widget\")).order(price: :desc).limit(5).offset(1)\n\tputs(Product.not(name: \"Deleted\").to_sql())\n\tputs(Product.exists?(name: \"Widget\"))\n\tputs(Product.find_by(name: \"Widget\"))\n\tputs(Product.pluck(:name))\n\tputs(Product.pick(:price))\n\tputs(Product.sum(:price))\n\tputs(Product.average(:price))\n\tputs(Product.minimum(:name))\n\tputs(Product.maximum(:price))\n\tputs(Product.ids())\n\tputs(Product.where(\"price\", \">=\", 10).exists?())\n\tputs(Product.where(\"price\", \">=\", 10).find_by(name: \"Widget\"))\n\tputs(Product.where(\"price\", \">=\", 10).pluck(:name))\n\tputs(Product.where(\"price\", \">=\", 10).pick(:price))\n\tputs(Product.where(\"price\", \">=\", 10).sum(:price))\n\tputs(Product.where(\"price\", \">=\", 10).average(:price))\n\tputs(Product.where(\"price\", \">=\", 10).minimum(:name))\n\tputs(Product.where(\"price\", \">=\", 10).maximum(:price))\n\tputs(Product.where(\"price\", \">=\", 10).ids())\n\tputs(Product.where(name: \"Widget\").update_all(price: 20.0))\n\tputs(Product.where(name: \"Deleted\").delete_all())\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,6 +639,8 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 		"TrbOrmFirstProduct", "TrbOrmExistsProduct", "trbOrmProductPredicateSQL",
 		"TrbOrmUpdateAllProduct", "TrbOrmDeleteAllProduct", "database bulk update failed", "database bulk delete failed",
 		"TrbOrmPluckProductName", "TrbOrmPickProductPrice", "database projection query failed",
+		"TrbOrmSumProductPrice", "TrbOrmAverageProductPrice", "TrbOrmMinimumProductName", "TrbOrmMaximumProductPrice",
+		"database aggregate result was invalid", "AS trb_aggregate", `COALESCE(SUM(\"trb_value\"), 0)`,
 		"TrbOrmProductOrder", "TrbOrmProductLimit", "TrbOrmProductOffset",
 		"TrbOrmToSQLProduct", "TrbOrmExplainProduct", "EXPLAIN QUERY PLAN", "TrbOrmCountProduct", "TrbOrmFirstProduct", `statement += " ORDER BY "`,
 	} {
@@ -548,6 +688,9 @@ end
 		{body: "\tProduct.where(name: \"Widget\").update_all(price: \"twenty\")", want: "has type String, expected Float"},
 		{body: "\tProduct.pluck(:missing)", want: "must be one of"},
 		{body: "\tProduct.pick(:missing)", want: "must be one of"},
+		{body: "\tProduct.sum(:name)", want: "must be one of"},
+		{body: "\tProduct.average(:active)", want: "must be one of"},
+		{body: "\tProduct.maximum(:active)", want: "must be one of"},
 		{body: "\tProduct.ids(1)", want: "ids() expects at most 0 arguments, got 1"},
 	}
 	for _, test := range invalid {
@@ -603,7 +746,7 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	for _, expected := range []string{
 		"TrbOrmFirstProduct(TrbOrmProductWhere", "func TrbOrmBatchProduct", "__trbBatchLoop", "break __trbBatchLoop", "TrbOrmBatchProduct",
 		"orm.DbResult[int]", "orm.NewDbResultOk[int]", "orm.NewDbResultErr[int]", "__trbBatchProcessed",
-		`"batch queries do not accept order, limit, or offset"`, "reassigned = orm.NewDbResultOk[int]",
+		`"batch queries do not accept order, limit, offset, or lock"`, "reassigned = orm.NewDbResultOk[int]",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated batch query is missing %q:\n%s", expected, output)
@@ -652,10 +795,11 @@ func TestPortableORMAssociationsReturnTypedQueries(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	source := []byte(`import { DbResult, Model, belongs_to, has_many } from trb/orm
+	source := []byte(`import { DbResult, Model, belongs_to, has_many, has_one } from trb/orm
 
 class Category < Model
 	has_many(Product)
+	has_one(Product)
 end
 
 class Product < Model
@@ -681,6 +825,15 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
+	case Category.where().preload(:product).all()
+	when DbResult::Ok(categories)
+		categories.each do |category|
+			puts(category.product())
+			puts(category.product_query().count())
+		end
+	when DbResult::Err(error)
+		puts(error.message)
+	end
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -694,9 +847,10 @@ end
 	}
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
-		`TrbOrmCategoryWhere([]string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
-		`TrbOrmProductWhere([]string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
+		`TrbOrmCategoryQueryWhere(TrbOrmCategoryUsing(product.TrbOrmTransaction()), []string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
+		`TrbOrmProductQueryWhere(TrbOrmProductUsing(category.TrbOrmTransaction()), []string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
 		`TrbOrmProductPreload`, `trbOrmPreloadProductCategory`, `trbOrmPreloadCategoryProducts`,
+		`trbOrmPreloadCategoryProduct`, `database has_one association returned multiple rows`,
 		`TrbOrmAssociationCategory`, `TrbOrmAssociationProducts`,
 	} {
 		if !strings.Contains(output, expected) {

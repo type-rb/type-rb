@@ -32,6 +32,10 @@ type Signature struct {
 
 type Block struct {
 	Parameters []types.Type
+	// Return makes the block a value-producing control-flow boundary. The
+	// final expression must be assignable to this type, and return or Result
+	// propagation exits the block rather than the enclosing method.
+	Return types.Type
 	// Structured keeps the block in typed IR instead of lowering it to a
 	// backend callback. Structured blocks may be assigned or returned while
 	// preserving return, break, and next in their lexical owner.

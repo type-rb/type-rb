@@ -20,6 +20,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		return nil, err
 	}
 	catalog := declaration.NewCatalog()
+	database := declaration.NewType("Database", "")
+	database.ClassMembers["transaction"] = transactionDeclaration(true)
+	catalog.Types["Database"] = database
+	transaction := declaration.NewType("Transaction", "")
+	transaction.InstanceMembers["transaction"] = transactionDeclaration(false)
+	catalog.Types["Transaction"] = transaction
 	for _, model := range models {
 		declared := declaration.NewType(model.Name, "Model")
 		for _, column := range model.Columns {
@@ -50,11 +56,21 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			}
 		}
 		declared.ClassMembers["where"] = whereDeclaration(model, "trb.orm.where", true)
+		declared.ClassMembers["using"] = declaration.Member{
+			Name: "using", Kind: declaration.Method, Intrinsic: "trb.orm.using",
+			Parameters: []declaration.Parameter{{Name: "transaction", Type: types.FromName("Transaction")}},
+			Return:     types.FromName(model.ScopeType()), Class: true, Provider: PackageName,
+		}
 		declared.ClassMembers["not"] = notDeclaration(model, "trb.orm.not", true)
 		declared.ClassMembers["find_by"] = findByDeclaration(model, "trb.orm.find_by", true)
 		declared.ClassMembers["exists?"] = existsDeclaration(model, "trb.orm.exists", true)
 		declared.ClassMembers["pluck"] = projectionDeclaration(model, "pluck", "trb.orm.pluck", true, false)
 		declared.ClassMembers["pick"] = projectionDeclaration(model, "pick", "trb.orm.pick", true, true)
+		for _, operation := range AggregateOperations() {
+			if aggregate, ok := aggregateDeclaration(model, operation, "trb.orm."+operation, true); ok {
+				declared.ClassMembers[operation] = aggregate
+			}
+		}
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
 			declared.ClassMembers["ids"] = idsDeclaration(model, "trb.orm.ids", true, primaryKey)
@@ -123,12 +139,21 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		query.InstanceMembers["pluck"] = projectionDeclaration(model, "pluck", "trb.orm.query.pluck", false, false)
 		query.InstanceMembers["pick"] = projectionDeclaration(model, "pick", "trb.orm.query.pick", false, true)
+		for _, operation := range AggregateOperations() {
+			if aggregate, ok := aggregateDeclaration(model, operation, "trb.orm.query."+operation, false); ok {
+				query.InstanceMembers[operation] = aggregate
+			}
+		}
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			query.InstanceMembers["ids"] = idsDeclaration(model, "trb.orm.query.ids", false, primaryKey)
 		}
 		query.InstanceMembers["order"] = orderDeclaration(model)
 		query.InstanceMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.query.limit", model.QueryType)
 		query.InstanceMembers["offset"] = integerQueryDeclaration("offset", "trb.orm.query.offset", model.QueryType)
+		query.InstanceMembers["lock"] = declaration.Member{
+			Name: "lock", Kind: declaration.Method, Intrinsic: "trb.orm.query.lock",
+			Return: types.FromName(model.QueryType), Provider: PackageName,
+		}
 		query.InstanceMembers["all"] = declaration.Member{
 			Name: "all", Kind: declaration.Method, Intrinsic: "trb.orm.query.all",
 			Return: dbResult(arrayOf(model.Name)), Provider: PackageName,
@@ -151,8 +176,45 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			query.InstanceMembers["find_in_batches"] = batchDeclaration(model, "find_in_batches", false, true)
 		}
 		catalog.Types[model.QueryType] = query
+		scope := declaration.NewType(model.ScopeType(), "")
+		for name, member := range query.InstanceMembers {
+			scope.InstanceMembers[name] = member
+		}
+		if primaryKey, ok := model.PrimaryKey(); ok {
+			scope.InstanceMembers["find"] = scopeFindDeclaration(model, primaryKey)
+			scope.InstanceMembers["build"] = scopeWriteDeclaration(model, "build", "trb.orm.scope.build", types.FromName(model.DraftType()), schema.Adapter)
+			scope.InstanceMembers["create"] = scopeWriteDeclaration(model, "create", "trb.orm.scope.create", dbResult(types.FromName(model.Name)), schema.Adapter)
+		}
+		catalog.Types[model.ScopeType()] = scope
 	}
 	return catalog, nil
+}
+
+func transactionDeclaration(class bool) declaration.Member {
+	typeParameter := types.FromName("T")
+	result := dbResult(typeParameter)
+	return declaration.Member{
+		Name: "transaction", Kind: declaration.Method, Intrinsic: "trb.orm.transaction",
+		Return: result, Class: class, TypeParameters: []string{"T"}, Provider: PackageName,
+		Block: &declaration.Block{
+			Parameters: []types.Type{types.FromName("Transaction")},
+			Return:     result, Structured: true,
+		},
+	}
+}
+
+func scopeFindDeclaration(model Model, primaryKey Column) declaration.Member {
+	member := findDeclaration(model, primaryKey)
+	member.Class = false
+	member.Intrinsic = "trb.orm.scope.find"
+	return member
+}
+
+func scopeWriteDeclaration(model Model, name, intrinsic string, result types.Type, adapter string) declaration.Member {
+	return declaration.Member{
+		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
+		Parameters: writeParameters(model, adapter), Return: result, Provider: PackageName,
+	}
 }
 
 func uniqueByDeclarationParameter(model Model) declaration.Parameter {
@@ -365,6 +427,30 @@ func projectionDeclaration(model Model, name, intrinsic string, class, pick bool
 	}
 }
 
+func aggregateDeclaration(model Model, operation, intrinsic string, class bool) (declaration.Member, bool) {
+	values := make([]string, 0, len(model.Columns))
+	alternatives := make([]declaration.Signature, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		result, ok := AggregateResultType(operation, column)
+		if !ok {
+			continue
+		}
+		values = append(values, column.Name)
+		alternatives = append(alternatives, declaration.Signature{
+			Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}},
+			Return:     dbResult(result),
+		})
+	}
+	if len(alternatives) == 0 {
+		return declaration.Member{}, false
+	}
+	return declaration.Member{
+		Name: operation, Kind: declaration.Method, Intrinsic: intrinsic,
+		Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: values}},
+		Return:     alternatives[0].Return, Class: class, Provider: PackageName, Alternatives: alternatives,
+	}, true
+}
+
 func idsDeclaration(model Model, intrinsic string, class bool, primaryKey Column) declaration.Member {
 	keyType := primaryKey.Type
 	keyType.Nullable = false
@@ -511,7 +597,7 @@ func discoverAssociations(source Model, class *ast.ClassStatement, models map[st
 			continue
 		}
 		callee, ok := call.Callee.(*ast.Identifier)
-		if !ok || callee.Name != string(BelongsTo) && callee.Name != string(HasMany) {
+		if !ok || callee.Name != string(BelongsTo) && callee.Name != string(HasMany) && callee.Name != string(HasOne) {
 			continue
 		}
 		if len(call.Arguments) != 1 || call.Arguments[0].Name != "" {
@@ -563,6 +649,14 @@ func buildAssociation(source, target Model, kind AssociationKind, schema *Schema
 		foreignKeys = targetTable.ForeignKeys
 		foreignTable, foreignColumn = target.Table, association.TargetColumn
 		referencedTable, referencedColumn = source.Table, association.SourceColumn
+	case HasOne:
+		association.Name = modelBaseName(target.Name)
+		association.SourceColumn = sourceKey.Name
+		association.TargetColumn = modelBaseName(source.Name) + "_id"
+		foreignKeys = targetTable.ForeignKeys
+		foreignTable, foreignColumn = target.Table, association.TargetColumn
+		referencedTable, referencedColumn = source.Table, association.SourceColumn
+		association.CardinalityVerified = hasExactUniqueConstraint(targetTable, association.TargetColumn)
 	default:
 		return Association{}, fmt.Errorf("unsupported trb/orm association %q", kind)
 	}
@@ -575,7 +669,7 @@ func buildAssociation(source, target Model, kind AssociationKind, schema *Schema
 			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
-		if kind == HasMany && foreignKey.Column == association.TargetColumn && foreignKey.ReferencedTable == source.Table && referencedColumn == association.SourceColumn {
+		if (kind == HasMany || kind == HasOne) && foreignKey.Column == association.TargetColumn && foreignKey.ReferencedTable == source.Table && referencedColumn == association.SourceColumn {
 			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
@@ -585,6 +679,15 @@ func buildAssociation(source, target Model, kind AssociationKind, schema *Schema
 		source.Name, association.Name,
 		foreignTable, foreignColumn, referencedTable, referencedColumn,
 	)
+}
+
+func hasExactUniqueConstraint(table Table, column string) bool {
+	for _, constraint := range table.UniqueConstraints {
+		if len(constraint.Columns) == 1 && constraint.Columns[0] == column {
+			return true
+		}
+	}
+	return false
 }
 
 func preloadKeyCompatible(source, target Model, association Association) bool {

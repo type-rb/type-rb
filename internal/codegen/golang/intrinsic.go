@@ -251,6 +251,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webLogger(call, arguments)
 	case "trb.orm.where":
 		return g.ormWhere(call)
+	case "trb.orm.using":
+		return g.ormUsing(call, arguments)
 	case "trb.orm.not":
 		return g.ormNot(call)
 	case "trb.orm.find_by":
@@ -263,12 +265,26 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormProjection(call, arguments, "pick")
 	case "trb.orm.ids", "trb.orm.query.ids":
 		return g.ormProjection(call, arguments, "ids")
+	case "trb.orm.sum", "trb.orm.query.sum":
+		return g.ormAggregate(call, arguments, "sum")
+	case "trb.orm.average", "trb.orm.query.average":
+		return g.ormAggregate(call, arguments, "average")
+	case "trb.orm.minimum", "trb.orm.query.minimum":
+		return g.ormAggregate(call, arguments, "minimum")
+	case "trb.orm.maximum", "trb.orm.query.maximum":
+		return g.ormAggregate(call, arguments, "maximum")
 	case "trb.orm.find":
 		return g.ormFind(call)
 	case "trb.orm.build":
 		return g.ormBuild(call)
 	case "trb.orm.create":
 		return g.ormCreate(call)
+	case "trb.orm.scope.find":
+		return g.ormScopeFind(call, arguments)
+	case "trb.orm.scope.build":
+		return g.ormScopeBuild(call, arguments)
+	case "trb.orm.scope.create":
+		return g.ormScopeCreate(call, arguments)
 	case "trb.orm.draft.save":
 		return g.ormDraftSave(call)
 	case "trb.orm.insert_all":
@@ -307,6 +323,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormQueryInteger(call, arguments, goORMLimit)
 	case "trb.orm.query.offset":
 		return g.ormQueryInteger(call, arguments, goORMOffset)
+	case "trb.orm.query.lock":
+		return g.ormQueryTerminal(call, arguments, goORMLock)
 	case "trb.orm.query.all":
 		return g.ormQueryTerminal(call, arguments, goORMLoader)
 	case "trb.orm.query.first":
@@ -319,9 +337,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormQueryTerminal(call, arguments, goORMExplain)
 	case "trb.orm.query.preload":
 		return g.ormPreload(call, arguments)
-	case "trb.orm.association.query.belongs_to", "trb.orm.association.query.has_many":
+	case "trb.orm.association.query.belongs_to", "trb.orm.association.query.has_many", "trb.orm.association.query.has_one":
 		return g.ormAssociationQuery(call)
-	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many":
+	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many", "trb.orm.association.loaded.has_one":
 		return g.ormLoadedAssociation(call)
 	case "trb.std.strings.length":
 		g.requireImport("unicode/utf8", "utf8")

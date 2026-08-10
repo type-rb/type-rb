@@ -34,3 +34,7 @@ func (*ormWASMRuntimeProvider) Close() error { return nil }
 func (*ormWASMRuntimeProvider) Call(_ *Evaluator, _ runtimeInvocation) (Value, error) {
 	return Value{}, errors.New("trb/orm database operations are not executable in the browser playground")
 }
+
+func (*ormWASMRuntimeProvider) Block(_ *Evaluator, _ runtimeBlockInvocation) (Value, error) {
+	return Value{}, errors.New("trb/orm database operations are not executable in the browser playground")
+}

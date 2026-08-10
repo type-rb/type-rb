@@ -445,11 +445,91 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		}
 	case *ir.Iterate:
 		return e.iterate(node, module, sc)
+	case *ir.StructuredBlock:
+		return e.structuredBlock(node, module, sc)
 	case *ir.Native, *ir.NativeBlock:
 		return flowResult{}, fmt.Errorf("native %s syntax is not executable by the typed IR REPL", e.mode)
 	default:
 		return flowResult{}, fmt.Errorf("unsupported REPL statement %T", statement)
 	}
+}
+
+func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc *scope) (flowResult, error) {
+	reference := expressionReference(node.Call.Callee)
+	if reference == nil || reference.Intrinsic == "" {
+		return flowResult{}, errors.New("structured block is missing its runtime intrinsic")
+	}
+	arguments := make([]evaluatedArgument, 0, len(node.Call.Arguments)+1)
+	if member, ok := node.Call.Callee.(*ir.Member); ok && (reference.ReceiverMethod || e.runtimeHandles(reference.Intrinsic)) {
+		receiver, err := e.expression(member.Receiver, module, sc)
+		if err != nil {
+			return flowResult{}, err
+		}
+		arguments = append(arguments, evaluatedArgument{Value: receiver})
+	}
+	for _, argument := range node.Call.Arguments {
+		value, err := e.expression(argument.Value, module, sc)
+		if err != nil {
+			return flowResult{}, err
+		}
+		arguments = append(arguments, evaluatedArgument{Name: argument.Name, Value: value})
+	}
+	evaluate := func(bindings []Value) (Value, error) {
+		blockScope := &scope{parent: sc, values: map[string]Value{}}
+		for index, binding := range node.Bindings {
+			if binding.Name == "_" || index >= len(bindings) {
+				continue
+			}
+			value := bindings[index]
+			value.Type = binding.Type
+			blockScope.values[binding.Name] = value
+		}
+		flow, err := e.evaluate(node.Body, module, blockScope)
+		if err != nil {
+			return Value{}, err
+		}
+		if flow.Loop != loopNone {
+			return Value{}, errors.New("loop transfer escaped a structured block")
+		}
+		if flow.Returned {
+			return flow.Result.Value, nil
+		}
+		return e.expression(node.Value, module, blockScope)
+	}
+	resultType := types.FromName("Void")
+	if node.Result != nil {
+		resultType = node.Result.Type
+	}
+	value, handled, err := e.runtimeBlock(runtimeBlockInvocation{
+		Name: reference.Intrinsic, Arguments: arguments, Type: resultType,
+		Block: node, Evaluate: evaluate,
+	})
+	if err != nil {
+		return flowResult{}, err
+	}
+	if !handled {
+		return flowResult{}, fmt.Errorf("runtime intrinsic %s is not executable in the REPL", reference.Intrinsic)
+	}
+	if node.Result == nil {
+		return flowResult{}, nil
+	}
+	value.Type = node.Result.Type
+	if node.Result.Variable != nil {
+		variable := node.Result.Variable
+		sc.values[variable.Name] = value
+		e.moduleValue[symbolKey(module, ownedName(variable.Owner, variable.Name))] = value
+		return flowResult{Result: Result{Value: value, Display: true}}, nil
+	}
+	if node.Result.Target != nil {
+		if err := e.assign(node.Result.Target, value, module, sc); err != nil {
+			return flowResult{}, err
+		}
+		return flowResult{Result: Result{Value: value, Display: true}}, nil
+	}
+	if node.Result.Return {
+		return flowResult{Result: Result{Value: value}, Returned: true}, nil
+	}
+	return flowResult{}, nil
 }
 
 func (e *Evaluator) selectIfBranch(node *ir.If, module string, sc *scope) ([]ir.Statement, ir.Expression, *scope, error) {
@@ -770,7 +850,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 	case *ir.Call:
 		reference := expressionReference(node.Callee)
 		arguments := make([]evaluatedArgument, 0, len(node.Arguments)+1)
-		if reference != nil && reference.Intrinsic != "" && reference.ReceiverMethod {
+		if reference != nil && reference.Intrinsic != "" && (reference.ReceiverMethod || e.runtimeHandles(reference.Intrinsic)) {
 			if member, ok := node.Callee.(*ir.Member); ok {
 				receiver, err := e.expression(member.Receiver, module, sc)
 				if err != nil {

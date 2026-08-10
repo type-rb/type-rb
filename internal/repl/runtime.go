@@ -18,12 +18,26 @@ type runtimeInvocation struct {
 	MemberName string
 }
 
+// runtimeBlockInvocation lets a provider own resource acquisition and cleanup
+// while the evaluator continues to execute ordinary typed IR inside the block.
+type runtimeBlockInvocation struct {
+	Name      string
+	Arguments []evaluatedArgument
+	Type      types.Type
+	Block     *ir.StructuredBlock
+	Evaluate  func(bindings []Value) (Value, error)
+}
+
 type runtimeProvider interface {
 	Name() string
 	Handles(intrinsic string) bool
 	Configure(programs []*ir.Program) error
 	Call(evaluator *Evaluator, invocation runtimeInvocation) (Value, error)
 	Close() error
+}
+
+type runtimeBlockProvider interface {
+	Block(evaluator *Evaluator, invocation runtimeBlockInvocation) (Value, error)
 }
 
 type runtimeProviderFactory func() runtimeProvider
@@ -57,6 +71,30 @@ func (e *Evaluator) runtimeCall(invocation runtimeInvocation) (Value, bool, erro
 			value, err := provider.Call(e, invocation)
 			return value, true, err
 		}
+	}
+	return Value{}, false, nil
+}
+
+func (e *Evaluator) runtimeHandles(intrinsic string) bool {
+	for _, provider := range e.runtimeProviders {
+		if provider.Handles(intrinsic) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Evaluator) runtimeBlock(invocation runtimeBlockInvocation) (Value, bool, error) {
+	for _, provider := range e.runtimeProviders {
+		if !provider.Handles(invocation.Name) {
+			continue
+		}
+		blockProvider, ok := provider.(runtimeBlockProvider)
+		if !ok {
+			return Value{}, true, errors.New("runtime provider does not support structured blocks")
+		}
+		value, err := blockProvider.Block(e, invocation)
+		return value, true, err
 	}
 	return Value{}, false, nil
 }

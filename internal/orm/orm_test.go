@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -68,6 +69,18 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 	if product.ClassMembers["pluck"].Alternatives[1].Return.String() != "DbResult<Array<String>>" || product.ClassMembers["pick"].Alternatives[2].Return.String() != "DbResult<Float?>" || product.ClassMembers["ids"].Return.String() != "DbResult<Array<Integer>>" {
 		t.Fatalf("unexpected projection declarations: %#v", product.ClassMembers)
+	}
+	if product.ClassMembers["sum"].Alternatives[0].Return.String() != "DbResult<Integer>" || product.ClassMembers["sum"].Alternatives[1].Return.String() != "DbResult<Float>" {
+		t.Fatalf("unexpected sum declaration: %#v", product.ClassMembers["sum"])
+	}
+	if product.ClassMembers["average"].Alternatives[1].Return.String() != "DbResult<Float?>" {
+		t.Fatalf("unexpected average declaration: %#v", product.ClassMembers["average"])
+	}
+	if product.ClassMembers["minimum"].Alternatives[0].Return.String() != "DbResult<Integer?>" || product.ClassMembers["minimum"].Alternatives[1].Return.String() != "DbResult<String?>" || product.ClassMembers["minimum"].Alternatives[2].Return.String() != "DbResult<Float?>" {
+		t.Fatalf("unexpected minimum declaration: %#v", product.ClassMembers["minimum"])
+	}
+	if !reflect.DeepEqual(product.ClassMembers["maximum"].Parameters[0].LiteralValues, []string{"id", "name", "price"}) {
+		t.Fatalf("unexpected maximum columns: %#v", product.ClassMembers["maximum"])
 	}
 	if product.ClassMembers["find"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
@@ -144,6 +157,11 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 	if query.InstanceMembers["pluck"].Alternatives[1].Return.String() != "DbResult<Array<String>>" || query.InstanceMembers["pick"].Alternatives[2].Return.String() != "DbResult<Float?>" || query.InstanceMembers["ids"].Return.String() != "DbResult<Array<Integer>>" {
 		t.Fatalf("unexpected query projection declarations: %#v", query.InstanceMembers)
+	}
+	for _, name := range []string{"sum", "average", "minimum", "maximum"} {
+		if query.InstanceMembers[name].Intrinsic != "trb.orm.query."+name {
+			t.Fatalf("unexpected query aggregate declaration: %#v", query.InstanceMembers[name])
+		}
 	}
 	for name, expected := range map[string]string{
 		"first": "DbResult<Product?>", "count": "DbResult<Integer>", "explain": "DbResult<String>",
@@ -257,16 +275,16 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 23 {
-		t.Fatalf("expected five fields and eighteen ORM methods, got %#v", product.Body)
+	if len(product.Body) != 29 {
+		t.Fatalf("expected six fields and twenty-three ORM methods, got %#v", product.Body)
 	}
-	field, ok := product.Body[0].(*ir.Field)
+	field, ok := product.Body[1].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
-		t.Fatalf("unexpected first field: %#v", product.Body[0])
+		t.Fatalf("unexpected first schema field: %#v", product.Body[1])
 	}
 	methods := map[string]bool{}
 	var where *ir.Method
-	for _, statement := range product.Body[5:] {
+	for _, statement := range product.Body[6:] {
 		method, ok := statement.(*ir.Method)
 		if ok && method.Name == "where" {
 			where = method
@@ -278,7 +296,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "not", "find_by", "exists?", "pluck", "pick", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "using", "not", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}
@@ -294,14 +312,18 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 			queryMethods[method.Name] = true
 		}
 	}
-	for _, name := range []string{"not", "or", "find_by", "exists?", "update_all", "delete_all", "pluck", "pick", "ids", "to_sql", "explain"} {
+	for _, name := range []string{"not", "or", "find_by", "exists?", "update_all", "delete_all", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "to_sql", "explain"} {
 		if !queryMethods[name] {
 			t.Fatalf("missing generated ORM query method %s: %#v", name, query.Body)
 		}
 	}
-	draft, ok := lowered.Statements[2].(*ir.Class)
+	scope, ok := lowered.Statements[2].(*ir.Class)
+	if !ok || !scope.External || scope.Name != "ProductScope" {
+		t.Fatalf("unexpected scope class: %#v", lowered.Statements[2])
+	}
+	draft, ok := lowered.Statements[3].(*ir.Class)
 	if !ok || !draft.External || draft.Name != "ProductDraft" || len(draft.Body) != 2 {
-		t.Fatalf("unexpected draft class: %#v", lowered.Statements[2])
+		t.Fatalf("unexpected draft class: %#v", lowered.Statements[3])
 	}
 	save, ok := draft.Body[0].(*ir.Method)
 	if !ok || !save.External || save.Name != "save" || save.ReturnType.String() != "DbResult<Product>" {
@@ -311,9 +333,9 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if !ok || !upsert.External || upsert.Name != "upsert" || upsert.ReturnType.String() != "DbResult<Product>" || len(upsert.Parameters[0].LiteralArrays) != 2 {
 		t.Fatalf("unexpected draft upsert method: %#v", draft.Body[1])
 	}
-	changes, ok := lowered.Statements[3].(*ir.Class)
+	changes, ok := lowered.Statements[4].(*ir.Class)
 	if !ok || !changes.External || changes.Name != "ProductChanges" || len(changes.Body) != 1 {
-		t.Fatalf("unexpected changes class: %#v", lowered.Statements[3])
+		t.Fatalf("unexpected changes class: %#v", lowered.Statements[4])
 	}
 	changeSave, ok := changes.Body[0].(*ir.Method)
 	if !ok || !changeSave.External || changeSave.Name != "save" || changeSave.ReturnType.String() != "DbResult<Product>" {
@@ -350,9 +372,19 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	if category.InstanceMembers["products_query"].Return.String() != "ProductQuery" {
 		t.Fatalf("unexpected has_many query declaration: %#v", category.InstanceMembers["products_query"])
 	}
+	if category.InstanceMembers["product"].Return.String() != "Product?" {
+		t.Fatalf("unexpected has_one declaration: %#v", category.InstanceMembers["product"])
+	}
+	if category.InstanceMembers["product_query"].Return.String() != "ProductQuery" {
+		t.Fatalf("unexpected has_one query declaration: %#v", category.InstanceMembers["product_query"])
+	}
 	preload := productQueryMember(t, catalog, "ProductQuery", "preload")
 	if len(preload.Parameters) != 1 || len(preload.Parameters[0].LiteralValues) != 1 || preload.Parameters[0].LiteralValues[0] != "category" {
 		t.Fatalf("unexpected ProductQuery.preload declaration: %#v", preload)
+	}
+	categoryPreload := productQueryMember(t, catalog, "CategoryQuery", "preload")
+	if len(categoryPreload.Parameters) != 1 || !reflect.DeepEqual(categoryPreload.Parameters[0].LiteralValues, []string{"product", "products"}) {
+		t.Fatalf("unexpected CategoryQuery.preload declaration: %#v", categoryPreload)
 	}
 	manifest, err := Analyze([]*ast.Program{program}, root, options)
 	if err != nil {
@@ -367,6 +399,47 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	hasMany, ok := categoryModel.Association("products")
 	if !ok || hasMany.SourceColumn != "id" || hasMany.TargetColumn != "category_id" {
 		t.Fatalf("unexpected has_many association: %#v", hasMany)
+	}
+	hasOne, ok := categoryModel.Association("product")
+	if !ok || hasOne.SourceColumn != "id" || hasOne.TargetColumn != "category_id" || hasOne.CardinalityVerified {
+		t.Fatalf("unexpected unverified has_one association: %#v", hasOne)
+	}
+}
+
+func TestSQLiteHasOneRecognizesUniqueForeignKey(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE products (
+			id INTEGER PRIMARY KEY,
+			category_id INTEGER NOT NULL UNIQUE,
+			name TEXT NOT NULL,
+			FOREIGN KEY (category_id) REFERENCES categories(id)
+		);
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(Config{Adapter: "sqlite", Database: filepath.Base(databasePath)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, map[string][]byte{PackageName: encoded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	category, _ := manifest.Model("Category")
+	hasOne, ok := category.Association("product")
+	if !ok || !hasOne.CardinalityVerified {
+		t.Fatalf("has_one did not recognize the unique foreign key: %#v", hasOne)
 	}
 }
 
@@ -492,10 +565,11 @@ func parseModel(t *testing.T) *ast.Program {
 
 func parseAssociationModels(t *testing.T) *ast.Program {
 	t.Helper()
-	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many } from trb/orm
+	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many, has_one } from trb/orm
 
 class Category < Model
 	has_many(Product)
+	has_one(Product)
 end
 
 class Product < Model

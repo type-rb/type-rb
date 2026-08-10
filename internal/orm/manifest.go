@@ -24,21 +24,25 @@ type AssociationKind string
 const (
 	BelongsTo AssociationKind = "belongs_to"
 	HasMany   AssociationKind = "has_many"
+	HasOne    AssociationKind = "has_one"
 )
 
 type Association struct {
-	Name         string
-	Kind         AssociationKind
-	TargetModel  string
-	TargetQuery  string
-	SourceColumn string
-	TargetColumn string
-	Preloadable  bool
+	Name                string
+	Kind                AssociationKind
+	TargetModel         string
+	TargetQuery         string
+	SourceColumn        string
+	TargetColumn        string
+	Preloadable         bool
+	CardinalityVerified bool
 }
 
 func (m Model) DraftType() string { return m.Name + "Draft" }
 
 func (m Model) ChangesType() string { return m.Name + "Changes" }
+
+func (m Model) ScopeType() string { return m.Name + "Scope" }
 
 func (m Model) PrimaryKey() (Column, bool) {
 	var result Column
@@ -88,6 +92,37 @@ func (m Model) Column(name string) (Column, bool) {
 	return Column{}, false
 }
 
+func AggregateResultType(operation string, column Column) (types.Type, bool) {
+	result := column.Type
+	switch operation {
+	case "sum":
+		if result.Kind != types.Int && result.Kind != types.Float {
+			return types.Type{}, false
+		}
+		result.Nullable = false
+	case "average":
+		if result.Kind != types.Int && result.Kind != types.Float {
+			return types.Type{}, false
+		}
+		result = types.FromName("Float")
+		result.Nullable = true
+	case "minimum", "maximum":
+		switch result.Kind {
+		case types.Int, types.Float, types.String:
+			result.Nullable = true
+		default:
+			return types.Type{}, false
+		}
+	default:
+		return types.Type{}, false
+	}
+	return result, true
+}
+
+func AggregateOperations() []string {
+	return []string{"sum", "average", "minimum", "maximum"}
+}
+
 func associationValueType(association Association) types.Type {
 	if association.Kind == HasMany {
 		return arrayOf(association.TargetModel)
@@ -125,6 +160,14 @@ func (m *Manifest) Augment(program *ir.Program) {
 		return
 	}
 	ensureRuntimeTypes(program)
+	if program.ModulePath == "trb/orm/index" {
+		for _, statement := range program.Statements {
+			class, ok := statement.(*ir.Class)
+			if ok && (class.Name == "Database" || class.Name == "Transaction") {
+				class.External = true
+			}
+		}
+	}
 	for _, model := range m.Models {
 		if model.ModulePath != program.ModulePath {
 			continue
@@ -143,6 +186,7 @@ func (m *Manifest) Augment(program *ir.Program) {
 					existing[node.Name] = true
 				}
 			}
+			class.Body = append(class.Body, &ir.Field{Name: ormQueryScopeField(), Type: types.FromName(model.QueryType)})
 			for _, column := range model.Columns {
 				if !existing[column.Name] {
 					class.Body = append(class.Body, &ir.Field{Name: "@" + column.Name, Type: column.Type})
@@ -179,6 +223,13 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["where"] {
 				class.Body = append(class.Body, whereIRMethod(model, true))
 			}
+			if !existing["using"] {
+				class.Body = append(class.Body, &ir.Method{
+					Name: "using", External: true, Class: true,
+					Parameters: []ir.Parameter{{Name: "transaction", Type: types.FromName("Transaction")}},
+					ReturnType: types.FromName(model.ScopeType()),
+				})
+			}
 			if !existing["not"] {
 				class.Body = append(class.Body, notIRMethod(model, true))
 			}
@@ -193,6 +244,13 @@ func (m *Manifest) Augment(program *ir.Program) {
 			}
 			if !existing["pick"] {
 				class.Body = append(class.Body, projectionIRMethod(model, "pick", true, true))
+			}
+			for _, operation := range AggregateOperations() {
+				if !existing[operation] {
+					if aggregate := aggregateIRMethod(model, operation, true); aggregate != nil {
+						class.Body = append(class.Body, aggregate)
+					}
+				}
 			}
 			if primaryKey, ok := model.PrimaryKey(); ok {
 				keyType := primaryKey.Type
@@ -250,6 +308,7 @@ func (m *Manifest) Augment(program *ir.Program) {
 			}
 		}
 		program.Statements = append(program.Statements, &ir.Class{Name: model.QueryType, External: true, Body: queryIRMethods(model)})
+		program.Statements = append(program.Statements, &ir.Class{Name: model.ScopeType(), External: true, Body: scopeIRMethods(model)})
 		if _, ok := model.PrimaryKey(); ok {
 			program.Statements = append(program.Statements, &ir.Class{
 				Name: model.DraftType(), External: true,
@@ -268,6 +327,30 @@ func (m *Manifest) Augment(program *ir.Program) {
 			})
 		}
 	}
+}
+
+func scopeIRMethods(model Model) []ir.Statement {
+	methods := queryIRMethods(model)
+	if primaryKey, ok := model.PrimaryKey(); ok {
+		keyType := primaryKey.Type
+		keyType.Nullable = false
+		findType := namedType(model.Name)
+		findType.Nullable = true
+		build := writeIRMethod(model, "build", namedType(model.DraftType()))
+		build.Class = false
+		create := writeIRMethod(model, "create", dbResult(namedType(model.Name)))
+		create.Class = false
+		methods = append(methods,
+			&ir.Method{
+				Name: "find", External: true,
+				Parameters: []ir.Parameter{{Name: primaryKey.Name, Type: keyType}},
+				ReturnType: dbResult(findType),
+			},
+			build,
+			create,
+		)
+	}
+	return methods
 }
 
 func uniqueByIRParameter(model Model) ir.Parameter {
@@ -354,11 +437,17 @@ func queryIRMethods(model Model) []ir.Statement {
 		order,
 		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "offset", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
+		&ir.Method{Name: "lock", External: true, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "all", External: true, ReturnType: dbResult(arrayOf(model.Name))},
 		&ir.Method{Name: "first", External: true, ReturnType: dbResult(firstType)},
 		&ir.Method{Name: "count", External: true, ReturnType: dbResult(types.FromName("Integer"))},
 		&ir.Method{Name: "to_sql", External: true, ReturnType: types.FromName("String")},
 		&ir.Method{Name: "explain", External: true, ReturnType: dbResult(types.FromName("String"))},
+	}
+	for _, operation := range AggregateOperations() {
+		if aggregate := aggregateIRMethod(model, operation, false); aggregate != nil {
+			methods = append(methods, aggregate)
+		}
 	}
 	if preload := preloadIRMethod(model); preload != nil {
 		methods = append(methods, preload)
@@ -423,6 +512,10 @@ func associationLoadedField(name string) string {
 	return "@__trb_association_" + name + "_loaded"
 }
 
+func ormQueryScopeField() string {
+	return "@__trb_orm_query_scope"
+}
+
 func whereIRMethod(model Model, class bool) *ir.Method {
 	method := &ir.Method{Name: "where", External: true, Class: class, ReturnType: namedType(model.QueryType)}
 	for _, column := range model.Columns {
@@ -471,6 +564,30 @@ func projectionIRMethod(model Model, name string, class, pick bool) *ir.Method {
 	for _, parameter := range declared.Parameters {
 		method.Parameters = append(method.Parameters, ir.Parameter{
 			Name: parameter.Name, Type: parameter.Type, Keyword: parameter.Keyword,
+			LiteralValues: append([]string(nil), parameter.LiteralValues...),
+		})
+	}
+	for _, signature := range declared.Alternatives {
+		alternative := ir.MethodSignature{ReturnType: signature.Return}
+		for _, parameter := range signature.Parameters {
+			alternative.Parameters = append(alternative.Parameters, ir.Parameter{
+				Name: parameter.Name, Type: parameter.Type, LiteralValues: append([]string(nil), parameter.LiteralValues...),
+			})
+		}
+		method.Alternatives = append(method.Alternatives, alternative)
+	}
+	return method
+}
+
+func aggregateIRMethod(model Model, operation string, class bool) *ir.Method {
+	declared, ok := aggregateDeclaration(model, operation, "", class)
+	if !ok {
+		return nil
+	}
+	method := &ir.Method{Name: operation, External: true, Class: class, ReturnType: declared.Return}
+	for _, parameter := range declared.Parameters {
+		method.Parameters = append(method.Parameters, ir.Parameter{
+			Name: parameter.Name, Type: parameter.Type,
 			LiteralValues: append([]string(nil), parameter.LiteralValues...),
 		})
 	}
@@ -546,6 +663,18 @@ func (m *Manifest) DraftModel(name string) (Model, bool) {
 	}
 	for _, model := range m.Models {
 		if model.DraftType() == name {
+			return model, true
+		}
+	}
+	return Model{}, false
+}
+
+func (m *Manifest) ScopeModel(name string) (Model, bool) {
+	if m == nil {
+		return Model{}, false
+	}
+	for _, model := range m.Models {
+		if model.ScopeType() == name {
 			return model, true
 		}
 	}

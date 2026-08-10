@@ -16,6 +16,12 @@ end
 
 type DbResult<T> = Result<T, DbError>
 
+class Database
+end
+
+class Transaction
+end
+
 class Model
 end
 
@@ -24,5 +30,9 @@ def belongs_to(model: Any)
 end
 
 def has_many(model: Any)
+	return
+end
+
+def has_one(model: Any)
 	return
 end

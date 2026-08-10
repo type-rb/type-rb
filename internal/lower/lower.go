@@ -222,6 +222,13 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return method
 	case *ast.VariableStatement:
 		typ := l.checked.Variables[n]
+		if block, ok := l.structuredBlock(n.Value); ok {
+			block.Result = &ir.StructuredBlockResult{
+				Variable: &ir.Variable{Base: base(n.Base), Name: n.Name, Type: typ, Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]},
+				Type:     typ,
+			}
+			return block
+		}
 		if iteration, ok := l.structuredIteration(n.Value); ok {
 			iteration.Result = &ir.IterationResult{
 				Variable: &ir.Variable{Base: base(n.Base), Name: n.Name, Type: typ, Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]},
@@ -231,12 +238,20 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		return &ir.Variable{Base: base(n.Base), Name: n.Name, Type: typ, Value: l.expression(n.Value), Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]}
 	case *ast.AssignmentStatement:
+		if block, ok := l.structuredBlock(n.Value); ok {
+			block.Result = &ir.StructuredBlockResult{Target: l.expression(n.Target), Type: l.checked.Expressions[n.Value]}
+			return block
+		}
 		if iteration, ok := l.structuredIteration(n.Value); ok {
 			iteration.Result = &ir.IterationResult{Target: l.expression(n.Target), Type: l.checked.Expressions[n.Value]}
 			return iteration
 		}
 		return &ir.Assignment{Base: base(n.Base), Target: l.expression(n.Target), Operator: n.Operator, Value: l.expression(n.Value)}
 	case *ast.ReturnStatement:
+		if block, ok := l.structuredBlock(n.Value); ok {
+			block.Result = &ir.StructuredBlockResult{Return: true, Type: l.checked.Expressions[n.Value]}
+			return block
+		}
 		if iteration, ok := l.structuredIteration(n.Value); ok {
 			iteration.Result = &ir.IterationResult{Return: true, Type: l.checked.Expressions[n.Value]}
 			return iteration
@@ -297,7 +312,7 @@ func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, b
 	}
 	member, external := l.checked.ExternalMembers[call.Callee]
 	callee, method := call.Callee.(*ast.MemberExpression)
-	if !external || !method || member.Block == nil || !member.Block.Structured {
+	if !external || !method || member.Block == nil || !member.Block.Structured || member.Block.Return.Name != "" {
 		return nil, false
 	}
 	result := &ir.Iterate{
@@ -320,6 +335,50 @@ func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, b
 		result.Bindings = append(result.Bindings, ir.IterationBinding{Name: name, Type: typ})
 	}
 	result.Body = l.statements(call.Block.Body)
+	return result, true
+}
+
+func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBlock, bool) {
+	call, ok := expression.(*ast.CallExpression)
+	if !ok || call.Block == nil {
+		return nil, false
+	}
+	member, external := l.checked.ExternalMembers[call.Callee]
+	semantic, checked := l.checked.StructuredBlocks[call]
+	if !external || !checked || member.Block == nil || !member.Block.Structured || member.Block.Return.Name == "" {
+		return nil, false
+	}
+	loweredCall := &ir.Call{
+		ExprBase: ir.NewExprBase(call.Span(), l.checked.Expressions[call]),
+		Callee:   l.expression(call.Callee),
+	}
+	if codec, ok := l.checked.CodecApplications[call]; ok {
+		loweredCall.Codec = lowerCodecSchema(codec.Schema)
+	}
+	for _, argument := range call.Arguments {
+		loweredCall.Arguments = append(loweredCall.Arguments, ir.CallArgument{
+			Name: argument.Name, Value: l.expression(argument.Value), Splat: argument.Splat,
+		})
+	}
+	resultIndex, resultExpression := lowerControlFlowBranchExpression(call.Block.Body)
+	if resultExpression == nil {
+		return nil, false
+	}
+	result := &ir.StructuredBlock{
+		Base:      ir.Base{Span: call.Span()},
+		Call:      loweredCall,
+		Intrinsic: member.Intrinsic,
+		Body:      l.statements(call.Block.Body[:resultIndex]),
+		Value:     l.expression(semantic.Result),
+	}
+	result.Body = append(result.Body, l.statements(call.Block.Body[resultIndex+1:])...)
+	for index, name := range call.Block.Parameters {
+		typ := types.Type{Kind: types.Any, Name: "Any"}
+		if index < len(semantic.Parameters) {
+			typ = semantic.Parameters[index]
+		}
+		result.Bindings = append(result.Bindings, ir.IterationBinding{Name: name, Type: typ})
+	}
 	return result, true
 }
 
@@ -590,6 +649,7 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 			return nil
 		}
 		_, receiver := node.(*ast.MemberExpression)
+		receiver = receiver && !member.Class
 		return &ir.Reference{Intrinsic: member.Intrinsic, Symbol: member.Name, ExportKind: string(member.Kind), ReceiverMethod: receiver}
 	}
 	result := &ir.Reference{Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name}

@@ -290,14 +290,27 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 
 	input := strings.Join([]string{
 		"import { Product } from main",
-		"import { DbResult } from trb/orm",
+		"import { Database, DbResult } from trb/orm",
 		"Product.where(id: [1, 2]).to_sql()",
 		`Product.exists?(name: "Priority")`,
 		"Product.where().order(id: :asc).pluck(:name)",
 		"Product.where(active: true).first()",
 		"Product.where().count()",
+		"Product.sum(:id)",
+		"Product.where().order(id: :desc).limit(1).sum(:id)",
+		"Product.sum(:price)",
+		"Product.average(:id)",
+		"Product.minimum(:name)",
+		"Product.maximum(:price)",
+		"Product.where(id: 999).sum(:price)",
+		"Product.where(id: 999).minimum(:price)",
 		"def first_product_name(): DbResult<String>\n\tcase Product.where(id: 1).all()\n\twhen DbResult::Ok(products)\n\t\treturn DbResult<String>::Ok(products[0].name)\n\twhen DbResult::Err(error)\n\t\treturn DbResult<String>::Err(error)\n\tend\nend",
 		"first_product_name()",
+		"def locked_product_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tproducts := Product.using(tx)\n\t\tcase products.where().lock().all()\n\t\twhen DbResult::Ok(locked)\n\t\t\tDbResult<Integer>::Ok(locked.size())\n\t\twhen DbResult::Err(error)\n\t\t\tDbResult<Integer>::Err(error)\n\t\tend\n\tend\nend",
+		"locked_product_count()",
+		"def nested_product_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tnested_result := tx.transaction() do |nested|\n\t\t\tproducts := Product.using(nested)\n\t\t\tcase products.where().all()\n\t\t\twhen DbResult::Ok(loaded)\n\t\t\t\tDbResult<Integer>::Ok(loaded.size())\n\t\t\twhen DbResult::Err(error)\n\t\t\t\tDbResult<Integer>::Err(error)\n\t\t\tend\n\t\tend\n\t\tnested_result\n\tend\nend",
+		"nested_product_count()",
+		"Product.where().lock().all()",
 		":quit",
 	}, "\n") + "\n"
 	var stdout, stderr bytes.Buffer
@@ -311,11 +324,82 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`DbResult::Ok(value: ["Priority", "Archive"]) : DbResult<Array<String>>`,
 		`DbResult::Ok(value: #<Product active: true, id: 1, name: "Priority", price: 10.5>) : DbResult<Product?>`,
 		`DbResult::Ok(value: 2) : DbResult<Integer>`,
+		`DbResult::Ok(value: 3) : DbResult<Integer>`,
+		`DbResult::Ok(value: 2) : DbResult<Integer>`,
+		`DbResult::Ok(value: 10.5) : DbResult<Float>`,
+		`DbResult::Ok(value: 1.5) : DbResult<Float?>`,
+		`DbResult::Ok(value: "Archive") : DbResult<String?>`,
+		`DbResult::Ok(value: 10.5) : DbResult<Float?>`,
+		`DbResult::Ok(value: 0) : DbResult<Float>`,
+		`DbResult::Ok(value: nil) : DbResult<Float?>`,
 		`DbResult::Ok(value: "Priority") : DbResult<String>`,
+		`DbResult::Ok(value: 2) : DbResult<Integer>`,
+		`DbResult::Ok(value: 2) : DbResult<Integer>`,
+		`DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: "database lock requires an explicit transaction scope")) : DbResult<Array<Product>>`,
 		"",
 	}, "\n")
 	if stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("unexpected ORM REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
+func TestReplRejectsDuplicateHasOnePreload(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE products (
+			id INTEGER PRIMARY KEY,
+			category_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			FOREIGN KEY (category_id) REFERENCES categories(id)
+		);
+		INSERT INTO categories (id, name) VALUES (1, 'Featured');
+		INSERT INTO products (category_id, name) VALUES (1, 'First'), (1, 'Second');
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-orm-has-one-test"
+	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"sqlite","database":"application.sqlite3"}`)
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { Model, belongs_to, has_one } from trb/orm
+
+class Category < Model
+	has_one(Product)
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "import { Category } from main\nCategory.where().preload(:product).all()\n:quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: \"database has_one association returned multiple rows\")) : DbResult<Array<Category>>\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected has_one REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
 	}
 }
 

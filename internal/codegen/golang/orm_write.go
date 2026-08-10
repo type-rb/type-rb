@@ -16,8 +16,10 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	modelType := types.FromName(model.Name)
 	resultType := g.ormResultType(modelType)
 	draftType := goIdentifier(model.DraftType(), true)
+	queryType := goORMQueryType(model)
 	g.line("type " + draftType + " struct {")
 	g.indent++
+	g.line("query " + queryType)
 	g.line("columns []string")
 	g.line("values []any")
 	g.indent--
@@ -31,16 +33,30 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+	g.line("func " + goORMBuildScoped(model) + "(query " + queryType + ", columns []string, values []any) *" + draftType + " {")
+	g.indent++
+	g.line("draft := " + goORMBuild(model) + "(columns, values)")
+	g.line("draft.query = query")
+	g.line("return draft")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 	g.line("func " + goORMDraftSave(model) + "(draft *" + draftType + ") " + resultType + " {")
 	g.indent++
-	g.line("return " + goORMCreate(model) + "(draft.columns, draft.values)")
+	g.line("return " + goORMCreateScoped(model) + "(draft.query, draft.columns, draft.values)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.line("func " + goORMCreate(model) + "(columns []string, values []any) " + resultType + " {")
 	g.indent++
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("return " + goORMCreateScoped(model) + "(" + queryType + "{}, columns, values)")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMCreateScoped(model) + "(query " + queryType + ", columns []string, values []any) " + resultType + " {")
+	g.indent++
+	g.line("database, databaseError := trbOrmExecutorForTransaction(query.transaction)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(modelType, "*databaseError") + " }")
 	g.line("statement := " + strconv.Quote("INSERT INTO "+adapter.QuoteIdentifier(model.Table)))
 	g.line("if len(columns) == 0 {")
 	g.indent++
@@ -57,6 +73,7 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 		g.line("row := database.QueryRow(statement+" + strconv.Quote(" RETURNING "+strings.Join(projection, ", ")) + ", values...)")
 		g.line("value := &" + goIdentifier(model.Name, true) + "{}")
 		g.line("if err := row.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database insert failed\")") + " }")
+		g.line("value." + goORMQueryScopeField() + " = query")
 		g.line("return " + g.ormResultOK(modelType, "value"))
 	} else {
 		if primaryKey.Generated {
@@ -71,7 +88,7 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 			g.line("if primaryKeyValue == nil { generated, err := written.LastInsertId(); if err != nil { return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database generated key was unavailable\")") + " }; primaryKeyValue = generated }")
 		}
 		g.line("if primaryKeyValue == nil { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "database insert did not produce a primary key")) + " }")
-		g.line("query := " + goORMWhere(model) + "([]string{" + strconv.Quote(primaryKey.Name) + "}, []string{\"=\"}, []any{primaryKeyValue})")
+		g.line("query = " + goORMQueryWhere(model) + "(query, []string{" + strconv.Quote(primaryKey.Name) + "}, []string{\"=\"}, []any{primaryKeyValue})")
 		g.line("return " + goORMFirst(model) + "(query)")
 	}
 	g.indent--
@@ -82,6 +99,14 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	g.ormUpsertAllRuntime(adapter, model)
 	g.ormUpdateRuntime(adapter, model, primaryKey, projection, scanTargets)
 	g.ormDeleteRuntime(adapter, model, primaryKey)
+}
+
+func goORMBuildScoped(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "BuildScoped"
+}
+
+func goORMCreateScoped(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "CreateScoped"
 }
 
 func (g *generator) ormConflictRuntime(model ormintegration.Model) {
@@ -347,8 +372,8 @@ func (g *generator) ormUpdateRuntime(adapter ormintegration.Adapter, model ormin
 	g.line("func " + goORMUpdate(model) + "(value *" + modelName + ", columns []string, values []any) " + resultType + " {")
 	g.indent++
 	g.line("if len(columns) == 0 { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "database update requires at least one value")) + " }")
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(value." + goORMQueryScopeField() + ".transaction)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(modelType, "*databaseError") + " }")
 	g.line("assignments := make([]string, len(columns))")
 	g.line("for index, column := range columns { assignments[index] = trbOrmQuoteIdentifier(column) + \" = \" + trbOrmPlaceholder(index + 1) }")
 	g.line("arguments := append([]any(nil), values...)")
@@ -364,10 +389,11 @@ func (g *generator) ormUpdateRuntime(adapter ormintegration.Adapter, model ormin
 		g.line("return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database update failed\")"))
 		g.indent--
 		g.line("}")
+		g.line("updated." + goORMQueryScopeField() + " = value." + goORMQueryScopeField())
 		g.line("return " + g.ormResultOK(modelType, "updated"))
 	} else {
 		g.line("if _, err := database.Exec(statement, arguments...); err != nil { return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database update failed\")") + " }")
-		g.line("query := " + goORMWhere(model) + "([]string{" + strconv.Quote(primaryKey.Name) + "}, []string{\"=\"}, []any{value." + goORMColumnGetter(primaryKey.Name) + "()})")
+		g.line("query := " + goORMQueryWhere(model) + "(value." + goORMQueryScopeField() + ", []string{" + strconv.Quote(primaryKey.Name) + "}, []string{\"=\"}, []any{value." + goORMColumnGetter(primaryKey.Name) + "()})")
 		g.line("loaded := " + goORMFirst(model) + "(query)")
 		g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(modelType, "loaded.ErrError") + " }")
 		g.line("if loaded.OkValue == nil { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "database update target was not found")) + " }")
@@ -383,8 +409,8 @@ func (g *generator) ormDeleteRuntime(adapter ormintegration.Adapter, model ormin
 	modelName := goIdentifier(model.Name, true)
 	g.line("func " + goORMDelete(model) + "(value *" + modelName + ") " + g.ormResultType(booleanType) + " {")
 	g.indent++
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(booleanType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(value." + goORMQueryScopeField() + ".transaction)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(booleanType, "*databaseError") + " }")
 	statement := "DELETE FROM " + adapter.QuoteIdentifier(model.Table) + " WHERE " + adapter.QuoteIdentifier(primaryKey.Name) + " = "
 	g.line("deleted, err := database.Exec(" + strconv.Quote(statement) + "+trbOrmPlaceholder(1), value." + goORMColumnGetter(primaryKey.Name) + "())")
 	g.line("if err != nil { return " + g.ormResultErr(booleanType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database delete failed\")") + " }")
@@ -399,13 +425,13 @@ func (g *generator) ormDeleteRuntime(adapter ormintegration.Adapter, model ormin
 func (g *generator) ormRelationWriteRuntime(adapter ormintegration.Adapter, model ormintegration.Model) {
 	integerType := types.FromName("Integer")
 	queryType := goORMQueryType(model)
-	invalidModifiers := "len(query.orders) > 0 || query.limit != nil || query.offset != nil || len(query.preloads) > 0"
+	invalidModifiers := "len(query.orders) > 0 || query.limit != nil || query.offset != nil || query.lock || len(query.preloads) > 0"
 	g.line("func " + goORMUpdateAll(model) + "(query " + queryType + ", columns []string, values []any) " + g.ormResultType(integerType) + " {")
 	g.indent++
 	g.line("if len(columns) == 0 { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update requires at least one value")) + " }")
-	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update does not accept order, limit, offset, or preload")) + " }")
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update does not accept order, limit, offset, lock, or preload")) + " }")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(query.transaction)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
 	g.line("assignments := make([]string, len(columns))")
 	g.line("for index, column := range columns { assignments[index] = trbOrmQuoteIdentifier(column) + \" = \" + trbOrmPlaceholder(index + 1) }")
 	g.line("arguments := append([]any(nil), values...)")
@@ -421,9 +447,9 @@ func (g *generator) ormRelationWriteRuntime(adapter ormintegration.Adapter, mode
 	g.b.WriteByte('\n')
 	g.line("func " + goORMDeleteAll(model) + "(query " + queryType + ") " + g.ormResultType(integerType) + " {")
 	g.indent++
-	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk delete does not accept order, limit, offset, or preload")) + " }")
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk delete does not accept order, limit, offset, lock, or preload")) + " }")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(query.transaction)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
 	g.line("arguments := []any{}")
 	g.line("statement := " + strconv.Quote("DELETE FROM "+adapter.QuoteIdentifier(model.Table)))
 	g.line("if query.predicate != nil { statement += \" WHERE \" + " + goORMPredicateSQL(model) + "(query.predicate, &arguments) }")
