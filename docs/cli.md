@@ -144,6 +144,12 @@ and type providers. Without a config, it starts an isolated Go-mode scratch
 session. `--mode` takes precedence over a discovered project mode for that
 session.
 
+Public declarations with a name unique across the project are available
+without typing an import in the REPL. The session adds deterministic hidden
+imports while ordinary project source continues to require explicit imports.
+If more than one module exports the same name, import the intended declaration
+explicitly before using it.
+
 Each submission passes through the ordinary parser, resolver, type checker,
 typed IR lowering, and evaluator. Platform packages are accepted or rejected
 according to the active mode.
@@ -156,8 +162,11 @@ REPL commands are:
 - `:help`
 - `:quit`
 
-Interactive terminals provide multiline input, colors, Tab completion,
-cursor editing, Up/Down history, and Ctrl-R reverse search. Ctrl-B/F moves by
+Interactive terminals provide multiline input, colors, and a Tab completion
+menu with checked signatures and return types. A single candidate completes
+directly; multiple candidates are shown before Tab or Shift-Tab cycles through
+them. Terminals also provide cursor editing, Up/Down history, and Ctrl-R reverse
+search. Ctrl-B/F moves by
 character, Ctrl-A/E by line, Alt-B/F by word, and Ctrl-P/N moves vertically or
 through history. Ctrl-C cancels current input or evaluation without exiting;
 Ctrl-D exits.

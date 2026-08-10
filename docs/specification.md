@@ -172,6 +172,10 @@ end
   syntax or type provider package, count as semantic uses.
 - Project module identities come from paths below `sourceDir`; source files do
   not declare target packages.
+- A project-aware REPL may add hidden imports for public declarations whose
+  names resolve to exactly one project module. Ambiguous declarations still
+  require an explicit import. This is an interactive convenience only;
+  project source keeps the same explicit-import rule.
 - Portable packages use `trb/std/*`. Mode-specific APIs use mode-checked
   `trb/platform/<mode>/*` packages.
 - Official formatter command: `trb fmt`.

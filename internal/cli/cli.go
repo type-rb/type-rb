@@ -18,6 +18,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/codegen"
 	"github.com/type-rb/type-rb/internal/compiler"
+	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/official"
@@ -26,6 +27,7 @@ import (
 	"github.com/type-rb/type-rb/internal/playground"
 	"github.com/type-rb/type-rb/internal/project"
 	"github.com/type-rb/type-rb/internal/repl"
+	"github.com/type-rb/type-rb/internal/resolver"
 )
 
 // Version is a variable so release builds can inject the tag with Go's -X
@@ -551,7 +553,7 @@ func (c *CLI) runRepl(args []string) error {
 	if config.Go != nil {
 		sessionPackage = config.Go.RootPackage
 	}
-	compile := func(source string) (*repl.Compilation, error) {
+	compileSource := func(source string) (*repl.Compilation, error) {
 		units, err := projectSourceUnits(config, files)
 		if err != nil {
 			return nil, err
@@ -569,7 +571,7 @@ func (c *CLI) runRepl(args []string) error {
 		if err != nil {
 			return nil, err
 		}
-		compilation := &repl.Compilation{Programs: make([]*ir.Program, 0, len(artifacts))}
+		compilation := &repl.Compilation{Artifacts: artifacts, Programs: make([]*ir.Program, 0, len(artifacts))}
 		for _, artifact := range artifacts {
 			compilation.Programs = append(compilation.Programs, artifact.IR)
 			if artifact.IR.ModulePath == sessionModule {
@@ -578,6 +580,25 @@ func (c *CLI) runRepl(args []string) error {
 		}
 		if compilation.Session == nil {
 			return nil, errors.New("compiler did not return the REPL session")
+		}
+		return compilation, nil
+	}
+	var projectImports []replProjectImport
+	preludeReady := false
+	compile := func(source string) (*repl.Compilation, error) {
+		if !preludeReady {
+			initial, err := compileSource("")
+			if err != nil {
+				return nil, err
+			}
+			projectImports = uniqueReplProjectImports(initial.Artifacts, sessionModule)
+			preludeReady = true
+		}
+		hiddenPrelude := replProjectPrelude(projectImports, source)
+		hiddenPreludeLines := strings.Count(hiddenPrelude, "\n")
+		compilation, err := compileSource(hiddenPrelude + source)
+		if err != nil {
+			return nil, hideReplPreludeDiagnostics(err, sessionFilename, hiddenPreludeLines, len(hiddenPrelude))
 		}
 		return compilation, nil
 	}
@@ -598,6 +619,107 @@ func (c *CLI) runRepl(args []string) error {
 		HistoryFile: historyFile,
 		Compile:     compile,
 	})
+}
+
+type replProjectImport struct {
+	path    string
+	symbols []string
+}
+
+func uniqueReplProjectImports(artifacts []*compiler.Artifact, modulePath string) []replProjectImport {
+	type origin struct{ path string }
+	byName := map[string][]origin{}
+	for _, artifact := range artifacts {
+		if artifact == nil || artifact.AST == nil || artifact.AST.ModulePath == modulePath || artifact.CompilerOwned || artifact.Official {
+			continue
+		}
+		for name := range resolver.CollectExports(artifact.AST.Statements) {
+			if name != "main" {
+				byName[name] = append(byName[name], origin{path: artifact.AST.ModulePath})
+			}
+		}
+	}
+	byPath := map[string][]string{}
+	for name, origins := range byName {
+		if len(origins) == 1 {
+			byPath[origins[0].path] = append(byPath[origins[0].path], name)
+		}
+	}
+	paths := make([]string, 0, len(byPath))
+	for path := range byPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	result := make([]replProjectImport, 0, len(paths))
+	for _, path := range paths {
+		sort.Strings(byPath[path])
+		result = append(result, replProjectImport{path: path, symbols: byPath[path]})
+	}
+	return result
+}
+
+func replProjectPrelude(imports []replProjectImport, sessionSource string) string {
+	explicit := map[string]bool{}
+	explicitPaths := map[string]bool{}
+	if program, diagnostics := parser.Parse([]byte(sessionSource)); !hasDiagnosticErrors(diagnostics) {
+		for _, statement := range program.Statements {
+			imported, ok := statement.(*ast.ImportStatement)
+			if !ok {
+				continue
+			}
+			if len(imported.Symbols) == 0 && imported.Alias == "" {
+				explicitPaths[imported.Path] = true
+			}
+			for _, name := range imported.Symbols {
+				explicit[name] = true
+			}
+		}
+	}
+	var source strings.Builder
+	for _, imported := range imports {
+		if explicitPaths[imported.path] {
+			continue
+		}
+		symbols := make([]string, 0, len(imported.symbols))
+		for _, name := range imported.symbols {
+			if !explicit[name] {
+				symbols = append(symbols, name)
+			}
+		}
+		if len(symbols) == 0 {
+			continue
+		}
+		fmt.Fprintf(&source, "import { %s } from %s\n", strings.Join(symbols, ", "), imported.path)
+	}
+	return source.String()
+}
+
+func hasDiagnosticErrors(diagnostics []diagnostic.Diagnostic) bool {
+	for _, item := range diagnostics {
+		if item.Severity == diagnostic.Error {
+			return true
+		}
+	}
+	return false
+}
+
+func hideReplPreludeDiagnostics(err error, filename string, lines, bytes int) error {
+	var compilation *compiler.CompileError
+	if lines == 0 || !errors.As(err, &compilation) || compilation.Filename != filename {
+		return err
+	}
+	adjusted := &compiler.CompileError{Filename: compilation.Filename, Diagnostics: append([]diagnostic.Diagnostic(nil), compilation.Diagnostics...)}
+	for index := range adjusted.Diagnostics {
+		span := &adjusted.Diagnostics[index].Span
+		if span.Start.Line <= lines {
+			continue
+		}
+		span.Start.Line -= lines
+		span.End.Line -= lines
+		span.Start.Offset -= bytes
+		span.End.Offset -= bytes
+	}
+	return adjusted
 }
 
 func (c *CLI) runPlay(args []string) error {

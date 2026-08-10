@@ -128,6 +128,9 @@ func TestTerminalReaderUsesMultilineAwareHistoryNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !terminal.Config.GetBool("menu-complete-display-prefix") {
+		t.Fatal("completion menu is not configured to display multiple candidates before cycling")
+	}
 	if terminal.AcceptMultiline([]rune("def greet()")) {
 		t.Fatal("incomplete definition should continue on a secondary line")
 	}

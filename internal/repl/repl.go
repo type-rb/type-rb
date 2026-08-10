@@ -21,8 +21,9 @@ import (
 )
 
 type Compilation struct {
-	Session  *compiler.Artifact
-	Programs []*ir.Program
+	Session   *compiler.Artifact
+	Artifacts []*compiler.Artifact
+	Programs  []*ir.Program
 }
 
 type CompileFunc func(source string) (*Compilation, error)

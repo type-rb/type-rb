@@ -72,6 +72,9 @@ func newTerminalReader(options Options, history []string) (*readline.Shell, erro
 	if err := terminal.Config.Set("enable-bracketed-paste", true); err != nil {
 		return nil, err
 	}
+	if err := terminal.Config.Set("menu-complete-display-prefix", true); err != nil {
+		return nil, err
+	}
 	for _, keymap := range []string{"emacs", "emacs-standard"} {
 		for _, binding := range []struct{ sequence, action string }{
 			{sequence: `\C-p`, action: "up-line-or-history"},
