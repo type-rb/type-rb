@@ -1118,3 +1118,52 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		}
 	}
 }
+
+func TestTypeScriptORMRetainsImportedModelRegistration(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := CompileProject([]SourceUnit{
+		{
+			Filename: filepath.Join(root, "src", "models", "product.trb"), ModulePath: "models/product", Package: "models",
+			Source: []byte("import { Model } from trb/orm\n\nclass Product < Model\nend\n"),
+		},
+		{
+			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
+			Source: []byte("import { Product } from models/product\nimport { Result } from trb/std/result\n\ndef main()\n\tcase attempt Product.all()\n\twhen Result::Ok(products)\n\t\tputs(products.size())\n\twhen Result::Err(error)\n\t\tputs(error.message)\n\tend\nend\n"),
+		},
+	}, Options{
+		Mode: "typescript", TypeScriptRuntime: "bun", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"` + databasePath + `"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := map[string]string{}
+	for _, artifact := range artifacts {
+		outputs[artifact.AST.ModulePath] = string(artifact.Output)
+	}
+	if output := outputs["models/product"]; !strings.Contains(output, `__trbOrm.registerModel(`) {
+		t.Fatalf("generated TypeScript model does not register itself:\n%s", output)
+	}
+	mainOutput := outputs["main"]
+	for _, expected := range []string{
+		`import { Product } from "./models/product.ts"`,
+		`__trbOrm.query(__trbOrm.modelName("Product", Product))`,
+		`Promise<Result<Array<Product>, __trbOrm.DbError>>`,
+	} {
+		if !strings.Contains(mainOutput, expected) {
+			t.Fatalf("generated TypeScript consumer is missing %q:\n%s", expected, mainOutput)
+		}
+	}
+}

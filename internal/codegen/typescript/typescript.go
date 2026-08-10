@@ -1375,7 +1375,19 @@ func tsType(t types.Type) string {
 }
 
 func (g *generator) tsType(t types.Type) string {
-	return tsTypeWithAliases(t, g.typeAliases)
+	if g.orm == nil || g.modulePath == "trb/orm/index" {
+		return tsTypeWithAliases(t, g.typeAliases)
+	}
+	aliases := make(map[string]string, len(g.typeAliases)+3)
+	for name, alias := range g.typeAliases {
+		aliases[name] = alias
+	}
+	for _, name := range []string{"DbError", "DbErrorKind", "DbResult"} {
+		if aliases[name] == "" {
+			aliases[name] = "__trbOrm"
+		}
+	}
+	return tsTypeWithAliases(t, aliases)
 }
 
 func (g *generator) runtimeName(name string) string {

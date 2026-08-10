@@ -578,9 +578,14 @@ module TrbOrmRuntime
 				end
 			end
 			sql = "SELECT " + (query.instance_variable_get(:@distinct) ? "DISTINCT " : "") + columns.join(", ") + " FROM " + quote(query.metadata.table)
-			query.joins.each { |join| sql += " " + render_join(join, arguments, execution) }
+			join_aliases = { query.metadata.table => query.metadata.table }
+			query.joins.each_with_index do |join, index|
+				join_sql, join_alias = render_join(join, index, arguments, execution, join_aliases)
+				sql += " " + join_sql
+				join_aliases[join.fetch(:table)] = join_alias
+			end
 			unless query.predicate.nil?
-				predicate_sql = render_predicate(query.metadata, query.predicate, arguments, execution)
+				predicate_sql = render_predicate(query.metadata, query.predicate, arguments, execution, nil, join_aliases)
 				sql += " WHERE " + predicate_sql unless predicate_sql.empty?
 			end
 			unless query.group_column.nil?
@@ -606,31 +611,33 @@ module TrbOrmRuntime
 			[sql, arguments]
 		end
 
-		def render_predicate(metadata, predicate, arguments, execution)
+		def render_predicate(metadata, predicate, arguments, execution, table_alias = nil, aliases = {})
+			table_alias ||= metadata.table
 			kind = predicate.fetch(0)
 			case kind
 			when "true" then "1 = 1"
 			when "and", "or"
 				values = predicate.fetch(1)
 				values = predicate.drop(1) if kind == "or"
-				"(" + values.compact.map { |value| render_predicate(metadata, value, arguments, execution) }.join(kind == "and" ? " AND " : " OR ") + ")"
+				"(" + values.compact.map { |value| render_predicate(metadata, value, arguments, execution, table_alias, aliases) }.join(kind == "and" ? " AND " : " OR ") + ")"
 			when "not"
-				"NOT (" + render_predicate(metadata, predicate.fetch(1), arguments, execution) + ")"
+				"NOT (" + render_predicate(metadata, predicate.fetch(1), arguments, execution, table_alias, aliases) + ")"
 			when "exists", "not_exists"
 				subquery_sql, subquery_arguments = select_sql(predicate.fetch(1).select_columns(["1"]), execution: execution)
 				arguments.concat(subquery_arguments)
 				(kind == "not_exists" ? "NOT EXISTS (" : "EXISTS (") + subquery_sql + ")"
 			when "qualified"
 				table, column, operator, value = predicate.fetch(1)
+				table = aliases.fetch(table, table)
 				left = qualified(table, column)
 				if value.is_a?(RawColumn)
-					left + " " + operator + " " + qualified(value.table, value.column)
+					left + " " + operator + " " + qualified(aliases.fetch(value.table, value.table), value.column)
 				else
 					left + " " + operator + " " + bind(arguments, value, execution)
 				end
 			else
 				column, operator, value = predicate
-				left = qualified(metadata.table, column)
+				left = qualified(table_alias, column)
 				if value.is_a?(Bounds)
 					first = bind(arguments, value.start, execution)
 					last = bind(arguments, value.finish, execution)
@@ -642,7 +649,7 @@ module TrbOrmRuntime
 					return left + (operator == "NOT_IN" || operator == "!=" ? " NOT IN (" : " IN (") + subquery_sql + ")"
 				end
 				if value.is_a?(RawColumn)
-					return left + " " + operator + " " + qualified(value.table, value.column)
+					return left + " " + operator + " " + qualified(aliases.fetch(value.table, value.table), value.column)
 				end
 				if value.is_a?(Array) || operator == "IN" || operator == "NOT_IN"
 					values = value.is_a?(Array) ? value : [value]
@@ -662,12 +669,14 @@ module TrbOrmRuntime
 			placeholder(arguments.length, execution)
 		end
 
-		def render_join(join, arguments, execution)
-			sql = join.fetch(:kind) + " " + quote(join.fetch(:table)) + " ON " + qualified(join.fetch(:left_table), join.fetch(:left_column)) + " = " + qualified(join.fetch(:table), join.fetch(:right_column))
+		def render_join(join, index, arguments, execution, aliases)
+			table_alias = "__trb_join_" + index.to_s
+			left_alias = aliases.fetch(join.fetch(:left_table), join.fetch(:left_table))
+			sql = join.fetch(:kind) + " " + quote(join.fetch(:table)) + " AS " + quote(table_alias) + " ON " + qualified(left_alias, join.fetch(:left_column)) + " = " + qualified(table_alias, join.fetch(:right_column))
 			unless join[:predicate].nil?
-				sql += " AND " + render_predicate(metadata_by_name(join.fetch(:target_model)), join.fetch(:predicate), arguments, execution)
+				sql += " AND " + render_predicate(metadata_by_name(join.fetch(:target_model)), join.fetch(:predicate), arguments, execution, table_alias, aliases.merge(join.fetch(:table) => table_alias))
 			end
-			sql
+			[sql, table_alias]
 		end
 
 		def render_having(query, values, arguments, execution)

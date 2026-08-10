@@ -116,11 +116,22 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	switch name {
 	case "trb.std.io.puts":
 		g.requireImport("fmt", "")
-		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Float {
-			if call.Arguments[0].Value.ExprType().Nullable {
+		if len(call.Arguments) == 1 {
+			argumentType := call.Arguments[0].Value.ExprType()
+			if argumentType.Kind == types.Float && argumentType.Nullable {
 				return "fmt.Println(func(value *float64) any { if value == nil { return nil }; return " + g.portableFloatString("*value") + " }(" + arguments[0] + "))"
 			}
-			return "fmt.Println(" + g.portableFloatString(arguments[0]) + ")"
+			if argumentType.Kind == types.Float {
+				return "fmt.Println(" + g.portableFloatString(arguments[0]) + ")"
+			}
+			if argumentType.Nullable {
+				baseType := argumentType
+				baseType.Nullable = false
+				goType := g.goType(baseType)
+				if goType != "any" && !strings.HasPrefix(goType, "*") {
+					return "fmt.Println(func(value *" + goType + ") any { if value == nil { return nil }; return *value }(" + arguments[0] + "))"
+				}
+			}
 		}
 		return "fmt.Println(" + strings.Join(arguments, ", ") + ")"
 	case "trb.std.path.separator":

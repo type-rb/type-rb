@@ -68,6 +68,28 @@ end
 	}
 }
 
+func TestGoDiscardsUnusedFallibleCallValueAfterPropagation(t *testing.T) {
+	source := []byte(`record AppError
+end
+
+def read_number(): Integer fails AppError
+	return 7
+end
+
+def run(): Integer fails AppError
+	read_number()
+	return 0
+end
+`)
+	artifact, err := Compile("main.trb", source, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output := string(artifact.Output); !strings.Contains(output, "_ = __trbValue") {
+		t.Fatalf("generated Go does not explicitly discard the propagated call value:\n%s", output)
+	}
+}
+
 func TestFailsDiagnosticsRequireExplicitHandling(t *testing.T) {
 	tests := []struct {
 		name   string
