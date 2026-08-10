@@ -83,6 +83,9 @@ than detailed syntax.
 - Extend the generated JSON codecs and client/server contracts from shared
   records with versioned wire fields, validation policy, schema export, and
   compatibility checking.
+- Extend the experimental `trb/orm` package from its Go implementation to Ruby
+  and TypeScript, add schema caching and cross-backend database conformance,
+  and prove typed relations through an end-to-end `trb/web` application.
 - Continue representative backend, server-rendered, and browser application
   slices with authentication, validation, transactions, background work, and
   realistic failure paths.
