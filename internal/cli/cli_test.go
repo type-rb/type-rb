@@ -369,6 +369,75 @@ func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 	}
 }
 
+func TestReplAutomaticallyImportsUniqueProjectExportsAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/repl-auto-import"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			modelPath := filepath.Join(root, "src", "models", "user.trb")
+			if err := os.MkdirAll(filepath.Dir(modelPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(modelPath, []byte("record User\n\tname: String\nend\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			input := "user := User.new(name: \"Ada\")\nuser.name\n:quit\n"
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			if got, want := stdout.String(), "User(name: \"Ada\") : User\n\"Ada\" : String\n"; got != want {
+				t.Fatalf("stdout=%q, want %q; stderr=%s", got, want, stderr.String())
+			}
+		})
+	}
+}
+
+func TestReplProjectPreludeDoesNotDuplicateExplicitImports(t *testing.T) {
+	imports := []replProjectImport{{path: "models/user", symbols: []string{"Profile", "User"}}}
+	if got, want := replProjectPrelude(imports, "import { User } from models/user\n"), "import { Profile } from models/user\n"; got != want {
+		t.Fatalf("named import prelude=%q, want %q", got, want)
+	}
+	if got := replProjectPrelude(imports, "import models/user\n"); got != "" {
+		t.Fatalf("whole-module import prelude=%q, want empty", got)
+	}
+}
+
+func TestReplAutoImportsDoNotShiftUserDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-auto-import-diagnostic"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	modelPath := filepath.Join(root, "src", "models", "user.trb")
+	if err := os.MkdirAll(filepath.Dir(modelPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modelPath, []byte("record User\n\tname: String\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader("missing()\n:quit\n"), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), ".trb-repl.trb:1:1: error:") {
+		t.Fatalf("hidden imports shifted the user diagnostic: %s", stderr.String())
+	}
+}
+
 func TestReplExecutesPortableORMReads(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "application.sqlite3")
