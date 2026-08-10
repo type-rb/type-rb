@@ -6,10 +6,18 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
 func (g *generator) integrationImports(extensions []ir.Extension) {
+	if manifest := ormintegration.ManifestFrom(extensions); manifest != nil {
+		if g.modulePath == "trb/orm/index" {
+			g.line(`import { SQL, type TransactionSQL } from "bun";`)
+		} else {
+			g.line("import * as __trbOrm from " + strconv.Quote(tsImportPath(g.modulePath, "trb/orm/index")) + ";")
+		}
+	}
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
 		g.line(`import { createServer } from "node:http";`)
 		g.line(`import type { Socket } from "node:net";`)
@@ -18,6 +26,9 @@ func (g *generator) integrationImports(extensions []ir.Extension) {
 }
 
 func (g *generator) integrations(extensions []ir.Extension) {
+	if manifest := ormintegration.ManifestFrom(extensions); manifest != nil {
+		g.ormRuntime(manifest)
+	}
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
 		g.webDispatcher(manifest)
 		g.webServer()

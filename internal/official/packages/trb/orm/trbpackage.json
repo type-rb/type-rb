@@ -5,6 +5,11 @@
   "source": "src/index.trb",
   "typeProvider": "trb.orm",
   "projectProvider": "trb.orm.schema",
+  "nativeDependencies": {
+    "typescript": {
+      "@types/bun": "latest"
+    }
+  },
   "nativeDependenciesByOption": {
     "ruby": {
       "adapter": {

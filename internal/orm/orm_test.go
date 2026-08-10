@@ -746,3 +746,44 @@ func assertUniqueConstraints(t *testing.T, constraints []UniqueConstraint, expec
 		t.Fatalf("first unique constraint is not primary: %#v", constraints)
 	}
 }
+
+func TestCaptureAssociationScopesUsesScopedManifestEntry(t *testing.T) {
+	activeScope := &ir.Block{Parameters: []string{"products"}}
+	archivedScope := &ir.Block{Parameters: []string{"products"}}
+	manifest := &Manifest{Models: []Model{{
+		Name:       "Category",
+		ModulePath: "main",
+		Associations: []Association{
+			{Name: "active_products", Kind: HasMany, TargetModel: "Product", Scoped: true},
+			{Name: "archived_products", Kind: HasMany, TargetModel: "Product", Scoped: true},
+			{Name: "products", Kind: HasMany, TargetModel: "Product"},
+		},
+	}}}
+	manifest.captureAssociationScopes(&ir.Program{ModulePath: "main", Statements: []ir.Statement{&ir.Class{
+		Name: "Category",
+		Body: []ir.Statement{
+			&ir.ExpressionStatement{Expression: &ir.Call{
+				Callee: &ir.Identifier{Name: "has_many"},
+				Arguments: []ir.CallArgument{
+					{Value: &ir.Identifier{Name: "Product"}},
+					{Value: &ir.Symbol{Name: "active_products"}},
+				},
+				Block: activeScope,
+			}},
+			&ir.ExpressionStatement{Expression: &ir.Call{
+				Callee: &ir.Identifier{Name: "has_many"},
+				Arguments: []ir.CallArgument{
+					{Value: &ir.Identifier{Name: "Product"}},
+					{Value: &ir.Symbol{Name: "archived_products"}},
+				},
+				Block: archivedScope,
+			}},
+		},
+	}}})
+	if manifest.Models[0].Associations[0].Scope != activeScope || manifest.Models[0].Associations[1].Scope != archivedScope {
+		t.Fatal("named scoped associations did not capture their respective typed blocks")
+	}
+	if manifest.Models[0].Associations[2].Scope != nil {
+		t.Fatal("scope was attached to the unscoped conventional association")
+	}
+}

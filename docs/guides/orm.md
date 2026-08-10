@@ -1,8 +1,8 @@
 # `trb/orm`
 
 `trb/orm` is an experimental official package for typed database access. Its
-generated runtime supports Go and Ruby with SQLite, PostgreSQL, and MySQL.
-The TypeScript runtime adapter is not implemented yet.
+generated runtime supports Go, Ruby, and TypeScript with SQLite, PostgreSQL,
+and MySQL. TypeScript server applications currently use the Bun runtime.
 
 The compiler reads a live database schema. Migrations remain outside TypeRB;
 use the schema tool that fits the project. The database must be reachable when
@@ -34,7 +34,8 @@ variable avoids embedding a database location in source or generated code:
 
 SQLite environment values must be absolute paths. Adapter names are `sqlite`,
 `postgresql`, and `mysql`. Set `mode` to `ruby` to generate a Ruby application;
-the ORM source and package options stay the same.
+the ORM source and package options stay the same. TypeScript projects must set
+`typescript.runtime` to `"bun"`.
 
 ## Models and associations
 
@@ -87,7 +88,7 @@ end
 ```
 
 Associations use the same effect rules. `user.posts` and `post.author` load on
-first access and cache their values. Preload fills the same cache in batches.
+first access and cache their values. Preload fills the same cache.
 `load()`, `reload()`, and `loaded?()` provide explicit cache control.
 
 ```trb

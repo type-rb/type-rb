@@ -482,9 +482,11 @@ func (m *Manifest) captureAssociationScopes(program *ir.Program) {
 				continue
 			}
 			name := ""
-			for _, argument := range call.Arguments[1:] {
-				if argument.Name == "name" {
-					name, _ = irStaticName(argument.Value)
+			for index, argument := range call.Arguments[1:] {
+				if argument.Name == "name" || index == 0 {
+					if explicit, ok := irStaticName(argument.Value); ok {
+						name = explicit
+					}
 				}
 			}
 			if name == "" {
@@ -496,11 +498,20 @@ func (m *Manifest) captureAssociationScopes(program *ir.Program) {
 					name = modelBaseName(target.Name)
 				}
 			}
+			candidates := make([]*Association, 0, 1)
 			for associationIndex := range m.Models[modelIndex].Associations {
 				association := &m.Models[modelIndex].Associations[associationIndex]
-				if association.Name == name && association.TargetModel == target.Name && string(association.Kind) == callee.Name {
-					association.Scope = call.Block
+				if association.Scoped && association.TargetModel == target.Name && string(association.Kind) == callee.Name {
+					candidates = append(candidates, association)
+					if association.Name == name {
+						association.Scope = call.Block
+						candidates = nil
+						break
+					}
 				}
+			}
+			if len(candidates) == 1 {
+				candidates[0].Scope = call.Block
 			}
 		}
 	}
