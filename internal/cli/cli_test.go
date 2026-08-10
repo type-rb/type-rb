@@ -296,7 +296,7 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		"Product.where().order(id: :asc).pluck(:name)",
 		"Product.where(active: true).first()",
 		"Product.where().count()",
-		"def first_product_name(): DbResult<String>\n\tproducts := Product.where(id: 1).all()?\n\treturn DbResult<String>::Ok(products[0].name)\nend",
+		"def first_product_name(): DbResult<String>\n\tcase Product.where(id: 1).all()\n\twhen DbResult::Ok(products)\n\t\treturn DbResult<String>::Ok(products[0].name)\n\twhen DbResult::Err(error)\n\t\treturn DbResult<String>::Err(error)\n\tend\nend",
 		"first_product_name()",
 		":quit",
 	}, "\n") + "\n"
