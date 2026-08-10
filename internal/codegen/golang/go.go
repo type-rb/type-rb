@@ -887,6 +887,7 @@ func (g *generator) parameterDefaults(parameters []ir.Parameter) {
 		}
 		g.indent--
 		g.line("}")
+		g.line("_ = " + name)
 	}
 }
 

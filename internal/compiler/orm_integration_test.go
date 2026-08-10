@@ -807,6 +807,12 @@ class Product < Model
 end
 
 def main()
+	puts(Product.all())
+	puts(Product.first())
+	puts(Product.count())
+	puts(Product.limit(1).offset(0).all())
+	puts(Product.to_sql())
+	puts(Product.explain())
 	puts(Product.join(:category, Category.where(name: "Books")).where(name: "TypeRB").all())
 	puts(Product.where(name: "TypeRB").left_join(:category).all())
 	puts(Category.join(:products).distinct().all())
@@ -819,8 +825,8 @@ def main()
 	puts(Product.where(name: "TypeRB").group(:category_id).having(:count, ">=", 1).count())
 	puts(Product.group(:category_id).sum(:id))
 	puts(Product.group(:category_id).having(:sum, :id, ">=", 1).sum(:id))
-	puts(Product.where().order(category_id: :desc).limit(1).group(:category_id).count())
-	case Product.where().preload(:category).all()
+	puts(Product.order(category_id: :desc).limit(1).group(:category_id).count())
+	case Product.preload(:category).all()
 	when DbResult::Ok(products)
 		products.each do |product|
 			puts(product.category())
@@ -829,7 +835,7 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
-	case Category.where().preload(:products).all()
+	case Category.preload(:products).all()
 	when DbResult::Ok(categories)
 		categories.each do |category|
 			puts(category.products().size())
@@ -838,7 +844,7 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
-	case Category.where().preload(:product).all()
+	case Category.preload(:product).all()
 	when DbResult::Ok(categories)
 		categories.each do |category|
 			puts(category.product())
@@ -847,7 +853,7 @@ def main()
 	when DbResult::Err(error)
 		puts(error.message)
 	end
-	case Category.where().preload(:products, Product.where(name: "TypeRB").preload(:category)).all()
+	case Category.preload(:products, Product.where(name: "TypeRB").preload(:category)).all()
 	when DbResult::Ok(categories)
 		categories.each do |category|
 			category.products().each do |product|
@@ -928,7 +934,7 @@ end
 		{expression: `Product.join(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
 		{expression: `Product.where_exists(:missing)`, want: `argument 1 to where_exists() must be one of "category"`},
 		{expression: `Product.where_exists(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
-		{expression: `Product.where().preload(:missing)`, want: `argument 1 to preload() must be one of "category"`},
+		{expression: `Product.preload(:missing)`, want: `argument 1 to preload() must be one of "category"`},
 		{expression: `Product.where().preload(:category, Product.where())`, want: `has type ProductQuery, expected CategoryQuery`},
 		{expression: `Product.group(:missing)`, want: `argument 1 to group() must be one of`},
 		{expression: `Product.group(:category_id).having(:sum, ">", 1)`, want: `argument 1 to having() must be one of "count"`},
@@ -938,6 +944,97 @@ end
 		if err := compileInvalidJoin(invalid.expression); err == nil || !strings.Contains(err.Error(), invalid.want) {
 			t.Fatalf("expected join diagnostic %q, got %v", invalid.want, err)
 		}
+	}
+}
+
+func TestPortableORMThroughAssociationCompilesToGo(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE memberships (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, project_id INTEGER NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (project_id) REFERENCES projects(id));
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`import { DbResult, Model, belongs_to, has_many } from trb/orm
+
+class User < Model
+	has_many(Membership)
+	has_many(Project, through: :memberships) do |projects|
+		projects.where(name: "TypeRB").order(id: :asc)
+	end
+end
+
+class Project < Model
+	has_many(Membership)
+end
+
+class Membership < Model
+	belongs_to(User)
+	belongs_to(Project)
+end
+
+def load_projects(): DbResult<Array<Project>>
+	case User.all()
+	when DbResult::Ok(users)
+		case User.join(:projects, Project.where(name: "TypeRB")).all()
+		when DbResult::Ok(joined_users)
+			puts(joined_users.size())
+			return users[0].projects_query().all()
+		when DbResult::Err(error)
+			return DbResult<Array<Project>>::Err(error)
+		end
+	when DbResult::Err(error)
+		return DbResult<Array<Project>>::Err(error)
+	end
+end
+
+def main()
+	puts(load_projects())
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main", Source: source,
+	}}, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		`TrbOrmMembershipQueryWhere(TrbOrmMembershipUsing(users[0].TrbOrmTransaction()), []string{"user_id"}, []string{"="}, []any{users[0].TrbOrmColumnId()})`,
+		`orm.TrbOrmJoin{Kind: "INNER JOIN", Table: "memberships", SourceColumn: "id", TargetColumn: "project_id"`,
+		`TrbOrmProjectJoin(TrbOrmProjectUsing(users[0].TrbOrmTransaction())`,
+		`Build: func(arguments *[]any) string`,
+		`trbOrmQuoteIdentifier("memberships")`,
+		`func(projects TrbOrmProjectQuery) TrbOrmProjectQuery`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated through association query is missing %q:\n%s", expected, output)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
+		t.Fatalf("generated invalid through association Go: %v\n%s", err, output)
+	}
+	invalidScope := []byte(strings.Replace(string(source), "do |projects|\n\t\tprojects.where(name: \"TypeRB\").order(id: :asc)", "do |_projects|\n\t\tUser.where()", 1))
+	if _, err := CompileProject([]SourceUnit{{
+		Filename: filepath.Join(root, "src", "invalid.trb"), ModulePath: "invalid", Package: "main", Source: invalidScope,
+	}}, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	}); err == nil || !strings.Contains(err.Error(), "has_many block result has type UserQuery, expected ProjectQuery") {
+		t.Fatalf("expected typed association scope diagnostic, got %v", err)
 	}
 }
 

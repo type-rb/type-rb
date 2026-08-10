@@ -70,6 +70,15 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if product.ClassMembers["find_by"].Return.String() != "DbResult<Product?>" || product.ClassMembers["exists?"].Return.String() != "DbResult<Boolean>" {
 		t.Fatalf("unexpected predicate terminal declarations: %#v", product.ClassMembers)
 	}
+	if product.ClassMembers["order"].Return.String() != "ProductQuery" || product.ClassMembers["limit"].Return.String() != "ProductQuery" || product.ClassMembers["offset"].Return.String() != "ProductQuery" {
+		t.Fatalf("unexpected model query-root declarations: %#v", product.ClassMembers)
+	}
+	if product.ClassMembers["all"].Return.String() != "DbResult<Array<Product>>" || product.ClassMembers["first"].Return.String() != "DbResult<Product?>" || product.ClassMembers["count"].Return.String() != "DbResult<Integer>" {
+		t.Fatalf("unexpected model terminal declarations: %#v", product.ClassMembers)
+	}
+	if product.ClassMembers["to_sql"].Return.String() != "String" || product.ClassMembers["explain"].Return.String() != "DbResult<String>" {
+		t.Fatalf("unexpected model diagnostic declarations: %#v", product.ClassMembers)
+	}
 	if product.ClassMembers["pluck"].Alternatives[1].Return.String() != "DbResult<Array<String>>" || product.ClassMembers["pick"].Alternatives[2].Return.String() != "DbResult<Float?>" || product.ClassMembers["ids"].Return.String() != "DbResult<Array<Integer>>" {
 		t.Fatalf("unexpected projection declarations: %#v", product.ClassMembers)
 	}
@@ -137,6 +146,9 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if product.InstanceMembers["delete"].Return.String() != "DbResult<Boolean>" {
 		t.Fatalf("unexpected delete declaration: %#v", product.InstanceMembers["delete"])
 	}
+	if product.InstanceMembers["destroy"].Return.String() != "DbResult<Boolean>" || product.ClassMembers["destroy_all"].Return.String() != "DbResult<Integer>" {
+		t.Fatalf("unexpected destroy declarations: %#v", product)
+	}
 	findEach := product.ClassMembers["find_each"]
 	if findEach.Return.String() != "DbResult<Integer>" || findEach.Block == nil || !findEach.Block.Structured || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
 		t.Fatalf("unexpected find_each declaration: %#v", findEach)
@@ -178,6 +190,78 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 		if query.InstanceMembers[name].Return.String() != expected {
 			t.Fatalf("unexpected %s declaration: %#v", name, query.InstanceMembers[name])
 		}
+	}
+}
+
+func TestAssociationOptionsAndThroughMetadata(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE users (id INTEGER PRIMARY KEY, external_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL);
+		CREATE TABLE posts (id INTEGER PRIMARY KEY, author_id TEXT NOT NULL, title TEXT NOT NULL, FOREIGN KEY (author_id) REFERENCES users(external_id));
+		CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE memberships (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, project_id INTEGER NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (project_id) REFERENCES projects(id));
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many } from trb/orm
+
+class User < Model
+	has_many(Post, name: :authored_posts, foreign_key: :author_id, references: :external_id, inverse: :author, dependent: :destroy)
+	has_many(Membership)
+	has_many(Project, through: :memberships)
+end
+
+class Post < Model
+	belongs_to(User, name: :author, foreign_key: :author_id, references: :external_id, inverse: :authored_posts)
+end
+
+class Project < Model
+	has_many(Membership)
+end
+
+class Membership < Model
+	belongs_to(User)
+	belongs_to(Project)
+end
+`))
+	if len(diagnostics) > 0 {
+		t.Fatalf("parse diagnostics: %#v", diagnostics)
+	}
+	program.ModulePath = "src/models"
+	encoded, err := json.Marshal(Config{Adapter: "sqlite", Database: filepath.Base(databasePath)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := Analyze([]*ast.Program{program}, root, map[string][]byte{PackageName: encoded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, ok := manifest.Model("User")
+	if !ok {
+		t.Fatal("User model was not discovered")
+	}
+	authored, ok := user.Association("authored_posts")
+	if !ok || authored.SourceColumn != "external_id" || authored.TargetColumn != "author_id" || authored.Inverse != "author" || authored.Dependent != DependentDestroy {
+		t.Fatalf("unexpected custom association metadata: %#v", authored)
+	}
+	projects, ok := user.Association("projects")
+	if !ok || projects.Through != "memberships" || projects.Source != "project" || projects.TargetModel != "Project" || !projects.Preloadable {
+		t.Fatalf("unexpected through association metadata: %#v", projects)
+	}
+	post, _ := manifest.Model("Post")
+	author, ok := post.Association("author")
+	if !ok || author.SourceColumn != "author_id" || author.TargetColumn != "external_id" || author.Inverse != "authored_posts" {
+		t.Fatalf("unexpected belongs_to metadata: %#v", author)
 	}
 }
 
@@ -284,8 +368,8 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	lowered := &ir.Program{ModulePath: "src/main", Statements: []ir.Statement{&ir.Class{Name: "Product"}}}
 	manifest.Augment(lowered)
 	product := lowered.Statements[0].(*ir.Class)
-	if len(product.Body) != 32 {
-		t.Fatalf("expected six fields and twenty-six ORM methods, got %#v", product.Body)
+	if len(product.Body) != 43 {
+		t.Fatalf("expected six fields and thirty-seven ORM methods, got %#v", product.Body)
 	}
 	field, ok := product.Body[1].(*ir.Field)
 	if !ok || field.Name != "@id" || field.Type.Kind != types.Int {
@@ -305,7 +389,7 @@ func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	if where == nil || !where.External || !where.Class || where.ReturnType.Name != "ProductQuery" {
 		t.Fatalf("unexpected where method: %#v", where)
 	}
-	for _, name := range []string{"where", "distinct", "select", "using", "not", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
+	for _, name := range []string{"where", "distinct", "select", "using", "not", "order", "limit", "offset", "lock", "all", "first", "count", "to_sql", "explain", "destroy_all", "find_by", "exists?", "pluck", "pick", "sum", "average", "minimum", "maximum", "ids", "find", "create", "build", "insert_all", "insert_if_absent", "upsert_all", "find_each", "find_in_batches"} {
 		if !methods[name] {
 			t.Fatalf("missing generated ORM class method %s: %#v", name, product.Body)
 		}
@@ -392,6 +476,11 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 		!reflect.DeepEqual(preload.Alternatives[0].Parameters[0].LiteralValues, []string{"category"}) ||
 		len(preload.Alternatives[1].Parameters) != 2 || preload.Alternatives[1].Parameters[1].Type.String() != "CategoryQuery" {
 		t.Fatalf("unexpected ProductQuery.preload declaration: %#v", preload)
+	}
+	modelPreload := product.ClassMembers["preload"]
+	if modelPreload.Intrinsic != "trb.orm.preload" || !modelPreload.Class || len(modelPreload.Alternatives) != 2 ||
+		!reflect.DeepEqual(modelPreload.Alternatives[0].Parameters[0].LiteralValues, []string{"category"}) {
+		t.Fatalf("unexpected Product.preload declaration: %#v", modelPreload)
 	}
 	categoryPreload := productQueryMember(t, catalog, "CategoryQuery", "preload")
 	if len(categoryPreload.Alternatives) != 4 ||

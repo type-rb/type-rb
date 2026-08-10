@@ -70,9 +70,21 @@ type Module struct {
 	InstanceMembers map[string]Member
 }
 
+// FunctionBlockRule describes a package function whose block type is derived
+// from one of the call arguments. Providers use this for declarative DSLs
+// without teaching the checker package-specific syntax.
+type FunctionBlockRule struct {
+	Package             string
+	Function            string
+	EnclosingSuperclass string
+	TypeArgument        int
+	ParameterTypeSuffix string
+}
+
 type Catalog struct {
-	Types   map[string]*Type
-	Modules map[string]*Module
+	Types              map[string]*Type
+	Modules            map[string]*Module
+	FunctionBlockRules []FunctionBlockRule
 }
 
 func NewCatalog() *Catalog {
@@ -89,6 +101,7 @@ func (c *Catalog) Merge(other *Catalog) {
 	for name, declaration := range other.Modules {
 		c.Modules[name] = declaration
 	}
+	c.FunctionBlockRules = append(c.FunctionBlockRules, other.FunctionBlockRules...)
 }
 
 func (c *Catalog) Type(name string) (*Type, bool) {

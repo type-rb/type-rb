@@ -48,6 +48,7 @@ type ormJoin struct {
 	sourceColumn string
 	targetColumn string
 	predicate    *ormPredicate
+	build        func(*[]any) (string, error)
 }
 
 type ormSubqueryValue struct {
@@ -427,23 +428,68 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		if !ok {
 			return Value{}, errors.New("ORM join target is not available")
 		}
+		targetQuery := &ormQueryValue{model: target}
 		var predicate *ormPredicate
 		if len(remaining) == 2 {
-			targetQuery, ok := remaining[1].Value.Data.(*ormQueryValue)
-			if !ok || targetQuery.model.Name != target.Name {
+			provided, ok := remaining[1].Value.Data.(*ormQueryValue)
+			if !ok || provided.model.Name != target.Name {
 				return Value{}, fmt.Errorf("ORM join %s requires a %s query", associationName, target.Name)
 			}
-			if targetQuery.transaction != nil {
+			if provided.transaction != nil {
 				return Value{}, errors.New("ORM association predicate query must not have a transaction scope; scope the base query instead")
 			}
-			if ormQueryModified(targetQuery) || ormPredicateContainsExists(targetQuery.predicate) {
+			if ormQueryModified(provided) || ormPredicateContainsExists(provided.predicate) {
 				return Value{}, errors.New("ORM association predicate query accepts only where, not, and or")
 			}
-			predicate = targetQuery.predicate
+			targetQuery = cloneORMQuery(provided)
+			predicate = provided.predicate
+		}
+		if association.Scope != nil {
+			scoped, scopeErr := e.ormAssociationScope(targetQuery, association, query.model.ModulePath)
+			if scopeErr != nil {
+				return Value{}, scopeErr
+			}
+			if scoped.transaction != nil || scoped.limit != nil || scoped.offset != nil || scoped.lock || len(scoped.joins) > 0 || ormPredicateContainsExists(scoped.predicate) {
+				return Value{}, errors.New("ORM association scope accepts filters, order, distinct, and preload only")
+			}
+			predicate = scoped.predicate
 		}
 		kind := "INNER JOIN"
 		if name == "trb.orm.left_join" || name == "trb.orm.query.left_join" {
 			kind = "LEFT JOIN"
+		}
+		if association.Through != "" {
+			through, throughOK := query.model.Association(association.Through)
+			middle, middleOK := e.ormRuntime().manifest.Model(through.TargetModel)
+			if !throughOK || !middleOK {
+				return Value{}, errors.New("ORM through association is not available")
+			}
+			via, viaOK := middle.Association(association.Source)
+			if !viaOK {
+				return Value{}, errors.New("ORM through source association is not available")
+			}
+			query.joins = append(query.joins, ormJoin{
+				kind: kind, sourceColumn: through.SourceColumn,
+				build: func(arguments *[]any) (string, error) {
+					adapter := e.ormRuntime().adapter
+					targetKey := "__trb_through_key"
+					targetAlias := "__trb_through_target"
+					targetStatement := "SELECT " + adapter.QuoteIdentifier(via.TargetColumn) + " AS " + adapter.QuoteIdentifier(targetKey) + " FROM " + adapter.QuoteIdentifier(target.Table)
+					if predicate != nil {
+						clause, err := e.ormPredicateSQL(predicate, arguments)
+						if err != nil {
+							return "", err
+						}
+						if clause != "" {
+							targetStatement += " WHERE " + clause
+						}
+					}
+					return "SELECT " + adapter.QuoteIdentifier(through.TargetColumn) + " AS " + adapter.QuoteIdentifier("__trb_join_key") +
+						" FROM " + adapter.QuoteIdentifier(middle.Table) + " INNER JOIN (" + targetStatement + ") AS " + adapter.QuoteIdentifier(targetAlias) +
+						" ON " + adapter.QuoteIdentifier(via.SourceColumn) + " = " + adapter.QuoteIdentifier(targetAlias) + "." + adapter.QuoteIdentifier(targetKey), nil
+				},
+			})
+			return ormQueryResult(typ, query), nil
 		}
 		query.joins = append(query.joins, ormJoin{
 			kind: kind, table: target.Table,
@@ -467,19 +513,31 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		if !ok {
 			return Value{}, errors.New("ORM where_exists target is not available")
 		}
+		targetQuery := &ormQueryValue{model: target}
 		var predicate *ormPredicate
 		if len(remaining) == 2 {
-			targetQuery, ok := remaining[1].Value.Data.(*ormQueryValue)
-			if !ok || targetQuery.model.Name != target.Name {
+			provided, ok := remaining[1].Value.Data.(*ormQueryValue)
+			if !ok || provided.model.Name != target.Name {
 				return Value{}, fmt.Errorf("ORM where_exists %s requires a %s query", associationName, target.Name)
 			}
-			if targetQuery.transaction != nil {
+			if provided.transaction != nil {
 				return Value{}, errors.New("ORM where_exists predicate query must not have a transaction scope; scope the base query instead")
 			}
-			if ormQueryModified(targetQuery) || ormPredicateContainsExists(targetQuery.predicate) {
+			if ormQueryModified(provided) || ormPredicateContainsExists(provided.predicate) {
 				return Value{}, errors.New("ORM where_exists predicate query accepts only where, not, and or")
 			}
-			predicate = targetQuery.predicate
+			targetQuery = cloneORMQuery(provided)
+			predicate = provided.predicate
+		}
+		if association.Scope != nil {
+			scoped, scopeErr := e.ormAssociationScope(targetQuery, association, query.model.ModulePath)
+			if scopeErr != nil {
+				return Value{}, scopeErr
+			}
+			if scoped.transaction != nil || scoped.limit != nil || scoped.offset != nil || scoped.lock || len(scoped.joins) > 0 || ormPredicateContainsExists(scoped.predicate) {
+				return Value{}, errors.New("ORM association scope accepts filters, order, distinct, and preload only")
+			}
+			predicate = scoped.predicate
 		}
 		negated := name == "trb.orm.where_not_exists" || name == "trb.orm.query.where_not_exists"
 		query.predicate = ormCombinePredicates("and", query.predicate, &ormPredicate{
@@ -523,7 +581,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 		}
 		query.predicate = ormCombinePredicates("or", query.predicate, other.predicate)
 		return ormQueryResult(typ, query), nil
-	case "trb.orm.query.order":
+	case "trb.orm.order", "trb.orm.query.order":
 		for _, argument := range remaining {
 			direction, ok := argument.Value.Data.(string)
 			if !ok || direction != "asc" && direction != "desc" {
@@ -532,27 +590,28 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			query.orders = append(query.orders, ormOrder{column: argument.Name, direction: direction})
 		}
 		return ormQueryResult(typ, query), nil
-	case "trb.orm.query.limit", "trb.orm.query.offset":
+	case "trb.orm.limit", "trb.orm.offset", "trb.orm.query.limit", "trb.orm.query.offset":
+		operation := name[strings.LastIndex(name, ".")+1:]
 		if len(remaining) != 1 {
-			return Value{}, fmt.Errorf("%s requires one count", strings.TrimPrefix(name, "trb.orm.query."))
+			return Value{}, fmt.Errorf("%s requires one count", operation)
 		}
 		count, ok := remaining[0].Value.Data.(int64)
 		if !ok || count < 0 {
-			return Value{}, fmt.Errorf("ORM %s must be non-negative", strings.TrimPrefix(name, "trb.orm.query."))
+			return Value{}, fmt.Errorf("ORM %s must be non-negative", operation)
 		}
-		if name == "trb.orm.query.limit" {
+		if operation == "limit" {
 			query.limit = &count
 		} else {
 			query.offset = &count
 		}
 		return ormQueryResult(typ, query), nil
-	case "trb.orm.query.lock":
+	case "trb.orm.lock", "trb.orm.query.lock":
 		query.lock = true
 		return ormQueryResult(typ, query), nil
 	case "trb.orm.distinct", "trb.orm.query.distinct":
 		query.distinct = true
 		return ormQueryResult(typ, query), nil
-	case "trb.orm.query.preload":
+	case "trb.orm.preload", "trb.orm.query.preload":
 		if len(remaining) < 1 || len(remaining) > 2 {
 			return Value{}, errors.New("ORM preload requires an association and optional query")
 		}
@@ -618,27 +677,27 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			return e.ormResultErr(typ, failure.kind, failure.message)
 		}
 		return e.ormResultOK(typ, Value{Type: types.FromName("Boolean"), Data: exists})
-	case "trb.orm.query.all":
+	case "trb.orm.all", "trb.orm.query.all":
 		values, failure := e.ormLoad(query)
 		if failure != nil {
 			return e.ormResultErr(typ, failure.kind, failure.message)
 		}
 		return e.ormResultOK(typ, Value{Type: ormResultValueType(typ), Data: &arrayValue{Items: values}})
-	case "trb.orm.query.first":
+	case "trb.orm.first", "trb.orm.query.first":
 		return e.ormFirstResult(typ, query)
-	case "trb.orm.query.count":
+	case "trb.orm.count", "trb.orm.query.count":
 		count, failure := e.ormCount(query)
 		if failure != nil {
 			return e.ormResultErr(typ, failure.kind, failure.message)
 		}
 		return e.ormResultOK(typ, Value{Type: types.FromName("Integer"), Data: count})
-	case "trb.orm.query.to_sql":
+	case "trb.orm.to_sql", "trb.orm.query.to_sql":
 		statement, _, err := e.ormStatement(query, e.ormModelProjection(query.model))
 		if err != nil {
 			return Value{}, err
 		}
 		return Value{Type: typ, Data: statement}, nil
-	case "trb.orm.query.explain":
+	case "trb.orm.explain", "trb.orm.query.explain":
 		detail, failure := e.ormExplain(query)
 		if failure != nil {
 			return e.ormResultErr(typ, failure.kind, failure.message)
@@ -938,15 +997,24 @@ func (e *Evaluator) ormStatementAppend(query *ormQueryValue, projection string, 
 		}
 		alias := "__trb_join_" + strconv.Itoa(index)
 		key := "__trb_join_key"
-		subquery := "SELECT " + runtime.adapter.QuoteIdentifier(join.targetColumn) + " AS " + runtime.adapter.QuoteIdentifier(key) +
-			" FROM " + runtime.adapter.QuoteIdentifier(join.table)
-		if join.predicate != nil {
-			predicate, err := e.ormPredicateSQL(join.predicate, arguments)
+		subquery := ""
+		if join.build != nil {
+			var err error
+			subquery, err = join.build(arguments)
 			if err != nil {
 				return "", err
 			}
-			if predicate != "" {
-				subquery += " WHERE " + predicate
+		} else {
+			subquery = "SELECT " + runtime.adapter.QuoteIdentifier(join.targetColumn) + " AS " + runtime.adapter.QuoteIdentifier(key) +
+				" FROM " + runtime.adapter.QuoteIdentifier(join.table)
+			if join.predicate != nil {
+				predicate, err := e.ormPredicateSQL(join.predicate, arguments)
+				if err != nil {
+					return "", err
+				}
+				if predicate != "" {
+					subquery += " WHERE " + predicate
+				}
 			}
 		}
 		statement += " " + join.kind + " (" + subquery + ") AS " + runtime.adapter.QuoteIdentifier(alias) +
@@ -1568,19 +1636,27 @@ func ormExplainText(value any) string {
 }
 
 func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, preload ormPreload) *ormFailure {
+	association, ok := model.Association(preload.name)
+	if !ok || !association.Preloadable {
+		return &ormFailure{kind: "InvalidData", message: "unsupported ORM preload " + preload.name}
+	}
+	scoped, err := e.ormAssociationScope(preload.query, association, model.ModulePath)
+	if err != nil {
+		return &ormFailure{kind: "InvalidData", message: err.Error()}
+	}
+	preload.query = scoped
 	if preload.query.transaction != nil {
 		return &ormFailure{kind: "InvalidData", message: "ORM preload query must not have a transaction scope; scope the base query instead"}
 	}
 	if preload.query.limit != nil || preload.query.offset != nil || preload.query.lock {
 		return &ormFailure{kind: "InvalidData", message: "ORM preload query does not accept limit, offset, or lock"}
 	}
-	association, ok := model.Association(preload.name)
-	if !ok || !association.Preloadable {
-		return &ormFailure{kind: "InvalidData", message: "unsupported ORM preload " + preload.name}
-	}
 	target, ok := e.ormRuntime().manifest.Model(association.TargetModel)
 	if !ok {
 		return &ormFailure{kind: "InvalidData", message: "ORM association target is not available"}
+	}
+	if association.Through != "" {
+		return e.ormPreloadThrough(values, model, target, association, preload)
 	}
 	items := []Value{}
 	seen := map[string]bool{}
@@ -1643,6 +1719,100 @@ func (e *Evaluator) ormPreload(values []Value, model ormintegration.Model, prelo
 	return nil
 }
 
+func (e *Evaluator) ormPreloadThrough(values []Value, model, target ormintegration.Model, association ormintegration.Association, preload ormPreload) *ormFailure {
+	through, throughOK := model.Association(association.Through)
+	middle, middleOK := e.ormRuntime().manifest.Model(through.TargetModel)
+	if !throughOK || !middleOK {
+		return &ormFailure{kind: "InvalidData", message: "ORM through association is not available"}
+	}
+	via, viaOK := middle.Association(association.Source)
+	if !viaOK {
+		return &ormFailure{kind: "InvalidData", message: "ORM through source association is not available"}
+	}
+	parentItems := []Value{}
+	seenParents := map[string]bool{}
+	var transaction *ormTransactionValue
+	for _, value := range values {
+		object := value.Data.(*objectInstance)
+		key := object.Fields["@"+through.SourceColumn]
+		if key.Data != nil && !seenParents[ormValueKey(key)] {
+			seenParents[ormValueKey(key)] = true
+			parentItems = append(parentItems, key)
+		}
+		if transaction == nil {
+			if scope, ok := object.Fields["@__trb_orm_query_scope"].Data.(*ormQueryValue); ok {
+				transaction = scope.transaction
+			}
+		}
+	}
+	middleQuery := &ormQueryValue{model: middle, transaction: transaction}
+	parentCondition := Value{Type: types.Type{Kind: types.Array, Name: "Array"}, Data: &arrayValue{Items: parentItems}}
+	middleQuery.predicate = ormPredicateGroup([]ormCondition{{column: through.TargetColumn, operator: "IN", value: parentCondition}})
+	middleValues, failure := e.ormLoad(middleQuery)
+	if failure != nil {
+		return &ormFailure{kind: failure.kind, message: "database through preload failed"}
+	}
+	links := map[string][]Value{}
+	targetItems := []Value{}
+	seenTargets := map[string]bool{}
+	for _, value := range middleValues {
+		object := value.Data.(*objectInstance)
+		parentKey := object.Fields["@"+through.TargetColumn]
+		targetKey := object.Fields["@"+via.SourceColumn]
+		if parentKey.Data == nil || targetKey.Data == nil {
+			continue
+		}
+		links[ormValueKey(parentKey)] = append(links[ormValueKey(parentKey)], targetKey)
+		if !seenTargets[ormValueKey(targetKey)] {
+			seenTargets[ormValueKey(targetKey)] = true
+			targetItems = append(targetItems, targetKey)
+		}
+	}
+	targetQuery := cloneORMQuery(preload.query)
+	targetQuery.transaction = transaction
+	targetCondition := Value{Type: types.Type{Kind: types.Array, Name: "Array"}, Data: &arrayValue{Items: targetItems}}
+	targetQuery.predicate = ormCombinePredicates("and", targetQuery.predicate, ormPredicateGroup([]ormCondition{{column: via.TargetColumn, operator: "IN", value: targetCondition}}))
+	targetValues, failure := e.ormLoad(targetQuery)
+	if failure != nil {
+		return &ormFailure{kind: failure.kind, message: "database through preload failed"}
+	}
+	byKey := map[string]Value{}
+	for _, value := range targetValues {
+		object := value.Data.(*objectInstance)
+		byKey[ormValueKey(object.Fields["@"+via.TargetColumn])] = value
+	}
+	for _, value := range values {
+		object := value.Data.(*objectInstance)
+		parentKey := object.Fields["@"+through.SourceColumn]
+		matches := []Value{}
+		for _, targetKey := range links[ormValueKey(parentKey)] {
+			if match, ok := byKey[ormValueKey(targetKey)]; ok {
+				matches = append(matches, match)
+			}
+		}
+		loadedField := "@__trb_association_" + preload.name + "_loaded"
+		valueField := "@__trb_association_" + preload.name
+		object.Fields[loadedField] = Value{Type: types.FromName("Boolean"), Data: true}
+		if association.Kind == ormintegration.HasMany {
+			itemType := types.FromName(target.Name)
+			object.Fields[valueField] = Value{Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{itemType}}, Data: &arrayValue{Items: matches}}
+			continue
+		}
+		if len(matches) > 1 {
+			return &ormFailure{kind: "InvalidData", message: "database has_one through association returned multiple rows"}
+		}
+		associationType := types.FromName(target.Name)
+		associationType.Nullable = true
+		loaded := Value{Type: associationType}
+		if len(matches) == 1 {
+			loaded = matches[0]
+			loaded.Type = associationType
+		}
+		object.Fields[valueField] = loaded
+	}
+	return nil
+}
+
 func ormValueKey(value Value) string {
 	if value.Data == nil {
 		return "nil"
@@ -1668,12 +1838,67 @@ func (e *Evaluator) ormAssociationQuery(typ types.Type, model ormintegration.Mod
 	if !ok {
 		return Value{}, errors.New("ORM association target is not available")
 	}
+	if association.Through != "" {
+		through, throughOK := model.Association(association.Through)
+		middle, middleOK := e.ormRuntime().manifest.Model(through.TargetModel)
+		if !throughOK || !middleOK {
+			return Value{}, errors.New("ORM through association is not available")
+		}
+		via, viaOK := middle.Association(association.Source)
+		if !viaOK {
+			return Value{}, errors.New("ORM through source association is not available")
+		}
+		value := object.Fields["@"+through.SourceColumn]
+		query := &ormQueryValue{model: target}
+		query.joins = append(query.joins, ormJoin{
+			kind: "INNER JOIN", table: middle.Table,
+			sourceColumn: via.TargetColumn, targetColumn: via.SourceColumn,
+			predicate: ormPredicateGroup([]ormCondition{{column: through.TargetColumn, operator: "=", value: value}}),
+		})
+		if scope, scopeOK := object.Fields["@__trb_orm_query_scope"].Data.(*ormQueryValue); scopeOK {
+			query.transaction = scope.transaction
+		}
+		scoped, err := e.ormAssociationScope(query, association, model.ModulePath)
+		if err != nil {
+			return Value{}, err
+		}
+		return ormQueryResult(typ, scoped), nil
+	}
 	value := object.Fields["@"+association.SourceColumn]
 	query := &ormQueryValue{model: target, predicate: ormPredicateGroup([]ormCondition{{column: association.TargetColumn, operator: "=", value: value}})}
 	if scope, ok := object.Fields["@__trb_orm_query_scope"].Data.(*ormQueryValue); ok {
 		query.transaction = scope.transaction
 	}
-	return ormQueryResult(typ, query), nil
+	scoped, err := e.ormAssociationScope(query, association, model.ModulePath)
+	if err != nil {
+		return Value{}, err
+	}
+	return ormQueryResult(typ, scoped), nil
+}
+
+func (e *Evaluator) ormAssociationScope(query *ormQueryValue, association ormintegration.Association, module string) (*ormQueryValue, error) {
+	if association.Scope == nil {
+		return query, nil
+	}
+	if len(association.Scope.Parameters) != 1 || len(association.Scope.Body) != 1 {
+		return nil, errors.New("ORM association scope must contain one query expression")
+	}
+	result, ok := association.Scope.Body[0].(*ir.ExpressionStatement)
+	if !ok {
+		return nil, errors.New("ORM association scope must return a query")
+	}
+	blockScope := &scope{parent: e.global, values: map[string]Value{
+		association.Scope.Parameters[0]: {Type: types.FromName(association.TargetQuery), Data: cloneORMQuery(query)},
+	}}
+	value, err := e.expression(result.Expression, module, blockScope)
+	if err != nil {
+		return nil, err
+	}
+	scoped, ok := value.Data.(*ormQueryValue)
+	if !ok || scoped.model.Name != association.TargetModel {
+		return nil, errors.New("ORM association scope returned an incompatible query")
+	}
+	return cloneORMQuery(scoped), nil
 }
 
 func (e *Evaluator) ormLoadedAssociation(typ types.Type, receiver Value, call *ir.Call) (Value, error) {

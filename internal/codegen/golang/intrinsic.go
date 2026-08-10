@@ -275,6 +275,26 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormUsing(call, arguments)
 	case "trb.orm.not":
 		return g.ormNot(call)
+	case "trb.orm.order":
+		return g.ormClassOrder(call)
+	case "trb.orm.limit":
+		return g.ormClassInteger(call, goORMLimit)
+	case "trb.orm.offset":
+		return g.ormClassInteger(call, goORMOffset)
+	case "trb.orm.lock":
+		return g.ormClassTerminal(call, goORMLock)
+	case "trb.orm.all":
+		return g.ormClassTerminal(call, goORMLoader)
+	case "trb.orm.first":
+		return g.ormClassTerminal(call, goORMFirst)
+	case "trb.orm.count":
+		return g.ormClassTerminal(call, goORMCount)
+	case "trb.orm.to_sql":
+		return g.ormClassTerminal(call, goORMToSQL)
+	case "trb.orm.explain":
+		return g.ormClassTerminal(call, goORMExplain)
+	case "trb.orm.preload":
+		return g.ormClassPreload(call)
 	case "trb.orm.find_by":
 		return g.ormFindBy(call)
 	case "trb.orm.exists":
@@ -323,6 +343,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormChangesSave(call)
 	case "trb.orm.delete":
 		return g.ormDelete(call)
+	case "trb.orm.destroy":
+		return g.ormDestroy(call)
+	case "trb.orm.destroy_all":
+		return g.ormClassTerminal(call, goORMDestroyAll)
 	case "trb.orm.query.where":
 		return g.ormQueryWhere(call, arguments)
 	case "trb.orm.query.join":
@@ -345,6 +369,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormQueryUpdateAll(call, arguments)
 	case "trb.orm.query.delete_all":
 		return g.ormQueryTerminal(call, arguments, goORMDeleteAll)
+	case "trb.orm.query.destroy_all":
+		return g.ormQueryTerminal(call, arguments, goORMDestroyAll)
 	case "trb.orm.query.order":
 		return g.ormOrder(call, arguments)
 	case "trb.orm.query.limit":

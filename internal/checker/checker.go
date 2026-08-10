@@ -3009,7 +3009,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if n.Block != nil {
 			if _, declared := c.external[n.Callee]; !declared {
-				if c.mode == "ruby" && c.resolution.NativeSyntax {
+				if blockMember, provided := c.declarationFunctionBlock(n, argumentTypes); provided {
+					if blockType, checked := c.checkDeclarationBlock(n, blockMember, sc, nil); checked {
+						typ = blockType
+					}
+				} else if c.mode == "ruby" && c.resolution.NativeSyntax {
 					c.checkNativeCallBlock(n.Block, sc)
 				} else {
 					c.error(n.Block.Span(), "call blocks require a block-accepting package declaration")
@@ -3056,6 +3060,60 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	}
 	c.result.Expressions[expression] = typ
 	return typ
+}
+
+func (c *Checker) declarationFunctionBlock(call *ast.CallExpression, arguments []types.Type) (declaration.Member, bool) {
+	binding, referenced := c.result.References[call.Callee]
+	if !referenced || binding.Import == nil || c.current == nil {
+		return declaration.Member{}, false
+	}
+	packagePath := strings.TrimSuffix(binding.Import.RuntimePath(), "/index")
+	for _, rule := range c.declarations().FunctionBlockRules {
+		if rule.Package != packagePath || rule.Function != binding.Name || !c.currentInherits(rule.EnclosingSuperclass) {
+			continue
+		}
+		if rule.TypeArgument < 0 || rule.TypeArgument >= len(arguments) {
+			return declaration.Member{}, false
+		}
+		argument := arguments[rule.TypeArgument]
+		if argument.Name == "" || argument.Kind == types.Any || argument.Kind == types.Invalid {
+			return declaration.Member{}, false
+		}
+		blockType := types.FromName(argument.Name + rule.ParameterTypeSuffix)
+		if _, declared := c.declarations().Type(blockType.Name); !declared {
+			return declaration.Member{}, false
+		}
+		block := &declaration.Block{Parameters: []types.Type{blockType}, Return: blockType}
+		return declaration.Member{
+			Name: binding.Name, Kind: declaration.Method, Return: types.FromName("Void"),
+			Provider: rule.Package, Block: block,
+		}, true
+	}
+	return declaration.Member{}, false
+}
+
+func (c *Checker) currentInherits(name string) bool {
+	if c.current == nil {
+		return false
+	}
+	current := c.current.superclass
+	seen := map[string]bool{}
+	for current != "" && !seen[current] {
+		if current == name {
+			return true
+		}
+		seen[current] = true
+		if local := c.classes[current]; local != nil {
+			current = local.superclass
+			continue
+		}
+		if declared, ok := c.declarations().Type(current); ok {
+			current = declared.Superclass
+			continue
+		}
+		break
+	}
+	return false
 }
 
 func expressionReturn(expression ast.Expression) ast.Statement {

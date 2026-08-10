@@ -47,8 +47,15 @@ func (g *generator) ormWhereExists(call *ir.Call, negated bool) string {
 		return "nil"
 	}
 	predicate := "nil"
+	targetQuery := g.ormModelQualifier(target) + goORMWhere(target) + "([]string{}, []string{}, []any{})"
 	if len(call.Arguments) > 1 {
-		predicate = g.ormModelQualifier(target) + goORMAssociationPredicate(target) + "(" + g.expr(call.Arguments[1].Value) + ")"
+		targetQuery = g.expr(call.Arguments[1].Value)
+	}
+	if association.Scope != nil {
+		targetQuery = g.ormAssociationScope(association, target, targetQuery)
+		predicate = g.ormModelQualifier(target) + goORMAssociationFilterPredicate(target) + "(" + targetQuery + ")"
+	} else if len(call.Arguments) > 1 {
+		predicate = g.ormModelQualifier(target) + goORMAssociationPredicate(target) + "(" + targetQuery + ")"
 	}
 	return g.ormModelQualifier(model) + goORMWhereExists(model) + "(" +
 		query + ", " + strconv.Quote(target.Table) + ", " + strconv.Quote(association.SourceColumn) + ", " +

@@ -267,8 +267,14 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	if _, err := database.Exec(`
 		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
 		CREATE TABLE products (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, name TEXT NOT NULL, price REAL, active BOOLEAN NOT NULL, FOREIGN KEY (category_id) REFERENCES categories(id));
+		CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE memberships (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, project_id INTEGER NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (project_id) REFERENCES projects(id));
 		INSERT INTO categories (id, name) VALUES (1, 'Featured'), (2, 'Archived');
 		INSERT INTO products (category_id, name, price, active) VALUES (1, 'Priority', 10.5, TRUE), (2, 'Archive', NULL, FALSE);
+		INSERT INTO users (id, name) VALUES (1, 'Ada');
+		INSERT INTO projects (id, name) VALUES (1, 'TypeRB'), (2, 'Other');
+		INSERT INTO memberships (id, user_id, project_id) VALUES (1, 1, 1), (2, 1, 2);
 	`); err != nil {
 		database.Close()
 		t.Fatal(err)
@@ -286,12 +292,12 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model, belongs_to, has_many } from trb/orm\n\nclass Category < Model\n\thas_many(Product)\nend\n\nclass Product < Model\n\tbelongs_to(Category)\nend\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model, belongs_to, has_many } from trb/orm\n\nclass Category < Model\n\thas_many(Product)\nend\n\nclass Product < Model\n\tbelongs_to(Category)\nend\n\nclass User < Model\n\thas_many(Membership)\n\thas_many(Project, through: :memberships) do |projects|\n\t\tprojects.where(name: \"TypeRB\").order(id: :asc)\n\tend\nend\n\nclass Project < Model\n\thas_many(Membership)\nend\n\nclass Membership < Model\n\tbelongs_to(User)\n\tbelongs_to(Project)\nend\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	input := strings.Join([]string{
-		"import { Category, Product } from main",
+		"import { Category, Product, Project, User } from main",
 		"import { Database, DbResult } from trb/orm",
 		"Product.where(id: [1, 2]).to_sql()",
 		`Product.join(:category, Category.where(name: "Featured")).to_sql()`,
@@ -310,17 +316,22 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		"Product.group(:category_id).average(:id)",
 		"Product.group(:category_id).minimum(:name)",
 		"Product.group(:category_id).maximum(:price)",
-		"Product.where().order(category_id: :desc).limit(1).group(:category_id).count()",
-		"Product.where().order(category_id: :asc).offset(1).group(:category_id).count()",
-		"def nested_preload_count(): DbResult<Integer>\n\tcase Category.where().preload(:products, Product.where(active: true).preload(:category)).all()\n\twhen DbResult::Ok(categories)\n\t\tproduct := categories[0].products()[0]\n\t\tputs(product.category().name)\n\t\treturn DbResult<Integer>::Ok(categories[0].products().size())\n\twhen DbResult::Err(error)\n\t\treturn DbResult<Integer>::Err(error)\n\tend\nend",
+		"Product.order(category_id: :desc).limit(1).group(:category_id).count()",
+		"Product.order(category_id: :asc).offset(1).group(:category_id).count()",
+		"def nested_preload_count(): DbResult<Integer>\n\tcase Category.preload(:products, Product.where(active: true).preload(:category)).all()\n\twhen DbResult::Ok(categories)\n\t\tproduct := categories[0].products()[0]\n\t\tputs(product.category().name)\n\t\treturn DbResult<Integer>::Ok(categories[0].products().size())\n\twhen DbResult::Err(error)\n\t\treturn DbResult<Integer>::Err(error)\n\tend\nend",
 		"nested_preload_count()",
-		"Category.where().preload(:products, Product.where().limit(1)).all()",
+		"def user_project_count(): DbResult<Integer>\n\tcase User.all()\n\twhen DbResult::Ok(users)\n\t\treturn users[0].projects_query().count()\n\twhen DbResult::Err(error)\n\t\treturn DbResult<Integer>::Err(error)\n\tend\nend",
+		"user_project_count()",
+		"def preloaded_user_project_count(): DbResult<Integer>\n\tcase User.preload(:projects, Project.where(name: \"TypeRB\")).all()\n\twhen DbResult::Ok(users)\n\t\treturn DbResult<Integer>::Ok(users[0].projects().size())\n\twhen DbResult::Err(error)\n\t\treturn DbResult<Integer>::Err(error)\n\tend\nend",
+		"preloaded_user_project_count()",
+		`User.join(:projects, Project.where(name: "TypeRB")).count()`,
+		"Category.preload(:products, Product.limit(1)).all()",
 		`Product.exists?(name: "Priority")`,
-		"Product.where().order(id: :asc).pluck(:name)",
+		"Product.order(id: :asc).pluck(:name)",
 		"Product.where(active: true).first()",
-		"Product.where().count()",
+		"Product.count()",
 		"Product.sum(:id)",
-		"Product.where().order(id: :desc).limit(1).sum(:id)",
+		"Product.order(id: :desc).limit(1).sum(:id)",
 		"Product.sum(:price)",
 		"Product.average(:id)",
 		"Product.minimum(:name)",
@@ -335,7 +346,7 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		"nested_product_count()",
 		"def scoped_subquery_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tcategory_ids := Category.using(tx).select(:id)\n\t\tcase Product.using(tx).where(category_id: category_ids).count()\n\t\twhen DbResult::Ok(count)\n\t\t\tDbResult<Integer>::Ok(count)\n\t\twhen DbResult::Err(error)\n\t\t\tDbResult<Integer>::Err(error)\n\t\tend\n\tend\nend",
 		"scoped_subquery_count()",
-		"Product.where().lock().all()",
+		"Product.lock().all()",
 		":quit",
 	}, "\n") + "\n"
 	var stdout, stderr bytes.Buffer
@@ -365,6 +376,9 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`DbResult::Ok(value: {2: 1}) : DbResult<Hash<Integer, Integer>>`,
 		`Featured`,
 		`DbResult::Ok(value: 1) : DbResult<Integer>`,
+		`DbResult::Ok(value: 1) : DbResult<Integer>`,
+		`DbResult::Ok(value: 1) : DbResult<Integer>`,
+		`DbResult::Ok(value: 1) : DbResult<Integer>`,
 		`DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: "ORM preload query does not accept limit, offset, or lock")) : DbResult<Array<Category>>`,
 		`DbResult::Ok(value: true) : DbResult<Boolean>`,
 		`DbResult::Ok(value: ["Priority", "Archive"]) : DbResult<Array<String>>`,
@@ -387,6 +401,197 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	}, "\n")
 	if stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("unexpected ORM REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
+func TestRunPortableORMDestroyLifecycle(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		PRAGMA foreign_keys = ON;
+		CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE products (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, name TEXT NOT NULL, FOREIGN KEY (category_id) REFERENCES categories(id));
+		CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE members (id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, name TEXT NOT NULL, FOREIGN KEY (team_id) REFERENCES teams(id));
+		CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE articles (id INTEGER PRIMARY KEY, author_id INTEGER, title TEXT NOT NULL, FOREIGN KEY (author_id) REFERENCES authors(id));
+		CREATE TABLE folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE files (id INTEGER PRIMARY KEY, folder_id INTEGER NOT NULL, name TEXT NOT NULL, FOREIGN KEY (folder_id) REFERENCES folders(id));
+		INSERT INTO categories (id, name) VALUES (1, 'Featured'), (2, 'Archived');
+		INSERT INTO products (id, category_id, name) VALUES (1, 1, 'TypeRB'), (2, 2, 'Old TypeRB');
+		INSERT INTO teams (id, name) VALUES (1, 'Compiler');
+		INSERT INTO members (id, team_id, name) VALUES (1, 1, 'Ada');
+		INSERT INTO authors (id, name) VALUES (1, 'Matz');
+		INSERT INTO articles (id, author_id, title) VALUES (1, 1, 'Language design');
+		INSERT INTO folders (id, name) VALUES (1, 'Temporary');
+		INSERT INTO files (id, folder_id, name) VALUES (1, 1, 'draft.txt');
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/orm-destroy-test"
+	config.PackageOptions["trb/orm"] = json.RawMessage(`{"adapter":"sqlite","database":"application.sqlite3"}`)
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { DbErrorKind, DbResult, Model, belongs_to, has_many } from trb/orm
+
+class Category < Model
+	has_many(Product, dependent: :destroy)
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+
+class Team < Model
+	has_many(Member, dependent: :restrict)
+end
+
+class Member < Model
+	belongs_to(Team)
+end
+
+class Author < Model
+	has_many(Article, dependent: :nullify)
+end
+
+class Article < Model
+	belongs_to(Author)
+end
+
+class Folder < Model
+	has_many(File, dependent: :delete)
+end
+
+class File < Model
+	belongs_to(Folder)
+end
+
+def destroy_category(id: Integer): DbResult<Integer>
+	case Category.find(id)
+	when DbResult::Ok(category)
+		case category.destroy()
+		when DbResult::Ok(destroyed)
+			if destroyed
+				return Product.count()
+			end
+			return DbResult<Integer>::Ok(-1)
+		when DbResult::Err(error)
+			return DbResult<Integer>::Err(error)
+		end
+	when DbResult::Err(error)
+		return DbResult<Integer>::Err(error)
+	end
+end
+
+def destroy_remaining_categories(): DbResult<Integer>
+	case Category.destroy_all()
+	when DbResult::Ok(destroyed)
+		if destroyed >= 0
+			return Product.count()
+		end
+		return DbResult<Integer>::Ok(-1)
+	when DbResult::Err(error)
+		return DbResult<Integer>::Err(error)
+	end
+end
+
+def restrict_team(): DbResult<Boolean>
+	case Team.find(1)
+	when DbResult::Ok(team)
+		case team.destroy()
+		when DbResult::Ok(_)
+			return DbResult<Boolean>::Ok(false)
+		when DbResult::Err(error)
+			return DbResult<Boolean>::Ok(error.kind == DbErrorKind::Constraint)
+		end
+	when DbResult::Err(error)
+		return DbResult<Boolean>::Err(error)
+	end
+end
+
+def nullify_articles(): DbResult<Integer>
+	case Author.find(1)
+	when DbResult::Ok(author)
+		case author.destroy()
+		when DbResult::Ok(destroyed)
+			if destroyed
+				return Article.where(author_id: nil).count()
+			end
+			return DbResult<Integer>::Ok(-1)
+		when DbResult::Err(error)
+			return DbResult<Integer>::Err(error)
+		end
+	when DbResult::Err(error)
+		return DbResult<Integer>::Err(error)
+	end
+end
+
+def delete_files(): DbResult<Integer>
+	case Folder.find(1)
+	when DbResult::Ok(folder)
+		case folder.destroy()
+		when DbResult::Ok(destroyed)
+			if destroyed
+				return File.count()
+			end
+			return DbResult<Integer>::Ok(-1)
+		when DbResult::Err(error)
+			return DbResult<Integer>::Err(error)
+		end
+	when DbResult::Err(error)
+		return DbResult<Integer>::Err(error)
+	end
+end
+
+def print_integer(result: DbResult<Integer>)
+	case result
+	when DbResult::Ok(value)
+		puts(value)
+	when DbResult::Err(error)
+		puts(error.message)
+	end
+end
+
+def print_boolean(result: DbResult<Boolean>)
+	case result
+	when DbResult::Ok(value)
+		puts(value)
+	when DbResult::Err(error)
+		puts(error.message)
+	end
+end
+
+def main()
+	print_integer(destroy_category(1))
+	print_integer(destroy_remaining_categories())
+	print_boolean(restrict_team())
+	print_integer(nullify_articles())
+	print_integer(delete_files())
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if want := "1\n0\ntrue\n1\n0\n"; stdout.String() != want {
+		t.Fatalf("unexpected ORM destroy result: want %q, got %q, stderr=%s", want, stdout.String(), stderr.String())
 	}
 }
 

@@ -48,8 +48,18 @@ func (g *generator) ormJoin(call *ir.Call, kind string) string {
 		return "nil"
 	}
 	predicate := "nil"
+	targetQuery := g.ormModelQualifier(target) + goORMWhere(target) + "([]string{}, []string{}, []any{})"
 	if len(call.Arguments) > 1 {
-		predicate = g.ormModelQualifier(target) + goORMAssociationPredicate(target) + "(" + g.expr(call.Arguments[1].Value) + ")"
+		targetQuery = g.expr(call.Arguments[1].Value)
+	}
+	if association.Scope != nil {
+		targetQuery = g.ormAssociationScope(association, target, targetQuery)
+		predicate = g.ormModelQualifier(target) + goORMAssociationFilterPredicate(target) + "(" + targetQuery + ")"
+	} else if len(call.Arguments) > 1 {
+		predicate = g.ormModelQualifier(target) + goORMAssociationPredicate(target) + "(" + targetQuery + ")"
+	}
+	if association.Through != "" {
+		return g.ormThroughJoin(model, query, association, target, predicate, kind)
 	}
 	join := g.ormLifecycleAlias() + ".TrbOrmJoin{" +
 		"Kind: " + strconv.Quote(kind) +
@@ -57,6 +67,35 @@ func (g *generator) ormJoin(call *ir.Call, kind string) string {
 		", SourceColumn: " + strconv.Quote(association.SourceColumn) +
 		", TargetColumn: " + strconv.Quote(association.TargetColumn) +
 		", Predicate: " + predicate + "}"
+	return g.ormModelQualifier(model) + goORMJoin(model) + "(" + query + ", " + join + ")"
+}
+
+func (g *generator) ormThroughJoin(model ormintegration.Model, query string, association ormintegration.Association, target ormintegration.Model, predicate, kind string) string {
+	through, ok := model.Association(association.Through)
+	if !ok {
+		return "nil"
+	}
+	middle, ok := g.orm.Model(through.TargetModel)
+	if !ok {
+		return "nil"
+	}
+	via, ok := middle.Association(association.Source)
+	if !ok {
+		return "nil"
+	}
+	predicateStatement := ""
+	if predicate != "nil" {
+		predicateStatement = "if clause := " + predicate + "(arguments); clause != \"\" { targetStatement += \" WHERE \" + clause }; "
+	}
+	build := "func(arguments *[]any) string { " +
+		"targetKey := \"__trb_through_key\"; targetAlias := \"__trb_through_target\"; " +
+		"targetStatement := \"SELECT \" + trbOrmQuoteIdentifier(" + strconv.Quote(via.TargetColumn) + ") + \" AS \" + trbOrmQuoteIdentifier(targetKey) + \" FROM \" + trbOrmQuoteIdentifier(" + strconv.Quote(target.Table) + "); " +
+		predicateStatement +
+		"return \"SELECT \" + trbOrmQuoteIdentifier(" + strconv.Quote(through.TargetColumn) + ") + \" AS \" + trbOrmQuoteIdentifier(\"__trb_join_key\") + \" FROM \" + trbOrmQuoteIdentifier(" + strconv.Quote(middle.Table) + ") + \" INNER JOIN (\" + targetStatement + \") AS \" + trbOrmQuoteIdentifier(targetAlias) + \" ON \" + trbOrmQuoteIdentifier(" + strconv.Quote(via.SourceColumn) + ") + \" = \" + trbOrmQuoteIdentifier(targetAlias) + \".\" + trbOrmQuoteIdentifier(targetKey) }"
+	join := g.ormLifecycleAlias() + ".TrbOrmJoin{" +
+		"Kind: " + strconv.Quote(kind) +
+		", SourceColumn: " + strconv.Quote(through.SourceColumn) +
+		", Build: " + build + "}"
 	return g.ormModelQualifier(model) + goORMJoin(model) + "(" + query + ", " + join + ")"
 }
 
@@ -84,4 +123,8 @@ func goORMJoin(model ormintegration.Model) string {
 
 func goORMAssociationPredicate(model ormintegration.Model) string {
 	return "TrbOrm" + goIdentifier(model.Name, true) + "AssociationPredicate"
+}
+
+func goORMAssociationFilterPredicate(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "AssociationFilterPredicate"
 }
