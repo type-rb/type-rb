@@ -15,6 +15,7 @@ variable avoids embedding a database location in source or generated code:
 
 ```jsonc
 {
+	"name": "my-app",
 	"mode": "go",
 	"sourceDir": "src",
 	"packageOptions": {
@@ -24,6 +25,9 @@ variable avoids embedding a database location in source or generated code:
 				"environment": "DATABASE_URL"
 			}
 		}
+	},
+	"go": {
+		"module": "example.com/my-app"
 	}
 }
 ```
