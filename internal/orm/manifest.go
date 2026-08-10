@@ -303,6 +303,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 			if !existing["offset"] {
 				class.Body = append(class.Body, integerQueryIRMethod(model, "offset", true))
 			}
+			if !existing["lock"] {
+				class.Body = append(class.Body, queryTerminalIRMethod(model, "lock", namedType(model.QueryType), true))
+			}
 			if !existing["all"] {
 				class.Body = append(class.Body, queryTerminalIRMethod(model, "all", dbResult(arrayOf(model.Name)), true))
 			}

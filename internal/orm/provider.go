@@ -91,6 +91,10 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		declared.ClassMembers["order"] = orderDeclaration(model, "trb.orm.order", true)
 		declared.ClassMembers["limit"] = integerQueryDeclaration("limit", "trb.orm.limit", model.QueryType, true)
 		declared.ClassMembers["offset"] = integerQueryDeclaration("offset", "trb.orm.offset", model.QueryType, true)
+		declared.ClassMembers["lock"] = declaration.Member{
+			Name: "lock", Kind: declaration.Method, Intrinsic: "trb.orm.lock",
+			Return: types.FromName(model.QueryType), Class: true, Provider: PackageName,
+		}
 		declared.ClassMembers["all"] = resultQueryDeclaration("all", "trb.orm.all", arrayOf(model.Name), true)
 		firstType := types.FromName(model.Name)
 		firstType.Nullable = true

@@ -605,7 +605,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 			query.offset = &count
 		}
 		return ormQueryResult(typ, query), nil
-	case "trb.orm.query.lock":
+	case "trb.orm.lock", "trb.orm.query.lock":
 		query.lock = true
 		return ormQueryResult(typ, query), nil
 	case "trb.orm.distinct", "trb.orm.query.distinct":

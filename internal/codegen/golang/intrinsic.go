@@ -281,6 +281,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.ormClassInteger(call, goORMLimit)
 	case "trb.orm.offset":
 		return g.ormClassInteger(call, goORMOffset)
+	case "trb.orm.lock":
+		return g.ormClassTerminal(call, goORMLock)
 	case "trb.orm.all":
 		return g.ormClassTerminal(call, goORMLoader)
 	case "trb.orm.first":

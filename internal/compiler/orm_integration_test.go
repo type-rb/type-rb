@@ -984,10 +984,18 @@ class Membership < Model
 end
 
 def load_projects(): DbResult<Array<Project>>
-	users := User.all()?
-	joined_users := User.join(:projects, Project.where(name: "TypeRB")).all()?
-	puts(joined_users.size())
-	return users[0].projects_query().all()
+	case User.all()
+	when DbResult::Ok(users)
+		case User.join(:projects, Project.where(name: "TypeRB")).all()
+		when DbResult::Ok(joined_users)
+			puts(joined_users.size())
+			return users[0].projects_query().all()
+		when DbResult::Err(error)
+			return DbResult<Array<Project>>::Err(error)
+		end
+	when DbResult::Err(error)
+		return DbResult<Array<Project>>::Err(error)
+	end
 end
 
 def main()

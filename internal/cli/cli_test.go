@@ -480,48 +480,80 @@ class File < Model
 end
 
 def destroy_category(id: Integer): DbResult<Integer>
-	category := Category.find(id)?
-	destroyed := category.destroy()?
-	if destroyed
-		return Product.count()
+	case Category.find(id)
+	when DbResult::Ok(category)
+		case category.destroy()
+		when DbResult::Ok(destroyed)
+			if destroyed
+				return Product.count()
+			end
+			return DbResult<Integer>::Ok(-1)
+		when DbResult::Err(error)
+			return DbResult<Integer>::Err(error)
+		end
+	when DbResult::Err(error)
+		return DbResult<Integer>::Err(error)
 	end
-	return DbResult<Integer>::Ok(-1)
 end
 
 def destroy_remaining_categories(): DbResult<Integer>
-	destroyed := Category.destroy_all()?
-	if destroyed >= 0
-		return Product.count()
+	case Category.destroy_all()
+	when DbResult::Ok(destroyed)
+		if destroyed >= 0
+			return Product.count()
+		end
+		return DbResult<Integer>::Ok(-1)
+	when DbResult::Err(error)
+		return DbResult<Integer>::Err(error)
 	end
-	return DbResult<Integer>::Ok(-1)
 end
 
 def restrict_team(): DbResult<Boolean>
-	team := Team.find(1)?
-	case team.destroy()
-	when DbResult::Ok(_)
-		return DbResult<Boolean>::Ok(false)
+	case Team.find(1)
+	when DbResult::Ok(team)
+		case team.destroy()
+		when DbResult::Ok(_)
+			return DbResult<Boolean>::Ok(false)
+		when DbResult::Err(error)
+			return DbResult<Boolean>::Ok(error.kind == DbErrorKind::Constraint)
+		end
 	when DbResult::Err(error)
-		return DbResult<Boolean>::Ok(error.kind == DbErrorKind::Constraint)
+		return DbResult<Boolean>::Err(error)
 	end
 end
 
 def nullify_articles(): DbResult<Integer>
-	author := Author.find(1)?
-	destroyed := author.destroy()?
-	if destroyed
-		return Article.where(author_id: nil).count()
+	case Author.find(1)
+	when DbResult::Ok(author)
+		case author.destroy()
+		when DbResult::Ok(destroyed)
+			if destroyed
+				return Article.where(author_id: nil).count()
+			end
+			return DbResult<Integer>::Ok(-1)
+		when DbResult::Err(error)
+			return DbResult<Integer>::Err(error)
+		end
+	when DbResult::Err(error)
+		return DbResult<Integer>::Err(error)
 	end
-	return DbResult<Integer>::Ok(-1)
 end
 
 def delete_files(): DbResult<Integer>
-	folder := Folder.find(1)?
-	destroyed := folder.destroy()?
-	if destroyed
-		return File.count()
+	case Folder.find(1)
+	when DbResult::Ok(folder)
+		case folder.destroy()
+		when DbResult::Ok(destroyed)
+			if destroyed
+				return File.count()
+			end
+			return DbResult<Integer>::Ok(-1)
+		when DbResult::Err(error)
+			return DbResult<Integer>::Err(error)
+		end
+	when DbResult::Err(error)
+		return DbResult<Integer>::Err(error)
 	end
-	return DbResult<Integer>::Ok(-1)
 end
 
 def print_integer(result: DbResult<Integer>)
