@@ -112,7 +112,7 @@ Before a response leaves the portable dispatcher, every backend rejects invalid
 status codes, header names, and CR/LF-bearing header values through the same
 JSON 500 boundary.
 
-The experimental official `trb/orm` package currently targets generated Go.
+The experimental official [`trb/orm`](guides/orm.md) package currently targets generated Go.
 It reads SQLite, PostgreSQL, or MySQL schema metadata directly and exposes typed
 models, immutable queries, associations and preload, aggregates, transactions,
 batching, writes, conflict handling, and destroy lifecycles. Database terminals
