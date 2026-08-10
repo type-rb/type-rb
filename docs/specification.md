@@ -499,6 +499,24 @@ end
   and case patterns—still require an explicit import such as
   `import { Result } from trb/std/result` or
   `import { IndexLookupError } from trb/std/errors`.
-- Concise propagation syntax such as postfix `?`, postfix `!`, or prefix `try`
-  remains deliberately unselected in v0.1. Fallible effects and explicit
-  capture are introduced separately from Result value syntax.
+- Postfix `?`, postfix `!`, prefix `try`, implicit exceptions, and `unwrap` are
+  not part of v0.1. Fallible operations use the effect rules below.
+
+### 4.2 Fallible effects
+
+- A function declares one fallible effect after its success type:
+  `def find_user(id: Integer): User fails DbError`. A function without a return
+  value may write `def save() fails DbError`.
+- A call with an error effect propagates automatically through an enclosing
+  function that declares a compatible `fails` type. The compiler reports an
+  error when a named function neither declares nor captures the effect.
+- `attempt expression` captures an effect as `Result<T, E>`. `attempt do ... end`
+  captures every compatible effect in the block and uses the block's final
+  expression as `T`. A block without a final value produces `Result<Unit, E>`.
+- `main()` cannot declare `fails`; it must capture fallible work explicitly.
+  The REPL top level is the deliberate exception: it executes a fallible call,
+  prints its success or error value, and keeps the session alive. Functions
+  defined in the REPL follow the ordinary declaration rule.
+- Typed IR represents propagation and capture explicitly. Backends may use a
+  native result representation internally, but TypeRB source has identical
+  control flow in Go, Ruby, and TypeScript modes.
