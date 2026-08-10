@@ -273,8 +273,8 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		INSERT INTO categories (id, name) VALUES (1, 'Featured'), (2, 'Archived');
 		INSERT INTO products (category_id, name, price, active) VALUES (1, 'Priority', 10.5, TRUE), (2, 'Archive', NULL, FALSE);
 		INSERT INTO users (id, name) VALUES (1, 'Ada');
-		INSERT INTO projects (id, name) VALUES (1, 'TypeRB');
-		INSERT INTO memberships (id, user_id, project_id) VALUES (1, 1, 1);
+		INSERT INTO projects (id, name) VALUES (1, 'TypeRB'), (2, 'Other');
+		INSERT INTO memberships (id, user_id, project_id) VALUES (1, 1, 1), (2, 1, 2);
 	`); err != nil {
 		database.Close()
 		t.Fatal(err)
@@ -292,12 +292,12 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model, belongs_to, has_many } from trb/orm\n\nclass Category < Model\n\thas_many(Product)\nend\n\nclass Product < Model\n\tbelongs_to(Category)\nend\n\nclass User < Model\n\thas_many(Membership)\n\thas_many(Project, through: :memberships)\nend\n\nclass Project < Model\n\thas_many(Membership)\nend\n\nclass Membership < Model\n\tbelongs_to(User)\n\tbelongs_to(Project)\nend\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { Model, belongs_to, has_many } from trb/orm\n\nclass Category < Model\n\thas_many(Product)\nend\n\nclass Product < Model\n\tbelongs_to(Category)\nend\n\nclass User < Model\n\thas_many(Membership)\n\thas_many(Project, through: :memberships) do |projects|\n\t\tprojects.where(name: \"TypeRB\").order(id: :asc)\n\tend\nend\n\nclass Project < Model\n\thas_many(Membership)\nend\n\nclass Membership < Model\n\tbelongs_to(User)\n\tbelongs_to(Project)\nend\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	input := strings.Join([]string{
-		"import { Category, Product, User } from main",
+		"import { Category, Product, Project, User } from main",
 		"import { Database, DbResult } from trb/orm",
 		"Product.where(id: [1, 2]).to_sql()",
 		`Product.join(:category, Category.where(name: "Featured")).to_sql()`,
@@ -322,6 +322,9 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		"nested_preload_count()",
 		"def user_project_count(): DbResult<Integer>\n\tcase User.all()\n\twhen DbResult::Ok(users)\n\t\treturn users[0].projects_query().count()\n\twhen DbResult::Err(error)\n\t\treturn DbResult<Integer>::Err(error)\n\tend\nend",
 		"user_project_count()",
+		"def preloaded_user_project_count(): DbResult<Integer>\n\tcase User.preload(:projects, Project.where(name: \"TypeRB\")).all()\n\twhen DbResult::Ok(users)\n\t\treturn DbResult<Integer>::Ok(users[0].projects().size())\n\twhen DbResult::Err(error)\n\t\treturn DbResult<Integer>::Err(error)\n\tend\nend",
+		"preloaded_user_project_count()",
+		`User.join(:projects, Project.where(name: "TypeRB")).count()`,
 		"Category.preload(:products, Product.limit(1)).all()",
 		`Product.exists?(name: "Priority")`,
 		"Product.order(id: :asc).pluck(:name)",
@@ -372,6 +375,8 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`DbResult::Ok(value: {2: 1}) : DbResult<Hash<Integer, Integer>>`,
 		`DbResult::Ok(value: {2: 1}) : DbResult<Hash<Integer, Integer>>`,
 		`Featured`,
+		`DbResult::Ok(value: 1) : DbResult<Integer>`,
+		`DbResult::Ok(value: 1) : DbResult<Integer>`,
 		`DbResult::Ok(value: 1) : DbResult<Integer>`,
 		`DbResult::Ok(value: 1) : DbResult<Integer>`,
 		`DbResult::Err(error: DbError(kind: DbErrorKind::InvalidData, message: "ORM preload query does not accept limit, offset, or lock")) : DbResult<Array<Category>>`,

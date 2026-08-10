@@ -2,6 +2,7 @@ package orm
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -38,6 +39,8 @@ type Association struct {
 	Through             string
 	Source              string
 	Dependent           DependentAction
+	Scoped              bool
+	Scope               *ir.Block
 	Preloadable         bool
 	CardinalityVerified bool
 }
@@ -182,6 +185,7 @@ func (m *Manifest) Augment(program *ir.Program) {
 	if m == nil || program == nil {
 		return
 	}
+	m.captureAssociationScopes(program)
 	ensureRuntimeTypes(program)
 	if program.ModulePath == "trb/orm/index" {
 		for _, statement := range program.Statements {
@@ -415,6 +419,79 @@ func (m *Manifest) Augment(program *ir.Program) {
 	}
 }
 
+func (m *Manifest) captureAssociationScopes(program *ir.Program) {
+	for _, statement := range program.Statements {
+		class, ok := statement.(*ir.Class)
+		if !ok {
+			continue
+		}
+		modelIndex := -1
+		for index := range m.Models {
+			if m.Models[index].Name == class.Name && m.Models[index].ModulePath == program.ModulePath {
+				modelIndex = index
+				break
+			}
+		}
+		if modelIndex < 0 {
+			continue
+		}
+		for _, member := range class.Body {
+			expression, ok := member.(*ir.ExpressionStatement)
+			if !ok {
+				continue
+			}
+			call, ok := expression.Expression.(*ir.Call)
+			if !ok || call.Block == nil {
+				continue
+			}
+			callee, ok := call.Callee.(*ir.Identifier)
+			if !ok || callee.Name != string(BelongsTo) && callee.Name != string(HasMany) && callee.Name != string(HasOne) || len(call.Arguments) == 0 {
+				continue
+			}
+			target, ok := call.Arguments[0].Value.(*ir.Identifier)
+			if !ok {
+				continue
+			}
+			name := ""
+			for _, argument := range call.Arguments[1:] {
+				if argument.Name == "name" {
+					name, _ = irStaticName(argument.Value)
+				}
+			}
+			if name == "" {
+				if callee.Name == string(HasMany) {
+					if targetModel, exists := m.Model(target.Name); exists {
+						name = targetModel.Table
+					}
+				} else {
+					name = modelBaseName(target.Name)
+				}
+			}
+			for associationIndex := range m.Models[modelIndex].Associations {
+				association := &m.Models[modelIndex].Associations[associationIndex]
+				if association.Name == name && association.TargetModel == target.Name && string(association.Kind) == callee.Name {
+					association.Scope = call.Block
+				}
+			}
+		}
+	}
+}
+
+func irStaticName(expression ir.Expression) (string, bool) {
+	switch value := expression.(type) {
+	case *ir.Symbol:
+		return value.Name, true
+	case *ir.Literal:
+		if value.Kind != "string" {
+			return "", false
+		}
+		decoded, err := strconv.Unquote(value.Raw)
+		return decoded, err == nil
+	default:
+		return "", false
+	}
+}
+
 func scopeIRMethods(model Model) []ir.Statement {
 	methods := queryIRMethods(model)
 	if primaryKey, ok := model.PrimaryKey(); ok {
@@ -610,7 +687,7 @@ func groupedIRMethods(model Model, column Column) []ir.Statement {
 func joinIRMethod(model Model, name string, class bool) *ir.Method {
 	method := &ir.Method{Name: name, External: true, Class: class, ReturnType: namedType(model.QueryType)}
 	for _, association := range model.Associations {
-		if association.Through != "" {
+		if association.Through != "" && name != "join" && name != "left_join" {
 			continue
 		}
 		associationParameter := ir.Parameter{

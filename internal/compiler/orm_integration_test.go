@@ -969,7 +969,9 @@ func TestPortableORMThroughAssociationCompilesToGo(t *testing.T) {
 
 class User < Model
 	has_many(Membership)
-	has_many(Project, through: :memberships)
+	has_many(Project, through: :memberships) do |projects|
+		projects.where(name: "TypeRB").order(id: :asc)
+	end
 end
 
 class Project < Model
@@ -983,6 +985,8 @@ end
 
 def load_projects(): DbResult<Array<Project>>
 	users := User.all()?
+	joined_users := User.join(:projects, Project.where(name: "TypeRB")).all()?
+	puts(joined_users.size())
 	return users[0].projects_query().all()
 end
 
@@ -1004,6 +1008,9 @@ end
 		`TrbOrmMembershipQueryWhere(TrbOrmMembershipUsing(users[0].TrbOrmTransaction()), []string{"user_id"}, []string{"="}, []any{users[0].TrbOrmColumnId()})`,
 		`orm.TrbOrmJoin{Kind: "INNER JOIN", Table: "memberships", SourceColumn: "id", TargetColumn: "project_id"`,
 		`TrbOrmProjectJoin(TrbOrmProjectUsing(users[0].TrbOrmTransaction())`,
+		`Build: func(arguments *[]any) string`,
+		`trbOrmQuoteIdentifier("memberships")`,
+		`func(projects TrbOrmProjectQuery) TrbOrmProjectQuery`,
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated through association query is missing %q:\n%s", expected, output)
@@ -1011,6 +1018,15 @@ end
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
 		t.Fatalf("generated invalid through association Go: %v\n%s", err, output)
+	}
+	invalidScope := []byte(strings.Replace(string(source), "do |projects|\n\t\tprojects.where(name: \"TypeRB\").order(id: :asc)", "do |_projects|\n\t\tUser.where()", 1))
+	if _, err := CompileProject([]SourceUnit{{
+		Filename: filepath.Join(root, "src", "invalid.trb"), ModulePath: "invalid", Package: "main", Source: invalidScope,
+	}}, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	}); err == nil || !strings.Contains(err.Error(), "has_many block result has type UserQuery, expected ProjectQuery") {
+		t.Fatalf("expected typed association scope diagnostic, got %v", err)
 	}
 }
 

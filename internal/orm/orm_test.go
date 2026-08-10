@@ -252,7 +252,7 @@ end
 		t.Fatalf("unexpected custom association metadata: %#v", authored)
 	}
 	projects, ok := user.Association("projects")
-	if !ok || projects.Through != "memberships" || projects.Source != "project" || projects.TargetModel != "Project" || projects.Preloadable {
+	if !ok || projects.Through != "memberships" || projects.Source != "project" || projects.TargetModel != "Project" || !projects.Preloadable {
 		t.Fatalf("unexpected through association metadata: %#v", projects)
 	}
 	post, _ := manifest.Model("Post")

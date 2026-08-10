@@ -21,6 +21,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		return nil, err
 	}
 	catalog := declaration.NewCatalog()
+	for _, function := range []string{string(BelongsTo), string(HasMany), string(HasOne)} {
+		catalog.FunctionBlockRules = append(catalog.FunctionBlockRules, declaration.FunctionBlockRule{
+			Package: PackageName, Function: function, EnclosingSuperclass: "Model",
+			TypeArgument: 0, ParameterTypeSuffix: "Query",
+		})
+	}
 	database := declaration.NewType("Database", "")
 	database.ClassMembers["transaction"] = transactionDeclaration(true)
 	catalog.Types["Database"] = database
@@ -298,7 +304,7 @@ func joinDeclaration(model Model, name, intrinsic string, class bool) declaratio
 		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
 	}
 	for _, association := range model.Associations {
-		if association.Through != "" {
+		if association.Through != "" && name != "join" && name != "left_join" {
 			continue
 		}
 		associationParameter := declaration.Parameter{
@@ -781,6 +787,7 @@ type associationSpec struct {
 	Through     string
 	Source      string
 	Dependent   DependentAction
+	Scoped      bool
 }
 
 func discoverAssociationSpecs(source Model, class *ast.ClassStatement, models map[string]*Model) ([]associationSpec, error) {
@@ -810,6 +817,15 @@ func discoverAssociationSpecs(source Model, class *ast.ClassStatement, models ma
 			return nil, fmt.Errorf("trb/orm %s.%s references unknown model %s", source.Name, callee.Name, targetName)
 		}
 		spec := associationSpec{Kind: AssociationKind(callee.Name), TargetModel: targetName}
+		if call.Block != nil {
+			if len(call.Block.Parameters) != 1 || len(call.Block.Body) != 1 {
+				return nil, fmt.Errorf("trb/orm %s.%s scope must have one query parameter and one result expression", source.Name, callee.Name)
+			}
+			if _, ok := call.Block.Body[0].(*ast.ExpressionStatement); !ok {
+				return nil, fmt.Errorf("trb/orm %s.%s scope must return one query expression", source.Name, callee.Name)
+			}
+			spec.Scoped = true
+		}
 		options := map[string]string{}
 		for _, argument := range call.Arguments[1:] {
 			if argument.Name == "" {
@@ -899,7 +915,7 @@ func buildAssociation(source, target Model, spec associationSpec, schema *Schema
 	}
 	association := Association{
 		Name: spec.Name, Kind: spec.Kind, TargetModel: target.Name, TargetQuery: target.QueryType,
-		Inverse: spec.Inverse, Dependent: spec.Dependent,
+		Inverse: spec.Inverse, Dependent: spec.Dependent, Scoped: spec.Scoped,
 	}
 	var foreignKeys []ForeignKey
 	foreignTable, foreignColumn := "", ""
@@ -1013,7 +1029,8 @@ func buildThroughAssociation(source Model, spec associationSpec, models map[stri
 	}
 	return Association{
 		Name: name, Kind: spec.Kind, TargetModel: spec.TargetModel, TargetQuery: models[spec.TargetModel].QueryType,
-		Inverse: spec.Inverse, Through: spec.Through, Source: sourceName, Dependent: spec.Dependent,
+		Inverse: spec.Inverse, Through: spec.Through, Source: sourceName, Dependent: spec.Dependent, Scoped: spec.Scoped,
+		Preloadable: source.ModulePath == middle.ModulePath && middle.ModulePath == models[spec.TargetModel].ModulePath && through.Preloadable && via.Preloadable,
 	}, nil
 }
 
