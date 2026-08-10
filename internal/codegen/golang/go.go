@@ -1138,6 +1138,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 		inConstructor: g.inConstructor,
 		methods:       g.methods,
 		topMethods:    g.topMethods,
+		topTargets:    g.topTargets,
 		staticMethods: g.staticMethods,
 		records:       g.records,
 		classes:       g.classes,
@@ -1147,6 +1148,8 @@ func (g *generator) ifExpression(node *ir.If) string {
 		modulePath:    g.modulePath,
 		goModule:      g.goModule,
 		temporary:     g.temporary,
+		breakTarget:   g.breakTarget,
+		orm:           g.orm,
 	}
 	child.line("func() " + child.goType(node.ExprType()) + " {")
 	child.indent++
@@ -1187,6 +1190,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		inConstructor: g.inConstructor,
 		methods:       g.methods,
 		topMethods:    g.topMethods,
+		topTargets:    g.topTargets,
 		staticMethods: g.staticMethods,
 		records:       g.records,
 		classes:       g.classes,
@@ -1196,6 +1200,8 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		modulePath:    g.modulePath,
 		goModule:      g.goModule,
 		temporary:     g.temporary,
+		breakTarget:   g.breakTarget,
+		orm:           g.orm,
 	}
 	child.line("func() " + child.goType(node.ExprType()) + " {")
 	child.indent++

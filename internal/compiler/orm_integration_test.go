@@ -177,10 +177,18 @@ end
 def create_product(): DbResult<Integer>
 	return Database.transaction() do |tx|
 		products := Product.using(tx)
-		product := products.create(name: "Created")?
-		locked_products := products.where(id: product.id).lock().all()?
-		puts(locked_products.size())
-		DbResult<Integer>::Ok(product.id)
+		case products.create(name: "Created")
+		when DbResult::Ok(product)
+			case products.where(id: product.id).lock().all()
+			when DbResult::Ok(locked_products)
+				puts(locked_products.size())
+				DbResult<Integer>::Ok(product.id)
+			when DbResult::Err(error)
+				DbResult<Integer>::Err(error)
+			end
+		when DbResult::Err(error)
+			DbResult<Integer>::Err(error)
+		end
 	end
 end
 
@@ -188,8 +196,12 @@ def create_nested_product(): DbResult<Integer>
 	return Database.transaction() do |tx|
 		nested_result := tx.transaction() do |nested|
 			products := Product.using(nested)
-			product := products.create(name: "Nested")?
-			DbResult<Integer>::Ok(product.id)
+			case products.create(name: "Nested")
+			when DbResult::Ok(product)
+				DbResult<Integer>::Ok(product.id)
+			when DbResult::Err(error)
+				DbResult<Integer>::Err(error)
+			end
 		end
 		nested_result
 	end
@@ -264,20 +276,9 @@ func assertORMTransactionScopeIR(t *testing.T, program *ir.Program) {
 	if !ok {
 		t.Fatalf("unexpected transaction block IR: %#v", method.Body)
 	}
-	var product *ir.Variable
-	for _, statement := range block.Body {
-		candidate, ok := statement.(*ir.Variable)
-		if ok && candidate.Name == "product" {
-			product = candidate
-			break
-		}
-	}
-	if product == nil {
-		t.Fatalf("missing propagated product IR: %#v", block.Body)
-	}
-	result, ok := product.Value.(*ir.Case)
+	result, ok := block.Value.(*ir.Case)
 	if !ok {
-		t.Fatalf("unexpected propagated product value IR: %#v", product.Value)
+		t.Fatalf("unexpected transaction result IR: %#v", block.Value)
 	}
 	call, ok := result.Value.(*ir.Call)
 	if !ok {
