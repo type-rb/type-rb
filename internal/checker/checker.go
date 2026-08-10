@@ -34,6 +34,7 @@ type Result struct {
 	CasePatterns        map[ast.Expression]CasePattern
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
+	TypeAliases         map[*ast.TypeAliasStatement]TypeAlias
 	ExternalMembers     map[ast.Expression]declaration.Member
 	RuntimeDependencies map[string]*stdlib.Package
 	ImportUses          map[*ast.ImportStatement]map[string]bool
@@ -42,6 +43,11 @@ type Result struct {
 type CodecApplication struct {
 	Operation string
 	Schema    CodecSchema
+}
+
+type TypeAlias struct {
+	Target   types.Type
+	Variants []EnumVariant
 }
 
 type CodecSchema struct {
@@ -167,6 +173,12 @@ type enumInfo struct {
 	byName         map[string]*ast.EnumMemberStatement
 }
 
+type aliasInfo struct {
+	statement      *ast.TypeAliasStatement
+	typeParameters []string
+	target         types.Type
+}
+
 type typeDeclaration struct {
 	kind           string
 	span           token.Span
@@ -180,6 +192,7 @@ type Checker struct {
 	classes            map[string]*classInfo
 	records            map[string]*recordInfo
 	enums              map[string]*enumInfo
+	aliases            map[string]*aliasInfo
 	interfaces         map[string]*ast.InterfaceStatement
 	functions          map[string]*ast.MethodStatement
 	current            *classInfo
@@ -197,6 +210,7 @@ type Checker struct {
 	enumPatternType    types.Type
 	usedImports        map[*ast.ImportStatement]map[string]bool
 	allowUnusedImports bool
+	aliasCycles        map[string]bool
 }
 
 type Options struct {
@@ -227,6 +241,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			CasePatterns:        map[ast.Expression]CasePattern{},
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
+			TypeAliases:         map[*ast.TypeAliasStatement]TypeAlias{},
 			ExternalMembers:     map[ast.Expression]declaration.Member{},
 			RuntimeDependencies: map[string]*stdlib.Package{},
 			ImportUses:          importUses,
@@ -234,6 +249,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		classes:            map[string]*classInfo{},
 		records:            map[string]*recordInfo{},
 		enums:              map[string]*enumInfo{},
+		aliases:            map[string]*aliasInfo{},
 		interfaces:         map[string]*ast.InterfaceStatement{},
 		functions:          map[string]*ast.MethodStatement{},
 		resolution:         resolution,
@@ -241,6 +257,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		declaredTypes:      map[string]typeDeclaration{},
 		usedImports:        importUses,
 		allowUnusedImports: options.AllowUnusedImports,
+		aliasCycles:        map[string]bool{},
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ast.MethodStatement); ok {
@@ -265,6 +282,8 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement) {
 			c.validateTypeReferences(node.Body)
 		case *ast.EnumStatement:
 			c.validateTypeReferences(node.Body)
+		case *ast.TypeAliasStatement:
+			c.validateTypeReference(node.Target)
 		case *ast.EnumMemberStatement:
 			for _, parameter := range node.Parameters {
 				c.validateTypeReference(parameter.Type)
@@ -435,7 +454,7 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 		c.error(ref.Span(), fmt.Sprintf("Hash expects two type arguments, got %d", len(ref.Arguments)))
 		return
 	}
-	key := fromTypeRef(ref.Arguments[0])
+	key := c.typeFromRef(ref.Arguments[0])
 	if !portableHashKey(key) {
 		c.error(ref.Arguments[0].Span(), fmt.Sprintf("Hash key type must be String or Integer, got %s", key))
 	}
@@ -523,6 +542,18 @@ func (c *Checker) collect(statements []ast.Statement) {
 				info.byName[member.Name] = member
 			}
 			c.enums[n.Name] = info
+		case *ast.TypeAliasStatement:
+			if !c.declareType(n.Name, "type alias", n.Span()) {
+				continue
+			}
+			info := &aliasInfo{statement: n, target: fromTypeRef(n.Target)}
+			for _, parameter := range n.TypeParameters {
+				info.typeParameters = append(info.typeParameters, parameter.Name)
+			}
+			declaration := c.declaredTypes[n.Name]
+			declaration.typeParameters = append([]string(nil), info.typeParameters...)
+			c.declaredTypes[n.Name] = declaration
+			c.aliases[n.Name] = info
 		case *ast.InterfaceStatement:
 			if c.declareType(n.Name, "interface", n.Span()) {
 				c.interfaces[n.Name] = n
@@ -565,7 +596,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			classScope := &scope{parent: sc, values: map[string]symbol{"self": {typ: types.FromName(n.Name)}}, constantsAllowed: true, constantOwner: owner}
 			for name, field := range c.current.fields {
-				classScope.values[name] = symbol{typ: fromTypeRef(field.Type), mutable: !field.ReadOnly, span: field.Span()}
+				classScope.values[name] = symbol{typ: c.typeFromRef(field.Type), mutable: !field.ReadOnly, span: field.Span()}
 			}
 			c.checkStatements(n.Body, classScope)
 			c.checkFieldInitialization(n)
@@ -628,6 +659,27 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 		case *ast.EnumMemberStatement:
 			// Checked as part of its enclosing enum.
+		case *ast.TypeAliasStatement:
+			if !sc.enumsAllowed {
+				c.error(n.Span(), fmt.Sprintf("type alias %s may only be declared at top level or directly inside a module", n.Name))
+			}
+			if !isConstant(n.Name) {
+				c.error(n.Span(), "type alias name must begin with an uppercase letter")
+			}
+			c.checkTypeParameters(n.TypeParameters)
+			if n.Target.Empty() {
+				c.error(n.Span(), fmt.Sprintf("type alias %s requires a target type", n.Name))
+			}
+			aliasType := types.FromName(n.Name)
+			for _, parameter := range n.TypeParameters {
+				aliasType.Args = append(aliasType.Args, types.FromName(parameter.Name))
+			}
+			target := c.expandAlias(aliasType, map[string]bool{})
+			alias := TypeAlias{Target: target}
+			if variants, ok := c.enumVariants(aliasType); ok {
+				alias.Variants = variants
+			}
+			c.result.TypeAliases[n] = alias
 		case *ast.RecordFieldStatement:
 			// Checked as part of its enclosing record.
 		case *ast.ModuleStatement:
@@ -647,7 +699,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 		case *ast.FieldStatement:
 			if n.Value != nil {
 				valueType := c.checkExpression(n.Value, sc)
-				declared := fromTypeRef(n.Type)
+				declared := c.typeFromRef(n.Type)
 				valueType = c.contextualizeCollectionLiteral(n.Value, declared, valueType)
 				if !n.Type.Empty() && !c.assignable(n.Value, declared, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot initialize %s with %s", declared, valueType))
@@ -657,6 +709,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.checkMethod(n, sc)
 		case *ast.VariableStatement:
 			valueType := c.checkExpression(n.Value, sc)
+			c.checkStructuredBlockValue(n.Value)
 			variableType := valueType
 			if n.Name == "_" {
 				c.error(n.Span(), "blank binding _ is only valid as a parameter or pattern binding")
@@ -670,7 +723,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				}
 			}
 			if !n.Type.Empty() {
-				variableType = fromTypeRef(n.Type)
+				variableType = c.typeFromRef(n.Type)
 				valueType = c.contextualizeCollectionLiteral(n.Value, variableType, valueType)
 				if !c.assignable(n.Value, variableType, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", valueType, variableType))
@@ -703,6 +756,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 		case *ast.AssignmentStatement:
 			leftType := c.checkExpression(n.Target, sc)
 			rightType := c.checkExpression(n.Value, sc)
+			c.checkStructuredBlockValue(n.Value)
 			rightType = c.contextualizeCollectionLiteral(n.Value, leftType, rightType)
 			if identifier, ok := n.Target.(*ast.Identifier); ok && !strings.HasPrefix(identifier.Name, "@") {
 				if _, exists := sc.lookup(identifier.Name); !exists {
@@ -744,6 +798,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			actual := types.Type{Kind: types.Void, Name: "Void"}
 			if n.Value != nil {
 				actual = c.checkExpression(n.Value, sc)
+				c.checkStructuredBlockValue(n.Value)
 			}
 			if len(c.returns) == 0 {
 				c.error(n.Span(), "return is only valid inside a function or method")
@@ -764,6 +819,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 		case *ast.ExpressionStatement:
 			c.checkExpression(n.Expression, sc)
+			if call, member, ok := c.structuredBlockCall(n.Expression); ok && member.Block.Structured {
+				c.error(call.Span(), fmt.Sprintf("result of %s() must be assigned or returned", member.Name))
+			}
 		case *ast.IfStatement:
 			c.checkIf(n, sc, false)
 		case *ast.CaseStatement:
@@ -960,7 +1018,7 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool)
 		c.enumPattern--
 		c.enumPatternType = previousPatternType
 		variant, member := c.caseEnumVariant(branch.Value, selectorType)
-		if !member || !types.Equivalent(selectorType, branchType) {
+		if !member || !c.typesEquivalent(selectorType, branchType) {
 			if selectorType.Kind != types.Invalid {
 				c.error(branch.Value.Span(), fmt.Sprintf("when value must be a member of %s", selectorType))
 			}
@@ -1214,6 +1272,24 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 	if typ.Nullable {
 		return nil, false
 	}
+	if parameters, target, alias := c.aliasDefinition(typ.Name); alias {
+		expanded := substituteType(target, typeSubstitutions(parameters, typ.Args))
+		expanded = c.expandAlias(expanded, map[string]bool{})
+		variants, ok := c.enumVariants(expanded)
+		if !ok {
+			return nil, false
+		}
+		result := make([]EnumVariant, len(variants))
+		for index, variant := range variants {
+			result[index] = variant
+			result[index].EnumName = typ.Name
+			result[index].TypeArguments = append([]types.Type(nil), typ.Args...)
+			if reference, exists := c.resolution.TypeMember(typ.Name, variant.Name); exists {
+				result[index].Reference = &reference
+			}
+		}
+		return result, true
+	}
 	if info := c.enums[typ.Name]; info != nil {
 		substitutions := typeSubstitutions(info.typeParameters, typ.Args)
 		variants := make([]EnumVariant, 0, len(info.members))
@@ -1221,7 +1297,7 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 			member := info.byName[name]
 			variant := EnumVariant{EnumName: typ.Name, Name: name, TypeArguments: append([]types.Type(nil), typ.Args...)}
 			for _, parameter := range member.Parameters {
-				variant.Fields = append(variant.Fields, EnumField{Name: parameter.Name, Type: substituteType(fromTypeRef(parameter.Type), substitutions)})
+				variant.Fields = append(variant.Fields, EnumField{Name: parameter.Name, Type: substituteType(c.typeFromRef(parameter.Type), substitutions)})
 			}
 			variants = append(variants, variant)
 		}
@@ -1248,6 +1324,18 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 		}
 		return variants, true
 	}
+	if exported, ok := c.resolution.CompilerOwnedType(typ.Name); ok && exported.Kind == resolver.EnumExport {
+		substitutions := typeSubstitutions(exported.TypeParameters, typ.Args)
+		variants := make([]EnumVariant, 0, len(exported.EnumVariants))
+		for _, imported := range exported.EnumVariants {
+			variant := EnumVariant{EnumName: typ.Name, Name: imported.Name, TypeArguments: append([]types.Type(nil), typ.Args...)}
+			for _, field := range imported.Fields {
+				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: substituteType(field.Type, substitutions)})
+			}
+			variants = append(variants, variant)
+		}
+		return variants, true
+	}
 	return nil, false
 }
 
@@ -1269,10 +1357,10 @@ func (c *Checker) caseEnumVariant(expression ast.Expression, selectorType types.
 		return EnumVariant{}, false
 	}
 	receiverType := c.result.Expressions[member.Receiver]
-	if !types.Equivalent(receiverType, selectorType) {
+	if !c.typesEquivalent(receiverType, selectorType) {
 		return EnumVariant{}, false
 	}
-	variants, ok := c.enumVariants(selectorType)
+	variants, ok := c.enumVariants(receiverType)
 	if !ok {
 		return EnumVariant{}, false
 	}
@@ -1345,11 +1433,14 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 	}
 	application := GenericApplication{Name: name}
 	for _, argument := range node.Arguments {
-		application.TypeArguments = append(application.TypeArguments, fromTypeRef(argument))
+		application.TypeArguments = append(application.TypeArguments, c.typeFromRef(argument))
 	}
 
 	if info := c.enums[name]; info != nil {
 		application.Kind = "enum"
+		application.TypeParameters = append([]string(nil), info.typeParameters...)
+	} else if info := c.aliases[name]; info != nil {
+		application.Kind = "type_alias"
 		application.TypeParameters = append([]string(nil), info.typeParameters...)
 	} else if method := c.functions[name]; method != nil {
 		application.Kind = "function"
@@ -1357,19 +1448,21 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.TypeParameters = append(application.TypeParameters, parameter.Name)
 		}
 		for _, parameter := range method.Parameters {
-			application.Parameters = append(application.Parameters, fromTypeRef(parameter.Type))
+			application.Parameters = append(application.Parameters, c.typeFromRef(parameter.Type))
 			if parameter.Default == nil && !parameter.Rest && !parameter.KeywordRest {
 				application.Required++
 			}
 			application.Variadic = application.Variadic || parameter.Rest || parameter.KeywordRest
 		}
-		application.ReturnType = methodReturnType(method)
+		application.ReturnType = c.methodReturnType(method)
 	} else if binding, ok := c.result.References[node.Receiver]; ok {
 		if binding.Export != nil {
 			application.TypeParameters = append([]string(nil), binding.Export.TypeParameters...)
 			switch binding.Export.Kind {
 			case resolver.EnumExport:
 				application.Kind = "enum"
+			case resolver.TypeAliasExport:
+				application.Kind = "type_alias"
 			case resolver.FunctionExport:
 				application.Kind = "function"
 				application.Parameters = append([]types.Type(nil), binding.Export.Parameters...)
@@ -1400,7 +1493,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 		return application, true
 	}
 	substitutions := typeSubstitutions(application.TypeParameters, application.TypeArguments)
-	if application.Kind == "enum" {
+	if application.Kind == "enum" || application.Kind == "type_alias" {
 		application.ReturnType = types.Type{Kind: types.Named, Name: name, Args: append([]types.Type(nil), application.TypeArguments...)}
 	} else {
 		for index := range application.Parameters {
@@ -1537,7 +1630,7 @@ func (c *Checker) codecRecord(name string) ([]resolver.RecordField, string, *res
 	if record := c.records[name]; record != nil {
 		fields := make([]resolver.RecordField, len(record.fields))
 		for index, field := range record.fields {
-			fields[index] = resolver.RecordField{Name: field.Name, JSONName: checkerRecordJSONName(field), Type: fromTypeRef(field.Type)}
+			fields[index] = resolver.RecordField{Name: field.Name, JSONName: checkerRecordJSONName(field), Type: c.typeFromRef(field.Type)}
 		}
 		return fields, c.result.Program.ModulePath, nil, true
 	}
@@ -1739,6 +1832,8 @@ func (c *Checker) assignable(expression ast.Expression, target, actual types.Typ
 }
 
 func (c *Checker) typesAssignable(target, actual types.Type) bool {
+	target = c.expandAlias(target, map[string]bool{})
+	actual = c.expandAlias(actual, map[string]bool{})
 	if types.Assignable(target, actual) {
 		return true
 	}
@@ -1775,6 +1870,12 @@ func (c *Checker) typesAssignable(target, actual types.Type) bool {
 		return true
 	}
 	return target.Kind == types.Named && actual.Kind == types.Named && c.isInterface(target.Name) && c.classImplements(actual.Name, target.Name, map[string]bool{})
+}
+
+func (c *Checker) typesEquivalent(left, right types.Type) bool {
+	left = c.expandAlias(left, map[string]bool{})
+	right = c.expandAlias(right, map[string]bool{})
+	return types.Equivalent(left, right)
 }
 
 func (c *Checker) isInterface(name string) bool {
@@ -1887,7 +1988,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	methodScope := &scope{parent: parent, values: map[string]symbol{}}
 	seenPositionalDefault := false
 	for _, parameter := range method.Parameters {
-		typ := fromTypeRef(parameter.Type)
+		typ := c.typeFromRef(parameter.Type)
 		if parameter.Type.Empty() {
 			typ = types.Type{Kind: types.Any, Name: "Any"}
 		}
@@ -1910,7 +2011,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		}
 		methodScope.values[parameter.Name] = symbol{typ: typ, mutable: true, span: parameter.Span()}
 	}
-	returnType := fromTypeRef(method.ReturnType)
+	returnType := c.typeFromRef(method.ReturnType)
 	if method.ReturnType.Empty() {
 		returnType = types.Type{Kind: types.Void, Name: "Void"}
 	}
@@ -2128,7 +2229,7 @@ func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
 		required := map[string]methodSignature{}
 		if local := c.interfaces[interfaceName]; local != nil {
 			for _, method := range local.Methods {
-				required[method.Name] = signatureFromMethod(method)
+				required[method.Name] = c.signatureFromMethod(method)
 			}
 		} else if imported, ok := c.resolution.ImportedType(interfaceName); ok && imported.Export.Kind == resolver.InterfaceExport {
 			c.markImportUsed(imported)
@@ -2159,7 +2260,7 @@ func (c *Checker) classMethodSignature(className, memberName string, seen map[st
 	seen[className] = true
 	if info := c.classes[className]; info != nil {
 		if method := info.methods[memberName]; method != nil && !method.Class {
-			return signatureFromMethod(method), true
+			return c.signatureFromMethod(method), true
 		}
 		if signature, ok := c.classMethodSignature(info.superclass, memberName, seen); ok {
 			return signature, true
@@ -2171,10 +2272,10 @@ func (c *Checker) classMethodSignature(className, memberName string, seen map[st
 	return methodSignature{}, false
 }
 
-func signatureFromMethod(method *ast.MethodStatement) methodSignature {
-	result := methodSignature{returnType: methodReturnType(method)}
+func (c *Checker) signatureFromMethod(method *ast.MethodStatement) methodSignature {
+	result := methodSignature{returnType: c.methodReturnType(method)}
 	for _, parameter := range method.Parameters {
-		result.parameters = append(result.parameters, fromTypeRef(parameter.Type))
+		result.parameters = append(result.parameters, c.typeFromRef(parameter.Type))
 		if parameter.Default == nil && !parameter.Rest && !parameter.KeywordRest {
 			result.required++
 		}
@@ -2209,14 +2310,14 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 	seen[className] = true
 	if info := c.classes[className]; info != nil {
 		if method := info.methods[memberName]; method != nil && method.Class == class {
-			return classMember{typ: methodReturnType(method), method: method}, true
+			return classMember{typ: c.methodReturnType(method), method: method}, true
 		}
 		if !class {
 			if field := info.fields["@"+memberName]; field != nil {
-				return classMember{typ: fromTypeRef(field.Type), field: field}, true
+				return classMember{typ: c.typeFromRef(field.Type), field: field}, true
 			}
 			if field := info.fields["@_"+strings.TrimPrefix(memberName, "_")]; field != nil {
-				return classMember{typ: fromTypeRef(field.Type), field: field}, true
+				return classMember{typ: c.typeFromRef(field.Type), field: field}, true
 			}
 		}
 		if member, ok := c.localMember(info.superclass, memberName, class, seen); ok {
@@ -2422,7 +2523,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.result.ExternalMembers[n] = member
 		} else if strings.HasPrefix(n.Name, "@") && c.current != nil {
 			if field, ok := c.current.fields[n.Name]; ok {
-				typ = fromTypeRef(field.Type)
+				typ = c.typeFromRef(field.Type)
 			}
 		} else if isConstant(n.Name) {
 			typ = types.FromName(n.Name)
@@ -2664,6 +2765,22 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if c.enumPattern > 0 && receiverType.Name == c.enumPatternType.Name && len(receiverType.Args) == 0 {
 			receiverType = c.enumPatternType
 			c.result.Expressions[n.Receiver] = receiverType
+		} else if c.enumPattern > 0 && len(receiverType.Args) == 0 {
+			if parameters, target, alias := c.aliasDefinition(receiverType.Name); alias {
+				parameterSet := map[string]bool{}
+				for _, parameter := range parameters {
+					parameterSet[parameter] = true
+				}
+				bindings := map[string]types.Type{}
+				bindDeclarationType(target, c.enumPatternType, parameterSet, bindings)
+				if len(bindings) == len(parameters) {
+					receiverType.Args = make([]types.Type, len(parameters))
+					for index, parameter := range parameters {
+						receiverType.Args[index] = bindings[parameter]
+					}
+					c.result.Expressions[n.Receiver] = receiverType
+				}
+			}
 		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
 		if identifier, ok := n.Receiver.(*ast.Identifier); ok {
@@ -2725,7 +2842,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if record := c.records[receiverType.Name]; record != nil && record.byName[n.Name] != nil {
-			typ = fromTypeRef(record.byName[n.Name].Type)
+			typ = c.typeFromRef(record.byName[n.Name].Type)
 		} else if member, found := c.localMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); found {
 			typ = member.typ
 		} else if binding, exists := c.importedAncestorMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
@@ -2849,7 +2966,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			receiverType := c.checkExpression(member.Receiver, sc)
 			classAccess := c.classMemberAccess(member.Receiver, sc)
 			if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
-				typ = methodReturnType(local.method)
+				typ = c.methodReturnType(local.method)
 				c.checkArguments(n.Span(), local.method, n.Arguments, argumentTypes)
 			}
 		}
@@ -2863,14 +2980,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				if method.Class != c.classMethod {
 					c.memberKindMismatch(identifier.Span(), c.current.name, identifier.Name, c.classMethod)
 				} else {
-					typ = methodReturnType(method)
+					typ = c.methodReturnType(method)
 					c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
 				}
 			} else if method := c.functions[identifier.Name]; method != nil {
 				if len(method.TypeParameters) > 0 {
 					c.error(identifier.Span(), fmt.Sprintf("generic function %s requires explicit type arguments", identifier.Name))
 				} else {
-					typ = methodReturnType(method)
+					typ = c.methodReturnType(method)
 					c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
 				}
 			} else if c.mode != "ruby" {
@@ -3083,7 +3200,7 @@ func iterableElementType(typ types.Type) (types.Type, bool) {
 func (c *Checker) checkLocalRecordArguments(call *ast.CallExpression, record *recordInfo) {
 	fields := make([]resolver.RecordField, len(record.fields))
 	for index, field := range record.fields {
-		fields[index] = resolver.RecordField{Name: field.Name, Type: fromTypeRef(field.Type)}
+		fields[index] = resolver.RecordField{Name: field.Name, Type: c.typeFromRef(field.Type)}
 	}
 	c.checkRecordArguments(call, record.name, fields)
 }
@@ -3483,6 +3600,9 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		c.error(call.Span(), fmt.Sprintf("%s() requires a block", member.Name))
 		return
 	}
+	if member.Block.Structured && len(c.returns) == 0 {
+		c.error(call.Span(), fmt.Sprintf("structured block %s() is only valid inside a function or method", member.Name))
+	}
 	if len(call.Block.Parameters) != len(member.Block.Parameters) {
 		c.error(call.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", member.Name, len(member.Block.Parameters), len(call.Block.Parameters)))
 	}
@@ -3508,6 +3628,28 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 	c.checkStatements(call.Block.Body, blockScope)
 	c.loopDepth--
 	c.result.Expressions[call.Block] = types.Type{Kind: types.Void, Name: "Void"}
+}
+
+func (c *Checker) structuredBlockCall(expression ast.Expression) (*ast.CallExpression, declaration.Member, bool) {
+	call, ok := expression.(*ast.CallExpression)
+	if !ok || call.Block == nil {
+		return nil, declaration.Member{}, false
+	}
+	member, ok := c.result.ExternalMembers[call.Callee]
+	return call, member, ok && member.Block != nil
+}
+
+func (c *Checker) checkStructuredBlockValue(expression ast.Expression) {
+	call, member, ok := c.structuredBlockCall(expression)
+	if !ok {
+		if call, isCall := expression.(*ast.CallExpression); isCall && call.Block != nil {
+			c.error(call.Span(), "call block cannot be used as a value without a structured package declaration")
+		}
+		return
+	}
+	if !member.Block.Structured {
+		c.error(call.Span(), fmt.Sprintf("block call %s() cannot be used as a value", member.Name))
+	}
 }
 
 func (c *Checker) checkNativeCallBlock(block *ast.BlockExpression, sc *scope) {
@@ -3679,11 +3821,11 @@ func integerLiteral(raw string) (int, bool) {
 	return value, err == nil
 }
 
-func methodReturnType(method *ast.MethodStatement) types.Type {
+func (c *Checker) methodReturnType(method *ast.MethodStatement) types.Type {
 	if method == nil || method.ReturnType.Empty() {
 		return types.Type{Kind: types.Void, Name: "Void"}
 	}
-	return fromTypeRef(method.ReturnType)
+	return c.typeFromRef(method.ReturnType)
 }
 
 func (c *Checker) checkArguments(span token.Span, method *ast.MethodStatement, arguments []ast.CallArgument, actual []types.Type) {
@@ -3712,7 +3854,7 @@ func (c *Checker) checkArguments(span token.Span, method *ast.MethodStatement, a
 		if i >= len(method.Parameters) {
 			break
 		}
-		expected := fromTypeRef(method.Parameters[i].Type)
+		expected := c.typeFromRef(method.Parameters[i].Type)
 		if method.Parameters[i].Type.Empty() || method.Parameters[i].Rest || method.Parameters[i].KeywordRest {
 			continue
 		}
@@ -3741,6 +3883,64 @@ func fromTypeRef(ref ast.TypeRef) types.Type {
 		t = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{t}, Nullable: ref.Nullable}
 	}
 	return t
+}
+
+func (c *Checker) typeFromRef(ref ast.TypeRef) types.Type {
+	return c.expandAlias(fromTypeRef(ref), map[string]bool{})
+}
+
+func (c *Checker) aliasDefinition(name string) ([]string, types.Type, bool) {
+	if alias := c.aliases[name]; alias != nil {
+		return alias.typeParameters, alias.target, true
+	}
+	if binding, imported := c.resolution.ImportedType(name); imported && binding.Export.Kind == resolver.TypeAliasExport {
+		return binding.Export.TypeParameters, binding.Export.AliasTarget, true
+	}
+	if exported, exists := c.resolution.CompilerOwnedType(name); exists && exported.Kind == resolver.TypeAliasExport {
+		return exported.TypeParameters, exported.AliasTarget, true
+	}
+	return nil, types.Type{}, false
+}
+
+func (c *Checker) expandAlias(typ types.Type, visiting map[string]bool) types.Type {
+	if typ.Kind == types.Union {
+		result := typ
+		result.Args = make([]types.Type, len(typ.Args))
+		for index, alternative := range typ.Args {
+			result.Args[index] = c.expandAlias(alternative, visiting)
+		}
+		return result
+	}
+	arguments := make([]types.Type, len(typ.Args))
+	for index, argument := range typ.Args {
+		arguments[index] = c.expandAlias(argument, visiting)
+	}
+	typ.Args = arguments
+	parameters, target, alias := c.aliasDefinition(typ.Name)
+	if !alias {
+		return typ
+	}
+	if visiting[typ.Name] {
+		if !c.aliasCycles[typ.Name] {
+			span := token.Span{}
+			if local := c.aliases[typ.Name]; local != nil {
+				span = local.statement.Span()
+			}
+			c.error(span, "type alias cycle involving "+typ.Name)
+			c.aliasCycles[typ.Name] = true
+		}
+		return invalidType()
+	}
+	if len(parameters) != len(typ.Args) {
+		return typ
+	}
+	visiting[typ.Name] = true
+	expanded := substituteType(target, typeSubstitutions(parameters, typ.Args))
+	expanded.Nullable = expanded.Nullable || typ.Nullable
+	expanded.Readonly = expanded.Readonly || typ.Readonly
+	expanded = c.expandAlias(expanded, visiting)
+	delete(visiting, typ.Name)
+	return expanded
 }
 
 func isConstant(name string) bool {

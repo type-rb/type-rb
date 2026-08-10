@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -26,9 +27,10 @@ type Config struct {
 }
 
 type Schema struct {
-	Adapter  string
-	Database string
-	Tables   []Table
+	Adapter             string
+	Database            string
+	DatabaseEnvironment string
+	Tables              []Table
 }
 
 type Table struct {
@@ -65,9 +67,28 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
-	var config Config
-	if err := decoder.Decode(&config); err != nil {
+	var encoded struct {
+		Adapter  string          `json:"adapter"`
+		Database json.RawMessage `json:"database"`
+	}
+	if err := decoder.Decode(&encoded); err != nil {
 		return nil, fmt.Errorf("packageOptions.%q: %w", PackageName, err)
+	}
+	config := Config{Adapter: encoded.Adapter}
+	databaseEnvironment, err := decodeDatabaseSource(encoded.Database)
+	if err != nil {
+		return nil, fmt.Errorf("packageOptions.%q.database: %w", PackageName, err)
+	}
+	if databaseEnvironment == "" {
+		if err := json.Unmarshal(encoded.Database, &config.Database); err != nil {
+			return nil, fmt.Errorf("packageOptions.%q.database: must be a string or environment source", PackageName)
+		}
+	} else {
+		value, found := os.LookupEnv(databaseEnvironment)
+		if !found || strings.TrimSpace(value) == "" {
+			return nil, fmt.Errorf("packageOptions.%q.database.environment %q is not set or empty", PackageName, databaseEnvironment)
+		}
+		config.Database = value
 	}
 	config.Adapter = strings.ToLower(strings.TrimSpace(config.Adapter))
 	config.Database = strings.TrimSpace(config.Database)
@@ -78,6 +99,9 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 		return nil, fmt.Errorf("packageOptions.%q.database is required", PackageName)
 	}
 	if config.Adapter == "sqlite" && !filepath.IsAbs(config.Database) {
+		if databaseEnvironment != "" {
+			return nil, fmt.Errorf("packageOptions.%q.database.environment %q must contain an absolute SQLite path", PackageName, databaseEnvironment)
+		}
 		config.Database = filepath.Join(projectRoot, config.Database)
 	}
 
@@ -89,6 +113,7 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 	if err != nil {
 		return nil, fmt.Errorf("inspect %s database: %w", config.Adapter, err)
 	}
+	schema.DatabaseEnvironment = databaseEnvironment
 	sort.Slice(schema.Tables, func(i, j int) bool { return schema.Tables[i].Name < schema.Tables[j].Name })
 	for index := range schema.Tables {
 		sort.Slice(schema.Tables[index].Columns, func(i, j int) bool {
@@ -96,6 +121,32 @@ func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) 
 		})
 	}
 	return schema, nil
+}
+
+func decodeDatabaseSource(raw json.RawMessage) (string, error) {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return "", errors.New("is required")
+	}
+	if strings.HasPrefix(value, `"`) {
+		return "", nil
+	}
+	if !strings.HasPrefix(value, "{") {
+		return "", errors.New("must be a string or environment source")
+	}
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.DisallowUnknownFields()
+	var source struct {
+		Environment string `json:"environment"`
+	}
+	if err := decoder.Decode(&source); err != nil {
+		return "", err
+	}
+	source.Environment = strings.TrimSpace(source.Environment)
+	if source.Environment == "" {
+		return "", errors.New("environment is required")
+	}
+	return source.Environment, nil
 }
 
 func (s *Schema) Table(name string) (Table, bool) {

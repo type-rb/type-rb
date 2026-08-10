@@ -172,6 +172,8 @@ func (g *generator) statement(statement ir.Statement) {
 		g.record(n)
 	case *ir.Enum:
 		g.enum(n)
+	case *ir.TypeAlias:
+		g.typeAlias(n)
 	case *ir.Module:
 		g.line("// module " + n.Name)
 		for _, member := range n.Body {
@@ -278,7 +280,7 @@ func (g *generator) statement(statement ir.Statement) {
 					continue
 				}
 				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
-				name := goBindingIdentifier(binding.Name)
+				name := goCaseBindingIdentifier(binding)
 				g.line(name + " := " + value + "." + field)
 				if namedUnusedBinding(binding.Name) {
 					g.line("_ = " + name)
@@ -336,7 +338,7 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 			if binding.Name == "_" {
 				continue
 			}
-			name := goBindingIdentifier(binding.Name)
+			name := goCaseBindingIdentifier(binding)
 			g.line(name + " := " + typed)
 			if namedUnusedBinding(binding.Name) {
 				g.line("_ = " + name)
@@ -362,7 +364,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	previousBreakTarget := g.breakTarget
 	g.breakTarget = ""
 	defer func() { g.breakTarget = previousBreakTarget }()
-	if iteration.Operation == "find_each" || iteration.Operation == "find_in_batches" {
+	if iteration.Intrinsic == "trb.orm.query.find_each" || iteration.Intrinsic == "trb.orm.query.find_in_batches" {
 		g.ormBatchIterate(iteration)
 		return
 	}
@@ -531,6 +533,49 @@ func (g *generator) enum(enum *ir.Enum) {
 	}
 	g.indent--
 	g.line(")")
+	g.b.WriteByte('\n')
+}
+
+func (g *generator) typeAlias(alias *ir.TypeAlias) {
+	name := goIdentifier(alias.Name, true)
+	g.line("type " + name + goTypeParameterDeclarations(alias.TypeParameters) + " = " + g.goType(alias.Target) + goTrailingComment(alias.TrailingComment))
+	if len(alias.Variants) == 0 {
+		g.b.WriteByte('\n')
+		return
+	}
+	targetName := goIdentifier(alias.Target.Name, true)
+	targetPrefix := ""
+	if imported := g.typeAliases[alias.Target.Name]; imported != "" {
+		targetPrefix = imported + "."
+	}
+	for _, variant := range alias.Variants {
+		aliasConstant := goConstantIdentifier(alias.Name, variant.Name)
+		targetConstant := targetPrefix + goConstantIdentifier(alias.Target.Name, variant.Name)
+		if len(variant.Fields) == 0 {
+			g.line("var " + aliasConstant + " = " + targetConstant)
+			continue
+		}
+		g.line("const " + aliasConstant + "Tag = " + targetConstant + "Tag")
+		constructor := "New" + name + goIdentifier(variant.Name, true)
+		returnType := name + goTypeParameterArguments(alias.TypeParameters)
+		g.line("func " + constructor + goTypeParameterDeclarations(alias.TypeParameters) + "(" + g.parameters(variant.Fields) + ") " + returnType + " {")
+		g.indent++
+		targetConstructor := targetPrefix + "New" + targetName + goIdentifier(variant.Name, true)
+		if len(alias.Target.Args) > 0 {
+			arguments := make([]string, len(alias.Target.Args))
+			for index, argument := range alias.Target.Args {
+				arguments[index] = g.goType(argument)
+			}
+			targetConstructor += "[" + strings.Join(arguments, ", ") + "]"
+		}
+		values := make([]string, len(variant.Fields))
+		for index, field := range variant.Fields {
+			values[index] = goBindingIdentifier(field.Name)
+		}
+		g.line("return " + targetConstructor + "(" + strings.Join(values, ", ") + ")")
+		g.indent--
+		g.line("}")
+	}
 	g.b.WriteByte('\n')
 }
 
@@ -764,6 +809,9 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
 	g.indent++
 	g.parameterDefaults(method.Parameters)
+	if method.Name == "main" && g.orm != nil && len(g.orm.Models) > 0 {
+		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
+	}
 	g.functionDepth++
 	g.statements(method.Body)
 	g.functionDepth--
@@ -1164,7 +1212,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 				if binding.Name == "_" {
 					continue
 				}
-				name := goBindingIdentifier(binding.Name)
+				name := goCaseBindingIdentifier(binding)
 				child.line(name + " := " + typed)
 				if namedUnusedBinding(binding.Name) {
 					child.line("_ = " + name)
@@ -1207,7 +1255,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 					continue
 				}
 				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
-				name := goBindingIdentifier(binding.Name)
+				name := goCaseBindingIdentifier(binding)
 				child.line(name + " := " + value + "." + field)
 				if namedUnusedBinding(binding.Name) {
 					child.line("_ = " + name)
@@ -1297,6 +1345,13 @@ func (g *generator) transform(transform *ir.Transform) string {
 
 func namedUnusedBinding(name string) bool {
 	return name != "_" && strings.HasPrefix(name, "_")
+}
+
+func goCaseBindingIdentifier(binding ir.CaseBinding) string {
+	if binding.Generated {
+		return binding.Name
+	}
+	return goBindingIdentifier(binding.Name)
 }
 
 func goBindingIdentifier(name string) string {

@@ -123,6 +123,16 @@ type EnumMember struct {
 
 func (*EnumMember) irStatement() {}
 
+type TypeAlias struct {
+	Base
+	Name           string
+	TypeParameters []string
+	Target         types.Type
+	Variants       []EnumMember
+}
+
+func (*TypeAlias) irStatement() {}
+
 type Module struct {
 	Base
 	Name string
@@ -271,9 +281,10 @@ type CaseBranch struct {
 }
 
 type CaseBinding struct {
-	Name  string
-	Field string
-	Type  types.Type
+	Name      string
+	Field     string
+	Type      types.Type
+	Generated bool
 }
 
 type Case struct {
@@ -307,14 +318,23 @@ type IterationBinding struct {
 	Type types.Type
 }
 
+type IterationResult struct {
+	Variable *Variable
+	Target   Expression
+	Return   bool
+	Type     types.Type
+}
+
 type Iterate struct {
 	Base
 	Source    Expression
 	Operation string
+	Intrinsic string
 	SliceSize Expression
 	WithIndex bool
 	Bindings  []IterationBinding
 	Body      []Statement
+	Result    *IterationResult
 }
 
 func (*Iterate) irStatement() {}

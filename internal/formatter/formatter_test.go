@@ -64,6 +64,19 @@ func TestFormatKeepsNullableTypeMarkersAttached(t *testing.T) {
 	}
 }
 
+func TestFormatTransparentGenericTypeAlias(t *testing.T) {
+	source := []byte("type  DbResult < T > =Result<T,DbError> # database result\n")
+	want := "type DbResult<T> = Result<T, DbError> # database result\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected type alias formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
 func TestFormatPreservesRailsRegexAndPercentLiterals(t *testing.T) {
 	source := []byte("class User<ApplicationRecord\nvalidates :code,format:{with:/\\A[a-z#]+\\z/i}\nTAGS=%(alpha beta)\nend\n")
 	formatted, diagnostics := Format(source)
@@ -101,6 +114,23 @@ func TestFormatPortableIterationAndRanges(t *testing.T) {
 	formattedAgain, diagnostics := Format(formatted)
 	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
 		t.Fatalf("iteration formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
+func TestFormatStructuredBlockValues(t *testing.T) {
+	source := []byte("def process()\nresult:=Product.find_each(batch_size:100) do |product| # batch\nputs(product)\nend\nreturn Product.find_in_batches() do |products|\nputs(products)\nend\nend\n")
+	want := "def process()\n\tresult := Product.find_each(batch_size: 100) do |product| # batch\n\t\tputs(product)\n\tend\n\treturn Product.find_in_batches() do |products|\n\t\tputs(products)\n\tend\nend\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected structured block formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("structured block formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
 	}
 }
 

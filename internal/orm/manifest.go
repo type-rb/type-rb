@@ -93,9 +93,10 @@ func associationValueType(association Association) types.Type {
 }
 
 type Manifest struct {
-	Adapter  string
-	Database string
-	Models   []Model
+	Adapter             string
+	Database            string
+	DatabaseEnvironment string
+	Models              []Model
 }
 
 func Analyze(programs []*ast.Program, projectRoot string, options map[string][]byte) (*Manifest, error) {
@@ -107,7 +108,9 @@ func Analyze(programs []*ast.Program, projectRoot string, options map[string][]b
 	if err != nil {
 		return nil, err
 	}
-	return &Manifest{Adapter: schema.Adapter, Database: schema.Database, Models: models}, nil
+	return &Manifest{
+		Adapter: schema.Adapter, Database: schema.Database, DatabaseEnvironment: schema.DatabaseEnvironment, Models: models,
+	}, nil
 }
 
 func (*Manifest) ExtensionName() string { return ProjectProvider }
@@ -116,6 +119,7 @@ func (m *Manifest) Augment(program *ir.Program) {
 	if m == nil || program == nil {
 		return
 	}
+	ensureRuntimeTypes(program)
 	for _, model := range m.Models {
 		if model.ModulePath != program.ModulePath {
 			continue
@@ -165,7 +169,7 @@ func (m *Manifest) Augment(program *ir.Program) {
 				if !existing["find"] {
 					class.Body = append(class.Body, &ir.Method{
 						Name: "find", External: true, Class: true,
-						Parameters: []ir.Parameter{{Name: primaryKey.Name, Type: keyType}}, ReturnType: findType,
+						Parameters: []ir.Parameter{{Name: primaryKey.Name, Type: keyType}}, ReturnType: dbResult(findType),
 					})
 				}
 			}
@@ -197,11 +201,11 @@ func queryIRMethods(model Model) []ir.Statement {
 		order,
 		&ir.Method{Name: "limit", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
 		&ir.Method{Name: "offset", External: true, Parameters: []ir.Parameter{{Name: "count", Type: types.FromName("Integer")}}, ReturnType: namedType(model.QueryType)},
-		&ir.Method{Name: "all", External: true, ReturnType: arrayOf(model.Name)},
-		&ir.Method{Name: "first", External: true, ReturnType: firstType},
-		&ir.Method{Name: "count", External: true, ReturnType: types.FromName("Integer")},
+		&ir.Method{Name: "all", External: true, ReturnType: dbResult(arrayOf(model.Name))},
+		&ir.Method{Name: "first", External: true, ReturnType: dbResult(firstType)},
+		&ir.Method{Name: "count", External: true, ReturnType: dbResult(types.FromName("Integer"))},
 		&ir.Method{Name: "to_sql", External: true, ReturnType: types.FromName("String")},
-		&ir.Method{Name: "explain", External: true, ReturnType: types.FromName("String")},
+		&ir.Method{Name: "explain", External: true, ReturnType: dbResult(types.FromName("String"))},
 	}
 	if preload := preloadIRMethod(model); preload != nil {
 		methods = append(methods, preload)
@@ -210,6 +214,31 @@ func queryIRMethods(model Model) []ir.Statement {
 		methods = append(methods, batchIRMethod("find_each", false), batchIRMethod("find_in_batches", false))
 	}
 	return methods
+}
+
+func ensureRuntimeTypes(program *ir.Program) {
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ir.Import)
+		if !ok || imported.Path != "trb/orm/index" {
+			continue
+		}
+		imported.RuntimeRequired = true
+		for _, symbol := range []string{"DbError", "DbErrorKind", "DbResult"} {
+			if !contains(imported.Symbols, symbol) {
+				imported.Symbols = append(imported.Symbols, symbol)
+			}
+		}
+		return
+	}
+}
+
+func contains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func preloadIRMethod(model Model) *ir.Method {
@@ -260,7 +289,7 @@ func batchIRMethod(name string, class bool) *ir.Method {
 	return &ir.Method{
 		Name: name, External: true, Class: class,
 		Parameters: []ir.Parameter{{Name: "batch_size", Type: types.FromName("Integer"), Keyword: true}},
-		ReturnType: types.FromName("Void"),
+		ReturnType: dbResult(types.FromName("Integer")),
 	}
 }
 

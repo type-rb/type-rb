@@ -57,18 +57,18 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		query.InstanceMembers["offset"] = integerQueryDeclaration("offset", "trb.orm.query.offset", model.QueryType)
 		query.InstanceMembers["all"] = declaration.Member{
 			Name: "all", Kind: declaration.Method, Intrinsic: "trb.orm.query.all",
-			Return: arrayOf(model.Name), Provider: PackageName,
+			Return: dbResult(arrayOf(model.Name)), Provider: PackageName,
 		}
 		firstType := types.FromName(model.Name)
 		firstType.Nullable = true
 		query.InstanceMembers["first"] = declaration.Member{
-			Name: "first", Kind: declaration.Method, Intrinsic: "trb.orm.query.first", Return: firstType, Provider: PackageName,
+			Name: "first", Kind: declaration.Method, Intrinsic: "trb.orm.query.first", Return: dbResult(firstType), Provider: PackageName,
 		}
 		query.InstanceMembers["count"] = declaration.Member{
-			Name: "count", Kind: declaration.Method, Intrinsic: "trb.orm.query.count", Return: types.FromName("Integer"), Provider: PackageName,
+			Name: "count", Kind: declaration.Method, Intrinsic: "trb.orm.query.count", Return: dbResult(types.FromName("Integer")), Provider: PackageName,
 		}
 		query.InstanceMembers["to_sql"] = stringQueryDeclaration("to_sql", "trb.orm.query.to_sql")
-		query.InstanceMembers["explain"] = stringQueryDeclaration("explain", "trb.orm.query.explain")
+		query.InstanceMembers["explain"] = resultQueryDeclaration("explain", "trb.orm.query.explain", types.FromName("String"))
 		if preload := preloadDeclaration(model); preload.Name != "" {
 			query.InstanceMembers["preload"] = preload
 		}
@@ -106,7 +106,7 @@ func findDeclaration(model Model, primaryKey Column) declaration.Member {
 	return declaration.Member{
 		Name: "find", Kind: declaration.Method, Intrinsic: "trb.orm.find",
 		Parameters: []declaration.Parameter{{Name: primaryKey.Name, Type: keyType}},
-		Return:     result, Class: true, Provider: PackageName,
+		Return:     dbResult(result), Class: true, Provider: PackageName,
 	}
 }
 
@@ -118,8 +118,8 @@ func batchDeclaration(model Model, name string, class, batches bool) declaration
 	return declaration.Member{
 		Name: name, Kind: declaration.Method, Intrinsic: "trb.orm.query." + name,
 		Parameters: []declaration.Parameter{{Name: "batch_size", Type: types.FromName("Integer"), Keyword: true, Optional: true}},
-		Return:     types.FromName("Void"), Class: class, Provider: PackageName,
-		Block: &declaration.Block{Parameters: []types.Type{parameterType}},
+		Return:     dbResult(types.FromName("Integer")), Class: class, Provider: PackageName,
+		Block: &declaration.Block{Parameters: []types.Type{parameterType}, Structured: true},
 	}
 }
 
@@ -162,6 +162,17 @@ func stringQueryDeclaration(name, intrinsic string) declaration.Member {
 		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
 		Return: types.FromName("String"), Provider: PackageName,
 	}
+}
+
+func resultQueryDeclaration(name, intrinsic string, result types.Type) declaration.Member {
+	return declaration.Member{
+		Name: name, Kind: declaration.Method, Intrinsic: intrinsic,
+		Return: dbResult(result), Provider: PackageName,
+	}
+}
+
+func dbResult(value types.Type) types.Type {
+	return types.Type{Kind: types.Named, Name: "DbResult", Args: []types.Type{value}}
 }
 
 func comparisonSignatures(column Column, queryType string) []declaration.Signature {

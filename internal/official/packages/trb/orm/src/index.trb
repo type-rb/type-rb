@@ -1,3 +1,21 @@
+import { Result } from trb/std/result
+
+enum DbErrorKind
+	Connection
+	Constraint
+	InvalidData
+	Query
+	Timeout
+	Unknown
+end
+
+record DbError
+	kind: DbErrorKind
+	message: String
+end
+
+type DbResult<T> = Result<T, DbError>
+
 class Model
 end
 

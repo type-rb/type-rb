@@ -52,23 +52,28 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if len(where.Alternatives) < 5 || where.Alternatives[0].Parameters[0].LiteralValues[0] != "id" {
 		t.Fatalf("comparison where signatures are missing: %#v", where.Alternatives)
 	}
-	if product.ClassMembers["find"].Return.String() != "Product?" {
+	if product.ClassMembers["find"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
 	}
 	findEach := product.ClassMembers["find_each"]
-	if findEach.Block == nil || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
+	if findEach.Return.String() != "DbResult<Integer>" || findEach.Block == nil || !findEach.Block.Structured || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
 		t.Fatalf("unexpected find_each declaration: %#v", findEach)
 	}
 	query, exists := catalog.Type("ProductQuery")
-	if !exists || query.InstanceMembers["all"].Return.String() != "Array<Product>" {
+	if !exists || query.InstanceMembers["all"].Return.String() != "DbResult<Array<Product>>" {
 		t.Fatalf("unexpected query declaration: %#v", query)
 	}
 	findInBatches := query.InstanceMembers["find_in_batches"]
-	if findInBatches.Block == nil || findInBatches.Block.Parameters[0].String() != "Array<Product>" {
+	if findInBatches.Return.String() != "DbResult<Integer>" || findInBatches.Block == nil || !findInBatches.Block.Structured || findInBatches.Block.Parameters[0].String() != "Array<Product>" {
 		t.Fatalf("unexpected find_in_batches declaration: %#v", findInBatches)
 	}
-	for _, name := range []string{"to_sql", "explain"} {
-		if query.InstanceMembers[name].Return.String() != "String" {
+	if query.InstanceMembers["to_sql"].Return.String() != "String" {
+		t.Fatalf("unexpected to_sql declaration: %#v", query.InstanceMembers["to_sql"])
+	}
+	for name, expected := range map[string]string{
+		"first": "DbResult<Product?>", "count": "DbResult<Integer>", "explain": "DbResult<String>",
+	} {
+		if query.InstanceMembers[name].Return.String() != expected {
 			t.Fatalf("unexpected %s declaration: %#v", name, query.InstanceMembers[name])
 		}
 	}
@@ -281,6 +286,40 @@ func TestSQLiteAssociationRejectsMissingForeignKey(t *testing.T) {
 	_, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, options)
 	if err == nil || !strings.Contains(err.Error(), "requires foreign key products.category_id -> categories.id") {
 		t.Fatalf("expected missing foreign key diagnostic, got %v", err)
+	}
+}
+
+func TestSQLiteDatabaseEnvironmentIsResolvedWithoutEmbeddingItsValue(t *testing.T) {
+	root, _ := sqliteFixture(t)
+	databasePath := filepath.Join(root, "application.sqlite3")
+	t.Setenv("TRB_TEST_DATABASE_URL", databasePath)
+	schema, err := LoadSchema(root, map[string][]byte{
+		PackageName: []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_DATABASE_URL"}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.Database != databasePath || schema.DatabaseEnvironment != "TRB_TEST_DATABASE_URL" {
+		t.Fatalf("unexpected database source: %#v", schema)
+	}
+	manifest, err := Analyze([]*ast.Program{parseModel(t)}, root, map[string][]byte{
+		PackageName: []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_DATABASE_URL"}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.DatabaseEnvironment != "TRB_TEST_DATABASE_URL" {
+		t.Fatalf("manifest database environment = %q", manifest.DatabaseEnvironment)
+	}
+}
+
+func TestDatabaseEnvironmentMustBePresent(t *testing.T) {
+	t.Setenv("TRB_TEST_MISSING_DATABASE_URL", "")
+	_, err := LoadSchema(t.TempDir(), map[string][]byte{
+		PackageName: []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_MISSING_DATABASE_URL"}}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), `database.environment "TRB_TEST_MISSING_DATABASE_URL" is not set or empty`) {
+		t.Fatalf("expected missing database environment diagnostic, got %v", err)
 	}
 }
 

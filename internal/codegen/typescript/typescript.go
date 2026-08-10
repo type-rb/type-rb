@@ -76,7 +76,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.Namespace && n.Alias != "" {
 			for symbol, kind := range n.SymbolKinds {
 				switch kind {
-				case "class", "record", "enum", "interface":
+				case "class", "record", "enum", "interface", "type_alias", "enum_alias":
 					g.typeAliases[symbol] = n.Alias
 				}
 			}
@@ -93,7 +93,7 @@ func (g *generator) statement(statement ir.Statement) {
 					continue
 				}
 				switch n.SymbolKinds[symbol] {
-				case "record", "interface":
+				case "record", "interface", "type_alias":
 					types = append(types, symbol)
 				case "function":
 					values = append(values, tsCallableName(symbol))
@@ -175,6 +175,12 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.indent--
 		g.line("});")
+	case *ir.TypeAlias:
+		parameters := tsTypeParameterDeclarations(n.TypeParameters)
+		g.line("export type " + n.Name + parameters + " = " + g.tsType(n.Target) + ";" + tsTrailingComment(n.TrailingComment))
+		if len(n.Variants) > 0 {
+			g.line("export const " + n.Name + " = " + g.runtimeName(n.Target.Name) + ";")
+		}
 	case *ir.Module:
 		g.line("export namespace " + n.Name + " {")
 		g.indent++

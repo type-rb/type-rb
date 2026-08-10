@@ -27,15 +27,26 @@ func TestPortableORMCompilesLiveSQLiteQuery(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	source := []byte(`import { Model } from trb/orm
+	t.Setenv("TRB_TEST_DATABASE_URL", databasePath)
+	source := []byte(`import { DbResult, Model } from trb/orm
 
 class Product < Model
 end
 
+type ProductList = Array<Product>
+
+def load_products(): DbResult<ProductList>
+	return Product.where(name: "Widget").all()
+end
+
 def main()
-	products := Product.where(name: "Widget").all()
-	products.each do |product|
-		puts(product.name)
+	case load_products()
+	when DbResult::Ok(products)
+		products.each do |product|
+			puts(product.name)
+		end
+	when DbResult::Err(error)
+		puts(error.message)
 	end
 end
 `)
@@ -43,27 +54,46 @@ end
 		Filename: filepath.Join(root, "src", "main.trb"), Source: source, ModulePath: "src/main", Package: "main",
 	}}, Options{
 		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
-		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+		PackageOptions: map[string][]byte{
+			"trb/orm": []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_DATABASE_URL"}}`),
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var output string
+	var output, ormOutput string
 	programs := make([]*ir.Program, 0, len(artifacts))
 	for _, artifact := range artifacts {
 		programs = append(programs, artifact.IR)
 		if artifact.AST.ModulePath == "src/main" {
 			output = string(artifact.Output)
-			break
+		} else if artifact.AST.ModulePath == "trb/orm/index" {
+			ormOutput = string(artifact.Output)
 		}
 	}
 	if output == "" {
 		t.Fatal("main artifact was not generated")
 	}
-	for _, expected := range []string{"type Product struct", "type TrbOrmProductQuery struct", `trbOrmProductStatement(query, "\"id\", \"name\", \"price\", \"active\"")`, "modernc.org/sqlite", "TrbOrmLoadProduct"} {
+	for _, expected := range []string{
+		"type Product struct", "type TrbOrmProductQuery struct",
+		`trbOrmProductStatement(query, "\"id\", \"name\", \"price\", \"active\"")`,
+		"TrbOrmLoadProduct", "type ProductList = []*Product", "orm.DbResult[[]*Product]", "defer orm.TrbOrmCloseDatabase()",
+		"orm.NewDbResultErr[[]*Product]", `"database query failed"`,
+	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
 		}
+	}
+	for _, expected := range []string{
+		"modernc.org/sqlite", "func TrbOrmDatabase() (*sql.DB, error)", "trbOrmDatabase.Ping()",
+		`os.LookupEnv("TRB_TEST_DATABASE_URL")`,
+	} {
+		if !strings.Contains(ormOutput, expected) {
+			t.Fatalf("generated ORM pool is missing %q:\n%s", expected, ormOutput)
+		}
+	}
+	if strings.Contains(ormOutput, databasePath) {
+		t.Fatalf("generated ORM pool exposes the compile-time database value:\n%s", ormOutput)
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
 		t.Fatalf("generated invalid Go: %v\n%s", err, output)
@@ -244,8 +274,7 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	compile := func(body string) ([]*Artifact, error) {
-		source := "import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n"
+	compileSource := func(source string) ([]*Artifact, error) {
 		return CompileProject([]SourceUnit{{
 			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main", Source: []byte(source),
 		}}, Options{
@@ -253,7 +282,10 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
 		})
 	}
-	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).where(name: \"Widget\").order(price: :desc).limit(5).offset(1)\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tquery.all()")
+	compile := func(body string) ([]*Artifact, error) {
+		return compileSource("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "\nend\n")
+	}
+	artifacts, err := compile("\tquery := Product.where(\"price\", \">=\", 10).where(name: \"Widget\").order(price: :desc).limit(5).offset(1)\n\tputs(query.to_sql())\n\tputs(query.explain())\n\tputs(query.count())\n\tputs(query.first())\n\tputs(query.all())")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,6 +296,30 @@ func TestPortableORMComposesTypedQueries(t *testing.T) {
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated composed query is missing %q:\n%s", expected, output)
+		}
+	}
+	direct, err := compileSource(`import { DbResult, Model } from trb/orm
+
+class Product < Model
+end
+
+def process_products(): DbResult<Integer>
+	return Product.find_each(batch_size: 2) do |product|
+		puts(product.name)
+	end
+end
+
+def main()
+	puts(process_products())
+end
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directOutput := string(direct[0].Output)
+	for _, expected := range []string{"func ProcessProducts() orm.DbResult[int]", "return orm.NewDbResultErr[int]", "return orm.NewDbResultOk[int]"} {
+		if !strings.Contains(directOutput, expected) {
+			t.Fatalf("generated direct-return batch query is missing %q:\n%s", expected, directOutput)
 		}
 	}
 	invalid := []struct {
@@ -306,14 +362,20 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	}
 	valid := `	found := Product.find(2)
 	puts(found)
-	Product.find_each(batch_size: 2) do |product|
+	each_result := Product.find_each(batch_size: 2) do |product|
 		puts(product.name)
 		break
 	end
-	Product.where("id", ">", 0).find_in_batches(batch_size: 2) do |products|
+	puts(each_result)
+	batch_result := Product.where("id", ">", 0).find_in_batches(batch_size: 2) do |products|
 		puts(products.size())
 	end
-	Product.where(name: "Widget").find_each(batch_size: 2) { |product| puts(product.name) }`
+	puts(batch_result)
+	inline_result := Product.where(name: "Widget").find_each(batch_size: 2) { |product| puts(product.name) }
+	puts(inline_result)
+	mut reassigned := Product.where(name: "Widget").find_each(batch_size: 2) { |product| puts(product.name) }
+	reassigned = Product.where(name: "Widget").find_each(batch_size: 2) { |product| puts(product.name) }
+	puts(reassigned)`
 	artifacts, err := compile(valid)
 	if err != nil {
 		t.Fatal(err)
@@ -321,10 +383,15 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
 		"TrbOrmFirstProduct(TrbOrmProductWhere", "func TrbOrmBatchProduct", "__trbBatchLoop", "break __trbBatchLoop", "TrbOrmBatchProduct",
+		"orm.DbResult[int]", "orm.NewDbResultOk[int]", "orm.NewDbResultErr[int]", "__trbBatchProcessed",
+		`"batch queries do not accept order, limit, or offset"`, "reassigned = orm.NewDbResultOk[int]",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated batch query is missing %q:\n%s", expected, output)
 		}
+	}
+	if strings.Contains(output, "panic(loaded.ErrError") {
+		t.Fatalf("generated batch query still exposes database failures through panic:\n%s", output)
 	}
 	invalid := []struct {
 		body string
@@ -335,6 +402,7 @@ func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 		{body: "\tProduct.find_each(batch_size: 1.5) do |product|\n\t\tputs(product.name)\n\tend", want: "has type Float, expected Integer"},
 		{body: "\tProduct.find_each() do |product|\n\t\tputs(1)\n\tend", want: "block parameter product is not used"},
 		{body: "\tProduct.find_in_batches() do |left, right|\n\t\tputs(left)\n\t\tputs(right)\n\tend", want: "find_in_batches block expects 1 parameter(s), got 2"},
+		{body: "\tProduct.find_each() do |product|\n\t\tputs(product.name)\n\tend", want: "result of find_each() must be assigned or returned"},
 	}
 	for _, test := range invalid {
 		if _, err := compile(test.body); err == nil || !strings.Contains(err.Error(), test.want) {
@@ -365,7 +433,7 @@ func TestPortableORMAssociationsReturnTypedQueries(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	source := []byte(`import { Model, belongs_to, has_many } from trb/orm
+	source := []byte(`import { DbResult, Model, belongs_to, has_many } from trb/orm
 
 class Category < Model
 	has_many(Product)
@@ -376,15 +444,23 @@ class Product < Model
 end
 
 def main()
-	products := Product.where().preload(:category).all()
-	products.each do |product|
-		puts(product.category())
-		puts(product.category_query().count())
+	case Product.where().preload(:category).all()
+	when DbResult::Ok(products)
+		products.each do |product|
+			puts(product.category())
+			puts(product.category_query().count())
+		end
+	when DbResult::Err(error)
+		puts(error.message)
 	end
-	categories := Category.where().preload(:products).all()
-	categories.each do |category|
-		puts(category.products().size())
-		puts(category.products_query().count())
+	case Category.where().preload(:products).all()
+	when DbResult::Ok(categories)
+		categories.each do |category|
+			puts(category.products().size())
+			puts(category.products_query().count())
+		end
+	when DbResult::Err(error)
+		puts(error.message)
 	end
 end
 `)
@@ -433,7 +509,7 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		},
 		{
 			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
-			Source: []byte("import { Product } from models/product\n\ndef main()\n\tproducts := Product.where(name: \"Widget\").all()\n\tproducts.each do |product|\n\t\tputs(product.name)\n\tend\nend\n"),
+			Source: []byte("import { DbResult } from trb/orm\nimport { Product } from models/product\n\ndef load_products(): DbResult<Array<Product>>\n\treturn Product.where(name: \"Widget\").all()\nend\n\ndef main()\n\tputs(load_products())\nend\n"),
 		},
 	}, Options{
 		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
@@ -453,7 +529,7 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 			t.Fatalf("generated model module is missing %q:\n%s", expected, modelOutput)
 		}
 	}
-	for _, expected := range []string{"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "product.TrbOrmColumnName()"} {
+	for _, expected := range []string{"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "orm.DbResult[[]*models.Product]"} {
 		if !strings.Contains(mainOutput, expected) {
 			t.Fatalf("generated main module is missing %q:\n%s", expected, mainOutput)
 		}
