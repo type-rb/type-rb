@@ -252,17 +252,22 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		return nil, &CompileError{Filename: issue.Filename, Diagnostics: []diagnostic.Diagnostic{{Severity: diagnostic.Error, Message: issue.Message, Span: issue.Span}}}
 	}
 
-	artifacts := make([]*Artifact, 0, len(units))
+	loweredPrograms := make([]*ir.Program, 0, len(units))
 	for _, source := range units {
-		program := programs[source.ModulePath]
 		checked := checkedPrograms[source.ModulePath]
 		lowered := lower.Program(checked)
 		integrations.Apply(lowered, source.ModulePath == ownerModule)
-		output, err := codegen.Generate(lowered)
-		if err != nil {
-			return nil, err
-		}
-		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: lowered, Output: output, CompilerOwned: source.CompilerOwned, Official: source.Official})
+		loweredPrograms = append(loweredPrograms, lowered)
+	}
+	outputs, err := codegen.GenerateProject(loweredPrograms)
+	if err != nil {
+		return nil, err
+	}
+
+	artifacts := make([]*Artifact, 0, len(units))
+	for index, source := range units {
+		program := programs[source.ModulePath]
+		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], Output: outputs[index], CompilerOwned: source.CompilerOwned, Official: source.Official})
 	}
 	return artifacts, nil
 }

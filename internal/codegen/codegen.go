@@ -25,6 +25,22 @@ func Generate(program *ir.Program) ([]byte, error) {
 	}
 }
 
+// GenerateProject emits a set of already-lowered modules in project order.
+// Keeping the project boundary here lets a backend perform whole-project
+// analysis without leaking backend-specific concerns into parsing, checking,
+// or the shared IR.
+func GenerateProject(programs []*ir.Program) ([][]byte, error) {
+	outputs := make([][]byte, len(programs))
+	for index, program := range programs {
+		output, err := Generate(program)
+		if err != nil {
+			return nil, err
+		}
+		outputs[index] = output
+	}
+	return outputs, nil
+}
+
 func Extension(mode string) string {
 	switch mode {
 	case "ruby":
