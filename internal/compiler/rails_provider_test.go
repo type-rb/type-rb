@@ -65,7 +65,7 @@ func TestRailsProviderChecksSchemaDerivedFinderArguments(t *testing.T) {
 		t.Fatalf("expected unknown finder column diagnostic, got %v", err)
 	}
 	unknownMember := strings.Replace(railsInsurersController, "insurer.as_json()", "insurer.not_a_method()", 1)
-	if _, err := CompileWithOptions("insurers_controller.trb", []byte(unknownMember), Options{Mode: "ruby", ProjectRoot: root}); err == nil || !strings.Contains(err.Error(), "provided by Rails has no member not_a_method") {
+	if _, err := CompileWithOptions("insurers_controller.trb", []byte(unknownMember), Options{Mode: "ruby", ProjectRoot: root}); err == nil || !strings.Contains(err.Error(), "externally provided type Insurer has no member not_a_method") {
 		t.Fatalf("expected unknown ActiveRecord member diagnostic, got %v", err)
 	}
 }

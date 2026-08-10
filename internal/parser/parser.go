@@ -137,6 +137,9 @@ func (p *Parser) parseStatement() ast.Statement {
 		p.pos = next
 		return assignment
 	}
+	if callBlock := p.tryCallBlockStatement(line, next, base); callBlock != nil {
+		return callBlock
+	}
 	if p.opensNativeBlock(line) {
 		return p.parseNativeBlock()
 	}
@@ -147,6 +150,87 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	p.pos = next
 	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
+}
+
+func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Base) ast.Statement {
+	blockAt := topLevelIndex(line, "do")
+	brace := false
+	if blockAt <= 0 {
+		blockAt = topLevelIndex(line, "{")
+		brace = blockAt > 0
+	}
+	if blockAt <= 0 {
+		return nil
+	}
+	expression, ok := parseExpressionTokens(line[:blockAt])
+	if !ok {
+		return nil
+	}
+	call, ok := expression.(*ast.CallExpression)
+	if !ok {
+		return nil
+	}
+	if !brace {
+		parameters, valid := p.blockParameters(line[blockAt+1:])
+		if !valid {
+			p.errorAt(spanOf(line[blockAt:]), "call block parameters must be written as |name, ...|")
+		}
+		p.pos = next
+		block := &ast.BlockExpression{Base: ast.Base{SourceSpan: spanOf(line[blockAt:])}, Parameters: parameters}
+		block.Body = p.parseStatements(map[string]bool{"end": true})
+		_, closeSpan := p.consumeTerminator("end")
+		block.SourceSpan.End = closeSpan.End
+		call.SourceSpan.End = closeSpan.End
+		call.Block = block
+		base.SourceSpan.End = closeSpan.End
+		return &ast.ExpressionStatement{Base: base, Expression: call}
+	}
+
+	close := matchingIndex(line, blockAt, "{", "}")
+	if close < 0 {
+		p.errorAt(line[blockAt].Span, "unterminated call block; expected }")
+		p.pos = next
+		return &ast.ExpressionStatement{Base: base, Expression: call}
+	}
+	firstPipe, secondPipe := -1, -1
+	for index := blockAt + 1; index < close; index++ {
+		if line[index].Lexeme != "|" {
+			continue
+		}
+		if firstPipe < 0 {
+			firstPipe = index
+		} else {
+			secondPipe = index
+			break
+		}
+	}
+	parameters := []string(nil)
+	if firstPipe != blockAt+1 || secondPipe < 0 {
+		p.errorAt(spanOf(line[blockAt:close+1]), "call block parameters must be written as |name, ...|")
+	} else if parsed, valid := p.blockParameters(line[firstPipe : secondPipe+1]); valid {
+		parameters = parsed
+	} else {
+		p.errorAt(spanOf(line[firstPipe:secondPipe+1]), "call block parameters must be identifiers")
+	}
+	block := &ast.BlockExpression{Base: ast.Base{SourceSpan: token.Span{Start: line[blockAt].Span.Start, End: line[close].Span.End}}, Parameters: parameters, Brace: true}
+	if secondPipe >= 0 {
+		for _, part := range splitTopLevel(line[secondPipe+1:close], ";") {
+			if len(part) == 0 {
+				continue
+			}
+			statement := p.inlineBlockStatement(part)
+			if statement == nil {
+				p.errorAt(spanOf(part), "unsupported statement in inline call block")
+				continue
+			}
+			block.Body = append(block.Body, statement)
+		}
+	}
+	call.SourceSpan.End = line[close].Span.End
+	call.Block = block
+	base.SourceSpan.End = line[close].Span.End
+	p.pos = next
+	return &ast.ExpressionStatement{Base: base, Expression: call}
 }
 
 func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {

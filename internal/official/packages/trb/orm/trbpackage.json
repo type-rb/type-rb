@@ -1,0 +1,13 @@
+{
+  "name": "trb/orm",
+  "version": "0.1.0",
+  "module": "trb/orm/index",
+  "source": "src/index.trb",
+  "typeProvider": "trb.orm",
+  "projectProvider": "trb.orm.schema",
+  "nativeDependencies": {
+    "go": {
+      "modernc.org/sqlite": "v1.53.0"
+    }
+  }
+}

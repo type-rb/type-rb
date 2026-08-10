@@ -34,6 +34,7 @@ type Result struct {
 	CasePatterns        map[ast.Expression]CasePattern
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
+	ExternalMembers     map[ast.Expression]declaration.Member
 	RuntimeDependencies map[string]*stdlib.Package
 	ImportUses          map[*ast.ImportStatement]map[string]bool
 }
@@ -226,6 +227,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			CasePatterns:        map[ast.Expression]CasePattern{},
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
+			ExternalMembers:     map[ast.Expression]declaration.Member{},
 			RuntimeDependencies: map[string]*stdlib.Package{},
 			ImportUses:          importUses,
 		},
@@ -2417,6 +2419,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if member, ok := c.currentDeclarationMember(n.Name); ok {
 			typ = member.Return
 			c.external[n] = member
+			c.result.ExternalMembers[n] = member
 		} else if strings.HasPrefix(n.Name, "@") && c.current != nil {
 			if field, ok := c.current.fields[n.Name]; ok {
 				typ = fromTypeRef(field.Type)
@@ -2732,6 +2735,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = member.Return
 			c.external[n] = member
+			c.result.ExternalMembers[n] = member
 		} else if exported, exists := c.resolution.CompilerOwnedType(receiverType.Name); exists {
 			if member, found := exported.Members[n.Name]; found && !member.Class {
 				typ = member.Type
@@ -2755,7 +2759,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.markImportUsed(imported)
 				c.error(n.Span(), fmt.Sprintf("type %s imported from %s has no member %s", receiverType.Name, imported.Import.Path, n.Name))
 			} else if declared, exists := c.declarations().Type(receiverType.Name); exists {
-				c.error(n.Span(), fmt.Sprintf("type %s provided by Rails has no member %s", declared.Name, n.Name))
+				c.error(n.Span(), fmt.Sprintf("externally provided type %s has no member %s", declared.Name, n.Name))
 			} else if portableReceiverKind(receiverType.Kind) {
 				c.error(n.Span(), fmt.Sprintf("type %s has no member %s", receiverType, n.Name))
 			}
@@ -2824,6 +2828,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if member, ok := c.external[n.Callee]; ok {
 			typ = c.checkDeclarationArguments(n.Span(), member, n.Arguments, argumentTypes)
+			c.checkDeclarationBlock(n, member, sc)
 		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Name == "new" {
 			if identifier, ok := member.Receiver.(*ast.Identifier); ok {
@@ -2872,6 +2877,15 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(identifier.Span(), fmt.Sprintf("function %s is not declared or imported", identifier.Name))
 			} else if !c.resolution.NativeSyntax {
 				c.error(identifier.Span(), fmt.Sprintf("Ruby function %s requires an explicit platform import", identifier.Name))
+			}
+		}
+		if n.Block != nil {
+			if _, declared := c.external[n.Callee]; !declared {
+				if c.mode == "ruby" && c.resolution.NativeSyntax {
+					c.checkNativeCallBlock(n.Block, sc)
+				} else {
+					c.error(n.Block.Span(), "call blocks require a block-accepting package declaration")
+				}
 			}
 		}
 	case *ast.IndexExpression:
@@ -3396,6 +3410,9 @@ func portableReceiverKind(kind types.Kind) bool {
 }
 
 func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.Member, arguments []ast.CallArgument, actual []types.Type) types.Type {
+	if len(member.Alternatives) > 0 && declarationCallUsesPositionalArguments(arguments) {
+		return c.checkDeclarationAlternativeArguments(span, member, arguments, actual)
+	}
 	bindings := map[string]types.Type{}
 	typeParameters := map[string]bool{}
 	for _, name := range member.TypeParameters {
@@ -3436,6 +3453,10 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 			}
 			continue
 		}
+		if len(parameter.LiteralValues) > 0 && !declarationLiteralValueAccepted(argument.Value, parameter.LiteralValues) {
+			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be one of %s", index+1, member.Name, quotedDeclarationValues(parameter.LiteralValues)))
+			continue
+		}
 		bindDeclarationType(parameter.Type, actual[index], typeParameters, bindings)
 		expected := instantiateDeclarationType(parameter.Type, bindings)
 		actual[index] = c.contextualizeCollectionLiteral(argument.Value, expected, actual[index])
@@ -3449,6 +3470,172 @@ func (c *Checker) checkDeclarationArguments(span token.Span, member declaration.
 		}
 	}
 	return instantiateDeclarationType(member.Return, bindings)
+}
+
+func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declaration.Member, sc *scope) {
+	if member.Block == nil {
+		if call.Block != nil {
+			c.error(call.Block.Span(), fmt.Sprintf("%s() does not accept a block", member.Name))
+		}
+		return
+	}
+	if call.Block == nil {
+		c.error(call.Span(), fmt.Sprintf("%s() requires a block", member.Name))
+		return
+	}
+	if len(call.Block.Parameters) != len(member.Block.Parameters) {
+		c.error(call.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", member.Name, len(member.Block.Parameters), len(call.Block.Parameters)))
+	}
+	blockScope := &scope{parent: sc, values: map[string]symbol{}}
+	for index, name := range call.Block.Parameters {
+		parameterType := types.Type{Kind: types.Any, Name: "Any"}
+		if index < len(member.Block.Parameters) {
+			parameterType = member.Block.Parameters[index]
+		}
+		if _, duplicate := blockScope.values[name]; duplicate {
+			c.error(call.Block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
+			continue
+		}
+		declared := symbol{typ: parameterType, mutable: true, span: call.Block.Span()}
+		if tracksUnusedBinding(name) {
+			used := false
+			declared.used = &used
+			declared.useKind = "block parameter"
+		}
+		blockScope.values[name] = declared
+	}
+	c.loopDepth++
+	c.checkStatements(call.Block.Body, blockScope)
+	c.loopDepth--
+	c.result.Expressions[call.Block] = types.Type{Kind: types.Void, Name: "Void"}
+}
+
+func (c *Checker) checkNativeCallBlock(block *ast.BlockExpression, sc *scope) {
+	blockScope := &scope{parent: sc, values: map[string]symbol{}}
+	for _, name := range block.Parameters {
+		if _, duplicate := blockScope.values[name]; duplicate {
+			c.error(block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
+			continue
+		}
+		blockScope.values[name] = symbol{typ: types.Type{Kind: types.Any, Name: "Any"}, mutable: true, span: block.Span()}
+	}
+	c.loopDepth++
+	c.checkStatements(block.Body, blockScope)
+	c.loopDepth--
+	c.result.Expressions[block] = types.Type{Kind: types.Void, Name: "Void"}
+}
+
+func (c *Checker) checkDeclarationAlternativeArguments(span token.Span, member declaration.Member, arguments []ast.CallArgument, actual []types.Type) types.Type {
+	candidates := make([]declaration.Signature, 0, len(member.Alternatives))
+	for _, signature := range member.Alternatives {
+		if declarationSignatureAcceptsArity(signature, len(arguments)) {
+			candidates = append(candidates, signature)
+		}
+	}
+	if len(candidates) == 0 {
+		c.error(span, fmt.Sprintf("%s() does not accept %d positional arguments", member.Name, len(arguments)))
+		return member.Return
+	}
+	for index, argument := range arguments {
+		allowed := map[string]bool{}
+		constrained := true
+		for _, signature := range candidates {
+			parameter := declarationSignatureParameter(signature, index)
+			if len(parameter.LiteralValues) == 0 {
+				constrained = false
+				break
+			}
+			for _, value := range parameter.LiteralValues {
+				allowed[value] = true
+			}
+		}
+		if !constrained {
+			continue
+		}
+		values := sortedDeclarationValues(allowed)
+		if !declarationLiteralValueAccepted(argument.Value, values) {
+			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be one of %s", index+1, member.Name, quotedDeclarationValues(values)))
+			return member.Return
+		}
+		filtered := candidates[:0]
+		for _, signature := range candidates {
+			if declarationLiteralValueAccepted(argument.Value, declarationSignatureParameter(signature, index).LiteralValues) {
+				filtered = append(filtered, signature)
+			}
+		}
+		candidates = filtered
+	}
+	selected := candidates[0]
+	member.Parameters = selected.Parameters
+	member.Return = selected.Return
+	member.Variadic = selected.Variadic
+	member.Alternatives = nil
+	return c.checkDeclarationArguments(span, member, arguments, actual)
+}
+
+func declarationCallUsesPositionalArguments(arguments []ast.CallArgument) bool {
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func declarationSignatureAcceptsArity(signature declaration.Signature, count int) bool {
+	required := 0
+	for _, parameter := range signature.Parameters {
+		if !parameter.Optional {
+			required++
+		}
+	}
+	return count >= required && (signature.Variadic || count <= len(signature.Parameters))
+}
+
+func declarationSignatureParameter(signature declaration.Signature, index int) declaration.Parameter {
+	if index < len(signature.Parameters) {
+		return signature.Parameters[index]
+	}
+	return signature.Parameters[len(signature.Parameters)-1]
+}
+
+func declarationLiteralValueAccepted(expression ast.Expression, allowed []string) bool {
+	value, ok := declarationLiteralValue(expression)
+	return ok && slices.Contains(allowed, value)
+}
+
+func declarationLiteralValue(expression ast.Expression) (string, bool) {
+	switch literal := expression.(type) {
+	case *ast.Literal:
+		if literal.Kind != ast.StringLiteral {
+			return "", false
+		}
+		if value, err := strconv.Unquote(literal.Raw); err == nil {
+			return value, true
+		}
+		return strings.Trim(literal.Raw, "'\""), true
+	case *ast.SymbolLiteral:
+		return literal.Name, true
+	default:
+		return "", false
+	}
+}
+
+func sortedDeclarationValues(values map[string]bool) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func quotedDeclarationValues(values []string) string {
+	quoted := make([]string, len(values))
+	for index, value := range values {
+		quoted[index] = strconv.Quote(value)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func bindDeclarationType(pattern, actual types.Type, parameters map[string]bool, bindings map[string]types.Type) {

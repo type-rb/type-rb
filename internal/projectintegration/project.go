@@ -20,9 +20,11 @@ type Source struct {
 }
 
 type Context struct {
-	Sources     []Source
-	Resolutions map[string]resolver.Result
-	SourceRoot  string
+	Sources        []Source
+	Resolutions    map[string]resolver.Result
+	SourceRoot     string
+	ProjectRoot    string
+	PackageOptions map[string][]byte
 }
 
 type Issue struct {
@@ -34,6 +36,7 @@ type Issue struct {
 type Contribution struct {
 	Extension     ir.Extension
 	MethodTargets map[string]map[string]string
+	AllPrograms   bool
 }
 
 type Analysis struct {
@@ -110,7 +113,12 @@ func (a Analysis) Apply(program *ir.Program, entrypoint bool) {
 				}
 			}
 		}
-		if entrypoint && contribution.Extension != nil {
+		if contribution.Extension != nil {
+			if augmenter, ok := contribution.Extension.(interface{ Augment(*ir.Program) }); ok {
+				augmenter.Augment(program)
+			}
+		}
+		if contribution.Extension != nil && (entrypoint || contribution.AllPrograms) {
 			program.Extensions = append(program.Extensions, contribution.Extension)
 		}
 	}

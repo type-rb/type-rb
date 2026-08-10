@@ -7,10 +7,14 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
 func (g *generator) integrations(extensions []ir.Extension) {
+	if manifest := ormintegration.ManifestFrom(extensions); manifest != nil {
+		g.ormRuntime(manifest)
+	}
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
 		g.webDispatcher(manifest)
 		g.webServer()

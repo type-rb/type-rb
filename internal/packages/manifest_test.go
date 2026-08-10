@@ -57,6 +57,26 @@ func TestSyncGoMod(t *testing.T) {
 	}
 }
 
+func TestSyncAddsImportedTypeRBPackageDependencies(t *testing.T) {
+	config := project.New(t.TempDir(), "go")
+	config.Go.Module = "example.com/acme/service"
+	path, err := SyncWithDependencies(config, map[string]string{"modernc.org/sqlite": "v1.53.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "modernc.org/sqlite v1.53.0") {
+		t.Fatalf("go.mod does not contain package-owned dependency:\n%s", data)
+	}
+	config.Dependencies["modernc.org/sqlite"] = "v1.52.0"
+	if _, err := SyncWithDependencies(config, map[string]string{"modernc.org/sqlite": "v1.53.0"}); err == nil || !strings.Contains(err.Error(), "requires v1.53.0") {
+		t.Fatalf("expected package dependency conflict, got %v", err)
+	}
+}
+
 func TestSyncNpmPackage(t *testing.T) {
 	config := project.New(t.TempDir(), "typescript")
 	config.Dependencies["zod"] = "^4.0.0"

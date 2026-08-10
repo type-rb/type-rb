@@ -49,6 +49,41 @@ func TestLoadJSONCWithComments(t *testing.T) {
 	}
 }
 
+func TestLoadPreservesOfficialPackageOptions(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ConfigName)
+	source := `{
+  "name": "orm-app",
+  "mode": "go",
+  "packageOptions": {
+    "trb/orm": {
+      "adapter": "sqlite",
+      "database": "database/application.sqlite3"
+    }
+  },
+  "go": {
+    "module": "example.com/orm-app"
+  }
+}`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var options struct {
+		Adapter  string `json:"adapter"`
+		Database string `json:"database"`
+	}
+	if err := json.Unmarshal(config.PackageOptions["trb/orm"], &options); err != nil {
+		t.Fatal(err)
+	}
+	if options.Adapter != "sqlite" || options.Database != "database/application.sqlite3" {
+		t.Fatalf("unexpected package options: %#v", options)
+	}
+}
+
 func TestLoadJSONCRejectsTrailingCommas(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, ConfigName)

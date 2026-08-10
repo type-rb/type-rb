@@ -26,6 +26,7 @@ type manifest struct {
 	Source             string                       `json:"source"`
 	SemanticProvider   string                       `json:"semanticProvider,omitempty"`
 	ProjectProvider    string                       `json:"projectProvider,omitempty"`
+	TypeProvider       string                       `json:"typeProvider,omitempty"`
 	NativeDependencies map[string]map[string]string `json:"nativeDependencies,omitempty"`
 }
 
@@ -100,11 +101,12 @@ func load() map[string]*Package {
 			ProjectProvider:    descriptor.ProjectProvider,
 			NativeDependencies: descriptor.NativeDependencies,
 			Definition: &stdlib.Package{
-				Path:       descriptor.Name,
-				ModulePath: descriptor.Module,
-				Source:     string(source),
-				Kind:       stdlib.Portable,
-				Symbols:    semanticSymbols(descriptor.SemanticProvider),
+				Path:         descriptor.Name,
+				ModulePath:   descriptor.Module,
+				Source:       string(source),
+				Kind:         stdlib.Portable,
+				TypeProvider: descriptor.TypeProvider,
+				Symbols:      semanticSymbols(descriptor.SemanticProvider),
 			},
 		}
 		return nil
