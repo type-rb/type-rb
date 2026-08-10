@@ -116,13 +116,13 @@ Before a response leaves the portable dispatcher, every backend rejects invalid
 status codes, header names, and CR/LF-bearing header values through the same
 JSON 500 boundary.
 
-The experimental official [`trb/orm`](guides/orm.md) package currently targets generated Go.
-It reads SQLite, PostgreSQL, or MySQL schema metadata directly and exposes typed
-models, immutable queries, associations and preload, aggregates, transactions,
-batching, writes, conflict handling, and destroy lifecycles. Database terminals
-and lazy association access use `fails DbError`; `attempt` captures them as
-ordinary `Result` values. The REPL can execute the same read and write API
-against SQLite. Ruby and TypeScript backend adapters, schema caching, and
+The experimental official [`trb/orm`](guides/orm.md) package targets generated
+Go and Ruby. It reads SQLite, PostgreSQL, or MySQL schema metadata directly and
+exposes typed models, immutable queries, associations and preload, aggregates,
+transactions, batching, writes, conflict handling, and destroy lifecycles.
+Database terminals and lazy association access use `fails DbError`; `attempt`
+captures them as ordinary `Result` values. The REPL uses the same schema-backed
+read and write API. The TypeScript backend adapter, schema caching, and
 production compatibility remain future work.
 
 The compiler pipeline is:
