@@ -69,6 +69,12 @@ func (e *Evaluator) ormWriteIntrinsic(name string, arguments []evaluatedArgument
 		}
 		value, err := e.ormDeleteModel(typ, arguments[0].Value)
 		return value, true, err
+	case "trb.orm.destroy":
+		if len(arguments) != 1 {
+			return Value{}, true, errors.New("ORM destroy requires a model receiver")
+		}
+		value, err := e.ormDestroyModel(typ, arguments[0].Value)
+		return value, true, err
 	case "trb.orm.query.update_all":
 		query, remaining, err := e.ormQueryReceiver(arguments)
 		if err != nil {
@@ -82,6 +88,13 @@ func (e *Evaluator) ormWriteIntrinsic(name string, arguments []evaluatedArgument
 			return Value{}, true, err
 		}
 		value, err := e.ormDeleteAll(typ, query)
+		return value, true, err
+	case "trb.orm.destroy_all", "trb.orm.query.destroy_all":
+		query, _, err := e.ormQueryReceiver(arguments)
+		if err != nil {
+			return Value{}, true, err
+		}
+		value, err := e.ormDestroyAll(typ, query)
 		return value, true, err
 	case "trb.orm.insert_all":
 		query, remaining, err := e.ormQueryReceiver(arguments)

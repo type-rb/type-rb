@@ -715,6 +715,54 @@ end
 	if want := "1\n0\ntrue\n1\n0\n"; stdout.String() != want {
 		t.Fatalf("unexpected ORM destroy result: want %q, got %q, stderr=%s", want, stdout.String(), stderr.String())
 	}
+	database, err = sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		DELETE FROM products; DELETE FROM categories; DELETE FROM members; DELETE FROM teams;
+		DELETE FROM articles; DELETE FROM authors; DELETE FROM files; DELETE FROM folders;
+		INSERT INTO categories (id, name) VALUES (1, 'Featured'), (2, 'Archived');
+		INSERT INTO products (id, category_id, name) VALUES (1, 1, 'TypeRB'), (2, 2, 'Old TypeRB');
+		INSERT INTO teams (id, name) VALUES (1, 'Compiler');
+		INSERT INTO members (id, team_id, name) VALUES (1, 1, 'Ada');
+		INSERT INTO authors (id, name) VALUES (1, 'Matz');
+		INSERT INTO articles (id, author_id, title) VALUES (1, 1, 'Language design');
+		INSERT INTO folders (id, name) VALUES (1, 'Temporary');
+		INSERT INTO files (id, folder_id, name) VALUES (1, 1, 'draft.txt');
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	input := strings.Join([]string{
+		"import { destroy_category, destroy_remaining_categories, restrict_team, nullify_articles, delete_files } from main",
+		"destroy_category(1)",
+		"destroy_remaining_categories()",
+		"restrict_team()",
+		"nullify_articles()",
+		"delete_files()",
+		":quit",
+	}, "\n") + "\n"
+	stdout.Reset()
+	stderr.Reset()
+	command = &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("REPL status=%d stderr=%s", status, stderr.String())
+	}
+	want := strings.Join([]string{
+		"1 : Integer",
+		"0 : Integer",
+		"true : Boolean",
+		"1 : Integer",
+		"0 : Integer",
+		"",
+	}, "\n")
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected ORM destroy REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
 }
 
 func TestReplExecutesORMDistinct(t *testing.T) {

@@ -796,7 +796,7 @@ func (e *Evaluator) ormIntrinsic(name string, arguments []evaluatedArgument, typ
 	case "trb.orm.association.loaded.belongs_to", "trb.orm.association.loaded.has_many", "trb.orm.association.loaded.has_one":
 		return e.ormAssociationLoaded(arguments[0].Value, call)
 	default:
-		return Value{}, fmt.Errorf("%s is type-checked, but ORM writes and batch iteration are not executable in the REPL yet; use trb run", name)
+		return Value{}, fmt.Errorf("ORM runtime intrinsic %s is not executable in the REPL", name)
 	}
 }
 
