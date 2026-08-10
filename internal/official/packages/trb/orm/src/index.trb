@@ -25,14 +25,14 @@ end
 class Model
 end
 
-def belongs_to(model: Any)
+def belongs_to(model: Any, name: String? = nil, foreign_key: String? = nil, references: String? = nil, inverse: String? = nil, dependent: String? = nil)
 	return
 end
 
-def has_many(model: Any)
+def has_many(model: Any, name: String? = nil, foreign_key: String? = nil, references: String? = nil, inverse: String? = nil, through: String? = nil, source: String? = nil, dependent: String? = nil)
 	return
 end
 
-def has_one(model: Any)
+def has_one(model: Any, name: String? = nil, foreign_key: String? = nil, references: String? = nil, inverse: String? = nil, through: String? = nil, source: String? = nil, dependent: String? = nil)
 	return
 end

@@ -947,6 +947,73 @@ end
 	}
 }
 
+func TestPortableORMThroughAssociationCompilesToGo(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE memberships (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, project_id INTEGER NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (project_id) REFERENCES projects(id));
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`import { DbResult, Model, belongs_to, has_many } from trb/orm
+
+class User < Model
+	has_many(Membership)
+	has_many(Project, through: :memberships)
+end
+
+class Project < Model
+	has_many(Membership)
+end
+
+class Membership < Model
+	belongs_to(User)
+	belongs_to(Project)
+end
+
+def load_projects(): DbResult<Array<Project>>
+	users := User.all()?
+	return users[0].projects_query().all()
+end
+
+def main()
+	puts(load_projects())
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main", Source: source,
+	}}, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		`TrbOrmMembershipQueryWhere(TrbOrmMembershipUsing(users[0].TrbOrmTransaction()), []string{"user_id"}, []string{"="}, []any{users[0].TrbOrmColumnId()})`,
+		`orm.TrbOrmJoin{Kind: "INNER JOIN", Table: "memberships", SourceColumn: "id", TargetColumn: "project_id"`,
+		`TrbOrmProjectJoin(TrbOrmProjectUsing(users[0].TrbOrmTransaction())`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated through association query is missing %q:\n%s", expected, output)
+		}
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", output, parser.AllErrors); err != nil {
+		t.Fatalf("generated invalid through association Go: %v\n%s", err, output)
+	}
+}
+
 func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 	root := t.TempDir()
 	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))

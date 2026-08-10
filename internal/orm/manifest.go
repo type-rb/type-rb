@@ -34,9 +34,22 @@ type Association struct {
 	TargetQuery         string
 	SourceColumn        string
 	TargetColumn        string
+	Inverse             string
+	Through             string
+	Source              string
+	Dependent           DependentAction
 	Preloadable         bool
 	CardinalityVerified bool
 }
+
+type DependentAction string
+
+const (
+	DependentDestroy  DependentAction = "destroy"
+	DependentDelete   DependentAction = "delete"
+	DependentNullify  DependentAction = "nullify"
+	DependentRestrict DependentAction = "restrict"
+)
 
 func (m Model) DraftType() string { return m.Name + "Draft" }
 
@@ -597,6 +610,9 @@ func groupedIRMethods(model Model, column Column) []ir.Statement {
 func joinIRMethod(model Model, name string, class bool) *ir.Method {
 	method := &ir.Method{Name: name, External: true, Class: class, ReturnType: namedType(model.QueryType)}
 	for _, association := range model.Associations {
+		if association.Through != "" {
+			continue
+		}
 		associationParameter := ir.Parameter{
 			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
 		}

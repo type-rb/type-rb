@@ -622,6 +622,9 @@ func (g *generator) ormAssociationQuery(call *ir.Call) string {
 	if !ok {
 		return "nil"
 	}
+	if association.Through != "" {
+		return g.ormThroughAssociationQuery(member, source, association)
+	}
 	target, ok := g.orm.Model(association.TargetModel)
 	if !ok {
 		return "nil"
@@ -630,6 +633,39 @@ func (g *generator) ormAssociationQuery(call *ir.Call) string {
 	value := g.expr(member.Receiver) + "." + goORMColumnGetter(association.SourceColumn) + "()"
 	scope := qualifier + goORMUsing(target) + "(" + g.expr(member.Receiver) + ".TrbOrmTransaction())"
 	return qualifier + goORMQueryWhere(target) + "(" + scope + ", []string{" + strconv.Quote(association.TargetColumn) + "}, []string{\"=\"}, []any{" + value + "})"
+}
+
+func (g *generator) ormThroughAssociationQuery(member *ir.Member, source ormintegration.Model, association ormintegration.Association) string {
+	through, ok := source.Association(association.Through)
+	if !ok {
+		return "nil"
+	}
+	middle, ok := g.orm.Model(through.TargetModel)
+	if !ok {
+		return "nil"
+	}
+	via, ok := middle.Association(association.Source)
+	if !ok {
+		return "nil"
+	}
+	target, ok := g.orm.Model(association.TargetModel)
+	if !ok {
+		return "nil"
+	}
+	receiver := g.expr(member.Receiver)
+	transaction := receiver + ".TrbOrmTransaction()"
+	middleQualifier := g.ormModelQualifier(middle)
+	middleScope := middleQualifier + goORMUsing(middle) + "(" + transaction + ")"
+	middleQuery := middleQualifier + goORMQueryWhere(middle) + "(" + middleScope + ", []string{" + strconv.Quote(through.TargetColumn) + "}, []string{\"=\"}, []any{" + receiver + "." + goORMColumnGetter(through.SourceColumn) + "()})"
+	predicate := middleQualifier + goORMAssociationPredicate(middle) + "(" + middleQuery + ")"
+	join := g.ormLifecycleAlias() + ".TrbOrmJoin{" +
+		"Kind: \"INNER JOIN\", Table: " + strconv.Quote(middle.Table) +
+		", SourceColumn: " + strconv.Quote(via.TargetColumn) +
+		", TargetColumn: " + strconv.Quote(via.SourceColumn) +
+		", Predicate: " + predicate + "}"
+	targetQualifier := g.ormModelQualifier(target)
+	targetScope := targetQualifier + goORMUsing(target) + "(" + transaction + ")"
+	return targetQualifier + goORMJoin(target) + "(" + targetScope + ", " + join + ")"
 }
 
 func (g *generator) ormPreload(call *ir.Call, arguments []string) string {

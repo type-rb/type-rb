@@ -1669,6 +1669,28 @@ func (e *Evaluator) ormAssociationQuery(typ types.Type, model ormintegration.Mod
 	if !ok {
 		return Value{}, errors.New("ORM association target is not available")
 	}
+	if association.Through != "" {
+		through, throughOK := model.Association(association.Through)
+		middle, middleOK := e.ormRuntime().manifest.Model(through.TargetModel)
+		if !throughOK || !middleOK {
+			return Value{}, errors.New("ORM through association is not available")
+		}
+		via, viaOK := middle.Association(association.Source)
+		if !viaOK {
+			return Value{}, errors.New("ORM through source association is not available")
+		}
+		value := object.Fields["@"+through.SourceColumn]
+		query := &ormQueryValue{model: target}
+		query.joins = append(query.joins, ormJoin{
+			kind: "INNER JOIN", table: middle.Table,
+			sourceColumn: via.TargetColumn, targetColumn: via.SourceColumn,
+			predicate: ormPredicateGroup([]ormCondition{{column: through.TargetColumn, operator: "=", value: value}}),
+		})
+		if scope, scopeOK := object.Fields["@__trb_orm_query_scope"].Data.(*ormQueryValue); scopeOK {
+			query.transaction = scope.transaction
+		}
+		return ormQueryResult(typ, query), nil
+	}
 	value := object.Fields["@"+association.SourceColumn]
 	query := &ormQueryValue{model: target, predicate: ormPredicateGroup([]ormCondition{{column: association.TargetColumn, operator: "=", value: value}})}
 	if scope, ok := object.Fields["@__trb_orm_query_scope"].Data.(*ormQueryValue); ok {

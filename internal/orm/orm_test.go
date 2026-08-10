@@ -190,6 +190,78 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 }
 
+func TestAssociationOptionsAndThroughMetadata(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE users (id INTEGER PRIMARY KEY, external_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL);
+		CREATE TABLE posts (id INTEGER PRIMARY KEY, author_id TEXT NOT NULL, title TEXT NOT NULL, FOREIGN KEY (author_id) REFERENCES users(external_id));
+		CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE memberships (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, project_id INTEGER NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (project_id) REFERENCES projects(id));
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many } from trb/orm
+
+class User < Model
+	has_many(Post, name: :authored_posts, foreign_key: :author_id, references: :external_id, inverse: :author, dependent: :destroy)
+	has_many(Membership)
+	has_many(Project, through: :memberships)
+end
+
+class Post < Model
+	belongs_to(User, name: :author, foreign_key: :author_id, references: :external_id, inverse: :authored_posts)
+end
+
+class Project < Model
+	has_many(Membership)
+end
+
+class Membership < Model
+	belongs_to(User)
+	belongs_to(Project)
+end
+`))
+	if len(diagnostics) > 0 {
+		t.Fatalf("parse diagnostics: %#v", diagnostics)
+	}
+	program.ModulePath = "src/models"
+	encoded, err := json.Marshal(Config{Adapter: "sqlite", Database: filepath.Base(databasePath)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := Analyze([]*ast.Program{program}, root, map[string][]byte{PackageName: encoded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, ok := manifest.Model("User")
+	if !ok {
+		t.Fatal("User model was not discovered")
+	}
+	authored, ok := user.Association("authored_posts")
+	if !ok || authored.SourceColumn != "external_id" || authored.TargetColumn != "author_id" || authored.Inverse != "author" || authored.Dependent != DependentDestroy {
+		t.Fatalf("unexpected custom association metadata: %#v", authored)
+	}
+	projects, ok := user.Association("projects")
+	if !ok || projects.Through != "memberships" || projects.Source != "project" || projects.TargetModel != "Project" || projects.Preloadable {
+		t.Fatalf("unexpected through association metadata: %#v", projects)
+	}
+	post, _ := manifest.Model("Post")
+	author, ok := post.Association("author")
+	if !ok || author.SourceColumn != "author_id" || author.TargetColumn != "external_id" || author.Inverse != "authored_posts" {
+		t.Fatalf("unexpected belongs_to metadata: %#v", author)
+	}
+}
+
 func TestSQLiteAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
 	adapter, err := AdapterFor("sqlite")
 	if err != nil {

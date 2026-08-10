@@ -3,6 +3,7 @@ package orm
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -297,6 +298,9 @@ func joinDeclaration(model Model, name, intrinsic string, class bool) declaratio
 		Return: types.FromName(model.QueryType), Class: class, Provider: PackageName,
 	}
 	for _, association := range model.Associations {
+		if association.Through != "" {
+			continue
+		}
 		associationParameter := declaration.Parameter{
 			Name: "association", Type: types.FromName("String"), LiteralValues: []string{association.Name},
 		}
@@ -721,12 +725,42 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 	for index := range models {
 		byName[models[index].Name] = &models[index]
 	}
+	specs := map[string][]associationSpec{}
 	for index := range models {
-		associations, err := discoverAssociations(models[index], classes[models[index].Name], byName, schema)
+		associations, err := discoverAssociationSpecs(models[index], classes[models[index].Name], byName)
 		if err != nil {
 			return nil, err
 		}
-		models[index].Associations = associations
+		specs[models[index].Name] = associations
+		for _, spec := range associations {
+			if spec.Through != "" {
+				continue
+			}
+			target := byName[spec.TargetModel]
+			association, buildErr := buildAssociation(models[index], *target, spec, schema)
+			if buildErr != nil {
+				return nil, buildErr
+			}
+			models[index].Associations = append(models[index].Associations, association)
+		}
+	}
+	for index := range models {
+		for _, spec := range specs[models[index].Name] {
+			if spec.Through == "" {
+				continue
+			}
+			association, err := buildThroughAssociation(models[index], spec, byName)
+			if err != nil {
+				return nil, err
+			}
+			models[index].Associations = append(models[index].Associations, association)
+		}
+		if err := resolveAssociationInverses(&models[index], byName); err != nil {
+			return nil, err
+		}
+		sort.Slice(models[index].Associations, func(left, right int) bool {
+			return models[index].Associations[left].Name < models[index].Associations[right].Name
+		})
 	}
 	sort.Slice(models, func(i, j int) bool {
 		if models[i].ModulePath != models[j].ModulePath {
@@ -737,11 +771,23 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 	return models, nil
 }
 
-func discoverAssociations(source Model, class *ast.ClassStatement, models map[string]*Model, schema *Schema) ([]Association, error) {
+type associationSpec struct {
+	Kind        AssociationKind
+	TargetModel string
+	Name        string
+	ForeignKey  string
+	References  string
+	Inverse     string
+	Through     string
+	Source      string
+	Dependent   DependentAction
+}
+
+func discoverAssociationSpecs(source Model, class *ast.ClassStatement, models map[string]*Model) ([]associationSpec, error) {
 	if class == nil {
 		return nil, nil
 	}
-	var result []Association
+	var result []associationSpec
 	seen := map[string]bool{}
 	for _, statement := range class.Body {
 		expression, ok := statement.(*ast.ExpressionStatement)
@@ -756,76 +802,171 @@ func discoverAssociations(source Model, class *ast.ClassStatement, models map[st
 		if !ok || callee.Name != string(BelongsTo) && callee.Name != string(HasMany) && callee.Name != string(HasOne) {
 			continue
 		}
-		if len(call.Arguments) != 1 || call.Arguments[0].Name != "" {
-			return nil, fmt.Errorf("trb/orm %s.%s expects exactly one model type", source.Name, callee.Name)
+		if len(call.Arguments) == 0 || call.Arguments[0].Name != "" {
+			return nil, fmt.Errorf("trb/orm %s.%s expects a model type as its first argument", source.Name, callee.Name)
 		}
 		targetName := expressionName(call.Arguments[0].Value)
-		target := models[targetName]
-		if target == nil {
+		if models[targetName] == nil {
 			return nil, fmt.Errorf("trb/orm %s.%s references unknown model %s", source.Name, callee.Name, targetName)
 		}
-		association, err := buildAssociation(source, *target, AssociationKind(callee.Name), schema)
-		if err != nil {
-			return nil, err
+		spec := associationSpec{Kind: AssociationKind(callee.Name), TargetModel: targetName}
+		options := map[string]string{}
+		for _, argument := range call.Arguments[1:] {
+			if argument.Name == "" {
+				return nil, fmt.Errorf("trb/orm %s.%s accepts only one positional model type", source.Name, callee.Name)
+			}
+			if _, duplicate := options[argument.Name]; duplicate {
+				return nil, fmt.Errorf("trb/orm %s.%s option %s is specified more than once", source.Name, callee.Name, argument.Name)
+			}
+			value, ok := associationOptionValue(argument.Value)
+			if !ok {
+				return nil, fmt.Errorf("trb/orm %s.%s option %s must be a symbol or string literal", source.Name, callee.Name, argument.Name)
+			}
+			options[argument.Name] = value
 		}
-		if seen[association.Name] {
-			return nil, fmt.Errorf("trb/orm model %s declares association %s more than once", source.Name, association.Name)
+		for name := range options {
+			if !associationOptionAllowed(spec.Kind, name) {
+				return nil, fmt.Errorf("trb/orm %s.%s does not accept option %s", source.Name, callee.Name, name)
+			}
 		}
-		seen[association.Name] = true
-		result = append(result, association)
+		spec.Name = options["name"]
+		spec.ForeignKey = options["foreign_key"]
+		spec.References = options["references"]
+		spec.Inverse = options["inverse"]
+		spec.Through = options["through"]
+		spec.Source = options["source"]
+		if spec.Source != "" && spec.Through == "" {
+			return nil, fmt.Errorf("trb/orm %s.%s option source requires through", source.Name, callee.Name)
+		}
+		if dependent := options["dependent"]; dependent != "" {
+			spec.Dependent = DependentAction(dependent)
+			switch spec.Dependent {
+			case DependentDestroy, DependentDelete, DependentNullify, DependentRestrict:
+			default:
+				return nil, fmt.Errorf("trb/orm %s.%s dependent must be destroy, delete, nullify, or restrict", source.Name, callee.Name)
+			}
+		}
+		associationName := spec.Name
+		if associationName == "" {
+			if spec.Kind == HasMany {
+				associationName = models[targetName].Table
+			} else {
+				associationName = modelBaseName(targetName)
+			}
+		}
+		if seen[associationName] {
+			return nil, fmt.Errorf("trb/orm model %s declares association %s more than once", source.Name, associationName)
+		}
+		seen[associationName] = true
+		result = append(result, spec)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result, nil
 }
 
-func buildAssociation(source, target Model, kind AssociationKind, schema *Schema) (Association, error) {
+func associationOptionAllowed(kind AssociationKind, name string) bool {
+	switch name {
+	case "name", "foreign_key", "references", "inverse", "dependent":
+		return true
+	case "through", "source":
+		return kind == HasMany || kind == HasOne
+	default:
+		return false
+	}
+}
+
+func associationOptionValue(expression ast.Expression) (string, bool) {
+	switch value := expression.(type) {
+	case *ast.SymbolLiteral:
+		return value.Name, true
+	case *ast.Literal:
+		if value.Kind != ast.StringLiteral {
+			return "", false
+		}
+		decoded, err := strconv.Unquote(value.Raw)
+		return decoded, err == nil
+	default:
+		return "", false
+	}
+}
+
+func buildAssociation(source, target Model, spec associationSpec, schema *Schema) (Association, error) {
 	sourceTable, _ := schema.Table(source.Table)
 	targetTable, _ := schema.Table(target.Table)
 	sourceKey, sourceKeyOK := source.PrimaryKey()
 	targetKey, targetKeyOK := target.PrimaryKey()
-	if !sourceKeyOK || !targetKeyOK {
+	if (!sourceKeyOK && spec.Kind != BelongsTo) || (!targetKeyOK && spec.Kind == BelongsTo) {
 		return Association{}, fmt.Errorf("trb/orm association %s to %s requires one primary key on each model", source.Name, target.Name)
 	}
-	association := Association{Kind: kind, TargetModel: target.Name, TargetQuery: target.QueryType}
+	association := Association{
+		Name: spec.Name, Kind: spec.Kind, TargetModel: target.Name, TargetQuery: target.QueryType,
+		Inverse: spec.Inverse, Dependent: spec.Dependent,
+	}
 	var foreignKeys []ForeignKey
 	foreignTable, foreignColumn := "", ""
 	referencedTable, referencedColumn := "", ""
-	switch kind {
+	switch spec.Kind {
 	case BelongsTo:
-		association.Name = modelBaseName(target.Name)
-		association.SourceColumn = modelBaseName(target.Name) + "_id"
-		association.TargetColumn = targetKey.Name
+		if association.Name == "" {
+			association.Name = modelBaseName(target.Name)
+		}
+		association.SourceColumn = spec.ForeignKey
+		if association.SourceColumn == "" {
+			association.SourceColumn = association.Name + "_id"
+		}
+		association.TargetColumn = spec.References
+		if association.TargetColumn == "" {
+			association.TargetColumn = targetKey.Name
+		}
 		foreignKeys = sourceTable.ForeignKeys
 		foreignTable, foreignColumn = source.Table, association.SourceColumn
 		referencedTable, referencedColumn = target.Table, association.TargetColumn
 	case HasMany:
-		association.Name = target.Table
-		association.SourceColumn = sourceKey.Name
-		association.TargetColumn = modelBaseName(source.Name) + "_id"
+		if association.Name == "" {
+			association.Name = target.Table
+		}
+		association.SourceColumn = spec.References
+		if association.SourceColumn == "" {
+			association.SourceColumn = sourceKey.Name
+		}
+		association.TargetColumn = spec.ForeignKey
+		if association.TargetColumn == "" {
+			association.TargetColumn = modelBaseName(source.Name) + "_id"
+		}
 		foreignKeys = targetTable.ForeignKeys
 		foreignTable, foreignColumn = target.Table, association.TargetColumn
 		referencedTable, referencedColumn = source.Table, association.SourceColumn
 	case HasOne:
-		association.Name = modelBaseName(target.Name)
-		association.SourceColumn = sourceKey.Name
-		association.TargetColumn = modelBaseName(source.Name) + "_id"
+		if association.Name == "" {
+			association.Name = modelBaseName(target.Name)
+		}
+		association.SourceColumn = spec.References
+		if association.SourceColumn == "" {
+			association.SourceColumn = sourceKey.Name
+		}
+		association.TargetColumn = spec.ForeignKey
+		if association.TargetColumn == "" {
+			association.TargetColumn = modelBaseName(source.Name) + "_id"
+		}
 		foreignKeys = targetTable.ForeignKeys
 		foreignTable, foreignColumn = target.Table, association.TargetColumn
 		referencedTable, referencedColumn = source.Table, association.SourceColumn
 		association.CardinalityVerified = hasExactUniqueConstraint(targetTable, association.TargetColumn)
 	default:
-		return Association{}, fmt.Errorf("unsupported trb/orm association %q", kind)
+		return Association{}, fmt.Errorf("unsupported trb/orm association %q", spec.Kind)
 	}
 	for _, foreignKey := range foreignKeys {
 		referencedColumn := foreignKey.ReferencedColumn
 		if referencedColumn == "" {
-			referencedColumn = targetKey.Name
+			referencedColumn = association.SourceColumn
+			if spec.Kind == BelongsTo {
+				referencedColumn = association.TargetColumn
+			}
 		}
-		if kind == BelongsTo && foreignKey.Column == association.SourceColumn && foreignKey.ReferencedTable == target.Table && referencedColumn == association.TargetColumn {
+		if spec.Kind == BelongsTo && foreignKey.Column == association.SourceColumn && foreignKey.ReferencedTable == target.Table && referencedColumn == association.TargetColumn {
 			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
-		if (kind == HasMany || kind == HasOne) && foreignKey.Column == association.TargetColumn && foreignKey.ReferencedTable == source.Table && referencedColumn == association.SourceColumn {
+		if (spec.Kind == HasMany || spec.Kind == HasOne) && foreignKey.Column == association.TargetColumn && foreignKey.ReferencedTable == source.Table && referencedColumn == association.SourceColumn {
 			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
@@ -835,6 +976,75 @@ func buildAssociation(source, target Model, kind AssociationKind, schema *Schema
 		source.Name, association.Name,
 		foreignTable, foreignColumn, referencedTable, referencedColumn,
 	)
+}
+
+func buildThroughAssociation(source Model, spec associationSpec, models map[string]*Model) (Association, error) {
+	through, ok := source.Association(spec.Through)
+	if !ok {
+		return Association{}, fmt.Errorf("trb/orm association %s through references unknown association %s", source.Name, spec.Through)
+	}
+	middle := models[through.TargetModel]
+	if middle == nil {
+		return Association{}, fmt.Errorf("trb/orm association %s through target %s is unavailable", source.Name, through.TargetModel)
+	}
+	sourceName := spec.Source
+	if sourceName == "" {
+		for _, candidate := range middle.Associations {
+			if candidate.TargetModel != spec.TargetModel {
+				continue
+			}
+			if sourceName != "" {
+				return Association{}, fmt.Errorf("trb/orm association %s through %s is ambiguous; specify source", source.Name, spec.Through)
+			}
+			sourceName = candidate.Name
+		}
+	}
+	via, ok := middle.Association(sourceName)
+	if !ok || via.TargetModel != spec.TargetModel {
+		return Association{}, fmt.Errorf("trb/orm association %s through %s has no source %s to %s", source.Name, spec.Through, sourceName, spec.TargetModel)
+	}
+	name := spec.Name
+	if name == "" {
+		if spec.Kind == HasMany {
+			name = models[spec.TargetModel].Table
+		} else {
+			name = modelBaseName(spec.TargetModel)
+		}
+	}
+	return Association{
+		Name: name, Kind: spec.Kind, TargetModel: spec.TargetModel, TargetQuery: models[spec.TargetModel].QueryType,
+		Inverse: spec.Inverse, Through: spec.Through, Source: sourceName, Dependent: spec.Dependent,
+	}, nil
+}
+
+func resolveAssociationInverses(source *Model, models map[string]*Model) error {
+	for index := range source.Associations {
+		association := &source.Associations[index]
+		target := models[association.TargetModel]
+		if target == nil || association.Through != "" {
+			continue
+		}
+		if association.Inverse != "" {
+			inverse, ok := target.Association(association.Inverse)
+			if !ok || inverse.TargetModel != source.Name || inverse.Through != "" {
+				return fmt.Errorf("trb/orm association %s.%s inverse %s does not reference %s", source.Name, association.Name, association.Inverse, source.Name)
+			}
+			continue
+		}
+		inferred := ""
+		for _, candidate := range target.Associations {
+			if candidate.TargetModel != source.Name || candidate.Through != "" || candidate.SourceColumn != association.TargetColumn || candidate.TargetColumn != association.SourceColumn {
+				continue
+			}
+			if inferred != "" {
+				inferred = ""
+				break
+			}
+			inferred = candidate.Name
+		}
+		association.Inverse = inferred
+	}
+	return nil
 }
 
 func hasExactUniqueConstraint(table Table, column string) bool {
