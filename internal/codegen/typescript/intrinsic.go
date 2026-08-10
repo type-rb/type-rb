@@ -9,6 +9,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if generated, ok := g.ormIntrinsic(name, call, arguments); ok {
+		return generated
+	}
 	if name == "trb.internal.runtime.fail" {
 		return "((): " + g.tsType(call.ExprType()) + " => { throw new Error(" + arguments[0] + "); })()"
 	}

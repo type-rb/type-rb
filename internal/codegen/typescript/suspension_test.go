@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -77,5 +78,35 @@ func TestPureTypeScriptFunctionsRemainSynchronous(t *testing.T) {
 	}
 	if strings.Contains(generated[0], "async function value") || !strings.Contains(generated[0], "export function value(): number") {
 		t.Fatalf("pure function unexpectedly became asynchronous:\n%s", generated[0])
+	}
+}
+
+func TestORMRejectsUnsupportedTypeScriptRuntimes(t *testing.T) {
+	for _, runtime := range []string{"", "browser", "node"} {
+		program := &ir.Program{
+			Mode:              "typescript",
+			ModulePath:        "main",
+			TypeScriptRuntime: runtime,
+			Extensions:        []ir.Extension{&ormintegration.Manifest{}},
+		}
+		if _, err := GenerateProject([]*ir.Program{program}); err == nil || !strings.Contains(err.Error(), `typescript.runtime: "bun"`) {
+			t.Fatalf("runtime %q returned %v", runtime, err)
+		}
+	}
+	program := &ir.Program{Mode: "typescript", ModulePath: "main", TypeScriptRuntime: "bun", Extensions: []ir.Extension{&ormintegration.Manifest{}}}
+	if _, err := GenerateProject([]*ir.Program{program}); err != nil {
+		t.Fatalf("Bun runtime was rejected: %v", err)
+	}
+	repl := &ir.Program{Mode: "typescript", ModulePath: "__trb_repl__", TypeScriptRuntime: "node"}
+	project := &ir.Program{Mode: "typescript", ModulePath: "main", TypeScriptRuntime: "node", Extensions: []ir.Extension{&ormintegration.Manifest{}}}
+	if _, err := GenerateProject([]*ir.Program{project, repl}); err != nil {
+		t.Fatalf("shared-host REPL project was rejected: %v", err)
+	}
+}
+
+func TestBooleanHashKeysUseJavaScriptPropertyKeys(t *testing.T) {
+	typ := types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("Boolean"), types.FromName("Integer")}}
+	if generated := tsType(typ); generated != "Record<string, number>" {
+		t.Fatalf("boolean-keyed Hash generated %q", generated)
 	}
 }

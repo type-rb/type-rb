@@ -1,12 +1,14 @@
 package typescript
 
 import (
+	"fmt"
 	pathpkg "path"
 	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
+	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -23,6 +25,8 @@ type generator struct {
 	typeAliases   map[string]string
 	temporary     int
 	suspension    *SuspensionPlan
+	orm           *ormintegration.Manifest
+	breakTarget   string
 }
 
 func Generate(program *ir.Program) string {
@@ -34,6 +38,20 @@ func Generate(program *ir.Program) string {
 }
 
 func GenerateProject(programs []*ir.Program) ([]string, error) {
+	interactive := false
+	for _, program := range programs {
+		// The REPL executes ORM operations through its shared host runtime; it does
+		// not execute the generated TypeScript modules in the configured runtime.
+		if program.ModulePath == "__trb_repl__" {
+			interactive = true
+			break
+		}
+	}
+	for _, program := range programs {
+		if !interactive && ormintegration.ManifestFrom(program.Extensions) != nil && program.TypeScriptRuntime != "bun" {
+			return nil, fmt.Errorf(`trb/orm in mode: typescript currently requires typescript.runtime: "bun"`)
+		}
+	}
 	plan, err := AnalyzeSuspension(programs)
 	if err != nil {
 		return nil, err
@@ -46,7 +64,7 @@ func GenerateProject(programs []*ir.Program) ([]string, error) {
 }
 
 func generate(program *ir.Program, suspension *SuspensionPlan) string {
-	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, suspension: suspension}
+	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, suspension: suspension, orm: ormintegration.ManifestFrom(program.Extensions)}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -244,7 +262,11 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.ReadOnly {
 			prefix += "readonly "
 		}
-		text := prefix + name + ": " + g.tsType(n.Type)
+		separator := ": "
+		if n.Value == nil {
+			separator = "!: "
+		}
+		text := prefix + name + separator + g.tsType(n.Type)
 		if n.Value != nil {
 			text += " = " + g.expr(n.Value)
 		}
@@ -294,10 +316,21 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line("return " + g.expr(n.Value) + ";")
 		}
 	case *ir.Break:
-		g.line("break;")
+		if g.breakTarget != "" {
+			g.line("break " + g.breakTarget + ";")
+		} else {
+			g.line("break;")
+		}
 	case *ir.Next:
 		g.line("continue;")
 	case *ir.ExpressionStatement:
+		if g.inClass > 0 {
+			if call, ok := n.Expression.(*ir.Call); ok {
+				if identifier, identifierOK := call.Callee.(*ir.Identifier); identifierOK && (identifier.Name == "belongs_to" || identifier.Name == "has_many" || identifier.Name == "has_one") {
+					return
+				}
+			}
+		}
 		g.line(g.expr(n.Expression) + ";")
 	case *ir.If:
 		g.line("if (" + g.expr(n.Condition) + ") {")
@@ -375,6 +408,8 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("}")
 	case *ir.Iterate:
 		g.iterate(n)
+	case *ir.StructuredBlock:
+		g.structuredBlock(n)
 	}
 }
 
@@ -431,6 +466,10 @@ func tsTypePattern(value string, typ types.Type) string {
 }
 
 func (g *generator) iterate(iteration *ir.Iterate) {
+	if iteration.Intrinsic == "trb.orm.query.find_each" || iteration.Intrinsic == "trb.orm.query.find_in_batches" {
+		g.ormBatchIterate(iteration)
+		return
+	}
 	binding := func(index int) ir.IterationBinding {
 		if index < len(iteration.Bindings) {
 			return iteration.Bindings[index]
@@ -750,6 +789,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if n.Reference != nil && n.Reference.Intrinsic == "trb.orm.column" {
+			return "__trbOrm.column(" + g.expr(n.Receiver) + ", " + strconv.Quote(n.Name) + ")"
+		}
 		receiver := g.expr(n.Receiver)
 		op := "."
 		if n.Safe {
@@ -772,7 +814,11 @@ func (g *generator) expr(expression ir.Expression) string {
 					parts = append([]string{g.expr(member.Receiver)}, parts...)
 				}
 			}
-			return g.awaitCall(n, g.intrinsic(reference.Intrinsic, n, parts))
+			generated := g.intrinsic(reference.Intrinsic, n, parts)
+			if isSuspendingORM(reference.Intrinsic, n.Fails) {
+				return "(await " + generated + ")"
+			}
+			return g.awaitCall(n, generated)
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok && (g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record") {
@@ -843,6 +889,8 @@ func (g *generator) ifExpression(node *ir.If) string {
 		typeAliases:   g.typeAliases,
 		temporary:     g.temporary,
 		suspension:    g.suspension,
+		orm:           g.orm,
+		breakTarget:   g.breakTarget,
 	}
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
 	if suspends {
@@ -897,6 +945,8 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		typeAliases:   g.typeAliases,
 		temporary:     g.temporary,
 		suspension:    g.suspension,
+		orm:           g.orm,
+		breakTarget:   g.breakTarget,
 	}
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
 	if suspends {
@@ -932,6 +982,8 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		typeAliases:   g.typeAliases,
 		temporary:     g.temporary,
 		suspension:    g.suspension,
+		orm:           g.orm,
+		breakTarget:   g.breakTarget,
 	}
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
 	if suspends {
@@ -1369,6 +1421,9 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 		value := "unknown"
 		if len(t.Args) == 2 {
 			key = tsTypeWithAliases(t.Args[0], aliases)
+			if t.Args[0].Kind == types.Bool {
+				key = "string"
+			}
 			value = tsTypeWithAliases(t.Args[1], aliases)
 		}
 		result = "Record<" + key + ", " + value + ">"

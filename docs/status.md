@@ -117,13 +117,14 @@ status codes, header names, and CR/LF-bearing header values through the same
 JSON 500 boundary.
 
 The experimental official [`trb/orm`](guides/orm.md) package targets generated
-Go and Ruby. It reads SQLite, PostgreSQL, or MySQL schema metadata directly and
-exposes typed models, immutable queries, associations and preload, aggregates,
-transactions, batching, writes, conflict handling, and destroy lifecycles.
+Go, Ruby, and TypeScript; TypeScript server applications currently select Bun.
+It reads SQLite, PostgreSQL, or MySQL schema metadata directly and exposes typed
+models, immutable queries, associations and preload, aggregates, transactions,
+batching, writes, conflict handling, and destroy lifecycles.
 Database terminals and lazy association access use `fails DbError`; `attempt`
 captures them as ordinary `Result` values. The REPL uses the same schema-backed
-read and write API. The TypeScript backend adapter, schema caching, and
-production compatibility remain future work.
+read and write API. Schema caching and production compatibility remain future
+work.
 
 The compiler pipeline is:
 
