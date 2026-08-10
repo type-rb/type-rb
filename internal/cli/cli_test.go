@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,36 @@ func TestVersionCommandUsesBuildVersion(t *testing.T) {
 	}
 	if stdout.String() != "trb 9.8.7-test\n" {
 		t.Fatalf("unexpected version output %q", stdout.String())
+	}
+}
+
+func TestInteractiveNoArgumentCommandStartsREPL(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var stdout, stderr bytes.Buffer
+	command := &CLI{
+		Stdin:  strings.NewReader("1 + 2\n:quit\n"),
+		Stdout: &stdout,
+		Stderr: &stderr,
+		terminal: func(io.Reader, io.Writer) bool {
+			return true
+		},
+	}
+	if status := command.Run(nil); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if stdout.String() != "3 : Integer\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected REPL output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestNonInteractiveNoArgumentCommandPrintsUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run(nil); status != 2 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Usage:\n  trb\n") || stderr.Len() != 0 {
+		t.Fatalf("unexpected usage output stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 
@@ -165,13 +196,13 @@ func TestPlaygroundModeSelection(t *testing.T) {
 	}
 }
 
-func TestTourCheckRejectsServerFlags(t *testing.T) {
+func TestTourDoesNotExposeCheckFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"tour", "--check", "--mode", "go"}); status != 1 {
+	if status := command.Run([]string{"tour", "--check"}); status != 1 {
 		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "tour --check cannot be combined") {
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -check") {
 		t.Fatalf("unexpected error: %s", stderr.String())
 	}
 }
