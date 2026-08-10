@@ -55,6 +55,7 @@ type Options struct {
 	ProjectRoot        string
 	PackageOptions     map[string][]byte
 	AllowUnusedImports bool
+	InteractiveModule  string
 }
 
 const MainFunction = "main"
@@ -97,7 +98,10 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 	}
 	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: filename, Declarations: declarations})
 	diagnostics = append(diagnostics, resolveDiagnostics...)
-	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{AllowUnusedImports: options.AllowUnusedImports})
+	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{
+		AllowUnusedImports:    options.AllowUnusedImports,
+		AllowUnhandledEffects: options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
+	})
 	diagnostics = append(diagnostics, checkDiagnostics...)
 	if hasErrors(diagnostics) {
 		return nil, &CompileError{Filename: filename, Diagnostics: diagnostics}
@@ -210,7 +214,10 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	checkDiagnostics := make(map[string][]diagnostic.Diagnostic, len(units))
 	for _, source := range units {
 		program := programs[source.ModulePath]
-		checked, diagnostics := checker.CheckWithOptions(program, resolutions[source.ModulePath], checker.Options{AllowUnusedImports: options.AllowUnusedImports})
+		checked, diagnostics := checker.CheckWithOptions(program, resolutions[source.ModulePath], checker.Options{
+			AllowUnusedImports:    options.AllowUnusedImports,
+			AllowUnhandledEffects: options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
+		})
 		checkedPrograms[source.ModulePath] = checked
 		checkDiagnostics[source.ModulePath] = diagnostics
 	}

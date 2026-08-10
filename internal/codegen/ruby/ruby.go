@@ -432,6 +432,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.ifExpression(n)
 	case *ir.Case:
 		return g.caseExpression(n)
+	case *ir.Attempt:
+		return g.attemptExpression(n)
+	case *ir.UnhandledEffect:
+		return g.expr(n.Value)
 	case *ir.Identifier:
 		if !n.Lexical && g.topTargets[n.Name] != "" {
 			return g.topTargets[n.Name]
@@ -596,6 +600,29 @@ func (g *generator) ifExpression(node *ir.If) string {
 	child.line("end", "")
 	child.indent--
 	child.line("end", "")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
+}
+
+func (g *generator) attemptExpression(node *ir.Attempt) string {
+	child := &generator{
+		loader:       g.loader,
+		modulePath:   g.modulePath,
+		topFunctions: g.topFunctions,
+		topTargets:   g.topTargets,
+		nativeSyntax: g.nativeSyntax,
+		temporary:    g.temporary,
+	}
+	child.line("-> do", "")
+	child.indent++
+	child.statements(node.Body)
+	result := node.Value
+	if result == nil {
+		result = node.BodyResult
+	}
+	child.line(child.expr(result), "")
+	child.indent--
+	child.line("end.call", "")
 	g.temporary = child.temporary
 	return strings.TrimSpace(child.b.String())
 }

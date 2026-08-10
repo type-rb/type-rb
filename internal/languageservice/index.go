@@ -150,7 +150,7 @@ func collectSymbols(statements []ir.Statement, owner string, typeMembers map[str
 			if privateName(node.Name) {
 				continue
 			}
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionFunction, Detail: methodSignature(node), Type: node.ReturnType, Call: methodCallInfo(node)})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionFunction, Detail: methodSignature(node), Type: methodValueType(node), Call: methodCallInfo(node)})
 		case *ir.Class:
 			qualified := qualify(owner, node.Name)
 			instance, namespace := classMembers(node.Body, qualified, typeMembers)
@@ -178,7 +178,7 @@ func collectSymbols(statements []ir.Statement, owner string, typeMembers map[str
 			methods := make([]Symbol, 0, len(node.Methods))
 			for _, method := range node.Methods {
 				if !privateName(method.Name) {
-					methods = append(methods, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: methodSignature(method), Type: method.ReturnType, Call: methodCallInfo(method)})
+					methods = append(methods, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: methodSignature(method), Type: methodValueType(method), Call: methodCallInfo(method)})
 				}
 			}
 			typeMembers[qualified] = methods
@@ -216,7 +216,7 @@ func classMembers(statements []ir.Statement, owner string, typeMembers map[strin
 			if privateName(node.Name) {
 				continue
 			}
-			symbol := Symbol{Name: node.Name, Kind: CompletionMethod, Detail: methodSignature(node), Type: node.ReturnType, Call: methodCallInfo(node)}
+			symbol := Symbol{Name: node.Name, Kind: CompletionMethod, Detail: methodSignature(node), Type: methodValueType(node), Call: methodCallInfo(node)}
 			if node.Class {
 				namespace = append(namespace, symbol)
 			} else {
@@ -281,10 +281,21 @@ func methodSignature(method *ir.Method) string {
 		parameters = append(parameters, text)
 	}
 	result := method.Name + "(" + strings.Join(parameters, ", ") + ")"
-	if method.ReturnType.Kind != types.Void {
-		result += ": " + method.ReturnType.String()
+	valueType := methodValueType(method)
+	if valueType.Kind != types.Void {
+		result += ": " + valueType.String()
+	}
+	if method.Fails.Kind != "" && method.Fails.Kind != types.Never {
+		result += " fails " + method.Fails.String()
 	}
 	return result
+}
+
+func methodValueType(method *ir.Method) types.Type {
+	if method.SuccessType.Kind != "" {
+		return method.SuccessType
+	}
+	return method.ReturnType
 }
 
 func methodCallInfo(method *ir.Method) *CallInfo {
@@ -338,6 +349,9 @@ func librarySignature(symbol stdlib.Symbol) string {
 	result := symbol.Name + "(" + strings.Join(parameters, ", ") + ")"
 	if symbol.Return.Kind != types.Void {
 		result += ": " + symbol.Return.String()
+	}
+	if symbol.Fails.Kind != "" && symbol.Fails.Kind != types.Never {
+		result += " fails " + symbol.Fails.String()
 	}
 	return result
 }

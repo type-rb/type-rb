@@ -544,6 +544,7 @@ func (c *CLI) runRepl(args []string) error {
 		})
 		options := compilerOptions(config)
 		options.AllowUnusedImports = true
+		options.InteractiveModule = sessionModule
 		artifacts, err := compiler.CompileProject(units, options)
 		if err != nil {
 			return nil, err

@@ -90,6 +90,10 @@ func (n *controlFlowNormalizer) reserveStatements(statements []ir.Statement) {
 				n.reserved[binding.Name] = true
 			}
 			n.reserveStatements(node.Body)
+		case *ir.ExpressionStatement:
+			if attempt, ok := node.Expression.(*ir.Attempt); ok {
+				n.reserveStatements(attempt.Body)
+			}
 		case *ir.NativeBlock:
 			n.reserveStatements(node.Body)
 		}
@@ -538,6 +542,11 @@ func containsEscapingTransfer(statements []ir.Statement, loopDepth int) bool {
 		case *ir.StructuredBlock:
 			// A value-producing structured block owns return and propagation.
 			// Transfers inside it do not escape into the surrounding method.
+		case *ir.ExpressionStatement:
+			if _, ok := node.Expression.(*ir.Attempt); ok {
+				// attempt owns propagation returns emitted inside its result closure.
+				continue
+			}
 		case *ir.NativeBlock:
 			if containsEscapingTransfer(node.Body, loopDepth) {
 				return true
@@ -556,6 +565,30 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		return n.ifExpression(node)
 	case *ir.Case:
 		return n.caseExpression(node)
+	case *ir.Attempt:
+		copy := *node
+		inner := &controlFlowNormalizer{temporary: n.temporary, reserved: n.reserved}
+		copy.Body = inner.statements(node.Body)
+		if node.Value != nil {
+			prefix, value := inner.expression(node.Value)
+			copy.Body = append(copy.Body, prefix...)
+			copy.Value = value
+		}
+		if node.BodyResult != nil {
+			prefix, value := inner.expression(node.BodyResult)
+			copy.Body = append(copy.Body, prefix...)
+			copy.BodyResult = value
+		}
+		n.temporary = inner.temporary
+		return nil, &copy
+	case *ir.UnhandledEffect:
+		prefix, value := n.expression(node.Value)
+		if value == nil {
+			return prefix, nil
+		}
+		copy := *node
+		copy.Value = value
+		return prefix, &copy
 	case *ir.InterpolatedString:
 		copy := *node
 		copy.Parts = append([]ir.StringPart(nil), node.Parts...)

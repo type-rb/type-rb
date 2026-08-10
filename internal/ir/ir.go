@@ -185,7 +185,9 @@ type Method struct {
 	TypeParameters []string
 	Parameters     []Parameter
 	Alternatives   []MethodSignature
+	SuccessType    types.Type
 	ReturnType     types.Type
+	Fails          types.Type
 	Body           []Statement
 	Class          bool
 }
@@ -515,9 +517,35 @@ type Call struct {
 	Arguments []CallArgument
 	Block     *Block
 	Codec     *CodecSchema
+	Fails     types.Type
 }
 
 func (*Call) irExpression() {}
+
+// Attempt captures every fallible effect produced by Value or Body and
+// exposes it as Result<Success, Error>. BodyResult is the final value of a
+// block attempt and is nil for a Void block.
+type Attempt struct {
+	ExprBase
+	Value      Expression
+	Body       []Statement
+	BodyResult Expression
+	Success    types.Type
+	Fails      types.Type
+}
+
+func (*Attempt) irExpression() {}
+
+// UnhandledEffect marks a fallible expression evaluated by an interactive
+// host. The REPL unwraps success and reports failure without terminating the
+// session; project builds never produce this node.
+type UnhandledEffect struct {
+	ExprBase
+	Value Expression
+	Fails types.Type
+}
+
+func (*UnhandledEffect) irExpression() {}
 
 // CodecSchema is the checked, target-independent shape used by typed JSON
 // encode/decode intrinsics. Backends consume this schema instead of reflecting

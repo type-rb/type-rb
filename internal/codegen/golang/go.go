@@ -900,6 +900,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.ifExpression(n)
 	case *ir.Case:
 		return g.caseExpression(n)
+	case *ir.Attempt:
+		return g.attemptExpression(n)
+	case *ir.UnhandledEffect:
+		return g.expr(n.Value)
 	case *ir.Identifier:
 		if n.Generated {
 			return n.Name
@@ -1289,6 +1293,40 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		child.indent--
 		child.line("}")
 	}
+	child.indent--
+	child.line("}()")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
+}
+
+func (g *generator) attemptExpression(node *ir.Attempt) string {
+	child := &generator{
+		functionDepth: g.functionDepth,
+		receiver:      g.receiver,
+		inConstructor: g.inConstructor,
+		methods:       g.methods,
+		topMethods:    g.topMethods,
+		topTargets:    g.topTargets,
+		staticMethods: g.staticMethods,
+		records:       g.records,
+		classes:       g.classes,
+		typeAliases:   g.typeAliases,
+		typeKinds:     g.typeKinds,
+		imports:       g.imports,
+		modulePath:    g.modulePath,
+		goModule:      g.goModule,
+		temporary:     g.temporary,
+		breakTarget:   g.breakTarget,
+		orm:           g.orm,
+	}
+	child.line("func() " + child.goType(node.ExprType()) + " {")
+	child.indent++
+	child.statements(node.Body)
+	result := node.Value
+	if result == nil {
+		result = node.BodyResult
+	}
+	child.line("return " + child.expr(result))
 	child.indent--
 	child.line("}()")
 	g.temporary = child.temporary

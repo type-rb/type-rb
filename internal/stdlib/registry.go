@@ -40,6 +40,7 @@ type Symbol struct {
 	ReceiverMutable     bool
 	Parameters          []Parameter
 	Return              types.Type
+	Fails               types.Type
 	Variadic            bool
 	Inference           string
 	RuntimeDependencies []types.Type
@@ -111,8 +112,9 @@ var queryParameterType = types.FromName("QueryParameter")
 
 var registry = map[string]*Package{
 	"trb/std/unit": {
-		Path:       "trb/std/unit",
-		ModulePath: "trb/std/unit/index",
+		Path:           "trb/std/unit",
+		ModulePath:     "trb/std/unit/index",
+		RuntimeExports: []RuntimeExport{{Name: "Unit", Kind: "record"}},
 		Source: `record Unit
 end
 `,

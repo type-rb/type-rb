@@ -94,6 +94,24 @@ func TestCompletionHandlesIncompleteFunctionParameters(t *testing.T) {
 	}
 }
 
+func TestCompletionShowsSourceReturnAndEffectSignature(t *testing.T) {
+	artifact := compile(t, "go", `record LoadError
+end
+def load_name(): String fails LoadError
+	return "Ada"
+end
+`)
+	service := languageservice.New("go")
+	service.Update([]*ir.Program{artifact.IR}, "repl")
+	item, ok := findCompletion(service.Complete("load_", len("load_")), "load_name")
+	if !ok {
+		t.Fatal("load_name completion is missing")
+	}
+	if item.Detail != "load_name(): String fails LoadError" {
+		t.Fatalf("effect completion detail=%q", item.Detail)
+	}
+}
+
 func TestCompletionIncludesExplicitImportedNamesAndNamespaces(t *testing.T) {
 	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
 		{Filename: "models/user.trb", ModulePath: "models/user", Source: []byte("record User\n\tname: String\nend\n")},
