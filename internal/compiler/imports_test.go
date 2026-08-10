@@ -2961,6 +2961,27 @@ func TestStandardPackageSignaturesAndReservedPathsAreChecked(t *testing.T) {
 	}
 }
 
+func TestPortableArrayOutputUsesOneLineAcrossBackends(t *testing.T) {
+	source := []byte("def main()\n\tputs([\"compiler\", \"web\"])\n\treturn\nend\n")
+	wants := map[string][]string{
+		"go":         {"strconv.Quote(item)", `strings.Join(parts, ", ")`},
+		"ruby":       {`$stdout.puts((["compiler", "web"]).inspect)`},
+		"typescript": {`.map((item) => JSON.stringify(item)).join(", ")`},
+	}
+	for mode, expected := range wants {
+		artifact, err := Compile("array_output.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, fragment := range expected {
+			if !strings.Contains(output, fragment) {
+				t.Fatalf("%s output is missing %q:\n%s", mode, fragment, output)
+			}
+		}
+	}
+}
+
 func TestRubyNativeSyntaxRequiresExplicitPlatformImport(t *testing.T) {
 	source := []byte("class Post < ApplicationRecord\n  belongs_to :author\nend\n")
 	if _, err := Compile("post.trb", source, "ruby"); err == nil || !strings.Contains(err.Error(), "requires import trb/platform/ruby") {
@@ -3455,6 +3476,30 @@ func TestProjectCompilerPreservesImportedClassMemberKindsAndReadonlyFields(t *te
 	end
 end
 `),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Source:     []byte("import models/probe\n\ndef identifier(): Integer\n\tprobe := Probe.new(1)\n\treturn probe.id\nend\n"),
+	}
+	for mode, expected := range map[string]string{
+		"go":         "probe.TrbFieldId",
+		"ruby":       "probe.__trb_field_id",
+		"typescript": "probe.__trb_id",
+	} {
+		artifacts, err := CompileProject([]SourceUnit{model, consumer}, Options{Mode: mode, GoModule: "example.com/project"})
+		if err != nil {
+			t.Fatalf("%s rejected imported class field access: %v", mode, err)
+		}
+		var output string
+		for _, artifact := range artifacts {
+			if artifact.IR.ModulePath == "main" {
+				output = string(artifact.Output)
+			}
+		}
+		if !strings.Contains(output, expected) {
+			t.Fatalf("%s imported class field access is missing %q:\n%s", mode, expected, output)
+		}
 	}
 	tests := []struct {
 		name string

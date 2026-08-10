@@ -607,7 +607,10 @@ type Member struct {
 	Name      string
 	Safe      bool
 	Namespace bool
-	Reference *Reference
+	// ClassField distinguishes storage-backed class properties from methods and
+	// record fields so backends can preserve both `value.name` and `value.name()`.
+	ClassField bool
+	Reference  *Reference
 }
 
 func (*Member) irExpression() {}

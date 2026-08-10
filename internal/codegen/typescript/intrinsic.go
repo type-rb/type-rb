@@ -87,6 +87,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	filesystemMessage := `const message = error instanceof Error ? error.message : String(error); `
 	switch name {
 	case "trb.std.io.puts":
+		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Array {
+			return "console.log(" + portableArrayString(arguments[0], call.Arguments[0].Value.ExprType()) + ")"
+		}
 		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Float {
 			return "console.log(" + portableFloatString(arguments[0]) + ")"
 		}
@@ -465,6 +468,23 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "undefined"
 	}
+}
+
+func portableArrayString(value string, typ types.Type) string {
+	elementType := types.Type{Kind: types.Any, Name: "Any"}
+	if len(typ.Args) > 0 {
+		elementType = typ.Args[0]
+	}
+	element := "String(item)"
+	switch elementType.Kind {
+	case types.String:
+		element = "JSON.stringify(item)"
+	case types.Float:
+		element = portableFloatString("item")
+	case types.Array:
+		element = portableArrayString("item", elementType)
+	}
+	return "(\"[\" + (" + value + ").map((item) => " + element + ").join(\", \") + \"]\")"
 }
 
 func tsWebLogger(call *ir.Call, arguments []string) string {

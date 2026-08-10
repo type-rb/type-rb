@@ -797,6 +797,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		if n.Safe {
 			op = "?."
 		}
+		if n.ClassField {
+			return receiver + op + "__trb_" + n.Name
+		}
 		return receiver + op + tsMethodName(n.Name)
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
