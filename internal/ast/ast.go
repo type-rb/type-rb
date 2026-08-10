@@ -175,6 +175,7 @@ type MethodStatement struct {
 	TypeParameters []TypeParameter
 	Parameters     []Parameter
 	ReturnType     TypeRef
+	Fails          TypeRef
 	Body           []Statement
 	Class          bool
 }
@@ -441,6 +442,17 @@ type RangeExpression struct {
 }
 
 func (*RangeExpression) expressionNode() {}
+
+// AttemptExpression turns the fallible effects produced while evaluating a
+// single expression or a statement block into a Result value. Exactly one of
+// Value and Body is populated.
+type AttemptExpression struct {
+	Base
+	Value Expression
+	Body  []Statement
+}
+
+func (*AttemptExpression) expressionNode() {}
 
 type CallArgument struct {
 	Name  string

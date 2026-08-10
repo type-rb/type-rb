@@ -16,6 +16,7 @@ import (
 
 var keywordDetails = map[string]string{
 	"and":        "Boolean conjunction",
+	"attempt":    "capture fallible operations as Result",
 	"break":      "exit the current loop",
 	"case":       "dispatch on an enum",
 	"class":      "declare a reference type",
@@ -26,6 +27,7 @@ var keywordDetails = map[string]string{
 	"end":        "close a block",
 	"enum":       "declare a closed nominal type",
 	"false":      "Boolean literal",
+	"fails":      "declare a function error effect",
 	"if":         "start a conditional",
 	"implements": "declare implemented interfaces",
 	"import":     "import a package",

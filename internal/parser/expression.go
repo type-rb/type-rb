@@ -169,6 +169,12 @@ func (p *exprParser) parsePrefix() ast.Expression {
 			return nil
 		}
 		return &ast.UnaryExpression{Base: ast.Base{SourceSpan: token.Span{Start: tok.Span.Start, End: operand.Span().End}}, Operator: tok.Lexeme, Operand: operand}
+	case "attempt":
+		operand := p.parse(0)
+		if operand == nil {
+			return nil
+		}
+		return &ast.AttemptExpression{Base: ast.Base{SourceSpan: token.Span{Start: tok.Span.Start, End: operand.Span().End}}, Value: operand}
 	case "(":
 		expr := p.parse(0)
 		if expr == nil || !p.take(")") {

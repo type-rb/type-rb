@@ -27,6 +27,7 @@ type Parameter struct {
 type Signature struct {
 	Parameters []Parameter
 	Return     types.Type
+	Fails      types.Type
 	Variadic   bool
 }
 
@@ -50,6 +51,7 @@ type Member struct {
 	MinimumArguments int
 	MaximumArguments int
 	Return           types.Type
+	Fails            types.Type
 	Variadic         bool
 	Class            bool
 	TypeParameters   []string

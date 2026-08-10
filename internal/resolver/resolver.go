@@ -48,6 +48,7 @@ type Export struct {
 	Name           string
 	Kind           ExportKind
 	Type           types.Type
+	Fails          types.Type
 	Parameters     []types.Type
 	Required       int
 	Variadic       bool
@@ -78,6 +79,7 @@ type Member struct {
 	Name       string
 	Kind       ExportKind
 	Type       types.Type
+	Fails      types.Type
 	Parameters []types.Type
 	Required   int
 	Variadic   bool
@@ -126,6 +128,19 @@ func (b Binding) Type() types.Type {
 		return b.Member.Type
 	}
 	return types.FromName("Any")
+}
+
+func (b Binding) FailureType() types.Type {
+	if b.Library != nil {
+		return b.Library.Fails
+	}
+	if b.Export != nil {
+		return b.Export.Fails
+	}
+	if b.Member != nil {
+		return b.Member.Fails
+	}
+	return types.Type{Kind: types.Never, Name: "Never"}
 }
 
 type Result struct {
@@ -680,7 +695,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 							continue
 						}
 						if public(item.Name) {
-							exported.Members[item.Name] = Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
+							exported.Members[item.Name] = Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Fails: failureTypeRef(item.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
 						}
 					case *ast.FieldStatement:
 						name := strings.TrimPrefix(item.Name, "@")
@@ -760,14 +775,14 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 				exported := Export{Name: node.Name, Kind: InterfaceExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Span: node.Span()}
 				for _, method := range node.Methods {
 					parameterTypes, required, variadic := parameters(method.Parameters)
-					exported.Members[method.Name] = Member{Name: method.Name, Kind: FunctionExport, Type: returnTypeRef(method.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic}
+					exported.Members[method.Name] = Member{Name: method.Name, Kind: FunctionExport, Type: returnTypeRef(method.ReturnType), Fails: failureTypeRef(method.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic}
 				}
 				result[node.Name] = exported
 			}
 		case *ast.MethodStatement:
 			if public(node.Name) {
 				parameterTypes, required, variadic := parameters(node.Parameters)
-				exported := Export{Name: node.Name, Kind: FunctionExport, Type: returnTypeRef(node.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Span: node.Span()}
+				exported := Export{Name: node.Name, Kind: FunctionExport, Type: returnTypeRef(node.ReturnType), Fails: failureTypeRef(node.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, Span: node.Span()}
 				for _, parameter := range node.TypeParameters {
 					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
 				}
@@ -974,6 +989,13 @@ func substituteEnumVariants(input []EnumVariant, substitutions map[string]types.
 func returnTypeRef(ref ast.TypeRef) types.Type {
 	if ref.Empty() {
 		return types.FromName("Void")
+	}
+	return typeRef(ref)
+}
+
+func failureTypeRef(ref ast.TypeRef) types.Type {
+	if ref.Empty() {
+		return types.Type{Kind: types.Never, Name: "Never"}
 	}
 	return typeRef(ref)
 }

@@ -317,6 +317,15 @@ func (*controlTransfer) Error() string {
 	return "control transfer from a value-producing branch"
 }
 
+type unhandledEffect struct {
+	typ   types.Type
+	value Value
+}
+
+func (e *unhandledEffect) Error() string {
+	return e.typ.String() + ": " + Inspect(e.value)
+}
+
 type loopFlow uint8
 
 const (
@@ -659,6 +668,53 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, fmt.Errorf("case expression branch has no result")
 		}
 		return e.expression(result, module, branchScope)
+	case *ir.Attempt:
+		attemptScope := &scope{parent: sc, values: map[string]Value{}}
+		flow, err := e.evaluate(node.Body, module, attemptScope)
+		if err != nil {
+			return Value{}, err
+		}
+		if flow.Returned {
+			return flow.Value, nil
+		}
+		result := node.Value
+		if result == nil {
+			result = node.BodyResult
+		}
+		value, err := e.expression(result, module, attemptScope)
+		if err != nil {
+			var transfer *controlTransfer
+			if errors.As(err, &transfer) && transfer.flow.Returned {
+				return transfer.flow.Value, nil
+			}
+		}
+		return value, err
+	case *ir.UnhandledEffect:
+		result, err := e.expression(node.Value, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		variant, ok := result.Data.(*enumValue)
+		if !ok {
+			return Value{}, fmt.Errorf("fallible operation returned %s instead of Result", result.Type)
+		}
+		switch variant.Name {
+		case "Ok":
+			value, exists := variant.Payload["value"]
+			if !exists {
+				return Value{}, errors.New("fallible operation returned Ok without a value")
+			}
+			value.Type = node.ExprType()
+			return value, nil
+		case "Err":
+			value, exists := variant.Payload["error"]
+			if !exists {
+				return Value{}, errors.New("fallible operation returned Err without an error")
+			}
+			return Value{}, &unhandledEffect{typ: node.Fails, value: value}
+		default:
+			return Value{}, fmt.Errorf("fallible operation returned unknown Result variant %s", variant.Name)
+		}
 	case *ir.Literal:
 		return literal(node)
 	case *ir.InterpolatedString:

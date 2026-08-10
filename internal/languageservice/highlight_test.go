@@ -38,6 +38,16 @@ func TestHighlightMarksLexicallyInvalidInputWithoutPanicking(t *testing.T) {
 	}
 }
 
+func TestHighlightClassifiesEffectKeywords(t *testing.T) {
+	source := "def load(): String fails LoadError\n\treturn attempt read()\nend"
+	spans := languageservice.Highlight(languageservice.HighlightRequest{Source: source, Mode: "go"})
+	for _, keyword := range []string{"fails", "attempt"} {
+		if !hasHighlight(source, spans, keyword, languageservice.HighlightKeyword) {
+			t.Errorf("missing keyword highlight for %q in %#v", keyword, spans)
+		}
+	}
+}
+
 func TestHighlightUsesByteOffsetsForUnicodeSource(t *testing.T) {
 	source := `puts("こんにちは")`
 	spans := languageservice.Highlight(languageservice.HighlightRequest{Source: source, Mode: "go"})

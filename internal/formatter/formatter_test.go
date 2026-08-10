@@ -77,6 +77,23 @@ func TestFormatTransparentGenericTypeAlias(t *testing.T) {
 	}
 }
 
+func TestFormatEffectSignaturesAndAttemptBlocks(t *testing.T) {
+	source := []byte("def load():String fails LoadError # effect\nvalue:=attempt read() # direct\ngrouped:=attempt do # block\nread() # body\nend\nreturn value\nend\n")
+	want := "def load(): String fails LoadError # effect\n\tvalue := attempt read() # direct\n\tgrouped := attempt do # block\n\t\tread() # body\n\tend\n\treturn value\nend\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected effect formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("effect formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatPreservesRailsRegexAndPercentLiterals(t *testing.T) {
 	source := []byte("class User<ApplicationRecord\nvalidates :code,format:{with:/\\A[a-z#]+\\z/i}\nTAGS=%(alpha beta)\nend\n")
 	formatted, diagnostics := Format(source)

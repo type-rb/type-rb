@@ -35,6 +35,9 @@ type Result struct {
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
 	TypeAliases         map[*ast.TypeAliasStatement]TypeAlias
+	Attempts            map[*ast.AttemptExpression]Attempt
+	ExpressionEffects   map[ast.Expression]types.Type
+	UnhandledEffects    map[ast.Expression]bool
 	StructuredBlocks    map[*ast.CallExpression]StructuredBlock
 	ExternalMembers     map[ast.Expression]declaration.Member
 	RuntimeDependencies map[string]*stdlib.Package
@@ -49,6 +52,13 @@ type CodecApplication struct {
 type TypeAlias struct {
 	Target   types.Type
 	Variants []EnumVariant
+}
+
+type Attempt struct {
+	SuccessType types.Type
+	ErrorType   types.Type
+	ResultType  types.Type
+	Result      ast.Expression
 }
 
 type StructuredBlock struct {
@@ -92,6 +102,7 @@ type GenericApplication struct {
 	TypeArguments  []types.Type
 	Parameters     []types.Type
 	ReturnType     types.Type
+	FailureType    types.Type
 	Required       int
 	Variadic       bool
 }
@@ -193,35 +204,43 @@ type typeDeclaration struct {
 }
 
 type Checker struct {
-	mode               string
-	result             Result
-	diags              []diagnostic.Diagnostic
-	classes            map[string]*classInfo
-	records            map[string]*recordInfo
-	enums              map[string]*enumInfo
-	aliases            map[string]*aliasInfo
-	interfaces         map[string]*ast.InterfaceStatement
-	functions          map[string]*ast.MethodStatement
-	current            *classInfo
-	classMethod        bool
-	initializing       int
-	loopDepth          int
-	moduleDepth        int
-	interfaceDepth     int
-	returns            []types.Type
-	resolution         resolver.Result
-	external           map[ast.Expression]declaration.Member
-	declaredTypes      map[string]typeDeclaration
-	enumCallee         int
-	enumPattern        int
-	enumPatternType    types.Type
-	usedImports        map[*ast.ImportStatement]map[string]bool
-	allowUnusedImports bool
-	aliasCycles        map[string]bool
+	mode                  string
+	result                Result
+	diags                 []diagnostic.Diagnostic
+	classes               map[string]*classInfo
+	records               map[string]*recordInfo
+	enums                 map[string]*enumInfo
+	aliases               map[string]*aliasInfo
+	interfaces            map[string]*ast.InterfaceStatement
+	functions             map[string]*ast.MethodStatement
+	current               *classInfo
+	classMethod           bool
+	initializing          int
+	loopDepth             int
+	moduleDepth           int
+	interfaceDepth        int
+	returns               []types.Type
+	resolution            resolver.Result
+	external              map[ast.Expression]declaration.Member
+	declaredTypes         map[string]typeDeclaration
+	enumCallee            int
+	enumPattern           int
+	enumPatternType       types.Type
+	usedImports           map[*ast.ImportStatement]map[string]bool
+	allowUnusedImports    bool
+	allowUnhandledEffects bool
+	aliasCycles           map[string]bool
+	declaredEffects       []types.Type
+	effectCaptures        []*effectCapture
+}
+
+type effectCapture struct {
+	effects []types.Type
 }
 
 type Options struct {
-	AllowUnusedImports bool
+	AllowUnusedImports    bool
+	AllowUnhandledEffects bool
 }
 
 func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnostic.Diagnostic) {
@@ -249,23 +268,27 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
 			TypeAliases:         map[*ast.TypeAliasStatement]TypeAlias{},
+			Attempts:            map[*ast.AttemptExpression]Attempt{},
+			ExpressionEffects:   map[ast.Expression]types.Type{},
+			UnhandledEffects:    map[ast.Expression]bool{},
 			StructuredBlocks:    map[*ast.CallExpression]StructuredBlock{},
 			ExternalMembers:     map[ast.Expression]declaration.Member{},
 			RuntimeDependencies: map[string]*stdlib.Package{},
 			ImportUses:          importUses,
 		},
-		classes:            map[string]*classInfo{},
-		records:            map[string]*recordInfo{},
-		enums:              map[string]*enumInfo{},
-		aliases:            map[string]*aliasInfo{},
-		interfaces:         map[string]*ast.InterfaceStatement{},
-		functions:          map[string]*ast.MethodStatement{},
-		resolution:         resolution,
-		external:           map[ast.Expression]declaration.Member{},
-		declaredTypes:      map[string]typeDeclaration{},
-		usedImports:        importUses,
-		allowUnusedImports: options.AllowUnusedImports,
-		aliasCycles:        map[string]bool{},
+		classes:               map[string]*classInfo{},
+		records:               map[string]*recordInfo{},
+		enums:                 map[string]*enumInfo{},
+		aliases:               map[string]*aliasInfo{},
+		interfaces:            map[string]*ast.InterfaceStatement{},
+		functions:             map[string]*ast.MethodStatement{},
+		resolution:            resolution,
+		external:              map[ast.Expression]declaration.Member{},
+		declaredTypes:         map[string]typeDeclaration{},
+		usedImports:           importUses,
+		allowUnusedImports:    options.AllowUnusedImports,
+		allowUnhandledEffects: options.AllowUnhandledEffects,
+		aliasCycles:           map[string]bool{},
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ast.MethodStatement); ok {
@@ -388,6 +411,9 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression) {
 	case *ast.RangeExpression:
 		c.validateExpressionTypeReferences(node.Start)
 		c.validateExpressionTypeReferences(node.End)
+	case *ast.AttemptExpression:
+		c.validateExpressionTypeReferences(node.Value)
+		c.validateTypeReferences(node.Body)
 	case *ast.CallExpression:
 		c.validateExpressionTypeReferences(node.Callee)
 		for _, argument := range node.Arguments {
@@ -410,6 +436,7 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression) {
 
 func (c *Checker) validateMethodTypes(method *ast.MethodStatement) {
 	c.validateTypeReference(method.ReturnType)
+	c.validateTypeReference(method.Fails)
 	for _, parameter := range method.Parameters {
 		c.validateTypeReference(parameter.Type)
 		c.validateExpressionTypeReferences(parameter.Default)
@@ -1463,6 +1490,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.Variadic = application.Variadic || parameter.Rest || parameter.KeywordRest
 		}
 		application.ReturnType = c.methodReturnType(method)
+		application.FailureType = c.methodFailureType(method)
 	} else if binding, ok := c.result.References[node.Receiver]; ok {
 		if binding.Export != nil {
 			application.TypeParameters = append([]string(nil), binding.Export.TypeParameters...)
@@ -1477,6 +1505,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 				application.Required = binding.Export.Required
 				application.Variadic = binding.Export.Variadic
 				application.ReturnType = binding.Export.Type
+				application.FailureType = binding.Export.Fails
 			}
 		} else if binding.Library != nil {
 			application.Kind = "function"
@@ -1489,6 +1518,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			}
 			application.Variadic = binding.Library.Variadic
 			application.ReturnType = binding.Library.Return
+			application.FailureType = binding.Library.Fails
 		}
 	}
 	if application.Kind == "" || len(application.TypeParameters) == 0 {
@@ -1508,6 +1538,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.Parameters[index] = substituteType(application.Parameters[index], substitutions)
 		}
 		application.ReturnType = substituteType(application.ReturnType, substitutions)
+		application.FailureType = substituteType(application.FailureType, substitutions)
 	}
 	return application, true
 }
@@ -2023,7 +2054,15 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	if method.ReturnType.Empty() {
 		returnType = types.Type{Kind: types.Void, Name: "Void"}
 	}
+	failureType := c.methodFailureType(method)
+	if failureType.Kind != types.Never {
+		if method.Name == "main" {
+			c.error(method.Span(), "main() cannot declare fails; handle fallible operations with attempt")
+		}
+		c.requireEffectRuntime(returnType, failureType)
+	}
 	c.returns = append(c.returns, returnType)
+	c.declaredEffects = append(c.declaredEffects, failureType)
 	previousLoopDepth := c.loopDepth
 	c.loopDepth = 0
 	if method.Name == "initialize" && c.current != nil {
@@ -2038,6 +2077,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	}
 	c.loopDepth = previousLoopDepth
 	c.returns = c.returns[:len(c.returns)-1]
+	c.declaredEffects = c.declaredEffects[:len(c.declaredEffects)-1]
 	c.classMethod = previousClassMethod
 }
 
@@ -2227,6 +2267,7 @@ func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
 
 type methodSignature struct {
 	returnType types.Type
+	fails      types.Type
 	parameters []types.Type
 	required   int
 	variadic   bool
@@ -2281,7 +2322,7 @@ func (c *Checker) classMethodSignature(className, memberName string, seen map[st
 }
 
 func (c *Checker) signatureFromMethod(method *ast.MethodStatement) methodSignature {
-	result := methodSignature{returnType: c.methodReturnType(method)}
+	result := methodSignature{returnType: c.methodReturnType(method), fails: c.methodFailureType(method)}
 	for _, parameter := range method.Parameters {
 		result.parameters = append(result.parameters, c.typeFromRef(parameter.Type))
 		if parameter.Default == nil && !parameter.Rest && !parameter.KeywordRest {
@@ -2293,7 +2334,7 @@ func (c *Checker) signatureFromMethod(method *ast.MethodStatement) methodSignatu
 }
 
 func signatureFromResolvedMember(member resolver.Member) methodSignature {
-	return methodSignature{returnType: member.Type, parameters: append([]types.Type(nil), member.Parameters...), required: member.Required, variadic: member.Variadic}
+	return methodSignature{returnType: member.Type, fails: member.Fails, parameters: append([]types.Type(nil), member.Parameters...), required: member.Required, variadic: member.Variadic}
 }
 
 func sameSignature(left, right methodSignature) bool {
@@ -2301,6 +2342,9 @@ func sameSignature(left, right methodSignature) bool {
 		return false
 	}
 	if !types.Assignable(left.returnType, right.returnType) || !types.Assignable(right.returnType, left.returnType) {
+		return false
+	}
+	if !types.Assignable(left.fails, right.fails) {
 		return false
 	}
 	for i := range left.parameters {
@@ -2608,6 +2652,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else {
 			typ = types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}
 		}
+	case *ast.AttemptExpression:
+		typ = c.checkAttempt(n, sc)
 	case *ast.IterationExpression:
 		sourceType := c.checkExpression(n.Source, sc)
 		if sourceType.Kind == types.Never {
@@ -2913,6 +2959,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if binding, imported := c.result.References[generic.Receiver]; imported && binding.Library != nil && len(application.TypeArguments) == 1 {
 				c.checkCodecApplication(n, binding.Library.Intrinsic, application.TypeArguments[0])
 			}
+			c.recordEffect(n, c.callFailureType(n, sc))
 			break
 		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok {
@@ -3020,6 +3067,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 			}
 		}
+		c.recordEffect(n, c.callFailureType(n, sc))
 	case *ast.IndexExpression:
 		receiver := c.checkExpression(n.Receiver, sc)
 		indexType := c.checkExpression(n.Index, sc)
@@ -3060,6 +3108,127 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	}
 	c.result.Expressions[expression] = typ
 	return typ
+}
+
+func (c *Checker) callFailureType(call *ast.CallExpression, sc *scope) types.Type {
+	callee := call.Callee
+	if generic, ok := callee.(*ast.GenericExpression); ok {
+		if application, exists := c.result.GenericApplications[generic]; exists {
+			return application.FailureType
+		}
+		callee = generic.Receiver
+	}
+	if binding, ok := c.result.References[callee]; ok {
+		return binding.FailureType()
+	}
+	if member, ok := c.external[callee]; ok {
+		return member.Fails
+	}
+	if member, ok := callee.(*ast.MemberExpression); ok {
+		receiverType := c.result.Expressions[member.Receiver]
+		classAccess := c.classMemberAccess(member.Receiver, sc)
+		if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
+			return c.methodFailureType(local.method)
+		}
+		if binding, found := c.importedAncestorMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found {
+			return binding.FailureType()
+		}
+		if declared, found := c.declarationMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found {
+			return declared.Fails
+		}
+	}
+	if identifier, ok := callee.(*ast.Identifier); ok {
+		if c.current != nil {
+			if method := c.current.methods[identifier.Name]; method != nil && method.Class == c.classMethod {
+				return c.methodFailureType(method)
+			}
+		}
+		if method := c.functions[identifier.Name]; method != nil {
+			return c.methodFailureType(method)
+		}
+	}
+	return types.Type{Kind: types.Never, Name: "Never"}
+}
+
+func (c *Checker) checkAttempt(node *ast.AttemptExpression, sc *scope) types.Type {
+	capture := &effectCapture{}
+	c.effectCaptures = append(c.effectCaptures, capture)
+	success := types.FromName("Void")
+	var resultExpression ast.Expression
+	if node.Value != nil {
+		success = c.checkExpression(node.Value, sc)
+		resultExpression = node.Value
+	} else {
+		blockScope := &scope{parent: sc, values: map[string]symbol{}}
+		resultIndex, result := controlFlowBranchExpression(node.Body)
+		if result == nil {
+			c.checkStatements(node.Body, blockScope)
+		} else {
+			c.checkStatementSequence(node.Body[:resultIndex], blockScope)
+			success = c.checkExpression(result, blockScope)
+			c.checkStatementSequence(node.Body[resultIndex+1:], blockScope)
+			resultExpression = result
+			c.checkUnusedBindings(blockScope)
+		}
+	}
+	c.effectCaptures = c.effectCaptures[:len(c.effectCaptures)-1]
+
+	if len(capture.effects) == 0 {
+		c.error(node.Span(), "attempt requires an expression or block that may fail")
+		return invalidType()
+	}
+	if success.Kind == types.Void {
+		success = types.FromName("Unit")
+	}
+	errorType := types.UnionOf(capture.effects...)
+	resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{success, errorType}}
+	c.requireRuntimeType(resultType)
+	c.result.Attempts[node] = Attempt{SuccessType: success, ErrorType: errorType, ResultType: resultType, Result: resultExpression}
+	return resultType
+}
+
+func (c *Checker) requireEffectRuntime(success, failure types.Type) {
+	if success.Kind == types.Void {
+		success = types.FromName("Unit")
+		c.requireRuntimeType(success)
+	}
+	c.requireRuntimeType(types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{success, failure}})
+}
+
+func (c *Checker) requireRuntimeType(typ types.Type) {
+	for _, definition := range stdlib.RuntimeDependenciesForType(typ) {
+		if definition != nil {
+			c.result.RuntimeDependencies[definition.Path] = definition
+		}
+	}
+}
+
+func (c *Checker) recordEffect(expression ast.Expression, effect types.Type) {
+	if effect.Kind == "" || effect.Kind == types.Never || effect.Kind == types.Invalid {
+		return
+	}
+	c.result.ExpressionEffects[expression] = effect
+	if len(c.effectCaptures) > 0 {
+		capture := c.effectCaptures[len(c.effectCaptures)-1]
+		capture.effects = append(capture.effects, effect)
+		return
+	}
+	if len(c.declaredEffects) == 0 {
+		if c.allowUnhandledEffects {
+			c.result.UnhandledEffects[expression] = true
+			return
+		}
+		c.error(expression.Span(), fmt.Sprintf("operation may fail with %s; handle it with attempt inside a function", effect))
+		return
+	}
+	declared := c.declaredEffects[len(c.declaredEffects)-1]
+	if !c.typesAssignable(declared, effect) {
+		if declared.Kind == types.Never {
+			c.error(expression.Span(), fmt.Sprintf("operation may fail with %s, but the enclosing function does not declare it; add fails %s or handle it with attempt", effect, effect))
+			return
+		}
+		c.error(expression.Span(), fmt.Sprintf("operation may fail with %s, but the enclosing function declares only fails %s", effect, declared))
+	}
 }
 
 func (c *Checker) declarationFunctionBlock(call *ast.CallExpression, arguments []types.Type) (declaration.Member, bool) {
@@ -3844,6 +4013,7 @@ func (c *Checker) checkDeclarationAlternativeArguments(span token.Span, member d
 	selected := candidates[0]
 	member.Parameters = selected.Parameters
 	member.Return = selected.Return
+	member.Fails = selected.Fails
 	member.Variadic = selected.Variadic
 	member.Alternatives = nil
 	return c.checkDeclarationArguments(span, member, arguments, actual)
@@ -4028,6 +4198,13 @@ func (c *Checker) methodReturnType(method *ast.MethodStatement) types.Type {
 		return types.Type{Kind: types.Void, Name: "Void"}
 	}
 	return c.typeFromRef(method.ReturnType)
+}
+
+func (c *Checker) methodFailureType(method *ast.MethodStatement) types.Type {
+	if method == nil || method.Fails.Empty() {
+		return types.Type{Kind: types.Never, Name: "Never"}
+	}
+	return c.typeFromRef(method.Fails)
 }
 
 func (c *Checker) checkArguments(span token.Span, method *ast.MethodStatement, arguments []ast.CallArgument, actual []types.Type) {

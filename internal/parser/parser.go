@@ -117,6 +117,9 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	}
 	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
+	if attempt := p.tryAttemptBlockStatement(line, next, base); attempt != nil {
+		return attempt
+	}
 	if expression := p.tryControlFlowExpressionStatement(line, next, base); expression != nil {
 		return expression
 	}
@@ -154,6 +157,43 @@ func (p *Parser) parseStatement() ast.Statement {
 	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
 }
 
+func (p *Parser) tryAttemptBlockStatement(line []token.Token, next int, base ast.Base) ast.Statement {
+	attemptAt := topLevelIndex(line, "attempt")
+	if attemptAt < 0 || attemptAt+1 >= len(line) || line[attemptAt+1].Lexeme != "do" {
+		return nil
+	}
+	if attemptAt+2 != len(line) {
+		p.errorAt(spanOf(line[attemptAt+2:]), "attempt block does not take parameters or trailing expressions")
+	}
+
+	p.pos = next
+	node := &ast.AttemptExpression{Base: ast.Base{SourceSpan: token.Span{Start: line[attemptAt].Span.Start, End: line[len(line)-1].Span.End}}}
+	node.Body = p.parseStatements(map[string]bool{"end": true})
+	_, closeSpan := p.consumeTerminator("end")
+	node.SourceSpan.End = closeSpan.End
+	base.SourceSpan.End = closeSpan.End
+
+	wrapper := append([]token.Token(nil), line[:attemptAt+1]...)
+	embedded := map[int]ast.Expression{line[attemptAt].Span.Start.Offset: node}
+	if len(wrapper) > 0 && wrapper[0].Lexeme == "return" {
+		value, valid := parseExpressionTokensWithEmbedded(wrapper[1:], embedded)
+		if valid {
+			return &ast.ReturnStatement{Base: base, Value: value}
+		}
+	}
+	if statement := p.tryVariableWithEmbedded(wrapper, base, embedded); statement != nil {
+		return statement
+	}
+	if statement := p.tryAssignmentWithEmbedded(wrapper, base, embedded); statement != nil {
+		return statement
+	}
+	if value, valid := parseExpressionTokensWithEmbedded(wrapper, embedded); valid {
+		return &ast.ExpressionStatement{Base: base, Expression: value}
+	}
+	p.errorAt(base.SourceSpan, "attempt block is not valid in this expression context")
+	return &ast.ExpressionStatement{Base: base, Expression: node}
+}
+
 func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Base) ast.Statement {
 	blockAt := topLevelIndex(line, "do")
 	brace := false
@@ -181,13 +221,34 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 	if !ok {
 		return nil
 	}
-	call, ok := expression.(*ast.CallExpression)
+	callExpression := expression
+	attempt, attempted := expression.(*ast.AttemptExpression)
+	if attempted {
+		callExpression = attempt.Value
+	}
+	call, ok := callExpression.(*ast.CallExpression)
+	syntheticCall := false
+	if !ok {
+		if !attempted {
+			return nil
+		}
+		switch callExpression.(type) {
+		case *ast.Identifier, *ast.MemberExpression:
+			call = &ast.CallExpression{Base: ast.Base{SourceSpan: callExpression.Span()}, Callee: callExpression}
+			syntheticCall = true
+			attempt.Value = call
+			ok = true
+		}
+	}
 	if !ok {
 		return nil
 	}
 	if !brace {
 		parameters, valid := p.blockParameters(line[blockAt+1:])
 		if !valid {
+			if syntheticCall && blockAt+1 == len(line) {
+				return nil
+			}
 			p.errorAt(spanOf(line[blockAt:]), "call block parameters must be written as |name, ...|")
 		}
 		p.pos = next
@@ -197,15 +258,18 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 		block.SourceSpan.End = closeSpan.End
 		call.SourceSpan.End = closeSpan.End
 		call.Block = block
+		if attempt, attempted := expression.(*ast.AttemptExpression); attempted {
+			attempt.SourceSpan.End = closeSpan.End
+		}
 		base.SourceSpan.End = closeSpan.End
-		return p.wrapCallBlock(prefix, wrapper, base, call)
+		return p.wrapCallBlock(prefix, wrapper, base, expression)
 	}
 
 	close := matchingIndex(line, blockAt, "{", "}")
 	if close < 0 {
 		p.errorAt(line[blockAt].Span, "unterminated call block; expected }")
 		p.pos = next
-		return p.wrapCallBlock(prefix, wrapper, base, call)
+		return p.wrapCallBlock(prefix, wrapper, base, expression)
 	}
 	firstPipe, secondPipe := -1, -1
 	for index := blockAt + 1; index < close; index++ {
@@ -221,6 +285,9 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 	}
 	parameters := []string(nil)
 	if firstPipe != blockAt+1 || secondPipe < 0 {
+		if syntheticCall {
+			return nil
+		}
 		p.errorAt(spanOf(line[blockAt:close+1]), "call block parameters must be written as |name, ...|")
 	} else if parsed, valid := p.blockParameters(line[firstPipe : secondPipe+1]); valid {
 		parameters = parsed
@@ -243,29 +310,32 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 	}
 	call.SourceSpan.End = line[close].Span.End
 	call.Block = block
+	if attempt, attempted := expression.(*ast.AttemptExpression); attempted {
+		attempt.SourceSpan.End = line[close].Span.End
+	}
 	base.SourceSpan.End = line[close].Span.End
 	p.pos = next
-	return p.wrapCallBlock(prefix, wrapper, base, call)
+	return p.wrapCallBlock(prefix, wrapper, base, expression)
 }
 
-func (p *Parser) wrapCallBlock(prefix []token.Token, wrapper string, base ast.Base, call *ast.CallExpression) ast.Statement {
+func (p *Parser) wrapCallBlock(prefix []token.Token, wrapper string, base ast.Base, expression ast.Expression) ast.Statement {
 	switch wrapper {
 	case "return":
-		return &ast.ReturnStatement{Base: base, Value: call}
+		return &ast.ReturnStatement{Base: base, Value: expression}
 	case "variable":
 		statement, ok := p.tryVariable(prefix, base).(*ast.VariableStatement)
 		if ok {
-			statement.Value = call
+			statement.Value = expression
 			return statement
 		}
 	case "assignment":
 		statement, ok := p.tryAssignment(prefix, base).(*ast.AssignmentStatement)
 		if ok {
-			statement.Value = call
+			statement.Value = expression
 			return statement
 		}
 	}
-	return &ast.ExpressionStatement{Base: base, Expression: call}
+	return &ast.ExpressionStatement{Base: base, Expression: expression}
 }
 
 func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {
@@ -909,9 +979,7 @@ func (p *Parser) parseMethodSignature(line []token.Token, comment string) *ast.M
 		return nil
 	}
 	m.Parameters = p.parseParameters(line[2:close])
-	if close+1 < len(line) && line[close+1].Lexeme == ":" {
-		m.ReturnType = p.parseReturnType(line[close+2:])
-	} else if close+1 != len(line) {
+	if !p.parseMethodResultAndEffects(m, line[close+1:]) {
 		return nil
 	}
 	return m
@@ -965,20 +1033,47 @@ func (p *Parser) parseMethod() ast.Statement {
 		}
 		m.Parameters = p.parseParameters(line[i+1 : close])
 		i = close + 1
-	} else if i < len(line) && line[i].Lexeme != ":" {
+	} else if i < len(line) && line[i].Lexeme != ":" && line[i].Lexeme != "fails" {
 		// Ruby-compatible unparenthesized definitions are represented, but the
 		// formatter will normalize them to parentheses.
 		m.Parameters = p.parseParameters(line[i:])
 		i = len(line)
 	}
-	if i < len(line) && line[i].Lexeme == ":" {
-		m.ReturnType = p.parseReturnType(line[i+1:])
+	if !p.parseMethodResultAndEffects(m, line[i:]) {
+		p.errorAt(spanOf(line[i:]), "method signature must contain an optional return type followed by an optional fails type")
 	}
 	p.pos = next
 	m.Body = p.parseStatements(map[string]bool{"end": true})
 	_, closeSpan := p.consumeTerminator("end")
 	m.SourceSpan.End = closeSpan.End
 	return m
+}
+
+func (p *Parser) parseMethodResultAndEffects(method *ast.MethodStatement, tokens []token.Token) bool {
+	if len(tokens) == 0 {
+		return true
+	}
+	failsAt := topLevelIndex(tokens, "fails")
+	resultTokens := tokens
+	if failsAt >= 0 {
+		resultTokens = tokens[:failsAt]
+		if failsAt+1 >= len(tokens) {
+			p.errorAt(tokens[failsAt].Span, "fails requires an error type")
+			return true
+		}
+		method.Fails = parseType(tokens[failsAt+1:])
+		if method.Fails.Empty() {
+			p.errorAt(spanOf(tokens[failsAt+1:]), "fails must be followed by an error type")
+		}
+	}
+	if len(resultTokens) == 0 {
+		return failsAt == 0
+	}
+	if resultTokens[0].Lexeme != ":" || len(resultTokens) == 1 {
+		return false
+	}
+	method.ReturnType = p.parseReturnType(resultTokens[1:])
+	return !method.ReturnType.Empty()
 }
 
 func (p *Parser) parseReturnType(tokens []token.Token) ast.TypeRef {

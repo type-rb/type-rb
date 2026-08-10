@@ -592,6 +592,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.ifExpression(n)
 	case *ir.Case:
 		return g.caseExpression(n)
+	case *ir.Attempt:
+		return g.attemptExpression(n)
+	case *ir.UnhandledEffect:
+		return g.expr(n.Value)
 	case *ir.Identifier:
 		if strings.HasPrefix(n.Name, "@") {
 			return "this.__trb_" + strings.TrimPrefix(strings.TrimPrefix(n.Name, "@"), "_")
@@ -809,6 +813,32 @@ func (g *generator) ifExpression(node *ir.If) string {
 	}
 	child.indent--
 	child.line("}")
+	child.indent--
+	child.line("})()")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
+}
+
+func (g *generator) attemptExpression(node *ir.Attempt) string {
+	child := &generator{
+		inClass:       g.inClass,
+		functionDepth: g.functionDepth,
+		methods:       g.methods,
+		modulePath:    g.modulePath,
+		topFunctions:  g.topFunctions,
+		topTargets:    g.topTargets,
+		records:       g.records,
+		typeAliases:   g.typeAliases,
+		temporary:     g.temporary,
+	}
+	child.line("((): " + child.tsType(node.ExprType()) + " => {")
+	child.indent++
+	child.statements(node.Body)
+	result := node.Value
+	if result == nil {
+		result = node.BodyResult
+	}
+	child.line("return " + child.expr(result) + ";")
 	child.indent--
 	child.line("})()")
 	g.temporary = child.temporary

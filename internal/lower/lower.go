@@ -4,17 +4,26 @@ package lower
 
 import (
 	"sort"
+	"strconv"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
 type lowerer struct {
-	checked   checker.Result
-	temporary int
+	checked          checker.Result
+	temporary        int
+	effectBoundaries []effectBoundary
+}
+
+type effectBoundary struct {
+	success types.Type
+	fails   types.Type
+	result  types.Type
 }
 
 func Program(checked checker.Result) *ir.Program {
@@ -205,12 +214,27 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 	case *ast.FieldStatement:
 		return &ir.Field{Base: base(n.Base), Name: n.Name, Type: lowerType(n.Type), Value: l.expression(n.Value), ReadOnly: n.ReadOnly}
 	case *ast.MethodStatement:
-		method := &ir.Method{Base: base(n.Base), Name: n.Name, ReturnType: lowerType(n.ReturnType), Body: l.statements(n.Body), Class: n.Class}
+		successType := lowerType(n.ReturnType)
+		if n.ReturnType.Empty() {
+			successType = types.Type{Kind: types.Void, Name: "Void"}
+		}
+		failsType := lowerFailureType(n.Fails)
+		method := &ir.Method{Base: base(n.Base), Name: n.Name, SuccessType: successType, ReturnType: successType, Fails: failsType, Class: n.Class}
 		for _, parameter := range n.TypeParameters {
 			method.TypeParameters = append(method.TypeParameters, parameter.Name)
 		}
-		if n.ReturnType.Empty() {
-			method.ReturnType = types.Type{Kind: types.Void, Name: "Void"}
+		if failsType.Kind != types.Never {
+			internalSuccess := effectSuccessType(successType)
+			boundary := effectBoundary{success: internalSuccess, fails: failsType, result: resultType(internalSuccess, failsType)}
+			method.ReturnType = boundary.result
+			l.effectBoundaries = append(l.effectBoundaries, boundary)
+			method.Body = l.statements(n.Body)
+			l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
+			if successType.Kind == types.Void {
+				method.Body = append(method.Body, &ir.Return{Value: l.resultSuccess(n.Span(), boundary, l.unitValue(n.Span()))})
+			}
+		} else {
+			method.Body = l.statements(n.Body)
 		}
 		for _, parameter := range n.Parameters {
 			typ := lowerType(parameter.Type)
@@ -256,7 +280,14 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			iteration.Result = &ir.IterationResult{Return: true, Type: l.checked.Expressions[n.Value]}
 			return iteration
 		}
-		return &ir.Return{Base: base(n.Base), Value: l.expression(n.Value)}
+		value := l.expression(n.Value)
+		if boundary, ok := l.currentEffectBoundary(); ok {
+			if value == nil {
+				value = l.unitValue(n.Span())
+			}
+			value = l.resultSuccess(n.Span(), boundary, value)
+		}
+		return &ir.Return{Base: base(n.Base), Value: value}
 	case *ast.BreakStatement:
 		return &ir.Break{Base: base(n.Base)}
 	case *ast.NextStatement:
@@ -441,6 +472,34 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		return &ir.Binary{ExprBase: base, Left: l.expression(n.Left), Operator: n.Operator, Right: l.expression(n.Right)}
 	case *ast.RangeExpression:
 		return &ir.Range{ExprBase: base, Start: l.expression(n.Start), End: l.expression(n.End), Exclusive: n.Exclusive}
+	case *ast.AttemptExpression:
+		semantic, ok := l.checked.Attempts[n]
+		if !ok {
+			return nil
+		}
+		boundary := effectBoundary{success: semantic.SuccessType, fails: semantic.ErrorType, result: semantic.ResultType}
+		attempt := &ir.Attempt{
+			ExprBase: ir.NewExprBase(n.Span(), semantic.ResultType),
+			Success:  semantic.SuccessType,
+			Fails:    semantic.ErrorType,
+		}
+		l.effectBoundaries = append(l.effectBoundaries, boundary)
+		if n.Value != nil {
+			attempt.Value = l.resultSuccess(n.Span(), boundary, l.expression(n.Value))
+		}
+		if n.Value == nil {
+			resultIndex, resultExpression := lowerControlFlowBranchExpression(n.Body)
+			if resultExpression == nil {
+				attempt.Body = l.statements(n.Body)
+				attempt.BodyResult = l.resultSuccess(n.Span(), boundary, l.unitValue(n.Span()))
+			} else {
+				attempt.Body = l.statements(n.Body[:resultIndex])
+				attempt.BodyResult = l.resultSuccess(n.Span(), boundary, l.expression(semantic.Result))
+				attempt.Body = append(attempt.Body, l.statements(n.Body[resultIndex+1:])...)
+			}
+		}
+		l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
+		return attempt
 	case *ast.IterationExpression:
 		result := &ir.Transform{
 			ExprBase:  base,
@@ -488,7 +547,12 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			}
 			return result
 		}
-		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee)}
+		fails := l.checked.ExpressionEffects[n]
+		callBase := base
+		if fails.Kind != "" && fails.Kind != types.Never {
+			callBase = ir.NewExprBase(n.Span(), resultType(effectSuccessType(typ), fails))
+		}
+		result := &ir.Call{ExprBase: callBase, Callee: l.expression(n.Callee), Fails: fails}
 		if codec, ok := l.checked.CodecApplications[n]; ok {
 			result.Codec = lowerCodecSchema(codec.Schema)
 		}
@@ -497,6 +561,14 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		if n.Block != nil {
 			result.Block = l.expression(n.Block).(*ir.Block)
+		}
+		if fails.Kind != "" && fails.Kind != types.Never {
+			if boundary, ok := l.currentEffectBoundary(); ok {
+				return l.effectPropagation(n.Span(), result, typ, fails, boundary)
+			}
+			if l.checked.UnhandledEffects[n] {
+				return &ir.UnhandledEffect{ExprBase: base, Value: result, Fails: fails}
+			}
 		}
 		return result
 	case *ast.MemberExpression:
@@ -680,6 +752,100 @@ func referenceFromBinding(binding *resolver.Binding) *ir.Reference {
 	return result
 }
 
+func (l *lowerer) currentEffectBoundary() (effectBoundary, bool) {
+	if len(l.effectBoundaries) == 0 {
+		return effectBoundary{}, false
+	}
+	return l.effectBoundaries[len(l.effectBoundaries)-1], true
+}
+
+func effectSuccessType(typ types.Type) types.Type {
+	if typ.Kind == types.Void {
+		return types.FromName("Unit")
+	}
+	return typ
+}
+
+func resultType(success, failure types.Type) types.Type {
+	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{success, failure}}
+}
+
+func resultReference() *ir.Reference {
+	return &ir.Reference{Package: "trb/std/result/index", Alias: "__trb_result", Symbol: "Result", ExportKind: "enum"}
+}
+
+func (l *lowerer) resultPattern(span token.Span, result types.Type, member string) ir.Expression {
+	reference := resultReference()
+	receiver := &ir.Identifier{ExprBase: ir.NewExprBase(span, result), Name: "Result", Reference: reference}
+	return &ir.Member{ExprBase: ir.NewExprBase(span, result), Receiver: receiver, Name: member, Namespace: true, Reference: reference}
+}
+
+func (l *lowerer) resultSuccess(span token.Span, boundary effectBoundary, value ir.Expression) ir.Expression {
+	return &ir.EnumConstruct{
+		ExprBase:      ir.NewExprBase(span, boundary.result),
+		EnumName:      "Result",
+		Member:        "Ok",
+		TypeArguments: []types.Type{boundary.success, boundary.fails},
+		Arguments:     []ir.Expression{value},
+		Reference:     resultReference(),
+	}
+}
+
+func (l *lowerer) resultFailure(span token.Span, boundary effectBoundary, value ir.Expression) ir.Expression {
+	return &ir.EnumConstruct{
+		ExprBase:      ir.NewExprBase(span, boundary.result),
+		EnumName:      "Result",
+		Member:        "Err",
+		TypeArguments: []types.Type{boundary.success, boundary.fails},
+		Arguments:     []ir.Expression{value},
+		Reference:     resultReference(),
+	}
+}
+
+func (l *lowerer) effectPropagation(span token.Span, value ir.Expression, success, failure types.Type, boundary effectBoundary) ir.Expression {
+	l.temporary++
+	suffix := strconv.Itoa(l.temporary)
+	valueName := "__trbEffectValue" + suffix
+	errorName := "__trbEffectError" + suffix
+	rawResult := resultType(effectSuccessType(success), failure)
+
+	valueIdentifier := &ir.Identifier{ExprBase: ir.NewExprBase(span, effectSuccessType(success)), Name: valueName, Lexical: true, Generated: true}
+	errorIdentifier := &ir.Identifier{ExprBase: ir.NewExprBase(span, failure), Name: errorName, Lexical: true, Generated: true}
+	returnFailure := l.resultFailure(span, boundary, errorIdentifier)
+
+	return &ir.Case{
+		ExprBase: ir.NewExprBase(span, success),
+		Value:    value,
+		Branches: []ir.CaseBranch{
+			{
+				Value:       l.resultPattern(span, rawResult, "Ok"),
+				EnumName:    "Result",
+				Member:      "Ok",
+				Bindings:    []ir.CaseBinding{{Name: valueName, Field: "value", Type: effectSuccessType(success), Generated: true}},
+				PayloadEnum: true,
+				Result:      valueIdentifier,
+			},
+			{
+				Value:       l.resultPattern(span, rawResult, "Err"),
+				EnumName:    "Result",
+				Member:      "Err",
+				Bindings:    []ir.CaseBinding{{Name: errorName, Field: "error", Type: failure, Generated: true}},
+				PayloadEnum: true,
+				Body:        []ir.Statement{&ir.Return{Value: returnFailure}},
+				Diverges:    true,
+			},
+		},
+	}
+}
+
+func (l *lowerer) unitValue(span token.Span) ir.Expression {
+	typ := types.FromName("Unit")
+	reference := &ir.Reference{Package: "trb/std/unit/index", Alias: "unit", Symbol: "Unit", ExportKind: "record"}
+	receiver := &ir.Identifier{ExprBase: ir.NewExprBase(span, typ), Name: "Unit", Reference: reference}
+	callee := &ir.Member{ExprBase: ir.NewExprBase(span, typ), Receiver: receiver, Name: "new", Reference: reference}
+	return &ir.Call{ExprBase: ir.NewExprBase(span, typ), Callee: callee}
+}
+
 func lowerType(ref ast.TypeRef) types.Type {
 	if len(ref.Union) > 0 {
 		alternatives := make([]types.Type, len(ref.Union))
@@ -697,4 +863,11 @@ func lowerType(ref ast.TypeRef) types.Type {
 		t = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{t}, Nullable: ref.Nullable}
 	}
 	return t
+}
+
+func lowerFailureType(ref ast.TypeRef) types.Type {
+	if ref.Empty() {
+		return types.Type{Kind: types.Never, Name: "Never"}
+	}
+	return lowerType(ref)
 }
