@@ -22,10 +22,31 @@ type generator struct {
 	records       map[string]bool
 	typeAliases   map[string]string
 	temporary     int
+	suspension    *SuspensionPlan
 }
 
 func Generate(program *ir.Program) string {
-	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}}
+	generated, err := GenerateProject([]*ir.Program{program})
+	if err != nil || len(generated) == 0 {
+		return ""
+	}
+	return generated[0]
+}
+
+func GenerateProject(programs []*ir.Program) ([]string, error) {
+	plan, err := AnalyzeSuspension(programs)
+	if err != nil {
+		return nil, err
+	}
+	generated := make([]string, len(programs))
+	for index, program := range programs {
+		generated[index] = generate(program, plan)
+	}
+	return generated, nil
+}
+
+func generate(program *ir.Program, suspension *SuspensionPlan) string {
+	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, suspension: suspension}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -49,9 +70,22 @@ func Generate(program *ir.Program) string {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
 		}
-		g.line("main();")
+		call := "main()"
+		if method := topLevelMethod(program.Statements, "main"); method != nil && suspension.Methods[method] {
+			call = "await " + call
+		}
+		g.line(call + ";")
 	}
 	return strings.TrimRight(g.b.String(), "\n") + "\n"
+}
+
+func topLevelMethod(statements []ir.Statement, name string) *ir.Method {
+	for _, statement := range statements {
+		if method, ok := statement.(*ir.Method); ok && method.Name == name {
+			return method
+		}
+	}
+	return nil
 }
 
 func (g *generator) statements(statements []ir.Statement) {
@@ -191,7 +225,11 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("export interface " + n.Name + " {")
 		g.indent++
 		for _, method := range n.Methods {
-			g.line(tsMethodName(method.Name) + "(" + g.parameters(method.Parameters) + "): " + g.tsType(method.ReturnType) + ";")
+			returnType := g.tsType(method.ReturnType)
+			if g.suspension.Methods[method] {
+				returnType = "Promise<" + returnType + ">"
+			}
+			g.line(tsMethodName(method.Name) + "(" + g.parameters(method.Parameters) + "): " + returnType + ";")
 		}
 		g.indent--
 		g.line("}")
@@ -524,6 +562,7 @@ func tsTypeParameterArguments(parameters []string) string {
 }
 
 func (g *generator) method(method *ir.Method) {
+	suspends := g.suspension.Methods[method]
 	if method.Name == "initialize" {
 		g.line("constructor(" + g.parameters(method.Parameters) + ") {")
 	} else {
@@ -538,7 +577,12 @@ func (g *generator) method(method *ir.Method) {
 		if strings.HasPrefix(method.Name, "_") {
 			prefix += "private "
 		}
-		g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + g.tsType(method.ReturnType) + " {")
+		returnType := g.tsType(method.ReturnType)
+		if suspends {
+			prefix += "async "
+			returnType = "Promise<" + returnType + ">"
+		}
+		g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + returnType + " {")
 	}
 	g.indent++
 	g.functionDepth++
@@ -558,7 +602,12 @@ func (g *generator) function(method *ir.Method) {
 	if name == "main" {
 		prefix = "function "
 	}
-	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + "): " + g.tsType(method.ReturnType) + " {")
+	returnType := g.tsType(method.ReturnType)
+	if g.suspension.Methods[method] {
+		prefix = strings.Replace(prefix, "function ", "async function ", 1)
+		returnType = "Promise<" + returnType + ">"
+	}
+	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + "): " + returnType + " {")
 	g.indent++
 	g.functionDepth++
 	g.statements(method.Body)
@@ -581,6 +630,13 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 		parts[i] = part
 	}
 	return strings.Join(parts, ", ")
+}
+
+func (g *generator) awaitCall(call *ir.Call, value string) string {
+	if g.suspension != nil && g.suspension.Calls[call] {
+		return "(await " + value + ")"
+	}
+	return value
 }
 
 func (g *generator) expr(expression ir.Expression) string {
@@ -716,27 +772,27 @@ func (g *generator) expr(expression ir.Expression) string {
 					parts = append([]string{g.expr(member.Receiver)}, parts...)
 				}
 			}
-			return g.intrinsic(reference.Intrinsic, n, parts)
+			return g.awaitCall(n, g.intrinsic(reference.Intrinsic, n, parts))
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok && (g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record") {
-				return g.recordLiteral(identifier, n.Arguments)
+				return g.awaitCall(n, g.recordLiteral(identifier, n.Arguments))
 			}
-			return "new " + g.expr(member.Receiver) + "(" + args + ")"
+			return g.awaitCall(n, "new "+g.expr(member.Receiver)+"("+args+")")
 		}
 		if identifier, ok := n.Callee.(*ir.Identifier); ok {
 			if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] {
-				return "this." + tsMethodName(identifier.Name) + "(" + args + ")"
+				return g.awaitCall(n, "this."+tsMethodName(identifier.Name)+"("+args+")")
 			}
 			if g.topFunctions[identifier.Name] {
 				name := identifier.Name
 				if target := g.topTargets[identifier.Name]; target != "" {
 					name = target
 				}
-				return tsCallableName(name) + "(" + args + ")"
+				return g.awaitCall(n, tsCallableName(name)+"("+args+")")
 			}
 		}
-		return g.expr(n.Callee) + "(" + args + ")"
+		return g.awaitCall(n, g.expr(n.Callee)+"("+args+")")
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
@@ -786,8 +842,14 @@ func (g *generator) ifExpression(node *ir.If) string {
 		records:       g.records,
 		typeAliases:   g.typeAliases,
 		temporary:     g.temporary,
+		suspension:    g.suspension,
 	}
-	child.line("((): " + child.tsType(node.ExprType()) + " => {")
+	suspends := child.suspension != nil && child.suspension.Expressions[node]
+	if suspends {
+		child.line("(async (): Promise<" + child.tsType(node.ExprType()) + "> => {")
+	} else {
+		child.line("((): " + child.tsType(node.ExprType()) + " => {")
+	}
 	child.indent++
 	child.line("if (" + child.expr(node.Condition) + ") {" + tsTrailingComment(node.TrailingComment))
 	child.indent++
@@ -816,7 +878,11 @@ func (g *generator) ifExpression(node *ir.If) string {
 	child.indent--
 	child.line("})()")
 	g.temporary = child.temporary
-	return strings.TrimSpace(child.b.String())
+	generated := strings.TrimSpace(child.b.String())
+	if suspends {
+		return "(await " + generated + ")"
+	}
+	return generated
 }
 
 func (g *generator) attemptExpression(node *ir.Attempt) string {
@@ -830,8 +896,14 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		records:       g.records,
 		typeAliases:   g.typeAliases,
 		temporary:     g.temporary,
+		suspension:    g.suspension,
 	}
-	child.line("((): " + child.tsType(node.ExprType()) + " => {")
+	suspends := child.suspension != nil && child.suspension.Expressions[node]
+	if suspends {
+		child.line("(async (): Promise<" + child.tsType(node.ExprType()) + "> => {")
+	} else {
+		child.line("((): " + child.tsType(node.ExprType()) + " => {")
+	}
 	child.indent++
 	child.statements(node.Body)
 	result := node.Value
@@ -842,7 +914,11 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 	child.indent--
 	child.line("})()")
 	g.temporary = child.temporary
-	return strings.TrimSpace(child.b.String())
+	value := strings.TrimSpace(child.b.String())
+	if suspends {
+		return "(await " + value + ")"
+	}
+	return value
 }
 
 func (g *generator) caseExpression(node *ir.Case) string {
@@ -855,8 +931,14 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		records:       g.records,
 		typeAliases:   g.typeAliases,
 		temporary:     g.temporary,
+		suspension:    g.suspension,
 	}
-	child.line("((): " + child.tsType(node.ExprType()) + " => {")
+	suspends := child.suspension != nil && child.suspension.Expressions[node]
+	if suspends {
+		child.line("(async (): Promise<" + child.tsType(node.ExprType()) + "> => {")
+	} else {
+		child.line("((): " + child.tsType(node.ExprType()) + " => {")
+	}
 	child.indent++
 	child.statements(node.Leading)
 	child.temporary++
@@ -909,7 +991,11 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	child.indent--
 	child.line("})()")
 	g.temporary = child.temporary
-	return strings.TrimSpace(child.b.String())
+	generated := strings.TrimSpace(child.b.String())
+	if suspends {
+		return "(await " + generated + ")"
+	}
+	return generated
 }
 
 func tsCallableName(name string) string {

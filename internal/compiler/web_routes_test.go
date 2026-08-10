@@ -383,7 +383,7 @@ func assertWebMiddlewareTarget(t *testing.T, mode string, artifact *Artifact) {
 	case "ruby":
 		target = "def trb_web_middleware_0("
 	case "typescript":
-		target = "export function trb_web_middleware_0("
+		target = "export async function trb_web_middleware_0("
 	}
 	if !strings.Contains(string(artifact.Output), target) {
 		t.Fatalf("%s output does not contain %q:\n%s", mode, target, artifact.Output)

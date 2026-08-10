@@ -54,12 +54,12 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	if len(manifest.Middlewares) > 0 {
 		g.webNext()
 	}
-	g.line("function trb_web_dispatch(request: TrbWebRequest) {")
+	g.line("async function trb_web_dispatch(request: TrbWebRequest): Promise<TrbWebResponse> {")
 	g.indent++
 	g.line("return trb_web_dispatch_with_body_limit(request, TRB_WEB_DEFAULT_MAX_BODY_BYTES);")
 	g.indent--
 	g.line("}")
-	g.line("function trb_web_dispatch_with_body_limit(request: TrbWebRequest, max_body_bytes: number) {")
+	g.line("async function trb_web_dispatch_with_body_limit(request: TrbWebRequest, max_body_bytes: number): Promise<TrbWebResponse> {")
 	g.indent++
 	g.line("try {")
 	g.indent++
@@ -103,14 +103,14 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		contextName := "route_context_" + strconv.Itoa(routeIndex)
 		handlerName := "route_handler_" + strconv.Itoa(routeIndex)
 		g.line("const " + contextName + ": TrbWebContext = { request, path_parameters };")
-		g.line("let " + handlerName + " = (middleware_context: TrbWebContext): TrbWebResponse => " + route.TargetHandler + "(middleware_context);")
+		g.line("let " + handlerName + " = async (middleware_context: TrbWebContext): Promise<TrbWebResponse> => await " + route.TargetHandler + "(middleware_context);")
 		for middlewareIndex := len(route.Middlewares) - 1; middlewareIndex >= 0; middlewareIndex-- {
 			middleware := route.Middlewares[middlewareIndex]
 			nextName := "next_handler_" + strconv.Itoa(routeIndex) + "_" + strconv.Itoa(middlewareIndex)
 			g.line("const " + nextName + " = " + handlerName + ";")
-			g.line(handlerName + " = (middleware_context: TrbWebContext): TrbWebResponse => " + middleware.TargetHandler + "(middleware_context, new TrbWebNext(" + nextName + "));")
+			g.line(handlerName + " = async (middleware_context: TrbWebContext): Promise<TrbWebResponse> => await " + middleware.TargetHandler + "(middleware_context, new TrbWebNext(" + nextName + "));")
 		}
-		g.line("return trb_web_finalize_response(request, " + handlerName + "(" + contextName + "));")
+		g.line("return trb_web_finalize_response(request, await " + handlerName + "(" + contextName + "));")
 		g.indent--
 		g.line("}")
 	}
@@ -130,14 +130,14 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		contextName := "options_context_" + strconv.Itoa(routeIndex)
 		handlerName := "options_handler_" + strconv.Itoa(routeIndex)
 		g.line("const " + contextName + ": TrbWebContext = { request, path_parameters };")
-		g.line("let " + handlerName + ` = (_middleware_context: TrbWebContext): TrbWebResponse => ({ status: 204, headers: { "allow": [allowed_methods.join(", ")] }, body: new Uint8Array() });`)
+		g.line("let " + handlerName + ` = async (_middleware_context: TrbWebContext): Promise<TrbWebResponse> => ({ status: 204, headers: { "allow": [allowed_methods.join(", ")] }, body: new Uint8Array() });`)
 		for middlewareIndex := len(route.Middlewares) - 1; middlewareIndex >= 0; middlewareIndex-- {
 			middleware := route.Middlewares[middlewareIndex]
 			nextName := "options_next_handler_" + strconv.Itoa(routeIndex) + "_" + strconv.Itoa(middlewareIndex)
 			g.line("const " + nextName + " = " + handlerName + ";")
-			g.line(handlerName + " = (middleware_context: TrbWebContext): TrbWebResponse => " + middleware.TargetHandler + "(middleware_context, new TrbWebNext(" + nextName + "));")
+			g.line(handlerName + " = async (middleware_context: TrbWebContext): Promise<TrbWebResponse> => await " + middleware.TargetHandler + "(middleware_context, new TrbWebNext(" + nextName + "));")
 		}
-		g.line("return trb_web_finalize_response(request, " + handlerName + "(" + contextName + "));")
+		g.line("return trb_web_finalize_response(request, await " + handlerName + "(" + contextName + "));")
 		g.indent--
 		g.line("}")
 	}
@@ -228,13 +228,13 @@ func (g *generator) webNext() {
 	g.line("class TrbWebNext {")
 	g.indent++
 	g.line("private called = false;")
-	g.line("private readonly handler: (context: TrbWebContext) => TrbWebResponse;")
-	g.line("constructor(handler: (context: TrbWebContext) => TrbWebResponse) {")
+	g.line("private readonly handler: (context: TrbWebContext) => Promise<TrbWebResponse>;")
+	g.line("constructor(handler: (context: TrbWebContext) => Promise<TrbWebResponse>) {")
 	g.indent++
 	g.line("this.handler = handler;")
 	g.indent--
 	g.line("}")
-	g.line("call(context: TrbWebContext): TrbWebResponse {")
+	g.line("async call(context: TrbWebContext): Promise<TrbWebResponse> {")
 	g.indent++
 	g.line("if (this.called) {")
 	g.indent++
@@ -242,7 +242,7 @@ func (g *generator) webNext() {
 	g.indent--
 	g.line("}")
 	g.line("this.called = true;")
-	g.line("return this.handler(context);")
+	g.line("return await this.handler(context);")
 	g.indent--
 	g.line("}")
 	g.indent--
@@ -327,7 +327,7 @@ func (g *generator) webServer() {
 	g.line(`const query_index = target.indexOf("?");`)
 	g.line(`const path = query_index === -1 ? target : target.slice(0, query_index);`)
 	g.line(`const query_string = query_index === -1 ? "" : target.slice(query_index + 1);`)
-	g.line(`response = trb_web_dispatch_with_body_limit({ method: incoming.method ?? "GET", path, query_string, headers, body }, config.body_limit_bytes);`)
+	g.line(`response = await trb_web_dispatch_with_body_limit({ method: incoming.method ?? "GET", path, query_string, headers, body }, config.body_limit_bytes);`)
 	g.indent--
 	g.line("}")
 	g.line("for (const [name, values] of Object.entries(response.headers)) {")
