@@ -478,7 +478,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.platform.typescript.react.data_boolean":
 		return "((" + arguments[0] + ".currentTarget as HTMLElement).dataset[" + arguments[1] + "] === \"true\")"
 	case "trb.platform.typescript.react.use_state":
-		return "useTrbState(" + arguments[0] + ")"
+		typeArguments := ""
+		if len(call.ExprType().Args) == 1 {
+			typeArguments = "<" + g.tsType(call.ExprType().Args[0]) + ">"
+		}
+		return "useTrbState" + typeArguments + "(" + arguments[0] + ")"
 	case "trb.platform.typescript.react.router.route":
 		return "{ path: " + arguments[0] + ", element: " + arguments[1] + " }"
 	case "trb.platform.typescript.react.router.browser_router":
@@ -489,6 +493,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "(useParams<Record<string, string | undefined>>()[" + arguments[0] + "] ?? null)"
 	case "trb.platform.typescript.react.router.use_navigate":
 		return "useTrbNavigate()"
+	case "trb.platform.typescript.react.form.use_form":
+		typeArguments := ""
+		if len(call.ExprType().Args) == 2 {
+			typeArguments = "<" + g.tsType(call.ExprType().Args[0]) + ", " + g.tsType(call.ExprType().Args[1]) + ">"
+		}
+		return "useTrbForm" + typeArguments + "(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.platform.typescript.web.get_json":
 		return "void fetch(" + arguments[0] + ").then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }).then(" + arguments[1] + " as any)"
 	case "trb.platform.typescript.web.post_json":

@@ -19,10 +19,26 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 		return reactSymbols()
 	case "trb.typescript.react.router":
 		return reactRouterSymbols()
+	case "trb.typescript.react.form":
+		return reactFormSymbols()
 	case "trb.typescript.browser":
 		return browserSymbols()
 	default:
 		panic(fmt.Sprintf("unknown official package semantic provider %q", provider))
+	}
+}
+
+func reactFormSymbols() map[string]stdlib.Symbol {
+	typeT := types.FromName("T")
+	typeE := types.FromName("E")
+	formType := types.Type{Kind: types.Named, Name: "ReactForm", Args: []types.Type{typeT, typeE}}
+	return map[string]stdlib.Symbol{
+		"use_form": {
+			Name: "use_form", Intrinsic: "trb.platform.typescript.react.form.use_form", RuntimeIndependent: true,
+			TypeParameters: []string{"T", "E"},
+			Parameters:     []stdlib.Parameter{{Name: "initial", Type: typeT}, {Name: "empty_errors", Type: typeE}},
+			Return:         formType,
+		},
 	}
 }
 
