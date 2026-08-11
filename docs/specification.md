@@ -81,7 +81,7 @@ mode by itself does not enable them.
   means no return value; a non-Void function uses `: Type` and must return that
   type on every reachable path.
 - Function types are written `(ParameterType, ...) -> ReturnType`. `Void` is
-  permitted in a function type, for example `(ReactEvent) -> Void`, but remains
+	permitted in a function type, for example `(ReactEvent) -> Void`, but remains
   omitted from the corresponding `fn` declaration.
 - A function value owns `return` statements in its body. It may capture outer
   lexical bindings, while ordinary immutability and `mut` assignment rules
