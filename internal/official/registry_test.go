@@ -72,6 +72,13 @@ func TestBundledReactPackage(t *testing.T) {
 	if packageDefinition.Definition.Symbols["mount"].Intrinsic != "trb.platform.typescript.react.mount" {
 		t.Fatalf("React semantic provider was not loaded: %#v", packageDefinition.Definition.Symbols)
 	}
+	if packageDefinition.Definition.TypeProvider != "trb.typescript.react" {
+		t.Fatalf("React type provider was not loaded: %#v", packageDefinition.Definition)
+	}
+	state := packageDefinition.Definition.Symbols["use_state"]
+	if state.Return.String() != "ReactState<T>" || len(state.TypeParameters) != 1 {
+		t.Fatalf("unexpected React state contract: %#v", state)
+	}
 }
 
 func TestBundledTypeScriptBrowserPackage(t *testing.T) {

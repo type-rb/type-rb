@@ -54,11 +54,13 @@ func browserSymbols() map[string]stdlib.Symbol {
 }
 
 func reactSymbols() map[string]stdlib.Symbol {
+	typeT := types.FromName("T")
 	stringType := types.FromName("String")
 	integerType := types.FromName("Integer")
 	booleanType := types.FromName("Boolean")
 	anyType := types.FromName("Any")
 	voidType := types.FromName("Void")
+	stateType := types.Type{Kind: types.Named, Name: "ReactState", Args: []types.Type{typeT}}
 	return map[string]stdlib.Symbol{
 		"element":         {Name: "element", Intrinsic: "trb.platform.typescript.react.element", Parameters: []stdlib.Parameter{{Name: "tag", Type: anyType}, {Name: "props", Type: types.FromName("Hash")}, {Name: "children", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{anyType}}}}, Return: types.FromName("ReactNode")},
 		"mount":           {Name: "mount", Intrinsic: "trb.platform.typescript.react.mount", Parameters: []stdlib.Parameter{{Name: "component", Type: anyType}, {Name: "element_id", Type: stringType}}, Return: voidType},
@@ -67,6 +69,7 @@ func reactSymbols() map[string]stdlib.Symbol {
 		"input_value":     {Name: "input_value", Intrinsic: "trb.platform.typescript.react.input_value", Parameters: []stdlib.Parameter{{Name: "event", Type: types.FromName("ReactEvent")}}, Return: stringType},
 		"data_integer":    {Name: "data_integer", Intrinsic: "trb.platform.typescript.react.data_integer", Parameters: []stdlib.Parameter{{Name: "event", Type: types.FromName("ReactEvent")}, {Name: "name", Type: stringType}}, Return: integerType},
 		"data_boolean":    {Name: "data_boolean", Intrinsic: "trb.platform.typescript.react.data_boolean", Parameters: []stdlib.Parameter{{Name: "event", Type: types.FromName("ReactEvent")}, {Name: "name", Type: stringType}}, Return: booleanType},
+		"use_state":       {Name: "use_state", Intrinsic: "trb.platform.typescript.react.use_state", RuntimeIndependent: true, TypeParameters: []string{"T"}, Parameters: []stdlib.Parameter{{Name: "initial", Type: typeT}}, Return: stateType},
 	}
 }
 

@@ -62,6 +62,7 @@ type Member struct {
 
 type Type struct {
 	Name            string
+	TypeParameters  []string
 	Superclass      string
 	InstanceMembers map[string]Member
 	ClassMembers    map[string]Member

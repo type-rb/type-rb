@@ -40,6 +40,7 @@ func Program(checked checker.Result) *ir.Program {
 		RubyLoader:        checked.Program.RubyLoader,
 		TypeScriptRuntime: checked.Program.TypeScriptRuntime,
 		UsesJSX:           l.usesJSX,
+		Declarations:      checked.Resolution.Declarations,
 		Statements:        statements,
 	}
 }

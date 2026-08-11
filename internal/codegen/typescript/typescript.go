@@ -131,6 +131,14 @@ func (g *generator) statement(statement ir.Statement) {
 			if containsString(n.Symbols, "mount") {
 				g.line(`import { createRoot } from "react-dom/client";`)
 			}
+			if containsString(n.Symbols, "use_state") {
+				g.line(`function useTrbState<T>(initial: T): Readonly<{ value: T; set: (value: T) => void }> {`)
+				g.indent++
+				g.line(`const [value, set] = React.useState<T>(initial);`)
+				g.line(`return { value, set };`)
+				g.indent--
+				g.line(`}`)
+			}
 			return
 		}
 		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) {
@@ -1690,6 +1698,12 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 			result = "React.SyntheticEvent"
 		case "ReactComponent":
 			result = "React.Component<Record<string, never>>"
+		case "ReactState":
+			value := "unknown"
+			if len(t.Args) > 0 {
+				value = tsTypeWithAliases(t.Args[0], aliases)
+			}
+			result = "Readonly<{ value: " + value + "; set: (value: " + value + ") => void }>"
 		case "Callback":
 			argument := "unknown"
 			if len(t.Args) > 0 {
@@ -1703,7 +1717,7 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 			}
 		}
 	}
-	if t.Kind == types.Named && len(t.Args) > 0 {
+	if t.Kind == types.Named && len(t.Args) > 0 && t.Name != "ReactState" {
 		arguments := make([]string, len(t.Args))
 		for index, argument := range t.Args {
 			arguments[index] = tsTypeWithAliases(argument, aliases)

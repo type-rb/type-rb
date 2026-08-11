@@ -6,6 +6,7 @@
   "kind": "platform",
   "targets": ["typescript"],
   "semanticProvider": "trb.typescript.react",
+  "typeProvider": "trb.typescript.react",
   "nativeDependencies": {
     "typescript": {
       "react": "latest",

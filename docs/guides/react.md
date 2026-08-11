@@ -46,9 +46,28 @@ end
 ```
 
 The callback keeps the ordinary TypeRB function type across module boundaries
-and lowers to a React-compatible TypeScript function. Hook state remains a
-separate prototype step; the compiler does not disguise untyped state as a
-finished API.
+and lowers to a React-compatible TypeScript function.
+
+Component-local state uses a typed wrapper around React `useState`:
+
+```trb
+import { ReactEvent, ReactNode, use_state } from trb/platform/typescript/react
+
+def Counter(): ReactNode
+	count := use_state(0)
+	increment := fn(_event: ReactEvent)
+		count.set(count.value + 1)
+		return
+	end
+	return <button onClick={increment}>Count: {count.value}</button>
+end
+```
+
+`use_state(initial)` infers `ReactState<T>` from the initial value. Its `value`
+property and `set(value)` method preserve that type, while generated TSX uses
+an ordinary React hook. Calls therefore follow the normal Rules of Hooks: keep
+them at the top level of a component or custom hook and do not place them in
+conditional control flow.
 
 Typed browser JSON calls use ordinary `fails` and `attempt` semantics:
 
