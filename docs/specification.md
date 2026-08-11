@@ -172,6 +172,12 @@ end
   syntax or type provider package, count as semantic uses.
 - Project module identities come from paths below `sourceDir`; source files do
   not declare target packages.
+- External TypeRB packages declare a canonical identity in
+  `trbpackage.json`. A project lock may map an explicit short import to that
+  identity. Alias mappings are scoped to the application or declaring package,
+  so two dependencies may use the same short name for different packages.
+  Package source passes through the ordinary parser, checker, typed IR, and
+  selected backend.
 - A REPL may add hidden imports for public declarations whose names resolve to
   exactly one project module, and for public types exported by portable
   standard packages. Ambiguous declarations still require an explicit import.

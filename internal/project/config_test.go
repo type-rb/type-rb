@@ -84,6 +84,64 @@ func TestLoadPreservesOfficialPackageOptions(t *testing.T) {
 	}
 }
 
+func TestLoadTypeRBPackageRequirements(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ConfigName)
+	source := `{
+  "name": "package-app",
+  "mode": "ruby",
+  "packages": {
+    "acme/contracts": "v1.2.3",
+    "private/contracts": {
+      "source": "gitlab.example.com/team/contracts",
+      "version": "v2.0.0"
+    },
+    "workspace/ui": {
+      "path": "../ui"
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := config.Packages["acme/contracts"].Version; got != "v1.2.3" {
+		t.Fatalf("unexpected shorthand requirement: %q", got)
+	}
+	if got := config.Packages["private/contracts"].Source; got != "gitlab.example.com/team/contracts" {
+		t.Fatalf("unexpected explicit source: %q", got)
+	}
+	if got := config.Packages["workspace/ui"].Path; got != "../ui" {
+		t.Fatalf("unexpected path requirement: %q", got)
+	}
+}
+
+func TestSaveUsesPackageVersionShorthand(t *testing.T) {
+	config := New(t.TempDir(), "ruby")
+	config.Packages["acme/contracts"] = PackageRequirement{Version: "v1.2.3"}
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(config.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"acme/contracts": "v1.2.3"`) {
+		t.Fatalf("version shorthand was not preserved:\n%s", data)
+	}
+}
+
+func TestTypeRBPackageRequirementRejectsMixedPathAndVersion(t *testing.T) {
+	config := New(t.TempDir(), "ruby")
+	config.Packages["acme/contracts"] = PackageRequirement{Path: "../contracts", Version: "v1.0.0"}
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("unexpected validation result: %v", err)
+	}
+}
+
 func TestLoadJSONCRejectsTrailingCommas(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, ConfigName)

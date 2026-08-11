@@ -7,6 +7,7 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/reeflective/readline v1.3.1-0.20260802023205-4d8e27a037bd
+	golang.org/x/mod v0.36.0
 	modernc.org/sqlite v1.53.0
 )
 

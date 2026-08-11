@@ -86,6 +86,8 @@ func (c *CLI) Run(args []string) int {
 		err = c.runAdd(args[1:])
 	case "remove":
 		err = c.runRemove(args[1:])
+	case "update":
+		err = c.runUpdate(args[1:])
 	case "install":
 		err = c.runInstall(args[1:])
 	case "version", "--version", "-v":
@@ -560,17 +562,17 @@ func (c *CLI) runRepl(args []string) error {
 		sessionPackage = config.Go.RootPackage
 	}
 	compileSource := func(source string) (*repl.Compilation, error) {
-		units, err := projectSourceUnits(config, files)
+		units, options, err := projectCompilation(config, files)
 		if err != nil {
 			return nil, err
 		}
 		units = append(units, compiler.SourceUnit{
-			Filename:   sessionFilename,
-			Source:     []byte(source),
-			ModulePath: sessionModule,
-			Package:    sessionPackage,
+			Filename:       sessionFilename,
+			Source:         []byte(source),
+			ModulePath:     sessionModule,
+			Package:        sessionPackage,
+			PackageAliases: nil,
 		})
-		options := compilerOptions(config)
 		options.AllowUnusedImports = true
 		options.InteractiveModule = sessionModule
 		artifacts, err := compiler.CompileProject(units, options)
@@ -735,7 +737,10 @@ func replStandardCandidates(config *project.Config, imports []replImport, sessio
 	if source.Len() == 0 {
 		return languageservice.Context{}, nil
 	}
-	options := compilerOptions(config)
+	options, err := compilerOptions(config)
+	if err != nil {
+		return languageservice.Context{}, err
+	}
 	options.AllowUnusedImports = true
 	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{{
 		Filename:   filepath.Join(config.SourcePath(), ".trb-repl-standard-candidates.trb"),
@@ -1012,21 +1017,74 @@ func (c *CLI) runSync(args []string) error {
 func (c *CLI) runAdd(args []string) error {
 	flags := flag.NewFlagSet("add", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
-	dev := flags.Bool("dev", false, "add a development dependency")
+	dev := flags.Bool("dev", false, "add a native development dependency")
+	native := flags.Bool("native", false, "add a target-language dependency")
+	source := flags.String("source", "", "Git source for a TypeRB package")
+	packagePath := flags.String("path", "", "local TypeRB package directory")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() < 1 || flags.NArg() > 2 {
-		return errors.New("usage: trb add [--dev] PACKAGE [VERSION]")
+		return errors.New("usage: trb add [--source GIT | --path DIRECTORY] PACKAGE [VERSION]")
 	}
 	config, err := project.Find(".")
 	if err != nil {
 		return err
 	}
-	if !config.ManagesPackages() {
-		return errors.New("package management is external; edit dependencies in the host project")
+	if *native {
+		if *source != "" || *packagePath != "" {
+			return errors.New("--native cannot be combined with --source or --path")
+		}
+		return c.addNativeDependency(config, flags.Args(), *dev)
+	}
+	if *dev {
+		return errors.New("--dev currently applies only to --native dependencies")
+	}
+	if *source != "" && *packagePath != "" {
+		return errors.New("--source and --path are mutually exclusive")
 	}
 	name, version := dependencySpec(flags.Args())
+	if *packagePath != "" {
+		if version != "" {
+			return errors.New("a local TypeRB package path cannot have a version")
+		}
+		config.Packages[name] = project.PackageRequirement{Path: *packagePath}
+	} else {
+		if version == "" {
+			version = "latest"
+		}
+		config.Packages[name] = project.PackageRequirement{Source: *source, Version: version}
+	}
+	if err := config.Validate(); err != nil {
+		return err
+	}
+	resolved, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{Update: true})
+	if err != nil {
+		return err
+	}
+	if err := config.Save(); err != nil {
+		return err
+	}
+	if config.ManagesPackages() {
+		files, collectErr := collectDependencyTRB(config)
+		if collectErr != nil {
+			return collectErr
+		}
+		if _, err := syncProjectPackages(config, files); err != nil {
+			return err
+		}
+	}
+	canonical := resolved.Aliases[name]
+	locked := resolved.Lock.Packages[canonical]
+	fmt.Fprintf(c.Stdout, "%s %s -> %s\n", name, locked.Version, packageManager.TypeRBLockPath(config))
+	return nil
+}
+
+func (c *CLI) addNativeDependency(config *project.Config, arguments []string, dev bool) error {
+	if !config.ManagesPackages() {
+		return errors.New("native package management is external; edit dependencies in the host project")
+	}
+	name, version := dependencySpec(arguments)
 	if version == "" && config.Mode == "typescript" {
 		version = "latest"
 	}
@@ -1035,7 +1093,7 @@ func (c *CLI) runAdd(args []string) error {
 	}
 	delete(config.Dependencies, name)
 	delete(config.DevDependencies, name)
-	if *dev {
+	if dev {
 		config.DevDependencies[name] = version
 	} else {
 		config.Dependencies[name] = version
@@ -1055,39 +1113,73 @@ func (c *CLI) runAdd(args []string) error {
 }
 
 func (c *CLI) runRemove(args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: trb remove PACKAGE")
+	flags := flag.NewFlagSet("remove", flag.ContinueOnError)
+	flags.SetOutput(c.Stderr)
+	native := flags.Bool("native", false, "remove a target-language dependency")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return errors.New("usage: trb remove [--native] PACKAGE")
 	}
 	config, err := project.Find(".")
 	if err != nil {
 		return err
 	}
-	if !config.ManagesPackages() {
-		return errors.New("package management is external; edit dependencies in the host project")
+	name := flags.Arg(0)
+	if *native {
+		if !config.ManagesPackages() {
+			return errors.New("native package management is external; edit dependencies in the host project")
+		}
+		delete(config.Dependencies, name)
+		delete(config.DevDependencies, name)
+	} else {
+		delete(config.Packages, name)
+		if _, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{Update: true}); err != nil {
+			return err
+		}
 	}
-	delete(config.Dependencies, args[0])
-	delete(config.DevDependencies, args[0])
 	if err := config.Save(); err != nil {
 		return err
 	}
-	files, collectErr := collectDependencyTRB(config)
-	if collectErr != nil {
-		return collectErr
+	if config.ManagesPackages() {
+		files, collectErr := collectDependencyTRB(config)
+		if collectErr != nil {
+			return collectErr
+		}
+		if _, err := syncProjectPackages(config, files); err != nil {
+			return err
+		}
 	}
-	manifest, err := syncProjectPackages(config, files)
-	if err == nil {
-		fmt.Fprintf(c.Stdout, "%s -> %s\n", args[0], manifest)
-	}
-	return err
+	fmt.Fprintf(c.Stdout, "%s -> %s\n", name, config.Path)
+	return nil
 }
 
 func (c *CLI) runInstall(args []string) error {
-	if len(args) != 0 {
-		return errors.New("install does not accept arguments")
+	flags := flag.NewFlagSet("install", flag.ContinueOnError)
+	flags.SetOutput(c.Stderr)
+	frozen := flags.Bool("frozen", false, "require trb.lock to match the project configuration")
+	offline := flags.Bool("offline", false, "use only the local TypeRB package cache")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("install does not accept package arguments")
 	}
 	config, err := project.Find(".")
 	if err != nil {
 		return err
+	}
+	resolved, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{Frozen: *frozen, Offline: *offline})
+	if err != nil {
+		return err
+	}
+	if resolved.Lock != nil {
+		fmt.Fprintf(c.Stdout, "resolved %d TypeRB package(s) -> %s\n", len(resolved.Packages), packageManager.TypeRBLockPath(config))
+	}
+	if !config.ManagesPackages() {
+		fmt.Fprintln(c.Stdout, "native package management is external")
+		return nil
 	}
 	files, err := collectDependencyTRB(config)
 	if err != nil {
@@ -1098,6 +1190,31 @@ func (c *CLI) runInstall(args []string) error {
 		return err
 	}
 	return packageManager.InstallWithDependencies(config, dependencies, c.Stdin, c.Stdout, c.Stderr)
+}
+
+func (c *CLI) runUpdate(args []string) error {
+	if len(args) != 0 {
+		return errors.New("update does not accept package arguments yet")
+	}
+	config, err := project.Find(".")
+	if err != nil {
+		return err
+	}
+	resolved, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{Update: true})
+	if err != nil {
+		return err
+	}
+	if config.ManagesPackages() {
+		files, err := collectDependencyTRB(config)
+		if err != nil {
+			return err
+		}
+		if _, err := syncProjectPackages(config, files); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(c.Stdout, "updated %d TypeRB package(s) -> %s\n", len(resolved.Packages), packageManager.TypeRBLockPath(config))
+	return nil
 }
 
 func syncProjectPackages(config *project.Config, files []string) (string, error) {
@@ -1117,7 +1234,11 @@ func collectDependencyTRB(config *project.Config) ([]string, error) {
 }
 
 func projectPackageDependencies(config *project.Config, files []string) (map[string]string, error) {
-	units, err := projectSourceUnits(config, files)
+	resolvedPackages, err := packageManager.LoadTypeRBPackages(config)
+	if err != nil {
+		return nil, err
+	}
+	units, err := projectSourceUnits(config, files, resolvedPackages)
 	if err != nil {
 		return nil, err
 	}
@@ -1126,6 +1247,9 @@ func projectPackageDependencies(config *project.Config, files []string) (map[str
 		sources = append(sources, unit.Source)
 	}
 	dependencies := map[string]string{}
+	for name, version := range resolvedPackages.NativeDependencies {
+		dependencies[name] = version
+	}
 	seen := map[string]bool{}
 	for len(sources) > 0 {
 		source := sources[0]
@@ -1165,11 +1289,11 @@ func loadConfig(explicit, start string) (*project.Config, error) {
 }
 
 func compileProject(config *project.Config, files []string) (map[string]*compiler.Artifact, error) {
-	units, err := projectSourceUnits(config, files)
+	units, options, err := projectCompilation(config, files)
 	if err != nil {
 		return nil, err
 	}
-	artifacts, err := compiler.CompileProject(units, compilerOptions(config))
+	artifacts, err := compiler.CompileProject(units, options)
 	if err != nil {
 		return nil, err
 	}
@@ -1181,7 +1305,19 @@ func compileProject(config *project.Config, files []string) (map[string]*compile
 	return result, nil
 }
 
-func projectSourceUnits(config *project.Config, files []string) ([]compiler.SourceUnit, error) {
+func projectCompilation(config *project.Config, files []string) ([]compiler.SourceUnit, compiler.Options, error) {
+	resolvedPackages, err := packageManager.LoadTypeRBPackages(config)
+	if err != nil {
+		return nil, compiler.Options{}, err
+	}
+	units, err := projectSourceUnits(config, files, resolvedPackages)
+	if err != nil {
+		return nil, compiler.Options{}, err
+	}
+	return units, compilerOptionsWithPackages(config, resolvedPackages), nil
+}
+
+func projectSourceUnits(config *project.Config, files []string, resolvedPackages *packageManager.TypeRBPackages) ([]compiler.SourceUnit, error) {
 	units := make([]compiler.SourceUnit, 0, len(files))
 	for _, filename := range files {
 		source, err := os.ReadFile(filename)
@@ -1221,6 +1357,34 @@ func projectSourceUnits(config *project.Config, files []string) ([]compiler.Sour
 			if err != nil {
 				return nil, err
 			}
+			units = append(units, unit)
+		}
+	}
+	for _, resolved := range resolvedPackages.Packages {
+		sourceRoot := filepath.Join(resolved.Root, resolved.Manifest.SourceDir)
+		packageAliases := map[string]string{}
+		if resolvedPackages.Lock != nil {
+			for alias, canonical := range resolvedPackages.Lock.Packages[resolved.Name].Dependencies {
+				packageAliases[alias] = canonical
+			}
+		}
+		packageFiles, err := collectTRB([]string{sourceRoot}, "")
+		if err != nil {
+			return nil, fmt.Errorf("TypeRB package %s: %w", resolved.Name, err)
+		}
+		if len(packageFiles) == 0 {
+			return nil, fmt.Errorf("TypeRB package %s has no .trb files below %s", resolved.Name, sourceRoot)
+		}
+		for _, filename := range packageFiles {
+			source, err := os.ReadFile(filename)
+			if err != nil {
+				return nil, err
+			}
+			unit, err := localSourceUnit(config, resolved.Name, sourceRoot, filename, source)
+			if err != nil {
+				return nil, err
+			}
+			unit.PackageAliases = packageAliases
 			units = append(units, unit)
 		}
 	}
@@ -1326,12 +1490,20 @@ func sourceUnit(config *project.Config, filename string, source []byte) (compile
 	return compiler.SourceUnit{Filename: absolute, Source: source, ModulePath: modulePath, Package: packageName}, nil
 }
 
-func compilerOptions(config *project.Config) compiler.Options {
+func compilerOptions(config *project.Config) (compiler.Options, error) {
+	resolvedPackages, err := packageManager.LoadTypeRBPackages(config)
+	if err != nil {
+		return compiler.Options{}, err
+	}
+	return compilerOptionsWithPackages(config, resolvedPackages), nil
+}
+
+func compilerOptionsWithPackages(config *project.Config, resolvedPackages *packageManager.TypeRBPackages) compiler.Options {
 	packageOptions := make(map[string][]byte, len(config.PackageOptions))
 	for name, value := range config.PackageOptions {
 		packageOptions[name] = append([]byte(nil), value...)
 	}
-	options := compiler.Options{Mode: config.Mode, SourceRoot: config.SourcePath(), ProjectRoot: config.Root, PackageOptions: packageOptions}
+	options := compiler.Options{Mode: config.Mode, SourceRoot: config.SourcePath(), ProjectRoot: config.Root, PackageOptions: packageOptions, PackageAliases: resolvedPackages.Aliases}
 	if config.Ruby != nil {
 		options.RubyLoader = config.Ruby.Loader
 	}
@@ -1469,7 +1641,7 @@ func collectTRB(paths []string, excluded string) ([]string, error) {
 			}
 			if entry.IsDir() {
 				absolute, _ := filepath.Abs(name)
-				if name != absolutePath && (entry.Name() == ".git" || entry.Name() == "node_modules" || absolute == excludedAbs) {
+				if name != absolutePath && (entry.Name() == ".git" || entry.Name() == ".trb" || entry.Name() == "node_modules" || absolute == excludedAbs) {
 					return filepath.SkipDir
 				}
 				return nil
@@ -1496,7 +1668,7 @@ func copyProjectFiles(root, outDir string) error {
 		}
 		absolute, _ := filepath.Abs(name)
 		if entry.IsDir() {
-			if name != rootAbs && (entry.Name() == ".git" || entry.Name() == "node_modules" || absolute == outAbs) {
+			if name != rootAbs && (entry.Name() == ".git" || entry.Name() == ".trb" || entry.Name() == "node_modules" || absolute == outAbs) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1555,8 +1727,10 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb tour [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb db plan|apply|export|lock|check [options]")
 	fmt.Fprintln(c.Stdout, "  trb sync")
-	fmt.Fprintln(c.Stdout, "  trb add [--dev] PACKAGE [VERSION]")
-	fmt.Fprintln(c.Stdout, "  trb remove PACKAGE")
-	fmt.Fprintln(c.Stdout, "  trb install")
+	fmt.Fprintln(c.Stdout, "  trb add [--source GIT | --path DIRECTORY] PACKAGE [VERSION]")
+	fmt.Fprintln(c.Stdout, "  trb add --native [--dev] PACKAGE [VERSION]")
+	fmt.Fprintln(c.Stdout, "  trb remove [--native] PACKAGE")
+	fmt.Fprintln(c.Stdout, "  trb install [--frozen] [--offline]")
+	fmt.Fprintln(c.Stdout, "  trb update")
 	fmt.Fprintln(c.Stdout, "  trb version")
 }

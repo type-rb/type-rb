@@ -32,12 +32,13 @@ type Artifact struct {
 }
 
 type SourceUnit struct {
-	Filename      string
-	Source        []byte
-	ModulePath    string
-	Package       string
-	CompilerOwned bool
-	Official      bool
+	Filename       string
+	Source         []byte
+	ModulePath     string
+	Package        string
+	PackageAliases map[string]string
+	CompilerOwned  bool
+	Official       bool
 }
 
 type CompileError struct {
@@ -55,6 +56,7 @@ type Options struct {
 	SourceRoot         string
 	ProjectRoot        string
 	PackageOptions     map[string][]byte
+	PackageAliases     map[string]string
 	AllowUnusedImports bool
 	InteractiveModule  string
 }
@@ -97,7 +99,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 	if providerErr != nil {
 		return nil, providerErr
 	}
-	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: filename, Declarations: declarations})
+	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: filename, PackageAliases: options.PackageAliases, Declarations: declarations})
 	diagnostics = append(diagnostics, resolveDiagnostics...)
 	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{
 		AllowUnusedImports:    options.AllowUnusedImports,
@@ -177,14 +179,19 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 
 	resolutions := make(map[string]resolver.Result, len(units))
 	for _, source := range units {
+		packageAliases := options.PackageAliases
+		if source.PackageAliases != nil {
+			packageAliases = source.PackageAliases
+		}
 		resolved, diagnostics := resolver.Resolve(programs[source.ModulePath], resolver.Options{
-			Mode:          options.Mode,
-			SourceRoot:    options.SourceRoot,
-			Filename:      source.Filename,
-			CompilerOwned: source.CompilerOwned,
-			Official:      source.Official,
-			Catalog:       catalog,
-			Declarations:  declarations,
+			Mode:           options.Mode,
+			SourceRoot:     options.SourceRoot,
+			Filename:       source.Filename,
+			PackageAliases: packageAliases,
+			CompilerOwned:  source.CompilerOwned,
+			Official:       source.Official,
+			Catalog:        catalog,
+			Declarations:   declarations,
 		})
 		if hasErrors(diagnostics) {
 			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
