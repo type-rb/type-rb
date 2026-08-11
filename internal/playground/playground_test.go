@@ -179,6 +179,9 @@ func TestExportStaticBuildsHostIndependentSite(t *testing.T) {
 		"tour.json",
 		"play/index.html",
 		"tour/index.html",
+		"type-rb/index.html",
+		"type-rb/play/index.html",
+		"type-rb/tour/index.html",
 		"assets/app.css",
 		"assets/app.js",
 		"assets/playground-worker.js",
@@ -222,6 +225,21 @@ func TestExportStaticBuildsHostIndependentSite(t *testing.T) {
 	}
 	if config.Transport != "wasm" || config.Mode != "go" || config.Version != "1.2.3-test" {
 		t.Fatalf("unexpected static config: %#v", config)
+	}
+
+	for path, destination := range map[string]string{
+		"type-rb/index.html":      "/",
+		"type-rb/play/index.html": "/play/",
+		"type-rb/tour/index.html": "/tour/",
+	} {
+		data, err := os.ReadFile(filepath.Join(output, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		redirect := string(data)
+		if !strings.Contains(redirect, `http-equiv="refresh"`) || !strings.Contains(redirect, `url=`+destination) {
+			t.Fatalf("legacy redirect %s does not target %s:\n%s", path, destination, redirect)
+		}
 	}
 }
 
