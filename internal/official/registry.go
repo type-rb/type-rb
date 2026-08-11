@@ -114,15 +114,23 @@ func Names() []string {
 }
 
 func load() map[string]*Package {
+	result, err := loadFromFS(packageFiles)
+	if err != nil {
+		panic("load official TypeRB packages: " + err.Error())
+	}
+	return result
+}
+
+func loadFromFS(packageFS fs.FS) (map[string]*Package, error) {
 	result := map[string]*Package{}
-	err := fs.WalkDir(packageFiles, "packages", func(filename string, entry fs.DirEntry, walkErr error) error {
+	err := fs.WalkDir(packageFS, "packages", func(filename string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() || entry.Name() != "trbpackage.json" {
 			return nil
 		}
-		data, err := packageFiles.ReadFile(filename)
+		data, err := fs.ReadFile(packageFS, filename)
 		if err != nil {
 			return err
 		}
@@ -147,7 +155,7 @@ func load() map[string]*Package {
 			return fmt.Errorf("%s: package %s is already registered", filename, descriptor.Name)
 		}
 		sourcePath := path.Join(path.Dir(filename), descriptor.Source)
-		source, err := packageFiles.ReadFile(sourcePath)
+		source, err := fs.ReadFile(packageFS, sourcePath)
 		if err != nil {
 			return fmt.Errorf("%s: %w", filename, err)
 		}
@@ -171,9 +179,9 @@ func load() map[string]*Package {
 		return nil
 	})
 	if err != nil {
-		panic("load official TypeRB packages: " + err.Error())
+		return nil, err
 	}
-	return result
+	return result, nil
 }
 
 func manifestKind(kind string) stdlib.Kind {

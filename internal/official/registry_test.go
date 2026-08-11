@@ -3,7 +3,56 @@ package official
 import (
 	"encoding/json"
 	"testing"
+	"testing/fstest"
 )
+
+func TestManifestDeclaresPlatformTargets(t *testing.T) {
+	packages, err := loadFromFS(fstest.MapFS{
+		"packages/browser/trbpackage.json": &fstest.MapFile{Data: []byte(`{
+  "name": "example/browser",
+  "version": "0.1.0",
+  "module": "example/browser/index",
+  "source": "src/index.trb",
+  "kind": "platform",
+  "targets": ["typescript"]
+}`)},
+		"packages/browser/src/index.trb": &fstest.MapFile{Data: []byte("# browser package\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := packages["example/browser"].Definition
+	if definition.Kind != "platform" || !definition.Supports("typescript") || definition.Supports("go") || definition.Supports("ruby") {
+		t.Fatalf("unexpected platform package definition: %#v", definition)
+	}
+}
+
+func TestManifestRejectsInvalidPackageBoundary(t *testing.T) {
+	tests := []struct {
+		name     string
+		boundary string
+	}{
+		{name: "kind", boundary: `"kind": "native"`},
+		{name: "target", boundary: `"targets": ["python"]`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := loadFromFS(fstest.MapFS{
+				"packages/example/trbpackage.json": &fstest.MapFile{Data: []byte(`{
+  "name": "example/package",
+  "version": "0.1.0",
+  "module": "example/package/index",
+  "source": "src/index.trb",
+  ` + test.boundary + `
+}`)},
+				"packages/example/src/index.trb": &fstest.MapFile{Data: []byte("# package\n")},
+			})
+			if err == nil {
+				t.Fatal("expected invalid package boundary to be rejected")
+			}
+		})
+	}
+}
 
 func TestBundledReactPackage(t *testing.T) {
 	packageDefinition, ok := Lookup("trb/platform/typescript/react")
@@ -51,6 +100,9 @@ func TestBundledWebPackage(t *testing.T) {
 	}
 	if packageDefinition.Definition.ModulePath != "trb/web/index" {
 		t.Fatalf("module = %q", packageDefinition.Definition.ModulePath)
+	}
+	if packageDefinition.Definition.Kind != "portable" || !packageDefinition.Definition.Supports("go") || !packageDefinition.Definition.Supports("ruby") || !packageDefinition.Definition.Supports("typescript") {
+		t.Fatalf("unexpected default package boundary: %#v", packageDefinition.Definition)
 	}
 	if packageDefinition.ProjectProvider != "trb.web.routes" {
 		t.Fatalf("project provider = %q", packageDefinition.ProjectProvider)
