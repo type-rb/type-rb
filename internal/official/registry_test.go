@@ -99,6 +99,20 @@ func TestBundledReactRouterPackage(t *testing.T) {
 	}
 }
 
+func TestBundledReactFormPackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/platform/typescript/react/form")
+	if !ok {
+		t.Fatal("bundled React form package is not registered")
+	}
+	if packageDefinition.Definition.TypeProvider != "trb.typescript.react.form" {
+		t.Fatalf("React form type provider was not loaded: %#v", packageDefinition.Definition)
+	}
+	form := packageDefinition.Definition.Symbols["use_form"]
+	if form.Return.String() != "ReactForm<T, E>" || len(form.TypeParameters) != 2 {
+		t.Fatalf("unexpected React form contract: %#v", form)
+	}
+}
+
 func TestBundledTypeScriptBrowserPackage(t *testing.T) {
 	packageDefinition, ok := Lookup("trb/platform/typescript/browser")
 	if !ok {

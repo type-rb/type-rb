@@ -126,7 +126,7 @@ end
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
 		"function useTrbState<T>(initial: T): Readonly<{ value: T; set: (value: T) => void }>",
-		"const count: Readonly<{ value: number; set: (value: number) => void }> = useTrbState(0);",
+		"const count: Readonly<{ value: number; set: (value: number) => void }> = useTrbState<number>(0);",
 		"count.set(count.value + 1);",
 		"<button onClick={increment}>Count: {count.value}</button>",
 	} {
@@ -215,6 +215,87 @@ end
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated routed TSX is missing %q:\n%s", expected, output)
 		}
+	}
+}
+
+func TestCompileTypeScriptJSXWithTypedFormState(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "form.trb",
+		ModulePath: "app/form",
+		Source: []byte(`import { ReactEvent, ReactNode, input_value, prevent_default } from trb/platform/typescript/react
+import { use_form } from trb/platform/typescript/react/form
+
+record TodoDraft
+	title: String
+end
+
+record TodoErrors
+	title: String?
+end
+
+def TodoEditor(): ReactNode
+	form := use_form(TodoDraft.new(title: ""), TodoErrors.new(title: nil))
+	update_title := fn(event: ReactEvent)
+		form.set_value(TodoDraft.new(title: input_value(event)))
+		return
+	end
+	submit := fn(event: ReactEvent)
+		prevent_default(event)
+		if form.value.title.empty?()
+			form.set_errors(TodoErrors.new(title: "Title is required"))
+		else
+			form.clear_errors()
+		end
+		return
+	end
+	return <form onSubmit={submit}>
+		<input value={form.value.title} onChange={update_title} />
+		<p>{form.errors.title}</p>
+		<button type="submit">Save</button>
+	</form>
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		`import { useState as useTrbFormState } from "react";`,
+		"function useTrbForm<T, E>(initial: T, emptyErrors: E)",
+		"const form: Readonly<{ value: TodoDraft; errors: TodoErrors; dirty: boolean; submitting: boolean;",
+		`form.set_value(({title: (event.currentTarget as HTMLInputElement).value} satisfies TodoDraft))`,
+		`form.set_errors(({title: "Title is required"} satisfies TodoErrors))`,
+		"form.clear_errors()",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated form TSX is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
+func TestCompileTypeScriptJSXChecksFormStateTypes(t *testing.T) {
+	source := []byte(`import { ReactNode } from trb/platform/typescript/react
+import { use_form } from trb/platform/typescript/react/form
+
+record Draft
+	title: String
+end
+
+record Errors
+	title: String?
+end
+
+def Editor(): ReactNode
+	form := use_form(Draft.new(title: ""), Errors.new(title: nil))
+	form.set_errors(Draft.new(title: "wrong"))
+	return <p>{form.value.title}</p>
+end
+`)
+	_, err := CompileProject([]SourceUnit{{Filename: "form.trb", ModulePath: "app/form", Source: source}}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err == nil || !strings.Contains(err.Error(), "argument 1 to set_errors() has type Draft, expected Errors") {
+		t.Fatalf("expected typed form error diagnostic, got %v", err)
 	}
 }
 

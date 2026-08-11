@@ -130,6 +130,48 @@ The generated application uses `react-router-dom`; `route_param(name)` returns
 Components without props accept no parameter and can be rendered as
 `<Component />`.
 
+Typed form state keeps the application value and validation errors as separate
+records:
+
+```trb
+import { ReactEvent, ReactNode, input_value, prevent_default } from trb/platform/typescript/react
+import { use_form } from trb/platform/typescript/react/form
+
+record ProfileDraft
+	name: String
+end
+
+record ProfileErrors
+	name: String?
+end
+
+def ProfileForm(): ReactNode
+	form := use_form(ProfileDraft.new(name: ""), ProfileErrors.new(name: nil))
+	update_name := fn(event: ReactEvent)
+		form.set_value(ProfileDraft.new(name: input_value(event)))
+		return
+	end
+	submit := fn(event: ReactEvent)
+		prevent_default(event)
+		if form.value.name.empty?()
+			form.set_errors(ProfileErrors.new(name: "Name is required"))
+		else
+			form.clear_errors()
+		end
+		return
+	end
+	return <form onSubmit={submit}>
+		<input value={form.value.name} onChange={update_name} />
+		<p>{form.errors.name}</p>
+	</form>
+end
+```
+
+`ReactForm<Value, Errors>` infers both record types. It also exposes `dirty`
+and `submitting` flags, typed setters, `clear_errors()`, and `reset()`. Validation
+policy stays in ordinary TypeRB functions, so domain constraints and
+UI-specific errors can evolve independently of React.
+
 Browser suspension remains a TypeScript backend concern; TypeRB does not add
 `async` syntax. Generated TSX and package dependencies are compatible with the
 normal React and Vite ecosystem.

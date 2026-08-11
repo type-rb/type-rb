@@ -32,6 +32,7 @@ record props and local state, JSX component calls are checked across project
 modules, and optional browser routing lowers to React Router. Only modules
 containing JSX use the `.tsx` extension. The explicit
 `trb/platform/typescript/react` package supplies the React boundary, while
+the optional React form package preserves separate typed value and error state.
 `trb/platform/typescript/browser` provides typed, fallible JSON transport for
 GET, POST, PUT, PATCH, and DELETE. This
 has been exercised as one end-to-end slice with shared contracts, a portable

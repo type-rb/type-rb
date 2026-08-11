@@ -160,6 +160,27 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 			return
 		}
+		if n.Path == "trb/platform/typescript/react/form" || n.Path == "trb/platform/typescript/react/form/index" {
+			g.line(`import { useState as useTrbFormState } from "react";`)
+			g.line(`function useTrbForm<T, E>(initial: T, emptyErrors: E): Readonly<{ value: T; errors: E; dirty: boolean; submitting: boolean; set_value: (value: T) => void; set_errors: (errors: E) => void; set_submitting: (submitting: boolean) => void; clear_errors: () => void; reset: () => void }> {`)
+			g.indent++
+			g.line(`const [value, setValue] = useTrbFormState<T>(initial);`)
+			g.line(`const [errors, setErrors] = useTrbFormState<E>(emptyErrors);`)
+			g.line(`const [dirty, setDirty] = useTrbFormState(false);`)
+			g.line(`const [submitting, setSubmitting] = useTrbFormState(false);`)
+			g.line(`return {`)
+			g.indent++
+			g.line(`value, errors, dirty, submitting,`)
+			g.line(`set_value: (next: T): void => { setValue(next); setDirty(true); },`)
+			g.line(`set_errors: setErrors, set_submitting: setSubmitting,`)
+			g.line(`clear_errors: (): void => setErrors(emptyErrors),`)
+			g.line(`reset: (): void => { setValue(initial); setErrors(emptyErrors); setDirty(false); setSubmitting(false); },`)
+			g.indent--
+			g.line(`};`)
+			g.indent--
+			g.line(`}`)
+			return
+		}
 		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) {
 			return
 		}
@@ -1725,6 +1746,16 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 			result = "Readonly<{ value: " + value + "; set: (value: " + value + ") => void }>"
 		case "ReactRoute":
 			result = "Readonly<{ path: string; element: React.ReactNode }>"
+		case "ReactForm":
+			value := "unknown"
+			errors := "unknown"
+			if len(t.Args) > 0 {
+				value = tsTypeWithAliases(t.Args[0], aliases)
+			}
+			if len(t.Args) > 1 {
+				errors = tsTypeWithAliases(t.Args[1], aliases)
+			}
+			result = "Readonly<{ value: " + value + "; errors: " + errors + "; dirty: boolean; submitting: boolean; set_value: (value: " + value + ") => void; set_errors: (errors: " + errors + ") => void; set_submitting: (submitting: boolean) => void; clear_errors: () => void; reset: () => void }>"
 		case "Callback":
 			argument := "unknown"
 			if len(t.Args) > 0 {
@@ -1738,7 +1769,7 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 			}
 		}
 	}
-	if t.Kind == types.Named && len(t.Args) > 0 && t.Name != "ReactState" && t.Name != "ReactRoute" {
+	if t.Kind == types.Named && len(t.Args) > 0 && t.Name != "ReactState" && t.Name != "ReactRoute" && t.Name != "ReactForm" {
 		arguments := make([]string, len(t.Args))
 		for index, argument := range t.Args {
 			arguments[index] = tsTypeWithAliases(argument, aliases)
