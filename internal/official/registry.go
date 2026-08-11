@@ -95,6 +95,15 @@ func Lookup(name string) (*Package, bool) {
 	return definition, ok
 }
 
+func LookupModule(modulePath string) (*Package, bool) {
+	for _, definition := range registry {
+		if definition.Definition.ModulePath == modulePath {
+			return definition, true
+		}
+	}
+	return nil, false
+}
+
 func OwnsModule(modulePath string) bool {
 	for _, packageDefinition := range registry {
 		if packageDefinition.Definition.ModulePath == modulePath {

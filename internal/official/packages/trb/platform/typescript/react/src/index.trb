@@ -6,3 +6,6 @@ end
 
 class ReactComponent
 end
+
+class ReactState
+end
