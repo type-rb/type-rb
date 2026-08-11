@@ -27,6 +27,7 @@ type generator struct {
 	suspension    *SuspensionPlan
 	orm           *ormintegration.Manifest
 	breakTarget   string
+	enumReceiver  string
 }
 
 func Generate(program *ir.Program) string {
@@ -213,8 +214,12 @@ func (g *generator) statement(statement ir.Statement) {
 			break
 		}
 		brand := "__trb" + n.Name + "Brand"
+		underlying := "string"
+		if n.RawType.Kind != "" {
+			underlying = g.tsType(n.RawType)
+		}
 		g.line("declare const " + brand + ": unique symbol;")
-		g.line("export type " + n.Name + " = string & { readonly [" + brand + "]: true };")
+		g.line("export type " + n.Name + " = " + underlying + " & { readonly [" + brand + "]: true };")
 		g.line("export const " + n.Name + " = Object.freeze({" + tsTrailingComment(n.TrailingComment))
 		g.indent++
 		for _, statement := range n.Body {
@@ -222,9 +227,14 @@ func (g *generator) statement(statement ir.Statement) {
 			case *ir.Comment:
 				g.statement(member)
 			case *ir.EnumMember:
-				g.line(member.Name + ": " + strconv.Quote(member.Name) + " as " + n.Name + "," + tsTrailingComment(member.TrailingComment))
+				value := strconv.Quote(member.Name)
+				if member.RawValue != nil {
+					value = g.expr(member.RawValue)
+				}
+				g.line(member.Name + ": " + value + " as " + n.Name + "," + tsTrailingComment(member.TrailingComment))
 			}
 		}
+		g.enumMethodProperties(n)
 		g.indent--
 		g.line("});")
 	case *ir.TypeAlias:
@@ -585,8 +595,42 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 			g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
 		}
 	}
+	g.enumMethodProperties(enum)
 	g.indent--
 	g.line("});")
+}
+
+func (g *generator) enumMethodProperties(enum *ir.Enum) {
+	for _, statement := range enum.Body {
+		method, ok := statement.(*ir.Method)
+		if !ok || method.External {
+			continue
+		}
+		parameters := g.parameters(method.Parameters)
+		if parameters != "" {
+			parameters = ", " + parameters
+		}
+		generic := tsTypeParameterDeclarations(enum.TypeParameters)
+		if generic != "" {
+			generic += ""
+		}
+		prefix := ""
+		returnType := g.tsType(method.ReturnType)
+		if g.suspension != nil && g.suspension.Methods[method] {
+			prefix = "async "
+			returnType = "Promise<" + returnType + ">"
+		}
+		g.line("__trb_" + tsCallableName(method.Name) + ": " + prefix + generic + "(self: " + enum.Name + tsTypeParameterArguments(enum.TypeParameters) + parameters + "): " + returnType + " => {")
+		g.indent++
+		previous := g.enumReceiver
+		g.enumReceiver = "self"
+		g.functionDepth++
+		g.statements(method.Body)
+		g.functionDepth--
+		g.enumReceiver = previous
+		g.indent--
+		g.line("},")
+	}
 }
 
 func tsTypeParameterDeclarations(parameters []string) string {
@@ -699,6 +743,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "null"
 		}
 		if n.Name == "self" {
+			if g.enumReceiver != "" {
+				return g.enumReceiver
+			}
 			return "this"
 		}
 		if !n.Lexical && g.inClass > 0 && g.methods[n.Name] {
@@ -842,6 +889,25 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 		}
 		return g.awaitCall(n, g.expr(n.Callee)+"("+args+")")
+	case *ir.EnumCall:
+		parts := make([]string, len(n.Arguments))
+		for index, argument := range n.Arguments {
+			parts[index] = g.expr(argument.Value)
+		}
+		switch n.Method {
+		case "raw_value":
+			return "(" + g.expr(n.Receiver) + " as unknown as " + g.tsType(n.RawType) + ")"
+		case "from_raw":
+			return g.rawEnumFromValue(n, parts[0])
+		default:
+			owner := g.runtimeName(n.EnumName)
+			parts = append([]string{g.expr(n.Receiver)}, parts...)
+			result := owner + ".__trb_" + tsCallableName(n.Method) + "(" + strings.Join(parts, ", ") + ")"
+			if g.suspension != nil && g.suspension.Expressions[n] {
+				return "(await " + result + ")"
+			}
+			return result
+		}
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
@@ -881,6 +947,21 @@ func (g *generator) expr(expression ir.Expression) string {
 	}
 }
 
+func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {
+	valueType := g.tsType(types.FromName(call.EnumName))
+	errorType := g.tsType(types.FromName("EnumValueError"))
+	resultType := g.tsType(call.ExprType())
+	result := g.runtimeName("Result")
+	owner := g.runtimeName(call.EnumName)
+	parts := []string{"((): " + resultType + " => { const value = " + argument + "; switch (value) {"}
+	for _, item := range call.RawValues {
+		parts = append(parts, "case "+item.Raw+": return "+result+".Ok<"+valueType+", "+errorType+">("+owner+"."+item.Member+");")
+	}
+	message := strconv.Quote("unknown raw value for " + call.EnumName)
+	parts = append(parts, "} return "+result+".Err<"+valueType+", "+errorType+">({ value, message: "+message+" }); })()")
+	return strings.Join(parts, " ")
+}
+
 func (g *generator) ifExpression(node *ir.If) string {
 	child := &generator{
 		inClass:       g.inClass,
@@ -894,6 +975,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 		suspension:    g.suspension,
 		orm:           g.orm,
 		breakTarget:   g.breakTarget,
+		enumReceiver:  g.enumReceiver,
 	}
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
 	if suspends {
@@ -950,6 +1032,7 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		suspension:    g.suspension,
 		orm:           g.orm,
 		breakTarget:   g.breakTarget,
+		enumReceiver:  g.enumReceiver,
 	}
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
 	if suspends {
@@ -987,6 +1070,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		suspension:    g.suspension,
 		orm:           g.orm,
 		breakTarget:   g.breakTarget,
+		enumReceiver:  g.enumReceiver,
 	}
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
 	if suspends {
@@ -1223,6 +1307,20 @@ func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		body = "if (value.kind === \"Integer\") { return value.value; } if (value.kind !== \"Float\") { " + expected("Float") + "; } return value.value;"
 	case "string":
 		body = "if (value.kind !== \"String\") { " + expected("String") + "; } return value.value;"
+	case "raw_enum":
+		kind := "String"
+		if schema.RawType.Kind == types.Int {
+			kind = "Integer"
+		}
+		owner := schema.Type.Name
+		if schema.Reference != nil && schema.Reference.Alias != "" {
+			owner = schema.Reference.Alias + "." + owner
+		}
+		branches := make([]string, 0, len(schema.RawValues))
+		for _, item := range schema.RawValues {
+			branches = append(branches, "case "+item.Raw+": return "+owner+"."+item.Member+";")
+		}
+		body = "if (value.kind !== " + strconv.Quote(kind) + ") { " + expected(kind) + "; } switch (value.value) { " + strings.Join(branches, " ") + " } return fail(path, " + strconv.Quote("unknown raw value for "+schema.Type.Name) + ");"
 	case "array":
 		child := b.decoder(schema.Element)
 		body = "if (value.kind !== \"Array\") { " + expected("Array") + "; } return value.value.map((item, index) => " + child + "(item, path + \"/\" + String(index)));"
@@ -1285,6 +1383,12 @@ func (b *tsJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Float") + "(value);"
 	case "string":
 		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.String") + "(value);"
+	case "raw_enum":
+		kind := "String"
+		if schema.RawType.Kind == types.Int {
+			kind = "Integer"
+		}
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue."+kind) + "(value as " + tsType(schema.RawType) + ");"
 	case "array":
 		child := b.encoder(schema.Element)
 		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Array") + "(value.map((item) => " + child + "(item)));"

@@ -179,12 +179,16 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return &ir.RecordField{Base: base(n.Base), Name: n.Name, Type: lowerType(n.Type), Attributes: attributes}
 	case *ast.EnumStatement:
 		result := &ir.Enum{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
+		if raw, ok := l.checked.RawEnums[n]; ok {
+			result.RawType = raw.Type
+		}
 		for _, parameter := range n.TypeParameters {
 			result.TypeParameters = append(result.TypeParameters, parameter.Name)
 		}
 		return result
 	case *ast.EnumMemberStatement:
 		member := &ir.EnumMember{Base: base(n.Base), Name: n.Name}
+		member.RawValue = l.expression(n.RawValue)
 		for _, field := range n.Parameters {
 			member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: lowerType(field.Type)})
 		}
@@ -597,6 +601,42 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		return result
 	case *ast.CallExpression:
+		if semantic, ok := l.checked.EnumCalls[n]; ok {
+			fails := l.checked.ExpressionEffects[n]
+			callBase := base
+			if fails.Kind != "" && fails.Kind != types.Never {
+				callBase = ir.NewExprBase(n.Span(), resultType(effectSuccessType(typ), fails))
+			}
+			result := &ir.EnumCall{ExprBase: callBase, EnumName: semantic.EnumName, Method: semantic.Method, Reference: l.reference(n.Callee), Fails: fails}
+			if semantic.Receiver != nil {
+				result.Receiver = l.expression(semantic.Receiver)
+			} else {
+				result.Receiver = &ir.Identifier{ExprBase: ir.NewExprBase(n.Span(), types.FromName(semantic.EnumName)), Name: "self", Lexical: true}
+			}
+			for _, argument := range n.Arguments {
+				result.Arguments = append(result.Arguments, ir.CallArgument{Name: argument.Name, Value: l.expression(argument.Value), Splat: argument.Splat})
+			}
+			if semantic.Raw != nil {
+				result.RawType = semantic.Raw.Type
+				names := make([]string, 0, len(semantic.Raw.Values))
+				for name := range semantic.Raw.Values {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				for _, name := range names {
+					result.RawValues = append(result.RawValues, ir.EnumRawValue{Member: name, Raw: semantic.Raw.Values[name].Raw})
+				}
+			}
+			if fails.Kind != "" && fails.Kind != types.Never {
+				if boundary, ok := l.currentEffectBoundary(); ok {
+					return l.effectPropagation(n.Span(), result, typ, fails, boundary)
+				}
+				if l.checked.UnhandledEffects[n] {
+					return &ir.UnhandledEffect{ExprBase: base, Value: result, Fails: fails}
+				}
+			}
+			return result
+		}
 		if variant, ok := l.checked.EnumConstructors[n]; ok {
 			result := &ir.EnumConstruct{ExprBase: base, EnumName: variant.EnumName, Member: variant.Name, TypeArguments: append([]types.Type(nil), variant.TypeArguments...), Reference: l.reference(n.Callee)}
 			for _, argument := range n.Arguments {
@@ -782,7 +822,10 @@ func lowerControlFlowBranchExpression(body []ast.Statement) (int, ast.Expression
 }
 
 func lowerCodecSchema(schema checker.CodecSchema) *ir.CodecSchema {
-	result := &ir.CodecSchema{Type: schema.Type, Kind: schema.Kind, Module: schema.Module}
+	result := &ir.CodecSchema{Type: schema.Type, Kind: schema.Kind, Module: schema.Module, RawType: schema.RawType}
+	for _, value := range schema.RawValues {
+		result.RawValues = append(result.RawValues, ir.EnumRawValue{Member: value.Member, Raw: value.Raw})
+	}
 	if schema.Reference != nil {
 		result.Reference = &ir.Reference{Package: schema.Reference.Import.RuntimePath(), Alias: schema.Reference.Import.Alias, Symbol: schema.Reference.Name, ExportKind: string(schema.Reference.Export.Kind)}
 	}

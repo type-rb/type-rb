@@ -87,6 +87,8 @@ func (a *suspensionAnalyzer) collect(module, owner string, statements []ir.State
 		case *ir.Class:
 			a.classes = append(a.classes, suspensionClass{name: node.Name, implements: append([]string(nil), node.Implements...)})
 			a.collect(module, node.Name, node.Body, false)
+		case *ir.Enum:
+			a.collect(module, node.Name, node.Body, false)
 		case *ir.Interface:
 			for _, method := range node.Methods {
 				a.addMethod(suspensionMethod{module: module, owner: node.Name, method: method}, true)
@@ -257,6 +259,13 @@ func (a *suspensionAnalyzer) expressionSuspends(expression ir.Expression, contex
 		for _, argument := range node.Arguments {
 			suspends = a.expressionSuspends(argument, context, record) || suspends
 		}
+	case *ir.EnumCall:
+		suspends = a.expressionSuspends(node.Receiver, context, record)
+		for _, argument := range node.Arguments {
+			suspends = a.expressionSuspends(argument.Value, context, record) || suspends
+		}
+		targetSuspends := anySuspending(a.plan.Methods, a.memberMethods[memberKey(node.EnumName, node.Method)])
+		suspends = targetSuspends || suspends
 	case *ir.TypeApply:
 		suspends = a.expressionSuspends(node.Receiver, context, record)
 	case *ir.Member:

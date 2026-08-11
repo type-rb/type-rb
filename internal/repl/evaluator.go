@@ -51,6 +51,7 @@ type enumDefinition struct {
 	Module  string
 	Node    *ir.Enum
 	Members map[string]*ir.EnumMember
+	Methods map[string]*ir.Method
 }
 
 type enumValue struct {
@@ -224,10 +225,13 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
 			}
 			e.definitions[symbolKey(module, node.Name)] = definition
 		case *ir.Enum:
-			definition := &enumDefinition{Module: module, Node: node, Members: map[string]*ir.EnumMember{}}
+			definition := &enumDefinition{Module: module, Node: node, Members: map[string]*ir.EnumMember{}, Methods: map[string]*ir.Method{}}
 			for _, statement := range node.Body {
-				if member, ok := statement.(*ir.EnumMember); ok {
+				switch member := statement.(type) {
+				case *ir.EnumMember:
 					definition.Members[member.Name] = member
+				case *ir.Method:
+					definition.Methods[member.Name] = member
 				}
 			}
 			e.definitions[symbolKey(module, node.Name)] = definition
@@ -236,7 +240,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
 				continue
 			}
 			enumNode := &ir.Enum{Name: node.Name, TypeParameters: append([]string(nil), node.TypeParameters...)}
-			definition := &enumDefinition{Module: module, Node: enumNode, Members: map[string]*ir.EnumMember{}}
+			definition := &enumDefinition{Module: module, Node: enumNode, Members: map[string]*ir.EnumMember{}, Methods: map[string]*ir.Method{}}
 			for index := range node.Variants {
 				member := node.Variants[index]
 				enumNode.Body = append(enumNode.Body, &member)
@@ -974,6 +978,8 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return e.intrinsicCall(function.Intrinsic, arguments, node.ExprType(), nil, node)
 		}
 		return e.call(function, arguments)
+	case *ir.EnumCall:
+		return e.enumCall(node, module, sc)
 	case *ir.EnumConstruct:
 		definitionModule := module
 		if node.Reference != nil && node.Reference.Package != "" {
@@ -1415,6 +1421,69 @@ func (e *Evaluator) call(function *callable, arguments []evaluatedArgument) (Val
 		return result.Value, nil
 	}
 	return Value{Type: method.ReturnType}, nil
+}
+
+func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value, error) {
+	arguments := make([]evaluatedArgument, len(node.Arguments))
+	for index, argument := range node.Arguments {
+		value, err := e.expression(argument.Value, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		arguments[index] = evaluatedArgument{Name: argument.Name, Value: value}
+	}
+	if node.Method == "from_raw" {
+		definitionModule := module
+		if node.Reference != nil && node.Reference.Package != "" {
+			definitionModule = node.Reference.Package
+		}
+		symbol, ok := e.symbol(definitionModule, node.EnumName)
+		if !ok {
+			return Value{}, fmt.Errorf("enum %s is not available in the REPL environment", node.EnumName)
+		}
+		typeValue, ok := symbol.Data.(*typeValue)
+		if !ok || typeValue.Enum == nil {
+			return Value{}, fmt.Errorf("%s is not an enum", node.EnumName)
+		}
+		for _, raw := range node.RawValues {
+			member := typeValue.Enum.Members[raw.Member]
+			if member == nil || member.RawValue == nil {
+				continue
+			}
+			rawValue, err := e.expression(member.RawValue, definitionModule, e.global)
+			if err != nil {
+				return Value{}, err
+			}
+			if equal(arguments[0].Value, rawValue) {
+				value := Value{Type: types.FromName(node.EnumName), Data: &enumValue{Definition: typeValue.Enum, Name: raw.Member, Payload: map[string]Value{}}}
+				return e.filesystemOK(node.ExprType(), value)
+			}
+		}
+		return e.structuredResultErr(node.ExprType(), "EnumValueError", map[string]Value{
+			"value":   arguments[0].Value,
+			"message": {Type: types.FromName("String"), Data: "unknown raw value for " + node.EnumName},
+		})
+	}
+	receiver, err := e.expression(node.Receiver, module, sc)
+	if err != nil {
+		return Value{}, err
+	}
+	variant, ok := receiver.Data.(*enumValue)
+	if !ok {
+		return Value{}, fmt.Errorf("%s is not an enum value", receiver.Type)
+	}
+	if node.Method == "raw_value" {
+		member := variant.Definition.Members[variant.Name]
+		if member == nil || member.RawValue == nil {
+			return Value{}, fmt.Errorf("enum %s has no raw value", variant.Definition.Node.Name)
+		}
+		return e.expression(member.RawValue, variant.Definition.Module, e.global)
+	}
+	method := variant.Definition.Methods[node.Method]
+	if method == nil {
+		return Value{}, fmt.Errorf("enum %s has no method %s", variant.Definition.Node.Name, node.Method)
+	}
+	return e.call(&callable{Method: method, Receiver: receiver, Module: variant.Definition.Module}, arguments)
 }
 
 func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evaluatedArgument, module string) error {
@@ -2154,6 +2223,32 @@ func (e *Evaluator) decodeJSONCodecValue(schema *ir.CodecSchema, value Value, pa
 			return mismatch("String")
 		}
 		return Value{Type: schema.Type, Data: payload.Data}, nil
+	case "raw_enum":
+		expected := "String"
+		if schema.RawType.Kind == types.Int {
+			expected = "Integer"
+		}
+		if variant.Name != expected {
+			return mismatch(expected)
+		}
+		definition, ok := e.definitions[symbolKey(schema.Module, schema.Type.Name)].(*enumDefinition)
+		if !ok {
+			return Value{}, &jsonConversionError{path: path, message: "enum " + schema.Type.Name + " is not loaded"}
+		}
+		for _, item := range schema.RawValues {
+			member := definition.Members[item.Member]
+			if member == nil || member.RawValue == nil {
+				continue
+			}
+			raw, err := e.expression(member.RawValue, schema.Module, e.global)
+			if err != nil {
+				return Value{}, &jsonConversionError{path: path, message: err.Error()}
+			}
+			if equal(payload, raw) {
+				return Value{Type: schema.Type, Data: &enumValue{Definition: definition, Name: item.Member, Payload: map[string]Value{}}}, nil
+			}
+		}
+		return Value{}, &jsonConversionError{path: path, message: "unknown raw value for " + schema.Type.Name}
 	case "array":
 		if variant.Name != "Array" {
 			return mismatch("Array")
@@ -2225,6 +2320,37 @@ func jsonCodecRaw(schema *ir.CodecSchema, value Value, path string) (any, *jsonC
 	switch schema.Kind {
 	case "boolean", "integer", "float", "string":
 		return value.Data, nil
+	case "raw_enum":
+		variant, ok := value.Data.(*enumValue)
+		if !ok {
+			return nil, &jsonConversionError{path: path, message: "expected " + schema.Type.Name}
+		}
+		member := variant.Definition.Members[variant.Name]
+		if member == nil || member.RawValue == nil {
+			return nil, &jsonConversionError{path: path, message: "enum has no raw value"}
+		}
+		switch raw := member.RawValue.(type) {
+		case *ir.Literal:
+			if raw.Kind == "string" {
+				decoded, err := strconv.Unquote(raw.Raw)
+				if err != nil {
+					return nil, &jsonConversionError{path: path, message: err.Error()}
+				}
+				return decoded, nil
+			}
+			parsed, err := strconv.ParseInt(strings.ReplaceAll(raw.Raw, "_", ""), 10, 64)
+			if err == nil {
+				return parsed, nil
+			}
+		case *ir.Unary:
+			if literal, ok := raw.Operand.(*ir.Literal); raw.Operator == "-" && ok {
+				parsed, err := strconv.ParseInt(strings.ReplaceAll(literal.Raw, "_", ""), 10, 64)
+				if err == nil {
+					return -parsed, nil
+				}
+			}
+		}
+		return nil, &jsonConversionError{path: path, message: "invalid enum raw value"}
 	case "array":
 		array, ok := value.Data.(*arrayValue)
 		if !ok {

@@ -56,6 +56,7 @@ type Export struct {
 	Fields         []RecordField
 	EnumMembers    []string
 	EnumVariants   []EnumVariant
+	EnumRawType    types.Type
 	TypeParameters []string
 	AliasTarget    types.Type
 	AliasEnum      bool
@@ -71,8 +72,9 @@ type RecordField struct {
 }
 
 type EnumVariant struct {
-	Name   string
-	Fields []RecordField
+	Name     string
+	Fields   []RecordField
+	RawValue string
 }
 
 type Member struct {
@@ -85,6 +87,8 @@ type Member struct {
 	Variadic   bool
 	Class      bool
 	Readonly   bool
+	EnumOwner  string
+	Generated  string
 }
 
 type Import struct {
@@ -121,11 +125,11 @@ func (b Binding) Type() types.Type {
 	if b.Library != nil {
 		return b.Library.Return
 	}
-	if b.Export != nil {
-		return b.Export.Type
-	}
 	if b.Member != nil {
 		return b.Member.Type
+	}
+	if b.Export != nil {
+		return b.Export.Type
 	}
 	return types.FromName("Any")
 }
@@ -134,11 +138,11 @@ func (b Binding) FailureType() types.Type {
 	if b.Library != nil {
 		return b.Library.Fails
 	}
-	if b.Export != nil {
-		return b.Export.Fails
-	}
 	if b.Member != nil {
 		return b.Member.Fails
+	}
+	if b.Export != nil {
+		return b.Export.Fails
 	}
 	return types.Type{Kind: types.Never, Name: "Never"}
 }
@@ -424,7 +428,8 @@ func (r Result) TypeMember(typeName, name string) (Binding, bool) {
 			return Binding{}, false
 		}
 		copy := member
-		return Binding{Import: binding.Import, Name: name, Member: &copy}, true
+		exported := *binding.Export
+		return Binding{Import: binding.Import, Name: name, Export: &exported, Member: &copy}, true
 	}
 	for _, imported := range r.Packages {
 		exported, exists := imported.Exports[typeName]
@@ -436,7 +441,8 @@ func (r Result) TypeMember(typeName, name string) (Binding, bool) {
 			return Binding{}, false
 		}
 		copy := member
-		return Binding{Import: imported, Name: name, Member: &copy}, true
+		exportCopy := exported
+		return Binding{Import: imported, Name: name, Export: &exportCopy, Member: &copy}, true
 	}
 	return Binding{}, false
 }
@@ -731,11 +737,21 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 				for _, parameter := range node.TypeParameters {
 					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
 				}
+				raw := false
 				for _, statement := range node.Body {
-					member, ok := statement.(*ast.EnumMemberStatement)
-					if ok && public(member.Name) {
+					if member, ok := statement.(*ast.EnumMemberStatement); ok && member.RawValue != nil {
+						raw = true
+						break
+					}
+				}
+				for _, statement := range node.Body {
+					switch member := statement.(type) {
+					case *ast.EnumMemberStatement:
+						if !public(member.Name) {
+							continue
+						}
 						exported.EnumMembers = append(exported.EnumMembers, member.Name)
-						variant := EnumVariant{Name: member.Name}
+						variant := EnumVariant{Name: member.Name, RawValue: rawExpression(member.RawValue)}
 						parameterTypes := make([]types.Type, 0, len(member.Parameters))
 						for _, parameter := range member.Parameters {
 							fieldType := typeRef(parameter.Type)
@@ -748,7 +764,17 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 							kind = FunctionExport
 						}
 						exported.Members[member.Name] = Member{Name: member.Name, Kind: kind, Type: typ, Parameters: parameterTypes, Required: len(parameterTypes), Class: true}
+					case *ast.MethodStatement:
+						if public(member.Name) {
+							parameterTypes, required, variadic := parameters(member.Parameters)
+							exported.Members[member.Name] = Member{Name: member.Name, Kind: FunctionExport, Type: returnTypeRef(member.ReturnType), Fails: failureTypeRef(member.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, EnumOwner: node.Name}
+						}
 					}
+				}
+				if raw {
+					exported.EnumRawType = enumRawType(node)
+					exported.Members["raw_value"] = Member{Name: "raw_value", Kind: FunctionExport, Type: exported.EnumRawType, EnumOwner: node.Name, Generated: "raw_value"}
+					exported.Members["from_raw"] = Member{Name: "from_raw", Kind: FunctionExport, Type: types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typ, types.FromName("EnumValueError")}}, Parameters: []types.Type{exported.EnumRawType}, Required: 1, Class: true, EnumOwner: node.Name, Generated: "from_raw"}
 				}
 				result[node.Name] = exported
 			}
@@ -976,6 +1002,7 @@ func substituteEnumVariants(input []EnumVariant, substitutions map[string]types.
 	result := make([]EnumVariant, len(input))
 	for index, variant := range input {
 		result[index].Name = variant.Name
+		result[index].RawValue = variant.RawValue
 		result[index].Fields = make([]RecordField, len(variant.Fields))
 		for fieldIndex, field := range variant.Fields {
 			copy := field
@@ -984,6 +1011,41 @@ func substituteEnumVariants(input []EnumVariant, substitutions map[string]types.
 		}
 	}
 	return result
+}
+
+func rawExpression(expression ast.Expression) string {
+	switch value := expression.(type) {
+	case *ast.Literal:
+		if value.Kind == ast.StringLiteral || value.Kind == ast.IntegerLiteral {
+			return value.Raw
+		}
+	case *ast.UnaryExpression:
+		if literal, ok := value.Operand.(*ast.Literal); value.Operator == "-" && ok && literal.Kind == ast.IntegerLiteral {
+			return "-" + literal.Raw
+		}
+	}
+	return ""
+}
+
+func enumRawType(enum *ast.EnumStatement) types.Type {
+	for _, statement := range enum.Body {
+		member, ok := statement.(*ast.EnumMemberStatement)
+		if !ok || member.RawValue == nil {
+			continue
+		}
+		switch value := member.RawValue.(type) {
+		case *ast.Literal:
+			if value.Kind == ast.StringLiteral {
+				return types.FromName("String")
+			}
+			if value.Kind == ast.IntegerLiteral {
+				return types.FromName("Integer")
+			}
+		case *ast.UnaryExpression:
+			return types.FromName("Integer")
+		}
+	}
+	return types.Type{}
 }
 
 func returnTypeRef(ref ast.TypeRef) types.Type {

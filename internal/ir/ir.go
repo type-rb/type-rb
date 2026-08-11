@@ -112,14 +112,16 @@ type Enum struct {
 	Name           string
 	TypeParameters []string
 	Body           []Statement
+	RawType        types.Type
 }
 
 func (*Enum) irStatement() {}
 
 type EnumMember struct {
 	Base
-	Name   string
-	Fields []Parameter
+	Name     string
+	Fields   []Parameter
+	RawValue Expression
 }
 
 func (*EnumMember) irStatement() {}
@@ -571,6 +573,8 @@ type CodecSchema struct {
 	Reference *Reference
 	Element   *CodecSchema
 	Fields    []CodecField
+	RawType   types.Type
+	RawValues []EnumRawValue
 }
 
 type CodecField struct {
@@ -592,6 +596,28 @@ type EnumConstruct struct {
 }
 
 func (*EnumConstruct) irExpression() {}
+
+// EnumCall preserves source-level enum methods independently from backend
+// enum representations. Generated raw_value/from_raw operations use the same
+// node so every backend and the REPL share one checked semantic boundary.
+type EnumCall struct {
+	ExprBase
+	EnumName  string
+	Method    string
+	Receiver  Expression
+	Arguments []CallArgument
+	Reference *Reference
+	RawType   types.Type
+	RawValues []EnumRawValue
+	Fails     types.Type
+}
+
+type EnumRawValue struct {
+	Member string
+	Raw    string
+}
+
+func (*EnumCall) irExpression() {}
 
 type TypeApply struct {
 	ExprBase

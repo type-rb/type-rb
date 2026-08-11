@@ -34,6 +34,8 @@ type Result struct {
 	CasePatterns        map[ast.Expression]CasePattern
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
+	RawEnums            map[*ast.EnumStatement]RawEnum
+	EnumCalls           map[*ast.CallExpression]EnumCall
 	TypeAliases         map[*ast.TypeAliasStatement]TypeAlias
 	Attempts            map[*ast.AttemptExpression]Attempt
 	ExpressionEffects   map[ast.Expression]types.Type
@@ -48,6 +50,24 @@ type Result struct {
 type CodecApplication struct {
 	Operation string
 	Schema    CodecSchema
+}
+
+type RawEnum struct {
+	Type   types.Type
+	Values map[string]RawEnumValue
+}
+
+type RawEnumValue struct {
+	Raw  string
+	Type types.Type
+}
+
+type EnumCall struct {
+	EnumName  string
+	Method    string
+	Receiver  ast.Expression
+	Reference *resolver.Binding
+	Raw       *RawEnum
 }
 
 type TypeAlias struct {
@@ -75,6 +95,13 @@ type CodecSchema struct {
 	Reference *resolver.Binding
 	Element   *CodecSchema
 	Fields    []CodecField
+	RawType   types.Type
+	RawValues []CodecRawValue
+}
+
+type CodecRawValue struct {
+	Member string
+	Raw    string
 }
 
 type CodecField struct {
@@ -177,6 +204,7 @@ type classMember struct {
 	typ    types.Type
 	method *ast.MethodStatement
 	field  *ast.FieldStatement
+	sig    *methodSignature
 }
 
 type recordInfo struct {
@@ -190,6 +218,8 @@ type enumInfo struct {
 	typeParameters []string
 	members        []string
 	byName         map[string]*ast.EnumMemberStatement
+	methods        map[string]*ast.MethodStatement
+	raw            *RawEnum
 }
 
 type aliasInfo struct {
@@ -215,6 +245,7 @@ type Checker struct {
 	interfaces            map[string]*ast.InterfaceStatement
 	functions             map[string]*ast.MethodStatement
 	current               *classInfo
+	currentEnum           *enumInfo
 	classMethod           bool
 	initializing          int
 	loopDepth             int
@@ -268,6 +299,8 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			CasePatterns:        map[ast.Expression]CasePattern{},
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
+			RawEnums:            map[*ast.EnumStatement]RawEnum{},
+			EnumCalls:           map[*ast.CallExpression]EnumCall{},
 			TypeAliases:         map[*ast.TypeAliasStatement]TypeAlias{},
 			Attempts:            map[*ast.AttemptExpression]Attempt{},
 			ExpressionEffects:   map[ast.Expression]types.Type{},
@@ -321,6 +354,7 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement) {
 			for _, parameter := range node.Parameters {
 				c.validateTypeReference(parameter.Type)
 			}
+			c.validateExpressionTypeReferences(node.RawValue)
 		case *ast.RecordFieldStatement:
 			c.validateTypeReference(node.Type)
 		case *ast.ModuleStatement:
@@ -559,7 +593,7 @@ func (c *Checker) collect(statements []ast.Statement) {
 			if !c.declareType(n.Name, "enum", n.Span()) {
 				continue
 			}
-			info := &enumInfo{name: n.Name, byName: map[string]*ast.EnumMemberStatement{}}
+			info := &enumInfo{name: n.Name, byName: map[string]*ast.EnumMemberStatement{}, methods: map[string]*ast.MethodStatement{}}
 			for _, parameter := range n.TypeParameters {
 				info.typeParameters = append(info.typeParameters, parameter.Name)
 			}
@@ -567,16 +601,36 @@ func (c *Checker) collect(statements []ast.Statement) {
 			declaration.typeParameters = append([]string(nil), info.typeParameters...)
 			c.declaredTypes[n.Name] = declaration
 			for _, statement := range n.Body {
-				member, ok := statement.(*ast.EnumMemberStatement)
-				if !ok {
-					continue
+				switch member := statement.(type) {
+				case *ast.EnumMemberStatement:
+					if previous := info.byName[member.Name]; previous != nil {
+						c.error(member.Span(), fmt.Sprintf("enum member %s was already declared at %s", member.Name, previous.Span().Start))
+						continue
+					}
+					if previous := info.methods[member.Name]; previous != nil {
+						c.error(member.Span(), fmt.Sprintf("enum member %s conflicts with a method declared at %s", member.Name, previous.Span().Start))
+						continue
+					}
+					info.members = append(info.members, member.Name)
+					info.byName[member.Name] = member
+				case *ast.MethodStatement:
+					if member.Name == "raw_value" || member.Name == "from_raw" {
+						c.error(member.Span(), fmt.Sprintf("enum method name %s is reserved", member.Name))
+						continue
+					}
+					if previous := info.methods[member.Name]; previous != nil {
+						c.error(member.Span(), fmt.Sprintf("enum method %s was already declared at %s", member.Name, previous.Span().Start))
+						continue
+					}
+					if previous := info.byName[member.Name]; previous != nil {
+						c.error(member.Span(), fmt.Sprintf("enum method %s conflicts with a member declared at %s", member.Name, previous.Span().Start))
+						continue
+					}
+					info.methods[member.Name] = member
 				}
-				if previous := info.byName[member.Name]; previous != nil {
-					c.error(member.Span(), fmt.Sprintf("enum member %s was already declared at %s", member.Name, previous.Span().Start))
-					continue
-				}
-				info.members = append(info.members, member.Name)
-				info.byName[member.Name] = member
+			}
+			if raw, ok := rawEnumShape(n); ok {
+				info.raw = &raw
 			}
 			c.enums[n.Name] = info
 		case *ast.TypeAliasStatement:
@@ -669,6 +723,20 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			if info != nil && len(info.members) == 0 {
 				c.error(n.Span(), fmt.Sprintf("enum %s must declare at least one member", n.Name))
 			}
+			rawCount := 0
+			for _, statement := range n.Body {
+				if member, ok := statement.(*ast.EnumMemberStatement); ok && member.RawValue != nil {
+					rawCount++
+				}
+			}
+			var raw *RawEnum
+			if rawCount > 0 {
+				raw = &RawEnum{Values: map[string]RawEnumValue{}}
+				if len(n.TypeParameters) > 0 {
+					c.error(n.Span(), "raw-value enums cannot declare type parameters")
+				}
+			}
+			seenRaw := map[string]string{}
 			for _, statement := range n.Body {
 				member, ok := statement.(*ast.EnumMemberStatement)
 				if !ok {
@@ -679,6 +747,28 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				}
 				if len(n.TypeParameters) > 0 && len(member.Parameters) == 0 {
 					c.error(member.Span(), "payloadless members of generic enums are reserved until typed singleton construction is defined")
+				}
+				if raw != nil {
+					if len(member.Parameters) > 0 {
+						c.error(member.Span(), "raw-value enum members cannot declare payload fields")
+					}
+					if member.RawValue == nil {
+						c.error(member.Span(), "every member of a raw-value enum must declare a raw value")
+					} else if value, key, ok := c.rawEnumLiteral(member.RawValue, sc); ok {
+						if raw.Type.Kind == "" {
+							raw.Type = value.Type
+						} else if !types.Equivalent(raw.Type, value.Type) {
+							c.error(member.RawValue.Span(), fmt.Sprintf("raw enum value has type %s, expected %s", value.Type, raw.Type))
+						}
+						if previous := seenRaw[key]; previous != "" {
+							c.error(member.RawValue.Span(), fmt.Sprintf("raw enum value duplicates %s", previous))
+						} else {
+							seenRaw[key] = member.Name
+						}
+						raw.Values[member.Name] = value
+					}
+				} else if member.RawValue != nil {
+					c.error(member.RawValue.Span(), "raw values cannot be mixed with ordinary enum members")
 				}
 				seenFields := map[string]bool{}
 				for _, parameter := range member.Parameters {
@@ -694,6 +784,28 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					seenFields[parameter.Name] = true
 				}
 			}
+			if raw != nil {
+				c.result.RawEnums[n] = *raw
+				if info != nil {
+					info.raw = raw
+				}
+			}
+			previousClass, previousEnum := c.current, c.currentEnum
+			if info != nil {
+				c.current = &classInfo{name: info.name, methods: info.methods, fields: map[string]*ast.FieldStatement{}}
+				c.currentEnum = info
+			}
+			selfType := types.FromName(n.Name)
+			for _, parameter := range n.TypeParameters {
+				selfType.Args = append(selfType.Args, types.FromName(parameter.Name))
+			}
+			enumScope := &scope{parent: sc, values: map[string]symbol{"self": {typ: selfType}}}
+			for _, statement := range n.Body {
+				if method, ok := statement.(*ast.MethodStatement); ok {
+					c.checkMethod(method, enumScope)
+				}
+			}
+			c.current, c.currentEnum = previousClass, previousEnum
 		case *ast.EnumMemberStatement:
 			// Checked as part of its enclosing enum.
 		case *ast.TypeAliasStatement:
@@ -1621,6 +1733,24 @@ func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[stri
 		schema.Kind = "hash"
 		schema.Element = &element
 	case types.Named:
+		if raw, module, reference, ok := c.codecRawEnum(base.Name); ok {
+			schema.Kind = "raw_enum"
+			schema.Module = module
+			schema.RawType = raw.Type
+			if reference != nil {
+				copy := *reference
+				schema.Reference = &copy
+			}
+			names := make([]string, 0, len(raw.Values))
+			for name := range raw.Values {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				schema.RawValues = append(schema.RawValues, CodecRawValue{Member: name, Raw: raw.Values[name].Raw})
+			}
+			break
+		}
 		fields, module, reference, ok := c.codecRecord(base.Name)
 		if !ok {
 			c.error(span, fmt.Sprintf("JSON codec type %s must be a record or JSON-compatible built-in type", typ))
@@ -1665,6 +1795,29 @@ func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[stri
 		return schema, false
 	}
 	return schema, true
+}
+
+func (c *Checker) codecRawEnum(name string) (RawEnum, string, *resolver.Binding, bool) {
+	if enum := c.enums[name]; enum != nil && enum.raw != nil {
+		return *enum.raw, c.result.Program.ModulePath, nil, true
+	}
+	if binding, ok := c.resolution.ImportedType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.EnumExport && binding.Export.EnumRawType.Kind != "" {
+		copy := binding
+		return rawEnumFromExport(binding.Export), binding.Import.RuntimePath(), &copy, true
+	}
+	for _, binding := range c.resolution.Symbols {
+		if binding.Import == nil {
+			continue
+		}
+		exported, ok := binding.Import.Exports[name]
+		if !ok || exported.Kind != resolver.EnumExport || exported.EnumRawType.Kind == "" {
+			continue
+		}
+		copyExport := exported
+		copy := resolver.Binding{Import: binding.Import, Name: name, Export: &copyExport}
+		return rawEnumFromExport(&copyExport), binding.Import.RuntimePath(), &copy, true
+	}
+	return RawEnum{}, "", nil, false
 }
 
 func (c *Checker) codecRecord(name string) ([]resolver.RecordField, string, *resolver.Binding, bool) {
@@ -2362,6 +2515,23 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 		return classMember{}, false
 	}
 	seen[className] = true
+	if info := c.enums[className]; info != nil {
+		if method := info.methods[memberName]; method != nil && !class {
+			signature := c.signatureFromMethod(method)
+			return classMember{typ: signature.returnType, method: method, sig: &signature}, true
+		}
+		if info.raw != nil {
+			switch {
+			case memberName == "raw_value" && !class:
+				signature := methodSignature{returnType: info.raw.Type, fails: types.Type{Kind: types.Never, Name: "Never"}}
+				return classMember{typ: signature.returnType, sig: &signature}, true
+			case memberName == "from_raw" && class:
+				resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName(className), types.FromName("EnumValueError")}}
+				signature := methodSignature{returnType: resultType, fails: types.Type{Kind: types.Never, Name: "Never"}, parameters: []types.Type{info.raw.Type}, required: 1}
+				return classMember{typ: resultType, sig: &signature}, true
+			}
+		}
+	}
 	if info := c.classes[className]; info != nil {
 		if method := info.methods[memberName]; method != nil && method.Class == class {
 			return classMember{typ: c.methodReturnType(method), method: method}, true
@@ -2379,6 +2549,40 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 		}
 	}
 	return classMember{}, false
+}
+
+func (c *Checker) specializeLocalEnumMember(receiver types.Type, member classMember) classMember {
+	info := c.enums[receiver.Name]
+	if info == nil || member.sig == nil || len(info.typeParameters) == 0 {
+		return member
+	}
+	substitutions := typeSubstitutions(info.typeParameters, receiver.Args)
+	copy := *member.sig
+	copy.returnType = substituteType(copy.returnType, substitutions)
+	copy.fails = substituteType(copy.fails, substitutions)
+	copy.parameters = append([]types.Type(nil), copy.parameters...)
+	for index := range copy.parameters {
+		copy.parameters[index] = substituteType(copy.parameters[index], substitutions)
+	}
+	member.typ = copy.returnType
+	member.sig = &copy
+	return member
+}
+
+func specializeResolvedEnumMember(receiver types.Type, binding resolver.Binding) resolver.Binding {
+	if binding.Export == nil || binding.Member == nil || binding.Member.EnumOwner == "" || len(binding.Export.TypeParameters) == 0 {
+		return binding
+	}
+	substitutions := typeSubstitutions(binding.Export.TypeParameters, receiver.Args)
+	copy := *binding.Member
+	copy.Type = substituteType(copy.Type, substitutions)
+	copy.Fails = substituteType(copy.Fails, substitutions)
+	copy.Parameters = append([]types.Type(nil), copy.Parameters...)
+	for index := range copy.Parameters {
+		copy.Parameters[index] = substituteType(copy.Parameters[index], substitutions)
+	}
+	binding.Member = &copy
+	return binding
 }
 
 func (c *Checker) importedAncestorMember(className, memberName string, class bool, seen map[string]bool) (resolver.Binding, bool) {
@@ -2419,14 +2623,14 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 			return false
 		}
 		if declared, exists := c.declaredTypes[node.Name]; exists {
-			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module"
+			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum"
 		}
 		if _, exists := c.declarations().Type(node.Name); exists {
 			return true
 		}
 		if binding, exists := c.result.References[node]; exists && binding.Export != nil {
 			switch binding.Export.Kind {
-			case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport:
+			case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport:
 				return true
 			}
 		}
@@ -2855,11 +3059,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				break
 			}
 		}
-		if variants, enum := c.enumVariants(receiverType); enum {
-			if !n.Namespace {
+		if variants, enum := c.enumVariants(receiverType); enum && !n.Namespace {
+			if _, variant := enumVariantNamed(variants, n.Name); variant {
 				c.error(n.Span(), fmt.Sprintf("enum member %s must be accessed with ::", n.Name))
 				break
 			}
+		}
+		if variants, enum := c.enumVariants(receiverType); enum && n.Namespace {
 			if expected, generic := c.genericTypeArity(receiverType.Name); generic && len(receiverType.Args) != expected {
 				c.error(n.Receiver.Span(), fmt.Sprintf("%s expects %d type argument(s), got %d", receiverType.Name, expected, len(receiverType.Args)))
 				break
@@ -2904,9 +3110,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if record := c.records[receiverType.Name]; record != nil && record.byName[n.Name] != nil {
 			typ = c.typeFromRef(record.byName[n.Name].Type)
 		} else if member, found := c.localMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); found {
+			member = c.specializeLocalEnumMember(receiverType, member)
 			typ = member.typ
 			c.result.ClassFieldAccesses[n] = member.field != nil
 		} else if binding, exists := c.importedAncestorMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
+			binding = specializeResolvedEnumMember(receiverType, binding)
 			typ = binding.Type()
 			classType := c.classes[receiverType.Name] != nil
 			if imported, found := c.resolution.ImportedType(receiverType.Name); found && imported.Export != nil {
@@ -2988,12 +3196,30 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if binding, ok := c.result.References[n.Callee]; ok {
+			if member, enumMethod := n.Callee.(*ast.MemberExpression); enumMethod && binding.Member != nil && binding.Member.EnumOwner != "" {
+				binding = specializeResolvedEnumMember(c.result.Expressions[member.Receiver], binding)
+			}
 			if binding.Export != nil && len(binding.Export.TypeParameters) > 0 {
 				c.error(n.Callee.Span(), fmt.Sprintf("generic function %s requires explicit type arguments", binding.Name))
 				break
 			}
 			typ = binding.Type()
 			library := c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
+			if binding.Member != nil && binding.Member.EnumOwner != "" {
+				copy := binding
+				call := EnumCall{EnumName: binding.Member.EnumOwner, Method: binding.Name, Reference: &copy}
+				if member, ok := n.Callee.(*ast.MemberExpression); ok {
+					call.Receiver = member.Receiver
+				}
+				if binding.Member.Generated != "" && binding.Export != nil {
+					raw := rawEnumFromExport(binding.Export)
+					call.Raw = &raw
+				}
+				c.result.EnumCalls[n] = call
+				if binding.Member.Generated == "from_raw" {
+					c.requireRuntimeType(binding.Member.Type)
+				}
+			}
 			if library != nil {
 				receiverType := invalidType()
 				if member, method := n.Callee.(*ast.MemberExpression); method && library.HasReceiver() {
@@ -3038,9 +3264,28 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if member, ok := n.Callee.(*ast.MemberExpression); ok {
 			receiverType := c.checkExpression(member.Receiver, sc)
 			classAccess := c.classMemberAccess(member.Receiver, sc)
-			if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
-				typ = c.methodReturnType(local.method)
-				c.checkArguments(n.Span(), local.method, n.Arguments, argumentTypes)
+			if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found {
+				local = c.specializeLocalEnumMember(receiverType, local)
+				if c.enums[receiverType.Name] != nil && local.sig != nil {
+					typ = local.sig.returnType
+					c.checkTypedArguments(n.Span(), member.Name, local.sig.parameters, local.sig.required, local.sig.variadic, n.Arguments, argumentTypes)
+				} else if local.method != nil {
+					typ = c.methodReturnType(local.method)
+					c.checkArguments(n.Span(), local.method, n.Arguments, argumentTypes)
+				} else if local.sig != nil {
+					typ = local.sig.returnType
+					c.checkTypedArguments(n.Span(), member.Name, local.sig.parameters, local.sig.required, local.sig.variadic, n.Arguments, argumentTypes)
+				}
+				if info := c.enums[receiverType.Name]; info != nil && (local.method != nil || info.raw != nil && (member.Name == "raw_value" || member.Name == "from_raw")) {
+					call := EnumCall{EnumName: receiverType.Name, Method: member.Name, Receiver: member.Receiver}
+					if info.raw != nil && (member.Name == "raw_value" || member.Name == "from_raw") {
+						call.Raw = info.raw
+					}
+					c.result.EnumCalls[n] = call
+					if member.Name == "from_raw" {
+						c.requireRuntimeType(typ)
+					}
+				}
 			}
 		}
 		if identifier, ok := n.Callee.(*ast.Identifier); ok {
@@ -3055,6 +3300,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				} else {
 					typ = c.methodReturnType(method)
 					c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
+					if c.currentEnum != nil {
+						c.result.EnumCalls[n] = EnumCall{EnumName: c.currentEnum.name, Method: identifier.Name}
+					}
 				}
 			} else if method := c.functions[identifier.Name]; method != nil {
 				if len(method.TypeParameters) > 0 {
@@ -3168,6 +3416,9 @@ func (c *Checker) callFailureType(call *ast.CallExpression, sc *scope) types.Typ
 		callee = generic.Receiver
 	}
 	if binding, ok := c.result.References[callee]; ok {
+		if member, enumMethod := callee.(*ast.MemberExpression); enumMethod && binding.Member != nil && binding.Member.EnumOwner != "" {
+			binding = specializeResolvedEnumMember(c.result.Expressions[member.Receiver], binding)
+		}
 		return binding.FailureType()
 	}
 	if member, ok := c.external[callee]; ok {
@@ -3177,10 +3428,13 @@ func (c *Checker) callFailureType(call *ast.CallExpression, sc *scope) types.Typ
 		receiverType := c.result.Expressions[member.Receiver]
 		classAccess := c.classMemberAccess(member.Receiver, sc)
 		if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
+			if c.enums[receiverType.Name] != nil {
+				return c.specializeLocalEnumMember(receiverType, local).sig.fails
+			}
 			return c.methodFailureType(local.method)
 		}
 		if binding, found := c.importedAncestorMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found {
-			return binding.FailureType()
+			return specializeResolvedEnumMember(receiverType, binding).FailureType()
 		}
 		if declared, found := c.declarationMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found {
 			return declared.Fails
@@ -3594,14 +3848,14 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 				}
 			}
 		}
-	} else if binding.Export != nil {
-		parameters = append(parameters, binding.Export.Parameters...)
-		required = binding.Export.Required
-		variadic = binding.Export.Variadic
 	} else if binding.Member != nil {
 		parameters = append(parameters, binding.Member.Parameters...)
 		required = binding.Member.Required
 		variadic = binding.Member.Variadic
+	} else if binding.Export != nil {
+		parameters = append(parameters, binding.Export.Parameters...)
+		required = binding.Export.Required
+		variadic = binding.Export.Variadic
 	}
 	if len(parameterIndexes) == 0 && (len(arguments) < required || (!variadic && len(arguments) > len(parameters))) {
 		if variadic {
@@ -4240,6 +4494,85 @@ func includedModule(text string) string {
 func integerLiteral(raw string) (int, bool) {
 	value, err := strconv.Atoi(strings.ReplaceAll(raw, "_", ""))
 	return value, err == nil
+}
+
+func (c *Checker) rawEnumLiteral(expression ast.Expression, sc *scope) (RawEnumValue, string, bool) {
+	typ := c.checkExpression(expression, sc)
+	switch value := expression.(type) {
+	case *ast.Literal:
+		switch value.Kind {
+		case ast.StringLiteral:
+			decoded, err := strconv.Unquote(value.Raw)
+			if err != nil {
+				c.error(value.Span(), "raw enum String value must be a valid string literal")
+				return RawEnumValue{}, "", false
+			}
+			return RawEnumValue{Raw: value.Raw, Type: typ}, "string:" + decoded, true
+		case ast.IntegerLiteral:
+			parsed, err := strconv.ParseInt(strings.ReplaceAll(value.Raw, "_", ""), 10, 64)
+			if err != nil {
+				c.error(value.Span(), "raw enum Integer value is outside the portable range")
+				return RawEnumValue{}, "", false
+			}
+			return RawEnumValue{Raw: value.Raw, Type: typ}, fmt.Sprintf("integer:%d", parsed), true
+		}
+	case *ast.UnaryExpression:
+		literal, ok := value.Operand.(*ast.Literal)
+		if value.Operator == "-" && ok && literal.Kind == ast.IntegerLiteral {
+			parsed, err := strconv.ParseInt(strings.ReplaceAll(literal.Raw, "_", ""), 10, 64)
+			if err == nil && parsed >= 0 {
+				raw := "-" + literal.Raw
+				return RawEnumValue{Raw: raw, Type: typ}, fmt.Sprintf("integer:%d", -parsed), true
+			}
+		}
+	}
+	c.error(expression.Span(), "raw enum values must be explicit String or Integer literals")
+	return RawEnumValue{}, "", false
+}
+
+func rawEnumFromExport(exported *resolver.Export) RawEnum {
+	result := RawEnum{Type: exported.EnumRawType, Values: map[string]RawEnumValue{}}
+	for _, variant := range exported.EnumVariants {
+		if variant.RawValue != "" {
+			result.Values[variant.Name] = RawEnumValue{Raw: variant.RawValue, Type: exported.EnumRawType}
+		}
+	}
+	return result
+}
+
+func rawEnumShape(enum *ast.EnumStatement) (RawEnum, bool) {
+	result := RawEnum{Values: map[string]RawEnumValue{}}
+	found := false
+	for _, statement := range enum.Body {
+		member, ok := statement.(*ast.EnumMemberStatement)
+		if !ok || member.RawValue == nil {
+			continue
+		}
+		found = true
+		raw := ""
+		typ := types.Type{}
+		switch value := member.RawValue.(type) {
+		case *ast.Literal:
+			raw = value.Raw
+			if value.Kind == ast.StringLiteral {
+				typ = types.FromName("String")
+			} else if value.Kind == ast.IntegerLiteral {
+				typ = types.FromName("Integer")
+			}
+		case *ast.UnaryExpression:
+			if literal, ok := value.Operand.(*ast.Literal); value.Operator == "-" && ok && literal.Kind == ast.IntegerLiteral {
+				raw = "-" + literal.Raw
+				typ = types.FromName("Integer")
+			}
+		}
+		if result.Type.Kind == "" && typ.Kind != "" {
+			result.Type = typ
+		}
+		if raw != "" {
+			result.Values[member.Name] = RawEnumValue{Raw: raw, Type: typ}
+		}
+	}
+	return result, found
 }
 
 func (c *Checker) methodReturnType(method *ast.MethodStatement) types.Type {

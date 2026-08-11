@@ -22,5 +22,10 @@ record KeyLookupError
 	key: String | Integer
 	message: String
 end
+
+record EnumValueError
+	value: String | Integer
+	message: String
+end
 `
 }

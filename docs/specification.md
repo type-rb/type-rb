@@ -325,6 +325,20 @@ The complete collection receiver and package API belongs to the
 - A payloadless member is written `Ready`. A payload-bearing member is written
   `Value(value: String)` using one or more required, positional, typed fields.
   Default, keyword, rest, and untyped payload fields are rejected.
+- A raw-value enum assigns every payloadless member an explicit String or
+  Integer literal, such as `Pending = "PENDING"` or `Unknown = -1`. Once one
+  member has a raw value, every member must have one of exactly the same type.
+  Raw expressions, duplicate raw values, payload fields, implicit numbering,
+  and generic raw-value enums are rejected.
+- A raw-value enum remains nominal. It does not implicitly become its raw
+  String or Integer type. `value.raw_value()` performs the outward conversion;
+  `EnumName.from_raw(raw)` returns
+  `Result<EnumName, EnumValueError>`. These generated names are reserved only
+  inside enum declarations.
+- Enums may declare instance methods after all members. `self` has the enum's
+  nominal type, and the same method surface applies to payloadless,
+  payload-bearing, and raw-value enums. Enum class methods are not yet
+  user-definable.
 - Members are explicitly qualified with `EnumName::Member`. They infer the
   enum's nominal type and cannot be mixed with members of another enum even
   when the member names match.
@@ -359,6 +373,25 @@ def describe(token: Token): String
 	end
 end
 ```
+
+```trb
+enum OrderStatus
+	Pending = "PENDING"
+	Completed = "COMPLETED"
+
+	def terminal?(): Boolean
+		return self == OrderStatus::Completed
+	end
+end
+
+status := OrderStatus::Completed
+raw := status.raw_value()
+parsed := OrderStatus.from_raw("PENDING")
+```
+
+Typed JSON codecs encode a raw-value enum as its raw String or Integer and
+decode only declared raw values. Unknown input produces `JsonError`; the
+target-language object representation never determines the wire value.
 
 ### 3.14 Value-producing control flow
 
