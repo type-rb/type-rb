@@ -84,7 +84,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.External {
 			return
 		}
-		header := "class " + n.Name
+		header := "class " + g.rubyClassName(n.Name, nil)
 		if n.Superclass != nil {
 			header += " < " + g.expr(n.Superclass)
 		}
@@ -520,7 +520,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if !n.Lexical && g.topTargets[n.Name] != "" {
 			return g.topTargets[n.Name]
 		}
-		return n.Name
+		return g.rubyClassName(n.Name, n.Reference)
 	case *ir.Literal:
 		return n.Raw
 	case *ir.InterpolatedString:
@@ -663,6 +663,22 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func rubyTimeRuntimeClass(name string) string {
+	switch name {
+	case "Date", "TimeOfDay", "DateTime", "Duration", "TimeZone", "Instant":
+		return "TrbTime" + name
+	default:
+		return name
+	}
+}
+
+func (g *generator) rubyClassName(name string, reference *ir.Reference) string {
+	if g.modulePath == "trb/std/time/index" || reference != nil && reference.Package == "trb/std/time/index" {
+		return rubyTimeRuntimeClass(name)
+	}
+	return name
 }
 
 func (g *generator) ifExpression(node *ir.If) string {
@@ -934,6 +950,12 @@ func (b *rubyJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		body = "if value.is_a?(JsonValue::Integer); value.value.to_f; elsif value.is_a?(JsonValue::Float); value.value; else; " + expected("Float") + "; end"
 	case "string":
 		body = "unless value.is_a?(JsonValue::String); " + expected("String") + "; end; value.value"
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
+		method := "try_parse"
+		if schema.Kind == "time_zone" {
+			method = "try_get"
+		}
+		body = "unless value.is_a?(JsonValue::String); " + expected("String") + "; end; parsed = " + rubyTimeRuntimeClass(schema.Type.Name) + "." + method + "(value.value); parsed.is_a?(Result::Err) ? fail.call(path, " + strconv.Quote("invalid "+schema.Type.Name) + ") : parsed.value"
 	case "raw_enum":
 		kind := "String"
 		if schema.RawType.Kind == types.Int {
@@ -996,6 +1018,10 @@ func (b *rubyJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		body = "JsonValue::Float.new(value)"
 	case "string":
 		body = "JsonValue::String.new(value)"
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration":
+		body = "JsonValue::String.new(value.to_s())"
+	case "time_zone":
+		body = "JsonValue::String.new(value.identifier())"
 	case "raw_enum":
 		kind := "String"
 		if schema.RawType.Kind == types.Int {

@@ -1307,6 +1307,16 @@ func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		body = "if (value.kind === \"Integer\") { return value.value; } if (value.kind !== \"Float\") { " + expected("Float") + "; } return value.value;"
 	case "string":
 		body = "if (value.kind !== \"String\") { " + expected("String") + "; } return value.value;"
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
+		owner := schema.Type.Name
+		if schema.Reference != nil && schema.Reference.Alias != "" {
+			owner = schema.Reference.Alias + "." + owner
+		}
+		method := "try_parse"
+		if schema.Kind == "time_zone" {
+			method = "try_get"
+		}
+		body = "if (value.kind !== \"String\") { " + expected("String") + "; } const parsed = " + owner + "." + method + "(value.value); if (parsed.kind === \"Err\") { return fail(path, " + strconv.Quote("invalid "+schema.Type.Name) + "); } return parsed.value;"
 	case "raw_enum":
 		kind := "String"
 		if schema.RawType.Kind == types.Int {
@@ -1383,6 +1393,10 @@ func (b *tsJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Float") + "(value);"
 	case "string":
 		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.String") + "(value);"
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration":
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.String") + "(value.to_s());"
+	case "time_zone":
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.String") + "(value.identifier());"
 	case "raw_enum":
 		kind := "String"
 		if schema.RawType.Kind == types.Int {

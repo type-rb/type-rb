@@ -241,8 +241,8 @@ func AggregateResultType(operation string, column Column) (types.Type, bool) {
 		result = types.FromName("Float")
 		result.Nullable = true
 	case "minimum", "maximum":
-		switch result.Kind {
-		case types.Int, types.Float, types.String:
+		switch {
+		case result.Kind == types.Int || result.Kind == types.Float || result.Kind == types.String || IsPortableTimeType(result):
 			result.Nullable = true
 		default:
 			return types.Type{}, false
@@ -534,6 +534,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 			})
 		}
 		for _, column := range model.Columns {
+			if !IsGroupableColumn(column) {
+				continue
+			}
 			program.Statements = append(program.Statements, &ir.Class{Name: model.GroupType(column), External: true, Body: groupedIRMethods(model, column)})
 		}
 	}
@@ -788,6 +791,9 @@ func distinctIRMethod(model Model, class bool) *ir.Method {
 func groupIRMethod(model Model, class bool) *ir.Method {
 	method := &ir.Method{Name: "group", External: true, Class: class}
 	for _, column := range model.Columns {
+		if !IsGroupableColumn(column) {
+			continue
+		}
 		method.Alternatives = append(method.Alternatives, ir.MethodSignature{Parameters: []ir.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}}, ReturnType: namedType(model.GroupType(column))})
 	}
 	method.ReturnType = method.Alternatives[0].ReturnType
@@ -1111,6 +1117,9 @@ func (m *Manifest) GroupModel(name string) (Model, Column, bool) {
 	}
 	for _, model := range m.Models {
 		for _, column := range model.Columns {
+			if !IsGroupableColumn(column) {
+				continue
+			}
 			if model.GroupType(column) == name {
 				return model, column, true
 			}

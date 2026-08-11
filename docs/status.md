@@ -30,7 +30,11 @@ The compiler-owned portable library covers scalar and collection foundations,
 `Result`, bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
 SHA-256/SHA-512 hashing and HMAC, non-cryptographic and secure randomness,
 constant-time byte comparison, Unicode text, logical paths,
-URL component and query handling, filesystem and process access, and JSON/JSONC.
+URL component and query handling, filesystem and process access, JSON/JSONC,
+and immutable date/time values. The portable time package separates `Date`,
+`TimeOfDay`, civil `DateTime`, exact `Instant`, fixed `Duration`, and named
+`TimeZone`; its canonical JSON codecs and DST error behavior run across all
+three backends.
 Raw-value enums use the same checked String or Integer representation for
 conversion, JSON codecs, generated applications, and the REPL. Its
 public contracts are listed in the
@@ -128,6 +132,9 @@ batching, writes, conflict handling, and destroy lifecycles.
 String- and Integer-backed enum columns preserve nominal enum types throughout
 queries and writes, while ordinary enums use a checked lower-snake-case storage
 convention. Unknown stored values become structured invalid-data errors.
+Date, time-of-day, civil date-time, and instant columns are inferred from each
+database schema and retain their portable types through predicates, writes,
+projections, and aggregates. Instant storage is normalized through UTC.
 The repository runs the same application contract across all nine backend and
 database combinations, plus an ORM-backed JSON route across all three backends.
 Database terminals and lazy association access use `fails DbError`; `attempt`

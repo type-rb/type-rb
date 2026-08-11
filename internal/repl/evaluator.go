@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/type-rb/type-rb/internal/ir"
@@ -2223,6 +2224,16 @@ func (e *Evaluator) decodeJSONCodecValue(schema *ir.CodecSchema, value Value, pa
 			return mismatch("String")
 		}
 		return Value{Type: schema.Type, Data: payload.Data}, nil
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
+		if variant.Name != "String" {
+			return mismatch("String")
+		}
+		decoded, err := e.decodeTimeJSONCodec(schema.Kind, payload.Data.(string))
+		if err != nil {
+			return Value{}, &jsonConversionError{path: path, message: "invalid " + schema.Type.Name}
+		}
+		decoded.Type = schema.Type
+		return decoded, nil
 	case "raw_enum":
 		expected := "String"
 		if schema.RawType.Kind == types.Int {
@@ -2320,6 +2331,31 @@ func jsonCodecRaw(schema *ir.CodecSchema, value Value, path string) (any, *jsonC
 	switch schema.Kind {
 	case "boolean", "integer", "float", "string":
 		return value.Data, nil
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
+		object, ok := value.Data.(*objectInstance)
+		if !ok {
+			return nil, &jsonConversionError{path: path, message: "expected " + schema.Type.Name}
+		}
+		switch schema.Kind {
+		case "time_date":
+			year, month, day := timeDateFields(object)
+			return fmt.Sprintf("%04d-%02d-%02d", year, month, day), nil
+		case "time_of_day":
+			hour, minute, second, nanosecond := timeClockFields(object)
+			return formatLocalTime(hour, minute, second, nanosecond), nil
+		case "time_datetime":
+			year, month, day := timeDateFields(object)
+			hour, minute, second, nanosecond := timeClockFields(object)
+			return fmt.Sprintf("%04d-%02d-%02dT%s", year, month, day, formatLocalTime(hour, minute, second, nanosecond)), nil
+		case "time_instant":
+			seconds, nanosecond := timeInstantFields(object)
+			return time.Unix(seconds, nanosecond).UTC().Format(time.RFC3339Nano), nil
+		case "time_duration":
+			seconds, nanosecond := timeDurationFields(object)
+			return formatDuration(seconds, nanosecond), nil
+		case "time_zone":
+			return timeStringField(object, "@_identifier"), nil
+		}
 	case "raw_enum":
 		variant, ok := value.Data.(*enumValue)
 		if !ok {

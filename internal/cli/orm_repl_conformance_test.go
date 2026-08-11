@@ -56,7 +56,11 @@ func TestReplORMConformanceAcrossModesAndDatabases(t *testing.T) {
 
 					input := strings.Join([]string{
 						"import { TrbReplConformanceProduct } from main",
+						"import { Date, DateTime, Instant, TimeOfDay } from trb/std/time",
+						`TrbReplConformanceProduct.create(name: "Portable", on_date: Date.parse("2025-03-08"), at_time: TimeOfDay.parse("12:34:56.123456"), local_at: DateTime.parse("2025-03-08T12:34:56.123456"), exact_at: Instant.parse("2025-03-08T03:34:56.123456Z")).id > 0`,
 						"TrbReplConformanceProduct.count()",
+						`TrbReplConformanceProduct.where(on_date: Date.parse("2025-03-08")).count()`,
+						"TrbReplConformanceProduct.first().exact_at.to_s()",
 						`TrbReplConformanceProduct.update_all(name: "Updated")`,
 						`TrbReplConformanceProduct.where(name: "Updated").count()`,
 						"TrbReplConformanceProduct.delete_all()",
@@ -68,7 +72,7 @@ func TestReplORMConformanceAcrossModesAndDatabases(t *testing.T) {
 					if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 						t.Fatalf("status=%d stderr=%s", status, stderr.String())
 					}
-					const want = "1 : Integer\n1 : Integer\n1 : Integer\n1 : Integer\n0 : Integer\n"
+					const want = "true : Boolean\n1 : Integer\n1 : Integer\n\"2025-03-08T03:34:56.123456Z\" : String\n1 : Integer\n1 : Integer\n1 : Integer\n0 : Integer\n"
 					if stdout.String() != want || stderr.Len() != 0 {
 						t.Fatalf("unexpected %s/%s ORM REPL output: stdout=%q stderr=%q", mode, adapter, stdout.String(), stderr.String())
 					}
@@ -155,16 +159,17 @@ func prepareReplORMConformanceTable(t *testing.T, driver, databaseSource, adapte
 	if _, err := database.Exec("DROP TABLE IF EXISTS trb_repl_conformance_products"); err != nil {
 		t.Fatal(err)
 	}
-	id := "INTEGER PRIMARY KEY"
+	id := "INTEGER PRIMARY KEY AUTOINCREMENT"
+	dateType, timeType, dateTimeType, instantType := "DATE", "TIME", "DATETIME", "TIMESTAMPTZ"
 	if adapter == "postgresql" {
-		id = "BIGINT PRIMARY KEY"
+		id = "BIGSERIAL PRIMARY KEY"
+		timeType, dateTimeType, instantType = "TIME(6) WITHOUT TIME ZONE", "TIMESTAMP(6) WITHOUT TIME ZONE", "TIMESTAMP(6) WITH TIME ZONE"
 	} else if adapter == "mysql" {
-		id = "BIGINT PRIMARY KEY"
+		id = "BIGINT AUTO_INCREMENT PRIMARY KEY"
+		timeType, dateTimeType, instantType = "TIME(6)", "DATETIME(6)", "TIMESTAMP(6)"
 	}
-	if _, err := database.Exec("CREATE TABLE trb_repl_conformance_products (id " + id + ", name VARCHAR(255) NOT NULL)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.Exec("INSERT INTO trb_repl_conformance_products (id, name) VALUES (1, 'Portable')"); err != nil {
+	statement := "CREATE TABLE trb_repl_conformance_products (id " + id + ", name VARCHAR(255) NOT NULL, on_date " + dateType + " NOT NULL, at_time " + timeType + " NOT NULL, local_at " + dateTimeType + " NOT NULL, exact_at " + instantType + " NOT NULL)"
+	if _, err := database.Exec(statement); err != nil {
 		t.Fatal(err)
 	}
 }

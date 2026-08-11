@@ -9,6 +9,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if value, ok := g.timeIntrinsic(name, call, arguments); ok {
+		return value
+	}
 	if generated, ok := g.ormIntrinsic(name, call, arguments); ok {
 		return generated
 	}

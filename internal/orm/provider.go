@@ -21,6 +21,20 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		return nil, err
 	}
 	catalog := declaration.NewCatalog()
+	runtimeTypes := map[string]map[string]bool{}
+	for _, model := range models {
+		for _, column := range model.Columns {
+			if runtimeTypes[model.ModulePath] == nil {
+				runtimeTypes[model.ModulePath] = map[string]bool{}
+			}
+			if IsPortableTimeType(column.Type) && !runtimeTypes[model.ModulePath][column.Type.Name] {
+				runtimeTypes[model.ModulePath][column.Type.Name] = true
+				runtimeType := column.Type
+				runtimeType.Nullable = false
+				catalog.RuntimeTypesByModule[model.ModulePath] = append(catalog.RuntimeTypesByModule[model.ModulePath], runtimeType)
+			}
+		}
+	}
 	for _, function := range []string{string(BelongsTo), string(HasMany), string(HasOne)} {
 		catalog.FunctionBlockRules = append(catalog.FunctionBlockRules, declaration.FunctionBlockRule{
 			Package: PackageName, Function: function, EnclosingSuperclass: "Model",
@@ -245,6 +259,9 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		catalog.Types[model.QueryType] = query
 		for _, column := range model.Columns {
+			if !IsGroupableColumn(column) {
+				continue
+			}
 			grouped := declaration.NewType(model.GroupType(column), "")
 			having := declaration.Member{Name: "having", Kind: declaration.Method, Intrinsic: "trb.orm.group.having", Return: types.FromName(model.GroupType(column)), Provider: PackageName}
 			having.Alternatives = append(having.Alternatives, declaration.Signature{Parameters: []declaration.Parameter{{Name: "aggregate", Type: types.FromName("String"), LiteralValues: []string{"count"}}, {Name: "operator", Type: types.FromName("String"), LiteralValues: []string{"=", "!=", "<", "<=", ">", ">="}}, {Name: "value", Type: types.FromName("Integer")}}, Return: having.Return})
@@ -324,6 +341,9 @@ func dbResultSuccess(result types.Type) (types.Type, bool) {
 func groupDeclaration(model Model, intrinsic string, class bool) declaration.Member {
 	member := declaration.Member{Name: "group", Kind: declaration.Method, Intrinsic: intrinsic, Class: class, Provider: PackageName}
 	for _, column := range model.Columns {
+		if !IsGroupableColumn(column) {
+			continue
+		}
 		member.Alternatives = append(member.Alternatives, declaration.Signature{Parameters: []declaration.Parameter{{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}}}, Return: types.FromName(model.GroupType(column))})
 	}
 	member.Return = member.Alternatives[0].Return
@@ -744,6 +764,12 @@ func comparisonSignatures(column Column, queryType string) []declaration.Signatu
 		orderedType := column.Type
 		orderedType.Nullable = false
 		result = append(result, signature([]string{"<", "<=", ">", ">="}, orderedType))
+	default:
+		if IsPortableTimeType(column.Type) {
+			orderedType := column.Type
+			orderedType.Nullable = false
+			result = append(result, signature([]string{"<", "<=", ">", ">="}, orderedType))
+		}
 	}
 	return result
 }

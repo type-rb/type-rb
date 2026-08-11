@@ -475,6 +475,42 @@ and accessors return typed errors with JSON Pointer paths where applicable.
 Go output currently uses the stable `encoding/json` API. The experimental
 `encoding/json/v2` package is not required by generated projects.
 
+## Date and time
+
+`trb/std/time` separates exact instants from timezone-free civil values:
+
+```trb
+import { Date, DateTime, Duration, Instant, TimeZone } from trb/std/time
+
+release_date := Date.parse("2026-08-11")
+puts(release_date.to_s())
+local_start := DateTime.parse("2026-08-11T09:30:00")
+tokyo := TimeZone.get("Asia/Tokyo")
+start := local_start.to_instant(tokyo)
+finish := start.add(Duration.minutes(90))
+puts(finish.to_datetime(tokyo).to_s())
+```
+
+The initial immutable types are `Date`, `TimeOfDay`, `DateTime`, `Instant`,
+`Duration`, and `TimeZone`. `DateTime` is a civil value and has no implicit
+timezone. `Instant` is an exact point and formats in UTC. Converting a local
+`DateTime` through `try_to_instant()` reports nonexistent and ambiguous DST
+times as `DateTimeError`; `to_instant()` is the strict convenience form.
+
+Constructors and strict `parse()` reject invalid values. `try_new()`,
+`try_parse()`, and `TimeZone.try_get()` return typed errors. Values support
+component access, canonical `to_s()`, `before?()`, `after?()`, and `same?()`.
+`Date` adds whole civil days. `Instant` adds or subtracts fixed `Duration`
+values and computes `duration_since()`. `Instant.now()` and package-level
+`now()` read the current clock.
+
+Canonical JSON codecs use strings: ISO dates and local date-times, RFC 3339
+UTC instants, named timezone identifiers, and `PT...S` durations. The portable
+range is Gregorian year 0001 through 9999 with nanosecond fields. A target or
+database with lower storage precision may round-trip only the precision its
+schema supports. Calendar periods, zoned date-time objects, locale formatting,
+and injectable clocks are not part of the initial package.
+
 ## Result and Unit
 
 Import `Result<T, E>` explicitly:
@@ -518,6 +554,7 @@ The current portable standard library includes:
 - `trb/std/process`
 - `trb/std/json`
 - `trb/std/jsonc`
+- `trb/std/time`
 - `trb/std/result`
 - `trb/std/errors`
 - `trb/std/unit`

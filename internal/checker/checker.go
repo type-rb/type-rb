@@ -325,6 +325,11 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		allowUnhandledEffects: options.AllowUnhandledEffects,
 		aliasCycles:           map[string]bool{},
 	}
+	if resolution.Declarations != nil {
+		for _, runtimeType := range resolution.Declarations.RuntimeTypesByModule[program.ModulePath] {
+			c.requireRuntimeType(runtimeType)
+		}
+	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ast.MethodStatement); ok {
 			c.functions[method.Name] = method
@@ -1733,6 +1738,13 @@ func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[stri
 		schema.Kind = "hash"
 		schema.Element = &element
 	case types.Named:
+		if kind, module, reference, ok := c.codecTimeScalar(base.Name); ok {
+			schema.Kind = kind
+			schema.Module = module
+			copy := reference
+			schema.Reference = &copy
+			break
+		}
 		if raw, module, reference, ok := c.codecRawEnum(base.Name); ok {
 			schema.Kind = "raw_enum"
 			schema.Module = module
@@ -1795,6 +1807,26 @@ func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[stri
 		return schema, false
 	}
 	return schema, true
+}
+
+func (c *Checker) codecTimeScalar(name string) (string, string, resolver.Binding, bool) {
+	kinds := map[string]string{
+		"Date":      "time_date",
+		"TimeOfDay": "time_of_day",
+		"DateTime":  "time_datetime",
+		"Instant":   "time_instant",
+		"Duration":  "time_duration",
+		"TimeZone":  "time_zone",
+	}
+	kind, supported := kinds[name]
+	if !supported {
+		return "", "", resolver.Binding{}, false
+	}
+	binding, imported := c.resolution.ImportedType(name)
+	if !imported || binding.Import == nil || binding.Import.Path != "trb/std/time" || binding.Export == nil || binding.Export.Kind != resolver.ClassExport {
+		return "", "", resolver.Binding{}, false
+	}
+	return kind, binding.Import.RuntimePath(), binding, true
 }
 
 func (c *Checker) codecRawEnum(name string) (RawEnum, string, *resolver.Binding, bool) {
@@ -3500,7 +3532,7 @@ func (c *Checker) requireEffectRuntime(success, failure types.Type) {
 
 func (c *Checker) requireRuntimeType(typ types.Type) {
 	for _, definition := range stdlib.RuntimeDependenciesForType(typ) {
-		if definition != nil {
+		if definition != nil && definition.ModulePath != c.result.Program.ModulePath {
 			c.result.RuntimeDependencies[definition.Path] = definition
 		}
 	}

@@ -101,15 +101,21 @@ CREATE TABLE products (
 	}
 }
 
-func TestParseSQLRejectsTypesWithoutPortableORMSemantics(t *testing.T) {
+func TestParseSQLAcceptsPortableDateTimeTypes(t *testing.T) {
 	for adapter, source := range map[string]string{
-		"sqlite":     "CREATE TABLE events (id INTEGER PRIMARY KEY, happened_at DATETIME);",
-		"postgresql": "CREATE TABLE events (id BIGSERIAL PRIMARY KEY, happened_at TIMESTAMP);",
-		"mysql":      "CREATE TABLE events (id BIGINT AUTO_INCREMENT PRIMARY KEY, happened_at DATETIME);",
+		"sqlite":     "CREATE TABLE events (id INTEGER PRIMARY KEY, on_date DATE, at_time TIME, local_at DATETIME, exact_at TIMESTAMPTZ);",
+		"postgresql": "CREATE TABLE events (id BIGSERIAL PRIMARY KEY, on_date DATE, at_time TIME, local_at TIMESTAMP, exact_at TIMESTAMPTZ);",
+		"mysql":      "CREATE TABLE events (id BIGINT AUTO_INCREMENT PRIMARY KEY, on_date DATE, at_time TIME(6), local_at DATETIME(6), exact_at TIMESTAMP(6));",
 	} {
 		t.Run(adapter, func(t *testing.T) {
-			if _, err := ParseSQL(adapter, []byte(source)); err == nil {
-				t.Fatal("unsupported time type was accepted before portable date/time semantics exist")
+			lock, err := ParseSQL(adapter, []byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, want := range map[string]string{"on_date": "Date", "at_time": "TimeOfDay", "local_at": "DateTime", "exact_at": "Instant"} {
+				if got := lock.Tables["events"].Columns[name].Type; got != want {
+					t.Fatalf("%s type=%s, want %s", name, got, want)
+				}
 			}
 		})
 	}

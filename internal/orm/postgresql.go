@@ -223,6 +223,14 @@ func inspectPostgreSQLForeignKeys(database *sql.DB, name string) ([]ForeignKey, 
 func postgresqlColumnType(dataType, databaseType string) (types.Type, error) {
 	normalized := strings.ToLower(strings.TrimSpace(databaseType))
 	switch normalized {
+	case "date":
+		return types.FromName("Date"), nil
+	case "time":
+		return types.FromName("TimeOfDay"), nil
+	case "timestamp":
+		return types.FromName("DateTime"), nil
+	case "timestamptz":
+		return types.FromName("Instant"), nil
 	case "int2", "int4", "int8", "serial2", "serial4", "serial8":
 		return types.FromName("Integer"), nil
 	case "float4", "float8", "numeric", "decimal":

@@ -86,8 +86,17 @@ func (g *generator) ormProjectionRuntime(adapter ormintegration.Adapter, model o
 	g.line("result := []" + g.goType(elementType) + "{}")
 	g.line("for rows.Next() {")
 	g.indent++
-	g.line("var value " + g.goType(elementType))
-	g.line("if err := rows.Scan(&value); err != nil { return " + g.ormResultErr(arrayType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database projection row was invalid\")") + " }")
+	if ormintegration.IsPortableTimeType(elementType) {
+		g.line("var raw any")
+		g.line("if err := rows.Scan(&raw); err != nil { return " + g.ormResultErr(arrayType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database projection row was invalid\")") + " }")
+		g.line("value, conversionError := " + goORMTemporalScan(elementType.Name) + "(raw); if conversionError != nil { return " + g.ormResultErr(arrayType, "trbOrmError(conversionError, "+g.ormErrorKind("InvalidData")+", \"database projection row was invalid\")") + " }")
+		if !elementType.Nullable {
+			g.line("if value == nil { return " + g.ormResultErr(arrayType, g.ormErrorValue("InvalidData", "database projection value must not be null")) + " }")
+		}
+	} else {
+		g.line("var value " + g.goType(elementType))
+		g.line("if err := rows.Scan(&value); err != nil { return " + g.ormResultErr(arrayType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database projection row was invalid\")") + " }")
+	}
 	g.line("result = append(result, value)")
 	g.indent--
 	g.line("}")
@@ -106,15 +115,23 @@ func (g *generator) ormProjectionRuntime(adapter ormintegration.Adapter, model o
 	g.line("if databaseError != nil { return " + g.ormResultErr(pickType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(adapter.QuoteIdentifier(column.Name)) + ")")
 	g.line("row := database.QueryRow(statement, arguments...)")
-	g.line("var value " + g.goType(elementType))
-	g.line("if err := row.Scan(&value); err != nil {")
+	if ormintegration.IsPortableTimeType(elementType) {
+		g.line("var raw any")
+		g.line("if err := row.Scan(&raw); err != nil {")
+	} else {
+		g.line("var value " + g.goType(elementType))
+		g.line("if err := row.Scan(&value); err != nil {")
+	}
 	g.indent++
 	g.line("if errors.Is(err, sql.ErrNoRows) { return " + g.ormResultOK(pickType, "nil") + " }")
 	g.line("return " + g.ormResultErr(pickType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database projection query failed\")"))
 	g.indent--
 	g.line("}")
 	value := "&value"
-	if elementType.Nullable {
+	if ormintegration.IsPortableTimeType(elementType) {
+		g.line("value, conversionError := " + goORMTemporalScan(elementType.Name) + "(raw); if conversionError != nil { return " + g.ormResultErr(pickType, "trbOrmError(conversionError, "+g.ormErrorKind("InvalidData")+", \"database projection value was invalid\")") + " }")
+		value = "value"
+	} else if elementType.Nullable {
 		value = "value"
 	}
 	g.line("return " + g.ormResultOK(pickType, value))
