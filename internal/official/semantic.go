@@ -28,27 +28,28 @@ func browserSymbols() map[string]stdlib.Symbol {
 	typeT := types.FromName("T")
 	jsonError := types.FromName("JsonError")
 	jsonResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, jsonError}}
+	operation := func(name, intrinsic string, body bool) stdlib.Symbol {
+		parameters := []stdlib.Parameter{{Name: "url", Type: types.FromName("String")}}
+		if body {
+			parameters = append(parameters, stdlib.Parameter{Name: "value", Type: typeT})
+		}
+		return stdlib.Symbol{
+			Name:                name,
+			Intrinsic:           intrinsic,
+			RuntimeIndependent:  true,
+			TypeParameters:      []string{"T"},
+			Parameters:          parameters,
+			Return:              typeT,
+			Fails:               types.FromName("FetchError"),
+			RuntimeDependencies: []types.Type{jsonResult},
+		}
+	}
 	return map[string]stdlib.Symbol{
-		"get_json": {
-			Name:                "get_json",
-			Intrinsic:           "trb.platform.typescript.browser.get_json",
-			RuntimeIndependent:  true,
-			TypeParameters:      []string{"T"},
-			Parameters:          []stdlib.Parameter{{Name: "url", Type: types.FromName("String")}},
-			Return:              typeT,
-			Fails:               types.FromName("FetchError"),
-			RuntimeDependencies: []types.Type{jsonResult},
-		},
-		"put_json": {
-			Name:                "put_json",
-			Intrinsic:           "trb.platform.typescript.browser.put_json",
-			RuntimeIndependent:  true,
-			TypeParameters:      []string{"T"},
-			Parameters:          []stdlib.Parameter{{Name: "url", Type: types.FromName("String")}, {Name: "value", Type: typeT}},
-			Return:              typeT,
-			Fails:               types.FromName("FetchError"),
-			RuntimeDependencies: []types.Type{jsonResult},
-		},
+		"get_json":    operation("get_json", "trb.platform.typescript.browser.get_json", false),
+		"post_json":   operation("post_json", "trb.platform.typescript.browser.post_json", true),
+		"put_json":    operation("put_json", "trb.platform.typescript.browser.put_json", true),
+		"patch_json":  operation("patch_json", "trb.platform.typescript.browser.patch_json", true),
+		"delete_json": operation("delete_json", "trb.platform.typescript.browser.delete_json", false),
 	}
 }
 

@@ -1702,7 +1702,7 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic string, typ types.Type) {
 	operation := ""
 	switch intrinsic {
-	case "trb.internal.json.decode", "trb.web.request_json", "trb.platform.typescript.browser.get_json", "trb.platform.typescript.browser.put_json":
+	case "trb.internal.json.decode", "trb.web.request_json", "trb.platform.typescript.browser.get_json", "trb.platform.typescript.browser.post_json", "trb.platform.typescript.browser.put_json", "trb.platform.typescript.browser.patch_json", "trb.platform.typescript.browser.delete_json":
 		operation = "decode"
 	case "trb.internal.json.encode", "trb.web.json":
 		operation = "encode"
