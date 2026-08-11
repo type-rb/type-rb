@@ -27,6 +27,8 @@ type manifest struct {
 	SemanticProvider           string                                             `json:"semanticProvider,omitempty"`
 	ProjectProvider            string                                             `json:"projectProvider,omitempty"`
 	TypeProvider               string                                             `json:"typeProvider,omitempty"`
+	Kind                       string                                             `json:"kind,omitempty"`
+	Targets                    []string                                           `json:"targets,omitempty"`
 	NativeDependencies         map[string]map[string]string                       `json:"nativeDependencies,omitempty"`
 	NativeDependenciesByOption map[string]map[string]map[string]map[string]string `json:"nativeDependenciesByOption,omitempty"`
 }
@@ -112,15 +114,23 @@ func Names() []string {
 }
 
 func load() map[string]*Package {
+	result, err := loadFromFS(packageFiles)
+	if err != nil {
+		panic("load official TypeRB packages: " + err.Error())
+	}
+	return result
+}
+
+func loadFromFS(packageFS fs.FS) (map[string]*Package, error) {
 	result := map[string]*Package{}
-	err := fs.WalkDir(packageFiles, "packages", func(filename string, entry fs.DirEntry, walkErr error) error {
+	err := fs.WalkDir(packageFS, "packages", func(filename string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() || entry.Name() != "trbpackage.json" {
 			return nil
 		}
-		data, err := packageFiles.ReadFile(filename)
+		data, err := fs.ReadFile(packageFS, filename)
 		if err != nil {
 			return err
 		}
@@ -133,11 +143,19 @@ func load() map[string]*Package {
 		if descriptor.Name == "" || descriptor.Version == "" || descriptor.Module == "" || descriptor.Source == "" {
 			return fmt.Errorf("%s: name, version, module, and source are required", filename)
 		}
+		if descriptor.Kind != "" && descriptor.Kind != "portable" && descriptor.Kind != "platform" {
+			return fmt.Errorf("%s: kind must be portable or platform", filename)
+		}
+		for _, target := range descriptor.Targets {
+			if target != "go" && target != "ruby" && target != "typescript" {
+				return fmt.Errorf("%s: unsupported target %q", filename, target)
+			}
+		}
 		if _, exists := result[descriptor.Name]; exists {
 			return fmt.Errorf("%s: package %s is already registered", filename, descriptor.Name)
 		}
 		sourcePath := path.Join(path.Dir(filename), descriptor.Source)
-		source, err := packageFiles.ReadFile(sourcePath)
+		source, err := fs.ReadFile(packageFS, sourcePath)
 		if err != nil {
 			return fmt.Errorf("%s: %w", filename, err)
 		}
@@ -152,7 +170,8 @@ func load() map[string]*Package {
 				Path:         descriptor.Name,
 				ModulePath:   descriptor.Module,
 				Source:       string(source),
-				Kind:         stdlib.Portable,
+				Kind:         manifestKind(descriptor.Kind),
+				Targets:      manifestTargets(descriptor.Targets),
 				TypeProvider: descriptor.TypeProvider,
 				Symbols:      semanticSymbols(descriptor.SemanticProvider),
 			},
@@ -160,7 +179,25 @@ func load() map[string]*Package {
 		return nil
 	})
 	if err != nil {
-		panic("load official TypeRB packages: " + err.Error())
+		return nil, err
+	}
+	return result, nil
+}
+
+func manifestKind(kind string) stdlib.Kind {
+	if kind == "platform" {
+		return stdlib.Platform
+	}
+	return stdlib.Portable
+}
+
+func manifestTargets(targets []string) map[string]bool {
+	if len(targets) == 0 {
+		return nil
+	}
+	result := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		result[target] = true
 	}
 	return result
 }
