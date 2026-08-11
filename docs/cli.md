@@ -18,14 +18,29 @@ trb init --mode go --module example.com/acme/api --template web .
 # Generate go.mod, Gemfile, or package.json from trbconfig.jsonc.
 trb sync
 
-# Update dependencies in trbconfig.jsonc and regenerate the manifest.
-trb add PACKAGE VERSION
-trb add --dev PACKAGE VERSION
-trb remove PACKAGE
+# Add, remove, or update portable TypeRB packages.
+trb add acme/contracts v1.2.3
+trb add --source gitlab.com/company/auth company/auth v2.0.0
+trb add --path ../contracts local/contracts
+trb remove acme/contracts
+trb update
 
-# Run go mod download, bundle install, npm install, or bun install.
+# Manage a Go module, gem, or npm/Bun package in the target manifest.
+trb add --native PACKAGE VERSION
+trb add --native --dev PACKAGE VERSION
+trb remove --native PACKAGE
+
+# Resolve TypeRB packages, then install native target dependencies.
 trb install
+trb install --frozen
+trb install --offline
 ```
+
+TypeRB packages are ordinary typed source compiled through the same AST, typed
+IR, and backend as application code. `trb.lock` pins their canonical identity,
+transitive graph, Git revision, and content checksum. `--frozen` rejects config
+drift, while `--offline` uses only local packages and the existing project
+cache. See the [package guide](guides/packages.md).
 
 The `web` template uses `src` as the source root and creates `main.trb`, an
 index route, and an explicit root middleware stack with request IDs and JSONL

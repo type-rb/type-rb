@@ -74,14 +74,19 @@ than detailed syntax.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
 - Stabilize compiler-owned library type providers so gems, Go modules, and npm
   packages do not require application-authored signature files.
-- Add reproducible dependency locking, checksums, offline builds, package
-  publishing, version constraints, and vulnerability/audit integration.
+- Evolve the initial distributed Git package system with semantic version
+  constraints, selective updates, publishing conventions, shared caches,
+  vulnerability/audit integration, and namespace-stable type identities.
+- Define a stable extension protocol before external packages can request
+  compiler integration; do not expose compiler internals as a public plugin
+  API.
 
 ## 6. Application-level proof
 
-- Build the official portable `trb/web` package around compile-time file-based
-  routes, typed JSON requests and responses, middleware, and consistent HTTP
-  behavior across Go, Ruby, and TypeScript runtimes.
+- Harden the official portable `trb/web` package around its existing
+  compile-time file-based routes, typed JSON requests and responses,
+  middleware, and consistent HTTP behavior across Go, Ruby, and TypeScript
+  runtimes.
 - Extend the generated JSON codecs and client/server contracts from shared
   records with versioned wire fields, validation policy, schema export, and
   compatibility checking.

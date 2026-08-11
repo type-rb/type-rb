@@ -36,24 +36,56 @@ const (
 )
 
 type Config struct {
-	Schema            string                     `json:"$schema,omitempty"`
-	Name              string                     `json:"name"`
-	Version           string                     `json:"version,omitempty"`
-	Mode              string                     `json:"mode"`
-	SourceDir         string                     `json:"sourceDir,omitempty"`
-	OutDir            string                     `json:"outDir,omitempty"`
-	CopyFiles         *bool                      `json:"copyFiles,omitempty"`
-	PackageManagement string                     `json:"packageManagement,omitempty"`
-	Dependencies      map[string]string          `json:"dependencies,omitempty"`
-	DevDependencies   map[string]string          `json:"devDependencies,omitempty"`
-	LocalPackages     map[string]string          `json:"localPackages,omitempty"`
-	PackageOptions    map[string]json.RawMessage `json:"packageOptions,omitempty"`
-	Ruby              *RubyConfig                `json:"ruby,omitempty"`
-	Go                *GoConfig                  `json:"go,omitempty"`
-	TypeScript        *TypeScriptConfig          `json:"typescript,omitempty"`
-	Database          *DatabaseConfig            `json:"db,omitempty"`
-	Root              string                     `json:"-"`
-	Path              string                     `json:"-"`
+	Schema            string                        `json:"$schema,omitempty"`
+	Name              string                        `json:"name"`
+	Version           string                        `json:"version,omitempty"`
+	Mode              string                        `json:"mode"`
+	SourceDir         string                        `json:"sourceDir,omitempty"`
+	OutDir            string                        `json:"outDir,omitempty"`
+	CopyFiles         *bool                         `json:"copyFiles,omitempty"`
+	PackageManagement string                        `json:"packageManagement,omitempty"`
+	Packages          map[string]PackageRequirement `json:"packages,omitempty"`
+	Dependencies      map[string]string             `json:"dependencies,omitempty"`
+	DevDependencies   map[string]string             `json:"devDependencies,omitempty"`
+	LocalPackages     map[string]string             `json:"localPackages,omitempty"`
+	PackageOptions    map[string]json.RawMessage    `json:"packageOptions,omitempty"`
+	Ruby              *RubyConfig                   `json:"ruby,omitempty"`
+	Go                *GoConfig                     `json:"go,omitempty"`
+	TypeScript        *TypeScriptConfig             `json:"typescript,omitempty"`
+	Database          *DatabaseConfig               `json:"db,omitempty"`
+	Root              string                        `json:"-"`
+	Path              string                        `json:"-"`
+}
+
+// PackageRequirement identifies one TypeRB package. A package name is an
+// import alias in the current dependency graph; Source selects an explicit Git
+// origin and Path selects an explicitly local development package.
+type PackageRequirement struct {
+	Source  string `json:"source,omitempty"`
+	Version string `json:"version,omitempty"`
+	Path    string `json:"path,omitempty"`
+}
+
+func (r *PackageRequirement) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return errors.New("package requirement cannot be null")
+	}
+	if trimmed[0] == '"' {
+		return json.Unmarshal(trimmed, &r.Version)
+	}
+	type encoded PackageRequirement
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode((*encoded)(r))
+}
+
+func (r PackageRequirement) MarshalJSON() ([]byte, error) {
+	if r.Source == "" && r.Path == "" {
+		return json.Marshal(r.Version)
+	}
+	type encoded PackageRequirement
+	return json.Marshal(encoded(r))
 }
 
 const DefaultSqldefVersion = "3.11.19"
@@ -210,6 +242,7 @@ func New(root, mode string) *Config {
 		SourceDir:       ".",
 		OutDir:          "build",
 		CopyFiles:       &copyFiles,
+		Packages:        map[string]PackageRequirement{},
 		Dependencies:    map[string]string{},
 		DevDependencies: map[string]string{},
 		LocalPackages:   map[string]string{},
@@ -240,12 +273,28 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("packageManagement must be managed or external; got %q", c.PackageManagement)
 	}
 	for name, packagePath := range c.LocalPackages {
-		clean := filepath.ToSlash(filepath.Clean(name))
-		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "trb/") || filepath.IsAbs(name) {
+		if !validPackageName(name) {
 			return fmt.Errorf("invalid local package name %q", name)
 		}
 		if strings.TrimSpace(packagePath) == "" {
 			return fmt.Errorf("local package %s requires a path", name)
+		}
+	}
+	for name, requirement := range c.Packages {
+		if !validPackageName(name) {
+			return fmt.Errorf("invalid TypeRB package name %q", name)
+		}
+		hasPath := strings.TrimSpace(requirement.Path) != ""
+		hasSource := strings.TrimSpace(requirement.Source) != ""
+		hasVersion := strings.TrimSpace(requirement.Version) != ""
+		if hasPath {
+			if hasSource || hasVersion {
+				return fmt.Errorf("TypeRB package %s path cannot be combined with source or version", name)
+			}
+			continue
+		}
+		if !hasVersion {
+			return fmt.Errorf("TypeRB package %s requires a version or path", name)
 		}
 	}
 	if escapesRoot(c.SourceDir) || escapesRoot(c.OutDir) {
@@ -334,6 +383,9 @@ func (c *Config) applyDefaults() {
 	if c.Dependencies == nil {
 		c.Dependencies = map[string]string{}
 	}
+	if c.Packages == nil {
+		c.Packages = map[string]PackageRequirement{}
+	}
 	if c.DevDependencies == nil {
 		c.DevDependencies = map[string]string{}
 	}
@@ -416,6 +468,12 @@ func (c *Config) applyDefaults() {
 			c.TypeScript.Scripts = map[string]string{}
 		}
 	}
+}
+
+func validPackageName(name string) bool {
+	clean := filepath.ToSlash(filepath.Clean(name))
+	return clean != "." && clean != ".." && clean == name && !strings.HasPrefix(clean, "../") &&
+		!strings.HasPrefix(clean, "trb/") && !filepath.IsAbs(name) && !strings.ContainsAny(name, " \\@")
 }
 
 func escapesRoot(path string) bool {

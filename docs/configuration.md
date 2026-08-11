@@ -1,8 +1,8 @@
 # Project configuration
 
 `trbconfig.jsonc` is the source of truth for the project target, source and
-output directories, and target dependencies. It accepts line and block
-comments. Trailing commas are not allowed.
+output directories, TypeRB packages, and native target dependencies. It
+accepts line and block comments. Trailing commas are not allowed.
 
 ## Example
 
@@ -16,6 +16,9 @@ comments. Trailing commas are not allowed.
   "outDir": "build",
   "copyFiles": true,
   "packageManagement": "managed",
+  "packages": {
+    "acme/contracts": "v1.2.3"
+  },
   "dependencies": {
     "example.com/acme/library": "v1.2.3"
   },
@@ -45,8 +48,9 @@ require an explicit `trb/platform/<mode>/*` import.
 
 Go mode owns `go.mod`, Ruby mode owns `Gemfile` and `.ruby-version`, and
 TypeScript mode owns `package.json`. These files are deterministic views of
-`trbconfig.jsonc`. Edit dependencies through the config or `trb add` and
-`trb remove`, then run `trb sync`.
+the native `dependencies` and `devDependencies` in `trbconfig.jsonc`. Edit
+native dependencies through the config or `trb add --native` and
+`trb remove --native`, then run `trb sync`.
 
 ## TypeScript toolchain
 
@@ -90,10 +94,42 @@ When `packageManager` is omitted, Bun runtime projects default to `bun`; other
 TypeScript projects default to `npm`. The two settings remain independent, so
 an explicitly configured npm installation can still be executed by Bun.
 
-## Package management
+## TypeRB packages
+
+`packages` declares portable TypeRB source packages. A short key defaults to a
+GitHub repository, while the lock records its canonical manifest identity:
+
+```jsonc
+{
+  "packages": {
+    "acme/contracts": "v1.2.3",
+    "company/auth": {
+      "source": "gitlab.com/company/auth",
+      "version": "v2.0.0"
+    },
+    "local/widgets": {
+      "path": "../widgets"
+    }
+  }
+}
+```
+
+`acme/contracts` resolves from `github.com/acme/contracts` by default and stays
+the explicit source import. Full repository paths are also valid keys. Remote
+packages accept an exact semantic-version tag, `latest`, or a Git revision.
+`latest` is pinned until `trb update` is run. Local paths are development
+inputs and are intentionally not content locked.
+
+`trb.lock` records canonical package names, transitive dependencies, Git commit
+IDs, and SHA-256 content checksums. Commit it to version control. Resolved
+content lives below the ignored `.trb/packages` directory. Builds and the REPL
+never contact a package source; run `trb install` after changing `packages`.
+See the [package guide](guides/packages.md).
+
+## Native package management
 
 The default `"packageManagement": "managed"` lets TypeRB generate and use the
-target manifest.
+target manifest from `dependencies` and `devDependencies`.
 
 When TypeRB is embedded in an application that already owns its manifest, set:
 
@@ -104,7 +140,9 @@ When TypeRB is embedded in an application that already owns its manifest, set:
 ```
 
 `trb build` then generates source without reading or modifying the host
-manifest. `trb sync`, `add`, `remove`, and `install` are disabled in this mode.
+manifest. Native `sync`, add, remove, and install operations are disabled in
+this mode. TypeRB source packages remain available because their lock and
+source cache are independent of the target package manager.
 
 ## Database schema workflow
 
@@ -139,7 +177,7 @@ entrypoint field. A library project may omit `main`.
 ## Local packages
 
 Map a portable source directory into the project import graph with
-`localPackages`:
+`localPackages` when maintaining an older source-only workspace:
 
 ```jsonc
 {
@@ -150,7 +188,9 @@ Map a portable source directory into the project import graph with
 ```
 
 An `index.trb` file is the package entry module. Projects in different modes can
-import the same package without copying its source.
+import the same package without copying its source. New reusable packages
+should instead contain `trbpackage.json` and use a `packages` path requirement,
+which exercises the same manifest and dependency graph as a remote package.
 
 ## Ruby toolchain and loader
 
