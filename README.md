@@ -9,11 +9,11 @@ and TypeScript.
 
 ## Try TypeRB
 
-[A Tour of TypeRB](https://type-rb.github.io/type-rb/tour/)
+[A Tour of TypeRB](https://type-rb.github.io/tour/)
 
 Learn the language through guided, executable lessons.
 
-[TypeRB Playground](https://type-rb.github.io/type-rb/play/)
+[TypeRB Playground](https://type-rb.github.io/play/)
 
 Write, run, format, and transpile TypeRB while switching between Go, Ruby, and
 TypeScript output.

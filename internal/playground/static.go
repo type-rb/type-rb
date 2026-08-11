@@ -27,6 +27,9 @@ func ExportStatic(options StaticOptions) error {
 		filepath.Join(options.OutputDir, "assets"),
 		filepath.Join(options.OutputDir, "play"),
 		filepath.Join(options.OutputDir, "tour"),
+		filepath.Join(options.OutputDir, "type-rb"),
+		filepath.Join(options.OutputDir, "type-rb", "play"),
+		filepath.Join(options.OutputDir, "type-rb", "tour"),
 	} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return err
@@ -68,7 +71,34 @@ func ExportStatic(options StaticOptions) error {
 	if err != nil {
 		return err
 	}
-	return writeStaticFile(options.OutputDir, "index.html", landing)
+	if err := writeStaticFile(options.OutputDir, "index.html", landing); err != nil {
+		return err
+	}
+	for path, destination := range map[string]string{
+		"type-rb/index.html":      "/",
+		"type-rb/play/index.html": "/play/",
+		"type-rb/tour/index.html": "/tour/",
+	} {
+		if err := writeStaticFile(options.OutputDir, path, legacyRedirectPage(destination)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func legacyRedirectPage(destination string) []byte {
+	return []byte(fmt.Sprintf(`<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta http-equiv="refresh" content="0; url=%s">
+		<link rel="canonical" href="https://type-rb.github.io%s">
+		<title>TypeRB</title>
+		<script>location.replace(%q + location.search + location.hash)</script>
+	</head>
+	<body><a href="%s">Continue to TypeRB</a></body>
+</html>
+`, destination, destination, destination, destination))
 }
 
 func writeStaticJSON(outputDir, name string, value any) error {
