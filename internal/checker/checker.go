@@ -1915,8 +1915,11 @@ func (c *Checker) jsxComponentProps(element *ast.JSXElement) ([]resolver.RecordF
 			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return ReactNode", identifier.Name))
 			return nil, false
 		}
+		if len(method.Parameters) == 0 {
+			return []resolver.RecordField{}, true
+		}
 		if len(method.Parameters) != 1 {
-			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept exactly one record parameter", identifier.Name))
+			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept no parameters or exactly one record parameter", identifier.Name))
 			return nil, false
 		}
 		fields, _, _, found := c.codecRecord(c.typeFromRef(method.Parameters[0].Type).Name)
@@ -1934,8 +1937,11 @@ func (c *Checker) jsxComponentProps(element *ast.JSXElement) ([]resolver.RecordF
 		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return ReactNode", identifier.Name))
 		return nil, false
 	}
+	if len(binding.Export.Parameters) == 0 {
+		return []resolver.RecordField{}, true
+	}
 	if len(binding.Export.Parameters) != 1 {
-		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept exactly one record parameter", identifier.Name))
+		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept no parameters or exactly one record parameter", identifier.Name))
 		return nil, false
 	}
 	fields, _, _, found := c.codecRecord(binding.Export.Parameters[0].Name)
@@ -3436,7 +3442,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			argumentTypes = append(argumentTypes, c.checkExpression(arg.Value, sc))
 		}
 		typ = calleeType
-		if parameters, returned, callable := types.FunctionSignature(calleeType); callable {
+		resolvedDeclaration := false
+		if binding, resolved := c.result.References[n.Callee]; resolved {
+			resolvedDeclaration = binding.Library != nil ||
+				binding.Export != nil && binding.Export.Kind == resolver.FunctionExport ||
+				binding.Member != nil && binding.Member.Kind == resolver.FunctionExport
+		}
+		if parameters, returned, callable := types.FunctionSignature(calleeType); callable && !resolvedDeclaration {
 			for _, argument := range n.Arguments {
 				if argument.Name != "" || argument.Splat != "" {
 					c.error(argument.Value.Span(), "fn values accept positional arguments only")

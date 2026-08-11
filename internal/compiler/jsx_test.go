@@ -170,6 +170,54 @@ end
 	}
 }
 
+func TestCompileTypeScriptJSXWithBrowserRouting(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "router.trb",
+		ModulePath: "app/router",
+		Source: []byte(`import { ReactNode } from trb/platform/typescript/react
+import { browser_router, link_to, route, route_param, use_navigate } from trb/platform/typescript/react/router
+
+def Home(): ReactNode
+	return <main>{link_to("/todos/42", <span>Open todo</span>)}</main>
+end
+
+def TodoPage(): ReactNode
+	id := route_param("id")
+	navigate := use_navigate()
+	go_home := fn()
+		navigate("/")
+		return
+	end
+	return <main><p>Todo {id}</p><button onClick={go_home}>Home</button></main>
+end
+
+def App(): ReactNode
+	return browser_router([
+		route("/", <Home />),
+		route("/todos/:id", <TodoPage />),
+	])
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		`import { BrowserRouter, Link, Route, Routes, useNavigate, useParams } from "react-router-dom";`,
+		"function renderTrbBrowserRouter(routes:",
+		`React.createElement(Link, { to: "/todos/42" }, <span>Open todo</span>)`,
+		`(useParams<Record<string, string | undefined>>()["id"] ?? null)`,
+		`{ path: "/todos/:id", element: <TodoPage /> }`,
+		"renderTrbBrowserRouter([",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated routed TSX is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
 func TestCompileTypeScriptJSXChecksComponentProps(t *testing.T) {
 	source := []byte(`import { ReactNode } from trb/platform/typescript/react
 

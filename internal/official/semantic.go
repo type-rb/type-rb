@@ -17,10 +17,47 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 		return webTestingSymbols()
 	case "trb.typescript.react":
 		return reactSymbols()
+	case "trb.typescript.react.router":
+		return reactRouterSymbols()
 	case "trb.typescript.browser":
 		return browserSymbols()
 	default:
 		panic(fmt.Sprintf("unknown official package semantic provider %q", provider))
+	}
+}
+
+func reactRouterSymbols() map[string]stdlib.Symbol {
+	stringType := types.FromName("String")
+	voidType := types.FromName("Void")
+	reactNodeType := types.FromName("ReactNode")
+	reactRouteType := types.FromName("ReactRoute")
+	navigateType := types.FunctionOf([]types.Type{stringType}, voidType)
+	optionalStringType := stringType
+	optionalStringType.Nullable = true
+	return map[string]stdlib.Symbol{
+		"route": {
+			Name: "route", Intrinsic: "trb.platform.typescript.react.router.route", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{{Name: "path", Type: stringType}, {Name: "element", Type: reactNodeType}},
+			Return:     reactRouteType,
+		},
+		"browser_router": {
+			Name: "browser_router", Intrinsic: "trb.platform.typescript.react.router.browser_router", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{{Name: "routes", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{reactRouteType}}}},
+			Return:     reactNodeType,
+		},
+		"link_to": {
+			Name: "link_to", Intrinsic: "trb.platform.typescript.react.router.link_to", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{{Name: "path", Type: stringType}, {Name: "child", Type: reactNodeType}},
+			Return:     reactNodeType,
+		},
+		"route_param": {
+			Name: "route_param", Intrinsic: "trb.platform.typescript.react.router.route_param", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{{Name: "name", Type: stringType}}, Return: optionalStringType,
+		},
+		"use_navigate": {
+			Name: "use_navigate", Intrinsic: "trb.platform.typescript.react.router.use_navigate", RuntimeIndependent: true,
+			Return: navigateType,
+		},
 	}
 }
 

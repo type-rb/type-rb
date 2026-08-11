@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"testing/fstest"
+
+	"github.com/type-rb/type-rb/internal/stdlib"
 )
 
 func TestManifestDeclaresPlatformTargets(t *testing.T) {
@@ -78,6 +80,22 @@ func TestBundledReactPackage(t *testing.T) {
 	state := packageDefinition.Definition.Symbols["use_state"]
 	if state.Return.String() != "ReactState<T>" || len(state.TypeParameters) != 1 {
 		t.Fatalf("unexpected React state contract: %#v", state)
+	}
+}
+
+func TestBundledReactRouterPackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/platform/typescript/react/router")
+	if !ok {
+		t.Fatal("bundled React Router package is not registered")
+	}
+	if packageDefinition.Definition.Kind != stdlib.Platform || !packageDefinition.Definition.Supports("typescript") || packageDefinition.Definition.Supports("go") {
+		t.Fatalf("unexpected React Router target boundary: %#v", packageDefinition.Definition)
+	}
+	if packageDefinition.Definition.Symbols["browser_router"].Intrinsic != "trb.platform.typescript.react.router.browser_router" {
+		t.Fatalf("React Router semantic provider was not loaded: %#v", packageDefinition.Definition.Symbols)
+	}
+	if version := packageDefinition.NativeDependencies["typescript"]["react-router-dom"]; version != "latest" {
+		t.Fatalf("unexpected React Router dependency: %q", version)
 	}
 }
 
