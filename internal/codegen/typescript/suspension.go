@@ -1,6 +1,7 @@
 package typescript
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
@@ -13,6 +14,7 @@ import (
 // Promise-based native APIs.
 type SuspensionPlan struct {
 	Methods          map[*ir.Method]bool
+	Lambdas          map[*ir.Lambda]bool
 	Calls            map[*ir.Call]bool
 	Expressions      map[ir.Expression]bool
 	Iterations       map[*ir.Iterate]bool
@@ -39,11 +41,19 @@ type suspensionAnalyzer struct {
 	memberMethods    map[string][]*ir.Method
 	interfaceMethods map[string][]*ir.Method
 	classes          []suspensionClass
+	lambdaBindings   map[functionBindingKey]*ir.Lambda
+}
+
+type functionBindingKey struct {
+	module string
+	method *ir.Method
+	name   string
 }
 
 func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
 	plan := &SuspensionPlan{
 		Methods:          map[*ir.Method]bool{},
+		Lambdas:          map[*ir.Lambda]bool{},
 		Calls:            map[*ir.Call]bool{},
 		Expressions:      map[ir.Expression]bool{},
 		Iterations:       map[*ir.Iterate]bool{},
@@ -53,6 +63,7 @@ func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
 		programs: programs, plan: plan, methodInfo: map[*ir.Method]suspensionMethod{},
 		topMethods: map[string][]*ir.Method{}, memberMethods: map[string][]*ir.Method{},
 		interfaceMethods: map[string][]*ir.Method{},
+		lambdaBindings:   map[functionBindingKey]*ir.Lambda{},
 	}
 	for _, program := range programs {
 		analyzer.collect(program.ModulePath, "", program.Statements, false)
@@ -77,6 +88,11 @@ func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
 	}
 	for _, program := range programs {
 		analyzer.statementsSuspend(program.Statements, suspensionMethod{module: program.ModulePath}, true)
+	}
+	for lambda, suspends := range plan.Lambdas {
+		if suspends && lambda.ReturnType.Kind != types.Void {
+			return nil, fmt.Errorf("TypeScript function values that may suspend must omit their return type")
+		}
 	}
 	return plan, nil
 }
@@ -163,6 +179,9 @@ func (a *suspensionAnalyzer) statementsSuspend(statements []ir.Statement, contex
 			suspends = a.expressionSuspends(node.Value, context, record) || suspends
 		case *ir.Variable:
 			suspends = a.expressionSuspends(node.Value, context, record) || suspends
+			if lambda, ok := node.Value.(*ir.Lambda); ok {
+				a.lambdaBindings[functionBindingKey{module: context.module, method: context.method, name: node.Name}] = lambda
+			}
 		case *ir.Assignment:
 			suspends = a.expressionSuspends(node.Target, context, record) || a.expressionSuspends(node.Value, context, record) || suspends
 		case *ir.Return:
@@ -216,6 +235,12 @@ func (a *suspensionAnalyzer) expressionSuspends(expression ir.Expression, contex
 	}
 	suspends := false
 	switch node := expression.(type) {
+	case *ir.Lambda:
+		// Creating a lambda never suspends the enclosing function. Its body owns
+		// a separate backend-only suspension boundary.
+		lambdaSuspends := a.statementsSuspend(node.Body, context, record)
+		a.plan.Lambdas[node] = lambdaSuspends
+		return false
 	case *ir.InterpolatedString:
 		for _, part := range node.Parts {
 			suspends = a.expressionSuspends(part.Expression, context, record) || suspends
@@ -286,6 +311,25 @@ func (a *suspensionAnalyzer) expressionSuspends(expression ir.Expression, contex
 }
 
 func (a *suspensionAnalyzer) callTargetSuspends(callee ir.Expression, context suspensionMethod) bool {
+	if callee != nil && callee.ExprType().Kind == types.Function {
+		if lambda, ok := callee.(*ir.Lambda); ok {
+			return a.plan.Lambdas[lambda]
+		}
+		if identifier, ok := callee.(*ir.Identifier); ok {
+			if lambda := a.lambdaBindings[functionBindingKey{module: context.module, method: context.method, name: identifier.Name}]; lambda != nil {
+				return a.plan.Lambdas[lambda]
+			}
+			if context.method != nil {
+				for _, parameter := range context.method.Parameters {
+					if parameter.Name == identifier.Name && parameter.Type.Kind == types.Function {
+						// A higher-order function must accept both synchronous and
+						// backend-suspending callbacks.
+						return true
+					}
+				}
+			}
+		}
+	}
 	switch node := callee.(type) {
 	case *ir.TypeApply:
 		return a.callTargetSuspends(node.Receiver, context)

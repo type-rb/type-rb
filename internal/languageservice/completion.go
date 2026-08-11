@@ -28,6 +28,7 @@ var keywordDetails = map[string]string{
 	"enum":       "declare a closed nominal type",
 	"false":      "Boolean literal",
 	"fails":      "declare a function error effect",
+	"fn":         "create a typed function value",
 	"if":         "start a conditional",
 	"implements": "declare implemented interfaces",
 	"import":     "import a package",
@@ -776,6 +777,8 @@ func lexicalSymbols(source string, cursor int, context Context) []Symbol {
 				known[name.Lexeme] = Symbol{Name: name.Lexeme, Kind: CompletionFunction, Detail: "function"}
 				collectParameters(significant, index+2, known)
 			}
+		case "fn":
+			collectParameters(significant, index+1, known)
 		case "import":
 			collectImportedNames(significant, index+1, known)
 		default:

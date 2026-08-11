@@ -26,7 +26,8 @@ TypeScript projects select a browser, Bun, or Node runtime independently from
 their npm or Bun package manager. Node remains the compatibility default, while
 Bun can be selected explicitly for server packages.
 
-The implemented language includes functions and classes, modules and
+The implemented language includes functions, typed first-class function values
+with lexical capture, and classes, modules and
 interfaces, records, ordinary and raw-value enums, payload enums as sum types,
 enum instance methods, initial generics, normalized unions, immutable and
 mutable bindings, typed collections and iteration, exhaustive pattern

@@ -423,6 +423,10 @@ func opensEndBlock(tokens []token.Token) bool {
 			if depth == 0 {
 				return true
 			}
+		case "fn":
+			if depth == 0 {
+				return true
+			}
 		}
 	}
 	return false

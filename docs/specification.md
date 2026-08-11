@@ -74,6 +74,30 @@ mode by itself does not enable them.
   distinct TypeRB names from silently colliding. Encoded target names are a
   compiler implementation detail rather than a target-language API contract.
 
+#### Function values
+
+- `fn(parameters) ... end` creates a first-class, lexically scoped function
+  value. Every parameter has an explicit type. An absent return annotation
+  means no return value; a non-Void function uses `: Type` and must return that
+  type on every reachable path.
+- Function types are written `(ParameterType, ...) -> ReturnType`. `Void` is
+  permitted in a function type, for example `(String) -> Void`, but remains
+  omitted from the corresponding `fn` declaration.
+- A function value owns `return` statements in its body. It may capture outer
+  lexical bindings, while ordinary immutability and `mut` assignment rules
+  continue to apply to captured values.
+- Function values take required positional parameters in the initial syntax;
+  defaults, keyword parameters, rest parameters, call blocks, and generic
+  lambda parameters are not accepted.
+- The compact spelling uses the ordinary statement separator rather than a
+  second lambda syntax: `double := fn(value: Integer): Integer; return value *
+  2; end`. `trb fmt` expands it to the canonical multiline form.
+- TypeScript alone may lower a no-result function value to an `async` callback
+  when its body reaches a Promise-based platform API. Suspension remains a
+  backend implementation detail rather than TypeRB syntax. A suspending
+  TypeScript function value with a non-Void result is rejected until the
+  portable effect model can express that higher-order contract safely.
+
 ### 3.2 Typing
 
 - Parameter/type annotation form is `name: Type`.

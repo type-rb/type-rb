@@ -455,6 +455,12 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression) {
 	case *ast.AttemptExpression:
 		c.validateExpressionTypeReferences(node.Value)
 		c.validateTypeReferences(node.Body)
+	case *ast.LambdaExpression:
+		for _, parameter := range node.Parameters {
+			c.validateTypeReference(parameter.Type)
+		}
+		c.validateTypeReference(node.ReturnType)
+		c.validateTypeReferences(node.Body)
 	case *ast.CallExpression:
 		c.validateExpressionTypeReferences(node.Callee)
 		for _, argument := range node.Arguments {
@@ -492,6 +498,13 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 		for _, alternative := range ref.Union {
 			c.validateTypeReference(alternative)
 		}
+		return
+	}
+	if ref.FunctionReturn != nil {
+		for _, parameter := range ref.FunctionParameters {
+			c.validateTypeReference(parameter)
+		}
+		c.validateTypeReference(*ref.FunctionReturn)
 		return
 	}
 	if ref.Name == "Never" {
@@ -2789,6 +2802,49 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = c.checkIf(n, sc, true)
 	case *ast.CaseStatement:
 		typ = c.checkCase(n, sc, true)
+	case *ast.LambdaExpression:
+		lambdaScope := &scope{parent: sc, values: map[string]symbol{}}
+		parameterTypes := make([]types.Type, 0, len(n.Parameters))
+		for _, parameter := range n.Parameters {
+			if parameter.Type.Empty() {
+				c.error(parameter.Span(), fmt.Sprintf("fn parameter %s requires a type", parameter.Name))
+			}
+			if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest {
+				c.error(parameter.Span(), "fn parameters must be required positional parameters")
+			}
+			parameterType := c.typeFromRef(parameter.Type)
+			if parameter.Type.Empty() {
+				parameterType = invalidType()
+			}
+			if _, duplicate := lambdaScope.values[parameter.Name]; duplicate {
+				c.error(parameter.Span(), fmt.Sprintf("fn parameter %s is duplicated", parameter.Name))
+				continue
+			}
+			declared := symbol{typ: parameterType, mutable: true, span: parameter.Span()}
+			if tracksUnusedBinding(parameter.Name) {
+				used := false
+				declared.used = &used
+				declared.useKind = "fn parameter"
+			}
+			lambdaScope.values[parameter.Name] = declared
+			parameterTypes = append(parameterTypes, parameterType)
+		}
+		returnType := types.FromName("Void")
+		if !n.ReturnType.Empty() {
+			returnType = c.typeFromRef(n.ReturnType)
+		}
+		c.returns = append(c.returns, returnType)
+		c.declaredEffects = append(c.declaredEffects, types.Type{Kind: types.Never, Name: "Never"})
+		previousLoopDepth := c.loopDepth
+		c.loopDepth = 0
+		c.checkStatements(n.Body, lambdaScope)
+		if returnType.Kind != types.Void && c.statementsFallThrough(n.Body) {
+			c.error(n.Span(), fmt.Sprintf("fn must return %s on every path", returnType))
+		}
+		c.loopDepth = previousLoopDepth
+		c.returns = c.returns[:len(c.returns)-1]
+		c.declaredEffects = c.declaredEffects[:len(c.declaredEffects)-1]
+		typ = types.FunctionOf(parameterTypes, returnType)
 	case *ast.Identifier:
 		if n.Name == "_" {
 			c.error(n.Span(), "blank binding _ cannot be used as a value")
@@ -3203,6 +3259,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			argumentTypes = append(argumentTypes, c.checkExpression(arg.Value, sc))
 		}
 		typ = calleeType
+		if parameters, returned, callable := types.FunctionSignature(calleeType); callable {
+			for _, argument := range n.Arguments {
+				if argument.Name != "" || argument.Splat != "" {
+					c.error(argument.Value.Span(), "fn values accept positional arguments only")
+				}
+			}
+			c.checkTypedArguments(n.Span(), "fn", parameters, len(parameters), false, n.Arguments, argumentTypes)
+			if n.Block != nil {
+				c.error(n.Block.Span(), "fn values do not accept call blocks")
+			}
+			typ = returned
+			break
+		}
 		if generic, ok := n.Callee.(*ast.GenericExpression); ok {
 			application := c.result.GenericApplications[generic]
 			if application.Kind != "function" {
@@ -3625,6 +3694,9 @@ func expressionReturn(expression ast.Expression) ast.Statement {
 		return nil
 	}
 	switch node := expression.(type) {
+	case *ast.LambdaExpression:
+		// A lambda owns its returns; none escape into the enclosing expression.
+		return nil
 	case *ast.IfStatement:
 		if result := expressionReturn(node.Condition); result != nil {
 			return result
@@ -4666,6 +4738,15 @@ func fromTypeRef(ref ast.TypeRef) types.Type {
 			alternatives[index] = fromTypeRef(alternative)
 		}
 		return types.UnionOf(alternatives...)
+	}
+	if ref.FunctionReturn != nil {
+		parameters := make([]types.Type, len(ref.FunctionParameters))
+		for index, parameter := range ref.FunctionParameters {
+			parameters[index] = fromTypeRef(parameter)
+		}
+		result := types.FunctionOf(parameters, fromTypeRef(*ref.FunctionReturn))
+		result.Nullable = ref.Nullable
+		return result
 	}
 	t := types.FromName(ref.Name)
 	t.Nullable = ref.Nullable

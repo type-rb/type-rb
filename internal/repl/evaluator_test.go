@@ -37,6 +37,39 @@ func TestEvaluateFloatClassificationIntrinsics(t *testing.T) {
 	}
 }
 
+func TestEvaluateFirstClassFunctionClosure(t *testing.T) {
+	integer := types.FromName("Integer")
+	functionType := types.FunctionOf([]types.Type{integer}, integer)
+	span := token.Span{}
+	lambda := &ir.Lambda{
+		ExprBase:   ir.NewExprBase(span, functionType),
+		Parameters: []ir.Parameter{{Name: "value", Type: integer}},
+		ReturnType: integer,
+		Body: []ir.Statement{&ir.Return{Value: &ir.Binary{
+			ExprBase: ir.NewExprBase(span, integer),
+			Left:     &ir.Identifier{ExprBase: ir.NewExprBase(span, integer), Name: "value", Lexical: true},
+			Operator: "+",
+			Right:    &ir.Identifier{ExprBase: ir.NewExprBase(span, integer), Name: "captured", Lexical: true},
+		}}},
+	}
+	statements := []ir.Statement{
+		&ir.Variable{Name: "captured", Type: integer, Value: &ir.Literal{ExprBase: ir.NewExprBase(span, integer), Kind: "integer", Raw: "2"}},
+		&ir.Variable{Name: "add", Type: functionType, Value: lambda},
+		&ir.ExpressionStatement{Expression: &ir.Call{
+			ExprBase:  ir.NewExprBase(span, integer),
+			Callee:    &ir.Identifier{ExprBase: ir.NewExprBase(span, functionType), Name: "add", Lexical: true},
+			Arguments: []ir.CallArgument{{Value: &ir.Literal{ExprBase: ir.NewExprBase(span, integer), Kind: "integer", Raw: "3"}}},
+		}},
+	}
+	result, err := NewEvaluator(&bytes.Buffer{}, "go").Evaluate(statements, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value.Data != int64(5) || Inspect(result.Value) != "5" {
+		t.Fatalf("result=%#v", result)
+	}
+}
+
 func TestEvaluateInternalRuntimeFailure(t *testing.T) {
 	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
 	_, err := evaluator.intrinsic(

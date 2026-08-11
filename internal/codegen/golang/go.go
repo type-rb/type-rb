@@ -946,6 +946,20 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.caseExpression(n)
 	case *ir.Attempt:
 		return g.attemptExpression(n)
+	case *ir.Lambda:
+		parts := make([]string, len(n.Parameters))
+		for index, parameter := range n.Parameters {
+			parts[index] = goBindingIdentifier(parameter.Name) + " " + g.goType(parameter.Type)
+		}
+		header := "func(" + strings.Join(parts, ", ") + ")"
+		if returned := g.goType(n.ReturnType); returned != "" {
+			header += " " + returned
+		}
+		child := *g
+		child.b = strings.Builder{}
+		child.indent = g.indent + 1
+		child.statements(n.Body)
+		return header + " {\n" + child.b.String() + strings.Repeat("\t", g.indent) + "}"
 	case *ir.UnhandledEffect:
 		return g.expr(n.Value)
 	case *ir.Identifier:
@@ -2008,6 +2022,20 @@ func (g *generator) goType(t types.Type) string {
 			value = g.goType(t.Args[1])
 		}
 		result = "map[" + key + "]" + value
+	case types.Function:
+		parameters, returned, ok := types.FunctionSignature(t)
+		if !ok {
+			result = "func()"
+			break
+		}
+		parts := make([]string, len(parameters))
+		for index, parameter := range parameters {
+			parts[index] = g.goType(parameter)
+		}
+		result = "func(" + strings.Join(parts, ", ") + ")"
+		if returnType := g.goType(returned); returnType != "" {
+			result += " " + returnType
+		}
 	default:
 		if t.Name == "" {
 			result = "any"

@@ -561,6 +561,12 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		return nil, nil
 	}
 	switch node := expression.(type) {
+	case *ir.Lambda:
+		copy := *node
+		inner := &controlFlowNormalizer{temporary: n.temporary, reserved: n.reserved}
+		copy.Body = inner.statements(node.Body)
+		n.temporary = inner.temporary
+		return nil, &copy
 	case *ir.If:
 		return n.ifExpression(node)
 	case *ir.Case:

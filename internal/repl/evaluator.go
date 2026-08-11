@@ -92,11 +92,18 @@ type typeValue struct {
 
 type callable struct {
 	Function  *functionDefinition
+	Lambda    *lambdaClosure
 	Method    *ir.Method
 	Receiver  Value
 	Module    string
 	Construct *typeValue
 	Intrinsic string
+}
+
+type lambdaClosure struct {
+	Node   *ir.Lambda
+	Module string
+	Scope  *scope
 }
 
 type scope struct {
@@ -666,6 +673,8 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		return Value{Type: types.FromName("Void")}, nil
 	}
 	switch node := expression.(type) {
+	case *ir.Lambda:
+		return Value{Type: node.ExprType(), Data: &callable{Lambda: &lambdaClosure{Node: node, Module: module, Scope: sc}}}, nil
 	case *ir.If:
 		body, result, branchScope, err := e.selectIfBranch(node, module, sc)
 		if err != nil {
@@ -1392,6 +1401,21 @@ func (e *Evaluator) member(receiver Value, name, module string) (Value, error) {
 }
 
 func (e *Evaluator) call(function *callable, arguments []evaluatedArgument) (Value, error) {
+	if function.Lambda != nil {
+		closure := function.Lambda
+		callScope := &scope{parent: closure.Scope, values: map[string]Value{}}
+		if err := e.bind(callScope, closure.Node.Parameters, arguments, closure.Module); err != nil {
+			return Value{}, err
+		}
+		result, err := e.evaluate(closure.Node.Body, closure.Module, callScope)
+		if err != nil {
+			return Value{}, err
+		}
+		if result.Returned {
+			return result.Value, nil
+		}
+		return Value{Type: closure.Node.ReturnType}, nil
+	}
 	if function.Construct != nil {
 		if function.Construct.Record != nil {
 			return e.constructRecord(function.Construct.Record, arguments)
@@ -2947,6 +2971,11 @@ func Inspect(value Value) string {
 		return item.Definition.Node.Name + "::" + item.Name + "(" + strings.Join(parts, ", ") + ")"
 	case map[string]string:
 		return "#<" + value.Type.String() + ">"
+	case *callable:
+		if item.Lambda != nil {
+			return "#<fn>"
+		}
+		return "#<callable>"
 	}
 	return fmt.Sprint(value.Data)
 }
