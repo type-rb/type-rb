@@ -27,11 +27,11 @@ their npm or Bun package manager. Node remains the compatibility default, while
 Bun can be selected explicitly for server packages.
 
 The implemented language includes functions and classes, modules and
-interfaces, records, payload and raw-value enums with instance methods,
-initial generics, normalized unions, immutable and mutable bindings, typed
-collections and iteration, exhaustive pattern matching, value-producing `if`
-and `case` expressions, and explicit fallible effects with `fails` and
-`attempt`. See the
+interfaces, records, ordinary and raw-value enums, payload enums as sum types,
+enum instance methods, initial generics, normalized unions, immutable and
+mutable bindings, typed collections and iteration, exhaustive pattern
+matching, value-producing `if` and `case` expressions, and explicit fallible
+effects with `fails` and `attempt`. See the
 [language guide](language.md) and [specification](specification.md) for the
 current semantics.
 

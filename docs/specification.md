@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-08
+Last updated: 2026-08-12
 
 ## 1. Language Goals
 
@@ -146,8 +146,9 @@ end
   records this widening explicitly and typed IR lowers it in initializers,
   assignments, arguments, record and enum payloads, defaults, and returns.
   `Float` does not narrow implicitly to `Integer`.
-- Method parameters and iterator block parameters are mutable bindings in
-  v0.1. Class fields use their existing `readonly` modifier instead of `mut`.
+- Method parameters and iterator block parameters are mutable bindings in the
+  current language. Class fields use their existing `readonly` modifier
+  instead of `mut`.
 - `@ivar := expr` is disallowed; instance variables use declared fields and `=` updates.
 
 ### 3.6 Constants
@@ -187,8 +188,9 @@ end
   `trb/platform/<mode>/*` packages.
 - Official formatter command: `trb fmt`.
 - Canonical TypeRB indentation is one tab per nesting level. Formatter
-  configuration is not part of v0.1; a future configuration surface may
-  select a different indentation style without changing language semantics.
+  configuration is not part of the current language; a future configuration
+  surface may select a different indentation style without changing language
+  semantics.
 
 #### Unused bindings
 
@@ -286,8 +288,8 @@ unless their package declaration explicitly provides structured lowering.
 - A portable hash type is written `Hash<K, V>` with exactly two type
   arguments. Bare `Hash` is rejected outside the explicit Ruby-native
   compatibility surface.
-- v0.1 portable keys are non-nullable `String` or `Integer` values. A literal
-  must use one homogeneous key type. The label-style `name: value` literal
+- Portable keys are currently non-nullable `String` or `Integer` values. A
+  literal must use one homogeneous key type. The label-style `name: value` literal
   spelling has a `String` key in portable TypeRB; it becomes a Ruby `Symbol`
   only under an explicit Ruby-native import.
 - Non-empty literals infer their key and value types. Equivalent values retain
@@ -308,12 +310,12 @@ unless their package declaration explicitly provides structured lowering.
   the same `break`, `next`, and enclosing-method `return` behavior as Array
   iteration. Iteration uses a shallow entry snapshot captured before the first
   block call, while enumeration order is unspecified. Hash `each.with_index`,
-  `each_slice`, `map`, `select`, and `reduce` are not enabled in v0.1.
+  `each_slice`, `map`, `select`, and `reduce` are not currently enabled.
 - `hash[key]` is a required lookup and raises a runtime error when the key is
   absent in every backend and the REPL.
 - Compound assignment to a Hash entry is reserved until its evaluate-once and
   missing-key behavior is represented directly in typed IR. Write
-  `hash[key] = hash[key] + value` in v0.1.
+  `hash[key] = hash[key] + value` in the current language.
 
 Arrays and Hashes describe homogeneous collections. A union element type
 retains the alternatives of heterogeneous collection values, while a future
@@ -324,43 +326,58 @@ type of each named field. `Array<Integer | String>[0]` therefore remains
 The complete collection receiver and package API belongs to the
 [standard-library reference](standard-library.md).
 
-### 3.13 Enums, payloads, and exhaustive case
+### 3.13 Enums, raw values, and sum types
 
-- An enum is a closed nominal type declared with `enum Name`, uppercase
-  members, and `end`. Enum declarations are allowed at top level or directly
-  inside a module.
-- A payloadless member is written `Ready`. A payload-bearing member is written
-  `Value(value: String)` using one or more required, positional, typed fields.
-  Default, keyword, rest, and untyped payload fields are rejected.
+An `enum` declaration defines a closed nominal set of uppercase variants. It
+is allowed at top level or directly inside a module. TypeRB uses the shared
+variant and exhaustive-case model for two related but distinct purposes.
+
+#### 3.13.1 Enumerated values and raw values
+
+- An ordinary member is a payloadless value such as `Ready`.
 - A raw-value enum assigns every payloadless member an explicit String or
-  Integer literal, such as `Pending = "PENDING"` or `Unknown = -1`. Once one
-  member has a raw value, every member must have one of exactly the same type.
-  Raw expressions, duplicate raw values, payload fields, implicit numbering,
-  and generic raw-value enums are rejected.
+  Integer literal, such as `Pending = "PENDING"` or `Unknown = -1`. This adds
+  an external representation to the ordinary enumeration model.
+- Once one member has a raw value, every member must have one of exactly the
+  same type. Raw expressions, duplicate raw values, payload fields, implicit
+  numbering, and generic raw-value enums are rejected.
 - A raw-value enum remains nominal. It does not implicitly become its raw
   String or Integer type. `value.raw_value()` performs the outward conversion;
   `EnumName.from_raw(raw)` returns
   `Result<EnumName, EnumValueError>`. These generated names are reserved only
   inside enum declarations.
-- Enums may declare instance methods after all members. `self` has the enum's
-  nominal type, and the same method surface applies to payloadless,
-  payload-bearing, and raw-value enums. Enum class methods are not yet
-  user-definable.
-- Members are explicitly qualified with `EnumName::Member`. They infer the
-  enum's nominal type and cannot be mixed with members of another enum even
-  when the member names match.
+
+```trb
+enum OrderStatus
+	Pending = "PENDING"
+	Completed = "COMPLETED"
+
+	def terminal?(): Boolean
+		return self == OrderStatus::Completed
+	end
+end
+
+status := OrderStatus::Completed
+raw := status.raw_value()
+parsed := OrderStatus.from_raw("PENDING")
+```
+
+Typed JSON codecs encode a raw-value enum as its raw String or Integer and
+decode only declared raw values. Unknown input produces `JsonError`; the
+target-language object representation never determines the wire value.
+
+#### 3.13.2 Payload enums as sum types
+
+- A payload enum has at least one payload-bearing variant such as
+  `Value(value: String)`. It may also contain payloadless variants. Payload
+  variants use one or more required, positional, typed fields; default,
+  keyword, rest, and untyped fields are rejected.
+- A payload enum cannot also be a raw-value enum. The payload is variant data,
+  not the external representation of an enumerated constant.
 - A payload value is constructed with `EnumName::Member(value, ...)`.
   Payloadless members are values and are not callable.
-- Portable `case` dispatches on enum variants. A payload pattern such as
-  `when Token::Text(value)` introduces immutable bindings whose types come from
-  the variant declaration. v0.1 patterns bind every payload field positionally;
-  partial patterns, guards, nested patterns, and wildcard syntax are reserved.
-  Duplicate branches and duplicate bindings are errors.
-- Without `else`, a case must list every member. With `else`, omitted members
-  are handled by that branch. The selector is evaluated exactly once in every
-  backend and the REPL.
-- A separate `sum` declaration is not introduced: payload-bearing enum members
-  provide the closed sum-type model.
+- A separate `sum` declaration is not introduced. Payload-bearing enum
+  variants provide TypeRB's closed sum-type model.
 
 ```trb
 enum Token
@@ -381,24 +398,22 @@ def describe(token: Token): String
 end
 ```
 
-```trb
-enum OrderStatus
-	Pending = "PENDING"
-	Completed = "COMPLETED"
+#### 3.13.3 Shared enum behavior
 
-	def terminal?(): Boolean
-		return self == OrderStatus::Completed
-	end
-end
-
-status := OrderStatus::Completed
-raw := status.raw_value()
-parsed := OrderStatus.from_raw("PENDING")
-```
-
-Typed JSON codecs encode a raw-value enum as its raw String or Integer and
-decode only declared raw values. Unknown input produces `JsonError`; the
-target-language object representation never determines the wire value.
+- Members are explicitly qualified with `EnumName::Member`. They infer the
+  enum's nominal type and cannot be mixed with members of another enum even
+  when the member names match.
+- Enums may declare instance methods after all members. `self` has the enum's
+  nominal type, and the same method surface applies to ordinary, raw-value,
+  and payload enums. Enum class methods are not yet user-definable.
+- Portable `case` dispatches on variants. A payload pattern such as
+  `when Token::Text(value)` introduces immutable bindings whose types come from
+  the variant declaration. Current patterns bind every payload field
+  positionally; partial patterns, guards, nested patterns, and wildcard syntax
+  are reserved. Duplicate branches and duplicate bindings are errors.
+- Without `else`, a case must list every member. With `else`, omitted members
+  are handled by that branch. The selector is evaluated exactly once in every
+  backend and the REPL.
 
 ### 3.14 Value-producing control flow
 
@@ -420,7 +435,7 @@ target-language object representation never determines the wire value.
 - The checker represents divergence with the internal bottom type `Never`.
   When every branch diverges, the control-flow expression also has `Never`;
   otherwise its type is the common type of the value-producing branches.
-  `Never` is not a source-level type name in v0.1.
+  `Never` is not a source-level type name.
 - Typed IR records each branch result and whether that branch diverges. Go and
   TypeScript hoist expressions containing enclosing transfers into structured
   statements and compiler-owned temporaries, preserving the function or loop
@@ -482,7 +497,7 @@ inferred from Go, Ruby, or TypeScript:
   common backend-safe rule is chosen, portable code should use a private
   backing field such as `@_name` for a public `name()` accessor;
 - whether abstract, final, or protected class members add enough value to
-  justify new syntax. They are not part of v0.1.
+  justify new syntax. They are not part of the current language.
 
 ## 4. Initial user-defined generics
 
@@ -514,9 +529,9 @@ inferred from Go, Ruby, or TypeScript:
 - `trb/std/result` exports the portable `Result<T, E>` payload enum with
   `Ok(value: T)` and `Err(error: E)` variants. It is imported explicitly with
   `import { Result } from trb/std/result`.
-- Construction and handling use the ordinary generic enum rules. v0.1 keeps
-  both control-flow paths visible with explicit constructors and exhaustive
-  pattern matching:
+- Construction and handling use the ordinary generic enum rules. The baseline
+  keeps both control-flow paths visible with explicit constructors and
+  exhaustive pattern matching:
 
 ```trb
 import { Result } from trb/std/result
@@ -543,8 +558,10 @@ end
   and case patterns—still require an explicit import such as
   `import { Result } from trb/std/result` or
   `import { IndexLookupError } from trb/std/errors`.
-- Postfix `?`, postfix `!`, prefix `try`, implicit exceptions, and `unwrap` are
-  not part of v0.1. Fallible operations use the effect rules below.
+- Postfix propagation with `?` or `!`, prefix `try`, implicit exceptions, and
+  `unwrap` are not part of the current language. Callable names may still end
+  in `?` or `!`; those suffixes are ordinary naming conventions. Fallible
+  operations use the effect rules below.
 
 ### 4.2 Fallible effects
 

@@ -7,9 +7,8 @@ compiler does not require Go.
 ## Version convention
 
 The version embedded in source builds is the next planned release followed by
-`-dev`, such as `0.1.2-dev`. A release tag uses the corresponding stable version,
-such as `v0.1.2`; release packaging replaces the development version in every
-binary with `0.1.2`.
+`-dev`, written as `X.Y.Z-dev`. A release tag uses the corresponding stable
+version `vX.Y.Z`; release packaging embeds `X.Y.Z` in every binary.
 
 After publishing a release, the Release workflow advances the source version
 to the next planned patch release through an automatically merged pull request

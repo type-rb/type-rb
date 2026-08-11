@@ -226,9 +226,45 @@ Construction is keyword-only and checks the complete field set. Records cannot
 inherit. Go emits a value struct, Ruby emits `Data`, and TypeScript emits an
 interface.
 
-## Enums and exhaustive case
+## Enums, raw values, and sum types
 
-Enums are closed nominal types and may carry typed payloads:
+TypeRB uses `enum` for two related but distinct models. An ordinary enum is a
+closed set of named values:
+
+```trb
+enum TrafficLight
+	Red
+	Yellow
+	Green
+end
+```
+
+Every member may instead bind an explicit String or Integer representation for
+storage and JSON boundaries. This is a raw-value enum: it extends the ordinary
+enumeration model rather than introducing a different runtime type.
+
+```trb
+enum OrderStatus
+	Pending = "PENDING"
+	Completed = "COMPLETED"
+
+	def terminal?(): Boolean
+		return self == OrderStatus::Completed
+	end
+end
+
+status := OrderStatus::Completed
+puts(status.terminal?())
+puts(status.raw_value())
+parsed := OrderStatus.from_raw("PENDING")
+```
+
+The enum remains a nominal `OrderStatus`; conversion is never implicit.
+`from_raw()` returns `Result<OrderStatus, EnumValueError>`. Every member of a
+raw-value enum must declare a distinct raw value of the same type.
+
+A payload enum is TypeRB's closed sum-type model. Its alternatives may carry
+different typed data, and it may mix payload-bearing and payloadless variants:
 
 ```trb
 enum Token
@@ -250,30 +286,13 @@ end
 ```
 
 A `case` without `else` must handle every member. Payload patterns introduce
-immutable bindings with types from the enum declaration.
+immutable bindings with types from the variant declaration. A payload enum
+cannot also declare raw values. `Result<T, E>` is the standard generic payload
+enum, with `Ok(value: T)` and `Err(error: E)` variants.
 
-Enums may define instance methods after their members. An enum can also bind
-every member to an explicit String or Integer used at storage and JSON
-boundaries:
-
-```trb
-enum OrderStatus
-	Pending = "PENDING"
-	Completed = "COMPLETED"
-
-	def terminal?(): Boolean
-		return self == OrderStatus::Completed
-	end
-end
-
-status := OrderStatus::Completed
-puts(status.terminal?())
-puts(status.raw_value())
-parsed := OrderStatus.from_raw("PENDING")
-```
-
-The enum remains a nominal `OrderStatus`; conversion is never implicit.
-`from_raw()` returns `Result<OrderStatus, EnumValueError>`.
+Ordinary, raw-value, and payload enums all remain nominal, use qualified member
+names, support exhaustive `case`, and may define instance methods after their
+members. TypeRB does not add a separate `sum` declaration.
 
 The initial user-defined generics surface supports payload enums and top-level
 functions with explicit type arguments:
@@ -441,7 +460,7 @@ These transformations currently operate on Arrays. The current alpha accepts
 one result expression in transformation blocks.
 Structured multi-statement blocks and first-class lambdas are planned.
 
-## Result
+## Result and fallible effects
 
 `trb/std/result` provides `Result<T, E>` with `Ok` and `Err` variants:
 
@@ -458,9 +477,34 @@ def unwrap(result: Result<Integer, String>): Integer
 end
 ```
 
-There is no propagation operator in the current alpha. Explicit exhaustive
-handling is the baseline while concise syntax is evaluated through application
-usage.
+`Result` is an ordinary value: it can be stored, returned, and handled
+explicitly with exhaustive `case`. TypeRB also models operations that may fail
+before they have been captured as a value. Such a function declares a `fails`
+effect:
+
+```trb
+def recent_posts(): Array<Post> fails DbError
+	return Post.order(created_at: :desc).limit(20).all()
+end
+```
+
+A compatible enclosing `fails` function propagates the effect automatically.
+A named function that neither declares nor captures it is rejected. `attempt`
+captures the effect as an ordinary `Result<T, E>`:
+
+```trb
+posts_result := attempt recent_posts()
+
+count_result := attempt do
+	posts := recent_posts()
+	posts.size()
+end
+```
+
+`main()` cannot declare `fails`; it must use `attempt`. At the REPL top level,
+a fallible expression prints its success or structured error and keeps the
+session alive. There is no postfix `Result` propagation operator in the current
+alpha; explicit `case`, `fails`, and `attempt` are the implemented choices.
 
 ## Formatting
 

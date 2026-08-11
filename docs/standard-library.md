@@ -520,7 +520,10 @@ import { Result } from trb/std/result
 ```
 
 Construct `Result::Ok(value)` or `Result::Err(error)` and handle it with an
-exhaustive enum `case`. The current alpha has no propagation operator.
+exhaustive enum `case`. The current alpha has no postfix propagation operator
+for a `Result` value; fallible effects use the language-level `fails` and
+`attempt` constructs described in the
+[language guide](language.md#result-and-fallible-effects).
 
 `trb/std/unit` provides `Unit` for successful generic operations with no
 application payload.
