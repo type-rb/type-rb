@@ -117,9 +117,10 @@ type HighlightRequest struct {
 // Service owns a checked project snapshot while keeping terminal and browser
 // presentation concerns outside the language analysis layer.
 type Service struct {
-	mu      sync.RWMutex
-	mode    string
-	context Context
+	mu         sync.RWMutex
+	mode       string
+	context    Context
+	candidates Context
 }
 
 func New(mode string) *Service {
@@ -133,18 +134,42 @@ func (s *Service) Update(programs []*ir.Program, modulePath string) {
 	s.mu.Unlock()
 }
 
+// SetCandidates adds declarations that tooling may offer before source has
+// imported them. They participate in completion and highlighting only; the
+// compiler remains responsible for activating the corresponding import.
+func (s *Service) SetCandidates(context Context) {
+	s.mu.Lock()
+	s.candidates = context
+	s.mu.Unlock()
+}
+
 func (s *Service) Complete(source string, cursor int) []CompletionItem {
 	s.mu.RLock()
-	request := CompletionRequest{Source: source, Cursor: cursor, Mode: s.mode, Context: s.context}
+	request := CompletionRequest{Source: source, Cursor: cursor, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
 	s.mu.RUnlock()
 	return Complete(request)
 }
 
 func (s *Service) Highlight(source string) []HighlightSpan {
 	s.mu.RLock()
-	request := HighlightRequest{Source: source, Mode: s.mode, Context: s.context}
+	request := HighlightRequest{Source: source, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
 	s.mu.RUnlock()
 	return Highlight(request)
+}
+
+func mergeCandidateContext(current, candidates Context) Context {
+	result := current
+	result.Symbols = append([]Symbol(nil), current.Symbols...)
+	visible := make(map[string]bool, len(current.Symbols))
+	for _, symbol := range current.Symbols {
+		visible[symbol.Name] = true
+	}
+	for _, symbol := range candidates.Symbols {
+		if !visible[symbol.Name] {
+			result.Symbols = append(result.Symbols, symbol)
+		}
+	}
+	return result
 }
 
 func emptyContext() Context {

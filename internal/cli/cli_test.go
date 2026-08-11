@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/project"
 )
 
@@ -402,13 +403,99 @@ func TestReplAutomaticallyImportsUniqueProjectExportsAcrossModes(t *testing.T) {
 	}
 }
 
-func TestReplProjectPreludeDoesNotDuplicateExplicitImports(t *testing.T) {
-	imports := []replProjectImport{{path: "models/user", symbols: []string{"Profile", "User"}}}
-	if got, want := replProjectPrelude(imports, "import { User } from models/user\n"), "import { Profile } from models/user\n"; got != want {
+func TestReplAutomaticallyImportsPortableStandardTypesAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/repl-standard-auto-import"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			input := "Date.parse(\"2026-08-11\").to_s()\n:quit\n"
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			if got, want := stdout.String(), "\"2026-08-11\" : String\n"; got != want {
+				t.Fatalf("stdout=%q, want %q; stderr=%s", got, want, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("unexpected stderr: %s", stderr.String())
+			}
+		})
+	}
+}
+
+func TestReplPreludeDoesNotDuplicateExplicitImports(t *testing.T) {
+	imports := []replImport{{path: "models/user", symbols: []string{"Profile", "User"}}}
+	if got, want := replPrelude(imports, "import { User } from models/user\n"), "import { Profile } from models/user\n"; got != want {
 		t.Fatalf("named import prelude=%q, want %q", got, want)
 	}
-	if got := replProjectPrelude(imports, "import models/user\n"); got != "" {
+	if got := replPrelude(imports, "import models/user\n"); got != "" {
 		t.Fatalf("whole-module import prelude=%q, want empty", got)
+	}
+	if got, want := replPrelude(imports, "record User\nend\n"), "import { Profile } from models/user\n"; got != want {
+		t.Fatalf("session declaration prelude=%q, want %q", got, want)
+	}
+}
+
+func TestReplPreludeLazilyActivatesPortableStandardTypes(t *testing.T) {
+	imports := []replImport{{path: "trb/std/time", symbols: []string{"Date", "DateTime"}, standard: true}}
+	if got := replPrelude(imports, "1 + 2\n"); got != "" {
+		t.Fatalf("unused standard prelude=%q, want empty", got)
+	}
+	if got, want := replPrelude(imports, "Date.parse(\"2026-08-11\")\n"), "import { Date } from trb/std/time\n"; got != want {
+		t.Fatalf("referenced standard prelude=%q, want %q", got, want)
+	}
+}
+
+func TestReplStandardCandidatesIncludeDateAndClassMembers(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-standard-candidates"
+	imports := uniqueReplImports(nil, "__trb_repl__", "go")
+	candidates, err := replStandardCandidates(config, imports, config.Go.RootPackage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, symbol := range candidates.Symbols {
+		if symbol.Name != "Date" {
+			continue
+		}
+		for _, member := range symbol.Members {
+			if member.Name == "parse" {
+				return
+			}
+		}
+		t.Fatal("Date completion candidate is missing parse()")
+	}
+	t.Fatal("Date completion candidate is missing")
+}
+
+func TestUniqueReplImportsOmitProjectAndStandardNameConflicts(t *testing.T) {
+	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
+		{Filename: "models/date.trb", ModulePath: "models/date", Package: "main", Source: []byte("record Date\nend\n")},
+		{Filename: ".trb-repl.trb", ModulePath: "__trb_repl__", Package: "main", Source: []byte("")},
+	}, compiler.Options{Mode: "go", Package: "main", ModulePath: "__trb_repl__", AllowUnusedImports: true, InteractiveModule: "__trb_repl__"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, imported := range uniqueReplImports(artifacts, "__trb_repl__", "go") {
+		for _, symbol := range imported.symbols {
+			if symbol == "Date" {
+				t.Fatalf("ambiguous Date was auto-imported from %s", imported.path)
+			}
+		}
 	}
 }
 

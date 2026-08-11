@@ -129,7 +129,7 @@ func TestCompletionIncludesExplicitImportedNamesAndNamespaces(t *testing.T) {
 	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
 		{Filename: "models/user.trb", ModulePath: "models/user", Source: []byte("record User\n\tname: String\nend\n")},
 		{Filename: "models/state.trb", ModulePath: "models/state", Source: []byte("enum State\n\tOpen\n\tClosed\nend\n")},
-		{Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { User } from models/user\nimport models/state as states\nimport { Result } from trb/std/result\nimport trb/std/strings\n")},
+		{Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { User } from models/user\nimport models/state as states\nimport { Result } from trb/std/result\nimport { Date } from trb/std/time\nimport trb/std/strings\n")},
 	}, compiler.Options{Mode: "go", Package: "main", ModulePath: "repl", AllowUnusedImports: true})
 	if err != nil {
 		t.Fatal(err)
@@ -149,6 +149,12 @@ func TestCompletionIncludesExplicitImportedNamesAndNamespaces(t *testing.T) {
 	}
 	if _, ok := findCompletion(service.Complete("Result::O", len("Result::O")), "Ok"); !ok {
 		t.Fatal("imported enum member was not completed")
+	}
+	if _, ok := findCompletion(service.Complete("Date", len("Date")), "Date"); !ok {
+		t.Fatal("imported standard type was not completed")
+	}
+	if _, ok := findCompletion(service.Complete("Date.pa", len("Date.pa")), "parse"); !ok {
+		t.Fatal("imported standard type member was not completed")
 	}
 	if _, ok := findCompletion(service.Complete("states::State::O", len("states::State::O")), "Open"); !ok {
 		t.Fatal("aliased project namespace member was not completed")
@@ -170,6 +176,28 @@ func TestCompletionDoesNotExposeImplicitRuntimeImports(t *testing.T) {
 		if _, ok := findCompletion(service.Complete(name[:3], 3), name); ok {
 			t.Fatalf("implicit runtime dependency %s was exposed as a source import", name)
 		}
+	}
+}
+
+func TestCompletionOffersImportCandidatesWithoutChangingCheckedContext(t *testing.T) {
+	service := languageservice.New("go")
+	service.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{{
+		Name: "Date", Kind: languageservice.CompletionType, Detail: "trb/std/time",
+		Members: []languageservice.Symbol{{Name: "parse", Kind: languageservice.CompletionMethod, Detail: "parse(value: String): Date"}},
+	}}})
+	if _, ok := findCompletion(service.Complete("Date", len("Date")), "Date"); !ok {
+		t.Fatal("standard import candidate was not completed")
+	}
+	if _, ok := findCompletion(service.Complete("Date.pa", len("Date.pa")), "parse"); !ok {
+		t.Fatal("standard import candidate members were not completed")
+	}
+
+	service.Update([]*ir.Program{{Mode: "go", ModulePath: "repl", Statements: []ir.Statement{
+		&ir.Record{Name: "Date"},
+	}}}, "repl")
+	items := service.Complete("Date.pa", len("Date.pa"))
+	if _, ok := findCompletion(items, "parse"); ok {
+		t.Fatal("import candidate was not shadowed by the checked session declaration")
 	}
 }
 
