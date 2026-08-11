@@ -887,7 +887,7 @@ func (e *Evaluator) ormGroupedIntrinsic(name string, arguments []evaluatedArgume
 		if err := rows.Scan(&raw, &rawValue); err != nil {
 			return e.ormResultErr(typ, "InvalidData", "database grouped count row was invalid")
 		}
-		key, err := ormColumnValue(copy.column.Type, raw)
+		key, err := e.ormColumnValue(copy.column, raw)
 		if err != nil {
 			return e.ormResultErr(typ, "InvalidData", "database grouped count row was invalid")
 		}
@@ -1250,6 +1250,29 @@ func ormDatabaseValue(value Value) any {
 	switch data := value.Data.(type) {
 	case bytesValue:
 		return []byte(data)
+	case *enumValue:
+		member := data.Definition.Members[data.Name]
+		if member != nil && member.RawValue != nil {
+			switch raw := member.RawValue.(type) {
+			case *ir.Literal:
+				if raw.Kind == "string" {
+					decoded, err := strconv.Unquote(raw.Raw)
+					if err == nil {
+						return decoded
+					}
+				}
+				if parsed, err := strconv.ParseInt(strings.ReplaceAll(raw.Raw, "_", ""), 10, 64); err == nil {
+					return parsed
+				}
+			case *ir.Unary:
+				if literal, ok := raw.Operand.(*ir.Literal); raw.Operator == "-" && ok {
+					if parsed, err := strconv.ParseInt(strings.ReplaceAll(literal.Raw, "_", ""), 10, 64); err == nil {
+						return -parsed
+					}
+				}
+			}
+		}
+		return ormintegration.EnumMemberStorageName(data.Name)
 	default:
 		return data
 	}
@@ -1354,7 +1377,7 @@ func (e *Evaluator) ormScanModel(rows *sql.Rows, query *ormQueryValue) (Value, *
 		fields[field.Name] = value
 	}
 	for index, column := range model.Columns {
-		value, err := ormColumnValue(column.Type, raw[index])
+		value, err := e.ormColumnValue(column, raw[index])
 		if err != nil {
 			return Value{}, &ormFailure{kind: "InvalidData", message: "database row was invalid"}
 		}
@@ -1418,6 +1441,36 @@ func ormColumnValue(typ types.Type, raw any) (Value, error) {
 		return Value{}, fmt.Errorf("unsupported ORM column type %s", typ)
 	}
 	return value, nil
+}
+
+func (e *Evaluator) ormColumnValue(column ormintegration.Column, raw any) (Value, error) {
+	if column.Enum == nil {
+		return ormColumnValue(column.Type, raw)
+	}
+	if raw == nil {
+		if !column.Type.Nullable {
+			return Value{}, errors.New("non-nullable database enum column contained NULL")
+		}
+		return Value{Type: column.Type}, nil
+	}
+	storageType := column.Enum.StorageType
+	storageType.Nullable = false
+	storage, err := ormColumnValue(storageType, raw)
+	if err != nil {
+		return Value{}, err
+	}
+	member, ok := column.Enum.MemberForStorage(storage.Data)
+	if !ok {
+		return Value{}, fmt.Errorf("database enum %s contains an unknown value", column.Enum.Name)
+	}
+	definition, ok := e.definitions[symbolKey(column.Enum.ModulePath, column.Enum.Name)].(*enumDefinition)
+	if !ok {
+		return Value{}, fmt.Errorf("ORM enum %s runtime is not loaded", column.Enum.Name)
+	}
+	return Value{
+		Type: column.Type,
+		Data: &enumValue{Definition: definition, Name: member, Payload: map[string]Value{}},
+	}, nil
 }
 
 func ormInteger(value any) (int64, bool) {
@@ -1585,7 +1638,7 @@ func (e *Evaluator) ormLoadProjection(query *ormQueryValue, column ormintegratio
 		if err := rows.Scan(&raw); err != nil {
 			return nil, &ormFailure{kind: "InvalidData", message: "database projection row was invalid"}
 		}
-		value, err := ormColumnValue(column.Type, raw)
+		value, err := e.ormColumnValue(column, raw)
 		if err != nil {
 			return nil, &ormFailure{kind: "InvalidData", message: "database projection row was invalid"}
 		}

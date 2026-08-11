@@ -197,6 +197,177 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	}
 }
 
+func TestEnumColumnsReplaceSchemaTypesWithNominalEnums(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE enum_products (
+		id INTEGER PRIMARY KEY,
+		status TEXT NOT NULL,
+		priority INTEGER,
+		phase TEXT NOT NULL
+	)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(Config{Adapter: "sqlite", Database: filepath.Base(databasePath)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	program, diagnostics := parser.Parse([]byte(`import { Model, enum_column } from trb/orm
+
+enum OrderStatus
+	Pending = "PENDING"
+	Completed = "COMPLETED"
+end
+
+enum Priority
+	Low = -1
+	High = 2
+end
+
+enum FulfillmentPhase
+	PendingReview
+	ReadyToShip
+end
+
+class EnumProduct < Model
+	enum_column(:status, OrderStatus)
+	enum_column(:priority, Priority)
+	enum_column(:phase, FulfillmentPhase)
+end
+`))
+	if len(diagnostics) != 0 {
+		t.Fatalf("parse diagnostics: %#v", diagnostics)
+	}
+	program.ModulePath = "models/product"
+	options := map[string][]byte{PackageName: encoded}
+	manifest, err := Analyze([]*ast.Program{program}, root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, ok := manifest.Model("EnumProduct")
+	if !ok {
+		t.Fatal("EnumProduct manifest is missing")
+	}
+	status, _ := model.Column("status")
+	if status.Type.String() != "OrderStatus" || status.Enum == nil || status.Enum.StorageType.String() != "String" || len(status.Enum.Values) != 2 || status.Enum.Values[0].StringValue != "PENDING" {
+		t.Fatalf("unexpected String raw enum column: %#v", status)
+	}
+	priority, _ := model.Column("priority")
+	if priority.Type.String() != "Priority?" || priority.Enum == nil || priority.Enum.StorageType.String() != "Integer?" || priority.Enum.Values[0].IntegerValue != -1 {
+		t.Fatalf("unexpected nullable Integer raw enum column: %#v", priority)
+	}
+	phase, _ := model.Column("phase")
+	if phase.Type.String() != "FulfillmentPhase" || phase.Enum == nil || phase.Enum.Values[0].StringValue != "pending_review" || phase.Enum.Values[1].StringValue != "ready_to_ship" {
+		t.Fatalf("unexpected conventional enum column: %#v", phase)
+	}
+	catalog, err := Declarations([]*ast.Program{program}, root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared, _ := catalog.Type("EnumProduct")
+	if declared.InstanceMembers["status"].Return.String() != "OrderStatus" || declared.ClassMembers["create"].Parameters[1].Type.String() != "OrderStatus" {
+		t.Fatalf("enum column types did not reach declarations: %#v", declared)
+	}
+}
+
+func TestEnumColumnsUseImportedEnumsWithSchemaLocks(t *testing.T) {
+	root := t.TempDir()
+	lock, err := schemalock.ParseSQL("sqlite", []byte(`
+CREATE TABLE enum_products (
+	id INTEGER PRIMARY KEY,
+	status TEXT NOT NULL
+);
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Write(filepath.Join(root, "db", "schema.lock.json")); err != nil {
+		t.Fatal(err)
+	}
+	options := map[string][]byte{PackageName: []byte(`{
+		"adapter": "sqlite",
+		"database": {"environment": "TRB_TEST_MISSING_DATABASE"}
+	}`)}
+	t.Setenv("TRB_TEST_MISSING_DATABASE", "")
+	enums, diagnostics := parser.Parse([]byte(`enum OrderStatus
+	Pending = "PENDING"
+	Completed = "COMPLETED"
+end
+`))
+	if len(diagnostics) != 0 {
+		t.Fatalf("enum parse diagnostics: %#v", diagnostics)
+	}
+	enums.ModulePath = "domain/status"
+	model, diagnostics := parser.Parse([]byte(`import { OrderStatus } from domain/status
+import { Model, enum_column } from trb/orm
+
+class EnumProduct < Model
+	enum_column(:status, OrderStatus)
+end
+`))
+	if len(diagnostics) != 0 {
+		t.Fatalf("model parse diagnostics: %#v", diagnostics)
+	}
+	model.ModulePath = "models/product"
+	manifest, err := Analyze([]*ast.Program{enums, model}, root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	product, ok := manifest.Model("EnumProduct")
+	if !ok {
+		t.Fatal("EnumProduct manifest is missing")
+	}
+	status, ok := product.Column("status")
+	if !ok || status.Type.String() != "OrderStatus" || status.Enum == nil || status.Enum.ModulePath != "domain/status" || status.Enum.Values[1].StringValue != "COMPLETED" {
+		t.Fatalf("unexpected imported enum column: %#v", status)
+	}
+}
+
+func TestEnumColumnsRejectInvalidMappings(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"missing column", "enum Status\n\tReady\nend\nclass EnumProduct < Model\n\tenum_column(:missing, Status)\nend\n", "has no column missing"},
+		{"storage mismatch", "enum Status\n\tReady = 1\nend\nclass EnumProduct < Model\n\tenum_column(:status, Status)\nend\n", "uses Integer storage"},
+		{"payload enum", "enum Status\n\tReady(value: String)\nend\nclass EnumProduct < Model\n\tenum_column(:status, Status)\nend\n", "only payloadless members"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			databasePath := filepath.Join(root, "application.sqlite3")
+			database, err := sql.Open("sqlite", databasePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.Exec(`CREATE TABLE enum_products (id INTEGER PRIMARY KEY, status TEXT NOT NULL)`); err != nil {
+				database.Close()
+				t.Fatal(err)
+			}
+			database.Close()
+			encoded, _ := json.Marshal(Config{Adapter: "sqlite", Database: filepath.Base(databasePath)})
+			program, diagnostics := parser.Parse([]byte("import { Model, enum_column } from trb/orm\n" + test.source))
+			if len(diagnostics) != 0 {
+				t.Fatalf("parse diagnostics: %#v", diagnostics)
+			}
+			program.ModulePath = "models/product"
+			_, err = Analyze([]*ast.Program{program}, root, map[string][]byte{PackageName: encoded})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q, got %v", test.want, err)
+			}
+		})
+	}
+}
+
 func TestLoadSchemaUsesDefaultLockWithoutLiveDatabase(t *testing.T) {
 	root := t.TempDir()
 	lock, err := schemalock.ParseSQL("sqlite", []byte(`
