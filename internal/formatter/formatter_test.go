@@ -39,7 +39,6 @@ func TestFormatFunctionValuesAndSemicolonForm(t *testing.T) {
 		t.Fatalf("fn formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
 	}
 }
-
 func TestFormatPreservesStructuredJSXAndIsIdempotent(t *testing.T) {
 	source := []byte("import { ReactNode } from trb/platform/typescript/react\ndef Card(props:CardProps):ReactNode\nreturn <article className=\"card\">\n\t<h2>{props.title}</h2>\n</article> # card\nend\n")
 	formatted, diagnostics := Format(source)
