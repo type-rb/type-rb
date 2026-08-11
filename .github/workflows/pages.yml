@@ -19,6 +19,8 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: pages-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'production' }}
@@ -62,8 +64,21 @@ jobs:
           test -s dist/playground/tour/index.html
           test -s dist/playground/assets/trb.wasm
           test -s dist/playground/assets/wasm_exec.js
+          grep -F 'url=/' dist/playground/type-rb/index.html
+          grep -F 'url=/tour/' dist/playground/type-rb/tour/index.html
+          grep -F 'url=/play/' dist/playground/type-rb/play/index.html
           grep -F '"transport": "wasm"' dist/playground/runtime.json
           grep -F '"version": "'"$version"'"' dist/playground/runtime.json
+
+      - name: Prepare legacy Pages redirects
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/legacy-pages/play dist/legacy-pages/tour
+          cp dist/playground/type-rb/index.html dist/legacy-pages/index.html
+          cp dist/playground/type-rb/play/index.html dist/legacy-pages/play/index.html
+          cp dist/playground/type-rb/tour/index.html dist/legacy-pages/tour/index.html
 
       - name: Publish organization Pages branch
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -106,3 +121,25 @@ jobs:
           fi
           git -C "$site_dir" commit -m "Deploy TypeRB website from $GITHUB_SHA"
           git -C "$site_dir" push origin HEAD:site
+
+      - name: Configure legacy GitHub Pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v6
+
+      - name: Upload legacy Pages redirects
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/legacy-pages
+
+  deploy-legacy-redirects:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy legacy Pages redirects
+        id: deployment
+        uses: actions/deploy-pages@v5
