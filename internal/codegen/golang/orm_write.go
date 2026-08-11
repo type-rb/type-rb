@@ -8,7 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormintegration.Model, projection, scanTargets []string) {
+func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormintegration.Model, projection []string) {
 	primaryKey, ok := model.PrimaryKey()
 	if !ok {
 		return
@@ -72,7 +72,7 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	if adapter.InsertReturning {
 		g.line("row := database.QueryRow(statement+" + strconv.Quote(" RETURNING "+strings.Join(projection, ", ")) + ", values...)")
 		g.line("value := &" + goIdentifier(model.Name, true) + "{}")
-		g.line("if err := row.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database insert failed\")") + " }")
+		g.line("if err := " + goORMScanModel(model) + "(row, value); err != nil { return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database insert failed\")") + " }")
 		g.line("value." + goORMQueryScopeField() + " = query")
 		g.line("return " + g.ormResultOK(modelType, "value"))
 	} else {
@@ -97,7 +97,7 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	g.ormInsertAllRuntime(adapter, model)
 	g.ormConflictRuntime(model)
 	g.ormUpsertAllRuntime(adapter, model)
-	g.ormUpdateRuntime(adapter, model, primaryKey, projection, scanTargets)
+	g.ormUpdateRuntime(adapter, model, primaryKey, projection)
 	g.ormDeleteRuntime(adapter, model, primaryKey)
 	g.ormDestroyRuntime(model)
 }
@@ -343,7 +343,7 @@ func (g *generator) ormInsertAllRuntime(adapter ormintegration.Adapter, model or
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) ormUpdateRuntime(adapter ormintegration.Adapter, model ormintegration.Model, primaryKey ormintegration.Column, projection, scanTargets []string) {
+func (g *generator) ormUpdateRuntime(adapter ormintegration.Adapter, model ormintegration.Model, primaryKey ormintegration.Column, projection []string) {
 	modelType := types.FromName(model.Name)
 	resultType := g.ormResultType(modelType)
 	modelName := goIdentifier(model.Name, true)
@@ -384,7 +384,7 @@ func (g *generator) ormUpdateRuntime(adapter ormintegration.Adapter, model ormin
 	if adapter.InsertReturning {
 		g.line("row := database.QueryRow(statement+" + strconv.Quote(" RETURNING "+strings.Join(projection, ", ")) + ", arguments...)")
 		g.line("updated := &" + modelName + "{}")
-		g.line("if err := row.Scan(" + strings.Join(replaceScanReceiver(scanTargets, "value", "updated"), ", ") + "); err != nil {")
+		g.line("if err := " + goORMScanModel(model) + "(row, updated); err != nil {")
 		g.indent++
 		g.line("if errors.Is(err, sql.ErrNoRows) { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "database update target was not found")) + " }")
 		g.line("return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database update failed\")"))

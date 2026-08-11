@@ -202,6 +202,14 @@ func mysqlColumnType(dataType, databaseType string) (types.Type, error) {
 	normalizedType := strings.ToLower(strings.TrimSpace(dataType))
 	normalizedDatabaseType := strings.ToLower(strings.TrimSpace(databaseType))
 	switch normalizedType {
+	case "date":
+		return types.FromName("Date"), nil
+	case "time":
+		return types.FromName("TimeOfDay"), nil
+	case "datetime":
+		return types.FromName("DateTime"), nil
+	case "timestamp":
+		return types.FromName("Instant"), nil
 	case "tinyint":
 		if strings.HasPrefix(normalizedDatabaseType, "tinyint(1)") {
 			return types.FromName("Boolean"), nil

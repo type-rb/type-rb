@@ -527,21 +527,19 @@ func TestPostgreSQLAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
 }
 
 func TestPostgreSQLColumnTypes(t *testing.T) {
-	tests := map[string]types.Kind{
-		"int8": types.Int, "float8": types.Float, "text": types.String,
-		"uuid": types.String, "jsonb": types.String, "bool": types.Bool, "bytea": types.Bytes,
+	tests := map[string]string{
+		"int8": "Integer", "float8": "Float", "text": "String",
+		"uuid": "String", "jsonb": "String", "bool": "Boolean", "bytea": "Bytes",
+		"date": "Date", "time": "TimeOfDay", "timestamp": "DateTime", "timestamptz": "Instant",
 	}
 	for databaseType, want := range tests {
 		got, err := postgresqlColumnType(databaseType, databaseType)
 		if err != nil {
 			t.Fatalf("postgresqlColumnType(%q): %v", databaseType, err)
 		}
-		if got.Kind != want {
-			t.Fatalf("postgresqlColumnType(%q) = %s, want %s", databaseType, got.Kind, want)
+		if got.String() != want {
+			t.Fatalf("postgresqlColumnType(%q) = %s, want %s", databaseType, got, want)
 		}
-	}
-	if _, err := postgresqlColumnType("timestamp without time zone", "timestamp"); err == nil {
-		t.Fatal("timestamp should remain unsupported until portable time types are defined")
 	}
 }
 
@@ -564,26 +562,27 @@ func TestMySQLAdapterDefinesPortableRuntimeSyntax(t *testing.T) {
 func TestMySQLColumnTypes(t *testing.T) {
 	tests := []struct {
 		dataType, databaseType string
-		want                   types.Kind
+		want                   string
 	}{
-		{dataType: "bigint", databaseType: "bigint", want: types.Int},
-		{dataType: "double", databaseType: "double", want: types.Float},
-		{dataType: "varchar", databaseType: "varchar(255)", want: types.String},
-		{dataType: "json", databaseType: "json", want: types.String},
-		{dataType: "tinyint", databaseType: "tinyint(1)", want: types.Bool},
-		{dataType: "blob", databaseType: "blob", want: types.Bytes},
+		{dataType: "bigint", databaseType: "bigint", want: "Integer"},
+		{dataType: "double", databaseType: "double", want: "Float"},
+		{dataType: "varchar", databaseType: "varchar(255)", want: "String"},
+		{dataType: "json", databaseType: "json", want: "String"},
+		{dataType: "tinyint", databaseType: "tinyint(1)", want: "Boolean"},
+		{dataType: "blob", databaseType: "blob", want: "Bytes"},
+		{dataType: "date", databaseType: "date", want: "Date"},
+		{dataType: "time", databaseType: "time(6)", want: "TimeOfDay"},
+		{dataType: "datetime", databaseType: "datetime(6)", want: "DateTime"},
+		{dataType: "timestamp", databaseType: "timestamp(6)", want: "Instant"},
 	}
 	for _, test := range tests {
 		got, err := mysqlColumnType(test.dataType, test.databaseType)
 		if err != nil {
 			t.Fatalf("mysqlColumnType(%q): %v", test.databaseType, err)
 		}
-		if got.Kind != test.want {
-			t.Fatalf("mysqlColumnType(%q) = %s, want %s", test.databaseType, got.Kind, test.want)
+		if got.String() != test.want {
+			t.Fatalf("mysqlColumnType(%q) = %s, want %s", test.databaseType, got, test.want)
 		}
-	}
-	if _, err := mysqlColumnType("timestamp", "timestamp"); err == nil {
-		t.Fatal("timestamp should remain unsupported until portable time types are defined")
 	}
 }
 

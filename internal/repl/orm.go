@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
@@ -1250,6 +1251,23 @@ func ormDatabaseValue(value Value) any {
 	switch data := value.Data.(type) {
 	case bytesValue:
 		return []byte(data)
+	case *objectInstance:
+		switch data.Definition.Node.Name {
+		case "Date":
+			year, month, day := timeDateFields(data)
+			return time.Date(int(year), time.Month(month), int(day), 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+		case "TimeOfDay":
+			hour, minute, second, nanosecond := timeClockFields(data)
+			return time.Date(2000, 1, 1, int(hour), int(minute), int(second), int(nanosecond), time.UTC).Format("15:04:05.999999999")
+		case "DateTime":
+			year, month, day := timeDateFields(data)
+			hour, minute, second, nanosecond := timeClockFields(data)
+			return time.Date(int(year), time.Month(month), int(day), int(hour), int(minute), int(second), int(nanosecond), time.UTC).Format("2006-01-02 15:04:05.999999999")
+		case "Instant":
+			seconds, nanosecond := timeInstantFields(data)
+			return time.Unix(seconds, nanosecond).UTC()
+		}
+		return data
 	case *enumValue:
 		member := data.Definition.Members[data.Name]
 		if member != nil && member.RawValue != nil {
@@ -1290,6 +1308,23 @@ func (e *Evaluator) ormDatabase() (*sql.DB, *ormFailure) {
 			return nil, &ormFailure{kind: "Connection", message: "database environment variable is not set or empty"}
 		}
 		databaseSource = value
+	}
+	if runtime.adapter.Name == "mysql" {
+		separator := "?"
+		if strings.Contains(databaseSource, "?") {
+			separator = "&"
+		}
+		if !strings.Contains(databaseSource, "parseTime=") {
+			databaseSource += separator + "parseTime=true"
+			separator = "&"
+		}
+		if !strings.Contains(databaseSource, "loc=") {
+			databaseSource += separator + "loc=UTC"
+			separator = "&"
+		}
+		if !strings.Contains(databaseSource, "time_zone=") {
+			databaseSource += separator + "time_zone=%27%2B00%3A00%27"
+		}
 	}
 	database, err := sql.Open(runtime.adapter.DriverName, databaseSource)
 	if err == nil {
@@ -1444,6 +1479,9 @@ func ormColumnValue(typ types.Type, raw any) (Value, error) {
 }
 
 func (e *Evaluator) ormColumnValue(column ormintegration.Column, raw any) (Value, error) {
+	if ormintegration.IsPortableTimeType(column.Type) {
+		return e.ormPortableTimeColumnValue(column.Type, raw)
+	}
 	if column.Enum == nil {
 		return ormColumnValue(column.Type, raw)
 	}
@@ -1471,6 +1509,117 @@ func (e *Evaluator) ormColumnValue(column ormintegration.Column, raw any) (Value
 		Type: column.Type,
 		Data: &enumValue{Definition: definition, Name: member, Payload: map[string]Value{}},
 	}, nil
+}
+
+func (e *Evaluator) ormPortableTimeColumnValue(typ types.Type, raw any) (Value, error) {
+	if raw == nil {
+		if !typ.Nullable {
+			return Value{}, errors.New("non-nullable database date/time column contained NULL")
+		}
+		return Value{Type: typ}, nil
+	}
+	text, err := ormPortableTimeText(typ.Name, raw)
+	if err != nil {
+		return Value{}, err
+	}
+	var fields map[string]Value
+	switch typ.Name {
+	case "Date":
+		parsed, parseErr := time.Parse("2006-01-02", text)
+		if parseErr != nil {
+			return Value{}, parseErr
+		}
+		fields = map[string]Value{"@_year": integerValue(int64(parsed.Year())), "@_month": integerValue(int64(parsed.Month())), "@_day": integerValue(int64(parsed.Day()))}
+	case "TimeOfDay":
+		parsed, parseErr := parseLocalTime(text, false)
+		if parseErr != nil {
+			return Value{}, parseErr
+		}
+		fields = timeFields(parsed)
+	case "DateTime":
+		parsed, parseErr := parseLocalTime(text, true)
+		if parseErr != nil {
+			return Value{}, parseErr
+		}
+		fields = dateTimeFields(parsed)
+	case "Instant":
+		parsed, parseErr := time.Parse(time.RFC3339Nano, text)
+		if parseErr != nil {
+			return Value{}, parseErr
+		}
+		if parsed.Year() < 1 || parsed.Year() > 9999 {
+			return Value{}, errors.New("database Instant is outside the portable range")
+		}
+		fields = map[string]Value{"@_epoch_seconds": integerValue(parsed.Unix()), "@_nanosecond": integerValue(int64(parsed.Nanosecond()))}
+	default:
+		return Value{}, fmt.Errorf("unsupported ORM portable date/time type %s", typ)
+	}
+	value, err := e.timeObject(typ.Name, fields)
+	if err != nil {
+		return Value{}, err
+	}
+	value.Type.Nullable = typ.Nullable
+	return value, nil
+}
+
+func ormPortableTimeText(kind string, raw any) (string, error) {
+	if value, ok := raw.(time.Time); ok {
+		switch kind {
+		case "Date":
+			return value.Format("2006-01-02"), nil
+		case "TimeOfDay":
+			return value.Format("15:04:05.999999999"), nil
+		case "DateTime":
+			return value.Format("2006-01-02T15:04:05.999999999"), nil
+		case "Instant":
+			return value.UTC().Format(time.RFC3339Nano), nil
+		}
+	}
+	var text string
+	switch value := raw.(type) {
+	case string:
+		text = value
+	case []byte:
+		text = string(value)
+	default:
+		return "", errors.New("database date/time value has an unsupported representation")
+	}
+	text = strings.TrimSpace(text)
+	switch kind {
+	case "Date":
+		if len(text) > 10 {
+			text = text[:10]
+		}
+	case "TimeOfDay":
+		if index := strings.IndexAny(text, "T "); index >= 0 {
+			text = text[index+1:]
+		}
+	case "DateTime":
+		text = strings.Replace(text, " ", "T", 1)
+	case "Instant":
+		text = strings.TrimSpace(strings.TrimSuffix(text, " UTC"))
+		text = strings.Replace(text, " ", "T", 1)
+		text = strings.Replace(text, " +", "+", 1)
+		text = strings.Replace(text, " -", "-", 1)
+		tail := text
+		if index := strings.IndexByte(text, 'T'); index >= 0 {
+			tail = text[index+1:]
+		}
+		if len(tail) >= 5 {
+			offset := tail[len(tail)-5:]
+			if (offset[0] == '+' || offset[0] == '-') && offset[3] != ':' {
+				text = text[:len(text)-2] + ":" + text[len(text)-2:]
+			}
+		}
+		tail = text
+		if index := strings.IndexByte(text, 'T'); index >= 0 {
+			tail = text[index+1:]
+		}
+		if !strings.HasSuffix(text, "Z") && !strings.ContainsAny(tail, "+-") {
+			text += "Z"
+		}
+	}
+	return text, nil
 }
 
 func ormInteger(value any) (int64, bool) {

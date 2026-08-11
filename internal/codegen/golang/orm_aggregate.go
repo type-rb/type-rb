@@ -82,8 +82,14 @@ func (g *generator) ormAggregateRuntime(adapter ormintegration.Adapter, model or
 	g.line("return " + g.ormResultErr(resultType, g.ormErrorValue("InvalidData", "database aggregate result was missing")))
 	g.indent--
 	g.line("}")
-	g.line("var value " + g.goType(resultType))
-	g.line("if err := rows.Scan(&value); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database aggregate result was invalid\")") + " }")
+	if ormintegration.IsPortableTimeType(resultType) {
+		g.line("var raw any")
+		g.line("if err := rows.Scan(&raw); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database aggregate result was invalid\")") + " }")
+		g.line("value, conversionError := " + goORMTemporalScan(resultType.Name) + "(raw); if conversionError != nil { return " + g.ormResultErr(resultType, "trbOrmError(conversionError, "+g.ormErrorKind("InvalidData")+", \"database aggregate result was invalid\")") + " }")
+	} else {
+		g.line("var value " + g.goType(resultType))
+		g.line("if err := rows.Scan(&value); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database aggregate result was invalid\")") + " }")
+	}
 	g.line("if err := rows.Err(); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database aggregate query failed\")") + " }")
 	g.line("return " + g.ormResultOK(resultType, "value"))
 	g.indent--

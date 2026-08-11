@@ -38,6 +38,9 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 	}); handled {
 		return value, err
 	}
+	if value, handled, err := e.timeIntrinsic(name, arguments, typ); handled {
+		return value, err
+	}
 	values := func() []Value {
 		result := make([]Value, len(arguments))
 		for index, argument := range arguments {

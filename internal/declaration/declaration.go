@@ -87,10 +87,13 @@ type Catalog struct {
 	Types              map[string]*Type
 	Modules            map[string]*Module
 	FunctionBlockRules []FunctionBlockRule
+	// RuntimeTypesByModule names compiler-owned value representations required
+	// by generated declarations in a particular application module.
+	RuntimeTypesByModule map[string][]types.Type
 }
 
 func NewCatalog() *Catalog {
-	return &Catalog{Types: map[string]*Type{}, Modules: map[string]*Module{}}
+	return &Catalog{Types: map[string]*Type{}, Modules: map[string]*Module{}, RuntimeTypesByModule: map[string][]types.Type{}}
 }
 
 func (c *Catalog) Merge(other *Catalog) {
@@ -104,6 +107,9 @@ func (c *Catalog) Merge(other *Catalog) {
 		c.Modules[name] = declaration
 	}
 	c.FunctionBlockRules = append(c.FunctionBlockRules, other.FunctionBlockRules...)
+	for module, runtimeTypes := range other.RuntimeTypesByModule {
+		c.RuntimeTypesByModule[module] = append(c.RuntimeTypesByModule[module], runtimeTypes...)
+	}
 }
 
 func (c *Catalog) Type(name string) (*Type, bool) {

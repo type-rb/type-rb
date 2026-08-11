@@ -56,6 +56,7 @@ func (g *generator) ormRegisterModel(model ormintegration.Model) {
 		}
 		columns = append(columns, "{"+
 			"name: "+strconv.Quote(column.Name)+
+			", kind: "+strconv.Quote(rubyORMColumnKind(column.Type))+
 			", primary_key: "+strconv.FormatBool(column.PrimaryKey)+
 			", generated: "+strconv.FormatBool(column.Generated)+
 			", nullable: "+strconv.FormatBool(column.Nullable)+
@@ -102,17 +103,38 @@ func (g *generator) ormRegisterModel(model ormintegration.Model) {
 	g.line(")", "")
 }
 
+func rubyORMColumnKind(value types.Type) string {
+	if ormintegration.IsPortableTimeType(value) {
+		return strings.ToLower(value.Name)
+	}
+	switch value.Kind {
+	case types.Bool:
+		return "boolean"
+	case types.Int:
+		return "integer"
+	case types.Float:
+		return "float"
+	case types.String:
+		return "string"
+	case types.Bytes:
+		return "bytes"
+	default:
+		return "any"
+	}
+}
+
 // This runtime deliberately owns TypeRB ORM semantics. Sequel is restricted to
 // opening connections, executing TypeRB-generated SQL, and transaction scopes,
 // so replacing the Ruby database adapter does not affect the provider or IR.
 const rubyORMRuntimeSource = `
 require "sequel"
 require "timeout"
+require "time"
 require "uri"
 
 module TrbOrmRuntime
 	Bounds = Data.define(:start, :finish, :exclusive)
-	Column = Data.define(:name, :primary_key, :generated, :nullable, :enum_values)
+	Column = Data.define(:name, :kind, :primary_key, :generated, :nullable, :enum_values)
 	Association = Data.define(:name, :kind, :target, :source_column, :target_column, :through, :source, :dependent, :preloadable, :scope)
 	Metadata = Data.define(:model_class, :name, :table, :columns, :unique_constraints, :associations)
 
@@ -352,7 +374,13 @@ module TrbOrmRuntime
 			TrbOrmRuntime.result do
 				function = { "sum" => "SUM", "average" => "AVG", "minimum" => "MIN", "maximum" => "MAX" }.fetch(operation)
 				value = TrbOrmRuntime.scalar(self, function + "(" + TrbOrmRuntime.qualified(@metadata.table, column) + ")")
-				operation == "average" && !value.nil? ? value.to_f : value
+				if operation == "average" && !value.nil?
+					value.to_f
+				elsif operation == "minimum" || operation == "maximum"
+					TrbOrmRuntime.application_value(TrbOrmRuntime.column!(@metadata, column), value)
+				else
+					value
+				end
 			end
 		end
 
@@ -362,7 +390,12 @@ module TrbOrmRuntime
 				function = operation == "count" ? "COUNT(*)" : { "sum" => "SUM", "average" => "AVG", "minimum" => "MIN", "maximum" => "MAX" }.fetch(operation) + "(" + TrbOrmRuntime.qualified(@metadata.table, column) + ")"
 				rows = TrbOrmRuntime.select_rows(select_columns([@group_column, TrbOrmRuntime::RawSelection.new(function, "__trb_value")]))
 				group = TrbOrmRuntime.column!(@metadata, @group_column)
-				rows.to_h { |row| [TrbOrmRuntime.application_value(group, TrbOrmRuntime.row_value(row, @group_column)), TrbOrmRuntime.row_value(row, "__trb_value")] }
+				aggregate_column = operation == "minimum" || operation == "maximum" ? TrbOrmRuntime.column!(@metadata, column) : nil
+				rows.to_h do |row|
+					value = TrbOrmRuntime.row_value(row, "__trb_value")
+					value = TrbOrmRuntime.application_value(aggregate_column, value) unless aggregate_column.nil?
+					[TrbOrmRuntime.application_value(group, TrbOrmRuntime.row_value(row, @group_column)), value]
+				end
 			end
 		end
 
@@ -415,6 +448,9 @@ module TrbOrmRuntime
 		attr_reader :adapter
 
 		def configure(adapter:, database:, environment:)
+			Sequel.database_timezone = :utc
+			Sequel.application_timezone = :utc
+			Sequel.typecast_timezone = :utc
 			@adapter = adapter
 			@database_source = database
 			@database_environment = environment
@@ -427,7 +463,7 @@ module TrbOrmRuntime
 				model_class,
 				name,
 				table,
-				columns.map { |value| Column.new(value.fetch(:name), value.fetch(:primary_key), value.fetch(:generated), value.fetch(:nullable), value.fetch(:enum_values)) },
+				columns.map { |value| Column.new(value.fetch(:name), value.fetch(:kind), value.fetch(:primary_key), value.fetch(:generated), value.fetch(:nullable), value.fetch(:enum_values)) },
 				unique_constraints,
 				associations.map { |value| Association.new(value.fetch(:name), value.fetch(:kind), value.fetch(:target), value.fetch(:source_column), value.fetch(:target_column), value.fetch(:through), value.fetch(:source), value.fetch(:dependent), value.fetch(:preloadable), value.fetch(:scope)) },
 			)
@@ -466,7 +502,7 @@ module TrbOrmRuntime
 			when "postgresql"
 				Sequel.connect(@database_source)
 			when "mysql"
-				Sequel.connect(mysql_options(@database_source))
+				Sequel.connect(mysql_options(@database_source), after_connect: proc { |connection| connection.query("SET time_zone = '+00:00'") })
 			else
 				raise Failure.new(db_error("Connection", "unsupported ORM adapter"))
 			end
@@ -580,18 +616,59 @@ module TrbOrmRuntime
 			return nil if value.nil?
 			column = metadata.columns.find { |candidate| candidate.name == name }
 			return value if column.nil?
-			return value if column.enum_values.empty?
-			entry = column.enum_values.find { |member, _storage| member == value }
-			invalid!("enum column " + name + " received an unknown value") if entry.nil?
-			entry.fetch(1)
+			unless column.enum_values.empty?
+				entry = column.enum_values.find { |member, _storage| member == value }
+				invalid!("enum column " + name + " received an unknown value") if entry.nil?
+				return entry.fetch(1)
+			end
+			case column.kind
+			when "date", "timeofday" then value.to_s
+			when "datetime" then value.to_s.tr("T", " ")
+			when "instant"
+				instant = Time.at(value.epoch_seconds, value.nanosecond, :nanosecond).utc
+				if @adapter == "mysql"
+					fraction = instant.nsec.zero? ? "" : "." + format("%09d", instant.nsec).sub(/0+\z/, "")
+					instant.strftime("%Y-%m-%d %H:%M:%S") + fraction
+				else
+					instant
+				end
+			else value
+			end
 		end
 
 		def application_value(column, value)
 			return nil if value.nil?
-			return value if column.enum_values.empty?
-			entry = column.enum_values.find { |_member, storage| storage == value || storage.to_s == value.to_s }
-			invalid!("database enum column " + column.name + " contains an unknown value") if entry.nil?
-			entry.fetch(0)
+			unless column.enum_values.empty?
+				entry = column.enum_values.find { |_member, storage| storage == value || storage.to_s == value.to_s }
+				invalid!("database enum column " + column.name + " contains an unknown value") if entry.nil?
+				return entry.fetch(0)
+			end
+			klass, text = case column.kind
+			when "date"
+				[TrbTimeDate, value.respond_to?(:strftime) ? value.strftime("%Y-%m-%d") : value.to_s]
+			when "timeofday"
+				fraction = value.respond_to?(:nsec) && !value.nsec.zero? ? "." + format("%09d", value.nsec).sub(/0+\z/, "") : ""
+				[TrbTimeTimeOfDay, (value.respond_to?(:strftime) ? value.strftime("%H:%M:%S") : value.to_s) + fraction]
+			when "datetime"
+				fraction = value.respond_to?(:nsec) && !value.nsec.zero? ? "." + format("%09d", value.nsec).sub(/0+\z/, "") : ""
+				[TrbTimeDateTime, (value.respond_to?(:strftime) ? value.strftime("%Y-%m-%dT%H:%M:%S") : value.to_s.tr(" ", "T")) + fraction]
+			when "instant"
+				text = value.to_s
+				instant = if value.respond_to?(:utc)
+					value.utc
+				elsif text.match?(/(?:Z|[+-][0-9]{2}:?[0-9]{2})\z/)
+					Time.parse(text).utc
+				else
+					Time.parse(text + " UTC").utc
+				end
+				fraction = instant.nsec.zero? ? "" : "." + format("%09d", instant.nsec).sub(/0+\z/, "")
+				[TrbTimeInstant, instant.strftime("%Y-%m-%dT%H:%M:%S") + fraction + "Z"]
+			else
+				return value
+			end
+			parsed = klass.try_parse(text)
+			invalid!("database " + column.kind + " column " + column.name + " contains an invalid value") if parsed.is_a?(Result::Err)
+			parsed.value
 		end
 
 		def and_predicates(left, right)

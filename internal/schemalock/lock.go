@@ -98,7 +98,7 @@ func (l *Lock) Validate() error {
 				return fmt.Errorf("schema lock table %s contains an incomplete column", tableName)
 			}
 			switch column.Type {
-			case "Boolean", "Bytes", "Float", "Integer", "String":
+			case "Boolean", "Bytes", "Date", "DateTime", "Float", "Instant", "Integer", "String", "TimeOfDay":
 			default:
 				return fmt.Errorf("schema lock table %s column %s has unsupported portable type %q", tableName, columnName, column.Type)
 			}

@@ -9,6 +9,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if value, ok := rubyTimeIntrinsic(name, arguments); ok {
+		return value
+	}
 	if name == "trb.internal.runtime.fail" {
 		return "raise " + arguments[0]
 	}

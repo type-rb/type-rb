@@ -147,7 +147,11 @@ func (g *generator) ormGroupedAggregateRuntime(adapter ormintegration.Adapter, m
 	g.line("if grouped.offset != nil { statement += \" OFFSET \" + trbOrmPlaceholder(len(arguments)+1); arguments = append(arguments, *grouped.offset) }")
 	g.line("rows, err := database.Query(statement, arguments...); if err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database grouped "+label+" query failed\")") + " }; defer rows.Close()")
 	g.line("values := make(" + g.goType(resultType) + ")")
-	g.line("for rows.Next() { var key " + g.goType(groupColumn.Type) + "; var value " + g.goType(valueType) + "; if err := rows.Scan(&key, &value); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }; values[key] = value }")
+	if ormintegration.IsPortableTimeType(valueType) {
+		g.line("for rows.Next() { var key " + g.goType(groupColumn.Type) + "; var raw any; if err := rows.Scan(&key, &raw); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }; value, conversionError := " + goORMTemporalScan(valueType.Name) + "(raw); if conversionError != nil { return " + g.ormResultErr(resultType, "trbOrmError(conversionError, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }; values[key] = value }")
+	} else {
+		g.line("for rows.Next() { var key " + g.goType(groupColumn.Type) + "; var value " + g.goType(valueType) + "; if err := rows.Scan(&key, &value); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }; values[key] = value }")
+	}
 	g.line("if err := rows.Err(); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database grouped "+label+" query failed\")") + " }; return " + g.ormResultOK(resultType, "values"))
 	g.indent--
 	g.line("}")

@@ -51,6 +51,10 @@ func (g *generator) ormModelDescriptor(model ormintegration.Model) string {
 	for _, column := range model.Columns {
 		columnType := column.Type
 		enumValues := "[]"
+		parser := "undefined"
+		if ormintegration.IsPortableTimeType(column.Type) {
+			parser = g.runtimeName(column.Type.Name) + ".try_parse"
+		}
 		if column.Enum != nil {
 			columnType = column.Enum.StorageType
 			values := make([]string, 0, len(column.Enum.Values))
@@ -64,7 +68,7 @@ func (g *generator) ormModelDescriptor(model ormintegration.Model) string {
 			}
 			enumValues = "[" + strings.Join(values, ", ") + "]"
 		}
-		columns = append(columns, "{ name: "+strconv.Quote(column.Name)+", kind: "+strconv.Quote(ormColumnKind(columnType))+", nullable: "+strconv.FormatBool(column.Type.Nullable)+", primary: "+strconv.FormatBool(column.PrimaryKey)+", enumValues: "+enumValues+" }")
+		columns = append(columns, "{ name: "+strconv.Quote(column.Name)+", kind: "+strconv.Quote(ormColumnKind(columnType))+", nullable: "+strconv.FormatBool(column.Type.Nullable)+", primary: "+strconv.FormatBool(column.PrimaryKey)+", enumValues: "+enumValues+", parse: "+parser+" }")
 	}
 	unique := make([]string, 0, len(model.UniqueConstraints))
 	for _, constraint := range model.UniqueConstraints {
@@ -88,6 +92,9 @@ func (g *generator) ormModelDescriptor(model ormintegration.Model) string {
 }
 
 func ormColumnKind(value types.Type) string {
+	if ormintegration.IsPortableTimeType(value) {
+		return strings.ToLower(value.Name)
+	}
 	switch value.Kind {
 	case types.Bool:
 		return "boolean"
@@ -532,7 +539,7 @@ func (g *generator) ormAssignIterationResult(value string, iteration *ir.Iterate
 
 const typescriptORMRuntime = `
 type TrbOrmAdapter = "sqlite" | "postgresql" | "mysql";
-type TrbOrmColumn = { name: string; kind: string; nullable: boolean; primary: boolean; enumValues: Array<[unknown, unknown]> };
+type TrbOrmColumn = { name: string; kind: string; nullable: boolean; primary: boolean; enumValues: Array<[unknown, unknown]>; parse?: (value: string) => { kind: "Ok"; value: unknown } | { kind: "Err" } };
 type TrbOrmAssociation = { name: string; kind: string; target: string; sourceColumn: string; targetColumn: string; inverse: string; through: string; source: string; dependent: string; scope?: (query: TrbOrmQuery) => TrbOrmQuery };
 type TrbOrmModel = { name: string; table: string; columns: TrbOrmColumn[]; unique: string[][]; associations: TrbOrmAssociation[]; factory?: new () => any };
 type TrbOrmPredicate = { kind: "conditions"; columns: string[]; operators: string[]; values: unknown[] } | { kind: "and" | "or"; left: TrbOrmPredicate; right: TrbOrmPredicate };
@@ -697,9 +704,9 @@ function predicateSQL(owner: TrbOrmModel, predicate: TrbOrmPredicate, args: unkn
     }
     if (typeof value === "object" && value !== null && (value as any).__trbRange === true) {
       const interval = value as TrbOrmRange;
-      args.push(interval.start, interval.end);
       const upper = interval.exclusive ? "<" : "<=";
-      conditions.push("(" + qualified + " >= " + placeholder(args.length - 1) + " AND " + qualified + " " + upper + " " + placeholder(args.length) + ")");
+      const lowerBind = bindValue(owner, column, interval.start, args); const upperBind = bindValue(owner, column, interval.end, args);
+      conditions.push("(" + qualified + " >= " + lowerBind + " AND " + qualified + " " + upper + " " + upperBind + ")");
       continue;
     }
     if (typeof value === "object" && value !== null && "query" in (value as any) && "column" in (value as any)) {
@@ -710,12 +717,11 @@ function predicateSQL(owner: TrbOrmModel, predicate: TrbOrmPredicate, args: unkn
     }
     if (Array.isArray(value)) {
       if (value.length === 0) { conditions.push(operator === "!=" ? "1 = 1" : "1 = 0"); continue; }
-      const binds = value.map(item => { args.push(databaseValue(owner, column, item)); return placeholder(args.length); });
+      const binds = value.map(item => bindValue(owner, column, item, args));
       conditions.push(qualified + (operator === "!=" ? " NOT IN (" : " IN (") + binds.join(", ") + ")");
       continue;
     }
-    args.push(databaseValue(owner, column, value));
-    conditions.push(qualified + " " + operator + " " + placeholder(args.length));
+    conditions.push(qualified + " " + operator + " " + bindValue(owner, column, value, args));
   }
   return conditions.length === 0 ? "1 = 1" : conditions.join(" AND ");
 }
@@ -757,7 +763,22 @@ function statement(source: TrbOrmQuery, projection: string, args: unknown[], ali
   if (source.lock && __trbOrmAdapter !== "sqlite") sql += " FOR UPDATE";
   return sql;
 }
-function projection(owner: TrbOrmModel): string { return owner.columns.map(column => quote(owner.table) + "." + quote(column.name)).join(", "); }
+function readColumn(column: TrbOrmColumn, expression: string): string {
+  if (__trbOrmAdapter === "mysql") {
+    if (column.kind === "date") return "DATE_FORMAT(" + expression + ", '%Y-%m-%d')";
+    if (column.kind === "timeofday") return "TIME_FORMAT(" + expression + ", '%H:%i:%s.%f')";
+    if (column.kind === "datetime") return "DATE_FORMAT(" + expression + ", '%Y-%m-%dT%H:%i:%s.%f')";
+    if (column.kind === "instant") return "DATE_FORMAT(CONVERT_TZ(" + expression + ", @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%s.%fZ')";
+  }
+  if (__trbOrmAdapter === "postgresql") {
+    if (column.kind === "date") return "to_char(" + expression + ", 'YYYY-MM-DD')";
+    if (column.kind === "timeofday") return "to_char(" + expression + ", 'HH24:MI:SS.US')";
+    if (column.kind === "datetime") return "to_char(" + expression + ", 'YYYY-MM-DD\"T\"HH24:MI:SS.US')";
+    if (column.kind === "instant") return "to_char(" + expression + " AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')";
+  }
+  return expression;
+}
+function projection(owner: TrbOrmModel): string { return owner.columns.map(column => readColumn(column, quote(owner.table) + "." + quote(column.name)) + " AS " + quote(column.name)).join(", "); }
 function normalizeColumn(column: TrbOrmColumn, value: unknown): unknown {
   if (value === null || value === undefined) return null;
   if (column.enumValues.length > 0) {
@@ -769,15 +790,46 @@ function normalizeColumn(column: TrbOrmColumn, value: unknown): unknown {
   if (column.kind === "integer") return Number(value);
   if (column.kind === "float") return Number(value);
   if (column.kind === "bytes" && !(value instanceof Uint8Array)) return new Uint8Array(value as ArrayLike<number>);
+	if (column.kind === "date" || column.kind === "timeofday" || column.kind === "datetime" || column.kind === "instant") {
+		let text: string;
+		if (value instanceof globalThis.Date) {
+			const base = value.toISOString();
+			text = column.kind === "date" ? base.slice(0, 10) : (column.kind === "timeofday" ? base.slice(11, 23).replace(/\.000$/, "") : (column.kind === "datetime" ? base.slice(0, 19) : base));
+		} else {
+			text = String(value).trim();
+		}
+		if (column.kind === "date") {
+			if (text.length > 10) text = text.slice(0, 10);
+			const parsed = column.parse!(text); if (parsed.kind === "Err") throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "database Date column " + column.name + " is invalid"); return parsed.value;
+		}
+		if (column.kind === "timeofday") {
+			const separator = Math.max(text.lastIndexOf("T"), text.lastIndexOf(" ")); if (separator >= 0) text = text.slice(separator + 1);
+			const parsed = column.parse!(text); if (parsed.kind === "Err") throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "database TimeOfDay column " + column.name + " is invalid"); return parsed.value;
+		}
+		if (column.kind === "datetime") {
+			text = text.replace(" ", "T"); const parsed = column.parse!(text); if (parsed.kind === "Err") throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "database DateTime column " + column.name + " is invalid"); return parsed.value;
+		}
+		text = text.replace(" ", "T"); const tail = text.slice(text.indexOf("T") + 1); if (!text.endsWith("Z") && !/[+-]/.test(tail)) text += "Z";
+		const parsed = column.parse!(text); if (parsed.kind === "Err") throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "database Instant column " + column.name + " is invalid"); return parsed.value;
+	}
   return value;
 }
 function databaseValue(owner: TrbOrmModel, columnName: string, value: unknown): unknown {
   if (value === null || value === undefined) return null;
   const column = owner.columns.find(item => item.name === columnName);
-  if (column === undefined || column.enumValues.length === 0) return value;
+	if (column === undefined) return value;
+	if (column.kind === "date" || column.kind === "timeofday") return (value as any).to_s();
+	if (column.kind === "instant") { const text = (value as any).to_s(); return __trbOrmAdapter === "mysql" ? text.replace("T", " ").replace(/Z$/, "") : text; }
+	if (column.kind === "datetime") return (value as any).to_s().replace("T", " ");
+	if (column.enumValues.length === 0) return value;
   const mapped = column.enumValues.find(([member]) => member === value);
   if (mapped === undefined) throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "enum column " + columnName + " received an unknown value");
   return mapped[1];
+}
+function bindValue(owner: TrbOrmModel, columnName: string, value: unknown, args: unknown[]): string {
+  args.push(databaseValue(owner, columnName, value));
+  const bind = placeholder(args.length); const column = owner.columns.find(item => item.name === columnName);
+  return __trbOrmAdapter === "mysql" && column?.kind === "instant" ? "CONVERT_TZ(" + bind + ", '+00:00', @@session.time_zone)" : bind;
 }
 function instantiate(owner: TrbOrmModel, row: Record<string, unknown>, scope: TrbOrmQuery): any {
   const Constructor = owner.factory;
@@ -820,7 +872,7 @@ export async function explain(source: TrbOrmQuery): Promise<DbResult<string>> {
   catch (error) { return databaseError<string>(error, "database explain failed"); }
 }
 export async function pluck(source: TrbOrmQuery, columnName: string): Promise<DbResult<any[]>> {
-  try { const owner = model(source.model); const column = owner.columns.find(item => item.name === columnName); if (column === undefined) throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "unknown projection column " + columnName); const args: unknown[] = []; const rows = await unsafe(source, statement(source, quote(columnName) + " AS trb_value", args), args); return resultOk(rows.map(row => normalizeColumn(column, row.trb_value))); }
+  try { const owner = model(source.model); const column = owner.columns.find(item => item.name === columnName); if (column === undefined) throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "unknown projection column " + columnName); const args: unknown[] = []; const rows = await unsafe(source, statement(source, readColumn(column, quote(columnName)) + " AS trb_value", args), args); return resultOk(rows.map(row => normalizeColumn(column, row.trb_value))); }
   catch (error) { return databaseError<any[]>(error, "database projection query failed"); }
 }
 export async function pick(source: TrbOrmQuery, columnName: string): Promise<DbResult<any | null>> {
@@ -829,19 +881,20 @@ export async function pick(source: TrbOrmQuery, columnName: string): Promise<DbR
 export async function aggregate(source: TrbOrmQuery, operation: string, columnName: string): Promise<DbResult<any>> {
   try {
     const sqlOperation = operation === "average" ? "AVG" : (operation === "minimum" ? "MIN" : (operation === "maximum" ? "MAX" : operation.toUpperCase()));
-    const expression = operation === "sum" ? "COALESCE(SUM(" + quote(columnName) + "), 0)" : sqlOperation + "(" + quote(columnName) + ")";
+    const column = model(source.model).columns.find(item => item.name === columnName); let expression = operation === "sum" ? "COALESCE(SUM(" + quote(columnName) + "), 0)" : sqlOperation + "(" + quote(columnName) + ")"; if ((operation === "minimum" || operation === "maximum") && column !== undefined) expression = readColumn(column, expression);
     const args: unknown[] = []; const rows = await unsafe(source, statement(source, expression + " AS trb_aggregate", args), args); const value = rows[0]?.trb_aggregate ?? null;
-    return resultOk(operation === "average" && value !== null ? Number(value) : value);
+		const normalized = value === null || column === undefined ? value : normalizeColumn(column, value);
+		return resultOk(operation === "average" && normalized !== null ? Number(normalized) : normalized);
   } catch (error) { return databaseError<any>(error, "database aggregate query failed"); }
 }
 export async function groupedAggregate(source: TrbOrmGroupedQuery, operation: string, target?: string): Promise<DbResult<Record<string, any>>> {
   try {
     const owner = model(source.query.model); let expression = "COUNT(*)";
-    if (operation !== "count") { const sqlOperation = operation === "average" ? "AVG" : (operation === "minimum" ? "MIN" : (operation === "maximum" ? "MAX" : operation.toUpperCase())); expression = operation === "sum" ? "COALESCE(SUM(" + quote(target!) + "), 0)" : sqlOperation + "(" + quote(target!) + ")"; }
+    if (operation !== "count") { const sqlOperation = operation === "average" ? "AVG" : (operation === "minimum" ? "MIN" : (operation === "maximum" ? "MAX" : operation.toUpperCase())); expression = operation === "sum" ? "COALESCE(SUM(" + quote(target!) + "), 0)" : sqlOperation + "(" + quote(target!) + ")"; const targetColumn = owner.columns.find(column => column.name === target); if ((operation === "minimum" || operation === "maximum") && targetColumn !== undefined) expression = readColumn(targetColumn, expression); }
     const args: unknown[] = []; let sql = statement(source.query, quote(source.column) + " AS trb_group, " + expression + " AS trb_value", args, undefined, false) + " GROUP BY " + quote(source.column);
     if (source.having !== null) { args.push(source.having.value); const havingExpression = source.having.expression === "count" ? "COUNT(*)" : source.having.expression; sql += " HAVING " + havingExpression + " " + source.having.operator + " " + placeholder(args.length); }
     if (source.query.orders.length > 0) sql += " ORDER BY " + source.query.orders.map(([column, direction]) => quote(column) + " " + direction.toUpperCase()).join(", ");
-    const rows = await unsafe(source.query, sql, args); const result: Record<string, any> = {}; const targetColumn = target === undefined ? undefined : owner.columns.find(column => column.name === target); const groupColumn = owner.columns.find(column => column.name === source.column)!; for (const row of rows) { let value = row.trb_value; if (operation === "count" || operation === "average" || targetColumn?.kind === "integer" || targetColumn?.kind === "float") value = Number(value); result[String(normalizeColumn(groupColumn, row.trb_group))] = value; } return resultOk(result);
+    const rows = await unsafe(source.query, sql, args); const result: Record<string, any> = {}; const targetColumn = target === undefined ? undefined : owner.columns.find(column => column.name === target); const groupColumn = owner.columns.find(column => column.name === source.column)!; for (const row of rows) { let value = row.trb_value; if (operation === "count" || operation === "average" || targetColumn?.kind === "integer" || targetColumn?.kind === "float") value = Number(value); else if (targetColumn !== undefined) value = normalizeColumn(targetColumn, value); result[String(normalizeColumn(groupColumn, row.trb_group))] = value; } return resultOk(result);
   } catch (error) { return databaseError<Record<string, any>>(error, "database grouped aggregate failed"); }
 }
 
@@ -850,9 +903,9 @@ function draftValue(draft: TrbOrmDraft, column: string): unknown { const index =
 function validUnique(owner: TrbOrmModel, columns: string[]): boolean { return owner.unique.some(unique => unique.length === columns.length && unique.every((column, index) => column === columns[index])); }
 async function inserted(source: TrbOrmQuery, owner: TrbOrmModel, columns: string[], values: unknown[]): Promise<DbResult<any>> {
   try {
-    const args = values.map((value, index) => databaseValue(owner, columns[index]!, value)); let sql = "INSERT INTO " + quote(owner.table);
+    const args: unknown[] = []; const binds = values.map((value, index) => bindValue(owner, columns[index]!, value, args)); let sql = "INSERT INTO " + quote(owner.table);
     if (columns.length === 0) sql += __trbOrmAdapter === "mysql" ? " () VALUES ()" : " DEFAULT VALUES";
-    else sql += " (" + columns.map(quote).join(", ") + ") VALUES (" + values.map((_, index) => placeholder(index + 1)).join(", ") + ")";
+    else sql += " (" + columns.map(quote).join(", ") + ") VALUES (" + binds.join(", ") + ")";
     const primary = owner.columns.find(column => column.primary);
     if (__trbOrmAdapter !== "mysql") sql += " RETURNING " + projection(owner).replaceAll(quote(owner.table) + ".", "");
     const rows = await unsafe(source, sql, args);
@@ -871,15 +924,15 @@ export async function saveChanges(value: TrbOrmChanges): Promise<DbResult<any>> 
 export async function update(name: string, value: any, columns: string[], values: unknown[]): Promise<DbResult<any>> {
   try {
     const owner = model(name); const primary = owner.columns.find(column => column.primary); if (primary === undefined) return resultErr(DbErrorKind.InvalidData, "model has no primary key");
-    const args = [...values.map((item, index) => databaseValue(owner, columns[index]!, item)), databaseValue(owner, primary.name, column(value, primary.name))]; let sql = "UPDATE " + quote(owner.table) + " SET " + columns.map((item, index) => quote(item) + " = " + placeholder(index + 1)).join(", ") + " WHERE " + quote(primary.name) + " = " + placeholder(args.length);
-    if (__trbOrmAdapter !== "mysql") sql += " RETURNING " + owner.columns.map(item => quote(item.name)).join(", ");
+    const args: unknown[] = []; const binds = values.map((item, index) => bindValue(owner, columns[index]!, item, args)); const primaryBind = bindValue(owner, primary.name, column(value, primary.name), args); let sql = "UPDATE " + quote(owner.table) + " SET " + columns.map((item, index) => quote(item) + " = " + binds[index]).join(", ") + " WHERE " + quote(primary.name) + " = " + primaryBind;
+    if (__trbOrmAdapter !== "mysql") sql += " RETURNING " + projection(owner).replaceAll(quote(owner.table) + ".", "");
     const source = scopeFor(value, name); const rows = await unsafe(source, sql, args);
     if (__trbOrmAdapter !== "mysql") return resultOk(instantiate(owner, rows[0]!, source));
     return await first(where(source, [primary.name], ["="], [column(value, primary.name)]));
   } catch (error) { return databaseError<any>(error, "database update failed"); }
 }
 export async function updateAll(source: TrbOrmQuery, columns: string[], values: unknown[]): Promise<DbResult<number>> {
-  try { const owner = model(source.model); const args = values.map((value, index) => databaseValue(owner, columns[index]!, value)); let sql = "UPDATE " + quote(owner.table) + " SET " + columns.map((item, index) => quote(item) + " = " + placeholder(index + 1)).join(", "); if (source.predicate !== null) sql += " WHERE " + predicateSQL(owner, source.predicate, args); const rows = await unsafe(source, sql, args); return resultOk(affectedRows(rows)); }
+  try { const owner = model(source.model); const args: unknown[] = []; const binds = values.map((value, index) => bindValue(owner, columns[index]!, value, args)); let sql = "UPDATE " + quote(owner.table) + " SET " + columns.map((item, index) => quote(item) + " = " + binds[index]).join(", "); if (source.predicate !== null) sql += " WHERE " + predicateSQL(owner, source.predicate, args); const rows = await unsafe(source, sql, args); return resultOk(affectedRows(rows)); }
   catch (error) { return databaseError<number>(error, "database bulk update failed"); }
 }
 export async function deleteAll(source: TrbOrmQuery): Promise<DbResult<number>> {

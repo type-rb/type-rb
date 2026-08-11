@@ -109,6 +109,13 @@ var indexLookupErrorType = types.FromName("IndexLookupError")
 var keyLookupErrorType = types.FromName("KeyLookupError")
 var percentDecodeErrorType = types.FromName("PercentDecodeError")
 var queryParameterType = types.FromName("QueryParameter")
+var dateType = types.FromName("Date")
+var timeOfDayType = types.FromName("TimeOfDay")
+var dateTimeType = types.FromName("DateTime")
+var instantType = types.FromName("Instant")
+var durationType = types.FromName("Duration")
+var timeZoneType = types.FromName("TimeZone")
+var dateTimeErrorType = types.FromName("DateTimeError")
 
 var registry = map[string]*Package{
 	"trb/std/unit": {
@@ -160,6 +167,29 @@ end
 				Return:     voidType,
 			},
 		},
+	},
+	"trb/std/time": {
+		Path:       "trb/std/time",
+		ModulePath: "trb/std/time/index",
+		RuntimeExports: []RuntimeExport{
+			{Name: "DateTimeErrorKind", Kind: "enum"},
+			{Name: "DateTimeError", Kind: "record"},
+			{Name: "Date", Kind: "class"},
+			{Name: "TimeOfDay", Kind: "class"},
+			{Name: "DateTime", Kind: "class"},
+			{Name: "Instant", Kind: "class"},
+			{Name: "Duration", Kind: "class"},
+			{Name: "TimeZone", Kind: "class"},
+		},
+		Source:  timeSource(),
+		Kind:    Portable,
+		Symbols: map[string]Symbol{},
+	},
+	"trb/internal/time": {
+		Path:     "trb/internal/time",
+		Kind:     Portable,
+		Internal: true,
+		Symbols:  timeIntrinsicSymbols(),
 	},
 	"trb/internal/runtime": {
 		Path:     "trb/internal/runtime",

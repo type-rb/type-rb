@@ -138,7 +138,7 @@ func TestORMPoolResolvesRuntimeDatabaseFromEnvironment(t *testing.T) {
 		Extensions: []ir.Extension{manifest},
 	})
 	for _, want := range []string{
-		`os.LookupEnv("DATABASE_URL")`, `sql.Open("pgx", databaseSource)`,
+		`os.LookupEnv("DATABASE_URL")`, `sql.Open("pgx", trbOrmSource)`,
 		`errors.New("database environment variable is not set or empty")`,
 	} {
 		if !strings.Contains(output, want) {

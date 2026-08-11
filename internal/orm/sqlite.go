@@ -200,6 +200,14 @@ func inspectSQLiteForeignKeys(database *sql.DB, name string) ([]ForeignKey, erro
 func sqliteColumnType(databaseType string) (types.Type, error) {
 	normalized := strings.ToLower(strings.TrimSpace(databaseType))
 	switch {
+	case normalized == "date":
+		return types.FromName("Date"), nil
+	case normalized == "time":
+		return types.FromName("TimeOfDay"), nil
+	case strings.Contains(normalized, "timestamptz"), normalized == "instant":
+		return types.FromName("Instant"), nil
+	case strings.Contains(normalized, "datetime"), strings.Contains(normalized, "timestamp"):
+		return types.FromName("DateTime"), nil
 	case strings.Contains(normalized, "int"):
 		return types.FromName("Integer"), nil
 	case strings.Contains(normalized, "char"), strings.Contains(normalized, "clob"), strings.Contains(normalized, "text"):

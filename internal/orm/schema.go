@@ -71,6 +71,27 @@ type Introspector interface {
 	Inspect(Config) (*Schema, error)
 }
 
+func IsPortableTimeType(value types.Type) bool {
+	switch value.Name {
+	case "Date", "TimeOfDay", "DateTime", "Instant":
+		return true
+	default:
+		return false
+	}
+}
+
+func IsGroupableColumn(column Column) bool {
+	if column.Enum != nil {
+		return true
+	}
+	switch column.Type.Kind {
+	case types.Bool, types.Int, types.Float, types.String:
+		return true
+	default:
+		return false
+	}
+}
+
 func LoadSchema(projectRoot string, options map[string][]byte) (*Schema, error) {
 	raw := options[PackageName]
 	if len(raw) == 0 {

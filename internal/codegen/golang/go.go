@@ -95,6 +95,9 @@ func generate(program *ir.Program, projectNames *goProjectNames) string {
 		}
 		g.statement(statement)
 	}
+	if g.modulePath == "trb/std/time/index" {
+		g.timeDatabaseInterop()
+	}
 	g.integrations(program.Extensions)
 	packageName := program.Package
 	if packageName == "" {
@@ -1115,6 +1118,15 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "New" + goIdentifier(g.expr(member.Receiver), true) + "(" + args + ")"
 		}
 		if member, ok := n.Callee.(*ir.Member); ok {
+			if receiver, ok := member.Receiver.(*ir.Identifier); ok && receiver.Reference != nil && receiver.Reference.ExportKind == "class" {
+				name := goIdentifier(receiver.Name, true) + goMethodName(member.Name)
+				if alias := g.referenceAlias(receiver.Reference); alias != "" {
+					name = alias + "." + name
+				}
+				return name + "(" + args + ")"
+			}
+		}
+		if member, ok := n.Callee.(*ir.Member); ok {
 			if receiver, ok := member.Receiver.(*ir.Identifier); ok && g.staticMethods[receiver.Name][member.Name] {
 				return goIdentifier(receiver.Name, true) + goMethodName(member.Name) + "(" + args + ")"
 			}
@@ -1655,6 +1667,9 @@ func (g *generator) goCodecType(schema *ir.CodecSchema) string {
 	if schema == nil {
 		return "any"
 	}
+	if isTimeCodec(schema.Kind) {
+		return g.goType(schema.Type)
+	}
 	base := schema.Type
 	nullable := base.Nullable
 	base.Nullable = false
@@ -1680,6 +1695,40 @@ func (g *generator) goCodecType(schema *ir.CodecSchema) string {
 		return "*" + result
 	}
 	return result
+}
+
+func isTimeCodec(kind string) bool {
+	return kind == "time_date" || kind == "time_of_day" || kind == "time_datetime" || kind == "time_instant" || kind == "time_duration" || kind == "time_zone"
+}
+
+func goTimeCodecOwner(schema *ir.CodecSchema, generator *generator) string {
+	if schema.Reference == nil || schema.Reference.Package == "" || schema.Reference.Package == generator.modulePath {
+		return ""
+	}
+	alias := schema.Reference.Alias
+	if alias == "" {
+		alias = pathpkg.Base(pathpkg.Dir(schema.Reference.Package))
+	}
+	return goImportAlias(alias) + "."
+}
+
+func timeCodecParseMethod(kind string) string {
+	switch kind {
+	case "time_date":
+		return "DateTryParse"
+	case "time_of_day":
+		return "TimeOfDayTryParse"
+	case "time_datetime":
+		return "DateTimeTryParse"
+	case "time_instant":
+		return "InstantTryParse"
+	case "time_duration":
+		return "DurationTryParse"
+	case "time_zone":
+		return "TimeZoneTryGet"
+	default:
+		return ""
+	}
 }
 
 type goJSONCodecBuilder struct {
@@ -1708,6 +1757,9 @@ func (b *goJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		nonnull.Type.Nullable = false
 		child := b.decoder(&nonnull)
 		body := "if value.Kind == " + b.jsonAlias + ".JsonValueNullTag { return nil, nil }; decoded, err := " + child + "(value, path); if err != nil { return nil, err }; return &decoded, nil"
+		if isTimeCodec(schema.Kind) {
+			body = "if value.Kind == " + b.jsonAlias + ".JsonValueNullTag { return nil, nil }; return " + child + "(value, path)"
+		}
 		b.source.WriteString(name + " := func(value " + jsonValue + ", path string) (" + valueType + ", *" + b.errorType + ") { " + body + " }; ")
 		return name
 	}
@@ -1721,6 +1773,9 @@ func (b *goJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		body = "if value.Kind == " + b.jsonAlias + ".JsonValueIntegerTag { return float64(value.IntegerValue), nil }; if value.Kind != " + b.jsonAlias + ".JsonValueFloatTag { " + expected("Float") + " }; return value.FloatValue, nil"
 	case "string":
 		body = "if value.Kind != " + b.jsonAlias + ".JsonValueStringTag { " + expected("String") + " }; return value.StringValue, nil"
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
+		method := goTimeCodecOwner(schema, b.generator) + timeCodecParseMethod(schema.Kind)
+		body = "if value.Kind != " + b.jsonAlias + ".JsonValueStringTag { " + expected("String") + " }; parsed := " + method + "(value.StringValue); if parsed.Kind != 0 { message := " + strconv.Quote("invalid "+schema.Type.Name) + "; " + zero + " }; return parsed.OkValue, nil"
 	case "raw_enum":
 		raw := "value.StringValue"
 		expectedKind := "String"
@@ -1784,7 +1839,11 @@ func (b *goJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		nonnull := *schema
 		nonnull.Type.Nullable = false
 		child := b.encoder(&nonnull)
-		b.source.WriteString(name + " := func(value " + valueType + ") " + jsonValue + " { if value == nil { return " + b.jsonAlias + ".JsonValueNull }; return " + child + "(*value) }; ")
+		body := "if value == nil { return " + b.jsonAlias + ".JsonValueNull }; return " + child + "(*value)"
+		if isTimeCodec(schema.Kind) {
+			body = "if value == nil { return " + b.jsonAlias + ".JsonValueNull }; return " + child + "(value)"
+		}
+		b.source.WriteString(name + " := func(value " + valueType + ") " + jsonValue + " { " + body + " }; ")
 		return name
 	}
 	body := ""
@@ -1797,6 +1856,10 @@ func (b *goJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		body = "return " + b.jsonAlias + ".NewJsonValueFloat(value)"
 	case "string":
 		body = "return " + b.jsonAlias + ".NewJsonValueString(value)"
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration":
+		body = "return " + b.jsonAlias + ".NewJsonValueString(value.ToS())"
+	case "time_zone":
+		body = "return " + b.jsonAlias + ".NewJsonValueString(value.Identifier())"
 	case "raw_enum":
 		if schema.RawType.Kind == types.Int {
 			body = "return " + b.jsonAlias + ".NewJsonValueInteger(int(value))"

@@ -10,6 +10,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if value, ok := g.timeIntrinsic(name, call, arguments); ok {
+		return value
+	}
 	if name == "trb.internal.runtime.fail" {
 		return "func() " + g.goType(call.ExprType()) + " { panic(" + arguments[0] + ") }()"
 	}

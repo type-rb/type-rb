@@ -1074,9 +1074,105 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.ormDialectRuntime(adapter)
+	if ormModelsUsePortableTime(models) {
+		g.ormTemporalRuntime(models)
+	}
 	for _, model := range models {
 		g.ormModelRuntime(manifest, adapter, model)
 	}
+}
+
+func ormModelsUsePortableTime(models []ormintegration.Model) bool {
+	for _, model := range models {
+		for _, column := range model.Columns {
+			if ormintegration.IsPortableTimeType(column.Type) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func goORMTemporalScan(name string) string { return "trbOrmScan" + name }
+
+func (g *generator) ormTemporalRuntime(models []ormintegration.Model) {
+	g.requireImport("time", "stdtime")
+	g.line("func trbOrmTemporalText(source any, kind string) (string, error) {")
+	g.indent++
+	g.line("if source == nil { return \"\", nil }")
+	g.line("if value, ok := source.(stdtime.Time); ok {")
+	g.indent++
+	g.line("switch kind { case \"Date\": return value.Format(\"2006-01-02\"), nil; case \"TimeOfDay\": return value.Format(\"15:04:05.999999999\"), nil; case \"DateTime\": return value.Format(\"2006-01-02T15:04:05.999999999\"), nil; case \"Instant\": return value.UTC().Format(stdtime.RFC3339Nano), nil }")
+	g.indent--
+	g.line("}")
+	g.line("var text string")
+	g.line("switch value := source.(type) { case string: text = value; case []byte: text = string(value); default: return \"\", errors.New(\"database date/time value has an unsupported representation\") }")
+	g.line("text = strings.TrimSpace(text)")
+	g.line("switch kind {")
+	g.indent++
+	g.line("case \"Date\": if len(text) > 10 { text = text[:10] }")
+	g.line("case \"TimeOfDay\": if index := strings.IndexAny(text, \"T \" ); index >= 0 { text = text[index+1:] }")
+	g.line("case \"DateTime\": text = strings.Replace(text, \" \", \"T\", 1)")
+	g.line("case \"Instant\": text = strings.TrimSpace(strings.TrimSuffix(text, \" UTC\")); text = strings.Replace(text, \" \", \"T\", 1); text = strings.Replace(text, \" +\", \"+\", 1); text = strings.Replace(text, \" -\", \"-\", 1); tail := text; if index := strings.IndexByte(text, 'T'); index >= 0 { tail = text[index+1:] }; if len(tail) >= 5 { offset := tail[len(tail)-5:]; if (offset[0] == '+' || offset[0] == '-') && offset[3] != ':' { text = text[:len(text)-2] + \":\" + text[len(text)-2:] } }; tail = text; if index := strings.IndexByte(text, 'T'); index >= 0 { tail = text[index+1:] }; if !strings.HasSuffix(text, \"Z\") && !strings.ContainsAny(tail, \"+-\") { text += \"Z\" }")
+	g.indent--
+	g.line("}")
+	g.line("return text, nil")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	used := map[string]bool{}
+	for _, model := range models {
+		for _, column := range model.Columns {
+			name := column.Type.Name
+			if !ormintegration.IsPortableTimeType(column.Type) || used[name] {
+				continue
+			}
+			used[name] = true
+			typ := column.Type
+			typ.Nullable = false
+			resultType := g.goType(typ)
+			owner := strings.TrimPrefix(strings.TrimSuffix(resultType, "."+name), "*")
+			method := name + "TryParse"
+			g.line("func " + goORMTemporalScan(name) + "(source any) (" + resultType + ", error) {")
+			g.indent++
+			g.line("if source == nil { return nil, nil }")
+			g.line("text, err := trbOrmTemporalText(source, " + strconv.Quote(name) + "); if err != nil { return nil, err }")
+			g.line("parsed := " + owner + "." + method + "(text); if parsed.Kind != 0 { return nil, errors.New(" + strconv.Quote("invalid "+name+" database value") + ") }")
+			g.line("return parsed.OkValue, nil")
+			g.indent--
+			g.line("}")
+			g.b.WriteByte('\n')
+		}
+	}
+}
+
+func goORMScanModel(model ormintegration.Model) string {
+	return "trbOrmScan" + goIdentifier(model.Name, true)
+}
+
+func (g *generator) ormModelScanner(model ormintegration.Model) {
+	targets := make([]string, 0, len(model.Columns))
+	for _, column := range model.Columns {
+		if ormintegration.IsPortableTimeType(column.Type) {
+			g.line("var raw" + goIdentifier(column.Name, true) + " any")
+			targets = append(targets, "&raw"+goIdentifier(column.Name, true))
+		} else {
+			targets = append(targets, "&value."+goFieldName(column.Name))
+		}
+	}
+	g.line("if err := scanner.Scan(" + strings.Join(targets, ", ") + "); err != nil { return err }")
+	for _, column := range model.Columns {
+		if !ormintegration.IsPortableTimeType(column.Type) {
+			continue
+		}
+		name := goIdentifier(column.Name, true)
+		g.line("converted" + name + ", err := " + goORMTemporalScan(column.Type.Name) + "(raw" + name + "); if err != nil { return err }")
+		if !column.Nullable {
+			g.line("if converted" + name + " == nil { return errors.New(" + strconv.Quote("database column "+column.Name+" must not be null") + ") }")
+		}
+		g.line("value." + goFieldName(column.Name) + " = converted" + name)
+	}
+	g.line("return nil")
 }
 
 func (g *generator) ormEnumColumnRuntime(enum *ormintegration.EnumColumn) {
@@ -1148,6 +1244,9 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.requireImport("context", "")
 	g.requireImport("strconv", "")
 	g.requireImport("sync", "")
+	if adapter.Name == "mysql" {
+		g.requireImport("strings", "")
+	}
 	if manifest.DatabaseEnvironment != "" {
 		g.requireImport("errors", "")
 		g.requireImport("os", "")
@@ -1166,7 +1265,11 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 		g.line("if !found || databaseSource == \"\" { trbOrmDatabaseError = errors.New(\"database environment variable is not set or empty\"); return }")
 		database = "databaseSource"
 	}
-	g.line("trbOrmDatabase, trbOrmDatabaseError = sql.Open(" + strconv.Quote(adapter.DriverName) + ", " + database + ")")
+	g.line("trbOrmSource := " + database)
+	if adapter.Name == "mysql" {
+		g.line("separator := \"?\"; if strings.Contains(trbOrmSource, \"?\") { separator = \"&\" }; if !strings.Contains(trbOrmSource, \"parseTime=\") { trbOrmSource += separator + \"parseTime=true\"; separator = \"&\" }; if !strings.Contains(trbOrmSource, \"loc=\") { trbOrmSource += separator + \"loc=UTC\"; separator = \"&\" }; if !strings.Contains(trbOrmSource, \"time_zone=\") { trbOrmSource += separator + \"time_zone=%27%2B00%3A00%27\" }")
+	}
+	g.line("trbOrmDatabase, trbOrmDatabaseError = sql.Open(" + strconv.Quote(adapter.DriverName) + ", trbOrmSource)")
 	g.line("if trbOrmDatabaseError == nil { trbOrmDatabaseError = trbOrmDatabase.Ping() }")
 	g.line("if trbOrmDatabaseError != nil && trbOrmDatabase != nil { _ = trbOrmDatabase.Close(); trbOrmDatabase = nil }")
 	g.indent--
@@ -1748,10 +1851,8 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.b.WriteByte('\n')
 
 	columns := make([]string, len(model.Columns))
-	scanTargets := make([]string, len(model.Columns))
 	for index, column := range model.Columns {
 		columns[index] = adapter.QuoteIdentifier(column.Name)
-		scanTargets[index] = "&value." + goFieldName(column.Name)
 		g.line("func (self *" + goIdentifier(model.Name, true) + ") " + goORMColumnGetter(column.Name) + "() " + g.goType(column.Type) + " {")
 		g.indent++
 		g.line("return self." + goFieldName(column.Name))
@@ -1759,14 +1860,22 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.line("}")
 		g.b.WriteByte('\n')
 	}
+	g.line("func " + goORMScanModel(model) + "(scanner interface { Scan(...any) error }, value *" + goIdentifier(model.Name, true) + ") error {")
+	g.indent++
+	g.ormModelScanner(model)
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 	g.line("func (self *" + goIdentifier(model.Name, true) + ") TrbOrmTransaction() *" + g.ormLifecycleAlias() + ".TrbOrmTransaction { return self." + goORMQueryScopeField() + ".transaction }")
 	g.b.WriteByte('\n')
-	g.ormCreateRuntime(adapter, model, columns, scanTargets)
+	g.ormCreateRuntime(adapter, model, columns)
 	g.ormRelationWriteRuntime(adapter, model)
 	for _, column := range model.Columns {
 		g.ormProjectionRuntime(adapter, model, column)
 		g.ormSubqueryRuntime(adapter, model, column)
-		g.ormGroupRuntime(adapter, model, column)
+		if ormintegration.IsGroupableColumn(column) {
+			g.ormGroupRuntime(adapter, model, column)
+		}
 		for _, operation := range ormintegration.AggregateOperations() {
 			if resultType, ok := ormintegration.AggregateResultType(operation, column); ok {
 				g.ormAggregateRuntime(adapter, model, column, operation, resultType)
@@ -1905,7 +2014,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("for rows.Next() {")
 	g.indent++
 	g.line("value := &" + goIdentifier(model.Name, true) + "{}")
-	g.line("if err := rows.Scan(" + strings.Join(scanTargets, ", ") + "); err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database row was invalid\")") + " }")
+	g.line("if err := " + goORMScanModel(model) + "(rows, value); err != nil { return " + g.ormResultErr(modelsType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database row was invalid\")") + " }")
 	g.line("value." + goORMQueryScopeField() + " = query")
 	g.line("result = append(result, value)")
 	g.indent--

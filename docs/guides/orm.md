@@ -46,6 +46,25 @@ The compiler looks for `db/schema.lock.json` by default. Set the optional
 configured lock is missing or invalid, compilation fails instead of silently
 using the live database.
 
+## Date and time columns
+
+Schema introspection and schema locks expose portable time types without model
+annotations:
+
+| TypeRB | PostgreSQL | MySQL | SQLite declared type |
+| --- | --- | --- | --- |
+| `Date` | `date` | `date` | `DATE` |
+| `TimeOfDay` | `time without time zone` | `time` | `TIME` |
+| `DateTime` | `timestamp without time zone` | `datetime` | `DATETIME` or `TIMESTAMP` |
+| `Instant` | `timestamp with time zone` | `timestamp` | `TIMESTAMPTZ` or `INSTANT` |
+
+These values work in model fields, typed predicates, writes, projections, and
+`minimum()` / `maximum()`. `Instant` database traffic is normalized through
+UTC; `DateTime` never gains an implicit timezone. MySQL `TIME` is accepted only
+within the portable `TimeOfDay` range from `00:00:00` through `23:59:59.999999`.
+Database precision remains controlled by the column declaration, such as
+`timestamp(6)`.
+
 ## Models and associations
 
 Model and table names follow conventions. Fields, nullability, primary keys,

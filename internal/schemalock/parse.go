@@ -270,6 +270,14 @@ func portableColumnType(adapter, databaseType string) (string, error) {
 	switch adapter {
 	case "sqlite":
 		switch {
+		case normalized == "date":
+			return "Date", nil
+		case normalized == "time":
+			return "TimeOfDay", nil
+		case strings.Contains(normalized, "timestamptz"), normalized == "instant":
+			return "Instant", nil
+		case strings.Contains(normalized, "datetime"), strings.Contains(normalized, "timestamp"):
+			return "DateTime", nil
 		case strings.Contains(normalized, "int"):
 			return "Integer", nil
 		case strings.Contains(normalized, "char"), strings.Contains(normalized, "clob"), strings.Contains(normalized, "text"):
@@ -282,6 +290,16 @@ func portableColumnType(adapter, databaseType string) (string, error) {
 			return "Bytes", nil
 		}
 	case "postgresql":
+		switch normalized {
+		case "date":
+			return "Date", nil
+		case "time", "time without time zone":
+			return "TimeOfDay", nil
+		case "timestamp", "timestamp without time zone":
+			return "DateTime", nil
+		case "timestamptz", "timestamp with time zone":
+			return "Instant", nil
+		}
 		base := strings.Fields(strings.NewReplacer("(", " ", ")", " ", ",", " ").Replace(normalized))
 		name := ""
 		if len(base) > 0 {
@@ -301,6 +319,14 @@ func portableColumnType(adapter, databaseType string) (string, error) {
 		}
 	case "mysql":
 		switch {
+		case normalized == "date":
+			return "Date", nil
+		case strings.HasPrefix(normalized, "datetime"):
+			return "DateTime", nil
+		case strings.HasPrefix(normalized, "timestamp"):
+			return "Instant", nil
+		case normalized == "time" || strings.HasPrefix(normalized, "time("):
+			return "TimeOfDay", nil
 		case strings.HasPrefix(normalized, "tinyint(1)"), normalized == "boolean", normalized == "bool":
 			return "Boolean", nil
 		case strings.Contains(normalized, "int"):
