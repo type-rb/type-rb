@@ -62,6 +62,7 @@ Imports are explicit and resolved before type checking:
 ```trb
 import app/models/user
 import { UserRepo } from app/repos/user_repo
+import { Contract } from acme/contracts
 import trb/std/strings
 ```
 
@@ -73,7 +74,10 @@ import trb/platform/go/http
 ```
 
 Project package identities come from paths below `sourceDir`; source files do
-not declare target packages.
+not declare target packages. External TypeRB packages also use explicit
+imports. A project may configure a short import such as `acme/contracts`; its
+lock maps that name to the canonical package identity without changing source
+syntax by target mode.
 
 Ordinary imports must be used. Package imports require a member reference, and
 each symbol named inside `{ ... }` must be referenced. Compiler integration

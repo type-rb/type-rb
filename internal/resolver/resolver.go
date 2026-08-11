@@ -157,13 +157,14 @@ type Result struct {
 }
 
 type Options struct {
-	Mode          string
-	SourceRoot    string
-	Filename      string
-	CompilerOwned bool
-	Official      bool
-	Catalog       *Catalog
-	Declarations  *declaration.Catalog
+	Mode           string
+	SourceRoot     string
+	Filename       string
+	PackageAliases map[string]string
+	CompilerOwned  bool
+	Official       bool
+	Catalog        *Catalog
+	Declarations   *declaration.Catalog
 }
 
 type Module struct {
@@ -594,11 +595,12 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || pathpkg.IsAbs(clean) {
 		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("invalid project import path %q", node.Path))}
 	}
-	resolved := &Import{Node: node, Kind: ProjectImport, Path: clean, Alias: node.Alias, Exports: map[string]Export{}}
+	canonical := canonicalPackageImport(clean, options.PackageAliases)
+	resolved := &Import{Node: node, Kind: ProjectImport, Path: canonical, Alias: node.Alias, Exports: map[string]Export{}}
 	if options.Catalog != nil {
-		module := options.Catalog.Modules[clean]
+		module := options.Catalog.Modules[canonical]
 		if module == nil {
-			module = options.Catalog.Modules[pathpkg.Join(clean, "index")]
+			module = options.Catalog.Modules[pathpkg.Join(canonical, "index")]
 		}
 		if module != nil {
 			resolved.Path = module.Path
@@ -651,6 +653,24 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 	}
 
 	return finalizeProjectImport(resolved)
+}
+
+func canonicalPackageImport(importPath string, aliases map[string]string) string {
+	selected := ""
+	canonical := ""
+	for alias, packageName := range aliases {
+		if importPath != alias && !strings.HasPrefix(importPath, alias+"/") {
+			continue
+		}
+		if len(alias) > len(selected) {
+			selected = alias
+			canonical = packageName + strings.TrimPrefix(importPath, alias)
+		}
+	}
+	if canonical != "" {
+		return canonical
+	}
+	return importPath
 }
 
 func finalizeProjectImport(resolved *Import) (*Import, []diagnostic.Diagnostic) {

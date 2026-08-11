@@ -74,8 +74,12 @@ than detailed syntax.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
 - Stabilize compiler-owned library type providers so gems, Go modules, and npm
   packages do not require application-authored signature files.
-- Add reproducible dependency locking, checksums, offline builds, package
-  publishing, version constraints, and vulnerability/audit integration.
+- Evolve the initial distributed Git package system with semantic version
+  constraints, selective updates, publishing conventions, shared caches,
+  vulnerability/audit integration, and namespace-stable type identities.
+- Define a stable extension protocol before external packages can request
+  compiler integration; do not expose compiler internals as a public plugin
+  API.
 
 ## 6. Application-level proof
 
