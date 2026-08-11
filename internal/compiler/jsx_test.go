@@ -84,7 +84,7 @@ func TestCompileTypeScriptBrowserJSONQueryIsTypedAndSuspending(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "query.trb",
 		ModulePath: "app/query",
-		Source: []byte(`import { FetchError, get_json, put_json } from trb/platform/typescript/browser
+		Source: []byte(`import { FetchError, delete_json, get_json, patch_json, post_json, put_json } from trb/platform/typescript/browser
 
 record Todo
 	id: Integer
@@ -97,6 +97,18 @@ end
 
 def save_todo(todo: Todo): Todo fails FetchError
 	return put_json<Todo>("/api/todos/1", todo)
+end
+
+def create_todo(todo: Todo): Todo fails FetchError
+	return post_json<Todo>("/api/todos", todo)
+end
+
+def patch_todo(todo: Todo): Todo fails FetchError
+	return patch_json<Todo>("/api/todos/1", todo)
+end
+
+def delete_todo(): Todo fails FetchError
+	return delete_json<Todo>("/api/todos/1")
 end
 `),
 	}
@@ -114,14 +126,38 @@ end
 		"async function load_todos(): Promise<Result<Array<Todo>, FetchError>>",
 		"await fetch(\"/api/todos\")",
 		`method: "PUT"`,
+		`method: "POST"`,
+		`method: "PATCH"`,
+		`method: "DELETE"`,
+		`fetch("/api/todos/1", { method: "DELETE" })`,
 		`"Content-Type": "application/json"`,
 		"FetchError.InvalidJson",
 		"Result.Ok<Array<Todo>, FetchError>",
 		"async function save_todo(todo: Todo): Promise<Result<Todo, FetchError>>",
+		"async function create_todo(todo: Todo): Promise<Result<Todo, FetchError>>",
+		"async function patch_todo(todo: Todo): Promise<Result<Todo, FetchError>>",
+		"async function delete_todo(): Promise<Result<Todo, FetchError>>",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated browser query is missing %q:\n%s", expected, output)
 		}
+	}
+}
+
+func TestCompileTypeScriptBrowserJSONChecksRequestValue(t *testing.T) {
+	source := []byte(`import { FetchError, post_json } from trb/platform/typescript/browser
+
+record Todo
+	id: Integer
+end
+
+def create_todo(): Todo fails FetchError
+	return post_json<Todo>("/api/todos", "not a todo")
+end
+`)
+	_, err := CompileProject([]SourceUnit{{Filename: "query.trb", ModulePath: "app/query", Source: source}}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err == nil || !strings.Contains(err.Error(), "argument 2 to post_json() has type String, expected Todo") {
+		t.Fatalf("expected typed browser request diagnostic, got %v", err)
 	}
 }
 

@@ -370,7 +370,20 @@ func isSuspendingORM(intrinsic string, fails types.Type) bool {
 }
 
 func isSuspendingIntrinsic(intrinsic string, fails types.Type) bool {
-	return isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || intrinsic == "trb.platform.typescript.browser.get_json" || intrinsic == "trb.platform.typescript.browser.put_json"
+	return isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || isSuspendingBrowserIntrinsic(intrinsic)
+}
+
+func isSuspendingBrowserIntrinsic(intrinsic string) bool {
+	switch intrinsic {
+	case "trb.platform.typescript.browser.get_json",
+		"trb.platform.typescript.browser.post_json",
+		"trb.platform.typescript.browser.put_json",
+		"trb.platform.typescript.browser.patch_json",
+		"trb.platform.typescript.browser.delete_json":
+		return true
+	default:
+		return false
+	}
 }
 
 func isWebNextCall(callee ir.Expression) bool {

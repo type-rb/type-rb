@@ -25,6 +25,22 @@ func TestBundledReactPackage(t *testing.T) {
 	}
 }
 
+func TestBundledTypeScriptBrowserPackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/platform/typescript/browser")
+	if !ok {
+		t.Fatal("TypeScript browser package is not registered")
+	}
+	if packageDefinition.Definition.Kind != "platform" || !packageDefinition.Definition.Supports("typescript") || packageDefinition.Definition.Supports("go") {
+		t.Fatalf("unexpected browser package targets: %#v", packageDefinition.Definition)
+	}
+	for _, name := range []string{"get_json", "post_json", "put_json", "patch_json", "delete_json"} {
+		symbol, exists := packageDefinition.Definition.Symbols[name]
+		if !exists || symbol.Return.String() != "T" || symbol.Fails.String() != "FetchError" || len(symbol.TypeParameters) != 1 {
+			t.Fatalf("unexpected %s browser contract: %#v", name, symbol)
+		}
+	}
+}
+
 func TestBundledWebPackage(t *testing.T) {
 	packageDefinition, ok := Lookup("trb/web")
 	if !ok {

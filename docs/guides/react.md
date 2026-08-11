@@ -26,7 +26,7 @@ imported from another TypeRB module. Files containing JSX are generated as
 Typed browser JSON calls use ordinary `fails` and `attempt` semantics:
 
 ```trb
-import { FetchError, get_json, put_json } from trb/platform/typescript/browser
+import { FetchError, get_json, patch_json, post_json } from trb/platform/typescript/browser
 
 record Todo
 	id: Integer
@@ -39,9 +39,17 @@ def load_todos(): Array<Todo> fails FetchError
 end
 
 def save_todo(todo: Todo): Todo fails FetchError
-	return put_json<Todo>("/api/todos/" + todo.id.to_s(), todo)
+	if todo.id == 0
+		return post_json<Todo>("/api/todos", todo)
+	end
+	return patch_json<Todo>("/api/todos/" + todo.id.to_s(), todo)
 end
 ```
+
+`get_json<T>`, `post_json<T>`, `put_json<T>`, `patch_json<T>`, and
+`delete_json<T>` encode request values and validate response JSON against the
+same TypeRB type. HTTP, network, and invalid-response failures remain explicit
+through `FetchError`.
 
 Browser suspension remains a TypeScript backend concern; TypeRB does not add
 `async` syntax. Generated TSX and package dependencies are compatible with the

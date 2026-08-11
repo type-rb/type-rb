@@ -12,8 +12,17 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	if name == "trb.platform.typescript.browser.get_json" {
 		return g.tsBrowserJSON("GET", call, arguments[0], "")
 	}
+	if name == "trb.platform.typescript.browser.post_json" {
+		return g.tsBrowserJSON("POST", call, arguments[0], arguments[1])
+	}
 	if name == "trb.platform.typescript.browser.put_json" {
 		return g.tsBrowserJSON("PUT", call, arguments[0], arguments[1])
+	}
+	if name == "trb.platform.typescript.browser.patch_json" {
+		return g.tsBrowserJSON("PATCH", call, arguments[0], arguments[1])
+	}
+	if name == "trb.platform.typescript.browser.delete_json" {
+		return g.tsBrowserJSON("DELETE", call, arguments[0], "")
 	}
 	if value, ok := g.timeIntrinsic(name, call, arguments); ok {
 		return value
@@ -488,6 +497,9 @@ func (g *generator) tsBrowserJSON(method string, call *ir.Call, url, body string
 	requestSetup := ""
 	requestOptions := ""
 	if method != "GET" {
+		requestOptions = ", { method: " + strconv.Quote(method) + " }"
+	}
+	if body != "" {
 		encoded := g.tsBrowserEncodeJSON(call, body)
 		requestSetup = "const __trbEncoded = " + encoded + "; if (__trbEncoded.kind === \"Err\") return " + g.runtimeName("Result") + ".Err<" + valueType + ", " + g.tsType(call.Fails) + ">(" + g.runtimeName("FetchError") + ".InvalidJson(__trbEncoded.error.message)); "
 		requestOptions = ", { method: " + strconv.Quote(method) + ", headers: { \"Content-Type\": \"application/json\" }, body: __trbEncoded.value }"

@@ -31,7 +31,8 @@ source and emits ordinary TSX for React tooling. Function components use typed
 record props, JSX component calls are checked across project modules, and only
 modules containing JSX use the `.tsx` extension. The explicit
 `trb/platform/typescript/react` package supplies the React boundary, while
-`trb/platform/typescript/browser` provides typed, fallible JSON queries. This
+`trb/platform/typescript/browser` provides typed, fallible JSON transport for
+GET, POST, PUT, PATCH, and DELETE. This
 has been exercised as one end-to-end slice with shared contracts, a portable
 JSON API, ORM persistence, form validation, and a React browser client.
 
