@@ -15,8 +15,57 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 		return webSymbols()
 	case "trb.web.testing":
 		return webTestingSymbols()
+	case "trb.typescript.react":
+		return reactSymbols()
+	case "trb.typescript.browser":
+		return browserSymbols()
 	default:
 		panic(fmt.Sprintf("unknown official package semantic provider %q", provider))
+	}
+}
+
+func browserSymbols() map[string]stdlib.Symbol {
+	typeT := types.FromName("T")
+	jsonError := types.FromName("JsonError")
+	jsonResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, jsonError}}
+	return map[string]stdlib.Symbol{
+		"get_json": {
+			Name:                "get_json",
+			Intrinsic:           "trb.platform.typescript.browser.get_json",
+			RuntimeIndependent:  true,
+			TypeParameters:      []string{"T"},
+			Parameters:          []stdlib.Parameter{{Name: "url", Type: types.FromName("String")}},
+			Return:              typeT,
+			Fails:               types.FromName("FetchError"),
+			RuntimeDependencies: []types.Type{jsonResult},
+		},
+		"put_json": {
+			Name:                "put_json",
+			Intrinsic:           "trb.platform.typescript.browser.put_json",
+			RuntimeIndependent:  true,
+			TypeParameters:      []string{"T"},
+			Parameters:          []stdlib.Parameter{{Name: "url", Type: types.FromName("String")}, {Name: "value", Type: typeT}},
+			Return:              typeT,
+			Fails:               types.FromName("FetchError"),
+			RuntimeDependencies: []types.Type{jsonResult},
+		},
+	}
+}
+
+func reactSymbols() map[string]stdlib.Symbol {
+	stringType := types.FromName("String")
+	integerType := types.FromName("Integer")
+	booleanType := types.FromName("Boolean")
+	anyType := types.FromName("Any")
+	voidType := types.FromName("Void")
+	return map[string]stdlib.Symbol{
+		"element":         {Name: "element", Intrinsic: "trb.platform.typescript.react.element", Parameters: []stdlib.Parameter{{Name: "tag", Type: anyType}, {Name: "props", Type: types.FromName("Hash")}, {Name: "children", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{anyType}}}}, Return: types.FromName("ReactNode")},
+		"mount":           {Name: "mount", Intrinsic: "trb.platform.typescript.react.mount", Parameters: []stdlib.Parameter{{Name: "component", Type: anyType}, {Name: "element_id", Type: stringType}}, Return: voidType},
+		"refresh":         {Name: "refresh", Intrinsic: "trb.platform.typescript.react.refresh", Parameters: []stdlib.Parameter{{Name: "component", Type: anyType}}, Return: voidType},
+		"prevent_default": {Name: "prevent_default", Intrinsic: "trb.platform.typescript.react.prevent_default", Parameters: []stdlib.Parameter{{Name: "event", Type: types.FromName("ReactEvent")}}, Return: voidType},
+		"input_value":     {Name: "input_value", Intrinsic: "trb.platform.typescript.react.input_value", Parameters: []stdlib.Parameter{{Name: "event", Type: types.FromName("ReactEvent")}}, Return: stringType},
+		"data_integer":    {Name: "data_integer", Intrinsic: "trb.platform.typescript.react.data_integer", Parameters: []stdlib.Parameter{{Name: "event", Type: types.FromName("ReactEvent")}, {Name: "name", Type: stringType}}, Return: integerType},
+		"data_boolean":    {Name: "data_boolean", Intrinsic: "trb.platform.typescript.react.data_boolean", Parameters: []stdlib.Parameter{{Name: "event", Type: types.FromName("ReactEvent")}, {Name: "name", Type: stringType}}, Return: booleanType},
 	}
 }
 

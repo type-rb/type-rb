@@ -228,6 +228,19 @@ func (a *suspensionAnalyzer) expressionSuspends(expression ir.Expression, contex
 		for _, entry := range node.Entries {
 			suspends = a.expressionSuspends(entry.Key, context, record) || a.expressionSuspends(entry.Value, context, record) || suspends
 		}
+	case *ir.JSXElement:
+		suspends = a.expressionSuspends(node.Component, context, record)
+		for _, attribute := range node.Attributes {
+			suspends = a.expressionSuspends(attribute.Value, context, record) || suspends
+		}
+		for _, child := range node.Children {
+			switch item := child.(type) {
+			case *ir.JSXElement:
+				suspends = a.expressionSuspends(item, context, record) || suspends
+			case *ir.JSXExpression:
+				suspends = a.expressionSuspends(item.Value, context, record) || suspends
+			}
+		}
 	case *ir.Unary:
 		suspends = a.expressionSuspends(node.Operand, context, record)
 	case *ir.Conversion:
@@ -357,7 +370,7 @@ func isSuspendingORM(intrinsic string, fails types.Type) bool {
 }
 
 func isSuspendingIntrinsic(intrinsic string, fails types.Type) bool {
-	return isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call"
+	return isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || intrinsic == "trb.platform.typescript.browser.get_json" || intrinsic == "trb.platform.typescript.browser.put_json"
 }
 
 func isWebNextCall(callee ir.Expression) bool {

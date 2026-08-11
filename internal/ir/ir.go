@@ -20,6 +20,7 @@ type Program struct {
 	GoModule          string
 	RubyLoader        string
 	TypeScriptRuntime string
+	UsesJSX           bool
 	Extensions        []Extension
 	Statements        []Statement
 }
@@ -481,6 +482,38 @@ type Hash struct {
 }
 
 func (*Hash) irExpression() {}
+
+type JSXAttribute struct {
+	Name    string
+	Value   Expression
+	Boolean bool
+}
+
+type JSXChild interface{ jsxChild() }
+
+type JSXElement struct {
+	ExprBase
+	Name       string
+	Component  Expression
+	Attributes []JSXAttribute
+	Children   []JSXChild
+	Fragment   bool
+}
+
+func (*JSXElement) irExpression() {}
+func (*JSXElement) jsxChild()     {}
+
+type JSXText struct {
+	Text string
+}
+
+func (*JSXText) jsxChild() {}
+
+type JSXExpression struct {
+	Value Expression
+}
+
+func (*JSXExpression) jsxChild() {}
 
 type Unary struct {
 	ExprBase

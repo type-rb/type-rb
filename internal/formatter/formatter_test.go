@@ -24,6 +24,27 @@ func TestFormatPreservesCommentsAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestFormatPreservesStructuredJSXAndIsIdempotent(t *testing.T) {
+	source := []byte("import { ReactNode } from trb/platform/typescript/react\ndef Card(props:CardProps):ReactNode\nreturn <article className=\"card\">\n\t<h2>{props.title}</h2>\n</article> # card\nend\n")
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	text := string(formatted)
+	for _, expected := range []string{
+		"def Card(props: CardProps): ReactNode",
+		"\treturn <article className=\"card\">\n\t<h2>{props.title}</h2>\n</article> # card",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("formatted JSX is missing %q:\n%s", expected, text)
+		}
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("JSX formatting is not idempotent:\nfirst:\n%s\nsecond:\n%s\ndiags=%v", formatted, formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatPreservesHeredocBody(t *testing.T) {
 	source := []byte("class Query\ndef sql():String\nreturn <<~SQL\n  SELECT  *\n+    FROM posts # SQL comment, not TypeRB\nSQL\nend\nend\n")
 	formatted, diagnostics := Format(source)

@@ -1,0 +1,8 @@
+record ReactNode
+end
+
+record ReactEvent
+end
+
+class ReactComponent
+end

@@ -628,6 +628,42 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 			copy.Entries[index] = ir.HashEntry{Key: key, Value: value}
 		}
 		return prefix, &copy
+	case *ir.JSXElement:
+		copy := *node
+		prefix, component := n.expression(node.Component)
+		if node.Component != nil && component == nil {
+			return prefix, nil
+		}
+		copy.Component = component
+		copy.Attributes = append([]ir.JSXAttribute(nil), node.Attributes...)
+		for index := range copy.Attributes {
+			attributePrefix, value := n.expression(copy.Attributes[index].Value)
+			prefix = append(prefix, attributePrefix...)
+			if copy.Attributes[index].Value != nil && value == nil {
+				return prefix, nil
+			}
+			copy.Attributes[index].Value = value
+		}
+		copy.Children = append([]ir.JSXChild(nil), node.Children...)
+		for index, child := range copy.Children {
+			switch item := child.(type) {
+			case *ir.JSXElement:
+				childPrefix, value := n.expression(item)
+				prefix = append(prefix, childPrefix...)
+				if value == nil {
+					return prefix, nil
+				}
+				copy.Children[index] = value.(*ir.JSXElement)
+			case *ir.JSXExpression:
+				childPrefix, value := n.expression(item.Value)
+				prefix = append(prefix, childPrefix...)
+				if value == nil {
+					return prefix, nil
+				}
+				copy.Children[index] = &ir.JSXExpression{Value: value}
+			}
+		}
+		return prefix, &copy
 	case *ir.Unary:
 		prefix, operand := n.expression(node.Operand)
 		if operand == nil {

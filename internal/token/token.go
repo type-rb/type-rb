@@ -24,6 +24,7 @@ const (
 	Identifier    Kind = "identifier"
 	Number        Kind = "number"
 	String        Kind = "string"
+	JSXLiteral    Kind = "jsx_literal"
 	NativeLiteral Kind = "native_literal"
 	Comment       Kind = "comment"
 	Newline       Kind = "newline"

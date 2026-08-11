@@ -27,6 +27,8 @@ type manifest struct {
 	SemanticProvider           string                                             `json:"semanticProvider,omitempty"`
 	ProjectProvider            string                                             `json:"projectProvider,omitempty"`
 	TypeProvider               string                                             `json:"typeProvider,omitempty"`
+	Kind                       string                                             `json:"kind,omitempty"`
+	Targets                    []string                                           `json:"targets,omitempty"`
 	NativeDependencies         map[string]map[string]string                       `json:"nativeDependencies,omitempty"`
 	NativeDependenciesByOption map[string]map[string]map[string]map[string]string `json:"nativeDependenciesByOption,omitempty"`
 }
@@ -133,6 +135,14 @@ func load() map[string]*Package {
 		if descriptor.Name == "" || descriptor.Version == "" || descriptor.Module == "" || descriptor.Source == "" {
 			return fmt.Errorf("%s: name, version, module, and source are required", filename)
 		}
+		if descriptor.Kind != "" && descriptor.Kind != "portable" && descriptor.Kind != "platform" {
+			return fmt.Errorf("%s: kind must be portable or platform", filename)
+		}
+		for _, target := range descriptor.Targets {
+			if target != "go" && target != "ruby" && target != "typescript" {
+				return fmt.Errorf("%s: unsupported target %q", filename, target)
+			}
+		}
 		if _, exists := result[descriptor.Name]; exists {
 			return fmt.Errorf("%s: package %s is already registered", filename, descriptor.Name)
 		}
@@ -152,7 +162,8 @@ func load() map[string]*Package {
 				Path:         descriptor.Name,
 				ModulePath:   descriptor.Module,
 				Source:       string(source),
-				Kind:         stdlib.Portable,
+				Kind:         manifestKind(descriptor.Kind),
+				Targets:      manifestTargets(descriptor.Targets),
 				TypeProvider: descriptor.TypeProvider,
 				Symbols:      semanticSymbols(descriptor.SemanticProvider),
 			},
@@ -161,6 +172,24 @@ func load() map[string]*Package {
 	})
 	if err != nil {
 		panic("load official TypeRB packages: " + err.Error())
+	}
+	return result
+}
+
+func manifestKind(kind string) stdlib.Kind {
+	if kind == "platform" {
+		return stdlib.Platform
+	}
+	return stdlib.Portable
+}
+
+func manifestTargets(targets []string) map[string]bool {
+	if len(targets) == 0 {
+		return nil
+	}
+	result := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		result[target] = true
 	}
 	return result
 }
