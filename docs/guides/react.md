@@ -97,6 +97,39 @@ end
 same TypeRB type. HTTP, network, and invalid-response failures remain explicit
 through `FetchError`.
 
+Browser routing is an optional React Router integration:
+
+```trb
+import { ReactEvent, ReactNode } from trb/platform/typescript/react
+import { browser_router, link_to, route, route_param, use_navigate } from trb/platform/typescript/react/router
+
+def Home(): ReactNode
+	return <main>{link_to("/todos/42", <span>Open todo</span>)}</main>
+end
+
+def TodoPage(): ReactNode
+	id := route_param("id")
+	navigate := use_navigate()
+	go_home := fn(_event: ReactEvent)
+		navigate("/")
+		return
+	end
+	return <main><p>Todo {id}</p><button onClick={go_home}>Home</button></main>
+end
+
+def App(): ReactNode
+	return browser_router([
+		route("/", <Home />),
+		route("/todos/:id", <TodoPage />),
+	])
+end
+```
+
+The generated application uses `react-router-dom`; `route_param(name)` returns
+`String?`, and `use_navigate()` returns a typed `(String) -> Void` function.
+Components without props accept no parameter and can be rendered as
+`<Component />`.
+
 Browser suspension remains a TypeScript backend concern; TypeRB does not add
 `async` syntax. Generated TSX and package dependencies are compatible with the
 normal React and Vite ecosystem.

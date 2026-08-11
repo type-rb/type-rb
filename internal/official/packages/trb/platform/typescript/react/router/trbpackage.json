@@ -1,0 +1,14 @@
+{
+  "name": "trb/platform/typescript/react/router",
+  "version": "0.1.0",
+  "module": "trb/platform/typescript/react/router/index",
+  "source": "src/index.trb",
+  "kind": "platform",
+  "targets": ["typescript"],
+  "semanticProvider": "trb.typescript.react.router",
+  "nativeDependencies": {
+    "typescript": {
+      "react-router-dom": "latest"
+    }
+  }
+}

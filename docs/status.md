@@ -29,7 +29,8 @@ Bun can be selected explicitly for server packages.
 The experimental TypeScript browser path accepts structured JSX in TypeRB
 source and emits ordinary TSX for React tooling. Function components use typed
 record props and local state, JSX component calls are checked across project
-modules, and only modules containing JSX use the `.tsx` extension. The explicit
+modules, and optional browser routing lowers to React Router. Only modules
+containing JSX use the `.tsx` extension. The explicit
 `trb/platform/typescript/react` package supplies the React boundary, while
 `trb/platform/typescript/browser` provides typed, fallible JSON transport for
 GET, POST, PUT, PATCH, and DELETE. This

@@ -141,6 +141,25 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 			return
 		}
+		if n.Path == "trb/platform/typescript/react/router" || n.Path == "trb/platform/typescript/react/router/index" {
+			g.line(`import { BrowserRouter, Link, Route, Routes, useNavigate, useParams } from "react-router-dom";`)
+			if containsString(n.Symbols, "browser_router") {
+				g.line(`function renderTrbBrowserRouter(routes: ReadonlyArray<Readonly<{ path: string; element: React.ReactNode }>>): React.ReactNode {`)
+				g.indent++
+				g.line(`return React.createElement(BrowserRouter, null, React.createElement(Routes, null, routes.map((entry) => React.createElement(Route, { key: entry.path, path: entry.path, element: entry.element }))));`)
+				g.indent--
+				g.line(`}`)
+			}
+			if containsString(n.Symbols, "use_navigate") {
+				g.line(`function useTrbNavigate(): (path: string) => void {`)
+				g.indent++
+				g.line(`const navigate = useNavigate();`)
+				g.line(`return (path: string): void => { void navigate(path); };`)
+				g.indent--
+				g.line(`}`)
+			}
+			return
+		}
 		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) {
 			return
 		}
@@ -1704,6 +1723,8 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 				value = tsTypeWithAliases(t.Args[0], aliases)
 			}
 			result = "Readonly<{ value: " + value + "; set: (value: " + value + ") => void }>"
+		case "ReactRoute":
+			result = "Readonly<{ path: string; element: React.ReactNode }>"
 		case "Callback":
 			argument := "unknown"
 			if len(t.Args) > 0 {
@@ -1717,7 +1738,7 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 			}
 		}
 	}
-	if t.Kind == types.Named && len(t.Args) > 0 && t.Name != "ReactState" {
+	if t.Kind == types.Named && len(t.Args) > 0 && t.Name != "ReactState" && t.Name != "ReactRoute" {
 		arguments := make([]string, len(t.Args))
 		for index, argument := range t.Args {
 			arguments[index] = tsTypeWithAliases(argument, aliases)
