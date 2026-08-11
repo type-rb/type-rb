@@ -21,6 +21,28 @@ func TestGenericPackageContractsInferFromEarlierArguments(t *testing.T) {
 	}
 }
 
+func TestRuntimeExportPackagesArePublicPortableAndSorted(t *testing.T) {
+	packages := RuntimeExportPackages("go")
+	if len(packages) == 0 {
+		t.Fatal("runtime export package catalog is empty")
+	}
+	previous := ""
+	foundTime := false
+	for _, definition := range packages {
+		if definition.Internal || definition.Kind != Portable || len(definition.RuntimeExports) == 0 {
+			t.Fatalf("unexpected runtime export package: %#v", definition)
+		}
+		if definition.Path < previous {
+			t.Fatalf("runtime export packages are not sorted: %q before %q", previous, definition.Path)
+		}
+		previous = definition.Path
+		foundTime = foundTime || definition.Path == "trb/std/time"
+	}
+	if !foundTime {
+		t.Fatal("trb/std/time is missing from runtime export packages")
+	}
+}
+
 func TestGenericReceiverContractsSpecializeReturnTypes(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
 	_, fetch, ok := LookupReceiverMethod(arrayType, "fetch")

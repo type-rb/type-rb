@@ -21,6 +21,8 @@ import (
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/languageservice"
+	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/official"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
 	"github.com/type-rb/type-rb/internal/parser"
@@ -28,6 +30,8 @@ import (
 	"github.com/type-rb/type-rb/internal/project"
 	"github.com/type-rb/type-rb/internal/repl"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/token"
 )
 
 // Version is a variable so release builds can inject the tag with Go's -X
@@ -585,18 +589,17 @@ func (c *CLI) runRepl(args []string) error {
 		}
 		return compilation, nil
 	}
-	var projectImports []replProjectImport
-	preludeReady := false
+	initial, err := compileSource("")
+	if err != nil {
+		return err
+	}
+	availableImports := uniqueReplImports(initial.Artifacts, sessionModule, config.Mode)
+	candidates, err := replStandardCandidates(config, availableImports, sessionPackage)
+	if err != nil {
+		return err
+	}
 	compile := func(source string) (*repl.Compilation, error) {
-		if !preludeReady {
-			initial, err := compileSource("")
-			if err != nil {
-				return nil, err
-			}
-			projectImports = uniqueReplProjectImports(initial.Artifacts, sessionModule)
-			preludeReady = true
-		}
-		hiddenPrelude := replProjectPrelude(projectImports, source)
+		hiddenPrelude := replPrelude(availableImports, source)
 		hiddenPreludeLines := strings.Count(hiddenPrelude, "\n")
 		compilation, err := compileSource(hiddenPrelude + source)
 		if err != nil {
@@ -620,16 +623,21 @@ func (c *CLI) runRepl(args []string) error {
 		Interactive: interactiveTerminal(c.Stdin, c.Stdout),
 		HistoryFile: historyFile,
 		Compile:     compile,
+		Candidates:  candidates,
 	})
 }
 
-type replProjectImport struct {
-	path    string
-	symbols []string
+type replImport struct {
+	path     string
+	symbols  []string
+	standard bool
 }
 
-func uniqueReplProjectImports(artifacts []*compiler.Artifact, modulePath string) []replProjectImport {
-	type origin struct{ path string }
+func uniqueReplImports(artifacts []*compiler.Artifact, modulePath, mode string) []replImport {
+	type origin struct {
+		path     string
+		standard bool
+	}
 	byName := map[string][]origin{}
 	for _, artifact := range artifacts {
 		if artifact == nil || artifact.AST == nil || artifact.AST.ModulePath == modulePath || artifact.CompilerOwned || artifact.Official {
@@ -641,29 +649,49 @@ func uniqueReplProjectImports(artifacts []*compiler.Artifact, modulePath string)
 			}
 		}
 	}
-	byPath := map[string][]string{}
-	for name, origins := range byName {
-		if len(origins) == 1 {
-			byPath[origins[0].path] = append(byPath[origins[0].path], name)
+	for _, definition := range stdlib.RuntimeExportPackages(mode) {
+		for _, exported := range definition.RuntimeExports {
+			byName[exported.Name] = append(byName[exported.Name], origin{path: definition.Path, standard: true})
 		}
 	}
-	paths := make([]string, 0, len(byPath))
-	for path := range byPath {
-		paths = append(paths, path)
+	type importKey struct {
+		path     string
+		standard bool
 	}
-	sort.Strings(paths)
-	result := make([]replProjectImport, 0, len(paths))
-	for _, path := range paths {
-		sort.Strings(byPath[path])
-		result = append(result, replProjectImport{path: path, symbols: byPath[path]})
+	byPath := map[importKey][]string{}
+	for name, origins := range byName {
+		if len(origins) == 1 {
+			key := importKey{path: origins[0].path, standard: origins[0].standard}
+			byPath[key] = append(byPath[key], name)
+		}
+	}
+	keys := make([]importKey, 0, len(byPath))
+	for key := range byPath {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(left, right int) bool { return keys[left].path < keys[right].path })
+	result := make([]replImport, 0, len(keys))
+	for _, key := range keys {
+		sort.Strings(byPath[key])
+		result = append(result, replImport{path: key.path, symbols: byPath[key], standard: key.standard})
 	}
 	return result
 }
 
-func replProjectPrelude(imports []replProjectImport, sessionSource string) string {
+func replPrelude(imports []replImport, sessionSource string) string {
 	explicit := map[string]bool{}
 	explicitPaths := map[string]bool{}
+	referenced := map[string]bool{}
+	tokens, _ := lexer.Lex([]byte(sessionSource))
+	for _, item := range tokens {
+		if item.Kind == token.Identifier {
+			referenced[item.Lexeme] = true
+		}
+	}
 	if program, diagnostics := parser.Parse([]byte(sessionSource)); !hasDiagnosticErrors(diagnostics) {
+		for name := range resolver.CollectExports(program.Statements) {
+			explicit[name] = true
+		}
 		for _, statement := range program.Statements {
 			imported, ok := statement.(*ast.ImportStatement)
 			if !ok {
@@ -684,7 +712,7 @@ func replProjectPrelude(imports []replProjectImport, sessionSource string) strin
 		}
 		symbols := make([]string, 0, len(imported.symbols))
 		for _, name := range imported.symbols {
-			if !explicit[name] {
+			if !explicit[name] && (!imported.standard || referenced[name]) {
 				symbols = append(symbols, name)
 			}
 		}
@@ -694,6 +722,35 @@ func replProjectPrelude(imports []replProjectImport, sessionSource string) strin
 		fmt.Fprintf(&source, "import { %s } from %s\n", strings.Join(symbols, ", "), imported.path)
 	}
 	return source.String()
+}
+
+func replStandardCandidates(config *project.Config, imports []replImport, sessionPackage string) (languageservice.Context, error) {
+	const modulePath = "__trb_repl_standard_candidates__"
+	var source strings.Builder
+	for _, imported := range imports {
+		if imported.standard {
+			fmt.Fprintf(&source, "import { %s } from %s\n", strings.Join(imported.symbols, ", "), imported.path)
+		}
+	}
+	if source.Len() == 0 {
+		return languageservice.Context{}, nil
+	}
+	options := compilerOptions(config)
+	options.AllowUnusedImports = true
+	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{{
+		Filename:   filepath.Join(config.SourcePath(), ".trb-repl-standard-candidates.trb"),
+		Source:     []byte(source.String()),
+		ModulePath: modulePath,
+		Package:    sessionPackage,
+	}}, options)
+	if err != nil {
+		return languageservice.Context{}, err
+	}
+	programs := make([]*ir.Program, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		programs = append(programs, artifact.IR)
+	}
+	return languageservice.BuildContext(programs, modulePath), nil
 }
 
 func hasDiagnosticErrors(diagnostics []diagnostic.Diagnostic) bool {

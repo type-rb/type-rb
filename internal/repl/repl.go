@@ -38,6 +38,7 @@ type Options struct {
 	Interactive bool
 	HistoryFile string
 	Compile     CompileFunc
+	Candidates  languageservice.Context
 	language    *languageservice.Service
 }
 
@@ -55,6 +56,7 @@ func Run(options Options) error {
 		return err
 	}
 	options.language = languageservice.New(options.Mode)
+	options.language.SetCandidates(options.Candidates)
 	options.language.Update(compilation.Programs, compilation.Session.IR.ModulePath)
 
 	if options.Interactive {
