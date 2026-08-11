@@ -752,6 +752,10 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 	var models []Model
 	seen := map[string]bool{}
 	classes := map[string]*ast.ClassStatement{}
+	enums, err := discoverORMEnums(programs)
+	if err != nil {
+		return nil, err
+	}
 	for _, program := range programs {
 		for _, statement := range program.Statements {
 			class, ok := statement.(*ast.ClassStatement)
@@ -768,11 +772,15 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 			if !exists {
 				return nil, fmt.Errorf("trb/orm model %s expects table %s, but it was not found", class.Name, tableName)
 			}
-			models = append(models, Model{
+			model := Model{
 				Name: class.Name, QueryType: class.Name + "Query", Table: table.Name,
 				ModulePath: program.ModulePath, Columns: append([]Column(nil), table.Columns...),
 				UniqueConstraints: append([]UniqueConstraint(nil), table.UniqueConstraints...),
-			})
+			}
+			if err := applyEnumColumns(&model, class, program, enums); err != nil {
+				return nil, err
+			}
+			models = append(models, model)
 		}
 	}
 	byName := map[string]*Model{}
@@ -823,6 +831,213 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 		return models[i].Name < models[j].Name
 	})
 	return models, nil
+}
+
+type ormEnumDefinition struct {
+	module  string
+	node    *ast.EnumStatement
+	mapping *EnumColumn
+}
+
+func discoverORMEnums(programs []*ast.Program) (map[string]map[string]*ormEnumDefinition, error) {
+	result := map[string]map[string]*ormEnumDefinition{}
+	for _, program := range programs {
+		module := result[program.ModulePath]
+		if module == nil {
+			module = map[string]*ormEnumDefinition{}
+			result[program.ModulePath] = module
+		}
+		for _, statement := range program.Statements {
+			enum, ok := statement.(*ast.EnumStatement)
+			if !ok {
+				continue
+			}
+			if module[enum.Name] != nil {
+				return nil, fmt.Errorf("trb/orm enum %s is declared more than once in %s", enum.Name, program.ModulePath)
+			}
+			module[enum.Name] = &ormEnumDefinition{module: program.ModulePath, node: enum}
+		}
+	}
+	return result, nil
+}
+
+func applyEnumColumns(model *Model, class *ast.ClassStatement, program *ast.Program, enums map[string]map[string]*ormEnumDefinition) error {
+	seen := map[string]bool{}
+	for _, statement := range class.Body {
+		expression, ok := statement.(*ast.ExpressionStatement)
+		if !ok {
+			continue
+		}
+		call, ok := expression.Expression.(*ast.CallExpression)
+		if !ok || call.Block != nil {
+			continue
+		}
+		callee, ok := call.Callee.(*ast.Identifier)
+		if !ok || callee.Name != "enum_column" {
+			continue
+		}
+		if len(call.Arguments) != 2 || call.Arguments[0].Name != "" || call.Arguments[1].Name != "" {
+			return fmt.Errorf("trb/orm %s.enum_column expects a column name and enum type", model.Name)
+		}
+		columnName, ok := associationOptionValue(call.Arguments[0].Value)
+		if !ok {
+			return fmt.Errorf("trb/orm %s.enum_column column must be a symbol or string literal", model.Name)
+		}
+		if seen[columnName] {
+			return fmt.Errorf("trb/orm model %s maps enum column %s more than once", model.Name, columnName)
+		}
+		seen[columnName] = true
+		columnIndex := -1
+		for index := range model.Columns {
+			if model.Columns[index].Name == columnName {
+				columnIndex = index
+				break
+			}
+		}
+		if columnIndex < 0 {
+			return fmt.Errorf("trb/orm model %s has no column %s for enum_column", model.Name, columnName)
+		}
+		enumName := expressionName(call.Arguments[1].Value)
+		if enumName == "" {
+			return fmt.Errorf("trb/orm %s.enum_column enum type must be an enum name", model.Name)
+		}
+		definition := resolveORMEnum(program, enumName, enums)
+		if definition == nil {
+			return fmt.Errorf("trb/orm %s.enum_column references unknown enum %s", model.Name, enumName)
+		}
+		if definition.mapping == nil {
+			mapping, err := buildORMEnumMapping(definition.module, definition.node)
+			if err != nil {
+				return fmt.Errorf("trb/orm %s.enum_column %s: %w", model.Name, columnName, err)
+			}
+			definition.mapping = mapping
+		}
+		column := &model.Columns[columnIndex]
+		if column.Type.Kind != definition.mapping.StorageType.Kind {
+			return fmt.Errorf("trb/orm %s.enum_column %s uses %s storage, but the schema column is %s", model.Name, columnName, definition.mapping.StorageType, column.Type)
+		}
+		copy := *definition.mapping
+		copy.StorageType.Nullable = column.Nullable
+		column.Enum = &copy
+		column.Type = types.FromName(definition.node.Name)
+		column.Type.Nullable = column.Nullable
+	}
+	return nil
+}
+
+func resolveORMEnum(program *ast.Program, name string, enums map[string]map[string]*ormEnumDefinition) *ormEnumDefinition {
+	if local := enums[program.ModulePath][name]; local != nil {
+		return local
+	}
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ast.ImportStatement)
+		if !ok {
+			continue
+		}
+		for _, symbol := range imported.Symbols {
+			if symbol == name {
+				return enums[imported.Path][name]
+			}
+		}
+	}
+	return nil
+}
+
+func buildORMEnumMapping(module string, enum *ast.EnumStatement) (*EnumColumn, error) {
+	if len(enum.TypeParameters) > 0 {
+		return nil, fmt.Errorf("enum %s must not be generic", enum.Name)
+	}
+	members := []*ast.EnumMemberStatement{}
+	raw := false
+	for _, statement := range enum.Body {
+		member, ok := statement.(*ast.EnumMemberStatement)
+		if !ok {
+			continue
+		}
+		if len(member.Parameters) > 0 {
+			return nil, fmt.Errorf("enum %s must contain only payloadless members", enum.Name)
+		}
+		raw = raw || member.RawValue != nil
+		members = append(members, member)
+	}
+	if len(members) == 0 {
+		return nil, fmt.Errorf("enum %s has no members", enum.Name)
+	}
+	mapping := &EnumColumn{Name: enum.Name, ModulePath: module, StorageType: types.FromName("String")}
+	seen := map[string]string{}
+	for _, member := range members {
+		value := EnumColumnValue{Name: member.Name, StringValue: EnumMemberStorageName(member.Name)}
+		key := "string:" + value.StringValue
+		if raw {
+			if member.RawValue == nil {
+				return nil, fmt.Errorf("raw-value enum %s requires a raw value for every member", enum.Name)
+			}
+			storageType, stringValue, integerValue, ok := ormEnumRawValue(member.RawValue)
+			if !ok {
+				return nil, fmt.Errorf("raw-value enum %s member %s must use a String or Integer literal", enum.Name, member.Name)
+			}
+			if len(mapping.Values) == 0 {
+				mapping.StorageType = storageType
+			} else if mapping.StorageType.Kind != storageType.Kind {
+				return nil, fmt.Errorf("raw-value enum %s must use one storage type", enum.Name)
+			}
+			value.StringValue = stringValue
+			value.IntegerValue = integerValue
+			if storageType.Kind == types.Int {
+				key = "integer:" + strconv.FormatInt(integerValue, 10)
+			} else {
+				key = "string:" + stringValue
+			}
+		} else if member.RawValue != nil {
+			return nil, fmt.Errorf("enum %s cannot mix raw and ordinary members", enum.Name)
+		}
+		if previous := seen[key]; previous != "" {
+			return nil, fmt.Errorf("enum %s members %s and %s use the same storage value", enum.Name, previous, member.Name)
+		}
+		seen[key] = member.Name
+		mapping.Values = append(mapping.Values, value)
+	}
+	return mapping, nil
+}
+
+func ormEnumRawValue(expression ast.Expression) (types.Type, string, int64, bool) {
+	switch value := expression.(type) {
+	case *ast.Literal:
+		switch value.Kind {
+		case ast.StringLiteral:
+			decoded, err := strconv.Unquote(value.Raw)
+			return types.FromName("String"), decoded, 0, err == nil
+		case ast.IntegerLiteral:
+			parsed, err := strconv.ParseInt(strings.ReplaceAll(value.Raw, "_", ""), 10, 64)
+			return types.FromName("Integer"), "", parsed, err == nil
+		}
+	case *ast.UnaryExpression:
+		literal, ok := value.Operand.(*ast.Literal)
+		if value.Operator == "-" && ok && literal.Kind == ast.IntegerLiteral {
+			parsed, err := strconv.ParseInt(strings.ReplaceAll(literal.Raw, "_", ""), 10, 64)
+			return types.FromName("Integer"), "", -parsed, err == nil
+		}
+	}
+	return types.Type{}, "", 0, false
+}
+
+func EnumMemberStorageName(name string) string {
+	var result strings.Builder
+	for index, character := range name {
+		if character >= 'A' && character <= 'Z' {
+			if index > 0 {
+				previous := rune(name[index-1])
+				nextLower := index+1 < len(name) && name[index+1] >= 'a' && name[index+1] <= 'z'
+				if previous >= 'a' && previous <= 'z' || previous >= '0' && previous <= '9' || nextLower {
+					result.WriteByte('_')
+				}
+			}
+			result.WriteRune(character + ('a' - 'A'))
+			continue
+		}
+		result.WriteRune(character)
+	}
+	return result.String()
 }
 
 type associationSpec struct {

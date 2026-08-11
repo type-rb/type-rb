@@ -1026,14 +1026,21 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 		g.ormPoolRuntime(manifest, adapter)
 		return
 	}
+	enums := manifest.EnumColumnsForModule(g.modulePath)
 	models := manifest.ModelsForModule(g.modulePath)
-	if len(models) == 0 {
+	if len(models) == 0 && len(enums) == 0 {
 		return
 	}
 	g.requireImport("database/sql/driver", "driver")
+	g.requireImport("errors", "")
+	for _, enum := range enums {
+		g.ormEnumColumnRuntime(enum)
+	}
+	if len(models) == 0 {
+		return
+	}
 	g.requireImport("context", "")
 	g.requireImport("database/sql", "sql")
-	g.requireImport("errors", "")
 	g.requireImport("net", "")
 	g.requireImport("reflect", "")
 	g.requireImport("strings", "")
@@ -1070,6 +1077,69 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	for _, model := range models {
 		g.ormModelRuntime(manifest, adapter, model)
 	}
+}
+
+func (g *generator) ormEnumColumnRuntime(enum *ormintegration.EnumColumn) {
+	name := goIdentifier(enum.Name, true)
+	g.line("func (self " + name + ") Value() (driver.Value, error) {")
+	g.indent++
+	g.line("switch self {")
+	g.indent++
+	for _, value := range enum.Values {
+		storage := strconv.Quote(value.StringValue)
+		if enum.StorageType.Kind == types.Int {
+			storage = "int64(" + strconv.FormatInt(value.IntegerValue, 10) + ")"
+		}
+		g.line("case " + goConstantIdentifier(enum.Name, value.Name) + ": return " + storage + ", nil")
+	}
+	g.line("default: return nil, errors.New(" + strconv.Quote("unknown "+enum.Name+" enum value") + ")")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func (self *" + name + ") Scan(source any) error {")
+	g.indent++
+	if enum.StorageType.Kind == types.Int {
+		g.requireImport("strconv", "")
+		g.line("var raw int64")
+		g.line("switch value := source.(type) {")
+		g.indent++
+		g.line("case int64: raw = value")
+		g.line("case int32: raw = int64(value)")
+		g.line("case int16: raw = int64(value)")
+		g.line("case int8: raw = int64(value)")
+		g.line("case int: raw = int64(value)")
+		g.line("case []byte: parsed, err := strconv.ParseInt(string(value), 10, 64); if err != nil { return errors.New(" + strconv.Quote("invalid "+enum.Name+" database value") + ") }; raw = parsed")
+		g.line("case string: parsed, err := strconv.ParseInt(value, 10, 64); if err != nil { return errors.New(" + strconv.Quote("invalid "+enum.Name+" database value") + ") }; raw = parsed")
+		g.line("default: return errors.New(" + strconv.Quote("invalid "+enum.Name+" database value") + ")")
+		g.indent--
+		g.line("}")
+	} else {
+		g.line("var raw string")
+		g.line("switch value := source.(type) {")
+		g.indent++
+		g.line("case string: raw = value")
+		g.line("case []byte: raw = string(value)")
+		g.line("default: return errors.New(" + strconv.Quote("invalid "+enum.Name+" database value") + ")")
+		g.indent--
+		g.line("}")
+	}
+	g.line("switch raw {")
+	g.indent++
+	for _, value := range enum.Values {
+		storage := strconv.Quote(value.StringValue)
+		if enum.StorageType.Kind == types.Int {
+			storage = strconv.FormatInt(value.IntegerValue, 10)
+		}
+		g.line("case " + storage + ": *self = " + goConstantIdentifier(enum.Name, value.Name) + "; return nil")
+	}
+	g.line("default: return errors.New(" + strconv.Quote("unknown "+enum.Name+" database value") + ")")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
 }
 
 func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter ormintegration.Adapter) {

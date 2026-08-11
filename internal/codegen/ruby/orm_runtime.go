@@ -6,6 +6,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 func (g *generator) ormRuntime() {
@@ -41,11 +42,24 @@ func (g *generator) ormRuntime() {
 func (g *generator) ormRegisterModel(model ormintegration.Model) {
 	columns := make([]string, 0, len(model.Columns))
 	for _, column := range model.Columns {
+		enumValues := "[]"
+		if column.Enum != nil {
+			values := make([]string, 0, len(column.Enum.Values))
+			for _, value := range column.Enum.Values {
+				storage := strconv.Quote(value.StringValue)
+				if column.Enum.StorageType.Kind == types.Int {
+					storage = strconv.FormatInt(value.IntegerValue, 10)
+				}
+				values = append(values, "["+column.Enum.Name+"::"+value.Name+", "+storage+"]")
+			}
+			enumValues = "[" + strings.Join(values, ", ") + "]"
+		}
 		columns = append(columns, "{"+
 			"name: "+strconv.Quote(column.Name)+
 			", primary_key: "+strconv.FormatBool(column.PrimaryKey)+
 			", generated: "+strconv.FormatBool(column.Generated)+
-			", nullable: "+strconv.FormatBool(column.Nullable)+"}")
+			", nullable: "+strconv.FormatBool(column.Nullable)+
+			", enum_values: "+enumValues+"}")
 	}
 	unique := make([]string, 0, len(model.UniqueConstraints))
 	for _, constraint := range model.UniqueConstraints {
@@ -98,7 +112,7 @@ require "uri"
 
 module TrbOrmRuntime
 	Bounds = Data.define(:start, :finish, :exclusive)
-	Column = Data.define(:name, :primary_key, :generated, :nullable)
+	Column = Data.define(:name, :primary_key, :generated, :nullable, :enum_values)
 	Association = Data.define(:name, :kind, :target, :source_column, :target_column, :through, :source, :dependent, :preloadable, :scope)
 	Metadata = Data.define(:model_class, :name, :table, :columns, :unique_constraints, :associations)
 
@@ -314,9 +328,11 @@ module TrbOrmRuntime
 			TrbOrmRuntime.result do
 				rows = TrbOrmRuntime.select_rows(select_columns(columns))
 				if columns.length == 1
-					rows.map { |row| TrbOrmRuntime.row_value(row, columns.fetch(0)) }
+					column = TrbOrmRuntime.column!(@metadata, columns.fetch(0))
+					rows.map { |row| TrbOrmRuntime.application_value(column, TrbOrmRuntime.row_value(row, column.name)) }
 				else
-					rows.map { |row| columns.map { |column| TrbOrmRuntime.row_value(row, column) } }
+					resolved = columns.map { |column| TrbOrmRuntime.column!(@metadata, column) }
+					rows.map { |row| resolved.map { |column| TrbOrmRuntime.application_value(column, TrbOrmRuntime.row_value(row, column.name)) } }
 				end
 			end
 		end
@@ -345,7 +361,8 @@ module TrbOrmRuntime
 				TrbOrmRuntime.invalid!("group() is required before a grouped aggregate") if @group_column.nil?
 				function = operation == "count" ? "COUNT(*)" : { "sum" => "SUM", "average" => "AVG", "minimum" => "MIN", "maximum" => "MAX" }.fetch(operation) + "(" + TrbOrmRuntime.qualified(@metadata.table, column) + ")"
 				rows = TrbOrmRuntime.select_rows(select_columns([@group_column, TrbOrmRuntime::RawSelection.new(function, "__trb_value")]))
-				rows.to_h { |row| [TrbOrmRuntime.row_value(row, @group_column), TrbOrmRuntime.row_value(row, "__trb_value")] }
+				group = TrbOrmRuntime.column!(@metadata, @group_column)
+				rows.to_h { |row| [TrbOrmRuntime.application_value(group, TrbOrmRuntime.row_value(row, @group_column)), TrbOrmRuntime.row_value(row, "__trb_value")] }
 			end
 		end
 
@@ -410,7 +427,7 @@ module TrbOrmRuntime
 				model_class,
 				name,
 				table,
-				columns.map { |value| Column.new(value.fetch(:name), value.fetch(:primary_key), value.fetch(:generated), value.fetch(:nullable)) },
+				columns.map { |value| Column.new(value.fetch(:name), value.fetch(:primary_key), value.fetch(:generated), value.fetch(:nullable), value.fetch(:enum_values)) },
 				unique_constraints,
 				associations.map { |value| Association.new(value.fetch(:name), value.fetch(:kind), value.fetch(:target), value.fetch(:source_column), value.fetch(:target_column), value.fetch(:through), value.fetch(:source), value.fetch(:dependent), value.fetch(:preloadable), value.fetch(:scope)) },
 			)
@@ -555,6 +572,28 @@ module TrbOrmRuntime
 			row[column.to_s]
 		end
 
+		def column!(metadata, name)
+			metadata.columns.find { |column| column.name == name } || invalid!("unknown ORM column " + metadata.name + "." + name)
+		end
+
+		def database_value(metadata, name, value)
+			return nil if value.nil?
+			column = metadata.columns.find { |candidate| candidate.name == name }
+			return value if column.nil?
+			return value if column.enum_values.empty?
+			entry = column.enum_values.find { |member, _storage| member == value }
+			invalid!("enum column " + name + " received an unknown value") if entry.nil?
+			entry.fetch(1)
+		end
+
+		def application_value(column, value)
+			return nil if value.nil?
+			return value if column.enum_values.empty?
+			entry = column.enum_values.find { |_member, storage| storage == value || storage.to_s == value.to_s }
+			invalid!("database enum column " + column.name + " contains an unknown value") if entry.nil?
+			entry.fetch(0)
+		end
+
 		def and_predicates(left, right)
 			return right if left.nil?
 			return left if right.nil?
@@ -633,7 +672,7 @@ module TrbOrmRuntime
 				if value.is_a?(RawColumn)
 					left + " " + operator + " " + qualified(aliases.fetch(value.table, value.table), value.column)
 				else
-					left + " " + operator + " " + bind(arguments, value, execution)
+					left + " " + operator + " " + bind(arguments, database_value(metadata, column, value), execution)
 				end
 			else
 				column, operator, value = predicate
@@ -654,13 +693,13 @@ module TrbOrmRuntime
 				if value.is_a?(Array) || operator == "IN" || operator == "NOT_IN"
 					values = value.is_a?(Array) ? value : [value]
 					return operator == "NOT_IN" ? "1 = 1" : "1 = 0" if values.empty?
-					marks = values.map { |item| bind(arguments, item, execution) }
+					marks = values.map { |item| bind(arguments, database_value(metadata, column, item), execution) }
 					return left + (operator == "NOT_IN" ? " NOT IN (" : " IN (") + marks.join(", ") + ")"
 				end
 				if value.nil?
 					return left + (operator == "!=" ? " IS NOT NULL" : " IS NULL")
 				end
-				left + " " + operator + " " + bind(arguments, value, execution)
+				left + " " + operator + " " + bind(arguments, database_value(metadata, column, value), execution)
 			end
 		end
 
@@ -702,7 +741,7 @@ module TrbOrmRuntime
 
 		def instantiate(metadata, row, transaction)
 			value = metadata.model_class.allocate
-			metadata.columns.each { |column| value.instance_variable_set("@" + column.name, row_value(row, column.name)) }
+			metadata.columns.each { |column| value.instance_variable_set("@" + column.name, application_value(column, row_value(row, column.name))) }
 			value.instance_variable_set(:@__trb_orm_transaction, transaction)
 			metadata.associations.each do |association|
 				value.instance_variable_set("@__trb_association_" + association.name + "_loaded", false)
@@ -856,7 +895,7 @@ module TrbOrmRuntime
 			result do
 				validate_values(draft.metadata, draft.values)
 				columns = draft.values.keys
-				values = columns.map { |column| draft.values.fetch(column) }
+				values = columns.map { |column| database_value(draft.metadata, column, draft.values.fetch(column)) }
 				if columns.empty?
 					sql = "INSERT INTO " + quote(draft.metadata.table) + (@adapter == "mysql" ? " () VALUES ()" : " DEFAULT VALUES")
 				else
@@ -968,7 +1007,7 @@ module TrbOrmRuntime
 			validate_values(query.metadata, values, allow_primary_key: false)
 			invalid!("database update requires at least one value") if values.empty?
 			arguments = []
-			set = values.map { |column, value| arguments << value; quote(column) + " = ?" }.join(", ")
+			set = values.map { |column, value| arguments << database_value(query.metadata, column, value); quote(column) + " = ?" }.join(", ")
 			where = ""
 			unless query.predicate.nil?
 				where_arguments = []

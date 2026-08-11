@@ -64,6 +64,7 @@ type Column struct {
 	HasDefault   bool
 	Generated    bool
 	Position     int
+	Enum         *EnumColumn
 }
 
 type Introspector interface {

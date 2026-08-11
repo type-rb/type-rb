@@ -20,6 +20,95 @@ type Model struct {
 	UniqueConstraints []UniqueConstraint
 }
 
+type EnumColumn struct {
+	Name        string
+	ModulePath  string
+	StorageType types.Type
+	Values      []EnumColumnValue
+}
+
+type EnumColumnValue struct {
+	Name         string
+	StringValue  string
+	IntegerValue int64
+}
+
+func (e *EnumColumn) StorageValue(member string) (any, bool) {
+	if e == nil {
+		return nil, false
+	}
+	for _, value := range e.Values {
+		if value.Name != member {
+			continue
+		}
+		if e.StorageType.Kind == types.Int {
+			return value.IntegerValue, true
+		}
+		return value.StringValue, true
+	}
+	return nil, false
+}
+
+func (e *EnumColumn) MemberForStorage(value any) (string, bool) {
+	if e == nil {
+		return "", false
+	}
+	for _, candidate := range e.Values {
+		switch e.StorageType.Kind {
+		case types.Int:
+			if integer, ok := enumStorageInteger(value); ok && integer == candidate.IntegerValue {
+				return candidate.Name, true
+			}
+		case types.String:
+			if stringValue, ok := enumStorageString(value); ok && stringValue == candidate.StringValue {
+				return candidate.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
+func enumStorageInteger(value any) (int64, bool) {
+	switch item := value.(type) {
+	case int:
+		return int64(item), true
+	case int8:
+		return int64(item), true
+	case int16:
+		return int64(item), true
+	case int32:
+		return int64(item), true
+	case int64:
+		return item, true
+	case uint:
+		return int64(item), uint64(item) <= uint64(^uint64(0)>>1)
+	case uint8:
+		return int64(item), true
+	case uint16:
+		return int64(item), true
+	case uint32:
+		return int64(item), true
+	case uint64:
+		if item > uint64(^uint64(0)>>1) {
+			return 0, false
+		}
+		return int64(item), true
+	default:
+		return 0, false
+	}
+}
+
+func enumStorageString(value any) (string, bool) {
+	switch item := value.(type) {
+	case string:
+		return item, true
+	case []byte:
+		return string(item), true
+	default:
+		return "", false
+	}
+}
+
 type AssociationKind string
 
 const (
@@ -116,6 +205,25 @@ func (m Model) Column(name string) (Column, bool) {
 		}
 	}
 	return Column{}, false
+}
+
+func (m *Manifest) EnumColumnsForModule(module string) []*EnumColumn {
+	if m == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	result := []*EnumColumn{}
+	for _, model := range m.Models {
+		for _, column := range model.Columns {
+			if column.Enum == nil || column.Enum.ModulePath != module || seen[column.Enum.Name] {
+				continue
+			}
+			seen[column.Enum.Name] = true
+			result = append(result, column.Enum)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result
 }
 
 func AggregateResultType(operation string, column Column) (types.Type, bool) {

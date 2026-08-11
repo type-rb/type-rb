@@ -74,6 +74,37 @@ class User < Model
 end
 ```
 
+## Enum columns
+
+Use `enum_column` when a schema column stores a domain enum. Model fields,
+query values, writes, and REPL results then use the nominal enum type rather
+than its database scalar type:
+
+```trb
+import { Model, enum_column } from trb/orm
+
+enum OrderStatus
+	Pending = "PENDING"
+	Completed = "COMPLETED"
+end
+
+enum FulfillmentPhase
+	PendingReview
+	ReadyToShip
+end
+
+class Order < Model
+	enum_column(:status, OrderStatus)
+	enum_column(:phase, FulfillmentPhase)
+end
+```
+
+Raw-value enums store their exact String or Integer raw values. Ordinary enums
+use lower snake case, so `PendingReview` maps to `pending_review`. Every mapping
+is checked against the schema or schema lock during compilation. Nullability
+still comes from the database column, and an unknown stored value is reported
+as `DbErrorKind::InvalidData` instead of being accepted as an enum member.
+
 ## Queries and effects
 
 Model classes are query roots; an empty `where()` is unnecessary. Query values

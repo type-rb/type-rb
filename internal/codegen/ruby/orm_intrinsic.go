@@ -17,7 +17,7 @@ func (g *generator) ormAssociationDeclaration(call *ir.Call) bool {
 		return false
 	}
 	switch identifier.Name {
-	case "belongs_to", "has_many", "has_one":
+	case "belongs_to", "has_many", "has_one", "enum_column":
 		return true
 	default:
 		return false

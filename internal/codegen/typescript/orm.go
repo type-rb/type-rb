@@ -49,7 +49,22 @@ func (g *generator) ormModelRuntime(model ormintegration.Model) {
 func (g *generator) ormModelDescriptor(model ormintegration.Model) string {
 	columns := make([]string, 0, len(model.Columns))
 	for _, column := range model.Columns {
-		columns = append(columns, "{ name: "+strconv.Quote(column.Name)+", kind: "+strconv.Quote(ormColumnKind(column.Type))+", nullable: "+strconv.FormatBool(column.Type.Nullable)+", primary: "+strconv.FormatBool(column.PrimaryKey)+" }")
+		columnType := column.Type
+		enumValues := "[]"
+		if column.Enum != nil {
+			columnType = column.Enum.StorageType
+			values := make([]string, 0, len(column.Enum.Values))
+			owner := g.runtimeName(column.Enum.Name)
+			for _, value := range column.Enum.Values {
+				storage := strconv.Quote(value.StringValue)
+				if column.Enum.StorageType.Kind == types.Int {
+					storage = strconv.FormatInt(value.IntegerValue, 10)
+				}
+				values = append(values, "["+owner+"."+value.Name+", "+storage+"]")
+			}
+			enumValues = "[" + strings.Join(values, ", ") + "]"
+		}
+		columns = append(columns, "{ name: "+strconv.Quote(column.Name)+", kind: "+strconv.Quote(ormColumnKind(columnType))+", nullable: "+strconv.FormatBool(column.Type.Nullable)+", primary: "+strconv.FormatBool(column.PrimaryKey)+", enumValues: "+enumValues+" }")
 	}
 	unique := make([]string, 0, len(model.UniqueConstraints))
 	for _, constraint := range model.UniqueConstraints {
@@ -517,7 +532,7 @@ func (g *generator) ormAssignIterationResult(value string, iteration *ir.Iterate
 
 const typescriptORMRuntime = `
 type TrbOrmAdapter = "sqlite" | "postgresql" | "mysql";
-type TrbOrmColumn = { name: string; kind: string; nullable: boolean; primary: boolean };
+type TrbOrmColumn = { name: string; kind: string; nullable: boolean; primary: boolean; enumValues: Array<[unknown, unknown]> };
 type TrbOrmAssociation = { name: string; kind: string; target: string; sourceColumn: string; targetColumn: string; inverse: string; through: string; source: string; dependent: string; scope?: (query: TrbOrmQuery) => TrbOrmQuery };
 type TrbOrmModel = { name: string; table: string; columns: TrbOrmColumn[]; unique: string[][]; associations: TrbOrmAssociation[]; factory?: new () => any };
 type TrbOrmPredicate = { kind: "conditions"; columns: string[]; operators: string[]; values: unknown[] } | { kind: "and" | "or"; left: TrbOrmPredicate; right: TrbOrmPredicate };
@@ -695,11 +710,11 @@ function predicateSQL(owner: TrbOrmModel, predicate: TrbOrmPredicate, args: unkn
     }
     if (Array.isArray(value)) {
       if (value.length === 0) { conditions.push(operator === "!=" ? "1 = 1" : "1 = 0"); continue; }
-      const binds = value.map(item => { args.push(item); return placeholder(args.length); });
+      const binds = value.map(item => { args.push(databaseValue(owner, column, item)); return placeholder(args.length); });
       conditions.push(qualified + (operator === "!=" ? " NOT IN (" : " IN (") + binds.join(", ") + ")");
       continue;
     }
-    args.push(value);
+    args.push(databaseValue(owner, column, value));
     conditions.push(qualified + " " + operator + " " + placeholder(args.length));
   }
   return conditions.length === 0 ? "1 = 1" : conditions.join(" AND ");
@@ -745,11 +760,24 @@ function statement(source: TrbOrmQuery, projection: string, args: unknown[], ali
 function projection(owner: TrbOrmModel): string { return owner.columns.map(column => quote(owner.table) + "." + quote(column.name)).join(", "); }
 function normalizeColumn(column: TrbOrmColumn, value: unknown): unknown {
   if (value === null || value === undefined) return null;
+  if (column.enumValues.length > 0) {
+    const mapped = column.enumValues.find(([, storage]) => storage === value || String(storage) === String(value));
+    if (mapped === undefined) throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "database enum column " + column.name + " contains an unknown value");
+    return mapped[0];
+  }
   if (column.kind === "boolean") return value === true || value === 1 || value === "1";
   if (column.kind === "integer") return Number(value);
   if (column.kind === "float") return Number(value);
   if (column.kind === "bytes" && !(value instanceof Uint8Array)) return new Uint8Array(value as ArrayLike<number>);
   return value;
+}
+function databaseValue(owner: TrbOrmModel, columnName: string, value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+  const column = owner.columns.find(item => item.name === columnName);
+  if (column === undefined || column.enumValues.length === 0) return value;
+  const mapped = column.enumValues.find(([member]) => member === value);
+  if (mapped === undefined) throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "enum column " + columnName + " received an unknown value");
+  return mapped[1];
 }
 function instantiate(owner: TrbOrmModel, row: Record<string, unknown>, scope: TrbOrmQuery): any {
   const Constructor = owner.factory;
@@ -792,7 +820,7 @@ export async function explain(source: TrbOrmQuery): Promise<DbResult<string>> {
   catch (error) { return databaseError<string>(error, "database explain failed"); }
 }
 export async function pluck(source: TrbOrmQuery, columnName: string): Promise<DbResult<any[]>> {
-  try { const args: unknown[] = []; const rows = await unsafe(source, statement(source, quote(columnName) + " AS trb_value", args), args); return resultOk(rows.map(row => row.trb_value)); }
+  try { const owner = model(source.model); const column = owner.columns.find(item => item.name === columnName); if (column === undefined) throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "unknown projection column " + columnName); const args: unknown[] = []; const rows = await unsafe(source, statement(source, quote(columnName) + " AS trb_value", args), args); return resultOk(rows.map(row => normalizeColumn(column, row.trb_value))); }
   catch (error) { return databaseError<any[]>(error, "database projection query failed"); }
 }
 export async function pick(source: TrbOrmQuery, columnName: string): Promise<DbResult<any | null>> {
@@ -813,7 +841,7 @@ export async function groupedAggregate(source: TrbOrmGroupedQuery, operation: st
     const args: unknown[] = []; let sql = statement(source.query, quote(source.column) + " AS trb_group, " + expression + " AS trb_value", args, undefined, false) + " GROUP BY " + quote(source.column);
     if (source.having !== null) { args.push(source.having.value); const havingExpression = source.having.expression === "count" ? "COUNT(*)" : source.having.expression; sql += " HAVING " + havingExpression + " " + source.having.operator + " " + placeholder(args.length); }
     if (source.query.orders.length > 0) sql += " ORDER BY " + source.query.orders.map(([column, direction]) => quote(column) + " " + direction.toUpperCase()).join(", ");
-    const rows = await unsafe(source.query, sql, args); const result: Record<string, any> = {}; const targetColumn = target === undefined ? undefined : owner.columns.find(column => column.name === target); for (const row of rows) { let value = row.trb_value; if (operation === "count" || operation === "average" || targetColumn?.kind === "integer" || targetColumn?.kind === "float") value = Number(value); result[String(row.trb_group)] = value; } return resultOk(result);
+    const rows = await unsafe(source.query, sql, args); const result: Record<string, any> = {}; const targetColumn = target === undefined ? undefined : owner.columns.find(column => column.name === target); const groupColumn = owner.columns.find(column => column.name === source.column)!; for (const row of rows) { let value = row.trb_value; if (operation === "count" || operation === "average" || targetColumn?.kind === "integer" || targetColumn?.kind === "float") value = Number(value); result[String(normalizeColumn(groupColumn, row.trb_group))] = value; } return resultOk(result);
   } catch (error) { return databaseError<Record<string, any>>(error, "database grouped aggregate failed"); }
 }
 
@@ -822,7 +850,7 @@ function draftValue(draft: TrbOrmDraft, column: string): unknown { const index =
 function validUnique(owner: TrbOrmModel, columns: string[]): boolean { return owner.unique.some(unique => unique.length === columns.length && unique.every((column, index) => column === columns[index])); }
 async function inserted(source: TrbOrmQuery, owner: TrbOrmModel, columns: string[], values: unknown[]): Promise<DbResult<any>> {
   try {
-    const args = [...values]; let sql = "INSERT INTO " + quote(owner.table);
+    const args = values.map((value, index) => databaseValue(owner, columns[index]!, value)); let sql = "INSERT INTO " + quote(owner.table);
     if (columns.length === 0) sql += __trbOrmAdapter === "mysql" ? " () VALUES ()" : " DEFAULT VALUES";
     else sql += " (" + columns.map(quote).join(", ") + ") VALUES (" + values.map((_, index) => placeholder(index + 1)).join(", ") + ")";
     const primary = owner.columns.find(column => column.primary);
@@ -843,7 +871,7 @@ export async function saveChanges(value: TrbOrmChanges): Promise<DbResult<any>> 
 export async function update(name: string, value: any, columns: string[], values: unknown[]): Promise<DbResult<any>> {
   try {
     const owner = model(name); const primary = owner.columns.find(column => column.primary); if (primary === undefined) return resultErr(DbErrorKind.InvalidData, "model has no primary key");
-    const args = [...values, column(value, primary.name)]; let sql = "UPDATE " + quote(owner.table) + " SET " + columns.map((item, index) => quote(item) + " = " + placeholder(index + 1)).join(", ") + " WHERE " + quote(primary.name) + " = " + placeholder(args.length);
+    const args = [...values.map((item, index) => databaseValue(owner, columns[index]!, item)), databaseValue(owner, primary.name, column(value, primary.name))]; let sql = "UPDATE " + quote(owner.table) + " SET " + columns.map((item, index) => quote(item) + " = " + placeholder(index + 1)).join(", ") + " WHERE " + quote(primary.name) + " = " + placeholder(args.length);
     if (__trbOrmAdapter !== "mysql") sql += " RETURNING " + owner.columns.map(item => quote(item.name)).join(", ");
     const source = scopeFor(value, name); const rows = await unsafe(source, sql, args);
     if (__trbOrmAdapter !== "mysql") return resultOk(instantiate(owner, rows[0]!, source));
@@ -851,7 +879,7 @@ export async function update(name: string, value: any, columns: string[], values
   } catch (error) { return databaseError<any>(error, "database update failed"); }
 }
 export async function updateAll(source: TrbOrmQuery, columns: string[], values: unknown[]): Promise<DbResult<number>> {
-  try { const owner = model(source.model); const args = [...values]; let sql = "UPDATE " + quote(owner.table) + " SET " + columns.map((item, index) => quote(item) + " = " + placeholder(index + 1)).join(", "); if (source.predicate !== null) sql += " WHERE " + predicateSQL(owner, source.predicate, args); const rows = await unsafe(source, sql, args); return resultOk(affectedRows(rows)); }
+  try { const owner = model(source.model); const args = values.map((value, index) => databaseValue(owner, columns[index]!, value)); let sql = "UPDATE " + quote(owner.table) + " SET " + columns.map((item, index) => quote(item) + " = " + placeholder(index + 1)).join(", "); if (source.predicate !== null) sql += " WHERE " + predicateSQL(owner, source.predicate, args); const rows = await unsafe(source, sql, args); return resultOk(affectedRows(rows)); }
   catch (error) { return databaseError<number>(error, "database bulk update failed"); }
 }
 export async function deleteAll(source: TrbOrmQuery): Promise<DbResult<number>> {

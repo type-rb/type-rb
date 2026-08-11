@@ -125,6 +125,9 @@ Go, Ruby, and TypeScript; TypeScript server applications currently select Bun.
 It reads SQLite, PostgreSQL, or MySQL schema metadata directly and exposes typed
 models, immutable queries, associations and preload, aggregates, transactions,
 batching, writes, conflict handling, and destroy lifecycles.
+String- and Integer-backed enum columns preserve nominal enum types throughout
+queries and writes, while ordinary enums use a checked lower-snake-case storage
+convention. Unknown stored values become structured invalid-data errors.
 The repository runs the same application contract across all nine backend and
 database combinations, plus an ORM-backed JSON route across all three backends.
 Database terminals and lazy association access use `fails DbError`; `attempt`
