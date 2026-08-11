@@ -444,6 +444,19 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression) {
 			c.validateExpressionTypeReferences(entry.Key)
 			c.validateExpressionTypeReferences(entry.Value)
 		}
+	case *ast.JSXElement:
+		c.validateExpressionTypeReferences(node.Component)
+		for _, attribute := range node.Attributes {
+			c.validateExpressionTypeReferences(attribute.Value)
+		}
+		for _, child := range node.Children {
+			switch item := child.(type) {
+			case *ast.JSXElement:
+				c.validateExpressionTypeReferences(item)
+			case *ast.JSXExpression:
+				c.validateExpressionTypeReferences(item.Value)
+			}
+		}
 	case *ast.UnaryExpression:
 		c.validateExpressionTypeReferences(node.Operand)
 	case *ast.BinaryExpression:
@@ -1689,7 +1702,7 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic string, typ types.Type) {
 	operation := ""
 	switch intrinsic {
-	case "trb.internal.json.decode", "trb.web.request_json":
+	case "trb.internal.json.decode", "trb.web.request_json", "trb.platform.typescript.browser.get_json", "trb.platform.typescript.browser.put_json":
 		operation = "decode"
 	case "trb.internal.json.encode", "trb.web.json":
 		operation = "encode"
@@ -1877,6 +1890,81 @@ func (c *Checker) codecRecord(name string) ([]resolver.RecordField, string, *res
 		return append([]resolver.RecordField(nil), exported.Fields...), binding.Import.RuntimePath(), &copy, true
 	}
 	return nil, "", nil, false
+}
+
+func (c *Checker) jsxComponentProps(element *ast.JSXElement) ([]resolver.RecordField, bool) {
+	identifier, ok := element.Component.(*ast.Identifier)
+	if !ok {
+		return nil, false
+	}
+	if method := c.functions[identifier.Name]; method != nil {
+		if !c.typesAssignable(types.FromName("ReactNode"), c.methodReturnType(method)) {
+			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return ReactNode", identifier.Name))
+			return nil, false
+		}
+		if len(method.Parameters) != 1 {
+			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept exactly one record parameter", identifier.Name))
+			return nil, false
+		}
+		fields, _, _, found := c.codecRecord(c.typeFromRef(method.Parameters[0].Type).Name)
+		if !found {
+			c.error(method.Parameters[0].Span(), fmt.Sprintf("JSX component %s props must be a record", identifier.Name))
+			return nil, false
+		}
+		return fields, true
+	}
+	binding, imported := c.result.References[identifier]
+	if !imported || binding.Export == nil || binding.Export.Kind != resolver.FunctionExport {
+		return nil, false
+	}
+	if !c.typesAssignable(types.FromName("ReactNode"), binding.Export.Type) {
+		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return ReactNode", identifier.Name))
+		return nil, false
+	}
+	if len(binding.Export.Parameters) != 1 {
+		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept exactly one record parameter", identifier.Name))
+		return nil, false
+	}
+	fields, _, _, found := c.codecRecord(binding.Export.Parameters[0].Name)
+	if !found {
+		c.error(identifier.Span(), fmt.Sprintf("JSX component %s props must be a record", identifier.Name))
+		return nil, false
+	}
+	return fields, true
+}
+
+func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.RecordField, attributes map[string]types.Type) {
+	declared := map[string]resolver.RecordField{}
+	for _, field := range fields {
+		declared[field.Name] = field
+	}
+	for name, actual := range attributes {
+		if name == "key" || name == "ref" {
+			continue
+		}
+		field, found := declared[name]
+		if !found {
+			c.error(element.Span(), fmt.Sprintf("JSX component %s has no prop %s", element.Name, name))
+			continue
+		}
+		if !c.typesAssignable(field.Type, actual) {
+			c.error(element.Span(), fmt.Sprintf("JSX prop %s expects %s, got %s", name, field.Type, actual))
+		}
+	}
+	for _, field := range fields {
+		if field.Name == "children" && len(element.Children) > 0 {
+			continue
+		}
+		if _, provided := attributes[field.Name]; provided || field.Type.Nullable {
+			continue
+		}
+		c.error(element.Span(), fmt.Sprintf("JSX component %s requires prop %s", element.Name, field.Name))
+	}
+	if len(element.Children) > 0 {
+		if _, acceptsChildren := declared["children"]; !acceptsChildren {
+			c.error(element.Span(), fmt.Sprintf("JSX component %s does not accept children", element.Name))
+		}
+	}
 }
 
 func checkerRecordJSONName(field *ast.RecordFieldStatement) string {
@@ -2865,6 +2953,58 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		valueType := c.inferCollectionType(values, sc)
 		typ = types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{keyType, valueType}}
+	case *ast.JSXElement:
+		if c.mode != "typescript" {
+			c.error(n.Span(), "JSX is only available in mode typescript")
+		}
+		reactImported := false
+		for _, imported := range c.resolution.Imports {
+			if imported.Path == "trb/platform/typescript/react" {
+				reactImported = true
+				c.markImportNodeUsed(imported, "")
+				break
+			}
+		}
+		if !reactImported {
+			c.error(n.Span(), "JSX requires import trb/platform/typescript/react")
+		}
+		var props []resolver.RecordField
+		componentHasTypedProps := false
+		if n.Component != nil {
+			componentType := c.checkExpression(n.Component, sc)
+			if componentType.Kind == types.Any || componentType.Kind == types.Invalid {
+				c.error(n.Component.Span(), fmt.Sprintf("JSX component %s is not declared or imported", n.Name))
+			} else {
+				props, componentHasTypedProps = c.jsxComponentProps(n)
+			}
+		}
+		attributeTypes := map[string]types.Type{}
+		for _, attribute := range n.Attributes {
+			if _, duplicate := attributeTypes[attribute.Name]; duplicate {
+				c.error(attribute.Span(), fmt.Sprintf("JSX attribute %s is already specified", attribute.Name))
+				continue
+			}
+			if attribute.Boolean {
+				attributeTypes[attribute.Name] = types.FromName("Boolean")
+			} else {
+				attributeTypes[attribute.Name] = c.checkExpression(attribute.Value, sc)
+			}
+		}
+		if componentHasTypedProps {
+			c.checkJSXProps(n, props, attributeTypes)
+		}
+		for _, child := range n.Children {
+			switch item := child.(type) {
+			case *ast.JSXElement:
+				c.checkExpression(item, sc)
+			case *ast.JSXExpression:
+				childType := c.checkExpression(item.Value, sc)
+				if !jsxRenderableType(childType) {
+					c.error(item.Span(), fmt.Sprintf("JSX child must be renderable, got %s", childType))
+				}
+			}
+		}
+		typ = types.FromName("ReactNode")
 	case *ast.UnaryExpression:
 		operand := c.checkExpression(n.Operand, sc)
 		typ = c.checkUnaryOperator(n.Span(), n.Operator, operand)
@@ -3405,6 +3545,29 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	return typ
 }
 
+func jsxRenderableType(typ types.Type) bool {
+	if typ.Nullable {
+		typ.Nullable = false
+	}
+	switch typ.Kind {
+	case types.Any, types.Invalid, types.Never, types.Nil, types.String, types.Int, types.Float, types.Bool:
+		return true
+	case types.Array:
+		return len(typ.Args) == 1 && jsxRenderableType(typ.Args[0])
+	case types.Named:
+		return typ.Name == "ReactNode"
+	case types.Union:
+		for _, alternative := range typ.Args {
+			if !jsxRenderableType(alternative) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Checker) checkAssociationControlMember(node *ast.MemberExpression, sc *scope) (types.Type, bool) {
 	control := node.Name
 	if control != "load" && control != "reload" && control != "loaded?" {
@@ -3667,6 +3830,27 @@ func expressionReturn(expression ast.Expression) ast.Statement {
 			}
 			if result := expressionReturn(entry.Value); result != nil {
 				return result
+			}
+		}
+	case *ast.JSXElement:
+		if result := expressionReturn(node.Component); result != nil {
+			return result
+		}
+		for _, attribute := range node.Attributes {
+			if result := expressionReturn(attribute.Value); result != nil {
+				return result
+			}
+		}
+		for _, child := range node.Children {
+			switch item := child.(type) {
+			case *ast.JSXElement:
+				if result := expressionReturn(item); result != nil {
+					return result
+				}
+			case *ast.JSXExpression:
+				if result := expressionReturn(item.Value); result != nil {
+					return result
+				}
 			}
 		}
 	case *ast.UnaryExpression:

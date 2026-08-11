@@ -9,6 +9,12 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if name == "trb.platform.typescript.browser.get_json" {
+		return g.tsBrowserJSON("GET", call, arguments[0], "")
+	}
+	if name == "trb.platform.typescript.browser.put_json" {
+		return g.tsBrowserJSON("PUT", call, arguments[0], arguments[1])
+	}
 	if value, ok := g.timeIntrinsic(name, call, arguments); ok {
 		return value
 	}
@@ -471,6 +477,48 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "undefined"
 	}
+}
+
+func (g *generator) tsBrowserJSON(method string, call *ir.Call, url, body string) string {
+	if call.Codec == nil {
+		return "undefined"
+	}
+	valueType := tsCodecType(call.Codec)
+	decoded := g.tsBrowserDecodeJSON(call, "__trbText")
+	requestSetup := ""
+	requestOptions := ""
+	if method != "GET" {
+		encoded := g.tsBrowserEncodeJSON(call, body)
+		requestSetup = "const __trbEncoded = " + encoded + "; if (__trbEncoded.kind === \"Err\") return " + g.runtimeName("Result") + ".Err<" + valueType + ", " + g.tsType(call.Fails) + ">(" + g.runtimeName("FetchError") + ".InvalidJson(__trbEncoded.error.message)); "
+		requestOptions = ", { method: " + strconv.Quote(method) + ", headers: { \"Content-Type\": \"application/json\" }, body: __trbEncoded.value }"
+	}
+	resultType := g.tsType(call.ExprType())
+	errorType := g.tsType(call.Fails)
+	result := g.runtimeName("Result")
+	fetchError := g.runtimeName("FetchError")
+	return "(async (): Promise<" + resultType + "> => { try { " + requestSetup + "const __trbResponse = await fetch(" + url + requestOptions + "); if (!__trbResponse.ok) return " + result + ".Err<" + valueType + ", " + errorType + ">(" + fetchError + ".Http(__trbResponse.status)); const __trbText = await __trbResponse.text(); const __trbDecoded = " + decoded + "; if (__trbDecoded.kind === \"Err\") return " + result + ".Err<" + valueType + ", " + errorType + ">(" + fetchError + ".InvalidJson(__trbDecoded.error.message)); return " + result + ".Ok<" + valueType + ", " + errorType + ">(__trbDecoded.value); } catch (__trbError) { const __trbMessage = __trbError instanceof Error ? __trbError.message : String(__trbError); return " + result + ".Err<" + valueType + ", " + errorType + ">(" + fetchError + ".Network(__trbMessage)); } })()"
+}
+
+func (g *generator) tsBrowserDecodeJSON(call *ir.Call, source string) string {
+	jsonError := types.FromName("JsonError")
+	jsonValue := types.FromName("JsonValue")
+	parseCall := *call
+	parseCall.ExprBase = ir.NewExprBase(call.Span, types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{jsonValue, jsonError}})
+	parsed := tsJSONParse(&parseCall, source, false)
+	builder := &tsJSONCodecBuilder{}
+	decoder := builder.decoder(call.Codec)
+	valueType := tsCodecType(call.Codec)
+	resultType := "Result<" + valueType + ", JsonError>"
+	return "((): " + resultType + " => { const codecError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Decode, message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parsed + "; if (parsed.kind === \"Err\") return Result.Err<" + valueType + ", JsonError>(parsed.error); try { return Result.Ok<" + valueType + ", JsonError>(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) return Result.Err<" + valueType + ", JsonError>((error as any).error as JsonError); throw error; } })()"
+}
+
+func (g *generator) tsBrowserEncodeJSON(call *ir.Call, value string) string {
+	builder := &tsJSONCodecBuilder{}
+	encoder := builder.encoder(call.Codec)
+	stringifyCall := *call
+	stringifyCall.ExprBase = ir.NewExprBase(call.Span, types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), types.FromName("JsonError")}})
+	encoded := tsJSONStringify(&stringifyCall, encoder+"("+value+")")
+	return "((): Result<string, JsonError> => { " + builder.source.String() + " return " + encoded + "; })()"
 }
 
 func portableArrayString(value string, typ types.Type) string {

@@ -964,18 +964,6 @@ end
 		Targets: map[string]bool{"typescript": true},
 		Symbols: map[string]Symbol{},
 	},
-	"trb/platform/typescript/react": {
-		Path: "trb/platform/typescript/react", Kind: Platform, Targets: map[string]bool{"typescript": true},
-		Symbols: map[string]Symbol{
-			"element":         {Name: "element", Intrinsic: "trb.platform.typescript.react.element", Parameters: []Parameter{{Name: "tag", Type: types.FromName("Any")}, {Name: "props", Type: types.FromName("Hash")}, {Name: "children", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Any")}}}}, Return: types.FromName("ReactNode")},
-			"mount":           {Name: "mount", Intrinsic: "trb.platform.typescript.react.mount", Parameters: []Parameter{{Name: "component", Type: types.FromName("Any")}, {Name: "element_id", Type: stringType}}, Return: voidType},
-			"refresh":         {Name: "refresh", Intrinsic: "trb.platform.typescript.react.refresh", Parameters: []Parameter{{Name: "component", Type: types.FromName("Any")}}, Return: voidType},
-			"prevent_default": {Name: "prevent_default", Intrinsic: "trb.platform.typescript.react.prevent_default", Parameters: []Parameter{{Name: "event", Type: types.FromName("ReactEvent")}}, Return: voidType},
-			"input_value":     {Name: "input_value", Intrinsic: "trb.platform.typescript.react.input_value", Parameters: []Parameter{{Name: "event", Type: types.FromName("ReactEvent")}}, Return: stringType},
-			"data_integer":    {Name: "data_integer", Intrinsic: "trb.platform.typescript.react.data_integer", Parameters: []Parameter{{Name: "event", Type: types.FromName("ReactEvent")}, {Name: "name", Type: stringType}}, Return: integerType},
-			"data_boolean":    {Name: "data_boolean", Intrinsic: "trb.platform.typescript.react.data_boolean", Parameters: []Parameter{{Name: "event", Type: types.FromName("ReactEvent")}, {Name: "name", Type: stringType}}, Return: booleanType},
-		},
-	},
 	"trb/platform/typescript/web": {
 		Path: "trb/platform/typescript/web", Kind: Platform, Targets: map[string]bool{"typescript": true},
 		Symbols: map[string]Symbol{

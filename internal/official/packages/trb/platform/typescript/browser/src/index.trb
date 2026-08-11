@@ -1,0 +1,5 @@
+enum FetchError
+	Network(message: String)
+	Http(status: Integer)
+	InvalidJson(message: String)
+end

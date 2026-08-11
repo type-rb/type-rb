@@ -267,7 +267,7 @@ func (c *CLI) runBuild(args []string) error {
 		if artifact == nil {
 			return fmt.Errorf("compiler did not produce an artifact for %s", name)
 		}
-		rel = generatedSourceRelative(config, rel)
+		rel = generatedSourceRelativeForArtifact(config, rel, artifact)
 		artifacts = append(artifacts, built{input: name, output: filepath.Join(outDir, rel), data: artifact.Output})
 	}
 	if *stdout {
@@ -1410,17 +1410,37 @@ func localSourceUnit(config *project.Config, packageName, packageRoot, filename 
 }
 
 func generatedRelative(config *project.Config, filename string, artifact *compiler.Artifact) (string, bool) {
+	extension := generatedExtension(config, artifact)
 	if artifact.CompilerOwned || artifact.Official {
-		return filepath.FromSlash(artifact.IR.ModulePath) + codegen.Extension(config.Mode), true
+		return filepath.FromSlash(artifact.IR.ModulePath) + extension, true
 	}
 	relative, err := filepath.Rel(config.SourcePath(), filename)
 	local := err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator))
 	if local {
-		relative = filepath.FromSlash(artifact.IR.ModulePath) + codegen.Extension(config.Mode)
+		relative = filepath.FromSlash(artifact.IR.ModulePath) + extension
 	} else {
-		relative = generatedSourceRelative(config, relative)
+		relative = generatedSourceRelativeForArtifact(config, relative, artifact)
 	}
 	return relative, local
+}
+
+func generatedSourceRelativeForArtifact(config *project.Config, relative string, artifact *compiler.Artifact) string {
+	if config.Mode != "typescript" || artifact == nil || artifact.IR == nil || !artifact.IR.UsesJSX {
+		return generatedSourceRelative(config, relative)
+	}
+	extension := ".tsx"
+	stem := strings.TrimSuffix(relative, filepath.Ext(relative))
+	if filepath.Ext(stem) == extension {
+		return stem
+	}
+	return stem + extension
+}
+
+func generatedExtension(config *project.Config, artifact *compiler.Artifact) string {
+	if config.Mode == "typescript" && artifact != nil && artifact.IR != nil && artifact.IR.UsesJSX {
+		return ".tsx"
+	}
+	return codegen.Extension(config.Mode)
 }
 
 func generatedSourceRelative(config *project.Config, relative string) string {
