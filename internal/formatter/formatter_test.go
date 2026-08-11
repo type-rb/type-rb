@@ -24,6 +24,22 @@ func TestFormatPreservesCommentsAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestFormatFunctionValuesAndSemicolonForm(t *testing.T) {
+	source := []byte("double:(Integer)->Integer:=fn(value:Integer):Integer; return value*2; end # closure\n")
+	want := "double: (Integer) -> Integer := fn(value: Integer): Integer\n\treturn value * 2\nend # closure\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected fn formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("fn formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatPreservesStructuredJSXAndIsIdempotent(t *testing.T) {
 	source := []byte("import { ReactNode } from trb/platform/typescript/react\ndef Card(props:CardProps):ReactNode\nreturn <article className=\"card\">\n\t<h2>{props.title}</h2>\n</article> # card\nend\n")
 	formatted, diagnostics := Format(source)

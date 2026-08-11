@@ -514,6 +514,16 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.caseExpression(n)
 	case *ir.Attempt:
 		return g.attemptExpression(n)
+	case *ir.Lambda:
+		parts := make([]string, len(n.Parameters))
+		for index, parameter := range n.Parameters {
+			parts[index] = parameter.Name
+		}
+		child := *g
+		child.b = strings.Builder{}
+		child.indent = g.indent + 1
+		child.statements(n.Body)
+		return "->(" + strings.Join(parts, ", ") + ") do\n" + child.b.String() + strings.Repeat("  ", g.indent) + "end"
 	case *ir.UnhandledEffect:
 		return g.expr(n.Value)
 	case *ir.Identifier:
@@ -626,7 +636,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
-		return g.expr(n.Callee) + "(" + strings.Join(parts, ", ") + ")"
+		callee := g.expr(n.Callee)
+		if n.Callee.ExprType().Kind == types.Function {
+			return callee + ".call(" + strings.Join(parts, ", ") + ")"
+		}
+		return callee + "(" + strings.Join(parts, ", ") + ")"
 	case *ir.EnumCall:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {

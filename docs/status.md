@@ -36,7 +36,8 @@ GET, POST, PUT, PATCH, and DELETE. This
 has been exercised as one end-to-end slice with shared contracts, a portable
 JSON API, ORM persistence, form validation, and a React browser client.
 
-The implemented language includes functions and classes, modules and
+The implemented language includes functions, typed first-class function values
+with lexical capture, and classes, modules and
 interfaces, records, ordinary and raw-value enums, payload enums as sum types,
 enum instance methods, initial generics, normalized unions, immutable and
 mutable bindings, typed collections and iteration, exhaustive pattern

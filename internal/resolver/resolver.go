@@ -969,6 +969,15 @@ func typeRef(ref ast.TypeRef) types.Type {
 		}
 		return types.UnionOf(alternatives...)
 	}
+	if ref.FunctionReturn != nil {
+		parameters := make([]types.Type, len(ref.FunctionParameters))
+		for index, parameter := range ref.FunctionParameters {
+			parameters[index] = typeRef(parameter)
+		}
+		result := types.FunctionOf(parameters, typeRef(*ref.FunctionReturn))
+		result.Nullable = ref.Nullable
+		return result
+	}
 	result := types.FromName(ref.Name)
 	result.Nullable = ref.Nullable
 	for _, argument := range ref.Arguments {

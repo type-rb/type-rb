@@ -25,6 +25,7 @@ const (
 	Range         Kind = "range"
 	Iterable      Kind = "iterable"
 	Hash          Kind = "hash"
+	Function      Kind = "function"
 	Union         Kind = "union"
 	Named         Kind = "named"
 	Nil           Kind = "nil"
@@ -39,6 +40,17 @@ type Type struct {
 }
 
 func (t Type) String() string {
+	if t.Kind == Function && len(t.Args) > 0 {
+		parts := make([]string, len(t.Args)-1)
+		for index := range parts {
+			parts[index] = t.Args[index].String()
+		}
+		name := "(" + strings.Join(parts, ", ") + ") -> " + t.Args[len(t.Args)-1].String()
+		if t.Nullable {
+			return "(" + name + ")?"
+		}
+		return name
+	}
 	if t.Kind == Union {
 		parts := make([]string, len(t.Args))
 		for index, alternative := range t.Args {
@@ -65,6 +77,19 @@ func (t Type) String() string {
 		name += "?"
 	}
 	return name
+}
+
+func FunctionOf(parameters []Type, result Type) Type {
+	arguments := append([]Type(nil), parameters...)
+	arguments = append(arguments, result)
+	return Type{Kind: Function, Name: "Function", Args: arguments}
+}
+
+func FunctionSignature(function Type) ([]Type, Type, bool) {
+	if function.Kind != Function || len(function.Args) == 0 {
+		return nil, Type{}, false
+	}
+	return function.Args[:len(function.Args)-1], function.Args[len(function.Args)-1], true
 }
 
 func FromName(name string) Type {
@@ -235,6 +260,19 @@ func Assignable(target, value Type) bool {
 	}
 	if target.Kind == Float && value.Kind == Int {
 		return true
+	}
+	if target.Kind == Function && value.Kind == Function {
+		targetParameters, targetReturn, targetOK := FunctionSignature(target)
+		valueParameters, valueReturn, valueOK := FunctionSignature(value)
+		if !targetOK || !valueOK || len(targetParameters) != len(valueParameters) {
+			return false
+		}
+		for index := range targetParameters {
+			if !Equivalent(targetParameters[index], valueParameters[index]) {
+				return false
+			}
+		}
+		return Equivalent(targetReturn, valueReturn)
 	}
 	if target.Kind == Iterable && (value.Kind == Iterable || value.Kind == Array || value.Kind == Range) {
 		if len(target.Args) == 0 || len(value.Args) == 0 {

@@ -47,6 +47,23 @@ end
 Writing `: Void` is an error. `Void` is an internal compiler type, not source
 syntax.
 
+Typed function values use `fn` and capture their lexical environment:
+
+```trb
+def apply(value: Integer, callable: (Integer) -> String): String
+	return callable(value)
+end
+
+prefix := "item "
+label := fn(value: Integer): String
+	return prefix + value.to_s()
+end
+```
+
+Each `fn` parameter has a type. A function value with no result omits its
+return annotation, just like `def`. Its `return` exits the function value, not
+the enclosing method.
+
 Outside delimiters, `;` can separate complete statements:
 
 ```trb

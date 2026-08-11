@@ -316,7 +316,7 @@
         },
         {
           "name": "storage.type.trb",
-          "match": "\\b(?:class|record|enum|module|interface|def)\\b"
+          "match": "\\b(?:class|record|enum|module|interface|def|fn)\\b"
         },
         {
           "name": "keyword.control.import.trb",

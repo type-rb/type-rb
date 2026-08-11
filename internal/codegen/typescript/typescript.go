@@ -302,8 +302,12 @@ func (g *generator) statement(statement ir.Statement) {
 			g.function(n)
 		}
 	case *ir.Variable:
+		variableType := g.tsType(n.Type)
+		if lambda, ok := n.Value.(*ir.Lambda); ok && g.suspension.Lambdas[lambda] {
+			variableType = g.tsSuspendingFunctionType(n.Type)
+		}
 		if g.inClass > 0 && g.functionDepth == 0 && n.Constant {
-			g.line("static readonly " + n.Name + ": " + g.tsType(n.Type) + " = " + g.expr(n.Value) + ";")
+			g.line("static readonly " + n.Name + ": " + variableType + " = " + g.expr(n.Value) + ";")
 			break
 		}
 		keyword := "const"
@@ -317,7 +321,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if g.functionDepth == 0 && n.Constant {
 			prefix = "export "
 		}
-		g.line(prefix + keyword + " " + n.Name + ": " + g.tsType(n.Type) + " = " + g.expr(n.Value) + ";")
+		g.line(prefix + keyword + " " + n.Name + ": " + variableType + " = " + g.expr(n.Value) + ";")
 		if g.functionDepth > 0 && !n.Constant && namedUnusedBinding(n.Name) {
 			g.line("void " + n.Name + ";")
 		}
@@ -753,6 +757,22 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.caseExpression(n)
 	case *ir.Attempt:
 		return g.attemptExpression(n)
+	case *ir.Lambda:
+		parts := make([]string, len(n.Parameters))
+		for index, parameter := range n.Parameters {
+			parts[index] = parameter.Name + ": " + g.tsType(parameter.Type)
+		}
+		child := *g
+		child.b = strings.Builder{}
+		child.indent = g.indent + 1
+		child.statements(n.Body)
+		prefix := ""
+		returnType := g.tsType(n.ReturnType)
+		if g.suspension.Lambdas[n] {
+			prefix = "async "
+			returnType = "Promise<" + returnType + ">"
+		}
+		return prefix + "(" + strings.Join(parts, ", ") + "): " + returnType + " => {\n" + child.b.String() + strings.Repeat("  ", g.indent) + "}"
 	case *ir.UnhandledEffect:
 		return g.expr(n.Value)
 	case *ir.Identifier:
@@ -1588,6 +1608,18 @@ func (g *generator) tsType(t types.Type) string {
 	return tsTypeWithAliases(t, aliases)
 }
 
+func (g *generator) tsSuspendingFunctionType(t types.Type) string {
+	parameters, returned, ok := types.FunctionSignature(t)
+	if !ok {
+		return g.tsType(t)
+	}
+	parts := make([]string, len(parameters))
+	for index, parameter := range parameters {
+		parts[index] = "arg" + strconv.Itoa(index) + ": " + g.tsType(parameter)
+	}
+	return "(" + strings.Join(parts, ", ") + ") => Promise<" + g.tsType(returned) + ">"
+}
+
 func (g *generator) runtimeName(name string) string {
 	if alias := g.typeAliases[name]; alias != "" {
 		return alias + "." + name
@@ -1637,6 +1669,17 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 			value = tsTypeWithAliases(t.Args[1], aliases)
 		}
 		result = "Record<" + key + ", " + value + ">"
+	case types.Function:
+		parameters, returned, ok := types.FunctionSignature(t)
+		if !ok {
+			result = "(...args: Array<unknown>) => unknown"
+			break
+		}
+		parts := make([]string, len(parameters))
+		for index, parameter := range parameters {
+			parts[index] = "arg" + strconv.Itoa(index) + ": " + tsTypeWithAliases(parameter, aliases)
+		}
+		result = "(" + strings.Join(parts, ", ") + ") => " + tsTypeWithAliases(returned, aliases)
 	case types.Nil:
 		result = "null"
 	default:
