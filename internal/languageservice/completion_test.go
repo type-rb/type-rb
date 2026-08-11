@@ -27,12 +27,22 @@ enum State
 	Closed
 end
 
+enum OrderStatus
+	Pending = "PENDING"
+	Completed = "COMPLETED"
+
+	def terminal?(): Boolean
+		return self == OrderStatus::Completed
+	end
+end
+
 def greet(name: String): String
 	return "Hello, " + name
 end
 
 user := User.new("Ada")
 str_a := "hello"
+status := OrderStatus::Pending
 `
 
 func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
@@ -51,6 +61,9 @@ func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
 				{source: "gre", want: "greet", insertText: "greet", kind: languageservice.CompletionFunction},
 				{source: "user.na", want: "name", insertText: "name()", kind: languageservice.CompletionMethod},
 				{source: "State::Cl", want: "Closed", insertText: "Closed", kind: languageservice.CompletionEnumMember},
+				{source: "OrderStatus.from", want: "from_raw", insertText: "from_raw", kind: languageservice.CompletionMethod},
+				{source: "status.raw", want: "raw_value", insertText: "raw_value()", kind: languageservice.CompletionMethod},
+				{source: "status.term", want: "terminal?", insertText: "terminal?()", kind: languageservice.CompletionMethod},
 				{source: `"hello".si`, want: "size", insertText: "size()", kind: languageservice.CompletionMethod},
 				{source: "str_a.siz", want: "size", insertText: "size()", kind: languageservice.CompletionMethod},
 				{source: `["a", "b"].jo`, want: "join", insertText: "join", kind: languageservice.CompletionMethod},

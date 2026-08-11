@@ -681,6 +681,7 @@ func (p *Parser) parseEnum() ast.Statement {
 	node := &ast.EnumStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
 	node.Name, node.TypeParameters = p.parseGenericDeclaration(line, "enum")
 	p.pos = next
+	methodsStarted := false
 	for !p.atEOF() {
 		p.skipSeparators()
 		if p.atEOF() || p.current().Lexeme == "end" {
@@ -692,11 +693,22 @@ func (p *Parser) parseEnum() ast.Statement {
 			node.Body = append(node.Body, &ast.CommentStatement{Base: ast.Base{SourceSpan: t.Span}, Text: t.Lexeme})
 			continue
 		}
+		if p.current().Lexeme == "def" {
+			methodsStarted = true
+			method := p.parseMethod()
+			if typed, ok := method.(*ast.MethodStatement); ok && typed.Class {
+				p.errorAt(typed.Span(), "enum methods must be instance methods")
+			}
+			node.Body = append(node.Body, method)
+			continue
+		}
 		s, e, nx, trailing := p.logicalLine(p.pos)
 		parts := p.codeTokens(s, e)
 		member := p.parseEnumMember(parts, trailing)
 		if member == nil {
-			p.errorAt(spanOf(parts), "enum body may only contain members such as Ready or Value(value: String)")
+			p.errorAt(spanOf(parts), "enum body may only contain members followed by instance methods")
+		} else if methodsStarted {
+			p.errorAt(member.Span(), "enum members must be declared before enum methods")
 		} else {
 			node.Body = append(node.Body, member)
 		}
@@ -771,6 +783,17 @@ func (p *Parser) parseEnumMember(parts []token.Token, trailing string) *ast.Enum
 		Name: parts[0].Lexeme,
 	}
 	if len(parts) == 1 {
+		return member
+	}
+	if parts[1].Lexeme == "=" {
+		if len(parts) == 2 {
+			return nil
+		}
+		value, ok := parseExpressionTokens(parts[2:])
+		if !ok {
+			return nil
+		}
+		member.RawValue = value
 		return member
 	}
 	if parts[1].Lexeme != "(" {

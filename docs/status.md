@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -18,10 +18,11 @@ their npm or Bun package manager. Node remains the compatibility default, while
 Bun can be selected explicitly for server packages.
 
 The implemented language includes functions and classes, modules and
-interfaces, records, payload enums, initial generics, normalized unions,
-immutable and mutable bindings, typed collections and iteration, exhaustive
-pattern matching, value-producing `if` and `case` expressions, and explicit
-fallible effects with `fails` and `attempt`. See the
+interfaces, records, payload and raw-value enums with instance methods,
+initial generics, normalized unions, immutable and mutable bindings, typed
+collections and iteration, exhaustive pattern matching, value-producing `if`
+and `case` expressions, and explicit fallible effects with `fails` and
+`attempt`. See the
 [language guide](language.md) and [specification](specification.md) for the
 current semantics.
 
@@ -29,7 +30,9 @@ The compiler-owned portable library covers scalar and collection foundations,
 `Result`, bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
 SHA-256/SHA-512 hashing and HMAC, non-cryptographic and secure randomness,
 constant-time byte comparison, Unicode text, logical paths,
-URL component and query handling, filesystem and process access, and JSON/JSONC. Its
+URL component and query handling, filesystem and process access, and JSON/JSONC.
+Raw-value enums use the same checked String or Integer representation for
+conversion, JSON codecs, generated applications, and the REPL. Its
 public contracts are listed in the
 [standard-library reference](standard-library.md).
 

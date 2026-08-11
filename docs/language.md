@@ -248,6 +248,29 @@ end
 A `case` without `else` must handle every member. Payload patterns introduce
 immutable bindings with types from the enum declaration.
 
+Enums may define instance methods after their members. An enum can also bind
+every member to an explicit String or Integer used at storage and JSON
+boundaries:
+
+```trb
+enum OrderStatus
+	Pending = "PENDING"
+	Completed = "COMPLETED"
+
+	def terminal?(): Boolean
+		return self == OrderStatus::Completed
+	end
+end
+
+status := OrderStatus::Completed
+puts(status.terminal?())
+puts(status.raw_value())
+parsed := OrderStatus.from_raw("PENDING")
+```
+
+The enum remains a nominal `OrderStatus`; conversion is never implicit.
+`from_raw()` returns `Result<OrderStatus, EnumValueError>`.
+
 The initial user-defined generics surface supports payload enums and top-level
 functions with explicit type arguments:
 

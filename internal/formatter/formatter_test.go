@@ -231,6 +231,22 @@ func TestFormatPayloadEnumAndPatternBindings(t *testing.T) {
 	}
 }
 
+func TestFormatRawValueEnumMethodsAndComments(t *testing.T) {
+	source := []byte("enum  OrderStatus # status\nPending=\"PENDING\" # pending\nCompleted = \"COMPLETED\"\ndef terminal?():Boolean # terminal\nreturn self==OrderStatus::Completed\nend\nend\n")
+	want := "enum OrderStatus # status\n\tPending = \"PENDING\" # pending\n\tCompleted = \"COMPLETED\"\n\tdef terminal?(): Boolean # terminal\n\t\treturn self == OrderStatus::Completed\n\tend\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected raw enum formatting:\n%s", formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || string(formattedAgain) != want {
+		t.Fatalf("raw enum formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatExplicitUserGenerics(t *testing.T) {
 	source := []byte("enum Result<T,E>\nOk(value:T)\nErr(error:E)\nend\ndef identity<T>(value:T):T\nreturn value\nend\ndef use():Result<Integer,String>\nnames:=identity<Array<String>>([\"Ada\"])\nreturn Result<Integer,String>::Ok(identity<Integer>(1))\nend\n")
 	formatted, diagnostics := Format(source)

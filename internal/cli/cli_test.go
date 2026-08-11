@@ -2440,19 +2440,66 @@ func TestReplEvaluatesPayloadEnumPatternBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	input := "enum Token; Text(value: String); EOF; end\n" +
+	input := "enum Token; Text(value: String); EOF; def text?(): Boolean; case self; when Token::Text(_); return true; when Token::EOF; return false; end; end; end\n" +
 		"def render(token: Token): String; case token; when Token::Text(value); return value; when Token::EOF; return \"eof\"; end; end\n" +
 		"render(Token::Text(\"Ada\"))\n" +
 		"Token::Text(\"Ada\")\n" +
+		"token := Token::Text(\"Ada\")\n" +
+		"token.text?()\n" +
 		":quit\n"
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	want := "\"Ada\" : String\nToken::Text(value: \"Ada\") : Token\n"
+	want := "\"Ada\" : String\nToken::Text(value: \"Ada\") : Token\nToken::Text(value: \"Ada\") : Token\ntrue : Boolean\n"
 	if stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("unexpected REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
+func TestReplEvaluatesRawValueEnumsAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/repl-raw-enum-test"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			input := "import { decode, encode } from trb/std/json\n" +
+				"enum OrderStatus; Pending = \"PENDING\"; Completed = \"COMPLETED\"; def terminal?(): Boolean; return self == OrderStatus::Completed; end; end\n" +
+				"status := OrderStatus::Completed\n" +
+				"status.raw_value()\n" +
+				"status.terminal?()\n" +
+				"encode(status)\n" +
+				"decode<OrderStatus>(\"\\\"PENDING\\\"\")\n" +
+				"OrderStatus.from_raw(\"PENDING\")\n" +
+				"OrderStatus.from_raw(\"UNKNOWN\")\n" +
+				":quit\n"
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			want := "OrderStatus::Completed : OrderStatus\n" +
+				"\"COMPLETED\" : String\n" +
+				"true : Boolean\n" +
+				"Result::Ok(value: \"\\\"COMPLETED\\\"\") : Result<String, JsonError>\n" +
+				"Result::Ok(value: OrderStatus::Pending) : Result<OrderStatus, JsonError>\n" +
+				"Result::Ok(value: OrderStatus::Pending) : Result<OrderStatus, EnumValueError>\n" +
+				"Result::Err(error: EnumValueError(value: \"UNKNOWN\", message: \"unknown raw value for OrderStatus\")) : Result<OrderStatus, EnumValueError>\n"
+			if stdout.String() != want || stderr.Len() != 0 {
+				t.Fatalf("unexpected %s raw enum REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 

@@ -136,13 +136,32 @@ func (g *generator) statement(statement ir.Statement) {
 			g.payloadEnum(n)
 			break
 		}
-		g.line(n.Name+" = Data.define(:name)", n.TrailingComment)
+		fields := ":name"
+		if n.RawType.Kind != "" {
+			fields += ", :raw_value"
+		}
+		methods := enumMethods(n)
+		if len(methods) == 0 {
+			g.line(n.Name+" = Data.define("+fields+")", n.TrailingComment)
+		} else {
+			g.line(n.Name+" = Data.define("+fields+") do", n.TrailingComment)
+			g.indent++
+			for _, method := range methods {
+				g.method(method, nil)
+			}
+			g.indent--
+			g.line("end", "")
+		}
 		for _, statement := range n.Body {
 			switch member := statement.(type) {
 			case *ir.Comment:
 				g.statement(member)
 			case *ir.EnumMember:
-				g.line(n.Name+"::"+member.Name+" = "+n.Name+".new(:"+member.Name+")", member.TrailingComment)
+				arguments := ":" + member.Name
+				if member.RawValue != nil {
+					arguments += ", " + g.expr(member.RawValue)
+				}
+				g.line(n.Name+"::"+member.Name+" = "+n.Name+".new("+arguments+")", member.TrailingComment)
 			}
 		}
 	case *ir.TypeAlias:
@@ -399,6 +418,16 @@ func caseHasPayload(value *ir.Case) bool {
 func (g *generator) payloadEnum(enum *ir.Enum) {
 	g.line("module "+enum.Name, enum.TrailingComment)
 	g.indent++
+	methods := enumMethods(enum)
+	if len(methods) > 0 {
+		g.line("module Methods", "")
+		g.indent++
+		for _, method := range methods {
+			g.method(method, nil)
+		}
+		g.indent--
+		g.line("end", "")
+	}
 	for _, statement := range enum.Body {
 		switch member := statement.(type) {
 		case *ir.Comment:
@@ -409,6 +438,9 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 				fields[index] = ":" + field.Name
 			}
 			definition := "Data.define(" + strings.Join(fields, ", ") + ")"
+			if len(methods) > 0 {
+				definition += " { include Methods }"
+			}
 			if len(fields) == 0 {
 				definition += ".new"
 			}
@@ -417,6 +449,16 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 	}
 	g.indent--
 	g.line("end", "")
+}
+
+func enumMethods(enum *ir.Enum) []*ir.Method {
+	result := []*ir.Method{}
+	for _, statement := range enum.Body {
+		if method, ok := statement.(*ir.Method); ok && !method.External {
+			result = append(result, method)
+		}
+	}
+	return result
 }
 
 func (g *generator) method(method *ir.Method, fields []*ir.Field) {
@@ -585,6 +627,24 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
 		return g.expr(n.Callee) + "(" + strings.Join(parts, ", ") + ")"
+	case *ir.EnumCall:
+		parts := make([]string, len(n.Arguments))
+		for index, argument := range n.Arguments {
+			parts[index] = g.expr(argument.Value)
+		}
+		switch n.Method {
+		case "raw_value":
+			return g.expr(n.Receiver) + ".raw_value"
+		case "from_raw":
+			branches := make([]string, 0, len(n.RawValues))
+			for _, item := range n.RawValues {
+				branches = append(branches, "when "+item.Raw+" then Result::Ok.new("+n.EnumName+"::"+item.Member+")")
+			}
+			message := strconv.Quote("unknown raw value for " + n.EnumName)
+			return "begin; value = " + parts[0] + "; case value; " + strings.Join(branches, "; ") + "; else Result::Err.new(EnumValueError.new(value: value, message: " + message + ")); end; end"
+		default:
+			return g.expr(n.Receiver) + "." + n.Method + "(" + strings.Join(parts, ", ") + ")"
+		}
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
@@ -874,6 +934,16 @@ func (b *rubyJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		body = "if value.is_a?(JsonValue::Integer); value.value.to_f; elsif value.is_a?(JsonValue::Float); value.value; else; " + expected("Float") + "; end"
 	case "string":
 		body = "unless value.is_a?(JsonValue::String); " + expected("String") + "; end; value.value"
+	case "raw_enum":
+		kind := "String"
+		if schema.RawType.Kind == types.Int {
+			kind = "Integer"
+		}
+		branches := make([]string, 0, len(schema.RawValues))
+		for _, item := range schema.RawValues {
+			branches = append(branches, "when "+item.Raw+" then "+schema.Type.Name+"::"+item.Member)
+		}
+		body = "unless value.is_a?(JsonValue::" + kind + "); " + expected(kind) + "; end; case value.value; " + strings.Join(branches, "; ") + "; else; fail.call(path, " + strconv.Quote("unknown raw value for "+schema.Type.Name) + "); end"
 	case "array":
 		child := b.decoder(schema.Element)
 		body = "unless value.is_a?(JsonValue::Array); " + expected("Array") + "; end; value.value.each_with_index.map { |item, index| " + child + ".call(item, path + \"/\" + index.to_s) }"
@@ -926,6 +996,12 @@ func (b *rubyJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		body = "JsonValue::Float.new(value)"
 	case "string":
 		body = "JsonValue::String.new(value)"
+	case "raw_enum":
+		kind := "String"
+		if schema.RawType.Kind == types.Int {
+			kind = "Integer"
+		}
+		body = "JsonValue::" + kind + ".new(value.raw_value)"
 	case "array":
 		child := b.encoder(schema.Element)
 		body = "JsonValue::Array.new(value.map { |item| " + child + ".call(item) })"

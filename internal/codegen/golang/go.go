@@ -527,9 +527,14 @@ func (g *generator) enum(enum *ir.Enum) {
 	name := goIdentifier(enum.Name, true)
 	if enumHasPayload(enum) {
 		g.payloadEnum(enum, name)
+		g.enumMethods(enum, name)
 		return
 	}
-	g.line("type " + name + " int" + goTrailingComment(enum.TrailingComment))
+	underlying := "int"
+	if enum.RawType.Kind != "" {
+		underlying = g.goType(enum.RawType)
+	}
+	g.line("type " + name + " " + underlying + goTrailingComment(enum.TrailingComment))
 	g.b.WriteByte('\n')
 	g.line("const (")
 	g.indent++
@@ -540,16 +545,45 @@ func (g *generator) enum(enum *ir.Enum) {
 			g.statement(member)
 		case *ir.EnumMember:
 			line := goConstantIdentifier(enum.Name, member.Name)
-			if first {
+			if member.RawValue != nil {
+				line += " " + name + " = " + g.expr(member.RawValue)
+			} else if first {
 				line += " " + name + " = iota"
-				first = false
 			}
+			first = false
 			g.line(line + goTrailingComment(member.TrailingComment))
 		}
 	}
 	g.indent--
 	g.line(")")
 	g.b.WriteByte('\n')
+	g.enumMethods(enum, name)
+}
+
+func (g *generator) enumMethods(enum *ir.Enum, enumName string) {
+	for _, statement := range enum.Body {
+		method, ok := statement.(*ir.Method)
+		if !ok || method.External {
+			continue
+		}
+		parameters := g.parameters(method.Parameters)
+		if parameters != "" {
+			parameters = ", " + parameters
+		}
+		g.line("func " + enumMethodName(enum.Name, method.Name) + goTypeParameterDeclarations(enum.TypeParameters) + "(self " + enumName + goTypeParameterArguments(enum.TypeParameters) + parameters + ")" + g.goReturn(method.ReturnType) + " {")
+		g.indent++
+		g.parameterDefaults(method.Parameters)
+		g.functionDepth++
+		g.statements(method.Body)
+		g.functionDepth--
+		g.indent--
+		g.line("}")
+		g.b.WriteByte('\n')
+	}
+}
+
+func enumMethodName(enumName, methodName string) string {
+	return goIdentifier(enumName, true) + goMethodName(methodName)
 }
 
 func (g *generator) typeAlias(alias *ir.TypeAlias) {
@@ -1095,6 +1129,24 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 		}
 		return g.expr(n.Callee) + "(" + args + ")"
+	case *ir.EnumCall:
+		parts := make([]string, 0, len(n.Arguments)+1)
+		for _, argument := range n.Arguments {
+			parts = append(parts, g.expr(argument.Value))
+		}
+		switch n.Method {
+		case "raw_value":
+			return g.goType(n.RawType) + "(" + g.expr(n.Receiver) + ")"
+		case "from_raw":
+			return g.rawEnumFromValue(n, parts[0])
+		default:
+			parts = append([]string{g.expr(n.Receiver)}, parts...)
+			name := enumMethodName(n.EnumName, n.Method)
+			if alias := g.referenceAlias(n.Reference); alias != "" {
+				name = alias + "." + name
+			}
+			return name + "(" + strings.Join(parts, ", ") + ")"
+		}
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
@@ -1133,6 +1185,28 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	valueType := g.goType(types.FromName(call.EnumName))
+	errorType := g.goType(types.FromName("EnumValueError"))
+	resultType := g.goType(call.ExprType())
+	prefix := ""
+	if alias := g.referenceAlias(call.Reference); alias != "" {
+		prefix = alias + "."
+	}
+	lines := []string{"func() " + resultType + " { value := " + argument + "; switch value {"}
+	for _, item := range call.RawValues {
+		constant := prefix + goConstantIdentifier(call.EnumName, item.Member)
+		lines = append(lines, "case "+item.Raw+": return "+resultAlias+".NewResultOk["+valueType+", "+errorType+"]("+constant+");")
+	}
+	message := strconv.Quote("unknown raw value for " + call.EnumName)
+	lines = append(lines, "}; return "+resultAlias+".NewResultErr["+valueType+", "+errorType+"]("+errorType+"{Value: value, Message: "+message+"}) }()")
+	return strings.Join(lines, " ")
 }
 
 func (g *generator) ifExpression(node *ir.If) string {
@@ -1590,7 +1664,7 @@ func (g *generator) goCodecType(schema *ir.CodecSchema) string {
 		result = "[]" + g.goCodecType(schema.Element)
 	case "hash":
 		result = "map[string]" + g.goCodecType(schema.Element)
-	case "record":
+	case "record", "raw_enum":
 		result = goIdentifier(base.Name, true)
 		if schema.Reference != nil && schema.Reference.Package != "" && schema.Reference.Package != g.modulePath {
 			alias := schema.Reference.Alias
@@ -1647,6 +1721,28 @@ func (b *goJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		body = "if value.Kind == " + b.jsonAlias + ".JsonValueIntegerTag { return float64(value.IntegerValue), nil }; if value.Kind != " + b.jsonAlias + ".JsonValueFloatTag { " + expected("Float") + " }; return value.FloatValue, nil"
 	case "string":
 		body = "if value.Kind != " + b.jsonAlias + ".JsonValueStringTag { " + expected("String") + " }; return value.StringValue, nil"
+	case "raw_enum":
+		raw := "value.StringValue"
+		expectedKind := "String"
+		jsonTag := "JsonValueStringTag"
+		if schema.RawType.Kind == types.Int {
+			raw = "value.IntegerValue"
+			expectedKind = "Integer"
+			jsonTag = "JsonValueIntegerTag"
+		}
+		prefix := ""
+		if schema.Reference != nil && schema.Reference.Package != "" && schema.Reference.Package != b.generator.modulePath {
+			alias := schema.Reference.Alias
+			if alias == "" {
+				alias = pathpkg.Base(pathpkg.Dir(schema.Reference.Package))
+			}
+			prefix = goImportAlias(alias) + "."
+		}
+		branches := make([]string, 0, len(schema.RawValues))
+		for _, item := range schema.RawValues {
+			branches = append(branches, "case "+item.Raw+": return "+prefix+goConstantIdentifier(schema.Type.Name, item.Member)+", nil")
+		}
+		body = "if value.Kind != " + b.jsonAlias + "." + jsonTag + " { " + expected(expectedKind) + " }; switch " + raw + " { " + strings.Join(branches, "; ") + " }; message := " + strconv.Quote("unknown raw value for "+schema.Type.Name) + "; " + zero
 	case "array":
 		b.generator.requireImport("strconv", "")
 		child := b.decoder(schema.Element)
@@ -1701,6 +1797,12 @@ func (b *goJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		body = "return " + b.jsonAlias + ".NewJsonValueFloat(value)"
 	case "string":
 		body = "return " + b.jsonAlias + ".NewJsonValueString(value)"
+	case "raw_enum":
+		if schema.RawType.Kind == types.Int {
+			body = "return " + b.jsonAlias + ".NewJsonValueInteger(int(value))"
+		} else {
+			body = "return " + b.jsonAlias + ".NewJsonValueString(string(value))"
+		}
 	case "array":
 		child := b.encoder(schema.Element)
 		body = "items := make([]" + jsonValue + ", len(value)); for index, item := range value { items[index] = " + child + "(item) }; return " + b.jsonAlias + ".NewJsonValueArray(items)"

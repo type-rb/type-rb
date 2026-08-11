@@ -165,7 +165,10 @@ func collectSymbols(statements []ir.Statement, owner string, typeMembers map[str
 			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "record " + qualified, Type: types.FromName(qualified), Members: namespace})
 		case *ir.Enum:
 			qualified := qualify(owner, node.Name)
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "enum " + qualified, Type: types.FromName(qualified), Members: enumMembers(node.Body)})
+			instance, namespace := enumMembers(node, qualified)
+			typeMembers[qualified] = append(typeMembers[qualified], instance...)
+			typeMembers[node.Name] = append(typeMembers[node.Name], instance...)
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "enum " + qualified, Type: types.FromName(qualified), Members: namespace})
 		case *ir.TypeAlias:
 			qualified := qualify(owner, node.Name)
 			members := make([]Symbol, 0, len(node.Variants))
@@ -274,25 +277,38 @@ func recordMembers(statements []ir.Statement, owner string) ([]Symbol, []Symbol)
 	return instance, namespace
 }
 
-func enumMembers(statements []ir.Statement) []Symbol {
-	result := []Symbol{}
-	for _, statement := range statements {
-		member, ok := statement.(*ir.EnumMember)
-		if !ok || privateName(member.Name) {
-			continue
+func enumMembers(enum *ir.Enum, owner string) ([]Symbol, []Symbol) {
+	instance := []Symbol{}
+	namespace := []Symbol{}
+	for _, statement := range enum.Body {
+		switch member := statement.(type) {
+		case *ir.EnumMember:
+			if privateName(member.Name) {
+				continue
+			}
+			parameters := make([]string, 0, len(member.Fields))
+			for _, field := range member.Fields {
+				parameters = append(parameters, field.Name+": "+field.Type.String())
+			}
+			detail := member.Name
+			if len(parameters) > 0 {
+				detail += "(" + strings.Join(parameters, ", ") + ")"
+			}
+			namespace = append(namespace, Symbol{Name: member.Name, Kind: CompletionEnumMember, Detail: detail})
+		case *ir.Method:
+			if !privateName(member.Name) {
+				instance = append(instance, methodSymbol(member, CompletionMethod))
+			}
 		}
-		parameters := make([]string, 0, len(member.Fields))
-		for _, field := range member.Fields {
-			parameters = append(parameters, field.Name+": "+field.Type.String())
-		}
-		detail := member.Name
-		if len(parameters) > 0 {
-			detail += "(" + strings.Join(parameters, ", ") + ")"
-		}
-		result = append(result, Symbol{Name: member.Name, Kind: CompletionEnumMember, Detail: detail})
 	}
-	sortSymbols(result)
-	return result
+	if enum.RawType.Kind != "" {
+		instance = append(instance, Symbol{Name: "raw_value", Kind: CompletionMethod, Detail: "raw_value(): " + enum.RawType.String(), Type: enum.RawType, Call: &CallInfo{}})
+		resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName(owner), types.FromName("EnumValueError")}}
+		namespace = append(namespace, Symbol{Name: "from_raw", Kind: CompletionMethod, Detail: "from_raw(value: " + enum.RawType.String() + "): " + resultType.String(), Type: resultType, Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value"}}}})
+	}
+	sortSymbols(instance)
+	sortSymbols(namespace)
+	return instance, namespace
 }
 
 func methodSignature(method *ir.Method) string {

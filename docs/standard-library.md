@@ -462,8 +462,10 @@ end
 ```
 
 Typed codecs support booleans, numbers, strings, nullable values, arrays,
-`Hash<String, V>`, nested records, and `@json` wire names. Unknown object fields
-are ignored. Schema information remains in typed IR; generated code does not
+`Hash<String, V>`, nested records, raw-value enums, and `@json` record-field
+wire names. Raw-value enums encode as their declared String or Integer raw
+value and reject unknown values during decode. Unknown object fields are
+ignored. Schema information remains in typed IR; generated code does not
 reflect over target objects.
 
 `json.parse` accepts strict JSON. `jsonc.parse` additionally accepts line and
@@ -486,6 +488,10 @@ exhaustive enum `case`. The current alpha has no propagation operator.
 
 `trb/std/unit` provides `Unit` for successful generic operations with no
 application payload.
+
+`trb/std/errors` provides `EnumValueError` for an unsuccessful raw-value enum
+conversion. `from_raw()` infers this error type and its runtime dependency; an
+explicit import is needed only when source code names `EnumValueError` itself.
 
 ## Package index
 

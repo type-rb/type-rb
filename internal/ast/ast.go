@@ -113,6 +113,7 @@ type EnumMemberStatement struct {
 	Base
 	Name       string
 	Parameters []Parameter
+	RawValue   Expression
 }
 
 func (*EnumMemberStatement) statementNode() {}

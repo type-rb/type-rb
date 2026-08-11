@@ -143,6 +143,7 @@ end
 			{Name: "NumberParseError", Kind: "record"},
 			{Name: "IndexLookupError", Kind: "record"},
 			{Name: "KeyLookupError", Kind: "record"},
+			{Name: "EnumValueError", Kind: "record"},
 		},
 		Source:  errorsSource(),
 		Kind:    Portable,
