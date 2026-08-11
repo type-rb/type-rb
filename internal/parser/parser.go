@@ -117,6 +117,9 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	}
 	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
+	if lambda := p.tryLambdaExpressionStatement(line, next, base); lambda != nil {
+		return lambda
+	}
 	if attempt := p.tryAttemptBlockStatement(line, next, base); attempt != nil {
 		return attempt
 	}
@@ -155,6 +158,56 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	p.pos = next
 	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
+}
+
+func (p *Parser) tryLambdaExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {
+	fnAt := topLevelIndex(line, "fn")
+	if fnAt < 0 || fnAt+1 >= len(line) || line[fnAt+1].Lexeme != "(" {
+		return nil
+	}
+	close := matchingIndex(line, fnAt+1, "(", ")")
+	if close < 0 {
+		p.errorAt(spanOf(line[fnAt:]), "unterminated fn parameters; expected )")
+		p.pos = next
+		return &ast.ExpressionStatement{Base: base, Expression: &ast.LambdaExpression{Base: ast.Base{SourceSpan: spanOf(line[fnAt:])}}}
+	}
+	node := &ast.LambdaExpression{
+		Base:       ast.Base{SourceSpan: token.Span{Start: line[fnAt].Span.Start, End: line[close].Span.End}},
+		Parameters: p.parseParameters(line[fnAt+2 : close]),
+	}
+	tail := line[close+1:]
+	if len(tail) > 0 {
+		if tail[0].Lexeme != ":" || len(tail) == 1 {
+			p.errorAt(spanOf(tail), "fn return type must be written as : Type")
+		} else {
+			node.ReturnType = p.parseReturnType(tail[1:])
+		}
+	}
+
+	p.pos = next
+	node.Body = p.parseStatements(map[string]bool{"end": true})
+	_, closeSpan := p.consumeTerminator("end")
+	node.SourceSpan.End = closeSpan.End
+	base.SourceSpan.End = closeSpan.End
+
+	wrapper := append([]token.Token(nil), line[:fnAt+1]...)
+	embedded := map[int]ast.Expression{line[fnAt].Span.Start.Offset: node}
+	if len(wrapper) > 0 && wrapper[0].Lexeme == "return" {
+		if value, valid := parseExpressionTokensWithEmbedded(wrapper[1:], embedded); valid {
+			return &ast.ReturnStatement{Base: base, Value: value}
+		}
+	}
+	if statement := p.tryVariableWithEmbedded(wrapper, base, embedded); statement != nil {
+		return statement
+	}
+	if statement := p.tryAssignmentWithEmbedded(wrapper, base, embedded); statement != nil {
+		return statement
+	}
+	if value, valid := parseExpressionTokensWithEmbedded(wrapper, embedded); valid {
+		return &ast.ExpressionStatement{Base: base, Expression: value}
+	}
+	p.errorAt(base.SourceSpan, "fn is not valid in this expression context")
+	return &ast.ExpressionStatement{Base: base, Expression: node}
 }
 
 func (p *Parser) tryAttemptBlockStatement(line []token.Token, next int, base ast.Base) ast.Statement {
@@ -1178,7 +1231,7 @@ func looksLikeType(tok token.Token) bool {
 	if tok.Lexeme == "" {
 		return false
 	}
-	if tok.Lexeme[0] >= 'A' && tok.Lexeme[0] <= 'Z' {
+	if tok.Lexeme == "(" || tok.Lexeme[0] >= 'A' && tok.Lexeme[0] <= 'Z' {
 		return true
 	}
 	switch strings.ToLower(tok.Lexeme) {

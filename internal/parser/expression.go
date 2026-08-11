@@ -410,6 +410,21 @@ func parseType(tokens []token.Token) ast.TypeRef {
 		return ast.TypeRef{}
 	}
 	tokens = expandGenericClosers(tokens)
+	if arrow := topLevelIndex(tokens, "->"); arrow >= 0 {
+		result := ast.TypeRef{Base: ast.Base{SourceSpan: spanOf(tokens)}}
+		if arrow < 2 || tokens[0].Lexeme != "(" || tokens[arrow-1].Lexeme != ")" || matchingIndex(tokens, 0, "(", ")") != arrow-1 || arrow+1 >= len(tokens) {
+			result.Name = joinLexemes(tokens)
+			return result
+		}
+		for _, part := range splitTopLevel(tokens[1:arrow-1], ",") {
+			if len(part) > 0 {
+				result.FunctionParameters = append(result.FunctionParameters, parseType(part))
+			}
+		}
+		returned := parseType(tokens[arrow+1:])
+		result.FunctionReturn = &returned
+		return result
+	}
 	if alternatives := splitTopLevel(tokens, "|"); len(alternatives) > 1 {
 		result := ast.TypeRef{Base: ast.Base{SourceSpan: spanOf(tokens)}}
 		for _, alternative := range alternatives {

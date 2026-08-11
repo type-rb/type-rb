@@ -313,16 +313,25 @@ func (*NativeBlock) statementNode() {}
 
 type TypeRef struct {
 	Base
-	Name      string
-	Arguments []TypeRef
-	Union     []TypeRef
-	Nullable  bool
-	Array     bool
+	Name               string
+	Arguments          []TypeRef
+	Union              []TypeRef
+	FunctionParameters []TypeRef
+	FunctionReturn     *TypeRef
+	Nullable           bool
+	Array              bool
 }
 
-func (t TypeRef) Empty() bool { return t.Name == "" && len(t.Union) == 0 }
+func (t TypeRef) Empty() bool { return t.Name == "" && len(t.Union) == 0 && t.FunctionReturn == nil }
 
 func (t TypeRef) String() string {
+	if t.FunctionReturn != nil {
+		parts := make([]string, len(t.FunctionParameters))
+		for index, parameter := range t.FunctionParameters {
+			parts[index] = parameter.String()
+		}
+		return "(" + strings.Join(parts, ", ") + ") -> " + t.FunctionReturn.String()
+	}
 	if len(t.Union) > 0 {
 		parts := make([]string, len(t.Union))
 		for index, alternative := range t.Union {
@@ -496,6 +505,17 @@ type AttemptExpression struct {
 }
 
 func (*AttemptExpression) expressionNode() {}
+
+// LambdaExpression is a typed, lexically scoped function value. Unlike an
+// iteration block, it owns return statements and can outlive its declaration.
+type LambdaExpression struct {
+	Base
+	Parameters []Parameter
+	ReturnType TypeRef
+	Body       []Statement
+}
+
+func (*LambdaExpression) expressionNode() {}
 
 type CallArgument struct {
 	Name  string

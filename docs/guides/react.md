@@ -23,6 +23,33 @@ The compiler checks required, unknown, and mistyped props, including components
 imported from another TypeRB module. Files containing JSX are generated as
 `.tsx`; other TypeScript modules remain `.ts`.
 
+Use a typed `fn` value for component callbacks and event handlers:
+
+```trb
+import { ReactEvent, ReactNode, prevent_default } from trb/platform/typescript/react
+
+record ButtonProps
+	on_click: (ReactEvent) -> Void
+end
+
+def Button(props: ButtonProps): ReactNode
+	return <button onClick={props.on_click}>Save</button>
+end
+
+def Page(): ReactNode
+	handle_click := fn(event: ReactEvent)
+		prevent_default(event)
+		return
+	end
+	return <Button on_click={handle_click} />
+end
+```
+
+The callback keeps the ordinary TypeRB function type across module boundaries
+and lowers to a React-compatible TypeScript function. Hook state remains a
+separate prototype step; the compiler does not disguise untyped state as a
+finished API.
+
 Typed browser JSON calls use ordinary `fails` and `attempt` semantics:
 
 ```trb

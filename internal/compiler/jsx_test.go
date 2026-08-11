@@ -59,6 +59,47 @@ end
 	}
 }
 
+func TestCompileTypeScriptJSXWithTypedFunctionCallbacks(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "button.trb",
+		ModulePath: "app/button",
+		Source: []byte(`import { ReactEvent, ReactNode, input_value, prevent_default } from trb/platform/typescript/react
+
+record ButtonProps
+	on_click: (ReactEvent) -> Void
+end
+
+def Button(props: ButtonProps): ReactNode
+	return <button onClick={props.on_click}>Save</button>
+end
+
+def Page(): ReactNode
+	handle_click := fn(event: ReactEvent)
+		prevent_default(event)
+		puts(input_value(event))
+		return
+	end
+	return <Button on_click={handle_click} />
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		"on_click: (arg0: React.SyntheticEvent) => void;",
+		"const handle_click: (arg0: React.SyntheticEvent) => void = (event: React.SyntheticEvent): void =>",
+		"event.preventDefault();",
+		"<Button on_click={handle_click} />",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated callback TSX is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
 func TestCompileTypeScriptJSXChecksComponentProps(t *testing.T) {
 	source := []byte(`import { ReactNode } from trb/platform/typescript/react
 
