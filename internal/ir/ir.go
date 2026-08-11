@@ -552,6 +552,17 @@ type Attempt struct {
 
 func (*Attempt) irExpression() {}
 
+// Lambda is a first-class lexical function. Parameters and result remain
+// target-independent so every backend can emit its native closure form.
+type Lambda struct {
+	ExprBase
+	Parameters []Parameter
+	ReturnType types.Type
+	Body       []Statement
+}
+
+func (*Lambda) irExpression() {}
+
 // UnhandledEffect marks a fallible expression evaluated by an interactive
 // host. The REPL unwraps success and reports failure without terminating the
 // session; project builds never produce this node.

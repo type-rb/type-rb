@@ -43,6 +43,10 @@ module Demo
 	end
 end
 
+double := fn(value: Integer): Integer
+	return value * 2
+end
+
 [1, 2, 3].each do |number|
 	puts(number)
 end

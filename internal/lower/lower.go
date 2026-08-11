@@ -561,6 +561,16 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
 		return attempt
+	case *ast.LambdaExpression:
+		result := &ir.Lambda{ExprBase: base, ReturnType: types.FromName("Void")}
+		if !n.ReturnType.Empty() {
+			result.ReturnType = lowerType(n.ReturnType)
+		}
+		for _, parameter := range n.Parameters {
+			result.Parameters = append(result.Parameters, ir.Parameter{Name: parameter.Name, Type: lowerType(parameter.Type)})
+		}
+		result.Body = l.statements(n.Body)
+		return result
 	case *ast.IterationExpression:
 		result := &ir.Transform{
 			ExprBase:  base,
@@ -978,6 +988,15 @@ func lowerType(ref ast.TypeRef) types.Type {
 			alternatives[index] = lowerType(alternative)
 		}
 		return types.UnionOf(alternatives...)
+	}
+	if ref.FunctionReturn != nil {
+		parameters := make([]types.Type, len(ref.FunctionParameters))
+		for index, parameter := range ref.FunctionParameters {
+			parameters[index] = lowerType(parameter)
+		}
+		result := types.FunctionOf(parameters, lowerType(*ref.FunctionReturn))
+		result.Nullable = ref.Nullable
+		return result
 	}
 	t := types.FromName(ref.Name)
 	t.Nullable = ref.Nullable

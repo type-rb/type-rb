@@ -51,6 +51,29 @@ func TestAssignableNamedGenericIsInvariant(t *testing.T) {
 	}
 }
 
+func TestFunctionTypesAreInvariant(t *testing.T) {
+	integer := FromName("Integer")
+	float := FromName("Float")
+	stringType := FromName("String")
+	integerToString := FunctionOf([]Type{integer}, stringType)
+	integerToInteger := FunctionOf([]Type{integer}, integer)
+	integerToFloat := FunctionOf([]Type{integer}, float)
+	floatToString := FunctionOf([]Type{float}, stringType)
+
+	if integerToString.String() != "(Integer) -> String" {
+		t.Fatalf("function type string=%s", integerToString)
+	}
+	if !Assignable(integerToString, integerToString) {
+		t.Fatal("equivalent function types must be assignable")
+	}
+	if Assignable(integerToString, floatToString) {
+		t.Fatal("function parameters must be invariant")
+	}
+	if Assignable(integerToFloat, integerToInteger) {
+		t.Fatal("function results remain invariant until backends insert adapters")
+	}
+}
+
 func TestCommonTypeUsesPortableNumericWidening(t *testing.T) {
 	integer := FromName("Integer")
 	float := FromName("Float")

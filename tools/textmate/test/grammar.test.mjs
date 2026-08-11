@@ -97,6 +97,7 @@ test("scopes representative portable TypeRB syntax", async () => {
   assertScope(tokens, "T", "entity.name.type.parameter.trb");
   assertScope(tokens, "@name", "variable.other.instance.trb");
   assertScope(tokens, "render", "entity.name.function.trb");
+  assertScope(tokens, "fn", "storage.type.trb");
   assertScope(tokens, "String", "support.type.builtin.trb");
   assertScope(tokens, "Outcome", "entity.name.type.trb");
   assertScope(tokens, "::", "punctuation.accessor.namespace.trb");
