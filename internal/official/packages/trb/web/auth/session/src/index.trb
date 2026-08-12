@@ -1,0 +1,11 @@
+import { OidcAuthError, OidcPrincipal, OidcSessionOptions } from trb/auth/oidc
+import { Context, Next, Response } from trb/web
+
+interface SessionContract
+	start_login(context: Context, options: OidcSessionOptions, return_to: String): Response
+	complete_login(context: Context, options: OidcSessionOptions): Response
+	principal(context: Context, options: OidcSessionOptions): OidcPrincipal
+	authenticate(context: Context, next_handler: Next, options: OidcSessionOptions): Response
+	end_session(context: Context, options: OidcSessionOptions): Response
+	error(): OidcAuthError
+end

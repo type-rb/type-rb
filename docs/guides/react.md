@@ -175,3 +175,7 @@ UI-specific errors can evolve independently of React.
 Browser suspension remains a TypeScript backend concern; TypeRB does not add
 `async` syntax. Generated TSX and package dependencies are compatible with the
 normal React and Vite ecosystem.
+
+Applications can choose either an encrypted server session or browser bearer
+tokens without changing their shared principal contract. See
+[Experimental OIDC authentication](authentication.md) for both profiles.

@@ -414,7 +414,7 @@ func isSuspendingORM(intrinsic string, fails types.Type) bool {
 }
 
 func isSuspendingIntrinsic(intrinsic string, fails types.Type) bool {
-	return isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || isSuspendingBrowserIntrinsic(intrinsic)
+	return isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || strings.HasPrefix(intrinsic, "trb.web.auth.") || isSuspendingBrowserIntrinsic(intrinsic)
 }
 
 func isSuspendingBrowserIntrinsic(intrinsic string) bool {
@@ -423,7 +423,17 @@ func isSuspendingBrowserIntrinsic(intrinsic string) bool {
 		"trb.platform.typescript.browser.post_json",
 		"trb.platform.typescript.browser.put_json",
 		"trb.platform.typescript.browser.patch_json",
-		"trb.platform.typescript.browser.delete_json":
+		"trb.platform.typescript.browser.delete_json",
+		"trb.platform.typescript.browser.bearer.get_json",
+		"trb.platform.typescript.browser.bearer.post_json",
+		"trb.platform.typescript.browser.bearer.put_json",
+		"trb.platform.typescript.browser.bearer.patch_json",
+		"trb.platform.typescript.browser.bearer.delete_json",
+		"trb.platform.typescript.browser.session.get_json",
+		"trb.platform.typescript.browser.session.post_json",
+		"trb.platform.typescript.browser.session.put_json",
+		"trb.platform.typescript.browser.session.patch_json",
+		"trb.platform.typescript.browser.session.delete_json":
 		return true
 	default:
 		return false

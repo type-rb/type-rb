@@ -19,6 +19,7 @@ larger applications.
 - [Database schema workflow](guides/database.md)
 - [`trb/orm` guide](guides/orm.md)
 - [Experimental React and JSX](guides/react.md)
+- [Experimental OIDC authentication](guides/authentication.md)
 
 ## Project
 

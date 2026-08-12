@@ -113,6 +113,33 @@ func TestBundledReactFormPackage(t *testing.T) {
 	}
 }
 
+func TestBundledOidcAuthenticationPackages(t *testing.T) {
+	portable, ok := Lookup("trb/auth/oidc")
+	if !ok || portable.Definition.Kind != stdlib.Portable {
+		t.Fatalf("portable OIDC contract is not registered: %#v", portable)
+	}
+	for _, name := range []string{"trb/web/auth/bearer", "trb/web/auth/session"} {
+		packageDefinition, exists := Lookup(name)
+		if !exists || !packageDefinition.Definition.Supports("go") || !packageDefinition.Definition.Supports("ruby") || !packageDefinition.Definition.Supports("typescript") {
+			t.Fatalf("portable auth package %s has an unexpected boundary: %#v", name, packageDefinition)
+		}
+	}
+	for _, name := range []string{
+		"trb/platform/typescript/browser/bearer",
+		"trb/platform/typescript/browser/session",
+		"trb/platform/typescript/react/oidc",
+	} {
+		packageDefinition, exists := Lookup(name)
+		if !exists || packageDefinition.Definition.Kind != stdlib.Platform || !packageDefinition.Definition.Supports("typescript") || packageDefinition.Definition.Supports("go") {
+			t.Fatalf("TypeScript auth package %s has an unexpected boundary: %#v", name, packageDefinition)
+		}
+	}
+	reactOidc, _ := Lookup("trb/platform/typescript/react/oidc")
+	if reactOidc.Definition.TypeProvider != "trb.typescript.react.oidc" || reactOidc.NativeDependencies["typescript"]["react-oidc-context"] != "latest" {
+		t.Fatalf("unexpected React OIDC integration: %#v", reactOidc)
+	}
+}
+
 func TestBundledTypeScriptBrowserPackage(t *testing.T) {
 	packageDefinition, ok := Lookup("trb/platform/typescript/browser")
 	if !ok {

@@ -29,6 +29,8 @@ type generator struct {
 	orm              *ormintegration.Manifest
 	breakTarget      string
 	enumReceiver     string
+	reactImported    bool
+	oidcRuntime      bool
 }
 
 func Generate(program *ir.Program) string {
@@ -92,6 +94,9 @@ func generate(program *ir.Program, suspension *SuspensionPlan, moduleExtensions 
 		}
 		g.statement(statement)
 	}
+	if g.oidcRuntime {
+		g.oidcRuntimeSupport()
+	}
 	g.integrations(program.Extensions)
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
@@ -127,7 +132,10 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line(comment(n.Text))
 	case *ir.Import:
 		if n.Path == "trb/platform/typescript/react" || n.Path == "trb/platform/typescript/react/index" {
-			g.line(`import * as React from "react";`)
+			if !g.reactImported {
+				g.line(`import * as React from "react";`)
+				g.reactImported = true
+			}
 			if containsString(n.Symbols, "mount") {
 				g.line(`import { createRoot } from "react-dom/client";`)
 			}
@@ -139,6 +147,33 @@ func (g *generator) statement(statement ir.Statement) {
 				g.indent--
 				g.line(`}`)
 			}
+			return
+		}
+		if n.Path == "trb/platform/typescript/react/oidc" || n.Path == "trb/platform/typescript/react/oidc/index" {
+			if !g.reactImported {
+				g.line(`import * as React from "react";`)
+				g.reactImported = true
+			}
+			g.line(`import { AuthProvider as TrbOidcProvider, useAuth as useTrbOidcAuth } from "react-oidc-context";`)
+			g.line(`const TrbOidcRolesClaim = React.createContext("roles");`)
+			g.line(`function trbOidcProvider(options: Readonly<{ authority: string; client_id: string; redirect_uri: string; post_logout_redirect_uri: string; scope: string; audience: string | null; roles_claim: string }>, child: React.ReactNode): React.ReactNode {`)
+			g.indent++
+			g.line(`const extraQueryParams = options.audience === null ? undefined : { audience: options.audience };`)
+			g.line(`const provider = React.createElement(TrbOidcProvider, { authority: options.authority, client_id: options.client_id, redirect_uri: options.redirect_uri, post_logout_redirect_uri: options.post_logout_redirect_uri, scope: options.scope, extraQueryParams, automaticSilentRenew: true }, child);`)
+			g.line(`return React.createElement(TrbOidcRolesClaim.Provider, { value: options.roles_claim }, provider);`)
+			g.indent--
+			g.line(`}`)
+			g.line(`function useTrbOidc(): Readonly<{ loading: boolean; authenticated: boolean; principal: Readonly<{ subject: string; name: string | null; email: string | null; roles: string[] }> | null; access_token: string | null; sign_in: (_event: unknown) => void; sign_out: (_event: unknown) => void }> {`)
+			g.indent++
+			g.line(`const auth = useTrbOidcAuth();`)
+			g.line(`const rolesClaim = React.useContext(TrbOidcRolesClaim);`)
+			g.line(`const profile = auth.user?.profile as Record<string, unknown> | undefined;`)
+			g.line(`const rawRoles = profile?.[rolesClaim];`)
+			g.line(`const roles = Array.isArray(rawRoles) ? rawRoles.filter((role): role is string => typeof role === "string") : [];`)
+			g.line(`const principal = profile === undefined || typeof profile.sub !== "string" ? null : { subject: profile.sub, name: typeof profile.name === "string" ? profile.name : null, email: typeof profile.email === "string" ? profile.email : null, roles };`)
+			g.line(`return { loading: auth.isLoading, authenticated: auth.isAuthenticated, principal, access_token: auth.user?.access_token ?? null, sign_in: (_event): void => { void auth.signinRedirect(); }, sign_out: (_event): void => { void auth.signoutRedirect(); } };`)
+			g.indent--
+			g.line(`}`)
 			return
 		}
 		if n.Path == "trb/platform/typescript/react/router" || n.Path == "trb/platform/typescript/react/router/index" {
@@ -1756,6 +1791,8 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 				errors = tsTypeWithAliases(t.Args[1], aliases)
 			}
 			result = "Readonly<{ value: " + value + "; errors: " + errors + "; dirty: boolean; submitting: boolean; set_value: (value: " + value + ") => void; set_errors: (errors: " + errors + ") => void; set_submitting: (submitting: boolean) => void; clear_errors: () => void; reset: () => void }>"
+		case "ReactOidcState":
+			result = "Readonly<{ loading: boolean; authenticated: boolean; principal: Readonly<{ subject: string; name: string | null; email: string | null; roles: string[] }> | null; access_token: string | null; sign_in: (event: React.SyntheticEvent) => void; sign_out: (event: React.SyntheticEvent) => void }>"
 		case "Callback":
 			argument := "unknown"
 			if len(t.Args) > 0 {

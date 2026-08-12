@@ -1,0 +1,16 @@
+{
+  "name": "trb/platform/typescript/react/oidc",
+  "version": "0.1.0",
+  "module": "trb/platform/typescript/react/oidc/index",
+  "source": "src/index.trb",
+  "kind": "platform",
+  "targets": ["typescript"],
+  "semanticProvider": "trb.typescript.react.oidc",
+  "typeProvider": "trb.typescript.react.oidc",
+  "nativeDependencies": {
+    "typescript": {
+      "oidc-client-ts": "latest",
+      "react-oidc-context": "latest"
+    }
+  }
+}
