@@ -40,6 +40,7 @@ type Module struct {
 type Export struct {
 	Kind              string            `json:"kind"`
 	Type              Type              `json:"type"`
+	AliasTarget       *Type             `json:"aliasTarget,omitempty"`
 	Parameters        []Type            `json:"parameters,omitempty"`
 	Required          int               `json:"required,omitempty"`
 	Variadic          bool              `json:"variadic,omitempty"`

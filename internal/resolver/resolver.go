@@ -66,6 +66,9 @@ type Export struct {
 	Interfaces        []string
 	Span              token.Span
 	UnsupportedFields map[string]string
+	// NativeExported distinguishes a real target-package type export from a
+	// provider-only structural record used to describe another declaration.
+	NativeExported bool
 }
 
 type RecordField struct {
@@ -489,6 +492,32 @@ func (r Result) ImportedType(typeName string) (Binding, bool) {
 	return Binding{}, false
 }
 
+// InferredType resolves a type that appears in the contract of an explicitly
+// imported symbol without making that type available to source annotations.
+// Source-visible type names continue to use ImportedType and therefore still
+// require an explicit named or namespace import.
+func (r Result) InferredType(typeName string) (Binding, bool) {
+	imports := make([]*Import, 0, len(r.Imports))
+	seen := map[*Import]bool{}
+	for _, imported := range r.Imports {
+		if imported == nil || seen[imported] {
+			continue
+		}
+		seen[imported] = true
+		imports = append(imports, imported)
+	}
+	sort.Slice(imports, func(i, j int) bool { return imports[i].Path < imports[j].Path })
+	for _, imported := range imports {
+		exported, exists := imported.Exports[typeName]
+		if !exists || exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != InterfaceExport {
+			continue
+		}
+		copy := exported
+		return Binding{Import: imported, Name: typeName, Export: &copy}, true
+	}
+	return Binding{}, false
+}
+
 // InferredTypeMember resolves a member on a type produced by an explicitly
 // imported package even when the source did not import that type by name. This
 // keeps inferred library values usable without weakening named-import rules
@@ -607,10 +636,10 @@ func resolveNativeImport(node *ast.ImportStatement, catalog *nativepackage.Catal
 	}
 	resolved := &Import{Node: node, Kind: NativeImport, Path: node.Path, ModulePath: node.Path, Alias: node.Alias, Exports: map[string]Export{}}
 	for name, exported := range module.Exports {
-		resolved.Exports[name] = nativeExport(name, exported)
+		resolved.Exports[name] = nativeExport(name, exported, true)
 	}
 	for name, exported := range module.Records {
-		resolved.Exports[name] = nativeExport(name, exported)
+		resolved.Exports[name] = nativeExport(name, exported, false)
 	}
 	if resolved.Alias == "" && len(node.Symbols) == 0 {
 		resolved.Alias = defaultAlias(node.Path)
@@ -634,7 +663,7 @@ func resolveNativeImport(node *ast.ImportStatement, catalog *nativepackage.Catal
 	return resolved, nil
 }
 
-func nativeExport(name string, exported nativepackage.Export) Export {
+func nativeExport(name string, exported nativepackage.Export, nativeExported bool) Export {
 	kind := ExportKind(exported.Kind)
 	if exported.Kind == "component" {
 		kind = FunctionExport
@@ -648,6 +677,10 @@ func nativeExport(name string, exported nativepackage.Export) Export {
 		TypeParameters:    append([]string(nil), exported.TypeParameters...),
 		Members:           map[string]Member{},
 		UnsupportedFields: cloneStrings(exported.UnsupportedFields),
+		NativeExported:    nativeExported,
+	}
+	if exported.AliasTarget != nil {
+		result.AliasTarget = exported.AliasTarget.Semantic()
 	}
 	for _, parameter := range exported.Parameters {
 		result.Parameters = append(result.Parameters, parameter.Semantic())

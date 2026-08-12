@@ -3115,6 +3115,14 @@ func (c *Checker) dataMember(receiver types.Type, name string) (types.Type, bool
 			}
 		}
 	}
+	if binding, inferred := c.resolution.InferredType(receiver.Name); inferred && binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
+		substitutions := typeSubstitutions(binding.Export.TypeParameters, receiver.Args)
+		for _, field := range binding.Export.Fields {
+			if field.Name == name {
+				return substituteType(field.Type, substitutions), true, false, true
+			}
+		}
+	}
 	if member, found := c.localMember(receiver.Name, name, false, map[string]bool{}); found && member.field != nil {
 		member = c.specializeLocalClassMember(receiver, member)
 		return member.typ, member.field.ReadOnly, true, true
@@ -3741,8 +3749,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			break
 		}
 		methodReceiverType := scalarType(receiverType)
-		if receiverType.Kind == types.Union && methodReceiverType.Kind == types.Union && !n.Namespace && !n.Safe {
-			memberType, alternatives, classField, found := c.unionDataMember(receiverType, n.Name)
+		dataReceiverType := c.expandAlias(receiverType, map[string]bool{})
+		if dataReceiverType.Kind == types.Union && scalarType(dataReceiverType).Kind == types.Union && !n.Namespace && !n.Safe {
+			memberType, alternatives, classField, found := c.unionDataMember(dataReceiverType, n.Name)
 			if !found {
 				c.error(n.Span(), fmt.Sprintf("union type %s has no common data member %s", receiverType, n.Name))
 				typ = invalidType()
@@ -4629,7 +4638,7 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 		}
 	}
 	for _, field := range fields {
-		if !used[field.Name] {
+		if !used[field.Name] && !field.Optional {
 			c.error(call.Span(), fmt.Sprintf("%s.new() is missing record field %s", name, field.Name))
 		}
 	}
@@ -5516,6 +5525,9 @@ func (c *Checker) aliasDefinition(name string) ([]string, types.Type, bool) {
 		return alias.typeParameters, alias.target, true
 	}
 	if binding, imported := c.resolution.ImportedType(name); imported && binding.Export.Kind == resolver.TypeAliasExport {
+		return binding.Export.TypeParameters, binding.Export.AliasTarget, true
+	}
+	if binding, inferred := c.resolution.InferredType(name); inferred && binding.Export.Kind == resolver.TypeAliasExport {
 		return binding.Export.TypeParameters, binding.Export.AliasTarget, true
 	}
 	if exported, exists := c.resolution.CompilerOwnedType(name); exists && exported.Kind == resolver.TypeAliasExport {

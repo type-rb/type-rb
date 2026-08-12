@@ -41,6 +41,73 @@ func nativeComponentCatalog() *nativepackage.Catalog {
 	}
 }
 
+func nativeGenericQueryCatalog() *nativepackage.Catalog {
+	typeParameter := func(name string) nativepackage.Type {
+		return nativepackage.Type{Kind: "named", Name: name}
+	}
+	named := func(name string, arguments ...nativepackage.Type) nativepackage.Type {
+		return nativepackage.Type{Kind: "named", Name: name, Args: arguments}
+	}
+	tData := typeParameter("TData")
+	tError := typeParameter("TError")
+	parameters := []string{"TData", "TError"}
+	queryResultTarget := nativepackage.Type{Kind: "union", Name: "Union", Args: []nativepackage.Type{
+		named("QueryObserverPendingResult", tData, tError),
+		named("QueryObserverLoadingErrorResult", tData, tError),
+		named("QueryObserverRefetchErrorResult", tData, tError),
+		named("QueryObserverSuccessResult", tData, tError),
+		named("QueryObserverPlaceholderResult", tData, tError),
+	}}
+	resultRecord := func(name, status string, fields ...nativepackage.Field) nativepackage.Export {
+		fields = append([]nativepackage.Field{{Name: "status", Type: nativepackage.Type{Kind: "string_literal", Name: `"` + status + `"`}}}, fields...)
+		return nativepackage.Export{Kind: "record", Type: named(name), TypeParameters: parameters, Fields: fields}
+	}
+	queryOptions := nativepackage.Export{
+		Kind: "record", Type: named("UseQueryOptions"), TypeParameters: parameters, Fields: []nativepackage.Field{
+			{Name: "queryKey", Type: nativepackage.Type{Kind: "array", Name: "Array", Args: []nativepackage.Type{{Kind: "string", Name: "String"}}}},
+			{Name: "queryFn", Type: nativepackage.Type{Kind: "function", Name: "Function", Args: []nativepackage.Type{tData}}},
+			{Name: "enabled", Type: nativepackage.Type{Kind: "bool", Name: "Boolean"}, Optional: true},
+		},
+	}
+	return &nativepackage.Catalog{
+		FormatVersion: nativepackage.FormatVersion,
+		Dependencies:  map[string]string{"@tanstack/react-query": "5.101.2"},
+		Modules: map[string]nativepackage.Module{
+			"@tanstack/react-query": {
+				Exports: map[string]nativepackage.Export{
+					"QueryClient": {Kind: "class", Type: named("QueryClient")},
+					"QueryClientProvider": {
+						Kind: "component", Type: named("ReactNode"), Parameters: []nativepackage.Type{named("QueryClientProviderProps")}, Required: 1,
+					},
+					"UseQueryResult": {
+						Kind: "type_alias", Type: named("UseQueryResult", tData, tError), TypeParameters: parameters, AliasTarget: &queryResultTarget,
+					},
+					"UseQueryOptions":                 queryOptions,
+					"QueryObserverPendingResult":      resultRecord("QueryObserverPendingResult", "pending"),
+					"QueryObserverLoadingErrorResult": resultRecord("QueryObserverLoadingErrorResult", "error", nativepackage.Field{Name: "error", Type: tError}),
+					"QueryObserverRefetchErrorResult": resultRecord("QueryObserverRefetchErrorResult", "error", nativepackage.Field{Name: "error", Type: tError}),
+					"QueryObserverSuccessResult":      resultRecord("QueryObserverSuccessResult", "success", nativepackage.Field{Name: "data", Type: tData}),
+					"QueryObserverPlaceholderResult":  resultRecord("QueryObserverPlaceholderResult", "success", nativepackage.Field{Name: "data", Type: tData}),
+					"queryOptions": {
+						Kind: "function", Type: named("UseQueryOptions", tData, tError), Parameters: []nativepackage.Type{named("UseQueryOptions", tData, tError)}, Required: 1, TypeParameters: parameters,
+					},
+					"useQuery": {
+						Kind: "function", Type: named("UseQueryResult", tData, tError), Parameters: []nativepackage.Type{named("UseQueryOptions", tData, tError)}, Required: 1, TypeParameters: parameters,
+					},
+				},
+				Records: map[string]nativepackage.Export{
+					"QueryClientProviderProps": {
+						Kind: "record", Type: named("QueryClientProviderProps"), Fields: []nativepackage.Field{
+							{Name: "client", Type: named("QueryClient")},
+							{Name: "children", Type: named("ReactNode"), Optional: true},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func TestCompileTypeScriptImportsIndexedNativeReactComponent(t *testing.T) {
 	source := []byte(`import { ReactNode } from trb/platform/typescript/react
 import { ClipLoader } from "react-spinners"
@@ -126,6 +193,76 @@ func TestCompileTypeScriptCallsIndexedNativeFunction(t *testing.T) {
 	for _, expected := range []string{`import { format } from "tiny-format";`, `const value: string = format("hello");`} {
 		if !strings.Contains(string(artifact.Output), expected) {
 			t.Fatalf("generated native function call is missing %q:\n%s", expected, artifact.Output)
+		}
+	}
+}
+
+func TestCompileTypeScriptUsesGenericNativeQueryContracts(t *testing.T) {
+	source := []byte(`import { ReactNode } from trb/platform/typescript/react
+import {
+	QueryClient,
+	QueryClientProvider,
+	UseQueryOptions,
+	queryOptions,
+	useQuery,
+} from "@tanstack/react-query"
+
+record Todo
+	id: Integer
+	title: String
+end
+
+CLIENT := QueryClient.new()
+
+def Todos(): ReactNode
+	query_fn := fn(): Todo
+		return Todo.new(id: 1, title: "Ship TypeRB")
+	end
+	raw_options := UseQueryOptions<Todo, String>.new(
+		queryKey: ["todos"],
+		queryFn: query_fn,
+	)
+	options := queryOptions<Todo, String>(raw_options)
+	query := useQuery<Todo, String>(options)
+	label := case query.status
+	when "pending"
+		"Loading"
+	when "error"
+		query.error
+	when "success"
+		query.data.title
+	end
+	return <p>{label}</p>
+end
+
+def App(): ReactNode
+	return <QueryClientProvider client={CLIENT}><Todos /></QueryClientProvider>
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "app.trb", ModulePath: "app", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "app.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		`import { QueryClient, QueryClientProvider, queryOptions, useQuery } from "@tanstack/react-query";`,
+		`import type { UseQueryOptions, QueryObserverLoadingErrorResult`,
+		`QueryObserverSuccessResult, UseQueryResult } from "@tanstack/react-query";`,
+		`const CLIENT: QueryClient = new QueryClient();`,
+		`satisfies UseQueryOptions<Todo, string>`,
+		`queryOptions<Todo, string>`,
+		`useQuery<Todo, string>(options)`,
+		`return query.data.title;`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated generic native package output is missing %q:\n%s", expected, output)
 		}
 	}
 }

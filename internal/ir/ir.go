@@ -72,10 +72,16 @@ type Import struct {
 	// SymbolKinds distinguishes value records from reference classes in
 	// backends whose representation makes that distinction explicit.
 	SymbolKinds map[string]string
-	// SymbolTypes and SymbolParameters retain imported declaration contracts for
-	// editor tooling even when the imported module has no generated TypeRB IR.
-	SymbolTypes      map[string]types.Type
-	SymbolParameters map[string][]types.Type
+	// SymbolTypes, SymbolParameters, and SymbolTypeParameters retain imported
+	// declaration contracts for editor tooling even when the imported module has
+	// no generated TypeRB IR.
+	SymbolTypes          map[string]types.Type
+	SymbolParameters     map[string][]types.Type
+	SymbolTypeParameters map[string][]string
+	// GeneratedTypeSymbols are target-package type exports referenced only by
+	// imported declaration contracts. They are emitted as type-only imports but
+	// stay invisible to source name resolution and editor completion.
+	GeneratedTypeSymbols []string
 }
 
 func (*Import) irStatement() {}

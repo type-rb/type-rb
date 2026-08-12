@@ -48,6 +48,7 @@ type CompletionItem struct {
 type CallInfo struct {
 	ParameterCount        int
 	ExplicitTypeArguments bool
+	TypeParameters        []string
 	Parameters            []CallParameter
 	Alternatives          []CallSignature
 }
