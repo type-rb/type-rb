@@ -558,7 +558,10 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 	result := l.expressionWithoutConversion(node)
 	if target, ok := l.checked.Conversions[node]; ok && result != nil {
 		kind := ir.IntegerToFloatConversion
-		if target.Nullable && !result.ExprType().Nullable && result.ExprType().Kind != types.Nil {
+		if target.Kind == types.Function && result.ExprType().Kind == types.Function &&
+			types.FunctionFailure(target).Kind != types.Never && types.FunctionFailure(result.ExprType()).Kind == types.Never {
+			kind = ir.PureFunctionToFallibleConversion
+		} else if target.Nullable && !result.ExprType().Nullable && result.ExprType().Kind != types.Nil {
 			kind = ir.NonNullableToNullableConversion
 		} else if result.ExprType().Kind == types.Union {
 			kind = ir.UnionIntegerToFloatConversion
@@ -656,14 +659,30 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
 		return attempt
 	case *ast.LambdaExpression:
-		result := &ir.Lambda{ExprBase: base, ReturnType: types.FromName("Void")}
+		result := &ir.Lambda{ExprBase: base, SuccessType: types.FromName("Void"), ReturnType: types.FromName("Void"), Fails: types.Type{Kind: types.Never, Name: "Never"}}
 		if !n.ReturnType.Empty() {
-			result.ReturnType = lowerType(n.ReturnType)
+			result.SuccessType = lowerType(n.ReturnType)
+			result.ReturnType = result.SuccessType
+		}
+		if !n.Fails.Empty() {
+			result.Fails = lowerType(n.Fails)
 		}
 		for _, parameter := range n.Parameters {
 			result.Parameters = append(result.Parameters, ir.Parameter{Name: parameter.Name, Type: lowerType(parameter.Type)})
 		}
-		result.Body = l.statements(n.Body)
+		if result.Fails.Kind != types.Never {
+			internalSuccess := effectSuccessType(result.SuccessType)
+			boundary := effectBoundary{success: internalSuccess, fails: result.Fails, result: resultType(internalSuccess, result.Fails)}
+			result.ReturnType = boundary.result
+			l.effectBoundaries = append(l.effectBoundaries, boundary)
+			result.Body = l.statements(n.Body)
+			l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
+			if result.SuccessType.Kind == types.Void {
+				result.Body = append(result.Body, &ir.Return{Value: l.resultSuccess(n.Span(), boundary, l.unitValue(n.Span()))})
+			}
+		} else {
+			result.Body = l.statements(n.Body)
+		}
 		return result
 	case *ast.IterationExpression:
 		result := &ir.Transform{
@@ -1101,7 +1120,11 @@ func lowerType(ref ast.TypeRef) types.Type {
 		for index, parameter := range ref.FunctionParameters {
 			parameters[index] = lowerType(parameter)
 		}
-		result := types.FunctionOf(parameters, lowerType(*ref.FunctionReturn))
+		failure := types.Type{Kind: types.Never, Name: "Never"}
+		if ref.FunctionFails != nil {
+			failure = lowerType(*ref.FunctionFails)
+		}
+		result := types.FunctionWithEffect(parameters, lowerType(*ref.FunctionReturn), failure)
 		result.Nullable = ref.Nullable
 		return result
 	}

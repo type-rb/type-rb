@@ -45,7 +45,7 @@ modules containing JSX use the `.tsx` extension. The explicit
 purpose-specific mouse, change, form, and keyboard event types.
 
 The implemented language includes functions, typed first-class function values
-with lexical capture, and classes, modules and
+with lexical capture and checked fallible effects, and classes, modules and
 interfaces, records, ordinary and raw-value enums, payload enums as sum types,
 enum instance methods, explicit generics for enums, aliases, records, classes,
 top-level functions and instance methods, normalized unions, immutable and
@@ -209,7 +209,7 @@ The current alpha does not yet provide:
   and non-discriminated structured union alternatives;
 - inferred type arguments, generic interfaces, or generic class methods;
 - complete superclass construction, override, and mutation-effect semantics;
-- first-class blocks or multi-statement collection transformations;
+- first-class call blocks or multi-statement collection transformations;
 - concise `Result` propagation syntax;
 - stable source maps, runtime stack mapping, incremental builds, or a
   persistent build cache;

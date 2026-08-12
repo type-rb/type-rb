@@ -421,7 +421,17 @@ func parseType(tokens []token.Token) ast.TypeRef {
 				result.FunctionParameters = append(result.FunctionParameters, parseType(part))
 			}
 		}
-		returned := parseType(tokens[arrow+1:])
+		returnedTokens := tokens[arrow+1:]
+		if failsAt := topLevelIndex(returnedTokens, "fails"); failsAt >= 0 {
+			if failsAt == 0 || failsAt+1 >= len(returnedTokens) {
+				result.Name = joinLexemes(tokens)
+				return result
+			}
+			failure := parseType(returnedTokens[failsAt+1:])
+			result.FunctionFails = &failure
+			returnedTokens = returnedTokens[:failsAt]
+		}
+		returned := parseType(returnedTokens)
 		result.FunctionReturn = &returned
 		return result
 	}

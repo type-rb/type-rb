@@ -62,7 +62,19 @@ end
 
 Each `fn` parameter has a type. A function value with no result omits its
 return annotation, just like `def`. Its `return` exits the function value, not
-the enclosing method.
+the enclosing method. Fallible function values retain their effect in both the
+declaration and type:
+
+```trb
+loader: () -> String fails LoadError := fn(): String fails LoadError
+	return read_name()
+end
+
+result := attempt loader()
+```
+
+A pure function can be used where the same callback is allowed to fail. The
+reverse assignment is rejected.
 
 Outside delimiters, `;` can separate complete statements:
 
@@ -538,8 +550,9 @@ end
 ```
 
 These transformations currently operate on Arrays. The current alpha accepts
-one result expression in transformation blocks.
-Structured multi-statement blocks and first-class lambdas are planned.
+one result expression in transformation blocks. General structured
+multi-statement transformation blocks remain planned; first-class `fn` values
+are available independently.
 
 ## Result and fallible effects
 

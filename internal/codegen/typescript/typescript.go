@@ -911,6 +911,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
+		case ir.PureFunctionToFallibleConversion:
+			return g.pureFunctionToFallible(n)
 		case ir.IntegerToFloatConversion:
 			return "Number(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
@@ -1066,6 +1068,46 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) pureFunctionToFallible(conversion *ir.Conversion) string {
+	parameters, success, ok := types.FunctionSignature(conversion.ExprType())
+	if !ok {
+		return g.expr(conversion.Value)
+	}
+	failure := types.FunctionFailure(conversion.ExprType())
+	parts := make([]string, len(parameters))
+	arguments := make([]string, len(parameters))
+	for index, parameter := range parameters {
+		name := "__trbArg" + strconv.Itoa(index)
+		parts[index] = name + ": " + g.tsType(parameter)
+		arguments[index] = name
+	}
+	internalSuccess := success
+	call := "__trbValue(" + strings.Join(arguments, ", ") + ")"
+	value := call
+	prefix := ""
+	if success.Kind == types.Void {
+		internalSuccess = types.FromName("Unit")
+		prefix = call + "; "
+		value = "({} satisfies " + g.tsType(internalSuccess) + ")"
+	}
+	asyncPrefix := ""
+	returnType := g.tsType(types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{internalSuccess, failure}})
+	if lambda, literal := conversion.Value.(*ir.Lambda); literal && g.suspension != nil && g.suspension.Lambdas[lambda] {
+		asyncPrefix = "async "
+		returnType = "Promise<" + returnType + ">"
+		if success.Kind != types.Void {
+			value = "await " + value
+		} else {
+			prefix = "await " + call + "; "
+		}
+	}
+	result := g.runtimeName("Result")
+	wrapped := asyncPrefix + "(" + strings.Join(parts, ", ") + "): " + returnType + " => { " + prefix + "return " +
+		result + ".Ok<" + g.tsType(internalSuccess) + ", " + g.tsType(failure) + ">(" + value + "); }"
+	return "((__trbValue: " + g.tsType(conversion.Value.ExprType()) + "): " + g.tsType(conversion.ExprType()) +
+		" => " + wrapped + ")(" + g.expr(conversion.Value) + ")"
 }
 
 func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {
@@ -1711,6 +1753,12 @@ func (g *generator) tsSuspendingFunctionType(t types.Type) string {
 	for index, parameter := range parameters {
 		parts[index] = "arg" + strconv.Itoa(index) + ": " + g.tsType(parameter)
 	}
+	if failure := types.FunctionFailure(t); failure.Kind != types.Never {
+		if returned.Kind == types.Void {
+			returned = types.FromName("Unit")
+		}
+		returned = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{returned, failure}}
+	}
 	return "(" + strings.Join(parts, ", ") + ") => Promise<" + g.tsType(returned) + ">"
 }
 
@@ -1775,7 +1823,19 @@ func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[st
 		for index, parameter := range parameters {
 			parts[index] = "arg" + strconv.Itoa(index) + ": " + tsTypeWithMappings(parameter, aliases, mappings)
 		}
-		result = "(" + strings.Join(parts, ", ") + ") => " + tsTypeWithMappings(returned, aliases, mappings)
+		fallible := false
+		if failure := types.FunctionFailure(t); failure.Kind != types.Never {
+			fallible = true
+			if returned.Kind == types.Void {
+				returned = types.FromName("Unit")
+			}
+			returned = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{returned, failure}}
+		}
+		resultType := tsTypeWithMappings(returned, aliases, mappings)
+		if fallible {
+			resultType += " | Promise<" + resultType + ">"
+		}
+		result = "(" + strings.Join(parts, ", ") + ") => " + resultType
 	case types.Nil:
 		result = "null"
 	default:

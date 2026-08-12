@@ -1168,7 +1168,11 @@ func typeRef(ref ast.TypeRef) types.Type {
 		for index, parameter := range ref.FunctionParameters {
 			parameters[index] = typeRef(parameter)
 		}
-		result := types.FunctionOf(parameters, typeRef(*ref.FunctionReturn))
+		failure := types.Type{Kind: types.Never, Name: "Never"}
+		if ref.FunctionFails != nil {
+			failure = typeRef(*ref.FunctionFails)
+		}
+		result := types.FunctionWithEffect(parameters, typeRef(*ref.FunctionReturn), failure)
 		result.Nullable = ref.Nullable
 		return result
 	}
@@ -1203,6 +1207,10 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 	result.Args = make([]types.Type, len(typ.Args))
 	for index, argument := range typ.Args {
 		result.Args[index] = substituteType(argument, substitutions)
+	}
+	if typ.Fails != nil {
+		failure := substituteType(*typ.Fails, substitutions)
+		result.Fails = &failure
 	}
 	return result
 }

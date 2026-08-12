@@ -11,9 +11,10 @@ than detailed syntax.
 
 ## 1. Complete the portable language core
 
-- Extend collection transformations to structured multi-statement blocks, then
-  add first-class blocks and lambdas. Evaluate concise `Result` propagation
-  syntax only after application usage establishes a clear ergonomic need.
+- Extend collection transformations to structured multi-statement blocks and
+  connect function effects to package-declared suspension and native callback
+  boundaries. Evaluate concise `Result` propagation syntax only after
+  application usage establishes a clear ergonomic need.
 - Extend union type-pattern narrowing to nullable, collection, enum, record,
   and class alternatives. Add position-typed Tuples and precise optional-value
   semantics.

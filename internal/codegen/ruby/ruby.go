@@ -563,6 +563,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
+		case ir.PureFunctionToFallibleConversion:
+			return g.pureFunctionToFallible(n)
 		case ir.IntegerToFloatConversion:
 			return "(" + g.expr(n.Value) + ").to_f"
 		case ir.UnionIntegerToFloatConversion:
@@ -1098,6 +1100,26 @@ func slashRelative(base, target string) (string, error) {
 	}
 	parts = append(parts, targetParts...)
 	return strings.Join(parts, "/"), nil
+}
+
+func (g *generator) pureFunctionToFallible(conversion *ir.Conversion) string {
+	parameters, success, ok := types.FunctionSignature(conversion.ExprType())
+	if !ok {
+		return g.expr(conversion.Value)
+	}
+	arguments := make([]string, len(parameters))
+	for index := range parameters {
+		arguments[index] = "__trb_arg" + strconv.Itoa(index)
+	}
+	call := "__trb_value.call(" + strings.Join(arguments, ", ") + ")"
+	value := call
+	prefix := ""
+	if success.Kind == types.Void {
+		prefix = call + "; "
+		value = "Unit.new"
+	}
+	wrapped := "->(" + strings.Join(arguments, ", ") + ") { " + prefix + "Result::Ok.new(" + value + ") }"
+	return "->(__trb_value) { " + wrapped + " }.call(" + g.expr(conversion.Value) + ")"
 }
 
 func classFields(statements []ir.Statement) []*ir.Field {

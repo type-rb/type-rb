@@ -90,7 +90,7 @@ func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
 		analyzer.statementsSuspend(program.Statements, suspensionMethod{module: program.ModulePath}, true)
 	}
 	for lambda, suspends := range plan.Lambdas {
-		if suspends && lambda.ReturnType.Kind != types.Void {
+		if suspends && lambda.SuccessType.Kind != types.Void && lambda.Fails.Kind == types.Never {
 			return nil, fmt.Errorf("TypeScript function values that may suspend must omit their return type")
 		}
 	}

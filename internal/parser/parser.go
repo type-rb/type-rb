@@ -177,10 +177,22 @@ func (p *Parser) tryLambdaExpressionStatement(line []token.Token, next int, base
 	}
 	tail := line[close+1:]
 	if len(tail) > 0 {
-		if tail[0].Lexeme != ":" || len(tail) == 1 {
-			p.errorAt(spanOf(tail), "fn return type must be written as : Type")
-		} else {
-			node.ReturnType = p.parseReturnType(tail[1:])
+		failsAt := topLevelIndex(tail, "fails")
+		returnTail := tail
+		if failsAt >= 0 {
+			returnTail = tail[:failsAt]
+			if failsAt+1 >= len(tail) {
+				p.errorAt(tail[failsAt].Span, "fails requires an error type")
+			} else {
+				node.Fails = parseType(tail[failsAt+1:])
+			}
+		}
+		if len(returnTail) > 0 {
+			if returnTail[0].Lexeme != ":" || len(returnTail) == 1 {
+				p.errorAt(spanOf(returnTail), "fn return type must be written as : Type")
+			} else {
+				node.ReturnType = p.parseReturnType(returnTail[1:])
+			}
 		}
 	}
 

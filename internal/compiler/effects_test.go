@@ -281,3 +281,90 @@ end
 		})
 	}
 }
+
+func TestFallibleFunctionValuesLowerAcrossBackends(t *testing.T) {
+	source := []byte(`record AppError
+	message: String
+end
+
+def read_number(): Integer fails AppError
+	return 7
+end
+
+def invoke<T, E>(callback: () -> T fails E): T fails E
+	return callback()
+end
+
+def main()
+	callback: () -> Integer fails AppError := fn(): Integer fails AppError
+		return read_number()
+	end
+	pure: () -> Integer fails AppError := fn(): Integer
+		return 8
+	end
+	puts(attempt invoke<Integer, AppError>(callback))
+	puts(attempt invoke<Integer, AppError>(pure))
+end
+`)
+
+	expected := map[string][]string{
+		"go": {
+			"callback func() __trb_result.Result[T, E]",
+			"func() __trb_result.Result[int, AppError]",
+		},
+		"ruby": {
+			"callback.call",
+			"Result::Ok.new(7)",
+		},
+		"typescript": {
+			"callback: () => Result<number, AppError> | Promise<Result<number, AppError>>",
+			"(): Result<number, AppError> =>",
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifact, err := Compile("main.trb", source, mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range expected[mode] {
+				if !strings.Contains(string(artifact.Output), want) {
+					t.Fatalf("generated %s function effect is missing %q:\n%s", mode, want, artifact.Output)
+				}
+			}
+		})
+	}
+}
+
+func TestFallibleFunctionValuesRequireCompatibleHandling(t *testing.T) {
+	source := []byte(`record AppError
+end
+
+def read_number(): Integer fails AppError
+	return 7
+end
+
+def invalid()
+	callback: () -> Integer fails AppError := fn(): Integer fails AppError
+		return read_number()
+	end
+	callback()
+	return
+end
+`)
+	if _, err := Compile("main.trb", source, "go"); err == nil || !strings.Contains(err.Error(), "add fails AppError or handle it with attempt") {
+		t.Fatalf("missing function effect diagnostic: %v", err)
+	}
+
+	unsafe := []byte(`record AppError
+end
+
+fallible: () -> Integer fails AppError := fn(): Integer fails AppError
+	return 1
+end
+pure: () -> Integer := fallible
+`)
+	if _, err := Compile("main.trb", unsafe, "go"); err == nil || !strings.Contains(err.Error(), "cannot assign () -> Integer fails AppError to () -> Integer") {
+		t.Fatalf("fallible-to-pure assignment diagnostic: %v", err)
+	}
+}

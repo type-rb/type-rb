@@ -543,6 +543,7 @@ type ConversionKind string
 const IntegerToFloatConversion ConversionKind = "integer_to_float"
 const UnionIntegerToFloatConversion ConversionKind = "union_integer_to_float"
 const NonNullableToNullableConversion ConversionKind = "non_nullable_to_nullable"
+const PureFunctionToFallibleConversion ConversionKind = "pure_function_to_fallible"
 
 type Conversion struct {
 	ExprBase
@@ -604,9 +605,11 @@ func (*Attempt) irExpression() {}
 // target-independent so every backend can emit its native closure form.
 type Lambda struct {
 	ExprBase
-	Parameters []Parameter
-	ReturnType types.Type
-	Body       []Statement
+	Parameters  []Parameter
+	SuccessType types.Type
+	ReturnType  types.Type
+	Fails       types.Type
+	Body        []Statement
 }
 
 func (*Lambda) irExpression() {}

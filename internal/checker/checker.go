@@ -492,6 +492,7 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression) {
 			c.validateTypeReference(parameter.Type)
 		}
 		c.validateTypeReference(node.ReturnType)
+		c.validateTypeReference(node.Fails)
 		c.validateTypeReferences(node.Body)
 	case *ast.CallExpression:
 		c.validateExpressionTypeReferences(node.Callee)
@@ -537,6 +538,9 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 			c.validateTypeReference(parameter)
 		}
 		c.validateTypeReference(*ref.FunctionReturn)
+		if ref.FunctionFails != nil {
+			c.validateTypeReference(*ref.FunctionFails)
+		}
 		return
 	}
 	if literal, ok := types.LiteralFromSource(ref.Name); ok {
@@ -1975,6 +1979,10 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 	for index, argument := range typ.Args {
 		result.Args[index] = substituteType(argument, substitutions)
 	}
+	if typ.Fails != nil {
+		failure := substituteType(*typ.Fails, substitutions)
+		result.Fails = &failure
+	}
 	return result
 }
 
@@ -2586,6 +2594,16 @@ func (c *Checker) classImplements(className, interfaceName string, seen map[stri
 }
 
 func (c *Checker) recordAssignableConversion(expression ast.Expression, target, actual types.Type) {
+	if expression != nil && target.Kind == types.Function && actual.Kind == types.Function &&
+		types.FunctionFailure(target).Kind != types.Never && types.FunctionFailure(actual).Kind == types.Never {
+		_, success, ok := types.FunctionSignature(target)
+		if ok {
+			failure := types.FunctionFailure(target)
+			c.requireEffectRuntime(success, failure)
+			c.result.Conversions[expression] = target
+			return
+		}
+	}
 	if expression != nil && target.Nullable && !actual.Nullable && actual.Kind != types.Nil {
 		c.result.Conversions[expression] = target
 		return
@@ -3416,8 +3434,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if !n.ReturnType.Empty() {
 			returnType = c.typeFromRef(n.ReturnType)
 		}
+		failureType := types.Type{Kind: types.Never, Name: "Never"}
+		if !n.Fails.Empty() {
+			failureType = c.typeFromRef(n.Fails)
+			c.requireEffectRuntime(returnType, failureType)
+		}
 		c.returns = append(c.returns, returnType)
-		c.declaredEffects = append(c.declaredEffects, types.Type{Kind: types.Never, Name: "Never"})
+		c.declaredEffects = append(c.declaredEffects, failureType)
 		previousLoopDepth := c.loopDepth
 		c.loopDepth = 0
 		c.checkStatements(n.Body, lambdaScope)
@@ -3427,7 +3450,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.loopDepth = previousLoopDepth
 		c.returns = c.returns[:len(c.returns)-1]
 		c.declaredEffects = c.declaredEffects[:len(c.declaredEffects)-1]
-		typ = types.FunctionOf(parameterTypes, returnType)
+		typ = types.FunctionWithEffect(parameterTypes, returnType, failureType)
 	case *ast.Identifier:
 		if n.Name == "_" {
 			c.error(n.Span(), "blank binding _ cannot be used as a value")
@@ -3929,6 +3952,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Block.Span(), "fn values do not accept call blocks")
 			}
 			typ = returned
+			c.recordEffect(n, types.FunctionFailure(calleeType))
 			break
 		}
 		if generic, ok := n.Callee.(*ast.GenericExpression); ok {
@@ -5310,6 +5334,9 @@ func bindDeclarationType(pattern, actual types.Type, parameters map[string]bool,
 	for index := range pattern.Args {
 		bindDeclarationType(pattern.Args[index], actual.Args[index], parameters, bindings)
 	}
+	if pattern.Fails != nil && actual.Fails != nil {
+		bindDeclarationType(*pattern.Fails, *actual.Fails, parameters, bindings)
+	}
 }
 
 func instantiateDeclarationType(input types.Type, bindings map[string]types.Type) types.Type {
@@ -5321,6 +5348,10 @@ func instantiateDeclarationType(input types.Type, bindings map[string]types.Type
 	result.Args = make([]types.Type, len(input.Args))
 	for index, argument := range input.Args {
 		result.Args[index] = instantiateDeclarationType(argument, bindings)
+	}
+	if input.Fails != nil {
+		failure := instantiateDeclarationType(*input.Fails, bindings)
+		result.Fails = &failure
 	}
 	return result
 }
@@ -5501,7 +5532,11 @@ func fromTypeRef(ref ast.TypeRef) types.Type {
 		for index, parameter := range ref.FunctionParameters {
 			parameters[index] = fromTypeRef(parameter)
 		}
-		result := types.FunctionOf(parameters, fromTypeRef(*ref.FunctionReturn))
+		failure := types.Type{Kind: types.Never, Name: "Never"}
+		if ref.FunctionFails != nil {
+			failure = fromTypeRef(*ref.FunctionFails)
+		}
+		result := types.FunctionWithEffect(parameters, fromTypeRef(*ref.FunctionReturn), failure)
 		result.Nullable = ref.Nullable
 		return result
 	}
@@ -5543,6 +5578,10 @@ func (c *Checker) expandAlias(typ types.Type, visiting map[string]bool) types.Ty
 		for index, alternative := range typ.Args {
 			result.Args[index] = c.expandAlias(alternative, visiting)
 		}
+		if typ.Fails != nil {
+			failure := c.expandAlias(*typ.Fails, visiting)
+			result.Fails = &failure
+		}
 		return result
 	}
 	arguments := make([]types.Type, len(typ.Args))
@@ -5550,6 +5589,10 @@ func (c *Checker) expandAlias(typ types.Type, visiting map[string]bool) types.Ty
 		arguments[index] = c.expandAlias(argument, visiting)
 	}
 	typ.Args = arguments
+	if typ.Fails != nil {
+		failure := c.expandAlias(*typ.Fails, visiting)
+		typ.Fails = &failure
+	}
 	parameters, target, alias := c.aliasDefinition(typ.Name)
 	if !alias {
 		return typ
