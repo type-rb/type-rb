@@ -119,6 +119,12 @@ preserve repeated keys. Boolean, portable numeric, raw-value enum, and
 date/time conversions share the same semantics in every backend. Binding
 failures remain explicit `ParameterError` results so applications choose their
 own validation response policy.
+`Context#bind<T>()` optionally combines path, query, and JSON body binding into
+one ordinary endpoint input record. The reserved record fields `params`,
+`query`, and `body` reuse the individual checked codecs, and failures retain
+their original typed error inside `EndpointInputError`. Contracts remain
+optional, route parameter compatibility is still verified at build time, and
+applications keep control of the corresponding HTTP error response.
 Typed `ContextKey<T>` values let middleware pass authentication principals,
 request identifiers, and other request-scoped state to handlers without casts
 or string-key collisions. `Context#with` returns a new context and

@@ -85,6 +85,44 @@ use their portable parsers. Malformed encoding, missing or duplicate scalar
 values, and invalid conversions return `ParameterError`; applications retain
 control over the corresponding error response.
 
+An endpoint can combine those explicit bindings into one optional input
+contract. The contract is an ordinary record whose supported fields are
+`params`, `query`, and `body`; each field may be omitted when the endpoint does
+not use that input source. `params` and `query` name binding records, while
+`body` names the typed JSON value:
+
+```trb
+import { Context, EndpointInputError, Response, text } from trb/web
+import { Result } from trb/std/result
+
+record TodoInput
+	params: TodoParams
+	query: TodoQuery
+	body: UpdateTodo
+end
+
+def invalid_input(_error: EndpointInputError): Response
+	return text("invalid request", 400)
+end
+
+def post(context: Context): Response
+	case context.bind<TodoInput>()
+	when Result::Ok(input)
+		return text(input.params.id.to_s() + ":" + input.body.title)
+	when Result::Err(error)
+		return invalid_input(error)
+	end
+end
+```
+
+`bind<T>()` checks path parameters, query parameters, then the JSON body and
+returns the first failure as `EndpointInputError::Params`, `Query`, or `Body`.
+Each variant preserves the original `ParameterError` or `RequestError`, so the
+application still chooses its validation response and logging policy. The
+compiler validates a contract's `params` record against the file-based route
+in the same way as a direct `params<T>()` call. Contracts are optional;
+handlers may continue to use the individual request methods.
+
 Middleware can attach request-scoped values without a string-keyed cast at
 the handler boundary. Create one `ContextKey<T>` and share that key between
 the producer and consumer:

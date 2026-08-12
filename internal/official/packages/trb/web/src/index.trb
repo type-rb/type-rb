@@ -40,6 +40,12 @@ enum ParameterError
 	Invalid(source: ParameterSource, name: String, value: String, expected: String)
 end
 
+enum EndpointInputError
+	Params(error: ParameterError)
+	Query(error: ParameterError)
+	Body(error: RequestError)
+end
+
 record ContextValueError
 	key: String
 end

@@ -243,6 +243,84 @@ end
 	}
 }
 
+func TestOfficialWebEndpointInputBindingCompilesAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Context, EndpointInputError } from trb/web
+import { Result } from trb/std/result
+
+record Params
+	id: Integer
+end
+
+record Query
+	page: Integer?
+	tag: Array<String>
+end
+
+record Payload
+	title: String
+end
+
+record CreateTodoInput
+	params: Params
+	query: Query
+	body: Payload
+end
+
+def bind(context: Context): Result<CreateTodoInput, EndpointInputError>
+	return context.bind<CreateTodoInput>()
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/endpoint-input", RubyLoader: "require_relative", ProjectRoot: "/project"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact := artifactForModule(artifacts, "main")
+			if artifact == nil || !strings.Contains(string(artifact.Output), "EndpointInputError") {
+				t.Fatalf("%s output is missing endpoint input binding:\n%s", mode, artifact.Output)
+			}
+		})
+	}
+}
+
+func TestOfficialWebEndpointInputBindingRejectsUnsupportedContracts(t *testing.T) {
+	tests := []struct {
+		name   string
+		record string
+		want   string
+	}{
+		{name: "empty", record: "record Input\nend", want: "endpoint input record Input must declare at least one of params, query, or body"},
+		{name: "unknown field", record: "record Input\n\theaders: String\nend", want: `endpoint input record Input has unsupported field "headers"`},
+		{name: "non-record query", record: "record Input\n\tquery: String\nend", want: "web parameter binding type String must be a non-nullable record"},
+	}
+	for _, test := range tests {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			t.Run(test.name+"/"+mode, func(t *testing.T) {
+				source := SourceUnit{Filename: "/project/main.trb", ModulePath: "main", Package: "main", Source: []byte(`import { Context } from trb/web
+
+` + test.record + `
+
+def invalid(context: Context)
+	context.bind<Input>()
+	return
+end
+`)}
+				_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/endpoint-input", RubyLoader: "require_relative", ProjectRoot: "/project"})
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("unexpected diagnostic: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestOfficialWebTypedContextKeysRejectMismatchedValues(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

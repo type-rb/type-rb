@@ -1808,7 +1808,7 @@ func (g *generator) jsonEncode(call *ir.Call, argument string) string {
 
 func (g *generator) jsonRuntimeAlias(call *ir.Call) string {
 	reference := expressionReference(call.Callee)
-	if reference != nil && reference.Intrinsic == "trb.web.request_json" {
+	if reference != nil && (reference.Intrinsic == "trb.web.request_json" || reference.Intrinsic == "trb.web.context_bind") {
 		if alias := g.typeAliases["JsonError"]; alias != "" {
 			return alias
 		}
@@ -1839,7 +1839,7 @@ func (g *generator) goCodecType(schema *ir.CodecSchema) string {
 		result = "[]" + g.goCodecType(schema.Element)
 	case "hash":
 		result = "map[string]" + g.goCodecType(schema.Element)
-	case "record", "raw_enum":
+	case "record", "raw_enum", "endpoint_input":
 		result = goIdentifier(base.Name, true)
 		if schema.Reference != nil && schema.Reference.Package != "" && schema.Reference.Package != g.modulePath {
 			alias := schema.Reference.Alias
