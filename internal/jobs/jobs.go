@@ -4,7 +4,6 @@
 package jobs
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -37,67 +36,7 @@ type Job struct {
 }
 
 type Manifest struct {
-	Jobs   []Job
-	Config Config
-}
-
-type Config struct {
-	Adapter                     string `json:"adapter"`
-	DatabaseAdapter             string `json:"database_adapter"`
-	Database                    string `json:"database"`
-	PollIntervalMilliseconds    int    `json:"poll_interval_milliseconds"`
-	LeaseTimeoutMilliseconds    int    `json:"lease_timeout_milliseconds"`
-	ShutdownTimeoutMilliseconds int    `json:"shutdown_timeout_milliseconds"`
-	DefaultMaximumAttempts      int    `json:"default_maximum_attempts"`
-	RetryBaseDelayMilliseconds  int    `json:"retry_base_delay_milliseconds"`
-	WorkerConcurrency           int    `json:"worker_concurrency"`
-}
-
-func DefaultConfig() Config {
-	return Config{
-		Adapter: "sql", DatabaseAdapter: "sqlite", Database: "jobs.sqlite3",
-		PollIntervalMilliseconds: 1000, LeaseTimeoutMilliseconds: 60_000,
-		ShutdownTimeoutMilliseconds: 30_000, DefaultMaximumAttempts: 5,
-		RetryBaseDelayMilliseconds: 1000, WorkerConcurrency: 1,
-	}
-}
-
-func ParseConfig(source []byte) (Config, error) {
-	config := DefaultConfig()
-	if len(source) != 0 {
-		if err := json.Unmarshal(source, &config); err != nil {
-			return Config{}, fmt.Errorf("trb/jobs options: %w", err)
-		}
-	}
-	config.Adapter = strings.ToLower(strings.TrimSpace(config.Adapter))
-	config.DatabaseAdapter = strings.ToLower(strings.TrimSpace(config.DatabaseAdapter))
-	if config.Adapter != "sql" {
-		return Config{}, fmt.Errorf("trb/jobs adapter must initially be sql")
-	}
-	switch config.DatabaseAdapter {
-	case "sqlite", "postgresql", "mysql":
-	default:
-		return Config{}, fmt.Errorf("trb/jobs database_adapter must be sqlite, postgresql, or mysql")
-	}
-	if strings.TrimSpace(config.Database) == "" {
-		return Config{}, fmt.Errorf("trb/jobs database must not be empty")
-	}
-	if config.PollIntervalMilliseconds <= 0 || config.LeaseTimeoutMilliseconds <= 0 || config.ShutdownTimeoutMilliseconds <= 0 {
-		return Config{}, fmt.Errorf("trb/jobs timing options must be positive")
-	}
-	if config.DefaultMaximumAttempts <= 0 {
-		return Config{}, fmt.Errorf("trb/jobs default_maximum_attempts must be positive")
-	}
-	if config.RetryBaseDelayMilliseconds <= 0 {
-		return Config{}, fmt.Errorf("trb/jobs retry_base_delay_milliseconds must be positive")
-	}
-	if config.WorkerConcurrency <= 0 {
-		return Config{}, fmt.Errorf("trb/jobs worker_concurrency must be positive")
-	}
-	if config.DatabaseAdapter == "sqlite" && config.WorkerConcurrency != 1 {
-		return Config{}, fmt.Errorf("trb/jobs SQLite initially supports worker_concurrency: 1 only")
-	}
-	return config, nil
+	Jobs []Job
 }
 
 func (*Manifest) ExtensionName() string { return ProjectProvider }
@@ -231,16 +170,12 @@ func Declarations(programs []*ast.Program) (*declaration.Catalog, error) {
 	return catalog, nil
 }
 
-func Analyze(programs []*ast.Program, options []byte) (*Manifest, error) {
+func Analyze(programs []*ast.Program) (*Manifest, error) {
 	jobs, err := Discover(programs)
 	if err != nil {
 		return nil, err
 	}
-	config, err := ParseConfig(options)
-	if err != nil {
-		return nil, err
-	}
-	return &Manifest{Jobs: jobs, Config: config}, nil
+	return &Manifest{Jobs: jobs}, nil
 }
 
 func Discover(programs []*ast.Program) ([]Job, error) {

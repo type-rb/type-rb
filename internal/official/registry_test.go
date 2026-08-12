@@ -86,9 +86,16 @@ func TestBundledReactPackage(t *testing.T) {
 }
 
 func TestBundledJobsPackageDefaultsNativeDatabaseAdapterToSQLite(t *testing.T) {
-	packageDefinition, ok := Lookup("trb/jobs")
+	contract, ok := Lookup("trb/jobs")
 	if !ok {
 		t.Fatal("jobs package is not registered")
+	}
+	if dependencies, err := contract.NativeDependenciesFor("go", nil); err != nil || len(dependencies) != 0 {
+		t.Fatalf("portable jobs contract has native dependencies: %#v, %v", dependencies, err)
+	}
+	packageDefinition, ok := Lookup("trb/jobs/sql")
+	if !ok {
+		t.Fatal("SQL jobs adapter is not registered")
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		dependencies, err := packageDefinition.NativeDependenciesFor(mode, nil)

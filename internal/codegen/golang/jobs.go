@@ -7,11 +7,12 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/jobs"
+	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	"github.com/type-rb/type-rb/internal/jobs/sqlstore"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-func (g *generator) jobsRuntimeAlias() string {
+func (g *generator) jobsContractAlias() string {
 	if g.modulePath == "trb/jobs/index" {
 		return ""
 	}
@@ -22,6 +23,15 @@ func (g *generator) jobsRuntimeAlias() string {
 	}
 	alias := "__trb_jobs"
 	g.requireImport(pathpkg.Join(g.goModule, "trb/jobs"), alias)
+	return alias
+}
+
+func (g *generator) jobsRuntimeAlias() string {
+	if g.modulePath == jobssql.ModulePath {
+		return ""
+	}
+	alias := "__trb_jobs_sql"
+	g.requireImport(pathpkg.Join(g.goModule, "trb/jobs/sql"), alias)
 	return alias
 }
 
@@ -42,17 +52,17 @@ func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 }
 
 func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
-	if manifest == nil {
+	if manifest == nil || g.jobsSQL == nil {
 		return
 	}
 	g.jobsClassEnqueueMethods(manifest)
 	if g.topMethods["main"] {
-		g.jobsWorker(manifest)
+		g.jobsWorker(manifest, g.jobsSQL.Config)
 	}
-	if g.modulePath != "trb/jobs/index" {
+	if g.modulePath != jobssql.ModulePath {
 		return
 	}
-	config := manifest.Config
+	config := g.jobsSQL.Config
 	g.requireImport("context", "")
 	g.requireImport("crypto/rand", "")
 	g.requireImport("database/sql", "")
@@ -107,7 +117,7 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	g.indent++
 	g.line("trbJobsDatabaseOnce.Do(func() {")
 	g.indent++
-	g.line("source := os.Getenv(\"TRB_JOBS_DATABASE\")")
+	g.line("source := os.Getenv(" + strconv.Quote(config.DatabaseEnvironment) + ")")
 	g.line("if source == \"\" { source = " + strconv.Quote(config.Database) + " }")
 	if config.DatabaseAdapter == "mysql" {
 		g.line("if strings.HasPrefix(source, \"mysql://\") { parsed, err := url.Parse(source); if err != nil { trbJobsDatabaseError = err; return }; credentials := parsed.User.Username(); if password, exists := parsed.User.Password(); exists { credentials += \":\" + password }; source = credentials + \"@tcp(\" + parsed.Host + \")\" + parsed.Path; if parsed.RawQuery != \"\" { source += \"?\" + parsed.RawQuery } }")
@@ -154,7 +164,7 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	g.jobsAdmin(config)
 }
 
-func (g *generator) jobsHeartbeat(config jobs.Config) {
+func (g *generator) jobsHeartbeat(config jobssql.Config) {
 	g.line("func TrbJobsHeartbeat(ctx context.Context, id string, workerId string) error {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
@@ -171,7 +181,7 @@ func (g *generator) jobsHeartbeat(config jobs.Config) {
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) jobsRecoverStale(config jobs.Config) {
+func (g *generator) jobsRecoverStale(config jobssql.Config) {
 	g.line("func TrbJobsRecoverStale(ctx context.Context) (int64, error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
@@ -186,7 +196,7 @@ func (g *generator) jobsRecoverStale(config jobs.Config) {
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) jobsAdmin(config jobs.Config) {
+func (g *generator) jobsAdmin(config jobssql.Config) {
 	g.line("func TrbJobsList(ctx context.Context) ([]TrbJobsStatus, error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
@@ -229,7 +239,7 @@ func (g *generator) jobsAdmin(config jobs.Config) {
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) jobsWorker(manifest *jobs.Manifest) {
+func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	jobsAlias := g.jobsRuntimeAlias()
 	resultAlias := ""
 	for _, job := range manifest.Jobs {
@@ -294,7 +304,6 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest) {
 	g.line("}")
 	g.b.WriteByte('\n')
 
-	config := manifest.Config
 	g.line("func trbJobsRunWorkerIfRequested() bool {")
 	g.indent++
 	g.line("command := os.Getenv(\"TRB_JOBS_COMMAND\")")
@@ -391,8 +400,9 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 			g.requireImport(pathpkg.Join(g.goModule, "trb/std/result"), resultAlias)
 		}
 		jobsAlias := g.jobsRuntimeAlias()
-		successType := jobsAlias + ".JobReference"
-		errorType := jobsAlias + ".EnqueueError"
+		contractAlias := g.jobsContractAlias()
+		successType := contractAlias + ".JobReference"
+		errorType := contractAlias + ".EnqueueError"
 		parameters := make([]string, len(job.Parameters))
 		arguments := make([]string, len(job.Parameters))
 		for index, parameter := range job.Parameters {
@@ -421,25 +431,26 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 	}
 }
 
-func (g *generator) jobsEnqueue(config jobs.Config) {
-	g.line("func TrbJobsEnqueue(jobName string, payload string, queueName string, priority int, waitMilliseconds int) (JobReference, error) {")
+func (g *generator) jobsEnqueue(config jobssql.Config) {
+	referenceType := g.jobsContractAlias() + ".JobReference"
+	g.line("func TrbJobsEnqueue(jobName string, payload string, queueName string, priority int, waitMilliseconds int) (" + referenceType + ", error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
-	g.line("if err != nil { return JobReference{}, err }")
+	g.line("if err != nil { return " + referenceType + "{}, err }")
 	g.line("id, err := trbJobsId()")
-	g.line("if err != nil { return JobReference{}, err }")
-	g.line("if waitMilliseconds < 0 { return JobReference{}, errors.New(\"job delay must not be negative\") }")
+	g.line("if err != nil { return " + referenceType + "{}, err }")
+	g.line("if waitMilliseconds < 0 { return " + referenceType + "{}, errors.New(\"job delay must not be negative\") }")
 	g.line("runAt := stdtime.Now().UTC().Add(stdtime.Duration(waitMilliseconds) * stdtime.Millisecond)")
 	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + goJobsPlaceholders(config.DatabaseAdapter, 7, 0) + ", 'ready', 0, " + goJobsPlaceholder(config.DatabaseAdapter, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
 	g.line("_, err = database.Exec(" + strconv.Quote(query) + ", id, queueName, jobName, payload, 1, priority, runAt, " + strconv.Itoa(config.DefaultMaximumAttempts) + ")")
-	g.line("if err != nil { return JobReference{}, err }")
-	g.line("return JobReference{Id: id, JobName: jobName}, nil")
+	g.line("if err != nil { return " + referenceType + "{}, err }")
+	g.line("return " + referenceType + "{Id: id, JobName: jobName}, nil")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) jobsClaim(config jobs.Config) {
+func (g *generator) jobsClaim(config jobssql.Config) {
 	selection, _ := sqlstore.ClaimSelection(sqlstore.Dialect(config.DatabaseAdapter))
 	queueSelection, _ := sqlstore.ClaimSelectionForQueue(sqlstore.Dialect(config.DatabaseAdapter), goJobsPlaceholder(config.DatabaseAdapter, 1))
 	g.line("func TrbJobsClaimNext(ctx context.Context, workerId string) (*TrbJobsClaim, error) {")
@@ -469,7 +480,7 @@ func (g *generator) jobsClaim(config jobs.Config) {
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) jobsAcknowledge(config jobs.Config) {
+func (g *generator) jobsAcknowledge(config jobssql.Config) {
 	g.line("func TrbJobsAcknowledge(ctx context.Context, id string, workerId string) error {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
@@ -486,7 +497,7 @@ func (g *generator) jobsAcknowledge(config jobs.Config) {
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) jobsFail(config jobs.Config) {
+func (g *generator) jobsFail(config jobssql.Config) {
 	g.line("func TrbJobsFail(ctx context.Context, id string, workerId string, message string) error {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
@@ -503,7 +514,7 @@ func (g *generator) jobsFail(config jobs.Config) {
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) jobsRelease(config jobs.Config) {
+func (g *generator) jobsRelease(config jobssql.Config) {
 	g.line("func TrbJobsReleaseWorker(ctx context.Context, workerId string) error {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
@@ -527,7 +538,7 @@ func goJobsDriver(adapter string) string {
 	}
 }
 
-func goJobsStaleCutoff(config jobs.Config) string {
+func goJobsStaleCutoff(config jobssql.Config) string {
 	milliseconds := config.LeaseTimeoutMilliseconds
 	switch config.DatabaseAdapter {
 	case "postgresql":
@@ -540,7 +551,7 @@ func goJobsStaleCutoff(config jobs.Config) string {
 	}
 }
 
-func goJobsRetryTime(config jobs.Config) string {
+func goJobsRetryTime(config jobssql.Config) string {
 	switch config.DatabaseAdapter {
 	case "postgresql":
 		return "CURRENT_TIMESTAMP + (attempts * INTERVAL '" + strconv.Itoa(config.RetryBaseDelayMilliseconds) + " milliseconds')"

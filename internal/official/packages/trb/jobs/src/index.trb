@@ -7,6 +7,9 @@ record JobReference
 	job_name: String
 end
 
+interface JobAdapter
+end
+
 class Job
 end
 

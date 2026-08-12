@@ -58,6 +58,7 @@ type Options struct {
 	ProjectRoot        string
 	PackageOptions     map[string][]byte
 	PackageAliases     map[string]string
+	JobsConfiguration  string
 	AllowUnusedImports bool
 	InteractiveModule  string
 	NativePackages     *nativepackage.Catalog
@@ -249,11 +250,12 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		})
 	}
 	integrations, integrationIssues, err := projectintegration.Analyze(projectintegration.Context{
-		Sources:        integrationSources,
-		Resolutions:    resolutions,
-		SourceRoot:     options.SourceRoot,
-		ProjectRoot:    projectRoot(options),
-		PackageOptions: options.PackageOptions,
+		Sources:           integrationSources,
+		Resolutions:       resolutions,
+		SourceRoot:        options.SourceRoot,
+		ProjectRoot:       projectRoot(options),
+		PackageOptions:    options.PackageOptions,
+		JobsConfiguration: options.JobsConfiguration,
 	})
 	if err != nil {
 		return nil, err

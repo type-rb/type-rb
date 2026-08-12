@@ -20,11 +20,12 @@ type Source struct {
 }
 
 type Context struct {
-	Sources        []Source
-	Resolutions    map[string]resolver.Result
-	SourceRoot     string
-	ProjectRoot    string
-	PackageOptions map[string][]byte
+	Sources           []Source
+	Resolutions       map[string]resolver.Result
+	SourceRoot        string
+	ProjectRoot       string
+	PackageOptions    map[string][]byte
+	JobsConfiguration string
 }
 
 type Issue struct {

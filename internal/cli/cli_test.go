@@ -116,6 +116,26 @@ func TestOfficialPackageOptionsSelectNativeDependencies(t *testing.T) {
 	}
 }
 
+func TestTypedSQLJobsConfigurationSelectsNativeDependencies(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/jobs-app"
+	configureSQLJobs(t, config, "postgresql", "postgres://localhost/jobs")
+	jobPath := filepath.Join(config.SourcePath(), "send_receipt_job.trb")
+	if err := os.WriteFile(jobPath, []byte("import { Job } from trb/jobs\n\nclass SendReceiptJob < Job\n\tdef perform()\n\t\treturn\n\tend\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configurationPath := filepath.Join(config.SourcePath(), "config", "jobs.trb")
+	dependencies, err := projectPackageDependencies(config, []string{jobPath, configurationPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dependencies["github.com/jackc/pgx/v5"] != "v5.10.0" || dependencies["modernc.org/sqlite"] != "" || len(dependencies) != 1 {
+		t.Fatalf("unexpected typed SQL jobs dependencies: %#v", dependencies)
+	}
+}
+
 func TestInitWebTemplateBuildsAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {

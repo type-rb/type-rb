@@ -178,6 +178,46 @@ defaults select `sqlite3def`, `psqldef`, or `mysqldef` and the sqldef version
 supported by the current TypeRB release. `sqldef.arguments` adds project-owned
 command options. See the [database schema guide](guides/database.md).
 
+## Job adapter composition
+
+Projects using `trb/jobs` select an adapter through one typed composition
+module:
+
+```jsonc
+{
+  "jobs": {
+    "configuration": "config/jobs"
+  }
+}
+```
+
+The module returns the portable `JobAdapter` contract. The official SQL
+adapter keeps database and worker choices outside application Job definitions:
+
+```trb
+import { JobAdapter } from trb/jobs
+import { SQLAdapter, SQLDatabase } from trb/jobs/sql
+import { Duration } from trb/std/time
+
+def configure_jobs(): JobAdapter
+	return SQLAdapter.new(
+		database_adapter: SQLDatabase::PostgreSQL,
+		database: "jobs",
+		poll_interval: Duration.seconds(1),
+		worker_concurrency: 4,
+	)
+end
+```
+
+`configuration` is relative to `sourceDir`; a trailing `.trb` is optional.
+Normal Job modules import only `trb/jobs`. Importing `trb/jobs/sql` in the
+composition module also selects the target-native database dependency. SQLite
+currently requires `worker_concurrency: 1`. The initial compiler integration
+accepts one `configure_jobs` function whose body directly returns
+`SQLAdapter.new(...)`; duration and scalar options are compile-time values.
+This keeps native dependency and generated SQL selection deterministic while
+the external adapter protocol is still under development.
+
 ## Project entrypoint
 
 A runnable project defines exactly one top-level `def main()`. `main` is a

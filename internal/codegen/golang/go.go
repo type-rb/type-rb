@@ -13,6 +13,7 @@ import (
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
+	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -36,6 +37,7 @@ type generator struct {
 	temporary       int
 	breakTarget     string
 	jobs            *jobsintegration.Manifest
+	jobsSQL         *jobssql.Manifest
 	orm             *ormintegration.Manifest
 	projectNames    *goProjectNames
 	execution       *effectplan.Plan
@@ -68,6 +70,7 @@ func generate(program *ir.Program, projectNames *goProjectNames, execution *effe
 		modulePath:    program.ModulePath,
 		goModule:      program.GoModule,
 		jobs:          jobsintegration.ManifestFrom(program.Extensions),
+		jobsSQL:       jobssql.ManifestFrom(program.Extensions),
 		orm:           ormintegration.ManifestFrom(program.Extensions),
 		projectNames:  projectNames,
 		execution:     execution,
@@ -1406,6 +1409,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 		temporary:       g.temporary,
 		breakTarget:     g.breakTarget,
 		jobs:            g.jobs,
+		jobsSQL:         g.jobsSQL,
 		orm:             g.orm,
 		projectNames:    g.projectNames,
 		execution:       g.execution,
@@ -1461,6 +1465,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		temporary:       g.temporary,
 		breakTarget:     g.breakTarget,
 		jobs:            g.jobs,
+		jobsSQL:         g.jobsSQL,
 		orm:             g.orm,
 		projectNames:    g.projectNames,
 		execution:       g.execution,
@@ -1577,6 +1582,7 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		temporary:       g.temporary,
 		breakTarget:     g.breakTarget,
 		jobs:            g.jobs,
+		jobsSQL:         g.jobsSQL,
 		orm:             g.orm,
 		projectNames:    g.projectNames,
 		execution:       g.execution,
@@ -2296,7 +2302,7 @@ func (g *generator) goType(t types.Type) string {
 		if t.Name == "" {
 			result = "any"
 		} else if (t.Name == "EnqueueError" || t.Name == "JobReference") && g.jobs != nil && g.modulePath != "trb/jobs/index" && g.typeAliases[t.Name] == "" {
-			result = g.jobsRuntimeAlias() + "." + goIdentifier(t.Name, true)
+			result = g.jobsContractAlias() + "." + goIdentifier(t.Name, true)
 		} else if t.Name == "DbError" && g.orm != nil && g.modulePath != "trb/orm/index" && g.typeAliases[t.Name] == "" {
 			result = g.ormLifecycleAlias() + ".DbError"
 		} else if t.Name == "DbErrorKind" && g.orm != nil && g.modulePath != "trb/orm/index" && g.typeAliases[t.Name] == "" {

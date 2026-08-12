@@ -84,6 +84,37 @@ func TestLoadPreservesOfficialPackageOptions(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesTypedJobsConfigurationModule(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ConfigName)
+	source := `{
+  "name": "jobs-app",
+  "mode": "ruby",
+  "sourceDir": "src",
+  "jobs": {
+    "configuration": "config/jobs.trb"
+  }
+}`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Jobs == nil || config.Jobs.Configuration != "config/jobs" {
+		t.Fatalf("unexpected jobs configuration: %#v", config.Jobs)
+	}
+}
+
+func TestJobsConfigurationCannotEscapeSourceDirectory(t *testing.T) {
+	config := New(t.TempDir(), "ruby")
+	config.Jobs = &JobsConfig{Configuration: "../jobs"}
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "must stay below sourceDir") {
+		t.Fatalf("unexpected jobs configuration validation: %v", err)
+	}
+}
+
 func TestLoadTypeRBPackageRequirements(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, ConfigName)

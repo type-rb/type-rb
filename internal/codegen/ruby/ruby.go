@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
+	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/types"
 	webintegration "github.com/type-rb/type-rb/internal/web"
@@ -23,6 +24,7 @@ type generator struct {
 	nativeSyntax    bool
 	temporary       int
 	jobs            *jobsintegration.Manifest
+	jobsSQL         *jobssql.Manifest
 	orm             *ormintegration.Manifest
 	breakTarget     string
 	execution       *effectplan.Plan
@@ -46,8 +48,9 @@ func generate(program *ir.Program, execution *effectplan.Plan) string {
 	g := &generator{
 		loader: program.RubyLoader, modulePath: program.ModulePath,
 		topFunctions: map[string]bool{}, topTargets: map[string]string{},
-		jobs: jobsintegration.ManifestFrom(program.Extensions),
-		orm:  ormintegration.ManifestFrom(program.Extensions), execution: execution,
+		jobs:    jobsintegration.ManifestFrom(program.Extensions),
+		jobsSQL: jobssql.ManifestFrom(program.Extensions),
+		orm:     ormintegration.ManifestFrom(program.Extensions), execution: execution,
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
@@ -780,6 +783,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 		nativeSyntax:    g.nativeSyntax,
 		temporary:       g.temporary,
 		jobs:            g.jobs,
+		jobsSQL:         g.jobsSQL,
 		orm:             g.orm,
 		breakTarget:     g.breakTarget,
 		execution:       g.execution,
@@ -826,6 +830,7 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		nativeSyntax:    g.nativeSyntax,
 		temporary:       g.temporary,
 		jobs:            g.jobs,
+		jobsSQL:         g.jobsSQL,
 		orm:             g.orm,
 		breakTarget:     g.breakTarget,
 		execution:       g.execution,
@@ -853,6 +858,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		nativeSyntax:    g.nativeSyntax,
 		temporary:       g.temporary,
 		jobs:            g.jobs,
+		jobsSQL:         g.jobsSQL,
 		orm:             g.orm,
 		breakTarget:     g.breakTarget,
 		execution:       g.execution,

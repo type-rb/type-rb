@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -42,7 +41,7 @@ func TestJobApplicationConformanceAcrossServerDatabases(t *testing.T) {
 						config.TypeScript.Runtime = project.TypeScriptRuntimeBun
 						config.TypeScript.PackageManager = "bun"
 					}
-					config.PackageOptions["trb/jobs"] = json.RawMessage(`{"database_adapter":` + quoteJSON(adapter) + `,"database":` + quoteJSON(configSource) + `}`)
+					configureSQLJobs(t, config, adapter, configSource)
 					if err := config.Save(); err != nil {
 						t.Fatal(err)
 					}

@@ -7,14 +7,15 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/jobs"
+	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	"github.com/type-rb/type-rb/internal/jobs/sqlstore"
 )
 
 func (g *generator) jobsIntegrationImports(manifest *jobs.Manifest) {
-	if manifest == nil {
+	if manifest == nil || g.jobsSQL == nil {
 		return
 	}
-	if g.modulePath == "trb/jobs/index" {
+	if g.modulePath == jobssql.ModulePath {
 		g.line("import { SQL, type TransactionSQL } from \"bun\";")
 	}
 	jobModule := false
@@ -26,13 +27,13 @@ func (g *generator) jobsIntegrationImports(manifest *jobs.Manifest) {
 	}
 	if jobModule {
 		g.line("import * as __trbJobResult from " + strconv.Quote(tsImportPath(g.modulePath, "trb/std/result/index")) + ";")
-		g.line("import * as __trbJobsRuntime from " + strconv.Quote(tsImportPath(g.modulePath, "trb/jobs/index")) + ";")
+		g.line("import * as __trbJobsRuntime from " + strconv.Quote(tsImportPath(g.modulePath, jobssql.ModulePath)) + ";")
 	}
 	if !g.topFunctions["main"] {
 		return
 	}
 	if !jobModule {
-		g.line("import * as __trbJobsRuntime from " + strconv.Quote(tsImportPath(g.modulePath, "trb/jobs/index")) + ";")
+		g.line("import * as __trbJobsRuntime from " + strconv.Quote(tsImportPath(g.modulePath, jobssql.ModulePath)) + ";")
 	}
 	modulePaths := []string{}
 	seen := map[string]bool{}
@@ -73,15 +74,15 @@ func (g *generator) jobsDeclaration(call *ir.Call) bool {
 }
 
 func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
-	if manifest == nil {
+	if manifest == nil || g.jobsSQL == nil {
 		return
 	}
 	g.jobsClassEnqueueMethods(manifest)
-	if g.modulePath == "trb/jobs/index" {
-		g.jobsStorage(manifest.Config)
+	if g.modulePath == jobssql.ModulePath {
+		g.jobsStorage(g.jobsSQL.Config)
 	}
 	if g.topFunctions["main"] {
-		g.jobsWorker(manifest)
+		g.jobsWorker(manifest, g.jobsSQL.Config)
 	}
 }
 
@@ -133,7 +134,7 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 	}
 }
 
-func (g *generator) jobsStorage(config jobs.Config) {
+func (g *generator) jobsStorage(config jobssql.Config) {
 	statements, _ := sqlstore.Schema(sqlstore.Dialect(config.DatabaseAdapter))
 	selection, _ := sqlstore.ClaimSelection(sqlstore.Dialect(config.DatabaseAdapter))
 	queueSelection, _ := sqlstore.ClaimSelectionForQueue(sqlstore.Dialect(config.DatabaseAdapter), tsJobsPlaceholder(config.DatabaseAdapter, 1))
@@ -143,7 +144,7 @@ func (g *generator) jobsStorage(config jobs.Config) {
 	g.line("const trbJobsConfiguredDatabase = " + strconv.Quote(config.Database) + ";")
 	g.line("let trbJobsDatabase: SQL | null = null;")
 	g.line("let trbJobsSchema: Promise<void> | null = null;")
-	g.line("function trbJobsDB(): SQL { if (trbJobsDatabase !== null) return trbJobsDatabase; const source = process.env.TRB_JOBS_DATABASE ?? trbJobsConfiguredDatabase; trbJobsDatabase = trbJobsAdapter === \"sqlite\" ? new SQL({ adapter: \"sqlite\", filename: source }) : new SQL(source); return trbJobsDatabase; }")
+	g.line("function trbJobsDB(): SQL { if (trbJobsDatabase !== null) return trbJobsDatabase; const source = process.env[" + strconv.Quote(config.DatabaseEnvironment) + "] ?? trbJobsConfiguredDatabase; trbJobsDatabase = trbJobsAdapter === \"sqlite\" ? new SQL({ adapter: \"sqlite\", filename: source }) : new SQL(source); return trbJobsDatabase; }")
 	g.line("async function trbJobsEnsureSchema(): Promise<void> { if (trbJobsSchema !== null) return trbJobsSchema; trbJobsSchema = (async () => {")
 	g.indent++
 	for _, statement := range statements {
@@ -178,7 +179,7 @@ func (g *generator) jobsStorage(config jobs.Config) {
 	g.line("export async function trbJobsDiscard(id: string): Promise<boolean> { return trbJobsAffected(await trbJobsDB().unsafe(" + strconv.Quote(discard) + ", [id])) === 1; }")
 }
 
-func (g *generator) jobsWorker(manifest *jobs.Manifest) {
+func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	aliases := g.jobsModuleAliases(manifest)
 	g.line("async function trbJobsDispatch(claim: __trbJobsRuntime.TrbJobsClaim): Promise<void> {")
 	g.indent++
@@ -212,7 +213,6 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest) {
 	g.line("}")
 	g.line("}")
 
-	config := manifest.Config
 	g.line("async function trbJobsRunWorkerOrCommand(): Promise<boolean> {")
 	g.indent++
 	g.line("const command = process.env.TRB_JOBS_COMMAND;")
@@ -272,7 +272,7 @@ func tsJobsPlaceholders(adapter string, count, offset int) string {
 	return strings.Join(values, ", ")
 }
 
-func tsJobsStaleCutoff(config jobs.Config) string {
+func tsJobsStaleCutoff(config jobssql.Config) string {
 	switch config.DatabaseAdapter {
 	case "postgresql":
 		return "CURRENT_TIMESTAMP - INTERVAL '" + strconv.Itoa(config.LeaseTimeoutMilliseconds) + " milliseconds'"
@@ -283,7 +283,7 @@ func tsJobsStaleCutoff(config jobs.Config) string {
 	}
 }
 
-func tsJobsRetryTime(config jobs.Config) string {
+func tsJobsRetryTime(config jobssql.Config) string {
 	switch config.DatabaseAdapter {
 	case "postgresql":
 		return "CURRENT_TIMESTAMP + (attempts * INTERVAL '" + strconv.Itoa(config.RetryBaseDelayMilliseconds) + " milliseconds')"

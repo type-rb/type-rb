@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +17,7 @@ func TestRunRubyJobApplicationPersistsAndPerforms(t *testing.T) {
 	databaseSource := filepath.Join(root, "jobs.sqlite3")
 	config := project.New(root, "ruby")
 	config.SourceDir = "src"
-	config.PackageOptions["trb/jobs"] = json.RawMessage(`{"database_adapter":"sqlite","database":` + quoteJSON(databaseSource) + `}`)
+	configureSQLJobs(t, config, "sqlite", databaseSource)
 	if err := config.Save(); err != nil {
 		t.Fatal(err)
 	}

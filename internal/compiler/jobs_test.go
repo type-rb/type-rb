@@ -5,7 +5,16 @@ import (
 	"testing"
 
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
+	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 )
+
+const jobsSQLConfigurationSource = `import { JobAdapter } from trb/jobs
+import { SQLAdapter, SQLDatabase } from trb/jobs/sql
+
+def configure_jobs(): JobAdapter
+	return SQLAdapter.new(database_adapter: SQLDatabase::SQLite, database: "jobs.sqlite3")
+end
+`
 
 func TestCompileProjectGeneratesTypedGoJobEnqueueRuntime(t *testing.T) {
 	sources := []SourceUnit{
@@ -40,9 +49,10 @@ class SendReceiptJob < Job
 end
 `),
 		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
 	}
 	artifacts, err := CompileProject(sources, Options{
-		Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project",
+		Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -62,8 +72,8 @@ end
 	if job == nil || !strings.Contains(string(job.Output), `.TrbJobsEnqueue("SendReceiptJob", string(payload), "mail", 10, 0)`) || !strings.Contains(string(job.Output), "SendReceiptJobPerformLaterIn") {
 		t.Fatalf("job module does not enqueue through the jobs runtime:\n%s", job.Output)
 	}
-	runtime := artifactForModule(artifacts, "trb/jobs/index")
-	if runtime == nil || !strings.Contains(string(runtime.Output), "func TrbJobsClaimNext") || !strings.Contains(string(runtime.Output), "FOR UPDATE") && manifest.Config.DatabaseAdapter != "sqlite" {
+	runtime := artifactForModule(artifacts, jobssql.ModulePath)
+	if runtime == nil || !strings.Contains(string(runtime.Output), "func TrbJobsClaimNext") {
 		t.Fatalf("jobs SQL runtime was not generated:\n%s", runtime.Output)
 	}
 }
@@ -91,6 +101,28 @@ end
 	_, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project"})
 	if err == nil || !strings.Contains(err.Error(), "must initially be Boolean, Integer, Float, or String") {
 		t.Fatalf("expected job argument diagnostic, got %v", err)
+	}
+}
+
+func TestCompileProjectRequiresTypedJobAdapterConfiguration(t *testing.T) {
+	sources := []SourceUnit{{
+		Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
+		Source: []byte(`import { Job } from trb/jobs
+
+class ExampleJob < Job
+	def perform()
+		return
+	end
+end
+
+def main()
+	return
+end
+`),
+	}}
+	_, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project"})
+	if err == nil || !strings.Contains(err.Error(), "trb/jobs requires jobs.configuration") {
+		t.Fatalf("expected typed jobs configuration diagnostic, got %v", err)
 	}
 }
 
@@ -125,8 +157,9 @@ class SendReceiptJob < Job
 end
 `),
 		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Source: []byte(jobsSQLConfigurationSource)},
 	}
-	artifacts, err := CompileProject(sources, Options{Mode: "ruby", RubyLoader: "require_relative", SourceRoot: "/project/src", ProjectRoot: "/project"})
+	artifacts, err := CompileProject(sources, Options{Mode: "ruby", RubyLoader: "require_relative", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +168,7 @@ end
 	}
 	main := artifactForModule(artifacts, "main")
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
-	runtime := artifactForModule(artifacts, "trb/jobs/index")
+	runtime := artifactForModule(artifacts, jobssql.ModulePath)
 	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "trb_jobs_run_worker_or_command") || !strings.Contains(string(job.Output), `TrbJobsRuntime.enqueue("SendReceiptJob", payload, "mail", 10, 0)`) || !strings.Contains(string(job.Output), "def self.perform_later_in") || !strings.Contains(string(runtime.Output), "module TrbJobsRuntime") {
 		t.Fatalf("Ruby jobs runtime is incomplete:\nmain=%s\njob=%s\nruntime=%s", main.Output, job.Output, runtime.Output)
 	}
@@ -172,14 +205,15 @@ class SendReceiptJob < Job
 end
 `),
 		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Source: []byte(jobsSQLConfigurationSource)},
 	}
-	artifacts, err := CompileProject(sources, Options{Mode: "typescript", TypeScriptRuntime: "bun", SourceRoot: "/project/src", ProjectRoot: "/project"})
+	artifacts, err := CompileProject(sources, Options{Mode: "typescript", TypeScriptRuntime: "bun", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	main := artifactForModule(artifacts, "main")
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
-	runtime := artifactForModule(artifacts, "trb/jobs/index")
+	runtime := artifactForModule(artifacts, jobssql.ModulePath)
 	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), `trbJobsEnqueue("SendReceiptJob", JSON.stringify([order_id, destination]), "mail", 10, 0)`) || !strings.Contains(string(job.Output), "function perform_later_in") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") {
 		t.Fatalf("TypeScript jobs runtime is incomplete:\nmain=%s\njob=%s\nruntime=%s", main.Output, job.Output, runtime.Output)
 	}
@@ -200,8 +234,8 @@ def main()
 	return
 end
 `),
-	}}
-	_, err := CompileProject(sources, Options{Mode: "typescript", TypeScriptRuntime: "node", SourceRoot: "/project/src", ProjectRoot: "/project"})
+	}, {Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Source: []byte(jobsSQLConfigurationSource)}}
+	_, err := CompileProject(sources, Options{Mode: "typescript", TypeScriptRuntime: "node", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"})
 	if err == nil || !strings.Contains(err.Error(), `trb/jobs in mode: typescript currently requires typescript.runtime: "bun"`) {
 		t.Fatalf("expected Bun jobs runtime diagnostic, got %v", err)
 	}

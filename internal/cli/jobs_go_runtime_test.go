@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +18,7 @@ func TestRunGoJobApplicationPersistsEnqueue(t *testing.T) {
 	config := project.New(root, "go")
 	config.SourceDir = "src"
 	config.Go.Module = "example.com/type-rb/jobs-conformance"
-	config.PackageOptions["trb/jobs"] = json.RawMessage(`{"database_adapter":"sqlite","database":` + quoteJSON(databaseSource) + `}`)
+	configureSQLJobs(t, config, "sqlite", databaseSource)
 	if err := config.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -179,9 +178,4 @@ end
 	if status := command.Run([]string{"jobs", "discard", "unknown-1", "--config", config.Path}); status != 0 || stderr.Len() != 0 {
 		t.Fatalf("discard status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-}
-
-func quoteJSON(value string) string {
-	encoded, _ := json.Marshal(value)
-	return string(encoded)
 }

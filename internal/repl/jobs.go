@@ -16,12 +16,14 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
+	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	"github.com/type-rb/type-rb/internal/jobs/sqlstore"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
 type jobsRuntimeProvider struct {
 	manifest *jobsintegration.Manifest
+	SQL      *jobssql.Manifest
 	database *sql.DB
 }
 
@@ -37,17 +39,24 @@ func (*jobsRuntimeProvider) Handles(intrinsic string) bool {
 
 func (provider *jobsRuntimeProvider) Configure(programs []*ir.Program) error {
 	var manifest *jobsintegration.Manifest
+	var SQLManifest *jobssql.Manifest
 	for _, program := range programs {
 		if current := jobsintegration.ManifestFrom(program.Extensions); current != nil {
 			manifest = current
-			break
+		}
+		if current := jobssql.ManifestFrom(program.Extensions); current != nil {
+			SQLManifest = current
 		}
 	}
 	if manifest == nil {
 		return nil
 	}
-	if provider.manifest != nil && provider.manifest.Config == manifest.Config {
+	if SQLManifest == nil {
+		return fmt.Errorf("trb/jobs has no configured adapter")
+	}
+	if provider.manifest != nil && provider.SQL != nil && provider.SQL.Config == SQLManifest.Config {
 		provider.manifest = manifest
+		provider.SQL = SQLManifest
 		return nil
 	}
 	if provider.database != nil {
@@ -55,6 +64,7 @@ func (provider *jobsRuntimeProvider) Configure(programs []*ir.Program) error {
 		provider.database = nil
 	}
 	provider.manifest = manifest
+	provider.SQL = SQLManifest
 	return nil
 }
 
@@ -102,7 +112,7 @@ func (provider *jobsRuntimeProvider) Call(evaluator *Evaluator, invocation runti
 	if err != nil {
 		return provider.resultError(evaluator, invocation.Type, err)
 	}
-	config := provider.manifest.Config
+	config := provider.SQL.Config
 	job, ok := provider.manifest.Job(jobName)
 	if !ok {
 		return provider.resultError(evaluator, invocation.Type, fmt.Errorf("trb/jobs Job %s is not registered", jobName))
@@ -143,8 +153,8 @@ func (provider *jobsRuntimeProvider) open() (*sql.DB, error) {
 	if provider.database != nil {
 		return provider.database, nil
 	}
-	config := provider.manifest.Config
-	source := os.Getenv("TRB_JOBS_DATABASE")
+	config := provider.SQL.Config
+	source := os.Getenv(config.DatabaseEnvironment)
 	if source == "" {
 		source = config.Database
 	}

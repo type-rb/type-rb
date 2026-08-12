@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/ir"
+	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/nativepackage"
@@ -1366,7 +1368,14 @@ func projectPackageDependencies(config *project.Config, files []string) (map[str
 				continue
 			}
 			seen[bundled.Name] = true
-			required, err := bundled.NativeDependenciesFor(config.Mode, config.PackageOptions[bundled.Name])
+			options := config.PackageOptions[bundled.Name]
+			if bundled.Name == jobssql.PackageName {
+				options, err = jobsSQLNativeOptions(config)
+				if err != nil {
+					return nil, err
+				}
+			}
+			required, err := bundled.NativeDependenciesFor(config.Mode, options)
 			if err != nil {
 				return nil, err
 			}
@@ -1629,6 +1638,9 @@ func compilerOptionsWithPackages(config *project.Config, resolvedPackages *packa
 		packageOptions[name] = append([]byte(nil), value...)
 	}
 	options := compiler.Options{Mode: config.Mode, SourceRoot: config.SourcePath(), ProjectRoot: config.Root, PackageOptions: packageOptions, PackageAliases: resolvedPackages.Aliases}
+	if config.Jobs != nil {
+		options.JobsConfiguration = config.Jobs.Configuration
+	}
 	if config.Ruby != nil {
 		options.RubyLoader = config.Ruby.Loader
 	}
@@ -1647,6 +1659,28 @@ func compilerOptionsWithPackages(config *project.Config, resolvedPackages *packa
 		}
 	}
 	return options, nil
+}
+
+func jobsSQLNativeOptions(config *project.Config) (json.RawMessage, error) {
+	if config == nil || config.Jobs == nil {
+		return nil, errors.New("trb/jobs/sql requires jobs.configuration in trbconfig.jsonc")
+	}
+	filename := filepath.Join(config.SourcePath(), filepath.FromSlash(config.Jobs.Configuration)+".trb")
+	source, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	program, diagnostics := parser.Parse(source)
+	for _, item := range diagnostics {
+		if item.Severity == diagnostic.Error {
+			return nil, fmt.Errorf("%s: %s", filename, item.Message)
+		}
+	}
+	SQLConfig, err := jobssql.ParseConfiguration(program)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filename, err)
+	}
+	return json.Marshal(map[string]string{"database_adapter": SQLConfig.DatabaseAdapter})
 }
 
 func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Artifact, root string) (map[string]string, error) {

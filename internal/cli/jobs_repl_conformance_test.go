@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +27,7 @@ func TestJobEnqueueFromProjectREPLAcrossBackends(t *testing.T) {
 				config.TypeScript.Runtime = project.TypeScriptRuntimeBun
 				config.TypeScript.PackageManager = "bun"
 			}
-			config.PackageOptions["trb/jobs"] = json.RawMessage(`{"database_adapter":"sqlite","database":` + quoteJSON(databaseSource) + `}`)
+			configureSQLJobs(t, config, "sqlite", databaseSource)
 			if err := config.Save(); err != nil {
 				t.Fatal(err)
 			}

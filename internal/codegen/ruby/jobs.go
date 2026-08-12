@@ -7,6 +7,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/jobs"
+	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	"github.com/type-rb/type-rb/internal/jobs/sqlstore"
 )
 
@@ -34,15 +35,15 @@ func (g *generator) jobsDeclaration(call *ir.Call) bool {
 }
 
 func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
-	if manifest == nil {
+	if manifest == nil || g.jobsSQL == nil {
 		return
 	}
 	g.jobsClassEnqueueMethods(manifest)
-	if g.modulePath == "trb/jobs/index" {
-		g.jobsStorage(manifest.Config)
+	if g.modulePath == jobssql.ModulePath {
+		g.jobsStorage(g.jobsSQL.Config)
 	}
 	if g.topFunctions["main"] {
-		g.jobsWorker(manifest)
+		g.jobsWorker(manifest, g.jobsSQL.Config)
 	}
 }
 
@@ -82,7 +83,7 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 	}
 }
 
-func (g *generator) jobsStorage(config jobs.Config) {
+func (g *generator) jobsStorage(config jobssql.Config) {
 	g.line("require \"json\"", "")
 	g.line("require \"securerandom\"", "")
 	g.line("require \"sequel\"", "")
@@ -92,7 +93,7 @@ func (g *generator) jobsStorage(config jobs.Config) {
 	g.line("def database", "")
 	g.indent++
 	g.line("return @database if @database", "")
-	g.line("source = ENV.fetch(\"TRB_JOBS_DATABASE\", "+strconv.Quote(config.Database)+")", "")
+	g.line("source = ENV.fetch("+strconv.Quote(config.DatabaseEnvironment)+", "+strconv.Quote(config.Database)+")", "")
 	if config.DatabaseAdapter == "mysql" {
 		g.line("source = source.sub(/\\Amysql:\\/\\//, \"mysql2://\")", "")
 	}
@@ -157,7 +158,7 @@ func (g *generator) jobsStorage(config jobs.Config) {
 	g.line("end", "")
 }
 
-func (g *generator) jobsWorker(manifest *jobs.Manifest) {
+func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	modules := map[string]bool{}
 	for _, job := range manifest.Jobs {
 		if job.ModulePath == g.modulePath {
@@ -219,7 +220,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest) {
 	g.line("break if stopping", "")
 	g.line("TrbJobsRuntime.recover_stale", "")
 	g.line("row = TrbJobsRuntime.claim(worker_id)", "")
-	g.line("if !row; break if ENV[\"TRB_JOBS_ONCE\"] == \"1\"; sleep("+strconv.FormatFloat(float64(manifest.Config.PollIntervalMilliseconds)/1000.0, 'f', 3, 64)+"); next; end", "")
+	g.line("if !row; break if ENV[\"TRB_JOBS_ONCE\"] == \"1\"; sleep("+strconv.FormatFloat(float64(config.PollIntervalMilliseconds)/1000.0, 'f', 3, 64)+"); next; end", "")
 	g.line("begin; trb_jobs_dispatch(row); TrbJobsRuntime.acknowledge(row[:id], worker_id); rescue StandardError => error; TrbJobsRuntime.fail(row[:id], worker_id, error.message); end", "")
 	g.line("break if ENV[\"TRB_JOBS_ONCE\"] == \"1\"", "")
 	g.indent--
