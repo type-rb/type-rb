@@ -19,6 +19,7 @@ func (g *generator) integrationImports(extensions []ir.Extension) {
 		}
 	}
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
+		g.ensureHTTPRuntime()
 		g.line(`import { createServer } from "node:http";`)
 		g.line(`import type { Socket } from "node:net";`)
 		g.webRouteImports(manifest)
@@ -58,9 +59,9 @@ func (g *generator) webRouteImports(manifest *webintegration.Manifest) {
 func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	routes := manifest.Routes
 	rootMiddlewares := webintegration.RootMiddlewares(manifest.Middlewares)
-	g.line("type TrbWebRequest = { method: string; path: string; query_string: string; headers: Record<string, string[]>; body: Uint8Array };")
+	g.line("type TrbWebRequest = { method: string; path: string; query_string: string; headers: __trb_http.Headers; body: __trb_http.Body };")
 	g.line("type TrbWebContext = { request: TrbWebRequest; path_parameters: Record<string, string> };")
-	g.line("type TrbWebResponse = { status: number; headers: Record<string, string[]>; body: Uint8Array };")
+	g.line("type TrbWebResponse = { status: number; headers: __trb_http.Headers; body: __trb_http.Body };")
 	g.line("type TrbWebServerConfig = { host: string; port: number; body_limit_bytes: number; shutdown_timeout_milliseconds: number };")
 	g.webProtocolResponses()
 	if len(manifest.Middlewares) > 0 {
@@ -114,7 +115,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("try {")
 	g.indent++
-	g.line("if (request.body.byteLength > max_body_bytes) return trb_web_payload_too_large();")
+	g.line("if (request.body.bytes().byteLength > max_body_bytes) return trb_web_payload_too_large();")
 	g.line("const method = request.method.toUpperCase();")
 	g.line(`const segments = request.path === "/" ? [] : request.path.slice(1).split("/");`)
 	g.line("let allowed_methods: string[] = [];")
@@ -172,7 +173,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		contextName := "options_context_" + strconv.Itoa(routeIndex)
 		handlerName := "options_handler_" + strconv.Itoa(routeIndex)
 		g.line("const " + contextName + ": TrbWebContext = { request, path_parameters };")
-		g.line("let " + handlerName + ` = async (_middleware_context: TrbWebContext): Promise<TrbWebResponse> => ({ status: 204, headers: { "allow": [allowed_methods.join(", ")] }, body: new Uint8Array() });`)
+		g.line("let " + handlerName + ` = async (_middleware_context: TrbWebContext): Promise<TrbWebResponse> => ({ status: 204, headers: new __trb_http.Headers([{ name: "allow", value: allowed_methods.join(", ") }]), body: new __trb_http.Body(new Uint8Array()) });`)
 		g.typescriptWebMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "options_next_handler_"+strconv.Itoa(routeIndex)+"_")
 		g.line("return trb_web_checked_response(await " + handlerName + "(" + contextName + "));")
 		g.indent--
@@ -180,10 +181,10 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	g.line("if (allowed_methods.length > 0) {")
 	g.indent++
-	g.line(`return { status: 405, headers: { "allow": [allowed_methods.join(", ")], "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"method_not_allowed\"}") };`)
+	g.line(`return { status: 405, headers: new __trb_http.Headers([{ name: "allow", value: allowed_methods.join(", ") }, { name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"method_not_allowed\"}")) };`)
 	g.indent--
 	g.line("}")
-	g.line(`return { status: 404, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"not_found\"}") };`)
+	g.line(`return { status: 404, headers: new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"not_found\"}")) };`)
 	g.indent--
 	g.line("} catch {")
 	g.indent++
@@ -201,7 +202,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("if (!trb_web_valid_response(response)) response = trb_web_internal_server_error();")
 	g.line(`if (request.method.toUpperCase() !== "HEAD") return response;`)
-	g.line("return { ...response, body: new Uint8Array() };")
+	g.line("return { ...response, body: new __trb_http.Body(new Uint8Array()) };")
 	g.indent--
 	g.line("}")
 }
@@ -219,14 +220,13 @@ func (g *generator) webProtocolResponses() {
 	g.line("const TRB_WEB_DEFAULT_MAX_BODY_BYTES = " + strconv.Itoa(webintegration.MaxBodyBytes) + ";")
 	g.line("function trb_web_normalize_request(request: TrbWebRequest): TrbWebRequest {")
 	g.indent++
-	g.line("const headers: Record<string, string[]> = {};")
-	g.line("for (const [name, values] of Object.entries(request.headers)) {")
+	g.line("const entries: Array<{ name: string; value: string }> = [];")
+	g.line("for (const entry of request.headers.entries()) {")
 	g.indent++
-	g.line("const normalized_name = name.toLowerCase();")
-	g.line("headers[normalized_name] = [...(headers[normalized_name] ?? []), ...values];")
+	g.line("entries.push({ name: entry.name.toLowerCase(), value: entry.value });")
 	g.indent--
 	g.line("}")
-	g.line("return { ...request, method: request.method.toUpperCase(), headers };")
+	g.line("return { ...request, method: request.method.toUpperCase(), headers: new __trb_http.Headers(entries) };")
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_normalize_path(path: string): string | undefined {")
@@ -254,23 +254,23 @@ func (g *generator) webProtocolResponses() {
 	g.line("}")
 	g.line("function trb_web_internal_server_error(): TrbWebResponse {")
 	g.indent++
-	g.line(`return { status: 500, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"internal_server_error\"}") };`)
+	g.line(`return { status: 500, headers: new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"internal_server_error\"}")) };`)
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_bad_request(): TrbWebResponse {")
 	g.indent++
-	g.line(`return { status: 400, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"bad_request\"}") };`)
+	g.line(`return { status: 400, headers: new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"bad_request\"}")) };`)
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_payload_too_large(): TrbWebResponse {")
 	g.indent++
-	g.line(`return { status: 413, headers: { "content-type": ["application/json; charset=utf-8"] }, body: new TextEncoder().encode("{\"error\":\"payload_too_large\"}") };`)
+	g.line(`return { status: 413, headers: new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"payload_too_large\"}")) };`)
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_valid_response(response: TrbWebResponse): boolean {")
 	g.indent++
 	g.line("if (!Number.isInteger(response.status) || response.status < 100 || response.status > 999) return false;")
-	g.line(`return Object.entries(response.headers).every(([name, values]) => /^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+$/.test(name) && values.every((value) => !value.includes("\r") && !value.includes("\n")));`)
+	g.line(`return response.headers.entries().every((entry) => /^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+$/.test(entry.name) && !entry.value.includes("\r") && !entry.value.includes("\n"));`)
 	g.indent--
 	g.line("}")
 }
@@ -329,16 +329,16 @@ func (g *generator) webServer() {
 	g.line("trb_web_validate_server_config(config);")
 	g.line("const server = createServer(async (incoming, writer) => {")
 	g.indent++
-	g.line("const headers: Record<string, string[]> = {};")
+	g.line("const header_entries: Array<{ name: string; value: string }> = [];")
 	g.line("for (const [name, value] of Object.entries(incoming.headers)) {")
 	g.indent++
 	g.line("if (Array.isArray(value)) {")
 	g.indent++
-	g.line("headers[name] = value;")
+	g.line("for (const item of value) header_entries.push({ name, value: item });")
 	g.indent--
 	g.line("} else if (value !== undefined) {")
 	g.indent++
-	g.line("headers[name] = [value];")
+	g.line("header_entries.push({ name, value });")
 	g.indent--
 	g.line("}")
 	g.indent--
@@ -366,7 +366,7 @@ func (g *generator) webServer() {
 	g.line("let response: TrbWebResponse;")
 	g.line("if (body_too_large) {")
 	g.indent++
-	g.line(`response = await trb_web_dispatch_protocol_response({ method: incoming.method ?? "GET", path, query_string, headers, body: new Uint8Array() }, trb_web_payload_too_large());`)
+	g.line(`response = await trb_web_dispatch_protocol_response({ method: incoming.method ?? "GET", path, query_string, headers: new __trb_http.Headers(header_entries), body: new __trb_http.Body(new Uint8Array()) }, trb_web_payload_too_large());`)
 	g.indent--
 	g.line("} else {")
 	g.indent++
@@ -378,16 +378,19 @@ func (g *generator) webServer() {
 	g.line("offset += chunk.byteLength;")
 	g.indent--
 	g.line("}")
-	g.line(`response = await trb_web_dispatch_with_body_limit({ method: incoming.method ?? "GET", path, query_string, headers, body }, config.body_limit_bytes);`)
+	g.line(`response = await trb_web_dispatch_with_body_limit({ method: incoming.method ?? "GET", path, query_string, headers: new __trb_http.Headers(header_entries), body: new __trb_http.Body(body) }, config.body_limit_bytes);`)
 	g.indent--
 	g.line("}")
-	g.line("for (const [name, values] of Object.entries(response.headers)) {")
+	g.line("const response_headers = new Map<string, string[]>();")
+	g.line("for (const entry of response.headers.entries()) {")
 	g.indent++
-	g.line("writer.setHeader(name, values);")
+	g.line("const name = entry.name.toLowerCase();")
+	g.line("response_headers.set(name, [...(response_headers.get(name) ?? []), entry.value]);")
 	g.indent--
 	g.line("}")
+	g.line("for (const [name, values] of response_headers) writer.setHeader(name, values);")
 	g.line("writer.statusCode = response.status;")
-	g.line("writer.end(response.body);")
+	g.line("writer.end(response.body.bytes());")
 	g.indent--
 	g.line("});")
 	g.line("const connections = new Set<Socket>();")

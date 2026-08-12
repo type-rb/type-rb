@@ -850,13 +850,13 @@ func (g *generator) webRequestJSON(call *ir.Call, request string) string {
 	okResult := resultAlias + ".NewResultOk[" + valueType + ", " + requestErrorType + "]"
 	innerCall := *call
 	innerCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{call.ExprType().Args[0], types.FromName("JsonError")}}
-	decoded := g.jsonDecode(&innerCall, "string(requestValue.Body)")
+	decoded := g.jsonDecode(&innerCall, "string(requestValue.Body.Bytes())")
 	missing := webAlias + "." + goConstantIdentifier("RequestError", "MissingContentType")
 	duplicate := webAlias + "." + goConstantIdentifier("RequestError", "DuplicateContentType")
 	unsupported := webAlias + ".New" + goIdentifier("RequestError", true) + goIdentifier("UnsupportedContentType", true) + "(contentTypes[0])"
 	invalidUTF8 := webAlias + "." + goConstantIdentifier("RequestError", "InvalidUtf8")
 	invalidJSON := webAlias + ".New" + goIdentifier("RequestError", true) + goIdentifier("InvalidJson", true) + "(decoded.ErrError)"
-	return "func() " + resultType + " { requestValue := " + request + "; contentTypes := []string{}; for name, values := range requestValue.Headers { if strings.EqualFold(name, \"content-type\") { contentTypes = append(contentTypes, values...) } }; if len(contentTypes) == 0 { return " + errResult(missing) + " }; if len(contentTypes) != 1 { return " + errResult(duplicate) + " }; mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentTypes[0], \";\", 2)[0])); if mediaType != \"application/json\" && !(strings.HasPrefix(mediaType, \"application/\") && strings.HasSuffix(mediaType, \"+json\")) { return " + errResult(unsupported) + " }; if !utf8.Valid(requestValue.Body) { return " + errResult(invalidUTF8) + " }; decoded := " + decoded + "; if decoded.Kind == " + resultAlias + ".ResultErrTag { return " + errResult(invalidJSON) + " }; return " + okResult + "(decoded.OkValue) }()"
+	return "func() " + resultType + " { requestValue := " + request + "; contentTypes := []string{}; for _, header := range requestValue.Headers.Entries() { if strings.EqualFold(header.Name, \"content-type\") { contentTypes = append(contentTypes, header.Value) } }; if len(contentTypes) == 0 { return " + errResult(missing) + " }; if len(contentTypes) != 1 { return " + errResult(duplicate) + " }; mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentTypes[0], \";\", 2)[0])); if mediaType != \"application/json\" && !(strings.HasPrefix(mediaType, \"application/\") && strings.HasSuffix(mediaType, \"+json\")) { return " + errResult(unsupported) + " }; if !utf8.Valid(requestValue.Body.Bytes()) { return " + errResult(invalidUTF8) + " }; decoded := " + decoded + "; if decoded.Kind == " + resultAlias + ".ResultErrTag { return " + errResult(invalidJSON) + " }; return " + okResult + "(decoded.OkValue) }()"
 }
 
 func (g *generator) webJSON(call *ir.Call, arguments []string) string {
@@ -882,9 +882,10 @@ func (g *generator) webJSON(call *ir.Call, arguments []string) string {
 		}
 	}
 	builder := &goJSONCodecBuilder{generator: g, jsonAlias: jsonAlias, errorType: jsonAlias + ".JsonError"}
+	g.requireImport(pathpkg.Join(g.goModule, "trb/http"), "http")
 	encoder := builder.encoder(call.Codec)
 	encoded := jsonAlias + ".Stringify(" + encoder + "(" + arguments[0] + "))"
 	responseType := webAlias + ".Response"
-	headers := "map[string][]string{\"content-type\": []string{\"application/json; charset=utf-8\"}}"
-	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + responseType + "{Status: 500, Headers: " + headers + ", Body: []byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")} }; return " + responseType + "{Status: " + status + ", Headers: " + headers + ", Body: []byte(encoded.OkValue)} }()"
+	headers := "http.NewHeaders([]http.Header{{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}})"
+	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + responseType + "{Status: 500, Headers: " + headers + ", Body: http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))} }; return " + responseType + "{Status: " + status + ", Headers: " + headers + ", Body: http.NewBody([]byte(encoded.OkValue))} }()"
 }

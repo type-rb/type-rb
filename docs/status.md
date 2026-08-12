@@ -98,9 +98,9 @@ graceful-shutdown timeout through typed keyword arguments. Every adapter
 validates that configuration before binding, handles SIGINT and SIGTERM, stops
 accepting new work, and gives active requests the configured time to finish.
 Unhandled handler failures become a portable JSON 500 response. Before
-middleware runs,
-request methods are uppercased and case-insensitive header names are merged
-under lowercase keys. Request paths are decoded exactly once as UTF-8 at the
+middleware runs, request methods are uppercased and header names are normalized
+to lowercase while insertion order and repeated values are preserved. Request
+paths are decoded exactly once as UTF-8 at the
 dispatcher boundary. Malformed escapes, encoded separators, backslashes, and
 dot segments receive a portable JSON 400 response. Repeated and trailing
 slashes remain distinct paths instead of being silently collapsed. Terminal
@@ -190,12 +190,14 @@ commands provide plan, guarded apply, export, lock, and drift checks around a
 pinned external sqldef executable on SQLite, PostgreSQL, and MySQL. Production
 compatibility policy remains future work.
 
+Portable `trb/http` owns the open HTTP method, ordered case-insensitive
+headers, and buffered body value types shared by server and client packages.
 TypeScript browser applications can import the official
 `trb/platform/typescript/browser` package. Its single request primitive accepts
-typed methods, repeated query parameters and headers, text/bytes/form/JSON
-bodies, and timeouts. Fetch responses retain status, headers, final URL, and
-buffered bytes; explicit JSON decoding produces `Response<T>` and preserves the
-raw response in a classified `RequestError` when the contract is invalid.
+those shared methods and headers, repeated query parameters, text/bytes/form/
+JSON bodies, and timeouts. Fetch responses retain status, headers, final URL,
+and buffered bytes; explicit JSON decoding produces `Response<T>` and preserves
+the raw response in a classified `RequestError` when the contract is invalid.
 Non-2xx statuses remain ordinary responses. The backend inserts suspension
 only in generated TypeScript, so TypeRB source does not add target-specific
 `async` syntax.

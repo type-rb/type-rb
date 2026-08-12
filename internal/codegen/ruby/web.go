@@ -96,7 +96,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("begin", "")
 	g.indent++
-	g.line("return trb_web_payload_too_large if request.body.bytesize > max_body_bytes", "")
+	g.line("return trb_web_payload_too_large if request.body.bytes.bytesize > max_body_bytes", "")
 	g.line("method = request.method.upcase", "")
 	g.line(`segments = request.path == "/" ? [] : request.path.delete_prefix("/").split("/", -1)`, "")
 	g.line("allowed_methods = []", "")
@@ -154,7 +154,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		contextName := "options_context_" + strconv.Itoa(routeIndex)
 		handlerName := "options_handler_" + strconv.Itoa(routeIndex)
 		g.line(contextName+" = Context.new(request: request, path_parameters: path_parameters)", "")
-		g.line(handlerName+` = ->(_middleware_context) { Response.new(status: 204, headers: { "allow" => [allowed_methods.join(", ")] }, body: "".b) }`, "")
+		g.line(handlerName+` = ->(_middleware_context) { Response.new(status: 204, headers: Headers.new([Header.new(name: "allow", value: allowed_methods.join(", "))]), body: Body.empty) }`, "")
 		g.rubyWebMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "options_next_handler_"+strconv.Itoa(routeIndex)+"_", "")
 		g.line("return trb_web_checked_response("+handlerName+".call("+contextName+"))", "")
 		g.indent--
@@ -162,10 +162,10 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	g.line("unless allowed_methods.empty?", "")
 	g.indent++
-	g.line(`return Response.new(status: 405, headers: { "allow" => [allowed_methods.join(", ")], "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"method_not_allowed\"}".b)`, "")
+	g.line(`return Response.new(status: 405, headers: Headers.new([Header.new(name: "allow", value: allowed_methods.join(", ")), Header.new(name: "content-type", value: "application/json; charset=utf-8")]), body: Body.new("{\"error\":\"method_not_allowed\"}".b))`, "")
 	g.indent--
 	g.line("end", "")
-	g.line(`Response.new(status: 404, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"not_found\"}".b)`, "")
+	g.line(`Response.new(status: 404, headers: Headers.new([Header.new(name: "content-type", value: "application/json; charset=utf-8")]), body: Body.new("{\"error\":\"not_found\"}".b))`, "")
 	g.indent--
 	g.line("rescue StandardError", "")
 	g.indent++
@@ -188,16 +188,27 @@ func (g *generator) rubyWebMiddlewareChain(middlewares []webintegration.Middlewa
 func (g *generator) webProtocolResponses() {
 	g.line("TRB_WEB_DEFAULT_MAX_BODY_BYTES = "+strconv.Itoa(webintegration.MaxBodyBytes), "")
 	g.line("", "")
-	g.line("def trb_web_normalize_request(request)", "")
+	g.line("def trb_web_headers_from_hash(values)", "")
 	g.indent++
-	g.line("headers = {}", "")
-	g.line("request.headers.each do |name, values|", "")
+	g.line("entries = []", "")
+	g.line("values.each do |name, header_values|", "")
 	g.indent++
-	g.line("normalized_name = name.downcase", "")
-	g.line("(headers[normalized_name] ||= []).concat(values)", "")
+	g.line("header_values.each { |value| entries << Header.new(name: name, value: value) }", "")
 	g.indent--
 	g.line("end", "")
-	g.line("Request.new(method: request.method.upcase, path: request.path, query_string: request.query_string, headers: headers, body: request.body)", "")
+	g.line("Headers.new(entries)", "")
+	g.indent--
+	g.line("end", "")
+	g.line("", "")
+	g.line("def trb_web_normalize_request(request)", "")
+	g.indent++
+	g.line("entries = []", "")
+	g.line("request.headers.entries.each do |header|", "")
+	g.indent++
+	g.line("entries << Header.new(name: header.name.downcase, value: header.value)", "")
+	g.indent--
+	g.line("end", "")
+	g.line("Request.new(method: request.method.upcase, path: request.path, query_string: request.query_string, headers: Headers.new(entries), body: request.body)", "")
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
@@ -220,19 +231,19 @@ func (g *generator) webProtocolResponses() {
 	g.line("", "")
 	g.line("def trb_web_internal_server_error", "")
 	g.indent++
-	g.line(`Response.new(status: 500, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"internal_server_error\"}".b)`, "")
+	g.line(`Response.new(status: 500, headers: Headers.new([Header.new(name: "content-type", value: "application/json; charset=utf-8")]), body: Body.new("{\"error\":\"internal_server_error\"}".b))`, "")
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
 	g.line("def trb_web_bad_request", "")
 	g.indent++
-	g.line(`Response.new(status: 400, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"bad_request\"}".b)`, "")
+	g.line(`Response.new(status: 400, headers: Headers.new([Header.new(name: "content-type", value: "application/json; charset=utf-8")]), body: Body.new("{\"error\":\"bad_request\"}".b))`, "")
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
 	g.line("def trb_web_payload_too_large", "")
 	g.indent++
-	g.line(`Response.new(status: 413, headers: { "content-type" => ["application/json; charset=utf-8"] }, body: "{\"error\":\"payload_too_large\"}".b)`, "")
+	g.line(`Response.new(status: 413, headers: Headers.new([Header.new(name: "content-type", value: "application/json; charset=utf-8")]), body: Body.new("{\"error\":\"payload_too_large\"}".b))`, "")
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
@@ -240,7 +251,7 @@ func (g *generator) webProtocolResponses() {
 	g.indent++
 	g.line("response = trb_web_internal_server_error unless trb_web_valid_response?(response)", "")
 	g.line(`return response unless request.method.upcase == "HEAD"`, "")
-	g.line(`Response.new(status: response.status, headers: response.headers, body: "".b)`, "")
+	g.line(`Response.new(status: response.status, headers: response.headers, body: Body.empty)`, "")
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
@@ -253,9 +264,10 @@ func (g *generator) webProtocolResponses() {
 	g.line("def trb_web_valid_response?(response)", "")
 	g.indent++
 	g.line("return false unless response.status.between?(100, 999)", "")
-	g.line(`response.headers.all? do |name, values|`, "")
+	g.line("return false unless response.headers && response.body", "")
+	g.line(`response.headers.entries.all? do |header|`, "")
 	g.indent++
-	g.line(`name.match?(/\A[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+\z/) && values.all? { |value| !value.include?("\r") && !value.include?("\n") }`, "")
+	g.line(`header.name.match?(/\A[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+\z/) && !header.value.include?("\r") && !header.value.include?("\n")`, "")
 	g.indent--
 	g.line("end", "")
 	g.indent--
@@ -364,18 +376,19 @@ func (g *generator) webServer() {
 	g.line("body_too_large = content_length > config.body_limit_bytes", "")
 	g.line("if body_too_large", "")
 	g.indent++
-	g.line(`web_request = Request.new(method: method, path: path, query_string: query_string, headers: headers, body: "".b)`, "")
+	g.line(`web_request = Request.new(method: method, path: path, query_string: query_string, headers: trb_web_headers_from_hash(headers), body: Body.empty)`, "")
 	g.line("response = trb_web_dispatch_protocol_response(web_request, trb_web_payload_too_large)", "")
 	g.indent--
 	g.line("else", "")
 	g.indent++
 	g.line(`body = content_length.positive? ? connection.read(content_length) : "".b`, "")
-	g.line("response = trb_web_dispatch_with_body_limit(Request.new(method: method, path: path, query_string: query_string, headers: headers, body: body), config.body_limit_bytes)", "")
+	g.line("response = trb_web_dispatch_with_body_limit(Request.new(method: method, path: path, query_string: query_string, headers: trb_web_headers_from_hash(headers), body: Body.new(body)), config.body_limit_bytes)", "")
 	g.indent--
 	g.line("end", "")
 	g.line(`reason = { 200 => "OK", 201 => "Created", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 405 => "Method Not Allowed", 413 => "Content Too Large", 500 => "Internal Server Error" }[response.status] || "Response"`, "")
-	g.line("response_headers = response.headers.dup", "")
-	g.line(`response_headers["content-length"] ||= [response.body.bytesize.to_s]`, "")
+	g.line("response_headers = {}", "")
+	g.line("response.headers.entries.each { |header| (response_headers[header.name] ||= []) << header.value }", "")
+	g.line(`response_headers["content-length"] ||= [response.body.bytes.bytesize.to_s]`, "")
 	g.line(`keep_alive = !body_too_large && version == "HTTP/1.1" && headers.fetch("connection", [""]).first.downcase != "close"`, "")
 	g.line(`response_headers["connection"] ||= [keep_alive ? "keep-alive" : "close"]`, "")
 	g.line(`connection.write("HTTP/1.1 #{response.status} #{reason}\r\n")`, "")
@@ -389,7 +402,7 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("end", "")
 	g.line(`connection.write("\r\n")`, "")
-	g.line("connection.write(response.body)", "")
+	g.line("connection.write(response.body.bytes)", "")
 	g.line("break unless keep_alive", "")
 	g.indent--
 	g.line("end", "")

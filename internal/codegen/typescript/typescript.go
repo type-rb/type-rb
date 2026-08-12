@@ -25,6 +25,8 @@ type generator struct {
 	records          map[string]bool
 	typeAliases      map[string]string
 	typeMappings     map[string]string
+	browserRuntime   string
+	httpRuntime      bool
 	reactStateHelper bool
 	temporary        int
 	suspension       *SuspensionPlan
@@ -108,6 +110,18 @@ func generate(program *ir.Program, suspension *SuspensionPlan, moduleExtensions 
 	return strings.TrimRight(g.b.String(), "\n") + "\n"
 }
 
+func (g *generator) ensureHTTPRuntime() string {
+	const alias = "__trb_http"
+	if !g.httpRuntime {
+		g.line("import * as " + alias + " from " + strconv.Quote(tsImportPath(g.modulePath, "trb/http/index", g.moduleExtensions["trb/http/index"])) + ";")
+		g.httpRuntime = true
+	}
+	for _, symbol := range []string{"Body", "Header", "Headers", "HttpMethod"} {
+		g.typeAliases[symbol] = alias
+	}
+	return alias
+}
+
 func topLevelMethod(statements []ir.Statement, name string) *ir.Method {
 	for _, statement := range statements {
 		if method, ok := statement.(*ir.Method); ok && method.Name == name {
@@ -177,6 +191,8 @@ func (g *generator) statement(statement ir.Statement) {
 			if n.Namespace && n.Alias != "" {
 				browserAlias = n.Alias
 			}
+			g.browserRuntime = browserAlias
+			g.ensureHTTPRuntime()
 			for symbol, kind := range n.SymbolKinds {
 				switch kind {
 				case "class", "record", "enum", "interface", "type_alias", "enum_alias":
@@ -186,6 +202,10 @@ func (g *generator) statement(statement ir.Statement) {
 			if !n.Namespace || n.Alias == "" {
 				g.line("import * as " + browserAlias + " from " + strconv.Quote(importPath) + ";")
 			}
+		}
+		webRuntime := n.Path == "trb/web/index" && n.RuntimeRequired
+		if webRuntime {
+			g.ensureHTTPRuntime()
 		}
 		if n.Namespace && n.Alias != "" {
 			for symbol, kind := range n.SymbolKinds {
