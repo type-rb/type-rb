@@ -190,6 +190,15 @@ read_number()
 	if _, ok := last.Expression.(*ir.UnhandledEffect); !ok {
 		t.Fatalf("top-level effect lowered to %T, want *ir.UnhandledEffect", last.Expression)
 	}
+	resultRuntime := false
+	for _, statement := range session.IR.Statements {
+		if imported, ok := statement.(*ir.Import); ok && imported.Path == "trb/std/result/index" && imported.Implicit && imported.RuntimeRequired {
+			resultRuntime = true
+		}
+	}
+	if !resultRuntime {
+		t.Fatal("interactive fallible call did not load its Result runtime")
+	}
 
 	unit.Source = []byte(`record AppError
 end
