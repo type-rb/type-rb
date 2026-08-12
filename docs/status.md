@@ -116,12 +116,17 @@ ambiguous content types and invalid UTF-8, and reports each failure as a
 `_middleware.trb` files form the same outer-to-inner onion chain in every
 backend. A single middleware file can build an explicit `Array<Middleware>`
 and pass it to `compose`; the first item is the outermost layer, and `Next` can
-still be called only once. Packaged middleware expose `middleware()` factories
-with specific option types such as `LoggerOptions` and `CORSOptions`. The
+still be called only once. Root middleware surrounds the complete dispatch
+boundary, including generated 400, 404, 405, 413, and recovered 500 responses;
+nested middleware remains scoped to matched routes. Packaged middleware expose
+`middleware()` factories with specific option types such as `LoggerOptions` and
+`CORSOptions`. The
 logger emits JSONL access logs and supports typed output-selection and
-path-exclusion options. A portable secure-headers middleware
-adds a conservative browser-security preset and accepts an explicit typed
-header map. An opt-in CORS middleware handles actual and preflight requests,
+path-exclusion options. It records the normalized routing path for valid
+requests but omits the raw query string by default so secrets in URLs are not
+copied into logs. A
+portable secure-headers middleware adds a conservative browser-security preset
+and accepts an explicit typed header map. An opt-in CORS middleware handles actual and preflight requests,
 explicit origin policies, credentials, exposed and allowed headers, and typed
 preflight cache duration. A request-ID middleware preserves bounded safe
 incoming IDs or generates cryptographically random IDs and exposes the chosen

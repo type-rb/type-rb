@@ -150,6 +150,23 @@ func TestDiscoverMiddlewaresOrdersRootBeforeNestedScopes(t *testing.T) {
 	}
 }
 
+func TestRootMiddlewaresSelectOnlyApplicationScope(t *testing.T) {
+	middlewares := []Middleware{
+		{Directory: "", ModulePath: "routes/_middleware"},
+		{Directory: "admin", ModulePath: "routes/admin/_middleware"},
+		{Directory: "", ModulePath: "routes/other/_middleware"},
+	}
+
+	root := RootMiddlewares(middlewares)
+	if len(root) != 2 || root[0].ModulePath != "routes/_middleware" || root[1].ModulePath != "routes/other/_middleware" {
+		t.Fatalf("unexpected root middleware selection: %#v", root)
+	}
+	nested := NestedMiddlewares(middlewares)
+	if len(nested) != 1 || nested[0].ModulePath != "routes/admin/_middleware" {
+		t.Fatalf("unexpected nested middleware selection: %#v", nested)
+	}
+}
+
 func parsedSource(t *testing.T, filename, modulePath, source string) Source {
 	t.Helper()
 	program, diagnostics := parser.Parse([]byte(source))
