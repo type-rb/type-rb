@@ -2171,14 +2171,14 @@ func (c *Checker) codecRecord(name string) ([]resolver.RecordField, string, *res
 	return nil, "", nil, false
 }
 
-func (c *Checker) jsxComponentProps(element *ast.JSXElement) ([]resolver.RecordField, bool) {
+func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type) ([]resolver.RecordField, bool) {
 	identifier, ok := element.Component.(*ast.Identifier)
 	if !ok {
 		return nil, false
 	}
 	if method := c.functions[identifier.Name]; method != nil {
-		if !c.typesAssignable(types.FromName("ReactNode"), c.methodReturnType(method)) {
-			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return ReactNode", identifier.Name))
+		if !c.typesAssignable(nodeType, c.methodReturnType(method)) {
+			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return %s", identifier.Name, nodeType))
 			return nil, false
 		}
 		if len(method.Parameters) == 0 {
@@ -2199,8 +2199,8 @@ func (c *Checker) jsxComponentProps(element *ast.JSXElement) ([]resolver.RecordF
 	if !imported || binding.Export == nil || binding.Export.Kind != resolver.FunctionExport {
 		return nil, false
 	}
-	if !c.typesAssignable(types.FromName("ReactNode"), binding.Export.Type) {
-		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return ReactNode", identifier.Name))
+	if !c.typesAssignable(nodeType, binding.Export.Type) {
+		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return %s", identifier.Name, nodeType))
 		return nil, false
 	}
 	if len(binding.Export.Parameters) == 0 {
@@ -2216,6 +2216,30 @@ func (c *Checker) jsxComponentProps(element *ast.JSXElement) ([]resolver.RecordF
 		return nil, false
 	}
 	return fields, true
+}
+
+func (c *Checker) jsxProvider(span token.Span) *stdlib.JSXProvider {
+	var provider *stdlib.JSXProvider
+	var selected *resolver.Import
+	seen := map[*resolver.Import]bool{}
+	for _, imported := range c.resolution.Imports {
+		if imported == nil || imported.Definition == nil || imported.Definition.JSX == nil || seen[imported] {
+			continue
+		}
+		seen[imported] = true
+		if provider != nil {
+			paths := []string{selected.Path, imported.Path}
+			sort.Strings(paths)
+			c.error(span, fmt.Sprintf("JSX providers %s and %s cannot be imported together", paths[0], paths[1]))
+			return provider
+		}
+		provider = imported.Definition.JSX
+		selected = imported
+	}
+	if selected != nil {
+		c.markImportNodeUsed(selected, "")
+	}
+	return provider
 }
 
 func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.RecordField, attributes map[string]types.Type) {
@@ -3469,16 +3493,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		valueType := c.inferCollectionType(values, sc)
 		typ = types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{keyType, valueType}}
 	case *ast.JSXElement:
-		reactImported := false
-		for _, imported := range c.resolution.Imports {
-			if imported.Path == "trb/platform/typescript/react" {
-				reactImported = true
-				c.markImportNodeUsed(imported, "")
-				break
-			}
-		}
-		if !reactImported {
+		provider := c.jsxProvider(n.Span())
+		nodeType := types.FromName("Any")
+		if provider == nil {
 			c.error(n.Span(), "JSX requires an imported JSX provider; import trb/platform/typescript/react for React")
+		} else {
+			nodeType = provider.Node
 		}
 		var props []resolver.RecordField
 		componentHasTypedProps := false
@@ -3487,7 +3507,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if componentType.Kind == types.Any || componentType.Kind == types.Invalid {
 				c.error(n.Component.Span(), fmt.Sprintf("JSX component %s is not declared or imported", n.Name))
 			} else {
-				props, componentHasTypedProps = c.jsxComponentProps(n)
+				props, componentHasTypedProps = c.jsxComponentProps(n, nodeType)
 			}
 		}
 		attributeTypes := map[string]types.Type{}
@@ -3501,6 +3521,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			} else {
 				attributeTypes[attribute.Name] = c.checkExpression(attribute.Value, sc)
 			}
+			if n.Component == nil && provider != nil {
+				if expected, checked := provider.IntrinsicAttributes[attribute.Name]; checked && !c.typesAssignable(expected, attributeTypes[attribute.Name]) {
+					c.error(attribute.Span(), fmt.Sprintf("JSX attribute %s expects %s, got %s", attribute.Name, expected, attributeTypes[attribute.Name]))
+				}
+			}
 		}
 		if componentHasTypedProps {
 			c.checkJSXProps(n, props, attributeTypes)
@@ -3511,12 +3536,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.checkExpression(item, sc)
 			case *ast.JSXExpression:
 				childType := c.checkExpression(item.Value, sc)
-				if !jsxRenderableType(childType) {
+				if provider != nil && !jsxRenderableType(childType, nodeType) {
 					c.error(item.Span(), fmt.Sprintf("JSX child must be renderable, got %s", childType))
 				}
 			}
 		}
-		typ = types.FromName("ReactNode")
+		typ = nodeType
 	case *ast.UnaryExpression:
 		operand := c.checkExpression(n.Operand, sc)
 		typ = c.checkUnaryOperator(n.Span(), n.Operator, operand)
@@ -4140,7 +4165,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	return typ
 }
 
-func jsxRenderableType(typ types.Type) bool {
+func jsxRenderableType(typ, nodeType types.Type) bool {
 	if typ.Nullable {
 		typ.Nullable = false
 	}
@@ -4148,12 +4173,12 @@ func jsxRenderableType(typ types.Type) bool {
 	case types.Any, types.Invalid, types.Never, types.Nil, types.String, types.Int, types.Float, types.Bool:
 		return true
 	case types.Array:
-		return len(typ.Args) == 1 && jsxRenderableType(typ.Args[0])
+		return len(typ.Args) == 1 && jsxRenderableType(typ.Args[0], nodeType)
 	case types.Named:
-		return typ.Name == "ReactNode"
+		return types.Equivalent(typ, nodeType)
 	case types.Union:
 		for _, alternative := range typ.Args {
-			if !jsxRenderableType(alternative) {
+			if !jsxRenderableType(alternative, nodeType) {
 				return false
 			}
 		}

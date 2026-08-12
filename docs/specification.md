@@ -111,6 +111,9 @@ mode by itself does not enable them.
   function or constant naming.
 - JSX attribute names retain their source spelling. The compiler does not
   translate names such as `className` or `onClick` to or from snake case.
+- A JSX provider may declare checked intrinsic attributes. The initial React
+  provider distinguishes mouse, change, form, and keyboard callbacks and maps
+  their event objects to the corresponding React and DOM types.
 - A TypeRB component returns the provider's node type. It accepts either no
   parameters or one record parameter; that record defines its checked props.
   Unknown, missing, duplicate, and incompatible component props are errors.
