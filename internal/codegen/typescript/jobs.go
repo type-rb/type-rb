@@ -133,7 +133,7 @@ func (g *generator) jobsStorage(config jobs.Config) {
 
 	ack := "DELETE FROM trb_jobs WHERE id = " + tsJobsPlaceholder(config.DatabaseAdapter, 1) + " AND state = 'running' AND claimed_by = " + tsJobsPlaceholder(config.DatabaseAdapter, 2)
 	g.line("export async function trbJobsAcknowledge(id: string, workerId: string): Promise<void> { const result = await trbJobsDB().unsafe(" + strconv.Quote(ack) + ", [id, workerId]); if (trbJobsAffected(result) !== 1) throw new Error(\"job claim was lost before acknowledgement\"); }")
-	fail := "UPDATE trb_jobs SET state = CASE WHEN attempts >= maximum_attempts THEN 'failed' ELSE 'ready' END, run_at = CURRENT_TIMESTAMP, claimed_by = NULL, claimed_at = NULL, last_error = " + tsJobsPlaceholder(config.DatabaseAdapter, 1) + ", updated_at = CURRENT_TIMESTAMP WHERE id = " + tsJobsPlaceholder(config.DatabaseAdapter, 2) + " AND state = 'running' AND claimed_by = " + tsJobsPlaceholder(config.DatabaseAdapter, 3)
+	fail := "UPDATE trb_jobs SET state = CASE WHEN attempts >= maximum_attempts THEN 'failed' ELSE 'ready' END, run_at = " + tsJobsRetryTime(config) + ", claimed_by = NULL, claimed_at = NULL, last_error = " + tsJobsPlaceholder(config.DatabaseAdapter, 1) + ", updated_at = CURRENT_TIMESTAMP WHERE id = " + tsJobsPlaceholder(config.DatabaseAdapter, 2) + " AND state = 'running' AND claimed_by = " + tsJobsPlaceholder(config.DatabaseAdapter, 3)
 	g.line("export async function trbJobsFail(id: string, workerId: string, message: string): Promise<void> { const result = await trbJobsDB().unsafe(" + strconv.Quote(fail) + ", [message, id, workerId]); if (trbJobsAffected(result) !== 1) throw new Error(\"job claim was lost before failure recording\"); }")
 	heartbeat := "UPDATE trb_jobs SET claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = " + tsJobsPlaceholder(config.DatabaseAdapter, 1) + " AND state = 'running' AND claimed_by = " + tsJobsPlaceholder(config.DatabaseAdapter, 2)
 	g.line("export async function trbJobsHeartbeat(id: string, workerId: string): Promise<void> { const result = await trbJobsDB().unsafe(" + strconv.Quote(heartbeat) + ", [id, workerId]); if (trbJobsAffected(result) !== 1) throw new Error(\"job claim was lost before heartbeat\"); }")
@@ -193,7 +193,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest) {
 	g.indent++
 	g.line("while (!stopping) {")
 	g.indent++
-	g.line("await __trbJobsRuntime.trbJobsRecoverStale(); const claim = await __trbJobsRuntime.trbJobsClaim(workerId); if (claim === null) { await Bun.sleep(" + strconv.Itoa(config.PollIntervalMilliseconds) + "); continue; }")
+	g.line("await __trbJobsRuntime.trbJobsRecoverStale(); const claim = await __trbJobsRuntime.trbJobsClaim(workerId); if (claim === null) { if (process.env.TRB_JOBS_ONCE === \"1\") break; await Bun.sleep(" + strconv.Itoa(config.PollIntervalMilliseconds) + "); continue; }")
 	g.line("const heartbeat = setInterval(() => { void __trbJobsRuntime.trbJobsHeartbeat(claim.id, workerId).catch(error => console.error(\"trb jobs heartbeat:\", error)); }, " + strconv.Itoa(max(config.LeaseTimeoutMilliseconds/3, 100)) + ");")
 	g.line("try { await trbJobsDispatch(claim); await __trbJobsRuntime.trbJobsAcknowledge(claim.id, workerId); } catch (error) { await __trbJobsRuntime.trbJobsFail(claim.id, workerId, error instanceof Error ? error.message : String(error)); } finally { clearInterval(heartbeat); }")
 	g.line("if (process.env.TRB_JOBS_ONCE === \"1\") break;")
@@ -250,5 +250,17 @@ func tsJobsStaleCutoff(config jobs.Config) string {
 		return "CURRENT_TIMESTAMP(6) - INTERVAL " + strconv.Itoa(config.LeaseTimeoutMilliseconds*1000) + " MICROSECOND"
 	default:
 		return "datetime(CURRENT_TIMESTAMP, '-" + strconv.Itoa(max((config.LeaseTimeoutMilliseconds+999)/1000, 1)) + " seconds')"
+	}
+}
+
+func tsJobsRetryTime(config jobs.Config) string {
+	switch config.DatabaseAdapter {
+	case "postgresql":
+		return "CURRENT_TIMESTAMP + (attempts * INTERVAL '" + strconv.Itoa(config.RetryBaseDelayMilliseconds) + " milliseconds')"
+	case "mysql":
+		return "TIMESTAMPADD(MICROSECOND, attempts * " + strconv.Itoa(config.RetryBaseDelayMilliseconds*1000) + ", CURRENT_TIMESTAMP(6))"
+	default:
+		seconds := max((config.RetryBaseDelayMilliseconds+999)/1000, 1)
+		return "datetime(CURRENT_TIMESTAMP, '+' || (attempts * " + strconv.Itoa(seconds) + ") || ' seconds')"
 	}
 }

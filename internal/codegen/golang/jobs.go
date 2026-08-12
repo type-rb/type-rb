@@ -57,6 +57,10 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	g.requireImport("errors", "")
 	g.requireImport("os", "")
 	g.requireImport("sync", "")
+	if config.DatabaseAdapter == "mysql" {
+		g.requireImport("net/url", "")
+		g.requireImport("strings", "")
+	}
 	switch config.DatabaseAdapter {
 	case "sqlite":
 		g.requireImport("modernc.org/sqlite", "_")
@@ -101,6 +105,9 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	g.indent++
 	g.line("source := os.Getenv(\"TRB_JOBS_DATABASE\")")
 	g.line("if source == \"\" { source = " + strconv.Quote(config.Database) + " }")
+	if config.DatabaseAdapter == "mysql" {
+		g.line("if strings.HasPrefix(source, \"mysql://\") { parsed, err := url.Parse(source); if err != nil { trbJobsDatabaseError = err; return }; credentials := parsed.User.Username(); if password, exists := parsed.User.Password(); exists { credentials += \":\" + password }; source = credentials + \"@tcp(\" + parsed.Host + \")\" + parsed.Path; if parsed.RawQuery != \"\" { source += \"?\" + parsed.RawQuery } }")
+	}
 	g.line("trbJobsDatabase, trbJobsDatabaseError = sql.Open(" + strconv.Quote(goJobsDriver(config.DatabaseAdapter)) + ", source)")
 	g.line("if trbJobsDatabaseError != nil { return }")
 	if config.DatabaseAdapter == "sqlite" {
@@ -322,7 +329,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest) {
 	g.line("if _, err := " + jobsAlias + ".TrbJobsRecoverStale(signalContext); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs recover stale:\", err) }")
 	g.line("claim, err := " + jobsAlias + ".TrbJobsClaimNext(signalContext, workerId)")
 	g.line("if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs claim:\", err); select { case <-signalContext.Done(): return true; case <-time.After(pollInterval): continue } }")
-	g.line("if claim == nil { select { case <-signalContext.Done(): return true; case <-time.After(pollInterval): continue } }")
+	g.line("if claim == nil { if runOnce { return true }; select { case <-signalContext.Done(): return true; case <-time.After(pollInterval): continue } }")
 	g.line("execution := make(chan error, 1)")
 	g.line("heartbeatDone := make(chan struct{})")
 	g.line("go func() { ticker := time.NewTicker(heartbeatInterval); defer ticker.Stop(); for { select { case <-heartbeatDone: return; case <-ticker.C: if err := " + jobsAlias + ".TrbJobsHeartbeat(context.Background(), claim.Id, workerId); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs heartbeat:\", err); return } } } }()")
@@ -469,7 +476,7 @@ func (g *generator) jobsFail(config jobs.Config) {
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return err }")
-	query := "UPDATE trb_jobs SET state = CASE WHEN attempts >= maximum_attempts THEN 'failed' ELSE 'ready' END, run_at = CURRENT_TIMESTAMP, claimed_by = NULL, claimed_at = NULL, last_error = " + goJobsPlaceholder(config.DatabaseAdapter, 1) + ", updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 2) + " AND state = 'running' AND claimed_by = " + goJobsPlaceholder(config.DatabaseAdapter, 3)
+	query := "UPDATE trb_jobs SET state = CASE WHEN attempts >= maximum_attempts THEN 'failed' ELSE 'ready' END, run_at = " + goJobsRetryTime(config) + ", claimed_by = NULL, claimed_at = NULL, last_error = " + goJobsPlaceholder(config.DatabaseAdapter, 1) + ", updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 2) + " AND state = 'running' AND claimed_by = " + goJobsPlaceholder(config.DatabaseAdapter, 3)
 	g.line("result, err := database.ExecContext(ctx, " + strconv.Quote(query) + ", message, id, workerId)")
 	g.line("if err != nil { return err }")
 	g.line("affected, err := result.RowsAffected()")
@@ -515,6 +522,18 @@ func goJobsStaleCutoff(config jobs.Config) string {
 	default:
 		seconds := max((milliseconds+999)/1000, 1)
 		return "datetime(CURRENT_TIMESTAMP, '-" + strconv.Itoa(seconds) + " seconds')"
+	}
+}
+
+func goJobsRetryTime(config jobs.Config) string {
+	switch config.DatabaseAdapter {
+	case "postgresql":
+		return "CURRENT_TIMESTAMP + (attempts * INTERVAL '" + strconv.Itoa(config.RetryBaseDelayMilliseconds) + " milliseconds')"
+	case "mysql":
+		return "TIMESTAMPADD(MICROSECOND, attempts * " + strconv.Itoa(config.RetryBaseDelayMilliseconds*1000) + ", CURRENT_TIMESTAMP(6))"
+	default:
+		seconds := max((config.RetryBaseDelayMilliseconds+999)/1000, 1)
+		return "datetime(CURRENT_TIMESTAMP, '+' || (attempts * " + strconv.Itoa(seconds) + ") || ' seconds')"
 	}
 }
 

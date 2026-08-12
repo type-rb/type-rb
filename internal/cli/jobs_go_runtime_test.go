@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/type-rb/type-rb/internal/project"
 )
@@ -106,6 +107,9 @@ end
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(1100 * time.Millisecond)
+		}
 		stdout.Reset()
 		stderr.Reset()
 		if status := command.Run([]string{"jobs", "start", "--once", "--config", config.Path}); status != 0 {

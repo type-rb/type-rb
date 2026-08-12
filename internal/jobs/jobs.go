@@ -46,6 +46,7 @@ type Config struct {
 	LeaseTimeoutMilliseconds    int    `json:"lease_timeout_milliseconds"`
 	ShutdownTimeoutMilliseconds int    `json:"shutdown_timeout_milliseconds"`
 	DefaultMaximumAttempts      int    `json:"default_maximum_attempts"`
+	RetryBaseDelayMilliseconds  int    `json:"retry_base_delay_milliseconds"`
 	WorkerConcurrency           int    `json:"worker_concurrency"`
 }
 
@@ -54,7 +55,7 @@ func DefaultConfig() Config {
 		Adapter: "sql", DatabaseAdapter: "sqlite", Database: "jobs.sqlite3",
 		PollIntervalMilliseconds: 1000, LeaseTimeoutMilliseconds: 60_000,
 		ShutdownTimeoutMilliseconds: 30_000, DefaultMaximumAttempts: 5,
-		WorkerConcurrency: 1,
+		RetryBaseDelayMilliseconds: 1000, WorkerConcurrency: 1,
 	}
 }
 
@@ -83,6 +84,9 @@ func ParseConfig(source []byte) (Config, error) {
 	}
 	if config.DefaultMaximumAttempts <= 0 {
 		return Config{}, fmt.Errorf("trb/jobs default_maximum_attempts must be positive")
+	}
+	if config.RetryBaseDelayMilliseconds <= 0 {
+		return Config{}, fmt.Errorf("trb/jobs retry_base_delay_milliseconds must be positive")
 	}
 	if config.WorkerConcurrency <= 0 {
 		return Config{}, fmt.Errorf("trb/jobs worker_concurrency must be positive")

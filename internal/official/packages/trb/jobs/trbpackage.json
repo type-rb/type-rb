@@ -6,13 +6,6 @@
   "typeProvider": "trb.jobs",
   "projectProvider": "trb.jobs.manifest",
   "nativeDependencies": {
-    "go": {
-      "modernc.org/sqlite": "v1.53.0"
-    },
-    "ruby": {
-      "sequel": "latest",
-      "sqlite3": "latest"
-    },
     "typescript": {
       "@types/bun": "latest"
     }
@@ -47,5 +40,8 @@
         }
       }
     }
+  },
+  "nativeDependencyOptionDefaults": {
+    "database_adapter": "sqlite"
   }
 }

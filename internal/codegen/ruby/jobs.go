@@ -69,6 +69,9 @@ func (g *generator) jobsStorage(config jobs.Config) {
 	g.indent++
 	g.line("return @database if @database", "")
 	g.line("source = ENV.fetch(\"TRB_JOBS_DATABASE\", "+strconv.Quote(config.Database)+")", "")
+	if config.DatabaseAdapter == "mysql" {
+		g.line("source = source.sub(/\\Amysql:\\/\\//, \"mysql2://\")", "")
+	}
 	g.line("source = \"sqlite://#{File.expand_path(source)}\" unless source.include?(\"://\")", "")
 	g.line("@database = Sequel.connect(source, max_connections: "+strconv.Itoa(max(config.WorkerConcurrency, 1))+" )", "")
 	statements, _ := sqlstore.Schema(sqlstore.Dialect(config.DatabaseAdapter))
@@ -115,7 +118,7 @@ func (g *generator) jobsStorage(config jobs.Config) {
 	g.line("row = database[:trb_jobs].where(id: id, state: \"running\", claimed_by: worker_id).first", "")
 	g.line("return false unless row", "")
 	g.line("state = row[:attempts] >= row[:maximum_attempts] ? \"failed\" : \"ready\"", "")
-	g.line("database[:trb_jobs].where(id: id, state: \"running\", claimed_by: worker_id).update(state: state, run_at: Time.now.utc, claimed_by: nil, claimed_at: nil, last_error: message, updated_at: Time.now.utc) == 1", "")
+	g.line("database[:trb_jobs].where(id: id, state: \"running\", claimed_by: worker_id).update(state: state, run_at: Time.now.utc + row[:attempts] * "+strconv.FormatFloat(float64(config.RetryBaseDelayMilliseconds)/1000.0, 'f', 3, 64)+", claimed_by: nil, claimed_at: nil, last_error: message, updated_at: Time.now.utc) == 1", "")
 	g.indent--
 	g.line("end", "")
 	g.line("def heartbeat(id, worker_id); database[:trb_jobs].where(id: id, state: \"running\", claimed_by: worker_id).update(claimed_at: Time.now.utc, updated_at: Time.now.utc) == 1; end", "")
@@ -190,7 +193,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest) {
 	g.line("break if stopping", "")
 	g.line("TrbJobsRuntime.recover_stale", "")
 	g.line("row = TrbJobsRuntime.claim(worker_id)", "")
-	g.line("if !row; sleep("+strconv.FormatFloat(float64(manifest.Config.PollIntervalMilliseconds)/1000.0, 'f', 3, 64)+"); next; end", "")
+	g.line("if !row; break if ENV[\"TRB_JOBS_ONCE\"] == \"1\"; sleep("+strconv.FormatFloat(float64(manifest.Config.PollIntervalMilliseconds)/1000.0, 'f', 3, 64)+"); next; end", "")
 	g.line("begin; trb_jobs_dispatch(row); TrbJobsRuntime.acknowledge(row[:id], worker_id); rescue StandardError => error; TrbJobsRuntime.fail(row[:id], worker_id, error.message); end", "")
 	g.line("break if ENV[\"TRB_JOBS_ONCE\"] == \"1\"", "")
 	g.indent--

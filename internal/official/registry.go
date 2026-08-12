@@ -20,27 +20,29 @@ import (
 var packageFiles embed.FS
 
 type manifest struct {
-	Name                       string                                             `json:"name"`
-	Version                    string                                             `json:"version"`
-	Module                     string                                             `json:"module"`
-	Source                     string                                             `json:"source"`
-	SemanticProvider           string                                             `json:"semanticProvider,omitempty"`
-	ProjectProvider            string                                             `json:"projectProvider,omitempty"`
-	TypeProvider               string                                             `json:"typeProvider,omitempty"`
-	Kind                       string                                             `json:"kind,omitempty"`
-	Targets                    []string                                           `json:"targets,omitempty"`
-	NativeDependencies         map[string]map[string]string                       `json:"nativeDependencies,omitempty"`
-	NativeDependenciesByOption map[string]map[string]map[string]map[string]string `json:"nativeDependenciesByOption,omitempty"`
+	Name                           string                                             `json:"name"`
+	Version                        string                                             `json:"version"`
+	Module                         string                                             `json:"module"`
+	Source                         string                                             `json:"source"`
+	SemanticProvider               string                                             `json:"semanticProvider,omitempty"`
+	ProjectProvider                string                                             `json:"projectProvider,omitempty"`
+	TypeProvider                   string                                             `json:"typeProvider,omitempty"`
+	Kind                           string                                             `json:"kind,omitempty"`
+	Targets                        []string                                           `json:"targets,omitempty"`
+	NativeDependencies             map[string]map[string]string                       `json:"nativeDependencies,omitempty"`
+	NativeDependenciesByOption     map[string]map[string]map[string]map[string]string `json:"nativeDependenciesByOption,omitempty"`
+	NativeDependencyOptionDefaults map[string]string                                  `json:"nativeDependencyOptionDefaults,omitempty"`
 }
 
 type Package struct {
-	ManifestPath               string
-	Name                       string
-	Version                    string
-	ProjectProvider            string
-	NativeDependencies         map[string]map[string]string
-	NativeDependenciesByOption map[string]map[string]map[string]map[string]string
-	Definition                 *stdlib.Package
+	ManifestPath                   string
+	Name                           string
+	Version                        string
+	ProjectProvider                string
+	NativeDependencies             map[string]map[string]string
+	NativeDependenciesByOption     map[string]map[string]map[string]map[string]string
+	NativeDependencyOptionDefaults map[string]string
+	Definition                     *stdlib.Package
 }
 
 func (p *Package) NativeDependenciesFor(mode string, rawOptions json.RawMessage) (map[string]string, error) {
@@ -74,7 +76,15 @@ func (p *Package) NativeDependenciesFor(mode string, rawOptions json.RawMessage)
 	sort.Strings(optionNames)
 	for _, optionName := range optionNames {
 		var value string
-		if err := json.Unmarshal(options[optionName], &value); err != nil || value == "" {
+		if raw := options[optionName]; len(raw) > 0 {
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return nil, fmt.Errorf("packageOptions.%q.%s must be a string", p.Name, optionName)
+			}
+		}
+		if value == "" {
+			value = p.NativeDependencyOptionDefaults[optionName]
+		}
+		if value == "" {
 			return nil, fmt.Errorf("packageOptions.%q.%s is required to select native dependencies", p.Name, optionName)
 		}
 		required, ok := conditional[optionName][value]
@@ -160,12 +170,13 @@ func loadFromFS(packageFS fs.FS) (map[string]*Package, error) {
 			return fmt.Errorf("%s: %w", filename, err)
 		}
 		result[descriptor.Name] = &Package{
-			ManifestPath:               filename,
-			Name:                       descriptor.Name,
-			Version:                    descriptor.Version,
-			ProjectProvider:            descriptor.ProjectProvider,
-			NativeDependencies:         descriptor.NativeDependencies,
-			NativeDependenciesByOption: descriptor.NativeDependenciesByOption,
+			ManifestPath:                   filename,
+			Name:                           descriptor.Name,
+			Version:                        descriptor.Version,
+			ProjectProvider:                descriptor.ProjectProvider,
+			NativeDependencies:             descriptor.NativeDependencies,
+			NativeDependenciesByOption:     descriptor.NativeDependenciesByOption,
+			NativeDependencyOptionDefaults: descriptor.NativeDependencyOptionDefaults,
 			Definition: &stdlib.Package{
 				Path:         descriptor.Name,
 				ModulePath:   descriptor.Module,
