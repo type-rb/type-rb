@@ -1,0 +1,11 @@
+record EnqueueError
+	message: String
+end
+
+record JobReference
+	id: String
+	job_name: String
+end
+
+class Job
+end
