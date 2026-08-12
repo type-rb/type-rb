@@ -50,11 +50,31 @@ func (g *generator) oidcRuntimeSupport() {
 	g.line(`require "openssl"`, "")
 	g.line(`require "digest"`, "")
 	g.line(`require "uri"`, "")
+	g.line(`TRB_OIDC_PROVIDER_CACHE = {} unless defined?(TRB_OIDC_PROVIDER_CACHE)`, "")
+	g.line(`TRB_OIDC_PROVIDER_MUTEX = Mutex.new unless defined?(TRB_OIDC_PROVIDER_MUTEX)`, "")
 	g.line(`TRB_OIDC_JWKS_CACHE = {} unless defined?(TRB_OIDC_JWKS_CACHE)`, "")
 	g.line(`TRB_OIDC_JWKS_MUTEX = Mutex.new unless defined?(TRB_OIDC_JWKS_MUTEX)`, "")
 	g.line(`def trb_oidc_base64url(value)`, "")
 	g.indent++
 	g.line(`Base64.urlsafe_decode64(value + ("=" * ((4 - value.length % 4) % 4)))`, "")
+	g.indent--
+	g.line(`end`, "")
+	g.line(`def trb_oidc_load_provider(issuer)`, "")
+	g.indent++
+	g.line(`return [nil, { kind: :provider, message: "OIDC issuer is empty" }] if issuer.empty?`, "")
+	g.line(`cached = TRB_OIDC_PROVIDER_MUTEX.synchronize { TRB_OIDC_PROVIDER_CACHE[issuer] }`, "")
+	g.line(`return [cached[:metadata], nil] if cached && cached[:expires] > Time.now.to_i`, "")
+	g.line(`uri = URI.parse(issuer.sub(%r{/+$}, "") + "/.well-known/openid-configuration")`, "")
+	g.line(`response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: 5, read_timeout: 5) { |http| http.get(uri.request_uri) }`, "")
+	g.line(`return [nil, { kind: :provider, message: "load OIDC discovery: HTTP #{response.code}" }] unless response.code.to_i == 200`, "")
+	g.line(`return [nil, { kind: :provider, message: "OIDC discovery response is too large" }] if response.body.bytesize > 1_048_576`, "")
+	g.line(`metadata = JSON.parse(response.body)`, "")
+	g.line(`return [nil, { kind: :provider, message: "OIDC discovery response is invalid" }] unless metadata["issuer"] == issuer && metadata["jwks_uri"].is_a?(String) && !metadata["jwks_uri"].empty?`, "")
+	g.line(`TRB_OIDC_PROVIDER_MUTEX.synchronize { TRB_OIDC_PROVIDER_CACHE[issuer] = { metadata: metadata, expires: Time.now.to_i + 300 } }`, "")
+	g.line(`[metadata, nil]`, "")
+	g.line(`rescue StandardError => error`, "")
+	g.indent++
+	g.line(`[nil, { kind: :provider, message: error.message }]`, "")
 	g.indent--
 	g.line(`end`, "")
 	g.line(`def trb_oidc_verify_bearer(headers, issuer, audience, jwks_uri, roles_claim)`, "")
@@ -68,14 +88,28 @@ func (g *generator) oidcRuntimeSupport() {
 	g.line(`end`, "")
 	g.line(`def trb_oidc_verify_jwt(token, issuer, audience, jwks_uri, roles_claim, nonce)`, "")
 	g.indent++
+	g.line(`if jwks_uri.nil?`, "")
+	g.indent++
+	g.line(`metadata, failure = trb_oidc_load_provider(issuer)`, "")
+	g.line(`return [nil, failure] if failure`, "")
+	g.line(`jwks_uri = metadata["jwks_uri"]`, "")
+	g.indent--
+	g.line(`end`, "")
 	g.line(`segments = token.split(".")`, "")
 	g.line(`return [nil, { kind: :invalid, message: "JWT must contain three segments" }] unless segments.length == 3`, "")
 	g.line(`header = JSON.parse(trb_oidc_base64url(segments[0]))`, "")
 	g.line(`claims = JSON.parse(trb_oidc_base64url(segments[1]))`, "")
 	g.line(`return [nil, { kind: :invalid, message: "JWT must use RS256 with a key id" }] unless header["alg"] == "RS256" && header["kid"].is_a?(String) && !header["kid"].empty?`, "")
-	g.line(`keys, failure = trb_oidc_load_jwks(jwks_uri)`, "")
+	g.line(`keys, failure = trb_oidc_load_jwks(jwks_uri, false)`, "")
 	g.line(`return [nil, failure] if failure`, "")
 	g.line(`jwk = keys.find { |candidate| candidate["kid"] == header["kid"] && candidate["kty"] == "RSA" && [nil, "sig"].include?(candidate["use"]) && [nil, "RS256"].include?(candidate["alg"]) }`, "")
+	g.line(`unless jwk`, "")
+	g.indent++
+	g.line(`keys, failure = trb_oidc_load_jwks(jwks_uri, true)`, "")
+	g.line(`return [nil, failure] if failure`, "")
+	g.line(`jwk = keys.find { |candidate| candidate["kid"] == header["kid"] && candidate["kty"] == "RSA" && [nil, "sig"].include?(candidate["use"]) && [nil, "RS256"].include?(candidate["alg"]) }`, "")
+	g.indent--
+	g.line(`end`, "")
 	g.line(`return [nil, { kind: :invalid, message: "JWT signing key was not found" }] unless jwk`, "")
 	g.line(`modulus = OpenSSL::BN.new(trb_oidc_base64url(jwk.fetch("n")), 2)`, "")
 	g.line(`exponent = OpenSSL::BN.new(trb_oidc_base64url(jwk.fetch("e")), 2)`, "")
@@ -99,11 +133,13 @@ func (g *generator) oidcRuntimeSupport() {
 	g.line(`[nil, { kind: :invalid, message: error.message }]`, "")
 	g.indent--
 	g.line(`end`, "")
-	g.line(`def trb_oidc_load_jwks(uri_text)`, "")
+	g.line(`def trb_oidc_load_jwks(uri_text, force)`, "")
 	g.indent++
-	g.line(`return [nil, { kind: :provider, message: "JWKS URI is empty" }] if uri_text.empty?`, "")
+	g.line(`return [nil, { kind: :provider, message: "JWKS URI is empty" }] if uri_text.nil? || uri_text.empty?`, "")
 	g.line(`cached = TRB_OIDC_JWKS_MUTEX.synchronize { TRB_OIDC_JWKS_CACHE[uri_text] }`, "")
-	g.line(`return [cached[:keys], nil] if cached && cached[:expires] > Time.now.to_i`, "")
+	g.line(`return [cached[:keys], nil] if !force && cached && cached[:expires] > Time.now.to_i`, "")
+	g.line(`return [cached[:keys], nil] if force && cached && cached[:refresh_after] && cached[:refresh_after] > Time.now.to_i`, "")
+	g.line(`TRB_OIDC_JWKS_MUTEX.synchronize { cached[:refresh_after] = Time.now.to_i + 30 } if force && cached`, "")
 	g.line(`uri = URI.parse(uri_text)`, "")
 	g.line(`response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: 5, read_timeout: 5) { |http| http.get(uri.request_uri) }`, "")
 	g.line(`return [nil, { kind: :provider, message: "load JWKS: HTTP #{response.code}" }] unless response.code.to_i == 200`, "")
@@ -111,7 +147,8 @@ func (g *generator) oidcRuntimeSupport() {
 	g.line(`document = JSON.parse(response.body)`, "")
 	g.line(`keys = document["keys"]`, "")
 	g.line(`return [nil, { kind: :provider, message: "JWKS response is invalid" }] unless keys.is_a?(Array) && !keys.empty?`, "")
-	g.line(`TRB_OIDC_JWKS_MUTEX.synchronize { TRB_OIDC_JWKS_CACHE[uri_text] = { keys: keys, expires: Time.now.to_i + 300 } }`, "")
+	g.line(`refresh_after = cached ? cached[:refresh_after] : nil`, "")
+	g.line(`TRB_OIDC_JWKS_MUTEX.synchronize { TRB_OIDC_JWKS_CACHE[uri_text] = { keys: keys, expires: Time.now.to_i + 300, refresh_after: refresh_after } }`, "")
 	g.line(`[keys, nil]`, "")
 	g.line(`rescue StandardError => error`, "")
 	g.indent++
@@ -178,14 +215,21 @@ def trb_oidc_auth_response(status, code)
 end
 
 def trb_oidc_start_login(_request, options, authored_return_to)
-  return trb_oidc_auth_response(500, "invalid_auth_configuration") if options.authorization_endpoint.empty? || options.client_id.empty? || options.redirect_uri.empty? || options.scope.empty? || options.cookie_name.empty?
+  endpoint = options.authorization_endpoint
+  unless endpoint
+    metadata, failure = trb_oidc_load_provider(options.issuer)
+    return trb_oidc_auth_response(502, "identity_provider_unavailable") if failure
+    endpoint = metadata["authorization_endpoint"]
+  end
+  return trb_oidc_auth_response(500, "invalid_auth_configuration") unless endpoint.is_a?(String) && !endpoint.empty?
+  return trb_oidc_auth_response(500, "invalid_auth_configuration") if options.client_id.empty? || options.redirect_uri.empty? || options.scope.empty? || options.cookie_name.empty?
   return_to = !authored_return_to.start_with?("/") || authored_return_to.start_with?("//") || authored_return_to.match?(/[\\\r\n]/) ? "/" : authored_return_to
   state = trb_oidc_random(32)
   nonce = trb_oidc_random(32)
   verifier = trb_oidc_random(48)
   encrypted = trb_oidc_encrypt({ state: state, nonce: nonce, verifier: verifier, return_to: return_to, expires: Time.now.to_i + 600 }, options.cookie_secret)
   challenge = Base64.urlsafe_encode64(Digest::SHA256.digest(verifier), padding: false)
-  uri = URI.parse(options.authorization_endpoint)
+  uri = URI.parse(endpoint)
   query = URI.decode_www_form(uri.query.to_s)
   query.concat([["response_type", "code"], ["client_id", options.client_id], ["redirect_uri", options.redirect_uri], ["scope", options.scope], ["state", state], ["nonce", nonce], ["code_challenge", challenge], ["code_challenge_method", "S256"]])
   query << ["audience", options.audience] if options.audience
@@ -209,7 +253,16 @@ def trb_oidc_complete_login(request, options)
   return trb_oidc_auth_response(400, "invalid_oidc_callback") unless code && state && state_cookies.length == 1
   login = trb_oidc_decrypt(state_cookies.first, options.cookie_secret)
   return trb_oidc_auth_response(400, "invalid_oidc_state") if login.fetch("expires") < Time.now.to_i || !trb_oidc_constant_time(login.fetch("state"), state)
-  uri = URI.parse(options.token_endpoint)
+  token_endpoint = options.token_endpoint
+  jwks_uri = options.jwks_uri
+  if token_endpoint.nil? || jwks_uri.nil?
+    metadata, failure = trb_oidc_load_provider(options.issuer)
+    return trb_oidc_auth_response(502, "identity_provider_unavailable") if failure
+    token_endpoint ||= metadata["token_endpoint"]
+    jwks_uri ||= metadata["jwks_uri"]
+  end
+  return trb_oidc_auth_response(500, "invalid_auth_configuration") unless token_endpoint.is_a?(String) && !token_endpoint.empty?
+  uri = URI.parse(token_endpoint)
   form = URI.encode_www_form(grant_type: "authorization_code", code: code, redirect_uri: options.redirect_uri, code_verifier: login.fetch("verifier"))
   token_request = Net::HTTP::Post.new(uri.request_uri)
   token_request["content-type"] = "application/x-www-form-urlencoded"
@@ -219,7 +272,7 @@ def trb_oidc_complete_login(request, options)
   return trb_oidc_auth_response(502, "identity_provider_error") unless token_response.code.to_i == 200 && token_response.body.bytesize <= 1_048_576
   tokens = JSON.parse(token_response.body)
   return trb_oidc_auth_response(502, "identity_provider_error") unless tokens["id_token"].is_a?(String)
-  principal, failure = trb_oidc_verify_jwt(tokens["id_token"], options.issuer, options.client_id, options.jwks_uri, options.roles_claim, login.fetch("nonce"))
+  principal, failure = trb_oidc_verify_jwt(tokens["id_token"], options.issuer, options.client_id, jwks_uri, options.roles_claim, login.fetch("nonce"))
   return trb_oidc_auth_response(400, "invalid_identity_token") if failure
   csrf = trb_oidc_random(32)
   session = { subject: principal[:subject], name: principal[:name].to_s, email: principal[:email].to_s, roles: principal[:roles], csrf: csrf, id_token: tokens["id_token"], expires: Time.now.to_i + 28_800 }
@@ -259,8 +312,13 @@ end
 
 def trb_oidc_end_session(request, options)
   location = options.post_logout_redirect_uri
-  if options.end_session_endpoint
-    uri = URI.parse(options.end_session_endpoint)
+  endpoint = options.end_session_endpoint
+  unless endpoint
+    metadata, failure = trb_oidc_load_provider(options.issuer)
+    endpoint = metadata["end_session_endpoint"] unless failure
+  end
+  if endpoint
+    uri = URI.parse(endpoint)
     query = URI.decode_www_form(uri.query.to_s)
     query.concat([["post_logout_redirect_uri", options.post_logout_redirect_uri], ["client_id", options.client_id]])
     _principal, session, failure = trb_oidc_session_principal(request.headers, options.cookie_name, options.cookie_secret)

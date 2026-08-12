@@ -9,15 +9,13 @@ func TestCompilePortableBearerAuthentication(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "auth.trb",
 		ModulePath: "app/auth",
-		Source: []byte(`import { OidcAuthError, OidcBearerOptions, OidcPrincipal } from trb/auth/oidc
+		Source: []byte(`import { OidcAuthError, OidcPrincipal, bearer_options } from trb/auth/oidc
 import { Context, Next, Response } from trb/web
 import { authenticate, principal } from trb/web/auth/bearer
 
-AUTH := OidcBearerOptions.new(
+AUTH := bearer_options(
 	issuer: "https://issuer.example/",
 	audience: "api",
-	jwks_uri: "https://issuer.example/.well-known/jwks.json",
-	roles_claim: "roles",
 )
 
 def current_principal(context: Context): OidcPrincipal fails OidcAuthError
@@ -49,9 +47,9 @@ end
 				}
 			}
 			for _, expected := range map[string][]string{
-				"go":         {"trbOidcVerifyBearer", "rsa.VerifyPKCS1v15", "Status: 401"},
-				"ruby":       {"trb_oidc_verify_bearer", "public_key.verify", "status: 401"},
-				"typescript": {"trbOidcVerifyBearer", "crypto.subtle.verify", "status: 401"},
+				"go":         {"trbOidcVerifyBearer", "trbOidcLoadProvider", "rsa.VerifyPKCS1v15", "Status: 401", "oidc.OidcBearerOptions"},
+				"ruby":       {"trb_oidc_verify_bearer", "trb_oidc_load_provider", "public_key.verify", "status: 401"},
+				"typescript": {"trbOidcVerifyBearer", "trbOidcLoadProvider", "crypto.subtle.verify", "status: 401"},
 			}[mode] {
 				if !strings.Contains(output, expected) {
 					t.Fatalf("generated %s bearer auth is missing %q:\n%s", mode, expected, output)

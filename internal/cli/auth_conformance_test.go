@@ -93,6 +93,14 @@ func TestOfficialOidcAuthenticationAcrossAvailableBackends(t *testing.T) {
 			assertOidcResponse(t, client, http.MethodGet, baseURL+"/bearer", "Bearer "+tamperedBearer, nil, 401, "unauthorized")
 			wrongAudience := identity.Token(t, identity.URL, "other-api", "bearer-user", "")
 			assertOidcResponse(t, client, http.MethodGet, baseURL+"/bearer", "Bearer "+wrongAudience, nil, 401, "unauthorized")
+			rotatedBearer := identity.RotateAndToken(t, identity.URL, "api", "rotated-user", "")
+			assertOidcResponse(t, client, http.MethodGet, baseURL+"/bearer", "Bearer "+rotatedBearer, nil, 200, "bearer ok")
+			jwksRequests := identity.JWKSRequests()
+			unknownKey := identity.TokenWithKeyID(t, identity.URL, "api", "unknown-key-user", "", "unknown-key")
+			assertOidcResponse(t, client, http.MethodGet, baseURL+"/bearer", "Bearer "+unknownKey, nil, 401, "unauthorized")
+			if identity.JWKSRequests() != jwksRequests {
+				t.Fatal("unknown signing keys bypassed the JWKS refresh rate limit")
+			}
 
 			loginResponse := assertOidcResponse(t, client, http.MethodGet, baseURL+"/auth/login", "", nil, 302, "")
 			authorizationURL, err := url.Parse(loginResponse.Header.Get("Location"))
@@ -122,6 +130,7 @@ func TestOfficialOidcAuthenticationAcrossAvailableBackends(t *testing.T) {
 
 			assertOidcResponse(t, client, http.MethodGet, baseURL+"/auth/logout", "", nil, 302, "")
 			assertOidcResponse(t, client, http.MethodGet, baseURL+"/session", "", nil, 401, "unauthorized")
+			identity.AssertRequests(t)
 
 			if err := server.Process.Kill(); err != nil {
 				t.Fatal(err)
@@ -155,21 +164,19 @@ def get(_context: Context): Response
 	return text("bearer ok")
 end
 `,
-		"routes/bearer/_middleware.trb": fmt.Sprintf(`import { OidcBearerOptions } from trb/auth/oidc
+		"routes/bearer/_middleware.trb": fmt.Sprintf(`import { bearer_options } from trb/auth/oidc
 import { Context, Next, Response } from trb/web
 import trb/web/auth/bearer
 
-BEARER_AUTH := OidcBearerOptions.new(
+BEARER_AUTH := bearer_options(
 	issuer: %q,
 	audience: "api",
-	jwks_uri: %q,
-	roles_claim: "roles",
 )
 
 def call(context: Context, next_handler: Next): Response
 	return bearer.authenticate(context, next_handler, BEARER_AUTH)
 end
-`, issuer, issuer+"/jwks"),
+`, issuer),
 		"routes/session/index.trb": `import { Context, Response, text } from trb/web
 
 def get(_context: Context): Response
@@ -180,7 +187,7 @@ def post(_context: Context): Response
 	return text("session ok")
 end
 `,
-		"routes/session/_middleware.trb": fmt.Sprintf(`import { OidcSessionOptions } from trb/auth/oidc
+		"routes/session/_middleware.trb": fmt.Sprintf(`import { session_options } from trb/auth/oidc
 import { Context, Next, Response } from trb/web
 import trb/web/auth/session
 
@@ -190,7 +197,7 @@ def call(context: Context, next_handler: Next): Response
 	return session.authenticate(context, next_handler, SESSION_AUTH)
 end
 `, oidcSessionOptionsSource(issuer, redirectURI)),
-		"routes/auth/login.trb": fmt.Sprintf(`import { OidcSessionOptions } from trb/auth/oidc
+		"routes/auth/login.trb": fmt.Sprintf(`import { session_options } from trb/auth/oidc
 import { Context, Response } from trb/web
 import trb/web/auth/session
 
@@ -200,7 +207,7 @@ def get(context: Context): Response
 	return session.start_login(context, LOGIN_AUTH, "/")
 end
 `, oidcSessionOptionsSource(issuer, redirectURI)),
-		"routes/auth/callback.trb": fmt.Sprintf(`import { OidcSessionOptions } from trb/auth/oidc
+		"routes/auth/callback.trb": fmt.Sprintf(`import { session_options } from trb/auth/oidc
 import { Context, Response } from trb/web
 import trb/web/auth/session
 
@@ -210,7 +217,7 @@ def get(context: Context): Response
 	return session.complete_login(context, CALLBACK_AUTH)
 end
 `, oidcSessionOptionsSource(issuer, redirectURI)),
-		"routes/auth/logout.trb": fmt.Sprintf(`import { OidcSessionOptions } from trb/auth/oidc
+		"routes/auth/logout.trb": fmt.Sprintf(`import { session_options } from trb/auth/oidc
 import { Context, Response } from trb/web
 import trb/web/auth/session
 
@@ -233,23 +240,15 @@ end
 }
 
 func oidcSessionOptionsSource(issuer, redirectURI string) string {
-	return fmt.Sprintf(`OidcSessionOptions.new(
+	return fmt.Sprintf(`session_options(
 	issuer: %q,
 	client_id: "server-client",
 	client_secret: "server-secret",
-	authorization_endpoint: %q,
-	token_endpoint: %q,
-	jwks_uri: %q,
 	redirect_uri: %q,
 	post_logout_redirect_uri: "http://127.0.0.1/",
-	end_session_endpoint: nil,
-	scope: "openid profile email",
-	audience: nil,
-	roles_claim: "roles",
-	cookie_name: "trb_session",
 	cookie_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 	secure: false,
-)`, issuer, issuer+"/authorize", issuer+"/token", issuer+"/jwks", redirectURI)
+)`, issuer, redirectURI)
 }
 
 func assertOidcResponse(t *testing.T, client *http.Client, method, target, authorization string, headers map[string]string, status int, body string) *http.Response {
@@ -294,10 +293,13 @@ func cookieValue(jar http.CookieJar, rawURL, name string) string {
 
 type oidcTestProvider struct {
 	*httptest.Server
-	key       *rsa.PrivateKey
-	mu        sync.Mutex
-	nonce     string
-	challenge string
+	key               *rsa.PrivateKey
+	kid               string
+	mu                sync.Mutex
+	nonce             string
+	challenge         string
+	discoveryRequests int
+	jwksRequests      int
 }
 
 func newOIDCTestProvider(t *testing.T) *oidcTestProvider {
@@ -306,13 +308,28 @@ func newOIDCTestProvider(t *testing.T) *oidcTestProvider {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := &oidcTestProvider{key: key}
+	provider := &oidcTestProvider{key: key, kid: "test-key"}
 	provider.Server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
+		case "/.well-known/openid-configuration":
+			provider.mu.Lock()
+			provider.discoveryRequests++
+			provider.mu.Unlock()
+			_ = json.NewEncoder(response).Encode(map[string]string{
+				"issuer":                 provider.URL,
+				"authorization_endpoint": provider.URL + "/authorize",
+				"token_endpoint":         provider.URL + "/token",
+				"jwks_uri":               provider.URL + "/jwks",
+				"end_session_endpoint":   provider.URL + "/logout",
+			})
 		case "/jwks":
+			provider.mu.Lock()
+			provider.jwksRequests++
+			key, kid := provider.key, provider.kid
+			provider.mu.Unlock()
 			modulus := base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes())
 			exponent := base64.RawURLEncoding.EncodeToString([]byte{1, 0, 1})
-			_ = json.NewEncoder(response).Encode(map[string]any{"keys": []map[string]string{{"kid": "test-key", "kty": "RSA", "use": "sig", "alg": "RS256", "n": modulus, "e": exponent}}})
+			_ = json.NewEncoder(response).Encode(map[string]any{"keys": []map[string]string{{"kid": kid, "kty": "RSA", "use": "sig", "alg": "RS256", "n": modulus, "e": exponent}}})
 		case "/token":
 			if username, password, ok := request.BasicAuth(); !ok || username != "server-client" || password != "server-secret" {
 				http.Error(response, "invalid client", http.StatusUnauthorized)
@@ -348,9 +365,53 @@ func (provider *oidcTestProvider) ExpectLogin(nonce, challenge string) {
 	provider.challenge = challenge
 }
 
+func (provider *oidcTestProvider) RotateAndToken(t *testing.T, issuer, audience, subject, nonce string) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.mu.Lock()
+	provider.key = key
+	provider.kid = "rotated-key"
+	provider.mu.Unlock()
+	return provider.Token(t, issuer, audience, subject, nonce)
+}
+
+func (provider *oidcTestProvider) AssertRequests(t *testing.T) {
+	t.Helper()
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if provider.discoveryRequests < 1 || provider.jwksRequests < 2 {
+		t.Fatalf("unexpected provider requests: discovery=%d jwks=%d", provider.discoveryRequests, provider.jwksRequests)
+	}
+}
+
+func (provider *oidcTestProvider) JWKSRequests() int {
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	return provider.jwksRequests
+}
+
 func (provider *oidcTestProvider) Token(t *testing.T, issuer, audience, subject, nonce string) string {
 	t.Helper()
-	header, _ := json.Marshal(map[string]string{"alg": "RS256", "kid": "test-key", "typ": "JWT"})
+	provider.mu.Lock()
+	key, kid := provider.key, provider.kid
+	provider.mu.Unlock()
+	return provider.tokenWithKey(t, key, kid, issuer, audience, subject, nonce)
+}
+
+func (provider *oidcTestProvider) TokenWithKeyID(t *testing.T, issuer, audience, subject, nonce, kid string) string {
+	t.Helper()
+	provider.mu.Lock()
+	key := provider.key
+	provider.mu.Unlock()
+	return provider.tokenWithKey(t, key, kid, issuer, audience, subject, nonce)
+}
+
+func (provider *oidcTestProvider) tokenWithKey(t *testing.T, key *rsa.PrivateKey, kid, issuer, audience, subject, nonce string) string {
+	t.Helper()
+	header, _ := json.Marshal(map[string]string{"alg": "RS256", "kid": kid, "typ": "JWT"})
 	claims := map[string]any{
 		"iss":   issuer,
 		"aud":   audience,
@@ -368,7 +429,7 @@ func (provider *oidcTestProvider) Token(t *testing.T, issuer, audience, subject,
 	encodedPayload := base64.RawURLEncoding.EncodeToString(payload)
 	message := encodedHeader + "." + encodedPayload
 	digest := sha256.Sum256([]byte(message))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, provider.key, crypto.SHA256, digest[:])
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
 	if err != nil {
 		t.Fatal(err)
 	}
