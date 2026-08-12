@@ -2757,6 +2757,26 @@ end
 	}
 }
 
+func TestQualifiedGenericPackageFunctionsRemainFunctions(t *testing.T) {
+	source := []byte(`import trb/std/json
+
+def encode_message()
+	json.encode<String>("hello")
+	return
+end
+`)
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("qualified_generic_function.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected a qualified generic package function: %v", mode, err)
+		}
+		if strings.Contains(string(artifact.Output), "AnyFail") {
+			t.Fatalf("%s lowered a package function as an instance generic method:\n%s", mode, artifact.Output)
+		}
+	}
+}
+
 func TestInitialUserGenericDiagnosticsAreModeIndependent(t *testing.T) {
 	tests := []struct {
 		name   string

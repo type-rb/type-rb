@@ -95,6 +95,10 @@ than detailed syntax.
 - Continue representative backend, server-rendered, and browser application
   slices with authentication, validation, transactions, background work, and
   realistic failure paths.
+- Evolve the initial buffered TypeScript browser HTTP client with generated
+  endpoint-contract adapters, external contract import, streaming, cancellation
+  handles, and established server-state package interop without introducing a
+  second request model.
 - Separate one-shot `trb run` from framework development servers and add a
   coherent `trb dev` and runtime-adapter model for backend and frontend
   development servers.

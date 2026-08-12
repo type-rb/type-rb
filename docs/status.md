@@ -161,6 +161,16 @@ commands provide plan, guarded apply, export, lock, and drift checks around a
 pinned external sqldef executable on SQLite, PostgreSQL, and MySQL. Production
 compatibility policy remains future work.
 
+TypeScript browser applications can import the official
+`trb/platform/typescript/browser` package. Its single request primitive accepts
+typed methods, repeated query parameters and headers, text/bytes/form/JSON
+bodies, and timeouts. Fetch responses retain status, headers, final URL, and
+buffered bytes; explicit JSON decoding produces `Response<T>` and preserves the
+raw response in a classified `RequestError` when the contract is invalid.
+Non-2xx statuses remain ordinary responses. The backend inserts suspension
+only in generated TypeScript, so TypeRB source does not add target-specific
+`async` syntax.
+
 The compiler pipeline is:
 
 ```text

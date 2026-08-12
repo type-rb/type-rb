@@ -405,6 +405,25 @@ func (r Result) Member(alias, name string) (Binding, bool) {
 // deliberately backed by the same standard package definition as its
 // function form, even though TypeRB source does not need to import the method.
 func (r Result) ReceiverMethod(receiver types.Type, name string) (Binding, bool) {
+	imports := make([]*Import, 0, len(r.Imports))
+	seen := map[*Import]bool{}
+	for _, imported := range r.Imports {
+		if imported == nil || imported.Definition == nil || seen[imported] {
+			continue
+		}
+		seen[imported] = true
+		imports = append(imports, imported)
+	}
+	sort.Slice(imports, func(i, j int) bool { return imports[i].Path < imports[j].Path })
+	for _, imported := range imports {
+		symbol, exists := imported.Definition.Symbols[name]
+		if !exists || !symbol.HasReceiver() || receiver.Nullable || !stdlib.ReceiverMatches(symbol.Receiver, receiver, symbol.TypeParameters) {
+			continue
+		}
+		copy := symbol
+		copy.Receiver = receiver
+		return Binding{Import: imported, Name: name, Library: &copy}, true
+	}
 	definition, symbol, ok := stdlib.LookupReceiverMethod(receiver, name)
 	if !ok {
 		return Binding{}, false
@@ -461,6 +480,37 @@ func (r Result) ImportedType(typeName string) (Binding, bool) {
 			copy := exported
 			return Binding{Import: imported, Name: typeName, Export: &copy}, true
 		}
+	}
+	return Binding{}, false
+}
+
+// InferredTypeMember resolves a member on a type produced by an explicitly
+// imported package even when the source did not import that type by name. This
+// keeps inferred library values usable without weakening named-import rules
+// for source annotations.
+func (r Result) InferredTypeMember(typeName, memberName string) (Binding, bool) {
+	imports := make([]*Import, 0, len(r.Imports))
+	seen := map[*Import]bool{}
+	for _, imported := range r.Imports {
+		if imported == nil || seen[imported] {
+			continue
+		}
+		seen[imported] = true
+		imports = append(imports, imported)
+	}
+	sort.Slice(imports, func(i, j int) bool { return imports[i].Path < imports[j].Path })
+	for _, imported := range imports {
+		exported, exists := imported.Exports[typeName]
+		if !exists {
+			continue
+		}
+		member, exists := exported.Members[memberName]
+		if !exists {
+			return Binding{}, false
+		}
+		exportCopy := exported
+		memberCopy := member
+		return Binding{Import: imported, Name: memberName, Export: &exportCopy, Member: &memberCopy}, true
 	}
 	return Binding{}, false
 }

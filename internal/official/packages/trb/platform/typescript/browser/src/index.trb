@@ -1,0 +1,109 @@
+enum HttpMethod
+	Get = "GET"
+	Post = "POST"
+	Put = "PUT"
+	Patch = "PATCH"
+	Delete = "DELETE"
+	Head = "HEAD"
+end
+
+record Header
+	name: String
+	value: String
+end
+
+record QueryParameter
+	name: String
+	value: String
+end
+
+class Headers
+	readonly @values: Array<Header>
+
+	def initialize(values: Array<Header>)
+		@values = values
+		return
+	end
+
+	def all(name: String): Array<String>
+		mut matches: Array<String> := []
+		normalized := name.downcase()
+		@values.each do |header|
+			if header.name.downcase() == normalized
+				matches.push(header.value)
+			end
+		end
+		return matches
+	end
+
+	def first(name: String): String?
+		matches := all(name)
+		if matches.empty?()
+			return nil
+		end
+		return matches[0]
+	end
+end
+
+class Body
+	readonly @bytes: Bytes
+
+	def initialize(bytes: Bytes)
+		@bytes = bytes
+		return
+	end
+end
+
+record NoBody
+end
+
+class Response<T>
+	readonly @status: Integer
+	readonly @headers: Headers
+	readonly @url: String
+	readonly @body: T
+
+	def initialize(status: Integer, headers: Headers, url: String, body: T)
+		@status = status
+		@headers = headers
+		@url = url
+		@body = body
+		return
+	end
+end
+
+enum RequestErrorKind
+	Network
+	Timeout
+	Abort
+	Contract
+end
+
+class RequestError
+	readonly @kind: RequestErrorKind
+	readonly @message: String
+	readonly @response: Response<Body>?
+
+	def initialize(kind: RequestErrorKind, message: String, response: Response<Body>? = nil)
+		@kind = kind
+		@message = message
+		@response = response
+		return
+	end
+end
+
+enum RequestBody
+	Text(value: String)
+	Bytes(value: Bytes)
+	Form(value: Array<QueryParameter>)
+	Json(value: String)
+end
+
+class HttpClient
+	readonly @base_url: String
+
+	def initialize(base_url: String = "")
+		@base_url = base_url
+		return
+	end
+end

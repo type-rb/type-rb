@@ -9,6 +9,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if generated, ok := g.browserHTTPIntrinsic(name, call, arguments); ok {
+		return generated
+	}
 	if value, ok := g.timeIntrinsic(name, call, arguments); ok {
 		return value
 	}
@@ -462,12 +465,6 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Number((" + arguments[0] + ".currentTarget as HTMLElement).dataset[" + arguments[1] + "])"
 	case "trb.platform.typescript.react.data_boolean":
 		return "((" + arguments[0] + ".currentTarget as HTMLElement).dataset[" + arguments[1] + "] === \"true\")"
-	case "trb.platform.typescript.web.get_json":
-		return "void fetch(" + arguments[0] + ").then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }).then(" + arguments[1] + " as any)"
-	case "trb.platform.typescript.web.post_json":
-		return g.fetchJSON("POST", arguments)
-	case "trb.platform.typescript.web.patch_json":
-		return g.fetchJSON("PATCH", arguments)
 	default:
 		return "undefined"
 	}

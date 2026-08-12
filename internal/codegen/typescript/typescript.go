@@ -126,6 +126,22 @@ func (g *generator) statement(statement ir.Statement) {
 			return
 		}
 		importPath := tsImportPath(g.modulePath, n.Path)
+		browserRuntime := n.Path == "trb/platform/typescript/browser/index" && n.RuntimeRequired
+		if browserRuntime {
+			browserAlias := "__trb_browser"
+			if n.Namespace && n.Alias != "" {
+				browserAlias = n.Alias
+			}
+			for symbol, kind := range n.SymbolKinds {
+				switch kind {
+				case "class", "record", "enum", "interface", "type_alias", "enum_alias":
+					g.typeAliases[symbol] = browserAlias
+				}
+			}
+			if !n.Namespace || n.Alias == "" {
+				g.line("import * as " + browserAlias + " from " + strconv.Quote(importPath) + ";")
+			}
+		}
 		if n.Namespace && n.Alias != "" {
 			for symbol, kind := range n.SymbolKinds {
 				switch kind {
@@ -154,7 +170,7 @@ func (g *generator) statement(statement ir.Statement) {
 					values = append(values, symbol)
 				}
 			}
-			if intrinsicRuntime {
+			if intrinsicRuntime && !browserRuntime {
 				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
 			if len(values) > 0 {
@@ -915,6 +931,10 @@ func (g *generator) expr(expression ir.Expression) string {
 			if reference.ReceiverMethod {
 				if member, ok := n.Callee.(*ir.Member); ok {
 					parts = append([]string{g.expr(member.Receiver)}, parts...)
+				} else if application, ok := n.Callee.(*ir.TypeApply); ok {
+					if member, memberApply := application.Receiver.(*ir.Member); memberApply {
+						parts = append([]string{g.expr(member.Receiver)}, parts...)
+					}
 				}
 			}
 			generated := g.intrinsic(reference.Intrinsic, n, parts)
@@ -1496,10 +1516,6 @@ func (b *tsJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 	}
 	b.source.WriteString("const " + name + " = (value: " + valueType + "): " + jsonValue + " => { " + body + " }; ")
 	return name
-}
-
-func (g *generator) fetchJSON(method string, arguments []string) string {
-	return "void fetch(" + arguments[0] + ", { method: \"" + method + "\", headers: { \"Content-Type\": \"application/json\" }, body: JSON.stringify(" + arguments[1] + ") }).then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }).then(" + arguments[2] + " as any)"
 }
 
 func expressionReference(expression ir.Expression) *ir.Reference {

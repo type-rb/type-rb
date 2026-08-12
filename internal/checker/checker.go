@@ -1814,7 +1814,21 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 	if member, ok := node.Receiver.(*ast.MemberExpression); ok && !member.Namespace {
 		receiver := c.result.Expressions[member.Receiver]
 		classAccess := false
-		if local, found := c.localMember(receiver.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
+		if binding, found := c.result.References[node.Receiver]; found && binding.Library != nil && binding.Library.HasReceiver() && len(binding.Library.TypeParameters) > 0 {
+			application.Kind = "method"
+			application.Owner = receiver.Name
+			application.OwnerArguments = append([]types.Type(nil), receiver.Args...)
+			application.TypeParameters = append([]string(nil), binding.Library.TypeParameters...)
+			for _, parameter := range binding.Library.Parameters {
+				application.Parameters = append(application.Parameters, parameter.Type)
+				if !parameter.Optional {
+					application.Required++
+				}
+			}
+			application.Variadic = binding.Library.Variadic
+			application.ReturnType = binding.Library.Return
+			application.FailureType = binding.Library.Fails
+		} else if local, found := c.localMember(receiver.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
 			local = c.specializeLocalClassMember(receiver, local)
 			if len(local.method.TypeParameters) > 0 {
 				application.Kind = "method"
@@ -1954,9 +1968,9 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic string, typ types.Type) {
 	operation := ""
 	switch intrinsic {
-	case "trb.internal.json.decode", "trb.web.request_json":
+	case "trb.internal.json.decode", "trb.web.request_json", "trb.platform.typescript.browser.response_json":
 		operation = "decode"
-	case "trb.internal.json.encode", "trb.web.json":
+	case "trb.internal.json.encode", "trb.web.json", "trb.platform.typescript.browser.json_body":
 		operation = "encode"
 	default:
 		return
@@ -3671,6 +3685,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.result.ClassFieldAccesses[n] = classType && binding.Member != nil && binding.Member.Kind == resolver.ValueExport
 			c.markImportedSymbolUsed(receiverType.Name)
 			c.recordReference(n, binding)
+		} else if binding, exists := c.resolution.InferredTypeMember(receiverType.Name, n.Name); exists && binding.Member != nil && binding.Member.Class == classAccess {
+			binding = specializeResolvedEnumMember(receiverType, binding)
+			binding = specializeResolvedClassMember(receiverType, binding)
+			typ = binding.Type()
+			c.result.ClassFieldAccesses[n] = binding.Export != nil && binding.Export.Kind == resolver.ClassExport && binding.Member.Kind == resolver.ValueExport
+			c.recordReference(n, binding)
 		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			typ = member.Return
 			c.external[n] = member
@@ -3680,7 +3700,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		} else if exported, exists := c.resolution.CompilerOwnedType(receiverType.Name); exists {
 			if member, found := exported.Members[n.Name]; found && !member.Class {
-				typ = member.Type
+				binding := resolver.Binding{Export: &exported, Member: &member, Name: member.Name}
+				binding = specializeResolvedClassMember(receiverType, binding)
+				typ = binding.Type()
+				c.result.ClassFieldAccesses[n] = exported.Kind == resolver.ClassExport && member.Kind == resolver.ValueExport
 			} else if n.Name != "new" {
 				c.error(n.Span(), fmt.Sprintf("type %s has no member %s", receiverType.Name, n.Name))
 			}
@@ -3799,7 +3822,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.error(n.Span(), fmt.Sprintf("cannot infer %s for %s()", strings.Join(unresolved, ", "), binding.Name))
 					typ = invalidType()
 				}
-				if (library.Intrinsic == "trb.internal.json.encode" || library.Intrinsic == "trb.web.json") && len(argumentTypes) >= 1 {
+				if (library.Intrinsic == "trb.internal.json.encode" || library.Intrinsic == "trb.web.json" || library.Intrinsic == "trb.platform.typescript.browser.json_body") && len(argumentTypes) >= 1 {
 					c.checkCodecApplication(n, library.Intrinsic, argumentTypes[0])
 				}
 				c.checkLibraryEqualityRequirements(n.Span(), binding.Name, *library)

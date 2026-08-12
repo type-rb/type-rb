@@ -970,7 +970,7 @@ func (l *lowerer) effectPropagation(span token.Span, value ir.Expression, succes
 	returnFailure := l.resultFailure(span, boundary, errorIdentifier)
 
 	return &ir.Case{
-		ExprBase: ir.NewExprBase(span, success),
+		ExprBase: ir.NewExprBase(span, effectSuccessType(success)),
 		Value:    value,
 		Branches: []ir.CaseBranch{
 			{
