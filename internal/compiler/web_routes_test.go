@@ -175,10 +175,11 @@ func TestCompileProjectRejectsInvalidWebMiddlewareSignature(t *testing.T) {
 			Filename:   "/project/src/routes/_middleware.trb",
 			ModulePath: "routes/_middleware",
 			Package:    "routes",
-			Source: []byte(`import { Context, Response } from trb/web
+			Source: []byte(`import { Body, Headers } from trb/http
+import { Context, Response } from trb/web
 
 def call(context: Context): Response
-	return Response.new(status: 204, headers: {}, body: "".to_bytes())
+	return Response.new(status: 204, headers: Headers.new(), body: Body.empty())
 end
 `),
 		},
@@ -296,10 +297,11 @@ end
 }
 
 func TestCompileProjectRejectsAmbiguousWebRoutes(t *testing.T) {
-	routeSource := []byte(`import { Response } from trb/web
+	routeSource := []byte(`import { Body, Headers } from trb/http
+import { Response } from trb/web
 
 def get(): Response
-	return Response.new(status: 204, headers: {}, body: "".to_bytes())
+	return Response.new(status: 204, headers: Headers.new(), body: Body.empty())
 end
 `)
 	sources := []SourceUnit{
@@ -360,11 +362,11 @@ func assertWebServerTarget(t *testing.T, mode string, artifact *Artifact) {
 	var targets []string
 	switch mode {
 	case "go":
-		targets = []string{"func trbWebServe(config web.ServerConfig)", "http.MaxBytesReader(writer, request.Body, int64(config.BodyLimitBytes))", "request.URL.EscapedPath()", "request.URL.RawQuery", `net.JoinHostPort(config.Host, strconv.Itoa(config.Port))`, "signal.NotifyContext", `trbWebServe(web.ServerConfig{Host: "127.0.0.1", Port: 4100, BodyLimitBytes: 2048, ShutdownTimeoutMilliseconds: 500})`}
+		targets = []string{"func trbWebServe(config web.ServerConfig)", "nethttp.MaxBytesReader(writer, request.Body, int64(config.BodyLimitBytes))", "request.URL.EscapedPath()", "request.URL.RawQuery", `net.JoinHostPort(config.Host, strconv.Itoa(config.Port))`, "signal.NotifyContext", `trbWebServe(web.ServerConfig{Host: "127.0.0.1", Port: 4100, BodyLimitBytes: 2048, ShutdownTimeoutMilliseconds: 500})`}
 	case "ruby":
 		targets = []string{"def trb_web_serve(config)", "content_length > config.body_limit_bytes", `path, query_string = target.split("?", 2)`, "Signal.trap(signal)", `TCPServer.new(config.host, config.port)`, `trb_web_serve(ServerConfig.new(host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500))`}
 	case "typescript":
-		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(config: TrbWebServerConfig)", "if (size > config.body_limit_bytes)", `const target = incoming.url ?? "/";`, "path, query_string, headers, body", `process.once("SIGTERM", shutdown)`, `server.listen(config.port, config.host)`, `trb_web_serve({ host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500 });`}
+		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(config: TrbWebServerConfig)", "if (size > config.body_limit_bytes)", `const target = incoming.url ?? "/";`, "headers: new __trb_http.Headers(header_entries)", `process.once("SIGTERM", shutdown)`, `server.listen(config.port, config.host)`, `trb_web_serve({ host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500 });`}
 	}
 	targets = append(targets, "payload_too_large")
 	for _, target := range targets {

@@ -409,7 +409,7 @@ func rubyWebLogger(arguments []string) string {
 
 func rubyWebRequestJSON(call *ir.Call, request string) string {
 	decoded := rubyJSONDecode(call, "source")
-	return "-> { request_value = " + request + "; content_types = request_value.headers.each_with_object([]) { |(name, values), result| result.concat(values) if name.downcase == \"content-type\" }; if content_types.empty?; Result::Err.new(RequestError::MissingContentType); elsif content_types.length != 1; Result::Err.new(RequestError::DuplicateContentType); else; media_type = content_types.first.split(\";\", 2).first.strip.downcase; if media_type != \"application/json\" && !(media_type.start_with?(\"application/\") && media_type.end_with?(\"+json\")); Result::Err.new(RequestError::UnsupportedContentType.new(content_types.first)); else; source = request_value.body.dup.force_encoding(Encoding::UTF_8); if !source.valid_encoding?; Result::Err.new(RequestError::InvalidUtf8); else; decoded = " + decoded + "; if decoded.is_a?(Result::Err); Result::Err.new(RequestError::InvalidJson.new(decoded.error)); else; decoded; end; end; end; end }.call"
+	return "-> { request_value = " + request + "; content_types = request_value.headers.entries.each_with_object([]) { |header, result| result << header.value if header.name.downcase == \"content-type\" }; if content_types.empty?; Result::Err.new(RequestError::MissingContentType); elsif content_types.length != 1; Result::Err.new(RequestError::DuplicateContentType); else; media_type = content_types.first.split(\";\", 2).first.strip.downcase; if media_type != \"application/json\" && !(media_type.start_with?(\"application/\") && media_type.end_with?(\"+json\")); Result::Err.new(RequestError::UnsupportedContentType.new(content_types.first)); else; source = request_value.body.bytes.dup.force_encoding(Encoding::UTF_8); if !source.valid_encoding?; Result::Err.new(RequestError::InvalidUtf8); else; decoded = " + decoded + "; if decoded.is_a?(Result::Err); Result::Err.new(RequestError::InvalidJson.new(decoded.error)); else; decoded; end; end; end; end }.call"
 }
 
 func rubyWebJSON(call *ir.Call, arguments []string) string {
@@ -421,6 +421,6 @@ func rubyWebJSON(call *ir.Call, arguments []string) string {
 		status = arguments[1]
 	}
 	encoded := rubyJSONEncode(call, arguments[0])
-	headers := `{ "content-type" => ["application/json; charset=utf-8"] }`
-	return "-> { encoded = " + encoded + "; if encoded.is_a?(Result::Err); Response.new(status: 500, headers: " + headers + ", body: \"{\\\"error\\\":\\\"internal_server_error\\\"}\".b); else; Response.new(status: " + status + ", headers: " + headers + ", body: encoded.value.b); end }.call"
+	headers := `Headers.new([Header.new(name: "content-type", value: "application/json; charset=utf-8")])`
+	return "-> { encoded = " + encoded + "; if encoded.is_a?(Result::Err); Response.new(status: 500, headers: " + headers + ", body: Body.new(\"{\\\"error\\\":\\\"internal_server_error\\\"}\".b)); else; Response.new(status: " + status + ", headers: " + headers + ", body: Body.new(encoded.value.b)); end }.call"
 }

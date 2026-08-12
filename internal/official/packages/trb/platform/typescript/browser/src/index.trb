@@ -1,58 +1,5 @@
-enum HttpMethod
-	Get = "GET"
-	Post = "POST"
-	Put = "PUT"
-	Patch = "PATCH"
-	Delete = "DELETE"
-	Head = "HEAD"
-end
-
-record Header
-	name: String
-	value: String
-end
-
-record QueryParameter
-	name: String
-	value: String
-end
-
-class Headers
-	readonly @values: Array<Header>
-
-	def initialize(values: Array<Header>)
-		@values = values
-		return
-	end
-
-	def all(name: String): Array<String>
-		mut matches: Array<String> := []
-		normalized := name.downcase()
-		@values.each do |header|
-			if header.name.downcase() == normalized
-				matches.push(header.value)
-			end
-		end
-		return matches
-	end
-
-	def first(name: String): String?
-		matches := all(name)
-		if matches.empty?()
-			return nil
-		end
-		return matches[0]
-	end
-end
-
-class Body
-	readonly @bytes: Bytes
-
-	def initialize(bytes: Bytes)
-		@bytes = bytes
-		return
-	end
-end
+import { Body, Header, Headers } from trb/http
+import { QueryParameter } from trb/std/url
 
 record NoBody
 end
@@ -106,4 +53,12 @@ class HttpClient
 		@base_url = base_url
 		return
 	end
+end
+
+def _transport_response(status: Integer, headers: Array<Header>, url: String, bytes: Bytes): Response<Body>
+	return Response<Body>.new(status, Headers.new(headers), url, Body.new(bytes))
+end
+
+def _map_response<T>(response: Response<Body>, body: T): Response<T>
+	return Response<T>.new(response.status, response.headers, response.url, body)
 end

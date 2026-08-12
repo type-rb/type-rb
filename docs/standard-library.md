@@ -563,4 +563,5 @@ The current portable standard library includes:
 - `trb/std/unit`
 
 Platform packages are mode checked and remain separate from the portable
-standard library.
+standard library. Portable official application packages such as `trb/http`,
+`trb/web`, and `trb/orm` are documented in their dedicated guides.

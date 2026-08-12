@@ -10,14 +10,13 @@ higher-level API objects that use it:
 
 ```trb
 import {
-	Header,
 	HttpClient,
-	HttpMethod,
-	QueryParameter,
 	RequestError,
 	Response,
 	json_body,
 } from trb/platform/typescript/browser
+import { Header, Headers, HttpMethod } from trb/http
+import { QueryParameter } from trb/std/url
 
 record Todo
 	id: Integer
@@ -32,7 +31,7 @@ def fetch_todo(client: HttpClient, id: Integer): Response<Todo> fails RequestErr
 	raw := client.request(
 		"/todos",
 		query: [QueryParameter.new(name: "id", value: id.to_s())],
-		headers: [Header.new(name: "accept", value: "application/json")],
+		headers: Headers.new([Header.new(name: "accept", value: "application/json")]),
 		timeout_milliseconds: 2000,
 	)
 	return raw.json<Todo>()
@@ -40,7 +39,7 @@ end
 
 def create_todo(client: HttpClient, input: CreateTodoInput): Response<Todo> fails RequestError
 	body := json_body(input)
-	raw := client.request("/todos", method: HttpMethod::Post, body: body)
+	raw := client.request("/todos", method: HttpMethod.post(), body: body)
 	return raw.json<Todo>()
 end
 ```
@@ -62,8 +61,10 @@ explicitly when no endpoint contract is available:
   `Response<NoBody>`.
 
 `response.headers.first(name)` performs case-insensitive lookup,
-`response.headers.all(name)` preserves repeated values, and
-`response.headers.values` exposes the ordered header list.
+`response.headers.values(name)` preserves repeated values, and
+`response.headers.entries()` exposes the ordered header list. These types come
+from portable `trb/http`, so server and browser packages share the same HTTP
+value model.
 
 Declared HTTP statuses, including non-2xx statuses, remain ordinary responses.
 They are not converted into transport errors. Literal status fields and union

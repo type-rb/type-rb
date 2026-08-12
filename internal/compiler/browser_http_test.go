@@ -7,16 +7,14 @@ import (
 
 func TestTypeScriptBrowserHTTPClient(t *testing.T) {
 	source := []byte(`import {
-	Body,
-	Header,
 	HttpClient,
-	HttpMethod,
 	NoBody,
-	QueryParameter,
 	RequestError,
 	Response,
 	json_body,
 } from trb/platform/typescript/browser
+import { Body, Header, Headers, HttpMethod } from trb/http
+import { QueryParameter } from trb/std/url
 
 record Todo
 	id: Integer
@@ -28,13 +26,13 @@ record CreateTodoInput
 end
 
 def fetch_todo(client: HttpClient, id: Integer): Response<Todo> fails RequestError
-	raw := client.request("/todos", query: [QueryParameter.new(name: "id", value: id.to_s())], headers: [Header.new(name: "accept", value: "application/json")], timeout_milliseconds: 1000)
+	raw := client.request("/todos", query: [QueryParameter.new(name: "id", value: id.to_s())], headers: Headers.new([Header.new(name: "accept", value: "application/json")]), timeout_milliseconds: 1000)
 	return raw.json<Todo>()
 end
 
 def create_todo(client: HttpClient, input: CreateTodoInput): Response<Todo> fails RequestError
 	body := json_body(input)
-	raw := client.request("/todos", method: HttpMethod::Post, body: body)
+	raw := client.request("/todos", method: HttpMethod.post(), body: body)
 	return raw.json<Todo>()
 end
 
@@ -171,7 +169,7 @@ end
 		}
 		found = true
 		output := string(artifact.Output)
-		for _, want := range []string{"export class Headers", "all(name: string)", "export class Response<T>", "export class RequestError", "export class HttpClient"} {
+		for _, want := range []string{"export class Response<T>", "export class RequestError", "export class HttpClient"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("generated browser package is missing %q:\n%s", want, output)
 			}
@@ -179,6 +177,18 @@ end
 	}
 	if !found {
 		t.Fatal("official browser package artifact is missing")
+	}
+	foundHTTP := false
+	for _, artifact := range artifacts {
+		if artifact.IR.ModulePath == "trb/http/index" {
+			foundHTTP = true
+			if !strings.Contains(string(artifact.Output), "export class Headers") {
+				t.Fatalf("generated HTTP package does not define Headers:\n%s", artifact.Output)
+			}
+		}
+	}
+	if !foundHTTP {
+		t.Fatal("official trb/http package artifact is missing")
 	}
 }
 

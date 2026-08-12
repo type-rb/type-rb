@@ -71,7 +71,7 @@ func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 				{Name: "path", Type: types.FromName("String")},
 				{Name: "method", Type: types.FromName("HttpMethod"), Optional: true, Keyword: true},
 				{Name: "query", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("QueryParameter")}}, Optional: true, Keyword: true},
-				{Name: "headers", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Header")}}, Optional: true, Keyword: true},
+				{Name: "headers", Type: types.FromName("Headers"), Optional: true, Keyword: true},
 				{Name: "body", Type: nullable(types.FromName("RequestBody")), Optional: true, Keyword: true},
 				{Name: "timeout_milliseconds", Type: nullable(types.FromName("Integer")), Optional: true, Keyword: true},
 			},

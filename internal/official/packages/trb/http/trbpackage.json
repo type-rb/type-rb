@@ -1,0 +1,8 @@
+{
+  "name": "trb/http",
+  "version": "0.1.0",
+  "module": "trb/http/index",
+  "source": "src/index.trb",
+  "kind": "portable",
+  "nativeDependencies": {}
+}

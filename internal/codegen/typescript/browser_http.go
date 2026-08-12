@@ -19,9 +19,9 @@ func (g *generator) browserHTTPIntrinsic(name string, call *ir.Call, arguments [
 	case browserHTTPPrefix + "response_json":
 		return g.browserResponseJSON(call, arguments[0]), true
 	case browserHTTPPrefix + "response_text":
-		return g.browserResponseMap(call, arguments[0], `new TextDecoder("utf-8").decode(response.__trb_body.__trb_bytes)`), true
+		return g.browserResponseMap(call, arguments[0], `new TextDecoder("utf-8").decode(response.__trb_body.bytes())`), true
 	case browserHTTPPrefix + "response_bytes":
-		return g.browserResponseMap(call, arguments[0], "response.__trb_body.__trb_bytes"), true
+		return g.browserResponseMap(call, arguments[0], "response.__trb_body.bytes()"), true
 	case browserHTTPPrefix + "response_no_body":
 		return g.browserResponseNoBody(call, arguments[0]), true
 	case browserHTTPPrefix + "json_body":
@@ -33,7 +33,15 @@ func (g *generator) browserHTTPIntrinsic(name string, call *ir.Call, arguments [
 
 func (g *generator) browserResponseNoBody(call *ir.Call, argument string) string {
 	resultType, successType, _ := g.browserResultParts(call)
-	return "((): " + resultType + " => { const response = " + argument + "; if (response.__trb_body.__trb_bytes.byteLength !== 0) { const message = \"expected an empty response body\"; return " + g.browserError(call, "Contract", "message", "response") + "; } return " + g.browserOK(call, g.browserResponseValue("response", "({} satisfies "+g.runtimeName("NoBody")+")", successType)) + "; })()"
+	return "((): " + resultType + " => { const response = " + argument + "; if (response.__trb_body.bytes().byteLength !== 0) { const message = \"expected an empty response body\"; return " + g.browserError(call, "Contract", "message", "response") + "; } return " + g.browserOK(call, g.browserResponseValue("response", "({} satisfies "+g.runtimeName("NoBody")+")", successType)) + "; })()"
+}
+
+func (g *generator) browserRuntimeName(name string) string {
+	alias := g.browserRuntime
+	if alias == "" {
+		alias = "__trb_browser"
+	}
+	return alias + "." + name
 }
 
 func (g *generator) browserResultParts(call *ir.Call) (string, string, string) {
@@ -60,7 +68,7 @@ func (g *generator) browserErrorValue(call *ir.Call, kind, message, response str
 }
 
 func (g *generator) browserResponseValue(response, body, responseType string) string {
-	return "(new " + g.runtimeName("Response") + "(" + response + ".__trb_status, " + response + ".__trb_headers, " + response + ".__trb_url, " + body + ") satisfies " + responseType + ")"
+	return "(" + g.browserRuntimeName("_map_response") + "(" + response + ", " + body + ") satisfies " + responseType + ")"
 }
 
 func (g *generator) browserResponseMap(call *ir.Call, argument, body string) string {
@@ -73,7 +81,7 @@ func (g *generator) browserRequest(call *ir.Call, arguments []string) string {
 	values := map[string]string{
 		"method":               strconv.Quote("GET"),
 		"query":                "[]",
-		"headers":              "[]",
+		"headers":              "null",
 		"body":                 "null",
 		"timeout_milliseconds": "null",
 	}
@@ -85,7 +93,11 @@ func (g *generator) browserRequest(call *ir.Call, arguments []string) string {
 			break
 		}
 		if argument.Name != "" {
-			values[argument.Name] = arguments[index+1]
+			if argument.Name == "method" {
+				values[argument.Name] = arguments[index+1] + ".to_s()"
+			} else {
+				values[argument.Name] = arguments[index+1]
+			}
 		}
 	}
 	bodySetup := "let nativeBody: BodyInit | undefined; "
@@ -95,11 +107,11 @@ func (g *generator) browserRequest(call *ir.Call, arguments []string) string {
 	return "(async (): Promise<" + resultType + "> => { " +
 		"const __trbClient = " + arguments[0] + "; const path = " + values["path"] + "; const base = __trbClient.__trb_base_url; " +
 		"let url = base.length === 0 ? path : new URL(path, base.endsWith(\"/\") ? base : base + \"/\").toString(); " +
-		"const query: Array<" + g.runtimeName("QueryParameter") + "> = " + values["query"] + "; if (query.length > 0) { const encoded = query.map((item) => encodeURIComponent(item.name) + \"=\" + encodeURIComponent(item.value)).join(\"&\"); url += (url.includes(\"?\") ? \"&\" : \"?\") + encoded; } " +
-		"const headers = new globalThis.Headers(); const requestHeaders: Array<" + g.runtimeName("Header") + "> = " + values["headers"] + "; for (const header of requestHeaders) headers.append(header.name, header.value); " +
+		"const query = " + values["query"] + "; if (query.length > 0) { const encoded = query.map((item) => encodeURIComponent(item.name) + \"=\" + encodeURIComponent(item.value)).join(\"&\"); url += (url.includes(\"?\") ? \"&\" : \"?\") + encoded; } " +
+		"const headers = new globalThis.Headers(); const requestHeaders = " + values["headers"] + "; if (requestHeaders !== null) { for (const header of requestHeaders.entries()) headers.append(header.name, header.value); } " +
 		bodySetup +
 		"const timeout: number | null = " + values["timeout_milliseconds"] + "; const controller: AbortController | null = timeout === null ? null : new globalThis.AbortController(); let timedOut = false; const timer = timeout === null ? null : globalThis.setTimeout(() => { timedOut = true; controller!.abort(); }, timeout); try { " +
-		"const nativeResponse = await globalThis.fetch(url, { method: " + values["method"] + " as string, headers, body: nativeBody, signal: controller?.signal }); const responseHeaders: Array<{ name: string; value: string }> = []; nativeResponse.headers.forEach((value, name) => responseHeaders.push({ name, value })); const bytes = new Uint8Array(await nativeResponse.arrayBuffer()); const response: " + successType + " = new " + g.runtimeName("Response") + "(nativeResponse.status, new " + g.runtimeName("Headers") + "(responseHeaders), nativeResponse.url, new " + g.runtimeName("Body") + "(bytes)); return " + g.browserOK(call, "response") + "; " +
+		"const nativeResponse = await globalThis.fetch(url, { method: " + values["method"] + ", headers, body: nativeBody, signal: controller?.signal }); const responseHeaders: Array<{ name: string; value: string }> = []; nativeResponse.headers.forEach((value, name) => responseHeaders.push({ name, value })); const bytes = new Uint8Array(await nativeResponse.arrayBuffer()); const response: " + successType + " = " + g.browserRuntimeName("_transport_response") + "(nativeResponse.status, responseHeaders, nativeResponse.url, bytes); return " + g.browserOK(call, "response") + "; " +
 		"} catch (error) { const message = error instanceof Error ? error.message : String(error); const aborted = error instanceof DOMException && error.name === \"AbortError\"; const kind = timedOut ? " + g.runtimeName("RequestErrorKind") + ".Timeout : aborted ? " + g.runtimeName("RequestErrorKind") + ".Abort : " + g.runtimeName("RequestErrorKind") + ".Network; return " + g.browserErrorValue(call, "kind", "message", "null") + "; } finally { if (timer !== null) globalThis.clearTimeout(timer); } })()"
 }
 
@@ -115,7 +127,7 @@ func (g *generator) browserResponseJSON(call *ir.Call, argument string) string {
 	return "((): " + resultType + " => { const response = " + argument + "; const source = new TextDecoder(\"utf-8\", { fatal: true }); " +
 		"const fail = (path: string, detail: string): never => { throw new Error((path.length === 0 ? \"/\" : path) + \": \" + detail); }; " + builder.source.String() +
 		"const convert = (value: unknown, path: string): " + jsonValue + " => { if (value === null) return JsonValue.Null; if (typeof value === \"boolean\") return JsonValue.Boolean(value); if (typeof value === \"string\") return JsonValue.String(value); if (typeof value === \"number\") { if (!Number.isFinite(value)) return fail(path, \"JSON number is not finite\"); if (Number.isInteger(value)) { if (!Number.isSafeInteger(value)) return fail(path, \"JSON integer is outside the portable range\"); return JsonValue.Integer(value); } return JsonValue.Float(value); } if (Array.isArray(value)) return JsonValue.Array(value.map((item, index) => convert(item, path + \"/\" + String(index)))); if (typeof value === \"object\") { const fields: Record<string, JsonValue> = {}; for (const [key, item] of Object.entries(value)) fields[key] = convert(item, path + \"/\" + key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\")); return JsonValue.Object(fields); } return fail(path, \"unsupported JSON value\"); }; " +
-		"try { const parsed: unknown = JSON.parse(source.decode(response.__trb_body.__trb_bytes)); const value = " + decoder + "(convert(parsed, \"\"), \"\"); return " + g.browserOK(call, g.browserResponseValue("response", "value", successType)) + "; } catch (error) { const message = error instanceof Error ? error.message : String(error); return " + contractError + "; } })()"
+		"try { const parsed: unknown = JSON.parse(source.decode(response.__trb_body.bytes())); const value = " + decoder + "(convert(parsed, \"\"), \"\"); return " + g.browserOK(call, g.browserResponseValue("response", "value", successType)) + "; } catch (error) { const message = error instanceof Error ? error.message : String(error); return " + contractError + "; } })()"
 }
 
 func (g *generator) browserJSONBody(call *ir.Call, argument string) string {

@@ -1,0 +1,173 @@
+import { Result } from trb/std/result
+
+class HttpMethod
+	readonly @value: String
+
+	def initialize(value: String)
+		@value = value
+		return
+	end
+
+	def self.get(): HttpMethod
+		return HttpMethod.new("GET")
+	end
+
+	def self.head(): HttpMethod
+		return HttpMethod.new("HEAD")
+	end
+
+	def self.post(): HttpMethod
+		return HttpMethod.new("POST")
+	end
+
+	def self.put(): HttpMethod
+		return HttpMethod.new("PUT")
+	end
+
+	def self.patch(): HttpMethod
+		return HttpMethod.new("PATCH")
+	end
+
+	def self.delete(): HttpMethod
+		return HttpMethod.new("DELETE")
+	end
+
+	def self.options(): HttpMethod
+		return HttpMethod.new("OPTIONS")
+	end
+
+	def self.connect(): HttpMethod
+		return HttpMethod.new("CONNECT")
+	end
+
+	def self.trace(): HttpMethod
+		return HttpMethod.new("TRACE")
+	end
+
+	def to_s(): String
+		return @value
+	end
+end
+
+record Header
+	name: String
+	value: String
+end
+
+enum HeaderValueError
+	Missing(name: String)
+	Duplicate(name: String)
+end
+
+class Headers
+	readonly @_entries: Array<Header>
+
+	def initialize(entries: Array<Header> = [])
+		@_entries = entries.dup()
+		return
+	end
+
+	def entries(): Array<Header>
+		return @_entries.dup()
+	end
+
+	def values(name: String): Array<String>
+		normalized_name := name.downcase()
+		mut result: Array<String> := []
+		@_entries.each do |header|
+			if header.name.downcase() == normalized_name
+				result.push(header.value)
+			end
+		end
+		return result
+	end
+
+	def first(name: String): String?
+		matches := values(name)
+		if matches.empty?()
+			return nil
+		end
+		return matches[0]
+	end
+
+	def key?(name: String): Boolean
+		return !values(name).empty?()
+	end
+
+	def value(name: String): Result<String, HeaderValueError>
+		matches := values(name)
+		if matches.empty?()
+			return Result<String, HeaderValueError>::Err(HeaderValueError::Missing(name))
+		end
+		if matches.size() > 1
+			return Result<String, HeaderValueError>::Err(HeaderValueError::Duplicate(name))
+		end
+		return Result<String, HeaderValueError>::Ok(matches[0])
+	end
+
+	def with(name: String, value: String): Headers
+		normalized_name := name.downcase()
+		mut entries: Array<Header> := []
+		@_entries.each do |header|
+			if header.name.downcase() != normalized_name
+				entries.push(header)
+			end
+		end
+		entries.push(Header.new(name: normalized_name, value: value))
+		return Headers.new(entries)
+	end
+
+	def add(name: String, value: String): Headers
+		mut entries := @_entries.dup()
+		entries.push(Header.new(name: name.downcase(), value: value))
+		return Headers.new(entries)
+	end
+
+	def without(name: String): Headers
+		normalized_name := name.downcase()
+		mut entries: Array<Header> := []
+		@_entries.each do |header|
+			if header.name.downcase() != normalized_name
+				entries.push(header)
+			end
+		end
+		return Headers.new(entries)
+	end
+
+	def empty?(): Boolean
+		return @_entries.empty?()
+	end
+
+	def size(): Integer
+		return @_entries.size()
+	end
+end
+
+class Body
+	readonly @_bytes: Bytes
+
+	def initialize(bytes: Bytes)
+		@_bytes = bytes
+		return
+	end
+
+	def bytes(): Bytes
+		return @_bytes
+	end
+
+	def self.empty(): Body
+		return Body.new("".to_bytes())
+	end
+
+	def empty?(): Boolean
+		return @_bytes.size() == 0
+	end
+
+	def size(): Integer
+		return @_bytes.size()
+	end
+
+	def to_s(): String
+		return @_bytes.to_s()
+	end
+end

@@ -1,14 +1,15 @@
 import { Result } from trb/std/result
 import { JsonError } from trb/std/json
 import { PercentDecodeError, QueryParameter, parse_query } from trb/std/url
+import { Body, Header, Headers, HeaderValueError } from trb/http
 import trb/internal/runtime
 
 record Request
 	method: String
 	path: String
 	query_string: String
-	headers: Hash<String, Array<String>>
-	body: Bytes
+	headers: Headers
+	body: Body
 end
 
 record RequestCookie
@@ -18,11 +19,6 @@ end
 
 enum QueryValueError
 	Malformed(error: PercentDecodeError)
-	Missing(name: String)
-	Duplicate(name: String)
-end
-
-enum HeaderValueError
 	Missing(name: String)
 	Duplicate(name: String)
 end
@@ -89,77 +85,44 @@ end
 
 record Response
 	status: Integer
-	headers: Hash<String, Array<String>>
-	body: Bytes
+	headers: Headers
+	body: Body
 end
 
 def text(value: String, status: Integer = 200): Response
 	return Response.new(
 		status: status,
-		headers: { "content-type" =>["text/plain; charset=utf-8"] },
-		body: value.to_bytes(),
+		headers: Headers.new([Header.new(name: "content-type", value: "text/plain; charset=utf-8")]),
+		body: Body.new(value.to_bytes()),
 	)
 end
 
 def bytes(value: Bytes, status: Integer = 200): Response
 	return Response.new(
 		status: status,
-		headers: { "content-type" =>["application/octet-stream"] },
-		body: value,
+		headers: Headers.new([Header.new(name: "content-type", value: "application/octet-stream")]),
+		body: Body.new(value),
 	)
 end
 
 def empty(status: Integer = 204): Response
-	return Response.new(status: status, headers: {}, body: "".to_bytes())
+	return Response.new(status: status, headers: Headers.new(), body: Body.empty())
 end
 
 def with_header(response: Response, name: String, value: String): Response
-	normalized_name := name.downcase()
-	mut headers: Hash<String, Array<String>> := {}
-	response.headers.each do |header_name, values|
-		if header_name.downcase() != normalized_name
-			headers[header_name] = values.dup()
-		end
-	end
-	headers[normalized_name] = [value]
-	return Response.new(status: response.status, headers: headers, body: response.body)
+	return Response.new(status: response.status, headers: response.headers.with(name, value), body: response.body)
 end
 
 def add_header(response: Response, name: String, value: String): Response
-	normalized_name := name.downcase()
-	mut headers: Hash<String, Array<String>> := {}
-	mut added_values: Array<String> := []
-	response.headers.each do |header_name, values|
-		if header_name.downcase() == normalized_name
-			values.each do |existing_value|
-				added_values.push(existing_value)
-			end
-		else
-			headers[header_name] = values.dup()
-		end
-	end
-	added_values.push(value)
-	headers[normalized_name] = added_values
-	return Response.new(status: response.status, headers: headers, body: response.body)
+	return Response.new(status: response.status, headers: response.headers.add(name, value), body: response.body)
 end
 
 def without_header(response: Response, name: String): Response
-	normalized_name := name.downcase()
-	mut headers: Hash<String, Array<String>> := {}
-	response.headers.each do |header_name, values|
-		if header_name.downcase() != normalized_name
-			headers[header_name] = values.dup()
-		end
-	end
-	return Response.new(status: response.status, headers: headers, body: response.body)
+	return Response.new(status: response.status, headers: response.headers.without(name), body: response.body)
 end
 
 def with_status(response: Response, status: Integer): Response
-	mut headers: Hash<String, Array<String>> := {}
-	response.headers.each do |header_name, values|
-		headers[header_name] = values.dup()
-	end
-	return Response.new(status: status, headers: headers, body: response.body)
+	return Response.new(status: status, headers: response.headers, body: response.body)
 end
 
 def redirect(location: String, status: Integer = 302): Response
@@ -167,27 +130,11 @@ def redirect(location: String, status: Integer = 302): Response
 end
 
 def response_header_values(response: Response, name: String): Array<String>
-	normalized_name := name.downcase()
-	mut result: Array<String> := []
-	response.headers.each do |header_name, values|
-		if header_name.downcase() == normalized_name
-			values.each do |value|
-				result.push(value)
-			end
-		end
-	end
-	return result
+	return response.headers.values(name)
 end
 
 def response_header_value(response: Response, name: String): Result<String, HeaderValueError>
-	values := response_header_values(response, name)
-	if values.empty?()
-		return Result<String, HeaderValueError>::Err(HeaderValueError::Missing(name))
-	end
-	if values.size() > 1
-		return Result<String, HeaderValueError>::Err(HeaderValueError::Duplicate(name))
-	end
-	return Result<String, HeaderValueError>::Ok(values[0])
+	return response.headers.value(name)
 end
 
 def vary(response: Response, field: String): Response
@@ -210,60 +157,31 @@ def vary(response: Response, field: String): Response
 end
 
 def with_request_header(request: Request, name: String, value: String): Request
-	normalized_name := name.downcase()
-	mut headers: Hash<String, Array<String>> := {}
-	request.headers.each do |header_name, values|
-		if header_name.downcase() != normalized_name
-			headers[header_name] = values.dup()
-		end
-	end
-	headers[normalized_name] = [value]
 	return Request.new(
 		method: request.method,
 		path: request.path,
 		query_string: request.query_string,
-		headers: headers,
+		headers: request.headers.with(name, value),
 		body: request.body,
 	)
 end
 
 def add_request_header(request: Request, name: String, value: String): Request
-	normalized_name := name.downcase()
-	mut headers: Hash<String, Array<String>> := {}
-	mut added_values: Array<String> := []
-	request.headers.each do |header_name, values|
-		if header_name.downcase() == normalized_name
-			values.each do |existing_value|
-				added_values.push(existing_value)
-			end
-		else
-			headers[header_name] = values.dup()
-		end
-	end
-	added_values.push(value)
-	headers[normalized_name] = added_values
 	return Request.new(
 		method: request.method,
 		path: request.path,
 		query_string: request.query_string,
-		headers: headers,
+		headers: request.headers.add(name, value),
 		body: request.body,
 	)
 end
 
 def without_request_header(request: Request, name: String): Request
-	normalized_name := name.downcase()
-	mut headers: Hash<String, Array<String>> := {}
-	request.headers.each do |header_name, values|
-		if header_name.downcase() != normalized_name
-			headers[header_name] = values.dup()
-		end
-	end
 	return Request.new(
 		method: request.method,
 		path: request.path,
 		query_string: request.query_string,
-		headers: headers,
+		headers: request.headers.without(name),
 		body: request.body,
 	)
 end
@@ -490,27 +408,11 @@ def query_value(request: Request, name: String): Result<String, QueryValueError>
 end
 
 def header_values(request: Request, name: String): Array<String>
-	normalized_name := name.downcase()
-	mut result: Array<String> := []
-	request.headers.each do |header_name, values|
-		if header_name.downcase() == normalized_name
-			values.each do |value|
-				result.push(value)
-			end
-		end
-	end
-	return result
+	return request.headers.values(name)
 end
 
 def header_value(request: Request, name: String): Result<String, HeaderValueError>
-	values := header_values(request, name)
-	if values.empty?()
-		return Result<String, HeaderValueError>::Err(HeaderValueError::Missing(name))
-	end
-	if values.size() > 1
-		return Result<String, HeaderValueError>::Err(HeaderValueError::Duplicate(name))
-	end
-	return Result<String, HeaderValueError>::Ok(values[0])
+	return request.headers.value(name)
 end
 
 def cookies(request: Request): Array<RequestCookie>

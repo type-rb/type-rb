@@ -10,13 +10,14 @@ func TestOfficialPackageSourceCompilesAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Response } from trb/web
+		Source: []byte(`import { Body, Header, Headers } from trb/http
+import { Response } from trb/web
 
 def response(): Response
 	return Response.new(
 		status: 200,
-		headers: {"content-type" => ["application/json"]},
-		body: "{}".to_bytes(),
+		headers: Headers.new([Header.new(name: "content-type", value: "application/json")]),
+		body: Body.new("{}".to_bytes()),
 	)
 end
 `),
@@ -50,10 +51,11 @@ func TestOfficialWebResponseHeadersRejectNonStringValues(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Response, with_header } from trb/web
+		Source: []byte(`import { Body, Headers } from trb/http
+import { Response, with_header } from trb/web
 
 def response(): Response
-	base := Response.new(status: 204, headers: {}, body: "".to_bytes())
+	base := Response.new(status: 204, headers: Headers.new(), body: Body.empty())
 	return with_header(base, "x-count", 1)
 end
 `),
@@ -74,7 +76,8 @@ func TestOfficialWebStrictHeaderLookupRejectsNonStringNames(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { HeaderValueError, Request, header_value } from trb/web
+		Source: []byte(`import { HeaderValueError } from trb/http
+import { Request, header_value } from trb/web
 import { Result } from trb/std/result
 
 def invalid(request: Request): Result<String, HeaderValueError>
@@ -244,7 +247,8 @@ func TestOfficialWebMiddlewareStackCompilesAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Context, Next, Response } from trb/web
+		Source: []byte(`import { Body, Headers } from trb/http
+import { Context, Next, Response } from trb/web
 import { Middleware, compose } from trb/web/middleware
 import trb/web/middleware/cors
 import trb/web/middleware/logger
@@ -253,7 +257,7 @@ import trb/web/middleware/secure_headers
 
 class Terminal implements Next
 	def call(_context: Context): Response
-		return Response.new(status: 204, headers: {}, body: "".to_bytes())
+		return Response.new(status: 204, headers: Headers.new(), body: Body.empty())
 	end
 end
 

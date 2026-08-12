@@ -128,6 +128,25 @@ func TestBundledWebPackage(t *testing.T) {
 	}
 }
 
+func TestBundledHTTPPackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/http")
+	if !ok {
+		t.Fatal("trb/http is not registered")
+	}
+	definition := packageDefinition.Definition
+	if definition.ModulePath != "trb/http/index" || definition.Kind != "portable" {
+		t.Fatalf("unexpected HTTP package boundary: %#v", definition)
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if !definition.Supports(mode) {
+			t.Fatalf("trb/http does not support %s", mode)
+		}
+	}
+	if definition.Source == "" {
+		t.Fatal("trb/http package source is empty")
+	}
+}
+
 func TestBundledWebTestingPackage(t *testing.T) {
 	packageDefinition, ok := Lookup("trb/web/testing")
 	if !ok {
@@ -219,6 +238,9 @@ func TestBundledTypeScriptBrowserPackage(t *testing.T) {
 	request := definition.Symbols["request"]
 	if request.Intrinsic != "trb.platform.typescript.browser.request" || request.Receiver.String() != "HttpClient" || request.Return.String() != "Response<Body>" || request.Fails.String() != "RequestError" {
 		t.Fatalf("unexpected request contract: %#v", request)
+	}
+	if request.Parameters[3].Type.String() != "Headers" {
+		t.Fatalf("unexpected browser request headers contract: %#v", request.Parameters[3])
 	}
 	json := definition.Symbols["json"]
 	if json.Receiver.String() != "Response<Body>" || json.Return.String() != "Response<T>" || len(json.TypeParameters) != 1 || json.Fails.String() != "RequestError" {
