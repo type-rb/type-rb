@@ -260,6 +260,57 @@ end
 			want: `Context#params<TodoParams>() field "slug" is not declared by route /todos/:id`,
 		},
 		{
+			name:       "endpoint input parameters",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, text } from trb/web
+import { Result } from trb/std/result
+
+record TodoParams
+	id: Integer
+end
+
+record TodoInput
+	params: TodoParams
+end
+
+def get(context: Context): Response
+	case context.bind<TodoInput>()
+	when Result::Ok(input)
+		return text(input.params.id.to_s())
+	when Result::Err(_error)
+		return text("invalid", 400)
+	end
+end
+`,
+		},
+		{
+			name:       "endpoint input parameters mismatch",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, text } from trb/web
+import { Result } from trb/std/result
+
+record TodoParams
+	slug: String
+end
+
+record TodoInput
+	params: TodoParams
+end
+
+def get(context: Context): Response
+	case context.bind<TodoInput>()
+	when Result::Ok(input)
+		return text(input.params.slug)
+	when Result::Err(_error)
+		return text("invalid", 400)
+	end
+end
+`,
+			want: `Context#bind<TodoInput>() params field "slug" is not declared by route /todos/:id`,
+		},
+		{
 			name:       "catch-all parameter",
 			filename:   "/project/src/routes/files/[...path].trb",
 			modulePath: "routes/files/[...path]",

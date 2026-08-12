@@ -77,6 +77,68 @@ func (e *Evaluator) webContextFetch(receiver, key Value, resultType types.Type) 
 	return e.structuredResultErrFrom(resultType, "trb/web/index", "ContextValueError", map[string]Value{"key": name})
 }
 
+func (e *Evaluator) webEndpointInput(receiver Value, resultType types.Type, schema *ir.CodecSchema) (Value, error) {
+	if schema == nil || schema.Kind != "endpoint_input" || len(resultType.Args) != 2 {
+		return Value{}, errors.New("Context#bind() requires a checked endpoint input record")
+	}
+	context, ok := receiver.Data.(*objectInstance)
+	if !ok {
+		return Value{}, errors.New("Context#bind() requires Context")
+	}
+	request, ok := context.Fields["@request"]
+	if !ok {
+		return Value{}, errors.New("Context#bind() requires Context#request")
+	}
+	recordDefinition, ok := e.definitions[symbolKey(schema.Module, schema.Type.Name)].(*recordDefinition)
+	if !ok {
+		return Value{}, fmt.Errorf("record %s is not loaded", schema.Type.Name)
+	}
+	fields := map[string]Value{}
+	for _, field := range schema.Fields {
+		errorName := "ParameterError"
+		variant := "Params"
+		fieldResultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{field.Schema.Type, types.FromName(errorName)}}
+		var bound Value
+		var err error
+		switch field.Name {
+		case "params":
+			bound, err = e.webParameterBinding(receiver, fieldResultType, field.Schema, "path")
+		case "query":
+			variant = "Query"
+			bound, err = e.webParameterBinding(request, fieldResultType, field.Schema, "query")
+		case "body":
+			errorName = "RequestError"
+			variant = "Body"
+			fieldResultType.Args[1] = types.FromName(errorName)
+			bound, err = e.webRequestJSON(request, fieldResultType, field.Schema)
+		default:
+			return Value{}, fmt.Errorf("unsupported endpoint input field %s", field.Name)
+		}
+		if err != nil {
+			return Value{}, err
+		}
+		result, ok := bound.Data.(*enumValue)
+		if !ok {
+			return Value{}, fmt.Errorf("endpoint input field %s returned an invalid Result", field.Name)
+		}
+		if result.Name == "Err" {
+			errorDefinition, loaded := e.definitions[symbolKey("trb/web/index", "EndpointInputError")].(*enumDefinition)
+			if !loaded {
+				return Value{}, errors.New("Context#bind() requires EndpointInputError")
+			}
+			resultDefinition, loaded := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
+			if !loaded {
+				return Value{}, errors.New("Context#bind() requires trb/std/result")
+			}
+			errorValue := Value{Type: types.FromName("EndpointInputError"), Data: &enumValue{Definition: errorDefinition, Name: variant, Payload: map[string]Value{"error": result.Payload["error"]}}}
+			return Value{Type: resultType, Data: &enumValue{Definition: resultDefinition, Name: "Err", Payload: map[string]Value{"error": errorValue}}}, nil
+		}
+		fields[field.Name] = result.Payload["value"]
+	}
+	value := Value{Type: schema.Type, Data: &recordInstance{Definition: recordDefinition, Fields: fields}}
+	return e.resultOK(resultType, value)
+}
+
 func (e *Evaluator) webRequestJSON(receiver Value, resultType types.Type, schema *ir.CodecSchema) (Value, error) {
 	if schema == nil {
 		return Value{}, errors.New("Request#json() requires a checked codec")

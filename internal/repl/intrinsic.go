@@ -75,6 +75,11 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return Value{}, err
 		}
 		return e.webParameterBinding(values[0], typ, codec, "path")
+	case "trb.web.context_bind":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		return e.webEndpointInput(values[0], typ, codec)
 	case "trb.web.context_with":
 		if err := require(3); err != nil {
 			return Value{}, err

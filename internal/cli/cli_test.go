@@ -2095,6 +2095,51 @@ func TestReplEvaluatesTypedWebContextKeysAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesWebEndpointInputBindingAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-web-endpoint-input-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := strings.Join([]string{
+			"import { Body, Header, Headers, HttpMethod } from trb/http",
+			"import { Context, EndpointInputError, Request } from trb/web",
+			"import { Result } from trb/std/result",
+			`record Params; id: Integer; end`,
+			`record Query; page: Integer; end`,
+			`record Payload; title: String; end`,
+			`record Input; params: Params; query: Query; body: Payload; end`,
+			`def context(path_id: String, query: String, body: String): Context; request := Request.new(method: HttpMethod.post(), path: "/", query_string: query, headers: Headers.new([Header.new(name: "content-type", value: "application/json")]), body: Body.new(body.to_bytes())); return Context.new(request: request, path_parameters: {"id" => path_id}); end`,
+			`context("7", "page=2", "{\"title\":\"ship\"}").bind<Input>()`,
+			`context("bad", "page=2", "{\"title\":\"ship\"}").bind<Input>()`,
+			`context("7", "", "{\"title\":\"ship\"}").bind<Input>()`,
+			`context("7", "page=2", "{}").bind<Input>()`,
+			":quit",
+		}, "\n") + "\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "Result::Ok(value: Input(params: Params(id: 7), query: Query(page: 2), body: Payload(title: \"ship\"))) : Result<Input, EndpointInputError>\n" +
+			"Result::Err(error: EndpointInputError::Params(error: ParameterError::Invalid(source: ParameterSource::Path, name: \"id\", value: \"bad\", expected: \"Integer\"))) : Result<Input, EndpointInputError>\n" +
+			"Result::Err(error: EndpointInputError::Query(error: ParameterError::Missing(source: ParameterSource::Query, name: \"page\"))) : Result<Input, EndpointInputError>\n" +
+			"Result::Err(error: EndpointInputError::Body(error: RequestError::InvalidJson(error: JsonError(kind: JsonErrorKind::Decode, message: \"missing field title\", path: \"/title\", line: nil, column: nil)))) : Result<Input, EndpointInputError>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s endpoint input REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestRunOfficialWebTypedContextKeysAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
@@ -5092,6 +5137,109 @@ end
 			want := "200\n7|set|2|true|true\n200\n7|nil|0|false|false\n400\nduplicate:query:page\n400\ninvalid:path:id:nope:Integer\n400\nmalformed:%ZZ\n400\ninvalid:query:visibility:UNKNOWN:Visibility\n"
 			if stdout.String() != want {
 				t.Fatalf("unexpected %s typed web parameter output: want %q, got %q", mode, want, stdout.String())
+			}
+		})
+	}
+}
+
+func TestRunOfficialWebEndpointInputBindingAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireWebServerRuntime(t, mode)
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/run-web-endpoint-input-test"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			mainSource := `import { Body, Header, Headers, HttpMethod } from trb/http
+import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def show(path: String, query: String, body: String)
+	request := Request.new(
+		method: HttpMethod.post(),
+		path: path,
+		query_string: query,
+		headers: Headers.new([Header.new(name: "content-type", value: "application/json")]),
+		body: Body.new(body.to_bytes()),
+	)
+	response := dispatch(request)
+	puts(response.status)
+	puts(response.body.to_s())
+	return
+end
+
+def main()
+	show("/todos/7", "page=2", "{\"title\":\"ship\"}")
+	show("/todos/bad", "page=2", "{\"title\":\"ship\"}")
+	show("/todos/7", "", "{\"title\":\"ship\"}")
+	show("/todos/7", "page=2", "{}")
+	return
+end
+`
+			routeSource := `import { Context, EndpointInputError, Response, text } from trb/web
+import { Result } from trb/std/result
+
+record TodoParams
+	id: Integer
+end
+
+record TodoQuery
+	page: Integer
+end
+
+record TodoBody
+	title: String
+end
+
+record TodoInput
+	params: TodoParams
+	query: TodoQuery
+	body: TodoBody
+end
+
+def get_error(error: EndpointInputError): Response
+	case error
+	when EndpointInputError::Params(_error)
+		return text("params", 400)
+	when EndpointInputError::Query(_error)
+		return text("query", 400)
+	when EndpointInputError::Body(_error)
+		return text("body", 400)
+	end
+end
+
+def post(context: Context): Response
+	case context.bind<TodoInput>()
+	when Result::Ok(input)
+		return text(input.params.id.to_s() + "|" + input.query.page.to_s() + "|" + input.body.title)
+	when Result::Err(error)
+		return get_error(error)
+	end
+end
+`
+			if err := os.MkdirAll(filepath.Join(root, "src", "routes", "todos"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "src", "routes", "todos", "[id].trb"), []byte(routeSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+				t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+			}
+			want := "200\n7|2|ship\n400\nparams\n400\nquery\n400\nbody\n"
+			if stdout.String() != want || stderr.Len() != 0 {
+				t.Fatalf("unexpected %s endpoint input output: want %q, got %q, stderr=%s", mode, want, stdout.String(), stderr.String())
 			}
 		})
 	}

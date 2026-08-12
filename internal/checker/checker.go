@@ -2019,6 +2019,8 @@ func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic stri
 		operation = "path_parameters"
 	case "trb.web.request_query":
 		operation = "query_parameters"
+	case "trb.web.context_bind":
+		operation = "endpoint_input"
 	case "trb.internal.json.encode", "trb.web.json", "trb.platform.typescript.browser.json_body":
 		operation = "encode"
 	default:
@@ -2026,7 +2028,9 @@ func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic stri
 	}
 	var schema CodecSchema
 	var ok bool
-	if operation == "path_parameters" || operation == "query_parameters" {
+	if operation == "endpoint_input" {
+		schema, ok = c.endpointInputSchema(call.Span(), typ)
+	} else if operation == "path_parameters" || operation == "query_parameters" {
 		schema, ok = c.parameterSchema(call.Span(), typ, operation)
 	} else {
 		schema, ok = c.codecSchema(call.Span(), typ, map[string]bool{})
@@ -2034,6 +2038,64 @@ func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic stri
 	if ok {
 		c.result.CodecApplications[call] = CodecApplication{Operation: operation, Schema: schema}
 	}
+}
+
+func (c *Checker) endpointInputSchema(span token.Span, typ types.Type) (CodecSchema, bool) {
+	schema := CodecSchema{Type: typ}
+	base := typ
+	base.Nullable = false
+	if base.Kind != types.Named || typ.Nullable {
+		c.error(span, fmt.Sprintf("endpoint input type %s must be a non-nullable record", typ))
+		return schema, false
+	}
+	fields, module, reference, ok := c.codecRecord(base.Name)
+	if !ok {
+		c.error(span, fmt.Sprintf("endpoint input type %s must be a non-nullable record", typ))
+		return schema, false
+	}
+	if len(fields) == 0 {
+		c.error(span, fmt.Sprintf("endpoint input record %s must declare at least one of params, query, or body", base.Name))
+		return schema, false
+	}
+	schema.Kind = "endpoint_input"
+	schema.Module = module
+	if reference != nil {
+		copy := *reference
+		schema.Reference = &copy
+	}
+	seen := map[string]bool{}
+	compiled := map[string]CodecSchema{}
+	for _, field := range fields {
+		if seen[field.Name] {
+			c.error(span, fmt.Sprintf("endpoint input record %s declares %s more than once", base.Name, field.Name))
+			return schema, false
+		}
+		seen[field.Name] = true
+		var fieldSchema CodecSchema
+		var fieldOK bool
+		switch field.Name {
+		case "params":
+			fieldSchema, fieldOK = c.parameterSchema(span, field.Type, "path_parameters")
+		case "query":
+			fieldSchema, fieldOK = c.parameterSchema(span, field.Type, "query_parameters")
+		case "body":
+			fieldSchema, fieldOK = c.codecSchema(span, field.Type, map[string]bool{})
+		default:
+			c.error(span, fmt.Sprintf("endpoint input record %s has unsupported field %q; expected params, query, or body", base.Name, field.Name))
+			return schema, false
+		}
+		if !fieldOK {
+			return schema, false
+		}
+		compiled[field.Name] = fieldSchema
+	}
+	for _, name := range []string{"params", "query", "body"} {
+		if fieldSchema, found := compiled[name]; found {
+			copy := fieldSchema
+			schema.Fields = append(schema.Fields, CodecField{Name: name, WireName: name, Schema: &copy})
+		}
+	}
+	return schema, true
 }
 
 func (c *Checker) parameterSchema(span token.Span, typ types.Type, operation string) (CodecSchema, bool) {
