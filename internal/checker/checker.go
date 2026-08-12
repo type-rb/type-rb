@@ -3330,6 +3330,42 @@ func (c *Checker) declarationMember(className, memberName string, class bool, se
 	return c.declarations().Member(className, memberName, class)
 }
 
+func (c *Checker) specializeDeclarationMember(receiver types.Type, member declaration.Member) declaration.Member {
+	declared, ok := c.declarations().Type(receiver.Name)
+	if !ok || len(declared.TypeParameters) == 0 || len(receiver.Args) == 0 {
+		return member
+	}
+	bindings := map[string]types.Type{}
+	for index, name := range declared.TypeParameters {
+		if index < len(receiver.Args) {
+			bindings[name] = receiver.Args[index]
+		}
+	}
+	result := member
+	result.Return = instantiateDeclarationType(member.Return, bindings)
+	result.Fails = instantiateDeclarationType(member.Fails, bindings)
+	result.Parameters = append([]declaration.Parameter(nil), member.Parameters...)
+	for index := range result.Parameters {
+		result.Parameters[index].Type = instantiateDeclarationType(result.Parameters[index].Type, bindings)
+	}
+	result.Alternatives = append([]declaration.Signature(nil), member.Alternatives...)
+	for index := range result.Alternatives {
+		result.Alternatives[index].Return = instantiateDeclarationType(result.Alternatives[index].Return, bindings)
+		result.Alternatives[index].Fails = instantiateDeclarationType(result.Alternatives[index].Fails, bindings)
+		result.Alternatives[index].Parameters = append([]declaration.Parameter(nil), result.Alternatives[index].Parameters...)
+		for parameterIndex := range result.Alternatives[index].Parameters {
+			result.Alternatives[index].Parameters[parameterIndex].Type = instantiateDeclarationType(result.Alternatives[index].Parameters[parameterIndex].Type, bindings)
+		}
+	}
+	if member.Block != nil {
+		block := *member.Block
+		block.Parameters = instantiateDeclarationTypes(member.Block.Parameters, bindings)
+		block.Return = instantiateDeclarationType(member.Block.Return, bindings)
+		result.Block = &block
+	}
+	return result
+}
+
 func (c *Checker) currentDeclarationMember(memberName string) (declaration.Member, bool) {
 	if c.current == nil {
 		return declaration.Member{}, false
@@ -3900,6 +3936,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.result.ClassFieldAccesses[n] = binding.Export != nil && binding.Export.Kind == resolver.ClassExport && binding.Member.Kind == resolver.ValueExport
 			c.recordReference(n, binding)
 		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
+			member = c.specializeDeclarationMember(receiverType, member)
 			typ = member.Return
 			c.external[n] = member
 			c.result.ExternalMembers[n] = member

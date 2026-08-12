@@ -75,6 +75,10 @@ func TestBundledReactPackage(t *testing.T) {
 	if packageDefinition.Definition.TypeProvider != "trb.typescript.react" || packageDefinition.Definition.JSX == nil {
 		t.Fatalf("React type and JSX providers were not loaded: %#v", packageDefinition.Definition)
 	}
+	state := packageDefinition.Definition.Symbols["use_state"]
+	if state.Return.String() != "ReactState<T>" || len(state.TypeParameters) != 1 {
+		t.Fatalf("unexpected React state contract: %#v", state)
+	}
 	onClick := packageDefinition.Definition.JSX.IntrinsicAttributes["onClick"]
 	if onClick.String() != "(MouseEvent) -> Void" {
 		t.Fatalf("unexpected onClick contract: %s", onClick)

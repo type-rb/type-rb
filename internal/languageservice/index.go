@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
@@ -30,6 +31,7 @@ func BuildContext(programs []*ir.Program, modulePath string) Context {
 	if session == nil {
 		return context
 	}
+	addDeclarationMembers(&context, session.Declarations)
 
 	visible := map[string]Symbol{}
 	for _, symbol := range exportsByPath[session.ModulePath] {
@@ -56,6 +58,56 @@ func BuildContext(programs []*ir.Program, modulePath string) Context {
 	}
 	sortSymbols(context.Symbols)
 	return context
+}
+
+func addDeclarationMembers(context *Context, catalog *declaration.Catalog) {
+	if context == nil || catalog == nil {
+		return
+	}
+	typeNames := make([]string, 0, len(catalog.Types))
+	for name := range catalog.Types {
+		typeNames = append(typeNames, name)
+	}
+	sort.Strings(typeNames)
+	for _, typeName := range typeNames {
+		declared := catalog.Types[typeName]
+		existing := map[string]bool{}
+		for _, member := range context.TypeMembers[typeName] {
+			existing[member.Name] = true
+		}
+		memberNames := make([]string, 0, len(declared.InstanceMembers))
+		for name := range declared.InstanceMembers {
+			memberNames = append(memberNames, name)
+		}
+		sort.Strings(memberNames)
+		for _, name := range memberNames {
+			member := declared.InstanceMembers[name]
+			if privateName(member.Name) || existing[member.Name] {
+				continue
+			}
+			context.TypeMembers[typeName] = append(context.TypeMembers[typeName], declarationSymbol(member))
+		}
+	}
+}
+
+func declarationSymbol(member declaration.Member) Symbol {
+	if member.Kind == declaration.Property {
+		return Symbol{Name: member.Name, Kind: CompletionField, Detail: member.Return.String(), Type: member.Return}
+	}
+	parameters := make([]string, len(member.Parameters))
+	callParameters := make([]CallParameter, len(member.Parameters))
+	for index, parameter := range member.Parameters {
+		parameters[index] = parameter.Name + ": " + parameter.Type.String()
+		callParameters[index] = CallParameter{Name: parameter.Name, Keyword: parameter.Keyword}
+	}
+	detail := member.Name + "(" + strings.Join(parameters, ", ") + "): " + member.Return.String()
+	if member.Fails.Kind != "" && member.Fails.Kind != types.Never {
+		detail += " fails " + member.Fails.String()
+	}
+	return Symbol{
+		Name: member.Name, Kind: CompletionMethod, Detail: detail, Type: member.Return,
+		Call: &CallInfo{ParameterCount: len(member.Parameters), Parameters: callParameters},
+	}
 }
 
 func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsByPath map[string]*ir.Program, exportsByPath map[string][]Symbol) {

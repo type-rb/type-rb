@@ -37,6 +37,28 @@ The compiler checks required, unknown, and mistyped props, including components
 imported from another TypeRB module. Files containing JSX are generated as
 `.tsx`; other TypeScript modules remain `.ts`.
 
+## Component state
+
+Component-local state uses a typed wrapper around React `useState`:
+
+```trb
+import { MouseEvent, ReactNode, use_state } from trb/platform/typescript/react
+
+def Counter(): ReactNode
+	count := use_state(0)
+	increment := fn(_event: MouseEvent)
+		count.set(count.value + 1)
+		return
+	end
+	return <button onClick={increment}>Count: {count.value}</button>
+end
+```
+
+`use_state(initial)` infers `ReactState<T>` from its initial value. `value` and
+`set(value)` retain that type through checking and completion, while generated
+TSX uses React's ordinary `useState`. The call follows the Rules of Hooks and
+therefore stays at the top level of a component or custom hook.
+
 ## Native React packages
 
 TypeScript projects can use representable named exports from npm packages

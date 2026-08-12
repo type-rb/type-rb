@@ -119,6 +119,7 @@ func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 }
 
 func reactSymbols() map[string]stdlib.Symbol {
+	typeT := types.FromName("T")
 	node := types.FromName("ReactNode")
 	return map[string]stdlib.Symbol{
 		"mount": {
@@ -129,6 +130,14 @@ func reactSymbols() map[string]stdlib.Symbol {
 				{Name: "element_id", Type: types.FromName("String")},
 			},
 			Return: types.FromName("Void"),
+		},
+		"use_state": {
+			Name:               "use_state",
+			Intrinsic:          "trb.platform.typescript.react.use_state",
+			RuntimeIndependent: true,
+			TypeParameters:     []string{"T"},
+			Parameters:         []stdlib.Parameter{{Name: "initial", Type: typeT}},
+			Return:             types.Type{Kind: types.Named, Name: "ReactState", Args: []types.Type{typeT}},
 		},
 	}
 }
