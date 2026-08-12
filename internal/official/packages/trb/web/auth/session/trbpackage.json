@@ -1,0 +1,9 @@
+{
+  "name": "trb/web/auth/session",
+  "version": "0.1.0",
+  "module": "trb/web/auth/session/index",
+  "source": "src/index.trb",
+  "kind": "portable",
+  "semanticProvider": "trb.web.auth.session",
+  "nativeDependencies": {}
+}

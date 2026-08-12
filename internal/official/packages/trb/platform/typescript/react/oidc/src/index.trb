@@ -1,0 +1,12 @@
+import { OidcBrowserOptions, OidcPrincipal } from trb/auth/oidc
+import { ReactEvent, ReactNode } from trb/platform/typescript/react
+
+class ReactOidcState
+end
+
+interface ReactOidcContract
+	provider(options: OidcBrowserOptions, child: ReactNode): ReactNode
+	use_oidc(): ReactOidcState
+	principal(): OidcPrincipal
+	event(): ReactEvent
+end

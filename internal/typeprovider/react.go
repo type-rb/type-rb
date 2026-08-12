@@ -8,10 +8,31 @@ import (
 
 const reactTypeProvider = "trb.typescript.react"
 const reactFormTypeProvider = "trb.typescript.react.form"
+const reactOidcTypeProvider = "trb.typescript.react.oidc"
 
 func init() {
 	register(reactTypeProvider, loadReact)
 	register(reactFormTypeProvider, loadReactForm)
+	register(reactOidcTypeProvider, loadReactOidc)
+}
+
+func loadReactOidc(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {
+	stringType := types.FromName("String")
+	optionalString := stringType
+	optionalString.Nullable = true
+	principalType := types.FromName("OidcPrincipal")
+	principalType.Nullable = true
+	eventHandler := types.FunctionOf([]types.Type{types.FromName("ReactEvent")}, types.FromName("Void"))
+	state := declaration.NewType("ReactOidcState", "")
+	state.InstanceMembers["loading"] = declaration.Member{Name: "loading", Kind: declaration.Property, Return: types.FromName("Boolean")}
+	state.InstanceMembers["authenticated"] = declaration.Member{Name: "authenticated", Kind: declaration.Property, Return: types.FromName("Boolean")}
+	state.InstanceMembers["principal"] = declaration.Member{Name: "principal", Kind: declaration.Property, Return: principalType}
+	state.InstanceMembers["access_token"] = declaration.Member{Name: "access_token", Kind: declaration.Property, Return: optionalString}
+	state.InstanceMembers["sign_in"] = declaration.Member{Name: "sign_in", Kind: declaration.Property, Return: eventHandler}
+	state.InstanceMembers["sign_out"] = declaration.Member{Name: "sign_out", Kind: declaration.Property, Return: eventHandler}
+	catalog := declaration.NewCatalog()
+	catalog.Types[state.Name] = state
+	return catalog, nil
 }
 
 func loadReactForm(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {

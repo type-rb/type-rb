@@ -35,6 +35,7 @@ type generator struct {
 	breakTarget   string
 	orm           *ormintegration.Manifest
 	projectNames  *goProjectNames
+	oidcRuntime   bool
 }
 
 func Generate(program *ir.Program) string {
@@ -44,13 +45,24 @@ func Generate(program *ir.Program) string {
 func GenerateProject(programs []*ir.Program) []string {
 	projectNames := analyzeGoProjectNames(programs)
 	result := make([]string, len(programs))
+	oidcRuntimeOwners := map[string]bool{}
 	for index, program := range programs {
-		result[index] = generate(program, projectNames)
+		output, usesOidcRuntime := generate(program, projectNames, true)
+		result[index] = output
+		if !usesOidcRuntime {
+			continue
+		}
+		group := goPackageGroup(program.ModulePath) + "\x00" + program.Package
+		if oidcRuntimeOwners[group] {
+			result[index], _ = generate(program, projectNames, false)
+			continue
+		}
+		oidcRuntimeOwners[group] = true
 	}
 	return result
 }
 
-func generate(program *ir.Program, projectNames *goProjectNames) string {
+func generate(program *ir.Program, projectNames *goProjectNames, emitOidcRuntime bool) (string, bool) {
 	g := &generator{
 		topMethods:    map[string]bool{},
 		staticMethods: map[string]map[string]bool{},
@@ -95,6 +107,9 @@ func generate(program *ir.Program, projectNames *goProjectNames) string {
 		}
 		g.statement(statement)
 	}
+	if g.oidcRuntime && emitOidcRuntime {
+		g.oidcRuntimeSupport()
+	}
 	if g.modulePath == "trb/std/time/index" {
 		g.timeDatabaseInterop()
 	}
@@ -124,9 +139,9 @@ func generate(program *ir.Program, projectNames *goProjectNames) string {
 	output.WriteString(g.b.String())
 	generated := strings.TrimRight(output.String(), "\n") + "\n"
 	if formatted, err := format.Source([]byte(generated)); err == nil {
-		return string(formatted)
+		return string(formatted), g.oidcRuntime
 	}
-	return generated
+	return generated, g.oidcRuntime
 }
 
 func (g *generator) importStatement(imported *ir.Import) {

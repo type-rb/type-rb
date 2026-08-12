@@ -21,6 +21,7 @@ type generator struct {
 	temporary    int
 	orm          *ormintegration.Manifest
 	breakTarget  string
+	oidcRuntime  bool
 }
 
 func Generate(program *ir.Program) string {
@@ -41,6 +42,9 @@ func Generate(program *ir.Program) string {
 		}
 	}
 	g.statements(program.Statements)
+	if g.oidcRuntime {
+		g.oidcRuntimeSupport()
+	}
 	g.integrations(program.Extensions)
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {

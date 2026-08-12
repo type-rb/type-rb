@@ -9,6 +9,26 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if value, ok := g.authIntrinsic(name, call, arguments); ok {
+		return value
+	}
+	if name == "trb.platform.typescript.react.oidc.provider" {
+		return "trbOidcProvider(" + arguments[0] + ", " + arguments[1] + ")"
+	}
+	if name == "trb.platform.typescript.react.oidc.use_oidc" {
+		return "useTrbOidc()"
+	}
+	if method, mode, ok := typescriptAuthTransport(name); ok {
+		body := ""
+		token := ""
+		if method == "POST" || method == "PUT" || method == "PATCH" {
+			body = arguments[1]
+		}
+		if mode == "bearer" {
+			token = arguments[len(arguments)-1]
+		}
+		return g.tsBrowserJSONWithAuth(method, call, arguments[0], body, mode, token)
+	}
 	if name == "trb.platform.typescript.browser.get_json" {
 		return g.tsBrowserJSON("GET", call, arguments[0], "")
 	}
@@ -510,21 +530,66 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	}
 }
 
+func typescriptAuthTransport(name string) (string, string, bool) {
+	for _, mode := range []string{"bearer", "session"} {
+		prefix := "trb.platform.typescript.browser." + mode + "."
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		switch strings.TrimPrefix(name, prefix) {
+		case "get_json":
+			return "GET", mode, true
+		case "post_json":
+			return "POST", mode, true
+		case "put_json":
+			return "PUT", mode, true
+		case "patch_json":
+			return "PATCH", mode, true
+		case "delete_json":
+			return "DELETE", mode, true
+		}
+	}
+	return "", "", false
+}
+
 func (g *generator) tsBrowserJSON(method string, call *ir.Call, url, body string) string {
+	return g.tsBrowserJSONWithAuth(method, call, url, body, "", "")
+}
+
+func (g *generator) tsBrowserJSONWithAuth(method string, call *ir.Call, url, body, authMode, accessToken string) string {
 	if call.Codec == nil {
 		return "undefined"
 	}
 	valueType := tsCodecType(call.Codec)
 	decoded := g.tsBrowserDecodeJSON(call, "__trbText")
 	requestSetup := ""
-	requestOptions := ""
+	optionParts := []string{}
 	if method != "GET" {
-		requestOptions = ", { method: " + strconv.Quote(method) + " }"
+		optionParts = append(optionParts, "method: "+strconv.Quote(method))
+	}
+	headerParts := []string{}
+	if authMode == "bearer" {
+		headerParts = append(headerParts, `"Authorization": "Bearer " + `+accessToken)
+	}
+	if authMode == "session" {
+		optionParts = append(optionParts, `credentials: "same-origin"`)
+		if method != "GET" {
+			requestSetup += `const __trbCsrf = document.cookie.split("; ").find((part) => part.startsWith("trb_csrf="))?.slice(9) ?? ""; `
+			headerParts = append(headerParts, `"X-CSRF-Token": decodeURIComponent(__trbCsrf)`)
+		}
 	}
 	if body != "" {
 		encoded := g.tsBrowserEncodeJSON(call, body)
-		requestSetup = "const __trbEncoded = " + encoded + "; if (__trbEncoded.kind === \"Err\") return " + g.runtimeName("Result") + ".Err<" + valueType + ", " + g.tsType(call.Fails) + ">(" + g.runtimeName("FetchError") + ".InvalidJson(__trbEncoded.error.message)); "
-		requestOptions = ", { method: " + strconv.Quote(method) + ", headers: { \"Content-Type\": \"application/json\" }, body: __trbEncoded.value }"
+		requestSetup += "const __trbEncoded = " + encoded + "; if (__trbEncoded.kind === \"Err\") return " + g.runtimeName("Result") + ".Err<" + valueType + ", " + g.tsType(call.Fails) + ">(" + g.runtimeName("FetchError") + ".InvalidJson(__trbEncoded.error.message)); "
+		headerParts = append(headerParts, `"Content-Type": "application/json"`)
+		optionParts = append(optionParts, `body: __trbEncoded.value`)
+	}
+	if len(headerParts) > 0 {
+		optionParts = append(optionParts, "headers: { "+strings.Join(headerParts, ", ")+" }")
+	}
+	requestOptions := ""
+	if len(optionParts) > 0 {
+		requestOptions = ", { " + strings.Join(optionParts, ", ") + " }"
 	}
 	resultType := g.tsType(call.ExprType())
 	errorType := g.tsType(call.Fails)

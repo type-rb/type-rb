@@ -1,0 +1,49 @@
+enum OidcAuthError
+	MissingCredentials
+	InvalidCredentials(message: String)
+	InvalidState(message: String)
+	Provider(message: String)
+	Configuration(message: String)
+end
+
+record OidcPrincipal
+	subject: String
+	name: String?
+	email: String?
+	roles: Array<String>
+end
+
+record OidcBearerOptions
+	issuer: String
+	audience: String
+	jwks_uri: String
+	roles_claim: String
+end
+
+record OidcSessionOptions
+	issuer: String
+	client_id: String
+	client_secret: String
+	authorization_endpoint: String
+	token_endpoint: String
+	jwks_uri: String
+	redirect_uri: String
+	post_logout_redirect_uri: String
+	end_session_endpoint: String?
+	scope: String
+	audience: String?
+	roles_claim: String
+	cookie_name: String
+	cookie_secret: String
+	secure: Boolean
+end
+
+record OidcBrowserOptions
+	authority: String
+	client_id: String
+	redirect_uri: String
+	post_logout_redirect_uri: String
+	scope: String
+	audience: String?
+	roles_claim: String
+end

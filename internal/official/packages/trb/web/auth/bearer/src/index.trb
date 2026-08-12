@@ -1,0 +1,8 @@
+import { OidcAuthError, OidcBearerOptions, OidcPrincipal } from trb/auth/oidc
+import { Context, Next, Response } from trb/web
+
+interface BearerContract
+	principal(context: Context, options: OidcBearerOptions): OidcPrincipal
+	authenticate(context: Context, next_handler: Next, options: OidcBearerOptions): Response
+	error(): OidcAuthError
+end

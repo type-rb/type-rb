@@ -1,0 +1,5 @@
+import { FetchError } from trb/platform/typescript/browser
+
+interface BearerTransportContract
+	error(): FetchError
+end

@@ -1,0 +1,10 @@
+{
+  "name": "trb/platform/typescript/browser/session",
+  "version": "0.1.0",
+  "module": "trb/platform/typescript/browser/session/index",
+  "source": "src/index.trb",
+  "kind": "platform",
+  "targets": ["typescript"],
+  "semanticProvider": "trb.typescript.browser.session",
+  "nativeDependencies": {}
+}

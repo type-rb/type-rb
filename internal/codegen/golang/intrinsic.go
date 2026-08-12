@@ -10,6 +10,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if value, ok := g.authIntrinsic(name, call, arguments); ok {
+		return value
+	}
 	if value, ok := g.timeIntrinsic(name, call, arguments); ok {
 		return value
 	}

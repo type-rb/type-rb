@@ -21,10 +21,109 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 		return reactRouterSymbols()
 	case "trb.typescript.react.form":
 		return reactFormSymbols()
+	case "trb.typescript.react.oidc":
+		return reactOidcSymbols()
 	case "trb.typescript.browser":
 		return browserSymbols()
+	case "trb.typescript.browser.bearer":
+		return browserBearerSymbols()
+	case "trb.typescript.browser.session":
+		return browserSessionSymbols()
+	case "trb.web.auth.bearer":
+		return webBearerAuthSymbols()
+	case "trb.web.auth.session":
+		return webSessionAuthSymbols()
 	default:
 		panic(fmt.Sprintf("unknown official package semantic provider %q", provider))
+	}
+}
+
+func reactOidcSymbols() map[string]stdlib.Symbol {
+	return map[string]stdlib.Symbol{
+		"provider": {
+			Name: "provider", Intrinsic: "trb.platform.typescript.react.oidc.provider", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{{Name: "options", Type: types.FromName("OidcBrowserOptions")}, {Name: "child", Type: types.FromName("ReactNode")}},
+			Return:     types.FromName("ReactNode"),
+		},
+		"use_oidc": {
+			Name: "use_oidc", Intrinsic: "trb.platform.typescript.react.oidc.use_oidc", RuntimeIndependent: true,
+			Return: types.FromName("ReactOidcState"),
+		},
+	}
+}
+
+func browserBearerSymbols() map[string]stdlib.Symbol {
+	return browserTransportSymbols("trb.platform.typescript.browser.bearer", true)
+}
+
+func browserSessionSymbols() map[string]stdlib.Symbol {
+	return browserTransportSymbols("trb.platform.typescript.browser.session", false)
+}
+
+func browserTransportSymbols(prefix string, bearer bool) map[string]stdlib.Symbol {
+	typeT := types.FromName("T")
+	jsonResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, types.FromName("JsonError")}}
+	operation := func(name string, body bool) stdlib.Symbol {
+		parameters := []stdlib.Parameter{{Name: "url", Type: types.FromName("String")}}
+		if body {
+			parameters = append(parameters, stdlib.Parameter{Name: "value", Type: typeT})
+		}
+		if bearer {
+			parameters = append(parameters, stdlib.Parameter{Name: "access_token", Type: types.FromName("String")})
+		}
+		return stdlib.Symbol{
+			Name: name, Intrinsic: prefix + "." + name, RuntimeIndependent: true,
+			TypeParameters: []string{"T"}, Parameters: parameters, Return: typeT,
+			Fails:               types.FromName("FetchError"),
+			RuntimeDependencies: []types.Type{jsonResult},
+		}
+	}
+	return map[string]stdlib.Symbol{
+		"get_json": operation("get_json", false), "post_json": operation("post_json", true),
+		"put_json": operation("put_json", true), "patch_json": operation("patch_json", true),
+		"delete_json": operation("delete_json", false),
+	}
+}
+
+func webBearerAuthSymbols() map[string]stdlib.Symbol {
+	return map[string]stdlib.Symbol{
+		"principal": {
+			Name: "principal", Intrinsic: "trb.web.auth.bearer.principal", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{{Name: "context", Type: types.FromName("Context")}, {Name: "options", Type: types.FromName("OidcBearerOptions")}},
+			Return:     types.FromName("OidcPrincipal"), Fails: types.FromName("OidcAuthError"),
+		},
+		"authenticate": {
+			Name: "authenticate", Intrinsic: "trb.web.auth.bearer.authenticate", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{{Name: "context", Type: types.FromName("Context")}, {Name: "next_handler", Type: types.FromName("Next")}, {Name: "options", Type: types.FromName("OidcBearerOptions")}},
+			Return:     types.FromName("Response"),
+		},
+	}
+}
+
+func webSessionAuthSymbols() map[string]stdlib.Symbol {
+	context := stdlib.Parameter{Name: "context", Type: types.FromName("Context")}
+	options := stdlib.Parameter{Name: "options", Type: types.FromName("OidcSessionOptions")}
+	return map[string]stdlib.Symbol{
+		"start_login": {
+			Name: "start_login", Intrinsic: "trb.web.auth.session.start_login", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{context, options, {Name: "return_to", Type: types.FromName("String")}}, Return: types.FromName("Response"),
+		},
+		"complete_login": {
+			Name: "complete_login", Intrinsic: "trb.web.auth.session.complete_login", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{context, options}, Return: types.FromName("Response"),
+		},
+		"principal": {
+			Name: "principal", Intrinsic: "trb.web.auth.session.principal", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{context, options}, Return: types.FromName("OidcPrincipal"), Fails: types.FromName("OidcAuthError"),
+		},
+		"authenticate": {
+			Name: "authenticate", Intrinsic: "trb.web.auth.session.authenticate", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{context, {Name: "next_handler", Type: types.FromName("Next")}, options}, Return: types.FromName("Response"),
+		},
+		"end_session": {
+			Name: "end_session", Intrinsic: "trb.web.auth.session.end_session", RuntimeIndependent: true,
+			Parameters: []stdlib.Parameter{context, options}, Return: types.FromName("Response"),
+		},
 	}
 }
 
