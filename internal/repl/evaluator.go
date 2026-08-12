@@ -963,7 +963,14 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		reference := expressionReference(node.Callee)
 		arguments := make([]evaluatedArgument, 0, len(node.Arguments)+1)
 		if reference != nil && reference.Intrinsic != "" && (reference.ReceiverMethod || e.runtimeHandles(reference.Intrinsic)) {
-			if member, ok := node.Callee.(*ir.Member); ok {
+			var member *ir.Member
+			switch callee := node.Callee.(type) {
+			case *ir.Member:
+				member = callee
+			case *ir.TypeApply:
+				member, _ = callee.Receiver.(*ir.Member)
+			}
+			if member != nil {
 				receiver, err := e.expression(member.Receiver, module, sc)
 				if err != nil {
 					return Value{}, err

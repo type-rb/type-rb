@@ -628,9 +628,9 @@ type UnhandledEffect struct {
 
 func (*UnhandledEffect) irExpression() {}
 
-// CodecSchema is the checked, target-independent shape used by typed JSON
-// encode/decode intrinsics. Backends consume this schema instead of reflecting
-// over a generated target type.
+// CodecSchema is the checked, target-independent value shape used by typed
+// codecs and protocol bindings. Backends consume this schema instead of
+// reflecting over a generated target type.
 type CodecSchema struct {
 	Type      types.Type
 	Kind      string

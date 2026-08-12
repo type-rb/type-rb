@@ -1002,7 +1002,13 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 		if !external || member.Intrinsic == "" {
 			return nil
 		}
-		_, receiver := node.(*ast.MemberExpression)
+		receiver := false
+		switch value := node.(type) {
+		case *ast.MemberExpression:
+			receiver = true
+		case *ast.GenericExpression:
+			_, receiver = value.Receiver.(*ast.MemberExpression)
+		}
 		receiver = receiver && !member.Class
 		return &ir.Reference{Intrinsic: member.Intrinsic, Symbol: member.Name, ExportKind: string(member.Kind), ReceiverMethod: receiver}
 	}

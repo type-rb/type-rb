@@ -131,6 +131,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return rubyJSONEncode(call, arguments[0])
 	case "trb.web.request_json":
 		return rubyWebRequestJSON(call, arguments[0])
+	case "trb.web.request_query":
+		return rubyWebParameterBinding(call, arguments[0], "query")
+	case "trb.web.context_params":
+		return rubyWebParameterBinding(call, arguments[0], "path")
 	case "trb.web.json":
 		return rubyWebJSON(call, arguments)
 	case "trb.web.configure_server":
@@ -410,6 +414,106 @@ func rubyWebLogger(arguments []string) string {
 func rubyWebRequestJSON(call *ir.Call, request string) string {
 	decoded := rubyJSONDecode(call, "source")
 	return "-> { request_value = " + request + "; content_types = request_value.__trb_field_headers.entries.each_with_object([]) { |header, result| result << header.value if header.name.downcase == \"content-type\" }; if content_types.empty?; Result::Err.new(RequestError::MissingContentType); elsif content_types.length != 1; Result::Err.new(RequestError::DuplicateContentType); else; media_type = content_types.first.split(\";\", 2).first.strip.downcase; if media_type != \"application/json\" && !(media_type.start_with?(\"application/\") && media_type.end_with?(\"+json\")); Result::Err.new(RequestError::UnsupportedContentType.new(content_types.first)); else; source = request_value.__trb_field_body.bytes.dup.force_encoding(Encoding::UTF_8); if !source.valid_encoding?; Result::Err.new(RequestError::InvalidUtf8); else; decoded = " + decoded + "; if decoded.is_a?(Result::Err); Result::Err.new(RequestError::InvalidJson.new(decoded.error)); else; decoded; end; end; end; end }.call"
+}
+
+func rubyWebParameterBinding(call *ir.Call, receiver, source string) string {
+	if call.Codec == nil || call.Codec.Kind != "record" || len(call.ExprType().Args) != 2 {
+		return "nil"
+	}
+	sourceName := "Path"
+	if source == "query" {
+		sourceName = "Query"
+	}
+	sourceValue := "ParameterSource::" + sourceName
+	missing := func(name string) string {
+		return "Result::Err.new(ParameterError::Missing.new(" + sourceValue + ", " + strconv.Quote(name) + "))"
+	}
+	duplicate := func(name string) string {
+		return "Result::Err.new(ParameterError::Duplicate.new(" + sourceValue + ", " + strconv.Quote(name) + "))"
+	}
+	invalid := func(name, value, expected string) string {
+		return "Result::Err.new(ParameterError::Invalid.new(" + sourceValue + ", " + strconv.Quote(name) + ", " + value + ", " + strconv.Quote(expected) + "))"
+	}
+	var body strings.Builder
+	body.WriteString("parameter_values = Hash.new { |hash, key| hash[key] = [] }; ")
+	if source == "query" {
+		body.WriteString("query_result = parameter_receiver.query_parameters; return Result::Err.new(ParameterError::MalformedQuery.new(query_result.error)) if query_result.is_a?(Result::Err); query_result.value.each { |parameter| parameter_values[parameter.name] << parameter.value }; ")
+	} else {
+		for _, field := range call.Codec.Fields {
+			body.WriteString("parameter_values[" + strconv.Quote(field.Name) + "] = [parameter_receiver.path_value(" + strconv.Quote(field.Name) + ")]; ")
+		}
+	}
+	constructor := make([]string, 0, len(call.Codec.Fields))
+	for index, field := range call.Codec.Fields {
+		variable := "field" + strconv.Itoa(index)
+		values := "values" + strconv.Itoa(index)
+		body.WriteString(values + " = parameter_values[" + strconv.Quote(field.Name) + "]; ")
+		if field.Schema.Kind == "array" {
+			parser := rubyWebParameterParser(field.Schema.Element)
+			body.WriteString("if " + values + ".empty?; " + variable + " = ")
+			if field.Schema.Type.Nullable {
+				body.WriteString("nil")
+			} else {
+				body.WriteString("[]")
+			}
+			body.WriteString("; else; " + variable + " = []; " + values + ".each { |raw_value| parsed = " + parser + ".call(raw_value); return " + invalid(field.Name, "raw_value", rubyParameterExpected(field.Schema.Element)) + " unless parsed[0]; " + variable + " << parsed[1] }; end; ")
+		} else {
+			body.WriteString("if " + values + ".empty?; ")
+			if field.Schema.Type.Nullable {
+				body.WriteString(variable + " = nil")
+			} else {
+				body.WriteString("return " + missing(field.Name))
+			}
+			body.WriteString("; elsif " + values + ".length > 1; return " + duplicate(field.Name) + "; else; raw_value = " + values + ".first; ")
+			nonnull := *field.Schema
+			nonnull.Type.Nullable = false
+			parser := rubyWebParameterParser(&nonnull)
+			body.WriteString("parsed = " + parser + ".call(raw_value); return " + invalid(field.Name, "raw_value", rubyParameterExpected(&nonnull)) + " unless parsed[0]; " + variable + " = parsed[1]; end; ")
+		}
+		constructor = append(constructor, field.Name+": "+variable)
+	}
+	body.WriteString("Result::Ok.new(" + call.Codec.Type.Name + ".new(" + strings.Join(constructor, ", ") + "))")
+	return "-> { parameter_receiver = " + receiver + "; " + body.String() + " }.call"
+}
+
+func rubyParameterExpected(schema *ir.CodecSchema) string {
+	if schema == nil {
+		return "value"
+	}
+	typ := schema.Type
+	typ.Nullable = false
+	return typ.String()
+}
+
+func rubyWebParameterParser(schema *ir.CodecSchema) string {
+	body := "[true, value]"
+	switch schema.Kind {
+	case "string":
+		body = "[true, value]"
+	case "boolean":
+		body = "value == \"true\" ? [true, true] : value == \"false\" ? [true, false] : [false, nil]"
+	case "integer":
+		body = "if !/\\A[+-]?[0-9]+\\z/.match?(value); [false, nil]; else; parsed = Integer(value, 10); parsed < -9007199254740991 || parsed > 9007199254740991 ? [false, nil] : [true, parsed]; end"
+	case "float":
+		body = "if !/\\A[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?\\z/.match?(value); [false, nil]; else; parsed = Float(value); parsed.finite? ? [true, parsed] : [false, nil]; end"
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
+		method := "try_parse"
+		if schema.Kind == "time_zone" {
+			method = "try_get"
+		}
+		body = "parsed = " + rubyTimeRuntimeClass(schema.Type.Name) + "." + method + "(value); parsed.is_a?(Result::Ok) ? [true, parsed.value] : [false, nil]"
+	case "raw_enum":
+		branches := make([]string, 0, len(schema.RawValues))
+		for _, item := range schema.RawValues {
+			raw := item.Raw
+			if schema.RawType.Kind == types.Int {
+				raw = strconv.Quote(item.Raw)
+			}
+			branches = append(branches, "when "+raw+" then [true, "+schema.Type.Name+"::"+item.Member+"]")
+		}
+		body = "case value; " + strings.Join(branches, "; ") + "; else; [false, nil]; end"
+	}
+	return "->(value) { " + body + " }"
 }
 
 func rubyWebJSON(call *ir.Call, arguments []string) string {

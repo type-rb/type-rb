@@ -48,6 +48,43 @@ response := json({"ok" => true})
 	.vary("accept")
 ```
 
+Path and query values can be bound to records without giving the target
+runtime permission to reflect over application types:
+
+```trb
+record TodoParams
+	id: Integer
+end
+
+record TodoQuery
+	page: Integer?
+	tag: Array<String>
+end
+
+def get(context: Context): Response
+	case context.params<TodoParams>()
+	when Result::Err(_error)
+		return text("invalid path", 400)
+	when Result::Ok(params)
+		case context.request.query<TodoQuery>()
+		when Result::Err(_error)
+			return text("invalid query", 400)
+		when Result::Ok(query)
+			return text(params.id.to_s() + ":" + query.tag.size().to_s())
+		end
+	end
+end
+```
+
+Record field names are wire names. A path record must contain exactly the
+parameters declared by its route file, which is checked during the build.
+Query scalars accept one value, nullable fields use `nil` when missing, and
+arrays preserve repeated keys and use an empty array when missing. Unknown
+query keys are ignored. Boolean, numeric, raw-value enum, and date/time fields
+use their portable parsers. Malformed encoding, missing or duplicate scalar
+values, and invalid conversions return `ParameterError`; applications retain
+control over the corresponding error response.
+
 Use `src/routes/_middleware.trb` for root middleware and nested
 `_middleware.trb` files for route-scoped middleware. `trb/web/testing` exposes
 the same dispatcher without opening a socket, so route and middleware tests can

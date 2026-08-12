@@ -217,6 +217,49 @@ end
 `,
 		},
 		{
+			name:       "typed parameters",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, text } from trb/web
+import { Result } from trb/std/result
+
+record TodoParams
+	id: Integer
+end
+
+def get(context: Context): Response
+	case context.params<TodoParams>()
+	when Result::Ok(params)
+		return text(params.id.to_s())
+	when Result::Err(_error)
+		return text("invalid", 400)
+	end
+end
+`,
+		},
+		{
+			name:       "typed parameters missing route field",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, text } from trb/web
+import { Result } from trb/std/result
+
+record TodoParams
+	slug: String
+end
+
+def get(context: Context): Response
+	case context.params<TodoParams>()
+	when Result::Ok(params)
+		return text(params.slug)
+	when Result::Err(_error)
+		return text("invalid", 400)
+	end
+end
+`,
+			want: `Context#params<TodoParams>() field "slug" is not declared by route /todos/:id`,
+		},
+		{
 			name:       "catch-all parameter",
 			filename:   "/project/src/routes/files/[...path].trb",
 			modulePath: "routes/files/[...path]",

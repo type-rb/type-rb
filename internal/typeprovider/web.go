@@ -14,6 +14,7 @@ func init() {
 
 func loadWeb(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {
 	typeT := types.FromName("T")
+	parameterResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, types.FromName("ParameterError")}}
 	request := declaration.NewType("Request", "")
 	request.InstanceMembers["json"] = declaration.Member{
 		Name:           "json",
@@ -23,8 +24,26 @@ func loadWeb(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {
 		TypeParameters: []string{"T"},
 		Provider:       webTypeProvider,
 	}
+	request.InstanceMembers["query"] = declaration.Member{
+		Name:           "query",
+		Kind:           declaration.Method,
+		Intrinsic:      "trb.web.request_query",
+		Return:         parameterResult,
+		TypeParameters: []string{"T"},
+		Provider:       webTypeProvider,
+	}
+	context := declaration.NewType("Context", "")
+	context.InstanceMembers["params"] = declaration.Member{
+		Name:           "params",
+		Kind:           declaration.Method,
+		Intrinsic:      "trb.web.context_params",
+		Return:         parameterResult,
+		TypeParameters: []string{"T"},
+		Provider:       webTypeProvider,
+	}
 
 	catalog := declaration.NewCatalog()
 	catalog.Types[request.Name] = request
+	catalog.Types[context.Name] = context
 	return catalog, nil
 }

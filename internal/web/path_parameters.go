@@ -6,6 +6,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/token"
 )
 
 func validatePathParameterCalls(route Route, program *ast.Program, resolved resolver.Result) []Issue {
@@ -33,6 +34,35 @@ func validatePathParameterCalls(route Route, program *ast.Program, resolved reso
 			}
 		}
 		walkStatements(method.Body, func(call *ast.CallExpression) {
+			if recordName, span, ok := officialTypedPathParameterCall(call, contextNames); ok {
+				fields, found := pathParameterRecordFields(recordName, route.ModulePath, resolved)
+				if !found {
+					return
+				}
+				for _, field := range fields {
+					if !declared[field.Name] {
+						issues = append(issues, Issue{
+							Filename: route.Filename,
+							Message:  fmt.Sprintf("Context#params<%s>() field %q is not declared by route %s", recordName, field.Name, route.Path),
+							Span:     span,
+						})
+					}
+				}
+				fieldNames := map[string]bool{}
+				for _, field := range fields {
+					fieldNames[field.Name] = true
+				}
+				for _, name := range route.PathParameters {
+					if !fieldNames[name] {
+						issues = append(issues, Issue{
+							Filename: route.Filename,
+							Message:  fmt.Sprintf("Context#params<%s>() is missing route parameter %q", recordName, name),
+							Span:     span,
+						})
+					}
+				}
+				return
+			}
 			if !officialPathParameterCall(call, contextNames) || len(call.Arguments) != 1 {
 				return
 			}
@@ -58,6 +88,41 @@ func validatePathParameterCalls(route Route, program *ast.Program, resolved reso
 		})
 	}
 	return issues
+}
+
+func officialTypedPathParameterCall(call *ast.CallExpression, contextNames map[string]bool) (string, token.Span, bool) {
+	generic, ok := call.Callee.(*ast.GenericExpression)
+	if !ok || len(generic.Arguments) != 1 {
+		return "", token.Span{}, false
+	}
+	member, ok := generic.Receiver.(*ast.MemberExpression)
+	if !ok || member.Name != "params" {
+		return "", token.Span{}, false
+	}
+	receiver, ok := member.Receiver.(*ast.Identifier)
+	if !ok || !contextNames[receiver.Name] {
+		return "", token.Span{}, false
+	}
+	argument := generic.Arguments[0]
+	return argument.Name, argument.Span(), true
+}
+
+func pathParameterRecordFields(name, modulePath string, resolved resolver.Result) ([]resolver.RecordField, bool) {
+	if binding := resolved.Symbols[name]; binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
+		return binding.Export.Fields, true
+	}
+	if resolved.Catalog == nil {
+		return nil, false
+	}
+	module := resolved.Catalog.Modules[modulePath]
+	if module == nil {
+		return nil, false
+	}
+	exported, ok := module.Exports[name]
+	if !ok || exported.Kind != resolver.RecordExport {
+		return nil, false
+	}
+	return exported.Fields, true
 }
 
 func officialPathParameterCall(call *ast.CallExpression, contextNames map[string]bool) bool {

@@ -111,6 +111,14 @@ could ambiguously match the same method and request path. Calls to
 `Context#path_value`
 inside route files require a string literal naming a parameter declared by that
 file's route pattern, so misspelled and dynamic names fail during the build.
+`Context#params<T>()` binds all route parameters to a checked record and
+verifies that the record fields exactly match the file-based route.
+`Request#query<T>()` binds decoded query parameters to a record: scalar fields
+are strict single values, nullable fields represent omission, and Array fields
+preserve repeated keys. Boolean, portable numeric, raw-value enum, and
+date/time conversions share the same semantics in every backend. Binding
+failures remain explicit `ParameterError` results so applications choose their
+own validation response policy.
 Typed `Request#json<T>()` accepts `application/json` and `application/*+json`,
 rejects ambiguous content types and invalid UTF-8, and reports each failure as
 a `RequestError` without exposing backend parser behavior. Root and nested

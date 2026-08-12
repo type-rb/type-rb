@@ -28,6 +28,18 @@ enum RequestError
 	InvalidJson(error: JsonError)
 end
 
+enum ParameterSource
+	Path
+	Query
+end
+
+enum ParameterError
+	MalformedQuery(error: PercentDecodeError)
+	Missing(source: ParameterSource, name: String)
+	Duplicate(source: ParameterSource, name: String)
+	Invalid(source: ParameterSource, name: String, value: String, expected: String)
+end
+
 class Request
 	readonly @method: HttpMethod
 	readonly @path: String
