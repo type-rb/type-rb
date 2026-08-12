@@ -205,6 +205,13 @@ func (p *exprParser) parsePrefix() ast.Expression {
 		}
 		return &ast.Literal{Base: ast.Base{SourceSpan: tok.Span}, Kind: ast.StringLiteral, Raw: tok.Lexeme}
 	}
+	if tok.Kind == token.JSXLiteral {
+		element, ok := parseJSXExpression(tok)
+		if !ok {
+			return nil
+		}
+		return element
+	}
 	if tok.Kind == token.NativeLiteral {
 		return &ast.NativeExpression{Base: ast.Base{SourceSpan: tok.Span}, Text: tok.Lexeme}
 	}

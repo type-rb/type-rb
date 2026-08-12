@@ -17,6 +17,8 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 		return webTestingSymbols()
 	case "trb.typescript.browser":
 		return typescriptBrowserSymbols()
+	case "trb.typescript.react":
+		return reactSymbols()
 	default:
 		panic(fmt.Sprintf("unknown official package semantic provider %q", provider))
 	}
@@ -86,6 +88,21 @@ func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 			Return:              types.FromName("RequestBody"),
 			Fails:               requestError,
 			RuntimeDependencies: jsonRuntime,
+		},
+	}
+}
+
+func reactSymbols() map[string]stdlib.Symbol {
+	node := types.FromName("ReactNode")
+	return map[string]stdlib.Symbol{
+		"mount": {
+			Name:      "mount",
+			Intrinsic: "trb.platform.typescript.react.mount",
+			Parameters: []stdlib.Parameter{
+				{Name: "node", Type: node},
+				{Name: "element_id", Type: types.FromName("String")},
+			},
+			Return: types.FromName("Void"),
 		},
 	}
 }

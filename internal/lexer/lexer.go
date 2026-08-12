@@ -39,6 +39,8 @@ func (l *Lexer) run() {
 			l.emit(token.Newline, "\n", start)
 		case b == '#':
 			l.scanComment(start)
+		case b == '<' && l.canStartJSX() && l.scanJSX(start):
+			// scanJSX emitted the token.
 		case b == '<' && l.offset+1 < len(l.source) && l.source[l.offset+1] == '<' && l.scanHeredoc(start):
 			// scanHeredoc emitted the token.
 		case b == '%' && l.scanPercentLiteral(start):
@@ -66,6 +68,170 @@ func (l *Lexer) run() {
 	}
 	pos := l.position()
 	l.tokens = append(l.tokens, token.Token{Kind: token.EOF, Span: token.Span{Start: pos, End: pos}})
+}
+
+func (l *Lexer) canStartJSX() bool {
+	if l.offset+1 >= len(l.source) {
+		return false
+	}
+	next := l.source[l.offset+1]
+	if next != '>' && next != '_' && !(next >= 'a' && next <= 'z') && !(next >= 'A' && next <= 'Z') {
+		return false
+	}
+	for index := len(l.tokens) - 1; index >= 0; index-- {
+		previous := l.tokens[index]
+		if previous.Kind == token.Comment {
+			continue
+		}
+		if previous.Kind == token.Newline {
+			return true
+		}
+		switch previous.Lexeme {
+		case "(", "[", "{", ",", ";", "=", ":=", "=>", "return", "when", "if", "and", "or", "&&", "||":
+			return true
+		}
+		return false
+	}
+	return true
+}
+
+// scanJSX retains a complete JSX root as one lossless token. The parser then
+// builds structured JSX AST nodes from that token; treating the root as a
+// lexical unit also lets multiline JSX participate in ordinary expressions.
+func (l *Lexer) scanJSX(start token.Position) bool {
+	begin := l.offset
+	stack := []string{}
+	for l.offset < len(l.source) {
+		if l.source[l.offset] != '<' {
+			if l.source[l.offset] == '{' {
+				l.scanJSXBraces()
+				continue
+			}
+			l.advance()
+			continue
+		}
+		closing := l.offset+1 < len(l.source) && l.source[l.offset+1] == '/'
+		l.advance()
+		if closing {
+			l.advance()
+		}
+		nameBegin := l.offset
+		for l.offset < len(l.source) && isJSXNameByte(l.source[l.offset]) {
+			l.advance()
+		}
+		name := string(l.source[nameBegin:l.offset])
+		fragment := name == ""
+		if fragment && (l.offset >= len(l.source) || l.source[l.offset] != '>') {
+			l.offset = begin
+			l.line = start.Line
+			l.column = start.Column
+			return false
+		}
+		selfClosing := false
+		quote := byte(0)
+		for l.offset < len(l.source) {
+			current := l.source[l.offset]
+			if quote != 0 {
+				if current == '\\' {
+					l.advance()
+					if l.offset < len(l.source) {
+						l.advance()
+					}
+					continue
+				}
+				l.advance()
+				if current == quote {
+					quote = 0
+				}
+				continue
+			}
+			if current == '\'' || current == '"' {
+				quote = current
+				l.advance()
+				continue
+			}
+			if current == '{' {
+				l.scanJSXBraces()
+				continue
+			}
+			if current == '>' {
+				if l.offset > begin && l.source[l.offset-1] == '/' {
+					selfClosing = true
+				}
+				l.advance()
+				break
+			}
+			l.advance()
+		}
+		if closing {
+			if len(stack) == 0 || stack[len(stack)-1] != name {
+				l.diags = append(l.diags, diagnostic.Diagnostic{Severity: diagnostic.Error, Message: "mismatched JSX closing element", Span: token.Span{Start: start, End: l.position()}})
+				l.emit(token.JSXLiteral, string(l.source[begin:l.offset]), start)
+				return true
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				l.emit(token.JSXLiteral, string(l.source[begin:l.offset]), start)
+				return true
+			}
+			continue
+		}
+		if !selfClosing {
+			if fragment {
+				stack = append(stack, "")
+			} else {
+				stack = append(stack, name)
+			}
+		} else if len(stack) == 0 {
+			l.emit(token.JSXLiteral, string(l.source[begin:l.offset]), start)
+			return true
+		}
+	}
+	l.emit(token.JSXLiteral, string(l.source[begin:l.offset]), start)
+	l.diags = append(l.diags, diagnostic.Diagnostic{Severity: diagnostic.Error, Message: "unterminated JSX element", Span: token.Span{Start: start, End: l.position()}})
+	return true
+}
+
+func (l *Lexer) scanJSXBraces() {
+	depth := 0
+	quote := byte(0)
+	for l.offset < len(l.source) {
+		current := l.source[l.offset]
+		if quote != 0 {
+			if current == '\\' {
+				l.advance()
+				if l.offset < len(l.source) {
+					l.advance()
+				}
+				continue
+			}
+			l.advance()
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '\'' || current == '"' || current == '`' {
+			quote = current
+			l.advance()
+			continue
+		}
+		if current == '{' {
+			depth++
+		} else if current == '}' {
+			depth--
+			l.advance()
+			if depth == 0 {
+				return
+			}
+			continue
+		}
+		l.advance()
+	}
+}
+
+func isJSXNameByte(value byte) bool {
+	return value == '_' || value == '-' || value == '.' || value == ':' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
 }
 
 func (l *Lexer) scanComment(start token.Position) {

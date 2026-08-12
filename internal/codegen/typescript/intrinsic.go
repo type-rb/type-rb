@@ -451,20 +451,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "String(" + arguments[0] + ")"
 	case "trb.platform.typescript.node.argv":
 		return "process.argv.slice(2)"
-	case "trb.platform.typescript.react.element":
-		return "React.createElement(" + arguments[0] + ", " + arguments[1] + " as any, ..." + arguments[2] + ")"
 	case "trb.platform.typescript.react.mount":
-		return "createRoot(document.getElementById(" + arguments[1] + ")!).render(React.createElement(" + arguments[0] + "))"
-	case "trb.platform.typescript.react.refresh":
-		return arguments[0] + ".forceUpdate()"
-	case "trb.platform.typescript.react.prevent_default":
-		return arguments[0] + ".preventDefault()"
-	case "trb.platform.typescript.react.input_value":
-		return "(" + arguments[0] + ".currentTarget as HTMLInputElement).value"
-	case "trb.platform.typescript.react.data_integer":
-		return "Number((" + arguments[0] + ".currentTarget as HTMLElement).dataset[" + arguments[1] + "])"
-	case "trb.platform.typescript.react.data_boolean":
-		return "((" + arguments[0] + ".currentTarget as HTMLElement).dataset[" + arguments[1] + "] === \"true\")"
+		return "createRoot(document.getElementById(" + arguments[1] + ")!).render(" + arguments[0] + ")"
 	default:
 		return "undefined"
 	}
