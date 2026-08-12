@@ -164,6 +164,24 @@ Use `src/routes/_middleware.trb` for root middleware and nested
 the same dispatcher without opening a socket, so route and middleware tests can
 construct a `Request` from the shared [`trb/http`](http.md) values.
 
+Response compression is opt-in middleware:
+
+```trb
+import { Context, Next, Response } from trb/web
+import trb/web/middleware/compression
+
+def call(context: Context, next_handler: Next): Response
+	return compression.call(context, next_handler)
+end
+```
+
+The default compresses eligible responses of at least 1 KiB with gzip when the
+request's `Accept-Encoding` allows it. `CompressionOptions` can change the
+minimum size. The shared implementation respects quality values,
+`Cache-Control: no-transform`, partial and bodyless responses, existing content
+encodings, and compressible media types. It also maintains `Vary` and removes
+representation metadata invalidated by compression.
+
 `text`, `bytes`, `json`, `empty`, and `redirect` remain the standard response
 builders. Server host, port, body limit, and shutdown timeout are configured
 with `configure_server`.

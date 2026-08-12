@@ -278,6 +278,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "trbWebDispatch(" + arguments[0] + ")"
 	case "trb.web.middleware.logger.call":
 		return g.webLogger(call, arguments)
+	case "trb.web.middleware.compression.gzip":
+		return g.webGzip(arguments[0])
 	case "trb.orm.where":
 		return g.ormWhere(call)
 	case "trb.orm.distinct", "trb.orm.query.distinct":
@@ -921,6 +923,12 @@ func (g *generator) webLogger(call *ir.Call, arguments []string) string {
 		options = "loggerOptions := " + arguments[2] + "; excluded = slices.Contains(loggerOptions.ExcludePaths, loggerContext.TrbFieldRequest.TrbFieldPath); useStderr = loggerOptions.Stderr; "
 	}
 	return "func() (response " + g.goType(call.ExprType()) + ") { loggerContext := " + arguments[0] + "; loggerNextHandler := " + arguments[1] + "; excluded := false; useStderr := false; " + options + "if excluded { return loggerNextHandler.Call(loggerContext) }; started := time.Now(); status := 500; defer func() { level := \"info\"; if status >= 500 { level = \"error\" }; entry := map[string]any{\"timestamp\": time.Now().UTC().Format(time.RFC3339Nano), \"level\": level, \"event\": \"http_request\", \"method\": loggerContext.TrbFieldRequest.TrbFieldMethod.ToS(), \"path\": loggerContext.TrbFieldRequest.TrbFieldPath, \"status\": status, \"duration_ms\": float64(time.Since(started).Nanoseconds()) / 1e6}; encoded, _ := json.Marshal(entry); output := os.Stdout; if useStderr { output = os.Stderr }; fmt.Fprintln(output, string(encoded)) }(); response = loggerNextHandler.Call(loggerContext); status = response.TrbFieldStatus; return response }()"
+}
+
+func (g *generator) webGzip(value string) string {
+	g.requireImport("bytes", "")
+	g.requireImport("compress/gzip", "gzip")
+	return "func(value []byte) []byte { var buffer bytes.Buffer; writer := gzip.NewWriter(&buffer); if _, err := writer.Write(value); err != nil { panic(\"trb/web gzip compression failed: \" + err.Error()) }; if err := writer.Close(); err != nil { panic(\"trb/web gzip compression failed: \" + err.Error()) }; return buffer.Bytes() }(" + value + ")"
 }
 
 func (g *generator) webRequestJSON(call *ir.Call, request string) string {

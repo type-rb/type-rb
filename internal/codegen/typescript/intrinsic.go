@@ -210,6 +210,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "trb_web_dispatch(" + arguments[0] + ")"
 	case "trb.web.middleware.logger.call":
 		return tsWebLogger(call, arguments)
+	case "trb.web.middleware.compression.gzip":
+		return tsWebGzip(arguments[0])
 	case "trb.std.strings.length":
 		return "Array.from(" + arguments[0] + ").length"
 	case "trb.std.strings.empty":
@@ -562,6 +564,10 @@ func tsWebLogger(call *ir.Call, arguments []string) string {
 		options = "const loggerOptions: { stderr: boolean; exclude_paths: string[] } | undefined = " + arguments[2] + "; "
 	}
 	return "(async (): Promise<" + tsType(call.ExprType()) + "> => { const loggerContext = " + arguments[0] + "; const loggerNextHandler = " + arguments[1] + "; " + options + "const excluded = loggerOptions !== undefined && loggerOptions.exclude_paths.includes(loggerContext.__trb_request.__trb_path); if (excluded) return await loggerNextHandler.call(loggerContext); const started = performance.now(); let status = 500; try { const response = await loggerNextHandler.call(loggerContext); status = response.__trb_status; return response; } finally { const entry = JSON.stringify({ timestamp: new Date().toISOString(), level: status >= 500 ? \"error\" : \"info\", event: \"http_request\", method: loggerContext.__trb_request.__trb_method.to_s(), path: loggerContext.__trb_request.__trb_path, status, duration_ms: performance.now() - started }); if (loggerOptions !== undefined && loggerOptions.stderr) console.error(entry); else console.log(entry); } })()"
+}
+
+func tsWebGzip(value string) string {
+	return "((value: Uint8Array): Uint8Array => { const bun = Reflect.get(globalThis, \"Bun\") as { gzipSync?: (input: Uint8Array) => Uint8Array } | undefined; if (typeof bun?.gzipSync === \"function\") return new Uint8Array(bun.gzipSync(value)); const host = Reflect.get(globalThis, \"process\") as { getBuiltinModule?: (name: string) => unknown } | undefined; const zlib = host?.getBuiltinModule?.(\"zlib\") as { gzipSync?: (input: Uint8Array) => Uint8Array } | undefined; if (typeof zlib?.gzipSync !== \"function\") throw new Error(\"trb/web gzip compression is unavailable in this TypeScript runtime\"); return new Uint8Array(zlib.gzipSync(value)); })(" + value + ")"
 }
 
 func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
