@@ -16,8 +16,8 @@ const ConfigName = "trbconfig.jsonc"
 // DefaultRubyVersion is the current Ruby toolchain supported by TypeRB.
 const DefaultRubyVersion = "4.0.6"
 
-// DefaultTypeScriptVersion tracks the current TypeScript release.
-const DefaultTypeScriptVersion = "latest"
+// DefaultTypeScriptVersion follows the latest compatible TypeScript 6 patch.
+const DefaultTypeScriptVersion = "^6.0.0"
 
 // DefaultTypeScriptRuntime preserves the runtime used by TypeScript projects
 // created before runtime selection became explicit.
