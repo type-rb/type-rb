@@ -25,6 +25,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	if name == "trb.internal.runtime.fail" {
 		return "((): " + g.tsType(call.ExprType()) + " => { throw new Error(" + arguments[0] + "); })()"
 	}
+	if name == "trb.jobs.perform_later" {
+		return g.jobsPerformLater(call, arguments)
+	}
 	unicodeAlias := "unicode"
 	pathAlias := "path"
 	reference := expressionReference(call.Callee)

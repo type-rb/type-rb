@@ -8,6 +8,13 @@
   "nativeDependencies": {
     "go": {
       "modernc.org/sqlite": "v1.53.0"
+    },
+    "ruby": {
+      "sequel": "latest",
+      "sqlite3": "latest"
+    },
+    "typescript": {
+      "@types/bun": "latest"
     }
   },
   "nativeDependenciesByOption": {
@@ -21,6 +28,22 @@
         },
         "mysql": {
           "github.com/go-sql-driver/mysql": "v1.10.0"
+        }
+      }
+    },
+    "ruby": {
+      "database_adapter": {
+        "sqlite": {
+          "sequel": "latest",
+          "sqlite3": "latest"
+        },
+        "postgresql": {
+          "pg": "latest",
+          "sequel": "latest"
+        },
+        "mysql": {
+          "mysql2": "latest",
+          "sequel": "latest"
         }
       }
     }

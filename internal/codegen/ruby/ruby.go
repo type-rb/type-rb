@@ -7,6 +7,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/ir"
+	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/types"
 	webintegration "github.com/type-rb/type-rb/internal/web"
@@ -21,6 +22,7 @@ type generator struct {
 	topTargets      map[string]string
 	nativeSyntax    bool
 	temporary       int
+	jobs            *jobsintegration.Manifest
 	orm             *ormintegration.Manifest
 	breakTarget     string
 	execution       *effectplan.Plan
@@ -44,7 +46,8 @@ func generate(program *ir.Program, execution *effectplan.Plan) string {
 	g := &generator{
 		loader: program.RubyLoader, modulePath: program.ModulePath,
 		topFunctions: map[string]bool{}, topTargets: map[string]string{},
-		orm: ormintegration.ManifestFrom(program.Extensions), execution: execution,
+		jobs: jobsintegration.ManifestFrom(program.Extensions),
+		orm:  ormintegration.ManifestFrom(program.Extensions), execution: execution,
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
@@ -67,10 +70,14 @@ func generate(program *ir.Program, execution *effectplan.Plan) string {
 			g.b.WriteByte('\n')
 		}
 		main := topLevelRubyMethod(program.Statements, "main")
+		call := "main()"
 		if g.methodUsesExecutionScope(main) {
-			g.line("main(TrbExecutionScope.root)", "")
+			call = "main(TrbExecutionScope.root)"
+		}
+		if g.jobs != nil && len(g.jobs.Jobs) > 0 {
+			g.line(call+" unless trb_jobs_run_worker_or_command", "")
 		} else {
-			g.line("main()", "")
+			g.line(call, "")
 		}
 	}
 	return strings.TrimRight(g.b.String(), "\n") + "\n"
@@ -772,6 +779,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 		topFunctions:    g.topFunctions,
 		nativeSyntax:    g.nativeSyntax,
 		temporary:       g.temporary,
+		jobs:            g.jobs,
 		orm:             g.orm,
 		breakTarget:     g.breakTarget,
 		execution:       g.execution,
@@ -817,6 +825,7 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		topTargets:      g.topTargets,
 		nativeSyntax:    g.nativeSyntax,
 		temporary:       g.temporary,
+		jobs:            g.jobs,
 		orm:             g.orm,
 		breakTarget:     g.breakTarget,
 		execution:       g.execution,
@@ -843,6 +852,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		topFunctions:    g.topFunctions,
 		nativeSyntax:    g.nativeSyntax,
 		temporary:       g.temporary,
+		jobs:            g.jobs,
 		orm:             g.orm,
 		breakTarget:     g.breakTarget,
 		execution:       g.execution,

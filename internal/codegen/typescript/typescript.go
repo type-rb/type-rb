@@ -9,6 +9,7 @@ import (
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
+	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -35,6 +36,7 @@ type generator struct {
 	suspension       *SuspensionPlan
 	execution        *effectplan.Plan
 	executionActive  bool
+	jobs             *jobsintegration.Manifest
 	orm              *ormintegration.Manifest
 	breakTarget      string
 	enumReceiver     string
@@ -62,6 +64,9 @@ func GenerateProject(programs []*ir.Program) ([]string, error) {
 		if !interactive && ormintegration.ManifestFrom(program.Extensions) != nil && program.TypeScriptRuntime != "bun" {
 			return nil, fmt.Errorf(`trb/orm in mode: typescript currently requires typescript.runtime: "bun"`)
 		}
+		if !interactive && jobsintegration.ManifestFrom(program.Extensions) != nil && program.TypeScriptRuntime != "bun" {
+			return nil, fmt.Errorf(`trb/jobs in mode: typescript currently requires typescript.runtime: "bun"`)
+		}
 	}
 	plan, err := AnalyzeSuspension(programs)
 	if err != nil {
@@ -83,7 +88,7 @@ func GenerateProject(programs []*ir.Program) ([]string, error) {
 }
 
 func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string) string {
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, orm: ormintegration.ManifestFrom(program.Extensions)}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions)}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -115,7 +120,11 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		if method != nil && suspension.Methods[method] {
 			call = "await " + call
 		}
-		g.line(call + ";")
+		if g.jobs != nil && len(g.jobs.Jobs) > 0 {
+			g.line("if (!(await trbJobsRunWorkerOrCommand())) { " + call + "; }")
+		} else {
+			g.line(call + ";")
+		}
 	}
 	return strings.TrimRight(g.b.String(), "\n") + "\n"
 }
@@ -1267,6 +1276,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 		suspension:      g.suspension,
 		execution:       g.execution,
 		executionActive: g.executionActive,
+		jobs:            g.jobs,
 		orm:             g.orm,
 		breakTarget:     g.breakTarget,
 		enumReceiver:    g.enumReceiver,
@@ -1326,6 +1336,7 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		suspension:      g.suspension,
 		execution:       g.execution,
 		executionActive: g.executionActive,
+		jobs:            g.jobs,
 		orm:             g.orm,
 		breakTarget:     g.breakTarget,
 		enumReceiver:    g.enumReceiver,
@@ -1366,6 +1377,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		suspension:      g.suspension,
 		execution:       g.execution,
 		executionActive: g.executionActive,
+		jobs:            g.jobs,
 		orm:             g.orm,
 		breakTarget:     g.breakTarget,
 		enumReceiver:    g.enumReceiver,
