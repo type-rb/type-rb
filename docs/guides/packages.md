@@ -123,11 +123,32 @@ union types for discriminated result contracts. TypeRB calls still provide
 explicit type arguments. Provider declarations cannot use `Any`;
 unrepresentable boundaries remain explicit diagnostics.
 
+A provider may expose a native Promise callback as a checked fallible TypeRB
+function. `fails` names the callback's error type and
+`effectBridge: "promise_rejection"` declares that an `Err` becomes a rejected
+Promise while an `Ok` becomes its resolved value:
+
+```json
+{
+  "name": "queryFn",
+  "type": {
+    "kind": "function",
+    "name": "Function",
+    "args": [{ "kind": "named", "name": "TData" }],
+    "fails": { "kind": "named", "name": "TError" },
+    "effectBridge": "promise_rejection"
+  }
+}
+```
+
+Application code still uses ordinary `fn ... fails ...`, `attempt`, and
+`Result` semantics. The bridge is allowed only at the declared native
+boundary; it does not make Promise rejection part of portable TypeRB.
+
 Provider-only records may describe props or parameter objects without becoming
 application-importable names. When a selected contract refers to real native
 package types, generated TypeScript adds the required type-only imports while
 keeping those transitive names invisible to TypeRB source and completion.
-Fallible or suspending callback effects remain future extension-protocol work.
 
 External executable compiler extensions are intentionally unavailable.
 Packages that need syntax, code generation, or dynamic type discovery must

@@ -911,6 +911,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
+		case ir.ResultFunctionToPromiseRejectionConversion:
+			return g.resultFunctionToPromiseRejection(n)
 		case ir.PureFunctionToFallibleConversion:
 			return g.pureFunctionToFallible(n)
 		case ir.IntegerToFloatConversion:
@@ -1108,6 +1110,28 @@ func (g *generator) pureFunctionToFallible(conversion *ir.Conversion) string {
 		result + ".Ok<" + g.tsType(internalSuccess) + ", " + g.tsType(failure) + ">(" + value + "); }"
 	return "((__trbValue: " + g.tsType(conversion.Value.ExprType()) + "): " + g.tsType(conversion.ExprType()) +
 		" => " + wrapped + ")(" + g.expr(conversion.Value) + ")"
+}
+
+func (g *generator) resultFunctionToPromiseRejection(conversion *ir.Conversion) string {
+	parameters, success, ok := types.FunctionSignature(conversion.ExprType())
+	if !ok {
+		return g.expr(conversion.Value)
+	}
+	parts := make([]string, len(parameters))
+	arguments := make([]string, len(parameters))
+	for index, parameter := range parameters {
+		name := "__trbArg" + strconv.Itoa(index)
+		parts[index] = name + ": " + g.tsType(parameter)
+		arguments[index] = name
+	}
+	returned := g.tsType(success)
+	returnValue := "return __trbResult.value;"
+	if success.Kind == types.Void {
+		returnValue = "return;"
+	}
+	return "((__trbCallback: " + g.tsType(conversion.Value.ExprType()) + ") => async (" + strings.Join(parts, ", ") +
+		"): Promise<" + returned + "> => { const __trbResult = await __trbCallback(" + strings.Join(arguments, ", ") +
+		"); if (__trbResult.kind === \"Err\") { throw __trbResult.error; } " + returnValue + " })(" + g.expr(conversion.Value) + ")"
 }
 
 func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {

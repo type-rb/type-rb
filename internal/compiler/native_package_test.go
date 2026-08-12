@@ -51,6 +51,7 @@ func nativeGenericQueryCatalog() *nativepackage.Catalog {
 	tData := typeParameter("TData")
 	tError := typeParameter("TError")
 	parameters := []string{"TData", "TError"}
+	queryCallback := nativepackage.Type{Kind: "function", Name: "Function", Args: []nativepackage.Type{tData}, Fails: &tError, EffectBridge: "promise_rejection"}
 	queryResultTarget := nativepackage.Type{Kind: "union", Name: "Union", Args: []nativepackage.Type{
 		named("QueryObserverPendingResult", tData, tError),
 		named("QueryObserverLoadingErrorResult", tData, tError),
@@ -65,7 +66,7 @@ func nativeGenericQueryCatalog() *nativepackage.Catalog {
 	queryOptions := nativepackage.Export{
 		Kind: "record", Type: named("UseQueryOptions"), TypeParameters: parameters, Fields: []nativepackage.Field{
 			{Name: "queryKey", Type: nativepackage.Type{Kind: "array", Name: "Array", Args: []nativepackage.Type{{Kind: "string", Name: "String"}}}},
-			{Name: "queryFn", Type: nativepackage.Type{Kind: "function", Name: "Function", Args: []nativepackage.Type{tData}}},
+			{Name: "queryFn", Type: queryCallback},
 			{Name: "enabled", Type: nativepackage.Type{Kind: "bool", Name: "Boolean"}, Optional: true},
 		},
 	}
@@ -93,6 +94,9 @@ func nativeGenericQueryCatalog() *nativepackage.Catalog {
 					},
 					"useQuery": {
 						Kind: "function", Type: named("UseQueryResult", tData, tError), Parameters: []nativepackage.Type{named("UseQueryOptions", tData, tError)}, Required: 1, TypeParameters: parameters,
+					},
+					"runQuery": {
+						Kind: "function", Type: tData, Parameters: []nativepackage.Type{queryCallback}, Required: 1, TypeParameters: parameters,
 					},
 				},
 				Records: map[string]nativepackage.Export{
@@ -259,10 +263,86 @@ end
 		`satisfies UseQueryOptions<Todo, string>`,
 		`queryOptions<Todo, string>`,
 		`useQuery<Todo, string>(options)`,
+		`if (__trbResult.kind === "Err") { throw __trbResult.error; }`,
 		`return query.data.title;`,
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated generic native package output is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
+func TestCompileTypeScriptBridgesSuspendingHTTPResultToNativePromiseRejection(t *testing.T) {
+	source := []byte(`import { HttpClient, RequestError } from trb/platform/typescript/browser
+import { UseQueryOptions } from "@tanstack/react-query"
+
+record Todo
+	id: Integer
+	title: String
+end
+
+def options(client: HttpClient): UseQueryOptions<Todo, RequestError>
+	query_fn := fn(): Todo fails RequestError
+		return client.request("/todos/1").json<Todo>().body
+	end
+	return UseQueryOptions<Todo, RequestError>.new(
+		queryKey: ["todos"],
+		queryFn: query_fn,
+	)
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "query.trb", ModulePath: "app/query", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "query.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		`const query_fn: () => Promise<Result<Todo, __trb_browser.RequestError>> = async ()`,
+		`globalThis.fetch`,
+		`const __trbResult = await __trbCallback()`,
+		`if (__trbResult.kind === "Err") { throw __trbResult.error; }`,
+		`return __trbResult.value;`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated native callback bridge is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
+func TestCompileTypeScriptBridgesDirectNativeCallbackParameters(t *testing.T) {
+	source := []byte(`import { runQuery } from "@tanstack/react-query"
+
+record LoadError
+	message: String
+end
+
+def load(): Integer fails LoadError
+	return 7
+end
+
+def main()
+	loader := fn(): Integer fails LoadError
+		return load()
+	end
+	puts(runQuery<Integer, LoadError>(loader))
+	return
+end
+`)
+	artifact, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	for _, expected := range []string{`runQuery<number, LoadError>`, `const __trbResult = await __trbCallback()`, `throw __trbResult.error`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated direct callback bridge is missing %q:\n%s", expected, output)
 		}
 	}
 }

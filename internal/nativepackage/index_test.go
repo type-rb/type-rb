@@ -5,7 +5,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/type-rb/type-rb/internal/types"
 )
+
+func TestNativeTypePreservesFunctionEffects(t *testing.T) {
+	failure := types.FromName("RequestError")
+	semantic := types.FunctionWithEffect([]types.Type{types.FromName("String")}, types.FromName("Integer"), failure)
+	wire := FromSemantic(semantic)
+	if wire.Fails == nil || wire.Fails.Name != "RequestError" {
+		t.Fatalf("wire function lost its failure type: %#v", wire)
+	}
+	if restored := wire.Semantic(); !types.Equivalent(restored, semantic) {
+		t.Fatalf("function effect round trip changed %s to %s", semantic, restored)
+	}
+}
 
 func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 	root := t.TempDir()

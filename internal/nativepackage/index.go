@@ -57,17 +57,23 @@ type Field struct {
 
 // Type is the stable on-disk form of a target-independent semantic type.
 type Type struct {
-	Kind     string `json:"kind"`
-	Name     string `json:"name,omitempty"`
-	Args     []Type `json:"args,omitempty"`
-	Nullable bool   `json:"nullable,omitempty"`
-	Readonly bool   `json:"readonly,omitempty"`
+	Kind         string `json:"kind"`
+	Name         string `json:"name,omitempty"`
+	Args         []Type `json:"args,omitempty"`
+	Fails        *Type  `json:"fails,omitempty"`
+	EffectBridge string `json:"effectBridge,omitempty"`
+	Nullable     bool   `json:"nullable,omitempty"`
+	Readonly     bool   `json:"readonly,omitempty"`
 }
 
 func (t Type) Semantic() types.Type {
 	result := types.Type{Kind: types.Kind(t.Kind), Name: t.Name, Nullable: t.Nullable, Readonly: t.Readonly}
 	for _, argument := range t.Args {
 		result.Args = append(result.Args, argument.Semantic())
+	}
+	if t.Fails != nil {
+		failure := t.Fails.Semantic()
+		result.Fails = &failure
 	}
 	if result.Name == "" {
 		result.Name = types.FromName(string(result.Kind)).Name
@@ -79,6 +85,10 @@ func FromSemantic(typ types.Type) Type {
 	result := Type{Kind: string(typ.Kind), Name: typ.Name, Nullable: typ.Nullable, Readonly: typ.Readonly}
 	for _, argument := range typ.Args {
 		result.Args = append(result.Args, FromSemantic(argument))
+	}
+	if typ.Fails != nil {
+		failure := FromSemantic(*typ.Fails)
+		result.Fails = &failure
 	}
 	return result
 }

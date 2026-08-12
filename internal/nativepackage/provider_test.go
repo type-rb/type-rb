@@ -75,7 +75,10 @@ func TestApplyProviderFilesAcceptsGenericNativeContracts(t *testing.T) {
 				Records: map[string]Export{
 					"QueryOptions": {
 						Kind: "record", Type: Type{Kind: "named", Name: "QueryOptions"}, TypeParameters: []string{"TData", "TError"},
-						Fields: []Field{{Name: "queryFn", Type: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "named", Name: "TData"}}}}},
+						Fields: []Field{{Name: "queryFn", Type: Type{
+							Kind: "function", Name: "Function", Args: []Type{{Kind: "named", Name: "TData"}},
+							Fails: &Type{Kind: "named", Name: "TError"}, EffectBridge: "promise_rejection",
+						}}},
 					},
 					"PendingResult": {Kind: "record", Type: Type{Kind: "named", Name: "PendingResult"}, TypeParameters: []string{"TData", "TError"}, Fields: []Field{{Name: "status", Type: Type{Kind: "string_literal", Name: `"pending"`}}}},
 					"SuccessResult": {Kind: "record", Type: Type{Kind: "named", Name: "SuccessResult"}, TypeParameters: []string{"TData", "TError"}, Fields: []Field{{Name: "status", Type: Type{Kind: "string_literal", Name: `"success"`}}, {Name: "data", Type: Type{Kind: "named", Name: "TData"}}}},
@@ -90,6 +93,35 @@ func TestApplyProviderFilesAcceptsGenericNativeContracts(t *testing.T) {
 	module := catalog.Modules["query-library"]
 	if module.Exports["useQuery"].TypeParameters[0] != "TData" || module.Exports["QueryResult"].AliasTarget == nil || module.Records["QueryOptions"].TypeParameters[1] != "TError" {
 		t.Fatalf("generic provider contracts were not retained: %#v", module)
+	}
+	queryFunction := module.Records["QueryOptions"].Fields[0].Type
+	if queryFunction.Fails == nil || queryFunction.Fails.Name != "TError" || queryFunction.EffectBridge != "promise_rejection" {
+		t.Fatalf("callback effect bridge was not retained: %#v", queryFunction)
+	}
+}
+
+func TestApplyProviderFilesRejectsInvalidEffectBridges(t *testing.T) {
+	tests := []struct {
+		name string
+		typ  Type
+		want string
+	}{
+		{name: "without effect", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, EffectBridge: "promise_rejection"}, want: "requires a fallible function type"},
+		{name: "unknown bridge", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, Fails: &Type{Kind: "string", Name: "String"}, EffectBridge: "throw_value"}, want: "unsupported effectBridge"},
+		{name: "non-function failure", typ: Type{Kind: "string", Name: "String", Fails: &Type{Kind: "string", Name: "String"}}, want: "fails is only valid on function types"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "native-types.json")
+			writeProviderFixture(t, path, Provider{FormatVersion: FormatVersion, Modules: map[string]Module{
+				"query-library": {Records: map[string]Export{"Options": {Kind: "record", Type: Type{Kind: "named", Name: "Options"}, Fields: []Field{{Name: "queryFn", Type: test.typ}}}}},
+			}})
+			err := ApplyProviderFiles(Empty(map[string]string{"query-library": "1.0.0"}), []ProviderSource{{Package: "provider", Path: path, Dependencies: map[string]string{"query-library": "1.0.0"}}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q, got %v", test.want, err)
+			}
+		})
 	}
 }
 

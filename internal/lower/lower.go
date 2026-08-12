@@ -566,10 +566,20 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 		} else if result.ExprType().Kind == types.Union {
 			kind = ir.UnionIntegerToFloatConversion
 		}
-		return &ir.Conversion{
+		result = &ir.Conversion{
 			ExprBase: ir.NewExprBase(node.Span(), target),
 			Kind:     kind,
 			Value:    result,
+		}
+	}
+	if bridge, ok := l.checked.NativeEffectBridges[node]; ok && result != nil {
+		parameters, success, valid := types.FunctionSignature(bridge.Type)
+		if valid {
+			result = &ir.Conversion{
+				ExprBase: ir.NewExprBase(node.Span(), types.FunctionOf(parameters, success)),
+				Kind:     ir.ResultFunctionToPromiseRejectionConversion,
+				Value:    result,
+			}
 		}
 	}
 	return result

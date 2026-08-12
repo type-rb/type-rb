@@ -74,9 +74,9 @@ than detailed syntax.
   framework integrations remain explicit platform packages.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
 - Expand automatic TypeScript `.d.ts` indexing beyond its initial simple
-  signatures. Evolve the generic declarative provider format for fallible and
-  suspending callback effects, then provide equivalent package-owned type
-  discovery for Go modules and gems without application-authored signatures.
+  signatures and harden the declarative fallible/suspending callback bridge.
+  Then provide equivalent package-owned type discovery for Go modules and
+  gems without application-authored signatures.
 - Evolve the initial distributed Git package system with semantic version
   constraints, selective updates, publishing conventions, shared caches,
   vulnerability/audit integration, and namespace-stable type identities.
