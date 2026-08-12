@@ -7,6 +7,7 @@ import (
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
+	"github.com/type-rb/type-rb/internal/nativepackage"
 )
 
 const completionProgram = `class User
@@ -165,6 +166,47 @@ func TestCompletionIncludesExplicitImportedNamesAndNamespaces(t *testing.T) {
 	withoutImport.Update(programs, "blank")
 	if _, ok := findCompletion(withoutImport.Complete("Us", 2), "User"); ok {
 		t.Fatal("unimported project name was completed")
+	}
+}
+
+func TestCompletionUsesIndexedNativePackageContracts(t *testing.T) {
+	propsName := "Native_react_spinners_ClipLoaderProps"
+	catalog := &nativepackage.Catalog{
+		FormatVersion: nativepackage.FormatVersion,
+		Dependencies:  map[string]string{"react-spinners": "^0.17.0"},
+		Modules: map[string]nativepackage.Module{
+			"react-spinners": {
+				Exports: map[string]nativepackage.Export{
+					"ClipLoader": {
+						Kind:       "component",
+						Type:       nativepackage.Type{Kind: "named", Name: "ReactNode"},
+						Parameters: []nativepackage.Type{{Kind: "named", Name: propsName}},
+						Required:   1,
+					},
+				},
+				Records: map[string]nativepackage.Export{
+					propsName: {Kind: "record", Type: nativepackage.Type{Kind: "named", Name: propsName}},
+				},
+			},
+		},
+	}
+	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{{
+		Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { ClipLoader } from react-spinners\n"),
+	}}, compiler.Options{Mode: "typescript", ModulePath: "repl", AllowUnusedImports: true, NativePackages: catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := languageservice.New("typescript")
+	service.Update([]*ir.Program{artifacts[0].IR}, "repl")
+	item, ok := findCompletion(service.Complete("Clip", len("Clip")), "ClipLoader")
+	if !ok {
+		t.Fatal("native package export was not completed")
+	}
+	if item.Kind != languageservice.CompletionFunction || item.InsertText != "ClipLoader" {
+		t.Fatalf("native package completion=%#v", item)
+	}
+	if item.Detail != "ClipLoader(Native_react_spinners_ClipLoaderProps): ReactNode" {
+		t.Fatalf("native package detail=%q", item.Detail)
 	}
 }
 

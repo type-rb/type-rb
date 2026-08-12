@@ -16,6 +16,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/official"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/stdlib"
@@ -29,6 +30,7 @@ const (
 	StandardImport ImportKind = "standard"
 	OfficialImport ImportKind = "official"
 	ProjectImport  ImportKind = "project"
+	NativeImport   ImportKind = "native"
 )
 
 type ExportKind string
@@ -45,30 +47,32 @@ const (
 )
 
 type Export struct {
-	Name           string
-	Kind           ExportKind
-	Type           types.Type
-	Fails          types.Type
-	Parameters     []types.Type
-	Required       int
-	Variadic       bool
-	Members        map[string]Member
-	Fields         []RecordField
-	EnumMembers    []string
-	EnumVariants   []EnumVariant
-	EnumRawType    types.Type
-	TypeParameters []string
-	AliasTarget    types.Type
-	AliasEnum      bool
-	Superclass     string
-	Interfaces     []string
-	Span           token.Span
+	Name              string
+	Kind              ExportKind
+	Type              types.Type
+	Fails             types.Type
+	Parameters        []types.Type
+	Required          int
+	Variadic          bool
+	Members           map[string]Member
+	Fields            []RecordField
+	EnumMembers       []string
+	EnumVariants      []EnumVariant
+	EnumRawType       types.Type
+	TypeParameters    []string
+	AliasTarget       types.Type
+	AliasEnum         bool
+	Superclass        string
+	Interfaces        []string
+	Span              token.Span
+	UnsupportedFields map[string]string
 }
 
 type RecordField struct {
 	Name     string
 	JSONName string
 	Type     types.Type
+	Optional bool
 }
 
 type EnumVariant struct {
@@ -166,6 +170,7 @@ type Options struct {
 	Official       bool
 	Catalog        *Catalog
 	Declarations   *declaration.Catalog
+	NativePackages *nativepackage.Catalog
 }
 
 type Module struct {
@@ -577,7 +582,102 @@ func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagn
 	if stdlib.IsReservedPath(node.Path) {
 		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("unknown TypeRB package %s", node.Path))}
 	}
+	if options.NativePackages != nil && options.NativePackages.Owns(node.Path) {
+		if options.Mode != "typescript" {
+			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("native package %s is only available in mode typescript", node.Path))}
+		}
+		if options.Catalog != nil && (options.Catalog.Modules[node.Path] != nil || options.Catalog.Modules[pathpkg.Join(node.Path, "index")] != nil) {
+			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("import %s is provided by both a TypeRB package and a native TypeScript dependency", node.Path))}
+		}
+		return resolveNativeImport(node, options.NativePackages)
+	}
 	return resolveProjectImport(node, options)
+}
+
+func resolveNativeImport(node *ast.ImportStatement, catalog *nativepackage.Catalog) (*Import, []diagnostic.Diagnostic) {
+	if catalog.UnavailableReason != "" {
+		return nil, []diagnostic.Diagnostic{errorAt(node, catalog.UnavailableReason)}
+	}
+	module, ok := catalog.Module(node.Path)
+	if !ok {
+		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("native TypeScript package module %s is not indexed; run trb install", node.Path))}
+	}
+	if issue := module.Unsupported["*"]; issue != "" {
+		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("native package %s cannot be represented safely: %s", node.Path, issue))}
+	}
+	resolved := &Import{Node: node, Kind: NativeImport, Path: node.Path, ModulePath: node.Path, Alias: node.Alias, Exports: map[string]Export{}}
+	for name, exported := range module.Exports {
+		resolved.Exports[name] = nativeExport(name, exported)
+	}
+	for name, exported := range module.Records {
+		resolved.Exports[name] = nativeExport(name, exported)
+	}
+	if resolved.Alias == "" && len(node.Symbols) == 0 {
+		resolved.Alias = defaultAlias(node.Path)
+	}
+	if len(node.Symbols) > 0 {
+		resolved.Symbols = append([]string(nil), node.Symbols...)
+	} else if resolved.Alias == "" {
+		for name := range module.Exports {
+			resolved.Symbols = append(resolved.Symbols, name)
+		}
+	}
+	for _, name := range resolved.Symbols {
+		if issue := module.Unsupported[name]; issue != "" {
+			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("native export %s from %s cannot be represented safely: %s; use a TypeRB provider for this package", name, node.Path, issue))}
+		}
+		if _, ok := module.Exports[name]; !ok {
+			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("native package %s does not export %s", node.Path, name))}
+		}
+	}
+	sort.Strings(resolved.Symbols)
+	return resolved, nil
+}
+
+func nativeExport(name string, exported nativepackage.Export) Export {
+	kind := ExportKind(exported.Kind)
+	if exported.Kind == "component" {
+		kind = FunctionExport
+	}
+	result := Export{
+		Name:              name,
+		Kind:              kind,
+		Type:              exported.Type.Semantic(),
+		Required:          exported.Required,
+		Variadic:          exported.Variadic,
+		TypeParameters:    append([]string(nil), exported.TypeParameters...),
+		Members:           map[string]Member{},
+		UnsupportedFields: cloneStrings(exported.UnsupportedFields),
+	}
+	for _, parameter := range exported.Parameters {
+		result.Parameters = append(result.Parameters, parameter.Semantic())
+	}
+	for _, field := range exported.Fields {
+		result.Fields = append(result.Fields, RecordField{Name: field.Name, JSONName: field.Name, Type: field.Type.Semantic(), Optional: field.Optional})
+		result.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: field.Type.Semantic(), Readonly: true}
+	}
+	return result
+}
+
+func cloneStrings(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(input))
+	for name, value := range input {
+		result[name] = value
+	}
+	return result
+}
+
+func defaultAlias(importPath string) string {
+	base := pathpkg.Base(importPath)
+	base = strings.TrimPrefix(base, "@")
+	base = strings.ReplaceAll(base, "-", "_")
+	if base == "" || base == "." {
+		return "package"
+	}
+	return base
 }
 
 func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package, kind ImportKind, options Options) (*Import, []diagnostic.Diagnostic) {

@@ -64,6 +64,40 @@ func TestResolveLocalTypeRBPackageWritesDeterministicLock(t *testing.T) {
 	}
 }
 
+func TestResolveTypeRBPackageExposesDeclarativeNativeTypeProvider(t *testing.T) {
+	workspace := t.TempDir()
+	packageRoot := filepath.Join(workspace, "ui-types")
+	writeTestPackage(t, packageRoot, TypeRBManifest{
+		Name:    "github.com/acme/ui-types",
+		Version: "0.1.0",
+		Modes:   []string{"typescript"},
+		NativeDependencies: map[string]map[string]string{
+			"typescript": {"@acme/ui": "1.0.0"},
+		},
+		NativeTypeProviders: map[string]string{"typescript": "native-types.json"},
+	}, "")
+	providerPath := filepath.Join(packageRoot, "native-types.json")
+	if err := os.WriteFile(providerPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(filepath.Join(workspace, "app"), "typescript")
+	config.Packages["acme/ui-types"] = project.PackageRequirement{Path: "../ui-types"}
+	resolved, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.NativeTypeProviders) != 1 {
+		t.Fatalf("unexpected native type providers: %#v", resolved.NativeTypeProviders)
+	}
+	provider := resolved.NativeTypeProviders[0]
+	if provider.Package != "github.com/acme/ui-types" || provider.Path != providerPath {
+		t.Fatalf("unexpected native type provider: %#v", provider)
+	}
+	if provider.Dependencies["@acme/ui"] != "1.0.0" {
+		t.Fatalf("native type provider lost package-owned dependencies: %#v", provider.Dependencies)
+	}
+}
+
 func TestResolveGitTypeRBPackagesLocksTransitiveContentAndSupportsOfflineUse(t *testing.T) {
 	workspace := t.TempDir()
 	baseRepository := filepath.Join(workspace, "base-repository")

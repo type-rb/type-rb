@@ -2171,51 +2171,51 @@ func (c *Checker) codecRecord(name string) ([]resolver.RecordField, string, *res
 	return nil, "", nil, false
 }
 
-func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type) ([]resolver.RecordField, bool) {
+func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type) ([]resolver.RecordField, map[string]string, bool) {
 	identifier, ok := element.Component.(*ast.Identifier)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 	if method := c.functions[identifier.Name]; method != nil {
 		if !c.typesAssignable(nodeType, c.methodReturnType(method)) {
 			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return %s", identifier.Name, nodeType))
-			return nil, false
+			return nil, nil, false
 		}
 		if len(method.Parameters) == 0 {
-			return nil, true
+			return nil, nil, true
 		}
 		if len(method.Parameters) != 1 {
 			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept no parameters or one record parameter", identifier.Name))
-			return nil, false
+			return nil, nil, false
 		}
 		fields, _, _, found := c.codecRecord(c.typeFromRef(method.Parameters[0].Type).Name)
 		if !found {
 			c.error(method.Parameters[0].Span(), fmt.Sprintf("JSX component %s props must be a record", identifier.Name))
-			return nil, false
+			return nil, nil, false
 		}
-		return fields, true
+		return fields, nil, true
 	}
 	binding, imported := c.result.References[identifier]
 	if !imported || binding.Export == nil || binding.Export.Kind != resolver.FunctionExport {
-		return nil, false
+		return nil, nil, false
 	}
 	if !c.typesAssignable(nodeType, binding.Export.Type) {
 		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must return %s", identifier.Name, nodeType))
-		return nil, false
+		return nil, nil, false
 	}
 	if len(binding.Export.Parameters) == 0 {
-		return nil, true
+		return nil, binding.Export.UnsupportedFields, true
 	}
 	if len(binding.Export.Parameters) != 1 {
 		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept no parameters or one record parameter", identifier.Name))
-		return nil, false
+		return nil, nil, false
 	}
 	fields, _, _, found := c.codecRecord(binding.Export.Parameters[0].Name)
 	if !found {
 		c.error(identifier.Span(), fmt.Sprintf("JSX component %s props must be a record", identifier.Name))
-		return nil, false
+		return nil, nil, false
 	}
-	return fields, true
+	return fields, binding.Export.UnsupportedFields, true
 }
 
 func (c *Checker) jsxProvider(span token.Span) *stdlib.JSXProvider {
@@ -2242,7 +2242,7 @@ func (c *Checker) jsxProvider(span token.Span) *stdlib.JSXProvider {
 	return provider
 }
 
-func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.RecordField, attributes map[string]types.Type) {
+func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.RecordField, unsupported map[string]string, attributes map[string]types.Type) {
 	declared := map[string]resolver.RecordField{}
 	for _, field := range fields {
 		declared[field.Name] = field
@@ -2253,6 +2253,10 @@ func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.Recor
 		}
 		field, found := declared[name]
 		if !found {
+			if issue := unsupported[name]; issue != "" {
+				c.error(element.Span(), fmt.Sprintf("JSX prop %s from native component %s cannot be represented safely: %s; use a TypeRB provider for this package", name, element.Name, issue))
+				continue
+			}
 			c.error(element.Span(), fmt.Sprintf("JSX component %s has no prop %s", element.Name, name))
 			continue
 		}
@@ -2264,7 +2268,7 @@ func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.Recor
 		if field.Name == "children" && len(element.Children) > 0 {
 			continue
 		}
-		if _, provided := attributes[field.Name]; provided || field.Type.Nullable {
+		if _, provided := attributes[field.Name]; provided || field.Optional || field.Type.Nullable {
 			continue
 		}
 		c.error(element.Span(), fmt.Sprintf("JSX component %s requires prop %s", element.Name, field.Name))
@@ -3501,13 +3505,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			nodeType = provider.Node
 		}
 		var props []resolver.RecordField
+		var unsupportedProps map[string]string
 		componentHasTypedProps := false
 		if n.Component != nil {
 			componentType := c.checkExpression(n.Component, sc)
 			if componentType.Kind == types.Any || componentType.Kind == types.Invalid {
 				c.error(n.Component.Span(), fmt.Sprintf("JSX component %s is not declared or imported", n.Name))
 			} else {
-				props, componentHasTypedProps = c.jsxComponentProps(n, nodeType)
+				props, unsupportedProps, componentHasTypedProps = c.jsxComponentProps(n, nodeType)
 			}
 		}
 		attributeTypes := map[string]types.Type{}
@@ -3528,7 +3533,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if componentHasTypedProps {
-			c.checkJSXProps(n, props, attributeTypes)
+			c.checkJSXProps(n, props, unsupportedProps, attributeTypes)
 		}
 		for _, child := range n.Children {
 			switch item := child.(type) {

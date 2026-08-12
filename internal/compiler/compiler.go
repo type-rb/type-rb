@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
+	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/official"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/projectintegration"
@@ -59,6 +60,7 @@ type Options struct {
 	PackageAliases     map[string]string
 	AllowUnusedImports bool
 	InteractiveModule  string
+	NativePackages     *nativepackage.Catalog
 }
 
 const MainFunction = "main"
@@ -99,7 +101,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 	if providerErr != nil {
 		return nil, providerErr
 	}
-	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: filename, PackageAliases: options.PackageAliases, Declarations: declarations})
+	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: filename, PackageAliases: options.PackageAliases, Declarations: declarations, NativePackages: options.NativePackages})
 	diagnostics = append(diagnostics, resolveDiagnostics...)
 	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{
 		AllowUnusedImports:    options.AllowUnusedImports,
@@ -192,6 +194,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 			Official:       source.Official,
 			Catalog:        catalog,
 			Declarations:   declarations,
+			NativePackages: options.NativePackages,
 		})
 		if hasErrors(diagnostics) {
 			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}

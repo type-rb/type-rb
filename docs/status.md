@@ -26,6 +26,14 @@ TypeScript projects select a browser, Bun, or Node runtime independently from
 their npm or Bun package manager. Node remains the compatibility default, while
 Bun can be selected explicitly for server packages.
 
+TypeScript projects can also import supported named functions and React
+components directly from configured native packages. `trb install` derives a
+cached semantic index from installed `.d.ts` files; ordinary builds, the REPL's
+project compiler, and completion consume the cache without invoking TypeScript.
+Unsupported declaration shapes are diagnosed instead of becoming `Any`.
+Installed TypeRB packages can supply versioned declarative corrections while
+generated code continues to import the original npm package.
+
 The experimental TypeScript browser path accepts structured JSX in TypeRB
 source and emits ordinary TSX for React tooling. Function components use typed
 record props, JSX component calls are checked across project modules, and only

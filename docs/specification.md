@@ -286,6 +286,12 @@ switches.
   explicit-import rule.
 - Portable packages use `trb/std/*`. Mode-specific APIs use mode-checked
   `trb/platform/<mode>/*` packages.
+- In TypeScript mode, a named import whose path belongs to a configured native
+  dependency resolves through the declaration index produced by `trb install`.
+  Its generated import keeps the original package specifier. Declaration
+  shapes that cannot be represented safely are errors and never fall back to
+  `Any`. A declarative provider from an installed TypeRB package may replace
+  indexed exports and records without changing the application import.
 - Official formatter command: `trb fmt`.
 - Canonical TypeRB indentation is one tab per nesting level. Formatter
   configuration is not part of the current language; a future configuration

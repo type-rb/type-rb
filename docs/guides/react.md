@@ -37,6 +37,37 @@ The compiler checks required, unknown, and mistyped props, including components
 imported from another TypeRB module. Files containing JSX are generated as
 `.tsx`; other TypeScript modules remain `.ts`.
 
+## Native React packages
+
+TypeScript projects can use representable named exports from npm packages
+without application-owned TypeRB declarations:
+
+```sh
+trb add --native react-spinners ^0.17.0
+trb install
+```
+
+```trb
+import { ReactNode } from trb/platform/typescript/react
+import { ClipLoader } from "react-spinners"
+
+def Loading(): ReactNode
+	return <ClipLoader color="#4f46e5" loading size={24} />
+end
+```
+
+`trb install` reads the installed package's `.d.ts` declarations, including
+dependency subpaths imported by project source, and writes an ignored
+`.trb/native-types.json` index. Builds and editor completion read that index
+without starting TypeScript. Runtime output imports the original npm package
+unchanged.
+
+The initial bridge supports ordinary functions and React components whose
+signatures can be represented safely by TypeRB types. Unsupported overloads,
+conditional types, `any`, and individual complex props produce a diagnostic
+instead of becoming `Any`. A TypeRB package may provide declarative corrections
+for a complex native package; see the [package guide](packages.md).
+
 Event attributes use purpose-specific React types instead of one untyped event:
 
 ```trb

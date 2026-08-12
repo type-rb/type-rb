@@ -153,7 +153,10 @@ func (g *generator) statement(statement ir.Statement) {
 		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) {
 			return
 		}
-		importPath := tsImportPath(g.modulePath, n.Path, g.moduleExtensions[n.Path])
+		importPath := n.Path
+		if !n.Native {
+			importPath = tsImportPath(g.modulePath, n.Path, g.moduleExtensions[n.Path])
+		}
 		browserRuntime := n.Path == "trb/platform/typescript/browser/index" && n.RuntimeRequired
 		if browserRuntime {
 			browserAlias := "__trb_browser"
