@@ -150,9 +150,10 @@ Experimental OIDC authentication supports two explicit profiles. Portable Go,
 Ruby, and TypeScript APIs can use either encrypted server sessions with PKCE
 and CSRF protection or RS256/JWKS bearer verification. TypeScript browser
 applications can use same-origin session JSON transport or React OIDC with
-typed bearer transport. Both profiles expose the same `OidcPrincipal` contract;
-provider discovery, session-store adapters, and downstream BFF token forwarding
-remain future work.
+typed bearer transport. Both profiles expose the same `OidcPrincipal` contract,
+load standard provider metadata from the issuer, cache metadata and JWKS, and
+refresh signing keys on a rate-limited unknown key ID. Session-store adapters,
+cookie-key rotation, and downstream BFF token forwarding remain future work.
 
 The experimental official [`trb/orm`](guides/orm.md) package targets generated
 Go, Ruby, and TypeScript; TypeScript server applications currently select Bun.

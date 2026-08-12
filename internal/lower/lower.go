@@ -147,6 +147,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 				}
 				result.SymbolKinds[name] = kind
 			}
+			l.addImportedSignatureTypes(result, resolved, l.checked.ImportUses[n])
 			if resolved.Definition != nil {
 				for name, symbol := range resolved.Definition.Symbols {
 					if symbol.Intrinsic != "" {
@@ -343,6 +344,40 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 	default:
 		return nil
 	}
+}
+
+func (l *lowerer) addImportedSignatureTypes(result *ir.Import, resolved *resolver.Import, uses map[string]bool) {
+	var addType func(types.Type)
+	addType = func(typ types.Type) {
+		for _, argument := range typ.Args {
+			addType(argument)
+		}
+		if typ.Kind != types.Named || typ.Name == "" {
+			return
+		}
+		exported, ok := resolved.Exports[typ.Name]
+		if !ok {
+			return
+		}
+		switch exported.Kind {
+		case resolver.ClassExport, resolver.RecordExport, resolver.EnumExport, resolver.TypeAliasExport, resolver.InterfaceExport:
+			if !contains(result.Symbols, typ.Name) {
+				result.Symbols = append(result.Symbols, typ.Name)
+			}
+		}
+	}
+	for name := range uses {
+		exported, ok := resolved.Exports[name]
+		if !ok {
+			continue
+		}
+		addType(exported.Type)
+		addType(exported.Fails)
+		for _, parameter := range exported.Parameters {
+			addType(parameter)
+		}
+	}
+	sort.Strings(result.Symbols)
 }
 
 func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, bool) {

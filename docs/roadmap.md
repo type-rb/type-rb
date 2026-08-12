@@ -95,9 +95,9 @@ than detailed syntax.
 - Continue representative backend, server-rendered, and browser application
   slices with authentication, validation, transactions, background work, and
   realistic failure paths.
-- Harden both OIDC profiles with provider discovery, signing-key rotation,
-  configurable server-side sessions, downstream BFF token forwarding, and
-  authorization policies without merging their browser security models.
+- Harden both OIDC profiles with configurable server-side sessions, cookie-key
+  rotation, downstream BFF token forwarding, and authorization policies
+  without merging their browser security models.
 - Separate one-shot `trb run` from framework development servers and add a
   coherent `trb dev` and runtime-adapter model for backend and frontend
   development servers.

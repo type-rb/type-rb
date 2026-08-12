@@ -15,31 +15,29 @@ transport packages are explicit TypeScript platform packages.
 
 ## Server-session profile
 
-Define an `OidcSessionOptions` value in application code and load its secrets
-from the deployment environment. `cookie_secret` must be a base64url-encoded
-32-byte key; use `secure: true` outside local HTTP development.
+Create the session configuration from the provider issuer. TypeRB loads the
+standard OpenID Provider Configuration document, so applications do not repeat
+the authorization, token, JWKS, and logout endpoints. Load secrets from the
+deployment environment. `cookie_secret` must be a base64url-encoded 32-byte
+key; `secure` defaults to `true`.
 
 ```trb
-import { OidcSessionOptions } from trb/auth/oidc
+import { session_options } from trb/auth/oidc
 
-SESSION_AUTH := OidcSessionOptions.new(
+SESSION_AUTH := session_options(
 	issuer: "https://identity.example.com/",
 	client_id: "type-rb-web",
 	client_secret: "...",
-	authorization_endpoint: "https://identity.example.com/authorize",
-	token_endpoint: "https://identity.example.com/token",
-	jwks_uri: "https://identity.example.com/.well-known/jwks.json",
 	redirect_uri: "https://app.example.com/auth/callback",
 	post_logout_redirect_uri: "https://app.example.com/",
-	end_session_endpoint: "https://identity.example.com/logout",
-	scope: "openid profile email",
-	audience: nil,
-	roles_claim: "roles",
-	cookie_name: "trb_session",
 	cookie_secret: "...",
-	secure: true,
 )
 ```
+
+Pass `secure: false` as the final argument only for local HTTP development.
+Applications that need nonstandard endpoints, claims, scope, audience, or
+cookie names can construct `OidcSessionOptions` directly; nullable endpoint
+fields opt back into discovery when omitted.
 
 File-based login, callback, and logout routes call the session package:
 
@@ -84,25 +82,26 @@ cookie into `X-CSRF-Token` for unsafe methods.
 
 ## Browser-bearer profile
 
-Protect the portable API with `trb/web/auth/bearer` and an
-`OidcBearerOptions` value:
+Protect the portable API with `trb/web/auth/bearer`. The concise configuration
+discovers the provider JWKS URI from the issuer:
 
 ```trb
-import { OidcBearerOptions } from trb/auth/oidc
+import { bearer_options } from trb/auth/oidc
 import { Context, Next, Response } from trb/web
 import trb/web/auth/bearer
 
-BEARER_AUTH := OidcBearerOptions.new(
+BEARER_AUTH := bearer_options(
 	issuer: "https://identity.example.com/",
 	audience: "type-rb-api",
-	jwks_uri: "https://identity.example.com/.well-known/jwks.json",
-	roles_claim: "roles",
 )
 
 def call(context: Context, next_handler: Next): Response
 	return bearer.authenticate(context, next_handler, BEARER_AUTH)
 end
 ```
+
+Construct `OidcBearerOptions` directly to override `jwks_uri` or the roles
+claim for a nonstandard provider.
 
 React uses the existing OIDC ecosystem through `react-oidc-context`:
 
@@ -141,9 +140,10 @@ Pass `auth.access_token` after handling its nullable state to the typed
 functions in `trb/platform/typescript/browser/bearer`.
 
 Both server profiles verify RS256 signatures from JWKS, issuer, audience,
-expiry, not-before, subject, and OIDC nonce where applicable. The session
-profile also enforces authorization-code PKCE, state, encrypted cookies, and
-constant-time CSRF comparison. The initial alpha API uses explicit provider
-endpoints and one active cookie key. Discovery, key rotation, downstream BFF
-token forwarding, and configurable server-side session stores remain future
-work.
+expiry, not-before, subject, and OIDC nonce where applicable. Provider metadata
+and JWKS are cached for five minutes. An unknown signing key ID triggers one
+rate-limited JWKS refresh, allowing normal provider key rotation without
+turning arbitrary tokens into an unbounded fetch path. The session profile also
+enforces authorization-code PKCE, state, encrypted cookies, and constant-time
+CSRF comparison. Cookie-key rotation, downstream BFF token forwarding, and
+configurable server-side session stores remain future work.

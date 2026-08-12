@@ -16,17 +16,29 @@ end
 record OidcBearerOptions
 	issuer: String
 	audience: String
-	jwks_uri: String
+	jwks_uri: String?
 	roles_claim: String
+end
+
+def bearer_options(
+		issuer:: String,
+		audience:: String,
+	): OidcBearerOptions
+	return OidcBearerOptions.new(
+		issuer: issuer,
+		audience: audience,
+		jwks_uri: nil,
+		roles_claim: "roles",
+	)
 end
 
 record OidcSessionOptions
 	issuer: String
 	client_id: String
 	client_secret: String
-	authorization_endpoint: String
-	token_endpoint: String
-	jwks_uri: String
+	authorization_endpoint: String?
+	token_endpoint: String?
+	jwks_uri: String?
 	redirect_uri: String
 	post_logout_redirect_uri: String
 	end_session_endpoint: String?
@@ -36,6 +48,34 @@ record OidcSessionOptions
 	cookie_name: String
 	cookie_secret: String
 	secure: Boolean
+end
+
+def session_options(
+		issuer:: String,
+		client_id:: String,
+		client_secret:: String,
+		redirect_uri:: String,
+		post_logout_redirect_uri:: String,
+		cookie_secret:: String,
+		secure:: Boolean = true,
+	): OidcSessionOptions
+	return OidcSessionOptions.new(
+		issuer: issuer,
+		client_id: client_id,
+		client_secret: client_secret,
+		authorization_endpoint: nil,
+		token_endpoint: nil,
+		jwks_uri: nil,
+		redirect_uri: redirect_uri,
+		post_logout_redirect_uri: post_logout_redirect_uri,
+		end_session_endpoint: nil,
+		scope: "openid profile email",
+		audience: nil,
+		roles_claim: "roles",
+		cookie_name: "trb_session",
+		cookie_secret: cookie_secret,
+		secure: secure,
+	)
 end
 
 record OidcBrowserOptions
