@@ -2301,6 +2301,9 @@ func (g *generator) goReturn(t types.Type) string {
 
 func goFieldName(name string) string {
 	name = strings.TrimPrefix(name, "@")
+	if strings.HasPrefix(name, "_trb_") {
+		return "TrbInternal" + goIdentifier(strings.TrimPrefix(name, "_trb_"), true)
+	}
 	if strings.HasPrefix(name, "_") {
 		return "trbField" + goIdentifier(strings.TrimPrefix(name, "_"), true)
 	}

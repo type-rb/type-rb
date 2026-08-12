@@ -40,6 +40,19 @@ enum ParameterError
 	Invalid(source: ParameterSource, name: String, value: String, expected: String)
 end
 
+record ContextValueError
+	key: String
+end
+
+class ContextKey<T>
+	readonly @name: String
+
+	def initialize(name: String)
+		@name = name
+		return
+	end
+end
+
 class Request
 	readonly @method: HttpMethod
 	readonly @path: String
@@ -214,6 +227,7 @@ end
 class Context
 	readonly @request: Request
 	readonly @_path_parameters: Hash<String, String>
+	readonly @_trb_context_state: Any? := nil
 
 	def initialize(request:: Request, path_parameters:: Hash<String, String>)
 		@request = request

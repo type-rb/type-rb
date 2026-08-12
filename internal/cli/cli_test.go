@@ -2049,6 +2049,124 @@ func TestReplEvaluatesTypedWebQueryBindingAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesTypedWebContextKeysAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-web-context-key-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := strings.Join([]string{
+			"import { Body, Headers, HttpMethod } from trb/http",
+			"import { Context, ContextKey, ContextValueError, Request } from trb/web",
+			"import { Result } from trb/std/result",
+			`record User; name: String; end`,
+			`def empty_context(): Context; request := Request.new(method: HttpMethod.get(), path: "/", query_string: "", headers: Headers.new(), body: Body.empty()); return Context.new(request: request, path_parameters: {}); end`,
+			`def missing(): Result<User, ContextValueError>; key := ContextKey<User>.new("current_user"); return empty_context().fetch(key); end`,
+			`def present(): Result<User, ContextValueError>; key := ContextKey<User>.new("current_user"); return empty_context().with(key, User.new(name: "Ada")).fetch(key); end`,
+			`def replaced(): Result<User, ContextValueError>; key := ContextKey<User>.new("current_user"); return empty_context().with(key, User.new(name: "Ada")).with(key, User.new(name: "Lin")).fetch(key); end`,
+			`def distinct(): Result<User, ContextValueError>; first := ContextKey<User>.new("current_user"); second := ContextKey<User>.new("current_user"); return empty_context().with(first, User.new(name: "Ada")).fetch(second); end`,
+			`missing()`,
+			`present()`,
+			`replaced()`,
+			`distinct()`,
+			":quit",
+		}, "\n") + "\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "Result::Err(error: ContextValueError(key: \"current_user\")) : Result<User, ContextValueError>\n" +
+			"Result::Ok(value: User(name: \"Ada\")) : Result<User, ContextValueError>\n" +
+			"Result::Ok(value: User(name: \"Lin\")) : Result<User, ContextValueError>\n" +
+			"Result::Err(error: ContextValueError(key: \"current_user\")) : Result<User, ContextValueError>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s typed web context key REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestRunOfficialWebTypedContextKeysAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireWebServerRuntime(t, mode)
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/run-web-context-key-test"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			mainSource := `import { Body, Headers, HttpMethod } from trb/http
+import { Context, ContextKey, ContextValueError, Request } from trb/web
+import { Result } from trb/std/result
+
+record User
+	name: String
+end
+
+CURRENT_USER := ContextKey<User>.new("current_user")
+SAME_NAME := ContextKey<User>.new("current_user")
+
+def render(result: Result<User, ContextValueError>): String
+	case result
+	when Result::Ok(user)
+		return "user:" + user.name
+	when Result::Err(error)
+		return "missing:" + error.key
+	end
+end
+
+def main()
+	request := Request.new(
+		method: HttpMethod.get(),
+		path: "/",
+		query_string: "",
+		headers: Headers.new(),
+		body: Body.empty(),
+	)
+	context := Context.new(request: request, path_parameters: {})
+	puts(render(context.fetch(CURRENT_USER)))
+	updated := context.with(CURRENT_USER, User.new(name: "Ada"))
+	puts(render(updated.fetch(CURRENT_USER)))
+	puts(render(context.fetch(CURRENT_USER)))
+	puts(render(updated.with(CURRENT_USER, User.new(name: "Lin")).fetch(CURRENT_USER)))
+	puts(render(updated.with_request(request).fetch(CURRENT_USER)))
+	puts(render(updated.fetch(SAME_NAME)))
+	return
+end
+`
+			if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+				t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+			}
+			want := "missing:current_user\nuser:Ada\nmissing:current_user\nuser:Lin\nuser:Ada\nmissing:current_user\n"
+			if stdout.String() != want || stderr.Len() != 0 {
+				t.Fatalf("unexpected %s typed context key output: want %q, got %q, stderr=%s", mode, want, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestReplEvaluatesCompilerOwnedUnicodeAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()

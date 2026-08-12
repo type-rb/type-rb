@@ -179,6 +179,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.tsWebParameterBinding(call, arguments[0], "query")
 	case "trb.web.context_params":
 		return g.tsWebParameterBinding(call, arguments[0], "path")
+	case "trb.web.context_with":
+		return tsWebContextWith(call, arguments)
+	case "trb.web.context_with_request":
+		return tsWebContextWithRequest(call, arguments)
+	case "trb.web.context_fetch":
+		return tsWebContextFetch(call, arguments)
 	case "trb.web.json":
 		return g.tsWebJSON(call, arguments)
 	case "trb.web.configure_server":
@@ -462,6 +468,30 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "undefined"
 	}
+}
+
+func tsWebContextWith(call *ir.Call, arguments []string) string {
+	if len(arguments) != 3 {
+		return "undefined"
+	}
+	return "((): " + tsType(call.ExprType()) + " => { const contextValue = " + arguments[0] + "; const contextKey = " + arguments[1] + "; const existing = (contextValue as any).__trb_trb_context_state; const contextState = existing instanceof Map ? new Map<unknown, unknown>(existing) : new Map<unknown, unknown>(); contextState.set(contextKey, " + arguments[2] + "); const result = contextValue.with_request(contextValue.__trb_request); (result as any).__trb_trb_context_state = contextState; return result; })()"
+}
+
+func tsWebContextWithRequest(call *ir.Call, arguments []string) string {
+	if len(arguments) != 2 {
+		return "undefined"
+	}
+	return "((): " + tsType(call.ExprType()) + " => { const contextValue = " + arguments[0] + "; const result = contextValue.with_request(" + arguments[1] + "); (result as any).__trb_trb_context_state = (contextValue as any).__trb_trb_context_state; return result; })()"
+}
+
+func tsWebContextFetch(call *ir.Call, arguments []string) string {
+	if len(arguments) != 2 || len(call.ExprType().Args) != 2 {
+		return "undefined"
+	}
+	valueType := tsType(call.ExprType().Args[0])
+	errorType := tsType(call.ExprType().Args[1])
+	resultType := tsType(call.ExprType())
+	return "((): " + resultType + " => { const contextValue = " + arguments[0] + "; const contextKey = " + arguments[1] + "; const contextState = (contextValue as any).__trb_trb_context_state; if (contextState instanceof Map && contextState.has(contextKey)) return Result.Ok<" + valueType + ", " + errorType + ">(contextState.get(contextKey) as " + valueType + "); return Result.Err<" + valueType + ", " + errorType + ">({ key: contextKey.__trb_name }); })()"
 }
 
 func portableArrayString(value string, typ types.Type) string {

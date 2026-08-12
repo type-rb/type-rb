@@ -119,6 +119,11 @@ preserve repeated keys. Boolean, portable numeric, raw-value enum, and
 date/time conversions share the same semantics in every backend. Binding
 failures remain explicit `ParameterError` results so applications choose their
 own validation response policy.
+Typed `ContextKey<T>` values let middleware pass authentication principals,
+request identifiers, and other request-scoped state to handlers without casts
+or string-key collisions. `Context#with` returns a new context and
+`Context#fetch` infers `Result<T, ContextValueError>` from the key; the same
+identity-based behavior runs in generated applications and the typed-IR REPL.
 Typed `Request#json<T>()` accepts `application/json` and `application/*+json`,
 rejects ambiguous content types and invalid UTF-8, and reports each failure as
 a `RequestError` without exposing backend parser behavior. Root and nested
