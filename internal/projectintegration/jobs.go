@@ -14,9 +14,9 @@ func analyzeJobs(context Context) (Contribution, []Issue) {
 	for _, source := range context.Sources {
 		programs = append(programs, source.Program)
 	}
-	manifest, err := jobsintegration.Analyze(programs)
+	manifest, err := jobsintegration.Analyze(programs, context.PackageOptions[jobsintegration.PackageName])
 	if err != nil {
 		return Contribution{}, []Issue{{Message: err.Error()}}
 	}
-	return Contribution{Extension: manifest}, nil
+	return Contribution{Extension: manifest, AllPrograms: true}, nil
 }

@@ -74,6 +74,35 @@ func TestDiscoverRejectsInvalidInitialJobContracts(t *testing.T) {
 	}
 }
 
+func TestParseConfigDefaultsToSingleWorkerSQLite(t *testing.T) {
+	config, err := ParseConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Adapter != "sql" || config.DatabaseAdapter != "sqlite" || config.Database != "jobs.sqlite3" || config.WorkerConcurrency != 1 {
+		t.Fatalf("unexpected default config: %#v", config)
+	}
+}
+
+func TestParseConfigRejectsMultipleSQLiteWorkers(t *testing.T) {
+	_, err := ParseConfig([]byte(`{"worker_concurrency":2}`))
+	if err == nil || !strings.Contains(err.Error(), "worker_concurrency: 1") {
+		t.Fatalf("expected SQLite concurrency diagnostic, got %v", err)
+	}
+}
+
+func TestParseConfigAcceptsMultiWorkerServerDatabases(t *testing.T) {
+	for _, adapter := range []string{"postgresql", "mysql"} {
+		config, err := ParseConfig([]byte(`{"database_adapter":"` + adapter + `","database":"jobs","worker_concurrency":4}`))
+		if err != nil {
+			t.Fatalf("%s: %v", adapter, err)
+		}
+		if config.WorkerConcurrency != 4 {
+			t.Fatalf("%s concurrency: %d", adapter, config.WorkerConcurrency)
+		}
+	}
+}
+
 func parseJobsTest(t *testing.T, source string) *ast.Program {
 	t.Helper()
 	program, diagnostics := parser.Parse([]byte(source))
