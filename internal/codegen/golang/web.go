@@ -7,11 +7,15 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
 func (g *generator) integrations(extensions []ir.Extension) {
+	if manifest := jobsintegration.ManifestFrom(extensions); manifest != nil {
+		g.jobsRuntime(manifest)
+	}
 	if manifest := ormintegration.ManifestFrom(extensions); manifest != nil {
 		g.ormRuntime(manifest)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
+	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -34,6 +35,7 @@ type generator struct {
 	goModule        string
 	temporary       int
 	breakTarget     string
+	jobs            *jobsintegration.Manifest
 	orm             *ormintegration.Manifest
 	projectNames    *goProjectNames
 	execution       *effectplan.Plan
@@ -65,6 +67,7 @@ func generate(program *ir.Program, projectNames *goProjectNames, execution *effe
 		imports:       map[string]string{},
 		modulePath:    program.ModulePath,
 		goModule:      program.GoModule,
+		jobs:          jobsintegration.ManifestFrom(program.Extensions),
 		orm:           ormintegration.ManifestFrom(program.Extensions),
 		projectNames:  projectNames,
 		execution:     execution,
@@ -897,6 +900,9 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 		g.line("__trbScope := trbcontext.Background()")
 	}
 	g.parameterDefaults(method.Parameters)
+	if method.Name == "main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
+		g.line("if trbJobsRunWorkerIfRequested() { return }")
+	}
 	if method.Name == "main" && g.orm != nil && len(g.orm.Models) > 0 {
 		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
 	}
@@ -1399,6 +1405,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 		goModule:        g.goModule,
 		temporary:       g.temporary,
 		breakTarget:     g.breakTarget,
+		jobs:            g.jobs,
 		orm:             g.orm,
 		projectNames:    g.projectNames,
 		execution:       g.execution,
@@ -1453,6 +1460,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		goModule:        g.goModule,
 		temporary:       g.temporary,
 		breakTarget:     g.breakTarget,
+		jobs:            g.jobs,
 		orm:             g.orm,
 		projectNames:    g.projectNames,
 		execution:       g.execution,
@@ -1568,6 +1576,7 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		goModule:        g.goModule,
 		temporary:       g.temporary,
 		breakTarget:     g.breakTarget,
+		jobs:            g.jobs,
 		orm:             g.orm,
 		projectNames:    g.projectNames,
 		execution:       g.execution,
@@ -2286,6 +2295,8 @@ func (g *generator) goType(t types.Type) string {
 	default:
 		if t.Name == "" {
 			result = "any"
+		} else if (t.Name == "EnqueueError" || t.Name == "JobReference") && g.jobs != nil && g.modulePath != "trb/jobs/index" && g.typeAliases[t.Name] == "" {
+			result = g.jobsRuntimeAlias() + "." + goIdentifier(t.Name, true)
 		} else if t.Name == "DbError" && g.orm != nil && g.modulePath != "trb/orm/index" && g.typeAliases[t.Name] == "" {
 			result = g.ormLifecycleAlias() + ".DbError"
 		} else if t.Name == "DbErrorKind" && g.orm != nil && g.modulePath != "trb/orm/index" && g.typeAliases[t.Name] == "" {
