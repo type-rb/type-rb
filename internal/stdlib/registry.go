@@ -1382,6 +1382,9 @@ func bindType(pattern, actual types.Type, typeParameters map[string]bool, bindin
 	for index := range pattern.Args {
 		bindType(pattern.Args[index], actual.Args[index], typeParameters, bindings)
 	}
+	if pattern.Fails != nil && actual.Fails != nil {
+		bindType(*pattern.Fails, *actual.Fails, typeParameters, bindings)
+	}
 }
 
 func substituteType(input types.Type, bindings map[string]types.Type) types.Type {
@@ -1394,6 +1397,10 @@ func substituteType(input types.Type, bindings map[string]types.Type) types.Type
 	result.Args = make([]types.Type, len(input.Args))
 	for index, argument := range input.Args {
 		result.Args[index] = substituteType(argument, bindings)
+	}
+	if input.Fails != nil {
+		failure := substituteType(*input.Fails, bindings)
+		result.Fails = &failure
 	}
 	return result
 }

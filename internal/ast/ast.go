@@ -320,6 +320,7 @@ type TypeRef struct {
 	Union              []TypeRef
 	FunctionParameters []TypeRef
 	FunctionReturn     *TypeRef
+	FunctionFails      *TypeRef
 	Nullable           bool
 	Array              bool
 }
@@ -332,7 +333,11 @@ func (t TypeRef) String() string {
 		for index, parameter := range t.FunctionParameters {
 			parts[index] = parameter.String()
 		}
-		return "(" + strings.Join(parts, ", ") + ") -> " + t.FunctionReturn.String()
+		result := "(" + strings.Join(parts, ", ") + ") -> " + t.FunctionReturn.String()
+		if t.FunctionFails != nil {
+			result += " fails " + t.FunctionFails.String()
+		}
+		return result
 	}
 	if len(t.Union) > 0 {
 		parts := make([]string, len(t.Union))
@@ -514,6 +519,7 @@ type LambdaExpression struct {
 	Base
 	Parameters []Parameter
 	ReturnType TypeRef
+	Fails      TypeRef
 	Body       []Statement
 }
 

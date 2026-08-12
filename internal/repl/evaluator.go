@@ -93,6 +93,9 @@ type typeValue struct {
 type callable struct {
 	Function  *functionDefinition
 	Lambda    *lambdaClosure
+	Adapted   *callable
+	Success   types.Type
+	Failure   types.Type
 	Method    *ir.Method
 	Receiver  Value
 	Module    string
@@ -852,6 +855,20 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		switch node.Kind {
+		case ir.PureFunctionToFallibleConversion:
+			function, ok := value.Data.(*callable)
+			if !ok {
+				return Value{}, fmt.Errorf("cannot adapt %s as a fallible function", value.Type)
+			}
+			_, success, valid := types.FunctionSignature(node.ExprType())
+			if !valid {
+				return Value{}, fmt.Errorf("invalid fallible function type %s", node.ExprType())
+			}
+			return Value{Type: node.ExprType(), Data: &callable{
+				Adapted: function,
+				Success: success,
+				Failure: types.FunctionFailure(node.ExprType()),
+			}}, nil
 		case ir.IntegerToFloatConversion:
 			integer, ok := value.Data.(int64)
 			if !ok {
@@ -1401,6 +1418,22 @@ func (e *Evaluator) member(receiver Value, name, module string) (Value, error) {
 }
 
 func (e *Evaluator) call(function *callable, arguments []evaluatedArgument) (Value, error) {
+	if function.Adapted != nil {
+		value, err := e.call(function.Adapted, arguments)
+		if err != nil {
+			return Value{}, err
+		}
+		success := function.Success
+		if success.Kind == types.Void {
+			value, err = e.unitValue()
+			if err != nil {
+				return Value{}, err
+			}
+			success = value.Type
+		}
+		resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{success, function.Failure}}
+		return e.resultOK(resultType, value)
+	}
 	if function.Lambda != nil {
 		closure := function.Lambda
 		callScope := &scope{parent: closure.Scope, values: map[string]Value{}}
@@ -1481,7 +1514,7 @@ func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value
 			}
 			if equal(arguments[0].Value, rawValue) {
 				value := Value{Type: types.FromName(node.EnumName), Data: &enumValue{Definition: typeValue.Enum, Name: raw.Member, Payload: map[string]Value{}}}
-				return e.filesystemOK(node.ExprType(), value)
+				return e.resultOK(node.ExprType(), value)
 			}
 		}
 		return e.structuredResultErr(node.ExprType(), "EnumValueError", map[string]Value{
@@ -1759,10 +1792,10 @@ func validUnicodeScalar(value int64) bool {
 	return value >= 0 && value <= utf8.MaxRune && (value < 0xd800 || value > 0xdfff)
 }
 
-func (e *Evaluator) filesystemOK(resultType types.Type, value Value) (Value, error) {
+func (e *Evaluator) resultOK(resultType types.Type, value Value) (Value, error) {
 	definition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
 	if !ok {
-		return Value{}, errors.New("filesystem requires trb/std/result")
+		return Value{}, errors.New("operation requires trb/std/result")
 	}
 	if len(resultType.Args) == 2 {
 		value.Type = resultType.Args[0]
@@ -1775,6 +1808,10 @@ func (e *Evaluator) filesystemOK(resultType types.Type, value Value) (Value, err
 			Payload:    map[string]Value{"value": value},
 		},
 	}, nil
+}
+
+func (e *Evaluator) filesystemOK(resultType types.Type, value Value) (Value, error) {
+	return e.resultOK(resultType, value)
 }
 
 func (e *Evaluator) unitValue() (Value, error) {
@@ -2604,7 +2641,7 @@ func jsonRaw(value Value, path string) (any, *jsonConversionError) {
 }
 
 func (e *Evaluator) jsonOK(resultType types.Type, value Value) (Value, error) {
-	return e.filesystemOK(resultType, value)
+	return e.resultOK(resultType, value)
 }
 
 func (e *Evaluator) jsonError(resultType types.Type, kind, message, path string, line, column *int64) (Value, error) {

@@ -83,6 +83,12 @@ mode by itself does not enable them.
 - Function types are written `(ParameterType, ...) -> ReturnType`. `Void` is
   permitted in a function type, for example `(String) -> Void`, but remains
   omitted from the corresponding `fn` declaration.
+- A function value may declare the same fallible effect as a named function:
+  `fn(): User fails LoadError ... end`. Its type is written
+  `() -> User fails LoadError`. Calling that value propagates or captures the
+  effect through the ordinary `fails` and `attempt` rules. A pure function is
+  assignable to a compatible fallible function type; a fallible function is
+  not assignable to a pure function type.
 - A function value owns `return` statements in its body. It may capture outer
   lexical bindings, while ordinary immutability and `mut` assignment rules
   continue to apply to captured values.
@@ -92,11 +98,12 @@ mode by itself does not enable them.
 - The compact spelling uses the ordinary statement separator rather than a
   second lambda syntax: `double := fn(value: Integer): Integer; return value *
   2; end`. `trb fmt` expands it to the canonical multiline form.
-- TypeScript alone may lower a no-result function value to an `async` callback
-  when its body reaches a Promise-based platform API. Suspension remains a
-  backend implementation detail rather than TypeRB syntax. A suspending
-  TypeScript function value with a non-Void result is rejected until the
-  portable effect model can express that higher-order contract safely.
+- TypeScript alone may lower a function value to an `async` callback when its
+  body reaches a Promise-based platform API. Suspension remains a backend
+  implementation detail rather than TypeRB syntax. A fallible function value
+  has an explicit `Result` runtime boundary and may suspend with a non-Void
+  success value. A pure suspending function value with a non-Void result
+  remains rejected until a higher-order suspension contract is available.
 
 #### JSX expressions
 
@@ -709,6 +716,9 @@ end
 - A call with an error effect propagates automatically through an enclosing
   function that declares a compatible `fails` type. The compiler reports an
   error when a named function neither declares nor captures the effect.
+- Function values retain their declared failure type. Invoking an effectful
+  function value follows the same propagation and capture rules as invoking a
+  named function.
 - `attempt expression` captures an effect as `Result<T, E>`. `attempt do ... end`
   captures every compatible effect in the block and uses the block's final
   expression as `T`. A block without a final value produces `Result<Unit, E>`.

@@ -41,3 +41,21 @@ func TestParseInlineSemicolonLambda(t *testing.T) {
 		t.Fatalf("lambda=%#v", variable.Value)
 	}
 }
+
+func TestParseFallibleLambdaAndFunctionType(t *testing.T) {
+	program, diagnostics := Parse([]byte(`loader: () -> String fails LoadError := fn(): String fails LoadError
+	return read()
+end
+`))
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	variable := program.Statements[0].(*ast.VariableStatement)
+	if variable.Type.String() != "() -> String fails LoadError" {
+		t.Fatalf("type=%s", variable.Type.String())
+	}
+	lambda := variable.Value.(*ast.LambdaExpression)
+	if lambda.ReturnType.String() != "String" || lambda.Fails.String() != "LoadError" {
+		t.Fatalf("lambda=%#v", lambda)
+	}
+}

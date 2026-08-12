@@ -74,6 +74,26 @@ func TestFunctionTypesAreInvariant(t *testing.T) {
 	}
 }
 
+func TestFunctionEffectsAcceptPureImplementationsButNotTheReverse(t *testing.T) {
+	integer := FromName("Integer")
+	appError := FromName("AppError")
+	pure := FunctionOf(nil, integer)
+	fallible := FunctionWithEffect(nil, integer, appError)
+
+	if fallible.String() != "() -> Integer fails AppError" {
+		t.Fatalf("function effect string=%s", fallible)
+	}
+	if !Assignable(fallible, pure) {
+		t.Fatal("a pure function must satisfy a compatible fallible callback")
+	}
+	if Assignable(pure, fallible) {
+		t.Fatal("a fallible function must not satisfy a pure callback")
+	}
+	if Equivalent(fallible, pure) {
+		t.Fatal("function effects are part of semantic type identity")
+	}
+}
+
 func TestCommonTypeUsesPortableNumericWidening(t *testing.T) {
 	integer := FromName("Integer")
 	float := FromName("Float")

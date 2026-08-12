@@ -1416,6 +1416,37 @@ func TestReplRetainsPredicateAndBangFunctionNamesAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesFallibleFunctionValuesAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-function-effect-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := "record AppError; message: String; end\n" +
+			"def read_number(): Integer fails AppError; return 7; end\n" +
+			"callback := fn(): Integer fails AppError; return read_number(); end\n" +
+			"attempt callback()\n" +
+			":quit\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "Result::Ok(value: 7) : Result<Integer, AppError>") || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s fallible function REPL result\nstdout:\n%s\nstderr:\n%s", mode, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableStringTrimmingAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()

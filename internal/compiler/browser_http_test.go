@@ -104,6 +104,41 @@ end
 	}
 }
 
+func TestBrowserHTTPCanSuspendInsideFallibleFunctionValue(t *testing.T) {
+	source := []byte(`import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+
+record Todo
+	id: Integer
+	title: String
+end
+
+def invoke(loader: () -> Response<Todo> fails RequestError): Response<Todo> fails RequestError
+	return loader()
+end
+
+def load(client: HttpClient): Response<Todo> fails RequestError
+	query_fn := fn(): Response<Todo> fails RequestError
+		return client.request("/todos/1").json<Todo>()
+	end
+	return invoke(query_fn)
+end
+`)
+	artifact, err := Compile("browser_http_callback.trb", source, "typescript")
+	if err != nil {
+		t.Fatalf("typescript rejected a suspending fallible function value: %v", err)
+	}
+	output := string(artifact.Output)
+	for _, want := range []string{
+		"loader: () => Result<__trb_browser.Response<Todo>, __trb_browser.RequestError> | Promise<Result<__trb_browser.Response<Todo>, __trb_browser.RequestError>>",
+		"const query_fn: () => Promise<Result<__trb_browser.Response<Todo>, __trb_browser.RequestError>> = async ()",
+		"globalThis.fetch",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("generated suspending callback is missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestOfficialReceiverMethodsRequireTheirImport(t *testing.T) {
 	source := []byte(`class HttpClient
 end

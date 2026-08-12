@@ -1052,6 +1052,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
+		case ir.PureFunctionToFallibleConversion:
+			return g.pureFunctionToFallible(n)
 		case ir.IntegerToFloatConversion:
 			return "float64(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
@@ -1260,6 +1262,38 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) pureFunctionToFallible(conversion *ir.Conversion) string {
+	parameters, success, ok := types.FunctionSignature(conversion.ExprType())
+	if !ok {
+		return g.expr(conversion.Value)
+	}
+	failure := types.FunctionFailure(conversion.ExprType())
+	parts := make([]string, len(parameters))
+	arguments := make([]string, len(parameters))
+	for index, parameter := range parameters {
+		name := "__trbArg" + strconv.Itoa(index)
+		parts[index] = name + " " + g.goType(parameter)
+		arguments[index] = name
+	}
+	internalSuccess := success
+	value := "__trbValue(" + strings.Join(arguments, ", ") + ")"
+	prefix := ""
+	if success.Kind == types.Void {
+		internalSuccess = types.FromName("Unit")
+		prefix = value + "; "
+		value = g.goType(internalSuccess) + "{}"
+	}
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{internalSuccess, failure}}
+	wrapped := "func(" + strings.Join(parts, ", ") + ") " + g.goType(resultType) + " { " + prefix + "return " +
+		resultAlias + ".NewResultOk[" + g.goType(internalSuccess) + ", " + g.goType(failure) + "](" + value + ") }"
+	return "func(__trbValue " + g.goType(conversion.Value.ExprType()) + ") " + g.goType(conversion.ExprType()) +
+		" { return " + wrapped + " }(" + g.expr(conversion.Value) + ")"
 }
 
 func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {
@@ -2151,6 +2185,12 @@ func (g *generator) goType(t types.Type) string {
 			parts[index] = g.goType(parameter)
 		}
 		result = "func(" + strings.Join(parts, ", ") + ")"
+		if failure := types.FunctionFailure(t); failure.Kind != types.Never {
+			if returned.Kind == types.Void {
+				returned = types.FromName("Unit")
+			}
+			returned = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{returned, failure}}
+		}
 		if returnType := g.goType(returned); returnType != "" {
 			result += " " + returnType
 		}
