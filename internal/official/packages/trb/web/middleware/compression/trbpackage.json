@@ -1,0 +1,7 @@
+{
+  "name": "trb/web/middleware/compression",
+  "version": "0.1.0",
+  "module": "trb/web/middleware/compression/index",
+  "source": "src/index.trb",
+  "nativeDependencies": {}
+}

@@ -150,8 +150,10 @@ and accepts an explicit typed header map. An opt-in CORS middleware handles actu
 explicit origin policies, credentials, exposed and allowed headers, and typed
 preflight cache duration. A request-ID middleware preserves bounded safe
 incoming IDs or generates cryptographically random IDs and exposes the chosen
-value to downstream handlers and the response. Additional middleware is still
-under development. Routing distinguishes
+value to downstream handlers and the response. Opt-in response-compression
+middleware negotiates gzip with `Accept-Encoding`, uses a typed minimum-size
+option, and consistently excludes unsafe or unsuitable responses across all
+three backends. Additional middleware is still under development. Routing distinguishes
 missing paths from unsupported methods and returns a portable JSON 405 response
 with an `Allow` header. Request bodies use a configurable limit of 1 MiB by
 default before dispatch, and oversized requests receive the same JSON 413

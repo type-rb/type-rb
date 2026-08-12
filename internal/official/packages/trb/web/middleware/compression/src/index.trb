@@ -1,0 +1,145 @@
+import { Body } from trb/http
+import { Context, Next, Response } from trb/web
+import { Middleware } from trb/web/middleware
+import { Result } from trb/std/result
+import trb/internal/runtime
+import trb/internal/web/compression as native_compression
+
+record CompressionOptions
+	minimum_size_bytes: Integer
+end
+
+def default_options(): CompressionOptions
+	return CompressionOptions.new(minimum_size_bytes: 1024)
+end
+
+class CompressionMiddleware implements Middleware
+	@options: CompressionOptions
+
+	def initialize(options: CompressionOptions)
+		@options = options
+		return
+	end
+
+	def call(context: Context, next_handler: Next): Response
+		return _invoke(context, next_handler, @options)
+	end
+end
+
+def middleware(options: CompressionOptions = default_options()): Middleware
+	return CompressionMiddleware.new(options)
+end
+
+def call(context: Context, next_handler: Next, options: CompressionOptions = default_options()): Response
+	return _invoke(context, next_handler, options)
+end
+
+def _invoke(context: Context, next_handler: Next, options: CompressionOptions): Response
+	if options.minimum_size_bytes < 0
+		return runtime.fail<Response>("trb/web compression minimum_size_bytes must be non-negative")
+	end
+	response := next_handler.call(context)
+	if !_compressible?(context, response, options)
+		return response
+	end
+	mut negotiated_response := response.vary("Accept-Encoding")
+	if !_accepts_gzip?(context)
+		return negotiated_response
+	end
+	compressed_body := native_compression.gzip(response.body.bytes())
+	negotiated_response = negotiated_response.with_header("content-encoding", "gzip")
+	negotiated_response = negotiated_response.without_header("content-length")
+	negotiated_response = negotiated_response.without_header("etag")
+	return Response.new(
+		status: negotiated_response.status,
+		headers: negotiated_response.headers,
+		body: Body.new(compressed_body),
+	)
+end
+
+def _compressible?(context: Context, response: Response, options: CompressionOptions): Boolean
+	if context.request.method.to_s() == "HEAD"
+		return false
+	end
+	if response.status < 200 || response.status == 204 || response.status == 206 || response.status == 304
+		return false
+	end
+	if response.body.size() < options.minimum_size_bytes || response.body.empty?()
+		return false
+	end
+	if response.headers.key?("content-encoding") || response.headers.key?("content-range")
+		return false
+	end
+	if _cache_control_prevents_transform?(response)
+		return false
+	end
+	return _compressible_content_type?(response)
+end
+
+def _cache_control_prevents_transform?(response: Response): Boolean
+	response.header_values("cache-control").each do |header|
+		header.split(",").each do |directive|
+			if directive.strip().downcase() == "no-transform"
+				return true
+			end
+		end
+	end
+	return false
+end
+
+def _compressible_content_type?(response: Response): Boolean
+	values := response.header_values("content-type")
+	if values.size() != 1
+		return false
+	end
+	media_type := values[0].split(";")[0].strip().downcase()
+	if media_type.start_with?("text/") || media_type.end_with?("+json") || media_type.end_with?("+xml")
+		return true
+	end
+	return [
+		"application/json",
+		"application/javascript",
+		"application/xml",
+		"image/svg+xml",
+		"application/wasm",
+		"font/otf",
+		"font/ttf",
+	].include?(media_type)
+end
+
+def _accepts_gzip?(context: Context): Boolean
+	mut wildcard_found := false
+	mut wildcard_allowed := false
+	context.request.header_values("accept-encoding").each do |header|
+		header.split(",").each do |item|
+			parts := item.split(";")
+			coding := parts[0].strip().downcase()
+			allowed := _quality_allows?(parts)
+			if coding == "gzip"
+				return allowed
+			end
+			if coding == "*"
+				wildcard_found = true
+				wildcard_allowed = allowed
+			end
+		end
+	end
+	return wildcard_found && wildcard_allowed
+end
+
+def _quality_allows?(parts: Array<String>): Boolean
+	mut index := 1
+	while index < parts.size()
+		parameter := parts[index].split("=")
+		if parameter.size() == 2 && parameter[0].strip().downcase() == "q"
+			case parameter[1].strip().try_to_f()
+			when Result::Ok(value)
+				return value > 0.0 && value <= 1.0
+			when Result::Err(_error)
+				return false
+			end
+		end
+		index += 1
+	end
+	return true
+end

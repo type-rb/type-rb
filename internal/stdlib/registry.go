@@ -232,6 +232,20 @@ end
 			},
 		},
 	},
+	"trb/internal/web/compression": {
+		Path:     "trb/internal/web/compression",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"gzip": {
+				Name:               "gzip",
+				Intrinsic:          "trb.web.middleware.compression.gzip",
+				RuntimeIndependent: true,
+				Parameters:         []Parameter{{Name: "value", Type: bytesType}},
+				Return:             bytesType,
+			},
+		},
+	},
 	"trb/std/path": {
 		Path:       "trb/std/path",
 		ModulePath: "trb/std/path/index",

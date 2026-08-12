@@ -458,6 +458,7 @@ func TestOfficialWebMiddlewareStackCompilesAcrossBackends(t *testing.T) {
 import { Context, Next, Response } from trb/web
 import { Middleware, compose } from trb/web/middleware
 import trb/web/middleware/cors
+import trb/web/middleware/compression
 import trb/web/middleware/logger
 import trb/web/middleware/request_id
 import trb/web/middleware/secure_headers
@@ -472,6 +473,7 @@ def stack(): Array<Middleware>
 	return [
 		request_id.middleware(),
 		logger.middleware(),
+		compression.middleware(),
 		secure_headers.middleware(),
 		cors.middleware(),
 	]

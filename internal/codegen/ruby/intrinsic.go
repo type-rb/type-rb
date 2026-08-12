@@ -166,6 +166,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "trb_web_dispatch(" + arguments[0] + ")"
 	case "trb.web.middleware.logger.call":
 		return rubyWebLogger(arguments)
+	case "trb.web.middleware.compression.gzip":
+		return rubyWebGzip(arguments[0])
 	case "trb.std.strings.length":
 		return arguments[0] + ".each_codepoint.count"
 	case "trb.std.strings.empty":
@@ -475,6 +477,10 @@ func rubyWebLogger(arguments []string) string {
 		options = "logger_options = " + arguments[2] + "; "
 	}
 	return "-> { require \"json\"; logger_context = " + arguments[0] + "; logger_next_handler = " + arguments[1] + "; " + options + "excluded = logger_options && logger_options.exclude_paths.include?(logger_context.__trb_field_request.__trb_field_path); if excluded; logger_next_handler.call(logger_context); else; started = Process.clock_gettime(Process::CLOCK_MONOTONIC); status = 500; begin; response = logger_next_handler.call(logger_context); status = response.__trb_field_status; response; ensure; level = status >= 500 ? \"error\" : \"info\"; entry = { timestamp: Time.now.utc.strftime(\"%Y-%m-%dT%H:%M:%S.%9NZ\"), level: level, event: \"http_request\", method: logger_context.__trb_field_request.__trb_field_method.to_s, path: logger_context.__trb_field_request.__trb_field_path, status: status, duration_ms: (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0 }; output = logger_options && logger_options.stderr ? $stderr : $stdout; output.puts(JSON.generate(entry)); end; end }.call"
+}
+
+func rubyWebGzip(value string) string {
+	return "->(value) { require \"zlib\"; Zlib.gzip(value) }.call(" + value + ")"
 }
 
 func rubyWebRequestJSON(call *ir.Call, request string) string {
