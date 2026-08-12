@@ -175,6 +175,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.tsJSONEncode(call, arguments[0])
 	case "trb.web.request_json":
 		return g.tsWebRequestJSON(call, arguments[0])
+	case "trb.web.request_query":
+		return g.tsWebParameterBinding(call, arguments[0], "query")
+	case "trb.web.context_params":
+		return g.tsWebParameterBinding(call, arguments[0], "path")
 	case "trb.web.json":
 		return g.tsWebJSON(call, arguments)
 	case "trb.web.configure_server":
@@ -504,6 +508,121 @@ func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
 	invalidUTF8 := "__trb_web.RequestError.InvalidUtf8"
 	invalidJSON := func(value string) string { return "__trb_web.RequestError.InvalidJson(" + value + ")" }
 	return "(() => { const requestValue = " + request + "; const contentTypes = requestValue.__trb_headers.entries().filter((entry) => entry.name.toLowerCase() === \"content-type\").map((entry) => entry.value); if (contentTypes.length === 0) return " + errResult(missing) + "; if (contentTypes.length !== 1) return " + errResult(duplicate) + "; const mediaType = contentTypes[0]!.split(\";\", 1)[0]!.trim().toLowerCase(); if (mediaType !== \"application/json\" && !(mediaType.startsWith(\"application/\") && mediaType.endsWith(\"+json\"))) return " + errResult(unsupported) + "; let source: string; try { source = new TextDecoder(\"utf-8\", { fatal: true }).decode(requestValue.__trb_body.bytes()); } catch { return " + errResult(invalidUTF8) + "; } const decoded = " + decoded + "; if (decoded.kind === \"Err\") return " + errResult(invalidJSON("decoded.error")) + "; return " + okResult + "(decoded.value); })()"
+}
+
+func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string) string {
+	if call.Codec == nil || call.Codec.Kind != "record" || len(call.ExprType().Args) != 2 {
+		return "undefined"
+	}
+	valueType := tsCodecType(call.Codec)
+	errorType := "__trb_web.ParameterError"
+	resultType := "Result<" + valueType + ", " + errorType + ">"
+	sourceName := "Path"
+	if source == "query" {
+		sourceName = "Query"
+	}
+	sourceValue := "__trb_web.ParameterSource." + sourceName
+	errResult := func(value string) string {
+		return "Result.Err<" + valueType + ", " + errorType + ">(" + value + ")"
+	}
+	missing := func(name string) string {
+		return errResult("__trb_web.ParameterError.Missing(" + sourceValue + ", " + strconv.Quote(name) + ")")
+	}
+	duplicate := func(name string) string {
+		return errResult("__trb_web.ParameterError.Duplicate(" + sourceValue + ", " + strconv.Quote(name) + ")")
+	}
+	invalid := func(name, value, expected string) string {
+		return errResult("__trb_web.ParameterError.Invalid(" + sourceValue + ", " + strconv.Quote(name) + ", " + value + ", " + strconv.Quote(expected) + ")")
+	}
+	var body strings.Builder
+	body.WriteString("const parameterValues = new Map<string, Array<string>>(); ")
+	if source == "query" {
+		body.WriteString("const queryResult = parameterReceiver.query_parameters(); if (queryResult.kind === \"Err\") return " + errResult("__trb_web.ParameterError.MalformedQuery(queryResult.error)") + "; for (const parameter of queryResult.value) { const values = parameterValues.get(parameter.name) ?? []; values.push(parameter.value); parameterValues.set(parameter.name, values); } ")
+	} else {
+		for _, field := range call.Codec.Fields {
+			body.WriteString("parameterValues.set(" + strconv.Quote(field.Name) + ", [parameterReceiver.path_value(" + strconv.Quote(field.Name) + ")]); ")
+		}
+	}
+	constructor := make([]string, 0, len(call.Codec.Fields))
+	for index, field := range call.Codec.Fields {
+		variable := "field" + strconv.Itoa(index)
+		values := "values" + strconv.Itoa(index)
+		body.WriteString("const " + values + " = parameterValues.get(" + strconv.Quote(field.Name) + ") ?? []; let " + variable + ": " + tsCodecType(field.Schema) + "; ")
+		if field.Schema.Kind == "array" {
+			parser := g.tsWebParameterParser(field.Schema.Element)
+			body.WriteString("if (" + values + ".length === 0) { ")
+			if field.Schema.Type.Nullable {
+				body.WriteString(variable + " = null;")
+			} else {
+				body.WriteString(variable + " = [];")
+			}
+			body.WriteString(" } else { const parsedValues: Array<" + tsCodecType(field.Schema.Element) + "> = []; for (const rawValue of " + values + ") { const parsedValue = " + parser + "(rawValue); if (parsedValue === undefined) return " + invalid(field.Name, "rawValue", tsParameterExpected(field.Schema.Element)) + "; parsedValues.push(parsedValue); } " + variable + " = parsedValues; } ")
+		} else {
+			body.WriteString("if (" + values + ".length === 0) { ")
+			if field.Schema.Type.Nullable {
+				body.WriteString(variable + " = null;")
+			} else {
+				body.WriteString("return " + missing(field.Name) + ";")
+			}
+			body.WriteString(" } else if (" + values + ".length > 1) { return " + duplicate(field.Name) + "; } else { const rawValue = " + values + "[0]!; ")
+			nonnull := *field.Schema
+			nonnull.Type.Nullable = false
+			parser := g.tsWebParameterParser(&nonnull)
+			body.WriteString("const parsedValue = " + parser + "(rawValue); if (parsedValue === undefined) return " + invalid(field.Name, "rawValue", tsParameterExpected(&nonnull)) + "; " + variable + " = parsedValue; } ")
+		}
+		constructor = append(constructor, field.Name+": "+variable)
+	}
+	body.WriteString("return Result.Ok<" + valueType + ", " + errorType + ">({ " + strings.Join(constructor, ", ") + " } satisfies " + valueType + ");")
+	return "((): " + resultType + " => { const parameterReceiver = " + receiver + "; " + body.String() + " })()"
+}
+
+func tsParameterExpected(schema *ir.CodecSchema) string {
+	if schema == nil {
+		return "value"
+	}
+	typ := schema.Type
+	typ.Nullable = false
+	return typ.String()
+}
+
+func (g *generator) tsWebParameterParser(schema *ir.CodecSchema) string {
+	valueType := tsCodecType(schema)
+	body := "return value;"
+	switch schema.Kind {
+	case "string":
+		body = "return value;"
+	case "boolean":
+		body = "if (value === \"true\") return true; if (value === \"false\") return false; return undefined;"
+	case "integer":
+		body = "if (!/^[+-]?[0-9]+$/.test(value)) return undefined; const parsed = Number(value); return Number.isSafeInteger(parsed) ? parsed : undefined;"
+	case "float":
+		body = "if (!/^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value)) return undefined; const parsed = Number(value); return Number.isFinite(parsed) ? parsed : undefined;"
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
+		owner := schema.Type.Name
+		if schema.Reference != nil && schema.Reference.Alias != "" {
+			owner = schema.Reference.Alias + "." + owner
+		}
+		method := "try_parse"
+		if schema.Kind == "time_zone" {
+			method = "try_get"
+		}
+		body = "const parsed = " + owner + "." + method + "(value); return parsed.kind === \"Ok\" ? parsed.value : undefined;"
+	case "raw_enum":
+		owner := schema.Type.Name
+		if schema.Reference != nil && schema.Reference.Alias != "" {
+			owner = schema.Reference.Alias + "." + owner
+		}
+		branches := make([]string, 0, len(schema.RawValues))
+		for _, item := range schema.RawValues {
+			raw := item.Raw
+			if schema.RawType.Kind == types.Int {
+				raw = strconv.Quote(item.Raw)
+			}
+			branches = append(branches, "case "+raw+": return "+owner+"."+item.Member+";")
+		}
+		body = "switch (value) { " + strings.Join(branches, " ") + " } return undefined;"
+	}
+	return "((value: string): " + valueType + " | undefined => { " + body + " })"
 }
 
 func (g *generator) tsWebJSON(call *ir.Call, arguments []string) string {

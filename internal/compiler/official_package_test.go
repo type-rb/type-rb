@@ -143,6 +143,71 @@ end
 	}
 }
 
+func TestOfficialWebTypedParameterBindingRejectsUnsupportedShapes(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "non-record root",
+			source: `import { ParameterError, Request } from trb/web
+import { Result } from trb/std/result
+
+def invalid(request: Request): Result<String, ParameterError>
+	return request.query<String>()
+end
+`,
+			want: "web parameter binding type String must be a non-nullable record",
+		},
+		{
+			name: "nested query record",
+			source: `import { ParameterError, Request } from trb/web
+import { Result } from trb/std/result
+
+record Filter
+	start: Integer
+end
+
+record Query
+	filter: Filter
+end
+
+def invalid(request: Request): Result<Query, ParameterError>
+	return request.query<Query>()
+end
+`,
+			want: "web parameter field filter has unsupported type Filter",
+		},
+		{
+			name: "array path field",
+			source: `import { Context, ParameterError } from trb/web
+import { Result } from trb/std/result
+
+record Params
+	id: Array<Integer>
+end
+
+def invalid(context: Context): Result<Params, ParameterError>
+	return context.params<Params>()
+end
+`,
+			want: "path parameter field id cannot be an Array",
+		},
+	}
+	for _, test := range tests {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			t.Run(test.name+"/"+mode, func(t *testing.T) {
+				source := SourceUnit{Filename: "/project/main.trb", ModulePath: "main", Package: "main", Source: []byte(test.source)}
+				_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("unexpected diagnostic: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestOfficialWebResponseBuildersRejectInvalidValues(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

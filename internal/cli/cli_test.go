@@ -2007,6 +2007,48 @@ func TestReplEvaluatesTypedJSONRecordCodecsAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesTypedWebQueryBindingAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-web-query-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := strings.Join([]string{
+			"import { Body, Header, Headers, HttpMethod } from trb/http",
+			"import { ParameterError, Request } from trb/web",
+			"import { Result } from trb/std/result",
+			`record Query; page: Integer; tag: Array<String>; end`,
+			`Request.new(method: HttpMethod.get(), path: "/", query_string: "page=2&tag=a&tag=b", headers: Headers.new(), body: Body.empty()).query<Query>()`,
+			`Request.new(method: HttpMethod.get(), path: "/", query_string: "tag=a", headers: Headers.new(), body: Body.empty()).query<Query>()`,
+			`Request.new(method: HttpMethod.get(), path: "/", query_string: "page=%ZZ", headers: Headers.new(), body: Body.empty()).query<Query>()`,
+			`record Payload; title: String; end`,
+			`Request.new(method: HttpMethod.post(), path: "/", query_string: "", headers: Headers.new([Header.new(name: "content-type", value: "application/json")]), body: Body.new("{\"title\":\"ship\"}".to_bytes())).json<Payload>()`,
+			":quit",
+		}, "\n") + "\n"
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "Result::Ok(value: Query(page: 2, tag: [\"a\", \"b\"])) : Result<Query, ParameterError>\n" +
+			"Result::Err(error: ParameterError::Missing(source: ParameterSource::Query, name: \"page\")) : Result<Query, ParameterError>\n" +
+			"Result::Err(error: ParameterError::MalformedQuery(error: PercentDecodeError(kind: PercentDecodeErrorKind::InvalidEscape, input: \"%ZZ\", message: \"invalid percent escape in URL query component\"))) : Result<Query, ParameterError>\n" +
+			"Result::Ok(value: Payload(title: \"ship\")) : Result<Payload, RequestError>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s typed web query REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesCompilerOwnedUnicodeAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -4807,6 +4849,133 @@ end
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web query helper output: want %q, got %q", mode, want, stdout.String())
 		}
+	}
+}
+
+func TestRunOfficialWebTypedParameterBindingAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireWebServerRuntime(t, mode)
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/run-web-typed-parameter-test"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			mainSource := `import { Body, Headers, HttpMethod } from trb/http
+import { Request } from trb/web
+import { dispatch } from trb/web/testing
+
+def show(path: String, query: String)
+	response := dispatch(Request.new(method: HttpMethod.get(), path: path, query_string: query, headers: Headers.new(), body: Body.empty()))
+	puts(response.status)
+	puts(response.body.to_s())
+	return
+end
+
+def main()
+	show("/todos/7", "page=2&tag=go&tag=web&published=true&rating=4.5&date=2026-08-13&visibility=PUBLIC")
+	show("/todos/7", "published=false")
+	show("/todos/7", "page=1&page=2&published=true")
+	show("/todos/nope", "published=true")
+	show("/todos/7", "published=%ZZ")
+	show("/todos/7", "published=true&visibility=UNKNOWN")
+	return
+end
+`
+			routeSource := `import {
+	Context,
+	ParameterError,
+	ParameterSource,
+	Response,
+	text,
+} from trb/web
+import { Result } from trb/std/result
+import { Date } from trb/std/time
+
+enum Visibility
+	Public = "PUBLIC"
+	Private = "PRIVATE"
+end
+
+record TodoParams
+	id: Integer
+end
+
+record TodoQuery
+	page: Integer?
+	tag: Array<String>
+	published: Boolean
+	rating: Float?
+	date: Date?
+	visibility: Visibility?
+end
+
+def parameter_error(error: ParameterError): Response
+	case error
+	when ParameterError::MalformedQuery(decode_error)
+		return text("malformed:" + decode_error.input, 400)
+	when ParameterError::Missing(source, name)
+		return text("missing:" + source_name(source) + ":" + name, 400)
+	when ParameterError::Duplicate(source, name)
+		return text("duplicate:" + source_name(source) + ":" + name, 400)
+	when ParameterError::Invalid(source, name, value, expected)
+		return text("invalid:" + source_name(source) + ":" + name + ":" + value + ":" + expected, 400)
+	end
+end
+
+def source_name(source: ParameterSource): String
+	case source
+	when ParameterSource::Path
+		return "path"
+	when ParameterSource::Query
+		return "query"
+	end
+end
+
+def get(context: Context): Response
+	case context.params<TodoParams>()
+	when Result::Err(error)
+		return parameter_error(error)
+	when Result::Ok(params)
+		case context.request.query<TodoQuery>()
+		when Result::Err(error)
+			return parameter_error(error)
+		when Result::Ok(query)
+			page := if query.page == nil
+				"nil"
+			else
+				"set"
+			end
+			extra := query.rating != nil && query.date != nil && query.visibility != nil
+			return text(params.id.to_s() + "|" + page + "|" + query.tag.size().to_s() + "|" + query.published.to_s() + "|" + extra.to_s())
+		end
+	end
+end
+`
+			if err := os.MkdirAll(filepath.Join(root, "src", "routes", "todos"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "src", "routes", "todos", "[id].trb"), []byte(routeSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			want := "200\n7|set|2|true|true\n200\n7|nil|0|false|false\n400\nduplicate:query:page\n400\ninvalid:path:id:nope:Integer\n400\nmalformed:%ZZ\n400\ninvalid:query:visibility:UNKNOWN:Visibility\n"
+			if stdout.String() != want {
+				t.Fatalf("unexpected %s typed web parameter output: want %q, got %q", mode, want, stdout.String())
+			}
+		})
 	}
 }
 

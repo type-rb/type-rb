@@ -65,6 +65,21 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		return nil
 	}
 	switch name {
+	case "trb.web.request_query":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		return e.webParameterBinding(values[0], typ, codec, "query")
+	case "trb.web.context_params":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		return e.webParameterBinding(values[0], typ, codec, "path")
+	case "trb.web.request_json":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		return e.webRequestJSON(values[0], typ, codec)
 	case "trb.std.io.puts":
 		if err := require(1); err != nil {
 			return Value{}, err

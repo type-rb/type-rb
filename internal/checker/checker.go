@@ -2015,15 +2015,120 @@ func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic stri
 	switch intrinsic {
 	case "trb.internal.json.decode", "trb.web.request_json", "trb.platform.typescript.browser.response_json":
 		operation = "decode"
+	case "trb.web.context_params":
+		operation = "path_parameters"
+	case "trb.web.request_query":
+		operation = "query_parameters"
 	case "trb.internal.json.encode", "trb.web.json", "trb.platform.typescript.browser.json_body":
 		operation = "encode"
 	default:
 		return
 	}
-	schema, ok := c.codecSchema(call.Span(), typ, map[string]bool{})
+	var schema CodecSchema
+	var ok bool
+	if operation == "path_parameters" || operation == "query_parameters" {
+		schema, ok = c.parameterSchema(call.Span(), typ, operation)
+	} else {
+		schema, ok = c.codecSchema(call.Span(), typ, map[string]bool{})
+	}
 	if ok {
 		c.result.CodecApplications[call] = CodecApplication{Operation: operation, Schema: schema}
 	}
+}
+
+func (c *Checker) parameterSchema(span token.Span, typ types.Type, operation string) (CodecSchema, bool) {
+	schema := CodecSchema{Type: typ}
+	base := typ
+	base.Nullable = false
+	if base.Kind != types.Named || typ.Nullable {
+		c.error(span, fmt.Sprintf("web parameter binding type %s must be a non-nullable record", typ))
+		return schema, false
+	}
+	fields, module, reference, ok := c.codecRecord(base.Name)
+	if !ok {
+		c.error(span, fmt.Sprintf("web parameter binding type %s must be a non-nullable record", typ))
+		return schema, false
+	}
+	schema.Kind = "record"
+	schema.Module = module
+	if reference != nil {
+		copy := *reference
+		schema.Reference = &copy
+	}
+	for _, field := range fields {
+		fieldSchema, fieldOK := c.parameterValueSchema(field.Type, operation == "query_parameters")
+		if !fieldOK {
+			if field.Type.Kind == types.Array && operation != "query_parameters" {
+				c.error(span, fmt.Sprintf("path parameter field %s cannot be an Array", field.Name))
+			} else if field.Type.Kind == types.Array {
+				c.error(span, fmt.Sprintf("query parameter field %s must use Array<T> with a non-nullable scalar T", field.Name))
+			} else {
+				c.error(span, fmt.Sprintf("web parameter field %s has unsupported type %s", field.Name, field.Type))
+			}
+			return schema, false
+		}
+		// JSON field aliases describe JSON documents, not URL parameters. Keep
+		// parameter names equal to the TypeRB field name until a dedicated
+		// parameter annotation is introduced.
+		schema.Fields = append(schema.Fields, CodecField{Name: field.Name, WireName: field.Name, Schema: &fieldSchema})
+	}
+	return schema, true
+}
+
+func (c *Checker) parameterValueSchema(typ types.Type, allowArray bool) (CodecSchema, bool) {
+	schema := CodecSchema{Type: typ}
+	base := typ
+	base.Nullable = false
+	switch base.Kind {
+	case types.Bool:
+		schema.Kind = "boolean"
+	case types.Int:
+		schema.Kind = "integer"
+	case types.Float:
+		schema.Kind = "float"
+	case types.String:
+		schema.Kind = "string"
+	case types.Array:
+		if !allowArray || len(base.Args) != 1 || base.Args[0].Nullable || base.Args[0].Kind == types.Array {
+			return schema, false
+		}
+		element, ok := c.parameterValueSchema(base.Args[0], false)
+		if !ok {
+			return schema, false
+		}
+		schema.Kind = "array"
+		schema.Element = &element
+	case types.Named:
+		if kind, module, reference, ok := c.codecTimeScalar(base.Name); ok {
+			schema.Kind = kind
+			schema.Module = module
+			copy := reference
+			schema.Reference = &copy
+			break
+		}
+		raw, module, reference, ok := c.codecRawEnum(base.Name)
+		if !ok {
+			return schema, false
+		}
+		schema.Kind = "raw_enum"
+		schema.Module = module
+		schema.RawType = raw.Type
+		if reference != nil {
+			copy := *reference
+			schema.Reference = &copy
+		}
+		names := make([]string, 0, len(raw.Values))
+		for name := range raw.Values {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			schema.RawValues = append(schema.RawValues, CodecRawValue{Member: name, Raw: raw.Values[name].Raw})
+		}
+	default:
+		return schema, false
+	}
+	return schema, true
 }
 
 func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[string]bool) (CodecSchema, bool) {

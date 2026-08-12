@@ -231,6 +231,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.jsonEncode(call, arguments[0])
 	case "trb.web.request_json":
 		return g.webRequestJSON(call, arguments[0])
+	case "trb.web.request_query":
+		return g.webParameterBinding(call, arguments[0], "query")
+	case "trb.web.context_params":
+		return g.webParameterBinding(call, arguments[0], "path")
 	case "trb.web.json":
 		return g.webJSON(call, arguments)
 	case "trb.web.configure_server":
@@ -861,6 +865,149 @@ func (g *generator) webRequestJSON(call *ir.Call, request string) string {
 	invalidUTF8 := webAlias + "." + goConstantIdentifier("RequestError", "InvalidUtf8")
 	invalidJSON := webAlias + ".New" + goIdentifier("RequestError", true) + goIdentifier("InvalidJson", true) + "(decoded.ErrError)"
 	return "func() " + resultType + " { requestValue := " + request + "; contentTypes := []string{}; for _, header := range requestValue.TrbFieldHeaders.Entries() { if strings.EqualFold(header.Name, \"content-type\") { contentTypes = append(contentTypes, header.Value) } }; if len(contentTypes) == 0 { return " + errResult(missing) + " }; if len(contentTypes) != 1 { return " + errResult(duplicate) + " }; mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentTypes[0], \";\", 2)[0])); if mediaType != \"application/json\" && !(strings.HasPrefix(mediaType, \"application/\") && strings.HasSuffix(mediaType, \"+json\")) { return " + errResult(unsupported) + " }; if !utf8.Valid(requestValue.TrbFieldBody.Bytes()) { return " + errResult(invalidUTF8) + " }; decoded := " + decoded + "; if decoded.Kind == " + resultAlias + ".ResultErrTag { return " + errResult(invalidJSON) + " }; return " + okResult + "(decoded.OkValue) }()"
+}
+
+func (g *generator) webParameterBinding(call *ir.Call, receiver, source string) string {
+	if call.Codec == nil || call.Codec.Kind != "record" || len(call.ExprType().Args) != 2 {
+		return "nil"
+	}
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	webAlias := "web"
+	if reference := expressionReference(call.Callee); reference != nil {
+		if alias := g.referenceAlias(reference); alias != "" {
+			webAlias = alias
+		}
+	}
+	valueType := g.goCodecType(call.Codec)
+	errorType := webAlias + ".ParameterError"
+	resultType := resultAlias + ".Result[" + valueType + ", " + errorType + "]"
+	okResult := resultAlias + ".NewResultOk[" + valueType + ", " + errorType + "]"
+	errResult := func(value string) string {
+		return resultAlias + ".NewResultErr[" + valueType + ", " + errorType + "](" + value + ")"
+	}
+	sourceName := "Path"
+	if source == "query" {
+		sourceName = "Query"
+	}
+	sourceValue := webAlias + "." + goConstantIdentifier("ParameterSource", sourceName)
+	missing := func(name string) string {
+		return errResult(webAlias + ".NewParameterErrorMissing(" + sourceValue + ", " + strconv.Quote(name) + ")")
+	}
+	duplicate := func(name string) string {
+		return errResult(webAlias + ".NewParameterErrorDuplicate(" + sourceValue + ", " + strconv.Quote(name) + ")")
+	}
+	invalid := func(name, value, expected string) string {
+		return errResult(webAlias + ".NewParameterErrorInvalid(" + sourceValue + ", " + strconv.Quote(name) + ", " + value + ", " + strconv.Quote(expected) + ")")
+	}
+
+	var body strings.Builder
+	body.WriteString("parameterValues := map[string][]string{}; ")
+	if source == "query" {
+		body.WriteString("queryResult := parameterReceiver.QueryParameters(); if queryResult.Kind == " + resultAlias + ".ResultErrTag { return " + errResult(webAlias+".NewParameterErrorMalformedQuery(queryResult.ErrError)") + " }; for _, parameter := range queryResult.OkValue { parameterValues[parameter.Name] = append(parameterValues[parameter.Name], parameter.Value) }; ")
+	} else {
+		for _, field := range call.Codec.Fields {
+			body.WriteString("parameterValues[" + strconv.Quote(field.Name) + "] = []string{parameterReceiver.PathValue(" + strconv.Quote(field.Name) + ")}; ")
+		}
+	}
+	constructor := make([]string, 0, len(call.Codec.Fields))
+	for index, field := range call.Codec.Fields {
+		variable := "field" + strconv.Itoa(index)
+		values := "values" + strconv.Itoa(index)
+		fieldType := g.goCodecType(field.Schema)
+		body.WriteString(values + " := parameterValues[" + strconv.Quote(field.Name) + "]; var " + variable + " " + fieldType + "; ")
+		if field.Schema.Kind == "array" {
+			if field.Schema.Type.Nullable {
+				body.WriteString("if len(" + values + ") > 0 { parsedValues := make(" + fieldType[1:] + ", len(" + values + ")); ")
+			} else {
+				body.WriteString("parsedValues := make(" + fieldType + ", len(" + values + ")); ")
+			}
+			parser := g.goWebParameterParser(field.Schema.Element)
+			body.WriteString("for valueIndex, rawValue := range " + values + " { parsedValue, valid := " + parser + "(rawValue); if !valid { return " + invalid(field.Name, "rawValue", parameterExpected(field.Schema.Element)) + " }; parsedValues[valueIndex] = parsedValue }; ")
+			if field.Schema.Type.Nullable {
+				body.WriteString(variable + " = &parsedValues }; ")
+			} else {
+				body.WriteString(variable + " = parsedValues; ")
+			}
+		} else {
+			body.WriteString("if len(" + values + ") == 0 { ")
+			if field.Schema.Type.Nullable {
+				body.WriteString(variable + " = nil")
+			} else {
+				body.WriteString("return " + missing(field.Name))
+			}
+			body.WriteString(" } else if len(" + values + ") > 1 { return " + duplicate(field.Name) + " } else { rawValue := " + values + "[0]; ")
+			nonnull := *field.Schema
+			nonnull.Type.Nullable = false
+			parser := g.goWebParameterParser(&nonnull)
+			body.WriteString("parsedValue, valid := " + parser + "(rawValue); if !valid { return " + invalid(field.Name, "rawValue", parameterExpected(&nonnull)) + " }; ")
+			if field.Schema.Type.Nullable && !isTimeCodec(field.Schema.Kind) {
+				body.WriteString(variable + " = &parsedValue")
+			} else {
+				body.WriteString(variable + " = parsedValue")
+			}
+			body.WriteString(" }; ")
+		}
+		constructor = append(constructor, goIdentifier(field.Name, true)+": "+variable)
+	}
+	body.WriteString("return " + okResult + "(" + valueType + "{" + strings.Join(constructor, ", ") + "})")
+	return "func() " + resultType + " { parameterReceiver := " + receiver + "; " + body.String() + " }()"
+}
+
+func parameterExpected(schema *ir.CodecSchema) string {
+	if schema == nil {
+		return "value"
+	}
+	typ := schema.Type
+	typ.Nullable = false
+	return typ.String()
+}
+
+func (g *generator) goWebParameterParser(schema *ir.CodecSchema) string {
+	valueType := g.goCodecType(schema)
+	body := "return value, true"
+	switch schema.Kind {
+	case "string":
+		body = "return value, true"
+	case "boolean":
+		body = "if value == \"true\" { return true, true }; if value == \"false\" { return false, true }; return false, false"
+	case "integer":
+		g.requireImport("regexp", "")
+		g.requireImport("strconv", "")
+		body = "valid, _ := regexp.MatchString(`^[+-]?[0-9]+$`, value); if !valid { return 0, false }; parsed, err := strconv.ParseInt(value, 10, 64); if err != nil || parsed < -9007199254740991 || parsed > 9007199254740991 { return 0, false }; return int(parsed), true"
+	case "float":
+		g.requireImport("math", "")
+		g.requireImport("regexp", "")
+		g.requireImport("strconv", "")
+		body = "valid, _ := regexp.MatchString(`^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`, value); if !valid { return 0, false }; parsed, err := strconv.ParseFloat(value, 64); if math.IsInf(parsed, 0) || (err != nil && parsed != 0) { return 0, false }; return parsed, true"
+	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
+		method := goTimeCodecOwner(schema, g) + timeCodecParseMethod(schema.Kind)
+		body = "parsed := " + method + "(value); if parsed.Kind != 0 { var zero " + valueType + "; return zero, false }; return parsed.OkValue, true"
+	case "raw_enum":
+		prefix := ""
+		if schema.Reference != nil && schema.Reference.Package != "" && schema.Reference.Package != g.modulePath {
+			alias := schema.Reference.Alias
+			if alias == "" {
+				alias = pathpkg.Base(pathpkg.Dir(schema.Reference.Package))
+			}
+			prefix = goImportAlias(alias) + "."
+		}
+		branches := make([]string, 0, len(schema.RawValues))
+		for _, item := range schema.RawValues {
+			comparison := strconv.Quote(item.Raw)
+			if schema.RawType.Kind == types.String {
+				raw, err := strconv.Unquote(item.Raw)
+				if err == nil {
+					comparison = strconv.Quote(raw)
+				}
+			}
+			branches = append(branches, "case "+comparison+": return "+prefix+goConstantIdentifier(schema.Type.Name, item.Member)+", true")
+		}
+		body = "switch value { " + strings.Join(branches, "; ") + " }; var zero " + valueType + "; return zero, false"
+	}
+	return "func(value string) (" + valueType + ", bool) { " + body + " }"
 }
 
 func (g *generator) webJSON(call *ir.Call, arguments []string) string {
