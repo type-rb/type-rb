@@ -13,21 +13,22 @@ import (
 )
 
 type generator struct {
-	b             strings.Builder
-	indent        int
-	inClass       int
-	functionDepth int
-	methods       map[string]bool
-	modulePath    string
-	topFunctions  map[string]bool
-	topTargets    map[string]string
-	records       map[string]bool
-	typeAliases   map[string]string
-	temporary     int
-	suspension    *SuspensionPlan
-	orm           *ormintegration.Manifest
-	breakTarget   string
-	enumReceiver  string
+	b                strings.Builder
+	indent           int
+	inClass          int
+	functionDepth    int
+	methods          map[string]bool
+	modulePath       string
+	moduleExtensions map[string]string
+	topFunctions     map[string]bool
+	topTargets       map[string]string
+	records          map[string]bool
+	typeAliases      map[string]string
+	temporary        int
+	suspension       *SuspensionPlan
+	orm              *ormintegration.Manifest
+	breakTarget      string
+	enumReceiver     string
 }
 
 func Generate(program *ir.Program) string {
@@ -57,15 +58,22 @@ func GenerateProject(programs []*ir.Program) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	moduleExtensions := map[string]string{}
+	for _, program := range programs {
+		moduleExtensions[program.ModulePath] = ".ts"
+		if program.UsesJSX {
+			moduleExtensions[program.ModulePath] = ".tsx"
+		}
+	}
 	generated := make([]string, len(programs))
 	for index, program := range programs {
-		generated[index] = generate(program, plan)
+		generated[index] = generate(program, plan, moduleExtensions)
 	}
 	return generated, nil
 }
 
-func generate(program *ir.Program, suspension *SuspensionPlan) string {
-	g := &generator{modulePath: program.ModulePath, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, suspension: suspension, orm: ormintegration.ManifestFrom(program.Extensions)}
+func generate(program *ir.Program, suspension *SuspensionPlan, moduleExtensions map[string]string) string {
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, suspension: suspension, orm: ormintegration.ManifestFrom(program.Extensions)}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -118,14 +126,17 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(comment(n.Text))
 	case *ir.Import:
-		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) {
-			if n.Path == "trb/platform/typescript/react" {
-				g.line(`import React from "react";`)
+		if n.Path == "trb/platform/typescript/react" || n.Path == "trb/platform/typescript/react/index" {
+			g.line(`import * as React from "react";`)
+			if containsString(n.Symbols, "mount") {
 				g.line(`import { createRoot } from "react-dom/client";`)
 			}
 			return
 		}
-		importPath := tsImportPath(g.modulePath, n.Path)
+		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) {
+			return
+		}
+		importPath := tsImportPath(g.modulePath, n.Path, g.moduleExtensions[n.Path])
 		browserRuntime := n.Path == "trb/platform/typescript/browser/index" && n.RuntimeRequired
 		if browserRuntime {
 			browserAlias := "__trb_browser"
@@ -190,11 +201,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		header := "export class " + n.Name + tsTypeParameterDeclarations(n.TypeParameters)
 		if n.Superclass != nil {
-			if identifier, ok := n.Superclass.(*ir.Identifier); ok && identifier.Name == "ReactComponent" {
-				header += " extends React.Component<Record<string, never>>"
-			} else {
-				header += " extends " + g.expr(n.Superclass)
-			}
+			header += " extends " + g.expr(n.Superclass)
 		}
 		if len(n.Implements) > 0 {
 			header += " implements " + strings.Join(n.Implements, ", ")
@@ -444,6 +451,15 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.StructuredBlock:
 		g.structuredBlock(n)
 	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *generator) typeUnionCase(node *ir.Case) {
@@ -860,6 +876,8 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[i] = "[" + g.expr(entry.Key) + "]: " + g.expr(entry.Value)
 		}
 		return "{" + strings.Join(parts, ", ") + "}"
+	case *ir.JSXElement:
+		return g.jsxElement(n)
 	case *ir.Unary:
 		op := n.Operator
 		if op == "not" || op == "!" {
@@ -1342,8 +1360,10 @@ func (g *generator) tsJSONDecode(call *ir.Call, argument string) string {
 	decoder := builder.decoder(call.Codec)
 	resultType := tsType(call.ExprType())
 	valueType := tsCodecType(call.Codec)
-	errorType := jsonAlias + ".JsonError"
-	return "((): " + resultType + " => { const codecError = (path: string, message: string): " + errorType + " => ({ kind: " + jsonAlias + ".JsonErrorKind.Decode, message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + jsonAlias + ".parse(" + argument + "); if (parsed.kind === \"Err\") { return Result.Err<" + valueType + ", " + errorType + ">(parsed.error); } try { return Result.Ok<" + valueType + ", " + errorType + ">(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return Result.Err<" + valueType + ", " + errorType + ">((error as any).error as " + errorType + "); } throw error; } })()"
+	errorType := tsJSONQualified(jsonAlias, "JsonError")
+	jsonErrorKind := tsJSONQualified(jsonAlias, "JsonErrorKind.Decode")
+	parse := tsJSONQualified(jsonAlias, "parse")
+	return "((): " + resultType + " => { const codecError = (path: string, message: string): " + errorType + " => ({ kind: " + jsonErrorKind + ", message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parse + "(" + argument + "); if (parsed.kind === \"Err\") { return Result.Err<" + valueType + ", " + errorType + ">(parsed.error); } try { return Result.Ok<" + valueType + ", " + errorType + ">(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return Result.Err<" + valueType + ", " + errorType + ">((error as any).error as " + errorType + "); } throw error; } })()"
 }
 
 func (g *generator) tsJSONEncode(call *ir.Call, argument string) string {
@@ -1353,11 +1373,14 @@ func (g *generator) tsJSONEncode(call *ir.Call, argument string) string {
 	jsonAlias := tsJSONRuntimeAlias(call)
 	builder := &tsJSONCodecBuilder{jsonAlias: jsonAlias}
 	encoder := builder.encoder(call.Codec)
-	return "((): " + tsType(call.ExprType()) + " => { " + builder.source.String() + " return " + jsonAlias + ".stringify(" + encoder + "(" + argument + ")); })()"
+	return "((): " + tsType(call.ExprType()) + " => { " + builder.source.String() + " return " + tsJSONQualified(jsonAlias, "stringify") + "(" + encoder + "(" + argument + ")); })()"
 }
 
 func tsJSONRuntimeAlias(call *ir.Call) string {
 	reference := expressionReference(call.Callee)
+	if reference != nil && reference.Alias == "$named" {
+		return ""
+	}
 	if reference != nil && reference.Alias != "" {
 		return reference.Alias
 	}
@@ -1546,7 +1569,50 @@ func (g *generator) importedJSONCall(call *ir.Call, packagePath string, argument
 	return name + "(" + strings.Join(arguments, ", ") + ")", true
 }
 
-func tsImportPath(modulePath, imported string) string {
+func (g *generator) jsxElement(element *ir.JSXElement) string {
+	name := element.Name
+	if element.Fragment {
+		name = ""
+	} else if element.Component != nil {
+		name = g.expr(element.Component)
+	}
+	var result strings.Builder
+	result.WriteByte('<')
+	result.WriteString(name)
+	for _, attribute := range element.Attributes {
+		result.WriteByte(' ')
+		result.WriteString(attribute.Name)
+		if attribute.Boolean {
+			continue
+		}
+		result.WriteString("={")
+		result.WriteString(g.expr(attribute.Value))
+		result.WriteByte('}')
+	}
+	if len(element.Children) == 0 && !element.Fragment {
+		result.WriteString(" />")
+		return result.String()
+	}
+	result.WriteByte('>')
+	for _, child := range element.Children {
+		switch node := child.(type) {
+		case *ir.JSXElement:
+			result.WriteString(g.jsxElement(node))
+		case *ir.JSXText:
+			result.WriteString(node.Text)
+		case *ir.JSXExpression:
+			result.WriteByte('{')
+			result.WriteString(g.expr(node.Value))
+			result.WriteByte('}')
+		}
+	}
+	result.WriteString("</")
+	result.WriteString(name)
+	result.WriteByte('>')
+	return result.String()
+}
+
+func tsImportPath(modulePath, imported string, extensions ...string) string {
 	currentDirectory := pathpkg.Dir(modulePath)
 	if currentDirectory == "." || currentDirectory == "" {
 		currentDirectory = "."
@@ -1558,7 +1624,14 @@ func tsImportPath(modulePath, imported string) string {
 	if !strings.HasPrefix(relative, ".") {
 		relative = "./" + relative
 	}
-	return relative + ".ts"
+	extension := ""
+	if len(extensions) > 0 {
+		extension = extensions[0]
+	}
+	if extension == "" {
+		extension = ".ts"
+	}
+	return relative + extension
 }
 
 func filepathRel(base, target string) (string, error) {
@@ -1684,10 +1757,6 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 		switch t.Name {
 		case "ReactNode":
 			result = "React.ReactNode"
-		case "ReactEvent":
-			result = "React.SyntheticEvent"
-		case "ReactComponent":
-			result = "React.Component<Record<string, never>>"
 		case "Callback":
 			argument := "unknown"
 			if len(t.Args) > 0 {

@@ -19,6 +19,7 @@ type lowerer struct {
 	checked          checker.Result
 	temporary        int
 	effectBoundaries []effectBoundary
+	usesJSX          bool
 }
 
 type effectBoundary struct {
@@ -38,6 +39,7 @@ func Program(checked checker.Result) *ir.Program {
 		GoModule:          checked.Program.GoModule,
 		RubyLoader:        checked.Program.RubyLoader,
 		TypeScriptRuntime: checked.Program.TypeScriptRuntime,
+		UsesJSX:           l.usesJSX,
 		Statements:        statements,
 	}
 }
@@ -533,6 +535,23 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		result := &ir.Hash{ExprBase: base}
 		for _, entry := range n.Entries {
 			result.Entries = append(result.Entries, ir.HashEntry{Key: l.expression(entry.Key), Value: l.expression(entry.Value)})
+		}
+		return result
+	case *ast.JSXElement:
+		l.usesJSX = true
+		result := &ir.JSXElement{ExprBase: base, Name: n.Name, Component: l.expression(n.Component), Fragment: n.Fragment}
+		for _, attribute := range n.Attributes {
+			result.Attributes = append(result.Attributes, ir.JSXAttribute{Name: attribute.Name, Value: l.expression(attribute.Value), Boolean: attribute.Boolean})
+		}
+		for _, child := range n.Children {
+			switch item := child.(type) {
+			case *ast.JSXElement:
+				result.Children = append(result.Children, l.expression(item).(*ir.JSXElement))
+			case *ast.JSXText:
+				result.Children = append(result.Children, &ir.JSXText{Text: item.Text})
+			case *ast.JSXExpression:
+				result.Children = append(result.Children, &ir.JSXExpression{Value: l.expression(item.Value)})
+			}
 		}
 		return result
 	case *ast.UnaryExpression:

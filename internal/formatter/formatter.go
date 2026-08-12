@@ -26,6 +26,21 @@ func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 	for lineIndex := 0; lineIndex < len(lines); lineIndex++ {
 		line := lines[lineIndex]
 		code := withoutNewline(line)
+		coveredLine := lineIndex
+		coveredOffset := -1
+		for _, item := range code {
+			if endLine := item.Span.End.Line - 1; endLine > coveredLine || endLine == coveredLine && item.Span.End.Offset > coveredOffset {
+				coveredLine = endLine
+				coveredOffset = item.Span.End.Offset
+			}
+		}
+		if coveredLine > lineIndex && coveredLine < len(lines) {
+			for _, item := range withoutNewline(lines[coveredLine]) {
+				if item.Span.Start.Offset >= coveredOffset {
+					code = append(code, item)
+				}
+			}
+		}
 		statements := splitStatements(code, continuation)
 		if len(statements) == 0 {
 			if !blank && out.Len() > 0 {
@@ -38,10 +53,8 @@ func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 		for _, statement := range statements {
 			writeStatement(&out, statement, &indent, &continuation)
 		}
-		for _, item := range code {
-			if covered := item.Span.End.Line - 1; covered > lineIndex {
-				lineIndex = covered
-			}
+		if coveredLine > lineIndex {
+			lineIndex = coveredLine
 		}
 	}
 	return []byte(strings.TrimRight(out.String(), "\n") + "\n"), nil

@@ -26,6 +26,12 @@ TypeScript projects select a browser, Bun, or Node runtime independently from
 their npm or Bun package manager. Node remains the compatibility default, while
 Bun can be selected explicitly for server packages.
 
+The experimental TypeScript browser path accepts structured JSX in TypeRB
+source and emits ordinary TSX for React tooling. Function components use typed
+record props, JSX component calls are checked across project modules, and only
+modules containing JSX use the `.tsx` extension. The explicit
+`trb/platform/typescript/react` package supplies the React boundary.
+
 The implemented language includes functions, typed first-class function values
 with lexical capture, and classes, modules and
 interfaces, records, ordinary and raw-value enums, payload enums as sum types,

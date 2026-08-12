@@ -1,0 +1,15 @@
+{
+  "name": "trb/platform/typescript/react",
+  "version": "0.1.0",
+  "module": "trb/platform/typescript/react/index",
+  "source": "src/index.trb",
+  "kind": "platform",
+  "targets": ["typescript"],
+  "semanticProvider": "trb.typescript.react",
+  "nativeDependencies": {
+    "typescript": {
+      "react": "latest",
+      "react-dom": "latest"
+    }
+  }
+}

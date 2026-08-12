@@ -98,6 +98,25 @@ mode by itself does not enable them.
   TypeScript function value with a non-Void result is rejected until the
   portable effect model can express that higher-order contract safely.
 
+#### JSX expressions
+
+- JSX is structured shared grammar represented in the syntax AST and typed IR.
+  Its element types and runtime meaning come from an explicitly imported JSX
+  provider; JSX without a provider is rejected.
+- The initial provider is `trb/platform/typescript/react`. It is a TypeScript
+  platform package and emits ordinary TSX for the React toolchain. This target
+  boundary does not make the grammar itself React- or TypeScript-specific.
+- Within JSX only, a lowercase name is an intrinsic element and an uppercase
+  name is a component reference. This rule does not change ordinary TypeRB
+  function or constant naming.
+- JSX attribute names retain their source spelling. The compiler does not
+  translate names such as `className` or `onClick` to or from snake case.
+- A TypeRB component returns the provider's node type. It accepts either no
+  parameters or one record parameter; that record defines its checked props.
+  Unknown, missing, duplicate, and incompatible component props are errors.
+- Text, numbers, Booleans, nullable values, provider nodes, and recursively
+  renderable arrays and unions may be JSX children. Other values are rejected.
+
 ### 3.2 Typing
 
 - Parameter/type annotation form is `name: Type`.

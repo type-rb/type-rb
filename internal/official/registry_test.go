@@ -1,6 +1,7 @@
 package official
 
 import (
+	"encoding/json"
 	"testing"
 	"testing/fstest"
 )
@@ -50,6 +51,26 @@ func TestManifestRejectsInvalidPackageBoundary(t *testing.T) {
 				t.Fatal("expected invalid package boundary to be rejected")
 			}
 		})
+	}
+}
+
+func TestBundledReactPackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/platform/typescript/react")
+	if !ok {
+		t.Fatal("React package is not registered")
+	}
+	if packageDefinition.Definition.Kind != "platform" || !packageDefinition.Definition.Supports("typescript") || packageDefinition.Definition.Supports("go") {
+		t.Fatalf("unexpected React package targets: %#v", packageDefinition.Definition)
+	}
+	dependencies, err := packageDefinition.NativeDependenciesFor("typescript", json.RawMessage(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dependencies["react"] != "latest" || dependencies["react-dom"] != "latest" {
+		t.Fatalf("unexpected React dependencies: %#v", dependencies)
+	}
+	if packageDefinition.Definition.Symbols["mount"].Intrinsic != "trb.platform.typescript.react.mount" {
+		t.Fatalf("React semantic provider was not loaded: %#v", packageDefinition.Definition.Symbols)
 	}
 }
 

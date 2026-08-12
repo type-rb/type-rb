@@ -430,6 +430,47 @@ type HashLiteral struct {
 
 func (*HashLiteral) expressionNode() {}
 
+// JSXElement is a provider-backed expression parsed into the shared AST.
+// Intrinsic elements keep Name only; component elements additionally retain a
+// normal TypeRB expression so imports and function references remain typed.
+type JSXElement struct {
+	Base
+	Name       string
+	Component  Expression
+	Attributes []JSXAttribute
+	Children   []JSXChild
+	Fragment   bool
+}
+
+func (*JSXElement) expressionNode() {}
+func (*JSXElement) jsxChildNode()   {}
+
+type JSXAttribute struct {
+	Base
+	Name    string
+	Value   Expression
+	Boolean bool
+}
+
+type JSXChild interface {
+	Node
+	jsxChildNode()
+}
+
+type JSXText struct {
+	Base
+	Text string
+}
+
+func (*JSXText) jsxChildNode() {}
+
+type JSXExpression struct {
+	Base
+	Value Expression
+}
+
+func (*JSXExpression) jsxChildNode() {}
+
 type UnaryExpression struct {
 	Base
 	Operator string
