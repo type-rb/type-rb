@@ -1127,7 +1127,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[i] = g.expr(argument.Value)
 		}
 		args := strings.Join(parts, ", ")
-		if application, ok := n.Callee.(*ir.TypeApply); ok && application.Kind == "method" {
+		if application, ok := n.Callee.(*ir.TypeApply); ok && application.Kind == "method" && referenceIntrinsic(n.Callee) == "" {
 			if member, method := application.Receiver.(*ir.Member); method {
 				name := goIdentifier(application.Owner, true) + goMethodName(member.Name)
 				if alias := g.referenceAlias(member.Reference); alias != "" {
@@ -1147,7 +1147,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
 			if reference.ReceiverMethod {
-				if member, ok := n.Callee.(*ir.Member); ok {
+				if member, ok := receiverMember(n.Callee); ok {
 					parts = append([]string{g.expr(member.Receiver)}, parts...)
 				}
 			}
@@ -2088,6 +2088,25 @@ func expressionReference(expression ir.Expression) *ir.Reference {
 	default:
 		return nil
 	}
+}
+
+func receiverMember(expression ir.Expression) (*ir.Member, bool) {
+	switch node := expression.(type) {
+	case *ir.Member:
+		return node, true
+	case *ir.TypeApply:
+		return receiverMember(node.Receiver)
+	default:
+		return nil, false
+	}
+}
+
+func referenceIntrinsic(expression ir.Expression) string {
+	reference := expressionReference(expression)
+	if reference == nil {
+		return ""
+	}
+	return reference.Intrinsic
 }
 
 func (g *generator) referenceAlias(reference *ir.Reference) string {

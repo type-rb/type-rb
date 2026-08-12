@@ -20,6 +20,7 @@ func (g *generator) integrationImports(extensions []ir.Extension) {
 	}
 	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
 		g.ensureHTTPRuntime()
+		g.ensureWebRuntime()
 		g.line(`import { createServer } from "node:http";`)
 		g.line(`import type { Socket } from "node:net";`)
 		g.webRouteImports(manifest)
@@ -59,10 +60,13 @@ func (g *generator) webRouteImports(manifest *webintegration.Manifest) {
 func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	routes := manifest.Routes
 	rootMiddlewares := webintegration.RootMiddlewares(manifest.Middlewares)
-	g.line("type TrbWebRequest = { method: string; path: string; query_string: string; headers: __trb_http.Headers; body: __trb_http.Body };")
-	g.line("type TrbWebContext = { request: TrbWebRequest; path_parameters: Record<string, string> };")
-	g.line("type TrbWebResponse = { status: number; headers: __trb_http.Headers; body: __trb_http.Body };")
+	g.line("type TrbWebRequest = __trb_web.Request;")
+	g.line("type TrbWebContext = __trb_web.Context;")
+	g.line("type TrbWebResponse = __trb_web.Response;")
 	g.line("type TrbWebServerConfig = { host: string; port: number; body_limit_bytes: number; shutdown_timeout_milliseconds: number };")
+	g.line("function trb_web_request(method: string, path: string, query_string: string, headers: __trb_http.Headers, body: __trb_http.Body): TrbWebRequest { return new __trb_web.Request(new __trb_http.HttpMethod(method), path, query_string, headers, body); }")
+	g.line("function trb_web_context(request: TrbWebRequest, path_parameters: Record<string, string>): TrbWebContext { return new __trb_web.Context(request, path_parameters); }")
+	g.line("function trb_web_response(status: number, headers: __trb_http.Headers, body: __trb_http.Body): TrbWebResponse { return new __trb_web.Response(status, headers, body); }")
 	g.webProtocolResponses()
 	if len(manifest.Middlewares) > 0 {
 		g.webNext()
@@ -77,11 +81,11 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("try {")
 	g.indent++
 	g.line("request = trb_web_normalize_request(request);")
-	g.line("const normalized_path = trb_web_normalize_path(request.path);")
+	g.line("const normalized_path = trb_web_normalize_path(request.__trb_path);")
 	g.line("if (normalized_path === undefined) return await trb_web_dispatch_protocol_response(request, trb_web_bad_request());")
-	g.line("request = { ...request, path: normalized_path };")
-	g.line("const context: TrbWebContext = { request, path_parameters: {} };")
-	g.line("let handler = async (middleware_context: TrbWebContext): Promise<TrbWebResponse> => await trb_web_dispatch_core(middleware_context.request, max_body_bytes);")
+	g.line("request = trb_web_request(request.__trb_method.to_s(), normalized_path, request.__trb_query_string, request.__trb_headers, request.__trb_body);")
+	g.line("const context = trb_web_context(request, {});")
+	g.line("let handler = async (middleware_context: TrbWebContext): Promise<TrbWebResponse> => await trb_web_dispatch_core(middleware_context.__trb_request, max_body_bytes);")
 	g.typescriptWebMiddlewareChain(rootMiddlewares, "handler", "root_next_handler_")
 	g.line("return trb_web_finalize_response(request, await handler(context));")
 	g.indent--
@@ -97,9 +101,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("try {")
 	g.indent++
 	g.line("request = trb_web_normalize_request(request);")
-	g.line("const normalized_path = trb_web_normalize_path(request.path);")
-	g.line("if (normalized_path !== undefined) request = { ...request, path: normalized_path };")
-	g.line("const context: TrbWebContext = { request, path_parameters: {} };")
+	g.line("const normalized_path = trb_web_normalize_path(request.__trb_path);")
+	g.line("if (normalized_path !== undefined) request = trb_web_request(request.__trb_method.to_s(), normalized_path, request.__trb_query_string, request.__trb_headers, request.__trb_body);")
+	g.line("const context = trb_web_context(request, {});")
 	g.line("let handler = async (_middleware_context: TrbWebContext): Promise<TrbWebResponse> => protocol_response;")
 	g.typescriptWebMiddlewareChain(rootMiddlewares, "handler", "protocol_next_handler_")
 	g.line("return trb_web_finalize_response(request, await handler(context));")
@@ -115,9 +119,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("try {")
 	g.indent++
-	g.line("if (request.body.bytes().byteLength > max_body_bytes) return trb_web_payload_too_large();")
-	g.line("const method = request.method.toUpperCase();")
-	g.line(`const segments = request.path === "/" ? [] : request.path.slice(1).split("/");`)
+	g.line("if (request.__trb_body.bytes().byteLength > max_body_bytes) return trb_web_payload_too_large();")
+	g.line("const method = request.__trb_method.to_s().toUpperCase();")
+	g.line(`const segments = request.__trb_path === "/" ? [] : request.__trb_path.slice(1).split("/");`)
 	g.line("let allowed_methods: string[] = [];")
 	g.line("let explicit_head = false;")
 	for _, route := range routes {
@@ -150,7 +154,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		}
 		contextName := "route_context_" + strconv.Itoa(routeIndex)
 		handlerName := "route_handler_" + strconv.Itoa(routeIndex)
-		g.line("const " + contextName + ": TrbWebContext = { request, path_parameters };")
+		g.line("const " + contextName + " = trb_web_context(request, path_parameters);")
 		g.line("let " + handlerName + " = async (middleware_context: TrbWebContext): Promise<TrbWebResponse> => await " + route.TargetHandler + "(middleware_context);")
 		g.typescriptWebMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "next_handler_"+strconv.Itoa(routeIndex)+"_")
 		g.line("return trb_web_checked_response(await " + handlerName + "(" + contextName + "));")
@@ -172,8 +176,8 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		}
 		contextName := "options_context_" + strconv.Itoa(routeIndex)
 		handlerName := "options_handler_" + strconv.Itoa(routeIndex)
-		g.line("const " + contextName + ": TrbWebContext = { request, path_parameters };")
-		g.line("let " + handlerName + ` = async (_middleware_context: TrbWebContext): Promise<TrbWebResponse> => ({ status: 204, headers: new __trb_http.Headers([{ name: "allow", value: allowed_methods.join(", ") }]), body: new __trb_http.Body(new Uint8Array()) });`)
+		g.line("const " + contextName + " = trb_web_context(request, path_parameters);")
+		g.line("let " + handlerName + ` = async (_middleware_context: TrbWebContext): Promise<TrbWebResponse> => trb_web_response(204, new __trb_http.Headers([{ name: "allow", value: allowed_methods.join(", ") }]), __trb_http.Body.empty());`)
 		g.typescriptWebMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "options_next_handler_"+strconv.Itoa(routeIndex)+"_")
 		g.line("return trb_web_checked_response(await " + handlerName + "(" + contextName + "));")
 		g.indent--
@@ -181,10 +185,10 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	g.line("if (allowed_methods.length > 0) {")
 	g.indent++
-	g.line(`return { status: 405, headers: new __trb_http.Headers([{ name: "allow", value: allowed_methods.join(", ") }, { name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"method_not_allowed\"}")) };`)
+	g.line(`return trb_web_response(405, new __trb_http.Headers([{ name: "allow", value: allowed_methods.join(", ") }, { name: "content-type", value: "application/json; charset=utf-8" }]), new __trb_http.Body(new TextEncoder().encode("{\"error\":\"method_not_allowed\"}")));`)
 	g.indent--
 	g.line("}")
-	g.line(`return { status: 404, headers: new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"not_found\"}")) };`)
+	g.line(`return trb_web_response(404, new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), new __trb_http.Body(new TextEncoder().encode("{\"error\":\"not_found\"}")));`)
 	g.indent--
 	g.line("} catch {")
 	g.indent++
@@ -201,8 +205,8 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("function trb_web_finalize_response(request: TrbWebRequest, response: TrbWebResponse): TrbWebResponse {")
 	g.indent++
 	g.line("if (!trb_web_valid_response(response)) response = trb_web_internal_server_error();")
-	g.line(`if (request.method.toUpperCase() !== "HEAD") return response;`)
-	g.line("return { ...response, body: new __trb_http.Body(new Uint8Array()) };")
+	g.line(`if (request.__trb_method.to_s().toUpperCase() !== "HEAD") return response;`)
+	g.line("return trb_web_response(response.__trb_status, response.__trb_headers, __trb_http.Body.empty());")
 	g.indent--
 	g.line("}")
 }
@@ -221,12 +225,12 @@ func (g *generator) webProtocolResponses() {
 	g.line("function trb_web_normalize_request(request: TrbWebRequest): TrbWebRequest {")
 	g.indent++
 	g.line("const entries: Array<{ name: string; value: string }> = [];")
-	g.line("for (const entry of request.headers.entries()) {")
+	g.line("for (const entry of request.__trb_headers.entries()) {")
 	g.indent++
 	g.line("entries.push({ name: entry.name.toLowerCase(), value: entry.value });")
 	g.indent--
 	g.line("}")
-	g.line("return { ...request, method: request.method.toUpperCase(), headers: new __trb_http.Headers(entries) };")
+	g.line("return trb_web_request(request.__trb_method.to_s().toUpperCase(), request.__trb_path, request.__trb_query_string, new __trb_http.Headers(entries), request.__trb_body);")
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_normalize_path(path: string): string | undefined {")
@@ -254,23 +258,23 @@ func (g *generator) webProtocolResponses() {
 	g.line("}")
 	g.line("function trb_web_internal_server_error(): TrbWebResponse {")
 	g.indent++
-	g.line(`return { status: 500, headers: new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"internal_server_error\"}")) };`)
+	g.line(`return trb_web_response(500, new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), new __trb_http.Body(new TextEncoder().encode("{\"error\":\"internal_server_error\"}")));`)
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_bad_request(): TrbWebResponse {")
 	g.indent++
-	g.line(`return { status: 400, headers: new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"bad_request\"}")) };`)
+	g.line(`return trb_web_response(400, new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), new __trb_http.Body(new TextEncoder().encode("{\"error\":\"bad_request\"}")));`)
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_payload_too_large(): TrbWebResponse {")
 	g.indent++
-	g.line(`return { status: 413, headers: new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), body: new __trb_http.Body(new TextEncoder().encode("{\"error\":\"payload_too_large\"}")) };`)
+	g.line(`return trb_web_response(413, new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }]), new __trb_http.Body(new TextEncoder().encode("{\"error\":\"payload_too_large\"}")));`)
 	g.indent--
 	g.line("}")
 	g.line("function trb_web_valid_response(response: TrbWebResponse): boolean {")
 	g.indent++
-	g.line("if (!Number.isInteger(response.status) || response.status < 100 || response.status > 999) return false;")
-	g.line(`return response.headers.entries().every((entry) => /^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+$/.test(entry.name) && !entry.value.includes("\r") && !entry.value.includes("\n"));`)
+	g.line("if (!Number.isInteger(response.__trb_status) || response.__trb_status < 100 || response.__trb_status > 999) return false;")
+	g.line(`return response.__trb_headers.entries().every((entry) => /^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+$/.test(entry.name) && !entry.value.includes("\r") && !entry.value.includes("\n"));`)
 	g.indent--
 	g.line("}")
 }
@@ -366,7 +370,7 @@ func (g *generator) webServer() {
 	g.line("let response: TrbWebResponse;")
 	g.line("if (body_too_large) {")
 	g.indent++
-	g.line(`response = await trb_web_dispatch_protocol_response({ method: incoming.method ?? "GET", path, query_string, headers: new __trb_http.Headers(header_entries), body: new __trb_http.Body(new Uint8Array()) }, trb_web_payload_too_large());`)
+	g.line(`response = await trb_web_dispatch_protocol_response(trb_web_request(incoming.method ?? "GET", path, query_string, new __trb_http.Headers(header_entries), __trb_http.Body.empty()), trb_web_payload_too_large());`)
 	g.indent--
 	g.line("} else {")
 	g.indent++
@@ -378,19 +382,19 @@ func (g *generator) webServer() {
 	g.line("offset += chunk.byteLength;")
 	g.indent--
 	g.line("}")
-	g.line(`response = await trb_web_dispatch_with_body_limit({ method: incoming.method ?? "GET", path, query_string, headers: new __trb_http.Headers(header_entries), body: new __trb_http.Body(body) }, config.body_limit_bytes);`)
+	g.line(`response = await trb_web_dispatch_with_body_limit(trb_web_request(incoming.method ?? "GET", path, query_string, new __trb_http.Headers(header_entries), new __trb_http.Body(body)), config.body_limit_bytes);`)
 	g.indent--
 	g.line("}")
 	g.line("const response_headers = new Map<string, string[]>();")
-	g.line("for (const entry of response.headers.entries()) {")
+	g.line("for (const entry of response.__trb_headers.entries()) {")
 	g.indent++
 	g.line("const name = entry.name.toLowerCase();")
 	g.line("response_headers.set(name, [...(response_headers.get(name) ?? []), entry.value]);")
 	g.indent--
 	g.line("}")
 	g.line("for (const [name, values] of response_headers) writer.setHeader(name, values);")
-	g.line("writer.statusCode = response.status;")
-	g.line("writer.end(response.body.bytes());")
+	g.line("writer.statusCode = response.__trb_status;")
+	g.line("writer.end(response.__trb_body.bytes());")
 	g.indent--
 	g.line("});")
 	g.line("const connections = new Set<Socket>();")

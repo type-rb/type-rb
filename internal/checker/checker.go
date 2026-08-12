@@ -1879,6 +1879,21 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.Variadic = binding.Member.Variadic
 			application.ReturnType = binding.Member.Type
 			application.FailureType = binding.Member.Fails
+		} else if declared, found := c.external[node.Receiver]; found && len(declared.TypeParameters) > 0 {
+			declared = c.specializeDeclarationMember(receiver, declared)
+			application.Kind = "method"
+			application.Owner = receiver.Name
+			application.OwnerArguments = append([]types.Type(nil), receiver.Args...)
+			application.TypeParameters = append([]string(nil), declared.TypeParameters...)
+			for _, parameter := range declared.Parameters {
+				application.Parameters = append(application.Parameters, parameter.Type)
+				if !parameter.Optional {
+					application.Required++
+				}
+			}
+			application.Variadic = declared.Variadic
+			application.ReturnType = declared.Return
+			application.FailureType = declared.Fails
 		}
 	}
 	if application.Kind != "" {
@@ -4018,8 +4033,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 			}
 			typ = application.ReturnType
-			if binding, imported := c.result.References[generic.Receiver]; imported && binding.Library != nil && len(application.TypeArguments) == 1 {
-				c.checkCodecApplication(n, binding.Library.Intrinsic, application.TypeArguments[0])
+			if len(application.TypeArguments) == 1 {
+				if binding, imported := c.result.References[generic.Receiver]; imported && binding.Library != nil {
+					c.checkCodecApplication(n, binding.Library.Intrinsic, application.TypeArguments[0])
+				} else if member, provided := c.external[generic.Receiver]; provided {
+					c.checkCodecApplication(n, member.Intrinsic, application.TypeArguments[0])
+				}
 			}
 			c.recordEffect(n, c.callFailureType(n, sc))
 			break

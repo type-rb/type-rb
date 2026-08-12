@@ -1,4 +1,4 @@
-import { Context, Next, Response, header_value, with_header, with_request_header } from trb/web
+import { Context, Next, Response } from trb/web
 import { Middleware } from trb/web/middleware
 import trb/std/encoding/hex
 import { Result } from trb/std/result
@@ -36,17 +36,17 @@ end
 
 def _invoke(context: Context, next_handler: Next, options: RequestIDOptions): Response
 	mut value := _generate()
-	case header_value(context.request, options.header_name)
+	case context.request.header_value(options.header_name)
 	when Result::Ok(candidate)
 		if _valid?(candidate, options.limit_length)
 			value = candidate
 		end
 	when Result::Err(_error)
 	end
-	request := with_request_header(context.request, options.header_name, value)
-	next_context := Context.new(request: request, path_parameters: context.path_parameters)
+	request := context.request.with_header(options.header_name, value)
+	next_context := context.with_request(request)
 	response := next_handler.call(next_context)
-	return with_header(response, options.header_name, value)
+	return response.with_header(options.header_name, value)
 end
 
 def _generate(): String

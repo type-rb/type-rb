@@ -4622,19 +4622,10 @@ func TestRunOfficialWebRequestHeadersAndCookiesAcrossAvailableBackends(t *testin
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Header, Headers, HeaderValueError } from trb/http
+		mainSource := `import { Body, Header, Headers, HeaderValueError, HttpMethod } from trb/http
 import {
 	CookieValueError,
 	Request,
-	add_request_header,
-	cookie,
-	cookie_value,
-	cookie_values,
-	cookies,
-	header_value,
-	header_values,
-	with_request_header,
-	without_request_header,
 } from trb/web
 import { Result } from trb/std/result
 
@@ -4668,7 +4659,7 @@ end
 
 def main()
 	request := Request.new(
-		method: "GET",
+		method: HttpMethod.get(),
 		path: "/",
 		query_string: "",
 		headers: Headers.new([
@@ -4676,31 +4667,38 @@ def main()
 			Header.new(name: "Cookie", value: "tag=first; broken; =empty; tag=second; token=a=b"),
 			Header.new(name: "X-Request-ID", value: "req-1"),
 		]),
-		body: Body.empty(),
+		body: Body.new("body".to_bytes()),
 	)
-	replaced := with_request_header(request, "cookie", "fresh=one")
-	added := add_request_header(replaced, "COOKIE", "fresh=two")
-	removed := without_request_header(added, "x-request-id")
-	puts(header_values(request, "cookie").size())
-	puts(header_values(added, "cookie").size())
-	puts(header_values(added, "cookie")[0])
-	puts(header_values(added, "cookie")[1])
-	puts(header_values(removed, "x-request-id").size())
-	puts(header_values(request, "COOKIE").size())
-	puts(render_header_value(header_value(request, "x-request-id")))
-	puts(render_header_value(header_value(request, "cookie")))
-	puts(render_header_value(header_value(request, "missing")))
-	parsed := cookies(request)
+	replaced := request.with_header("cookie", "fresh=one")
+	added := replaced.add_header("COOKIE", "fresh=two")
+	removed := added.without_header("x-request-id")
+	puts(request.header_values("cookie").size())
+	puts(added.header_values("cookie").size())
+	puts(added.header_values("cookie")[0])
+	puts(added.header_values("cookie")[1])
+	puts(removed.header_values("x-request-id").size())
+	puts(request.header_values("COOKIE").size())
+	puts(render_header_value(request.header_value("x-request-id")))
+	puts(render_header_value(request.header_value("cookie")))
+	puts(render_header_value(request.header_value("missing")))
+	parsed := request.cookies()
 	puts(parsed.size())
 	parsed.each do |value|
 		puts(value.name + "=" + value.value)
 	end
-	puts(cookie_values(request, "tag").size())
-	puts(render_cookie_value(cookie_value(request, "session")))
-	puts(render_cookie_value(cookie_value(request, "tag")))
-	puts(render_cookie_value(cookie_value(request, "missing")))
-	puts(cookie(request, "tag") == nil)
-	puts(cookie(request, "missing") == nil)
+	puts(request.cookie_values("tag").size())
+	puts(render_cookie_value(request.cookie_value("session")))
+	puts(render_cookie_value(request.cookie_value("tag")))
+	puts(render_cookie_value(request.cookie_value("missing")))
+	puts(request.cookie_values("tag").empty?())
+	puts(request.cookie_values("missing").empty?())
+	puts(request.bytes().size())
+	case request.text()
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(_error)
+		puts("invalid")
+	end
 	return
 end
 `
@@ -4715,7 +4713,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "2\n2\nfresh=one\nfresh=two\n0\n2\nok:req-1\nduplicate:cookie\nmissing:missing\n5\nsession=abc\ntheme=dark\ntag=first\ntag=second\ntoken=a=b\n2\nok:abc\nduplicate:tag\nmissing:missing\nfalse\ntrue\n"
+		want := "2\n2\nfresh=one\nfresh=two\n0\n2\nok:req-1\nduplicate:cookie\nmissing:missing\n5\nsession=abc\ntheme=dark\ntag=first\ntag=second\ntoken=a=b\n2\nok:abc\nduplicate:tag\nmissing:missing\nfalse\ntrue\n4\nbody\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web cookie output: want %q, got %q", mode, want, stdout.String())
 		}
@@ -4745,13 +4743,13 @@ func TestRunOfficialWebQueryHelpersAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Headers } from trb/http
-import { QueryValueError, Request, query_value, query_values } from trb/web
+		mainSource := `import { Body, Headers, HttpMethod } from trb/http
+import { QueryValueError, Request } from trb/web
 import { PercentDecodeError } from trb/std/url
 import { Result } from trb/std/result
 
 def request(query_string: String): Request
-	return Request.new(method: "GET", path: "/", query_string: query_string, headers: Headers.new(), body: Body.empty())
+	return Request.new(method: HttpMethod.get(), path: "/", query_string: query_string, headers: Headers.new(), body: Body.empty())
 end
 
 def render_value(result: Result<String, QueryValueError>): String
@@ -4785,12 +4783,12 @@ end
 
 def main()
 	parsed := request("tag=go&tag=web&page=2&empty=")
-	print_values(query_values(parsed, "tag"))
-	print_values(query_values(parsed, "missing"))
-	puts(render_value(query_value(parsed, "page")))
-	puts(render_value(query_value(parsed, "missing")))
-	puts(render_value(query_value(parsed, "tag")))
-	puts(render_value(query_value(request("value=%ZZ"), "value")))
+	print_values(parsed.query_values("tag"))
+	print_values(parsed.query_values("missing"))
+	puts(render_value(parsed.query_value("page")))
+	puts(render_value(parsed.query_value("missing")))
+	puts(render_value(parsed.query_value("tag")))
+	puts(render_value(request("value=%ZZ").query_value("value")))
 	return
 end
 `
@@ -4838,14 +4836,7 @@ func TestRunOfficialWebResponseHeadersAcrossAvailableBackends(t *testing.T) {
 		mainSource := `import { Body, Header, Headers, HeaderValueError } from trb/http
 import {
 	Response,
-	add_header,
 	redirect,
-	response_header_value,
-	response_header_values,
-	vary,
-	with_header,
-	with_status,
-	without_header,
 } from trb/web
 import { Result } from trb/std/result
 
@@ -4873,12 +4864,12 @@ def main()
 		]),
 		body: Body.new("body".to_bytes()),
 	)
-	replaced := with_header(base, "x-TRACE", "two")
-	added := add_header(replaced, "X-Trace", "three")
-	removed := without_header(added, "X-Keep")
-	created := with_status(removed, 201)
-	varied := vary(vary(vary(created, "accept"), "Origin"), "origin")
-	found := response_header_values(varied, "VARY")
+	replaced := base.with_header("x-TRACE", "two")
+	added := replaced.add_header("X-Trace", "three")
+	removed := added.without_header("X-Keep")
+	created := removed.with_status(201)
+	varied := created.vary("accept").vary("Origin").vary("origin")
+	found := varied.header_values("VARY")
 	default_redirect := redirect("/login")
 	temporary_redirect := redirect("/next", 307)
 	puts(base.headers.values("X-Trace").size())
@@ -4892,9 +4883,9 @@ def main()
 	puts(varied.body.to_s())
 	puts(found.size())
 	puts(found.join("|"))
-	puts(render_header_value(response_header_value(base, "x-keep")))
-	puts(render_header_value(response_header_value(added, "x-trace")))
-	puts(render_header_value(response_header_value(base, "missing")))
+	puts(render_header_value(base.header_value("x-keep")))
+	puts(render_header_value(added.header_value("x-trace")))
+	puts(render_header_value(base.header_value("missing")))
 	puts(default_redirect.status)
 	puts(default_redirect.headers.values("location")[0])
 	puts(default_redirect.body.size())
@@ -5013,12 +5004,11 @@ import {
 	ResponseCookie,
 	ResponseCookieAttribute,
 	new_response_cookie,
-	set_cookie,
 } from trb/web
 
 def main()
 	base := Response.new(status: 204, headers: Headers.new(), body: Body.empty())
-	simple := set_cookie(base, new_response_cookie("theme", "dark"))
+	simple := base.set_cookie(new_response_cookie("theme", "dark"))
 	session_cookie := ResponseCookie.new(
 		name: "session",
 		value: "abc",
@@ -5031,7 +5021,7 @@ def main()
 			ResponseCookieAttribute::SameSite(CookieSameSite::Lax),
 		],
 	)
-	complete := set_cookie(simple, session_cookie)
+	complete := simple.set_cookie(session_cookie)
 	puts(base.headers.size())
 	puts(complete.headers.values("set-cookie").size())
 	puts(complete.headers.values("set-cookie")[0])
@@ -5070,8 +5060,8 @@ func TestRunOfficialWebRejectsInvalidResponseCookiesAcrossAvailableBackends(t *t
 			if err := config.Save(); err != nil {
 				t.Fatal(err)
 			}
-			mainSource := `import { Body, Headers } from trb/http
-import { Request, response_header_values } from trb/web
+			mainSource := `import { Body, Headers, HttpMethod } from trb/http
+import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def main()
@@ -5089,14 +5079,14 @@ def main()
 		"valid",
 	].each do |kind|
 		response := dispatch(Request.new(
-			method: "GET",
+			method: HttpMethod.get(),
 			path: "/cookies/" + kind,
 			query_string: "",
 			headers: Headers.new(),
 			body: Body.empty(),
 		))
 		puts(response.status)
-		values := response_header_values(response, "set-cookie")
+		values := response.header_values("set-cookie")
 		puts(values.size())
 		if !values.empty?()
 			puts(values[0])
@@ -5113,69 +5103,67 @@ import {
 	ResponseCookie,
 	ResponseCookieAttribute,
 	new_response_cookie,
-	path_param,
-	set_cookie,
 } from trb/web
 
 def get(context: Context): Response
-	kind := path_param(context, "kind")
+	kind := context.path_value("kind")
 	base := Response.new(status: 204, headers: Headers.new(), body: Body.empty())
 	if kind == "name"
-		return set_cookie(base, new_response_cookie("bad name", "value"))
+		return base.set_cookie(new_response_cookie("bad name", "value"))
 	end
 	if kind == "value"
-		return set_cookie(base, new_response_cookie("session", "non ascii"))
+		return base.set_cookie(new_response_cookie("session", "non ascii"))
 	end
 	if kind == "domain"
-		return set_cookie(base, ResponseCookie.new(
+		return base.set_cookie(ResponseCookie.new(
 			name: "session",
 			value: "value",
 			attributes: [ResponseCookieAttribute::Domain("-example.com")],
 		))
 	end
 	if kind == "path"
-		return set_cookie(base, ResponseCookie.new(
+		return base.set_cookie(ResponseCookie.new(
 			name: "session",
 			value: "value",
 			attributes: [ResponseCookieAttribute::Path("relative")],
 		))
 	end
 	if kind == "max-age"
-		return set_cookie(base, ResponseCookie.new(
+		return base.set_cookie(ResponseCookie.new(
 			name: "session",
 			value: "value",
 			attributes: [ResponseCookieAttribute::MaxAge(-1)],
 		))
 	end
 	if kind == "attribute"
-		return set_cookie(base, ResponseCookie.new(
+		return base.set_cookie(ResponseCookie.new(
 			name: "session",
 			value: "value",
 			attributes: [ResponseCookieAttribute::Secure, ResponseCookieAttribute::Secure],
 		))
 	end
 	if kind == "same-site"
-		return set_cookie(base, ResponseCookie.new(
+		return base.set_cookie(ResponseCookie.new(
 			name: "session",
 			value: "value",
 			attributes: [ResponseCookieAttribute::SameSite(CookieSameSite::None)],
 		))
 	end
 	if kind == "secure-prefix"
-		return set_cookie(base, new_response_cookie("__Secure-session", "value"))
+		return base.set_cookie(new_response_cookie("__Secure-session", "value"))
 	end
 	if kind == "host-prefix"
-		return set_cookie(base, ResponseCookie.new(
+		return base.set_cookie(ResponseCookie.new(
 			name: "__Host-session",
 			value: "value",
 			attributes: [ResponseCookieAttribute::Secure, ResponseCookieAttribute::Path("/app")],
 		))
 	end
 	if kind == "duplicate"
-		first := set_cookie(base, new_response_cookie("session", "first"))
-		return set_cookie(first, new_response_cookie("session", "second"))
+		first := base.set_cookie(new_response_cookie("session", "first"))
+		return first.set_cookie(new_response_cookie("session", "second"))
 	end
-	return set_cookie(base, ResponseCookie.new(
+	return base.set_cookie(ResponseCookie.new(
 		name: "__Host-session",
 		value: "value",
 		attributes: [
@@ -5232,13 +5220,13 @@ func TestRunOfficialWebJSONAPIsAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Header, Headers } from trb/http
+		mainSource := `import { Body, Header, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def main()
 	request := Request.new(
-		method: "POST",
+		method: HttpMethod.post(),
 		path: "/todos/7",
 		query_string: "tag=type+rb&tag=go",
 		headers: Headers.new([Header.new(name: "content-type", value: "application/json")]),
@@ -5247,7 +5235,7 @@ def main()
 	response := dispatch(request)
 	puts(response.status)
 	puts(response.body.to_s())
-	method_not_allowed := dispatch(Request.new(method: "GET", path: "/todos/7", query_string: "", headers: Headers.new(), body: Body.empty()))
+	method_not_allowed := dispatch(Request.new(method: HttpMethod.get(), path: "/todos/7", query_string: "", headers: Headers.new(), body: Body.empty()))
 	puts(method_not_allowed.status)
 	puts(method_not_allowed.headers.values("allow")[0])
 	puts(method_not_allowed.body.to_s())
@@ -5255,13 +5243,13 @@ def main()
 	(0...21).each do |_index|
 		oversized_body = oversized_body.concat(oversized_body)
 	end
-	payload_too_large := dispatch(Request.new(method: "POST", path: "/todos/7", query_string: "", headers: Headers.new(), body: Body.new(oversized_body)))
+	payload_too_large := dispatch(Request.new(method: HttpMethod.post(), path: "/todos/7", query_string: "", headers: Headers.new(), body: Body.new(oversized_body)))
 	puts(payload_too_large.status)
 	puts(payload_too_large.body.to_s())
 	return
 end
 `
-		routeSource := `import { Context, Response, json, path_param, query_parameters, request_json } from trb/web
+		routeSource := `import { Context, Response, json } from trb/web
 import { Result } from trb/std/result
 
 record TodoRequest
@@ -5274,10 +5262,10 @@ record TodoResponse
 end
 
 def post(context: Context): Response
-	id := path_param(context, "id")
-	case request_json<TodoRequest>(context.request)
+	id := context.path_value("id")
+	case context.request.json<TodoRequest>()
 	when Result::Ok(payload)
-		case query_parameters(context.request)
+		case context.request.query_parameters()
 		when Result::Ok(parameters)
 			return json(TodoResponse.new(id: id, title: payload.title + ":" + parameters[0].value + ":" + parameters[1].value), 201)
 		when Result::Err(_error)
@@ -5349,15 +5337,15 @@ func TestRunOfficialWebCatchAllRoutesAcrossAvailableBackends(t *testing.T) {
 			if err := config.Save(); err != nil {
 				t.Fatal(err)
 			}
-			mainSource := `import { Body, Headers } from trb/http
-import { Request, response_header_values } from trb/web
+			mainSource := `import { Body, Headers, HttpMethod } from trb/http
+import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def show(method: String, path: String)
-	response := dispatch(Request.new(method: method, path: path, query_string: "", headers: Headers.new(), body: Body.empty()))
+	response := dispatch(Request.new(method: HttpMethod.new(method), path: path, query_string: "", headers: Headers.new(), body: Body.empty()))
 	puts(response.status)
 	puts(response.body.to_s())
-	allow := response_header_values(response, "allow")
+	allow := response.header_values("allow")
 	if allow.empty?()
 		puts("-")
 	else
@@ -5376,10 +5364,10 @@ def main()
 	return
 end
 `
-			routeSource := `import { Context, Response, path_param, text } from trb/web
+			routeSource := `import { Context, Response, text } from trb/web
 
 def get(context: Context): Response
-	return text(path_param(context, "path"))
+	return text(context.path_value("path"))
 end
 `
 			if err := os.MkdirAll(filepath.Join(root, "src", "routes", "files"), 0o755); err != nil {
@@ -5430,7 +5418,7 @@ func TestRunOfficialWebRequestErrorsAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		mainSource := `import { Body, Header, Headers } from trb/http
+		mainSource := `import { Body, Header, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 import { decode } from trb/std/encoding/hex
@@ -5443,7 +5431,7 @@ end
 
 def print_response(input: RequestInput)
 	response := dispatch(Request.new(
-		method: "POST",
+		method: HttpMethod.post(),
 		path: "/payload",
 		query_string: "",
 		headers: input.headers,
@@ -5471,7 +5459,7 @@ def main()
 	return
 end
 `
-		routeSource := `import { Context, RequestError, Response, request_json, text } from trb/web
+		routeSource := `import { Context, RequestError, Response, text } from trb/web
 import { Result } from trb/std/result
 
 record Payload
@@ -5479,7 +5467,7 @@ record Payload
 end
 
 def post(context: Context): Response
-	case request_json<Payload>(context.request)
+	case context.request.json<Payload>()
 	when Result::Ok(payload)
 		return text("ok:" + payload.title)
 	when Result::Err(error)
@@ -5549,13 +5537,13 @@ func TestRunOfficialWebMethodSemanticsAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Header, Headers } from trb/http
+		mainSource := `import { Body, Header, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def request(method: String, path: String): Request
 	return Request.new(
-		method: method,
+		method: HttpMethod.new(method),
 		path: path,
 		query_string: "",
 		headers: Headers.new([Header.new(name: "X-Trace", value: "value")]),
@@ -5601,7 +5589,7 @@ def get(context: Context): Response
 		status: 200,
 		headers: Headers.new([
 			Header.new(name: "x-handler", value: "get"),
-			Header.new(name: "x-method", value: context.request.method),
+			Header.new(name: "x-method", value: context.request.method.to_s()),
 			Header.new(name: "x-trace", value: context.request.headers.values("x-trace")[0]),
 		]),
 		body: Body.new("fallback".to_bytes()),
@@ -5685,12 +5673,12 @@ func TestRunOfficialWebRecoveryAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Headers } from trb/http
+		mainSource := `import { Body, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def main()
-	request := Request.new(method: "GET", path: "/failure", query_string: "", headers: Headers.new(), body: Body.empty())
+	request := Request.new(method: HttpMethod.get(), path: "/failure", query_string: "", headers: Headers.new(), body: Body.empty())
 	response := dispatch(request)
 	puts(response.status)
 	puts(response.body.to_s())
@@ -5755,7 +5743,7 @@ func TestRunOfficialWebResponseValidationAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Headers } from trb/http
+		mainSource := `import { Body, Headers, HttpMethod } from trb/http
 import { Request, Response } from trb/web
 import { dispatch } from trb/web/testing
 
@@ -5769,7 +5757,7 @@ end
 def main()
 	["invalid-name", "invalid-value", "invalid-status", "valid"].each do |path|
 		print_response(dispatch(Request.new(
-			method: "GET",
+			method: HttpMethod.get(),
 			path: "/" + path,
 			query_string: "",
 			headers: Headers.new(),
@@ -5855,16 +5843,16 @@ func TestRunOfficialWebJSONLLoggerAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Headers } from trb/http
+		mainSource := `import { Body, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def main()
-	_logged_response := dispatch(Request.new(method: "GET", path: "/logged", query_string: "token=must-not-be-logged", headers: Headers.new(), body: Body.empty()))
-	_excluded_response := dispatch(Request.new(method: "GET", path: "/health", query_string: "", headers: Headers.new(), body: Body.empty()))
-	_not_found_response := dispatch(Request.new(method: "GET", path: "/missing", query_string: "", headers: Headers.new(), body: Body.empty()))
-	_method_not_allowed_response := dispatch(Request.new(method: "POST", path: "/logged", query_string: "", headers: Headers.new(), body: Body.empty()))
-	_failure_response := dispatch(Request.new(method: "GET", path: "/failure", query_string: "", headers: Headers.new(), body: Body.empty()))
+	_logged_response := dispatch(Request.new(method: HttpMethod.get(), path: "/logged", query_string: "token=must-not-be-logged", headers: Headers.new(), body: Body.empty()))
+	_excluded_response := dispatch(Request.new(method: HttpMethod.get(), path: "/health", query_string: "", headers: Headers.new(), body: Body.empty()))
+	_not_found_response := dispatch(Request.new(method: HttpMethod.get(), path: "/missing", query_string: "", headers: Headers.new(), body: Body.empty()))
+	_method_not_allowed_response := dispatch(Request.new(method: HttpMethod.post(), path: "/logged", query_string: "", headers: Headers.new(), body: Body.empty()))
+	_failure_response := dispatch(Request.new(method: HttpMethod.get(), path: "/failure", query_string: "", headers: Headers.new(), body: Body.empty()))
 	return
 end
 `
@@ -5976,15 +5964,15 @@ func TestRunOfficialWebMiddlewareCompositionAcrossAvailableBackends(t *testing.T
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Headers } from trb/http
+		mainSource := `import { Body, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def main()
-	ordered := dispatch(Request.new(method: "GET", path: "/ordered", query_string: "", headers: Headers.new(), body: Body.empty()))
+	ordered := dispatch(Request.new(method: HttpMethod.get(), path: "/ordered", query_string: "", headers: Headers.new(), body: Body.empty()))
 	puts(ordered.status)
 	puts(ordered.headers.values("x-content-type-options")[0])
-	rejected := dispatch(Request.new(method: "GET", path: "/twice", query_string: "", headers: Headers.new(), body: Body.empty()))
+	rejected := dispatch(Request.new(method: HttpMethod.get(), path: "/twice", query_string: "", headers: Headers.new(), body: Body.empty()))
 	puts(rejected.status)
 	puts(rejected.body.to_s())
 	return
@@ -6088,17 +6076,17 @@ func TestRunOfficialWebSecureHeadersAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Headers } from trb/http
+		mainSource := `import { Body, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def main()
-	default_response := dispatch(Request.new(method: "GET", path: "/default", query_string: "", headers: Headers.new(), body: Body.empty()))
+	default_response := dispatch(Request.new(method: HttpMethod.get(), path: "/default", query_string: "", headers: Headers.new(), body: Body.empty()))
 	puts(default_response.headers.values("x-content-type-options")[0])
 	puts(default_response.headers.values("x-frame-options")[0])
 	puts(default_response.headers.values("referrer-policy")[0])
 	puts(default_response.headers.values("x-xss-protection")[0])
-	custom_response := dispatch(Request.new(method: "GET", path: "/custom", query_string: "", headers: Headers.new(), body: Body.empty()))
+	custom_response := dispatch(Request.new(method: HttpMethod.get(), path: "/custom", query_string: "", headers: Headers.new(), body: Body.empty()))
 	puts(custom_response.headers.values("x-custom-security")[0])
 	puts(custom_response.headers.key?("x-content-type-options"))
 	return
@@ -6117,10 +6105,10 @@ def call(context: Context, next_handler: Next): Response
 	return secure_headers.call(context, next_handler)
 end
 `
-		routeSource := `import { Context, Response, text, with_header } from trb/web
+		routeSource := `import { Context, Response, text } from trb/web
 
 def get(_context: Context): Response
-	return with_header(text("ok"), "X-Frame-Options", "DENY")
+	return text("ok").with_header("X-Frame-Options", "DENY")
 end
 `
 		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
@@ -6173,13 +6161,13 @@ func TestRunOfficialWebRequestIDAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Header, Headers } from trb/http
+		mainSource := `import { Body, Header, Headers, HttpMethod } from trb/http
 import { Request, Response } from trb/web
 import { dispatch } from trb/web/testing
 
 def send(headers: Headers): Response
 	return dispatch(Request.new(
-		method: "GET",
+		method: HttpMethod.get(),
 		path: "/id",
 		query_string: "",
 		headers: headers,
@@ -6218,11 +6206,11 @@ def call(context: Context, next_handler: Next): Response
 	return request_id.call(context, next_handler)
 end
 `
-		routeSource := `import { Context, Response, header_value, text } from trb/web
+		routeSource := `import { Context, Response, text } from trb/web
 import { Result } from trb/std/result
 
 def get(context: Context): Response
-	case header_value(context.request, "x-request-id")
+	case context.request.header_value("x-request-id")
 	when Result::Ok(value)
 		return text(value)
 	when Result::Err(_error)
@@ -6277,13 +6265,13 @@ func TestRunOfficialWebCORSAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { Body, Header, Headers } from trb/http
+		mainSource := `import { Body, Header, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def main()
 	allowed := dispatch(Request.new(
-		method: "GET",
+		method: HttpMethod.get(),
 		path: "/allowed",
 		query_string: "",
 		headers: Headers.new([Header.new(name: "origin", value: "https://app.example")]),
@@ -6295,7 +6283,7 @@ def main()
 	puts(allowed.headers.values("vary").join("|"))
 
 	disallowed := dispatch(Request.new(
-		method: "GET",
+		method: HttpMethod.get(),
 		path: "/disallowed",
 		query_string: "",
 		headers: Headers.new([Header.new(name: "origin", value: "https://other.example")]),
@@ -6305,7 +6293,7 @@ def main()
 	puts(disallowed.headers.values("vary").join("|"))
 
 	preflight := dispatch(Request.new(
-		method: "OPTIONS",
+		method: HttpMethod.options(),
 		path: "/allowed",
 		query_string: "",
 		headers: Headers.new([
@@ -6323,7 +6311,7 @@ def main()
 	puts(preflight.headers.key?("x-handler"))
 
 	wildcard := dispatch(Request.new(
-		method: "GET",
+		method: HttpMethod.get(),
 		path: "/wildcard",
 		query_string: "",
 		headers: Headers.new([Header.new(name: "origin", value: "https://any.example")]),
@@ -6354,10 +6342,10 @@ def call(context: Context, next_handler: Next): Response
 	return cors.call(context, next_handler, CORS_OPTIONS)
 end
 `
-		routeSource := `import { Context, Response, text, with_header } from trb/web
+		routeSource := `import { Context, Response, text } from trb/web
 
 def get(_context: Context): Response
-	return with_header(with_header(text("ok"), "Vary", "Accept"), "X-Handler", "route")
+	return text("ok").with_header("Vary", "Accept").with_header("X-Handler", "route")
 end
 `
 		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
@@ -6524,7 +6512,7 @@ end
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
 	packageOutput, err := os.ReadFile(filepath.Join(root, "build", "trb", "web", "index.rb"))
-	if err != nil || !strings.Contains(string(packageOutput), "Response = Data.define") {
+	if err != nil || !strings.Contains(string(packageOutput), "class Response") {
 		t.Fatalf("official package was not emitted: err=%v\n%s", err, packageOutput)
 	}
 	consumer, err := os.ReadFile(filepath.Join(root, "build", "main.rb"))
@@ -6599,13 +6587,13 @@ func TestRunOfficialWebPathNormalizationAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		mainSource := `import { Body, Headers } from trb/http
+		mainSource := `import { Body, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def print_response(path: String)
 	response := dispatch(Request.new(
-		method: "GET",
+		method: HttpMethod.get(),
 		path: path,
 		query_string: "",
 		headers: Headers.new(),
@@ -6640,10 +6628,10 @@ def main()
 end
 `
 		routeSource := `import { Body, Headers } from trb/http
-import { Context, Response, path_param } from trb/web
+import { Context, Response } from trb/web
 
 def get(context: Context): Response
-	value := context.request.path + "|" + path_param(context, "name")
+	value := context.request.path + "|" + context.path_value("name")
 	return Response.new(status: 200, headers: Headers.new(), body: Body.new(value.to_bytes()))
 end
 `

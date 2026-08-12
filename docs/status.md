@@ -107,12 +107,13 @@ slashes remain distinct paths instead of being silently collapsed. Terminal
 catch-all files such as `[...path].trb` match one or more decoded path
 segments and bind their slash-joined value. Route analysis rejects catch-alls
 outside the final position and any static, parameter, or catch-all pattern that
-could ambiguously match the same method and request path. Calls to `path_param`
+could ambiguously match the same method and request path. Calls to
+`Context#path_value`
 inside route files require a string literal naming a parameter declared by that
 file's route pattern, so misspelled and dynamic names fail during the build.
-Typed `request_json<T>` accepts `application/json` and `application/*+json`, rejects
-ambiguous content types and invalid UTF-8, and reports each failure as a
-`RequestError` without exposing backend parser behavior. Root and nested
+Typed `Request#json<T>()` accepts `application/json` and `application/*+json`,
+rejects ambiguous content types and invalid UTF-8, and reports each failure as
+a `RequestError` without exposing backend parser behavior. Root and nested
 `_middleware.trb` files form the same outer-to-inner onion chain in every
 backend. A single middleware file can build an explicit `Array<Middleware>`
 and pass it to `compose`; the first item is the outermost layer, and `Next` can
@@ -137,22 +138,25 @@ with an `Allow` header. Request bodies use a configurable limit of 1 MiB by
 default before dispatch, and oversized requests receive the same JSON 413
 response in every backend. Query
 parameters use the portable URL decoder and preserve repeated keys and source
-order instead of collapsing them into a hash. `query_values` returns all
-repeated values, while strict `query_value` reports malformed, missing, and
-duplicate values through a typed error. HEAD requests prefer an explicit
-handler, otherwise reuse the matching GET handler and middleware chain, and
+order instead of collapsing them into a hash. `Request#query_values` returns
+all repeated values, while strict `Request#query_value` reports malformed,
+missing, and duplicate values through a typed error. HEAD requests prefer an
+explicit handler, otherwise reuse the matching GET handler and middleware chain, and
 never expose a response body. OPTIONS requests likewise prefer explicit
 handlers; otherwise a middleware-aware 204 response advertises the available
 methods through `Allow`.
-Request header lookup is case-insensitive; `header_value` rejects missing and
-duplicate values instead of choosing one implicitly. Request headers can also
-be replaced, appended, or removed without mutating the original request.
+Request header lookup is case-insensitive; `Request#header_value` rejects
+missing and duplicate values instead of choosing one implicitly. Request
+headers can also be replaced, appended, or removed without mutating the
+original request.
 Portable cookie parsing preserves header order, duplicate names, and opaque
 values without delegating
-semantics to the target runtime. `cookie_values` returns all matching values,
-while strict `cookie_value` reports missing and duplicate names through a typed
-error.
-Responses can replace, append, remove, or inspect case-insensitive header values
+semantics to the target runtime. `Request#cookie_values` returns all matching
+values, while strict `Request#cookie_value` reports missing and duplicate names
+through a typed error.
+`Request`, `Response`, and `Context` are immutable classes. Their method APIs
+replace, append, remove, or inspect values by returning new instances where
+state changes. Responses support case-insensitive header operations
 without mutating the original response. Strict response lookup rejects missing
 and duplicate values instead of selecting one. `vary` composes cache keys
 without duplicating an existing field.
@@ -163,8 +167,8 @@ header values. Cookie names, values, domains, paths, attribute uniqueness,
 serialization. Invalid cookie construction reaches the same portable JSON 500
 boundary as any other invalid response.
 Portable `text`, `bytes`, `empty`, and `redirect` builders create common
-responses with consistent default statuses and content types. `with_status`
-returns a copy with a different status.
+responses with consistent default statuses and content types.
+`Response#with_status` returns a copy with a different status.
 Before a response leaves the portable dispatcher, every backend rejects invalid
 status codes, header names, and CR/LF-bearing header values through the same
 JSON 500 boundary.

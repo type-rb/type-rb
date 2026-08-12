@@ -12,53 +12,61 @@ func validatePathParameterCalls(route Route, program *ast.Program, resolved reso
 	if program == nil {
 		return nil
 	}
+	contextBinding, imported := resolved.Symbols["Context"]
+	if !imported || !officialWebBinding(contextBinding) {
+		return nil
+	}
 	declared := make(map[string]bool, len(route.PathParameters))
 	for _, name := range route.PathParameters {
 		declared[name] = true
 	}
 	var issues []Issue
-	walkStatements(program.Statements, func(call *ast.CallExpression) {
-		if !officialPathParameterCall(call, resolved) || len(call.Arguments) != 2 {
-			return
+	for _, statement := range program.Statements {
+		method, ok := statement.(*ast.MethodStatement)
+		if !ok {
+			continue
 		}
-		argument := call.Arguments[1].Value
-		literal, ok := argument.(*ast.Literal)
-		if !ok || literal.Kind != ast.StringLiteral {
+		contextNames := map[string]bool{}
+		for _, parameter := range method.Parameters {
+			if parameter.Type.Name == "Context" {
+				contextNames[parameter.Name] = true
+			}
+		}
+		walkStatements(method.Body, func(call *ast.CallExpression) {
+			if !officialPathParameterCall(call, contextNames) || len(call.Arguments) != 1 {
+				return
+			}
+			argument := call.Arguments[0].Value
+			literal, ok := argument.(*ast.Literal)
+			if !ok || literal.Kind != ast.StringLiteral {
+				issues = append(issues, Issue{
+					Filename: route.Filename,
+					Message:  "Context#path_value() name must be a string literal in a route file",
+					Span:     argument.Span(),
+				})
+				return
+			}
+			name, err := strconv.Unquote(literal.Raw)
+			if err != nil || declared[name] {
+				return
+			}
 			issues = append(issues, Issue{
 				Filename: route.Filename,
-				Message:  "path_param() name must be a string literal in a route file",
+				Message:  fmt.Sprintf("Context#path_value() references undeclared route parameter %q", name),
 				Span:     argument.Span(),
 			})
-			return
-		}
-		name, err := strconv.Unquote(literal.Raw)
-		if err != nil || declared[name] {
-			return
-		}
-		issues = append(issues, Issue{
-			Filename: route.Filename,
-			Message:  fmt.Sprintf("path_param() references undeclared route parameter %q", name),
-			Span:     argument.Span(),
 		})
-	})
+	}
 	return issues
 }
 
-func officialPathParameterCall(call *ast.CallExpression, resolved resolver.Result) bool {
-	switch callee := call.Callee.(type) {
-	case *ast.Identifier:
-		binding, ok := resolved.Symbols[callee.Name]
-		return ok && callee.Name == "path_param" && officialWebBinding(binding)
-	case *ast.MemberExpression:
-		receiver, ok := callee.Receiver.(*ast.Identifier)
-		if !ok || callee.Name != "path_param" {
-			return false
-		}
-		binding, ok := resolved.Member(receiver.Name, callee.Name)
-		return ok && officialWebBinding(binding)
-	default:
+func officialPathParameterCall(call *ast.CallExpression, contextNames map[string]bool) bool {
+	callee, ok := call.Callee.(*ast.MemberExpression)
+	if !ok || callee.Name != "path_value" {
 		return false
 	}
+	receiver, ok := callee.Receiver.(*ast.Identifier)
+	return ok && contextNames[receiver.Name]
 }
 
 func officialWebBinding(binding resolver.Binding) bool {

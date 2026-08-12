@@ -16,6 +16,7 @@ larger applications.
 - [Standard library](standard-library.md)
 - [Package system](guides/packages.md)
 - [Shared HTTP values](guides/http.md)
+- [Portable web applications](guides/web.md)
 - [Browser HTTP client](guides/browser-http.md)
 - [Syntax highlighting](syntax-highlighting.md)
 - [Database schema workflow](guides/database.md)

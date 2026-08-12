@@ -108,12 +108,12 @@ func TestRunORMBackedWebJSONAcrossBackends(t *testing.T) {
 			}
 
 			files := map[string]string{
-				"main.trb": `import { Body, Headers } from trb/http
+				"main.trb": `import { Body, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
 
 def main()
-	response := dispatch(Request.new(method: "GET", path: "/products", query_string: "", headers: Headers.new(), body: Body.empty()))
+	response := dispatch(Request.new(method: HttpMethod.get(), path: "/products", query_string: "", headers: Headers.new(), body: Body.empty()))
 	puts(response.status)
 	puts(response.body.to_s())
 	return

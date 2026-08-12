@@ -27,6 +27,8 @@ type generator struct {
 	typeMappings     map[string]string
 	browserRuntime   string
 	httpRuntime      bool
+	webRuntime       bool
+	jsonRuntime      bool
 	reactStateHelper bool
 	temporary        int
 	suspension       *SuspensionPlan
@@ -122,6 +124,24 @@ func (g *generator) ensureHTTPRuntime() string {
 	return alias
 }
 
+func (g *generator) ensureWebRuntime() string {
+	const alias = "__trb_web"
+	if !g.webRuntime {
+		g.line("import * as " + alias + " from " + strconv.Quote(tsImportPath(g.modulePath, "trb/web/index", g.moduleExtensions["trb/web/index"])) + ";")
+		g.webRuntime = true
+	}
+	return alias
+}
+
+func (g *generator) ensureJSONRuntime() string {
+	const alias = "__trb_json"
+	if !g.jsonRuntime {
+		g.line("import * as " + alias + " from " + strconv.Quote(tsImportPath(g.modulePath, "trb/std/json/index", g.moduleExtensions["trb/std/json/index"])) + ";")
+		g.jsonRuntime = true
+	}
+	return alias
+}
+
 func topLevelMethod(statements []ir.Statement, name string) *ir.Method {
 	for _, statement := range statements {
 		if method, ok := statement.(*ir.Method); ok && method.Name == name {
@@ -206,7 +226,10 @@ func (g *generator) statement(statement ir.Statement) {
 		webRuntime := n.Path == "trb/web/index" && n.RuntimeRequired
 		if webRuntime {
 			g.ensureHTTPRuntime()
+			g.ensureWebRuntime()
+			g.ensureJSONRuntime()
 		}
+		jsonRuntime := n.Path == "trb/std/json/index" && n.RuntimeRequired
 		if n.Namespace && n.Alias != "" {
 			for symbol, kind := range n.SymbolKinds {
 				switch kind {
@@ -240,8 +263,11 @@ func (g *generator) statement(statement ir.Statement) {
 					types = append(types, symbol)
 				}
 			}
-			if intrinsicRuntime && !browserRuntime {
+			if intrinsicRuntime && !browserRuntime && !webRuntime && !(jsonRuntime && g.jsonRuntime) {
 				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
+				if jsonRuntime {
+					g.jsonRuntime = true
+				}
 			}
 			if len(values) > 0 {
 				g.line("import { " + strings.Join(values, ", ") + " } from " + strconv.Quote(importPath) + ";")
@@ -1010,12 +1036,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		args := strings.Join(parts, ", ")
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
 			if reference.ReceiverMethod {
-				if member, ok := n.Callee.(*ir.Member); ok {
+				if member, ok := receiverMember(n.Callee); ok {
 					parts = append([]string{g.expr(member.Receiver)}, parts...)
-				} else if application, ok := n.Callee.(*ir.TypeApply); ok {
-					if member, memberApply := application.Receiver.(*ir.Member); memberApply {
-						parts = append([]string{g.expr(member.Receiver)}, parts...)
-					}
 				}
 			}
 			generated := g.intrinsic(reference.Intrinsic, n, parts)
@@ -1676,6 +1698,17 @@ func expressionReference(expression ir.Expression) *ir.Reference {
 		return expressionReference(node.Receiver)
 	default:
 		return nil
+	}
+}
+
+func receiverMember(expression ir.Expression) (*ir.Member, bool) {
+	switch node := expression.(type) {
+	case *ir.Member:
+		return node, true
+	case *ir.TypeApply:
+		return receiverMember(node.Receiver)
+	default:
+		return nil, false
 	}
 }
 

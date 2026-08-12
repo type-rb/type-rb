@@ -52,11 +52,11 @@ func TestOfficialWebResponseHeadersRejectNonStringValues(t *testing.T) {
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { Body, Headers } from trb/http
-import { Response, with_header } from trb/web
+import { Response } from trb/web
 
 def response(): Response
 	base := Response.new(status: 204, headers: Headers.new(), body: Body.empty())
-	return with_header(base, "x-count", 1)
+	return base.with_header("x-count", 1)
 end
 `),
 	}
@@ -64,7 +64,7 @@ end
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
-			if err == nil || !strings.Contains(err.Error(), "argument 3 to with_header() has type Integer, expected String") {
+			if err == nil || !strings.Contains(err.Error(), "argument 2 to with_header() has type Integer, expected String") {
 				t.Fatalf("unexpected diagnostic: %v", err)
 			}
 		})
@@ -77,11 +77,11 @@ func TestOfficialWebStrictHeaderLookupRejectsNonStringNames(t *testing.T) {
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { HeaderValueError } from trb/http
-import { Request, header_value } from trb/web
+import { Request } from trb/web
 import { Result } from trb/std/result
 
 def invalid(request: Request): Result<String, HeaderValueError>
-	return header_value(request, 1)
+	return request.header_value(1)
 end
 `),
 	}
@@ -89,7 +89,7 @@ end
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
-			if err == nil || !strings.Contains(err.Error(), "argument 2 to header_value() has type Integer, expected String") {
+			if err == nil || !strings.Contains(err.Error(), "argument 1 to header_value() has type Integer, expected String") {
 				t.Fatalf("unexpected diagnostic: %v", err)
 			}
 		})
@@ -124,11 +124,11 @@ func TestOfficialWebQueryHelpersRejectNonStringNames(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Request, QueryValueError, query_value } from trb/web
+		Source: []byte(`import { Request, QueryValueError } from trb/web
 import { Result } from trb/std/result
 
 def invalid(request: Request): Result<String, QueryValueError>
-	return query_value(request, 1)
+	return request.query_value(1)
 end
 `),
 	}
@@ -136,7 +136,7 @@ end
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
-			if err == nil || !strings.Contains(err.Error(), "argument 2 to query_value() has type Integer, expected String") {
+			if err == nil || !strings.Contains(err.Error(), "argument 1 to query_value() has type Integer, expected String") {
 				t.Fatalf("unexpected diagnostic: %v", err)
 			}
 		})
