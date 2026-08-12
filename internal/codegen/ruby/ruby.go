@@ -632,7 +632,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
 			if reference.ReceiverMethod {
-				if member, ok := n.Callee.(*ir.Member); ok {
+				if member, ok := receiverMember(n.Callee); ok {
 					parts = append([]string{g.expr(member.Receiver)}, parts...)
 				}
 			}
@@ -1072,6 +1072,17 @@ func expressionReference(expression ir.Expression) *ir.Reference {
 		return expressionReference(node.Receiver)
 	default:
 		return nil
+	}
+}
+
+func receiverMember(expression ir.Expression) (*ir.Member, bool) {
+	switch node := expression.(type) {
+	case *ir.Member:
+		return node, true
+	case *ir.TypeApply:
+		return receiverMember(node.Receiver)
+	default:
+		return nil, false
 	}
 }
 

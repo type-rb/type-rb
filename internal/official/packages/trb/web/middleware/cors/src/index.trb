@@ -1,4 +1,4 @@
-import { Context, Next, Request, Response, empty, header_values, vary, with_header } from trb/web
+import { Context, Next, Request, Response, empty } from trb/web
 import { Middleware } from trb/web/middleware
 
 enum PreflightMaxAge
@@ -58,7 +58,7 @@ def _invoke(context: Context, next_handler: Next, options: CORSOptions): Respons
 end
 
 def _request_origin(request: Request): String
-	values := header_values(request, "origin")
+	values := request.header_values("origin")
 	if values.size() != 1
 		return ""
 	end
@@ -66,16 +66,16 @@ def _request_origin(request: Request): String
 end
 
 def _preflight?(request: Request): Boolean
-	if request.method != "OPTIONS"
+	if request.method.to_s() != "OPTIONS"
 		return false
 	end
-	return header_values(request, "access-control-request-method").size() == 1
+	return request.header_values("access-control-request-method").size() == 1
 end
 
 def _preflight_response(request: Request, origin: String, options: CORSOptions): Response
 	mut response := empty()
 	if _varies_by_origin?(options)
-		response = vary(response, "Origin")
+		response = response.vary("Origin")
 	end
 	allowed_origin := _allowed_origin(origin, options)
 	if allowed_origin == ""
@@ -83,16 +83,16 @@ def _preflight_response(request: Request, origin: String, options: CORSOptions):
 	end
 	response = _apply_origin(response, allowed_origin, options)
 	if !options.allow_methods.empty?()
-		response = with_header(response, "access-control-allow-methods", options.allow_methods.join(", "))
+		response = response.with_header("access-control-allow-methods", options.allow_methods.join(", "))
 	end
 	if options.allow_headers.empty?()
-		requested_headers := header_values(request, "access-control-request-headers")
+		requested_headers := request.header_values("access-control-request-headers")
 		if !requested_headers.empty?()
-			response = with_header(response, "access-control-allow-headers", requested_headers.join(", "))
-			response = vary(response, "Access-Control-Request-Headers")
+			response = response.with_header("access-control-allow-headers", requested_headers.join(", "))
+			response = response.vary("Access-Control-Request-Headers")
 		end
 	else
-		response = with_header(response, "access-control-allow-headers", options.allow_headers.join(", "))
+		response = response.with_header("access-control-allow-headers", options.allow_headers.join(", "))
 	end
 	return _apply_max_age(response, options.max_age)
 end
@@ -100,7 +100,7 @@ end
 def _apply_actual_response(response: Response, origin: String, options: CORSOptions): Response
 	mut result := response
 	if _varies_by_origin?(options)
-		result = vary(result, "Origin")
+		result = result.vary("Origin")
 	end
 	allowed_origin := _allowed_origin(origin, options)
 	if allowed_origin == ""
@@ -108,7 +108,7 @@ def _apply_actual_response(response: Response, origin: String, options: CORSOpti
 	end
 	result = _apply_origin(result, allowed_origin, options)
 	if !options.expose_headers.empty?()
-		result = with_header(result, "access-control-expose-headers", options.expose_headers.join(", "))
+		result = result.with_header("access-control-expose-headers", options.expose_headers.join(", "))
 	end
 	return result
 end
@@ -134,9 +134,9 @@ def _varies_by_origin?(options: CORSOptions): Boolean
 end
 
 def _apply_origin(response: Response, origin: String, options: CORSOptions): Response
-	mut result := with_header(response, "access-control-allow-origin", origin)
+	mut result := response.with_header("access-control-allow-origin", origin)
 	if options.credentials
-		result = with_header(result, "access-control-allow-credentials", "true")
+		result = result.with_header("access-control-allow-credentials", "true")
 	end
 	return result
 end
@@ -149,6 +149,6 @@ def _apply_max_age(response: Response, max_age: PreflightMaxAge): Response
 		if value < 0
 			return response
 		end
-		return with_header(response, "access-control-max-age", value.to_s())
+		return response.with_header("access-control-max-age", value.to_s())
 	end
 end

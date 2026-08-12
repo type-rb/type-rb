@@ -25,7 +25,7 @@ end
 			Filename:   "/project/src/routes/todos/[id].trb",
 			ModulePath: "routes/todos/[id]",
 			Package:    "todos",
-			Source: []byte(`import { Context, Response, json, path_param, request_json } from trb/web
+			Source: []byte(`import { Context, Response, json } from trb/web
 import { Result } from trb/std/result
 
 record TodoRequest
@@ -38,8 +38,8 @@ record TodoResponse
 end
 
 def post(context: Context): Response
-	id := path_param(context, "id")
-	case request_json<TodoRequest>(context.request)
+	id := context.path_value("id")
+	case context.request.json<TodoRequest>()
 	when Result::Ok(payload)
 		return json(TodoResponse.new(id: id, title: payload.title), 201)
 	when Result::Err(_error)
@@ -209,10 +209,10 @@ func TestCompileProjectValidatesWebPathParameterCalls(t *testing.T) {
 			name:       "ordinary parameter",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, path_param, text } from trb/web
+			source: `import { Context, Response, text } from trb/web
 
 def get(context: Context): Response
-	return text(path_param(context, "id"))
+	return text(context.path_value("id"))
 end
 `,
 		},
@@ -220,10 +220,25 @@ end
 			name:       "catch-all parameter",
 			filename:   "/project/src/routes/files/[...path].trb",
 			modulePath: "routes/files/[...path]",
-			source: `import { Context, Response, path_param, text } from trb/web
+			source: `import { Context, Response, text } from trb/web
 
 def get(context: Context): Response
-	return text(path_param(context, "path"))
+	return text(context.path_value("path"))
+end
+`,
+		},
+		{
+			name:       "helper parameter",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, text } from trb/web
+
+def todo_id(context: Context): String
+	return context.path_value("id")
+end
+
+def get(context: Context): Response
+	return text(todo_id(context))
 end
 `,
 		},
@@ -248,26 +263,42 @@ end
 			name:       "dynamic parameter name",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, path_param, text } from trb/web
+			source: `import { Context, Response, text } from trb/web
 
 def get(context: Context): Response
 	name := "id"
-	return text(path_param(context, name))
+	return text(context.path_value(name))
 end
 `,
-			want: "path_param() name must be a string literal in a route file",
+			want: "Context#path_value() name must be a string literal in a route file",
 		},
 		{
 			name:       "undeclared parameter",
 			filename:   "/project/src/routes/files/[...path].trb",
 			modulePath: "routes/files/[...path]",
-			source: `import { Context, Response, path_param, text } from trb/web
+			source: `import { Context, Response, text } from trb/web
 
 def get(context: Context): Response
-	return text(path_param(context, "slug"))
+	return text(context.path_value("slug"))
 end
 `,
-			want: `path_param() references undeclared route parameter "slug"`,
+			want: `Context#path_value() references undeclared route parameter "slug"`,
+		},
+		{
+			name:       "undeclared helper parameter",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, text } from trb/web
+
+def todo_slug(context: Context): String
+	return context.path_value("slug")
+end
+
+def get(context: Context): Response
+	return text(todo_slug(context))
+end
+`,
+			want: `Context#path_value() references undeclared route parameter "slug"`,
 		},
 	}
 
@@ -366,7 +397,7 @@ func assertWebServerTarget(t *testing.T, mode string, artifact *Artifact) {
 	case "ruby":
 		targets = []string{"def trb_web_serve(config)", "content_length > config.body_limit_bytes", `path, query_string = target.split("?", 2)`, "Signal.trap(signal)", `TCPServer.new(config.host, config.port)`, `trb_web_serve(ServerConfig.new(host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500))`}
 	case "typescript":
-		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(config: TrbWebServerConfig)", "if (size > config.body_limit_bytes)", `const target = incoming.url ?? "/";`, "headers: new __trb_http.Headers(header_entries)", `process.once("SIGTERM", shutdown)`, `server.listen(config.port, config.host)`, `trb_web_serve({ host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500 });`}
+		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(config: TrbWebServerConfig)", "if (size > config.body_limit_bytes)", `new __trb_http.Headers(header_entries)`, `process.once("SIGTERM", shutdown)`, `server.listen(config.port, config.host)`, `trb_web_serve({ host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500 });`}
 	}
 	targets = append(targets, "payload_too_large")
 	for _, target := range targets {

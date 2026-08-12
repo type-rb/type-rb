@@ -563,5 +563,6 @@ The current portable standard library includes:
 - `trb/std/unit`
 
 Platform packages are mode checked and remain separate from the portable
-standard library. Portable official application packages such as `trb/http`,
-`trb/web`, and `trb/orm` are documented in their dedicated guides.
+standard library. Portable official application packages are documented in the
+[`trb/http`](guides/http.md), [`trb/web`](guides/web.md), and
+[`trb/orm`](guides/orm.md) guides.

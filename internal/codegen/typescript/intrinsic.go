@@ -482,18 +482,16 @@ func tsWebLogger(call *ir.Call, arguments []string) string {
 	if len(arguments) > 2 {
 		options = "const loggerOptions: { stderr: boolean; exclude_paths: string[] } | undefined = " + arguments[2] + "; "
 	}
-	return "(async (): Promise<" + tsType(call.ExprType()) + "> => { const loggerContext = " + arguments[0] + "; const loggerNextHandler = " + arguments[1] + "; " + options + "const excluded = loggerOptions !== undefined && loggerOptions.exclude_paths.includes(loggerContext.request.path); if (excluded) return await loggerNextHandler.call(loggerContext); const started = performance.now(); let status = 500; try { const response = await loggerNextHandler.call(loggerContext); status = response.status; return response; } finally { const entry = JSON.stringify({ timestamp: new Date().toISOString(), level: status >= 500 ? \"error\" : \"info\", event: \"http_request\", method: loggerContext.request.method, path: loggerContext.request.path, status, duration_ms: performance.now() - started }); if (loggerOptions !== undefined && loggerOptions.stderr) console.error(entry); else console.log(entry); } })()"
+	return "(async (): Promise<" + tsType(call.ExprType()) + "> => { const loggerContext = " + arguments[0] + "; const loggerNextHandler = " + arguments[1] + "; " + options + "const excluded = loggerOptions !== undefined && loggerOptions.exclude_paths.includes(loggerContext.__trb_request.__trb_path); if (excluded) return await loggerNextHandler.call(loggerContext); const started = performance.now(); let status = 500; try { const response = await loggerNextHandler.call(loggerContext); status = response.__trb_status; return response; } finally { const entry = JSON.stringify({ timestamp: new Date().toISOString(), level: status >= 500 ? \"error\" : \"info\", event: \"http_request\", method: loggerContext.__trb_request.__trb_method.to_s(), path: loggerContext.__trb_request.__trb_path, status, duration_ms: performance.now() - started }); if (loggerOptions !== undefined && loggerOptions.stderr) console.error(entry); else console.log(entry); } })()"
 }
 
 func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
-	if call.Codec == nil {
+	if call.Codec == nil || len(call.ExprType().Args) != 2 {
 		return "undefined"
 	}
-	parseCall := *call
-	parseCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("JsonValue"), types.FromName("JsonError")}}
-	parsed := tsJSONParse(&parseCall, "source", false)
-	builder := &tsJSONCodecBuilder{}
-	decoder := builder.decoder(call.Codec)
+	decodeCall := *call
+	decodeCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{call.ExprType().Args[0], types.FromName("JsonError")}}
+	decoded := g.tsJSONDecode(&decodeCall, "source")
 	valueType := tsCodecType(call.Codec)
 	errorType := "__trb_web.RequestError"
 	errResult := func(value string) string {
@@ -505,7 +503,7 @@ func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
 	unsupported := "__trb_web.RequestError.UnsupportedContentType(contentTypes[0]!)"
 	invalidUTF8 := "__trb_web.RequestError.InvalidUtf8"
 	invalidJSON := func(value string) string { return "__trb_web.RequestError.InvalidJson(" + value + ")" }
-	return "(() => { const requestValue = " + request + "; const contentTypes = requestValue.headers.entries().filter((entry) => entry.name.toLowerCase() === \"content-type\").map((entry) => entry.value); if (contentTypes.length === 0) return " + errResult(missing) + "; if (contentTypes.length !== 1) return " + errResult(duplicate) + "; const mediaType = contentTypes[0]!.split(\";\", 1)[0]!.trim().toLowerCase(); if (mediaType !== \"application/json\" && !(mediaType.startsWith(\"application/\") && mediaType.endsWith(\"+json\"))) return " + errResult(unsupported) + "; let source: string; try { source = new TextDecoder(\"utf-8\", { fatal: true }).decode(requestValue.body.bytes()); } catch { return " + errResult(invalidUTF8) + "; } const codecError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Decode, message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parsed + "; if (parsed.kind === \"Err\") return " + errResult(invalidJSON("parsed.error")) + "; try { return " + okResult + "(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) return " + errResult(invalidJSON("(error as any).error as JsonError")) + "; throw error; } })()"
+	return "(() => { const requestValue = " + request + "; const contentTypes = requestValue.__trb_headers.entries().filter((entry) => entry.name.toLowerCase() === \"content-type\").map((entry) => entry.value); if (contentTypes.length === 0) return " + errResult(missing) + "; if (contentTypes.length !== 1) return " + errResult(duplicate) + "; const mediaType = contentTypes[0]!.split(\";\", 1)[0]!.trim().toLowerCase(); if (mediaType !== \"application/json\" && !(mediaType.startsWith(\"application/\") && mediaType.endsWith(\"+json\"))) return " + errResult(unsupported) + "; let source: string; try { source = new TextDecoder(\"utf-8\", { fatal: true }).decode(requestValue.__trb_body.bytes()); } catch { return " + errResult(invalidUTF8) + "; } const decoded = " + decoded + "; if (decoded.kind === \"Err\") return " + errResult(invalidJSON("decoded.error")) + "; return " + okResult + "(decoded.value); })()"
 }
 
 func (g *generator) tsWebJSON(call *ir.Call, arguments []string) string {
@@ -516,11 +514,9 @@ func (g *generator) tsWebJSON(call *ir.Call, arguments []string) string {
 	if len(arguments) > 1 {
 		status = arguments[1]
 	}
-	builder := &tsJSONCodecBuilder{}
-	encoder := builder.encoder(call.Codec)
-	stringifyCall := *call
-	stringifyCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), types.FromName("JsonError")}}
-	encoded := tsJSONStringify(&stringifyCall, encoder+"("+arguments[0]+")")
+	encodeCall := *call
+	encodeCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), types.FromName("JsonError")}}
+	encoded := g.tsJSONEncode(&encodeCall, arguments[0])
 	headers := `new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }])`
-	return "(() => { " + builder.source.String() + " const encoded = " + encoded + "; if (encoded.kind === \"Err\") { return { status: 500, headers: " + headers + ", body: new __trb_http.Body(new TextEncoder().encode(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")) }; } return { status: " + status + ", headers: " + headers + ", body: new __trb_http.Body(new TextEncoder().encode(encoded.value)) }; })()"
+	return "(() => { const encoded = " + encoded + "; if (encoded.kind === \"Err\") { return new __trb_web.Response(500, " + headers + ", new __trb_http.Body(new TextEncoder().encode(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))); } return new __trb_web.Response(" + status + ", " + headers + ", new __trb_http.Body(new TextEncoder().encode(encoded.value))); })()"
 }

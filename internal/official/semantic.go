@@ -157,9 +157,6 @@ func webTestingSymbols() map[string]stdlib.Symbol {
 func webSymbols() map[string]stdlib.Symbol {
 	typeT := types.FromName("T")
 	jsonError := types.FromName("JsonError")
-	jsonResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, jsonError}}
-	requestError := types.FromName("RequestError")
-	requestResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, requestError}}
 	encodingResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), jsonError}}
 	return map[string]stdlib.Symbol{
 		"configure_server": {
@@ -178,14 +175,6 @@ func webSymbols() map[string]stdlib.Symbol {
 			Intrinsic:  "trb.web.serve",
 			Parameters: []stdlib.Parameter{{Name: "config", Type: types.FromName("ServerConfig"), Optional: true}},
 			Return:     types.FromName("Void"),
-		},
-		"request_json": {
-			Name:                "request_json",
-			Intrinsic:           "trb.web.request_json",
-			TypeParameters:      []string{"T"},
-			Parameters:          []stdlib.Parameter{{Name: "request", Type: types.FromName("Request")}},
-			Return:              requestResult,
-			RuntimeDependencies: []types.Type{jsonResult},
 		},
 		"json": {
 			Name:                "json",

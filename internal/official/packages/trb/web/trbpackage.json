@@ -4,6 +4,7 @@
   "module": "trb/web/index",
   "source": "src/index.trb",
   "semanticProvider": "trb.web",
+  "typeProvider": "trb.web",
   "projectProvider": "trb.web.routes",
   "nativeDependencies": {}
 }
