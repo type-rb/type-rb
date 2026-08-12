@@ -626,7 +626,6 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`"SELECT \"id\", \"category_id\", \"name\", \"price\", \"active\" FROM \"products\" WHERE EXISTS (SELECT 1 FROM \"categories\" WHERE \"categories\".\"id\" = \"products\".\"category_id\" AND (\"name\" = ?))" : String`,
 		`1 : Integer`,
 		`1 : Integer`,
-		`1 : Integer`,
 		`16 : Integer`,
 		`Featured`,
 		`1 : Integer`,

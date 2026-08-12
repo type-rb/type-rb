@@ -3611,6 +3611,10 @@ func (c *Checker) recordEffect(expression ast.Expression, effect types.Type) {
 	if effect.Kind == "" || effect.Kind == types.Never || effect.Kind == types.Invalid {
 		return
 	}
+	// Every fallible call is represented as Result in typed IR, including an
+	// unhandled interactive expression. Load that representation at the call
+	// site rather than relying on an enclosing fails declaration to do it.
+	c.requireRuntimeType(types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("Any"), effect}})
 	c.result.ExpressionEffects[expression] = effect
 	if len(c.effectCaptures) > 0 {
 		capture := c.effectCaptures[len(c.effectCaptures)-1]
