@@ -29,7 +29,8 @@ Bun can be selected explicitly for server packages.
 The implemented language includes functions, typed first-class function values
 with lexical capture, and classes, modules and
 interfaces, records, ordinary and raw-value enums, payload enums as sum types,
-enum instance methods, initial generics, normalized unions, immutable and
+enum instance methods, explicit generics for enums, aliases, records, classes,
+top-level functions and instance methods, normalized unions, immutable and
 mutable bindings, typed collections and iteration, exhaustive pattern
 matching, value-producing `if` and `case` expressions, and explicit fallible
 effects with `fails` and `attempt`. See the
@@ -178,7 +179,7 @@ The current alpha does not yet provide:
 - a complete everyday receiver API;
 - position-typed tuples or type-pattern narrowing for nullable, collection,
   and non-discriminated structured union alternatives;
-- inferred type arguments or generic records, classes, and methods;
+- inferred type arguments, generic interfaces, or generic class methods;
 - complete superclass construction, override, and mutation-effect semantics;
 - first-class blocks or multi-statement collection transformations;
 - concise `Result` propagation syntax;

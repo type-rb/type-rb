@@ -278,6 +278,22 @@ func TestFormatExplicitUserGenerics(t *testing.T) {
 	}
 }
 
+func TestFormatGenericClassesAndRecords(t *testing.T) {
+	source := []byte("class Box<T>\n@value:T\ndef pair<U>(other:U):Pair<T,U>\nreturn Pair<T,U>.new(left:@value,right:other)\nend\nend\nrecord Pair<T,U>\nleft:T\nright:U\nend\n")
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "class Box<T>\n\t@value: T\n\tdef pair<U>(other: U): Pair<T, U>\n\t\treturn Pair<T, U>.new(left: @value, right: other)\n\tend\nend\nrecord Pair<T, U>\n\tleft: T\n\tright: U\nend\n"
+	if string(formatted) != want {
+		t.Fatalf("unexpected generic object formatting:\n%s", formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("generic object formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatExpandsStatementSeparatorsAndPreservesNestedSemicolons(t *testing.T) {
 	source := []byte("enum State; Open; Closed; end # enum\n" +
 		"def label(value:State):String; case value; when State::Open; return \"a;b\"; when State::Closed; return \"closed\"; end; end\n" +

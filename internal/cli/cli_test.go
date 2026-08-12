@@ -2712,6 +2712,34 @@ func TestReplEvaluatesExplicitUserGenerics(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesGenericClassesAndMethods(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-generic-objects-test"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	input := "class Box<T>; @value: T; def initialize(value: T); @value = value; return; end; def value(): T; return @value; end; def echo<U>(value: U): U; return value; end; end\n" +
+		"box := Box<Integer>.new(7)\n" +
+		"box.value()\n" +
+		"box.echo<String>(\"Ada\")\n" +
+		":quit\n"
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	want := "#<Box value: 7> : Box<Integer>\n7 : Integer\n\"Ada\" : String\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("unexpected generic object REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
+	}
+}
+
 func TestReplEvaluatesStandardResult(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

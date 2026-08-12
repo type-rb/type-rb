@@ -78,17 +78,18 @@ type EnumVariant struct {
 }
 
 type Member struct {
-	Name       string
-	Kind       ExportKind
-	Type       types.Type
-	Fails      types.Type
-	Parameters []types.Type
-	Required   int
-	Variadic   bool
-	Class      bool
-	Readonly   bool
-	EnumOwner  string
-	Generated  string
+	Name           string
+	Kind           ExportKind
+	Type           types.Type
+	Fails          types.Type
+	TypeParameters []string
+	Parameters     []types.Type
+	Required       int
+	Variadic       bool
+	Class          bool
+	Readonly       bool
+	EnumOwner      string
+	Generated      string
 }
 
 type Import struct {
@@ -712,6 +713,9 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		case *ast.ClassStatement:
 			if public(node.Name) {
 				exported := Export{Name: node.Name, Kind: ClassExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Superclass: expressionName(node.Superclass), Interfaces: append([]string(nil), node.Implements...), Span: node.Span()}
+				for _, parameter := range node.TypeParameters {
+					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
+				}
 				for _, member := range node.Body {
 					switch item := member.(type) {
 					case *ast.MethodStatement:
@@ -721,7 +725,11 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 							continue
 						}
 						if public(item.Name) {
-							exported.Members[item.Name] = Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Fails: failureTypeRef(item.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
+							method := Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Fails: failureTypeRef(item.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
+							for _, parameter := range item.TypeParameters {
+								method.TypeParameters = append(method.TypeParameters, parameter.Name)
+							}
+							exported.Members[item.Name] = method
 						}
 					case *ast.FieldStatement:
 						name := strings.TrimPrefix(item.Name, "@")
@@ -739,6 +747,9 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		case *ast.RecordStatement:
 			if public(node.Name) {
 				exported := Export{Name: node.Name, Kind: RecordExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Span: node.Span()}
+				for _, parameter := range node.TypeParameters {
+					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
+				}
 				for _, member := range node.Body {
 					field, ok := member.(*ast.RecordFieldStatement)
 					if !ok {

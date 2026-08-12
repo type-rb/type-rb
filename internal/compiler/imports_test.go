@@ -3442,6 +3442,47 @@ end
 	}
 }
 
+func TestProjectCompilerExportsGenericClassesRecordsAndMethods(t *testing.T) {
+	models := SourceUnit{Filename: "models.trb", ModulePath: "models/index", Source: []byte(`class Box<T>
+	@value: T
+
+	def initialize(value: T)
+		@value = value
+		return
+	end
+
+	def value(): T
+		return @value
+	end
+
+	def pair<U>(other: U): Pair<T, U>
+		return Pair<T, U>.new(left: @value, right: other)
+	end
+end
+
+record Pair<T, U>
+	left: T
+	right: U
+end
+`)}
+	main := SourceUnit{Filename: "main.trb", ModulePath: "app/main", Source: []byte(`import { Box, Pair } from models
+
+def pair(): Pair<Integer, String>
+	box := Box<Integer>.new(7)
+	return box.pair<String>("Ada")
+end
+`)}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{models, main}, Options{Mode: mode, GoModule: "example.com/generic-imports"})
+		if err != nil {
+			t.Fatalf("%s rejected imported generic objects: %v", mode, err)
+		}
+		if len(artifacts) != 2 {
+			t.Fatalf("%s generated %d artifacts, want 2", mode, len(artifacts))
+		}
+	}
+}
+
 func TestProjectCompilerRejectsImportCycles(t *testing.T) {
 	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("import b\n\nclass A\nend\n")}
 	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("import a\n\nclass B\nend\n")}

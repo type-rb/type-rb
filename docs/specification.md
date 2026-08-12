@@ -568,8 +568,7 @@ inferred from Go, Ruby, or TypeScript:
   order, and the Go representation of an initialized superclass;
 - method mutation effects and whether calling a mutating method requires a
   mutable receiver binding;
-- generic classes and variance, which belong to the user-defined generics
-  phase;
+- variance and generic class methods;
 - override compatibility and whether an explicit `override` marker is useful;
 - whether a field and method may share one source-level member name. Until a
   common backend-safe rule is chosen, portable code should use a private
@@ -577,30 +576,59 @@ inferred from Go, Ruby, or TypeScript:
 - whether abstract, final, or protected class members add enough value to
   justify new syntax. They are not part of the current language.
 
-## 4. Initial user-defined generics
+## 4. User-defined generics
 
-- The first user-defined generic declarations are payload enums, transparent
-  type aliases, and top-level functions: `enum Result<T, E>`,
-  `type DbResult<T> = Result<T, DbError>`, and
-  `def identity<T>(value: T): T`.
+- Generic declarations include payload enums, transparent type aliases,
+  records, classes, top-level functions, and instance methods: `enum Result<T,
+  E>`, `type DbResult<T> = Result<T, DbError>`, `record Pair<T, U>`, `class
+  Response<T>`, `def identity<T>(value: T): T`, and `response.json<T>()`.
 - `type Alias<T> = Target<T, ...>` creates a transparent alias rather than a
   nominal type. Assignment and member checking use the expanded target, while
   diagnostics, completion, imports, and generated signatures retain the alias.
   An alias of an enum also qualifies its variants, such as
   `DbResult<Integer>::Ok(1)` and `when DbResult::Err(error)`.
-- Calls use explicit type arguments in this phase. Examples are
+- Calls, construction, and generic method selection use explicit type
+  arguments in this phase. Examples are
   `Result<Integer, String>::Ok(1)` and `identity<String>("value")`. The checker
-  substitutes the arguments through parameters, return types, enum payloads,
-  case bindings, and cross-file signatures before producing typed IR.
+  also accepts `Box<Integer>.new(1)`, `Pair<Integer, String>.new(...)`, and
+  `response.json<Todo>()`. It substitutes arguments through parameters,
+  returns, fields, enum payloads, case bindings, and cross-file signatures
+  before producing typed IR.
 - Generic enum patterns omit repeated type arguments because the selector
   supplies them: a `case` over `Result<Integer, String>` uses
   `when Result::Ok(value)` and binds `value` as `Integer`.
 - User-defined generic arguments are invariant. Missing, extra, and mismatched
-  arguments are compile-time errors in every mode.
+  arguments are compile-time errors in every mode. A method type parameter may
+  not duplicate one owned by its class.
 - Payloadless variants of generic enums are reserved until typed singleton
-  construction has a portable representation. Generic records, classes,
-  instance/class methods, constraints, variance declarations, and type-argument
-  inference are staged work rather than implicit target-language behavior.
+  construction has a portable representation. Generic class methods, generic
+  interfaces, constraints, variance declarations, and type-argument inference
+  are staged work rather than implicit target-language behavior. A portable
+  generic instance method remains callable even when a target lacks native
+  generic methods; that backend lowers the checked operation through an
+  equivalent generated helper.
+
+```trb
+record Pair<T, U>
+	left: T
+	right: U
+end
+
+class Box<T>
+	@value: T
+
+	def initialize(value: T)
+		@value = value
+		return
+	end
+
+	def pair<U>(other: U): Pair<T, U>
+		return Pair<T, U>.new(left: @value, right: other)
+	end
+end
+
+pair := Box<Integer>.new(1).pair<String>("one")
+```
 
 ### 4.1 Standard Result
 

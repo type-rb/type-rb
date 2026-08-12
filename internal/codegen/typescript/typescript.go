@@ -172,7 +172,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.External {
 			return
 		}
-		header := "export class " + n.Name
+		header := "export class " + n.Name + tsTypeParameterDeclarations(n.TypeParameters)
 		if n.Superclass != nil {
 			if identifier, ok := n.Superclass.(*ir.Identifier); ok && identifier.Name == "ReactComponent" {
 				header += " extends React.Component<Record<string, never>>"
@@ -196,7 +196,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("}")
 	case *ir.Record:
-		g.line("export interface " + n.Name + " {")
+		g.line("export interface " + n.Name + tsTypeParameterDeclarations(n.TypeParameters) + " {")
 		g.indent++
 		for _, member := range n.Body {
 			switch field := member.(type) {
@@ -702,7 +702,7 @@ func (g *generator) method(method *ir.Method) {
 			prefix += "async "
 			returnType = "Promise<" + returnType + ">"
 		}
-		g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + returnType + " {")
+		g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + "): " + returnType + " {")
 	}
 	g.indent++
 	g.functionDepth++
@@ -924,6 +924,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.awaitCall(n, generated)
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
+			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "record" {
+				if identifier, named := application.Receiver.(*ir.Identifier); named {
+					return g.awaitCall(n, g.recordLiteralApplied(identifier, application.Arguments, n.Arguments))
+				}
+			}
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok && (g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record") {
 				return g.awaitCall(n, g.recordLiteral(identifier, n.Arguments))
 			}
@@ -1268,6 +1273,22 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
 	}
 	return "({" + strings.Join(fields, ", ") + "} satisfies " + record.Name + ")"
+}
+
+func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
+	fields := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			continue
+		}
+		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
+	}
+	items := make([]string, len(typeArguments))
+	for index, argument := range typeArguments {
+		items[index] = g.tsType(argument)
+	}
+	name := g.runtimeName(record.Name) + "<" + strings.Join(items, ", ") + ">"
+	return "({" + strings.Join(fields, ", ") + "} satisfies " + name + ")"
 }
 
 func portableFloatInteger(value, operation string) string {

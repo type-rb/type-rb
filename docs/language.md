@@ -311,8 +311,9 @@ Ordinary, raw-value, and payload enums all remain nominal, use qualified member
 names, support exhaustive `case`, and may define instance methods after their
 members. TypeRB does not add a separate `sum` declaration.
 
-The initial user-defined generics surface supports payload enums and top-level
-functions with explicit type arguments:
+User-defined generics support payload enums, transparent aliases, records,
+classes, top-level functions, and instance methods with explicit type
+arguments:
 
 ```trb
 def identity<T>(value: T): T
@@ -320,7 +321,26 @@ def identity<T>(value: T): T
 end
 
 text := identity<String>("value")
+
+class Box<T>
+	@value: T
+
+	def initialize(value: T)
+		@value = value
+		return
+	end
+
+	def echo<U>(value: U): U
+		return value
+	end
+end
+
+box := Box<Integer>.new(1)
+label := box.echo<String>("one")
 ```
+
+Generic arguments are invariant. Type-argument inference, generic interfaces,
+and generic class methods are not part of the current language.
 
 ## Control-flow expressions
 

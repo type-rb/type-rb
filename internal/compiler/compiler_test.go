@@ -2595,6 +2595,92 @@ end
 	}
 }
 
+func TestGenericClassesRecordsAndInstanceMethodsAcrossModes(t *testing.T) {
+	source := []byte(`class Box<T>
+	@value: T
+
+	def initialize(value: T)
+		@value = value
+		return
+	end
+
+	def value(): T
+		return @value
+	end
+
+	def pair<U>(other: U): Pair<T, U>
+		return Pair<T, U>.new(left: @value, right: other)
+	end
+end
+
+record Pair<T, U>
+	left: T
+	right: U
+end
+
+def main()
+	box := Box<Integer>.new(7)
+	pair := box.pair<String>("Ada")
+	puts(box.value())
+	puts(pair.left)
+	puts(pair.right)
+	return
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("generic_objects.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected generic objects: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	goOutput := string(artifacts["go"].Output)
+	for _, want := range []string{
+		"type Box[T any] struct",
+		"func NewBox[T any](value T) *Box[T]",
+		"func (self *Box[T]) Value() T",
+		"func BoxPair[T any, U any](self *Box[T], other U) Pair[T, U]",
+		"type Pair[T any, U any] struct",
+		"NewBox[int](7)",
+		"BoxPair[int, string](box, \"Ada\")",
+	} {
+		if !strings.Contains(goOutput, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
+		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "generic_objects.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated generic Go: %v\n%s", err, goOutput)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated generic Go did not type-check: %v\n%s", err, goOutput)
+	}
+
+	rubyOutput := string(artifacts["ruby"].Output)
+	for _, want := range []string{"class Box", "Pair = Data.define(:left, :right)", "Box.new(7)", `box.pair("Ada")`} {
+		if !strings.Contains(rubyOutput, want) {
+			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
+		}
+	}
+
+	typescriptOutput := string(artifacts["typescript"].Output)
+	for _, want := range []string{
+		"export class Box<T>",
+		"pair<U>(other: U): Pair<T, U>",
+		"export interface Pair<T, U>",
+		"new Box<number>(7)",
+		`box.pair<string>("Ada")`,
+	} {
+		if !strings.Contains(typescriptOutput, want) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
+		}
+	}
+}
+
 func TestTransparentGenericEnumAliasesAcrossModes(t *testing.T) {
 	source := []byte(`enum Result<T, E>
 	Ok(value: T)
@@ -2683,7 +2769,9 @@ func TestInitialUserGenericDiagnosticsAreModeIndependent(t *testing.T) {
 		{"enum type arity in annotation", "enum Result<T, E>\n\tOk(value: T)\n\tErr(error: E)\nend\ndef bad(value: Result<Integer>)\n\treturn\nend\n", "Result expects 2 type argument(s), got 1"},
 		{"enum construction needs all type arguments", "enum Result<T, E>\n\tOk(value: T)\n\tErr(error: E)\nend\ndef bad(): Result<Integer, String>\n\treturn Result::Ok(1)\nend\n", "Result expects 2 type argument(s), got 0"},
 		{"payloadless generic variant", "enum Option<T>\n\tSome(value: T)\n\tNone\nend\n", "payloadless members of generic enums are reserved"},
-		{"generic class method deferred", "class Box\n\tdef value<T>(item: T): T\n\t\treturn item\n\tend\nend\n", "only non-main top-level functions may be generic"},
+		{"generic method needs explicit arguments", "class Box\n\tdef value<T>(item: T): T\n\t\treturn item\n\tend\nend\ndef bad(box: Box): String\n\treturn box.value(\"x\")\nend\n", "generic method value requires explicit type arguments"},
+		{"generic class type arity", "class Box<T>\n\t@value: T\nend\ndef bad(value: Box)\n\treturn\nend\n", "Box expects 1 type argument(s), got 0"},
+		{"generic class method rejected", "class Box<T>\n\tdef self.value(): T\n\t\treturn nil\n\tend\nend\n", "class methods on a generic class cannot use the class type parameters"},
 		{"duplicate type parameter", "def identity<T, T>(value: T): T\n\treturn value\nend\n", "type parameter T is duplicated"},
 	}
 

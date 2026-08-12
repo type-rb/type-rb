@@ -696,11 +696,7 @@ func (p *Parser) parseRecord() ast.Statement {
 	start, end, next, comment := p.logicalLine(p.pos)
 	line := p.codeTokens(start, end)
 	record := &ast.RecordStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
-	if len(line) != 2 {
-		p.errorAt(spanOf(line), "record declaration must be: record Name")
-	} else {
-		record.Name = line[1].Lexeme
-	}
+	record.Name, record.TypeParameters = p.parseGenericDeclaration(line, "record")
 	p.pos = next
 	for !p.atEOF() {
 		p.skipSeparators()
@@ -952,16 +948,34 @@ func (p *Parser) parseClass() ast.Statement {
 		p.errorAt(line[0].Span, "class name is required")
 	} else {
 		nameEnd := len(line)
-		for i := 2; i < len(line); i++ {
+		genericEnd := -1
+		if len(line) > 2 && line[2].Lexeme == "<" {
+			if close := matchingIndex(line, 2, "<", ">"); close >= 0 {
+				genericEnd = close
+				c.Name, c.TypeParameters = p.parseGenericDeclaration(line[:genericEnd+1], "class")
+				nameEnd = genericEnd + 1
+			}
+		}
+		scanAt := 2
+		if genericEnd >= 0 {
+			scanAt = genericEnd + 1
+		}
+		for i := scanAt; i < len(line); i++ {
 			if line[i].Lexeme == "<" || line[i].Lexeme == "implements" {
 				nameEnd = i
 				break
 			}
 		}
-		c.Name = joinLexemes(line[1:nameEnd])
+		if genericEnd < 0 {
+			c.Name = joinLexemes(line[1:nameEnd])
+		}
 	}
 	extendsAt, implementsAt := -1, -1
-	for i := 2; i < len(line); i++ {
+	searchAt := 2
+	if len(c.TypeParameters) > 0 {
+		searchAt = matchingIndex(line, 2, "<", ">") + 1
+	}
+	for i := searchAt; i < len(line); i++ {
 		if line[i].Lexeme == "<" && extendsAt < 0 {
 			extendsAt = i
 		}

@@ -76,19 +76,21 @@ func (*Import) irStatement() {}
 
 type Class struct {
 	Base
-	Name       string
-	External   bool
-	Superclass Expression
-	Implements []string
-	Body       []Statement
+	Name           string
+	TypeParameters []string
+	External       bool
+	Superclass     Expression
+	Implements     []string
+	Body           []Statement
 }
 
 func (*Class) irStatement() {}
 
 type Record struct {
 	Base
-	Name string
-	Body []Statement
+	Name           string
+	TypeParameters []string
+	Body           []Statement
 }
 
 func (*Record) irStatement() {}
@@ -634,8 +636,11 @@ func (*EnumCall) irExpression() {}
 
 type TypeApply struct {
 	ExprBase
-	Receiver  Expression
-	Arguments []types.Type
+	Receiver       Expression
+	Arguments      []types.Type
+	Owner          string
+	OwnerArguments []types.Type
+	Kind           string
 }
 
 func (*TypeApply) irExpression() {}

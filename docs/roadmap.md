@@ -17,12 +17,12 @@ than detailed syntax.
 - Extend union type-pattern narrowing to nullable, collection, enum, record,
   and class alternatives. Add position-typed Tuples and precise optional-value
   semantics.
-- Add type-argument inference and generics for records, classes, and methods.
+- Add type-argument inference, generic interfaces, and generic class methods.
 - Define mutation effects for methods and parameters so immutable values remain
   safe across calls, not only assignments and known collection operations.
 - Complete the portable class model with explicit superclass construction and
-  `super` semantics, initialization order, override rules, generic classes, and
-  a backend-safe decision for field/method name collisions.
+  `super` semantics, initialization order, override rules, and a backend-safe
+  decision for field/method name collisions.
 - Specify module visibility, initialization order, constant evaluation, and
   cross-file semantics completely.
 
