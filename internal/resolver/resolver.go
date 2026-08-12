@@ -78,17 +78,18 @@ type EnumVariant struct {
 }
 
 type Member struct {
-	Name       string
-	Kind       ExportKind
-	Type       types.Type
-	Fails      types.Type
-	Parameters []types.Type
-	Required   int
-	Variadic   bool
-	Class      bool
-	Readonly   bool
-	EnumOwner  string
-	Generated  string
+	Name           string
+	Kind           ExportKind
+	Type           types.Type
+	Fails          types.Type
+	TypeParameters []string
+	Parameters     []types.Type
+	Required       int
+	Variadic       bool
+	Class          bool
+	Readonly       bool
+	EnumOwner      string
+	Generated      string
 }
 
 type Import struct {
@@ -404,6 +405,25 @@ func (r Result) Member(alias, name string) (Binding, bool) {
 // deliberately backed by the same standard package definition as its
 // function form, even though TypeRB source does not need to import the method.
 func (r Result) ReceiverMethod(receiver types.Type, name string) (Binding, bool) {
+	imports := make([]*Import, 0, len(r.Imports))
+	seen := map[*Import]bool{}
+	for _, imported := range r.Imports {
+		if imported == nil || imported.Definition == nil || seen[imported] {
+			continue
+		}
+		seen[imported] = true
+		imports = append(imports, imported)
+	}
+	sort.Slice(imports, func(i, j int) bool { return imports[i].Path < imports[j].Path })
+	for _, imported := range imports {
+		symbol, exists := imported.Definition.Symbols[name]
+		if !exists || !symbol.HasReceiver() || receiver.Nullable || !stdlib.ReceiverMatches(symbol.Receiver, receiver, symbol.TypeParameters) {
+			continue
+		}
+		copy := symbol
+		copy.Receiver = receiver
+		return Binding{Import: imported, Name: name, Library: &copy}, true
+	}
 	definition, symbol, ok := stdlib.LookupReceiverMethod(receiver, name)
 	if !ok {
 		return Binding{}, false
@@ -460,6 +480,37 @@ func (r Result) ImportedType(typeName string) (Binding, bool) {
 			copy := exported
 			return Binding{Import: imported, Name: typeName, Export: &copy}, true
 		}
+	}
+	return Binding{}, false
+}
+
+// InferredTypeMember resolves a member on a type produced by an explicitly
+// imported package even when the source did not import that type by name. This
+// keeps inferred library values usable without weakening named-import rules
+// for source annotations.
+func (r Result) InferredTypeMember(typeName, memberName string) (Binding, bool) {
+	imports := make([]*Import, 0, len(r.Imports))
+	seen := map[*Import]bool{}
+	for _, imported := range r.Imports {
+		if imported == nil || seen[imported] {
+			continue
+		}
+		seen[imported] = true
+		imports = append(imports, imported)
+	}
+	sort.Slice(imports, func(i, j int) bool { return imports[i].Path < imports[j].Path })
+	for _, imported := range imports {
+		exported, exists := imported.Exports[typeName]
+		if !exists {
+			continue
+		}
+		member, exists := exported.Members[memberName]
+		if !exists {
+			return Binding{}, false
+		}
+		exportCopy := exported
+		memberCopy := member
+		return Binding{Import: imported, Name: memberName, Export: &exportCopy, Member: &memberCopy}, true
 	}
 	return Binding{}, false
 }
@@ -712,6 +763,9 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		case *ast.ClassStatement:
 			if public(node.Name) {
 				exported := Export{Name: node.Name, Kind: ClassExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Superclass: expressionName(node.Superclass), Interfaces: append([]string(nil), node.Implements...), Span: node.Span()}
+				for _, parameter := range node.TypeParameters {
+					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
+				}
 				for _, member := range node.Body {
 					switch item := member.(type) {
 					case *ast.MethodStatement:
@@ -721,7 +775,11 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 							continue
 						}
 						if public(item.Name) {
-							exported.Members[item.Name] = Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Fails: failureTypeRef(item.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
+							method := Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Fails: failureTypeRef(item.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
+							for _, parameter := range item.TypeParameters {
+								method.TypeParameters = append(method.TypeParameters, parameter.Name)
+							}
+							exported.Members[item.Name] = method
 						}
 					case *ast.FieldStatement:
 						name := strings.TrimPrefix(item.Name, "@")
@@ -739,6 +797,9 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		case *ast.RecordStatement:
 			if public(node.Name) {
 				exported := Export{Name: node.Name, Kind: RecordExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Span: node.Span()}
+				for _, parameter := range node.TypeParameters {
+					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
+				}
 				for _, member := range node.Body {
 					field, ok := member.(*ast.RecordFieldStatement)
 					if !ok {

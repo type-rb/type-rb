@@ -90,6 +90,34 @@ end
 	}
 }
 
+func TestAttemptNormalizesVoidEffectsToUnitAcrossBackends(t *testing.T) {
+	source := []byte(`record AppError
+end
+
+def perform() fails AppError
+	return
+end
+
+def main()
+	result := attempt perform()
+	puts(result)
+	return
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("main.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected a Void effect attempt: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		if mode == "typescript" {
+			if strings.Contains(output, "let __trbValue1: void") || !strings.Contains(output, "let __trbValue1: Unit") {
+				t.Fatalf("TypeScript did not normalize the propagated success value to Unit:\n%s", output)
+			}
+		}
+	}
+}
+
 func TestFailsDiagnosticsRequireExplicitHandling(t *testing.T) {
 	tests := []struct {
 		name   string

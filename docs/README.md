@@ -15,6 +15,7 @@ larger applications.
 - [Language specification](specification.md)
 - [Standard library](standard-library.md)
 - [Package system](guides/packages.md)
+- [Browser HTTP client](guides/browser-http.md)
 - [Syntax highlighting](syntax-highlighting.md)
 - [Database schema workflow](guides/database.md)
 - [`trb/orm` guide](guides/orm.md)

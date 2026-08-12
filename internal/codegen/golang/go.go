@@ -292,6 +292,7 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 			g.line(header + condition + " {" + goTrailingComment(branch.TrailingComment))
 			g.indent++
+			g.caseNarrowings(branch.Narrowings)
 			for _, binding := range branch.Bindings {
 				if binding.Name == "_" {
 					continue
@@ -309,6 +310,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.HasElse {
 			g.line("} else {")
 			g.indent++
+			g.caseNarrowings(n.ElseNarrowings)
 			g.statements(n.Else)
 			g.indent--
 		} else {
@@ -491,7 +493,7 @@ func (g *generator) exprExpected(expression ir.Expression, expected types.Type) 
 }
 
 func (g *generator) record(record *ir.Record) {
-	g.line("type " + goIdentifier(record.Name, true) + " struct {")
+	g.line("type " + goIdentifier(record.Name, true) + goTypeParameterDeclarations(record.TypeParameters) + " struct {")
 	g.indent++
 	for _, member := range record.Body {
 		switch field := member.(type) {
@@ -749,6 +751,8 @@ func (g *generator) statements(statements []ir.Statement) {
 
 func (g *generator) class(class *ir.Class) {
 	name := goIdentifier(class.Name, true)
+	typeDeclarations := goTypeParameterDeclarations(class.TypeParameters)
+	typeArguments := goTypeParameterArguments(class.TypeParameters)
 	fields := []*ir.Field{}
 	methods := []*ir.Method{}
 	for _, member := range class.Body {
@@ -770,7 +774,7 @@ func (g *generator) class(class *ir.Class) {
 		g.methods[method.Name] = true
 	}
 	defer func() { g.methods = previousMethods }()
-	g.line("type " + name + " struct {")
+	g.line("type " + name + typeDeclarations + " struct {")
 	g.indent++
 	if class.Superclass != nil {
 		superclass := g.expr(class.Superclass)
@@ -787,7 +791,7 @@ func (g *generator) class(class *ir.Class) {
 	g.indent--
 	g.line("}")
 	for _, interfaceName := range class.Implements {
-		g.line("var _ " + g.goType(types.FromName(interfaceName)) + " = (*" + name + ")(nil)")
+		g.line("var _ " + g.goType(types.FromName(interfaceName)) + " = (*" + name + typeArguments + ")(nil)")
 	}
 	g.b.WriteByte('\n')
 
@@ -797,12 +801,12 @@ func (g *generator) class(class *ir.Class) {
 		if initialize != nil {
 			parameters = g.parameters(initialize.Parameters)
 		}
-		g.line("func New" + name + "(" + parameters + ") *" + name + " {")
+		g.line("func New" + name + typeDeclarations + "(" + parameters + ") *" + name + typeArguments + " {")
 		g.indent++
 		if initialize != nil {
 			g.parameterDefaults(initialize.Parameters)
 		}
-		g.line("self := &" + name + "{}")
+		g.line("self := &" + name + typeArguments + "{}")
 		for _, field := range fields {
 			if field.Value != nil {
 				g.line("self." + goFieldName(field.Name) + " = " + g.expr(field.Value))
@@ -826,16 +830,23 @@ func (g *generator) class(class *ir.Class) {
 		if method.Name == "initialize" || method.External {
 			continue
 		}
-		g.classMethod(name, method)
+		g.classMethod(name, class.TypeParameters, method)
 	}
 }
 
-func (g *generator) classMethod(className string, method *ir.Method) {
+func (g *generator) classMethod(className string, classTypeParameters []string, method *ir.Method) {
 	name := goMethodName(method.Name)
 	if method.Class {
 		g.line("func " + className + name + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
+	} else if len(method.TypeParameters) > 0 {
+		parameters := g.parameters(method.Parameters)
+		if parameters != "" {
+			parameters = ", " + parameters
+		}
+		allTypeParameters := append(append([]string(nil), classTypeParameters...), method.TypeParameters...)
+		g.line("func " + className + name + goTypeParameterDeclarations(allTypeParameters) + "(self *" + className + goTypeParameterArguments(classTypeParameters) + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 	} else {
-		g.line("func (self *" + className + ") " + name + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
+		g.line("func (self *" + className + goTypeParameterArguments(classTypeParameters) + ") " + name + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
 	}
 	g.indent++
 	g.parameterDefaults(method.Parameters)
@@ -1087,6 +1098,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if len(n.UnionAlternatives) > 0 {
+			return g.unionMemberExpression(n)
+		}
 		if n.Reference != nil && n.Reference.Intrinsic == "trb.orm.column" {
 			return g.expr(n.Receiver) + "." + goORMColumnGetter(n.Name) + "()"
 		}
@@ -1111,6 +1125,24 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[i] = g.expr(argument.Value)
 		}
 		args := strings.Join(parts, ", ")
+		if application, ok := n.Callee.(*ir.TypeApply); ok && application.Kind == "method" {
+			if member, method := application.Receiver.(*ir.Member); method {
+				name := goIdentifier(application.Owner, true) + goMethodName(member.Name)
+				if alias := g.referenceAlias(member.Reference); alias != "" {
+					name = alias + "." + name
+				}
+				typeArguments := append(append([]types.Type(nil), application.OwnerArguments...), application.Arguments...)
+				if len(typeArguments) > 0 {
+					items := make([]string, len(typeArguments))
+					for index, argument := range typeArguments {
+						items[index] = g.goType(argument)
+					}
+					name += "[" + strings.Join(items, ", ") + "]"
+				}
+				values := append([]string{g.expr(member.Receiver)}, parts...)
+				return name + "(" + strings.Join(values, ", ") + ")"
+			}
+		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
 			if reference.ReceiverMethod {
 				if member, ok := n.Callee.(*ir.Member); ok {
@@ -1120,6 +1152,23 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
+			if application, generic := member.Receiver.(*ir.TypeApply); generic && (application.Kind == "class" || application.Kind == "record") {
+				identifier, named := application.Receiver.(*ir.Identifier)
+				if named {
+					if application.Kind == "record" {
+						return g.recordLiteralApplied(identifier, application.Arguments, n.Arguments)
+					}
+					name := "New" + goIdentifier(identifier.Name, true)
+					if alias := g.referenceAlias(identifier.Reference); alias != "" {
+						name = alias + "." + name
+					}
+					arguments := make([]string, len(application.Arguments))
+					for index, argument := range application.Arguments {
+						arguments[index] = g.goType(argument)
+					}
+					return name + "[" + strings.Join(arguments, ", ") + "](" + args + ")"
+				}
+			}
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok {
 				if g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record" {
 					return g.recordLiteral(identifier, n.Arguments)
@@ -1362,6 +1411,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 			}
 			child.line(header + condition + " {" + goTrailingComment(branch.TrailingComment))
 			child.indent++
+			child.caseNarrowings(branch.Narrowings)
 			for _, binding := range branch.Bindings {
 				if binding.Name == "_" {
 					continue
@@ -1382,6 +1432,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		child.line("} else {")
 		child.indent++
 		if node.HasElse {
+			child.caseNarrowings(node.ElseNarrowings)
 			child.statements(node.Else)
 			if !node.ElseDiverges {
 				child.line("return " + child.expr(node.ElseResult))
@@ -1550,6 +1601,67 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 		fields = append(fields, goIdentifier(argument.Name, true)+": "+g.expr(argument.Value))
 	}
 	return name + "{" + strings.Join(fields, ", ") + "}"
+}
+
+func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
+	name := goIdentifier(record.Name, true)
+	if alias := g.referenceAlias(record.Reference); alias != "" {
+		name = alias + "." + name
+	}
+	items := make([]string, len(typeArguments))
+	for index, argument := range typeArguments {
+		items[index] = g.goType(argument)
+	}
+	fields := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			continue
+		}
+		fields = append(fields, goIdentifier(argument.Name, true)+": "+g.expr(argument.Value))
+	}
+	return name + "[" + strings.Join(items, ", ") + "]{" + strings.Join(fields, ", ") + "}"
+}
+
+func (g *generator) unionMemberExpression(member *ir.Member) string {
+	child := *g
+	child.b = strings.Builder{}
+	child.indent = 1
+	resultType := g.goType(member.ExprType())
+	field := goMethodName(member.Name)
+	if member.ClassField {
+		field = goFieldName(member.Name)
+	}
+	child.line("switch value := value.(type) {")
+	child.indent++
+	for _, alternative := range member.UnionAlternatives {
+		child.line("case " + g.goType(alternative.Type) + ":")
+		child.indent++
+		value := "value." + field
+		if member.ExprType().Kind == types.Float && (alternative.MemberType.Kind == types.Int || alternative.MemberType.Kind == types.IntLiteral) {
+			value = "float64(" + value + ")"
+		}
+		child.line("return " + value)
+		child.indent--
+	}
+	child.line("default:")
+	child.indent++
+	child.line("panic(\"unreachable discriminated union member access\")")
+	child.indent--
+	child.indent--
+	child.line("}")
+	return "func(value any) " + resultType + " {\n" + child.b.String() + strings.Repeat("\t", g.indent) + "}(" + g.expr(member.Receiver) + ")"
+}
+
+func (g *generator) caseNarrowings(narrowings []ir.CaseBinding) {
+	for _, narrowing := range narrowings {
+		name := goBindingIdentifier(narrowing.Name)
+		value := name
+		if narrowing.Type.Kind != types.Union {
+			value = name + ".(" + g.goType(narrowing.Type) + ")"
+		}
+		g.line(name + " := " + value)
+		g.line("_ = " + name)
+	}
 }
 
 func (g *generator) portableFloatInteger(value, operation string) string {
@@ -1987,15 +2099,21 @@ func (g *generator) goType(t types.Type) string {
 	switch t.Kind {
 	case types.Void:
 		result = ""
-	case types.Any, types.Invalid, types.Union:
+	case types.Any, types.Invalid:
 		result = "any"
+	case types.Union:
+		if base, ok := types.LiteralUnionBase(t); ok {
+			result = g.goType(base)
+		} else {
+			result = "any"
+		}
 	case types.Bool:
 		result = "bool"
-	case types.Int:
+	case types.Int, types.IntLiteral:
 		result = "int"
 	case types.Float:
 		result = "float64"
-	case types.String:
+	case types.String, types.StringLiteral:
 		result = "string"
 	case types.Bytes:
 		result = "[]byte"

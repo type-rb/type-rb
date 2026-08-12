@@ -126,6 +126,22 @@ func (g *generator) statement(statement ir.Statement) {
 			return
 		}
 		importPath := tsImportPath(g.modulePath, n.Path)
+		browserRuntime := n.Path == "trb/platform/typescript/browser/index" && n.RuntimeRequired
+		if browserRuntime {
+			browserAlias := "__trb_browser"
+			if n.Namespace && n.Alias != "" {
+				browserAlias = n.Alias
+			}
+			for symbol, kind := range n.SymbolKinds {
+				switch kind {
+				case "class", "record", "enum", "interface", "type_alias", "enum_alias":
+					g.typeAliases[symbol] = browserAlias
+				}
+			}
+			if !n.Namespace || n.Alias == "" {
+				g.line("import * as " + browserAlias + " from " + strconv.Quote(importPath) + ";")
+			}
+		}
 		if n.Namespace && n.Alias != "" {
 			for symbol, kind := range n.SymbolKinds {
 				switch kind {
@@ -154,7 +170,7 @@ func (g *generator) statement(statement ir.Statement) {
 					values = append(values, symbol)
 				}
 			}
-			if intrinsicRuntime {
+			if intrinsicRuntime && !browserRuntime {
 				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
 			if len(values) > 0 {
@@ -172,7 +188,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.External {
 			return
 		}
-		header := "export class " + n.Name
+		header := "export class " + n.Name + tsTypeParameterDeclarations(n.TypeParameters)
 		if n.Superclass != nil {
 			if identifier, ok := n.Superclass.(*ir.Identifier); ok && identifier.Name == "ReactComponent" {
 				header += " extends React.Component<Record<string, never>>"
@@ -196,7 +212,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("}")
 	case *ir.Record:
-		g.line("export interface " + n.Name + " {")
+		g.line("export interface " + n.Name + tsTypeParameterDeclarations(n.TypeParameters) + " {")
 		g.indent++
 		for _, member := range n.Body {
 			switch field := member.(type) {
@@ -375,6 +391,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("{")
 		g.indent++
 		g.line("const " + value + " = " + g.expr(n.Value) + ";" + tsTrailingComment(n.TrailingComment))
+		narrowingName, narrowingTemp := g.caseNarrowingCapture(n)
 		for index, branch := range n.Branches {
 			header := "if ("
 			if index > 0 {
@@ -386,6 +403,7 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 			g.line(header + condition + ") {" + tsTrailingComment(branch.TrailingComment))
 			g.indent++
+			g.caseNarrowings(branch.Narrowings, narrowingName, narrowingTemp)
 			for _, binding := range branch.Bindings {
 				if binding.Name == "_" {
 					continue
@@ -401,6 +419,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.HasElse {
 			g.line("} else {")
 			g.indent++
+			g.caseNarrowings(n.ElseNarrowings, narrowingName, narrowingTemp)
 			g.statements(n.Else)
 			g.indent--
 		} else {
@@ -464,6 +483,36 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 	g.line("}")
 	g.indent--
 	g.line("}")
+}
+
+func (g *generator) caseNarrowingCapture(node *ir.Case) (string, string) {
+	name := ""
+	for _, branch := range node.Branches {
+		if len(branch.Narrowings) > 0 {
+			name = branch.Narrowings[0].Name
+			break
+		}
+	}
+	if name == "" && len(node.ElseNarrowings) > 0 {
+		name = node.ElseNarrowings[0].Name
+	}
+	if name == "" {
+		return "", ""
+	}
+	g.temporary++
+	temporary := "__trbNarrow" + strconv.Itoa(g.temporary)
+	g.line("const " + temporary + " = " + name + ";")
+	return name, temporary
+}
+
+func (g *generator) caseNarrowings(narrowings []ir.CaseBinding, name, temporary string) {
+	for _, narrowing := range narrowings {
+		if narrowing.Name != name || temporary == "" {
+			continue
+		}
+		g.line("const " + name + " = " + temporary + " as " + g.tsType(narrowing.Type) + ";")
+		g.line("void " + name + ";")
+	}
 }
 
 func tsTypePattern(value string, typ types.Type) string {
@@ -669,7 +718,7 @@ func (g *generator) method(method *ir.Method) {
 			prefix += "async "
 			returnType = "Promise<" + returnType + ">"
 		}
-		g.line(prefix + name + "(" + g.parameters(method.Parameters) + "): " + returnType + " {")
+		g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + "): " + returnType + " {")
 	}
 	g.indent++
 	g.functionDepth++
@@ -882,6 +931,10 @@ func (g *generator) expr(expression ir.Expression) string {
 			if reference.ReceiverMethod {
 				if member, ok := n.Callee.(*ir.Member); ok {
 					parts = append([]string{g.expr(member.Receiver)}, parts...)
+				} else if application, ok := n.Callee.(*ir.TypeApply); ok {
+					if member, memberApply := application.Receiver.(*ir.Member); memberApply {
+						parts = append([]string{g.expr(member.Receiver)}, parts...)
+					}
 				}
 			}
 			generated := g.intrinsic(reference.Intrinsic, n, parts)
@@ -891,6 +944,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.awaitCall(n, generated)
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
+			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "record" {
+				if identifier, named := application.Receiver.(*ir.Identifier); named {
+					return g.awaitCall(n, g.recordLiteralApplied(identifier, application.Arguments, n.Arguments))
+				}
+			}
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok && (g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record") {
 				return g.awaitCall(n, g.recordLiteral(identifier, n.Arguments))
 			}
@@ -1103,6 +1161,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	child.temporary++
 	value := "__trbCase" + strconv.Itoa(child.temporary)
 	child.line("const " + value + " = " + child.expr(node.Value) + ";" + tsTrailingComment(node.TrailingComment))
+	narrowingName, narrowingTemp := child.caseNarrowingCapture(node)
 	for index, branch := range node.Branches {
 		header := "if ("
 		if index > 0 {
@@ -1116,6 +1175,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		}
 		child.line(header + condition + ") {" + tsTrailingComment(branch.TrailingComment))
 		child.indent++
+		child.caseNarrowings(branch.Narrowings, narrowingName, narrowingTemp)
 		for _, binding := range branch.Bindings {
 			if binding.Name == "_" {
 				continue
@@ -1138,6 +1198,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	child.line("} else {")
 	child.indent++
 	if node.HasElse {
+		child.caseNarrowings(node.ElseNarrowings, narrowingName, narrowingTemp)
 		child.statements(node.Else)
 		if !node.ElseDiverges {
 			child.line("return " + child.expr(node.ElseResult) + ";")
@@ -1232,6 +1293,22 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
 	}
 	return "({" + strings.Join(fields, ", ") + "} satisfies " + record.Name + ")"
+}
+
+func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
+	fields := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			continue
+		}
+		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
+	}
+	items := make([]string, len(typeArguments))
+	for index, argument := range typeArguments {
+		items[index] = g.tsType(argument)
+	}
+	name := g.runtimeName(record.Name) + "<" + strings.Join(items, ", ") + ">"
+	return "({" + strings.Join(fields, ", ") + "} satisfies " + name + ")"
 }
 
 func portableFloatInteger(value, operation string) string {
@@ -1441,10 +1518,6 @@ func (b *tsJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 	return name
 }
 
-func (g *generator) fetchJSON(method string, arguments []string) string {
-	return "void fetch(" + arguments[0] + ", { method: \"" + method + "\", headers: { \"Content-Type\": \"application/json\" }, body: JSON.stringify(" + arguments[1] + ") }).then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }).then(" + arguments[2] + " as any)"
-}
-
 func expressionReference(expression ir.Expression) *ir.Reference {
 	switch node := expression.(type) {
 	case *ir.Identifier:
@@ -1567,6 +1640,8 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 		result = "boolean"
 	case types.Int, types.Float:
 		result = "number"
+	case types.IntLiteral, types.StringLiteral:
+		result = t.Name
 	case types.String:
 		result = "string"
 	case types.Bytes:

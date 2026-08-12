@@ -178,8 +178,10 @@ func formatTokens(tokens []token.Token) string {
 		if previous != nil {
 			genericOpen := current.Lexeme == "<" && (startsUpper(previous.Lexeme) || genericApplicationOpen(tokens, i))
 			if genericOpen && lineKind == "class" && genericDepth == 0 && !classInheritance {
-				genericOpen = false
-				classInheritance = true
+				if !classTypeParameterOpen(tokens, i) {
+					genericOpen = false
+					classInheritance = true
+				}
 			}
 			genericClosers := 0
 			if current.Lexeme == ">" && genericDepth > 0 {
@@ -193,10 +195,10 @@ func formatTokens(tokens []token.Token) string {
 			if (current.Lexeme == "|" || previous.Lexeme == "|") && !openingPipe && !closingPipe && !inBlockParameters {
 				space = true
 			}
-			if lineKind == "class" && current.Lexeme == "<" {
+			if lineKind == "class" && current.Lexeme == "<" && !genericOpen {
 				space = true
 			}
-			if lineKind == "class" && previous.Lexeme == "<" {
+			if lineKind == "class" && previous.Lexeme == "<" && genericDepth == 0 {
 				space = true
 			}
 			if importLine && (previous.Lexeme == "/" || current.Lexeme == "/") {
@@ -231,6 +233,41 @@ func formatTokens(tokens []token.Token) string {
 	return strings.TrimSpace(out.String())
 }
 
+func classTypeParameterOpen(tokens []token.Token, open int) bool {
+	if open != 2 {
+		return false
+	}
+	close := matchingTokenIndex(tokens, open, "<", ">")
+	if close < 0 {
+		return false
+	}
+	for index := open + 1; index < close; index++ {
+		if tokens[index].Kind == token.Comment {
+			continue
+		}
+		if tokens[index].Kind != token.Identifier && tokens[index].Lexeme != "," {
+			return false
+		}
+	}
+	return true
+}
+
+func matchingTokenIndex(tokens []token.Token, open int, opening, closing string) int {
+	depth := 0
+	for index := open; index < len(tokens); index++ {
+		switch tokens[index].Lexeme {
+		case opening:
+			depth++
+		case closing:
+			depth--
+			if depth == 0 {
+				return index
+			}
+		}
+	}
+	return -1
+}
+
 func genericApplicationOpen(tokens []token.Token, open int) bool {
 	depth := 0
 	for index := open; index < len(tokens); index++ {
@@ -252,7 +289,7 @@ func genericApplicationOpen(tokens []token.Token, open int) bool {
 			if tokens[next].Kind == token.Comment {
 				continue
 			}
-			return tokens[next].Lexeme == "(" || tokens[next].Lexeme == "::"
+			return tokens[next].Lexeme == "(" || tokens[next].Lexeme == "." || tokens[next].Lexeme == "::"
 		}
 		return false
 	}

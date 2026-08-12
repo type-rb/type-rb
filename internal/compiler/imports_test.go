@@ -3264,6 +3264,64 @@ end
 	}
 }
 
+func TestProjectCompilerExportsDiscriminatedUnionContracts(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/contracts/responses.trb",
+		ModulePath: "contracts/responses",
+		Package:    "contracts",
+		Source: []byte(`record CreatedResponse
+	status: 201
+	body: String
+end
+
+record InvalidResponse
+	status: 422
+	body: Array<String>
+end
+
+type CreateResponse = CreatedResponse | InvalidResponse
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import contracts/responses
+
+def render(response: CreateResponse): String
+	case response.status
+	when 201
+		return response.body
+	when 422
+		return response.body[0]
+	end
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{consumer, contract}, Options{Mode: mode, GoModule: "example.com/project"})
+		if err != nil {
+			t.Fatalf("%s rejected imported discriminated union contract: %v", mode, err)
+		}
+		for _, artifact := range artifacts {
+			if artifact.Filename != consumer.Filename {
+				continue
+			}
+			output := string(artifact.Output)
+			wants := map[string][]string{
+				"go":         {"case contracts.CreatedResponse:", "response := response.(contracts.CreatedResponse)"},
+				"ruby":       {"case response.status", "return response.body"},
+				"typescript": {"import type { CreateResponse, CreatedResponse, InvalidResponse }", "as CreatedResponse"},
+			}[mode]
+			for _, want := range wants {
+				if !strings.Contains(output, want) {
+					t.Fatalf("generated %s imported contract consumer is missing %q:\n%s", mode, want, output)
+				}
+			}
+		}
+	}
+}
+
 func TestProjectCompilerExportsPayloadEnumSignatures(t *testing.T) {
 	contract := SourceUnit{
 		Filename:   "/project/contracts/token.trb",
@@ -3380,6 +3438,47 @@ end
 					t.Fatalf("generated %s generic consumer is missing %q:\n%s", mode, want, output)
 				}
 			}
+		}
+	}
+}
+
+func TestProjectCompilerExportsGenericClassesRecordsAndMethods(t *testing.T) {
+	models := SourceUnit{Filename: "models.trb", ModulePath: "models/index", Source: []byte(`class Box<T>
+	@value: T
+
+	def initialize(value: T)
+		@value = value
+		return
+	end
+
+	def value(): T
+		return @value
+	end
+
+	def pair<U>(other: U): Pair<T, U>
+		return Pair<T, U>.new(left: @value, right: other)
+	end
+end
+
+record Pair<T, U>
+	left: T
+	right: U
+end
+`)}
+	main := SourceUnit{Filename: "main.trb", ModulePath: "app/main", Source: []byte(`import { Box, Pair } from models
+
+def pair(): Pair<Integer, String>
+	box := Box<Integer>.new(7)
+	return box.pair<String>("Ada")
+end
+`)}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{models, main}, Options{Mode: mode, GoModule: "example.com/generic-imports"})
+		if err != nil {
+			t.Fatalf("%s rejected imported generic objects: %v", mode, err)
+		}
+		if len(artifacts) != 2 {
+			t.Fatalf("%s generated %d artifacts, want 2", mode, len(artifacts))
 		}
 	}
 }

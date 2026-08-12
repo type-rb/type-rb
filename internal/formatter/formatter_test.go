@@ -278,6 +278,22 @@ func TestFormatExplicitUserGenerics(t *testing.T) {
 	}
 }
 
+func TestFormatGenericClassesAndRecords(t *testing.T) {
+	source := []byte("class Box<T>\n@value:T\ndef pair<U>(other:U):Pair<T,U>\nreturn Pair<T,U>.new(left:@value,right:other)\nend\nend\nrecord Pair<T,U>\nleft:T\nright:U\nend\n")
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "class Box<T>\n\t@value: T\n\tdef pair<U>(other: U): Pair<T, U>\n\t\treturn Pair<T, U>.new(left: @value, right: other)\n\tend\nend\nrecord Pair<T, U>\n\tleft: T\n\tright: U\nend\n"
+	if string(formatted) != want {
+		t.Fatalf("unexpected generic object formatting:\n%s", formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("generic object formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatExpandsStatementSeparatorsAndPreservesNestedSemicolons(t *testing.T) {
 	source := []byte("enum State; Open; Closed; end # enum\n" +
 		"def label(value:State):String; case value; when State::Open; return \"a;b\"; when State::Closed; return \"closed\"; end; end\n" +
@@ -352,5 +368,21 @@ func TestFormatUnionTypesAndPatterns(t *testing.T) {
 	}
 	if string(formatted) != want {
 		t.Fatalf("unexpected union formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
+func TestFormatLiteralTypesAndDiscriminantCase(t *testing.T) {
+	source := []byte("record Response\nstatus:201\nkind:\"created\"\nend\ndef show(response:Response):String\ncase response.status\nwhen 201\nreturn response.kind\nend\nend\n")
+	want := "record Response\n\tstatus: 201\n\tkind: \"created\"\nend\ndef show(response: Response): String\n\tcase response.status\n\twhen 201\n\t\treturn response.kind\n\tend\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected literal type formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("literal type formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
 	}
 }

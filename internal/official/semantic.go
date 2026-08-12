@@ -15,8 +15,78 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 		return webSymbols()
 	case "trb.web.testing":
 		return webTestingSymbols()
+	case "trb.typescript.browser":
+		return typescriptBrowserSymbols()
 	default:
 		panic(fmt.Sprintf("unknown official package semantic provider %q", provider))
+	}
+}
+
+func typescriptBrowserSymbols() map[string]stdlib.Symbol {
+	typeT := types.FromName("T")
+	nullable := func(typ types.Type) types.Type {
+		typ.Nullable = true
+		return typ
+	}
+	responseOf := func(body types.Type) types.Type {
+		return types.Type{Kind: types.Named, Name: "Response", Args: []types.Type{body}}
+	}
+	body := types.FromName("Body")
+	requestError := types.FromName("RequestError")
+	jsonRuntime := []types.Type{types.FromName("JsonValue")}
+	return map[string]stdlib.Symbol{
+		"request": {
+			Name:      "request",
+			Intrinsic: "trb.platform.typescript.browser.request",
+			Receiver:  types.FromName("HttpClient"),
+			Parameters: []stdlib.Parameter{
+				{Name: "path", Type: types.FromName("String")},
+				{Name: "method", Type: types.FromName("HttpMethod"), Optional: true, Keyword: true},
+				{Name: "query", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("QueryParameter")}}, Optional: true, Keyword: true},
+				{Name: "headers", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Header")}}, Optional: true, Keyword: true},
+				{Name: "body", Type: nullable(types.FromName("RequestBody")), Optional: true, Keyword: true},
+				{Name: "timeout_milliseconds", Type: nullable(types.FromName("Integer")), Optional: true, Keyword: true},
+			},
+			Return: responseOf(body),
+			Fails:  requestError,
+		},
+		"json": {
+			Name:                "json",
+			Intrinsic:           "trb.platform.typescript.browser.response_json",
+			Receiver:            responseOf(body),
+			TypeParameters:      []string{"T"},
+			Return:              responseOf(typeT),
+			Fails:               requestError,
+			RuntimeDependencies: jsonRuntime,
+		},
+		"text": {
+			Name:      "text",
+			Intrinsic: "trb.platform.typescript.browser.response_text",
+			Receiver:  responseOf(body),
+			Return:    responseOf(types.FromName("String")),
+		},
+		"bytes": {
+			Name:      "bytes",
+			Intrinsic: "trb.platform.typescript.browser.response_bytes",
+			Receiver:  responseOf(body),
+			Return:    responseOf(types.FromName("Bytes")),
+		},
+		"no_body": {
+			Name:      "no_body",
+			Intrinsic: "trb.platform.typescript.browser.response_no_body",
+			Receiver:  responseOf(body),
+			Return:    responseOf(types.FromName("NoBody")),
+			Fails:     requestError,
+		},
+		"json_body": {
+			Name:                "json_body",
+			Intrinsic:           "trb.platform.typescript.browser.json_body",
+			TypeParameters:      []string{"T"},
+			Parameters:          []stdlib.Parameter{{Name: "value", Type: typeT}},
+			Return:              types.FromName("RequestBody"),
+			Fails:               requestError,
+			RuntimeDependencies: jsonRuntime,
+		},
 	}
 }
 

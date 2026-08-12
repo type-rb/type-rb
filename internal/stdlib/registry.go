@@ -976,14 +976,6 @@ end
 			"data_boolean":    {Name: "data_boolean", Intrinsic: "trb.platform.typescript.react.data_boolean", Parameters: []Parameter{{Name: "event", Type: types.FromName("ReactEvent")}, {Name: "name", Type: stringType}}, Return: booleanType},
 		},
 	},
-	"trb/platform/typescript/web": {
-		Path: "trb/platform/typescript/web", Kind: Platform, Targets: map[string]bool{"typescript": true},
-		Symbols: map[string]Symbol{
-			"get_json":   {Name: "get_json", Intrinsic: "trb.platform.typescript.web.get_json", Parameters: []Parameter{{Name: "url", Type: stringType}, {Name: "callback", Type: types.FromName("Any")}}, Return: voidType},
-			"post_json":  {Name: "post_json", Intrinsic: "trb.platform.typescript.web.post_json", Parameters: []Parameter{{Name: "url", Type: stringType}, {Name: "value", Type: types.FromName("Any")}, {Name: "callback", Type: types.FromName("Any")}}, Return: voidType},
-			"patch_json": {Name: "patch_json", Intrinsic: "trb.platform.typescript.web.patch_json", Parameters: []Parameter{{Name: "url", Type: stringType}, {Name: "value", Type: types.FromName("Any")}, {Name: "callback", Type: types.FromName("Any")}}, Return: voidType},
-		},
-	},
 }
 
 // receiverMethods maps Ruby-like method syntax to the same compiler-owned
@@ -1338,6 +1330,14 @@ func receiverMatches(pattern, actual types.Type, typeParameterNames []string) bo
 		return true
 	}
 	return matches(pattern, actual)
+}
+
+// ReceiverMatches reports whether a compiler-known receiver pattern applies to
+// a checked value type. Official packages use the same matching rule as the
+// portable standard library, while remaining unavailable until explicitly
+// imported.
+func ReceiverMatches(pattern, actual types.Type, typeParameterNames []string) bool {
+	return receiverMatches(pattern, actual, typeParameterNames)
 }
 
 // Instantiate substitutes compiler-owned type parameters inferred from call

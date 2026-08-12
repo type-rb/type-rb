@@ -1,0 +1,10 @@
+{
+  "name": "trb/platform/typescript/browser",
+  "version": "0.1.0",
+  "module": "trb/platform/typescript/browser/index",
+  "source": "src/index.trb",
+  "semanticProvider": "trb.typescript.browser",
+  "kind": "platform",
+  "targets": ["typescript"],
+  "nativeDependencies": {}
+}

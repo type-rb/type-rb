@@ -311,8 +311,9 @@ Ordinary, raw-value, and payload enums all remain nominal, use qualified member
 names, support exhaustive `case`, and may define instance methods after their
 members. TypeRB does not add a separate `sum` declaration.
 
-The initial user-defined generics surface supports payload enums and top-level
-functions with explicit type arguments:
+User-defined generics support payload enums, transparent aliases, records,
+classes, top-level functions, and instance methods with explicit type
+arguments:
 
 ```trb
 def identity<T>(value: T): T
@@ -320,7 +321,26 @@ def identity<T>(value: T): T
 end
 
 text := identity<String>("value")
+
+class Box<T>
+	@value: T
+
+	def initialize(value: T)
+		@value = value
+		return
+	end
+
+	def echo<U>(value: U): U
+		return value
+	end
+end
+
+box := Box<Integer>.new(1)
+label := box.echo<String>("one")
 ```
+
+Generic arguments are invariant. Type-argument inference, generic interfaces,
+and generic class methods are not part of the current language.
 
 ## Control-flow expressions
 
@@ -368,6 +388,50 @@ to model these paths is not source syntax. A `return` inside the single-result
 block of `map`, `select`, or `reduce` remains unsupported; use explicit `each`
 when a transformation needs enclosing control flow. The statement forms remain
 available when no value is needed.
+
+## Literal types and discriminated unions
+
+Integer and String literals can constrain data fields. An exhaustive `case`
+on a readonly literal field narrows the complete union value:
+
+```trb
+record Created
+	status: 201
+	body: String
+end
+
+record Invalid
+	status: 422
+	body: Array<String>
+end
+
+type Response = Created | Invalid
+
+def message(response: Response): String
+	case response.status
+	when 201
+		return response.body
+	when 422
+		return response.body[0]
+	end
+end
+```
+
+Record fields are immutable. A class field used as a discriminant must be
+`readonly`. Alternatives may share a literal, in which case that branch keeps
+their remaining union. Ordinary scalar cases are also available when no
+contract is present:
+
+```trb
+case response.status
+when 200
+	puts("ok")
+when 404
+	puts("missing")
+else
+	puts("unexpected response")
+end
+```
 
 ## Arrays, hashes, and iteration
 

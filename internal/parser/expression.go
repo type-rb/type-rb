@@ -106,7 +106,7 @@ func (p *exprParser) parse(min int) ast.Expression {
 
 func (p *exprParser) parseGenericApplication(receiver ast.Expression) ast.Expression {
 	// Keep comparison parsing unambiguous: explicit type arguments are only
-	// recognized immediately before a call or namespace access.
+	// recognized immediately before a call, member access, or namespace access.
 	original := p.tokens
 	prefix := append([]token.Token(nil), p.tokens[:p.pos]...)
 	expanded := expandGenericClosers(p.tokens[p.pos:])
@@ -127,7 +127,7 @@ func (p *exprParser) parseGenericApplication(receiver ast.Expression) ast.Expres
 			break
 		}
 	}
-	if close < 0 || close+1 >= len(p.tokens) || p.tokens[close+1].Lexeme != "(" && p.tokens[close+1].Lexeme != "::" {
+	if close < 0 || close+1 >= len(p.tokens) || p.tokens[close+1].Lexeme != "(" && p.tokens[close+1].Lexeme != "." && p.tokens[close+1].Lexeme != "::" {
 		p.tokens = original
 		return nil
 	}

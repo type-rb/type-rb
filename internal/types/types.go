@@ -3,6 +3,7 @@ package types
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -17,8 +18,10 @@ const (
 	Void          Kind = "void"
 	Bool          Kind = "bool"
 	Int           Kind = "int"
+	IntLiteral    Kind = "int_literal"
 	Float         Kind = "float"
 	String        Kind = "string"
+	StringLiteral Kind = "string_literal"
 	Bytes         Kind = "bytes"
 	StringBuilder Kind = "string_builder"
 	Array         Kind = "array"
@@ -93,6 +96,9 @@ func FunctionSignature(function Type) ([]Type, Type, bool) {
 }
 
 func FromName(name string) Type {
+	if literal, ok := LiteralFromSource(name); ok {
+		return literal
+	}
 	switch strings.ToLower(name) {
 	case "", "void":
 		return Type{Kind: Void, Name: "Void"}
@@ -125,6 +131,56 @@ func FromName(name string) Type {
 	}
 }
 
+// LiteralFromSource returns the compile-time type denoted by an explicit
+// Integer or String literal in a type position. Literal types are erased to
+// their ordinary scalar representation by non-TypeScript backends.
+func LiteralFromSource(source string) (Type, bool) {
+	if strings.HasPrefix(source, `"`) {
+		value, err := strconv.Unquote(source)
+		if err != nil {
+			return Type{}, false
+		}
+		return Type{Kind: StringLiteral, Name: strconv.Quote(value)}, true
+	}
+	value, err := strconv.ParseInt(strings.ReplaceAll(source, "_", ""), 10, 64)
+	if err != nil {
+		return Type{}, false
+	}
+	return Type{Kind: IntLiteral, Name: strconv.FormatInt(value, 10)}, true
+}
+
+func IsLiteral(typ Type) bool {
+	return typ.Kind == IntLiteral || typ.Kind == StringLiteral
+}
+
+func LiteralBase(typ Type) (Type, bool) {
+	switch typ.Kind {
+	case IntLiteral:
+		return FromName("Integer"), true
+	case StringLiteral:
+		return FromName("String"), true
+	default:
+		return Type{}, false
+	}
+}
+
+func LiteralUnionBase(typ Type) (Type, bool) {
+	if typ.Kind != Union || len(typ.Args) == 0 {
+		return Type{}, false
+	}
+	base, literal := LiteralBase(typ.Args[0])
+	if !literal {
+		return Type{}, false
+	}
+	for _, alternative := range typ.Args[1:] {
+		current, ok := LiteralBase(alternative)
+		if !ok || !Equivalent(base, current) {
+			return Type{}, false
+		}
+	}
+	return base, true
+}
+
 // CommonType returns the most-specific type that can represent both inputs
 // through portable implicit conversions. It deliberately does not fall back to
 // Any: callers choose whether a missing common type is an error, a union, or a
@@ -137,6 +193,12 @@ func CommonType(left, right Type) (Type, bool) {
 		return left, true
 	}
 	if Equivalent(left, right) {
+		return left, true
+	}
+	if base, literal := LiteralBase(left); literal && Equivalent(base, right) {
+		return right, true
+	}
+	if base, literal := LiteralBase(right); literal && Equivalent(left, base) {
 		return left, true
 	}
 	if left.Kind == Any || right.Kind == Any {
@@ -186,13 +248,20 @@ func UnionOf(input ...Type) Type {
 	}
 
 	hasFloat := false
+	hasInteger := false
+	hasString := false
 	for _, alternative := range alternatives {
 		hasFloat = hasFloat || alternative.Kind == Float && !alternative.Nullable
+		hasInteger = hasInteger || alternative.Kind == Int && !alternative.Nullable
+		hasString = hasString || alternative.Kind == String && !alternative.Nullable
 	}
-	if hasFloat {
+	if hasFloat || hasInteger || hasString {
 		filtered := alternatives[:0]
 		for _, alternative := range alternatives {
-			if alternative.Kind != Int || alternative.Nullable {
+			subsumed := hasFloat && !alternative.Nullable && (alternative.Kind == Int || alternative.Kind == IntLiteral)
+			subsumed = subsumed || hasInteger && !alternative.Nullable && alternative.Kind == IntLiteral
+			subsumed = subsumed || hasString && !alternative.Nullable && alternative.Kind == StringLiteral
+			if !subsumed {
 				filtered = append(filtered, alternative)
 			}
 		}
@@ -231,6 +300,18 @@ func Assignable(target, value Type) bool {
 	}
 	target.Nullable = false
 	value.Nullable = false
+	if Equivalent(target, value) {
+		return true
+	}
+	if base, literal := LiteralBase(value); literal && Equivalent(target, base) {
+		return true
+	}
+	if base, literal := LiteralBase(value); literal && base.Kind == Int && target.Kind == Float {
+		return true
+	}
+	if IsLiteral(target) || IsLiteral(value) {
+		return false
+	}
 	if target.Kind == Union {
 		values := []Type{value}
 		if value.Kind == Union {

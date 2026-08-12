@@ -141,6 +141,60 @@ end
   record, and class alternatives are staged until one runtime test model is
   specified across all backends.
 
+#### Literal types and discriminated unions
+
+- An explicit Integer or String literal may appear in a type position, for
+  example `status: 201` or `kind: "created"`. It constrains that value to the
+  one written literal. A literal value widens safely to its ordinary
+  `Integer` or `String` type; an arbitrary scalar does not narrow implicitly to
+  a literal type.
+- Literal types may form unions such as `200 | 404`. A scalar alternative
+  subsumes its literals, so `200 | Integer` normalizes to `Integer`. Nullable,
+  array, and generic modifiers are not accepted on a literal type.
+- `case` accepts explicit Integer and String values. A case over an ordinary
+  scalar may be open and normally uses `else`; a case over a literal union is
+  exhaustive and may omit `else` after handling every alternative.
+- A union of records or classes exposes a data member only when every
+  alternative exposes that member through the same storage model. The member
+  type is the normalized union of the alternative field types. This rule does
+  not select methods from a union.
+- When such a common member has a literal type in every alternative, a case on
+  `binding.member` narrows the complete lexical `binding` in each branch.
+  Record fields are immutable discriminants. A class field must be declared
+  `readonly`; imported fields retain their exported readonly flag.
+- Alternatives may share a discriminant. That branch retains their union
+  rather than choosing one arbitrarily. An `else` branch, when present, narrows
+  to the unhandled alternatives.
+
+```trb
+record CreatedResponse
+	status: 201
+	body: String
+end
+
+record InvalidResponse
+	status: 422
+	body: Array<String>
+end
+
+type CreateResponse = CreatedResponse | InvalidResponse
+
+def body_text(response: CreateResponse): String
+	case response.status
+	when 201
+		return response.body
+	when 422
+		return response.body[0]
+	end
+end
+```
+
+Literal types are compile-time constraints rather than new runtime scalar
+representations. TypeScript output retains them in generated types. Go and
+Ruby erase them to the corresponding scalar while typed IR preserves the
+discriminant and Go lowers erased-union field access through checked type
+switches.
+
 ### 3.3 Access Rules (Private)
 
 - Private class/method names must start with `_`.
@@ -514,8 +568,7 @@ inferred from Go, Ruby, or TypeScript:
   order, and the Go representation of an initialized superclass;
 - method mutation effects and whether calling a mutating method requires a
   mutable receiver binding;
-- generic classes and variance, which belong to the user-defined generics
-  phase;
+- variance and generic class methods;
 - override compatibility and whether an explicit `override` marker is useful;
 - whether a field and method may share one source-level member name. Until a
   common backend-safe rule is chosen, portable code should use a private
@@ -523,30 +576,59 @@ inferred from Go, Ruby, or TypeScript:
 - whether abstract, final, or protected class members add enough value to
   justify new syntax. They are not part of the current language.
 
-## 4. Initial user-defined generics
+## 4. User-defined generics
 
-- The first user-defined generic declarations are payload enums, transparent
-  type aliases, and top-level functions: `enum Result<T, E>`,
-  `type DbResult<T> = Result<T, DbError>`, and
-  `def identity<T>(value: T): T`.
+- Generic declarations include payload enums, transparent type aliases,
+  records, classes, top-level functions, and instance methods: `enum Result<T,
+  E>`, `type DbResult<T> = Result<T, DbError>`, `record Pair<T, U>`, `class
+  Response<T>`, `def identity<T>(value: T): T`, and `response.json<T>()`.
 - `type Alias<T> = Target<T, ...>` creates a transparent alias rather than a
   nominal type. Assignment and member checking use the expanded target, while
   diagnostics, completion, imports, and generated signatures retain the alias.
   An alias of an enum also qualifies its variants, such as
   `DbResult<Integer>::Ok(1)` and `when DbResult::Err(error)`.
-- Calls use explicit type arguments in this phase. Examples are
+- Calls, construction, and generic method selection use explicit type
+  arguments in this phase. Examples are
   `Result<Integer, String>::Ok(1)` and `identity<String>("value")`. The checker
-  substitutes the arguments through parameters, return types, enum payloads,
-  case bindings, and cross-file signatures before producing typed IR.
+  also accepts `Box<Integer>.new(1)`, `Pair<Integer, String>.new(...)`, and
+  `response.json<Todo>()`. It substitutes arguments through parameters,
+  returns, fields, enum payloads, case bindings, and cross-file signatures
+  before producing typed IR.
 - Generic enum patterns omit repeated type arguments because the selector
   supplies them: a `case` over `Result<Integer, String>` uses
   `when Result::Ok(value)` and binds `value` as `Integer`.
 - User-defined generic arguments are invariant. Missing, extra, and mismatched
-  arguments are compile-time errors in every mode.
+  arguments are compile-time errors in every mode. A method type parameter may
+  not duplicate one owned by its class.
 - Payloadless variants of generic enums are reserved until typed singleton
-  construction has a portable representation. Generic records, classes,
-  instance/class methods, constraints, variance declarations, and type-argument
-  inference are staged work rather than implicit target-language behavior.
+  construction has a portable representation. Generic class methods, generic
+  interfaces, constraints, variance declarations, and type-argument inference
+  are staged work rather than implicit target-language behavior. A portable
+  generic instance method remains callable even when a target lacks native
+  generic methods; that backend lowers the checked operation through an
+  equivalent generated helper.
+
+```trb
+record Pair<T, U>
+	left: T
+	right: U
+end
+
+class Box<T>
+	@value: T
+
+	def initialize(value: T)
+		@value = value
+		return
+	end
+
+	def pair<U>(other: U): Pair<T, U>
+		return Pair<T, U>.new(left: @value, right: other)
+	end
+end
+
+pair := Box<Integer>.new(1).pair<String>("one")
+```
 
 ### 4.1 Standard Result
 

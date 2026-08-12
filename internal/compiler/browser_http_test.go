@@ -1,0 +1,162 @@
+package compiler
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestTypeScriptBrowserHTTPClient(t *testing.T) {
+	source := []byte(`import {
+	Body,
+	Header,
+	HttpClient,
+	HttpMethod,
+	NoBody,
+	QueryParameter,
+	RequestError,
+	Response,
+	json_body,
+} from trb/platform/typescript/browser
+
+record Todo
+	id: Integer
+	title: String
+end
+
+record CreateTodoInput
+	title: String
+end
+
+def fetch_todo(client: HttpClient, id: Integer): Response<Todo> fails RequestError
+	raw := client.request("/todos", query: [QueryParameter.new(name: "id", value: id.to_s())], headers: [Header.new(name: "accept", value: "application/json")], timeout_milliseconds: 1000)
+	return raw.json<Todo>()
+end
+
+def create_todo(client: HttpClient, input: CreateTodoInput): Response<Todo> fails RequestError
+	body := json_body(input)
+	raw := client.request("/todos", method: HttpMethod::Post, body: body)
+	return raw.json<Todo>()
+end
+
+def raw_body(client: HttpClient): Body fails RequestError
+	return client.request("/health").body
+end
+
+def text_response(raw: Response<Body>): Response<String>
+	return raw.text()
+end
+
+def bytes_response(raw: Response<Body>): Response<Bytes>
+	return raw.bytes()
+end
+
+def empty_response(raw: Response<Body>): Response<NoBody> fails RequestError
+	return raw.no_body()
+end
+`)
+
+	artifact, err := Compile("browser_http.trb", source, "typescript")
+	if err != nil {
+		t.Fatalf("typescript rejected browser HTTP client: %v", err)
+	}
+	output := string(artifact.Output)
+	for _, want := range []string{
+		`import * as __trb_browser from "./trb/platform/typescript/browser/index.ts";`,
+		`async function fetch_todo`,
+		`globalThis.fetch`,
+		`nativeResponse.arrayBuffer()`,
+		`__trb_browser.RequestErrorKind.Contract`,
+		`new __trb_browser.RequestError(__trb_browser.RequestErrorKind.Contract, message, response)`,
+		`JSON.parse`,
+		`JSON.stringify`,
+		`__trb_browser.Response<Todo>`,
+		`expected an empty response body`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "response.ok") {
+		t.Fatalf("declared HTTP status responses must not be converted into transport errors:\n%s", output)
+	}
+}
+
+func TestBrowserHTTPInferredTypesRemainUsableWithoutTypeImports(t *testing.T) {
+	source := []byte(`import { HttpClient, RequestError } from trb/platform/typescript/browser
+
+record Todo
+	id: Integer
+	title: String
+end
+
+def title(client: HttpClient): String fails RequestError
+	response := client.request("/todo").json<Todo>()
+	return response.body.title
+end
+`)
+	artifact, err := Compile("browser_http_inferred.trb", source, "typescript")
+	if err != nil {
+		t.Fatalf("typescript rejected inferred browser types: %v", err)
+	}
+	output := string(artifact.Output)
+	if !strings.Contains(output, "response.__trb_body.title") {
+		t.Fatalf("inferred generic class fields were not specialized and lowered:\n%s", output)
+	}
+}
+
+func TestOfficialReceiverMethodsRequireTheirImport(t *testing.T) {
+	source := []byte(`class HttpClient
+end
+
+def fetch(client: HttpClient)
+	client.request("/todo")
+	return
+end
+`)
+	if _, err := Compile("browser_http_missing_import.trb", source, "typescript"); err == nil || !strings.Contains(err.Error(), "class HttpClient has no instance member request") {
+		t.Fatalf("browser receiver method was available without an import: %v", err)
+	}
+}
+
+func TestTypeScriptBrowserPackageBuildsAsAnOfficialProjectUnit(t *testing.T) {
+	source := SourceUnit{Filename: "main.trb", ModulePath: "app/main", Source: []byte(`import { HttpClient } from trb/platform/typescript/browser
+
+def client(): HttpClient
+	return HttpClient.new("https://api.example.test")
+end
+`)}
+	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err != nil {
+		t.Fatalf("browser package project build failed: %v", err)
+	}
+	found := false
+	for _, artifact := range artifacts {
+		if artifact.IR.ModulePath != "trb/platform/typescript/browser/index" {
+			continue
+		}
+		found = true
+		output := string(artifact.Output)
+		for _, want := range []string{"export class Headers", "all(name: string)", "export class Response<T>", "export class RequestError", "export class HttpClient"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated browser package is missing %q:\n%s", want, output)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("official browser package artifact is missing")
+	}
+}
+
+func TestBrowserHTTPPackageIsTypeScriptOnly(t *testing.T) {
+	source := []byte(`import { HttpClient } from trb/platform/typescript/browser
+
+def client(): HttpClient
+	return HttpClient.new()
+end
+`)
+	for _, mode := range []string{"go", "ruby"} {
+		if _, err := Compile("browser_http.trb", source, mode); err == nil || !strings.Contains(err.Error(), "does not support mode "+mode) {
+			t.Fatalf("%s accepted the TypeScript browser package: %v", mode, err)
+		}
+	}
+}

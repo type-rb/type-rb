@@ -29,12 +29,18 @@ Bun can be selected explicitly for server packages.
 The implemented language includes functions, typed first-class function values
 with lexical capture, and classes, modules and
 interfaces, records, ordinary and raw-value enums, payload enums as sum types,
-enum instance methods, initial generics, normalized unions, immutable and
+enum instance methods, explicit generics for enums, aliases, records, classes,
+top-level functions and instance methods, normalized unions, immutable and
 mutable bindings, typed collections and iteration, exhaustive pattern
 matching, value-producing `if` and `case` expressions, and explicit fallible
 effects with `fails` and `attempt`. See the
 [language guide](language.md) and [specification](specification.md) for the
 current semantics.
+
+Integer and String literal types support status- and kind-indexed data.
+Exhaustive `case` over a readonly literal field narrows the complete record or
+class union in every backend and in the REPL. Ordinary scalar `case` remains
+available for untyped external values that have no endpoint or data contract.
 
 The compiler-owned portable library covers scalar and collection foundations,
 `Result`, bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
@@ -155,6 +161,16 @@ commands provide plan, guarded apply, export, lock, and drift checks around a
 pinned external sqldef executable on SQLite, PostgreSQL, and MySQL. Production
 compatibility policy remains future work.
 
+TypeScript browser applications can import the official
+`trb/platform/typescript/browser` package. Its single request primitive accepts
+typed methods, repeated query parameters and headers, text/bytes/form/JSON
+bodies, and timeouts. Fetch responses retain status, headers, final URL, and
+buffered bytes; explicit JSON decoding produces `Response<T>` and preserves the
+raw response in a classified `RequestError` when the contract is invalid.
+Non-2xx statuses remain ordinary responses. The backend inserts suspension
+only in generated TypeScript, so TypeRB source does not add target-specific
+`async` syntax.
+
 The compiler pipeline is:
 
 ```text
@@ -171,9 +187,9 @@ target code, and browser tools.
 The current alpha does not yet provide:
 
 - a complete everyday receiver API;
-- position-typed tuples or comprehensive narrowing for nullable and structured
-  union alternatives;
-- inferred type arguments or generic records, classes, and methods;
+- position-typed tuples or type-pattern narrowing for nullable, collection,
+  and non-discriminated structured union alternatives;
+- inferred type arguments, generic interfaces, or generic class methods;
 - complete superclass construction, override, and mutation-effect semantics;
 - first-class blocks or multi-statement collection transformations;
 - concise `Result` propagation syntax;

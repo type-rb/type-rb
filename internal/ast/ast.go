@@ -64,10 +64,11 @@ func (*ImportStatement) statementNode() {}
 
 type ClassStatement struct {
 	Base
-	Name       string
-	Superclass Expression
-	Implements []string
-	Body       []Statement
+	Name           string
+	TypeParameters []TypeParameter
+	Superclass     Expression
+	Implements     []string
+	Body           []Statement
 }
 
 func (*ClassStatement) statementNode() {}
@@ -77,8 +78,9 @@ func (*ClassStatement) statementNode() {}
 // inheritance. Backends lower it to their native data representation.
 type RecordStatement struct {
 	Base
-	Name string
-	Body []Statement
+	Name           string
+	TypeParameters []TypeParameter
+	Body           []Statement
 }
 
 func (*RecordStatement) statementNode() {}

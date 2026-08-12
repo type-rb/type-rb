@@ -164,9 +164,17 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		return result
 	case *ast.ClassStatement:
-		return &ir.Class{Base: base(n.Base), Name: n.Name, Superclass: l.expression(n.Superclass), Implements: append([]string(nil), n.Implements...), Body: l.statements(n.Body)}
+		result := &ir.Class{Base: base(n.Base), Name: n.Name, Superclass: l.expression(n.Superclass), Implements: append([]string(nil), n.Implements...), Body: l.statements(n.Body)}
+		for _, parameter := range n.TypeParameters {
+			result.TypeParameters = append(result.TypeParameters, parameter.Name)
+		}
+		return result
 	case *ast.RecordStatement:
-		return &ir.Record{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
+		result := &ir.Record{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
+		for _, parameter := range n.TypeParameters {
+			result.TypeParameters = append(result.TypeParameters, parameter.Name)
+		}
+		return result
 	case *ast.RecordFieldStatement:
 		attributes := make([]ir.Attribute, len(n.Attributes))
 		for index, attribute := range n.Attributes {
@@ -689,6 +697,9 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			}
 		}
 		member := &ir.Member{ExprBase: base, Receiver: l.expression(receiver), Name: name, Safe: n.Safe, Namespace: n.Namespace, ClassField: l.checked.ClassFieldAccesses[n], Reference: reference}
+		for _, alternative := range l.checked.UnionMemberAccesses[n] {
+			member.UnionAlternatives = append(member.UnionAlternatives, ir.UnionMemberAlternative{Type: alternative.Alternative, MemberType: alternative.Member})
+		}
 		fails := l.checked.ExpressionEffects[n]
 		if fails.Kind != "" && fails.Kind != types.Never {
 			raw := &ir.Call{
@@ -706,7 +717,8 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		return member
 	case *ast.GenericExpression:
-		result := &ir.TypeApply{ExprBase: base, Receiver: l.expression(n.Receiver)}
+		application := l.checked.GenericApplications[n]
+		result := &ir.TypeApply{ExprBase: base, Receiver: l.expression(n.Receiver), Owner: application.Owner, OwnerArguments: append([]types.Type(nil), application.OwnerArguments...), Kind: application.Kind}
 		for _, argument := range n.Arguments {
 			result.Arguments = append(result.Arguments, lowerType(argument))
 		}
@@ -762,6 +774,10 @@ func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
 		HasElse:  node.HasElse,
 	}
 	result.Else, result.ElseResult, result.ElseDiverges = l.controlFlowBranch(node.Else, expression)
+	narrowing, narrows := l.checked.CaseNarrowings[node]
+	if narrows && narrowing.Else.Kind != "" && narrowing.Else.Kind != types.Invalid {
+		result.ElseNarrowings = append(result.ElseNarrowings, ir.CaseBinding{Name: narrowing.Name, Type: narrowing.Else})
+	}
 	for _, branch := range node.Branches {
 		body, branchResult, diverges := l.controlFlowBranch(branch.Body, expression)
 		lowered := ir.CaseBranch{
@@ -780,6 +796,11 @@ func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
 			lowered.PayloadEnum = pattern.PayloadEnum
 			for _, binding := range pattern.Bindings {
 				lowered.Bindings = append(lowered.Bindings, ir.CaseBinding{Name: binding.Name, Field: binding.Field.Name, Type: binding.Field.Type})
+			}
+		}
+		if narrows {
+			if narrowed, ok := narrowing.Branches[branch.Value]; ok {
+				lowered.Narrowings = append(lowered.Narrowings, ir.CaseBinding{Name: narrowing.Name, Type: narrowed})
 			}
 		}
 		result.Branches = append(result.Branches, lowered)
@@ -949,7 +970,7 @@ func (l *lowerer) effectPropagation(span token.Span, value ir.Expression, succes
 	returnFailure := l.resultFailure(span, boundary, errorIdentifier)
 
 	return &ir.Case{
-		ExprBase: ir.NewExprBase(span, success),
+		ExprBase: ir.NewExprBase(span, effectSuccessType(success)),
 		Value:    value,
 		Branches: []ir.CaseBranch{
 			{

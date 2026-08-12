@@ -174,3 +174,26 @@ func TestBundledWebRequestIDMiddlewarePackage(t *testing.T) {
 		t.Fatal("request ID package source is empty")
 	}
 }
+
+func TestBundledTypeScriptBrowserPackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/platform/typescript/browser")
+	if !ok {
+		t.Fatal("trb/platform/typescript/browser is not registered")
+	}
+	definition := packageDefinition.Definition
+	if definition.Kind != "platform" || !definition.Supports("typescript") || definition.Supports("go") || definition.Supports("ruby") {
+		t.Fatalf("unexpected browser package boundary: %#v", definition)
+	}
+	request := definition.Symbols["request"]
+	if request.Intrinsic != "trb.platform.typescript.browser.request" || request.Receiver.String() != "HttpClient" || request.Return.String() != "Response<Body>" || request.Fails.String() != "RequestError" {
+		t.Fatalf("unexpected request contract: %#v", request)
+	}
+	json := definition.Symbols["json"]
+	if json.Receiver.String() != "Response<Body>" || json.Return.String() != "Response<T>" || len(json.TypeParameters) != 1 || json.Fails.String() != "RequestError" {
+		t.Fatalf("unexpected response JSON contract: %#v", json)
+	}
+	jsonBody := definition.Symbols["json_body"]
+	if jsonBody.Return.String() != "RequestBody" || jsonBody.Fails.String() != "RequestError" || len(jsonBody.TypeParameters) != 1 {
+		t.Fatalf("unexpected JSON body contract: %#v", jsonBody)
+	}
+}
