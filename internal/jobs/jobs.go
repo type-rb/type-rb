@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -31,6 +32,8 @@ type Job struct {
 	ModulePath string
 	Parameters []Parameter
 	Fails      types.Type
+	Queue      string
+	Priority   int
 }
 
 type Manifest struct {
@@ -108,6 +111,18 @@ func ManifestFrom(extensions []ir.Extension) *Manifest {
 	return nil
 }
 
+func (m *Manifest) Job(name string) (Job, bool) {
+	if m == nil {
+		return Job{}, false
+	}
+	for _, job := range m.Jobs {
+		if job.Name == name {
+			return job, true
+		}
+	}
+	return Job{}, false
+}
+
 func (m *Manifest) Augment(program *ir.Program) {
 	if m == nil || program == nil {
 		return
@@ -147,8 +162,36 @@ func (m *Manifest) Augment(program *ir.Program) {
 				Parameters: parameters, SuccessType: types.FromName("JobReference"),
 				ReturnType: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
 			})
+			delayedParameters := append([]ir.Parameter{{Name: "delay", Type: types.FromName("Duration")}}, parameters...)
+			class.Body = append(class.Body, &ir.Method{
+				Name: "perform_later_in", External: true, Class: true,
+				Parameters: delayedParameters, SuccessType: types.FromName("JobReference"),
+				ReturnType: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+			})
+			ensureJobRuntimeImport(program, "trb/std/time/index", "Duration", "class")
 		}
 	}
+}
+
+func ensureJobRuntimeImport(program *ir.Program, modulePath, symbol, kind string) {
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ir.Import)
+		if !ok || imported.Path != modulePath {
+			continue
+		}
+		if !contains(imported.Symbols, symbol) {
+			imported.Symbols = append(imported.Symbols, symbol)
+		}
+		if imported.SymbolKinds == nil {
+			imported.SymbolKinds = map[string]string{}
+		}
+		imported.SymbolKinds[symbol] = kind
+		imported.RuntimeRequired = true
+		return
+	}
+	program.Statements = append([]ir.Statement{&ir.Import{
+		Path: modulePath, Symbols: []string{symbol}, SymbolKinds: map[string]string{symbol: kind}, Implicit: true, RuntimeRequired: true,
+	}}, program.Statements...)
 }
 
 func contains(values []string, target string) bool {
@@ -175,6 +218,12 @@ func Declarations(programs []*ast.Program) (*declaration.Catalog, error) {
 		declared.ClassMembers["perform_later"] = declaration.Member{
 			Name: "perform_later", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_later",
 			Parameters: parameters, Return: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+			Class: true, Provider: PackageName,
+		}
+		delayedParameters := append([]declaration.Parameter{{Name: "delay", Type: types.FromName("Duration")}}, parameters...)
+		declared.ClassMembers["perform_later_in"] = declaration.Member{
+			Name: "perform_later_in", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_later_in",
+			Parameters: delayedParameters, Return: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
 			Class: true, Provider: PackageName,
 		}
 		catalog.Types[job.Name] = declared
@@ -247,7 +296,10 @@ func discoverJob(modulePath string, class *ast.ClassStatement) (Job, error) {
 	if !perform.ReturnType.Empty() {
 		return Job{}, fmt.Errorf("trb/jobs Job %s perform must not return a value", class.Name)
 	}
-	job := Job{Name: class.Name, ModulePath: modulePath, Fails: typeRef(perform.Fails)}
+	job := Job{Name: class.Name, ModulePath: modulePath, Fails: typeRef(perform.Fails), Queue: "default"}
+	if err := discoverJobDefaults(&job, class); err != nil {
+		return Job{}, err
+	}
 	for _, parameter := range perform.Parameters {
 		if parameter.Keyword || parameter.Rest || parameter.KeywordRest || parameter.Default != nil {
 			return Job{}, fmt.Errorf("trb/jobs Job %s perform initially accepts required positional parameters only", class.Name)
@@ -259,6 +311,56 @@ func discoverJob(modulePath string, class *ast.ClassStatement) (Job, error) {
 		job.Parameters = append(job.Parameters, Parameter{Name: parameter.Name, Type: typ})
 	}
 	return job, nil
+}
+
+func discoverJobDefaults(job *Job, class *ast.ClassStatement) error {
+	seen := map[string]bool{}
+	for _, statement := range class.Body {
+		expression, ok := statement.(*ast.ExpressionStatement)
+		if !ok {
+			continue
+		}
+		call, ok := expression.Expression.(*ast.CallExpression)
+		if !ok || call.Block != nil {
+			continue
+		}
+		callee, ok := call.Callee.(*ast.Identifier)
+		if !ok || callee.Name != "queue" && callee.Name != "priority" {
+			continue
+		}
+		if seen[callee.Name] {
+			return fmt.Errorf("trb/jobs Job %s declares %s more than once", job.Name, callee.Name)
+		}
+		seen[callee.Name] = true
+		if len(call.Arguments) != 1 || call.Arguments[0].Name != "" {
+			return fmt.Errorf("trb/jobs Job %s.%s expects one positional literal", job.Name, callee.Name)
+		}
+		literal, ok := call.Arguments[0].Value.(*ast.Literal)
+		if !ok {
+			return fmt.Errorf("trb/jobs Job %s.%s expects a literal", job.Name, callee.Name)
+		}
+		switch callee.Name {
+		case "queue":
+			if literal.Kind != ast.StringLiteral {
+				return fmt.Errorf("trb/jobs Job %s.queue expects a String literal", job.Name)
+			}
+			value, err := strconv.Unquote(literal.Raw)
+			if err != nil || strings.TrimSpace(value) == "" || len(value) > 255 {
+				return fmt.Errorf("trb/jobs Job %s.queue must be a non-empty String of at most 255 bytes", job.Name)
+			}
+			job.Queue = value
+		case "priority":
+			if literal.Kind != ast.IntegerLiteral {
+				return fmt.Errorf("trb/jobs Job %s.priority expects an Integer literal", job.Name)
+			}
+			value, err := strconv.ParseInt(strings.ReplaceAll(literal.Raw, "_", ""), 10, 32)
+			if err != nil || value < 0 {
+				return fmt.Errorf("trb/jobs Job %s.priority must be a non-negative Integer", job.Name)
+			}
+			job.Priority = int(value)
+		}
+	}
+	return nil
 }
 
 func initialArgumentType(typ types.Type) bool {

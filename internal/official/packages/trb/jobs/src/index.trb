@@ -9,3 +9,11 @@ end
 
 class Job
 end
+
+def queue(name: String)
+	return
+end
+
+def priority(value: Integer)
+	return
+end

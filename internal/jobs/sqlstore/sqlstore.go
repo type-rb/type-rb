@@ -117,13 +117,26 @@ func Schema(dialect Dialect) ([]string, error) {
 }
 
 func ClaimSelection(dialect Dialect) (string, error) {
+	return claimSelection(dialect, "")
+}
+
+// ClaimSelectionForQueue returns the atomic claim selection restricted to one
+// queue. The backend supplies the placeholder because SQL drivers differ.
+func ClaimSelectionForQueue(dialect Dialect, placeholder string) (string, error) {
+	if placeholder == "" {
+		return "", fmt.Errorf("queue placeholder must not be empty")
+	}
+	return claimSelection(dialect, " AND queue_name = "+placeholder)
+}
+
+func claimSelection(dialect Dialect, queueCondition string) (string, error) {
 	switch dialect {
 	case SQLite:
-		return `SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= CURRENT_TIMESTAMP ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1`, nil
+		return `SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= CURRENT_TIMESTAMP` + queueCondition + ` ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1`, nil
 	case PostgreSQL:
-		return `SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= CURRENT_TIMESTAMP ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`, nil
+		return `SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= CURRENT_TIMESTAMP` + queueCondition + ` ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`, nil
 	case MySQL:
-		return `SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= CURRENT_TIMESTAMP(6) ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`, nil
+		return `SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= CURRENT_TIMESTAMP(6)` + queueCondition + ` ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`, nil
 	default:
 		return "", fmt.Errorf("unsupported job SQL dialect %q", dialect)
 	}

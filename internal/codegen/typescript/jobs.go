@@ -51,12 +51,25 @@ func (g *generator) jobsIntegrationImports(manifest *jobs.Manifest) {
 
 func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 	jobName := "Job"
+	method := "perform_later"
 	if member, ok := call.Callee.(*ir.Member); ok {
+		method = member.Name
 		if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
 			jobName = identifier.Name
 		}
 	}
-	return jobName + "." + tsMethodName("perform_later") + "(" + strings.Join(arguments, ", ") + ")"
+	return jobName + "." + tsMethodName(method) + "(" + strings.Join(arguments, ", ") + ")"
+}
+
+func (g *generator) jobsDeclaration(call *ir.Call) bool {
+	if g.jobs == nil || call == nil {
+		return false
+	}
+	identifier, ok := call.Callee.(*ir.Identifier)
+	if !ok || identifier.Reference == nil || identifier.Reference.Package != "trb/jobs/index" {
+		return false
+	}
+	return identifier.Name == "queue" || identifier.Name == "priority"
 }
 
 func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
@@ -89,7 +102,23 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		g.indent++
 		g.line("try {")
 		g.indent++
-		g.line("const reference = await __trbJobsRuntime.trbJobsEnqueue(" + strconv.Quote(job.Name) + ", JSON.stringify([" + strings.Join(arguments, ", ") + "]));")
+		g.line("const reference = await __trbJobsRuntime.trbJobsEnqueue(" + strconv.Quote(job.Name) + ", JSON.stringify([" + strings.Join(arguments, ", ") + "]), " + strconv.Quote(job.Queue) + ", " + strconv.Itoa(job.Priority) + ", 0);")
+		g.line("return __trbJobResult.Result.Ok<JobReference, EnqueueError>(reference);")
+		g.indent--
+		g.line("} catch (error) {")
+		g.indent++
+		g.line("return __trbJobResult.Result.Err<JobReference, EnqueueError>({ message: error instanceof Error ? error.message : String(error) });")
+		g.indent--
+		g.line("}")
+		g.indent--
+		g.line("}")
+		delayedParameters := append([]string{"delay: Duration"}, parameters...)
+		g.line("export async function " + tsMethodName("perform_later_in") + "(" + strings.Join(delayedParameters, ", ") + "): Promise<__trbJobResult.Result<JobReference, EnqueueError>> {")
+		g.indent++
+		g.line("try {")
+		g.indent++
+		g.line("const waitMilliseconds = delay.whole_seconds() * 1000 + Math.ceil(delay.nanosecond() / 1000000);")
+		g.line("const reference = await __trbJobsRuntime.trbJobsEnqueue(" + strconv.Quote(job.Name) + ", JSON.stringify([" + strings.Join(arguments, ", ") + "]), " + strconv.Quote(job.Queue) + ", " + strconv.Itoa(job.Priority) + ", waitMilliseconds);")
 		g.line("return __trbJobResult.Result.Ok<JobReference, EnqueueError>(reference);")
 		g.indent--
 		g.line("} catch (error) {")
@@ -107,6 +136,7 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 func (g *generator) jobsStorage(config jobs.Config) {
 	statements, _ := sqlstore.Schema(sqlstore.Dialect(config.DatabaseAdapter))
 	selection, _ := sqlstore.ClaimSelection(sqlstore.Dialect(config.DatabaseAdapter))
+	queueSelection, _ := sqlstore.ClaimSelectionForQueue(sqlstore.Dialect(config.DatabaseAdapter), tsJobsPlaceholder(config.DatabaseAdapter, 1))
 	g.line("export type TrbJobsClaim = { id: string; job_name: string; payload: string; payload_version: number; attempts: number; maximum_attempts: number };")
 	g.line("export type TrbJobsStatus = { id: string; queue_name: string; job_name: string; state: string; attempts: number; maximum_attempts: number; last_error: string | null };")
 	g.line("const trbJobsAdapter = " + strconv.Quote(config.DatabaseAdapter) + ";")
@@ -124,12 +154,12 @@ func (g *generator) jobsStorage(config jobs.Config) {
 	g.line("function trbJobsAffected(rows: any): number { return Number(rows.affectedRows ?? rows.count ?? rows.changes ?? rows.length ?? 0); }")
 	g.line("export async function trbJobsClose(): Promise<void> { if (trbJobsDatabase !== null) await trbJobsDatabase.close(); trbJobsDatabase = null; trbJobsSchema = null; }")
 
-	insert := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + tsJobsPlaceholders(config.DatabaseAdapter, 6, 0) + ", CURRENT_TIMESTAMP, 'ready', 0, " + tsJobsPlaceholder(config.DatabaseAdapter, 7) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-	g.line("export async function trbJobsEnqueue(jobName: string, payload: string): Promise<JobReference> { await trbJobsEnsureSchema(); const id = crypto.randomUUID().replaceAll(\"-\", \"\"); await trbJobsDB().unsafe(" + strconv.Quote(insert) + ", [id, \"default\", jobName, payload, 1, 0, " + strconv.Itoa(config.DefaultMaximumAttempts) + "]); return { id, job_name: jobName }; }")
+	insert := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + tsJobsPlaceholders(config.DatabaseAdapter, 7, 0) + ", 'ready', 0, " + tsJobsPlaceholder(config.DatabaseAdapter, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+	g.line("export async function trbJobsEnqueue(jobName: string, payload: string, queueName: string, priority: number, waitMilliseconds: number): Promise<JobReference> { if (waitMilliseconds < 0) throw new Error(\"job delay must not be negative\"); await trbJobsEnsureSchema(); const id = crypto.randomUUID().replaceAll(\"-\", \"\"); const timestamp = new Date(Date.now() + waitMilliseconds).toISOString(); const runAt = timestamp.slice(0, waitMilliseconds === 0 ? 19 : 23).replace(\"T\", \" \" ); await trbJobsDB().unsafe(" + strconv.Quote(insert) + ", [id, queueName, jobName, payload, 1, priority, runAt, " + strconv.Itoa(config.DefaultMaximumAttempts) + "]); return { id, job_name: jobName }; }")
 
 	update := "UPDATE trb_jobs SET state = 'running', attempts = attempts + 1, claimed_by = " + tsJobsPlaceholder(config.DatabaseAdapter, 1) + ", claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = " + tsJobsPlaceholder(config.DatabaseAdapter, 2) + " AND state = 'ready'"
 	read := "SELECT job_name, payload, payload_version, attempts, maximum_attempts FROM trb_jobs WHERE id = " + tsJobsPlaceholder(config.DatabaseAdapter, 1)
-	g.line("export async function trbJobsClaim(workerId: string): Promise<TrbJobsClaim | null> { await trbJobsEnsureSchema(); const run = async (transaction: SQL | TransactionSQL): Promise<TrbJobsClaim | null> => { const selected = await transaction.unsafe(" + strconv.Quote(selection) + ", []) as any[]; if (selected.length === 0) return null; const id = String(selected[0]!.id); const updated = await transaction.unsafe(" + strconv.Quote(update) + ", [workerId, id]); if (trbJobsAffected(updated) !== 1) return null; const rows = await transaction.unsafe(" + strconv.Quote(read) + ", [id]) as any[]; const row = rows[0]!; return { id, job_name: String(row.job_name), payload: typeof row.payload === \"string\" ? row.payload : JSON.stringify(row.payload), payload_version: Number(row.payload_version), attempts: Number(row.attempts), maximum_attempts: Number(row.maximum_attempts) }; }; return trbJobsAdapter === \"sqlite\" ? await trbJobsDB().begin(\"immediate\", run) : await trbJobsDB().begin(run); }")
+	g.line("export async function trbJobsClaim(workerId: string): Promise<TrbJobsClaim | null> { await trbJobsEnsureSchema(); const run = async (transaction: SQL | TransactionSQL): Promise<TrbJobsClaim | null> => { const queueName = process.env.TRB_JOBS_QUEUE ?? \"\"; const selected = await transaction.unsafe(queueName === \"\" ? " + strconv.Quote(selection) + " : " + strconv.Quote(queueSelection) + ", queueName === \"\" ? [] : [queueName]) as any[]; if (selected.length === 0) return null; const id = String(selected[0]!.id); const updated = await transaction.unsafe(" + strconv.Quote(update) + ", [workerId, id]); if (trbJobsAffected(updated) !== 1) return null; const rows = await transaction.unsafe(" + strconv.Quote(read) + ", [id]) as any[]; const row = rows[0]!; return { id, job_name: String(row.job_name), payload: typeof row.payload === \"string\" ? row.payload : JSON.stringify(row.payload), payload_version: Number(row.payload_version), attempts: Number(row.attempts), maximum_attempts: Number(row.maximum_attempts) }; }; return trbJobsAdapter === \"sqlite\" ? await trbJobsDB().begin(\"immediate\", run) : await trbJobsDB().begin(run); }")
 
 	ack := "DELETE FROM trb_jobs WHERE id = " + tsJobsPlaceholder(config.DatabaseAdapter, 1) + " AND state = 'running' AND claimed_by = " + tsJobsPlaceholder(config.DatabaseAdapter, 2)
 	g.line("export async function trbJobsAcknowledge(id: string, workerId: string): Promise<void> { const result = await trbJobsDB().unsafe(" + strconv.Quote(ack) + ", [id, workerId]); if (trbJobsAffected(result) !== 1) throw new Error(\"job claim was lost before acknowledgement\"); }")

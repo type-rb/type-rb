@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/jobs"
 	"github.com/type-rb/type-rb/internal/jobs/sqlstore"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 func (g *generator) jobsRuntimeAlias() string {
@@ -26,8 +27,10 @@ func (g *generator) jobsRuntimeAlias() string {
 
 func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 	jobName := "Job"
+	method := "perform_later"
 	qualifier := ""
 	if member, ok := call.Callee.(*ir.Member); ok {
+		method = member.Name
 		if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
 			jobName = identifier.Name
 			if alias := g.typeAliases[identifier.Name]; alias != "" {
@@ -35,7 +38,7 @@ func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 			}
 		}
 	}
-	return qualifier + goIdentifier(jobName, true) + goMethodName("perform_later") + "(" + strings.Join(arguments, ", ") + ")"
+	return qualifier + goIdentifier(jobName, true) + goMethodName(method) + "(" + strings.Join(arguments, ", ") + ")"
 }
 
 func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
@@ -57,6 +60,7 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	g.requireImport("errors", "")
 	g.requireImport("os", "")
 	g.requireImport("sync", "")
+	g.requireImport("time", "stdtime")
 	if config.DatabaseAdapter == "mysql" {
 		g.requireImport("net/url", "")
 		g.requireImport("strings", "")
@@ -246,7 +250,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest) {
 	g.requireImport("os/signal", "")
 	g.requireImport("strconv", "")
 	g.requireImport("syscall", "")
-	g.requireImport("time", "")
+	g.requireImport("time", "stdtime")
 
 	aliases := g.jobsModuleAliases(manifest)
 	g.line("func trbJobsDispatch(jobName string, payload string, payloadVersion int) (result error) {")
@@ -319,27 +323,27 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest) {
 	g.line("defer stop()")
 	g.line("workerId := \"worker-\" + strconv.Itoa(os.Getpid())")
 	g.line("defer func() { _ = " + jobsAlias + ".TrbJobsReleaseWorker(context.Background(), workerId); " + jobsAlias + ".TrbJobsCloseDatabase() }()")
-	g.line("pollInterval := " + strconv.Itoa(config.PollIntervalMilliseconds) + " * time.Millisecond")
-	g.line("heartbeatInterval := " + strconv.Itoa(max(config.LeaseTimeoutMilliseconds/3, 100)) + " * time.Millisecond")
-	g.line("shutdownTimeout := " + strconv.Itoa(config.ShutdownTimeoutMilliseconds) + " * time.Millisecond")
+	g.line("pollInterval := " + strconv.Itoa(config.PollIntervalMilliseconds) + " * stdtime.Millisecond")
+	g.line("heartbeatInterval := " + strconv.Itoa(max(config.LeaseTimeoutMilliseconds/3, 100)) + " * stdtime.Millisecond")
+	g.line("shutdownTimeout := " + strconv.Itoa(config.ShutdownTimeoutMilliseconds) + " * stdtime.Millisecond")
 	g.line("runOnce := os.Getenv(\"TRB_JOBS_ONCE\") == \"1\"")
 	g.line("for {")
 	g.indent++
 	g.line("if signalContext.Err() != nil { return true }")
 	g.line("if _, err := " + jobsAlias + ".TrbJobsRecoverStale(signalContext); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs recover stale:\", err) }")
 	g.line("claim, err := " + jobsAlias + ".TrbJobsClaimNext(signalContext, workerId)")
-	g.line("if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs claim:\", err); select { case <-signalContext.Done(): return true; case <-time.After(pollInterval): continue } }")
-	g.line("if claim == nil { if runOnce { return true }; select { case <-signalContext.Done(): return true; case <-time.After(pollInterval): continue } }")
+	g.line("if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs claim:\", err); select { case <-signalContext.Done(): return true; case <-stdtime.After(pollInterval): continue } }")
+	g.line("if claim == nil { if runOnce { return true }; select { case <-signalContext.Done(): return true; case <-stdtime.After(pollInterval): continue } }")
 	g.line("execution := make(chan error, 1)")
 	g.line("heartbeatDone := make(chan struct{})")
-	g.line("go func() { ticker := time.NewTicker(heartbeatInterval); defer ticker.Stop(); for { select { case <-heartbeatDone: return; case <-ticker.C: if err := " + jobsAlias + ".TrbJobsHeartbeat(context.Background(), claim.Id, workerId); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs heartbeat:\", err); return } } } }()")
+	g.line("go func() { ticker := stdtime.NewTicker(heartbeatInterval); defer ticker.Stop(); for { select { case <-heartbeatDone: return; case <-ticker.C: if err := " + jobsAlias + ".TrbJobsHeartbeat(context.Background(), claim.Id, workerId); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs heartbeat:\", err); return } } } }()")
 	g.line("go func() { execution <- trbJobsDispatch(claim.JobName, claim.Payload, claim.PayloadVersion) }()")
 	g.line("var executionError error")
 	g.line("select {")
 	g.line("case executionError = <-execution:")
 	g.line("case <-signalContext.Done():")
 	g.indent++
-	g.line("select { case executionError = <-execution: case <-time.After(shutdownTimeout): close(heartbeatDone); return true }")
+	g.line("select { case executionError = <-execution: case <-stdtime.After(shutdownTimeout): close(heartbeatDone); return true }")
 	g.indent--
 	g.line("}")
 	g.line("close(heartbeatDone)")
@@ -397,29 +401,37 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 			arguments[index] = name
 		}
 		resultType := resultAlias + ".Result[" + successType + ", " + errorType + "]"
-		functionName := goIdentifier(job.Name, true) + goMethodName("perform_later")
-		g.line("func " + functionName + "(" + strings.Join(parameters, ", ") + ") " + resultType + " {")
-		g.indent++
-		g.line("payload, err := json.Marshal([]any{" + strings.Join(arguments, ", ") + "})")
-		g.line("if err != nil { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorType + "{Message: err.Error()}) }")
-		g.line("reference, err := " + jobsAlias + ".TrbJobsEnqueue(" + strconv.Quote(job.Name) + ", string(payload))")
-		g.line("if err != nil { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorType + "{Message: err.Error()}) }")
-		g.line("return " + resultAlias + ".NewResultOk[" + successType + ", " + errorType + "](reference)")
-		g.indent--
-		g.line("}")
-		g.b.WriteByte('\n')
+		emit := func(method string, methodParameters []string, waitMilliseconds string) {
+			functionName := goIdentifier(job.Name, true) + goMethodName(method)
+			g.line("func " + functionName + "(" + strings.Join(methodParameters, ", ") + ") " + resultType + " {")
+			g.indent++
+			g.line("payload, err := json.Marshal([]any{" + strings.Join(arguments, ", ") + "})")
+			g.line("if err != nil { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorType + "{Message: err.Error()}) }")
+			g.line("reference, err := " + jobsAlias + ".TrbJobsEnqueue(" + strconv.Quote(job.Name) + ", string(payload), " + strconv.Quote(job.Queue) + ", " + strconv.Itoa(job.Priority) + ", " + waitMilliseconds + ")")
+			g.line("if err != nil { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorType + "{Message: err.Error()}) }")
+			g.line("return " + resultAlias + ".NewResultOk[" + successType + ", " + errorType + "](reference)")
+			g.indent--
+			g.line("}")
+			g.b.WriteByte('\n')
+		}
+		emit("perform_later", parameters, "0")
+		durationType := g.goType(types.FromName("Duration"))
+		delayedParameters := append([]string{"delay " + durationType}, parameters...)
+		emit("perform_later_in", delayedParameters, "delay.WholeSeconds()*1000+(delay.Nanosecond()+999999)/1000000")
 	}
 }
 
 func (g *generator) jobsEnqueue(config jobs.Config) {
-	g.line("func TrbJobsEnqueue(jobName string, payload string) (JobReference, error) {")
+	g.line("func TrbJobsEnqueue(jobName string, payload string, queueName string, priority int, waitMilliseconds int) (JobReference, error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return JobReference{}, err }")
 	g.line("id, err := trbJobsId()")
 	g.line("if err != nil { return JobReference{}, err }")
-	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + goJobsPlaceholders(config.DatabaseAdapter, 6, 0) + ", CURRENT_TIMESTAMP, 'ready', 0, " + goJobsPlaceholder(config.DatabaseAdapter, 7) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-	g.line("_, err = database.Exec(" + strconv.Quote(query) + ", id, \"default\", jobName, payload, 1, 0, " + strconv.Itoa(config.DefaultMaximumAttempts) + ")")
+	g.line("if waitMilliseconds < 0 { return JobReference{}, errors.New(\"job delay must not be negative\") }")
+	g.line("runAt := stdtime.Now().UTC().Add(stdtime.Duration(waitMilliseconds) * stdtime.Millisecond)")
+	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + goJobsPlaceholders(config.DatabaseAdapter, 7, 0) + ", 'ready', 0, " + goJobsPlaceholder(config.DatabaseAdapter, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+	g.line("_, err = database.Exec(" + strconv.Quote(query) + ", id, queueName, jobName, payload, 1, priority, runAt, " + strconv.Itoa(config.DefaultMaximumAttempts) + ")")
 	g.line("if err != nil { return JobReference{}, err }")
 	g.line("return JobReference{Id: id, JobName: jobName}, nil")
 	g.indent--
@@ -429,6 +441,7 @@ func (g *generator) jobsEnqueue(config jobs.Config) {
 
 func (g *generator) jobsClaim(config jobs.Config) {
 	selection, _ := sqlstore.ClaimSelection(sqlstore.Dialect(config.DatabaseAdapter))
+	queueSelection, _ := sqlstore.ClaimSelectionForQueue(sqlstore.Dialect(config.DatabaseAdapter), goJobsPlaceholder(config.DatabaseAdapter, 1))
 	g.line("func TrbJobsClaimNext(ctx context.Context, workerId string) (*TrbJobsClaim, error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
@@ -437,7 +450,9 @@ func (g *generator) jobsClaim(config jobs.Config) {
 	g.line("if err != nil { return nil, err }")
 	g.line("defer func() { _ = transaction.Rollback() }()")
 	g.line("var id string")
-	g.line("if err = transaction.QueryRowContext(ctx, " + strconv.Quote(selection) + ").Scan(&id); errors.Is(err, sql.ErrNoRows) { return nil, nil } else if err != nil { return nil, err }")
+	g.line("queueName := os.Getenv(\"TRB_JOBS_QUEUE\")")
+	g.line("if queueName == \"\" { err = transaction.QueryRowContext(ctx, " + strconv.Quote(selection) + ").Scan(&id) } else { err = transaction.QueryRowContext(ctx, " + strconv.Quote(queueSelection) + ", queueName).Scan(&id) }")
+	g.line("if errors.Is(err, sql.ErrNoRows) { return nil, nil } else if err != nil { return nil, err }")
 	update := "UPDATE trb_jobs SET state = 'running', attempts = attempts + 1, claimed_by = " + goJobsPlaceholder(config.DatabaseAdapter, 1) + ", claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 2) + " AND state = 'ready'"
 	g.line("result, err := transaction.ExecContext(ctx, " + strconv.Quote(update) + ", workerId, id)")
 	g.line("if err != nil { return nil, err }")

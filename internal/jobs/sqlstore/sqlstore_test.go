@@ -56,6 +56,18 @@ func TestServerDatabaseClaimsUseSkipLocked(t *testing.T) {
 	}
 }
 
+func TestClaimSelectionCanFilterOneQueue(t *testing.T) {
+	for _, dialect := range []Dialect{SQLite, PostgreSQL, MySQL} {
+		query, err := ClaimSelectionForQueue(dialect, "?")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(query, "queue_name = ?") {
+			t.Fatalf("%s selection does not filter its queue: %s", dialect, query)
+		}
+	}
+}
+
 func TestAllDialectsCreateDurableJobSchema(t *testing.T) {
 	for _, dialect := range []Dialect{SQLite, PostgreSQL, MySQL} {
 		statements, err := Schema(dialect)

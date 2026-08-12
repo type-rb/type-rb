@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 func (c *CLI) runJobs(args []string) error {
@@ -34,10 +35,27 @@ func (c *CLI) runJobsCommand(command, id string, args []string) error {
 
 func (c *CLI) runJobsStart(args []string) error {
 	once := false
+	queue := ""
 	forwarded := make([]string, 0, len(args))
-	for _, argument := range args {
+	for index := 0; index < len(args); index++ {
+		argument := args[index]
 		if argument == "--once" {
 			once = true
+			continue
+		}
+		if argument == "--queue" {
+			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
+				return fmt.Errorf("jobs start --queue requires a queue name")
+			}
+			index++
+			queue = args[index]
+			continue
+		}
+		if strings.HasPrefix(argument, "--queue=") {
+			queue = strings.TrimPrefix(argument, "--queue=")
+			if strings.TrimSpace(queue) == "" {
+				return fmt.Errorf("jobs start --queue requires a queue name")
+			}
 			continue
 		}
 		forwarded = append(forwarded, argument)
@@ -47,6 +65,10 @@ func (c *CLI) runJobsStart(args []string) error {
 	if once {
 		restoreOnce := temporaryEnvironment("TRB_JOBS_ONCE", "1")
 		defer restoreOnce()
+	}
+	if queue != "" {
+		restoreQueue := temporaryEnvironment("TRB_JOBS_QUEUE", queue)
+		defer restoreQueue()
 	}
 	return c.runProgram(forwarded)
 }

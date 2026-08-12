@@ -31,6 +31,10 @@ end
 	if len(performLater.Parameters) != 2 || performLater.Parameters[0].Name != "order_id" || performLater.Parameters[0].Type.String() != "Integer" || performLater.Parameters[1].Type.String() != "String" {
 		t.Fatalf("unexpected perform_later parameters: %#v", performLater.Parameters)
 	}
+	performLaterIn := job.ClassMembers["perform_later_in"]
+	if performLaterIn.Intrinsic != "trb.jobs.perform_later_in" || len(performLaterIn.Parameters) != 3 || performLaterIn.Parameters[0].Type.String() != "Duration" {
+		t.Fatalf("unexpected perform_later_in declaration: %#v", performLaterIn)
+	}
 }
 
 func TestManifestAugmentsJobRuntimeContract(t *testing.T) {
@@ -47,9 +51,13 @@ func TestManifestAugmentsJobRuntimeContract(t *testing.T) {
 	if !imported.RuntimeRequired || !contains(imported.Symbols, "EnqueueError") || !contains(imported.Symbols, "JobReference") {
 		t.Fatalf("job runtime types were not attached: %#v", imported)
 	}
-	method, ok := class.Body[len(class.Body)-1].(*ir.Method)
+	method, ok := class.Body[len(class.Body)-2].(*ir.Method)
 	if !ok || method.Name != "perform_later" || !method.External || !method.Class || method.Fails.String() != "EnqueueError" {
 		t.Fatalf("job class was not augmented: %#v", class.Body)
+	}
+	delayed, ok := class.Body[len(class.Body)-1].(*ir.Method)
+	if !ok || delayed.Name != "perform_later_in" || len(delayed.Parameters) != 2 || delayed.Parameters[0].Type.String() != "Duration" {
+		t.Fatalf("delayed job method was not augmented: %#v", class.Body)
 	}
 }
 
@@ -67,6 +75,47 @@ func TestDiscoverRejectsInvalidInitialJobContracts(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := Discover([]*ast.Program{parseJobsTest(t, test.source)})
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("expected %q, got %v", test.message, err)
+			}
+		})
+	}
+}
+
+func TestDiscoverCapturesQueueAndPriorityDefaults(t *testing.T) {
+	program := parseJobsTest(t, `class SendReceiptJob < Job
+	queue("mail")
+	priority(10)
+
+	def perform(order_id: Integer)
+		return
+	end
+end
+`)
+	jobs, err := Discover([]*ast.Program{program})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].Queue != "mail" || jobs[0].Priority != 10 {
+		t.Fatalf("unexpected Job defaults: %#v", jobs)
+	}
+}
+
+func TestDiscoverRejectsInvalidQueueAndPriorityDefaults(t *testing.T) {
+	tests := []struct {
+		name    string
+		setting string
+		message string
+	}{
+		{name: "empty queue", setting: `queue("")`, message: "non-empty String"},
+		{name: "dynamic queue", setting: `queue(QUEUE)`, message: "expects a literal"},
+		{name: "negative priority", setting: `priority(-1)`, message: "expects a literal"},
+		{name: "string priority", setting: `priority("first")`, message: "expects an Integer literal"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			program := parseJobsTest(t, "class InvalidJob < Job\n\t"+test.setting+"\n\tdef perform()\n\t\treturn\n\tend\nend\n")
+			_, err := Discover([]*ast.Program{program})
 			if err == nil || !strings.Contains(err.Error(), test.message) {
 				t.Fatalf("expected %q, got %v", test.message, err)
 			}

@@ -28,9 +28,12 @@ end
 		},
 		{
 			Filename: "/project/src/jobs/send_receipt_job.trb", ModulePath: "jobs/send_receipt_job", Package: "jobs",
-			Source: []byte(`import { Job } from trb/jobs
+			Source: []byte(`import { Job, priority, queue } from trb/jobs
 
 class SendReceiptJob < Job
+	queue("mail")
+	priority(10)
+
 	def perform(order_id: Integer, destination: String)
 		return
 	end
@@ -49,14 +52,14 @@ end
 		t.Fatal("main artifact was not generated")
 	}
 	manifest := jobsintegration.ManifestFrom(main.IR.Extensions)
-	if manifest == nil || len(manifest.Jobs) != 1 || manifest.Jobs[0].Name != "SendReceiptJob" {
+	if manifest == nil || len(manifest.Jobs) != 1 || manifest.Jobs[0].Name != "SendReceiptJob" || manifest.Jobs[0].Queue != "mail" || manifest.Jobs[0].Priority != 10 {
 		t.Fatalf("unexpected jobs manifest: %#v", manifest)
 	}
 	if !strings.Contains(string(main.Output), `jobs.SendReceiptJobPerformLater(42, "ada@example.test")`) {
 		t.Fatalf("main does not call the typed job enqueue wrapper:\n%s", main.Output)
 	}
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
-	if job == nil || !strings.Contains(string(job.Output), `.TrbJobsEnqueue("SendReceiptJob"`) {
+	if job == nil || !strings.Contains(string(job.Output), `.TrbJobsEnqueue("SendReceiptJob", string(payload), "mail", 10, 0)`) || !strings.Contains(string(job.Output), "SendReceiptJobPerformLaterIn") {
 		t.Fatalf("job module does not enqueue through the jobs runtime:\n%s", job.Output)
 	}
 	runtime := artifactForModule(artifacts, "trb/jobs/index")
@@ -110,9 +113,12 @@ end
 		},
 		{
 			Filename: "/project/src/jobs/send_receipt_job.trb", ModulePath: "jobs/send_receipt_job", Package: "jobs",
-			Source: []byte(`import { Job } from trb/jobs
+			Source: []byte(`import { Job, priority, queue } from trb/jobs
 
 class SendReceiptJob < Job
+	queue("mail")
+	priority(10)
+
 	def perform(order_id: Integer, destination: String)
 		return
 	end
@@ -130,7 +136,7 @@ end
 	main := artifactForModule(artifacts, "main")
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
 	runtime := artifactForModule(artifacts, "trb/jobs/index")
-	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "trb_jobs_run_worker_or_command") || !strings.Contains(string(job.Output), "def self.perform_later") || !strings.Contains(string(runtime.Output), "module TrbJobsRuntime") {
+	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "trb_jobs_run_worker_or_command") || !strings.Contains(string(job.Output), `TrbJobsRuntime.enqueue("SendReceiptJob", payload, "mail", 10, 0)`) || !strings.Contains(string(job.Output), "def self.perform_later_in") || !strings.Contains(string(runtime.Output), "module TrbJobsRuntime") {
 		t.Fatalf("Ruby jobs runtime is incomplete:\nmain=%s\njob=%s\nruntime=%s", main.Output, job.Output, runtime.Output)
 	}
 }
@@ -154,9 +160,12 @@ end
 		},
 		{
 			Filename: "/project/src/jobs/send_receipt_job.trb", ModulePath: "jobs/send_receipt_job", Package: "jobs",
-			Source: []byte(`import { Job } from trb/jobs
+			Source: []byte(`import { Job, priority, queue } from trb/jobs
 
 class SendReceiptJob < Job
+	queue("mail")
+	priority(10)
+
 	def perform(order_id: Integer, destination: String)
 		return
 	end
@@ -171,7 +180,7 @@ end
 	main := artifactForModule(artifacts, "main")
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
 	runtime := artifactForModule(artifacts, "trb/jobs/index")
-	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), "export namespace SendReceiptJob") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") {
+	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), `trbJobsEnqueue("SendReceiptJob", JSON.stringify([order_id, destination]), "mail", 10, 0)`) || !strings.Contains(string(job.Output), "function perform_later_in") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") {
 		t.Fatalf("TypeScript jobs runtime is incomplete:\nmain=%s\njob=%s\nruntime=%s", main.Output, job.Output, runtime.Output)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
@@ -31,7 +32,7 @@ func init() {
 func (*jobsRuntimeProvider) Name() string { return "trb/jobs" }
 
 func (*jobsRuntimeProvider) Handles(intrinsic string) bool {
-	return intrinsic == "trb.jobs.perform_later"
+	return intrinsic == "trb.jobs.perform_later" || intrinsic == "trb.jobs.perform_later_in"
 }
 
 func (provider *jobsRuntimeProvider) Configure(programs []*ir.Program) error {
@@ -69,6 +70,19 @@ func (provider *jobsRuntimeProvider) Call(evaluator *Evaluator, invocation runti
 	if len(callArguments) > 0 && callArguments[0].Value.Type.Name == "Class" {
 		callArguments = callArguments[1:]
 	}
+	waitMilliseconds := int64(0)
+	if invocation.Name == "trb.jobs.perform_later_in" {
+		if len(callArguments) == 0 {
+			return Value{}, fmt.Errorf("trb/jobs perform_later_in delay is missing")
+		}
+		duration, ok := callArguments[0].Value.Data.(*objectInstance)
+		if !ok {
+			return Value{}, fmt.Errorf("trb/jobs perform_later_in delay is invalid")
+		}
+		seconds, nanosecond := timeDurationFields(duration)
+		waitMilliseconds = seconds*1000 + (nanosecond+999999)/1000000
+		callArguments = callArguments[1:]
+	}
 	arguments := make([]any, len(callArguments))
 	for index, argument := range callArguments {
 		arguments[index], err = jobsJSONValue(argument.Value)
@@ -89,8 +103,16 @@ func (provider *jobsRuntimeProvider) Call(evaluator *Evaluator, invocation runti
 		return provider.resultError(evaluator, invocation.Type, err)
 	}
 	config := provider.manifest.Config
-	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + jobsPlaceholders(config.DatabaseAdapter, 6, 0) + ", CURRENT_TIMESTAMP, 'ready', 0, " + jobsPlaceholder(config.DatabaseAdapter, 7) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-	if _, err := database.ExecContext(context.Background(), query, id, "default", jobName, string(payload), 1, 0, config.DefaultMaximumAttempts); err != nil {
+	job, ok := provider.manifest.Job(jobName)
+	if !ok {
+		return provider.resultError(evaluator, invocation.Type, fmt.Errorf("trb/jobs Job %s is not registered", jobName))
+	}
+	if waitMilliseconds < 0 {
+		return provider.resultError(evaluator, invocation.Type, fmt.Errorf("job delay must not be negative"))
+	}
+	runAt := time.Now().UTC().Add(time.Duration(waitMilliseconds) * time.Millisecond)
+	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + jobsPlaceholders(config.DatabaseAdapter, 7, 0) + ", 'ready', 0, " + jobsPlaceholder(config.DatabaseAdapter, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+	if _, err := database.ExecContext(context.Background(), query, id, job.Queue, jobName, string(payload), 1, job.Priority, runAt, config.DefaultMaximumAttempts); err != nil {
 		return provider.resultError(evaluator, invocation.Type, err)
 	}
 	definition, ok := evaluator.definitions[symbolKey("trb/jobs/index", "JobReference")].(*recordDefinition)

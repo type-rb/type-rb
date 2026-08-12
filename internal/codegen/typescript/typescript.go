@@ -468,7 +468,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.ExpressionStatement:
 		if g.inClass > 0 {
 			if call, ok := n.Expression.(*ir.Call); ok {
-				if identifier, identifierOK := call.Callee.(*ir.Identifier); identifierOK && (identifier.Name == "belongs_to" || identifier.Name == "has_many" || identifier.Name == "has_one" || identifier.Name == "enum_column") {
+				if identifier, identifierOK := call.Callee.(*ir.Identifier); identifierOK && (identifier.Name == "belongs_to" || identifier.Name == "has_many" || identifier.Name == "has_one" || identifier.Name == "enum_column") || g.jobsDeclaration(call) {
 					return
 				}
 			}

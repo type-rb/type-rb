@@ -26,6 +26,7 @@ func TestRunRubyJobApplicationPersistsAndPerforms(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainSource := `import { Result } from trb/std/result
+import { Duration } from trb/std/time
 import { SendReceiptJob } from jobs/send_receipt_job
 
 def main()
@@ -35,12 +36,21 @@ def main()
 	when Result::Err(error)
 		puts(error.message)
 	end
+	case attempt SendReceiptJob.perform_later_in(Duration.seconds(60), 43, "later@example.test")
+	when Result::Ok(reference)
+		puts(reference.job_name)
+	when Result::Err(error)
+		puts(error.message)
+	end
 	return
 end
 `
-	jobSource := `import { Job } from trb/jobs
+	jobSource := `import { Job, priority, queue } from trb/jobs
 
 class SendReceiptJob < Job
+	queue("mail")
+	priority(10)
+
 	def perform(order_id: Integer, destination: String)
 		puts("performed " + order_id.to_s() + " for " + destination)
 		return
@@ -59,27 +69,28 @@ end
 	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 		t.Fatalf("run status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-	if stdout.String() != "SendReceiptJob\n" {
+	if stdout.String() != "SendReceiptJob\nSendReceiptJob\n" {
 		t.Fatalf("unexpected enqueue output %q stderr=%s", stdout.String(), stderr.String())
 	}
 	database, err := sql.Open("sqlite", databaseSource)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var jobName, payload, state string
-	if err := database.QueryRow(`SELECT job_name, payload, state FROM trb_jobs`).Scan(&jobName, &payload, &state); err != nil {
+	var jobName, payload, queueName, state string
+	var priority int
+	if err := database.QueryRow(`SELECT job_name, payload, queue_name, priority, state FROM trb_jobs ORDER BY run_at LIMIT 1`).Scan(&jobName, &payload, &queueName, &priority, &state); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if jobName != "SendReceiptJob" || payload != `[42,"ada@example.test"]` || state != "ready" {
-		t.Fatalf("unexpected Ruby persisted job name=%q payload=%q state=%q", jobName, payload, state)
+	if jobName != "SendReceiptJob" || payload != `[42,"ada@example.test"]` || queueName != "mail" || priority != 10 || state != "ready" {
+		t.Fatalf("unexpected Ruby persisted job name=%q payload=%q queue=%q priority=%d state=%q", jobName, payload, queueName, priority, state)
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if status := command.Run([]string{"jobs", "start", "--once", "--config", config.Path}); status != 0 {
+	if status := command.Run([]string{"jobs", "start", "--once", "--queue", "mail", "--config", config.Path}); status != 0 {
 		t.Fatalf("worker status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 	if stdout.String() != "performed 42 for ada@example.test\n" {
@@ -94,7 +105,7 @@ end
 	if err := database.QueryRow(`SELECT COUNT(*) FROM trb_jobs`).Scan(&remaining); err != nil {
 		t.Fatal(err)
 	}
-	if remaining != 0 {
-		t.Fatalf("Ruby worker did not acknowledge the job: %d", remaining)
+	if remaining != 1 {
+		t.Fatalf("Ruby worker did not leave only the delayed job: %d", remaining)
 	}
 }

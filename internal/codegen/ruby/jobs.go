@@ -12,12 +12,25 @@ import (
 
 func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 	jobName := "Job"
+	method := "perform_later"
 	if member, ok := call.Callee.(*ir.Member); ok {
+		method = member.Name
 		if identifier, identifierOK := member.Receiver.(*ir.Identifier); identifierOK {
 			jobName = identifier.Name
 		}
 	}
-	return g.rubyClassName(jobName, nil) + ".perform_later(" + strings.Join(arguments, ", ") + ")"
+	return g.rubyClassName(jobName, nil) + "." + method + "(" + strings.Join(arguments, ", ") + ")"
+}
+
+func (g *generator) jobsDeclaration(call *ir.Call) bool {
+	if g.jobs == nil || call == nil {
+		return false
+	}
+	identifier, ok := call.Callee.(*ir.Identifier)
+	if !ok || identifier.Reference == nil || identifier.Reference.Package != "trb/jobs/index" {
+		return false
+	}
+	return identifier.Name == "queue" || identifier.Name == "priority"
 }
 
 func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
@@ -47,7 +60,18 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		g.line("def self.perform_later("+strings.Join(parameters, ", ")+")", "")
 		g.indent++
 		g.line("payload = JSON.generate(["+strings.Join(parameters, ", ")+"])", "")
-		g.line("reference = TrbJobsRuntime.enqueue("+strconv.Quote(job.Name)+", payload)", "")
+		g.line("reference = TrbJobsRuntime.enqueue("+strconv.Quote(job.Name)+", payload, "+strconv.Quote(job.Queue)+", "+strconv.Itoa(job.Priority)+", 0)", "")
+		g.line("Result::Ok.new(reference)", "")
+		g.line("rescue StandardError => error", "")
+		g.line("Result::Err.new(EnqueueError.new(message: error.message))", "")
+		g.indent--
+		g.line("end", "")
+		delayedParameters := append([]string{"delay"}, parameters...)
+		g.line("def self.perform_later_in("+strings.Join(delayedParameters, ", ")+")", "")
+		g.indent++
+		g.line("payload = JSON.generate(["+strings.Join(parameters, ", ")+"])", "")
+		g.line("wait_milliseconds = delay.whole_seconds * 1000 + (delay.nanosecond + 999999) / 1000000", "")
+		g.line("reference = TrbJobsRuntime.enqueue("+strconv.Quote(job.Name)+", payload, "+strconv.Quote(job.Queue)+", "+strconv.Itoa(job.Priority)+", wait_milliseconds)", "")
 		g.line("Result::Ok.new(reference)", "")
 		g.line("rescue StandardError => error", "")
 		g.line("Result::Err.new(EnqueueError.new(message: error.message))", "")
@@ -82,11 +106,12 @@ func (g *generator) jobsStorage(config jobs.Config) {
 	g.indent--
 	g.line("end", "")
 	g.line("def close; @database.disconnect if @database; @database = nil; end", "")
-	g.line("def enqueue(job_name, payload)", "")
+	g.line("def enqueue(job_name, payload, queue_name, priority, wait_milliseconds)", "")
 	g.indent++
 	g.line("id = SecureRandom.hex(16)", "")
 	g.line("now = Time.now.utc", "")
-	g.line("database[:trb_jobs].insert(id: id, queue_name: \"default\", job_name: job_name, payload: payload, payload_version: 1, priority: 0, run_at: now, state: \"ready\", attempts: 0, maximum_attempts: "+strconv.Itoa(config.DefaultMaximumAttempts)+", created_at: now, updated_at: now)", "")
+	g.line("raise \"job delay must not be negative\" if wait_milliseconds < 0", "")
+	g.line("database[:trb_jobs].insert(id: id, queue_name: queue_name, job_name: job_name, payload: payload, payload_version: 1, priority: priority, run_at: now + wait_milliseconds / 1000.0, state: \"ready\", attempts: 0, maximum_attempts: "+strconv.Itoa(config.DefaultMaximumAttempts)+", created_at: now, updated_at: now)", "")
 	g.line("JobReference.new(id: id, job_name: job_name)", "")
 	g.indent--
 	g.line("end", "")
@@ -96,6 +121,7 @@ func (g *generator) jobsStorage(config jobs.Config) {
 	g.line("database.transaction do", "")
 	g.indent++
 	g.line("dataset = database[:trb_jobs].where(state: \"ready\").where { run_at <= Time.now.utc }.order(:priority, :run_at, :id).limit(1)", "")
+	g.line("dataset = dataset.where(queue_name: ENV[\"TRB_JOBS_QUEUE\"]) if ENV[\"TRB_JOBS_QUEUE\"] && !ENV[\"TRB_JOBS_QUEUE\"].empty?", "")
 	if config.DatabaseAdapter != "sqlite" {
 		g.line("dataset = dataset.for_update.skip_locked", "")
 	}

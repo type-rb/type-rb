@@ -16,7 +16,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	if name == "trb.internal.runtime.fail" {
 		return "raise " + arguments[0]
 	}
-	if name == "trb.jobs.perform_later" {
+	if name == "trb.jobs.perform_later" || name == "trb.jobs.perform_later_in" {
 		return g.jobsPerformLater(call, arguments)
 	}
 	if strings.HasPrefix(name, "trb.orm.") {

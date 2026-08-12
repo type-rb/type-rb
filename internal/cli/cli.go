@@ -1859,7 +1859,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb play [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb tour [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb db plan|apply|export|lock|check [options]")
-	fmt.Fprintln(c.Stdout, "  trb jobs start [--once] [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb jobs start [--once] [--queue NAME] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb jobs list|retry|discard [JOB_ID] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--source GIT | --path DIRECTORY] PACKAGE [VERSION]")
