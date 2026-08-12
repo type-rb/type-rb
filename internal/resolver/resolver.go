@@ -52,6 +52,7 @@ type Export struct {
 	Type              types.Type
 	Fails             types.Type
 	Parameters        []types.Type
+	ParameterBridges  []string
 	Required          int
 	Variadic          bool
 	Members           map[string]Member
@@ -72,10 +73,11 @@ type Export struct {
 }
 
 type RecordField struct {
-	Name     string
-	JSONName string
-	Type     types.Type
-	Optional bool
+	Name         string
+	JSONName     string
+	Type         types.Type
+	Optional     bool
+	EffectBridge string
 }
 
 type EnumVariant struct {
@@ -684,9 +686,10 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 	}
 	for _, parameter := range exported.Parameters {
 		result.Parameters = append(result.Parameters, parameter.Semantic())
+		result.ParameterBridges = append(result.ParameterBridges, parameter.EffectBridge)
 	}
 	for _, field := range exported.Fields {
-		result.Fields = append(result.Fields, RecordField{Name: field.Name, JSONName: field.Name, Type: field.Type.Semantic(), Optional: field.Optional})
+		result.Fields = append(result.Fields, RecordField{Name: field.Name, JSONName: field.Name, Type: field.Type.Semantic(), Optional: field.Optional, EffectBridge: field.Type.EffectBridge})
 		result.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: field.Type.Semantic(), Readonly: true}
 	}
 	return result

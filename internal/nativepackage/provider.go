@@ -216,6 +216,22 @@ func validateProviderType(typ Type) error {
 	if (typ.Kind == "named" || typ.Kind == "function") && strings.TrimSpace(typ.Name) == "" {
 		return fmt.Errorf("type kind %s requires a name", typ.Kind)
 	}
+	if typ.Fails != nil {
+		if typ.Kind != "function" {
+			return errors.New("fails is only valid on function types")
+		}
+		if err := validateProviderType(*typ.Fails); err != nil {
+			return fmt.Errorf("invalid function failure type: %w", err)
+		}
+	}
+	if typ.EffectBridge != "" {
+		if typ.Kind != "function" || typ.Fails == nil {
+			return errors.New("effectBridge requires a fallible function type")
+		}
+		if typ.EffectBridge != "promise_rejection" {
+			return fmt.Errorf("unsupported effectBridge %q", typ.EffectBridge)
+		}
+	}
 	for _, argument := range typ.Args {
 		if err := validateProviderType(argument); err != nil {
 			return err

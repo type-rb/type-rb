@@ -22,6 +22,7 @@ type Result struct {
 	Program             *ast.Program
 	Expressions         map[ast.Expression]types.Type
 	Conversions         map[ast.Expression]types.Type
+	NativeEffectBridges map[ast.Expression]NativeEffectBridge
 	Variables           map[*ast.VariableStatement]types.Type
 	Iterations          map[*ast.IterationExpression]types.Type
 	IterationBindings   map[*ast.IterationExpression][]types.Type
@@ -84,6 +85,11 @@ type Attempt struct {
 	Result      ast.Expression
 }
 
+type NativeEffectBridge struct {
+	Kind string
+	Type types.Type
+}
+
 type StructuredBlock struct {
 	Parameters []types.Type
 	Return     types.Type
@@ -126,17 +132,18 @@ type EnumVariant struct {
 }
 
 type GenericApplication struct {
-	Name           string
-	Kind           string
-	Owner          string
-	TypeParameters []string
-	TypeArguments  []types.Type
-	OwnerArguments []types.Type
-	Parameters     []types.Type
-	ReturnType     types.Type
-	FailureType    types.Type
-	Required       int
-	Variadic       bool
+	Name             string
+	Kind             string
+	Owner            string
+	TypeParameters   []string
+	TypeArguments    []types.Type
+	OwnerArguments   []types.Type
+	Parameters       []types.Type
+	ParameterBridges []string
+	ReturnType       types.Type
+	FailureType      types.Type
+	Required         int
+	Variadic         bool
 }
 
 type CaseBinding struct {
@@ -304,6 +311,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			Program:             program,
 			Expressions:         map[ast.Expression]types.Type{},
 			Conversions:         map[ast.Expression]types.Type{},
+			NativeEffectBridges: map[ast.Expression]NativeEffectBridge{},
 			Variables:           map[*ast.VariableStatement]types.Type{},
 			Iterations:          map[*ast.IterationExpression]types.Type{},
 			IterationBindings:   map[*ast.IterationExpression][]types.Type{},
@@ -1917,6 +1925,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			case resolver.FunctionExport:
 				application.Kind = "function"
 				application.Parameters = append([]types.Type(nil), binding.Export.Parameters...)
+				application.ParameterBridges = append([]string(nil), binding.Export.ParameterBridges...)
 				application.Required = binding.Export.Required
 				application.Variadic = binding.Export.Variadic
 				application.ReturnType = binding.Export.Type
@@ -3962,6 +3971,15 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				break
 			}
 			c.checkTypedArguments(n.Span(), application.Name, application.Parameters, application.Required, application.Variadic, n.Arguments, argumentTypes)
+			for index, argument := range n.Arguments {
+				parameterIndex := index
+				if parameterIndex >= len(application.Parameters) && application.Variadic {
+					parameterIndex = len(application.Parameters) - 1
+				}
+				if parameterIndex >= 0 && parameterIndex < len(application.Parameters) && parameterIndex < len(application.ParameterBridges) {
+					c.recordNativeEffectBridge(argument.Value, application.Parameters[parameterIndex], application.ParameterBridges[parameterIndex])
+				}
+			}
 			typ = application.ReturnType
 			if binding, imported := c.result.References[generic.Receiver]; imported && binding.Library != nil && len(application.TypeArguments) == 1 {
 				c.checkCodecApplication(n, binding.Library.Intrinsic, application.TypeArguments[0])
@@ -4659,6 +4677,8 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 		actual = c.contextualizeCollectionLiteral(argument.Value, field.Type, actual)
 		if !c.assignable(argument.Value, field.Type, actual) {
 			c.error(argument.Value.Span(), fmt.Sprintf("record field %s has type %s, expected %s", field.Name, actual, field.Type))
+		} else {
+			c.recordNativeEffectBridge(argument.Value, field.Type, field.EffectBridge)
 		}
 	}
 	for _, field := range fields {
@@ -4775,11 +4795,21 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		} else if library != nil {
 			c.recordAssignableConversion(arguments[i].Value, expected, actualType)
 		}
+		if assignable && binding.Export != nil && parameterIndex < len(binding.Export.ParameterBridges) {
+			c.recordNativeEffectBridge(arguments[i].Value, expected, binding.Export.ParameterBridges[parameterIndex])
+		}
 		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Mutable {
 			c.requireMutable(arguments[i].Value, sc, name+"()")
 		}
 	}
 	return library
+}
+
+func (c *Checker) recordNativeEffectBridge(expression ast.Expression, typ types.Type, bridge string) {
+	if expression == nil || bridge == "" {
+		return
+	}
+	c.result.NativeEffectBridges[expression] = NativeEffectBridge{Kind: bridge, Type: typ}
 }
 
 func libraryAssignable(expected, actual types.Type) bool {

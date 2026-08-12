@@ -302,7 +302,11 @@ switches.
   provider may describe generic functions, classes, records, and transparent
   type aliases. Calls continue to use TypeRB's explicit type arguments, and
   generated TypeScript imports any transitive target types required by the
-  selected contracts without exposing those helper names to TypeRB source.
+  selected contracts without exposing those helper names to TypeRB source. A
+  provider may mark a fallible function field or parameter with the
+  `promise_rejection` effect bridge. The TypeScript backend then unwraps the
+  callback's `Result`, resolves `Ok(value)`, and rejects `Err(error)` only at
+  that native boundary.
 - Official formatter command: `trb fmt`.
 - Canonical TypeRB indentation is one tab per nesting level. Formatter
   configuration is not part of the current language; a future configuration
