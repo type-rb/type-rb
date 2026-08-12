@@ -85,6 +85,42 @@ use their portable parsers. Malformed encoding, missing or duplicate scalar
 values, and invalid conversions return `ParameterError`; applications retain
 control over the corresponding error response.
 
+Middleware can attach request-scoped values without a string-keyed cast at
+the handler boundary. Create one `ContextKey<T>` and share that key between
+the producer and consumer:
+
+```trb
+import { Context, ContextKey, Next, Response, text } from trb/web
+import { Result } from trb/std/result
+
+record CurrentUser
+	id: Integer
+	name: String
+end
+
+CURRENT_USER := ContextKey<CurrentUser>.new("current_user")
+
+def authenticate(context: Context, next_handler: Next): Response
+	user := CurrentUser.new(id: 42, name: "Ada")
+	return next_handler.call(context.with(CURRENT_USER, user))
+end
+
+def get(context: Context): Response
+	case context.fetch(CURRENT_USER)
+	when Result::Ok(user)
+		return text(user.name)
+	when Result::Err(_error)
+		return text("unauthorized", 401)
+	end
+end
+```
+
+The key supplies the value type to both operations, so `with` rejects a value
+of another type and `fetch` infers `Result<CurrentUser, ContextValueError>`.
+Keys use instance identity: two keys with the same diagnostic name remain
+independent. `Context` stays immutable; `with` returns a new context, replacing
+the value only for that key, and `with_request` retains attached values.
+
 Use `src/routes/_middleware.trb` for root middleware and nested
 `_middleware.trb` files for route-scoped middleware. `trb/web/testing` exposes
 the same dispatcher without opening a socket, so route and middleware tests can

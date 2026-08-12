@@ -10,6 +10,73 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
+type webContextState struct {
+	values map[*objectInstance]Value
+}
+
+func cloneWebContext(receiver Value, resultType types.Type) (*objectInstance, Value, error) {
+	context, ok := receiver.Data.(*objectInstance)
+	if !ok {
+		return nil, Value{}, errors.New("web context operation requires a Context receiver")
+	}
+	fields := make(map[string]Value, len(context.Fields))
+	for name, value := range context.Fields {
+		fields[name] = value
+	}
+	copy := &objectInstance{Definition: context.Definition, Fields: fields}
+	return copy, Value{Type: resultType, Data: copy}, nil
+}
+
+func (e *Evaluator) webContextWith(receiver, key, value Value, resultType types.Type) (Value, error) {
+	contextKey, ok := key.Data.(*objectInstance)
+	if !ok {
+		return Value{}, errors.New("Context#with() requires a ContextKey")
+	}
+	context, result, err := cloneWebContext(receiver, resultType)
+	if err != nil {
+		return Value{}, err
+	}
+	state := &webContextState{values: map[*objectInstance]Value{}}
+	if existing, ok := context.Fields["@_trb_context_state"].Data.(*webContextState); ok {
+		for existingKey, existingValue := range existing.values {
+			state.values[existingKey] = existingValue
+		}
+	}
+	state.values[contextKey] = value
+	context.Fields["@_trb_context_state"] = Value{Type: types.Type{Kind: types.Any, Name: "Any", Nullable: true}, Data: state}
+	return result, nil
+}
+
+func (e *Evaluator) webContextWithRequest(receiver, request Value, resultType types.Type) (Value, error) {
+	context, result, err := cloneWebContext(receiver, resultType)
+	if err != nil {
+		return Value{}, err
+	}
+	context.Fields["@request"] = request
+	return result, nil
+}
+
+func (e *Evaluator) webContextFetch(receiver, key Value, resultType types.Type) (Value, error) {
+	context, ok := receiver.Data.(*objectInstance)
+	if !ok {
+		return Value{}, errors.New("Context#fetch() requires a Context receiver")
+	}
+	contextKey, ok := key.Data.(*objectInstance)
+	if !ok {
+		return Value{}, errors.New("Context#fetch() requires a ContextKey")
+	}
+	if state, ok := context.Fields["@_trb_context_state"].Data.(*webContextState); ok {
+		if value, found := state.values[contextKey]; found {
+			return e.resultOK(resultType, value)
+		}
+	}
+	name, ok := contextKey.Fields["@name"]
+	if !ok {
+		return Value{}, errors.New("Context#fetch() requires ContextKey#name")
+	}
+	return e.structuredResultErrFrom(resultType, "trb/web/index", "ContextValueError", map[string]Value{"key": name})
+}
+
 func (e *Evaluator) webRequestJSON(receiver Value, resultType types.Type, schema *ir.CodecSchema) (Value, error) {
 	if schema == nil {
 		return Value{}, errors.New("Request#json() requires a checked codec")

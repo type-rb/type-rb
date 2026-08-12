@@ -122,6 +122,18 @@ func TestBundledWebPackage(t *testing.T) {
 	if serve.Intrinsic != "trb.web.serve" || serve.Return.String() != "Void" || len(serve.Parameters) != 1 || serve.Parameters[0].Type.String() != "ServerConfig" || !serve.Parameters[0].Optional {
 		t.Fatalf("unexpected serve contract: %#v", serve)
 	}
+	with := packageDefinition.Definition.Symbols["with"]
+	if with.Intrinsic != "trb.web.context_with" || with.Receiver.String() != "Context" || len(with.TypeParameters) != 1 || len(with.Parameters) != 2 || with.Parameters[0].Type.String() != "ContextKey<T>" || with.Parameters[1].Type.String() != "T" || with.Return.String() != "Context" {
+		t.Fatalf("unexpected Context#with contract: %#v", with)
+	}
+	withRequest := packageDefinition.Definition.Symbols["with_request"]
+	if withRequest.Intrinsic != "trb.web.context_with_request" || withRequest.Receiver.String() != "Context" || len(withRequest.Parameters) != 1 || withRequest.Parameters[0].Type.String() != "Request" || withRequest.Return.String() != "Context" {
+		t.Fatalf("unexpected Context#with_request contract: %#v", withRequest)
+	}
+	fetch := packageDefinition.Definition.Symbols["fetch"]
+	if fetch.Intrinsic != "trb.web.context_fetch" || fetch.Receiver.String() != "Context" || len(fetch.TypeParameters) != 1 || len(fetch.Parameters) != 1 || fetch.Parameters[0].Type.String() != "ContextKey<T>" || fetch.Return.String() != "Result<T, ContextValueError>" {
+		t.Fatalf("unexpected Context#fetch contract: %#v", fetch)
+	}
 }
 
 func TestBundledHTTPPackage(t *testing.T) {

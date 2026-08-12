@@ -208,6 +208,70 @@ end
 	}
 }
 
+func TestOfficialWebTypedContextKeysCompileAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Context, ContextKey, ContextValueError } from trb/web
+import { Result } from trb/std/result
+
+record User
+	name: String
+end
+
+CURRENT_USER := ContextKey<User>.new("current_user")
+
+def current_user(context: Context): Result<User, ContextValueError>
+	updated := context.with(CURRENT_USER, User.new(name: "Ada"))
+	return updated.fetch(CURRENT_USER)
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/typed-context-key", RubyLoader: "require_relative", ProjectRoot: "/project"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact := artifactForModule(artifacts, "main")
+			if artifact == nil || !strings.Contains(string(artifact.Output), "ContextValueError") {
+				t.Fatalf("%s output is missing typed context lookup:\n%s", mode, artifact.Output)
+			}
+		})
+	}
+}
+
+func TestOfficialWebTypedContextKeysRejectMismatchedValues(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Context, ContextKey } from trb/web
+
+record User
+	name: String
+end
+
+CURRENT_USER := ContextKey<User>.new("current_user")
+
+def invalid(context: Context): Context
+	return context.with(CURRENT_USER, "Ada")
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/typed-context-key", RubyLoader: "require_relative", ProjectRoot: "/project"})
+			if err == nil || !strings.Contains(err.Error(), "argument 2 to with() has type String, expected User") {
+				t.Fatalf("unexpected diagnostic: %v", err)
+			}
+		})
+	}
+}
+
 func TestOfficialWebResponseBuildersRejectInvalidValues(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

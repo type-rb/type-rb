@@ -135,6 +135,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return rubyWebParameterBinding(call, arguments[0], "query")
 	case "trb.web.context_params":
 		return rubyWebParameterBinding(call, arguments[0], "path")
+	case "trb.web.context_with":
+		return rubyWebContextWith(arguments)
+	case "trb.web.context_with_request":
+		return rubyWebContextWithRequest(arguments)
+	case "trb.web.context_fetch":
+		return rubyWebContextFetch(arguments)
 	case "trb.web.json":
 		return rubyWebJSON(call, arguments)
 	case "trb.web.configure_server":
@@ -401,6 +407,27 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func rubyWebContextWith(arguments []string) string {
+	if len(arguments) != 3 {
+		return "nil"
+	}
+	return "-> { context_value = " + arguments[0] + "; context_key = " + arguments[1] + "; context_state = {}.compare_by_identity; existing = context_value.instance_variable_get(:@_trb_context_state); existing.each_pair { |key, value| context_state[key] = value } if existing.is_a?(Hash); context_state[context_key] = " + arguments[2] + "; result = context_value.with_request(context_value.__trb_field_request); result.instance_variable_set(:@_trb_context_state, context_state); result }.call"
+}
+
+func rubyWebContextWithRequest(arguments []string) string {
+	if len(arguments) != 2 {
+		return "nil"
+	}
+	return "-> { context_value = " + arguments[0] + "; result = context_value.with_request(" + arguments[1] + "); result.instance_variable_set(:@_trb_context_state, context_value.instance_variable_get(:@_trb_context_state)); result }.call"
+}
+
+func rubyWebContextFetch(arguments []string) string {
+	if len(arguments) != 2 {
+		return "nil"
+	}
+	return "-> { context_value = " + arguments[0] + "; context_key = " + arguments[1] + "; context_state = context_value.instance_variable_get(:@_trb_context_state); return Result::Ok.new(context_state[context_key]) if context_state.is_a?(Hash) && context_state.key?(context_key); Result::Err.new(ContextValueError.new(key: context_key.__trb_field_name)) }.call"
 }
 
 func rubyWebLogger(arguments []string) string {

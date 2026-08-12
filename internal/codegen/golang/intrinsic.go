@@ -235,6 +235,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webParameterBinding(call, arguments[0], "query")
 	case "trb.web.context_params":
 		return g.webParameterBinding(call, arguments[0], "path")
+	case "trb.web.context_with":
+		return g.webContextWith(call, arguments)
+	case "trb.web.context_with_request":
+		return g.webContextWithRequest(call, arguments)
+	case "trb.web.context_fetch":
+		return g.webContextFetch(call, arguments)
 	case "trb.web.json":
 		return g.webJSON(call, arguments)
 	case "trb.web.configure_server":
@@ -787,6 +793,36 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) webContextWith(call *ir.Call, arguments []string) string {
+	if len(arguments) != 3 {
+		return "nil"
+	}
+	return "func() " + g.goType(call.ExprType()) + " { contextValue := " + arguments[0] + "; contextKey := " + arguments[1] + "; contextState := map[any]any{}; if existing, ok := contextValue.TrbInternalContextState.(map[any]any); ok { for key, value := range existing { contextState[key] = value } }; contextState[contextKey] = " + arguments[2] + "; result := contextValue.WithRequest(contextValue.TrbFieldRequest); result.TrbInternalContextState = contextState; return result }()"
+}
+
+func (g *generator) webContextWithRequest(call *ir.Call, arguments []string) string {
+	if len(arguments) != 2 {
+		return "nil"
+	}
+	return "func() " + g.goType(call.ExprType()) + " { contextValue := " + arguments[0] + "; result := contextValue.WithRequest(" + arguments[1] + "); result.TrbInternalContextState = contextValue.TrbInternalContextState; return result }()"
+}
+
+func (g *generator) webContextFetch(call *ir.Call, arguments []string) string {
+	if len(arguments) != 2 || len(call.ExprType().Args) != 2 {
+		return "nil"
+	}
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	resultType := g.goType(call.ExprType())
+	valueType := g.goType(call.ExprType().Args[0])
+	errorType := g.goType(call.ExprType().Args[1])
+	okResult := resultAlias + ".NewResultOk[" + valueType + ", " + errorType + "]"
+	errResult := resultAlias + ".NewResultErr[" + valueType + ", " + errorType + "]"
+	return "func() " + resultType + " { contextValue := " + arguments[0] + "; contextKey := " + arguments[1] + "; if contextState, ok := contextValue.TrbInternalContextState.(map[any]any); ok { if raw, found := contextState[contextKey]; found { value, valid := raw.(" + valueType + "); if !valid { panic(\"ContextKey value has an incompatible runtime type\") }; return " + okResult + "(value) } }; return " + errResult + "(" + errorType + "{Key: contextKey.TrbFieldName}) }()"
 }
 
 func (g *generator) portableArrayString(value string, typ types.Type) string {
