@@ -375,6 +375,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("{")
 		g.indent++
 		g.line("const " + value + " = " + g.expr(n.Value) + ";" + tsTrailingComment(n.TrailingComment))
+		narrowingName, narrowingTemp := g.caseNarrowingCapture(n)
 		for index, branch := range n.Branches {
 			header := "if ("
 			if index > 0 {
@@ -386,6 +387,7 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 			g.line(header + condition + ") {" + tsTrailingComment(branch.TrailingComment))
 			g.indent++
+			g.caseNarrowings(branch.Narrowings, narrowingName, narrowingTemp)
 			for _, binding := range branch.Bindings {
 				if binding.Name == "_" {
 					continue
@@ -401,6 +403,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.HasElse {
 			g.line("} else {")
 			g.indent++
+			g.caseNarrowings(n.ElseNarrowings, narrowingName, narrowingTemp)
 			g.statements(n.Else)
 			g.indent--
 		} else {
@@ -464,6 +467,36 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 	g.line("}")
 	g.indent--
 	g.line("}")
+}
+
+func (g *generator) caseNarrowingCapture(node *ir.Case) (string, string) {
+	name := ""
+	for _, branch := range node.Branches {
+		if len(branch.Narrowings) > 0 {
+			name = branch.Narrowings[0].Name
+			break
+		}
+	}
+	if name == "" && len(node.ElseNarrowings) > 0 {
+		name = node.ElseNarrowings[0].Name
+	}
+	if name == "" {
+		return "", ""
+	}
+	g.temporary++
+	temporary := "__trbNarrow" + strconv.Itoa(g.temporary)
+	g.line("const " + temporary + " = " + name + ";")
+	return name, temporary
+}
+
+func (g *generator) caseNarrowings(narrowings []ir.CaseBinding, name, temporary string) {
+	for _, narrowing := range narrowings {
+		if narrowing.Name != name || temporary == "" {
+			continue
+		}
+		g.line("const " + name + " = " + temporary + " as " + g.tsType(narrowing.Type) + ";")
+		g.line("void " + name + ";")
+	}
 }
 
 func tsTypePattern(value string, typ types.Type) string {
@@ -1103,6 +1136,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	child.temporary++
 	value := "__trbCase" + strconv.Itoa(child.temporary)
 	child.line("const " + value + " = " + child.expr(node.Value) + ";" + tsTrailingComment(node.TrailingComment))
+	narrowingName, narrowingTemp := child.caseNarrowingCapture(node)
 	for index, branch := range node.Branches {
 		header := "if ("
 		if index > 0 {
@@ -1116,6 +1150,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		}
 		child.line(header + condition + ") {" + tsTrailingComment(branch.TrailingComment))
 		child.indent++
+		child.caseNarrowings(branch.Narrowings, narrowingName, narrowingTemp)
 		for _, binding := range branch.Bindings {
 			if binding.Name == "_" {
 				continue
@@ -1138,6 +1173,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	child.line("} else {")
 	child.indent++
 	if node.HasElse {
+		child.caseNarrowings(node.ElseNarrowings, narrowingName, narrowingTemp)
 		child.statements(node.Else)
 		if !node.ElseDiverges {
 			child.line("return " + child.expr(node.ElseResult) + ";")
@@ -1567,6 +1603,8 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 		result = "boolean"
 	case types.Int, types.Float:
 		result = "number"
+	case types.IntLiteral, types.StringLiteral:
+		result = t.Name
 	case types.String:
 		result = "string"
 	case types.Bytes:

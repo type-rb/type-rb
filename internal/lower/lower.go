@@ -689,6 +689,9 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			}
 		}
 		member := &ir.Member{ExprBase: base, Receiver: l.expression(receiver), Name: name, Safe: n.Safe, Namespace: n.Namespace, ClassField: l.checked.ClassFieldAccesses[n], Reference: reference}
+		for _, alternative := range l.checked.UnionMemberAccesses[n] {
+			member.UnionAlternatives = append(member.UnionAlternatives, ir.UnionMemberAlternative{Type: alternative.Alternative, MemberType: alternative.Member})
+		}
 		fails := l.checked.ExpressionEffects[n]
 		if fails.Kind != "" && fails.Kind != types.Never {
 			raw := &ir.Call{
@@ -762,6 +765,10 @@ func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
 		HasElse:  node.HasElse,
 	}
 	result.Else, result.ElseResult, result.ElseDiverges = l.controlFlowBranch(node.Else, expression)
+	narrowing, narrows := l.checked.CaseNarrowings[node]
+	if narrows && narrowing.Else.Kind != "" && narrowing.Else.Kind != types.Invalid {
+		result.ElseNarrowings = append(result.ElseNarrowings, ir.CaseBinding{Name: narrowing.Name, Type: narrowing.Else})
+	}
 	for _, branch := range node.Branches {
 		body, branchResult, diverges := l.controlFlowBranch(branch.Body, expression)
 		lowered := ir.CaseBranch{
@@ -780,6 +787,11 @@ func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
 			lowered.PayloadEnum = pattern.PayloadEnum
 			for _, binding := range pattern.Bindings {
 				lowered.Bindings = append(lowered.Bindings, ir.CaseBinding{Name: binding.Name, Field: binding.Field.Name, Type: binding.Field.Type})
+			}
+		}
+		if narrows {
+			if narrowed, ok := narrowing.Branches[branch.Value]; ok {
+				lowered.Narrowings = append(lowered.Narrowings, ir.CaseBinding{Name: narrowing.Name, Type: narrowed})
 			}
 		}
 		result.Branches = append(result.Branches, lowered)

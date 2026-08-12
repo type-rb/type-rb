@@ -2244,6 +2244,100 @@ end
 	}
 }
 
+func TestDiscriminatedUnionNarrowingAcrossAvailableBackendsAndREPL(t *testing.T) {
+	definitions := `record CreatedResponse
+	status: 201
+	body: String
+end
+
+record InvalidResponse
+	status: 422
+	body: Array<String>
+end
+
+type CreateResponse = CreatedResponse | InvalidResponse
+
+def render(response: CreateResponse): String
+	case response.status
+	when 201
+		return response.body
+	when 422
+		return response.body[0]
+	end
+end
+
+def classify(status: Integer): String
+	case status
+	when 200
+		return "ok"
+	else
+		return "other"
+	end
+end
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby discriminated union run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript discriminated union run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/discriminated-union-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := definitions + `render(CreatedResponse.new(status: 201, body: "created"))
+render(InvalidResponse.new(status: 422, body: ["invalid"]))
+classify(200)
+classify(500)
+:quit
+`
+		var replStdout, replStderr bytes.Buffer
+		replCommand := &CLI{Stdin: strings.NewReader(input), Stdout: &replStdout, Stderr: &replStderr}
+		if status := replCommand.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s REPL status=%d stderr=%s", mode, status, replStderr.String())
+		}
+		if want := "\"created\" : String\n\"invalid\" : String\n\"ok\" : String\n\"other\" : String\n"; replStdout.String() != want || replStderr.Len() != 0 {
+			t.Fatalf("unexpected %s discriminated union REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, replStdout.String(), replStderr.String())
+		}
+
+		source := definitions + `
+def main()
+	puts(render(CreatedResponse.new(status: 201, body: "created")))
+	puts(render(InvalidResponse.new(status: 422, body: ["invalid"])))
+	puts(classify(200))
+	puts(classify(500))
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "created\ninvalid\nok\nother\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s discriminated union output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestDivergingControlFlowExpressionsAcrossAvailableBackendsAndREPL(t *testing.T) {
 	definitions := `enum Outcome
 	Found(value: String)

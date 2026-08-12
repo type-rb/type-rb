@@ -3264,6 +3264,64 @@ end
 	}
 }
 
+func TestProjectCompilerExportsDiscriminatedUnionContracts(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/contracts/responses.trb",
+		ModulePath: "contracts/responses",
+		Package:    "contracts",
+		Source: []byte(`record CreatedResponse
+	status: 201
+	body: String
+end
+
+record InvalidResponse
+	status: 422
+	body: Array<String>
+end
+
+type CreateResponse = CreatedResponse | InvalidResponse
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import contracts/responses
+
+def render(response: CreateResponse): String
+	case response.status
+	when 201
+		return response.body
+	when 422
+		return response.body[0]
+	end
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{consumer, contract}, Options{Mode: mode, GoModule: "example.com/project"})
+		if err != nil {
+			t.Fatalf("%s rejected imported discriminated union contract: %v", mode, err)
+		}
+		for _, artifact := range artifacts {
+			if artifact.Filename != consumer.Filename {
+				continue
+			}
+			output := string(artifact.Output)
+			wants := map[string][]string{
+				"go":         {"case contracts.CreatedResponse:", "response := response.(contracts.CreatedResponse)"},
+				"ruby":       {"case response.status", "return response.body"},
+				"typescript": {"import type { CreateResponse, CreatedResponse, InvalidResponse }", "as CreatedResponse"},
+			}[mode]
+			for _, want := range wants {
+				if !strings.Contains(output, want) {
+					t.Fatalf("generated %s imported contract consumer is missing %q:\n%s", mode, want, output)
+				}
+			}
+		}
+	}
+}
+
 func TestProjectCompilerExportsPayloadEnumSignatures(t *testing.T) {
 	contract := SourceUnit{
 		Filename:   "/project/contracts/token.trb",

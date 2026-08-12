@@ -369,6 +369,50 @@ block of `map`, `select`, or `reduce` remains unsupported; use explicit `each`
 when a transformation needs enclosing control flow. The statement forms remain
 available when no value is needed.
 
+## Literal types and discriminated unions
+
+Integer and String literals can constrain data fields. An exhaustive `case`
+on a readonly literal field narrows the complete union value:
+
+```trb
+record Created
+	status: 201
+	body: String
+end
+
+record Invalid
+	status: 422
+	body: Array<String>
+end
+
+type Response = Created | Invalid
+
+def message(response: Response): String
+	case response.status
+	when 201
+		return response.body
+	when 422
+		return response.body[0]
+	end
+end
+```
+
+Record fields are immutable. A class field used as a discriminant must be
+`readonly`. Alternatives may share a literal, in which case that branch keeps
+their remaining union. Ordinary scalar cases are also available when no
+contract is present:
+
+```trb
+case response.status
+when 200
+	puts("ok")
+when 404
+	puts("missing")
+else
+	puts("unexpected response")
+end
+```
+
 ## Arrays, hashes, and iteration
 
 Arrays and hashes are homogeneous collections. Hash keys are non-nullable

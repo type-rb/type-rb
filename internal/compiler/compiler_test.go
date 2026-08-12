@@ -1953,6 +1953,199 @@ end
 	}
 }
 
+func TestDiscriminatedUnionNarrowingAcrossModes(t *testing.T) {
+	source := []byte(`record CreatedResponse
+	status: 201
+	body: String
+end
+
+record InvalidResponse
+	status: 422
+	body: Array<String>
+end
+
+type CreateResponse = CreatedResponse | InvalidResponse
+
+def render(response: CreateResponse): String
+	case response.status
+	when 201
+		return response.body
+	when 422
+		return response.body[0]
+	end
+end
+
+def status_text(response: CreateResponse): String
+	return response.status.to_s()
+end
+
+def main()
+	created: CreateResponse := CreatedResponse.new(status: 201, body: "created")
+	invalid: CreateResponse := InvalidResponse.new(status: 422, body: ["invalid"])
+	puts(render(created))
+	puts(render(invalid))
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("discriminated_union.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected discriminated union narrowing: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	for mode, wants := range map[string][]string{
+		"go": {
+			"Status int",
+			"func(value any) int",
+			"case CreatedResponse:",
+			"response := response.(CreatedResponse)",
+		},
+		"ruby": {
+			"CreatedResponse = Data.define(:status, :body)",
+			"case response.status",
+		},
+		"typescript": {
+			"status: 201",
+			"status: 422",
+			"const response = __trbNarrow",
+			"as CreatedResponse",
+		},
+	} {
+		output := string(artifacts[mode].Output)
+		for _, want := range wants {
+			if !strings.Contains(output, want) {
+				t.Fatalf("generated %s discriminated union support is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "discriminated_union.go", artifacts["go"].Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated Go: %v\n%s", err, artifacts["go"].Output)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated discriminated union Go did not type-check: %v\n%s", err, artifacts["go"].Output)
+	}
+
+	method := artifacts["go"].IR.Statements[3].(*ir.Method)
+	caseStatement := method.Body[0].(*ir.Case)
+	if caseStatement.Value.ExprType().String() != "201 | 422" || len(caseStatement.Branches[0].Narrowings) != 1 {
+		t.Fatalf("typed IR lost discriminant or branch narrowing: %#v", caseStatement)
+	}
+}
+
+func TestReadonlyClassFieldsMayDiscriminateAUnionAcrossModes(t *testing.T) {
+	source := []byte(`class Loaded
+	readonly @kind: "loaded"
+	readonly @value: String
+
+	def initialize(kind: "loaded", value: String)
+		@kind = kind
+		@value = value
+	end
+end
+
+class Missing
+	readonly @kind: "missing"
+	readonly @message: String
+
+	def initialize(kind: "missing", message: String)
+		@kind = kind
+		@message = message
+	end
+end
+
+type LoadResult = Loaded | Missing
+
+def read(result: LoadResult): String
+	case result.kind
+	when "loaded"
+		return result.value
+	when "missing"
+		return result.message
+	end
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("class_discriminated_union.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected readonly class discriminants: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		if mode == "go" && (!strings.Contains(output, "case *Loaded:") || !strings.Contains(output, "result := result.(*Loaded)")) {
+			t.Fatalf("generated Go did not project and narrow class alternatives:\n%s", output)
+		}
+		if mode == "typescript" && (!strings.Contains(output, `__trb_kind!: "loaded"`) || !strings.Contains(output, "as Loaded")) {
+			t.Fatalf("generated TypeScript lost class literal fields or narrowing:\n%s", output)
+		}
+	}
+}
+
+func TestUnionDataMemberUsesSafeCommonTypeAcrossModes(t *testing.T) {
+	source := []byte(`record Count
+	value: Integer
+end
+record Ratio
+	value: Float
+end
+type NumberValue = Count | Ratio
+def number(value: NumberValue): Float
+	return value.value
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("union_common_member.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected a safely widened common union member: %v", mode, err)
+		}
+		if mode == "go" && !strings.Contains(string(artifact.Output), "return float64(value.Value)") {
+			t.Fatalf("generated Go did not widen the Integer member to Float:\n%s", artifact.Output)
+		}
+	}
+}
+
+func TestLiteralAndDiscriminatedUnionDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "literal field mismatch",
+			source: "record Response\n\tstatus: 201\nend\ndef main()\n\tresponse := Response.new(status: 200)\n\tputs(response.status)\nend\n",
+			want:   "record field status has type Integer, expected 201",
+		},
+		{
+			name:   "non exhaustive literal union",
+			source: "record Found\n\tstatus: 200\nend\nrecord Missing\n\tstatus: 404\nend\ntype Response = Found | Missing\ndef show(response: Response)\n\tcase response.status\n\twhen 200\n\t\treturn\n\tend\nend\n",
+			want:   "case for 200 | 404 is not exhaustive; missing 404",
+		},
+		{
+			name:   "wrong literal kind",
+			source: "def show(status: Integer)\n\tcase status\n\twhen \"ok\"\n\t\treturn\n\telse\n\t\treturn\n\tend\nend\n",
+			want:   "when value has type String, expected Integer",
+		},
+		{
+			name:   "invalid literal modifier",
+			source: "def status(): 201?\n\treturn 201\nend\n",
+			want:   "literal type 201 cannot have type arguments, array, or nullable modifiers",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_discriminated_union.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestIfExpressionAcrossModes(t *testing.T) {
 	source := []byte(`def choose(primary: Boolean, secondary: Boolean): String
 	result := if primary
@@ -2581,11 +2774,6 @@ func TestEnumCaseDiagnosticsAreModeIndependent(t *testing.T) {
 			name:   "unknown member",
 			source: "enum State\n\tOpen\nend\ndef show(value: State)\n\tcase value\n\twhen State::Closed\n\t\treturn\n\tend\nend\n",
 			want:   "enum State has no member Closed",
-		},
-		{
-			name:   "non enum selector",
-			source: "def show(value: Integer)\n\tcase value\n\twhen 1\n\t\treturn\n\telse\n\t\treturn\n\tend\nend\n",
-			want:   "case value must be an enum, got Integer",
 		},
 		{
 			name:   "empty enum",

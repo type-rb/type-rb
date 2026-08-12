@@ -354,3 +354,19 @@ func TestFormatUnionTypesAndPatterns(t *testing.T) {
 		t.Fatalf("unexpected union formatting\nwant:\n%s\ngot:\n%s", want, formatted)
 	}
 }
+
+func TestFormatLiteralTypesAndDiscriminantCase(t *testing.T) {
+	source := []byte("record Response\nstatus:201\nkind:\"created\"\nend\ndef show(response:Response):String\ncase response.status\nwhen 201\nreturn response.kind\nend\nend\n")
+	want := "record Response\n\tstatus: 201\n\tkind: \"created\"\nend\ndef show(response: Response): String\n\tcase response.status\n\twhen 201\n\t\treturn response.kind\n\tend\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected literal type formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("literal type formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}

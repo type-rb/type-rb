@@ -136,6 +136,27 @@ func TestUnionNormalizationAndAssignability(t *testing.T) {
 	}
 }
 
+func TestLiteralTypesRetainDiscriminantsAndWidenToScalars(t *testing.T) {
+	created, ok := LiteralFromSource("2_01")
+	if !ok || created.String() != "201" {
+		t.Fatalf("Integer literal type was not canonicalized: %s, %v", created, ok)
+	}
+	invalid, ok := LiteralFromSource(`"invalid"`)
+	if !ok || invalid.String() != `"invalid"` {
+		t.Fatalf("String literal type was not retained: %s, %v", invalid, ok)
+	}
+	statuses := UnionOf(created, FromName("422"))
+	if statuses.String() != "201 | 422" {
+		t.Fatalf("literal union lost its alternatives: %s", statuses)
+	}
+	if !Assignable(FromName("Integer"), created) || Assignable(created, FromName("Integer")) {
+		t.Fatal("a literal must widen to its scalar, while a scalar must not narrow implicitly")
+	}
+	if widened := UnionOf(created, FromName("Integer")); !Equivalent(widened, FromName("Integer")) {
+		t.Fatalf("a scalar alternative must subsume its literals: %s", widened)
+	}
+}
+
 func TestArrayAssignabilityIsInvariant(t *testing.T) {
 	integers := Type{Kind: Array, Name: "Array", Args: []Type{FromName("Integer")}}
 	values := Type{Kind: Array, Name: "Array", Args: []Type{UnionOf(FromName("Integer"), FromName("String"))}}

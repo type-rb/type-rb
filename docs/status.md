@@ -36,6 +36,11 @@ effects with `fails` and `attempt`. See the
 [language guide](language.md) and [specification](specification.md) for the
 current semantics.
 
+Integer and String literal types support status- and kind-indexed data.
+Exhaustive `case` over a readonly literal field narrows the complete record or
+class union in every backend and in the REPL. Ordinary scalar `case` remains
+available for untyped external values that have no endpoint or data contract.
+
 The compiler-owned portable library covers scalar and collection foundations,
 `Result`, bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
 SHA-256/SHA-512 hashing and HMAC, non-cryptographic and secure randomness,
@@ -171,8 +176,8 @@ target code, and browser tools.
 The current alpha does not yet provide:
 
 - a complete everyday receiver API;
-- position-typed tuples or comprehensive narrowing for nullable and structured
-  union alternatives;
+- position-typed tuples or type-pattern narrowing for nullable, collection,
+  and non-discriminated structured union alternatives;
 - inferred type arguments or generic records, classes, and methods;
 - complete superclass construction, override, and mutation-effect semantics;
 - first-class blocks or multi-statement collection transformations;

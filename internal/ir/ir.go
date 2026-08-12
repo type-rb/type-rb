@@ -286,6 +286,7 @@ type CaseBranch struct {
 	PayloadEnum bool
 	TypePattern bool
 	MatchType   types.Type
+	Narrowings  []CaseBinding
 	Body        []Statement
 	Result      Expression
 	Diverges    bool
@@ -300,14 +301,15 @@ type CaseBinding struct {
 
 type Case struct {
 	ExprBase
-	Value        Expression
-	Leading      []Statement
-	Branches     []CaseBranch
-	Else         []Statement
-	HasElse      bool
-	TypeUnion    bool
-	ElseResult   Expression
-	ElseDiverges bool
+	Value          Expression
+	Leading        []Statement
+	Branches       []CaseBranch
+	Else           []Statement
+	HasElse        bool
+	TypeUnion      bool
+	ElseResult     Expression
+	ElseDiverges   bool
+	ElseNarrowings []CaseBinding
 }
 
 func (*Case) irStatement()  {}
@@ -647,7 +649,15 @@ type Member struct {
 	// ClassField distinguishes storage-backed class properties from methods and
 	// record fields so backends can preserve both `value.name` and `value.name()`.
 	ClassField bool
-	Reference  *Reference
+	// UnionAlternatives asks representation-sensitive backends to project a
+	// common data member from an erased union value.
+	UnionAlternatives []UnionMemberAlternative
+	Reference         *Reference
+}
+
+type UnionMemberAlternative struct {
+	Type       types.Type
+	MemberType types.Type
 }
 
 func (*Member) irExpression() {}

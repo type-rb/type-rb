@@ -141,6 +141,60 @@ end
   record, and class alternatives are staged until one runtime test model is
   specified across all backends.
 
+#### Literal types and discriminated unions
+
+- An explicit Integer or String literal may appear in a type position, for
+  example `status: 201` or `kind: "created"`. It constrains that value to the
+  one written literal. A literal value widens safely to its ordinary
+  `Integer` or `String` type; an arbitrary scalar does not narrow implicitly to
+  a literal type.
+- Literal types may form unions such as `200 | 404`. A scalar alternative
+  subsumes its literals, so `200 | Integer` normalizes to `Integer`. Nullable,
+  array, and generic modifiers are not accepted on a literal type.
+- `case` accepts explicit Integer and String values. A case over an ordinary
+  scalar may be open and normally uses `else`; a case over a literal union is
+  exhaustive and may omit `else` after handling every alternative.
+- A union of records or classes exposes a data member only when every
+  alternative exposes that member through the same storage model. The member
+  type is the normalized union of the alternative field types. This rule does
+  not select methods from a union.
+- When such a common member has a literal type in every alternative, a case on
+  `binding.member` narrows the complete lexical `binding` in each branch.
+  Record fields are immutable discriminants. A class field must be declared
+  `readonly`; imported fields retain their exported readonly flag.
+- Alternatives may share a discriminant. That branch retains their union
+  rather than choosing one arbitrarily. An `else` branch, when present, narrows
+  to the unhandled alternatives.
+
+```trb
+record CreatedResponse
+	status: 201
+	body: String
+end
+
+record InvalidResponse
+	status: 422
+	body: Array<String>
+end
+
+type CreateResponse = CreatedResponse | InvalidResponse
+
+def body_text(response: CreateResponse): String
+	case response.status
+	when 201
+		return response.body
+	when 422
+		return response.body[0]
+	end
+end
+```
+
+Literal types are compile-time constraints rather than new runtime scalar
+representations. TypeScript output retains them in generated types. Go and
+Ruby erase them to the corresponding scalar while typed IR preserves the
+discriminant and Go lowers erased-union field access through checked type
+switches.
+
 ### 3.3 Access Rules (Private)
 
 - Private class/method names must start with `_`.

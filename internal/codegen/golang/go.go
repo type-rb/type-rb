@@ -292,6 +292,7 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 			g.line(header + condition + " {" + goTrailingComment(branch.TrailingComment))
 			g.indent++
+			g.caseNarrowings(branch.Narrowings)
 			for _, binding := range branch.Bindings {
 				if binding.Name == "_" {
 					continue
@@ -309,6 +310,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.HasElse {
 			g.line("} else {")
 			g.indent++
+			g.caseNarrowings(n.ElseNarrowings)
 			g.statements(n.Else)
 			g.indent--
 		} else {
@@ -1087,6 +1089,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if len(n.UnionAlternatives) > 0 {
+			return g.unionMemberExpression(n)
+		}
 		if n.Reference != nil && n.Reference.Intrinsic == "trb.orm.column" {
 			return g.expr(n.Receiver) + "." + goORMColumnGetter(n.Name) + "()"
 		}
@@ -1362,6 +1367,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 			}
 			child.line(header + condition + " {" + goTrailingComment(branch.TrailingComment))
 			child.indent++
+			child.caseNarrowings(branch.Narrowings)
 			for _, binding := range branch.Bindings {
 				if binding.Name == "_" {
 					continue
@@ -1382,6 +1388,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		child.line("} else {")
 		child.indent++
 		if node.HasElse {
+			child.caseNarrowings(node.ElseNarrowings)
 			child.statements(node.Else)
 			if !node.ElseDiverges {
 				child.line("return " + child.expr(node.ElseResult))
@@ -1550,6 +1557,48 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 		fields = append(fields, goIdentifier(argument.Name, true)+": "+g.expr(argument.Value))
 	}
 	return name + "{" + strings.Join(fields, ", ") + "}"
+}
+
+func (g *generator) unionMemberExpression(member *ir.Member) string {
+	child := *g
+	child.b = strings.Builder{}
+	child.indent = 1
+	resultType := g.goType(member.ExprType())
+	field := goMethodName(member.Name)
+	if member.ClassField {
+		field = goFieldName(member.Name)
+	}
+	child.line("switch value := value.(type) {")
+	child.indent++
+	for _, alternative := range member.UnionAlternatives {
+		child.line("case " + g.goType(alternative.Type) + ":")
+		child.indent++
+		value := "value." + field
+		if member.ExprType().Kind == types.Float && (alternative.MemberType.Kind == types.Int || alternative.MemberType.Kind == types.IntLiteral) {
+			value = "float64(" + value + ")"
+		}
+		child.line("return " + value)
+		child.indent--
+	}
+	child.line("default:")
+	child.indent++
+	child.line("panic(\"unreachable discriminated union member access\")")
+	child.indent--
+	child.indent--
+	child.line("}")
+	return "func(value any) " + resultType + " {\n" + child.b.String() + strings.Repeat("\t", g.indent) + "}(" + g.expr(member.Receiver) + ")"
+}
+
+func (g *generator) caseNarrowings(narrowings []ir.CaseBinding) {
+	for _, narrowing := range narrowings {
+		name := goBindingIdentifier(narrowing.Name)
+		value := name
+		if narrowing.Type.Kind != types.Union {
+			value = name + ".(" + g.goType(narrowing.Type) + ")"
+		}
+		g.line(name + " := " + value)
+		g.line("_ = " + name)
+	}
 }
 
 func (g *generator) portableFloatInteger(value, operation string) string {
@@ -1987,15 +2036,21 @@ func (g *generator) goType(t types.Type) string {
 	switch t.Kind {
 	case types.Void:
 		result = ""
-	case types.Any, types.Invalid, types.Union:
+	case types.Any, types.Invalid:
 		result = "any"
+	case types.Union:
+		if base, ok := types.LiteralUnionBase(t); ok {
+			result = g.goType(base)
+		} else {
+			result = "any"
+		}
 	case types.Bool:
 		result = "bool"
-	case types.Int:
+	case types.Int, types.IntLiteral:
 		result = "int"
 	case types.Float:
 		result = "float64"
-	case types.String:
+	case types.String, types.StringLiteral:
 		result = "string"
 	case types.Bytes:
 		result = "[]byte"

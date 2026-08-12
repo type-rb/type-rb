@@ -32,6 +32,7 @@ type Result struct {
 	References          map[ast.Expression]resolver.Binding
 	EnumConstructors    map[*ast.CallExpression]EnumVariant
 	CasePatterns        map[ast.Expression]CasePattern
+	CaseNarrowings      map[*ast.CaseStatement]CaseNarrowing
 	GenericApplications map[*ast.GenericExpression]GenericApplication
 	CodecApplications   map[*ast.CallExpression]CodecApplication
 	RawEnums            map[*ast.EnumStatement]RawEnum
@@ -43,6 +44,7 @@ type Result struct {
 	StructuredBlocks    map[*ast.CallExpression]StructuredBlock
 	ExternalMembers     map[ast.Expression]declaration.Member
 	ClassFieldAccesses  map[*ast.MemberExpression]bool
+	UnionMemberAccesses map[*ast.MemberExpression][]UnionMemberAccess
 	RuntimeDependencies map[string]*stdlib.Package
 	ImportUses          map[*ast.ImportStatement]map[string]bool
 }
@@ -146,6 +148,17 @@ type CasePattern struct {
 	PayloadEnum bool
 	MatchType   types.Type
 	TypeUnion   bool
+}
+
+type CaseNarrowing struct {
+	Name     string
+	Branches map[ast.Expression]types.Type
+	Else     types.Type
+}
+
+type UnionMemberAccess struct {
+	Alternative types.Type
+	Member      types.Type
 }
 
 type symbol struct {
@@ -297,6 +310,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			References:          map[ast.Expression]resolver.Binding{},
 			EnumConstructors:    map[*ast.CallExpression]EnumVariant{},
 			CasePatterns:        map[ast.Expression]CasePattern{},
+			CaseNarrowings:      map[*ast.CaseStatement]CaseNarrowing{},
 			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
 			RawEnums:            map[*ast.EnumStatement]RawEnum{},
@@ -308,6 +322,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			StructuredBlocks:    map[*ast.CallExpression]StructuredBlock{},
 			ExternalMembers:     map[ast.Expression]declaration.Member{},
 			ClassFieldAccesses:  map[*ast.MemberExpression]bool{},
+			UnionMemberAccesses: map[*ast.MemberExpression][]UnionMemberAccess{},
 			RuntimeDependencies: map[string]*stdlib.Package{},
 			ImportUses:          importUses,
 		},
@@ -505,6 +520,12 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 			c.validateTypeReference(parameter)
 		}
 		c.validateTypeReference(*ref.FunctionReturn)
+		return
+	}
+	if literal, ok := types.LiteralFromSource(ref.Name); ok {
+		if ref.Nullable || ref.Array || len(ref.Arguments) > 0 {
+			c.error(ref.Span(), fmt.Sprintf("literal type %s cannot have type arguments, array, or nullable modifiers", literal))
+		}
 		return
 	}
 	if ref.Name == "Never" {
@@ -1161,6 +1182,9 @@ func (c *Checker) checkIf(node *ast.IfStatement, sc *scope, expression bool) typ
 
 func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool) types.Type {
 	selectorType := c.checkExpression(node.Value, sc)
+	if literalCaseSelector(selectorType) {
+		return c.checkLiteralCase(node, sc, selectorType, expression)
+	}
 	if selectorType.Kind == types.Union {
 		return c.checkUnionCase(node, sc, selectorType, expression)
 	}
@@ -1248,6 +1272,168 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool)
 		return types.FromName("Void")
 	}
 	return c.controlFlowResultType("case", node.Span(), results)
+}
+
+func literalCaseSelector(selector types.Type) bool {
+	if types.IsLiteral(selector) || selector.Kind == types.Int || selector.Kind == types.String {
+		return true
+	}
+	if selector.Kind != types.Union || len(selector.Args) == 0 {
+		return false
+	}
+	for _, alternative := range selector.Args {
+		if !types.IsLiteral(alternative) {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Checker) checkLiteralCase(node *ast.CaseStatement, sc *scope, selectorType types.Type, expression bool) types.Type {
+	for _, statement := range node.Leading {
+		if _, comment := statement.(*ast.CommentStatement); !comment {
+			c.error(statement.Span(), "case statements must be inside a when or else branch")
+		}
+	}
+	c.checkStatements(node.Leading, &scope{parent: sc, values: map[string]symbol{}})
+
+	exhaustive := selectorType.Kind == types.Union || types.IsLiteral(selectorType)
+	wanted := map[string]types.Type{}
+	if selectorType.Kind == types.Union {
+		for _, alternative := range selectorType.Args {
+			wanted[alternative.String()] = alternative
+		}
+	} else if types.IsLiteral(selectorType) {
+		wanted[selectorType.String()] = selectorType
+	}
+	selectorBase := scalarType(selectorType)
+
+	narrowing, narrows := c.discriminantNarrowing(node.Value, sc)
+	if narrows {
+		narrowing.Branches = map[ast.Expression]types.Type{}
+	}
+	seen := map[string]bool{}
+	results := []controlFlowBranchResult{}
+	for _, branch := range node.Branches {
+		c.checkExpression(branch.Value, sc)
+		literal, ok := literalExpressionType(branch.Value)
+		if !ok {
+			c.error(branch.Value.Span(), "when value must be an explicit Integer or String literal")
+			literal = invalidType()
+		} else {
+			c.result.Expressions[branch.Value] = literal
+			if exhaustive {
+				if _, exists := wanted[literal.String()]; !exists {
+					c.error(branch.Value.Span(), fmt.Sprintf("when value %s is not an alternative of %s", literal, selectorType))
+				}
+			} else if !types.Equivalent(scalarType(literal), selectorBase) {
+				c.error(branch.Value.Span(), fmt.Sprintf("when value has type %s, expected %s", scalarType(literal), selectorBase))
+			}
+			if seen[literal.String()] {
+				c.error(branch.Value.Span(), fmt.Sprintf("literal %s is handled more than once", literal))
+			} else {
+				seen[literal.String()] = true
+				delete(wanted, literal.String())
+			}
+		}
+
+		branchScope := &scope{parent: sc, values: map[string]symbol{}}
+		if narrows && ok {
+			if narrowed, found := narrowing.typeForLiteral(literal); found {
+				value, _ := sc.lookup(narrowing.Name)
+				value.typ = narrowed
+				branchScope.values[narrowing.Name] = value
+				narrowing.Branches[branch.Value] = narrowed
+			}
+		}
+		if result := c.checkControlFlowBranch(branch.Body, branchScope, branch.Span(), "case", expression); result != nil {
+			results = append(results, *result)
+		}
+	}
+
+	elseScope := &scope{parent: sc, values: map[string]symbol{}}
+	if narrows && node.HasElse {
+		remaining := make([]types.Type, 0, len(narrowing.Alternatives))
+		for _, alternative := range narrowing.Alternatives {
+			member, _, _, _ := c.dataMember(alternative, narrowing.Member)
+			if !seen[member.String()] {
+				remaining = append(remaining, alternative)
+			}
+		}
+		if len(remaining) > 0 {
+			narrowing.Else = types.UnionOf(remaining...)
+			value, _ := sc.lookup(narrowing.Name)
+			value.typ = narrowing.Else
+			elseScope.values[narrowing.Name] = value
+		}
+	}
+	if node.HasElse {
+		if result := c.checkControlFlowBranch(node.Else, elseScope, node.Span(), "case", expression); result != nil {
+			results = append(results, *result)
+		}
+	} else if exhaustive && len(wanted) > 0 {
+		missing := make([]string, 0, len(wanted))
+		for value := range wanted {
+			missing = append(missing, value)
+		}
+		sort.Strings(missing)
+		c.error(node.Span(), fmt.Sprintf("case for %s is not exhaustive; missing %s", selectorType, strings.Join(missing, ", ")))
+	}
+	if narrows {
+		c.result.CaseNarrowings[node] = narrowing.CaseNarrowing
+	}
+	if !expression {
+		return types.FromName("Void")
+	}
+	return c.controlFlowResultType("case", node.Span(), results)
+}
+
+type discriminantNarrowing struct {
+	CaseNarrowing
+	Member       string
+	Alternatives []types.Type
+	byLiteral    map[string][]types.Type
+}
+
+func (n discriminantNarrowing) typeForLiteral(literal types.Type) (types.Type, bool) {
+	alternatives := n.byLiteral[literal.String()]
+	if len(alternatives) == 0 {
+		return types.Type{}, false
+	}
+	return types.UnionOf(alternatives...), true
+}
+
+func (c *Checker) discriminantNarrowing(expression ast.Expression, sc *scope) (discriminantNarrowing, bool) {
+	member, ok := expression.(*ast.MemberExpression)
+	if !ok || member.Namespace || member.Safe {
+		return discriminantNarrowing{}, false
+	}
+	receiver, ok := member.Receiver.(*ast.Identifier)
+	if !ok {
+		return discriminantNarrowing{}, false
+	}
+	value, ok := sc.lookup(receiver.Name)
+	if !ok {
+		return discriminantNarrowing{}, false
+	}
+	receiverType := c.expandAlias(value.typ, map[string]bool{})
+	if receiverType.Kind != types.Union {
+		return discriminantNarrowing{}, false
+	}
+	result := discriminantNarrowing{
+		CaseNarrowing: CaseNarrowing{Name: receiver.Name},
+		Member:        member.Name,
+		Alternatives:  append([]types.Type(nil), receiverType.Args...),
+		byLiteral:     map[string][]types.Type{},
+	}
+	for _, alternative := range receiverType.Args {
+		memberType, readonly, _, found := c.dataMember(alternative, member.Name)
+		if !found || !readonly || !types.IsLiteral(memberType) {
+			return discriminantNarrowing{}, false
+		}
+		result.byLiteral[memberType.String()] = append(result.byLiteral[memberType.String()], alternative)
+	}
+	return result, true
 }
 
 func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorType types.Type, expression bool) types.Type {
@@ -1931,6 +2117,7 @@ func (c *Checker) checkTypedArguments(span token.Span, name string, parameters [
 }
 
 func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand types.Type) types.Type {
+	operand = scalarType(operand)
 	if operand.Kind == types.Invalid {
 		return invalidType()
 	}
@@ -1967,6 +2154,8 @@ func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand t
 }
 
 func (c *Checker) checkBinaryOperator(span token.Span, operator string, left, right types.Type) types.Type {
+	left = scalarType(left)
+	right = scalarType(right)
 	if left.Kind == types.Invalid || right.Kind == types.Invalid {
 		return invalidType()
 	}
@@ -2045,7 +2234,20 @@ func isNonNullable(typ types.Type, kind types.Kind) bool {
 }
 
 func isNonNullableNumber(typ types.Type) bool {
-	return !typ.Nullable && (typ.Kind == types.Int || typ.Kind == types.Float)
+	return !typ.Nullable && (typ.Kind == types.Int || typ.Kind == types.IntLiteral || typ.Kind == types.Float)
+}
+
+func scalarType(typ types.Type) types.Type {
+	if base, literal := types.LiteralBase(typ); literal {
+		base.Nullable = typ.Nullable
+		return base
+	}
+	if typ.Kind == types.Union && len(typ.Args) > 0 {
+		if base, ok := types.LiteralUnionBase(typ); ok {
+			return base
+		}
+	}
+	return typ
 }
 
 func plainNumberType(kind types.Kind) types.Type {
@@ -2063,11 +2265,46 @@ func commonNumberType(left, right types.Type) types.Type {
 }
 
 func (c *Checker) assignable(expression ast.Expression, target, actual types.Type) bool {
-	if !c.typesAssignable(target, actual) {
+	if !c.typesAssignable(target, actual) && !c.literalTargetAcceptsExpression(target, expression) {
 		return false
 	}
 	c.recordAssignableConversion(expression, target, actual)
 	return true
+}
+
+func (c *Checker) literalTargetAcceptsExpression(target types.Type, expression ast.Expression) bool {
+	target = c.expandAlias(target, map[string]bool{})
+	actual, ok := literalExpressionType(expression)
+	if !ok {
+		return false
+	}
+	if target.Kind == types.Union {
+		for _, alternative := range target.Args {
+			if types.Equivalent(alternative, actual) {
+				return true
+			}
+		}
+		return false
+	}
+	return types.Equivalent(target, actual)
+}
+
+func literalExpressionType(expression ast.Expression) (types.Type, bool) {
+	switch value := expression.(type) {
+	case *ast.Literal:
+		if value.Kind != ast.IntegerLiteral && value.Kind != ast.StringLiteral {
+			return types.Type{}, false
+		}
+		return types.LiteralFromSource(value.Raw)
+	case *ast.UnaryExpression:
+		literal, ok := value.Operand.(*ast.Literal)
+		if value.Operator != "-" || !ok || literal.Kind != ast.IntegerLiteral {
+			return types.Type{}, false
+		}
+		return types.LiteralFromSource("-" + literal.Raw)
+	default:
+		return types.Type{}, false
+	}
 }
 
 func (c *Checker) typesAssignable(target, actual types.Type) bool {
@@ -2155,7 +2392,7 @@ func (c *Checker) recordAssignableConversion(expression ast.Expression, target, 
 		c.result.Conversions[expression] = target
 		return
 	}
-	if actual.Kind != types.Int || actual.Nullable || target.Nullable {
+	if scalarType(actual).Kind != types.Int || actual.Nullable || target.Nullable {
 		return
 	}
 	if target.Kind == types.Float {
@@ -2188,6 +2425,8 @@ func (c *Checker) recordIntegerToFloat(expression ast.Expression) {
 }
 
 func (c *Checker) portableEqualityOperands(left, right types.Type) bool {
+	left = scalarType(left)
+	right = scalarType(right)
 	if left.Kind == types.Nil {
 		return right.Nullable
 	}
@@ -2337,7 +2576,22 @@ func (c *Checker) caseFallsThrough(node *ast.CaseStatement) bool {
 func (c *Checker) caseCoversSelector(node *ast.CaseStatement) bool {
 	selectorType := c.result.Expressions[node.Value]
 	wanted := map[string]bool{}
-	if selectorType.Kind == types.Union {
+	if literalCaseSelector(selectorType) {
+		if selectorType.Kind == types.Union {
+			for _, alternative := range selectorType.Args {
+				wanted[alternative.String()] = true
+			}
+		} else if types.IsLiteral(selectorType) {
+			wanted[selectorType.String()] = true
+		} else {
+			return false
+		}
+		for _, branch := range node.Branches {
+			if literal, ok := literalExpressionType(branch.Value); ok {
+				delete(wanted, literal.String())
+			}
+		}
+	} else if selectorType.Kind == types.Union {
 		for _, alternative := range selectorType.Args {
 			wanted[alternative.String()] = true
 		}
@@ -2594,6 +2848,64 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 		}
 	}
 	return classMember{}, false
+}
+
+// dataMember resolves storage-backed fields without selecting methods. It is
+// used for safe common-member access across a union and for readonly
+// discriminant analysis.
+func (c *Checker) dataMember(receiver types.Type, name string) (types.Type, bool, bool, bool) {
+	receiver = c.expandAlias(receiver, map[string]bool{})
+	if receiver.Kind != types.Named {
+		return types.Type{}, false, false, false
+	}
+	if record := c.records[receiver.Name]; record != nil {
+		if field := record.byName[name]; field != nil {
+			return c.typeFromRef(field.Type), true, false, true
+		}
+	}
+	if binding, imported := c.resolution.ImportedType(receiver.Name); imported && binding.Export != nil {
+		if binding.Export.Kind == resolver.RecordExport {
+			for _, field := range binding.Export.Fields {
+				if field.Name == name {
+					return field.Type, true, false, true
+				}
+			}
+		}
+	}
+	if member, found := c.localMember(receiver.Name, name, false, map[string]bool{}); found && member.field != nil {
+		return member.typ, member.field.ReadOnly, true, true
+	}
+	if binding, found := c.importedAncestorMember(receiver.Name, name, false, map[string]bool{}); found && binding.Member != nil && binding.Member.Kind == resolver.ValueExport {
+		return binding.Member.Type, binding.Member.Readonly, true, true
+	}
+	if exported, found := c.resolution.CompilerOwnedType(receiver.Name); found {
+		if member, exists := exported.Members[name]; exists && !member.Class && member.Kind == resolver.ValueExport {
+			return member.Type, member.Readonly, true, true
+		}
+	}
+	return types.Type{}, false, false, false
+}
+
+func (c *Checker) unionDataMember(receiver types.Type, name string) (types.Type, []UnionMemberAccess, bool, bool) {
+	receiver = c.expandAlias(receiver, map[string]bool{})
+	if receiver.Kind != types.Union || len(receiver.Args) == 0 {
+		return types.Type{}, nil, false, false
+	}
+	memberTypes := make([]types.Type, 0, len(receiver.Args))
+	alternatives := make([]UnionMemberAccess, 0, len(receiver.Args))
+	classField := false
+	for index, alternative := range receiver.Args {
+		member, _, storageField, found := c.dataMember(alternative, name)
+		if !found || index > 0 && storageField != classField {
+			return types.Type{}, nil, false, false
+		}
+		if index == 0 {
+			classField = storageField
+		}
+		memberTypes = append(memberTypes, member)
+		alternatives = append(alternatives, UnionMemberAccess{Alternative: alternative, Member: member})
+	}
+	return types.UnionOf(memberTypes...), alternatives, classField, true
 }
 
 func (c *Checker) specializeLocalEnumMember(receiver types.Type, member classMember) classMember {
@@ -2928,11 +3240,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		left := c.checkExpression(n.Left, sc)
 		right := c.checkExpression(n.Right, sc)
 		typ = c.checkBinaryOperator(n.Span(), n.Operator, left, right)
-		if typ.Kind != types.Invalid && isNonNullableNumber(left) && isNonNullableNumber(right) && left.Kind != right.Kind {
-			if left.Kind == types.Int {
+		if typ.Kind != types.Invalid && isNonNullableNumber(left) && isNonNullableNumber(right) && scalarType(left).Kind != scalarType(right).Kind {
+			if scalarType(left).Kind == types.Int {
 				c.recordIntegerToFloat(n.Left)
 			}
-			if right.Kind == types.Int {
+			if scalarType(right).Kind == types.Int {
 				c.recordIntegerToFloat(n.Right)
 			}
 		}
@@ -2941,7 +3253,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		end := c.checkExpression(n.End, sc)
 		if start.Kind == types.Never || end.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
-		} else if start.Kind != types.Int || end.Kind != types.Int {
+		} else if scalarType(start).Kind != types.Int || scalarType(end).Kind != types.Int {
 			c.error(n.Span(), fmt.Sprintf("range endpoints must be Integer, got %s and %s", start, end))
 		} else {
 			typ = types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}
@@ -2985,7 +3297,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Span(), "each_slice expects exactly one size argument")
 			} else {
 				sizeType := c.checkExpression(n.SliceSize, sc)
-				if sizeType.Kind != types.Int {
+				if scalarType(sizeType).Kind != types.Int {
 					c.error(n.SliceSize.Span(), fmt.Sprintf("each_slice size must be Integer, got %s", sizeType))
 				}
 				if literal, ok := n.SliceSize.(*ast.Literal); ok {
@@ -3114,6 +3426,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = types.Type{Kind: types.Never, Name: "Never"}
 			break
 		}
+		methodReceiverType := scalarType(receiverType)
+		if receiverType.Kind == types.Union && methodReceiverType.Kind == types.Union && !n.Namespace && !n.Safe {
+			memberType, alternatives, classField, found := c.unionDataMember(receiverType, n.Name)
+			if !found {
+				c.error(n.Span(), fmt.Sprintf("union type %s has no common data member %s", receiverType, n.Name))
+				typ = invalidType()
+			} else {
+				typ = memberType
+				c.result.UnionMemberAccesses[n] = alternatives
+				c.result.ClassFieldAccesses[n] = classField
+			}
+			break
+		}
 		if c.enumPattern > 0 && receiverType.Name == c.enumPatternType.Name && len(receiverType.Args) == 0 {
 			receiverType = c.enumPatternType
 			c.result.Expressions[n.Receiver] = receiverType
@@ -3183,7 +3508,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if !classAccess && !n.Namespace {
-			if binding, exists := c.resolution.ReceiverMethod(receiverType, n.Name); exists {
+			if binding, exists := c.resolution.ReceiverMethod(methodReceiverType, n.Name); exists {
 				typ = binding.Type()
 				c.recordReference(n, binding)
 				break
@@ -4083,6 +4408,7 @@ func isReferenceType(typ types.Type) bool {
 }
 
 func portableHashKey(typ types.Type) bool {
+	typ = scalarType(typ)
 	return typ.Kind == types.Never || !typ.Nullable && (typ.Kind == types.String || typ.Kind == types.Int)
 }
 
