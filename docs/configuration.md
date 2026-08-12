@@ -73,6 +73,11 @@ TypeRB targets the current TypeScript release without legacy code-generation
 branches. Browser applications are the primary TypeScript use case; APIs tied
 to a particular runtime remain explicit platform packages.
 
+After native dependencies are installed, `trb install` also indexes supported
+`.d.ts` exports into `.trb/native-types.json`. TypeRB source can import those
+configured packages directly; ordinary builds and completion use the cached
+index and generated TypeScript keeps the original package specifier.
+
 `typescript.runtime` selects `browser`, `bun`, or `node`. Existing projects
 that omit it retain the previous Node execution behavior. `browser` projects
 compile source for a browser application or bundler and cannot use `trb run`

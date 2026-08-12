@@ -54,6 +54,7 @@ type Import struct {
 	Standard  bool
 	Official  bool
 	Platform  bool
+	Native    bool
 	Runtime   bool
 	// RuntimeRequired records that generated code must load the compiler-owned
 	// source module. Fully lowered intrinsics can leave this false.
@@ -71,6 +72,10 @@ type Import struct {
 	// SymbolKinds distinguishes value records from reference classes in
 	// backends whose representation makes that distinction explicit.
 	SymbolKinds map[string]string
+	// SymbolTypes and SymbolParameters retain imported declaration contracts for
+	// editor tooling even when the imported module has no generated TypeRB IR.
+	SymbolTypes      map[string]types.Type
+	SymbolParameters map[string][]types.Type
 }
 
 func (*Import) irStatement() {}

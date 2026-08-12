@@ -27,11 +27,18 @@ type TypeRBResolvedPackage struct {
 	Manifest *TypeRBManifest
 }
 
+type NativeTypeProvider struct {
+	Package      string
+	Path         string
+	Dependencies map[string]string
+}
+
 type TypeRBPackages struct {
-	Lock               *TypeRBLock
-	Aliases            map[string]string
-	Packages           []TypeRBResolvedPackage
-	NativeDependencies map[string]string
+	Lock                *TypeRBLock
+	Aliases             map[string]string
+	Packages            []TypeRBResolvedPackage
+	NativeDependencies  map[string]string
+	NativeTypeProviders []NativeTypeProvider
 }
 
 // ResolveTypeRBPackages creates or reuses the deterministic project lock and
@@ -276,6 +283,11 @@ func loadResolvedTypeRBPackages(config *project.Config, lock *TypeRBLock) (*Type
 				return nil, fmt.Errorf("TypeRB packages require conflicting versions of %s: %s and %s", dependency, existing, version)
 			}
 			result.NativeDependencies[dependency] = version
+		}
+		if provider := manifest.NativeTypeProviderFor(config.Mode); provider != "" {
+			result.NativeTypeProviders = append(result.NativeTypeProviders, NativeTypeProvider{
+				Package: name, Path: filepath.Join(root, provider), Dependencies: manifest.NativeDependenciesFor(config.Mode),
+			})
 		}
 		result.Packages = append(result.Packages, TypeRBResolvedPackage{Name: name, Root: root, Manifest: manifest})
 	}

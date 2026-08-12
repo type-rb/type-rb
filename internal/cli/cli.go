@@ -23,6 +23,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/lexer"
+	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/official"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
 	"github.com/type-rb/type-rb/internal/parser"
@@ -1179,7 +1180,7 @@ func (c *CLI) runInstall(args []string) error {
 	}
 	if !config.ManagesPackages() {
 		fmt.Fprintln(c.Stdout, "native package management is external")
-		return nil
+		return c.indexNativeTypeScriptPackages(config, resolved)
 	}
 	files, err := collectDependencyTRB(config)
 	if err != nil {
@@ -1189,7 +1190,105 @@ func (c *CLI) runInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	return packageManager.InstallWithDependencies(config, dependencies, c.Stdin, c.Stdout, c.Stderr)
+	if err := packageManager.InstallWithDependencies(config, dependencies, c.Stdin, c.Stdout, c.Stderr); err != nil {
+		return err
+	}
+	return c.indexNativeTypeScriptPackages(config, resolved)
+}
+
+func (c *CLI) indexNativeTypeScriptPackages(config *project.Config, resolved *packageManager.TypeRBPackages) error {
+	if config.Mode != "typescript" || config.TypeScript == nil {
+		return nil
+	}
+	dependencies, err := nativeTypeScriptDependencies(config, resolved)
+	if err != nil {
+		return err
+	}
+	modules, err := nativeTypeScriptModules(config, resolved, dependencies)
+	if err != nil {
+		return err
+	}
+	catalog, err := nativepackage.GenerateModules(config.Root, config.TypeScript.PackageManager, dependencies, modules)
+	if err != nil {
+		return err
+	}
+	providers := nativeTypeProviderSources(resolved)
+	if err := nativepackage.ApplyProviderFiles(catalog, providers); err != nil {
+		return err
+	}
+	if err := nativepackage.Write(config.Root, catalog); err != nil {
+		return err
+	}
+	if len(dependencies) > 0 {
+		fmt.Fprintf(c.Stdout, "indexed %d native TypeScript module(s) from %d package(s) -> %s\n", len(catalog.Modules), len(dependencies), nativepackage.IndexPath(config.Root))
+	}
+	return nil
+}
+
+func nativeTypeScriptModules(config *project.Config, resolved *packageManager.TypeRBPackages, dependencies map[string]string) ([]string, error) {
+	modules := make([]string, 0, len(dependencies))
+	seen := map[string]bool{}
+	for name := range dependencies {
+		seen[name] = true
+		modules = append(modules, name)
+	}
+	files, err := collectDependencyTRB(config)
+	if err != nil {
+		return nil, err
+	}
+	units, err := projectSourceUnits(config, files, resolved)
+	if err != nil {
+		return nil, err
+	}
+	for _, unit := range units {
+		program, _ := parser.Parse(unit.Source)
+		for _, statement := range program.Statements {
+			imported, ok := statement.(*ast.ImportStatement)
+			if !ok || seen[imported.Path] || !nativeDependencyOwns(dependencies, imported.Path) {
+				continue
+			}
+			seen[imported.Path] = true
+			modules = append(modules, imported.Path)
+		}
+	}
+	sort.Strings(modules)
+	return modules, nil
+}
+
+func nativeDependencyOwns(dependencies map[string]string, importPath string) bool {
+	for dependency := range dependencies {
+		if importPath == dependency || strings.HasPrefix(importPath, dependency+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func nativeTypeScriptDependencies(config *project.Config, resolved *packageManager.TypeRBPackages) (map[string]string, error) {
+	dependencies := make(map[string]string, len(config.Dependencies))
+	for name, version := range config.Dependencies {
+		dependencies[name] = version
+	}
+	if resolved != nil {
+		for name, version := range resolved.NativeDependencies {
+			if existing, ok := dependencies[name]; ok && existing != version {
+				return nil, fmt.Errorf("native TypeScript dependency %s has conflicting versions %s and %s", name, existing, version)
+			}
+			dependencies[name] = version
+		}
+	}
+	return dependencies, nil
+}
+
+func nativeTypeProviderSources(resolved *packageManager.TypeRBPackages) []nativepackage.ProviderSource {
+	if resolved == nil {
+		return nil
+	}
+	providers := make([]nativepackage.ProviderSource, 0, len(resolved.NativeTypeProviders))
+	for _, provider := range resolved.NativeTypeProviders {
+		providers = append(providers, nativepackage.ProviderSource{Package: provider.Package, Path: provider.Path, Dependencies: provider.Dependencies})
+	}
+	return providers
 }
 
 func (c *CLI) runUpdate(args []string) error {
@@ -1314,7 +1413,11 @@ func projectCompilation(config *project.Config, files []string) ([]compiler.Sour
 	if err != nil {
 		return nil, compiler.Options{}, err
 	}
-	return units, compilerOptionsWithPackages(config, resolvedPackages), nil
+	options, err := compilerOptionsWithPackages(config, resolvedPackages)
+	if err != nil {
+		return nil, compiler.Options{}, err
+	}
+	return units, options, nil
 }
 
 func projectSourceUnits(config *project.Config, files []string, resolvedPackages *packageManager.TypeRBPackages) ([]compiler.SourceUnit, error) {
@@ -1515,10 +1618,10 @@ func compilerOptions(config *project.Config) (compiler.Options, error) {
 	if err != nil {
 		return compiler.Options{}, err
 	}
-	return compilerOptionsWithPackages(config, resolvedPackages), nil
+	return compilerOptionsWithPackages(config, resolvedPackages)
 }
 
-func compilerOptionsWithPackages(config *project.Config, resolvedPackages *packageManager.TypeRBPackages) compiler.Options {
+func compilerOptionsWithPackages(config *project.Config, resolvedPackages *packageManager.TypeRBPackages) (compiler.Options, error) {
 	packageOptions := make(map[string][]byte, len(config.PackageOptions))
 	for name, value := range config.PackageOptions {
 		packageOptions[name] = append([]byte(nil), value...)
@@ -1532,8 +1635,16 @@ func compilerOptionsWithPackages(config *project.Config, resolvedPackages *packa
 	}
 	if config.TypeScript != nil {
 		options.TypeScriptRuntime = config.TypeScript.Runtime
+		dependencies, err := nativeTypeScriptDependencies(config, resolvedPackages)
+		if err != nil {
+			return compiler.Options{}, err
+		}
+		options.NativePackages, err = nativepackage.LoadWithProviders(config.Root, dependencies, nativeTypeProviderSources(resolvedPackages))
+		if err != nil {
+			return compiler.Options{}, err
+		}
 	}
-	return options
+	return options, nil
 }
 
 func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Artifact, root string) (map[string]string, error) {

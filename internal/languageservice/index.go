@@ -2,6 +2,7 @@ package languageservice
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
@@ -80,10 +81,28 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 		if strings.HasPrefix(name, "_") {
 			continue
 		}
-		if isTypeName(name) {
+		switch imported.SymbolKinds[name] {
+		case "class", "record", "enum", "type_alias", "enum_alias", "interface":
 			kind = CompletionType
 		}
-		byName[name] = Symbol{Name: name, Kind: kind, Detail: string(kind), Type: inferredNamedType(name, kind)}
+		typ := imported.SymbolTypes[name]
+		if typ.Kind == "" {
+			typ = inferredNamedType(name, kind)
+		}
+		detail := string(kind)
+		var call *CallInfo
+		if kind == CompletionFunction {
+			parameters := imported.SymbolParameters[name]
+			parts := make([]string, len(parameters))
+			callParameters := make([]CallParameter, len(parameters))
+			for index, parameter := range parameters {
+				parts[index] = parameter.String()
+				callParameters[index] = CallParameter{Name: "arg" + strconv.Itoa(index)}
+			}
+			detail = name + "(" + strings.Join(parts, ", ") + "): " + typ.String()
+			call = &CallInfo{ParameterCount: len(parameters), Parameters: callParameters}
+		}
+		byName[name] = Symbol{Name: name, Kind: kind, Detail: detail, Type: typ, Call: call}
 	}
 
 	if imported.Namespace && imported.Alias != "" {

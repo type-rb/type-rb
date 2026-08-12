@@ -1,0 +1,195 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/type-rb/type-rb/internal/nativepackage"
+	packageManager "github.com/type-rb/type-rb/internal/packages"
+	"github.com/type-rb/type-rb/internal/project"
+)
+
+func TestBuildUsesInstalledNativeTypeScriptPackageIndex(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "typescript")
+	config.SourceDir = "src"
+	config.OutDir = "build"
+	config.PackageManagement = project.ExternalPackages
+	config.TypeScript.Runtime = project.TypeScriptRuntimeBrowser
+	config.Dependencies["react-spinners"] = "^0.17.0"
+	copyFiles := false
+	config.CopyFiles = &copyFiles
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { ReactNode } from trb/platform/typescript/react
+import { ClipLoader } from "react-spinners"
+
+def Loading(): ReactNode
+	return <ClipLoader color="#4f46e5" loading size={24} />
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "loading.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := nativepackage.Write(root, cliNativeComponentCatalog()); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	generated, err := os.ReadFile(filepath.Join(config.OutputPath(), "loading.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`import { ClipLoader } from "react-spinners";`,
+		`return <ClipLoader color={"#4f46e5"} loading size={24} />;`,
+	} {
+		if !strings.Contains(string(generated), expected) {
+			t.Fatalf("generated native component TSX is missing %q:\n%s", expected, generated)
+		}
+	}
+}
+
+func TestBuildRejectsStaleNativeTypeScriptPackageIndex(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "typescript")
+	config.SourceDir = "src"
+	config.PackageManagement = project.ExternalPackages
+	config.Dependencies["react-spinners"] = "^0.18.0"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("import { ClipLoader } from react-spinners\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := nativepackage.Write(root, cliNativeComponentCatalog()); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path}); status == 0 {
+		t.Fatal("stale native package index unexpectedly compiled")
+	}
+	if !strings.Contains(stderr.String(), "native TypeScript package types are stale; run trb install") {
+		t.Fatalf("unexpected diagnostic: %s", stderr.String())
+	}
+}
+
+func TestInstallAppliesTypeRBPackageNativeTypeProvider(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "typescript")
+	config.TypeScript.PackageManager = "npm"
+	config.Dependencies["ui"] = "1.0.0"
+	providerPath := filepath.Join(root, "provider.json")
+	provider := nativepackage.Provider{
+		FormatVersion: nativepackage.FormatVersion,
+		Modules: map[string]nativepackage.Module{
+			"ui": {Exports: map[string]nativepackage.Export{
+				"Button": {Kind: "component", Type: nativepackage.Type{Kind: "named", Name: "ReactNode"}},
+			}},
+		},
+	}
+	providerData, err := json.Marshal(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(providerPath, append(providerData, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	indexerOutput := `{"typescriptVersion":"7.0.0","modules":{"ui":{"exports":{},"unsupported":{"Button":"uses a conditional type"}}}}`
+	node := filepath.Join(bin, "node")
+	if err := os.WriteFile(node, []byte("#!/bin/sh\nprintf '%s' '"+indexerOutput+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	resolved := &packageManager.TypeRBPackages{NativeTypeProviders: []packageManager.NativeTypeProvider{{
+		Package: "github.com/acme/ui-types", Path: providerPath, Dependencies: map[string]string{"ui": "1.0.0"},
+	}}}
+	var stdout bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &bytes.Buffer{}}
+	if err := command.indexNativeTypeScriptPackages(config, resolved); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := nativepackage.Load(root, map[string]string{"ui": "1.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Modules["ui"].Exports["Button"].Kind != "component" {
+		t.Fatalf("provider correction is missing: %#v", loaded.Modules["ui"])
+	}
+	if !strings.Contains(stdout.String(), "indexed 1 native TypeScript module(s) from 1 package(s)") {
+		t.Fatalf("unexpected install output: %s", stdout.String())
+	}
+}
+
+func TestNativeTypeScriptModulesIncludeImportedDependencySubpaths(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "typescript")
+	config.SourceDir = "src"
+	config.Dependencies["@acme/ui"] = "1.0.0"
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "import { Button } from \"@acme/ui/components\"\n"
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modules, err := nativeTypeScriptModules(config, &packageManager.TypeRBPackages{}, config.Dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(modules, ",") != "@acme/ui,@acme/ui/components" {
+		t.Fatalf("unexpected native modules: %#v", modules)
+	}
+}
+
+func cliNativeComponentCatalog() *nativepackage.Catalog {
+	propsName := "Native_react_spinners_ClipLoaderProps"
+	return &nativepackage.Catalog{
+		FormatVersion: nativepackage.FormatVersion,
+		Dependencies:  map[string]string{"react-spinners": "^0.17.0"},
+		Modules: map[string]nativepackage.Module{
+			"react-spinners": {
+				Exports: map[string]nativepackage.Export{
+					"ClipLoader": {
+						Kind:       "component",
+						Type:       nativepackage.Type{Kind: "named", Name: "ReactNode"},
+						Parameters: []nativepackage.Type{{Kind: "named", Name: propsName}},
+						Required:   1,
+					},
+				},
+				Records: map[string]nativepackage.Export{
+					propsName: {
+						Kind: "record",
+						Type: nativepackage.Type{Kind: "named", Name: propsName},
+						Fields: []nativepackage.Field{
+							{Name: "color", Type: nativepackage.Type{Kind: "string", Name: "String", Nullable: true}, Optional: true},
+							{Name: "loading", Type: nativepackage.Type{Kind: "bool", Name: "Boolean", Nullable: true}, Optional: true},
+							{Name: "size", Type: nativepackage.Type{Kind: "union", Name: "Union", Args: []nativepackage.Type{{Kind: "string", Name: "String"}, {Kind: "float", Name: "Float"}}, Nullable: true}, Optional: true},
+						},
+					},
+				},
+			},
+		},
+	}
+}

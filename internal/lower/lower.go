@@ -83,6 +83,8 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 			IntrinsicSymbols:          map[string]bool{},
 			RuntimeIndependentSymbols: map[string]bool{},
 			SymbolKinds:               map[string]string{},
+			SymbolTypes:               map[string]types.Type{},
+			SymbolParameters:          map[string][]types.Type{},
 		}
 		for _, exported := range definition.RuntimeExports {
 			imported.Symbols = append(imported.Symbols, exported.Name)
@@ -126,6 +128,8 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			Symbols:                   append([]string(nil), n.Symbols...),
 			Alias:                     n.Alias,
 			SymbolKinds:               map[string]string{},
+			SymbolTypes:               map[string]types.Type{},
+			SymbolParameters:          map[string][]types.Type{},
 			IntrinsicSymbols:          map[string]bool{},
 			RuntimeIndependentSymbols: map[string]bool{},
 		}
@@ -137,6 +141,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			result.Kind = string(resolved.Kind)
 			result.Standard = resolved.Kind == resolver.StandardImport
 			result.Official = resolved.Kind == resolver.OfficialImport
+			result.Native = resolved.Kind == resolver.NativeImport
 			result.Platform = resolved.Definition != nil && resolved.Definition.Kind == "platform"
 			result.Runtime = resolved.Definition != nil && resolved.Definition.Source != ""
 			for name, exported := range resolved.Exports {
@@ -145,6 +150,8 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 					kind = "enum_alias"
 				}
 				result.SymbolKinds[name] = kind
+				result.SymbolTypes[name] = exported.Type
+				result.SymbolParameters[name] = append([]types.Type(nil), exported.Parameters...)
 			}
 			if resolved.Definition != nil {
 				for name, symbol := range resolved.Definition.Symbols {

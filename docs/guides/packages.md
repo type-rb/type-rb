@@ -58,8 +58,12 @@ A repository publishes `trbpackage.json` at its root:
       "uuid7": "0.1.0"
     },
     "typescript": {
+      "@acme/ui": "1.0.0",
       "uuid": "11.1.0"
     }
+  },
+  "nativeTypeProviders": {
+    "typescript": "native-types/typescript.json"
   }
 }
 ```
@@ -70,10 +74,56 @@ aliases are local to the declaring package. Native dependencies are selected
 only for the application's active mode and merge into its generated target
 manifest.
 
-External compiler extensions are intentionally unavailable. Packages that
-need syntax, type-provider, or code-generation integration must wait for a
-versioned and sandboxed extension protocol rather than importing compiler
-internals.
+An optional TypeScript native type provider corrects declarations inferred from
+installed `.d.ts` files while application source continues to import the npm
+package directly. The provider is declarative data and cannot execute compiler
+code. Each declared module must belong to the package's TypeScript
+`nativeDependencies`; two providers cannot replace the same export or record.
+
+The initial provider file uses a versioned semantic type format:
+
+```json
+{
+  "formatVersion": 1,
+  "modules": {
+    "@acme/ui": {
+      "exports": {
+        "Button": {
+          "kind": "component",
+          "type": { "kind": "named", "name": "ReactNode" },
+          "parameters": [
+            { "kind": "named", "name": "ButtonProps" }
+          ],
+          "required": 1
+        }
+      },
+      "records": {
+        "ButtonProps": {
+          "kind": "record",
+          "type": { "kind": "named", "name": "ButtonProps" },
+          "fields": [
+            {
+              "name": "label",
+              "type": { "kind": "string", "name": "String" }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+This format is an alpha Tier 1 extension for package authors. It supports
+`function`, `component`, and `record` declarations; broader generic and effect
+contracts remain future extension-protocol work. Provider declarations cannot
+use `Any`; unrepresentable boundaries remain explicit diagnostics.
+
+External executable compiler extensions are intentionally unavailable.
+Packages that need syntax, code generation, or dynamic type discovery must
+wait for a versioned and sandboxed extension protocol rather than importing
+compiler internals. The declarative native type provider above is the safe
+non-executable subset.
 
 ## Lock and cache
 
@@ -104,7 +154,9 @@ trb add --path ../contracts local/contracts
 Local paths are recorded relative to the project and source content is not
 locked, so code edits are visible immediately. The normalized manifest is
 checksummed; run `trb install` after changing its identity, dependencies,
-supported modes, or native dependencies. A local package's manifest name
+supported modes, native dependencies, or native type provider. Provider file
+changes also require `trb install`; a build diagnoses a stale cached provider.
+A local package's manifest name
 remains its canonical identity; `local/contracts` is only the importing
 project's alias.
 
@@ -129,4 +181,5 @@ trb sync
 
 Projects with `"packageManagement": "external"` may still resolve TypeRB
 packages, but the host project remains responsible for installing all merged
-native dependencies.
+native dependencies. In TypeScript mode, `trb install` still indexes declared
+native package types after the host package manager has installed them.

@@ -297,6 +297,16 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("TypeRB package %s requires a version or path", name)
 		}
 	}
+	if c.Mode == "typescript" {
+		for name := range c.Dependencies {
+			if _, exists := c.Packages[name]; exists {
+				return fmt.Errorf("dependency %s is declared as both a TypeRB package and a native TypeScript package", name)
+			}
+			if _, exists := c.LocalPackages[name]; exists {
+				return fmt.Errorf("dependency %s is declared as both a local TypeRB package and a native TypeScript package", name)
+			}
+		}
+	}
 	if escapesRoot(c.SourceDir) || escapesRoot(c.OutDir) {
 		return errors.New("sourceDir and outDir cannot escape the project root")
 	}

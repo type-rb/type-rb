@@ -142,6 +142,15 @@ func TestTypeRBPackageRequirementRejectsMixedPathAndVersion(t *testing.T) {
 	}
 }
 
+func TestTypeScriptDependencyCannotAlsoBeATypeRBPackage(t *testing.T) {
+	config := New(t.TempDir(), "typescript")
+	config.Dependencies["acme/ui"] = "1.0.0"
+	config.Packages["acme/ui"] = PackageRequirement{Version: "v1.0.0"}
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "both a TypeRB package and a native TypeScript package") {
+		t.Fatalf("unexpected validation result: %v", err)
+	}
+}
+
 func TestLoadJSONCRejectsTrailingCommas(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, ConfigName)
