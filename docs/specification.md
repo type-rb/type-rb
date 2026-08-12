@@ -637,6 +637,11 @@ inferred from Go, Ruby, or TypeScript:
   `response.json<Todo>()`. It substitutes arguments through parameters,
   returns, fields, enum payloads, case bindings, and cross-file signatures
   before producing typed IR.
+- A compiler-owned package function may define an argument-inferred type
+  contract where the package API would otherwise expose target-only machinery.
+  For example, `use_state(0)` from the explicit React platform package returns
+  `ReactState<Integer>`. This does not add general type-argument inference to
+  user-defined or native-package functions.
 - Generic enum patterns omit repeated type arguments because the selector
   supplies them: a `case` over `Result<Integer, String>` uses
   `when Result::Ok(value)` and binds `value` as `Integer`.

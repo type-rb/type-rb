@@ -13,6 +13,7 @@ func init() {
 }
 
 func loadReact(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {
+	typeT := types.FromName("T")
 	stringType := types.FromName("String")
 	booleanType := types.FromName("Boolean")
 	integerType := types.FromName("Integer")
@@ -47,8 +48,15 @@ func loadReact(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {
 	keyboard.InstanceMembers["key"] = declaration.Member{Name: "key", Kind: declaration.Property, Return: stringType, Provider: reactTypeProvider}
 	keyboard.InstanceMembers["code"] = declaration.Member{Name: "code", Kind: declaration.Property, Return: stringType, Provider: reactTypeProvider}
 
+	state := declaration.NewType("ReactState", "")
+	state.TypeParameters = []string{"T"}
+	state.InstanceMembers["value"] = declaration.Member{Name: "value", Kind: declaration.Property, Return: typeT, Provider: reactTypeProvider}
+	state.InstanceMembers["set"] = declaration.Member{
+		Name: "set", Kind: declaration.Method, Parameters: []declaration.Parameter{{Name: "value", Type: typeT}}, Return: voidType, Provider: reactTypeProvider,
+	}
+
 	catalog := declaration.NewCatalog()
-	for _, declarationType := range []*declaration.Type{element, input, form, synthetic, mouse, change, formEvent, keyboard} {
+	for _, declarationType := range []*declaration.Type{element, input, form, synthetic, mouse, change, formEvent, keyboard, state} {
 		catalog.Types[declarationType.Name] = declarationType
 	}
 	return catalog, nil

@@ -4,6 +4,7 @@
 package ir
 
 import (
+	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -21,6 +22,7 @@ type Program struct {
 	RubyLoader        string
 	TypeScriptRuntime string
 	UsesJSX           bool
+	Declarations      *declaration.Catalog
 	Extensions        []Extension
 	Statements        []Statement
 }

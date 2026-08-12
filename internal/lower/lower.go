@@ -40,6 +40,7 @@ func Program(checked checker.Result) *ir.Program {
 		RubyLoader:        checked.Program.RubyLoader,
 		TypeScriptRuntime: checked.Program.TypeScriptRuntime,
 		UsesJSX:           l.usesJSX,
+		Declarations:      checked.Resolution.Declarations,
 		Statements:        statements,
 	}
 }
@@ -215,6 +216,16 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			}
 			if resolved.Definition != nil {
 				for name, symbol := range resolved.Definition.Symbols {
+					if result.SymbolTypes[name].Kind == "" {
+						result.SymbolKinds[name] = "function"
+						result.SymbolTypes[name] = symbol.Return
+						parameters := make([]types.Type, len(symbol.Parameters))
+						for index, parameter := range symbol.Parameters {
+							parameters[index] = parameter.Type
+						}
+						result.SymbolParameters[name] = parameters
+						result.SymbolTypeParameters[name] = append([]string(nil), symbol.TypeParameters...)
+					}
 					if symbol.Intrinsic != "" {
 						if _, hasRuntimeExport := resolved.Exports[name]; symbol.RuntimeIndependent || !hasRuntimeExport {
 							result.IntrinsicSymbols[name] = true

@@ -25,6 +25,7 @@ type generator struct {
 	records          map[string]bool
 	typeAliases      map[string]string
 	typeMappings     map[string]string
+	reactStateHelper bool
 	temporary        int
 	suspension       *SuspensionPlan
 	orm              *ormintegration.Manifest
@@ -143,10 +144,23 @@ func (g *generator) statement(statement ir.Statement) {
 					g.typeMappings[symbol] = "React.FormEvent<HTMLFormElement>"
 				case "KeyboardEvent":
 					g.typeMappings[symbol] = "React.KeyboardEvent<HTMLElement>"
+				case "ReactState":
+					g.typeMappings[symbol] = "__TrbReactState"
 				}
 			}
 			if containsString(n.Symbols, "mount") {
 				g.line(`import { createRoot } from "react-dom/client";`)
+			}
+			if containsString(n.Symbols, "use_state") && !g.reactStateHelper {
+				g.typeMappings["ReactState"] = "__TrbReactState"
+				g.line(`type __TrbReactState<T> = Readonly<{ value: T; set: (value: T) => void }>;`)
+				g.line(`function useTrbState<T>(initial: T): __TrbReactState<T> {`)
+				g.indent++
+				g.line(`const [value, setValue] = React.useState<T>(initial);`)
+				g.line(`return { value, set: setValue };`)
+				g.indent--
+				g.line(`}`)
+				g.reactStateHelper = true
 			}
 			return
 		}

@@ -816,6 +816,9 @@ func collectImportedNames(tokens []token.Token, start int, symbols map[string]Sy
 			continue
 		}
 		name := tokens[index].Lexeme
+		if _, exists := symbols[name]; exists {
+			continue
+		}
 		kind := CompletionFunction
 		if isTypeName(name) {
 			kind = CompletionType

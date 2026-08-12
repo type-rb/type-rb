@@ -3,6 +3,9 @@ package compiler
 import (
 	"strings"
 	"testing"
+
+	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/languageservice"
 )
 
 func TestCompileTypeScriptJSXToStructuredTSX(t *testing.T) {
@@ -63,6 +66,74 @@ end
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated TSX is missing %q:\n%s", expected, output)
 		}
+	}
+}
+
+func TestCompileTypeScriptJSXWithTypedState(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "counter.trb",
+		ModulePath: "app/counter",
+		Source: []byte(`import { MouseEvent, ReactNode, use_state } from trb/platform/typescript/react
+
+def Counter(): ReactNode
+	count := use_state(0)
+	increment := fn(_event: MouseEvent)
+		count.set(count.value + 1)
+		return
+	end
+	return <button onClick={increment}>Count: {count.value}</button>
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		"type __TrbReactState<T> = Readonly<{ value: T; set: (value: T) => void }>;",
+		"function useTrbState<T>(initial: T): __TrbReactState<T>",
+		"const count: __TrbReactState<number> = useTrbState(0);",
+		"count.set(count.value + 1);",
+		"<button onClick={increment}>Count: {count.value}</button>",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated stateful TSX is missing %q:\n%s", expected, output)
+		}
+	}
+	programs := make([]*ir.Program, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		programs = append(programs, artifact.IR)
+	}
+	context := languageservice.BuildContext(programs, source.ModulePath)
+	completionSource := `import { ReactNode, use_state } from trb/platform/typescript/react
+def Counter(): ReactNode
+	count := use_state(0)
+	count.`
+	items := languageservice.Complete(languageservice.CompletionRequest{
+		Source: completionSource, Cursor: len(completionSource), Mode: "typescript", Context: context,
+	})
+	seen := map[string]bool{}
+	for _, item := range items {
+		seen[item.Label] = true
+	}
+	if !seen["value"] || !seen["set"] {
+		t.Fatalf("React state completion is missing value/set: %#v", items)
+	}
+}
+
+func TestCompileTypeScriptJSXChecksStateUpdates(t *testing.T) {
+	source := []byte(`import { ReactNode, use_state } from trb/platform/typescript/react
+
+def Counter(): ReactNode
+	count := use_state(0)
+	count.set("wrong")
+	return <p>{count.value}</p>
+end
+`)
+	_, err := CompileProject([]SourceUnit{{Filename: "counter.trb", ModulePath: "app/counter", Source: source}}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err == nil || !strings.Contains(err.Error(), "argument 1 to set() has type String, expected Integer") {
+		t.Fatalf("expected typed state update diagnostic, got %v", err)
 	}
 }
 

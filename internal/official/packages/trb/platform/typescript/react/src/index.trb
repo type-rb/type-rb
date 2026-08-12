@@ -24,3 +24,6 @@ end
 
 class KeyboardEvent < SyntheticEvent
 end
+
+class ReactState<T>
+end

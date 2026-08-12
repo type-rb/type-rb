@@ -453,6 +453,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "process.argv.slice(2)"
 	case "trb.platform.typescript.react.mount":
 		return "createRoot(document.getElementById(" + arguments[1] + ")!).render(" + arguments[0] + ")"
+	case "trb.platform.typescript.react.use_state":
+		return "useTrbState(" + arguments[0] + ")"
 	default:
 		return "undefined"
 	}

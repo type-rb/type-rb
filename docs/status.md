@@ -46,7 +46,9 @@ source and emits ordinary TSX for React tooling. Function components use typed
 record props, JSX component calls are checked across project modules, and only
 modules containing JSX use the `.tsx` extension. The explicit
 `trb/platform/typescript/react` package supplies the React boundary, including
-purpose-specific mouse, change, form, and keyboard event types.
+purpose-specific mouse, change, form, and keyboard event types. Its typed
+`use_state(initial)` wrapper infers `ReactState<T>` and exposes checked `value`
+and `set(value)` members while generated TSX uses React `useState`.
 
 The implemented language includes functions, typed first-class function values
 with lexical capture and checked fallible effects, and classes, modules and
