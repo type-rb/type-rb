@@ -111,6 +111,7 @@ func ApplyProviderFiles(catalog *Catalog, sources []ProviderSource) error {
 				}
 				owners[key] = source.Package
 				current.Records[name] = record
+				delete(current.Unsupported, name)
 			}
 			catalog.Modules[moduleName] = current
 		}
@@ -148,11 +149,24 @@ func validateProviderModule(moduleName string, module Module) error {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("%s contains an empty export name", moduleName)
 		}
-		if exported.Kind != "component" && exported.Kind != "function" {
+		if exported.Kind != "component" && exported.Kind != "function" && exported.Kind != "class" && exported.Kind != "record" && exported.Kind != "type_alias" {
 			return fmt.Errorf("export %s from %s has unsupported kind %q", name, moduleName, exported.Kind)
+		}
+		if err := validateProviderTypeParameters(exported.TypeParameters); err != nil {
+			return fmt.Errorf("export %s from %s: %w", name, moduleName, err)
 		}
 		if err := validateProviderType(exported.Type); err != nil {
 			return fmt.Errorf("export %s from %s: %w", name, moduleName, err)
+		}
+		if exported.Kind == "type_alias" {
+			if exported.AliasTarget == nil || exported.AliasTarget.Kind == "" {
+				return fmt.Errorf("export %s from %s: type alias requires aliasTarget", name, moduleName)
+			}
+			if err := validateProviderType(*exported.AliasTarget); err != nil {
+				return fmt.Errorf("export %s from %s: %w", name, moduleName, err)
+			}
+		} else if exported.AliasTarget != nil {
+			return fmt.Errorf("export %s from %s: aliasTarget is only valid for type aliases", name, moduleName)
 		}
 		for _, parameter := range exported.Parameters {
 			if err := validateProviderType(parameter); err != nil {
@@ -162,12 +176,23 @@ func validateProviderModule(moduleName string, module Module) error {
 		if exported.Required < 0 || exported.Required > len(exported.Parameters) {
 			return fmt.Errorf("export %s from %s has invalid required parameter count", name, moduleName)
 		}
+		for _, field := range exported.Fields {
+			if strings.TrimSpace(field.Name) == "" {
+				return fmt.Errorf("export %s from %s contains an empty field name", name, moduleName)
+			}
+			if err := validateProviderType(field.Type); err != nil {
+				return fmt.Errorf("export %s.%s from %s: %w", name, field.Name, moduleName, err)
+			}
+		}
 	}
 	for name, record := range module.Records {
 		if strings.TrimSpace(name) == "" || record.Kind != "record" {
 			return fmt.Errorf("record %s from %s must use kind record", name, moduleName)
 		}
 		if err := validateProviderType(record.Type); err != nil {
+			return fmt.Errorf("record %s from %s: %w", name, moduleName, err)
+		}
+		if err := validateProviderTypeParameters(record.TypeParameters); err != nil {
 			return fmt.Errorf("record %s from %s: %w", name, moduleName, err)
 		}
 		for _, field := range record.Fields {
@@ -184,7 +209,7 @@ func validateProviderModule(moduleName string, module Module) error {
 
 func validateProviderType(typ Type) error {
 	switch typ.Kind {
-	case "array", "bool", "bytes", "float", "function", "hash", "int", "named", "never", "nil", "range", "string", "union", "void":
+	case "array", "bool", "bytes", "float", "function", "hash", "int", "int_literal", "named", "never", "nil", "range", "string", "string_literal", "union", "void":
 	default:
 		return fmt.Errorf("unsupported type kind %q", typ.Kind)
 	}
@@ -195,6 +220,20 @@ func validateProviderType(typ Type) error {
 		if err := validateProviderType(argument); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateProviderTypeParameters(parameters []string) error {
+	seen := map[string]bool{}
+	for _, parameter := range parameters {
+		if strings.TrimSpace(parameter) == "" {
+			return errors.New("type parameter name is empty")
+		}
+		if seen[parameter] {
+			return fmt.Errorf("type parameter %s is duplicated", parameter)
+		}
+		seen[parameter] = true
 	}
 	return nil
 }

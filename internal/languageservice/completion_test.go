@@ -183,6 +183,10 @@ func TestCompletionUsesIndexedNativePackageContracts(t *testing.T) {
 						Parameters: []nativepackage.Type{{Kind: "named", Name: propsName}},
 						Required:   1,
 					},
+					"identity": {
+						Kind: "function", Type: nativepackage.Type{Kind: "named", Name: "T"},
+						TypeParameters: []string{"T"}, Parameters: []nativepackage.Type{{Kind: "named", Name: "T"}}, Required: 1,
+					},
 				},
 				Records: map[string]nativepackage.Export{
 					propsName: {Kind: "record", Type: nativepackage.Type{Kind: "named", Name: propsName}},
@@ -191,7 +195,7 @@ func TestCompletionUsesIndexedNativePackageContracts(t *testing.T) {
 		},
 	}
 	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{{
-		Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { ClipLoader } from react-spinners\n"),
+		Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { ClipLoader, identity } from react-spinners\n"),
 	}}, compiler.Options{Mode: "typescript", ModulePath: "repl", AllowUnusedImports: true, NativePackages: catalog})
 	if err != nil {
 		t.Fatal(err)
@@ -207,6 +211,13 @@ func TestCompletionUsesIndexedNativePackageContracts(t *testing.T) {
 	}
 	if item.Detail != "ClipLoader(Native_react_spinners_ClipLoaderProps): ReactNode" {
 		t.Fatalf("native package detail=%q", item.Detail)
+	}
+	item, ok = findCompletion(service.Complete("iden", len("iden")), "identity")
+	if !ok {
+		t.Fatal("generic native package export was not completed")
+	}
+	if item.InsertText != "identity" || item.Detail != "identity<T>(T): T" {
+		t.Fatalf("generic native package completion=%#v", item)
 	}
 }
 

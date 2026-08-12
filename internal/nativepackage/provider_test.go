@@ -28,7 +28,10 @@ func TestApplyProviderFilesCorrectsIndexedExport(t *testing.T) {
 		FormatVersion: FormatVersion,
 		Dependencies:  map[string]string{"@acme/ui": "1.0.0"},
 		Modules: map[string]Module{
-			"@acme/ui": {Exports: map[string]Export{}, Unsupported: map[string]string{"Button": "uses a conditional type"}},
+			"@acme/ui": {Exports: map[string]Export{}, Unsupported: map[string]string{
+				"Button":      "uses a conditional type",
+				"ButtonProps": "uses a mapped type",
+			}},
 		},
 	}
 	if err := ApplyProviderFiles(catalog, []ProviderSource{{Package: "github.com/acme/ui-types", Path: path, Dependencies: map[string]string{"@acme/ui": "1.0.0"}}}); err != nil {
@@ -40,6 +43,53 @@ func TestApplyProviderFilesCorrectsIndexedExport(t *testing.T) {
 	}
 	if _, exists := module.Unsupported["Button"]; exists {
 		t.Fatalf("provider did not replace the inferred unsupported export: %#v", module.Unsupported)
+	}
+	if _, exists := module.Unsupported["ButtonProps"]; exists {
+		t.Fatalf("provider did not replace the inferred unsupported record: %#v", module.Unsupported)
+	}
+}
+
+func TestApplyProviderFilesAcceptsGenericNativeContracts(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "native-types.json")
+	aliasTarget := Type{Kind: "union", Name: "Union", Args: []Type{
+		{Kind: "named", Name: "PendingResult", Args: []Type{{Kind: "named", Name: "TData"}, {Kind: "named", Name: "TError"}}},
+		{Kind: "named", Name: "SuccessResult", Args: []Type{{Kind: "named", Name: "TData"}, {Kind: "named", Name: "TError"}}},
+	}}
+	writeProviderFixture(t, path, Provider{
+		FormatVersion: FormatVersion,
+		Modules: map[string]Module{
+			"query-library": {
+				Exports: map[string]Export{
+					"Client": {Kind: "class", Type: Type{Kind: "named", Name: "Client"}},
+					"QueryResult": {
+						Kind: "type_alias", Type: Type{Kind: "named", Name: "QueryResult", Args: []Type{{Kind: "named", Name: "TData"}, {Kind: "named", Name: "TError"}}},
+						TypeParameters: []string{"TData", "TError"}, AliasTarget: &aliasTarget,
+					},
+					"useQuery": {
+						Kind: "function", TypeParameters: []string{"TData", "TError"},
+						Type:       Type{Kind: "named", Name: "QueryResult", Args: []Type{{Kind: "named", Name: "TData"}, {Kind: "named", Name: "TError"}}},
+						Parameters: []Type{{Kind: "named", Name: "QueryOptions", Args: []Type{{Kind: "named", Name: "TData"}, {Kind: "named", Name: "TError"}}}}, Required: 1,
+					},
+				},
+				Records: map[string]Export{
+					"QueryOptions": {
+						Kind: "record", Type: Type{Kind: "named", Name: "QueryOptions"}, TypeParameters: []string{"TData", "TError"},
+						Fields: []Field{{Name: "queryFn", Type: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "named", Name: "TData"}}}}},
+					},
+					"PendingResult": {Kind: "record", Type: Type{Kind: "named", Name: "PendingResult"}, TypeParameters: []string{"TData", "TError"}, Fields: []Field{{Name: "status", Type: Type{Kind: "string_literal", Name: `"pending"`}}}},
+					"SuccessResult": {Kind: "record", Type: Type{Kind: "named", Name: "SuccessResult"}, TypeParameters: []string{"TData", "TError"}, Fields: []Field{{Name: "status", Type: Type{Kind: "string_literal", Name: `"success"`}}, {Name: "data", Type: Type{Kind: "named", Name: "TData"}}}},
+				},
+			},
+		},
+	})
+	catalog := Empty(map[string]string{"query-library": "1.0.0"})
+	if err := ApplyProviderFiles(catalog, []ProviderSource{{Package: "github.com/acme/query-types", Path: path, Dependencies: map[string]string{"query-library": "1.0.0"}}}); err != nil {
+		t.Fatal(err)
+	}
+	module := catalog.Modules["query-library"]
+	if module.Exports["useQuery"].TypeParameters[0] != "TData" || module.Exports["QueryResult"].AliasTarget == nil || module.Records["QueryOptions"].TypeParameters[1] != "TError" {
+		t.Fatalf("generic provider contracts were not retained: %#v", module)
 	}
 }
 

@@ -201,6 +201,11 @@ func (g *generator) statement(statement ir.Statement) {
 					values = append(values, symbol)
 				}
 			}
+			for _, symbol := range n.GeneratedTypeSymbols {
+				if !containsString(types, symbol) {
+					types = append(types, symbol)
+				}
+			}
 			if intrinsicRuntime && !browserRuntime {
 				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}

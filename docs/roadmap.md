@@ -72,8 +72,9 @@ than detailed syntax.
   also supporting Bun and Node server runtimes. Runtime-only APIs and server
   framework integrations remain explicit platform packages.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
-- Expand the initial TypeScript `.d.ts` bridge and declarative correction format
-  to generic and effect-rich APIs, then provide equivalent package-owned type
+- Expand automatic TypeScript `.d.ts` indexing beyond its initial simple
+  signatures. Evolve the generic declarative provider format for fallible and
+  suspending callback effects, then provide equivalent package-owned type
   discovery for Go modules and gems without application-authored signatures.
 - Evolve the initial distributed Git package system with semantic version
   constraints, selective updates, publishing conventions, shared caches,

@@ -115,9 +115,19 @@ The initial provider file uses a versioned semantic type format:
 ```
 
 This format is an alpha Tier 1 extension for package authors. It supports
-`function`, `component`, and `record` declarations; broader generic and effect
-contracts remain future extension-protocol work. Provider declarations cannot
-use `Any`; unrepresentable boundaries remain explicit diagnostics.
+`function`, `component`, `class`, `record`, and transparent `type_alias`
+declarations. `typeParameters` names explicit generic parameters on functions,
+classes, records, and aliases; `aliasTarget` describes an alias's semantic
+target. Semantic types may refer to those parameters and may use literal and
+union types for discriminated result contracts. TypeRB calls still provide
+explicit type arguments. Provider declarations cannot use `Any`;
+unrepresentable boundaries remain explicit diagnostics.
+
+Provider-only records may describe props or parameter objects without becoming
+application-importable names. When a selected contract refers to real native
+package types, generated TypeScript adds the required type-only imports while
+keeping those transitive names invisible to TypeRB source and completion.
+Fallible or suspending callback effects remain future extension-protocol work.
 
 External executable compiler extensions are intentionally unavailable.
 Packages that need syntax, code generation, or dynamic type discovery must

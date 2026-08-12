@@ -291,7 +291,11 @@ switches.
   Its generated import keeps the original package specifier. Declaration
   shapes that cannot be represented safely are errors and never fall back to
   `Any`. A declarative provider from an installed TypeRB package may replace
-  indexed exports and records without changing the application import.
+  indexed exports and records without changing the application import. A
+  provider may describe generic functions, classes, records, and transparent
+  type aliases. Calls continue to use TypeRB's explicit type arguments, and
+  generated TypeScript imports any transitive target types required by the
+  selected contracts without exposing those helper names to TypeRB source.
 - Official formatter command: `trb fmt`.
 - Canonical TypeRB indentation is one tab per nesting level. Formatter
   configuration is not part of the current language; a future configuration

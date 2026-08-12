@@ -44,6 +44,60 @@ func Program(checked checker.Result) *ir.Program {
 	}
 }
 
+func nativeContractTypeSymbols(imported *resolver.Import) []string {
+	if imported == nil {
+		return nil
+	}
+	sourceSymbols := map[string]bool{}
+	for _, name := range imported.Symbols {
+		sourceSymbols[name] = true
+	}
+	generated := map[string]bool{}
+	visiting := map[string]bool{}
+	var visitType func(types.Type)
+	var visitExport func(string, resolver.Export)
+	visitExport = func(name string, exported resolver.Export) {
+		if visiting[name] {
+			return
+		}
+		visiting[name] = true
+		if exported.NativeExported && !sourceSymbols[name] {
+			generated[name] = true
+		}
+		visitType(exported.Type)
+		visitType(exported.AliasTarget)
+		for _, parameter := range exported.Parameters {
+			visitType(parameter)
+		}
+		for _, field := range exported.Fields {
+			visitType(field.Type)
+		}
+		delete(visiting, name)
+	}
+	visitType = func(typ types.Type) {
+		for _, argument := range typ.Args {
+			visitType(argument)
+		}
+		if typ.Kind != types.Named || typ.Name == "" {
+			return
+		}
+		if exported, exists := imported.Exports[typ.Name]; exists {
+			visitExport(typ.Name, exported)
+		}
+	}
+	for _, name := range imported.Symbols {
+		if exported, exists := imported.Exports[name]; exists {
+			visitExport(name, exported)
+		}
+	}
+	result := make([]string, 0, len(generated))
+	for name := range generated {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
+
 func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 	loaded := map[string]*ir.Import{}
 	for _, statement := range statements {
@@ -85,6 +139,7 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 			SymbolKinds:               map[string]string{},
 			SymbolTypes:               map[string]types.Type{},
 			SymbolParameters:          map[string][]types.Type{},
+			SymbolTypeParameters:      map[string][]string{},
 		}
 		for _, exported := range definition.RuntimeExports {
 			imported.Symbols = append(imported.Symbols, exported.Name)
@@ -130,6 +185,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			SymbolKinds:               map[string]string{},
 			SymbolTypes:               map[string]types.Type{},
 			SymbolParameters:          map[string][]types.Type{},
+			SymbolTypeParameters:      map[string][]string{},
 			IntrinsicSymbols:          map[string]bool{},
 			RuntimeIndependentSymbols: map[string]bool{},
 		}
@@ -152,6 +208,10 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 				result.SymbolKinds[name] = kind
 				result.SymbolTypes[name] = exported.Type
 				result.SymbolParameters[name] = append([]types.Type(nil), exported.Parameters...)
+				result.SymbolTypeParameters[name] = append([]string(nil), exported.TypeParameters...)
+			}
+			if resolved.Kind == resolver.NativeImport {
+				result.GeneratedTypeSymbols = nativeContractTypeSymbols(resolved)
 			}
 			if resolved.Definition != nil {
 				for name, symbol := range resolved.Definition.Symbols {

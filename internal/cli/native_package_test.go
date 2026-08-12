@@ -102,6 +102,9 @@ func TestInstallAppliesTypeRBPackageNativeTypeProvider(t *testing.T) {
 		Modules: map[string]nativepackage.Module{
 			"ui": {Exports: map[string]nativepackage.Export{
 				"Button": {Kind: "component", Type: nativepackage.Type{Kind: "named", Name: "ReactNode"}},
+				"identity": {
+					Kind: "function", Type: nativepackage.Type{Kind: "named", Name: "T"}, Parameters: []nativepackage.Type{{Kind: "named", Name: "T"}}, Required: 1, TypeParameters: []string{"T"},
+				},
 			}},
 		},
 	}
@@ -116,7 +119,7 @@ func TestInstallAppliesTypeRBPackageNativeTypeProvider(t *testing.T) {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	indexerOutput := `{"typescriptVersion":"7.0.0","modules":{"ui":{"exports":{},"unsupported":{"Button":"uses a conditional type"}}}}`
+	indexerOutput := `{"typescriptVersion":"7.0.0","modules":{"ui":{"exports":{},"unsupported":{"Button":"uses a conditional type","identity":"uses generic call signatures"}}}}`
 	node := filepath.Join(bin, "node")
 	if err := os.WriteFile(node, []byte("#!/bin/sh\nprintf '%s' '"+indexerOutput+"'\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -136,6 +139,9 @@ func TestInstallAppliesTypeRBPackageNativeTypeProvider(t *testing.T) {
 	}
 	if loaded.Modules["ui"].Exports["Button"].Kind != "component" {
 		t.Fatalf("provider correction is missing: %#v", loaded.Modules["ui"])
+	}
+	if parameters := loaded.Modules["ui"].Exports["identity"].TypeParameters; len(parameters) != 1 || parameters[0] != "T" {
+		t.Fatalf("generic provider correction is missing: %#v", loaded.Modules["ui"])
 	}
 	if !strings.Contains(stdout.String(), "indexed 1 native TypeScript module(s) from 1 package(s)") {
 		t.Fatalf("unexpected install output: %s", stdout.String())

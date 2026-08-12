@@ -90,6 +90,11 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 			typ = inferredNamedType(name, kind)
 		}
 		detail := string(kind)
+		typeParameters := imported.SymbolTypeParameters[name]
+		genericSuffix := ""
+		if len(typeParameters) > 0 {
+			genericSuffix = "<" + strings.Join(typeParameters, ", ") + ">"
+		}
 		var call *CallInfo
 		if kind == CompletionFunction {
 			parameters := imported.SymbolParameters[name]
@@ -99,8 +104,15 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 				parts[index] = parameter.String()
 				callParameters[index] = CallParameter{Name: "arg" + strconv.Itoa(index)}
 			}
-			detail = name + "(" + strings.Join(parts, ", ") + "): " + typ.String()
-			call = &CallInfo{ParameterCount: len(parameters), Parameters: callParameters}
+			detail = name + genericSuffix + "(" + strings.Join(parts, ", ") + "): " + typ.String()
+			call = &CallInfo{
+				ParameterCount:        len(parameters),
+				ExplicitTypeArguments: len(typeParameters) > 0,
+				TypeParameters:        append([]string(nil), typeParameters...),
+				Parameters:            callParameters,
+			}
+		} else if genericSuffix != "" {
+			detail += " " + name + genericSuffix
 		}
 		byName[name] = Symbol{Name: name, Kind: kind, Detail: detail, Type: typ, Call: call}
 	}
@@ -366,6 +378,7 @@ func methodCallInfo(method *ir.Method) *CallInfo {
 	result := &CallInfo{
 		ParameterCount:        len(method.Parameters),
 		ExplicitTypeArguments: len(method.TypeParameters) > 0,
+		TypeParameters:        append([]string(nil), method.TypeParameters...),
 	}
 	for _, parameter := range method.Parameters {
 		result.Parameters = append(result.Parameters, callParameter(parameter))

@@ -31,8 +31,11 @@ components directly from configured native packages. `trb install` derives a
 cached semantic index from installed `.d.ts` files; ordinary builds, the REPL's
 project compiler, and completion consume the cache without invoking TypeScript.
 Unsupported declaration shapes are diagnosed instead of becoming `Any`.
-Installed TypeRB packages can supply versioned declarative corrections while
-generated code continues to import the original npm package.
+Installed TypeRB packages can supply versioned declarative generic functions,
+classes, records, and transparent type aliases while generated code continues
+to import the original npm package. The bridge preserves discriminated generic
+results and emits transitive native type-only imports without making their
+names source-visible.
 
 The experimental TypeScript browser path accepts structured JSX in TypeRB
 source and emits ordinary TSX for React tooling. Function components use typed
