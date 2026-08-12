@@ -59,7 +59,8 @@ end
 `trb install` reads the installed package's `.d.ts` declarations, including
 dependency subpaths imported by project source, and writes an ignored
 `.trb/native-types.json` index. Builds and editor completion read that index
-without starting TypeScript. Runtime output imports the original npm package
+without starting TypeScript. Index generation currently requires the supported
+TypeScript 6.x toolchain. Runtime output imports the original npm package
 unchanged.
 
 Automatic `.d.ts` indexing supports ordinary functions and React components

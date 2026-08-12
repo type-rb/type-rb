@@ -220,9 +220,9 @@ func TestExternalPackageManagement(t *testing.T) {
 	}
 }
 
-func TestNewTypeScriptProjectUsesLatestCompiler(t *testing.T) {
+func TestNewTypeScriptProjectUsesSupportedCompiler(t *testing.T) {
 	config := New(t.TempDir(), "typescript")
-	if got := config.DevDependencies["typescript"]; got != DefaultTypeScriptVersion {
+	if got := config.DevDependencies["typescript"]; got != "^6.0.0" {
 		t.Fatalf("unexpected TypeScript version: %q", got)
 	}
 	if config.TypeScript.Runtime != TypeScriptRuntimeNode || config.TypeScript.PackageManager != "npm" {

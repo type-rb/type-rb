@@ -112,6 +112,13 @@ try {
 } catch (error) {
 	throw new Error("TypeScript is not installed in this project; run trb install after adding it to devDependencies");
 }
+const typeScriptMajor = Number.parseInt(ts.version.split(".")[0], 10);
+if (typeScriptMajor !== 6) {
+	throw new Error(
+		"TypeRB native package indexing supports TypeScript 6.x; found " + ts.version +
+		". Set devDependencies.typescript to \"^6.0.0\" and run trb install"
+	);
+}
 
 const compilerOptions = {
 	target: ts.ScriptTarget.ESNext,

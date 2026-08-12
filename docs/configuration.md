@@ -54,12 +54,13 @@ native dependencies through the config or `trb add --native` and
 
 ## TypeScript toolchain
 
-New managed TypeScript projects use ESM, npm, and the latest TypeScript release:
+New managed TypeScript projects use ESM, npm, and the latest compatible
+TypeScript 6 patch:
 
 ```jsonc
 {
   "devDependencies": {
-    "typescript": "latest"
+    "typescript": "^6.0.0"
   },
   "typescript": {
     "packageManager": "npm",
@@ -69,14 +70,18 @@ New managed TypeScript projects use ESM, npm, and the latest TypeScript release:
 }
 ```
 
-TypeRB targets the current TypeScript release without legacy code-generation
-branches. Browser applications are the primary TypeScript use case; APIs tied
-to a particular runtime remain explicit platform packages.
+TypeScript 6 is the supported toolchain while the TypeScript 7 programmatic API
+and its surrounding package ecosystem stabilize. The range accepts compatible
+6.x patch releases without moving a project to 7.x. Browser applications are
+the primary TypeScript use case; APIs tied to a particular runtime remain
+explicit platform packages.
 
 After native dependencies are installed, `trb install` also indexes supported
 `.d.ts` exports into `.trb/native-types.json`. TypeRB source can import those
 configured packages directly; ordinary builds and completion use the cached
-index and generated TypeScript keeps the original package specifier.
+index and generated TypeScript keeps the original package specifier. Native
+declaration indexing requires TypeScript 6.x and reports the installed version
+when another major version is detected.
 
 `typescript.runtime` selects `browser`, `bun`, or `node`. Existing projects
 that omit it retain the previous Node execution behavior. `browser` projects

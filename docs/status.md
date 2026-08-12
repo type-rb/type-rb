@@ -30,6 +30,8 @@ TypeScript projects can also import supported named functions and React
 components directly from configured native packages. `trb install` derives a
 cached semantic index from installed `.d.ts` files; ordinary builds, the REPL's
 project compiler, and completion consume the cache without invoking TypeScript.
+The indexer currently uses the TypeScript 6 compiler API; TypeScript 7 support
+is deferred until its replacement programmatic API is stable.
 Unsupported declaration shapes are diagnosed instead of becoming `Any`.
 Installed TypeRB packages can supply versioned declarative generic functions,
 classes, records, and transparent type aliases while generated code continues
