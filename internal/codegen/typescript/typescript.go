@@ -24,6 +24,7 @@ type generator struct {
 	topTargets       map[string]string
 	records          map[string]bool
 	typeAliases      map[string]string
+	typeMappings     map[string]string
 	temporary        int
 	suspension       *SuspensionPlan
 	orm              *ormintegration.Manifest
@@ -73,7 +74,7 @@ func GenerateProject(programs []*ir.Program) ([]string, error) {
 }
 
 func generate(program *ir.Program, suspension *SuspensionPlan, moduleExtensions map[string]string) string {
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, suspension: suspension, orm: ormintegration.ManifestFrom(program.Extensions)}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, orm: ormintegration.ManifestFrom(program.Extensions)}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -128,6 +129,22 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Import:
 		if n.Path == "trb/platform/typescript/react" || n.Path == "trb/platform/typescript/react/index" {
 			g.line(`import * as React from "react";`)
+			for _, symbol := range n.Symbols {
+				switch symbol {
+				case "ReactNode":
+					g.typeMappings[symbol] = "React.ReactNode"
+				case "SyntheticEvent":
+					g.typeMappings[symbol] = "React.SyntheticEvent<HTMLElement>"
+				case "MouseEvent":
+					g.typeMappings[symbol] = "React.MouseEvent<HTMLElement>"
+				case "ChangeEvent":
+					g.typeMappings[symbol] = "React.ChangeEvent<HTMLInputElement>"
+				case "FormEvent":
+					g.typeMappings[symbol] = "React.FormEvent<HTMLFormElement>"
+				case "KeyboardEvent":
+					g.typeMappings[symbol] = "React.KeyboardEvent<HTMLElement>"
+				}
+			}
 			if containsString(n.Symbols, "mount") {
 				g.line(`import { createRoot } from "react-dom/client";`)
 			}
@@ -1658,12 +1675,12 @@ func filepathRel(base, target string) (string, error) {
 }
 
 func tsType(t types.Type) string {
-	return tsTypeWithAliases(t, nil)
+	return tsTypeWithMappings(t, nil, nil)
 }
 
 func (g *generator) tsType(t types.Type) string {
 	if g.orm == nil || g.modulePath == "trb/orm/index" {
-		return tsTypeWithAliases(t, g.typeAliases)
+		return tsTypeWithMappings(t, g.typeAliases, g.typeMappings)
 	}
 	aliases := make(map[string]string, len(g.typeAliases)+3)
 	for name, alias := range g.typeAliases {
@@ -1674,7 +1691,7 @@ func (g *generator) tsType(t types.Type) string {
 			aliases[name] = "__trbOrm"
 		}
 	}
-	return tsTypeWithAliases(t, aliases)
+	return tsTypeWithMappings(t, aliases, g.typeMappings)
 }
 
 func (g *generator) tsSuspendingFunctionType(t types.Type) string {
@@ -1696,7 +1713,7 @@ func (g *generator) runtimeName(name string) string {
 	return name
 }
 
-func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
+func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[string]string) string {
 	var result string
 	switch t.Kind {
 	case types.Void:
@@ -1706,7 +1723,7 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 	case types.Union:
 		alternatives := make([]string, len(t.Args))
 		for index, alternative := range t.Args {
-			alternatives[index] = tsTypeWithAliases(alternative, aliases)
+			alternatives[index] = tsTypeWithMappings(alternative, aliases, mappings)
 		}
 		result = strings.Join(alternatives, " | ")
 	case types.Bool:
@@ -1724,7 +1741,7 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 	case types.Array, types.Iterable:
 		element := "unknown"
 		if len(t.Args) > 0 {
-			element = tsTypeWithAliases(t.Args[0], aliases)
+			element = tsTypeWithMappings(t.Args[0], aliases, mappings)
 		}
 		result = "Array<" + element + ">"
 	case types.Range:
@@ -1733,11 +1750,11 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 		key := "string"
 		value := "unknown"
 		if len(t.Args) == 2 {
-			key = tsTypeWithAliases(t.Args[0], aliases)
+			key = tsTypeWithMappings(t.Args[0], aliases, mappings)
 			if t.Args[0].Kind == types.Bool {
 				key = "string"
 			}
-			value = tsTypeWithAliases(t.Args[1], aliases)
+			value = tsTypeWithMappings(t.Args[1], aliases, mappings)
 		}
 		result = "Record<" + key + ", " + value + ">"
 	case types.Function:
@@ -1748,32 +1765,33 @@ func tsTypeWithAliases(t types.Type, aliases map[string]string) string {
 		}
 		parts := make([]string, len(parameters))
 		for index, parameter := range parameters {
-			parts[index] = "arg" + strconv.Itoa(index) + ": " + tsTypeWithAliases(parameter, aliases)
+			parts[index] = "arg" + strconv.Itoa(index) + ": " + tsTypeWithMappings(parameter, aliases, mappings)
 		}
-		result = "(" + strings.Join(parts, ", ") + ") => " + tsTypeWithAliases(returned, aliases)
+		result = "(" + strings.Join(parts, ", ") + ") => " + tsTypeWithMappings(returned, aliases, mappings)
 	case types.Nil:
 		result = "null"
 	default:
 		switch t.Name {
-		case "ReactNode":
-			result = "React.ReactNode"
 		case "Callback":
 			argument := "unknown"
 			if len(t.Args) > 0 {
-				argument = tsTypeWithAliases(t.Args[0], aliases)
+				argument = tsTypeWithMappings(t.Args[0], aliases, mappings)
 			}
 			result = "(value: " + argument + ") => void"
 		default:
-			result = t.Name
-			if alias := aliases[t.Name]; alias != "" {
-				result = alias + "." + result
+			result = mappings[t.Name]
+			if result == "" {
+				result = t.Name
+				if alias := aliases[t.Name]; alias != "" {
+					result = alias + "." + result
+				}
 			}
 		}
 	}
 	if t.Kind == types.Named && len(t.Args) > 0 {
 		arguments := make([]string, len(t.Args))
 		for index, argument := range t.Args {
-			arguments[index] = tsTypeWithAliases(argument, aliases)
+			arguments[index] = tsTypeWithMappings(argument, aliases, mappings)
 		}
 		result += "<" + strings.Join(arguments, ", ") + ">"
 	}

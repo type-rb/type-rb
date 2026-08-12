@@ -72,6 +72,13 @@ func TestBundledReactPackage(t *testing.T) {
 	if packageDefinition.Definition.Symbols["mount"].Intrinsic != "trb.platform.typescript.react.mount" {
 		t.Fatalf("React semantic provider was not loaded: %#v", packageDefinition.Definition.Symbols)
 	}
+	if packageDefinition.Definition.TypeProvider != "trb.typescript.react" || packageDefinition.Definition.JSX == nil {
+		t.Fatalf("React type and JSX providers were not loaded: %#v", packageDefinition.Definition)
+	}
+	onClick := packageDefinition.Definition.JSX.IntrinsicAttributes["onClick"]
+	if onClick.String() != "(MouseEvent) -> Void" {
+		t.Fatalf("unexpected onClick contract: %s", onClick)
+	}
 }
 
 func TestBundledWebPackage(t *testing.T) {

@@ -171,3 +171,94 @@ end
 		t.Fatalf("expected non-renderable child diagnostic, got %v", err)
 	}
 }
+
+func TestCompileTypeScriptJSXChecksPurposeSpecificReactEvents(t *testing.T) {
+	source := []byte(`import {
+	ChangeEvent,
+	FormEvent,
+	KeyboardEvent,
+	MouseEvent,
+	ReactNode,
+} from trb/platform/typescript/react
+
+def Form(): ReactNode
+	on_change := fn(event: ChangeEvent)
+		puts(event.currentTarget.value)
+		return
+	end
+	on_submit := fn(event: FormEvent)
+		event.preventDefault()
+		puts(event.currentTarget.id)
+		return
+	end
+	on_click := fn(event: MouseEvent)
+		puts(event.button)
+		return
+	end
+	on_key_down := fn(event: KeyboardEvent)
+		puts(event.key)
+		return
+	end
+	return <form id="todo-form" onSubmit={on_submit}>
+		<input name="title" onChange={on_change} onKeyDown={on_key_down} />
+		<button type="submit" onClick={on_click}>Save</button>
+	</form>
+end
+`)
+	artifact, err := Compile("events.trb", source, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	for _, expected := range []string{
+		"React.ChangeEvent<HTMLInputElement>",
+		"React.FormEvent<HTMLFormElement>",
+		"React.MouseEvent<HTMLElement>",
+		"React.KeyboardEvent<HTMLElement>",
+		"event.currentTarget.value",
+		"event.preventDefault()",
+		"onSubmit={on_submit}",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated event TSX is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
+func TestCompileTypeScriptJSXRejectsWrongReactEventHandler(t *testing.T) {
+	source := []byte(`import { ChangeEvent, ReactNode } from trb/platform/typescript/react
+
+def Page(): ReactNode
+	handle := fn(event: ChangeEvent)
+		puts(event.currentTarget.value)
+		return
+	end
+	return <button onClick={handle}>Save</button>
+end
+`)
+	_, err := Compile("wrong_event.trb", source, "typescript")
+	if err == nil || !strings.Contains(err.Error(), "JSX attribute onClick expects (MouseEvent) -> Void, got (ChangeEvent) -> Void") {
+		t.Fatalf("expected purpose-specific event diagnostic, got %v", err)
+	}
+}
+
+func TestCompileTypeScriptDoesNotRewriteLocalReactEventNames(t *testing.T) {
+	source := []byte(`class MouseEvent
+end
+
+def passthrough(event: MouseEvent): MouseEvent
+	return event
+end
+`)
+	artifact, err := Compile("local_event.trb", source, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	if strings.Contains(output, "React.MouseEvent") {
+		t.Fatalf("local MouseEvent was rewritten as a React type:\n%s", output)
+	}
+	if !strings.Contains(output, "event: MouseEvent") {
+		t.Fatalf("generated TypeScript is missing the local event type:\n%s", output)
+	}
+}

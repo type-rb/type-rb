@@ -51,6 +51,14 @@ type RuntimeExport struct {
 	Kind string
 }
 
+// JSXProvider declares the node and intrinsic-attribute types contributed by
+// an explicitly imported package. Grammar remains shared while each frontend
+// runtime owns its JSX semantics.
+type JSXProvider struct {
+	Node                types.Type
+	IntrinsicAttributes map[string]types.Type
+}
+
 func (s Symbol) HasReceiver() bool {
 	return s.Receiver.Kind != "" && s.Receiver.Kind != types.Invalid
 }
@@ -71,6 +79,7 @@ type Package struct {
 	Targets        map[string]bool
 	NativeSyntax   bool
 	TypeProvider   string
+	JSX            *JSXProvider
 	Symbols        map[string]Symbol
 }
 

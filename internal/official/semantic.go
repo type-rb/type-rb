@@ -24,6 +24,32 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 	}
 }
 
+func semanticJSX(provider string) *stdlib.JSXProvider {
+	if provider != "trb.typescript.react" {
+		return nil
+	}
+	callback := func(event string) types.Type {
+		return types.FunctionOf([]types.Type{types.FromName(event)}, types.FromName("Void"))
+	}
+	return &stdlib.JSXProvider{
+		Node: types.FromName("ReactNode"),
+		IntrinsicAttributes: map[string]types.Type{
+			"className": types.FromName("String"),
+			"id":        types.FromName("String"),
+			"name":      types.FromName("String"),
+			"type":      types.FromName("String"),
+			"value":     types.FromName("String"),
+			"checked":   types.FromName("Boolean"),
+			"disabled":  types.FromName("Boolean"),
+			"onClick":   callback("MouseEvent"),
+			"onChange":  callback("ChangeEvent"),
+			"onSubmit":  callback("FormEvent"),
+			"onKeyDown": callback("KeyboardEvent"),
+			"onKeyUp":   callback("KeyboardEvent"),
+		},
+	}
+}
+
 func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 	typeT := types.FromName("T")
 	nullable := func(typ types.Type) types.Type {

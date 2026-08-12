@@ -30,7 +30,8 @@ The experimental TypeScript browser path accepts structured JSX in TypeRB
 source and emits ordinary TSX for React tooling. Function components use typed
 record props, JSX component calls are checked across project modules, and only
 modules containing JSX use the `.tsx` extension. The explicit
-`trb/platform/typescript/react` package supplies the React boundary.
+`trb/platform/typescript/react` package supplies the React boundary, including
+purpose-specific mouse, change, form, and keyboard event types.
 
 The implemented language includes functions, typed first-class function values
 with lexical capture, and classes, modules and
