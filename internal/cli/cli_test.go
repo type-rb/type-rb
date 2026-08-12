@@ -5241,7 +5241,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship:type rb:go\"}\n405\nOPTIONS, POST\n{\"error\":\"method_not_allowed\"}\n413\n{\"error\":\"payload_too_large\"}\n"; stdout.String() != want {
+		if want := "root:before\ntodos:before\ntodos:after\nroot:after\n201\n{\"id\":\"7\",\"title\":\"ship:type rb:go\"}\nroot:before\nroot:after\n405\nOPTIONS, POST\n{\"error\":\"method_not_allowed\"}\nroot:before\nroot:after\n413\n{\"error\":\"payload_too_large\"}\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web JSON output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
@@ -5561,7 +5561,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "middleware:before\nfallback:get\nmiddleware:after\n200\n0\nget\nHEAD\nvalue\nmiddleware:before\nexplicit:head\nmiddleware:after\n202\n0\nhead\nmiddleware:before\nmiddleware:after\n204\nGET, HEAD, OPTIONS\n0\nmiddleware:before\nexplicit:options\nmiddleware:after\n203\noptions\nexplicit-options\n405\nGET, HEAD, OPTIONS\n{\"error\":\"method_not_allowed\"}\n404\n0\n"
+		want := "middleware:before\nfallback:get\nmiddleware:after\n200\n0\nget\nHEAD\nvalue\nmiddleware:before\nexplicit:head\nmiddleware:after\n202\n0\nhead\nmiddleware:before\nmiddleware:after\n204\nGET, HEAD, OPTIONS\n0\nmiddleware:before\nexplicit:options\nmiddleware:after\n203\noptions\nexplicit-options\nmiddleware:before\nmiddleware:after\n405\nGET, HEAD, OPTIONS\n{\"error\":\"method_not_allowed\"}\nmiddleware:before\nmiddleware:after\n404\n0\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s trb/web method semantics output: want %q, got %q", mode, want, stdout.String())
 		}
@@ -5759,8 +5759,11 @@ func TestRunOfficialWebJSONLLoggerAcrossAvailableBackends(t *testing.T) {
 import { dispatch } from trb/web/testing
 
 def main()
-	_logged_response := dispatch(Request.new(method: "GET", path: "/logged", query_string: "", headers: {}, body: "".to_bytes()))
+	_logged_response := dispatch(Request.new(method: "GET", path: "/logged", query_string: "token=must-not-be-logged", headers: {}, body: "".to_bytes()))
 	_excluded_response := dispatch(Request.new(method: "GET", path: "/health", query_string: "", headers: {}, body: "".to_bytes()))
+	_not_found_response := dispatch(Request.new(method: "GET", path: "/missing", query_string: "", headers: {}, body: "".to_bytes()))
+	_method_not_allowed_response := dispatch(Request.new(method: "POST", path: "/logged", query_string: "", headers: {}, body: "".to_bytes()))
+	_failure_response := dispatch(Request.new(method: "GET", path: "/failure", query_string: "", headers: {}, body: "".to_bytes()))
 	return
 end
 `
@@ -5768,6 +5771,17 @@ end
 
 def get(_context: Context): Response
 	return Response.new(status: 204, headers: {}, body: "".to_bytes())
+end
+`
+		failureRouteSource := `import { Context, Response, json } from trb/web
+
+record FailureResponse
+	value: Integer
+end
+
+def get(_context: Context): Response
+	value := "not-an-integer".to_i()
+	return json(FailureResponse.new(value: value))
 end
 `
 		middlewareSource := `import { Context, Next, Response } from trb/web
@@ -5792,6 +5806,9 @@ end
 		if err := os.WriteFile(filepath.Join(root, "src", "routes", "health.trb"), []byte(routeSource), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.WriteFile(filepath.Join(root, "src", "routes", "failure.trb"), []byte(failureRouteSource), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(root, "src", "routes", "_middleware.trb"), []byte(middlewareSource), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -5801,21 +5818,35 @@ end
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
 		lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-		if len(lines) != 1 {
-			t.Fatalf("%s logger emitted %d lines, want 1: %q", mode, len(lines), stdout.String())
+		if len(lines) != 4 {
+			t.Fatalf("%s logger emitted %d lines, want 4: %q", mode, len(lines), stdout.String())
 		}
-		var entry map[string]any
-		if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
-			t.Fatalf("%s logger did not emit JSONL: %v: %q", mode, err, lines[0])
+		wantEntries := []struct {
+			method string
+			path   string
+			status float64
+			level  string
+		}{
+			{method: "GET", path: "/logged", status: 204, level: "info"},
+			{method: "GET", path: "/missing", status: 404, level: "info"},
+			{method: "POST", path: "/logged", status: 405, level: "info"},
+			{method: "GET", path: "/failure", status: 500, level: "error"},
 		}
-		if entry["event"] != "http_request" || entry["level"] != "info" || entry["method"] != "GET" || entry["path"] != "/logged" || entry["status"] != float64(204) {
-			t.Fatalf("unexpected %s logger entry: %#v", mode, entry)
-		}
-		if timestamp, ok := entry["timestamp"].(string); !ok || timestamp == "" {
-			t.Fatalf("%s logger timestamp is missing: %#v", mode, entry)
-		}
-		if duration, ok := entry["duration_ms"].(float64); !ok || duration < 0 {
-			t.Fatalf("%s logger duration is invalid: %#v", mode, entry)
+		for index, line := range lines {
+			var entry map[string]any
+			if err := json.Unmarshal([]byte(line), &entry); err != nil {
+				t.Fatalf("%s logger did not emit JSONL: %v: %q", mode, err, line)
+			}
+			want := wantEntries[index]
+			if entry["event"] != "http_request" || entry["level"] != want.level || entry["method"] != want.method || entry["path"] != want.path || entry["status"] != want.status {
+				t.Fatalf("unexpected %s logger entry %d: %#v", mode, index, entry)
+			}
+			if timestamp, ok := entry["timestamp"].(string); !ok || timestamp == "" {
+				t.Fatalf("%s logger timestamp is missing: %#v", mode, entry)
+			}
+			if duration, ok := entry["duration_ms"].(float64); !ok || duration < 0 {
+				t.Fatalf("%s logger duration is invalid: %#v", mode, entry)
+			}
 		}
 	}
 }

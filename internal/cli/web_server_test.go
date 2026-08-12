@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -58,6 +59,16 @@ end
 			if err := os.WriteFile(filepath.Join(routeDirectory, "health.trb"), []byte(routeSource), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			middlewareSource := `import { Context, Next, Response } from trb/web
+import trb/web/middleware/logger
+
+def call(context: Context, next_handler: Next): Response
+	return logger.call(context, next_handler)
+end
+`
+			if err := os.WriteFile(filepath.Join(routeDirectory, "_middleware.trb"), []byte(middlewareSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
 			var buildStdout, buildStderr bytes.Buffer
 			command := &CLI{Stdin: strings.NewReader(""), Stdout: &buildStdout, Stderr: &buildStderr}
@@ -89,7 +100,7 @@ end
 					DisableKeepAlives: true,
 				},
 			}
-			url := "http://127.0.0.1:" + strconv.Itoa(port) + "/health"
+			url := "http://127.0.0.1:" + strconv.Itoa(port) + "/health?token=must-not-be-logged"
 			waitForWebServer(t, client, url, wait, &serverOutput)
 
 			response, err := client.Get(url)
@@ -100,6 +111,16 @@ end
 			_ = response.Body.Close()
 			if readErr != nil || response.StatusCode != 200 || string(body) != "ok" {
 				t.Fatalf("unexpected health response: status=%d body=%q err=%v", response.StatusCode, body, readErr)
+			}
+
+			response, err = client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/missing?token=must-not-be-logged")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, readErr = io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if readErr != nil || response.StatusCode != 404 || !bytes.Contains(body, []byte("not_found")) {
+				t.Fatalf("unexpected missing response: status=%d body=%q err=%v", response.StatusCode, body, readErr)
 			}
 
 			response, err = client.Post(url, "text/plain", strings.NewReader("123456789"))
@@ -121,10 +142,38 @@ end
 				if err != nil {
 					t.Fatalf("server did not stop cleanly: %v\n%s", err, serverOutput.String())
 				}
+				assertWebServerAccessLogs(t, mode, serverOutput.String())
 			case <-time.After(5 * time.Second):
 				t.Fatalf("server did not stop before the lifecycle deadline\n%s", serverOutput.String())
 			}
 		})
+	}
+}
+
+func assertWebServerAccessLogs(t *testing.T, mode, output string) {
+	t.Helper()
+	statuses := map[float64]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil || entry["event"] != "http_request" {
+			continue
+		}
+		if strings.Contains(line, "must-not-be-logged") {
+			t.Fatalf("%s access logger exposed a query value: %s", mode, line)
+		}
+		status, ok := entry["status"].(float64)
+		if !ok {
+			t.Fatalf("%s access logger emitted an invalid status: %s", mode, line)
+		}
+		statuses[status] = true
+	}
+	for _, status := range []float64{200, 404, 413} {
+		if !statuses[status] {
+			t.Fatalf("%s access logger did not record status %.0f: %s", mode, status, output)
+		}
 	}
 }
 

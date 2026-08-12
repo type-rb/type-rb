@@ -84,6 +84,30 @@ func UniquePathRoutes(routes []Route) []Route {
 	return result
 }
 
+// RootMiddlewares returns the middleware that applies to every request,
+// including responses produced before or after route matching.
+func RootMiddlewares(middlewares []Middleware) []Middleware {
+	result := make([]Middleware, 0, len(middlewares))
+	for _, middleware := range middlewares {
+		if middleware.Directory == "" {
+			result = append(result, middleware)
+		}
+	}
+	return result
+}
+
+// NestedMiddlewares returns middleware that is scoped below the route root.
+// Root middleware is applied once around the complete dispatcher instead.
+func NestedMiddlewares(middlewares []Middleware) []Middleware {
+	result := make([]Middleware, 0, len(middlewares))
+	for _, middleware := range middlewares {
+		if middleware.Directory != "" {
+			result = append(result, middleware)
+		}
+	}
+	return result
+}
+
 func ManifestFrom(extensions []ir.Extension) *Manifest {
 	for _, extension := range extensions {
 		if manifest, ok := extension.(*Manifest); ok {
