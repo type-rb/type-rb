@@ -22,6 +22,7 @@ type Result struct {
 	Program             *ast.Program
 	Expressions         map[ast.Expression]types.Type
 	Conversions         map[ast.Expression]types.Type
+	NullableUnwraps     map[*ast.Identifier]types.Type
 	NativeEffectBridges map[ast.Expression]NativeEffectBridge
 	Variables           map[*ast.VariableStatement]types.Type
 	Iterations          map[*ast.IterationExpression]types.Type
@@ -172,6 +173,7 @@ type UnionMemberAccess struct {
 
 type symbol struct {
 	typ      types.Type
+	declared types.Type
 	mutable  bool
 	constant bool
 	owner    string
@@ -210,6 +212,20 @@ func (s *scope) markUsed(name string) {
 			}
 			return
 		}
+	}
+}
+
+func (s *scope) resetNarrowing(name string) {
+	for current := s; current != nil; current = current.parent {
+		value, ok := current.values[name]
+		if !ok {
+			continue
+		}
+		if value.declared.Kind != "" {
+			value.typ = value.declared
+			current.values[name] = value
+		}
+		return
 	}
 }
 
@@ -311,6 +327,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			Program:             program,
 			Expressions:         map[ast.Expression]types.Type{},
 			Conversions:         map[ast.Expression]types.Type{},
+			NullableUnwraps:     map[*ast.Identifier]types.Type{},
 			NativeEffectBridges: map[ast.Expression]NativeEffectBridge{},
 			Variables:           map[*ast.VariableStatement]types.Type{},
 			Iterations:          map[*ast.IterationExpression]types.Type{},
@@ -990,6 +1007,13 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.result.Variables[n] = variableType
 		case *ast.AssignmentStatement:
 			leftType := c.checkExpression(n.Target, sc)
+			if identifier, ok := n.Target.(*ast.Identifier); ok {
+				if value, exists := sc.lookup(identifier.Name); exists && value.declared.Kind != "" {
+					leftType = value.declared
+					c.result.Expressions[identifier] = leftType
+					delete(c.result.NullableUnwraps, identifier)
+				}
+			}
 			rightType := c.checkExpression(n.Value, sc)
 			c.checkStructuredBlockValue(n.Value)
 			rightType = c.contextualizeCollectionLiteral(n.Value, leftType, rightType)
@@ -1029,6 +1053,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			if leftType.Kind != types.Any && !types.Assignable(leftType, assignedType) {
 				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", assignedType, leftType))
 			}
+			if identifier, ok := n.Target.(*ast.Identifier); ok {
+				sc.resetNarrowing(identifier.Name)
+			}
 		case *ast.ReturnStatement:
 			actual := types.Type{Kind: types.Void, Name: "Void"}
 			if n.Value != nil {
@@ -1063,8 +1090,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.checkCase(n, sc, false)
 		case *ast.WhileStatement:
 			c.checkBooleanCondition(n.Condition, sc, "while")
+			bodyScope, _ := c.nullableConditionScopes(n.Condition, sc)
 			c.loopDepth++
-			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}})
+			c.checkStatements(n.Body, bodyScope)
 			c.loopDepth--
 		case *ast.NativeStatement:
 			if c.mode != "ruby" {
@@ -1205,26 +1233,85 @@ type controlFlowBranchResult struct {
 func (c *Checker) checkIf(node *ast.IfStatement, sc *scope, expression bool) types.Type {
 	results := []controlFlowBranchResult{}
 	c.checkBooleanCondition(node.Condition, sc, "if")
-	if result := c.checkControlFlowBranch(node.Then, &scope{parent: sc, values: map[string]symbol{}}, node.Span(), "if", expression); result != nil {
+	thenScope, remainingScope := c.nullableConditionScopes(node.Condition, sc)
+	if result := c.checkControlFlowBranch(node.Then, thenScope, node.Span(), "if", expression); result != nil {
 		results = append(results, *result)
 	}
+	allMatchedBranchesDiverge := !c.statementsFallThrough(node.Then)
 	for _, branch := range node.ElseIf {
-		c.checkBooleanCondition(branch.Condition, sc, "elsif")
-		if result := c.checkControlFlowBranch(branch.Body, &scope{parent: sc, values: map[string]symbol{}}, node.Span(), "if", expression); result != nil {
+		c.checkBooleanCondition(branch.Condition, remainingScope, "elsif")
+		branchScope, nextScope := c.nullableConditionScopes(branch.Condition, remainingScope)
+		if result := c.checkControlFlowBranch(branch.Body, branchScope, node.Span(), "if", expression); result != nil {
 			results = append(results, *result)
 		}
+		allMatchedBranchesDiverge = allMatchedBranchesDiverge && !c.statementsFallThrough(branch.Body)
+		remainingScope = nextScope
 	}
 	if node.HasElse {
-		if result := c.checkControlFlowBranch(node.Else, &scope{parent: sc, values: map[string]symbol{}}, node.Span(), "if", expression); result != nil {
+		if result := c.checkControlFlowBranch(node.Else, &scope{parent: remainingScope, values: map[string]symbol{}}, node.Span(), "if", expression); result != nil {
 			results = append(results, *result)
 		}
 	} else if expression {
 		c.error(node.Span(), "if expression requires an else branch")
 	}
+	if !node.HasElse && allMatchedBranchesDiverge {
+		c.promoteNullableNarrowings(sc, remainingScope)
+	}
 	if !expression {
 		return types.FromName("Void")
 	}
 	return c.controlFlowResultType("if", node.Span(), results)
+}
+
+func (c *Checker) nullableConditionScopes(expression ast.Expression, sc *scope) (*scope, *scope) {
+	matched := &scope{parent: sc, values: map[string]symbol{}}
+	unmatched := sc
+	binary, ok := expression.(*ast.BinaryExpression)
+	if !ok || binary.Operator != "==" && binary.Operator != "!=" {
+		return matched, unmatched
+	}
+	identifier, nilComparison := nullableComparisonIdentifier(binary.Left, binary.Right)
+	if !nilComparison {
+		identifier, nilComparison = nullableComparisonIdentifier(binary.Right, binary.Left)
+	}
+	if !nilComparison {
+		return matched, unmatched
+	}
+	value, ok := sc.lookup(identifier.Name)
+	if !ok || !value.typ.Nullable {
+		return matched, unmatched
+	}
+	if value.declared.Kind == "" {
+		value.declared = value.typ
+	}
+	nonnull := value.typ
+	nonnull.Nullable = false
+	value.typ = nonnull
+	if binary.Operator == "!=" {
+		matched.values[identifier.Name] = value
+	} else {
+		unmatched = &scope{parent: sc, values: map[string]symbol{identifier.Name: value}}
+	}
+	return matched, unmatched
+}
+
+func nullableComparisonIdentifier(value, nilValue ast.Expression) (*ast.Identifier, bool) {
+	identifier, ok := value.(*ast.Identifier)
+	if !ok {
+		return nil, false
+	}
+	literal, ok := nilValue.(*ast.Literal)
+	return identifier, ok && literal.Kind == ast.NilLiteral
+}
+
+func (c *Checker) promoteNullableNarrowings(target, narrowed *scope) {
+	for current := narrowed; current != nil && current != target; current = current.parent {
+		for name, value := range current.values {
+			if value.declared.Nullable && !value.typ.Nullable {
+				target.values[name] = value
+			}
+		}
+	}
 }
 
 func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool) types.Type {
@@ -3686,6 +3773,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if value, ok := sc.lookup(n.Name); ok {
 			typ = value.typ
+			if value.declared.Nullable && !value.typ.Nullable {
+				c.result.NullableUnwraps[n] = value.declared
+			}
 			if !value.constant {
 				c.result.LexicalBindings[n] = true
 			}
@@ -3810,7 +3900,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = c.checkUnaryOperator(n.Span(), n.Operator, operand)
 	case *ast.BinaryExpression:
 		left := c.checkExpression(n.Left, sc)
-		right := c.checkExpression(n.Right, sc)
+		rightScope := sc
+		if n.Operator == "and" || n.Operator == "&&" {
+			rightScope, _ = c.nullableConditionScopes(n.Left, sc)
+		} else if n.Operator == "or" || n.Operator == "||" {
+			_, rightScope = c.nullableConditionScopes(n.Left, sc)
+		}
+		right := c.checkExpression(n.Right, rightScope)
 		typ = c.checkBinaryOperator(n.Span(), n.Operator, left, right)
 		if typ.Kind != types.Invalid && isNonNullableNumber(left) && isNonNullableNumber(right) && scalarType(left).Kind != scalarType(right).Kind {
 			if scalarType(left).Kind == types.Int {

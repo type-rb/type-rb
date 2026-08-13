@@ -178,6 +178,26 @@ end
   record, and class alternatives are staged until one runtime test model is
   specified across all backends.
 
+#### Nullable narrowing
+
+- Comparing a nullable lexical binding directly with `nil` narrows the
+  non-`nil` path. `value != nil` narrows the matching `if`, `elsif`, or `while`
+  body; `value == nil` narrows the unmatched `elsif` and `else` paths. The
+  operands may be written in either order.
+- Short-circuit Boolean evaluation carries the same fact into the right-hand
+  side: `value != nil and use(value)` and `value == nil or use(value)` may use
+  `value` as non-nullable in `use(value)`.
+- A guard without `else` narrows the following statements when every matching
+  branch returns. For example, after `if value == nil; return fallback; end`,
+  `value` has its non-nullable type.
+- Reassignment invalidates the narrowing immediately. The assignment itself is
+  checked against the binding's declared nullable type, and subsequent uses
+  must narrow again.
+- Initial narrowing is deliberately limited to stable lexical identifiers.
+  Member, index, and call expressions are not assumed to produce the same
+  value when evaluated again. Typed IR records each nullable unwrap explicitly
+  so Go, Ruby, TypeScript, and the REPL use the same checked flow facts.
+
 #### Literal types and discriminated unions
 
 - An explicit Integer or String literal may appear in a type position, for

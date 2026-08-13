@@ -1139,6 +1139,12 @@ func (g *generator) expr(expression ir.Expression) string {
 				return value
 			}
 			return "func(value " + baseType + ") " + nullableType + " { return &value }(" + value + ")"
+		case ir.NullableToNonNullableConversion:
+			value := g.expr(n.Value)
+			if g.goType(n.Value.ExprType()) == g.goType(n.ExprType()) {
+				return value
+			}
+			return "*(" + value + ")"
 		default:
 			return g.expr(n.Value)
 		}

@@ -424,6 +424,27 @@ func TestEvaluateNonNullableToNullableConversion(t *testing.T) {
 	}
 }
 
+func TestEvaluateNullableToNonNullableConversion(t *testing.T) {
+	stringType := types.FromName("String")
+	nullableString := stringType
+	nullableString.Nullable = true
+	conversion := &ir.Conversion{
+		ExprBase: ir.NewExprBase(token.Span{}, stringType),
+		Kind:     ir.NullableToNonNullableConversion,
+		Value:    &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, nullableString), Name: "name"},
+	}
+
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	evaluator.moduleValue[symbolKey("repl", "name")] = Value{Type: nullableString, Data: "Ada"}
+	result, err := evaluator.Evaluate([]ir.Statement{&ir.ExpressionStatement{Expression: conversion}}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Display || Inspect(result.Value) != `"Ada"` || result.Value.Type.String() != "String" {
+		t.Fatalf("unexpected nullable unwrap result: %#v", result)
+	}
+}
+
 func TestEvaluateDivergingIfExpressionPropagatesReturn(t *testing.T) {
 	booleanType := types.FromName("Boolean")
 	stringType := types.FromName("String")

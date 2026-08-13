@@ -1111,6 +1111,89 @@ end
 	}
 }
 
+func TestNullableBindingsNarrowAcrossPortableControlFlow(t *testing.T) {
+	source := []byte(`def guarded(value: String?): String
+	if value == nil
+		return "missing"
+	end
+	return value + "!"
+end
+
+def branched(value: String?): Integer
+	if nil != value
+		return value.size()
+	else
+		return 0
+	end
+end
+
+def short_circuit(value: String?): Boolean
+	return value != nil and value.size() > 0
+end
+
+def inverse_short_circuit(value: String?): Boolean
+	return value == nil or value.size() == 0
+end
+
+def elsif_branch(value: String?): String
+	if value == nil
+		return "missing"
+	elsif value.size() == 0
+		return "empty"
+	else
+		return value
+	end
+end
+
+def consume(mut_value: String?)
+	while mut_value != nil
+		puts(mut_value.size())
+		mut_value = nil
+	end
+	return
+end
+`)
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("nullable_narrowing.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected nullable narrowing: %v", mode, err)
+		}
+		var guardedReturn ir.Expression
+		for _, statement := range artifact.IR.Statements {
+			method, ok := statement.(*ir.Method)
+			if !ok || method.Name != "guarded" {
+				continue
+			}
+			guardedReturn = method.Body[1].(*ir.Return).Value
+		}
+		binary, ok := guardedReturn.(*ir.Binary)
+		if !ok {
+			t.Fatalf("%s guarded return is not a binary expression: %#v", mode, guardedReturn)
+		}
+		conversion, ok := binary.Left.(*ir.Conversion)
+		if !ok || conversion.Kind != ir.NullableToNonNullableConversion || conversion.ExprType().Nullable || !conversion.Value.ExprType().Nullable {
+			t.Fatalf("%s did not retain nullable unwrap in typed IR: %#v", mode, binary.Left)
+		}
+	}
+}
+
+func TestNullableNarrowingIsInvalidatedByAssignment(t *testing.T) {
+	source := []byte(`def invalid(value: String?): Integer
+	if value == nil
+		return 0
+	end
+	value = nil
+	return value.size()
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("nullable_assignment.trb", source, mode); err == nil || !strings.Contains(err.Error(), "type String? has no member size") {
+			t.Fatalf("%s expected invalidated nullable narrowing diagnostic, got %v", mode, err)
+		}
+	}
+}
+
 func TestCollectionLiteralsInferCommonNumericTypeAcrossBackends(t *testing.T) {
 	source := []byte(`def array_values(): Array<Float>
 	return [1, 2.5]
