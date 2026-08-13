@@ -324,6 +324,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".include?(" + arguments[1] + ")"
 	case "trb.std.arrays.count":
 		return arguments[0] + ".count(" + arguments[1] + ")"
+	case "trb.std.arrays.uniq":
+		return arguments[0] + ".each_with_object([]) { |value, result| result << value unless result.any? { |known| known == value } }"
+	case "trb.std.arrays.concat":
+		return arguments[0] + " + " + arguments[1]
 	case "trb.std.arrays.join":
 		return arguments[0] + ".join(" + arguments[1] + ")"
 	case "trb.std.arrays.pop":

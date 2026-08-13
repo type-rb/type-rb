@@ -451,6 +451,13 @@ collation, and Float `NaN` values follow all ordinary numbers in both
 directions. Negative and positive zero compare as equal. Arbitrary comparators
 and mixed-direction multi-key ordering are not part of the current language.
 
+`uniq()` returns a new Array containing the first occurrence of each value in
+input order. It uses portable `==` and is therefore available only when that
+equality is defined for the element type. `concat(other)` returns a new Array
+with the receiver's elements followed by `other`; neither input is mutated.
+Unlike Ruby's destructive `Array#concat`, TypeRB `concat()` follows the
+language's non-destructive collection default and does not require `mut`.
+
 ### 3.12 Hashes
 
 - A portable hash type is written `Hash<K, V>` with exactly two type

@@ -303,17 +303,24 @@ func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 
 func TestArrayValueQueryReceiversPreserveEqualityRequirements(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
-	for _, name := range []string{"include?", "count"} {
+	for _, name := range []string{"include?", "count", "uniq"} {
 		_, method, ok := LookupReceiverMethod(arrayType, name)
 		if !ok {
 			t.Fatalf("Array#%s is missing", name)
 		}
-		if len(method.Parameters) != 1 || method.Parameters[0].Type.String() != "String" {
+		if name != "uniq" && (len(method.Parameters) != 1 || method.Parameters[0].Type.String() != "String") {
 			t.Fatalf("Array#%s value parameter was not specialized: %#v", name, method.Parameters)
+		}
+		if name == "uniq" && (len(method.Parameters) != 0 || method.Return.String() != "Array<String>" || method.ReceiverMutable) {
+			t.Fatalf("Array#uniq has the wrong non-destructive contract: %#v", method)
 		}
 		if len(method.EqualityTypes) != 1 || method.EqualityTypes[0].String() != "String" {
 			t.Fatalf("Array#%s equality requirement was not specialized: %#v", name, method.EqualityTypes)
 		}
+	}
+	_, concat, ok := LookupReceiverMethod(arrayType, "concat")
+	if !ok || concat.ReceiverMutable || concat.Return.String() != "Array<String>" || len(concat.Parameters) != 1 || concat.Parameters[0].Type.String() != "Array<String>" {
+		t.Fatalf("Array#concat has the wrong non-destructive contract: %#v", concat)
 	}
 }
 

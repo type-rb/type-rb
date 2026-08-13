@@ -990,6 +990,41 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return Value{Type: typ, Data: count > 0}, nil
 		}
 		return Value{Type: typ, Data: count}, nil
+	case "trb.std.arrays.uniq":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.uniq expects Array")
+		}
+		items := make([]Value, 0, len(array.Items))
+		for _, item := range array.Items {
+			known := false
+			for _, existing := range items {
+				if equal(existing, item) {
+					known = true
+					break
+				}
+			}
+			if !known {
+				items = append(items, item)
+			}
+		}
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.arrays.concat":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		left, leftOK := values[0].Data.(*arrayValue)
+		right, rightOK := values[1].Data.(*arrayValue)
+		if !leftOK || !rightOK {
+			return Value{}, errors.New("arrays.concat expects two Arrays")
+		}
+		items := make([]Value, 0, len(left.Items)+len(right.Items))
+		items = append(items, left.Items...)
+		items = append(items, right.Items...)
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
 	case "trb.std.arrays.join":
 		if err := require(2); err != nil {
 			return Value{}, err

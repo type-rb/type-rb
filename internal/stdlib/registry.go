@@ -768,6 +768,24 @@ end
 				},
 				Return: integerType,
 			},
+			"uniq": {
+				Name:           "uniq",
+				Intrinsic:      "trb.std.arrays.uniq",
+				TypeParameters: []string{"T"},
+				EqualityTypes:  []types.Type{typeT},
+				Parameters:     []Parameter{{Name: "values", Type: arrayOf(typeT)}},
+				Return:         arrayOf(typeT),
+			},
+			"concat": {
+				Name:           "concat",
+				Intrinsic:      "trb.std.arrays.concat",
+				TypeParameters: []string{"T"},
+				Parameters: []Parameter{
+					{Name: "left", Type: arrayOf(typeT)},
+					{Name: "right", Type: arrayOf(typeT)},
+				},
+				Return: arrayOf(typeT),
+			},
 			"join": {
 				Name:       "join",
 				Intrinsic:  "trb.std.arrays.join",
@@ -1106,6 +1124,8 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"dup":             {PackagePath: "trb/std/arrays", Symbol: "copy"},
 		"include?":        {PackagePath: "trb/std/arrays", Symbol: "contains"},
 		"count":           {PackagePath: "trb/std/arrays", Symbol: "count"},
+		"uniq":            {PackagePath: "trb/std/arrays", Symbol: "uniq"},
+		"concat":          {PackagePath: "trb/std/arrays", Symbol: "concat"},
 		"join":            {PackagePath: "trb/std/arrays", Symbol: "join"},
 		"pop":             {PackagePath: "trb/std/arrays", Symbol: "pop"},
 		"shift":           {PackagePath: "trb/std/arrays", Symbol: "shift"},

@@ -1425,6 +1425,15 @@ def query_values(): Integer
 	return 0
 end
 
+def unique_values(): Array<Integer>
+	values := [3, 1, 3, 2, 1]
+	return values.uniq().concat(arrays.uniq([2, 2, 4]))
+end
+
+def concatenated_values(): Array<Integer>
+	return arrays.concat([1, 2], [3, 4])
+end
+
 def enum_query(state: QueryState): Boolean
 	return [QueryState::Ready, QueryState::Done].include?(state)
 end
@@ -1490,6 +1499,8 @@ end
 			`slices.Contains(values, 2)`,
 			`slices.Contains(values, float64(1))`,
 			`target := 1`,
+			`!slices.Contains(result, value)`,
+			`append(slices.Clone([]int{1, 2}), []int{3, 4}...)`,
 			`maps.Keys(labels)`,
 			`maps.Values(maps.Clone(labels))`,
 			`values := maps.Clone(values)`,
@@ -1511,6 +1522,8 @@ end
 			`values.include?(2)`,
 			`values.include?((1).to_f)`,
 			`values.count(1)`,
+			`result << value unless result.any? { |known| known == value }`,
+			`[1, 2] + [3, 4]`,
 			`labels.keys`,
 			`labels.dup.values`,
 			`values.merge({`,
@@ -1531,6 +1544,8 @@ end
 			`values.indexOf(2) >= 0`,
 			`values.indexOf(Number(1)) >= 0`,
 			`if (value === target)`,
+			`if (result.indexOf(value) < 0)`,
+			`[...[1, 2], ...[3, 4]]`,
 			`Object.keys(labels).map(Number)`,
 			`Object.values(({ ...labels }))`,
 			`({ ...values, ...{`,
@@ -1572,6 +1587,16 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 		source string
 		want   string
 	}{
+		{
+			name:   "uniq requires portable equality",
+			source: "record Item\n\tname: String\nend\ndef bad(values: Array<Item>): Array<Item>\n\treturn values.uniq()\nend\n",
+			want:   "portable equality is not defined for Item, required by uniq()",
+		},
+		{
+			name:   "concat keeps element type exact",
+			source: "def bad(values: Array<Integer>): Array<Integer>\n\treturn values.concat([\"two\"])\nend\n",
+			want:   "argument 1 to concat() has type Array<String>, expected Array<Integer>",
+		},
 		{
 			name:   "receiver push type",
 			source: "def bad()\n\tmut values := [1]\n\tvalues.push(\"two\")\n\treturn\nend\n",

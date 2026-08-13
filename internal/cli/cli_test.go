@@ -1442,6 +1442,37 @@ end
 	}
 }
 
+func TestReplEvaluatesPortableArrayUniqAndConcatAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-array-uniq-concat-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := `[3, 1, 3, 2, 1].uniq()
+[1, 2].concat([3, 4])
+:quit
+`
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "[3, 1, 2] : Array<Integer>\n[1, 2, 3, 4] : Array<Integer>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("%s unexpected uniq/concat REPL result\nstdout:\n%s\nstderr:\n%s", mode, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplRetainsPredicateAndBangFunctionNamesAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -4455,6 +4486,11 @@ func TestRunPortableCollectionTransformationsAcrossAvailableBackends(t *testing.
 		}
 		source := `import trb/std/math
 
+enum UniqueState
+	Ready
+	Done
+end
+
 class SortKey
 	@calls: Integer
 
@@ -4558,6 +4594,10 @@ def main()
 	floats := [math.sqrt(-1), 1.0, -1.0]
 	floats_ascending := floats.sort()
 	floats_descending := floats.sort_descending()
+	mut repeated := [3, 1, 3, 2, 1]
+	unique_values := repeated.uniq()
+	concatenated := repeated.concat([4, 5])
+	unique_states := [UniqueState::Ready, UniqueState::Ready, UniqueState::Done].uniq()
 	puts(mapped.fetch(2))
 	puts(selected.size())
 	puts(total)
@@ -4597,6 +4637,14 @@ def main()
 	puts(floats_ascending.fetch(2).nan?())
 	puts(floats_descending.fetch(0))
 	puts(floats_descending.fetch(2).nan?())
+	puts(repeated.size())
+	puts(unique_values.size())
+	puts(unique_values.fetch(0))
+	puts(unique_values.fetch(1))
+	puts(unique_values.fetch(2))
+	puts(concatenated.size())
+	puts(concatenated.fetch(6))
+	puts(unique_states.size())
 	return
 end
 `
@@ -4608,7 +4656,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "6\n1\n14\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\n5\ntrue\n2\n1\n7\n3\n1\n3\n0\n2\n0\n2\n3\n\n😀\n-1.0\ntrue\n1.0\ntrue\n"; stdout.String() != want {
+		if want := "6\n1\n14\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\n5\ntrue\n2\n1\n7\n3\n1\n3\n0\n2\n0\n2\n3\n\n😀\n-1.0\ntrue\n1.0\ntrue\n5\n3\n3\n1\n2\n7\n5\n2\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s collection-transformation output: want %q, got %q", mode, want, stdout.String())
 		}
 	}

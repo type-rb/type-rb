@@ -68,7 +68,8 @@ available for untyped external values that have no endpoint or data contract.
 
 The compiler-owned portable library covers scalar and collection foundations,
 including stable Array sorting, typed short-circuit predicates and nullable
-searches, `Result`, bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
+searches, stable deduplication and non-destructive concatenation, `Result`,
+bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
 SHA-256/SHA-512 hashing and HMAC, non-cryptographic and secure randomness,
 constant-time byte comparison, Unicode text, logical paths,
 URL component and query handling, filesystem and process access, JSON/JSONC,
