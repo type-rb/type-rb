@@ -1,0 +1,37 @@
+import { JobAdapter } from trb/jobs
+import { Duration } from trb/std/time
+
+enum SQLDialect
+	SQLite
+	PostgreSQL
+	MySQL
+end
+
+class SQLAdapter implements JobAdapter
+	readonly @dialect: SQLDialect
+	readonly @source: String
+	readonly @source_environment: String?
+	readonly @poll_interval: Duration
+	readonly @lease_timeout: Duration
+	readonly @default_maximum_attempts: Integer
+	readonly @retry_base_delay: Duration
+
+	def initialize(
+			dialect:: SQLDialect = SQLDialect::SQLite,
+			source:: String = "jobs.sqlite3",
+			source_environment:: String? = nil,
+			poll_interval:: Duration = Duration.seconds(1),
+			lease_timeout:: Duration = Duration.seconds(60),
+			default_maximum_attempts:: Integer = 5,
+			retry_base_delay:: Duration = Duration.seconds(1),
+		)
+		@dialect = dialect
+		@source = source
+		@source_environment = source_environment
+		@poll_interval = poll_interval
+		@lease_timeout = lease_timeout
+		@default_maximum_attempts = default_maximum_attempts
+		@retry_base_delay = retry_base_delay
+		return
+	end
+end

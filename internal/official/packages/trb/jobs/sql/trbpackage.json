@@ -1,0 +1,46 @@
+{
+  "name": "trb/jobs/sql",
+  "version": "0.1.0",
+  "module": "trb/jobs/sql/index",
+  "source": "src/index.trb",
+  "projectProvider": "trb.jobs.sql",
+  "nativeDependencies": {
+    "typescript": {
+      "@types/bun": "latest"
+    }
+  },
+  "nativeDependenciesByOption": {
+    "go": {
+      "dialect": {
+        "sqlite": {
+          "modernc.org/sqlite": "v1.53.0"
+        },
+        "postgresql": {
+          "github.com/jackc/pgx/v5": "v5.10.0"
+        },
+        "mysql": {
+          "github.com/go-sql-driver/mysql": "v1.10.0"
+        }
+      }
+    },
+    "ruby": {
+      "dialect": {
+        "sqlite": {
+          "sequel": "latest",
+          "sqlite3": "latest"
+        },
+        "postgresql": {
+          "pg": "latest",
+          "sequel": "latest"
+        },
+        "mysql": {
+          "mysql2": "latest",
+          "sequel": "latest"
+        }
+      }
+    }
+  },
+  "nativeDependencyOptionDefaults": {
+    "dialect": "sqlite"
+  }
+}

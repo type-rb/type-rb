@@ -230,6 +230,20 @@ Non-2xx statuses remain ordinary responses. The backend inserts suspension
 only in generated TypeScript, so TypeRB source does not add target-specific
 `async` syntax.
 
+The experimental `trb/jobs` contract discovers typed Job classes and provides
+typed immediate, relative-delay, and absolute-`Instant` enqueue operations. A
+separate `trb/jobs/sql` adapter persists queue state in SQLite, PostgreSQL, or
+MySQL and runs the same Job source in generated Go, Ruby, and Bun applications.
+Projects select the adapter through a typed TypeRB composition module rather
+than a string adapter name in `packageOptions`; Job definitions remain
+independent from storage.
+Workers support queues, priorities, retry and failed state, heartbeats, stale
+claim recovery, graceful stop, listing, manual retry, and discard. PostgreSQL
+and MySQL use short locking claims for multiple workers. SQLite is deliberately
+limited to one worker. Delivery is at least once, so Jobs remain responsible
+for idempotence. Recurring schedules, transactional outbox delivery, parallel
+workers within one process, and forced-shutdown timeouts remain future work.
+
 The compiler pipeline is:
 
 ```text

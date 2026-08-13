@@ -53,8 +53,13 @@ type Config struct {
 	Go                *GoConfig                     `json:"go,omitempty"`
 	TypeScript        *TypeScriptConfig             `json:"typescript,omitempty"`
 	Database          *DatabaseConfig               `json:"db,omitempty"`
+	Jobs              *JobsConfig                   `json:"jobs,omitempty"`
 	Root              string                        `json:"-"`
 	Path              string                        `json:"-"`
+}
+
+type JobsConfig struct {
+	Configuration string `json:"configuration"`
 }
 
 // PackageRequirement identifies one TypeRB package. A package name is an
@@ -341,6 +346,17 @@ func (c *Config) Validate() error {
 		if database.Database != nil && strings.TrimSpace(database.Database.Value) == "" && strings.TrimSpace(database.Database.Environment) == "" {
 			return errors.New("db.database must be a non-empty string or environment source")
 		}
+	}
+	if c.Jobs != nil {
+		configuration := strings.TrimSpace(filepath.ToSlash(c.Jobs.Configuration))
+		configuration = strings.TrimSuffix(configuration, ".trb")
+		if configuration == "" {
+			return errors.New("jobs.configuration is required")
+		}
+		if filepath.IsAbs(configuration) || escapesRoot(configuration) {
+			return errors.New("jobs.configuration must stay below sourceDir")
+		}
+		c.Jobs.Configuration = configuration
 	}
 	if c.Ruby != nil && c.Ruby.Loader != "" && c.Ruby.Loader != "require_relative" && c.Ruby.Loader != "zeitwerk" {
 		return fmt.Errorf("ruby.loader must be require_relative or zeitwerk; got %q", c.Ruby.Loader)

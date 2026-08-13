@@ -1,0 +1,34 @@
+enum EnqueueErrorKind
+	Serialization
+	InvalidArgument
+	Cancelled
+	Adapter
+end
+
+record EnqueueError
+	kind: EnqueueErrorKind
+	message: String
+end
+
+record JobReference
+	id: String
+	job_name: String
+end
+
+interface JobAdapter
+end
+
+class Job
+end
+
+def queue(name: String)
+	return
+end
+
+def priority(value: Integer)
+	return
+end
+
+def maximum_attempts(value: Integer)
+	return
+end

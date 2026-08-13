@@ -85,6 +85,49 @@ func TestBundledReactPackage(t *testing.T) {
 	}
 }
 
+func TestBundledJobsPackageDefaultsNativeDatabaseAdapterToSQLite(t *testing.T) {
+	contract, ok := Lookup("trb/jobs")
+	if !ok {
+		t.Fatal("jobs package is not registered")
+	}
+	if dependencies, err := contract.NativeDependenciesFor("go", nil); err != nil || len(dependencies) != 0 {
+		t.Fatalf("portable jobs contract has native dependencies: %#v, %v", dependencies, err)
+	}
+	packageDefinition, ok := Lookup("trb/jobs/sql")
+	if !ok {
+		t.Fatal("SQL jobs adapter is not registered")
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		dependencies, err := packageDefinition.NativeDependenciesFor(mode, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		switch mode {
+		case "go":
+			if dependencies["modernc.org/sqlite"] == "" {
+				t.Fatalf("Go SQLite dependency is missing: %#v", dependencies)
+			}
+		case "ruby":
+			if dependencies["sequel"] == "" || dependencies["sqlite3"] == "" {
+				t.Fatalf("Ruby SQLite dependencies are missing: %#v", dependencies)
+			}
+		case "typescript":
+			if dependencies["@types/bun"] == "" {
+				t.Fatalf("Bun types dependency is missing: %#v", dependencies)
+			}
+		}
+	}
+	for _, mode := range []string{"go", "ruby"} {
+		dependencies, err := packageDefinition.NativeDependenciesFor(mode, json.RawMessage(`{"dialect":"postgresql"}`))
+		if err != nil {
+			t.Fatalf("%s PostgreSQL: %v", mode, err)
+		}
+		if dependencies["modernc.org/sqlite"] != "" || dependencies["sqlite3"] != "" {
+			t.Fatalf("%s PostgreSQL unexpectedly includes SQLite dependencies: %#v", mode, dependencies)
+		}
+	}
+}
+
 func TestBundledWebPackage(t *testing.T) {
 	packageDefinition, ok := Lookup("trb/web")
 	if !ok {

@@ -6,10 +6,14 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
 func (g *generator) integrations(extensions []ir.Extension) {
+	if manifest := jobsintegration.ManifestFrom(extensions); manifest != nil {
+		g.jobsRuntime(manifest)
+	}
 	if g.orm != nil {
 		g.ormRuntime()
 	}
