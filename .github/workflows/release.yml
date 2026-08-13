@@ -34,12 +34,18 @@ jobs:
       - name: Verify compiler
         run: go test ./...
 
-      - name: Package release binaries and Formula
+      - name: Package release binaries, Formula, and notes
         id: package
         shell: bash
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
+          source_version="$(sed -n 's/^var Version = "\([^"]*\)"$/\1/p' internal/cli/cli.go)"
+          if [ "$source_version" != "${version}-dev" ]; then
+            echo "expected source version ${version}-dev, found ${source_version}" >&2
+            exit 1
+          fi
+          ./scripts/extract-release-notes.sh "$version" CHANGELOG.md dist/release-notes.md
           ./scripts/package-release.sh "$version" dist
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
@@ -74,13 +80,15 @@ jobs:
               dist/checksums.txt \
               dist/trb.rb \
               --clobber
+            gh release edit "$GITHUB_REF_NAME" \
+              --notes-file dist/release-notes.md
           else
             gh release create "$GITHUB_REF_NAME" \
               dist/trb_*.tar.gz \
               dist/checksums.txt \
               dist/trb.rb \
               --verify-tag \
-              --generate-notes
+              --notes-file dist/release-notes.md
           fi
 
       - name: Publish Formula to Homebrew tap

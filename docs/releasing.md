@@ -38,6 +38,17 @@ homebrew-tap/
 
 ## Release
 
+Add a user-facing entry to `CHANGELOG.md` before tagging. Use a level-two
+heading in this exact form:
+
+```text
+## X.Y.Z - YYYY-MM-DD
+```
+
+Group the entry by user impact rather than copying a pull-request list. The
+release workflow requires a non-empty matching section and publishes its body
+as the GitHub Release notes.
+
 Run the full checks, create the version tag, and push it:
 
 ```sh
@@ -50,11 +61,12 @@ git push origin "v${release_version}"
 The release workflow then:
 
 1. repeats the compiler tests;
-2. builds four `trb_VERSION_OS_ARCH.tar.gz` binary archives;
-3. writes `checksums.txt` and renders `trb.rb`;
-4. creates or updates the GitHub release;
-5. commits the Formula to `type-rb/homebrew-tap`; and
-6. opens and merges a pull request for the next patch `-dev` version, then
+2. verifies that the source and changelog match the tag;
+3. builds four `trb_VERSION_OS_ARCH.tar.gz` binary archives;
+4. writes `checksums.txt` and renders `trb.rb`;
+5. creates or updates the GitHub release using the changelog entry;
+6. commits the Formula to `type-rb/homebrew-tap`; and
+7. opens and merges a pull request for the next patch `-dev` version, then
    dispatches Pages.
 
 Users can then install with:
