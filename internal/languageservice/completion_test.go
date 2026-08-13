@@ -43,6 +43,7 @@ end
 
 user := User.new("Ada")
 str_a := "hello"
+numbers := [1, 2, 3]
 status := OrderStatus::Pending
 `
 
@@ -68,6 +69,8 @@ func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
 				{source: `"hello".si`, want: "size", insertText: "size()", kind: languageservice.CompletionMethod},
 				{source: "str_a.siz", want: "size", insertText: "size()", kind: languageservice.CompletionMethod},
 				{source: `["a", "b"].jo`, want: "join", insertText: "join", kind: languageservice.CompletionMethod},
+				{source: "numbers.an", want: "any?", insertText: "any?", kind: languageservice.CompletionMethod},
+				{source: "[1, 2, 3].no", want: "none?", insertText: "none?", kind: languageservice.CompletionMethod},
 				{source: "0.25.to_", want: "to_i", insertText: "to_i()", kind: languageservice.CompletionMethod},
 				{source: "0.25.to_", want: "to_s", insertText: "to_s()", kind: languageservice.CompletionMethod},
 				{source: "1.pos", want: "positive?", insertText: "positive?()", kind: languageservice.CompletionMethod},

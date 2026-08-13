@@ -1116,7 +1116,24 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 			}
 			continue
 		}
+		if node.Operation == "any?" || node.Operation == "all?" || node.Operation == "none?" {
+			matched, ok := value.Data.(bool)
+			if !ok {
+				return Value{}, fmt.Errorf("%s block result must be Boolean", node.Operation)
+			}
+			if node.Operation == "any?" && matched || node.Operation == "all?" && !matched || node.Operation == "none?" && matched {
+				answer := node.Operation == "any?"
+				return Value{Type: node.ExprType(), Data: answer}, nil
+			}
+			continue
+		}
 		result.Items = append(result.Items, value)
+	}
+	if node.Operation == "any?" {
+		return Value{Type: node.ExprType(), Data: false}, nil
+	}
+	if node.Operation == "all?" || node.Operation == "none?" {
+		return Value{Type: node.ExprType(), Data: true}, nil
 	}
 	return Value{Type: node.ExprType(), Data: result}, nil
 }

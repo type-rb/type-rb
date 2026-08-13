@@ -1373,6 +1373,24 @@ def total(): Integer
 		sum + value
 	end
 end
+
+def any_large?(): Boolean
+	return [1, 2, 3].any?() do |value|
+		value > 2
+	end
+end
+
+def all_positive?(): Boolean
+	return [1, 2, 3].all? do |value|
+		value > 0
+	end
+end
+
+def none_negative?(): Boolean
+	return [1, 2, 3].none?() do |value|
+		value < 0
+	end
+end
 `)
 	wants := map[string][]string{
 		"go": {
@@ -1380,18 +1398,27 @@ end
 			`append(__trbResult`,
 			`if (value % 2) == 0`,
 			`sum := __trbResult`,
+			`if value > 2 {`,
+			`if !(value > 0) {`,
+			`if value < 0 {`,
 		},
 		"ruby": {
 			`.map { |value| value.to_s }`,
 			`.map.with_index { |value, index| value + index }`,
 			`.select { |value| ((value).remainder(2)) == 0 }`,
 			`.reduce(0) { |sum, value| sum + value }`,
+			`.any? { |value| value > 2 }`,
+			`.all? { |value| value > 0 }`,
+			`.none? { |value| value < 0 }`,
 		},
 		"typescript": {
 			`.map((value) => String(value))`,
 			`.map((value, index) => value + index)`,
 			`.select`,
 			`.reduce((sum, value) => sum + value, 0)`,
+			`.some((value) => value > 2)`,
+			`.every((value) => value > 0)`,
+			`!([1, 2, 3].some((value) => value < 0))`,
 		},
 	}
 	// TypeScript calls the portable select operation through Array#filter.
@@ -1417,6 +1444,14 @@ func TestPortableCollectionTransformationDiagnosticsAcrossModes(t *testing.T) {
 		{
 			source: "def bad(): Array<Integer>\n\treturn [1].select do |value|\n\t\tvalue\n\tend\nend\n",
 			want:   "select block result must be Boolean, got Integer",
+		},
+		{
+			source: "def bad(): Boolean\n\treturn [1].any? do |value|\n\t\tvalue\n\tend\nend\n",
+			want:   "any? block result must be Boolean, got Integer",
+		},
+		{
+			source: "def bad(): Boolean\n\treturn [1].all?.with_index do |value, index|\n\t\tvalue > index\n\tend\nend\n",
+			want:   "all?.with_index is not supported",
 		},
 		{
 			source: "def bad(): Array<Integer>\n\treturn [1].map do |value|\n\t\tvalue\n\t\tvalue + 1\n\tend\nend\n",

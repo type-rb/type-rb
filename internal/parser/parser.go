@@ -671,19 +671,19 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 	iteration := &ast.IterationExpression{WithIndex: withIndex}
 	switch node := expression.(type) {
 	case *ast.MemberExpression:
-		if node.Name != "each" && node.Name != "map" && node.Name != "select" && node.Name != "reduce" {
+		if !portableIterationOperation(node.Name) {
 			return nil, false
 		}
 		iteration.Source = node.Receiver
 		iteration.Operation = node.Name
 	case *ast.CallExpression:
 		member, memberOK := node.Callee.(*ast.MemberExpression)
-		if !memberOK || (member.Name != "each" && member.Name != "each_slice" && member.Name != "map" && member.Name != "select" && member.Name != "reduce") {
+		if !memberOK || !portableIterationOperation(member.Name) {
 			return nil, false
 		}
 		iteration.Source = member.Receiver
 		iteration.Operation = member.Name
-		if member.Name == "each" || member.Name == "map" || member.Name == "select" {
+		if member.Name == "each" || member.Name == "map" || member.Name == "select" || member.Name == "any?" || member.Name == "all?" || member.Name == "none?" {
 			if len(node.Arguments) != 0 {
 				p.errorAt(node.Span(), member.Name+" does not take arguments")
 			}
@@ -702,6 +702,15 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 		return nil, false
 	}
 	return iteration, true
+}
+
+func portableIterationOperation(name string) bool {
+	switch name {
+	case "each", "each_slice", "map", "select", "reduce", "any?", "all?", "none?":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parseRecord() ast.Statement {

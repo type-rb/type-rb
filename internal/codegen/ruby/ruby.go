@@ -927,7 +927,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 	}
 	result := g.expr(transform.Result)
 	switch transform.Operation {
-	case "map", "select":
+	case "map", "select", "any?", "all?", "none?":
 		operation := transform.Operation
 		parameters := []string{transform.Item}
 		if transform.WithIndex {

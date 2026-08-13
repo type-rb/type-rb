@@ -547,12 +547,28 @@ end
 total := [1, 2, 3].reduce(0) do |sum, value|
 	sum + value
 end
+
+has_large := [1, 20, 3].any? do |value|
+	value > 10
+end
+
+all_positive := [1, 20, 3].all? do |value|
+	value > 0
+end
+
+none_negative := [1, 20, 3].none? do |value|
+	value < 0
+end
 ```
 
 These transformations currently operate on Arrays. The current alpha accepts
 one result expression in transformation blocks. General structured
 multi-statement transformation blocks remain planned; first-class `fn` values
 are available independently.
+
+`any?`, `all?`, and `none?` short-circuit and require a non-nullable Boolean
+result. On an empty Array, they return `false`, `true`, and `true`,
+respectively.
 
 ## Result and fallible effects
 
