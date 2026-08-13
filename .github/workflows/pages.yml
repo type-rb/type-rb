@@ -48,6 +48,9 @@ jobs:
       - name: Verify compiler and tour
         run: go test ./...
 
+      - name: Verify release tooling
+        run: ./scripts/extract-release-notes_test.sh
+
       - name: Verify TextMate grammar
         run: |
           npm ci --prefix tools/textmate

@@ -39,9 +39,33 @@ Use `<type>/<short-kebab-description>`, for example `feat/homebrew-install` or `
 2. Push the working branch to `origin`; never push the change to `main`.
 3. Open a pull request targeting `main`. Keep it draft while required work remains.
 4. Summarize what changed, why, user or developer impact, checks, and intentional follow-ups.
-5. Apply the label that exactly matches the branch prefix. Apply exactly one change-type label; unrelated status or area labels may coexist.
-6. Assign the pull request author to the pull request. Read the author login from the created pull request response or current pull request metadata; do not guess it.
-7. Mark the pull request ready only when it is reviewable and required checks pass.
+5. Add the release-note block described below.
+6. Apply the label that exactly matches the branch prefix. Apply exactly one change-type label; unrelated status or area labels may coexist.
+7. Assign the pull request author to the pull request. Read the author login from the created pull request response or current pull request metadata; do not guess it.
+8. Mark the pull request ready only when it is reviewable and required checks pass.
+
+### Record release impact
+
+Include this exact section in every pull request body:
+
+```text
+## Release note
+
+Area: <short user-facing subsystem>
+Kind: <Added|Changed|Fixed|Performance|Security|Deprecated|Removed|None>
+Breaking: <Yes|No>
+
+<one concise user-facing paragraph, or a short reason when Kind is None>
+```
+
+- Describe observable behavior, not files or implementation mechanics.
+- Use `Kind: None` for internal maintenance, documentation-only changes, release
+  preparation, and other changes users do not need in a changelog.
+- Keep the area stable and recognizable, such as `Language`, `Compiler`,
+  `CLI`, `REPL`, `Standard library`, `Web`, `ORM`, `Jobs`, `Packages`, or
+  `Tooling`. Add a new area when none of these fits naturally.
+- Set `Breaking: Yes` only when users must change existing code or operation.
+- Keep required migration guidance in the paragraph when a change is breaking.
 
 If a needed change-type label does not exist, create it before assigning it. Keep label names identical to the prefixes above.
 
