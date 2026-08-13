@@ -48,6 +48,9 @@ func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 			}
 		}
 	}
+	if g.execution != nil && g.execution.Calls[call] {
+		arguments = append([]string{"__trbScope"}, arguments...)
+	}
 	return qualifier + goIdentifier(jobName, true) + goMethodName(method) + "(" + strings.Join(arguments, ", ") + ")"
 }
 
@@ -63,7 +66,7 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 		return
 	}
 	config := g.jobsSQL.Config
-	g.requireImport("context", "")
+	g.requireImport("context", "trbcontext")
 	g.requireImport("crypto/rand", "")
 	g.requireImport("database/sql", "")
 	g.requireImport("encoding/hex", "")
@@ -71,11 +74,11 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	g.requireImport("os", "")
 	g.requireImport("sync", "")
 	g.requireImport("time", "stdtime")
-	if config.DatabaseAdapter == "mysql" {
+	if config.Dialect == "mysql" {
 		g.requireImport("net/url", "")
 		g.requireImport("strings", "")
 	}
-	switch config.DatabaseAdapter {
+	switch config.Dialect {
 	case "sqlite":
 		g.requireImport("modernc.org/sqlite", "_")
 	case "postgresql":
@@ -117,17 +120,22 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	g.indent++
 	g.line("trbJobsDatabaseOnce.Do(func() {")
 	g.indent++
-	g.line("source := os.Getenv(" + strconv.Quote(config.DatabaseEnvironment) + ")")
-	g.line("if source == \"\" { source = " + strconv.Quote(config.Database) + " }")
-	if config.DatabaseAdapter == "mysql" {
+	if config.SourceEnvironment == "" {
+		g.line("source := " + strconv.Quote(config.Source))
+	} else {
+		g.requireImport("strings", "")
+		g.line("source, sourceExists := os.LookupEnv(" + strconv.Quote(config.SourceEnvironment) + ")")
+		g.line("if !sourceExists || strings.TrimSpace(source) == \"\" { trbJobsDatabaseError = errors.New(" + strconv.Quote("jobs database environment "+config.SourceEnvironment+" is not set or empty") + "); return }")
+	}
+	if config.Dialect == "mysql" {
 		g.line("if strings.HasPrefix(source, \"mysql://\") { parsed, err := url.Parse(source); if err != nil { trbJobsDatabaseError = err; return }; credentials := parsed.User.Username(); if password, exists := parsed.User.Password(); exists { credentials += \":\" + password }; source = credentials + \"@tcp(\" + parsed.Host + \")\" + parsed.Path; if parsed.RawQuery != \"\" { source += \"?\" + parsed.RawQuery } }")
 	}
-	g.line("trbJobsDatabase, trbJobsDatabaseError = sql.Open(" + strconv.Quote(goJobsDriver(config.DatabaseAdapter)) + ", source)")
+	g.line("trbJobsDatabase, trbJobsDatabaseError = sql.Open(" + strconv.Quote(goJobsDriver(config.Dialect)) + ", source)")
 	g.line("if trbJobsDatabaseError != nil { return }")
-	if config.DatabaseAdapter == "sqlite" {
+	if config.Dialect == "sqlite" {
 		g.line("trbJobsDatabase.SetMaxOpenConns(1)")
 	}
-	statements, _ := sqlstore.Schema(sqlstore.Dialect(config.DatabaseAdapter))
+	statements, _ := sqlstore.Schema(sqlstore.Dialect(config.Dialect))
 	for _, statement := range statements {
 		g.line("if _, trbJobsDatabaseError = trbJobsDatabase.Exec(" + strconv.Quote(statement) + "); trbJobsDatabaseError != nil { return }")
 	}
@@ -165,11 +173,11 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 }
 
 func (g *generator) jobsHeartbeat(config jobssql.Config) {
-	g.line("func TrbJobsHeartbeat(ctx context.Context, id string, workerId string) error {")
+	g.line("func TrbJobsHeartbeat(ctx trbcontext.Context, id string, workerId string) error {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return err }")
-	query := "UPDATE trb_jobs SET claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 1) + " AND state = 'running' AND claimed_by = " + goJobsPlaceholder(config.DatabaseAdapter, 2)
+	query := "UPDATE trb_jobs SET claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.Dialect, 1) + " AND state = 'running' AND claimed_by = " + goJobsPlaceholder(config.Dialect, 2)
 	g.line("result, err := database.ExecContext(ctx, " + strconv.Quote(query) + ", id, workerId)")
 	g.line("if err != nil { return err }")
 	g.line("affected, err := result.RowsAffected()")
@@ -182,7 +190,7 @@ func (g *generator) jobsHeartbeat(config jobssql.Config) {
 }
 
 func (g *generator) jobsRecoverStale(config jobssql.Config) {
-	g.line("func TrbJobsRecoverStale(ctx context.Context) (int64, error) {")
+	g.line("func TrbJobsRecoverStale(ctx trbcontext.Context) (int64, error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return 0, err }")
@@ -197,7 +205,7 @@ func (g *generator) jobsRecoverStale(config jobssql.Config) {
 }
 
 func (g *generator) jobsAdmin(config jobssql.Config) {
-	g.line("func TrbJobsList(ctx context.Context) ([]TrbJobsStatus, error) {")
+	g.line("func TrbJobsList(ctx trbcontext.Context) ([]TrbJobsStatus, error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return nil, err }")
@@ -212,11 +220,11 @@ func (g *generator) jobsAdmin(config jobssql.Config) {
 	g.line("}")
 	g.b.WriteByte('\n')
 
-	g.line("func TrbJobsRetry(ctx context.Context, id string) (bool, error) {")
+	g.line("func TrbJobsRetry(ctx trbcontext.Context, id string) (bool, error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return false, err }")
-	query := "UPDATE trb_jobs SET state = 'ready', attempts = 0, run_at = CURRENT_TIMESTAMP, claimed_by = NULL, claimed_at = NULL, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 1) + " AND state = 'failed'"
+	query := "UPDATE trb_jobs SET state = 'ready', attempts = 0, run_at = CURRENT_TIMESTAMP, claimed_by = NULL, claimed_at = NULL, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.Dialect, 1) + " AND state = 'failed'"
 	g.line("result, err := database.ExecContext(ctx, " + strconv.Quote(query) + ", id)")
 	g.line("if err != nil { return false, err }")
 	g.line("affected, err := result.RowsAffected()")
@@ -225,11 +233,11 @@ func (g *generator) jobsAdmin(config jobssql.Config) {
 	g.line("}")
 	g.b.WriteByte('\n')
 
-	g.line("func TrbJobsDiscard(ctx context.Context, id string) (bool, error) {")
+	g.line("func TrbJobsDiscard(ctx trbcontext.Context, id string) (bool, error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return false, err }")
-	query = "DELETE FROM trb_jobs WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 1) + " AND state != 'running'"
+	query = "DELETE FROM trb_jobs WHERE id = " + goJobsPlaceholder(config.Dialect, 1) + " AND state != 'running'"
 	g.line("result, err := database.ExecContext(ctx, " + strconv.Quote(query) + ", id)")
 	g.line("if err != nil { return false, err }")
 	g.line("affected, err := result.RowsAffected()")
@@ -253,7 +261,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 		}
 		break
 	}
-	g.requireImport("context", "")
+	g.requireImport("context", "trbcontext")
 	g.requireImport("encoding/json", "")
 	g.requireImport("fmt", "")
 	g.requireImport("os", "")
@@ -263,7 +271,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.requireImport("time", "stdtime")
 
 	aliases := g.jobsModuleAliases(manifest)
-	g.line("func trbJobsDispatch(jobName string, payload string, payloadVersion int) (result error) {")
+	g.line("func trbJobsDispatch(__trbScope trbcontext.Context, jobName string, payload string, payloadVersion int) (result error) {")
 	g.indent++
 	g.line("defer func() { if recovered := recover(); recovered != nil { result = fmt.Errorf(\"job panic: %v\", recovered) } }()")
 	g.line("if payloadVersion != 1 { return fmt.Errorf(\"unsupported job payload version %d\", payloadVersion) }")
@@ -284,6 +292,9 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 		qualifier := aliases[job.ModulePath]
 		if qualifier != "" {
 			qualifier += "."
+		}
+		if g.execution.Method(job.ModulePath, job.Name, "perform") {
+			argumentNames = append([]string{"__trbScope"}, argumentNames...)
 		}
 		call := qualifier + "New" + goIdentifier(job.Name, true) + "()." + goMethodName("perform") + "(" + strings.Join(argumentNames, ", ") + ")"
 		if job.Fails.Kind != "" && job.Fails.Kind != "Never" {
@@ -313,25 +324,25 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.line("switch command {")
 	g.line("case \"list\":")
 	g.indent++
-	g.line("statuses, err := " + jobsAlias + ".TrbJobsList(context.Background()); if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs list:\", err); return true }; for _, status := range statuses { message := \"\"; if status.LastError.Valid { message = status.LastError.String }; fmt.Printf(\"%s\\t%s\\t%s\\t%d/%d\\t%s\\n\", status.Id, status.State, status.JobName, status.Attempts, status.MaximumAttempts, message) }")
+	g.line("statuses, err := " + jobsAlias + ".TrbJobsList(trbcontext.Background()); if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs list:\", err); os.Exit(1) }; for _, status := range statuses { message := \"\"; if status.LastError.Valid { message = status.LastError.String }; fmt.Printf(\"%s\\t%s\\t%s\\t%d/%d\\t%s\\n\", status.Id, status.State, status.JobName, status.Attempts, status.MaximumAttempts, message) }")
 	g.indent--
 	g.line("case \"retry\":")
 	g.indent++
-	g.line("changed, err := " + jobsAlias + ".TrbJobsRetry(context.Background(), id); if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs retry:\", err) } else if !changed { fmt.Fprintln(os.Stderr, \"trb jobs retry: failed job not found\") }")
+	g.line("changed, err := " + jobsAlias + ".TrbJobsRetry(trbcontext.Background(), id); if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs retry:\", err); os.Exit(1) } else if !changed { fmt.Fprintln(os.Stderr, \"trb jobs retry: failed job not found\"); os.Exit(1) }")
 	g.indent--
 	g.line("case \"discard\":")
 	g.indent++
-	g.line("changed, err := " + jobsAlias + ".TrbJobsDiscard(context.Background(), id); if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs discard:\", err) } else if !changed { fmt.Fprintln(os.Stderr, \"trb jobs discard: job not found or currently running\") }")
+	g.line("changed, err := " + jobsAlias + ".TrbJobsDiscard(trbcontext.Background(), id); if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs discard:\", err); os.Exit(1) } else if !changed { fmt.Fprintln(os.Stderr, \"trb jobs discard: job not found or currently running\"); os.Exit(1) }")
 	g.indent--
 	g.line("}")
 	g.line("return true")
 	g.indent--
 	g.line("}")
 	g.line("if os.Getenv(\"TRB_JOBS_WORKER\") != \"1\" { return false }")
-	g.line("signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)")
+	g.line("signalContext, stop := signal.NotifyContext(trbcontext.Background(), os.Interrupt, syscall.SIGTERM)")
 	g.line("defer stop()")
 	g.line("workerId := \"worker-\" + strconv.Itoa(os.Getpid())")
-	g.line("defer func() { _ = " + jobsAlias + ".TrbJobsReleaseWorker(context.Background(), workerId); " + jobsAlias + ".TrbJobsCloseDatabase() }()")
+	g.line("defer func() { _ = " + jobsAlias + ".TrbJobsReleaseWorker(trbcontext.Background(), workerId); " + jobsAlias + ".TrbJobsCloseDatabase() }()")
 	g.line("pollInterval := " + strconv.Itoa(config.PollIntervalMilliseconds) + " * stdtime.Millisecond")
 	g.line("heartbeatInterval := " + strconv.Itoa(max(config.LeaseTimeoutMilliseconds/3, 100)) + " * stdtime.Millisecond")
 	g.line("shutdownTimeout := " + strconv.Itoa(config.ShutdownTimeoutMilliseconds) + " * stdtime.Millisecond")
@@ -339,14 +350,14 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.line("for {")
 	g.indent++
 	g.line("if signalContext.Err() != nil { return true }")
-	g.line("if _, err := " + jobsAlias + ".TrbJobsRecoverStale(signalContext); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs recover stale:\", err) }")
+	g.line("if _, err := " + jobsAlias + ".TrbJobsRecoverStale(signalContext); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs recover stale:\", err); if runOnce { os.Exit(1) } }")
 	g.line("claim, err := " + jobsAlias + ".TrbJobsClaimNext(signalContext, workerId)")
-	g.line("if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs claim:\", err); select { case <-signalContext.Done(): return true; case <-stdtime.After(pollInterval): continue } }")
+	g.line("if err != nil { fmt.Fprintln(os.Stderr, \"trb jobs claim:\", err); if runOnce { os.Exit(1) }; select { case <-signalContext.Done(): return true; case <-stdtime.After(pollInterval): continue } }")
 	g.line("if claim == nil { if runOnce { return true }; select { case <-signalContext.Done(): return true; case <-stdtime.After(pollInterval): continue } }")
 	g.line("execution := make(chan error, 1)")
 	g.line("heartbeatDone := make(chan struct{})")
-	g.line("go func() { ticker := stdtime.NewTicker(heartbeatInterval); defer ticker.Stop(); for { select { case <-heartbeatDone: return; case <-ticker.C: if err := " + jobsAlias + ".TrbJobsHeartbeat(context.Background(), claim.Id, workerId); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs heartbeat:\", err); return } } } }()")
-	g.line("go func() { execution <- trbJobsDispatch(claim.JobName, claim.Payload, claim.PayloadVersion) }()")
+	g.line("go func() { ticker := stdtime.NewTicker(heartbeatInterval); defer ticker.Stop(); for { select { case <-heartbeatDone: return; case <-ticker.C: if err := " + jobsAlias + ".TrbJobsHeartbeat(trbcontext.Background(), claim.Id, workerId); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs heartbeat:\", err); return } } } }()")
+	g.line("go func() { execution <- trbJobsDispatch(signalContext, claim.JobName, claim.Payload, claim.PayloadVersion) }()")
 	g.line("var executionError error")
 	g.line("select {")
 	g.line("case executionError = <-execution:")
@@ -356,7 +367,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.indent--
 	g.line("}")
 	g.line("close(heartbeatDone)")
-	g.line("if executionError != nil { if err := " + jobsAlias + ".TrbJobsFail(context.Background(), claim.Id, workerId, executionError.Error()); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs fail:\", err) } } else if err := " + jobsAlias + ".TrbJobsAcknowledge(context.Background(), claim.Id, workerId); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs acknowledge:\", err) }")
+	g.line("if executionError != nil { if err := " + jobsAlias + ".TrbJobsFail(trbcontext.Background(), claim.Id, workerId, executionError.Error()); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs fail:\", err) } } else if err := " + jobsAlias + ".TrbJobsAcknowledge(trbcontext.Background(), claim.Id, workerId); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs acknowledge:\", err) }")
 	g.line("if runOnce { return true }")
 	g.indent--
 	g.line("}")
@@ -403,6 +414,9 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		contractAlias := g.jobsContractAlias()
 		successType := contractAlias + ".JobReference"
 		errorType := contractAlias + ".EnqueueError"
+		errorValue := func(kind, message string) string {
+			return errorType + "{Kind: " + contractAlias + "." + goConstantIdentifier("EnqueueErrorKind", kind) + ", Message: " + message + "}"
+		}
 		parameters := make([]string, len(job.Parameters))
 		arguments := make([]string, len(job.Parameters))
 		for index, parameter := range job.Parameters {
@@ -411,14 +425,18 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 			arguments[index] = name
 		}
 		resultType := resultAlias + ".Result[" + successType + ", " + errorType + "]"
+		g.requireImport("context", "trbcontext")
 		emit := func(method string, methodParameters []string, waitMilliseconds string) {
 			functionName := goIdentifier(job.Name, true) + goMethodName(method)
+			methodParameters = append([]string{"__trbScope trbcontext.Context"}, methodParameters...)
 			g.line("func " + functionName + "(" + strings.Join(methodParameters, ", ") + ") " + resultType + " {")
 			g.indent++
 			g.line("payload, err := json.Marshal([]any{" + strings.Join(arguments, ", ") + "})")
-			g.line("if err != nil { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorType + "{Message: err.Error()}) }")
-			g.line("reference, err := " + jobsAlias + ".TrbJobsEnqueue(" + strconv.Quote(job.Name) + ", string(payload), " + strconv.Quote(job.Queue) + ", " + strconv.Itoa(job.Priority) + ", " + waitMilliseconds + ")")
-			g.line("if err != nil { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorType + "{Message: err.Error()}) }")
+			g.line("if err != nil { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorValue("Serialization", "err.Error()") + ") }")
+			g.line("waitMilliseconds := " + waitMilliseconds)
+			g.line("if waitMilliseconds < 0 { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorValue("InvalidArgument", strconv.Quote("job delay must not be negative")) + ") }")
+			g.line("reference, err := " + jobsAlias + ".TrbJobsEnqueue(__trbScope, " + strconv.Quote(job.Name) + ", string(payload), " + strconv.Quote(job.Queue) + ", " + strconv.Itoa(job.Priority) + ", waitMilliseconds, " + strconv.Itoa(job.MaximumAttempts) + ")")
+			g.line("if err != nil { kind := " + contractAlias + "." + goConstantIdentifier("EnqueueErrorKind", "Adapter") + "; if __trbScope.Err() != nil { kind = " + contractAlias + "." + goConstantIdentifier("EnqueueErrorKind", "Cancelled") + " }; return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorType + "{Kind: kind, Message: err.Error()}) }")
 			g.line("return " + resultAlias + ".NewResultOk[" + successType + ", " + errorType + "](reference)")
 			g.indent--
 			g.line("}")
@@ -427,22 +445,27 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		emit("perform_later", parameters, "0")
 		durationType := g.goType(types.FromName("Duration"))
 		delayedParameters := append([]string{"delay " + durationType}, parameters...)
-		emit("perform_later_in", delayedParameters, "delay.WholeSeconds()*1000+(delay.Nanosecond()+999999)/1000000")
+		emit("perform_in", delayedParameters, "delay.WholeSeconds()*1000+(delay.Nanosecond()+999999)/1000000")
+		g.requireImport("time", "stdtime")
+		instantType := g.goType(types.FromName("Instant"))
+		scheduledParameters := append([]string{"scheduledAt " + instantType}, parameters...)
+		emit("perform_at", scheduledParameters, "int(max(int64(scheduledAt.EpochSeconds())*1000+(int64(scheduledAt.Nanosecond())+999999)/1000000-stdtime.Now().UTC().UnixMilli(), 0))")
 	}
 }
 
 func (g *generator) jobsEnqueue(config jobssql.Config) {
 	referenceType := g.jobsContractAlias() + ".JobReference"
-	g.line("func TrbJobsEnqueue(jobName string, payload string, queueName string, priority int, waitMilliseconds int) (" + referenceType + ", error) {")
+	g.line("func TrbJobsEnqueue(ctx trbcontext.Context, jobName string, payload string, queueName string, priority int, waitMilliseconds int, maximumAttempts int) (" + referenceType + ", error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return " + referenceType + "{}, err }")
 	g.line("id, err := trbJobsId()")
 	g.line("if err != nil { return " + referenceType + "{}, err }")
 	g.line("if waitMilliseconds < 0 { return " + referenceType + "{}, errors.New(\"job delay must not be negative\") }")
+	g.line("if maximumAttempts <= 0 { maximumAttempts = " + strconv.Itoa(config.DefaultMaximumAttempts) + " }")
 	g.line("runAt := stdtime.Now().UTC().Add(stdtime.Duration(waitMilliseconds) * stdtime.Millisecond)")
-	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + goJobsPlaceholders(config.DatabaseAdapter, 7, 0) + ", 'ready', 0, " + goJobsPlaceholder(config.DatabaseAdapter, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-	g.line("_, err = database.Exec(" + strconv.Quote(query) + ", id, queueName, jobName, payload, 1, priority, runAt, " + strconv.Itoa(config.DefaultMaximumAttempts) + ")")
+	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + goJobsPlaceholders(config.Dialect, 7, 0) + ", 'ready', 0, " + goJobsPlaceholder(config.Dialect, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+	g.line("_, err = database.ExecContext(ctx, " + strconv.Quote(query) + ", id, queueName, jobName, payload, 1, priority, runAt, maximumAttempts)")
 	g.line("if err != nil { return " + referenceType + "{}, err }")
 	g.line("return " + referenceType + "{Id: id, JobName: jobName}, nil")
 	g.indent--
@@ -451,9 +474,9 @@ func (g *generator) jobsEnqueue(config jobssql.Config) {
 }
 
 func (g *generator) jobsClaim(config jobssql.Config) {
-	selection, _ := sqlstore.ClaimSelection(sqlstore.Dialect(config.DatabaseAdapter))
-	queueSelection, _ := sqlstore.ClaimSelectionForQueue(sqlstore.Dialect(config.DatabaseAdapter), goJobsPlaceholder(config.DatabaseAdapter, 1))
-	g.line("func TrbJobsClaimNext(ctx context.Context, workerId string) (*TrbJobsClaim, error) {")
+	selection, _ := sqlstore.ClaimSelection(sqlstore.Dialect(config.Dialect))
+	queueSelection, _ := sqlstore.ClaimSelectionForQueue(sqlstore.Dialect(config.Dialect), goJobsPlaceholder(config.Dialect, 1))
+	g.line("func TrbJobsClaimNext(ctx trbcontext.Context, workerId string) (*TrbJobsClaim, error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return nil, err }")
@@ -464,14 +487,14 @@ func (g *generator) jobsClaim(config jobssql.Config) {
 	g.line("queueName := os.Getenv(\"TRB_JOBS_QUEUE\")")
 	g.line("if queueName == \"\" { err = transaction.QueryRowContext(ctx, " + strconv.Quote(selection) + ").Scan(&id) } else { err = transaction.QueryRowContext(ctx, " + strconv.Quote(queueSelection) + ", queueName).Scan(&id) }")
 	g.line("if errors.Is(err, sql.ErrNoRows) { return nil, nil } else if err != nil { return nil, err }")
-	update := "UPDATE trb_jobs SET state = 'running', attempts = attempts + 1, claimed_by = " + goJobsPlaceholder(config.DatabaseAdapter, 1) + ", claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 2) + " AND state = 'ready'"
+	update := "UPDATE trb_jobs SET state = 'running', attempts = attempts + 1, claimed_by = " + goJobsPlaceholder(config.Dialect, 1) + ", claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.Dialect, 2) + " AND state = 'ready'"
 	g.line("result, err := transaction.ExecContext(ctx, " + strconv.Quote(update) + ", workerId, id)")
 	g.line("if err != nil { return nil, err }")
 	g.line("affected, err := result.RowsAffected()")
 	g.line("if err != nil { return nil, err }")
 	g.line("if affected != 1 { return nil, nil }")
 	g.line("claim := &TrbJobsClaim{Id: id}")
-	read := "SELECT job_name, payload, payload_version, attempts, maximum_attempts FROM trb_jobs WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 1)
+	read := "SELECT job_name, payload, payload_version, attempts, maximum_attempts FROM trb_jobs WHERE id = " + goJobsPlaceholder(config.Dialect, 1)
 	g.line("if err = transaction.QueryRowContext(ctx, " + strconv.Quote(read) + ", id).Scan(&claim.JobName, &claim.Payload, &claim.PayloadVersion, &claim.Attempts, &claim.MaximumAttempts); err != nil { return nil, err }")
 	g.line("if err = transaction.Commit(); err != nil { return nil, err }")
 	g.line("return claim, nil")
@@ -481,11 +504,11 @@ func (g *generator) jobsClaim(config jobssql.Config) {
 }
 
 func (g *generator) jobsAcknowledge(config jobssql.Config) {
-	g.line("func TrbJobsAcknowledge(ctx context.Context, id string, workerId string) error {")
+	g.line("func TrbJobsAcknowledge(ctx trbcontext.Context, id string, workerId string) error {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return err }")
-	query := "DELETE FROM trb_jobs WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 1) + " AND state = 'running' AND claimed_by = " + goJobsPlaceholder(config.DatabaseAdapter, 2)
+	query := "DELETE FROM trb_jobs WHERE id = " + goJobsPlaceholder(config.Dialect, 1) + " AND state = 'running' AND claimed_by = " + goJobsPlaceholder(config.Dialect, 2)
 	g.line("result, err := database.ExecContext(ctx, " + strconv.Quote(query) + ", id, workerId)")
 	g.line("if err != nil { return err }")
 	g.line("affected, err := result.RowsAffected()")
@@ -498,11 +521,11 @@ func (g *generator) jobsAcknowledge(config jobssql.Config) {
 }
 
 func (g *generator) jobsFail(config jobssql.Config) {
-	g.line("func TrbJobsFail(ctx context.Context, id string, workerId string, message string) error {")
+	g.line("func TrbJobsFail(ctx trbcontext.Context, id string, workerId string, message string) error {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return err }")
-	query := "UPDATE trb_jobs SET state = CASE WHEN attempts >= maximum_attempts THEN 'failed' ELSE 'ready' END, run_at = " + goJobsRetryTime(config) + ", claimed_by = NULL, claimed_at = NULL, last_error = " + goJobsPlaceholder(config.DatabaseAdapter, 1) + ", updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.DatabaseAdapter, 2) + " AND state = 'running' AND claimed_by = " + goJobsPlaceholder(config.DatabaseAdapter, 3)
+	query := "UPDATE trb_jobs SET state = CASE WHEN attempts >= maximum_attempts THEN 'failed' ELSE 'ready' END, run_at = " + goJobsRetryTime(config) + ", claimed_by = NULL, claimed_at = NULL, last_error = " + goJobsPlaceholder(config.Dialect, 1) + ", updated_at = CURRENT_TIMESTAMP WHERE id = " + goJobsPlaceholder(config.Dialect, 2) + " AND state = 'running' AND claimed_by = " + goJobsPlaceholder(config.Dialect, 3)
 	g.line("result, err := database.ExecContext(ctx, " + strconv.Quote(query) + ", message, id, workerId)")
 	g.line("if err != nil { return err }")
 	g.line("affected, err := result.RowsAffected()")
@@ -515,11 +538,11 @@ func (g *generator) jobsFail(config jobssql.Config) {
 }
 
 func (g *generator) jobsRelease(config jobssql.Config) {
-	g.line("func TrbJobsReleaseWorker(ctx context.Context, workerId string) error {")
+	g.line("func TrbJobsReleaseWorker(ctx trbcontext.Context, workerId string) error {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return err }")
-	query := "UPDATE trb_jobs SET state = 'ready', claimed_by = NULL, claimed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE state = 'running' AND claimed_by = " + goJobsPlaceholder(config.DatabaseAdapter, 1)
+	query := "UPDATE trb_jobs SET state = 'ready', claimed_by = NULL, claimed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE state = 'running' AND claimed_by = " + goJobsPlaceholder(config.Dialect, 1)
 	g.line("_, err = database.ExecContext(ctx, " + strconv.Quote(query) + ", workerId)")
 	g.line("return err")
 	g.indent--
@@ -540,7 +563,7 @@ func goJobsDriver(adapter string) string {
 
 func goJobsStaleCutoff(config jobssql.Config) string {
 	milliseconds := config.LeaseTimeoutMilliseconds
-	switch config.DatabaseAdapter {
+	switch config.Dialect {
 	case "postgresql":
 		return "CURRENT_TIMESTAMP - INTERVAL '" + strconv.Itoa(milliseconds) + " milliseconds'"
 	case "mysql":
@@ -552,7 +575,7 @@ func goJobsStaleCutoff(config jobssql.Config) string {
 }
 
 func goJobsRetryTime(config jobssql.Config) string {
-	switch config.DatabaseAdapter {
+	switch config.Dialect {
 	case "postgresql":
 		return "CURRENT_TIMESTAMP + (attempts * INTERVAL '" + strconv.Itoa(config.RetryBaseDelayMilliseconds) + " milliseconds')"
 	case "mysql":

@@ -118,7 +118,7 @@ func TestBundledJobsPackageDefaultsNativeDatabaseAdapterToSQLite(t *testing.T) {
 		}
 	}
 	for _, mode := range []string{"go", "ruby"} {
-		dependencies, err := packageDefinition.NativeDependenciesFor(mode, json.RawMessage(`{"database_adapter":"postgresql"}`))
+		dependencies, err := packageDefinition.NativeDependenciesFor(mode, json.RawMessage(`{"dialect":"postgresql"}`))
 		if err != nil {
 			t.Fatalf("%s PostgreSQL: %v", mode, err)
 		}

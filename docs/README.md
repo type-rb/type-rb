@@ -21,6 +21,7 @@ larger applications.
 - [Syntax highlighting](syntax-highlighting.md)
 - [Database schema workflow](guides/database.md)
 - [`trb/orm` guide](guides/orm.md)
+- [Portable background Jobs](guides/jobs.md)
 - [Experimental React and JSX](guides/react.md)
 
 ## Project

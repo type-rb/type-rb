@@ -41,7 +41,9 @@ func TestJobApplicationConformanceAcrossServerDatabases(t *testing.T) {
 						config.TypeScript.Runtime = project.TypeScriptRuntimeBun
 						config.TypeScript.PackageManager = "bun"
 					}
-					configureSQLJobs(t, config, adapter, configSource)
+					environment := "TRB_JOBS_CONFORMANCE_DATABASE"
+					t.Setenv(environment, configSource)
+					configureSQLJobsFromEnvironment(t, config, adapter, environment)
 					if err := config.Save(); err != nil {
 						t.Fatal(err)
 					}

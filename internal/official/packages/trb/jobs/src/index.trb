@@ -1,4 +1,12 @@
+enum EnqueueErrorKind
+	Serialization
+	InvalidArgument
+	Cancelled
+	Adapter
+end
+
 record EnqueueError
+	kind: EnqueueErrorKind
 	message: String
 end
 
@@ -18,5 +26,9 @@ def queue(name: String)
 end
 
 def priority(value: Integer)
+	return
+end
+
+def maximum_attempts(value: Integer)
 	return
 end

@@ -8,7 +8,7 @@ import (
 
 func (c *CLI) runJobs(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("jobs command requires start")
+		return fmt.Errorf("jobs command requires a subcommand")
 	}
 	switch args[0] {
 	case "start":

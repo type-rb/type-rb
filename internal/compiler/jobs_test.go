@@ -9,10 +9,10 @@ import (
 )
 
 const jobsSQLConfigurationSource = `import { JobAdapter } from trb/jobs
-import { SQLAdapter, SQLDatabase } from trb/jobs/sql
+import { SQLAdapter, SQLDialect } from trb/jobs/sql
 
 def configure_jobs(): JobAdapter
-	return SQLAdapter.new(database_adapter: SQLDatabase::SQLite, database: "jobs.sqlite3")
+	return SQLAdapter.new(dialect: SQLDialect::SQLite, source: "jobs.sqlite3")
 end
 `
 
@@ -37,11 +37,12 @@ end
 		},
 		{
 			Filename: "/project/src/jobs/send_receipt_job.trb", ModulePath: "jobs/send_receipt_job", Package: "jobs",
-			Source: []byte(`import { Job, priority, queue } from trb/jobs
+			Source: []byte(`import { Job, maximum_attempts, priority, queue } from trb/jobs
 
 class SendReceiptJob < Job
 	queue("mail")
 	priority(10)
+	maximum_attempts(3)
 
 	def perform(order_id: Integer, destination: String)
 		return
@@ -62,14 +63,14 @@ end
 		t.Fatal("main artifact was not generated")
 	}
 	manifest := jobsintegration.ManifestFrom(main.IR.Extensions)
-	if manifest == nil || len(manifest.Jobs) != 1 || manifest.Jobs[0].Name != "SendReceiptJob" || manifest.Jobs[0].Queue != "mail" || manifest.Jobs[0].Priority != 10 {
+	if manifest == nil || len(manifest.Jobs) != 1 || manifest.Jobs[0].Name != "SendReceiptJob" || manifest.Jobs[0].Queue != "mail" || manifest.Jobs[0].Priority != 10 || manifest.Jobs[0].MaximumAttempts != 3 {
 		t.Fatalf("unexpected jobs manifest: %#v", manifest)
 	}
-	if !strings.Contains(string(main.Output), `jobs.SendReceiptJobPerformLater(42, "ada@example.test")`) {
+	if !strings.Contains(string(main.Output), `jobs.SendReceiptJobPerformLater(__trbScope, 42, "ada@example.test")`) {
 		t.Fatalf("main does not call the typed job enqueue wrapper:\n%s", main.Output)
 	}
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
-	if job == nil || !strings.Contains(string(job.Output), `.TrbJobsEnqueue("SendReceiptJob", string(payload), "mail", 10, 0)`) || !strings.Contains(string(job.Output), "SendReceiptJobPerformLaterIn") {
+	if job == nil || !strings.Contains(string(job.Output), `.TrbJobsEnqueue(__trbScope, "SendReceiptJob", string(payload), "mail", 10, waitMilliseconds, 3)`) || !strings.Contains(string(job.Output), "SendReceiptJobPerformIn") || !strings.Contains(string(job.Output), "SendReceiptJobPerformAt") {
 		t.Fatalf("job module does not enqueue through the jobs runtime:\n%s", job.Output)
 	}
 	runtime := artifactForModule(artifacts, jobssql.ModulePath)
@@ -145,11 +146,12 @@ end
 		},
 		{
 			Filename: "/project/src/jobs/send_receipt_job.trb", ModulePath: "jobs/send_receipt_job", Package: "jobs",
-			Source: []byte(`import { Job, priority, queue } from trb/jobs
+			Source: []byte(`import { Job, maximum_attempts, priority, queue } from trb/jobs
 
 class SendReceiptJob < Job
 	queue("mail")
 	priority(10)
+	maximum_attempts(3)
 
 	def perform(order_id: Integer, destination: String)
 		return
@@ -169,7 +171,7 @@ end
 	main := artifactForModule(artifacts, "main")
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
 	runtime := artifactForModule(artifacts, jobssql.ModulePath)
-	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "trb_jobs_run_worker_or_command") || !strings.Contains(string(job.Output), `TrbJobsRuntime.enqueue("SendReceiptJob", payload, "mail", 10, 0)`) || !strings.Contains(string(job.Output), "def self.perform_later_in") || !strings.Contains(string(runtime.Output), "module TrbJobsRuntime") {
+	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "trb_jobs_run_worker_or_command") || !strings.Contains(string(job.Output), `TrbJobsRuntime.enqueue(__trb_scope, "SendReceiptJob", payload, "mail", 10, wait_milliseconds, 3)`) || !strings.Contains(string(job.Output), "def self.perform_in") || !strings.Contains(string(job.Output), "def self.perform_at") || !strings.Contains(string(runtime.Output), "module TrbJobsRuntime") {
 		t.Fatalf("Ruby jobs runtime is incomplete:\nmain=%s\njob=%s\nruntime=%s", main.Output, job.Output, runtime.Output)
 	}
 }
@@ -193,11 +195,12 @@ end
 		},
 		{
 			Filename: "/project/src/jobs/send_receipt_job.trb", ModulePath: "jobs/send_receipt_job", Package: "jobs",
-			Source: []byte(`import { Job, priority, queue } from trb/jobs
+			Source: []byte(`import { Job, maximum_attempts, priority, queue } from trb/jobs
 
 class SendReceiptJob < Job
 	queue("mail")
 	priority(10)
+	maximum_attempts(3)
 
 	def perform(order_id: Integer, destination: String)
 		return
@@ -214,7 +217,7 @@ end
 	main := artifactForModule(artifacts, "main")
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
 	runtime := artifactForModule(artifacts, jobssql.ModulePath)
-	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), `trbJobsEnqueue("SendReceiptJob", JSON.stringify([order_id, destination]), "mail", 10, 0)`) || !strings.Contains(string(job.Output), "function perform_later_in") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") {
+	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), `trbJobsEnqueue(__trbScope, "SendReceiptJob", payload, "mail", 10, waitMilliseconds, 3)`) || !strings.Contains(string(job.Output), "function perform_in") || !strings.Contains(string(job.Output), "function perform_at") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") {
 		t.Fatalf("TypeScript jobs runtime is incomplete:\nmain=%s\njob=%s\nruntime=%s", main.Output, job.Output, runtime.Output)
 	}
 }
@@ -238,5 +241,60 @@ end
 	_, err := CompileProject(sources, Options{Mode: "typescript", TypeScriptRuntime: "node", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"})
 	if err == nil || !strings.Contains(err.Error(), `trb/jobs in mode: typescript currently requires typescript.runtime: "bun"`) {
 		t.Fatalf("expected Bun jobs runtime diagnostic, got %v", err)
+	}
+}
+
+func TestCompileProjectPropagatesExecutionScopeThroughJobDispatch(t *testing.T) {
+	sources := []SourceUnit{
+		{
+			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
+			Source: []byte(`import { EnqueueError, Job } from trb/jobs
+
+class ChildJob < Job
+	def perform(value: Integer)
+		return
+	end
+end
+
+class ParentJob < Job
+	def perform(value: Integer) fails EnqueueError
+		ChildJob.perform_later(value)
+		return
+	end
+end
+
+def main()
+	return
+end
+`),
+		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Source: []byte(jobsSQLConfigurationSource)},
+	}
+
+	for _, test := range []struct {
+		mode    string
+		options Options
+		want    []string
+	}{
+		{mode: "go", options: Options{Mode: "go", GoModule: "example.com/jobs"}, want: []string{"func (self *ParentJob) Perform(__trbScope trbcontext.Context", "ChildJobPerformLater(__trbScope, value)", "NewParentJob().Perform(__trbScope, argument0)"}},
+		{mode: "ruby", options: Options{Mode: "ruby", RubyLoader: "require_relative"}, want: []string{"def perform(__trb_scope, value)", "ChildJob.perform_later(__trb_scope, value)", "ParentJob.new.perform(__trb_scope, *arguments)"}},
+		{mode: "typescript", options: Options{Mode: "typescript", TypeScriptRuntime: "bun"}, want: []string{"perform(__trbScope: AbortSignal | undefined, value: number)", "ChildJob.perform_later(__trbScope, value)", "new ParentJob().perform(__trbScope, parameters[0] as number)"}},
+	} {
+		t.Run(test.mode, func(t *testing.T) {
+			options := test.options
+			options.SourceRoot = "/project/src"
+			options.ProjectRoot = "/project"
+			options.JobsConfiguration = "config/jobs"
+			artifacts, err := CompileProject(sources, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := string(artifactForModule(artifacts, "main").Output)
+			for _, expected := range test.want {
+				if !strings.Contains(output, expected) {
+					t.Fatalf("generated %s Job execution scope is missing %q:\n%s", test.mode, expected, output)
+				}
+			}
+		})
 	}
 }

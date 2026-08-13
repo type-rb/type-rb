@@ -95,6 +95,9 @@ than detailed syntax.
   compatibility checking.
 - Harden the experimental `trb/orm` package with schema caching, compatibility
   policy, production diagnostics, and larger end-to-end `trb/web` applications.
+- Harden the experimental `trb/jobs` contract with structured payload codecs,
+  worker failure-injection tests, recurring schedules, operational metrics,
+  and explicit delivery profiles such as transactional outbox adapters.
 - Continue representative backend, server-rendered, and browser application
   slices with authentication, validation, transactions, background work, and
   realistic failure paths.

@@ -212,6 +212,20 @@ change. DROP operations remain disabled unless `--allow-destructive` is
 explicit. `lock` and `check` operate offline by default; `--from-db` selects
 live introspection. See the [database schema guide](guides/database.md).
 
+## Background Jobs
+
+```sh
+trb jobs start [--once] [--queue NAME]
+trb jobs list
+trb jobs retry JOB_ID
+trb jobs discard JOB_ID
+```
+
+These commands run the adapter selected by `jobs.configuration`. `start`
+claims and performs durable Jobs; `--once` stops after at most one claim and
+`--queue` limits claims to one queue. `list`, `retry`, and `discard` operate on
+persisted adapter state. See the [`trb/jobs` guide](guides/jobs.md).
+
 ## Playground and tour
 
 ```sh

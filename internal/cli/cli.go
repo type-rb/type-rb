@@ -1680,7 +1680,7 @@ func jobsSQLNativeOptions(config *project.Config) (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", filename, err)
 	}
-	return json.Marshal(map[string]string{"database_adapter": SQLConfig.DatabaseAdapter})
+	return json.Marshal(map[string]string{"dialect": SQLConfig.Dialect})
 }
 
 func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Artifact, root string) (map[string]string, error) {
@@ -1894,7 +1894,8 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb tour [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb db plan|apply|export|lock|check [options]")
 	fmt.Fprintln(c.Stdout, "  trb jobs start [--once] [--queue NAME] [--config trbconfig.jsonc]")
-	fmt.Fprintln(c.Stdout, "  trb jobs list|retry|discard [JOB_ID] [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb jobs list [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb jobs retry|discard JOB_ID [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--source GIT | --path DIRECTORY] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb add --native [--dev] PACKAGE [VERSION]")

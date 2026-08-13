@@ -10,6 +10,14 @@ import (
 )
 
 func configureSQLJobs(t *testing.T, config *project.Config, adapter, database string) {
+	configureSQLJobsSource(t, config, adapter, "source: "+strconv.Quote(database))
+}
+
+func configureSQLJobsFromEnvironment(t *testing.T, config *project.Config, adapter, environment string) {
+	configureSQLJobsSource(t, config, adapter, "source_environment: "+strconv.Quote(environment))
+}
+
+func configureSQLJobsSource(t *testing.T, config *project.Config, adapter, sourceArgument string) {
 	t.Helper()
 	member := map[string]string{"sqlite": "SQLite", "postgresql": "PostgreSQL", "mysql": "MySQL"}[adapter]
 	if member == "" {
@@ -21,12 +29,12 @@ func configureSQLJobs(t *testing.T, config *project.Config, adapter, database st
 		t.Fatal(err)
 	}
 	source := `import { JobAdapter } from trb/jobs
-import { SQLAdapter, SQLDatabase } from trb/jobs/sql
+import { SQLAdapter, SQLDialect } from trb/jobs/sql
 
 def configure_jobs(): JobAdapter
 	return SQLAdapter.new(
-		database_adapter: SQLDatabase::` + member + `,
-		database: ` + strconv.Quote(database) + `,
+		dialect: SQLDialect::` + member + `,
+		` + sourceArgument + `,
 	)
 end
 `

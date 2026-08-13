@@ -31,9 +31,13 @@ end
 	if len(performLater.Parameters) != 2 || performLater.Parameters[0].Name != "order_id" || performLater.Parameters[0].Type.String() != "Integer" || performLater.Parameters[1].Type.String() != "String" {
 		t.Fatalf("unexpected perform_later parameters: %#v", performLater.Parameters)
 	}
-	performLaterIn := job.ClassMembers["perform_later_in"]
-	if performLaterIn.Intrinsic != "trb.jobs.perform_later_in" || len(performLaterIn.Parameters) != 3 || performLaterIn.Parameters[0].Type.String() != "Duration" {
-		t.Fatalf("unexpected perform_later_in declaration: %#v", performLaterIn)
+	performIn := job.ClassMembers["perform_in"]
+	if performIn.Intrinsic != "trb.jobs.perform_in" || len(performIn.Parameters) != 3 || performIn.Parameters[0].Type.String() != "Duration" {
+		t.Fatalf("unexpected perform_in declaration: %#v", performIn)
+	}
+	performAt := job.ClassMembers["perform_at"]
+	if performAt.Intrinsic != "trb.jobs.perform_at" || len(performAt.Parameters) != 3 || performAt.Parameters[0].Type.String() != "Instant" {
+		t.Fatalf("unexpected perform_at declaration: %#v", performAt)
 	}
 }
 
@@ -48,16 +52,20 @@ func TestManifestAugmentsJobRuntimeContract(t *testing.T) {
 
 	manifest.Augment(program)
 
-	if !imported.RuntimeRequired || !contains(imported.Symbols, "EnqueueError") || !contains(imported.Symbols, "JobReference") {
+	if !imported.RuntimeRequired || !contains(imported.Symbols, "EnqueueError") || !contains(imported.Symbols, "EnqueueErrorKind") || !contains(imported.Symbols, "JobReference") {
 		t.Fatalf("job runtime types were not attached: %#v", imported)
 	}
-	method, ok := class.Body[len(class.Body)-2].(*ir.Method)
+	method, ok := class.Body[len(class.Body)-3].(*ir.Method)
 	if !ok || method.Name != "perform_later" || !method.External || !method.Class || method.Fails.String() != "EnqueueError" {
 		t.Fatalf("job class was not augmented: %#v", class.Body)
 	}
-	delayed, ok := class.Body[len(class.Body)-1].(*ir.Method)
-	if !ok || delayed.Name != "perform_later_in" || len(delayed.Parameters) != 2 || delayed.Parameters[0].Type.String() != "Duration" {
+	delayed, ok := class.Body[len(class.Body)-2].(*ir.Method)
+	if !ok || delayed.Name != "perform_in" || len(delayed.Parameters) != 2 || delayed.Parameters[0].Type.String() != "Duration" {
 		t.Fatalf("delayed job method was not augmented: %#v", class.Body)
+	}
+	scheduled, ok := class.Body[len(class.Body)-1].(*ir.Method)
+	if !ok || scheduled.Name != "perform_at" || len(scheduled.Parameters) != 2 || scheduled.Parameters[0].Type.String() != "Instant" {
+		t.Fatalf("scheduled job method was not augmented: %#v", class.Body)
 	}
 }
 
@@ -82,10 +90,11 @@ func TestDiscoverRejectsInvalidInitialJobContracts(t *testing.T) {
 	}
 }
 
-func TestDiscoverCapturesQueueAndPriorityDefaults(t *testing.T) {
+func TestDiscoverCapturesJobDefaults(t *testing.T) {
 	program := parseJobsTest(t, `class SendReceiptJob < Job
 	queue("mail")
 	priority(10)
+	maximum_attempts(3)
 
 	def perform(order_id: Integer)
 		return
@@ -96,7 +105,7 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs) != 1 || jobs[0].Queue != "mail" || jobs[0].Priority != 10 {
+	if len(jobs) != 1 || jobs[0].Queue != "mail" || jobs[0].Priority != 10 || jobs[0].MaximumAttempts != 3 {
 		t.Fatalf("unexpected Job defaults: %#v", jobs)
 	}
 }
@@ -111,6 +120,7 @@ func TestDiscoverRejectsInvalidQueueAndPriorityDefaults(t *testing.T) {
 		{name: "dynamic queue", setting: `queue(QUEUE)`, message: "expects a literal"},
 		{name: "negative priority", setting: `priority(-1)`, message: "expects a literal"},
 		{name: "string priority", setting: `priority("first")`, message: "expects an Integer literal"},
+		{name: "zero attempts", setting: `maximum_attempts(0)`, message: "must be a positive Integer"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -27,12 +27,13 @@ type Parameter struct {
 }
 
 type Job struct {
-	Name       string
-	ModulePath string
-	Parameters []Parameter
-	Fails      types.Type
-	Queue      string
-	Priority   int
+	Name            string
+	ModulePath      string
+	Parameters      []Parameter
+	Fails           types.Type
+	Queue           string
+	Priority        int
+	MaximumAttempts int
 }
 
 type Manifest struct {
@@ -75,15 +76,20 @@ func (m *Manifest) Augment(program *ir.Program) {
 		// in the package source, so its result and error representations must be
 		// made available to generated code explicitly.
 		imported.RuntimeRequired = true
-		for _, symbol := range []string{"EnqueueError", "JobReference"} {
+		for _, symbol := range []string{"EnqueueError", "EnqueueErrorKind", "JobReference"} {
 			if !contains(imported.Symbols, symbol) {
 				imported.Symbols = append(imported.Symbols, symbol)
 			}
-			imported.SymbolKinds[symbol] = "record"
+			if symbol == "EnqueueErrorKind" {
+				imported.SymbolKinds[symbol] = "enum"
+			} else {
+				imported.SymbolKinds[symbol] = "record"
+			}
 		}
 		sort.Strings(imported.Symbols)
 	}
-	for _, job := range m.Jobs {
+	for jobIndex := range m.Jobs {
+		job := &m.Jobs[jobIndex]
 		if job.ModulePath != program.ModulePath {
 			continue
 		}
@@ -103,11 +109,18 @@ func (m *Manifest) Augment(program *ir.Program) {
 			})
 			delayedParameters := append([]ir.Parameter{{Name: "delay", Type: types.FromName("Duration")}}, parameters...)
 			class.Body = append(class.Body, &ir.Method{
-				Name: "perform_later_in", External: true, Class: true,
+				Name: "perform_in", External: true, Class: true,
 				Parameters: delayedParameters, SuccessType: types.FromName("JobReference"),
 				ReturnType: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
 			})
+			scheduledParameters := append([]ir.Parameter{{Name: "scheduled_at", Type: types.FromName("Instant")}}, parameters...)
+			class.Body = append(class.Body, &ir.Method{
+				Name: "perform_at", External: true, Class: true,
+				Parameters: scheduledParameters, SuccessType: types.FromName("JobReference"),
+				ReturnType: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+			})
 			ensureJobRuntimeImport(program, "trb/std/time/index", "Duration", "class")
+			ensureJobRuntimeImport(program, "trb/std/time/index", "Instant", "class")
 		}
 	}
 }
@@ -160,9 +173,15 @@ func Declarations(programs []*ast.Program) (*declaration.Catalog, error) {
 			Class: true, Provider: PackageName,
 		}
 		delayedParameters := append([]declaration.Parameter{{Name: "delay", Type: types.FromName("Duration")}}, parameters...)
-		declared.ClassMembers["perform_later_in"] = declaration.Member{
-			Name: "perform_later_in", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_later_in",
+		declared.ClassMembers["perform_in"] = declaration.Member{
+			Name: "perform_in", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_in",
 			Parameters: delayedParameters, Return: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+			Class: true, Provider: PackageName,
+		}
+		scheduledParameters := append([]declaration.Parameter{{Name: "scheduled_at", Type: types.FromName("Instant")}}, parameters...)
+		declared.ClassMembers["perform_at"] = declaration.Member{
+			Name: "perform_at", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_at",
+			Parameters: scheduledParameters, Return: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
 			Class: true, Provider: PackageName,
 		}
 		catalog.Types[job.Name] = declared
@@ -260,7 +279,7 @@ func discoverJobDefaults(job *Job, class *ast.ClassStatement) error {
 			continue
 		}
 		callee, ok := call.Callee.(*ast.Identifier)
-		if !ok || callee.Name != "queue" && callee.Name != "priority" {
+		if !ok || callee.Name != "queue" && callee.Name != "priority" && callee.Name != "maximum_attempts" {
 			continue
 		}
 		if seen[callee.Name] {
@@ -293,6 +312,15 @@ func discoverJobDefaults(job *Job, class *ast.ClassStatement) error {
 				return fmt.Errorf("trb/jobs Job %s.priority must be a non-negative Integer", job.Name)
 			}
 			job.Priority = int(value)
+		case "maximum_attempts":
+			if literal.Kind != ast.IntegerLiteral {
+				return fmt.Errorf("trb/jobs Job %s.maximum_attempts expects an Integer literal", job.Name)
+			}
+			value, err := strconv.ParseInt(strings.ReplaceAll(literal.Raw, "_", ""), 10, 32)
+			if err != nil || value <= 0 {
+				return fmt.Errorf("trb/jobs Job %s.maximum_attempts must be a positive Integer", job.Name)
+			}
+			job.MaximumAttempts = int(value)
 		}
 	}
 	return nil

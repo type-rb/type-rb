@@ -196,25 +196,24 @@ adapter keeps database and worker choices outside application Job definitions:
 
 ```trb
 import { JobAdapter } from trb/jobs
-import { SQLAdapter, SQLDatabase } from trb/jobs/sql
+import { SQLAdapter, SQLDialect } from trb/jobs/sql
 import { Duration } from trb/std/time
 
 def configure_jobs(): JobAdapter
 	return SQLAdapter.new(
-		database_adapter: SQLDatabase::PostgreSQL,
-		database: "jobs",
+		dialect: SQLDialect::PostgreSQL,
+		source_environment: "JOBS_DATABASE_URL",
 		poll_interval: Duration.seconds(1),
-		worker_concurrency: 4,
 	)
 end
 ```
 
 `configuration` is relative to `sourceDir`; a trailing `.trb` is optional.
 Normal Job modules import only `trb/jobs`. Importing `trb/jobs/sql` in the
-composition module also selects the target-native database dependency. SQLite
-currently requires `worker_concurrency: 1`. The initial compiler integration
-accepts one `configure_jobs` function whose body directly returns
-`SQLAdapter.new(...)`; duration and scalar options are compile-time values.
+composition module also selects the target-native database dependency. The
+initial compiler integration accepts one `configure_jobs` function whose body
+directly returns `SQLAdapter.new(...)`; duration and scalar options are
+compile-time values.
 This keeps native dependency and generated SQL selection deterministic while
 the external adapter protocol is still under development.
 

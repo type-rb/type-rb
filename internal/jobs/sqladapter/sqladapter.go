@@ -19,23 +19,22 @@ const (
 )
 
 type Config struct {
-	DatabaseAdapter             string
-	Database                    string
-	DatabaseEnvironment         string
+	Dialect                     string
+	Source                      string
+	SourceEnvironment           string
 	PollIntervalMilliseconds    int
 	LeaseTimeoutMilliseconds    int
 	ShutdownTimeoutMilliseconds int
 	DefaultMaximumAttempts      int
 	RetryBaseDelayMilliseconds  int
-	WorkerConcurrency           int
 }
 
 func DefaultConfig() Config {
 	return Config{
-		DatabaseAdapter: "sqlite", Database: "jobs.sqlite3", DatabaseEnvironment: "TRB_JOBS_DATABASE",
+		Dialect: "sqlite", Source: "jobs.sqlite3",
 		PollIntervalMilliseconds: 1000, LeaseTimeoutMilliseconds: 60_000,
 		ShutdownTimeoutMilliseconds: 30_000, DefaultMaximumAttempts: 5,
-		RetryBaseDelayMilliseconds: 1000, WorkerConcurrency: 1,
+		RetryBaseDelayMilliseconds: 1000,
 	}
 }
 
@@ -169,24 +168,20 @@ func ParseConfiguration(program *ast.Program) (Config, error) {
 		seen[argument.Name] = true
 		var err error
 		switch argument.Name {
-		case "database_adapter":
-			config.DatabaseAdapter, err = databaseAdapter(argument.Value)
-		case "database":
-			config.Database, err = stringLiteral(argument.Value)
-		case "database_environment":
-			config.DatabaseEnvironment, err = stringLiteral(argument.Value)
+		case "dialect":
+			config.Dialect, err = sqlDialect(argument.Value)
+		case "source":
+			config.Source, err = stringLiteral(argument.Value)
+		case "source_environment":
+			config.SourceEnvironment, err = stringLiteral(argument.Value)
 		case "poll_interval":
 			config.PollIntervalMilliseconds, err = durationMilliseconds(argument.Value)
 		case "lease_timeout":
 			config.LeaseTimeoutMilliseconds, err = durationMilliseconds(argument.Value)
-		case "shutdown_timeout":
-			config.ShutdownTimeoutMilliseconds, err = durationMilliseconds(argument.Value)
 		case "default_maximum_attempts":
 			config.DefaultMaximumAttempts, err = integerLiteral(argument.Value)
 		case "retry_base_delay":
 			config.RetryBaseDelayMilliseconds, err = durationMilliseconds(argument.Value)
-		case "worker_concurrency":
-			config.WorkerConcurrency, err = integerLiteral(argument.Value)
 		default:
 			return Config{}, fmt.Errorf("SQLAdapter.new has no option %s", argument.Name)
 		}
@@ -194,20 +189,17 @@ func ParseConfiguration(program *ast.Program) (Config, error) {
 			return Config{}, fmt.Errorf("SQLAdapter.new %s: %w", argument.Name, err)
 		}
 	}
-	if strings.TrimSpace(config.Database) == "" {
-		return Config{}, fmt.Errorf("SQLAdapter.new database must not be empty")
+	if strings.TrimSpace(config.Source) == "" {
+		return Config{}, fmt.Errorf("SQLAdapter.new source must not be empty")
 	}
-	if strings.TrimSpace(config.DatabaseEnvironment) == "" {
-		return Config{}, fmt.Errorf("SQLAdapter.new database_environment must not be empty")
+	if seen["source_environment"] && strings.TrimSpace(config.SourceEnvironment) == "" {
+		return Config{}, fmt.Errorf("SQLAdapter.new source_environment must not be empty")
 	}
 	if config.PollIntervalMilliseconds <= 0 || config.LeaseTimeoutMilliseconds <= 0 || config.ShutdownTimeoutMilliseconds <= 0 || config.RetryBaseDelayMilliseconds <= 0 {
 		return Config{}, fmt.Errorf("SQLAdapter.new durations must be positive")
 	}
-	if config.DefaultMaximumAttempts <= 0 || config.WorkerConcurrency <= 0 {
-		return Config{}, fmt.Errorf("SQLAdapter.new attempt and concurrency values must be positive")
-	}
-	if config.DatabaseAdapter == "sqlite" && config.WorkerConcurrency != 1 {
-		return Config{}, fmt.Errorf("trb/jobs/sql SQLite initially supports worker_concurrency: 1 only")
+	if config.DefaultMaximumAttempts <= 0 {
+		return Config{}, fmt.Errorf("SQLAdapter.new default_maximum_attempts must be positive")
 	}
 	return config, nil
 }
@@ -221,14 +213,14 @@ func sqlAdapterConstructor(expression ast.Expression) bool {
 	return ok && receiver.Name == "SQLAdapter"
 }
 
-func databaseAdapter(expression ast.Expression) (string, error) {
+func sqlDialect(expression ast.Expression) (string, error) {
 	member, ok := expression.(*ast.MemberExpression)
 	if !ok || !member.Namespace {
-		return "", fmt.Errorf("must be a SQLDatabase member")
+		return "", fmt.Errorf("must be a SQLDialect member")
 	}
 	receiver, ok := member.Receiver.(*ast.Identifier)
-	if !ok || receiver.Name != "SQLDatabase" {
-		return "", fmt.Errorf("must be a SQLDatabase member")
+	if !ok || receiver.Name != "SQLDialect" {
+		return "", fmt.Errorf("must be a SQLDialect member")
 	}
 	switch member.Name {
 	case "SQLite":
@@ -238,7 +230,7 @@ func databaseAdapter(expression ast.Expression) (string, error) {
 	case "MySQL":
 		return "mysql", nil
 	default:
-		return "", fmt.Errorf("has unsupported value SQLDatabase::%s", member.Name)
+		return "", fmt.Errorf("has unsupported value SQLDialect::%s", member.Name)
 	}
 }
 

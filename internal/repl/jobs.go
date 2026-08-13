@@ -34,7 +34,7 @@ func init() {
 func (*jobsRuntimeProvider) Name() string { return "trb/jobs" }
 
 func (*jobsRuntimeProvider) Handles(intrinsic string) bool {
-	return intrinsic == "trb.jobs.perform_later" || intrinsic == "trb.jobs.perform_later_in"
+	return intrinsic == "trb.jobs.perform_later" || intrinsic == "trb.jobs.perform_in" || intrinsic == "trb.jobs.perform_at"
 }
 
 func (provider *jobsRuntimeProvider) Configure(programs []*ir.Program) error {
@@ -81,49 +81,65 @@ func (provider *jobsRuntimeProvider) Call(evaluator *Evaluator, invocation runti
 		callArguments = callArguments[1:]
 	}
 	waitMilliseconds := int64(0)
-	if invocation.Name == "trb.jobs.perform_later_in" {
+	if invocation.Name == "trb.jobs.perform_in" {
 		if len(callArguments) == 0 {
-			return Value{}, fmt.Errorf("trb/jobs perform_later_in delay is missing")
+			return Value{}, fmt.Errorf("trb/jobs perform_in delay is missing")
 		}
 		duration, ok := callArguments[0].Value.Data.(*objectInstance)
 		if !ok {
-			return Value{}, fmt.Errorf("trb/jobs perform_later_in delay is invalid")
+			return Value{}, fmt.Errorf("trb/jobs perform_in delay is invalid")
 		}
 		seconds, nanosecond := timeDurationFields(duration)
 		waitMilliseconds = seconds*1000 + (nanosecond+999999)/1000000
+		callArguments = callArguments[1:]
+	} else if invocation.Name == "trb.jobs.perform_at" {
+		if len(callArguments) == 0 {
+			return Value{}, fmt.Errorf("trb/jobs perform_at scheduled_at is missing")
+		}
+		instant, ok := callArguments[0].Value.Data.(*objectInstance)
+		if !ok {
+			return Value{}, fmt.Errorf("trb/jobs perform_at scheduled_at is invalid")
+		}
+		seconds, nanosecond := timeInstantFields(instant)
+		targetMilliseconds := seconds*1000 + (nanosecond+999999)/1000000
+		waitMilliseconds = max(targetMilliseconds-time.Now().UTC().UnixMilli(), 0)
 		callArguments = callArguments[1:]
 	}
 	arguments := make([]any, len(callArguments))
 	for index, argument := range callArguments {
 		arguments[index], err = jobsJSONValue(argument.Value)
 		if err != nil {
-			return provider.resultError(evaluator, invocation.Type, err)
+			return provider.resultError(evaluator, invocation.Type, "Serialization", err)
 		}
 	}
 	payload, err := json.Marshal(arguments)
 	if err != nil {
-		return provider.resultError(evaluator, invocation.Type, err)
+		return provider.resultError(evaluator, invocation.Type, "Serialization", err)
 	}
 	database, err := provider.open()
 	if err != nil {
-		return provider.resultError(evaluator, invocation.Type, err)
+		return provider.resultError(evaluator, invocation.Type, "Adapter", err)
 	}
 	id, err := jobsID()
 	if err != nil {
-		return provider.resultError(evaluator, invocation.Type, err)
+		return provider.resultError(evaluator, invocation.Type, "Adapter", err)
 	}
 	config := provider.SQL.Config
 	job, ok := provider.manifest.Job(jobName)
 	if !ok {
-		return provider.resultError(evaluator, invocation.Type, fmt.Errorf("trb/jobs Job %s is not registered", jobName))
+		return provider.resultError(evaluator, invocation.Type, "InvalidArgument", fmt.Errorf("trb/jobs Job %s is not registered", jobName))
 	}
 	if waitMilliseconds < 0 {
-		return provider.resultError(evaluator, invocation.Type, fmt.Errorf("job delay must not be negative"))
+		return provider.resultError(evaluator, invocation.Type, "InvalidArgument", fmt.Errorf("job delay must not be negative"))
+	}
+	maximumAttempts := job.MaximumAttempts
+	if maximumAttempts <= 0 {
+		maximumAttempts = config.DefaultMaximumAttempts
 	}
 	runAt := time.Now().UTC().Add(time.Duration(waitMilliseconds) * time.Millisecond)
-	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + jobsPlaceholders(config.DatabaseAdapter, 7, 0) + ", 'ready', 0, " + jobsPlaceholder(config.DatabaseAdapter, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-	if _, err := database.ExecContext(context.Background(), query, id, job.Queue, jobName, string(payload), 1, job.Priority, runAt, config.DefaultMaximumAttempts); err != nil {
-		return provider.resultError(evaluator, invocation.Type, err)
+	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + jobsPlaceholders(config.Dialect, 7, 0) + ", 'ready', 0, " + jobsPlaceholder(config.Dialect, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+	if _, err := database.ExecContext(context.Background(), query, id, job.Queue, jobName, string(payload), 1, job.Priority, runAt, maximumAttempts); err != nil {
+		return provider.resultError(evaluator, invocation.Type, "Adapter", err)
 	}
 	definition, ok := evaluator.definitions[symbolKey("trb/jobs/index", "JobReference")].(*recordDefinition)
 	if !ok {
@@ -154,12 +170,16 @@ func (provider *jobsRuntimeProvider) open() (*sql.DB, error) {
 		return provider.database, nil
 	}
 	config := provider.SQL.Config
-	source := os.Getenv(config.DatabaseEnvironment)
-	if source == "" {
-		source = config.Database
+	source := config.Source
+	if config.SourceEnvironment != "" {
+		var exists bool
+		source, exists = os.LookupEnv(config.SourceEnvironment)
+		if !exists || strings.TrimSpace(source) == "" {
+			return nil, fmt.Errorf("jobs database environment %s is not set or empty", config.SourceEnvironment)
+		}
 	}
-	driver := config.DatabaseAdapter
-	switch config.DatabaseAdapter {
+	driver := config.Dialect
+	switch config.Dialect {
 	case "sqlite":
 		driver = "sqlite"
 	case "postgresql":
@@ -185,10 +205,10 @@ func (provider *jobsRuntimeProvider) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.DatabaseAdapter == "sqlite" {
+	if config.Dialect == "sqlite" {
 		database.SetMaxOpenConns(1)
 	}
-	statements, err := sqlstore.Schema(sqlstore.Dialect(config.DatabaseAdapter))
+	statements, err := sqlstore.Schema(sqlstore.Dialect(config.Dialect))
 	if err != nil {
 		database.Close()
 		return nil, err
@@ -203,8 +223,14 @@ func (provider *jobsRuntimeProvider) open() (*sql.DB, error) {
 	return database, nil
 }
 
-func (provider *jobsRuntimeProvider) resultError(evaluator *Evaluator, resultType types.Type, err error) (Value, error) {
+func (provider *jobsRuntimeProvider) resultError(evaluator *Evaluator, resultType types.Type, kind string, err error) (Value, error) {
+	kindDefinition, ok := evaluator.definitions[symbolKey("trb/jobs/index", "EnqueueErrorKind")].(*enumDefinition)
+	if !ok {
+		return Value{}, fmt.Errorf("trb/jobs EnqueueErrorKind runtime is not loaded")
+	}
+	kindValue := Value{Type: types.FromName("EnqueueErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
 	return evaluator.structuredResultErrFrom(resultType, "trb/jobs/index", "EnqueueError", map[string]Value{
+		"kind":    kindValue,
 		"message": {Type: types.FromName("String"), Data: err.Error()},
 	})
 }

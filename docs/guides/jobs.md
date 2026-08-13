@@ -1,0 +1,148 @@
+# `trb/jobs`
+
+`trb/jobs` is an experimental portable contract for durable background work.
+The same typed Job source runs in generated Go, Ruby, and Bun applications.
+Storage is selected separately; the official `trb/jobs/sql` adapter supports
+SQLite, PostgreSQL, and MySQL.
+
+## Define and enqueue a Job
+
+Job argument types come from the instance `perform` method. The initial
+portable payload contract accepts Boolean, Integer, Float, and String values.
+
+```trb
+import { Job, maximum_attempts, priority, queue } from trb/jobs
+
+class SendReceiptJob < Job
+	queue("mail")
+	priority(10)
+	maximum_attempts(3)
+
+	def perform(order_id: Integer, destination: String)
+		puts("sending order " + order_id.to_s() + " to " + destination)
+		return
+	end
+end
+```
+
+The compiler derives typed enqueue methods from `perform`:
+
+```trb
+import { EnqueueError } from trb/jobs
+import { Result } from trb/std/result
+import { Duration, Instant } from trb/std/time
+
+def enqueue_receipt(order_id: Integer) fails EnqueueError
+	case attempt SendReceiptJob.perform_later(order_id, "ada@example.test")
+	when Result::Ok(reference)
+		puts(reference.id)
+	when Result::Err(error)
+		puts(error.message)
+	end
+
+	SendReceiptJob.perform_in(Duration.minutes(5), order_id, "later@example.test")
+	SendReceiptJob.perform_at(
+		Instant.now().add(Duration.hours(2)),
+		order_id,
+		"scheduled@example.test",
+	)
+	return
+end
+```
+
+Enqueue operations declare `fails EnqueueError`, so they propagate inside a
+compatible `fails` function. `attempt` converts the operation to an explicit
+`Result`. `EnqueueErrorKind` distinguishes serialization, invalid arguments,
+cancellation, and adapter failures.
+
+`perform_in` schedules relative to now; `perform_at` accepts an absolute
+portable `Instant`. A past `Instant` is ready immediately. `queue`, `priority`,
+and `maximum_attempts` are compile-time Job settings. The
+default queue is `default`, the default priority is `0`, and lower priority
+numbers run first. If a Job omits `maximum_attempts`, the adapter default is
+used.
+
+## Configure the SQL adapter
+
+Add a typed composition module to the project configuration:
+
+```jsonc
+{
+	"jobs": {
+		"configuration": "config/jobs"
+	}
+}
+```
+
+Then select the adapter without coupling application Job modules to SQL:
+
+```trb
+import { JobAdapter } from trb/jobs
+import { SQLAdapter, SQLDialect } from trb/jobs/sql
+import { Duration } from trb/std/time
+
+def configure_jobs(): JobAdapter
+	return SQLAdapter.new(
+		dialect: SQLDialect::PostgreSQL,
+		source: "postgres://localhost/jobs",
+		source_environment: "JOBS_DATABASE_URL",
+		poll_interval: Duration.seconds(1),
+		lease_timeout: Duration.seconds(60),
+		default_maximum_attempts: 5,
+		retry_base_delay: Duration.seconds(1),
+	)
+end
+```
+
+When `source_environment` is present, its environment variable is required at
+runtime and replaces `source`. A missing or empty value fails startup instead
+of silently connecting to another database.
+The configuration module is also the native dependency boundary: application
+Job source imports only `trb/jobs`, while an adapter package owns its target
+drivers and worker implementation.
+
+## Run and inspect workers
+
+```sh
+trb jobs start
+trb jobs start --queue mail
+trb jobs start --once
+trb jobs list
+trb jobs retry JOB_ID
+trb jobs discard JOB_ID
+```
+
+One command process runs one worker. PostgreSQL and MySQL support multiple
+worker processes through short atomic claims. SQLite is for local and small
+single-worker use only. `--once` claims at most one ready Job and is useful for
+tests and operational scripts.
+
+Workers retry failures with adapter-configured backoff, move exhausted Jobs to
+`failed`, heartbeat active claims, and recover stale claims. Shutdown stops new
+claims and lets the current Job return before releasing it. Delivery is at
+least once, so Job implementations must be idempotent.
+
+`trb jobs list` shows persisted state. `retry` returns a failed Job to the ready
+queue, and `discard` removes a non-running Job.
+
+## Application and REPL behavior
+
+Jobs may call other portable packages, including `trb/orm`. The compiler-owned
+execution scope crosses the worker dispatch boundary, so signal cancellation
+can reach nested database and HTTP operations without adding a public context
+parameter to `perform`.
+
+In a configured project REPL, import a Job and call the same derived methods:
+
+```console
+trb:go> import { SendReceiptJob } from jobs/send_receipt_job
+trb:go> SendReceiptJob.perform_later(42, "ada@example.test")
+Ok(...) : Result<JobReference, EnqueueError>
+```
+
+The REPL persists through the configured adapter. Run `trb jobs start --once`
+from another terminal to perform the queued Job.
+
+Queue storage is intentionally separate from application transactions in this
+initial contract. It provides durable enqueue after a successful call, not an
+implicit cross-database transactional outbox.

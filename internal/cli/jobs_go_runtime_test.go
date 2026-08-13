@@ -26,7 +26,7 @@ func TestRunGoJobApplicationPersistsEnqueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainSource := `import { Result } from trb/std/result
-import { Duration } from trb/std/time
+import { Duration, Instant } from trb/std/time
 import { SendReceiptJob } from jobs/send_receipt_job
 
 def main()
@@ -36,7 +36,13 @@ def main()
 	when Result::Err(error)
 		puts(error.message)
 	end
-	case attempt SendReceiptJob.perform_later_in(Duration.seconds(60), 43, "later@example.test")
+	case attempt SendReceiptJob.perform_in(Duration.seconds(60), 43, "later@example.test")
+	when Result::Ok(reference)
+		puts(reference.job_name)
+	when Result::Err(error)
+		puts(error.message)
+	end
+	case attempt SendReceiptJob.perform_at(Instant.now().add(Duration.seconds(120)), 44, "scheduled@example.test")
 	when Result::Ok(reference)
 		puts(reference.job_name)
 	when Result::Err(error)
@@ -70,7 +76,7 @@ end
 	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 		t.Fatalf("run status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-	if stdout.String() != "SendReceiptJob\nSendReceiptJob\n" {
+	if stdout.String() != "SendReceiptJob\nSendReceiptJob\nSendReceiptJob\n" {
 		t.Fatalf("unexpected output %q stderr=%s", stdout.String(), stderr.String())
 	}
 	database, err := sql.Open("sqlite", databaseSource)
@@ -109,7 +115,7 @@ end
 	if err := database.QueryRow(`SELECT COUNT(*) FROM trb_jobs`).Scan(&remaining); err != nil {
 		t.Fatal(err)
 	}
-	if remaining != 2 {
+	if remaining != 3 {
 		t.Fatalf("queue-filtered worker changed an unexpected number of jobs: %d", remaining)
 	}
 	if _, err := database.Exec(`DELETE FROM trb_jobs`); err != nil {
@@ -177,5 +183,10 @@ end
 	stderr.Reset()
 	if status := command.Run([]string{"jobs", "discard", "unknown-1", "--config", config.Path}); status != 0 || stderr.Len() != 0 {
 		t.Fatalf("discard status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"jobs", "retry", "missing-job", "--config", config.Path}); status == 0 || !strings.Contains(stderr.String(), "failed job not found") {
+		t.Fatalf("missing retry status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 }

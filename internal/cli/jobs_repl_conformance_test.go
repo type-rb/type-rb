@@ -53,7 +53,7 @@ end
 			if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			input := "import { ReplJob } from main\nimport { Duration } from trb/std/time\nReplJob.perform_later(7)\nReplJob.perform_later_in(Duration.seconds(60), 8)\n:quit\n"
+			input := "import { ReplJob } from main\nimport { Duration, Instant } from trb/std/time\nReplJob.perform_later(7)\nReplJob.perform_in(Duration.seconds(60), 8)\nReplJob.perform_at(Instant.now().add(Duration.seconds(120)), 9)\n:quit\n"
 			var stdout, stderr bytes.Buffer
 			command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -78,6 +78,13 @@ end
 			}
 			if delayed != 1 {
 				t.Fatal("REPL did not persist the delayed job in the future")
+			}
+			var scheduled int
+			if err := database.QueryRow(`SELECT COUNT(*) FROM trb_jobs WHERE payload = '[9]' AND run_at > CURRENT_TIMESTAMP`).Scan(&scheduled); err != nil {
+				t.Fatal(err)
+			}
+			if scheduled != 1 {
+				t.Fatal("REPL did not persist the scheduled job in the future")
 			}
 		})
 	}

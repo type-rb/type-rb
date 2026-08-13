@@ -63,7 +63,7 @@ func generate(program *ir.Program, execution *effectplan.Plan) string {
 			g.nativeSyntax = true
 		}
 	}
-	if g.programUsesExecutionScope(program.Statements) || webintegration.ManifestFrom(program.Extensions) != nil {
+	if g.programUsesExecutionScope(program.Statements) || webintegration.ManifestFrom(program.Extensions) != nil || g.jobs != nil {
 		g.executionScopeRuntime()
 	}
 	g.statements(program.Statements)

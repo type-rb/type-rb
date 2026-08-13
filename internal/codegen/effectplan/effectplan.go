@@ -19,6 +19,20 @@ type Plan struct {
 	Expressions      map[ir.Expression]bool
 	Iterations       map[*ir.Iterate]bool
 	StructuredBlocks map[*ir.StructuredBlock]bool
+	methodKeys       map[methodKey]bool
+}
+
+type methodKey struct {
+	module string
+	owner  string
+	name   string
+}
+
+// Method reports whether a named project method transitively reaches an
+// effect root. Integrations use this stable identity when dispatch code is
+// generated outside the module that owns the method.
+func (p *Plan) Method(module, owner, name string) bool {
+	return p != nil && p.methodKeys[methodKey{module: module, owner: owner, name: name}]
 }
 
 type methodContext struct {
@@ -68,6 +82,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 		Expressions:      map[ir.Expression]bool{},
 		Iterations:       map[*ir.Iterate]bool{},
 		StructuredBlocks: map[*ir.StructuredBlock]bool{},
+		methodKeys:       map[methodKey]bool{},
 	}
 	analyzer := &analyzer{
 		programs: programs, plan: plan, options: options, methodInfo: map[*ir.Method]methodContext{},
@@ -102,6 +117,9 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 
 	for _, method := range analyzer.methods {
 		analyzer.statementsReach(method.method.Body, method, true)
+		if plan.Methods[method.method] {
+			plan.methodKeys[methodKey{module: method.module, owner: method.owner, name: method.method.Name}] = true
+		}
 	}
 	for _, program := range programs {
 		analyzer.statementsReach(program.Statements, methodContext{module: program.ModulePath}, true)
@@ -454,6 +472,7 @@ func ExecutionScope(programs []*ir.Program) *Plan {
 		WebNext: true, CaptureLambdas: true,
 		Intrinsic: func(intrinsic string, fails types.Type) bool {
 			return strings.HasPrefix(intrinsic, "trb.orm.") ||
+				strings.HasPrefix(intrinsic, "trb.jobs.") ||
 				intrinsic == "trb.platform.typescript.browser.request" ||
 				intrinsic == "trb.web.middleware.logger.call" ||
 				intrinsic == "trb.web.middleware.timeout.call" ||
