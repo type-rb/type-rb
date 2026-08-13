@@ -297,6 +297,15 @@ values.unshift(0)
 reversed := arrays.reverse(values)
 known := values.include?(2)
 occurrences := arrays.count(values, 2)
+has_even := values.any? do |value|
+	value % 2 == 0
+end
+all_positive := values.all? do |value|
+	value > 0
+end
+none_negative := values.none? do |value|
+	value < 0
+end
 
 mut labels: Hash<Integer, String> := {1 => "one"}
 known_label := labels.key?(1)
@@ -314,6 +323,10 @@ Arrays provide size, emptiness, strict `fetch`, safe `try_fetch`, `first`,
 `last`, shallow `dup`, mutable `push`/`unshift`, mutable strict `pop`/`shift`,
 non-destructive shallow `reverse`, value membership, and occurrence counting.
 `Array<String>` also provides `join`.
+
+`any?`, `all?`, and `none?` evaluate a typed Boolean predicate from left to
+right and stop as soon as the result is known. Empty Arrays return `false` for
+`any?` and `true` for `all?` and `none?`.
 
 Value membership is `include?` on a receiver and `arrays.contains` in package
 form. `count(value)` has the same name in both forms. Both use portable `==`

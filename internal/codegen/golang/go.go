@@ -1644,6 +1644,20 @@ func (g *generator) transform(transform *ir.Transform) string {
 			}
 		}
 		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := make(" + g.goType(transform.ExprType()) + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { " + itemUse + indexUse + "if " + value + " { " + result + " = append(" + result + ", " + item + ") } }; return " + result + " }()"
+	case "any?", "all?", "none?":
+		initial := "false"
+		match := value
+		if transform.Operation == "all?" || transform.Operation == "none?" {
+			initial = "true"
+		}
+		if transform.Operation == "all?" {
+			match = "!(" + value + ")"
+		}
+		matched := "true"
+		if transform.Operation == "all?" || transform.Operation == "none?" {
+			matched = "false"
+		}
+		return "func() bool { for _, " + item + " := range " + source + " { " + itemUse + "if " + match + " { return " + matched + " } }; return " + initial + " }()"
 	case "reduce":
 		accumulator := goBindingIdentifier(transform.Accumulator)
 		binding := ""

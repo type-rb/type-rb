@@ -590,6 +590,11 @@ func receiverMembers(receiver types.Type, context Context) []Symbol {
 	for _, method := range stdlib.ReceiverMethods(receiver) {
 		result = append(result, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: librarySignature(method), Type: method.Return, Call: &CallInfo{ParameterCount: len(method.Parameters)}})
 	}
+	if receiver.Kind == types.Array || receiver.Kind == types.Range {
+		for _, name := range []string{"all?", "any?", "none?"} {
+			result = append(result, Symbol{Name: name, Kind: CompletionMethod, Detail: name + " { |value| Boolean }: Boolean", Type: types.FromName("Boolean")})
+		}
+	}
 	byName := map[string]Symbol{}
 	for _, symbol := range result {
 		byName[symbol.Name] = symbol

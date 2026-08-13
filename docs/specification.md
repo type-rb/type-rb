@@ -412,6 +412,12 @@ The result must be assigned or returned; silently discarding it is an error.
 ordinary portable iteration. Ordinary call blocks are not value-producing
 unless their package declaration explicitly provides structured lowering.
 
+Portable Array transformations `map`, `select`, and `reduce` use the same
+typed-IR boundary. The short-circuit predicates `any?`, `all?`, and `none?`
+require one non-nullable Boolean result expression. They evaluate from left to
+right and stop when the result is known. Empty Arrays produce `false`, `true`,
+and `true`, respectively. Indexed predicate blocks are not currently enabled.
+
 ### 3.12 Hashes
 
 - A portable hash type is written `Hash<K, V>` with exactly two type

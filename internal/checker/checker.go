@@ -3863,7 +3863,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.error(n.Span(), "Hash#each.with_index is not supported in v0.1")
 		}
 		itemType := elementType
-		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce"
+		predicate := n.Operation == "any?" || n.Operation == "all?" || n.Operation == "none?"
+		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce" || predicate
+		if predicate && n.WithIndex {
+			c.error(n.Span(), n.Operation+".with_index is not supported; use each with an explicit accumulator")
+		}
 		if n.Operation == "each_slice" && !hashSource {
 			if n.SliceSize == nil {
 				c.error(n.Span(), "each_slice expects exactly one size argument")
@@ -3955,11 +3959,15 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				switch n.Operation {
 				case "map":
 					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{blockType}}
-				case "select":
+				case "select", "any?", "all?", "none?":
 					if blockType.Kind != types.Bool || blockType.Nullable {
-						c.error(n.Block.Span(), fmt.Sprintf("select block result must be Boolean, got %s", blockType))
+						c.error(n.Block.Span(), fmt.Sprintf("%s block result must be Boolean, got %s", n.Operation, blockType))
 					}
-					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
+					if n.Operation == "select" {
+						typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
+					} else {
+						typ = types.FromName("Boolean")
+					}
 				case "reduce":
 					if !c.assignable(resultExpression, accumulatorType, blockType) {
 						c.error(n.Block.Span(), fmt.Sprintf("reduce block result is %s, expected %s", blockType, accumulatorType))
