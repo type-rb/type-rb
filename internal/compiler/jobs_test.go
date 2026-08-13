@@ -74,7 +74,7 @@ end
 		t.Fatalf("job module does not enqueue through the jobs runtime:\n%s", job.Output)
 	}
 	runtime := artifactForModule(artifacts, jobssql.ModulePath)
-	if runtime == nil || !strings.Contains(string(runtime.Output), "func TrbJobsClaimNext") {
+	if runtime == nil || !strings.Contains(string(runtime.Output), "func TrbJobsClaimNext") || !strings.Contains(string(runtime.Output), `runAtValue := runAt.Format("2006-01-02 15:04:05.000")`) || !strings.Contains(string(runtime.Output), `strftime('%Y-%m-%d %H:%M:%f', 'now')`) {
 		t.Fatalf("jobs SQL runtime was not generated:\n%s", runtime.Output)
 	}
 }
@@ -217,7 +217,7 @@ end
 	main := artifactForModule(artifacts, "main")
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
 	runtime := artifactForModule(artifacts, jobssql.ModulePath)
-	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), `trbJobsEnqueue(__trbScope, "SendReceiptJob", payload, "mail", 10, waitMilliseconds, 3)`) || !strings.Contains(string(job.Output), "function perform_in") || !strings.Contains(string(job.Output), "function perform_at") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") {
+	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), `trbJobsEnqueue(__trbScope, "SendReceiptJob", payload, "mail", 10, waitMilliseconds, 3)`) || !strings.Contains(string(job.Output), "function perform_in") || !strings.Contains(string(job.Output), "function perform_at") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") || !strings.Contains(string(runtime.Output), "timestamp.slice(0, 23)") || !strings.Contains(string(runtime.Output), `strftime('%Y-%m-%d %H:%M:%f', 'now')`) {
 		t.Fatalf("TypeScript jobs runtime is incomplete:\nmain=%s\njob=%s\nruntime=%s", main.Output, job.Output, runtime.Output)
 	}
 }

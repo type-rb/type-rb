@@ -464,8 +464,13 @@ func (g *generator) jobsEnqueue(config jobssql.Config) {
 	g.line("if waitMilliseconds < 0 { return " + referenceType + "{}, errors.New(\"job delay must not be negative\") }")
 	g.line("if maximumAttempts <= 0 { maximumAttempts = " + strconv.Itoa(config.DefaultMaximumAttempts) + " }")
 	g.line("runAt := stdtime.Now().UTC().Add(stdtime.Duration(waitMilliseconds) * stdtime.Millisecond)")
+	runAtArgument := "runAt"
+	if config.Dialect == "sqlite" {
+		g.line(`runAtValue := runAt.Format("2006-01-02 15:04:05.000")`)
+		runAtArgument = "runAtValue"
+	}
 	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + goJobsPlaceholders(config.Dialect, 7, 0) + ", 'ready', 0, " + goJobsPlaceholder(config.Dialect, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-	g.line("_, err = database.ExecContext(ctx, " + strconv.Quote(query) + ", id, queueName, jobName, payload, 1, priority, runAt, maximumAttempts)")
+	g.line("_, err = database.ExecContext(ctx, " + strconv.Quote(query) + ", id, queueName, jobName, payload, 1, priority, " + runAtArgument + ", maximumAttempts)")
 	g.line("if err != nil { return " + referenceType + "{}, err }")
 	g.line("return " + referenceType + "{Id: id, JobName: jobName}, nil")
 	g.indent--

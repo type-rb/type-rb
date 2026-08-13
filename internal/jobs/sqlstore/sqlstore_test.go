@@ -54,6 +54,9 @@ func TestServerDatabaseClaimsUseSkipLocked(t *testing.T) {
 	if strings.Contains(query, "SKIP LOCKED") {
 		t.Fatalf("SQLite must retain its explicit single-worker path: %s", query)
 	}
+	if !strings.Contains(query, `strftime('%Y-%m-%d %H:%M:%f', 'now')`) {
+		t.Fatalf("SQLite must compare scheduled jobs with fractional-second precision: %s", query)
+	}
 }
 
 func TestClaimSelectionCanFilterOneQueue(t *testing.T) {

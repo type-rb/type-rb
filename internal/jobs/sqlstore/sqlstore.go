@@ -132,7 +132,7 @@ func ClaimSelectionForQueue(dialect Dialect, placeholder string) (string, error)
 func claimSelection(dialect Dialect, queueCondition string) (string, error) {
 	switch dialect {
 	case SQLite:
-		return `SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= CURRENT_TIMESTAMP` + queueCondition + ` ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1`, nil
+		return `SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= strftime('%Y-%m-%d %H:%M:%f', 'now')` + queueCondition + ` ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1`, nil
 	case PostgreSQL:
 		return `SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= CURRENT_TIMESTAMP` + queueCondition + ` ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`, nil
 	case MySQL:
