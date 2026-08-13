@@ -38,6 +38,7 @@ func (g *generator) ormGroup(call *ir.Call) string {
 	if !ok {
 		return "nil"
 	}
+	query = g.ormExecutionQuery(model, query)
 	return g.ormModelQualifier(model) + goORMGroup(model, column) + "(" + query + ")"
 }
 
@@ -72,7 +73,8 @@ func (g *generator) ormGroupCount(call *ir.Call, arguments []string) string {
 	if !ok {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMGroupCount(model, column) + "(" + arguments[0] + ")"
+	grouped := g.ormModelQualifier(model) + goORMGroupExecutionScope(model, column) + "(" + arguments[0] + ", __trbScope)"
+	return g.ormModelQualifier(model) + goORMGroupCount(model, column) + "(" + grouped + ")"
 }
 
 func (g *generator) ormGroupAggregate(call *ir.Call, arguments []string, operation string) string {
@@ -92,7 +94,8 @@ func (g *generator) ormGroupAggregate(call *ir.Call, arguments []string, operati
 	if _, ok := ormintegration.AggregateResultType(operation, target); !ok {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMGroupedAggregate(model, groupColumn, operation, target) + "(" + arguments[0] + ")"
+	grouped := g.ormModelQualifier(model) + goORMGroupExecutionScope(model, groupColumn) + "(" + arguments[0] + ", __trbScope)"
+	return g.ormModelQualifier(model) + goORMGroupedAggregate(model, groupColumn, operation, target) + "(" + grouped + ")"
 }
 
 func (g *generator) ormGroupRuntime(adapter ormintegration.Adapter, model ormintegration.Model, groupColumn ormintegration.Column) {
@@ -108,6 +111,8 @@ func (g *generator) ormGroupRuntime(adapter ormintegration.Adapter, model ormint
 	g.line("grouped.query.orders = nil; grouped.query.limit = nil; grouped.query.offset = nil; return grouped")
 	g.indent--
 	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMGroupExecutionScope(model, groupColumn) + "(grouped " + groupType + ", scope trbcontext.Context) " + groupType + " { grouped.query.scope = scope; return grouped }")
 	g.b.WriteByte('\n')
 	g.line("func " + goORMGroupHaving(model, groupColumn) + "(grouped " + groupType + ", expression string, operator string, value any) " + groupType + " {")
 	g.indent++
@@ -137,7 +142,7 @@ func (g *generator) ormGroupedAggregateRuntime(adapter ormintegration.Adapter, m
 	}
 	g.line("func " + functionName + "(grouped " + groupType + ") " + g.ormResultType(resultType) + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForQuery(grouped.query.transaction, false); if databaseError != nil { return " + g.ormResultErr(resultType, "*databaseError") + " }")
+	g.line("database, databaseError := trbOrmExecutorForQuery(grouped.query.scope, grouped.query.transaction, false); if databaseError != nil { return " + g.ormResultErr(resultType, "*databaseError") + " }")
 	g.line("projection := " + strconv.Quote(projection))
 	g.line("statement, arguments := " + goORMStatement(model) + "(grouped.query, projection)")
 	g.line("statement = \"SELECT \" + trbOrmQuoteIdentifier(\"trb_group\") + \", " + expression + " FROM (\" + statement + \") AS trb_grouped GROUP BY \" + trbOrmQuoteIdentifier(\"trb_group\")")
@@ -180,6 +185,9 @@ func goORMGroupType(model ormintegration.Model, column ormintegration.Column) st
 }
 func goORMGroup(model ormintegration.Model, column ormintegration.Column) string {
 	return "TrbOrmGroup" + goIdentifier(model.Name, true) + goIdentifier(column.Name, true)
+}
+func goORMGroupExecutionScope(model ormintegration.Model, column ormintegration.Column) string {
+	return "TrbOrm" + goIdentifier(model.GroupType(column), true) + "ExecutionScope"
 }
 func goORMGroupHaving(model ormintegration.Model, column ormintegration.Column) string {
 	return "TrbOrmHaving" + goIdentifier(model.Name, true) + goIdentifier(column.Name, true)

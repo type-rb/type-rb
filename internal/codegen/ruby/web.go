@@ -45,24 +45,28 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	g.webProtocolResponses()
 
-	g.line("def trb_web_dispatch(request)", "")
+	g.line("def trb_web_dispatch(scope, request)", "")
 	g.indent++
-	g.line("trb_web_dispatch_with_body_limit(request, TRB_WEB_DEFAULT_MAX_BODY_BYTES)", "")
+	g.line("trb_web_dispatch_with_body_limit(scope, request, TRB_WEB_DEFAULT_MAX_BODY_BYTES)", "")
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
-	g.line("def trb_web_dispatch_with_body_limit(request, max_body_bytes)", "")
+	g.line("def trb_web_dispatch_with_body_limit(scope, request, max_body_bytes)", "")
 	g.indent++
 	g.line("begin", "")
 	g.indent++
 	g.line("request = trb_web_normalize_request(request)", "")
 	g.line("normalized_path = trb_web_normalize_path(request.__trb_field_path)", "")
-	g.line("return trb_web_dispatch_protocol_response(request, trb_web_bad_request) if normalized_path.nil?", "")
+	g.line("return trb_web_dispatch_protocol_response(scope, request, trb_web_bad_request) if normalized_path.nil?", "")
 	g.line("request = Request.new(method: request.__trb_field_method, path: normalized_path, query_string: request.__trb_field_query_string, headers: request.__trb_field_headers, body: request.__trb_field_body)", "")
 	g.line("context = Context.new(request: request, path_parameters: {})", "")
-	g.line("handler = ->(middleware_context) { trb_web_dispatch_core(middleware_context.__trb_field_request, max_body_bytes) }", "")
+	g.line("handler = ->(handler_scope, middleware_context) { trb_web_dispatch_core(handler_scope, middleware_context.__trb_field_request, max_body_bytes) }", "")
 	g.rubyWebMiddlewareChain(rootMiddlewares, "handler", "root_next_handler_", "")
-	g.line("trb_web_finalize_response(request, handler.call(context))", "")
+	g.line("trb_web_finalize_response(request, handler.call(scope, context))", "")
+	g.indent--
+	g.line("rescue TrbExecutionCancelled", "")
+	g.indent++
+	g.line("raise", "")
 	g.indent--
 	g.line("rescue StandardError", "")
 	g.indent++
@@ -72,7 +76,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
-	g.line("def trb_web_dispatch_protocol_response(request, protocol_response)", "")
+	g.line("def trb_web_dispatch_protocol_response(scope, request, protocol_response)", "")
 	g.indent++
 	g.line("begin", "")
 	g.indent++
@@ -80,9 +84,13 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("normalized_path = trb_web_normalize_path(request.__trb_field_path)", "")
 	g.line("request = Request.new(method: request.__trb_field_method, path: normalized_path, query_string: request.__trb_field_query_string, headers: request.__trb_field_headers, body: request.__trb_field_body) unless normalized_path.nil?", "")
 	g.line("context = Context.new(request: request, path_parameters: {})", "")
-	g.line("handler = ->(_middleware_context) { protocol_response }", "")
+	g.line("handler = ->(_handler_scope, _middleware_context) { protocol_response }", "")
 	g.rubyWebMiddlewareChain(rootMiddlewares, "handler", "protocol_next_handler_", "")
-	g.line("trb_web_finalize_response(request, handler.call(context))", "")
+	g.line("trb_web_finalize_response(request, handler.call(scope, context))", "")
+	g.indent--
+	g.line("rescue TrbExecutionCancelled", "")
+	g.indent++
+	g.line("raise", "")
 	g.indent--
 	g.line("rescue StandardError", "")
 	g.indent++
@@ -92,7 +100,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
-	g.line("def trb_web_dispatch_core(request, max_body_bytes)", "")
+	g.line("def trb_web_dispatch_core(scope, request, max_body_bytes)", "")
 	g.indent++
 	g.line("begin", "")
 	g.indent++
@@ -132,9 +140,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		contextName := "route_context_" + strconv.Itoa(routeIndex)
 		handlerName := "route_handler_" + strconv.Itoa(routeIndex)
 		g.line(contextName+" = Context.new(request: request, path_parameters: path_parameters)", "")
-		g.line(handlerName+" = ->(middleware_context) { "+route.TargetHandler+"(middleware_context) }", "")
+		g.line(handlerName+" = ->(handler_scope, middleware_context) { "+route.TargetHandler+"(handler_scope, middleware_context) }", "")
 		g.rubyWebMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "next_handler_"+strconv.Itoa(routeIndex)+"_", "")
-		g.line("return trb_web_checked_response("+handlerName+".call("+contextName+"))", "")
+		g.line("return trb_web_checked_response("+handlerName+".call(scope, "+contextName+"))", "")
 		g.indent--
 		g.line("end", "")
 	}
@@ -154,9 +162,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		contextName := "options_context_" + strconv.Itoa(routeIndex)
 		handlerName := "options_handler_" + strconv.Itoa(routeIndex)
 		g.line(contextName+" = Context.new(request: request, path_parameters: path_parameters)", "")
-		g.line(handlerName+` = ->(_middleware_context) { Response.new(status: 204, headers: Headers.new([Header.new(name: "allow", value: allowed_methods.join(", "))]), body: Body.empty) }`, "")
+		g.line(handlerName+` = ->(_handler_scope, _middleware_context) { Response.new(status: 204, headers: Headers.new([Header.new(name: "allow", value: allowed_methods.join(", "))]), body: Body.empty) }`, "")
 		g.rubyWebMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "options_next_handler_"+strconv.Itoa(routeIndex)+"_", "")
-		g.line("return trb_web_checked_response("+handlerName+".call("+contextName+"))", "")
+		g.line("return trb_web_checked_response("+handlerName+".call(scope, "+contextName+"))", "")
 		g.indent--
 		g.line("end", "")
 	}
@@ -166,6 +174,10 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("end", "")
 	g.line(`Response.new(status: 404, headers: Headers.new([Header.new(name: "content-type", value: "application/json; charset=utf-8")]), body: Body.new("{\"error\":\"not_found\"}".b))`, "")
+	g.indent--
+	g.line("rescue TrbExecutionCancelled", "")
+	g.indent++
+	g.line("raise", "")
 	g.indent--
 	g.line("rescue StandardError", "")
 	g.indent++
@@ -181,7 +193,7 @@ func (g *generator) rubyWebMiddlewareChain(middlewares []webintegration.Middlewa
 		middleware := middlewares[middlewareIndex]
 		nextName := nextPrefix + strconv.Itoa(middlewareIndex)
 		g.line(nextName+" = "+handlerName, suffix)
-		g.line(handlerName+" = ->(middleware_context) { "+middleware.TargetHandler+"(middleware_context, TrbWebNext.new("+nextName+")) }", suffix)
+		g.line(handlerName+" = ->(handler_scope, middleware_context) { "+middleware.TargetHandler+"(handler_scope, middleware_context, TrbWebNext.new("+nextName+")) }", suffix)
 	}
 }
 
@@ -285,11 +297,11 @@ func (g *generator) webNext() {
 	g.indent--
 	g.line("end", "")
 	g.line("", "")
-	g.line("def call(context)", "")
+	g.line("def call(scope, context)", "")
 	g.indent++
 	g.line(`raise "trb/web Next.call may only be called once" if @called`, "")
 	g.line("@called = true", "")
-	g.line("@handler.call(context)", "")
+	g.line("@handler.call(scope, context)", "")
 	g.indent--
 	g.line("end", "")
 	g.indent--
@@ -352,6 +364,7 @@ func (g *generator) webServer() {
 	g.indent++
 	g.line("begin", "")
 	g.indent++
+	g.line("request_scope = nil", "")
 	g.line("loop do", "")
 	g.indent++
 	g.line(`request_line = connection.gets("\r\n")`, "")
@@ -374,15 +387,16 @@ func (g *generator) webServer() {
 	g.line(`query_string ||= ""`, "")
 	g.line(`content_length = (headers["content-length"]&.first || "0").to_i`, "")
 	g.line("body_too_large = content_length > config.body_limit_bytes", "")
+	g.line("request_scope = TrbExecutionScope.root", "")
 	g.line("if body_too_large", "")
 	g.indent++
 	g.line(`web_request = Request.new(method: HttpMethod.new(method), path: path, query_string: query_string, headers: trb_web_headers_from_hash(headers), body: Body.empty)`, "")
-	g.line("response = trb_web_dispatch_protocol_response(web_request, trb_web_payload_too_large)", "")
+	g.line("response = trb_web_dispatch_protocol_response(request_scope, web_request, trb_web_payload_too_large)", "")
 	g.indent--
 	g.line("else", "")
 	g.indent++
 	g.line(`body = content_length.positive? ? connection.read(content_length) : "".b`, "")
-	g.line("response = trb_web_dispatch_with_body_limit(Request.new(method: HttpMethod.new(method), path: path, query_string: query_string, headers: trb_web_headers_from_hash(headers), body: Body.new(body)), config.body_limit_bytes)", "")
+	g.line("response = trb_web_dispatch_with_body_limit(request_scope, Request.new(method: HttpMethod.new(method), path: path, query_string: query_string, headers: trb_web_headers_from_hash(headers), body: Body.new(body)), config.body_limit_bytes)", "")
 	g.indent--
 	g.line("end", "")
 	g.line(`reason = { 200 => "OK", 201 => "Created", 204 => "No Content", 400 => "Bad Request", 404 => "Not Found", 405 => "Method Not Allowed", 413 => "Content Too Large", 500 => "Internal Server Error" }[response.__trb_field_status] || "Response"`, "")
@@ -403,6 +417,8 @@ func (g *generator) webServer() {
 	g.line("end", "")
 	g.line(`connection.write("\r\n")`, "")
 	g.line("connection.write(response.__trb_field_body.bytes)", "")
+	g.line("request_scope.cancel", "")
+	g.line("request_scope = nil", "")
 	g.line("break unless keep_alive", "")
 	g.indent--
 	g.line("end", "")
@@ -410,6 +426,7 @@ func (g *generator) webServer() {
 	g.line("rescue StandardError", "")
 	g.line("ensure", "")
 	g.indent++
+	g.line("request_scope&.cancel", "")
 	g.line("connection.close", "")
 	g.line("state_lock.synchronize { connections.delete(connection) }", "")
 	g.indent--

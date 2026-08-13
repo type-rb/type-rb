@@ -137,8 +137,8 @@ end
 		"orm.NewDbResultErr[[]*Product]", `"database query failed"`, "type ProductDraft struct", "TrbOrmBuildProduct",
 		"TrbOrmSaveProductDraft", "TrbOrmCreateProduct", "type ProductChanges struct", "TrbOrmWithProduct",
 		"TrbOrmSaveProductChanges", "TrbOrmUpdateProduct", "TrbOrmInsertAllProduct", "TrbOrmDeleteProduct",
-		`TrbOrmUpdateAllProduct(TrbOrmProductWhere([]string{}, []string{}, []any{}), []string{"name"}, []any{"Updated"})`,
-		`TrbOrmDeleteAllProduct(TrbOrmProductWhere([]string{}, []string{}, []any{}))`,
+		`TrbOrmUpdateAllProduct(TrbOrmProductExecutionScope(`, `[]string{"name"}, []any{"Updated"})`,
+		`TrbOrmDeleteAllProduct(TrbOrmProductExecutionScope(`,
 		"TrbOrmInsertProductIfAbsent", "TrbOrmUpsertProduct", "trbOrmProductUniqueColumns",
 		"TrbOrmUpsertAllProduct", "func(value *float64) any", "if value == nil {",
 	} {
@@ -231,9 +231,9 @@ end
 		}
 	}
 	for _, expected := range []string{
-		"func CreateProduct() __trb_result.Result[int, orm.DbError]", "orm.TrbOrmBeginTransaction()",
+		"func CreateProduct(__trbScope trbcontext.Context) __trb_result.Result[int, orm.DbError]", "orm.TrbOrmBeginTransaction(__trbScope)",
 		"TrbOrmProductUsing(tx)", "TrbOrmProductCreateScoped(products", "defer func()",
-		"TrbOrmProductLock(TrbOrmProductQueryWhere(products", "trbOrmExecutorForQuery(query.transaction, query.lock)",
+		"TrbOrmProductLock(TrbOrmProductExecutionScope(TrbOrmProductQueryWhere(products", "trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)",
 		"orm.TrbOrmBeginNestedTransaction(tx)", "TrbOrmProductUsing(nested)",
 		".Rollback()", ".Commit()", "orm.DbResultErrTag",
 	} {
@@ -242,7 +242,7 @@ end
 		}
 	}
 	for _, expected := range []string{
-		"type TrbOrmTransaction struct", "func TrbOrmBeginTransaction()", `"BEGIN IMMEDIATE"`, "func TrbOrmBeginNestedTransaction(parent *TrbOrmTransaction)",
+		"type TrbOrmTransaction struct", "func TrbOrmBeginTransaction(scope trbcontext.Context)", `"BEGIN IMMEDIATE"`, "func TrbOrmBeginNestedTransaction(parent *TrbOrmTransaction)",
 		`"SAVEPOINT " + savepoint`, `"ROLLBACK TO SAVEPOINT " + transaction.savepoint`, `"RELEASE SAVEPOINT " + transaction.savepoint`,
 		"func (transaction *TrbOrmTransaction) Commit()", "func (transaction *TrbOrmTransaction) Rollback()",
 	} {
@@ -478,7 +478,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output := string(artifacts[0].Output); !strings.Contains(output, `TrbOrmCreateProduct([]string{"name"}, []any{"Widget"})`) {
+	if output := string(artifacts[0].Output); !strings.Contains(output, `TrbOrmProductCreateScoped(`) || !strings.Contains(output, `[]string{"name"}, []any{"Widget"})`) {
 		t.Fatalf("generated create call does not preserve schema keywords:\n%s", output)
 	}
 	artifacts, err = compile(`Product.build(name: "Widget").save()`)
@@ -486,7 +486,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := string(artifacts[0].Output)
-	if !strings.Contains(output, `TrbOrmSaveProductDraft(TrbOrmBuildProduct([]string{"name"}, []any{"Widget"}))`) {
+	if !strings.Contains(output, `TrbOrmSaveProductDraft(TrbOrmProductBuildScoped(`) || !strings.Contains(output, `[]string{"name"}, []any{"Widget"})`) {
 		t.Fatalf("generated draft save does not preserve schema keywords:\n%s", output)
 	}
 	artifacts, err = compile(`puts(Product.new().with(name: "Updated").save())`)
@@ -502,7 +502,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	output = string(artifacts[0].Output)
-	if !strings.Contains(output, `TrbOrmInsertAllProduct([]*ProductDraft{TrbOrmBuildProduct`) {
+	if !strings.Contains(output, `TrbOrmInsertAllProduct([]*ProductDraft{TrbOrmProductBuildScoped`) {
 		t.Fatalf("generated strict bulk insert does not use typed drafts:\n%s", output)
 	}
 	artifacts, err = compile(`puts(Product.insert_if_absent(Product.build(name: "Unique"), unique_by: [:name]))`)
@@ -510,7 +510,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	output = string(artifacts[0].Output)
-	if !strings.Contains(output, `TrbOrmInsertProductIfAbsent(TrbOrmBuildProduct([]string{"name"}, []any{"Unique"}), []string{"name"})`) {
+	if !strings.Contains(output, `TrbOrmInsertProductIfAbsent(TrbOrmProductBuildScoped(`) || !strings.Contains(output, `[]string{"name"}, []any{"Unique"})`) || !strings.Contains(output, `[]string{"name"})`) {
 		t.Fatalf("generated insert_if_absent does not preserve unique_by:\n%s", output)
 	}
 	artifacts, err = compile(`puts(Product.build(name: "Unique", price: 1.0).upsert(unique_by: [:name], update: [:price]))`)
@@ -518,7 +518,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	output = string(artifacts[0].Output)
-	if !strings.Contains(output, `TrbOrmUpsertProduct(TrbOrmBuildProduct`) || !strings.Contains(output, `[]string{"name"}, []string{"price"}`) {
+	if !strings.Contains(output, `TrbOrmUpsertProduct(TrbOrmProductBuildScoped`) || !strings.Contains(output, `[]string{"name"}, []string{"price"}`) {
 		t.Fatalf("generated upsert does not preserve conflict and update columns:\n%s", output)
 	}
 	artifacts, err = compile(`puts(Product.upsert_all([Product.build(name: "First", price: 1.0), Product.build(price: 2.0, name: "Second")], unique_by: [:name], update: [:price]))`)
@@ -526,7 +526,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	output = string(artifacts[0].Output)
-	if !strings.Contains(output, `TrbOrmUpsertAllProduct([]*ProductDraft{TrbOrmBuildProduct`) || !strings.Contains(output, `[]string{"name"}, []string{"price"}`) {
+	if !strings.Contains(output, `TrbOrmUpsertAllProduct([]*ProductDraft{TrbOrmProductBuildScoped`) || !strings.Contains(output, `[]string{"name"}, []string{"price"}`) {
 		t.Fatalf("generated upsert_all does not use typed drafts and literal columns:\n%s", output)
 	}
 	for _, test := range []struct {
@@ -677,7 +677,7 @@ end
 		t.Fatal(err)
 	}
 	directOutput := string(direct[0].Output)
-	for _, expected := range []string{"func ProcessProducts() __trb_result.Result[int, orm.DbError]", "return __trb_result.NewResultErr[int, orm.DbError]", "return orm.NewDbResultOk[int]"} {
+	for _, expected := range []string{"func ProcessProducts(__trbScope trbcontext.Context) __trb_result.Result[int, orm.DbError]", "return __trb_result.NewResultErr[int, orm.DbError]", "return orm.NewDbResultOk[int]"} {
 		if !strings.Contains(directOutput, expected) {
 			t.Fatalf("generated direct-return batch query is missing %q:\n%s", expected, directOutput)
 		}
@@ -883,19 +883,19 @@ end
 		`TrbOrmProductJoin(TrbOrmProductWhere`, `Kind: "INNER JOIN"`, `Kind: "LEFT JOIN"`,
 		`TrbOrmCategoryDistinct(TrbOrmCategoryJoin`, `prefix += "DISTINCT "`,
 		`Table: "categories"`, `SourceColumn: "category_id"`, `TargetColumn: "id"`,
-		`TrbOrmCategoryAssociationPredicate(TrbOrmCategoryWhere`, `__trb_join_key`,
+		`TrbOrmCategoryAssociationPredicate(`, `TrbOrmCategoryWhere`, `__trb_join_key`,
 		`TrbOrmSelectCategoryId(TrbOrmCategoryWhere`, `*orm.TrbOrmSubquery[int]`,
 		`condition.operator == "IN" || condition.operator == "NOT_IN"`, `operator = " NOT IN "`,
 		`TrbOrmProductWhereExists(TrbOrmProductWhere`, `operator := "EXISTS"`, `operator = "NOT EXISTS"`,
-		`TrbOrmGroupProductCategoryId(TrbOrmProductWhere`, `TrbOrmHavingProductCategoryId`, `TrbOrmCountGroupedProductCategoryId`,
+		`TrbOrmGroupProductCategoryId(TrbOrmProductExecutionScope(TrbOrmProductWhere`, `TrbOrmHavingProductCategoryId`, `TrbOrmCountGroupedProductCategoryId`,
 		`TrbOrmSumGroupedProductCategoryIdId`, `COALESCE(SUM(trb_value), 0)`,
 		`grouped.query.orders = nil`, `ORDER BY`, `grouped.limit`,
 		`GROUP BY`, `grouped.havingExpression`, `map[int]int`,
-		`trbOrmQuoteIdentifier("products")`, `TrbOrmCategoryAssociationPredicate(TrbOrmCategoryWhere`,
+		`trbOrmQuoteIdentifier("products")`, `TrbOrmCategoryAssociationPredicate(`, `TrbOrmCategoryWhere`,
 		`TrbOrmCategoryQueryWhere(TrbOrmCategoryUsing(product.TrbOrmTransaction()), []string{"id"}, []string{"="}, []any{product.TrbOrmColumnCategoryId()})`,
 		`TrbOrmProductQueryWhere(TrbOrmProductUsing(category.TrbOrmTransaction()), []string{"category_id"}, []string{"="}, []any{category.TrbOrmColumnId()})`,
 		`TrbOrmProductPreload`, `trbOrmPreloadProductCategory`, `trbOrmPreloadCategoryProducts`,
-		`TrbOrmCategoryPreloadProducts`, `func(transaction *orm.TrbOrmTransaction, values []*Category) *orm.DbError`,
+		`TrbOrmCategoryPreloadProducts`, `func(scope trbcontext.Context, transaction *orm.TrbOrmTransaction, values []*Category) *orm.DbError`,
 		`TrbOrmProductQueryWhere(targetQuery, []string{"category_id"}, []string{"IN"}, []any{arguments})`,
 		`trbOrmPreloadCategoryProduct`, `database has_one association returned multiple rows`,
 		`TrbOrmAssociationCategory`, `TrbOrmAssociationProducts`,
@@ -1106,7 +1106,7 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 	for _, expected := range []string{
 		"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "__trb_result.Result[[]*models.Product, orm.DbError]",
 		"models.TrbOrmPluckProductName", "models.TrbOrmPickProductName", "models.TrbOrmPluckProductId",
-		"models.TrbOrmInsertAllProduct([]*models.ProductDraft{models.TrbOrmBuildProduct",
+		"models.TrbOrmInsertAllProduct([]*models.ProductDraft{models.TrbOrmProductBuildScoped",
 	} {
 		if !strings.Contains(mainOutput, expected) {
 			t.Fatalf("generated main module is missing %q:\n%s", expected, mainOutput)

@@ -173,6 +173,21 @@ module TrbOrmRuntime
 		end
 	end
 
+	class << self
+		def with_scope(scope)
+			previous = Thread.current.thread_variable_get(:__trb_orm_execution_scope)
+			Thread.current.thread_variable_set(:__trb_orm_execution_scope, scope)
+			scope.check!
+			yield
+		ensure
+			Thread.current.thread_variable_set(:__trb_orm_execution_scope, previous)
+		end
+
+		def check_scope!
+			Thread.current.thread_variable_get(:__trb_orm_execution_scope)&.check!
+		end
+	end
+
 	class Draft
 		attr_reader :metadata, :values, :query
 
@@ -565,7 +580,7 @@ module TrbOrmRuntime
 			kind = case error
 			when Sequel::ConstraintViolation then "Constraint"
 			when Sequel::DatabaseConnectionError, Sequel::DatabaseDisconnectError then "Connection"
-			when Timeout::Error then "Timeout"
+			when Timeout::Error, TrbExecutionCancelled then "Timeout"
 			else fallback
 			end
 			db_error(kind, message)
@@ -586,19 +601,28 @@ module TrbOrmRuntime
 		end
 
 		def fetch_rows(sql, arguments)
-			database.fetch(sql, *arguments).all
+			check_scope!
+			rows = database.fetch(sql, *arguments).all
+			check_scope!
+			rows
 		rescue StandardError => error
 			raise Failure.new(map_error(error, "Query", "database query failed"))
 		end
 
 		def execute_dui(sql, arguments)
-			database.execute_dui(database.literal(Sequel.lit(sql, *arguments)))
+			check_scope!
+			value = database.execute_dui(database.literal(Sequel.lit(sql, *arguments)))
+			check_scope!
+			value
 		rescue StandardError => error
 			raise Failure.new(map_error(error, "Constraint", "database write failed"))
 		end
 
 		def execute_insert(sql, arguments)
-			database.execute_insert(database.literal(Sequel.lit(sql, *arguments)))
+			check_scope!
+			value = database.execute_insert(database.literal(Sequel.lit(sql, *arguments)))
+			check_scope!
+			value
 		rescue StandardError => error
 			raise Failure.new(map_error(error, "Constraint", "database insert failed"))
 		end

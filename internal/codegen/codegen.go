@@ -57,6 +57,14 @@ func GenerateProject(programs []*ir.Program) ([][]byte, error) {
 		}
 		return outputs, nil
 	}
+	if len(programs) > 0 && programs[0].Mode == "ruby" {
+		generated := ruby.GenerateProject(programs)
+		outputs := make([][]byte, len(generated))
+		for index, output := range generated {
+			outputs[index] = []byte(output)
+		}
+		return outputs, nil
+	}
 	outputs := make([][]byte, len(programs))
 	for index, program := range programs {
 		output, err := Generate(program)

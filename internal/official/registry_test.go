@@ -195,6 +195,19 @@ func TestBundledWebCompressionMiddlewarePackage(t *testing.T) {
 	}
 }
 
+func TestBundledWebTimeoutMiddlewarePackage(t *testing.T) {
+	packageDefinition, ok := Lookup("trb/web/middleware/timeout")
+	if !ok {
+		t.Fatal("trb/web/middleware/timeout is not registered")
+	}
+	if packageDefinition.Definition.ModulePath != "trb/web/middleware/timeout/index" {
+		t.Fatalf("module = %q", packageDefinition.Definition.ModulePath)
+	}
+	if packageDefinition.Definition.Source == "" {
+		t.Fatal("timeout package source is empty")
+	}
+}
+
 func TestBundledWebMiddlewarePackage(t *testing.T) {
 	packageDefinition, ok := Lookup("trb/web/middleware")
 	if !ok {

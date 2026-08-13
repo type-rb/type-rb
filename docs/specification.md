@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-12
+Last updated: 2026-08-13
 
 ## 1. Language Goals
 
@@ -27,6 +27,14 @@ source syntax has the same meaning in every mode. Target-specific APIs,
 framework integration, native escape syntax, and compatibility behavior are
 available only through an explicit `trb/platform/<mode>/*` import; selecting a
 mode by itself does not enable them.
+
+Portable packages may expose cancellable operations without adding a context
+or `async` parameter to TypeRB source. Whole-project analysis forwards a hidden
+execution scope through the generated call graph, including interface methods
+and function values. Request disconnects and middleware deadlines cancel that
+scope; generated control-flow checkpoints and supported native APIs observe it.
+The scope belongs to backend lowering, is absent from the source type system
+and typed IR signatures, and must not create mode-dependent source semantics.
 
 ## 3. Core Syntax and Semantics (Confirmed)
 

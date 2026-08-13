@@ -53,16 +53,16 @@ func TestSuspensionPropagatesOnlyThroughTypeScriptProjectGeneration(t *testing.T
 		t.Fatal(err)
 	}
 	for index, want := range []string{
-		"export async function load(): Promise<Result<Array<Product>, DbError>>",
-		"async function main(): Promise<void>",
+		"export async function load(__trbScope: AbortSignal | undefined): Promise<Result<Array<Product>, DbError>>",
+		"async function main(__trbScope: AbortSignal | undefined): Promise<void>",
 	} {
 		if !strings.Contains(strings.Join(generated, "\n"), want) {
 			t.Fatalf("generated project is missing %q:\n%s", want, generated[index])
 		}
 	}
-	if !strings.Contains(generated[1], "export async function forward(): Promise<Result<Array<Product>, DbError>>") ||
-		!strings.Contains(generated[1], "return (await load());") ||
-		!strings.Contains(generated[1], "await main();") {
+	if !strings.Contains(generated[1], "export async function forward(__trbScope: AbortSignal | undefined): Promise<Result<Array<Product>, DbError>>") ||
+		!strings.Contains(generated[1], "return (await load(__trbScope));") ||
+		!strings.Contains(generated[1], "await main(undefined);") {
 		t.Fatalf("suspension did not propagate through imported and entry calls:\n%s", generated[1])
 	}
 }

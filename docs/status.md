@@ -144,28 +144,31 @@ nested middleware remains scoped to matched routes. Packaged middleware expose
 logger emits JSONL access logs and supports typed output-selection and
 path-exclusion options. It records the normalized routing path for valid
 requests but omits the raw query string by default so secrets in URLs are not
-copied into logs. A
-portable secure-headers middleware adds a conservative browser-security preset
-and accepts an explicit typed header map. An opt-in CORS middleware handles actual and preflight requests,
-explicit origin policies, credentials, exposed and allowed headers, and typed
-preflight cache duration. A request-ID middleware preserves bounded safe
+copied into logs. A portable secure-headers middleware adds a conservative
+browser-security preset and accepts an explicit typed header map. An opt-in
+CORS middleware handles actual and preflight requests, explicit origin
+policies, credentials, exposed and allowed headers, and typed preflight cache
+duration. A request-ID middleware preserves bounded safe
 incoming IDs or generates cryptographically random IDs and exposes the chosen
 value to downstream handlers and the response. Opt-in response-compression
 middleware negotiates gzip with `Accept-Encoding`, uses a typed minimum-size
 option, and consistently excludes unsafe or unsuitable responses across all
-three backends. Additional middleware is still under development. Routing distinguishes
-missing paths from unsupported methods and returns a portable JSON 405 response
-with an `Allow` header. Request bodies use a configurable limit of 1 MiB by
-default before dispatch, and oversized requests receive the same JSON 413
-response in every backend. Query
-parameters use the portable URL decoder and preserve repeated keys and source
-order instead of collapsing them into a hash. `Request#query_values` returns
-all repeated values, while strict `Request#query_value` reports malformed,
-missing, and duplicate values through a typed error. HEAD requests prefer an
-explicit handler, otherwise reuse the matching GET handler and middleware chain, and
-never expose a response body. OPTIONS requests likewise prefer explicit
-handlers; otherwise a middleware-aware 204 response advertises the available
-methods through `Allow`.
+three backends. An opt-in timeout middleware adds a portable request deadline,
+returns a JSON 504 response, and propagates a compiler-owned cancellation scope
+through handlers, ORM work, and browser HTTP without adding a source-level
+`async` or context parameter. Additional middleware is still under development.
+Routing distinguishes missing paths from unsupported methods and returns a
+portable JSON 405 response with an `Allow` header. Request bodies use a
+configurable limit of 1 MiB by default before dispatch, and oversized requests
+receive the same JSON 413 response in every backend. Query parameters use the
+portable URL decoder and preserve repeated keys and source order instead of
+collapsing them into a hash. `Request#query_values` returns all repeated values,
+while strict `Request#query_value` reports malformed, missing, and duplicate
+values through a typed error. HEAD requests prefer an explicit handler,
+otherwise reuse the matching GET handler and middleware chain, and never expose
+a response body. OPTIONS requests likewise prefer explicit handlers; otherwise
+a middleware-aware 204 response advertises the available methods through
+`Allow`.
 Request header lookup is case-insensitive; `Request#header_value` rejects
 missing and duplicate values instead of choosing one implicitly. Request
 headers can also be replaced, appended, or removed without mutating the

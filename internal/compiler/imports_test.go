@@ -2939,7 +2939,7 @@ func TestPlatformPackageIsModeChecked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output := string(artifact.Output); !strings.Contains(output, `import "context"`) || !strings.Contains(output, `context.Background()`) {
+	if output := string(artifact.Output); !strings.Contains(output, `import trbcontext "context"`) || !strings.Contains(output, `trbcontext.Background()`) {
 		t.Fatalf("Go platform binding was not lowered:\n%s", output)
 	}
 }

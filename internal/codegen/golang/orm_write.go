@@ -55,7 +55,7 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 	g.b.WriteByte('\n')
 	g.line("func " + goORMCreateScoped(model) + "(query " + queryType + ", columns []string, values []any) " + resultType + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForTransaction(query.transaction)")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(query.scope, query.transaction)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(modelType, "*databaseError") + " }")
 	g.line("statement := " + strconv.Quote("INSERT INTO "+adapter.QuoteIdentifier(model.Table)))
 	g.line("if len(columns) == 0 {")
@@ -251,8 +251,8 @@ func (g *generator) ormUpsertAllRuntime(adapter ormintegration.Adapter, model or
 }
 
 func (g *generator) ormNativeUpsertAllBody(adapter ormintegration.Adapter, model ormintegration.Model, integerType types.Type) {
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(drafts[0].query.scope, drafts[0].query.transaction)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
 	g.line("quotedColumns := make([]string, len(columns)); for index, column := range columns { quotedColumns[index] = trbOrmQuoteIdentifier(column) }")
 	g.line("groups := make([]string, len(rows))")
 	g.line("arguments := make([]any, 0, len(rows)*len(columns))")
@@ -269,7 +269,8 @@ func (g *generator) ormNativeUpsertAllBody(adapter ormintegration.Adapter, model
 func (g *generator) ormMySQLUpsertAllBody(adapter ormintegration.Adapter, model ormintegration.Model, integerType types.Type) {
 	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
 	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
-	g.line("transaction, err := database.Begin(); if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk upsert failed\")") + " }")
+	g.line("scope := drafts[0].query.scope; if scope == nil { scope = trbcontext.Background() }")
+	g.line("transaction, err := database.BeginTx(scope, nil); if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk upsert failed\")") + " }")
 	g.line("defer transaction.Rollback()")
 	g.line("quotedColumns := make([]string, len(columns)); for index, column := range columns { quotedColumns[index] = trbOrmQuoteIdentifier(column) }")
 	g.line("insertStatement := " + strconv.Quote("INSERT INTO "+adapter.QuoteIdentifier(model.Table)+" (") + " + strings.Join(quotedColumns, \", \") + \") VALUES (\" + trbOrmPlaceholders(len(columns)) + \")\"")
@@ -282,9 +283,9 @@ func (g *generator) ormMySQLUpsertAllBody(adapter ormintegration.Adapter, model 
 	g.line("uniqueValues := uniqueRows[rowIndex]")
 	g.line("updateValues, _ := " + goORMDraftColumnValues(model) + "(draft, updateColumns)")
 	g.line("exists := false")
-	g.line("if !" + goORMValuesContainNil(model) + "(uniqueValues) { var marker int; err := transaction.QueryRow(selectStatement, uniqueValues...).Scan(&marker); if err == nil { exists = true } else if !errors.Is(err, sql.ErrNoRows) { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk upsert failed\")") + " } }")
-	g.line("if exists { arguments := append(append([]any(nil), updateValues...), uniqueValues...); if _, err := transaction.Exec(updateStatement, arguments...); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk upsert failed\")") + " }; continue }")
-	g.line("if _, err := transaction.Exec(insertStatement, rows[rowIndex]...); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk upsert failed\")") + " }")
+	g.line("if !" + goORMValuesContainNil(model) + "(uniqueValues) { var marker int; err := transaction.QueryRowContext(scope, selectStatement, uniqueValues...).Scan(&marker); if err == nil { exists = true } else if !errors.Is(err, sql.ErrNoRows) { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk upsert failed\")") + " } }")
+	g.line("if exists { arguments := append(append([]any(nil), updateValues...), uniqueValues...); if _, err := transaction.ExecContext(scope, updateStatement, arguments...); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk upsert failed\")") + " }; continue }")
+	g.line("if _, err := transaction.ExecContext(scope, insertStatement, rows[rowIndex]...); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk upsert failed\")") + " }")
 	g.indent--
 	g.line("}")
 	g.line("if err := transaction.Commit(); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk upsert failed\")") + " }")
@@ -310,14 +311,18 @@ func (g *generator) ormInsertAllRuntime(adapter ormintegration.Adapter, model or
 	g.line("rows[rowIndex] = row")
 	g.indent--
 	g.line("}")
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Connection")+", \"database connection failed\")") + " }")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(drafts[0].query.scope, drafts[0].query.transaction)")
+	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
 	g.line("if len(columns) == 0 {")
 	g.indent++
-	g.line("transaction, err := database.Begin()")
-	g.line("if err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database bulk insert failed\")") + " }")
-	g.line("for range drafts { if _, err := transaction.Exec(" + strconv.Quote("INSERT INTO "+adapter.QuoteIdentifier(model.Table)+adapter.DefaultInsert) + "); err != nil { _ = transaction.Rollback(); return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk insert failed\")") + " } }")
-	g.line("if err := transaction.Commit(); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk insert failed\")") + " }")
+	g.line("transaction := drafts[0].query.transaction")
+	g.line("ownedTransaction := false")
+	g.line("if transaction == nil { var beginError *" + g.goType(types.FromName("DbError")) + "; transaction, beginError = " + g.ormLifecycleAlias() + ".TrbOrmBeginTransaction(drafts[0].query.scope); if beginError != nil { return " + g.ormResultErr(integerType, "*beginError") + " }; ownedTransaction = true }")
+	g.line("if ownedTransaction { defer transaction.Rollback() }")
+	g.line("transactionExecutor, transactionError := trbOrmExecutorForTransaction(drafts[0].query.scope, transaction)")
+	g.line("if transactionError != nil { return " + g.ormResultErr(integerType, "*transactionError") + " }")
+	g.line("for range drafts { if _, err := transactionExecutor.Exec(" + strconv.Quote("INSERT INTO "+adapter.QuoteIdentifier(model.Table)+adapter.DefaultInsert) + "); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database bulk insert failed\")") + " } }")
+	g.line("if ownedTransaction { if commitError := transaction.Commit(); commitError != nil { return " + g.ormResultErr(integerType, "*commitError") + " } }")
 	g.line("return " + g.ormResultOK(integerType, "len(drafts)"))
 	g.indent--
 	g.line("}")
@@ -373,7 +378,7 @@ func (g *generator) ormUpdateRuntime(adapter ormintegration.Adapter, model ormin
 	g.line("func " + goORMUpdate(model) + "(value *" + modelName + ", columns []string, values []any) " + resultType + " {")
 	g.indent++
 	g.line("if len(columns) == 0 { return " + g.ormResultErr(modelType, g.ormErrorValue("InvalidData", "database update requires at least one value")) + " }")
-	g.line("database, databaseError := trbOrmExecutorForTransaction(value." + goORMQueryScopeField() + ".transaction)")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(value." + goORMQueryScopeField() + ".scope, value." + goORMQueryScopeField() + ".transaction)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(modelType, "*databaseError") + " }")
 	g.line("assignments := make([]string, len(columns))")
 	g.line("for index, column := range columns { assignments[index] = trbOrmQuoteIdentifier(column) + \" = \" + trbOrmPlaceholder(index + 1) }")
@@ -410,7 +415,7 @@ func (g *generator) ormDeleteRuntime(adapter ormintegration.Adapter, model ormin
 	modelName := goIdentifier(model.Name, true)
 	g.line("func " + goORMDelete(model) + "(value *" + modelName + ") " + g.ormResultType(booleanType) + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForTransaction(value." + goORMQueryScopeField() + ".transaction)")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(value." + goORMQueryScopeField() + ".scope, value." + goORMQueryScopeField() + ".transaction)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(booleanType, "*databaseError") + " }")
 	statement := "DELETE FROM " + adapter.QuoteIdentifier(model.Table) + " WHERE " + adapter.QuoteIdentifier(primaryKey.Name) + " = "
 	g.line("deleted, err := database.Exec(" + strconv.Quote(statement) + "+trbOrmPlaceholder(1), value." + goORMColumnGetter(primaryKey.Name) + "())")
@@ -433,7 +438,7 @@ func (g *generator) ormDestroyRuntime(model ormintegration.Model) {
 	g.line("func " + goORMDestroy(model) + "(value *" + modelName + ") " + g.ormResultType(booleanType) + " {")
 	g.indent++
 	g.line("if transaction := value." + goORMQueryScopeField() + ".transaction; transaction != nil { return " + core + "(value, transaction) }")
-	g.line("transaction, databaseError := " + g.ormLifecycleAlias() + ".TrbOrmBeginTransaction()")
+	g.line("transaction, databaseError := " + g.ormLifecycleAlias() + ".TrbOrmBeginTransaction(value." + goORMQueryScopeField() + ".scope)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(booleanType, "*databaseError") + " }")
 	g.line("value." + goORMQueryScopeField() + ".transaction = transaction")
 	g.line("result := " + core + "(value, transaction)")
@@ -491,7 +496,7 @@ func (g *generator) ormDestroyRuntime(model ormintegration.Model) {
 	g.indent++
 	g.line("owned := query.transaction == nil")
 	g.line("transaction := query.transaction")
-	g.line("if owned { var databaseError *" + g.goType(types.FromName("DbError")) + "; transaction, databaseError = " + g.ormLifecycleAlias() + ".TrbOrmBeginTransaction(); if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " } }")
+	g.line("if owned { var databaseError *" + g.goType(types.FromName("DbError")) + "; transaction, databaseError = " + g.ormLifecycleAlias() + ".TrbOrmBeginTransaction(query.scope); if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " } }")
 	g.line("query.transaction = transaction")
 	g.line("loaded := " + goORMLoader(model) + "(query)")
 	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { if owned { _ = transaction.Rollback() }; return " + g.ormResultErr(integerType, "loaded.ErrError") + " }")
@@ -512,7 +517,7 @@ func (g *generator) ormRelationWriteRuntime(adapter ormintegration.Adapter, mode
 	g.indent++
 	g.line("if len(columns) == 0 { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update requires at least one value")) + " }")
 	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk update does not accept distinct, joins, order, limit, offset, lock, or preload")) + " }")
-	g.line("database, databaseError := trbOrmExecutorForTransaction(query.transaction)")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(query.scope, query.transaction)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
 	g.line("assignments := make([]string, len(columns))")
 	g.line("for index, column := range columns { assignments[index] = trbOrmQuoteIdentifier(column) + \" = \" + trbOrmPlaceholder(index + 1) }")
@@ -530,7 +535,7 @@ func (g *generator) ormRelationWriteRuntime(adapter ormintegration.Adapter, mode
 	g.line("func " + goORMDeleteAll(model) + "(query " + queryType + ") " + g.ormResultType(integerType) + " {")
 	g.indent++
 	g.line("if " + invalidModifiers + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database bulk delete does not accept distinct, joins, order, limit, offset, lock, or preload")) + " }")
-	g.line("database, databaseError := trbOrmExecutorForTransaction(query.transaction)")
+	g.line("database, databaseError := trbOrmExecutorForTransaction(query.scope, query.transaction)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
 	g.line("arguments := []any{}")
 	g.line("statement := " + strconv.Quote("DELETE FROM "+adapter.QuoteIdentifier(model.Table)))

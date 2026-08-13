@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
@@ -32,6 +33,8 @@ type generator struct {
 	reactStateHelper bool
 	temporary        int
 	suspension       *SuspensionPlan
+	execution        *effectplan.Plan
+	executionActive  bool
 	orm              *ormintegration.Manifest
 	breakTarget      string
 	enumReceiver     string
@@ -64,6 +67,7 @@ func GenerateProject(programs []*ir.Program) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	execution := effectplan.ExecutionScope(programs)
 	moduleExtensions := map[string]string{}
 	for _, program := range programs {
 		moduleExtensions[program.ModulePath] = ".ts"
@@ -73,13 +77,13 @@ func GenerateProject(programs []*ir.Program) ([]string, error) {
 	}
 	generated := make([]string, len(programs))
 	for index, program := range programs {
-		generated[index] = generate(program, plan, moduleExtensions)
+		generated[index] = generate(program, plan, execution, moduleExtensions)
 	}
 	return generated, nil
 }
 
-func generate(program *ir.Program, suspension *SuspensionPlan, moduleExtensions map[string]string) string {
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, orm: ormintegration.ManifestFrom(program.Extensions)}
+func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string) string {
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, orm: ormintegration.ManifestFrom(program.Extensions)}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -103,8 +107,12 @@ func generate(program *ir.Program, suspension *SuspensionPlan, moduleExtensions 
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
 		}
+		method := topLevelMethod(program.Statements, "main")
 		call := "main()"
-		if method := topLevelMethod(program.Statements, "main"); method != nil && suspension.Methods[method] {
+		if g.methodUsesExecutionScope(method) {
+			call = "main(undefined)"
+		}
+		if method != nil && suspension.Methods[method] {
 			call = "await " + call
 		}
 		g.line(call + ";")
@@ -152,6 +160,9 @@ func topLevelMethod(statements []ir.Statement, name string) *ir.Method {
 }
 
 func (g *generator) statements(statements []ir.Statement) {
+	if g.executionActive && len(statements) > 0 {
+		g.line(`{ const __trbDeadline = (__trbScope as (AbortSignal & { __trbDeadline?: number; __trbCancel?: () => void }) | undefined)?.__trbDeadline; if (__trbDeadline !== undefined && performance.now() >= __trbDeadline) (__trbScope as AbortSignal & { __trbCancel?: () => void }).__trbCancel?.(); if (__trbScope?.aborted) throw new DOMException("TypeRB execution was cancelled", "AbortError"); }`)
+	}
 	for _, statement := range statements {
 		g.statement(statement)
 	}
@@ -365,7 +376,7 @@ func (g *generator) statement(statement ir.Statement) {
 			if g.suspension.Methods[method] {
 				returnType = "Promise<" + returnType + ">"
 			}
-			g.line(tsMethodName(method.Name) + "(" + g.parameters(method.Parameters) + "): " + returnType + ";")
+			g.line(tsMethodName(method.Name) + "(" + g.methodParameters(method) + "): " + returnType + ";")
 		}
 		g.indent--
 		g.line("}")
@@ -760,7 +771,7 @@ func (g *generator) enumMethodProperties(enum *ir.Enum) {
 		if !ok || method.External {
 			continue
 		}
-		parameters := g.parameters(method.Parameters)
+		parameters := g.methodParameters(method)
 		if parameters != "" {
 			parameters = ", " + parameters
 		}
@@ -779,7 +790,10 @@ func (g *generator) enumMethodProperties(enum *ir.Enum) {
 		previous := g.enumReceiver
 		g.enumReceiver = "self"
 		g.functionDepth++
+		previousExecution := g.executionActive
+		g.executionActive = g.methodUsesExecutionScope(method)
 		g.statements(method.Body)
+		g.executionActive = previousExecution
 		g.functionDepth--
 		g.enumReceiver = previous
 		g.indent--
@@ -801,7 +815,7 @@ func tsTypeParameterArguments(parameters []string) string {
 func (g *generator) method(method *ir.Method) {
 	suspends := g.suspension.Methods[method]
 	if method.Name == "initialize" {
-		g.line("constructor(" + g.parameters(method.Parameters) + ") {")
+		g.line("constructor(" + g.methodParameters(method) + ") {")
 	} else {
 		prefix := ""
 		name := tsMethodName(method.Name)
@@ -819,11 +833,14 @@ func (g *generator) method(method *ir.Method) {
 			prefix += "async "
 			returnType = "Promise<" + returnType + ">"
 		}
-		g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + "): " + returnType + " {")
+		g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.methodParameters(method) + "): " + returnType + " {")
 	}
 	g.indent++
 	g.functionDepth++
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
+	g.executionActive = previousExecution
 	g.functionDepth--
 	g.indent--
 	g.line("}")
@@ -844,10 +861,13 @@ func (g *generator) function(method *ir.Method) {
 		prefix = strings.Replace(prefix, "function ", "async function ", 1)
 		returnType = "Promise<" + returnType + ">"
 	}
-	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + "): " + returnType + " {")
+	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.methodParameters(method) + "): " + returnType + " {")
 	g.indent++
 	g.functionDepth++
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
+	g.executionActive = previousExecution
 	g.functionDepth--
 	g.indent--
 	g.line("}")
@@ -867,6 +887,30 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 		parts[i] = part
 	}
 	return strings.Join(parts, ", ")
+}
+
+func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
+	return method != nil && (strings.HasPrefix(method.TargetName, "trb_web_route_") ||
+		strings.HasPrefix(method.TargetName, "trb_web_middleware_") ||
+		g.execution != nil && g.execution.Methods[method])
+}
+
+func (g *generator) methodParameters(method *ir.Method) string {
+	parameters := g.parameters(method.Parameters)
+	if !g.methodUsesExecutionScope(method) {
+		return parameters
+	}
+	if parameters == "" {
+		return "__trbScope: AbortSignal | undefined"
+	}
+	return "__trbScope: AbortSignal | undefined, " + parameters
+}
+
+func (g *generator) executionArguments(call *ir.Call, arguments []string) []string {
+	if g.execution == nil || !g.execution.Calls[call] {
+		return arguments
+	}
+	return append([]string{"__trbScope"}, arguments...)
 }
 
 func (g *generator) awaitCall(call *ir.Call, value string) string {
@@ -1046,6 +1090,8 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.awaitCall(n, generated)
 		}
+		parts = g.executionArguments(n, parts)
+		args = strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "record" {
 				if identifier, named := application.Receiver.(*ir.Identifier); named {
@@ -1083,6 +1129,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		default:
 			owner := g.runtimeName(n.EnumName)
 			parts = append([]string{g.expr(n.Receiver)}, parts...)
+			if g.execution != nil && g.execution.EnumCalls[n] {
+				parts = append(parts[:1], append([]string{"__trbScope"}, parts[1:]...)...)
+			}
 			result := owner + ".__trb_" + tsCallableName(n.Method) + "(" + strings.Join(parts, ", ") + ")"
 			if g.suspension != nil && g.suspension.Expressions[n] {
 				return "(await " + result + ")"
@@ -1207,18 +1256,20 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 
 func (g *generator) ifExpression(node *ir.If) string {
 	child := &generator{
-		inClass:       g.inClass,
-		functionDepth: g.functionDepth,
-		methods:       g.methods,
-		modulePath:    g.modulePath,
-		topFunctions:  g.topFunctions,
-		records:       g.records,
-		typeAliases:   g.typeAliases,
-		temporary:     g.temporary,
-		suspension:    g.suspension,
-		orm:           g.orm,
-		breakTarget:   g.breakTarget,
-		enumReceiver:  g.enumReceiver,
+		inClass:         g.inClass,
+		functionDepth:   g.functionDepth,
+		methods:         g.methods,
+		modulePath:      g.modulePath,
+		topFunctions:    g.topFunctions,
+		records:         g.records,
+		typeAliases:     g.typeAliases,
+		temporary:       g.temporary,
+		suspension:      g.suspension,
+		execution:       g.execution,
+		executionActive: g.executionActive,
+		orm:             g.orm,
+		breakTarget:     g.breakTarget,
+		enumReceiver:    g.enumReceiver,
 	}
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
 	if suspends {
@@ -1263,19 +1314,21 @@ func (g *generator) ifExpression(node *ir.If) string {
 
 func (g *generator) attemptExpression(node *ir.Attempt) string {
 	child := &generator{
-		inClass:       g.inClass,
-		functionDepth: g.functionDepth,
-		methods:       g.methods,
-		modulePath:    g.modulePath,
-		topFunctions:  g.topFunctions,
-		topTargets:    g.topTargets,
-		records:       g.records,
-		typeAliases:   g.typeAliases,
-		temporary:     g.temporary,
-		suspension:    g.suspension,
-		orm:           g.orm,
-		breakTarget:   g.breakTarget,
-		enumReceiver:  g.enumReceiver,
+		inClass:         g.inClass,
+		functionDepth:   g.functionDepth,
+		methods:         g.methods,
+		modulePath:      g.modulePath,
+		topFunctions:    g.topFunctions,
+		topTargets:      g.topTargets,
+		records:         g.records,
+		typeAliases:     g.typeAliases,
+		temporary:       g.temporary,
+		suspension:      g.suspension,
+		execution:       g.execution,
+		executionActive: g.executionActive,
+		orm:             g.orm,
+		breakTarget:     g.breakTarget,
+		enumReceiver:    g.enumReceiver,
 	}
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
 	if suspends {
@@ -1302,18 +1355,20 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 
 func (g *generator) caseExpression(node *ir.Case) string {
 	child := &generator{
-		inClass:       g.inClass,
-		functionDepth: g.functionDepth,
-		methods:       g.methods,
-		modulePath:    g.modulePath,
-		topFunctions:  g.topFunctions,
-		records:       g.records,
-		typeAliases:   g.typeAliases,
-		temporary:     g.temporary,
-		suspension:    g.suspension,
-		orm:           g.orm,
-		breakTarget:   g.breakTarget,
-		enumReceiver:  g.enumReceiver,
+		inClass:         g.inClass,
+		functionDepth:   g.functionDepth,
+		methods:         g.methods,
+		modulePath:      g.modulePath,
+		topFunctions:    g.topFunctions,
+		records:         g.records,
+		typeAliases:     g.typeAliases,
+		temporary:       g.temporary,
+		suspension:      g.suspension,
+		execution:       g.execution,
+		executionActive: g.executionActive,
+		orm:             g.orm,
+		breakTarget:     g.breakTarget,
+		enumReceiver:    g.enumReceiver,
 	}
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
 	if suspends {

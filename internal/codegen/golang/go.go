@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
@@ -16,25 +17,27 @@ import (
 )
 
 type generator struct {
-	b             strings.Builder
-	indent        int
-	functionDepth int
-	receiver      string
-	inConstructor bool
-	methods       map[string]bool
-	topMethods    map[string]bool
-	staticMethods map[string]map[string]bool
-	records       map[string]bool
-	classes       map[string]bool
-	typeAliases   map[string]string
-	typeKinds     map[string]string
-	imports       map[string]string
-	modulePath    string
-	goModule      string
-	temporary     int
-	breakTarget   string
-	orm           *ormintegration.Manifest
-	projectNames  *goProjectNames
+	b               strings.Builder
+	indent          int
+	functionDepth   int
+	receiver        string
+	inConstructor   bool
+	methods         map[string]bool
+	topMethods      map[string]bool
+	staticMethods   map[string]map[string]bool
+	records         map[string]bool
+	classes         map[string]bool
+	typeAliases     map[string]string
+	typeKinds       map[string]string
+	imports         map[string]string
+	modulePath      string
+	goModule        string
+	temporary       int
+	breakTarget     string
+	orm             *ormintegration.Manifest
+	projectNames    *goProjectNames
+	execution       *effectplan.Plan
+	executionActive bool
 }
 
 func Generate(program *ir.Program) string {
@@ -43,14 +46,15 @@ func Generate(program *ir.Program) string {
 
 func GenerateProject(programs []*ir.Program) []string {
 	projectNames := analyzeGoProjectNames(programs)
+	execution := effectplan.ExecutionScope(programs)
 	result := make([]string, len(programs))
 	for index, program := range programs {
-		result[index] = generate(program, projectNames)
+		result[index] = generate(program, projectNames, execution)
 	}
 	return result
 }
 
-func generate(program *ir.Program, projectNames *goProjectNames) string {
+func generate(program *ir.Program, projectNames *goProjectNames, execution *effectplan.Plan) string {
 	g := &generator{
 		topMethods:    map[string]bool{},
 		staticMethods: map[string]map[string]bool{},
@@ -63,6 +67,7 @@ func generate(program *ir.Program, projectNames *goProjectNames) string {
 		goModule:      program.GoModule,
 		orm:           ormintegration.ManifestFrom(program.Extensions),
 		projectNames:  projectNames,
+		execution:     execution,
 	}
 	for _, statement := range program.Statements {
 		switch n := statement.(type) {
@@ -156,6 +161,12 @@ func (g *generator) importStatement(imported *ir.Import) {
 		g.typeAliases[symbol] = goImportAlias(alias)
 		g.typeKinds[symbol] = imported.SymbolKinds[symbol]
 	}
+	if strings.TrimSuffix(imported.Path, "/index") == "trb/http" && g.typeAliases["Headers"] != "" && g.typeAliases["Header"] == "" {
+		// Headers.new accepts Array<Header>, so an inferred empty array can
+		// mention Header in generated Go without an explicit source import.
+		g.typeAliases["Header"] = goImportAlias(alias)
+		g.typeKinds["Header"] = "record"
+	}
 }
 
 func (g *generator) currentDirectory() string {
@@ -196,7 +207,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("type " + goIdentifier(n.Name, true) + " interface {")
 		g.indent++
 		for _, method := range n.Methods {
-			g.line(goMethodName(method.Name) + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType))
+			g.line(goMethodName(method.Name) + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType))
 		}
 		g.indent--
 		g.line("}")
@@ -571,7 +582,7 @@ func (g *generator) enumMethods(enum *ir.Enum, enumName string) {
 		if !ok || method.External {
 			continue
 		}
-		parameters := g.parameters(method.Parameters)
+		parameters := g.methodParameters(method)
 		if parameters != "" {
 			parameters = ", " + parameters
 		}
@@ -579,7 +590,10 @@ func (g *generator) enumMethods(enum *ir.Enum, enumName string) {
 		g.indent++
 		g.parameterDefaults(method.Parameters)
 		g.functionDepth++
+		previousExecution := g.executionActive
+		g.executionActive = g.methodUsesExecutionScope(method)
 		g.statements(method.Body)
+		g.executionActive = previousExecution
 		g.functionDepth--
 		g.indent--
 		g.line("}")
@@ -744,6 +758,9 @@ func (g *generator) enumTag(branch ir.CaseBranch) string {
 }
 
 func (g *generator) statements(statements []ir.Statement) {
+	if g.executionActive && len(statements) > 0 {
+		g.line("if err := __trbScope.Err(); err != nil { panic(err) }")
+	}
 	for _, statement := range statements {
 		g.statement(statement)
 	}
@@ -799,7 +816,7 @@ func (g *generator) class(class *ir.Class) {
 	{
 		parameters := ""
 		if initialize != nil {
-			parameters = g.parameters(initialize.Parameters)
+			parameters = g.methodParameters(initialize)
 		}
 		g.line("func New" + name + typeDeclarations + "(" + parameters + ") *" + name + typeArguments + " {")
 		g.indent++
@@ -816,7 +833,10 @@ func (g *generator) class(class *ir.Class) {
 		g.receiver, g.inConstructor = "self", true
 		g.functionDepth++
 		if initialize != nil {
+			previousExecution := g.executionActive
+			g.executionActive = g.methodUsesExecutionScope(initialize)
 			g.statements(initialize.Body)
+			g.executionActive = previousExecution
 		}
 		g.functionDepth--
 		g.receiver, g.inConstructor = previousReceiver, previousConstructor
@@ -837,23 +857,26 @@ func (g *generator) class(class *ir.Class) {
 func (g *generator) classMethod(className string, classTypeParameters []string, method *ir.Method) {
 	name := goMethodName(method.Name)
 	if method.Class {
-		g.line("func " + className + name + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
+		g.line("func " + className + name + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType) + " {")
 	} else if len(method.TypeParameters) > 0 {
-		parameters := g.parameters(method.Parameters)
+		parameters := g.methodParameters(method)
 		if parameters != "" {
 			parameters = ", " + parameters
 		}
 		allTypeParameters := append(append([]string(nil), classTypeParameters...), method.TypeParameters...)
 		g.line("func " + className + name + goTypeParameterDeclarations(allTypeParameters) + "(self *" + className + goTypeParameterArguments(classTypeParameters) + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 	} else {
-		g.line("func (self *" + className + goTypeParameterArguments(classTypeParameters) + ") " + name + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
+		g.line("func (self *" + className + goTypeParameterArguments(classTypeParameters) + ") " + name + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType) + " {")
 	}
 	g.indent++
 	g.parameterDefaults(method.Parameters)
 	previous := g.receiver
 	g.receiver = "self"
 	g.functionDepth++
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
+	g.executionActive = previousExecution
 	g.functionDepth--
 	g.receiver = previous
 	g.indent--
@@ -863,18 +886,54 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 
 func (g *generator) topLevelMethod(method *ir.Method) {
 	name := g.projectFunctionName(g.modulePath, method.Name)
-	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + g.parameters(method.Parameters) + ")" + g.goReturn(method.ReturnType) + " {")
+	parameters := g.methodParameters(method)
+	if method.Name == "main" {
+		parameters = g.parameters(method.Parameters)
+	}
+	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 	g.indent++
+	if method.Name == "main" && g.methodUsesExecutionScope(method) {
+		g.requireImport("context", "trbcontext")
+		g.line("__trbScope := trbcontext.Background()")
+	}
 	g.parameterDefaults(method.Parameters)
 	if method.Name == "main" && g.orm != nil && len(g.orm.Models) > 0 {
 		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
 	}
 	g.functionDepth++
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
+	g.executionActive = previousExecution
 	g.functionDepth--
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
+}
+
+func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
+	return method != nil && (strings.HasPrefix(method.TargetName, "trb_web_route_") ||
+		strings.HasPrefix(method.TargetName, "trb_web_middleware_") ||
+		g.execution != nil && g.execution.Methods[method])
+}
+
+func (g *generator) methodParameters(method *ir.Method) string {
+	parameters := g.parameters(method.Parameters)
+	if !g.methodUsesExecutionScope(method) {
+		return parameters
+	}
+	g.requireImport("context", "trbcontext")
+	if parameters == "" {
+		return "__trbScope trbcontext.Context"
+	}
+	return "__trbScope trbcontext.Context, " + parameters
+}
+
+func (g *generator) executionArguments(call *ir.Call, arguments []string) []string {
+	if g.execution == nil || !g.execution.Calls[call] {
+		return arguments
+	}
+	return append([]string{"__trbScope"}, arguments...)
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
@@ -1141,7 +1200,7 @@ func (g *generator) expr(expression ir.Expression) string {
 					}
 					name += "[" + strings.Join(items, ", ") + "]"
 				}
-				values := append([]string{g.expr(member.Receiver)}, parts...)
+				values := append([]string{g.expr(member.Receiver)}, g.executionArguments(n, parts)...)
 				return name + "(" + strings.Join(values, ", ") + ")"
 			}
 		}
@@ -1153,6 +1212,8 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
+		parts = g.executionArguments(n, parts)
+		args = strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if application, generic := member.Receiver.(*ir.TypeApply); generic && (application.Kind == "class" || application.Kind == "record") {
 				identifier, named := application.Receiver.(*ir.Identifier)
@@ -1218,6 +1279,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.rawEnumFromValue(n, parts[0])
 		default:
 			parts = append([]string{g.expr(n.Receiver)}, parts...)
+			if g.execution != nil && g.execution.EnumCalls[n] {
+				parts = append(parts[:1], append([]string{"__trbScope"}, parts[1:]...)...)
+			}
 			name := enumMethodName(n.EnumName, n.Method)
 			if alias := g.referenceAlias(n.Reference); alias != "" {
 				name = alias + "." + name
@@ -1320,23 +1384,25 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 
 func (g *generator) ifExpression(node *ir.If) string {
 	child := &generator{
-		functionDepth: g.functionDepth,
-		receiver:      g.receiver,
-		inConstructor: g.inConstructor,
-		methods:       g.methods,
-		topMethods:    g.topMethods,
-		staticMethods: g.staticMethods,
-		records:       g.records,
-		classes:       g.classes,
-		typeAliases:   g.typeAliases,
-		typeKinds:     g.typeKinds,
-		imports:       g.imports,
-		modulePath:    g.modulePath,
-		goModule:      g.goModule,
-		temporary:     g.temporary,
-		breakTarget:   g.breakTarget,
-		orm:           g.orm,
-		projectNames:  g.projectNames,
+		functionDepth:   g.functionDepth,
+		receiver:        g.receiver,
+		inConstructor:   g.inConstructor,
+		methods:         g.methods,
+		topMethods:      g.topMethods,
+		staticMethods:   g.staticMethods,
+		records:         g.records,
+		classes:         g.classes,
+		typeAliases:     g.typeAliases,
+		typeKinds:       g.typeKinds,
+		imports:         g.imports,
+		modulePath:      g.modulePath,
+		goModule:        g.goModule,
+		temporary:       g.temporary,
+		breakTarget:     g.breakTarget,
+		orm:             g.orm,
+		projectNames:    g.projectNames,
+		execution:       g.execution,
+		executionActive: g.executionActive,
 	}
 	child.line("func() " + child.goType(node.ExprType()) + " {")
 	child.indent++
@@ -1372,23 +1438,25 @@ func (g *generator) ifExpression(node *ir.If) string {
 
 func (g *generator) caseExpression(node *ir.Case) string {
 	child := &generator{
-		functionDepth: g.functionDepth,
-		receiver:      g.receiver,
-		inConstructor: g.inConstructor,
-		methods:       g.methods,
-		topMethods:    g.topMethods,
-		staticMethods: g.staticMethods,
-		records:       g.records,
-		classes:       g.classes,
-		typeAliases:   g.typeAliases,
-		typeKinds:     g.typeKinds,
-		imports:       g.imports,
-		modulePath:    g.modulePath,
-		goModule:      g.goModule,
-		temporary:     g.temporary,
-		breakTarget:   g.breakTarget,
-		orm:           g.orm,
-		projectNames:  g.projectNames,
+		functionDepth:   g.functionDepth,
+		receiver:        g.receiver,
+		inConstructor:   g.inConstructor,
+		methods:         g.methods,
+		topMethods:      g.topMethods,
+		staticMethods:   g.staticMethods,
+		records:         g.records,
+		classes:         g.classes,
+		typeAliases:     g.typeAliases,
+		typeKinds:       g.typeKinds,
+		imports:         g.imports,
+		modulePath:      g.modulePath,
+		goModule:        g.goModule,
+		temporary:       g.temporary,
+		breakTarget:     g.breakTarget,
+		orm:             g.orm,
+		projectNames:    g.projectNames,
+		execution:       g.execution,
+		executionActive: g.executionActive,
 	}
 	child.line("func() " + child.goType(node.ExprType()) + " {")
 	child.indent++
@@ -1485,23 +1553,25 @@ func (g *generator) caseExpression(node *ir.Case) string {
 
 func (g *generator) attemptExpression(node *ir.Attempt) string {
 	child := &generator{
-		functionDepth: g.functionDepth,
-		receiver:      g.receiver,
-		inConstructor: g.inConstructor,
-		methods:       g.methods,
-		topMethods:    g.topMethods,
-		staticMethods: g.staticMethods,
-		records:       g.records,
-		classes:       g.classes,
-		typeAliases:   g.typeAliases,
-		typeKinds:     g.typeKinds,
-		imports:       g.imports,
-		modulePath:    g.modulePath,
-		goModule:      g.goModule,
-		temporary:     g.temporary,
-		breakTarget:   g.breakTarget,
-		orm:           g.orm,
-		projectNames:  g.projectNames,
+		functionDepth:   g.functionDepth,
+		receiver:        g.receiver,
+		inConstructor:   g.inConstructor,
+		methods:         g.methods,
+		topMethods:      g.topMethods,
+		staticMethods:   g.staticMethods,
+		records:         g.records,
+		classes:         g.classes,
+		typeAliases:     g.typeAliases,
+		typeKinds:       g.typeKinds,
+		imports:         g.imports,
+		modulePath:      g.modulePath,
+		goModule:        g.goModule,
+		temporary:       g.temporary,
+		breakTarget:     g.breakTarget,
+		orm:             g.orm,
+		projectNames:    g.projectNames,
+		execution:       g.execution,
+		executionActive: g.executionActive,
 	}
 	child.line("func() " + child.goType(node.ExprType()) + " {")
 	child.indent++

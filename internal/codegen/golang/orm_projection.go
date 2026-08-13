@@ -50,6 +50,7 @@ func (g *generator) ormProjection(call *ir.Call, arguments []string, operation s
 	if _, exists := model.Column(column); !exists {
 		return "nil"
 	}
+	query = g.ormExecutionQuery(model, query)
 	helper := goORMPluck(model, column)
 	if operation == "pick" {
 		helper = goORMPick(model, column)
@@ -77,7 +78,7 @@ func (g *generator) ormProjectionRuntime(adapter ormintegration.Adapter, model o
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
 	g.line("func " + goORMPluck(model, column.Name) + "(query " + queryType + ") " + g.ormResultType(arrayType) + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(arrayType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(adapter.QuoteIdentifier(column.Name)) + ")")
 	g.line("rows, err := database.Query(statement, arguments...)")
@@ -111,7 +112,7 @@ func (g *generator) ormProjectionRuntime(adapter ormintegration.Adapter, model o
 	g.line("func " + goORMPick(model, column.Name) + "(query " + queryType + ") " + g.ormResultType(pickType) + " {")
 	g.indent++
 	g.line("if query.limit == nil || *query.limit > 1 { count := 1; query.limit = &count }")
-	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(pickType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(adapter.QuoteIdentifier(column.Name)) + ")")
 	g.line("row := database.QueryRow(statement, arguments...)")

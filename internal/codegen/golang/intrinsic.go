@@ -275,9 +275,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return "trbWebServe(" + config + ")"
 	case "trb.web.testing.dispatch":
-		return "trbWebDispatch(" + arguments[0] + ")"
+		return "trbWebDispatch(__trbScope, " + arguments[0] + ")"
 	case "trb.web.middleware.logger.call":
 		return g.webLogger(call, arguments)
+	case "trb.web.middleware.timeout.call":
+		return g.webTimeout(call, arguments)
 	case "trb.web.middleware.compression.gzip":
 		return g.webGzip(arguments[0])
 	case "trb.orm.where":
@@ -742,11 +744,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("strconv", "")
 		return "strconv.FormatBool(" + arguments[0] + ")"
 	case "trb.platform.go.context.background":
-		g.requireImport("context", "")
-		return "context.Background()"
+		g.requireImport("context", "trbcontext")
+		return "trbcontext.Background()"
 	case "trb.platform.go.context.todo":
-		g.requireImport("context", "")
-		return "context.TODO()"
+		g.requireImport("context", "trbcontext")
+		return "trbcontext.TODO()"
 	case "trb.platform.go.http.router":
 		g.requireImport("net/http", "http")
 		return "http.NewServeMux()"
@@ -922,7 +924,14 @@ func (g *generator) webLogger(call *ir.Call, arguments []string) string {
 		g.requireImport("slices", "")
 		options = "loggerOptions := " + arguments[2] + "; excluded = slices.Contains(loggerOptions.ExcludePaths, loggerContext.TrbFieldRequest.TrbFieldPath); useStderr = loggerOptions.Stderr; "
 	}
-	return "func() (response " + g.goType(call.ExprType()) + ") { loggerContext := " + arguments[0] + "; loggerNextHandler := " + arguments[1] + "; excluded := false; useStderr := false; " + options + "if excluded { return loggerNextHandler.Call(loggerContext) }; started := time.Now(); status := 500; defer func() { level := \"info\"; if status >= 500 { level = \"error\" }; entry := map[string]any{\"timestamp\": time.Now().UTC().Format(time.RFC3339Nano), \"level\": level, \"event\": \"http_request\", \"method\": loggerContext.TrbFieldRequest.TrbFieldMethod.ToS(), \"path\": loggerContext.TrbFieldRequest.TrbFieldPath, \"status\": status, \"duration_ms\": float64(time.Since(started).Nanoseconds()) / 1e6}; encoded, _ := json.Marshal(entry); output := os.Stdout; if useStderr { output = os.Stderr }; fmt.Fprintln(output, string(encoded)) }(); response = loggerNextHandler.Call(loggerContext); status = response.TrbFieldStatus; return response }()"
+	return "func() (response " + g.goType(call.ExprType()) + ") { loggerContext := " + arguments[0] + "; loggerNextHandler := " + arguments[1] + "; excluded := false; useStderr := false; " + options + "if excluded { return loggerNextHandler.Call(__trbScope, loggerContext) }; started := time.Now(); status := 500; defer func() { level := \"info\"; if status >= 500 { level = \"error\" }; entry := map[string]any{\"timestamp\": time.Now().UTC().Format(time.RFC3339Nano), \"level\": level, \"event\": \"http_request\", \"method\": loggerContext.TrbFieldRequest.TrbFieldMethod.ToS(), \"path\": loggerContext.TrbFieldRequest.TrbFieldPath, \"status\": status, \"duration_ms\": float64(time.Since(started).Nanoseconds()) / 1e6}; encoded, _ := json.Marshal(entry); output := os.Stdout; if useStderr { output = os.Stderr }; fmt.Fprintln(output, string(encoded)) }(); response = loggerNextHandler.Call(__trbScope, loggerContext); status = response.TrbFieldStatus; return response }()"
+}
+
+func (g *generator) webTimeout(call *ir.Call, arguments []string) string {
+	g.requireImport("context", "trbcontext")
+	g.requireImport("time", "time")
+	responseType := g.goType(call.ExprType())
+	return "func() " + responseType + " { timeoutContext, cancel := trbcontext.WithTimeout(__trbScope, time.Duration(" + arguments[2] + ")*time.Millisecond); defer cancel(); type timeoutOutcome struct { response " + responseType + "; panicValue any }; outcome := make(chan timeoutOutcome, 1); go func() { result := timeoutOutcome{}; defer func() { result.panicValue = recover(); outcome <- result }(); result.response = " + arguments[1] + ".Call(timeoutContext, " + arguments[0] + ") }(); select { case result := <-outcome: if timeoutContext.Err() != nil { return " + arguments[3] + " }; if result.panicValue != nil { panic(result.panicValue) }; return result.response; case <-timeoutContext.Done(): return " + arguments[3] + " } }()"
 }
 
 func (g *generator) webGzip(value string) string {

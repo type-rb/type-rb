@@ -376,7 +376,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	if success.Kind == "" || success.Kind == types.Void {
 		success = types.FromName("Unit")
 	}
-	g.line("const " + raw + ": " + g.runtimeName("DbResult") + "<" + g.tsType(success) + "> = await __trbOrm.transaction(" + parent + ", async (" + tx + ") => {")
+	g.line("const " + raw + ": " + g.runtimeName("DbResult") + "<" + g.tsType(success) + "> = await __trbOrm.withScope(__trbScope, async () => __trbOrm.transaction(" + parent + ", async (" + tx + ") => {")
 	g.indent++
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
 		g.line("const " + block.Bindings[0].Name + " = " + tx + ";")
@@ -391,7 +391,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	}
 	g.line("return { kind: \"Ok\", value: " + value + " };")
 	g.indent--
-	g.line("});")
+	g.line("}));")
 	if block.Result.Return {
 		g.line("return " + raw + ";")
 		return
@@ -555,7 +555,12 @@ type TrbOrmRange = { __trbRange: true; start: unknown; end: unknown; exclusive: 
 const __trbOrmModels = new Map<string, TrbOrmModel>();
 const __trbOrmScopes = new WeakMap<object, TrbOrmQuery>();
 const __trbOrmAssociations = new WeakMap<object, Map<string, { loaded: boolean; value: unknown }>>();
+const __trbOrmExecutionScopes = new AsyncLocalStorage<AbortSignal | undefined>();
 let __trbOrmDatabase: SQL | null = null;
+
+export function withScope<T>(signal: AbortSignal | undefined, callback: () => Promise<T>): Promise<T> {
+  return __trbOrmExecutionScopes.run(signal, callback);
+}
 
 export class Transaction {
   constructor(readonly sql: SQL | TransactionSQL) {}
@@ -843,7 +848,14 @@ export function column(value: any, name: string): any { return value["__trb_" + 
 function scopeFor(value: any, name: string): TrbOrmQuery { return __trbOrmScopes.get(value) ?? query(name); }
 async function unsafe(source: TrbOrmQuery, sql: string, args: unknown[]): Promise<any[]> {
   if (source.lock && source.transaction === null) throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "database lock requires an explicit transaction scope");
-  return await executor(source).unsafe(sql, args) as any[];
+  const signal = __trbOrmExecutionScopes.getStore();
+  if (signal?.aborted) throw new TrbOrmExecutionError(DbErrorKind.Timeout, "database operation was cancelled");
+  const operation = executor(source).unsafe(sql, args) as Promise<any[]> & { cancel?: () => void };
+  const cancel = () => operation.cancel?.();
+  signal?.addEventListener("abort", cancel, { once: true });
+  try { return await operation; }
+  catch (error) { if (signal?.aborted) throw new TrbOrmExecutionError(DbErrorKind.Timeout, "database operation was cancelled"); throw error; }
+  finally { signal?.removeEventListener("abort", cancel); }
 }
 function affectedRows(result: any): number { return Number(result.affectedRows ?? result.count ?? result.changes ?? result.length ?? 0); }
 
