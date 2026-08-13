@@ -2426,6 +2426,50 @@ fields[:count]
 	}
 }
 
+func TestReplNarrowsNullableBindingsAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-nullable-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := `def maybe_name(present: Boolean): String?
+	if present
+		return "Ada"
+	else
+		return nil
+	end
+end
+def label(value: String?): String
+	if value == nil
+		return "missing"
+	end
+	return value + "!"
+end
+label(maybe_name(true))
+label(maybe_name(false))
+:quit
+`
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "\"Ada!\" : String\n\"missing\" : String\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s nullable REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestRunUnionTypesAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
@@ -4439,6 +4483,81 @@ end
 		}
 		if want := "6\n1\n14\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s collection-transformation output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunNullableNarrowingAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby nullable-narrowing run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript nullable-narrowing run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-nullable-narrowing-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `def maybe_name(present: Boolean): String?
+	if present
+		return "Ada"
+	else
+		return nil
+	end
+end
+
+def label(value: String?): String
+	if value == nil
+		return "missing"
+	end
+	return value + "!"
+end
+
+def has_name(value: String?): Boolean
+	return value != nil and value.size() > 0
+end
+
+def missing_or_empty(value: String?): Boolean
+	return value == nil or value.size() == 0
+end
+
+def main()
+	present := maybe_name(true)
+	missing := maybe_name(false)
+	puts(label(present))
+	puts(label(missing))
+	puts(has_name(present))
+	puts(has_name(missing))
+	puts(missing_or_empty(present))
+	puts(missing_or_empty(missing))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		if want := "Ada!\nmissing\ntrue\nfalse\nfalse\ntrue\n"; stdout.String() != want {
+			t.Fatalf("unexpected %s nullable-narrowing output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

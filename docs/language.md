@@ -140,6 +140,23 @@ names.push("Grace")
 An immutable reference cannot become mutable by assigning it to a new `mut`
 binding.
 
+Compare a nullable binding with `nil` to narrow its non-`nil` path. A returning
+guard also narrows the statements that follow it:
+
+```trb
+def display_name(name: String?): String
+	if name == nil
+		return "Anonymous"
+	end
+	return name + "!"
+end
+```
+
+The same narrowing is available in the matching branch of `name != nil`, in
+the remaining `elsif` or `else` path of `name == nil`, in `while`, and on the
+right side of a compatible short-circuit `and` or `or`. Reassigning the binding
+invalidates the narrowed type.
+
 Identifiers beginning with an uppercase letter are immutable constants. They
 are allowed at top level or directly inside a module or class:
 

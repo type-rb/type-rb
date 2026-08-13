@@ -256,6 +256,11 @@ text. The repository suite covers compiler phases, formatter, language
 services, REPL, project builds, standard packages, type providers, generated
 target code, and browser tools.
 
+Nullable lexical bindings narrow through direct `nil` comparisons in
+conditional branches, loops, compatible short-circuit expressions, and
+returning guards. Reassignment invalidates the flow fact, while typed IR keeps
+the required unwrap explicit for every backend and the REPL.
+
 ## Current limitations
 
 The current alpha does not yet provide:

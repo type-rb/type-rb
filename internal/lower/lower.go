@@ -567,6 +567,18 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 		return nil
 	}
 	result := l.expressionWithoutConversion(node)
+	if identifierNode, identifierExpression := node.(*ast.Identifier); identifierExpression && result != nil {
+		if source, ok := l.checked.NullableUnwraps[identifierNode]; ok {
+			identifier := result.(*ir.Identifier)
+			value := *identifier
+			value.ExprBase.Type = source
+			result = &ir.Conversion{
+				ExprBase: ir.NewExprBase(node.Span(), identifier.ExprType()),
+				Kind:     ir.NullableToNonNullableConversion,
+				Value:    &value,
+			}
+		}
+	}
 	if target, ok := l.checked.Conversions[node]; ok && result != nil {
 		kind := ir.IntegerToFloatConversion
 		if target.Kind == types.Function && result.ExprType().Kind == types.Function &&

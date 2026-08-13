@@ -1039,6 +1039,8 @@ func (g *generator) expr(expression ir.Expression) string {
 				return "Number(" + g.expr(n.Value) + ")"
 			}
 			return g.expr(n.Value)
+		case ir.NullableToNonNullableConversion:
+			return g.expr(n.Value)
 		default:
 			return g.expr(n.Value)
 		}

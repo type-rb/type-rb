@@ -891,6 +891,12 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			}
 			value.Type = node.ExprType()
 			return value, nil
+		case ir.NullableToNonNullableConversion:
+			if value.Data == nil {
+				return Value{}, fmt.Errorf("cannot use nil as %s", node.ExprType())
+			}
+			value.Type = node.ExprType()
+			return value, nil
 		default:
 			return Value{}, fmt.Errorf("unknown conversion %s", node.Kind)
 		}
