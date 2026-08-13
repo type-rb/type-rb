@@ -336,6 +336,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".unshift(" + arguments[1] + ")"
 	case "trb.std.arrays.reverse":
 		return arguments[0] + ".reverse"
+	case "trb.std.arrays.sort", "trb.std.arrays.sort_descending":
+		comparison := rubyPortableSortComparison("left[0]", "right[0]", call.ExprType().Args[0], name == "trb.std.arrays.sort_descending")
+		return "->(values) { values.each_with_index.map { |value, index| [value, index] }.sort { |left, right| compared = " + comparison + "; compared.zero? ? left[1] <=> right[1] : compared }.map(&:first) }.call(" + arguments[0] + ")"
 	case "trb.std.hashes.length":
 		return arguments[0] + ".length"
 	case "trb.std.hashes.empty":

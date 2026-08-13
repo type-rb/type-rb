@@ -1098,6 +1098,45 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 		accumulator.Type = node.ExprType()
 		return accumulator, nil
 	}
+	if node.Operation == "sort_by" || node.Operation == "sort_by_descending" {
+		type decoratedValue struct {
+			value Value
+			key   Value
+		}
+		decorated := make([]decoratedValue, 0, len(items))
+		for _, item := range items {
+			if err := e.checkContext(); err != nil {
+				return Value{}, err
+			}
+			iterationScope := &scope{parent: sc, values: map[string]Value{node.Item: item}}
+			key, err := e.expression(node.Result, module, iterationScope)
+			if err != nil {
+				return Value{}, err
+			}
+			decorated = append(decorated, decoratedValue{value: item, key: key})
+		}
+		var compareErr error
+		descending := node.Operation == "sort_by_descending"
+		sort.SliceStable(decorated, func(left, right int) bool {
+			compared, err := comparePortableValues(decorated[left].key, decorated[right].key)
+			if err != nil {
+				compareErr = err
+				return false
+			}
+			if descending {
+				return compared > 0
+			}
+			return compared < 0
+		})
+		if compareErr != nil {
+			return Value{}, compareErr
+		}
+		result := &arrayValue{Items: make([]Value, len(decorated))}
+		for index, item := range decorated {
+			result.Items[index] = item.value
+		}
+		return Value{Type: node.ExprType(), Data: result}, nil
+	}
 
 	result := &arrayValue{}
 	for index, item := range items {
@@ -2932,6 +2971,37 @@ func truthy(value Value) bool {
 
 func equal(left, right Value) bool {
 	return reflect.DeepEqual(left.Data, right.Data)
+}
+
+func comparePortableValues(left, right Value) (int, error) {
+	if leftString, ok := left.Data.(string); ok {
+		rightString, rightOK := right.Data.(string)
+		if !rightOK {
+			return 0, fmt.Errorf("cannot compare %s and %s", left.Type, right.Type)
+		}
+		return strings.Compare(leftString, rightString), nil
+	}
+	leftNumber, _, leftOK := number(left)
+	rightNumber, _, rightOK := number(right)
+	if !leftOK || !rightOK {
+		return 0, fmt.Errorf("portable natural order is not defined for %s", left.Type)
+	}
+	if math.IsNaN(leftNumber) {
+		if math.IsNaN(rightNumber) {
+			return 0, nil
+		}
+		return 1, nil
+	}
+	if math.IsNaN(rightNumber) {
+		return -1, nil
+	}
+	if leftNumber < rightNumber {
+		return -1, nil
+	}
+	if leftNumber > rightNumber {
+		return 1, nil
+	}
+	return 0, nil
 }
 
 func expressionReference(expression ir.Expression) *ir.Reference {

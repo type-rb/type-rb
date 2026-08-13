@@ -67,8 +67,8 @@ class union in every backend and in the REPL. Ordinary scalar `case` remains
 available for untyped external values that have no endpoint or data contract.
 
 The compiler-owned portable library covers scalar and collection foundations,
-including typed short-circuit Array predicates and nullable searches, `Result`, bytes, hexadecimal
-and Base64 encoding, legacy MD5/SHA-1 checksums,
+including stable Array sorting, typed short-circuit predicates and nullable
+searches, `Result`, bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
 SHA-256/SHA-512 hashing and HMAC, non-cryptographic and secure randomness,
 constant-time byte comparison, Unicode text, logical paths,
 URL component and query handling, filesystem and process access, JSON/JSONC,

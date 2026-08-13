@@ -929,6 +929,9 @@ func (g *generator) transform(transform *ir.Transform) string {
 	}
 	result := g.expr(transform.Result)
 	switch transform.Operation {
+	case "sort_by", "sort_by_descending":
+		comparison := rubyPortableSortComparison("left[1]", "right[1]", transform.Result.ExprType(), transform.Operation == "sort_by_descending")
+		return source + ".each_with_index.map { |" + transform.Item + ", index| [" + transform.Item + ", " + result + ", index] }.sort { |left, right| compared = " + comparison + "; compared.zero? ? left[2] <=> right[2] : compared }.map(&:first)"
 	case "map", "select", "any?", "all?", "none?", "find", "find_index":
 		operation := transform.Operation
 		parameters := []string{transform.Item}
@@ -942,6 +945,23 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
+}
+
+func rubyPortableSortComparison(left, right string, typ types.Type, descending bool) string {
+	if base, literal := types.LiteralBase(typ); literal {
+		typ = base
+	}
+	if typ.Kind == types.Float {
+		operator := left + " <=> " + right
+		if descending {
+			operator = right + " <=> " + left
+		}
+		return "(" + left + ".nan? ? (" + right + ".nan? ? 0 : 1) : (" + right + ".nan? ? -1 : (" + operator + ")))"
+	}
+	if descending {
+		return right + " <=> " + left
+	}
+	return left + " <=> " + right
 }
 
 func (g *generator) assignmentTarget(expression ir.Expression) string {

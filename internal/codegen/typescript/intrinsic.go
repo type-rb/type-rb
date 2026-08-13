@@ -384,6 +384,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".unshift(" + arguments[1] + ")"
 	case "trb.std.arrays.reverse":
 		return "[..." + arguments[0] + "].reverse()"
+	case "trb.std.arrays.sort", "trb.std.arrays.sort_descending":
+		comparison := tsPortableSortComparison("left.value", "right.value", call.ExprType().Args[0], name == "trb.std.arrays.sort_descending")
+		return arguments[0] + ".map((value, index) => ({ value, index })).sort((left, right) => { const compared = " + comparison + "; return compared === 0 ? left.index - right.index : compared; }).map((entry) => entry.value)"
 	case "trb.std.hashes.length":
 		return "Object.keys(" + arguments[0] + ").length"
 	case "trb.std.hashes.empty":

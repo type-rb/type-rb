@@ -633,6 +633,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.reverse":
 		g.requireImport("slices", "")
 		return "func() " + g.goType(call.ExprType()) + " { values := slices.Clone(" + arguments[0] + "); slices.Reverse(values); return values }()"
+	case "trb.std.arrays.sort", "trb.std.arrays.sort_descending":
+		g.requireImport("slices", "")
+		valuesType := call.ExprType()
+		elementType := types.Type{Kind: types.Any, Name: "Any"}
+		if len(valuesType.Args) == 1 {
+			elementType = valuesType.Args[0]
+		}
+		comparison := g.portableSortComparison("left", "right", elementType, name == "trb.std.arrays.sort_descending")
+		return "func() " + g.goType(valuesType) + " { values := slices.Clone(" + arguments[0] + "); slices.SortStableFunc(values, func(left, right " + g.goType(elementType) + ") int { return " + comparison + " }); return values }()"
 	case "trb.std.hashes.length":
 		return "len(" + arguments[0] + ")"
 	case "trb.std.hashes.empty":

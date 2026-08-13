@@ -1537,6 +1537,76 @@ end
 	}
 }
 
+func TestPortableArraySortingAcrossModes(t *testing.T) {
+	source := []byte(`import trb/std/arrays
+
+record Item
+	name: String
+	rank: Integer
+end
+
+def sorted_numbers(): Array<Integer>
+	return [3, 1, 2].sort()
+end
+
+def descending_numbers(): Array<Integer>
+	return [3, 1, 2].sort_descending()
+end
+
+def package_sorted_numbers(): Array<Integer>
+	return arrays.sort([3, 1, 2])
+end
+
+def sorted_items(items: Array<Item>): Array<Item>
+	return items.sort_by do |item|
+		item.rank
+	end
+end
+
+def descending_items(items: Array<Item>): Array<Item>
+	return items.sort_by_descending do |item|
+		item.rank
+	end
+end
+`)
+	wants := map[string][]string{
+		"go":         {"slices.SortStableFunc", "type __trbDecorated", "left.key > right.key"},
+		"ruby":       {"each_with_index.map", ".sort { |left, right|", "right[1] <=> left[1]"},
+		"typescript": {".map((value, index) => ({ value, index }))", "key: item", "left.key > right.key"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := CompileWithOptions("sorting.trb", source, Options{Mode: mode, Package: "sorting", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable Array sorting: %v", mode, err)
+		}
+		for _, want := range wants[mode] {
+			if output := string(artifact.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s sorting is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestPortableArraySortingDiagnosticsAcrossModes(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: "record Item\n\tname: String\nend\ndef bad(values: Array<Item>): Array<Item>\n\treturn values.sort()\nend\n", want: "portable natural order is not defined for Item, required by sort()"},
+		{source: "def bad(values: Array<Integer?>): Array<Integer?>\n\treturn values.sort()\nend\n", want: "portable natural order is not defined for Integer?, required by sort()"},
+		{source: "record Item\n\tname: String\nend\ndef bad(values: Array<Item>): Array<Item>\n\treturn values.sort_by do |value|\n\t\tvalue\n\tend\nend\n", want: "sort_by block result must have portable natural order, got Item"},
+		{source: "def bad(values: Array<Integer>): Array<Integer>\n\treturn values.sort_by do |value, index|\n\t\tvalue + index\n\tend\nend\n", want: "sort_by block expects 1 parameter(s), got 2"},
+		{source: "record AppError\nend\ndef key(value: Integer): Integer fails AppError\n\treturn value\nend\ndef bad(values: Array<Integer>): Array<Integer> fails AppError\n\treturn values.sort_by do |value|\n\t\tkey(value)\n\tend\nend\n", want: "sort_by block must not use operations that may fail"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("bad_sort.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s: expected %q sorting diagnostic, got %v", mode, test.want, err)
+			}
+		}
+	}
+}
+
 func TestPortableCollectionTransformationDiagnosticsAcrossModes(t *testing.T) {
 	tests := []struct {
 		source string

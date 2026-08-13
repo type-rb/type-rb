@@ -1405,6 +1405,43 @@ Result::Err(error: IndexLookupError(index: 2, size: 2, message: "String index is
 	}
 }
 
+func TestReplEvaluatesPortableArraySortingAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-array-sorting-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := `[3, 1, 2].sort()
+[3, 1, 2].sort_descending()
+[[2, 0], [1, 1], [2, 2]].sort_by do |value|
+	value[0]
+end
+[[2, 0], [1, 1], [2, 2]].sort_by_descending do |value|
+	value[0]
+end
+:quit
+`
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "[1, 2, 3] : Array<Integer>\n[3, 2, 1] : Array<Integer>\n[[1, 1], [2, 0], [2, 2]] : Array<Array<Integer>>\n[[2, 0], [2, 2], [1, 1]] : Array<Array<Integer>>\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("%s unexpected sorting REPL result\nstdout:\n%s\nstderr:\n%s", mode, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplRetainsPredicateAndBangFunctionNamesAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -4416,7 +4453,27 @@ func TestRunPortableCollectionTransformationsAcrossAvailableBackends(t *testing.
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `class Box
+		source := `import trb/std/math
+
+class SortKey
+	@calls: Integer
+
+	def initialize()
+		@calls = 0
+		return
+	end
+
+	def rank(value: Array<Integer>): Integer
+		@calls += 1
+		return value.fetch(0)
+	end
+
+	def calls(): Integer
+		return @calls
+	end
+end
+
+class Box
 	@value: Integer
 
 	def initialize(value: Integer)
@@ -4486,6 +4543,21 @@ def main()
 	found_box := [Box.new(7)].find do |box|
 		box.value() == 7
 	end
+	mut original := [3, 1, 2]
+	ascending := original.sort()
+	descending := original.sort_descending()
+	key := SortKey.new()
+	stable := [[2, 0], [1, 1], [2, 2]].sort_by do |value|
+		key.rank(value)
+	end
+	stable_descending := [[2, 0], [1, 1], [2, 2]].sort_by_descending do |value|
+		value.fetch(0)
+	end
+	ordered_strings := ["😀", ""].sort()
+	ordered_strings_descending := ["😀", ""].sort_descending()
+	floats := [math.sqrt(-1), 1.0, -1.0]
+	floats_ascending := floats.sort()
+	floats_descending := floats.sort_descending()
 	puts(mapped.fetch(2))
 	puts(selected.size())
 	puts(total)
@@ -4511,6 +4583,20 @@ def main()
 	if found_box != nil
 		puts(found_box.value())
 	end
+	puts(original.fetch(0))
+	puts(ascending.fetch(0))
+	puts(descending.fetch(0))
+	puts(stable.fetch(1).fetch(1))
+	puts(stable.fetch(2).fetch(1))
+	puts(stable_descending.fetch(0).fetch(1))
+	puts(stable_descending.fetch(1).fetch(1))
+	puts(key.calls())
+	puts(ordered_strings.fetch(0))
+	puts(ordered_strings_descending.fetch(0))
+	puts(floats_ascending.fetch(0))
+	puts(floats_ascending.fetch(2).nan?())
+	puts(floats_descending.fetch(0))
+	puts(floats_descending.fetch(2).nan?())
 	return
 end
 `
@@ -4522,7 +4608,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "6\n1\n14\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\n5\ntrue\n2\n1\n7\n"; stdout.String() != want {
+		if want := "6\n1\n14\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\n5\ntrue\n2\n1\n7\n3\n1\n3\n0\n2\n0\n2\n3\n\n😀\n-1.0\ntrue\n1.0\ntrue\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s collection-transformation output: want %q, got %q", mode, want, stdout.String())
 		}
 	}

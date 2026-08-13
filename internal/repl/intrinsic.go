@@ -1074,6 +1074,32 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			items[len(array.Items)-1-index] = array.Items[index]
 		}
 		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.arrays.sort", "trb.std.arrays.sort_descending":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		array, ok := values[0].Data.(*arrayValue)
+		if !ok {
+			return Value{}, errors.New("arrays.sort expects Array")
+		}
+		items := append([]Value(nil), array.Items...)
+		descending := name == "trb.std.arrays.sort_descending"
+		var compareErr error
+		sort.SliceStable(items, func(left, right int) bool {
+			compared, err := comparePortableValues(items[left], items[right])
+			if err != nil {
+				compareErr = err
+				return false
+			}
+			if descending {
+				return compared > 0
+			}
+			return compared < 0
+		})
+		if compareErr != nil {
+			return Value{}, compareErr
+		}
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
 	case "trb.std.hashes.length", "trb.std.hashes.empty":
 		if err := require(1); err != nil {
 			return Value{}, err

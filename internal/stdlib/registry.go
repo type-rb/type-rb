@@ -36,6 +36,7 @@ type Symbol struct {
 	RequiredSymbols     []string
 	TypeParameters      []string
 	EqualityTypes       []types.Type
+	OrderingTypes       []types.Type
 	Receiver            types.Type
 	ReceiverMutable     bool
 	Parameters          []Parameter
@@ -808,6 +809,22 @@ end
 				Return: voidType,
 			},
 			"reverse": genericUnary("reverse", "trb.std.arrays.reverse", []string{"T"}, arrayOf(typeT), arrayOf(typeT)),
+			"sort": {
+				Name:           "sort",
+				Intrinsic:      "trb.std.arrays.sort",
+				TypeParameters: []string{"T"},
+				OrderingTypes:  []types.Type{typeT},
+				Parameters:     []Parameter{{Name: "values", Type: arrayOf(typeT)}},
+				Return:         arrayOf(typeT),
+			},
+			"sort_descending": {
+				Name:           "sort_descending",
+				Intrinsic:      "trb.std.arrays.sort_descending",
+				TypeParameters: []string{"T"},
+				OrderingTypes:  []types.Type{typeT},
+				Parameters:     []Parameter{{Name: "values", Type: arrayOf(typeT)}},
+				Return:         arrayOf(typeT),
+			},
 		},
 	},
 	"trb/std/hashes": {
@@ -1080,21 +1097,23 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"clear":            {PackagePath: "trb/std/string_builder", Symbol: "clear"},
 	},
 	types.Array: {
-		"size":      {PackagePath: "trb/std/arrays", Symbol: "length"},
-		"empty?":    {PackagePath: "trb/std/arrays", Symbol: "empty"},
-		"fetch":     {PackagePath: "trb/std/arrays", Symbol: "fetch"},
-		"try_fetch": {PackagePath: "trb/std/arrays", Symbol: "try_fetch"},
-		"first":     {PackagePath: "trb/std/arrays", Symbol: "first"},
-		"last":      {PackagePath: "trb/std/arrays", Symbol: "last"},
-		"dup":       {PackagePath: "trb/std/arrays", Symbol: "copy"},
-		"include?":  {PackagePath: "trb/std/arrays", Symbol: "contains"},
-		"count":     {PackagePath: "trb/std/arrays", Symbol: "count"},
-		"join":      {PackagePath: "trb/std/arrays", Symbol: "join"},
-		"pop":       {PackagePath: "trb/std/arrays", Symbol: "pop"},
-		"shift":     {PackagePath: "trb/std/arrays", Symbol: "shift"},
-		"push":      {PackagePath: "trb/std/arrays", Symbol: "push"},
-		"unshift":   {PackagePath: "trb/std/arrays", Symbol: "unshift"},
-		"reverse":   {PackagePath: "trb/std/arrays", Symbol: "reverse"},
+		"size":            {PackagePath: "trb/std/arrays", Symbol: "length"},
+		"empty?":          {PackagePath: "trb/std/arrays", Symbol: "empty"},
+		"fetch":           {PackagePath: "trb/std/arrays", Symbol: "fetch"},
+		"try_fetch":       {PackagePath: "trb/std/arrays", Symbol: "try_fetch"},
+		"first":           {PackagePath: "trb/std/arrays", Symbol: "first"},
+		"last":            {PackagePath: "trb/std/arrays", Symbol: "last"},
+		"dup":             {PackagePath: "trb/std/arrays", Symbol: "copy"},
+		"include?":        {PackagePath: "trb/std/arrays", Symbol: "contains"},
+		"count":           {PackagePath: "trb/std/arrays", Symbol: "count"},
+		"join":            {PackagePath: "trb/std/arrays", Symbol: "join"},
+		"pop":             {PackagePath: "trb/std/arrays", Symbol: "pop"},
+		"shift":           {PackagePath: "trb/std/arrays", Symbol: "shift"},
+		"push":            {PackagePath: "trb/std/arrays", Symbol: "push"},
+		"unshift":         {PackagePath: "trb/std/arrays", Symbol: "unshift"},
+		"reverse":         {PackagePath: "trb/std/arrays", Symbol: "reverse"},
+		"sort":            {PackagePath: "trb/std/arrays", Symbol: "sort"},
+		"sort_descending": {PackagePath: "trb/std/arrays", Symbol: "sort_descending"},
 	},
 	types.Hash: {
 		"size":      {PackagePath: "trb/std/hashes", Symbol: "length"},
@@ -1397,6 +1416,10 @@ func Instantiate(symbol Symbol, arguments []types.Type) Symbol {
 	result.EqualityTypes = append([]types.Type(nil), symbol.EqualityTypes...)
 	for index := range result.EqualityTypes {
 		result.EqualityTypes[index] = substituteType(result.EqualityTypes[index], bindings)
+	}
+	result.OrderingTypes = append([]types.Type(nil), symbol.OrderingTypes...)
+	for index := range result.OrderingTypes {
+		result.OrderingTypes[index] = substituteType(result.OrderingTypes[index], bindings)
 	}
 	return result
 }

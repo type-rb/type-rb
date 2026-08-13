@@ -66,6 +66,19 @@ func TestGenericReceiverContractsSpecializeReturnTypes(t *testing.T) {
 	}
 }
 
+func TestArraySortingReceiverContractsRequirePortableOrdering(t *testing.T) {
+	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
+	for _, name := range []string{"sort", "sort_descending"} {
+		_, method, ok := LookupReceiverMethod(arrayType, name)
+		if !ok || method.Return.String() != "Array<String>" {
+			t.Fatalf("Array<String>#%s contract=%#v", name, method)
+		}
+		if len(method.OrderingTypes) != 1 || method.OrderingTypes[0].String() != "String" {
+			t.Fatalf("Array<String>#%s ordering requirement=%#v", name, method.OrderingTypes)
+		}
+	}
+}
+
 func TestSafeReceiverContractsUseStructuredErrors(t *testing.T) {
 	tests := []struct {
 		receiver types.Type
