@@ -1810,13 +1810,13 @@ func TestReplEvaluatesPortableCollectionTransformationsAcrossModes(t *testing.T)
 			t.Fatal(err)
 		}
 
-		input := "[1, 2, 3].map { |value| value * 2 }\n[1, 2, 3].select.with_index { |value, index| value > 1 and index < 2 }\n[1, 2, 3].reduce(10) { |sum, value| sum + value }\n[1, 2, 3].any? { |value| value > 2 }\n[1, 2, 3].all?() { |value| value > 0 }\n[1, 2, 3].none? { |value| value < 0 }\n:quit\n"
+		input := "[1, 2, 3].map { |value| value * 2 }\n[1, 2, 3].select.with_index { |value, index| value > 1 and index < 2 }\n[1, 2, 3].reduce(10) { |sum, value| sum + value }\n[1, 2, 3].any? { |value| value > 2 }\n[1, 2, 3].all?() { |value| value > 0 }\n[1, 2, 3].none? { |value| value < 0 }\n[1, 2, 3].find { |value| value > 1 }\n[1, 2, 3].find_index() { |value| value == 3 }\n[1, 2, 3].find { |value| value > 9 }\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "[2, 4, 6] : Array<Integer>\n[2] : Array<Integer>\n16 : Integer\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\n"
+		want := "[2, 4, 6] : Array<Integer>\n[2] : Array<Integer>\n16 : Integer\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\n2 : Integer?\n2 : Integer?\nnil : Integer?\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s collection-transformation REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -4416,7 +4416,20 @@ func TestRunPortableCollectionTransformationsAcrossAvailableBackends(t *testing.
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `def empty_integers(): Array<Integer>
+		source := `class Box
+	@value: Integer
+
+	def initialize(value: Integer)
+		@value = value
+		return
+	end
+
+	def value(): Integer
+		return @value
+	end
+end
+
+def empty_integers(): Array<Integer>
 	return []
 end
 
@@ -4458,6 +4471,21 @@ def main()
 	short_none := [1, 0].none? do |value|
 		1 / value > 0
 	end
+	found := mapped.find do |value|
+		value > 2
+	end
+	missing := mapped.find do |value|
+		value > 99
+	end
+	found_index := mapped.find_index do |value|
+		value == 6
+	end
+	short_find := [1, 0].find do |value|
+		1 / value > 0
+	end
+	found_box := [Box.new(7)].find do |box|
+		box.value() == 7
+	end
 	puts(mapped.fetch(2))
 	puts(selected.size())
 	puts(total)
@@ -4470,6 +4498,19 @@ def main()
 	puts(short_any)
 	puts(short_all)
 	puts(short_none)
+	if found == nil
+		puts(0)
+	else
+		puts(found + 1)
+	end
+	puts(missing == nil)
+	if found_index != nil
+		puts(found_index)
+	end
+	puts(short_find)
+	if found_box != nil
+		puts(found_box.value())
+	end
 	return
 end
 `
@@ -4481,7 +4522,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "6\n1\n14\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\n"; stdout.String() != want {
+		if want := "6\n1\n14\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\n5\ntrue\n2\n1\n7\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s collection-transformation output: want %q, got %q", mode, want, stdout.String())
 		}
 	}

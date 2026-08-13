@@ -1479,7 +1479,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 	source := g.expr(transform.Source)
 	result := g.expr(transform.Result)
 	switch transform.Operation {
-	case "map", "select", "any?", "all?", "none?":
+	case "map", "select", "any?", "all?", "none?", "find", "find_index":
 		parameters := transform.Item
 		if transform.WithIndex {
 			parameters += ", " + transform.Index
@@ -1491,10 +1491,18 @@ func (g *generator) transform(transform *ir.Transform) string {
 			operation = "some"
 		} else if operation == "all?" {
 			operation = "every"
+		} else if operation == "find_index" {
+			operation = "findIndex"
 		}
 		value := source + "." + operation + "((" + parameters + ") => " + result + ")"
 		if transform.Operation == "none?" {
 			return "!(" + value + ")"
+		}
+		if transform.Operation == "find" {
+			return "(" + value + " ?? null)"
+		}
+		if transform.Operation == "find_index" {
+			return "((index: number): number | null => index < 0 ? null : index)(" + value + ")"
 		}
 		return value
 	case "reduce":

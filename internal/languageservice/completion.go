@@ -591,8 +591,16 @@ func receiverMembers(receiver types.Type, context Context) []Symbol {
 		result = append(result, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: librarySignature(method), Type: method.Return, Call: &CallInfo{ParameterCount: len(method.Parameters)}})
 	}
 	if receiver.Kind == types.Array || receiver.Kind == types.Range {
-		for _, name := range []string{"all?", "any?", "none?"} {
-			result = append(result, Symbol{Name: name, Kind: CompletionMethod, Detail: name + " { |value| Boolean }: Boolean", Type: types.FromName("Boolean")})
+		for _, name := range []string{"all?", "any?", "find", "find_index", "none?"} {
+			returnType := types.FromName("Boolean")
+			if name == "find" && len(receiver.Args) > 0 {
+				returnType = receiver.Args[0]
+				returnType.Nullable = true
+			} else if name == "find_index" {
+				returnType = types.FromName("Integer")
+				returnType.Nullable = true
+			}
+			result = append(result, Symbol{Name: name, Kind: CompletionMethod, Detail: name + " { |value| Boolean }: " + returnType.String(), Type: returnType})
 		}
 	}
 	byName := map[string]Symbol{}

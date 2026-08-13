@@ -1474,6 +1474,18 @@ def none_negative?(): Boolean
 		value < 0
 	end
 end
+
+def first_even(): Integer?
+	return [1, 2, 3].find do |value|
+		value % 2 == 0
+	end
+end
+
+def first_large_index(): Integer?
+	return [1, 2, 3].find_index() do |value|
+		value > 2
+	end
+end
 `)
 	wants := map[string][]string{
 		"go": {
@@ -1484,6 +1496,8 @@ end
 			`if value > 2 {`,
 			`if !(value > 0) {`,
 			`if value < 0 {`,
+			`return &value`,
+			`return &__trbResult`,
 		},
 		"ruby": {
 			`.map { |value| value.to_s }`,
@@ -1493,6 +1507,8 @@ end
 			`.any? { |value| value > 2 }`,
 			`.all? { |value| value > 0 }`,
 			`.none? { |value| value < 0 }`,
+			`.find { |value| ((value).remainder(2)) == 0 }`,
+			`.find_index { |value| value > 2 }`,
 		},
 		"typescript": {
 			`.map((value) => String(value))`,
@@ -1502,6 +1518,8 @@ end
 			`.some((value) => value > 2)`,
 			`.every((value) => value > 0)`,
 			`!([1, 2, 3].some((value) => value < 0))`,
+			`.find((value) => (value % 2) == 0) ?? null`,
+			`.findIndex((value) => value > 2)`,
 		},
 	}
 	// TypeScript calls the portable select operation through Array#filter.
@@ -1531,6 +1549,10 @@ func TestPortableCollectionTransformationDiagnosticsAcrossModes(t *testing.T) {
 		{
 			source: "def bad(): Boolean\n\treturn [1].any? do |value|\n\t\tvalue\n\tend\nend\n",
 			want:   "any? block result must be Boolean, got Integer",
+		},
+		{
+			source: "def bad(): Integer?\n\treturn [1].find do |value|\n\t\tvalue\n\tend\nend\n",
+			want:   "find block result must be Boolean, got Integer",
 		},
 		{
 			source: "def bad(): Boolean\n\treturn [1].all?.with_index do |value, index|\n\t\tvalue > index\n\tend\nend\n",

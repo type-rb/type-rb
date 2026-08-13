@@ -434,9 +434,11 @@ unless their package declaration explicitly provides structured lowering.
 
 Portable Array transformations `map`, `select`, and `reduce` use the same
 typed-IR boundary. The short-circuit predicates `any?`, `all?`, and `none?`
-require one non-nullable Boolean result expression. They evaluate from left to
-right and stop when the result is known. Empty Arrays produce `false`, `true`,
-and `true`, respectively. Indexed predicate blocks are not currently enabled.
+and searches `find` and `find_index` require one non-nullable Boolean result
+expression. They evaluate from left to right and stop when the result is known.
+Empty Arrays produce `false`, `true`, and `true` for the predicates;
+`find` and `find_index` return a nullable element and nullable `Integer`, with
+`nil` for no match. Indexed predicate blocks are not currently enabled.
 
 ### 3.12 Hashes
 

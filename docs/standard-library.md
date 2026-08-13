@@ -306,6 +306,12 @@ end
 none_negative := values.none? do |value|
 	value < 0
 end
+first_even := values.find do |value|
+	value % 2 == 0
+end
+first_even_index := values.find_index do |value|
+	value % 2 == 0
+end
 
 mut labels: Hash<Integer, String> := {1 => "one"}
 known_label := labels.key?(1)
@@ -327,6 +333,11 @@ non-destructive shallow `reverse`, value membership, and occurrence counting.
 `any?`, `all?`, and `none?` evaluate a typed Boolean predicate from left to
 right and stop as soon as the result is known. Empty Arrays return `false` for
 `any?` and `true` for `all?` and `none?`.
+
+`find` returns the first matching element as `T?`, while `find_index` returns
+its position as `Integer?`. Both short-circuit and return `nil` when no element
+matches. A nullable element type remains nullable, so finding a stored `nil`
+and finding no element intentionally have the same result.
 
 Value membership is `include?` on a receiver and `arrays.contains` in package
 form. `count(value)` has the same name in both forms. Both use portable `==`

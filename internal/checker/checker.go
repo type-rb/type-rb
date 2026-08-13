@@ -3959,7 +3959,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.error(n.Span(), "Hash#each.with_index is not supported in v0.1")
 		}
 		itemType := elementType
-		predicate := n.Operation == "any?" || n.Operation == "all?" || n.Operation == "none?"
+		predicate := n.Operation == "any?" || n.Operation == "all?" || n.Operation == "none?" || n.Operation == "find" || n.Operation == "find_index"
 		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce" || predicate
 		if predicate && n.WithIndex {
 			c.error(n.Span(), n.Operation+".with_index is not supported; use each with an explicit accumulator")
@@ -4055,12 +4055,18 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				switch n.Operation {
 				case "map":
 					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{blockType}}
-				case "select", "any?", "all?", "none?":
+				case "select", "any?", "all?", "none?", "find", "find_index":
 					if blockType.Kind != types.Bool || blockType.Nullable {
 						c.error(n.Block.Span(), fmt.Sprintf("%s block result must be Boolean, got %s", n.Operation, blockType))
 					}
 					if n.Operation == "select" {
 						typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
+					} else if n.Operation == "find" {
+						typ = elementType
+						typ.Nullable = true
+					} else if n.Operation == "find_index" {
+						typ = types.FromName("Integer")
+						typ.Nullable = true
 					} else {
 						typ = types.FromName("Boolean")
 					}
