@@ -539,6 +539,18 @@ Natural ordering and `sort_by` keys currently support non-nullable `Integer`,
 and cannot use an operation that may fail. Equal values retain their original
 order, including with `sort_descending` and `sort_by_descending`.
 
+`uniq()` removes later duplicates without changing the receiver, while
+`concat()` returns a new Array in left-to-right order:
+
+```trb
+values := [3, 1, 3, 2]
+deduplicated := values.uniq()       # [3, 1, 2]
+combined := values.concat([4, 5])  # [3, 1, 3, 2, 4, 5]
+```
+
+`uniq()` uses portable `==` and retains the first occurrence. TypeRB
+`concat()` is non-destructive, unlike Ruby's `Array#concat`.
+
 Arrays, integer ranges, and hashes support structured iteration:
 
 ```trb

@@ -300,6 +300,8 @@ descending := values.sort_descending()
 ranked := ["second", "first"].sort_by do |label|
 	label.size()
 end
+deduplicated := [3, 1, 3, 2].uniq()
+combined_values := values.concat([4, 5])
 known := values.include?(2)
 occurrences := arrays.count(values, 2)
 has_even := values.any? do |value|
@@ -342,6 +344,12 @@ stable, including descending order. Strings use Unicode code point order,
 independent of locale. Float `NaN` values sort after ordinary values in either
 direction, and negative and positive zero compare as equal. Custom comparator
 and locale-sensitive ordering APIs remain future design work.
+
+`uniq()` returns the first occurrence of each element in input order and uses
+the same portable equality contract as `include?` and `count`. `concat(other)`
+returns a new shallow Array containing both inputs in order. Neither method
+mutates its receiver; specifically, TypeRB `concat()` is not Ruby's destructive
+`Array#concat`.
 
 `any?`, `all?`, and `none?` evaluate a typed Boolean predicate from left to
 right and stop as soon as the result is known. Empty Arrays return `false` for
