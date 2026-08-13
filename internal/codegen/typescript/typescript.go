@@ -1479,6 +1479,9 @@ func (g *generator) transform(transform *ir.Transform) string {
 	source := g.expr(transform.Source)
 	result := g.expr(transform.Result)
 	switch transform.Operation {
+	case "sort_by", "sort_by_descending":
+		comparison := tsPortableSortComparison("left.key", "right.key", transform.Result.ExprType(), transform.Operation == "sort_by_descending")
+		return source + ".map((" + transform.Item + ", index) => ({ value: " + transform.Item + ", key: " + result + ", index })).sort((left, right) => { const compared = " + comparison + "; return compared === 0 ? left.index - right.index : compared; }).map((entry) => entry.value)"
 	case "map", "select", "any?", "all?", "none?", "find", "find_index":
 		parameters := transform.Item
 		if transform.WithIndex {
@@ -1510,6 +1513,31 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "undefined"
 	}
+}
+
+func tsPortableSortComparison(left, right string, typ types.Type, descending bool) string {
+	if base, literal := types.LiteralBase(typ); literal {
+		typ = base
+	}
+	if typ.Kind == types.Float {
+		less, greater := "<", ">"
+		if descending {
+			less, greater = ">", "<"
+		}
+		return "(Number.isNaN(" + left + ") ? (Number.isNaN(" + right + ") ? 0 : 1) : (Number.isNaN(" + right + ") ? -1 : (" + left + " " + less + " " + right + " ? -1 : (" + left + " " + greater + " " + right + " ? 1 : 0))))"
+	}
+	if typ.Kind == types.String {
+		comparison := "((a: string, b: string): number => { const leftCodepoints = Array.from(a, (value) => value.codePointAt(0)!); const rightCodepoints = Array.from(b, (value) => value.codePointAt(0)!); const length = Math.min(leftCodepoints.length, rightCodepoints.length); for (let index = 0; index < length; index += 1) { if (leftCodepoints[index]! < rightCodepoints[index]!) return -1; if (leftCodepoints[index]! > rightCodepoints[index]!) return 1; } return leftCodepoints.length < rightCodepoints.length ? -1 : (leftCodepoints.length > rightCodepoints.length ? 1 : 0); })(" + left + ", " + right + ")"
+		if descending {
+			return "-(" + comparison + ")"
+		}
+		return comparison
+	}
+	less, greater := "<", ">"
+	if descending {
+		less, greater = ">", "<"
+	}
+	return "(" + left + " " + less + " " + right + " ? -1 : (" + left + " " + greater + " " + right + " ? 1 : 0))"
 }
 
 func (g *generator) assignmentTarget(expression ir.Expression) string {

@@ -1624,6 +1624,13 @@ func (g *generator) transform(transform *ir.Transform) string {
 	source := g.expr(transform.Source)
 	value := g.expr(transform.Result)
 	switch transform.Operation {
+	case "sort_by", "sort_by_descending":
+		g.requireImport("slices", "")
+		keyType := transform.Result.ExprType()
+		decorated := "__trbDecorated" + suffix
+		index := "__trbIndex" + suffix
+		comparison := g.portableSortComparison("left.key", "right.key", keyType, transform.Operation == "sort_by_descending")
+		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; type " + decorated + " struct { value " + g.goType(transform.ItemType) + "; key " + g.goType(keyType) + " }; ordered := make([]" + decorated + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { _ = " + index + "; " + itemUse + "ordered = append(ordered, " + decorated + "{value: " + item + ", key: " + value + "}) }; slices.SortStableFunc(ordered, func(left, right " + decorated + ") int { return " + comparison + " }); " + result + " := make(" + g.goType(transform.ExprType()) + ", 0, len(ordered)); for _, entry := range ordered { " + result + " = append(" + result + ", entry.value) }; return " + result + " }()"
 	case "map":
 		index := "_"
 		indexUse := ""
@@ -1689,6 +1696,35 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) portableSortComparison(left, right string, typ types.Type, descending bool) string {
+	typ = sortScalarType(typ)
+	switch typ.Kind {
+	case types.Float:
+		g.requireImport("math", "")
+		if descending {
+			return "func() int { if math.IsNaN(" + left + ") { if math.IsNaN(" + right + ") { return 0 }; return 1 }; if math.IsNaN(" + right + ") { return -1 }; if " + left + " > " + right + " { return -1 }; if " + left + " < " + right + " { return 1 }; return 0 }()"
+		}
+		return "func() int { if math.IsNaN(" + left + ") { if math.IsNaN(" + right + ") { return 0 }; return 1 }; if math.IsNaN(" + right + ") { return -1 }; if " + left + " < " + right + " { return -1 }; if " + left + " > " + right + " { return 1 }; return 0 }()"
+	case types.String:
+		if descending {
+			return "func() int { if " + left + " > " + right + " { return -1 }; if " + left + " < " + right + " { return 1 }; return 0 }()"
+		}
+		return "func() int { if " + left + " < " + right + " { return -1 }; if " + left + " > " + right + " { return 1 }; return 0 }()"
+	default:
+		if descending {
+			return "func() int { if " + left + " > " + right + " { return -1 }; if " + left + " < " + right + " { return 1 }; return 0 }()"
+		}
+		return "func() int { if " + left + " < " + right + " { return -1 }; if " + left + " > " + right + " { return 1 }; return 0 }()"
+	}
+}
+
+func sortScalarType(typ types.Type) types.Type {
+	if base, literal := types.LiteralBase(typ); literal {
+		return base
+	}
+	return typ
 }
 
 func namedUnusedBinding(name string) bool {

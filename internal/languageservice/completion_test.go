@@ -71,6 +71,8 @@ func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
 				{source: `["a", "b"].jo`, want: "join", insertText: "join", kind: languageservice.CompletionMethod},
 				{source: "numbers.an", want: "any?", insertText: "any?", kind: languageservice.CompletionMethod},
 				{source: "numbers.find_", want: "find_index", insertText: "find_index", kind: languageservice.CompletionMethod},
+				{source: "numbers.sort_", want: "sort_by", insertText: "sort_by", kind: languageservice.CompletionMethod},
+				{source: "numbers.sort_d", want: "sort_descending", insertText: "sort_descending()", kind: languageservice.CompletionMethod},
 				{source: "[1, 2, 3].no", want: "none?", insertText: "none?", kind: languageservice.CompletionMethod},
 				{source: "0.25.to_", want: "to_i", insertText: "to_i()", kind: languageservice.CompletionMethod},
 				{source: "0.25.to_", want: "to_s", insertText: "to_s()", kind: languageservice.CompletionMethod},

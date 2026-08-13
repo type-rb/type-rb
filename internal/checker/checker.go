@@ -3960,9 +3960,16 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		itemType := elementType
 		predicate := n.Operation == "any?" || n.Operation == "all?" || n.Operation == "none?" || n.Operation == "find" || n.Operation == "find_index"
-		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce" || predicate
+		sortBy := n.Operation == "sort_by" || n.Operation == "sort_by_descending"
+		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce" || predicate || sortBy
+		if sortBy && sourceType.Kind != types.Array {
+			c.error(n.Source.Span(), fmt.Sprintf("%s is available only on Array, got %s", n.Operation, sourceType))
+		}
 		if predicate && n.WithIndex {
 			c.error(n.Span(), n.Operation+".with_index is not supported; use each with an explicit accumulator")
+		}
+		if sortBy && n.WithIndex {
+			c.error(n.Span(), n.Operation+".with_index is not supported")
 		}
 		if n.Operation == "each_slice" && !hashSource {
 			if n.SliceSize == nil {
@@ -3982,6 +3989,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		c.result.Iterations[n] = itemType
 		if n.Block != nil {
+			effectsBeforeBlock := len(c.result.ExpressionEffects)
 			blockScope := &scope{parent: sc, values: map[string]symbol{}}
 			accumulatorType := types.Type{Kind: types.Any, Name: "Any"}
 			if n.Operation == "reduce" {
@@ -4075,6 +4083,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 						c.error(n.Block.Span(), fmt.Sprintf("reduce block result is %s, expected %s", blockType, accumulatorType))
 					}
 					typ = accumulatorType
+				case "sort_by", "sort_by_descending":
+					if !portableOrderType(blockType) {
+						c.error(n.Block.Span(), fmt.Sprintf("%s block result must have portable natural order, got %s", n.Operation, blockType))
+					}
+					if len(c.result.ExpressionEffects) != effectsBeforeBlock {
+						c.error(n.Block.Span(), fmt.Sprintf("%s block must not use operations that may fail", n.Operation))
+					}
+					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{elementType}}
 				}
 			} else {
 				c.loopDepth++
@@ -4377,6 +4393,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.checkCodecApplication(n, library.Intrinsic, argumentTypes[0])
 				}
 				c.checkLibraryEqualityRequirements(n.Span(), binding.Name, *library)
+				c.checkLibraryOrderingRequirements(n.Span(), binding.Name, *library)
 			}
 		}
 		if member, ok := c.external[n.Callee]; ok {
@@ -5174,6 +5191,22 @@ func (c *Checker) checkLibraryEqualityRequirements(span token.Span, name string,
 			c.error(span, fmt.Sprintf("portable equality is not defined for %s, required by %s()", typ, name))
 		}
 	}
+}
+
+func (c *Checker) checkLibraryOrderingRequirements(span token.Span, name string, symbol stdlib.Symbol) {
+	for _, typ := range symbol.OrderingTypes {
+		if typ.Kind == types.Invalid || len(unresolvedLibraryTypeParameters(symbol, typ)) > 0 {
+			continue
+		}
+		if !portableOrderType(typ) {
+			c.error(span, fmt.Sprintf("portable natural order is not defined for %s, required by %s()", typ, name))
+		}
+	}
+}
+
+func portableOrderType(typ types.Type) bool {
+	typ = scalarType(typ)
+	return !typ.Nullable && (typ.Kind == types.Int || typ.Kind == types.Float || typ.Kind == types.String)
 }
 
 func (c *Checker) requireMutable(expression ast.Expression, sc *scope, action string) {

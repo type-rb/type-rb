@@ -295,6 +295,11 @@ values.push(3)
 first := values.shift()
 values.unshift(0)
 reversed := arrays.reverse(values)
+ascending := values.sort()
+descending := values.sort_descending()
+ranked := ["second", "first"].sort_by do |label|
+	label.size()
+end
 known := values.include?(2)
 occurrences := arrays.count(values, 2)
 has_even := values.any? do |value|
@@ -327,8 +332,16 @@ removed := hashes.delete(labels, 1)
 
 Arrays provide size, emptiness, strict `fetch`, safe `try_fetch`, `first`,
 `last`, shallow `dup`, mutable `push`/`unshift`, mutable strict `pop`/`shift`,
-non-destructive shallow `reverse`, value membership, and occurrence counting.
-`Array<String>` also provides `join`.
+non-destructive shallow `reverse`, stable non-destructive sorting, value
+membership, and occurrence counting. `Array<String>` also provides `join`.
+
+`sort()` and `sort_descending()` order an Array of `Integer`, `Float`, or
+`String`. `sort_by` and `sort_by_descending` evaluate one non-fallible key
+expression per element and accept the same key types. All four operations are
+stable, including descending order. Strings use Unicode code point order,
+independent of locale. Float `NaN` values sort after ordinary values in either
+direction, and negative and positive zero compare as equal. Custom comparator
+and locale-sensitive ordering APIs remain future design work.
 
 `any?`, `all?`, and `none?` evaluate a typed Boolean predicate from left to
 right and stop as soon as the result is known. Empty Arrays return `false` for

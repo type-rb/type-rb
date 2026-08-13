@@ -524,6 +524,21 @@ Membership and occurrence counting use portable `==` and are therefore
 available for numeric, Boolean, String, and payloadless enum elements. They do
 not implicitly enable target-native structural equality for nested values.
 
+Array sorting is stable and returns a new Array:
+
+```trb
+ascending := [3, 1, 2].sort()
+descending := [3, 1, 2].sort_descending()
+shortest_first := ["three", "one", "four"].sort_by do |word|
+	word.size()
+end
+```
+
+Natural ordering and `sort_by` keys currently support non-nullable `Integer`,
+`Float`, and `String`. Key expressions are evaluated exactly once per element
+and cannot use an operation that may fail. Equal values retain their original
+order, including with `sort_descending` and `sort_by_descending`.
+
 Arrays, integer ranges, and hashes support structured iteration:
 
 ```trb

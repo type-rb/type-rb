@@ -683,7 +683,7 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 		}
 		iteration.Source = member.Receiver
 		iteration.Operation = member.Name
-		if member.Name == "each" || member.Name == "map" || member.Name == "select" || member.Name == "any?" || member.Name == "all?" || member.Name == "none?" || member.Name == "find" || member.Name == "find_index" {
+		if member.Name == "each" || member.Name == "map" || member.Name == "select" || member.Name == "any?" || member.Name == "all?" || member.Name == "none?" || member.Name == "find" || member.Name == "find_index" || member.Name == "sort_by" || member.Name == "sort_by_descending" {
 			if len(node.Arguments) != 0 {
 				p.errorAt(node.Span(), member.Name+" does not take arguments")
 			}
@@ -706,7 +706,7 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 
 func portableIterationOperation(name string) bool {
 	switch name {
-	case "each", "each_slice", "map", "select", "reduce", "any?", "all?", "none?", "find", "find_index":
+	case "each", "each_slice", "map", "select", "reduce", "any?", "all?", "none?", "find", "find_index", "sort_by", "sort_by_descending":
 		return true
 	default:
 		return false

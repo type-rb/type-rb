@@ -440,6 +440,17 @@ Empty Arrays produce `false`, `true`, and `true` for the predicates;
 `find` and `find_index` return a nullable element and nullable `Integer`, with
 `nil` for no match. Indexed predicate blocks are not currently enabled.
 
+Array sorting is stable and non-destructive. `sort()` and
+`sort_descending()` use the element's portable natural order. `sort_by` and
+`sort_by_descending` accept one expression whose key is evaluated exactly once
+per element; the key expression cannot use an operation that may fail. Equal
+elements or keys retain their input order in both directions. Portable natural
+order currently covers non-nullable `Integer`, `Float`, and `String`: numeric
+values use numeric order, Strings use Unicode code point order without locale
+collation, and Float `NaN` values follow all ordinary numbers in both
+directions. Negative and positive zero compare as equal. Arbitrary comparators
+and mixed-direction multi-key ordering are not part of the current language.
+
 ### 3.12 Hashes
 
 - A portable hash type is written `Hash<K, V>` with exactly two type
