@@ -1664,6 +1664,18 @@ func (g *generator) transform(transform *ir.Transform) string {
 			matched = "false"
 		}
 		return "func() bool { for _, " + item + " := range " + source + " { " + itemUse + "if " + match + " { return " + matched + " } }; return " + initial + " }()"
+	case "find":
+		found := "&" + item
+		if len(transform.Source.ExprType().Args) > 0 {
+			elementType := transform.Source.ExprType().Args[0]
+			if g.goType(elementType) == g.goType(transform.ExprType()) {
+				found = item
+			}
+		}
+		return "func() " + g.goType(transform.ExprType()) + " { for _, " + item + " := range " + source + " { " + itemUse + "if " + value + " { return " + found + " } }; return nil }()"
+	case "find_index":
+		index := "__trbIndex" + suffix
+		return "func() " + g.goType(transform.ExprType()) + " { for " + index + ", " + item + " := range " + source + " { " + itemUse + "if " + value + " { " + result + " := " + index + "; return &" + result + " } }; return nil }()"
 	case "reduce":
 		accumulator := goBindingIdentifier(transform.Accumulator)
 		binding := ""

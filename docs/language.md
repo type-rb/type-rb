@@ -576,6 +576,14 @@ end
 none_negative := [1, 20, 3].none? do |value|
 	value < 0
 end
+
+first_large := [1, 20, 3].find do |value|
+	value > 10
+end
+
+first_large_index := [1, 20, 3].find_index do |value|
+	value > 10
+end
 ```
 
 These transformations currently operate on Arrays. The current alpha accepts
@@ -585,7 +593,9 @@ are available independently.
 
 `any?`, `all?`, and `none?` short-circuit and require a non-nullable Boolean
 result. On an empty Array, they return `false`, `true`, and `true`,
-respectively.
+respectively. `find` and `find_index` use the same predicate and stop at the
+first match. They return a nullable element or nullable `Integer`; an empty or
+unmatched Array returns `nil`.
 
 ## Result and fallible effects
 

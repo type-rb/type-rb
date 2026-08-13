@@ -391,7 +391,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			return iteration
 		}
 		if iteration, ok := n.Expression.(*ast.IterationExpression); ok {
-			if iteration.Operation == "map" || iteration.Operation == "select" || iteration.Operation == "reduce" || iteration.Operation == "any?" || iteration.Operation == "all?" || iteration.Operation == "none?" {
+			if iteration.Operation == "map" || iteration.Operation == "select" || iteration.Operation == "reduce" || iteration.Operation == "any?" || iteration.Operation == "all?" || iteration.Operation == "none?" || iteration.Operation == "find" || iteration.Operation == "find_index" {
 				return &ir.ExpressionStatement{Base: base(n.Base), Expression: l.expression(iteration)}
 			}
 			result := &ir.Iterate{

@@ -1133,6 +1133,20 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 			}
 			continue
 		}
+		if node.Operation == "find" || node.Operation == "find_index" {
+			matched, ok := value.Data.(bool)
+			if !ok {
+				return Value{}, fmt.Errorf("%s block result must be Boolean", node.Operation)
+			}
+			if matched {
+				if node.Operation == "find_index" {
+					return Value{Type: node.ExprType(), Data: int64(index)}, nil
+				}
+				item.Type = node.ExprType()
+				return item, nil
+			}
+			continue
+		}
 		result.Items = append(result.Items, value)
 	}
 	if node.Operation == "any?" {
@@ -1140,6 +1154,9 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 	}
 	if node.Operation == "all?" || node.Operation == "none?" {
 		return Value{Type: node.ExprType(), Data: true}, nil
+	}
+	if node.Operation == "find" || node.Operation == "find_index" {
+		return Value{Type: node.ExprType(), Data: nil}, nil
 	}
 	return Value{Type: node.ExprType(), Data: result}, nil
 }
