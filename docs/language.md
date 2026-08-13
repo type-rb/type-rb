@@ -547,8 +547,7 @@ end
 `return` exits the enclosing function, including from an iterator block.
 Hash iteration always binds key and value separately. Its enumeration order is
 unspecified, and the entries are captured in a shallow snapshot before the
-first iteration. Indexed and transforming Hash iteration is not part of the
-current alpha.
+first iteration.
 
 Value-producing collection blocks are part of the typed IR:
 

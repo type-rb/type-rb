@@ -466,8 +466,7 @@ Empty Arrays produce `false`, `true`, and `true` for the predicates;
   structured iteration IR. It requires exactly two block parameters and has
   the same `break`, `next`, and enclosing-method `return` behavior as Array
   iteration. Iteration uses a shallow entry snapshot captured before the first
-  block call, while enumeration order is unspecified. Hash `each.with_index`,
-  `each_slice`, `map`, `select`, and `reduce` are not currently enabled.
+  block call, while enumeration order is unspecified.
 - `hash[key]` is a required lookup and raises a runtime error when the key is
   absent in every backend and the REPL.
 - Compound assignment to a Hash entry is reserved until its evaluate-once and
