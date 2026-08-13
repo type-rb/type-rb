@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -16,6 +17,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return value
 	}
 	if generated, ok := g.ormIntrinsic(name, call, arguments); ok {
+		if effectplan.ORMOperation(name, call.Fails) {
+			return "__trbOrm.withScope(__trbScope, async () => " + generated + ")"
+		}
 		return generated
 	}
 	if name == "trb.internal.runtime.fail" {
@@ -207,9 +211,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return "trb_web_serve(" + config + ")"
 	case "trb.web.testing.dispatch":
-		return "trb_web_dispatch(" + arguments[0] + ")"
+		return "trb_web_dispatch(__trbScope, " + arguments[0] + ")"
 	case "trb.web.middleware.logger.call":
 		return tsWebLogger(call, arguments)
+	case "trb.web.middleware.timeout.call":
+		return tsWebTimeout(call, arguments)
 	case "trb.web.middleware.compression.gzip":
 		return tsWebGzip(arguments[0])
 	case "trb.std.strings.length":
@@ -563,7 +569,11 @@ func tsWebLogger(call *ir.Call, arguments []string) string {
 	if len(arguments) > 2 {
 		options = "const loggerOptions: { stderr: boolean; exclude_paths: string[] } | undefined = " + arguments[2] + "; "
 	}
-	return "(async (): Promise<" + tsType(call.ExprType()) + "> => { const loggerContext = " + arguments[0] + "; const loggerNextHandler = " + arguments[1] + "; " + options + "const excluded = loggerOptions !== undefined && loggerOptions.exclude_paths.includes(loggerContext.__trb_request.__trb_path); if (excluded) return await loggerNextHandler.call(loggerContext); const started = performance.now(); let status = 500; try { const response = await loggerNextHandler.call(loggerContext); status = response.__trb_status; return response; } finally { const entry = JSON.stringify({ timestamp: new Date().toISOString(), level: status >= 500 ? \"error\" : \"info\", event: \"http_request\", method: loggerContext.__trb_request.__trb_method.to_s(), path: loggerContext.__trb_request.__trb_path, status, duration_ms: performance.now() - started }); if (loggerOptions !== undefined && loggerOptions.stderr) console.error(entry); else console.log(entry); } })()"
+	return "(async (): Promise<" + tsType(call.ExprType()) + "> => { const loggerContext = " + arguments[0] + "; const loggerNextHandler = " + arguments[1] + "; " + options + "const excluded = loggerOptions !== undefined && loggerOptions.exclude_paths.includes(loggerContext.__trb_request.__trb_path); if (excluded) return await loggerNextHandler.call(__trbScope, loggerContext); const started = performance.now(); let status = 500; try { const response = await loggerNextHandler.call(__trbScope, loggerContext); status = response.__trb_status; return response; } finally { const entry = JSON.stringify({ timestamp: new Date().toISOString(), level: status >= 500 ? \"error\" : \"info\", event: \"http_request\", method: loggerContext.__trb_request.__trb_method.to_s(), path: loggerContext.__trb_request.__trb_path, status, duration_ms: performance.now() - started }); if (loggerOptions !== undefined && loggerOptions.stderr) console.error(entry); else console.log(entry); } })()"
+}
+
+func tsWebTimeout(call *ir.Call, arguments []string) string {
+	return "(async (): Promise<" + tsType(call.ExprType()) + "> => { const controller = new AbortController(); const abort = () => controller.abort(); if (__trbScope?.aborted) abort(); else __trbScope?.addEventListener(\"abort\", abort, { once: true }); const parentDeadline = (__trbScope as (AbortSignal & { __trbDeadline?: number }) | undefined)?.__trbDeadline; const requestedDeadline = performance.now() + " + arguments[2] + "; const deadline = parentDeadline === undefined ? requestedDeadline : Math.min(parentDeadline, requestedDeadline); Object.defineProperties(controller.signal, { __trbDeadline: { value: deadline }, __trbCancel: { value: abort } }); let timer: ReturnType<typeof setTimeout> | undefined; const timeout = new Promise<" + tsType(call.ExprType()) + ">((resolve) => { timer = setTimeout(() => { abort(); resolve(" + arguments[3] + "); }, Math.max(0, deadline - performance.now())); }); try { const result = await Promise.race([" + arguments[1] + ".call(controller.signal, " + arguments[0] + "), timeout]); if (controller.signal.aborted && performance.now() >= deadline) return " + arguments[3] + "; return result; } catch (error) { if (controller.signal.aborted && performance.now() >= deadline) return " + arguments[3] + "; throw error; } finally { if (timer !== undefined) clearTimeout(timer); __trbScope?.removeEventListener(\"abort\", abort); } })()"
 }
 
 func tsWebGzip(value string) string {

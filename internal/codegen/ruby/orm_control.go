@@ -20,7 +20,9 @@ func (g *generator) ormStructuredBlock(block *ir.StructuredBlock) {
 		parent = g.expr(member.Receiver)
 	}
 
-	g.line(raw+" = TrbOrmRuntime.transaction_result("+parent+") do |"+transaction+"|", block.TrailingComment)
+	g.line(raw+" = TrbOrmRuntime.with_scope(__trb_scope) do", block.TrailingComment)
+	g.indent++
+	g.line("TrbOrmRuntime.transaction_result("+parent+") do |"+transaction+"|", "")
 	g.indent++
 	g.line("-> do", "")
 	g.indent++
@@ -31,6 +33,8 @@ func (g *generator) ormStructuredBlock(block *ir.StructuredBlock) {
 	g.line("Result::Ok.new("+g.expr(block.Value)+")", "")
 	g.indent--
 	g.line("end.call", "")
+	g.indent--
+	g.line("end", "")
 	g.indent--
 	g.line("end", "")
 	g.ormAssignStructuredResult(raw, block.Result, block.CaptureEffect, block.PropagateSuccess)
@@ -56,7 +60,9 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		batchSize = g.expr(iteration.SliceSize)
 	}
 
-	g.line(raw+" = -> do", iteration.TrailingComment)
+	g.line(raw+" = TrbOrmRuntime.with_scope(__trb_scope) do", iteration.TrailingComment)
+	g.indent++
+	g.line("-> do", "")
 	g.indent++
 	g.line("begin", "")
 	g.indent++
@@ -101,6 +107,8 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	g.line("end", "")
 	g.indent--
 	g.line("end.call", "")
+	g.indent--
+	g.line("end", "")
 	g.ormAssignIterationResult(raw, iteration)
 }
 

@@ -246,6 +246,24 @@ end
 			},
 		},
 	},
+	"trb/internal/web/timeout": {
+		Path:     "trb/internal/web/timeout",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"call": {
+				Name:      "call",
+				Intrinsic: "trb.web.middleware.timeout.call",
+				Parameters: []Parameter{
+					{Name: "context", Type: types.FromName("Context")},
+					{Name: "next_handler", Type: types.FromName("Next")},
+					{Name: "milliseconds", Type: integerType},
+					{Name: "timeout_response", Type: types.FromName("Response")},
+				},
+				Return: types.FromName("Response"),
+			},
+		},
+	},
 	"trb/std/path": {
 		Path:       "trb/std/path",
 		ModulePath: "trb/std/path/index",

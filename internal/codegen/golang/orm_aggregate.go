@@ -47,6 +47,7 @@ func (g *generator) ormAggregate(call *ir.Call, arguments []string, operation st
 	if _, supported := ormintegration.AggregateResultType(operation, column); !supported {
 		return "nil"
 	}
+	query = g.ormExecutionQuery(model, query)
 	return g.ormModelQualifier(model) + goORMAggregate(model, operation, columnName) + "(" + query + ")"
 }
 
@@ -70,7 +71,7 @@ func (g *generator) ormAggregateRuntime(adapter ormintegration.Adapter, model or
 
 	g.line("func " + goORMAggregate(model, operation, column.Name) + "(query " + queryType + ") " + g.ormResultType(resultType) + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(resultType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(projection) + ")")
 	g.line("rows, err := database.Query(" + strconv.Quote("SELECT "+expression+" FROM (") + "+statement+" + strconv.Quote(") AS trb_aggregate") + ", arguments...)")

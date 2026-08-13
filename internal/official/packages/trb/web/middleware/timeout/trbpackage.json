@@ -1,0 +1,7 @@
+{
+  "name": "trb/web/middleware/timeout",
+  "version": "0.1.0",
+  "module": "trb/web/middleware/timeout/index",
+  "source": "src/index.trb",
+  "nativeDependencies": {}
+}

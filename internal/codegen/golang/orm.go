@@ -28,7 +28,8 @@ func (g *generator) ormWhere(call *ir.Call) string {
 	if !exists {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
+	query := g.ormModelQualifier(model) + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
+	return g.ormExecutionQuery(model, query)
 }
 
 func (g *generator) ormInitialQuery(call *ir.Call) (ormintegration.Model, string, bool) {
@@ -44,7 +45,7 @@ func (g *generator) ormInitialQuery(call *ir.Call) (ormintegration.Model, string
 	if !exists {
 		return ormintegration.Model{}, "", false
 	}
-	query := g.ormModelQualifier(model) + goORMWhere(model) + "([]string{}, []string{}, []any{})"
+	query := g.ormExecutionQuery(model, g.ormModelQualifier(model)+goORMWhere(model)+"([]string{}, []string{}, []any{})")
 	return model, query, true
 }
 
@@ -112,7 +113,7 @@ func (g *generator) ormUsing(call *ir.Call, arguments []string) string {
 	if !exists {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMUsing(model) + "(" + arguments[0] + ")"
+	return g.ormExecutionQuery(model, g.ormModelQualifier(model)+goORMUsing(model)+"("+arguments[0]+")")
 }
 
 func (g *generator) ormNot(call *ir.Call) string {
@@ -128,7 +129,8 @@ func (g *generator) ormNot(call *ir.Call) string {
 	if !exists {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMNot(model) + "(" + g.ormPredicateArguments(call) + ")"
+	query := g.ormModelQualifier(model) + goORMNot(model) + "(" + g.ormPredicateArguments(call) + ")"
+	return g.ormExecutionQuery(model, query)
 }
 
 func (g *generator) ormFindBy(call *ir.Call) string {
@@ -146,6 +148,7 @@ func (g *generator) ormFindBy(call *ir.Call) string {
 	}
 	qualifier := g.ormModelQualifier(model)
 	query := qualifier + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
+	query = g.ormExecutionQuery(model, query)
 	return qualifier + goORMFirst(model) + "(" + query + ")"
 }
 
@@ -164,6 +167,7 @@ func (g *generator) ormExists(call *ir.Call) string {
 	}
 	qualifier := g.ormModelQualifier(model)
 	query := qualifier + goORMWhere(model) + "(" + g.ormPredicateArguments(call) + ")"
+	query = g.ormExecutionQuery(model, query)
 	return qualifier + goORMExists(model) + "(" + query + ")"
 }
 
@@ -186,6 +190,7 @@ func (g *generator) ormFind(call *ir.Call) string {
 	}
 	qualifier := g.ormModelQualifier(model)
 	query := qualifier + goORMWhere(model) + "([]string{" + strconv.Quote(primaryKey.Name) + "}, []string{\"=\"}, []any{" + g.expr(call.Arguments[0].Value) + "})"
+	query = g.ormExecutionQuery(model, query)
 	return qualifier + goORMFirst(model) + "(" + query + ")"
 }
 
@@ -194,7 +199,8 @@ func (g *generator) ormCreate(call *ir.Call) string {
 	if !ok {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMCreate(model) + "([]string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+	query := g.ormExecutionQuery(model, g.ormModelQualifier(model)+goORMWhere(model)+"([]string{}, []string{}, []any{})")
+	return g.ormModelQualifier(model) + goORMCreateScoped(model) + "(" + query + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
 }
 
 func (g *generator) ormScopeFind(call *ir.Call, arguments []string) string {
@@ -208,6 +214,7 @@ func (g *generator) ormScopeFind(call *ir.Call, arguments []string) string {
 	}
 	qualifier := g.ormModelQualifier(model)
 	filtered := qualifier + goORMQueryWhere(model) + "(" + query + ", []string{" + strconv.Quote(primaryKey.Name) + "}, []string{\"=\"}, []any{" + g.expr(call.Arguments[0].Value) + "})"
+	filtered = g.ormExecutionQuery(model, filtered)
 	return qualifier + goORMFirst(model) + "(" + filtered + ")"
 }
 
@@ -252,7 +259,8 @@ func (g *generator) ormBuild(call *ir.Call) string {
 	if !ok {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMBuild(model) + "([]string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+	query := g.ormExecutionQuery(model, g.ormModelQualifier(model)+goORMWhere(model)+"([]string{}, []string{}, []any{})")
+	return g.ormModelQualifier(model) + goORMBuildScoped(model) + "(" + query + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
 }
 
 func (g *generator) ormModelWriteArguments(call *ir.Call) (ormintegration.Model, []string, []string, bool) {
@@ -529,6 +537,7 @@ func (g *generator) ormQueryFindBy(call *ir.Call, arguments []string) string {
 	}
 	qualifier := g.ormModelQualifier(model)
 	filtered := qualifier + goORMQueryWhere(model) + "(" + query + ", " + g.ormPredicateArguments(call) + ")"
+	filtered = g.ormExecutionQuery(model, filtered)
 	return qualifier + goORMFirst(model) + "(" + filtered + ")"
 }
 
@@ -545,7 +554,7 @@ func (g *generator) ormQueryUpdateAll(call *ir.Call, arguments []string) string 
 			values = append(values, g.expr(argument.Value))
 		}
 	}
-	return g.ormModelQualifier(model) + goORMUpdateAll(model) + "(" + query + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
+	return g.ormModelQualifier(model) + goORMUpdateAll(model) + "(" + g.ormExecutionQuery(model, query) + ", []string{" + strings.Join(columns, ", ") + "}, []any{" + strings.Join(values, ", ") + "})"
 }
 
 func (g *generator) ormClassUpdateAll(call *ir.Call) string {
@@ -590,7 +599,7 @@ func (g *generator) ormQueryInteger(call *ir.Call, arguments []string, operation
 	if !ok || len(arguments) < 2 {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + operation(model) + "(" + query + ", " + arguments[1] + ")"
+	return g.ormModelQualifier(model) + operation(model) + "(" + g.ormExecutionQuery(model, query) + ", " + arguments[1] + ")"
 }
 
 func (g *generator) ormQueryTerminal(call *ir.Call, arguments []string, operation func(ormintegration.Model) string) string {
@@ -598,7 +607,11 @@ func (g *generator) ormQueryTerminal(call *ir.Call, arguments []string, operatio
 	if !ok {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + operation(model) + "(" + query + ")"
+	return g.ormModelQualifier(model) + operation(model) + "(" + g.ormExecutionQuery(model, query) + ")"
+}
+
+func (g *generator) ormExecutionQuery(model ormintegration.Model, query string) string {
+	return g.ormModelQualifier(model) + goORMExecutionScope(model) + "(" + query + ", __trbScope)"
 }
 
 func (g *generator) ormResultType(value types.Type) string {
@@ -782,6 +795,7 @@ func (g *generator) ormLoadAssociation(call *ir.Call, reload bool) string {
 	getter := receiver + "." + goORMAssociationGetter(association.Name) + "()"
 	setter := receiver + "." + goORMAssociationSetter(association.Name)
 	query := g.ormAssociationQuery(call)
+	query = g.ormExecutionQuery(target, query)
 	qualifier := g.ormModelQualifier(target)
 	load := qualifier + goORMLoader(target) + "(" + query + ")"
 	if association.Kind == ormintegration.BelongsTo {
@@ -827,6 +841,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		qualifier := g.ormModelQualifier(model)
 		querySource = qualifier + goORMWhere(model) + "([]string{}, []string{}, []any{})"
 	}
+	querySource = g.ormExecutionQuery(model, querySource)
 	batchKey, ok := model.BatchKey()
 	if !ok {
 		return
@@ -1039,7 +1054,7 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	if len(models) == 0 {
 		return
 	}
-	g.requireImport("context", "")
+	g.requireImport("context", "trbcontext")
 	g.requireImport("database/sql", "sql")
 	g.requireImport("net", "")
 	g.requireImport("reflect", "")
@@ -1049,27 +1064,33 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	}
 	g.line("type trbOrmRange struct { start any; end any }")
 	g.b.WriteByte('\n')
-	g.line("type trbOrmExecutor interface {")
+	g.line("type trbOrmExecutorTarget interface {")
 	g.indent++
-	g.line("Exec(string, ...any) (sql.Result, error)")
-	g.line("Query(string, ...any) (*sql.Rows, error)")
-	g.line("QueryRow(string, ...any) *sql.Row")
+	g.line("ExecContext(trbcontext.Context, string, ...any) (sql.Result, error)")
+	g.line("QueryContext(trbcontext.Context, string, ...any) (*sql.Rows, error)")
+	g.line("QueryRowContext(trbcontext.Context, string, ...any) *sql.Row")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func trbOrmExecutorForTransaction(transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction) (trbOrmExecutor, *" + g.goType(types.FromName("DbError")) + ") {")
+	g.line("type trbOrmExecutor struct { target trbOrmExecutorTarget; scope trbcontext.Context }")
+	g.line("func (executor trbOrmExecutor) context() trbcontext.Context { if executor.scope != nil { return executor.scope }; return trbcontext.Background() }")
+	g.line("func (executor trbOrmExecutor) Exec(statement string, arguments ...any) (sql.Result, error) { return executor.target.ExecContext(executor.context(), statement, arguments...) }")
+	g.line("func (executor trbOrmExecutor) Query(statement string, arguments ...any) (*sql.Rows, error) { return executor.target.QueryContext(executor.context(), statement, arguments...) }")
+	g.line("func (executor trbOrmExecutor) QueryRow(statement string, arguments ...any) *sql.Row { return executor.target.QueryRowContext(executor.context(), statement, arguments...) }")
+	g.b.WriteByte('\n')
+	g.line("func trbOrmExecutorForTransaction(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction) (trbOrmExecutor, *" + g.goType(types.FromName("DbError")) + ") {")
 	g.indent++
-	g.line("if transaction != nil { return transaction, nil }")
+	g.line("if transaction != nil { return trbOrmExecutor{target: transaction, scope: scope}, nil }")
 	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { value := trbOrmError(err, " + g.ormErrorKind("Connection") + ", \"database connection failed\"); return nil, &value }")
-	g.line("return database, nil")
+	g.line("if err != nil { value := trbOrmError(err, " + g.ormErrorKind("Connection") + ", \"database connection failed\"); return trbOrmExecutor{}, &value }")
+	g.line("return trbOrmExecutor{target: database, scope: scope}, nil")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func trbOrmExecutorForQuery(transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, lock bool) (trbOrmExecutor, *" + g.goType(types.FromName("DbError")) + ") {")
+	g.line("func trbOrmExecutorForQuery(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, lock bool) (trbOrmExecutor, *" + g.goType(types.FromName("DbError")) + ") {")
 	g.indent++
-	g.line("if lock && transaction == nil { value := " + g.ormErrorValue("InvalidData", "database lock requires an explicit transaction scope") + "; return nil, &value }")
-	g.line("return trbOrmExecutorForTransaction(transaction)")
+	g.line("if lock && transaction == nil { value := " + g.ormErrorValue("InvalidData", "database lock requires an explicit transaction scope") + "; return trbOrmExecutor{}, &value }")
+	g.line("return trbOrmExecutorForTransaction(scope, transaction)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1241,7 +1262,7 @@ func (g *generator) ormEnumColumnRuntime(enum *ormintegration.EnumColumn) {
 func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter ormintegration.Adapter) {
 	g.requireImport("database/sql", "sql")
 	g.requireImport(adapter.GoDriverImport, "_")
-	g.requireImport("context", "")
+	g.requireImport("context", "trbcontext")
 	g.requireImport("strconv", "")
 	g.requireImport("sync", "")
 	if adapter.Name == "mysql" {
@@ -1287,6 +1308,7 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.b.WriteByte('\n')
 	g.line("type TrbOrmTransaction struct {")
 	g.indent++
+	g.line("scope trbcontext.Context")
 	g.line("transaction *sql.Tx")
 	g.line("connection *sql.Conn")
 	g.line("parent *TrbOrmTransaction")
@@ -1330,19 +1352,20 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.line("func (subquery *TrbOrmSubquery[T]) TrbOrmBuild(arguments *[]any) string { return subquery.build(arguments) }")
 	g.line("func (subquery *TrbOrmSubquery[T]) TrbOrmTransactionScope() *TrbOrmTransaction { return subquery.transaction }")
 	g.b.WriteByte('\n')
-	g.line("func TrbOrmBeginTransaction() (*TrbOrmTransaction, *DbError) {")
+	g.line("func TrbOrmBeginTransaction(scope trbcontext.Context) (*TrbOrmTransaction, *DbError) {")
 	g.indent++
+	g.line("if scope == nil { scope = trbcontext.Background() }")
 	g.line("database, err := TrbOrmDatabase()")
 	g.line("if err != nil { value := DbError{Kind: DbErrorKindConnection, Message: \"database connection failed\"}; return nil, &value }")
 	if adapter.Name == "sqlite" {
-		g.line("connection, err := database.Conn(context.Background())")
+		g.line("connection, err := database.Conn(scope)")
 		g.line("if err != nil { value := DbError{Kind: DbErrorKindConnection, Message: \"database connection failed\"}; return nil, &value }")
-		g.line("if _, err := connection.ExecContext(context.Background(), \"BEGIN IMMEDIATE\"); err != nil { _ = connection.Close(); value := DbError{Kind: DbErrorKindQuery, Message: \"database transaction failed to begin\"}; return nil, &value }")
-		g.line("return &TrbOrmTransaction{connection: connection}, nil")
+		g.line("if _, err := connection.ExecContext(scope, \"BEGIN IMMEDIATE\"); err != nil { _ = connection.Close(); value := DbError{Kind: DbErrorKindQuery, Message: \"database transaction failed to begin\"}; return nil, &value }")
+		g.line("return &TrbOrmTransaction{scope: scope, connection: connection}, nil")
 	} else {
-		g.line("transaction, err := database.Begin()")
+		g.line("transaction, err := database.BeginTx(scope, nil)")
 		g.line("if err != nil { value := DbError{Kind: DbErrorKindQuery, Message: \"database transaction failed to begin\"}; return nil, &value }")
-		g.line("return &TrbOrmTransaction{transaction: transaction}, nil")
+		g.line("return &TrbOrmTransaction{scope: scope, transaction: transaction}, nil")
 	}
 	g.indent--
 	g.line("}")
@@ -1356,7 +1379,7 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.line("savepoint := \"trb_savepoint_\" + strconv.Itoa(root.nextSavepoint)")
 	g.line("root.mutex.Unlock()")
 	g.line("if _, err := parent.Exec(\"SAVEPOINT \" + savepoint); err != nil { value := DbError{Kind: DbErrorKindQuery, Message: \"database savepoint failed to begin\"}; return nil, &value }")
-	g.line("return &TrbOrmTransaction{transaction: parent.transaction, connection: parent.connection, parent: parent, savepoint: savepoint}, nil")
+	g.line("return &TrbOrmTransaction{scope: parent.scope, transaction: parent.transaction, connection: parent.connection, parent: parent, savepoint: savepoint}, nil")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1379,7 +1402,7 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.indent++
 	g.line("if !transaction.active() { value := DbError{Kind: " + goConstantIdentifier("DbErrorKind", "InvalidData") + ", Message: \"database transaction is closed\"}; return &value }")
 	g.line("if transaction.savepoint != \"\" { if _, err := transaction.Exec(\"RELEASE SAVEPOINT \" + transaction.savepoint); err != nil { value := DbError{Kind: DbErrorKindQuery, Message: \"database savepoint failed to commit\"}; return &value }; transaction.closed = true; return nil }")
-	g.line("if transaction.connection != nil { if _, err := transaction.connection.ExecContext(context.Background(), \"COMMIT\"); err != nil { value := DbError{Kind: DbErrorKindQuery, Message: \"database transaction failed to commit\"}; return &value }; transaction.closed = true; _ = transaction.connection.Close(); return nil }")
+	g.line("if transaction.connection != nil { if _, err := transaction.connection.ExecContext(transaction.scope, \"COMMIT\"); err != nil { value := DbError{Kind: DbErrorKindQuery, Message: \"database transaction failed to commit\"}; return &value }; transaction.closed = true; _ = transaction.connection.Close(); return nil }")
 	g.line("if err := transaction.transaction.Commit(); err != nil { value := DbError{Kind: DbErrorKindQuery, Message: \"database transaction failed to commit\"}; return &value }")
 	g.line("transaction.closed = true")
 	g.line("return nil")
@@ -1397,15 +1420,19 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.line("return nil")
 	g.indent--
 	g.line("}")
-	g.line("if transaction.connection != nil { _, err := transaction.connection.ExecContext(context.Background(), \"ROLLBACK\"); _ = transaction.connection.Close(); if err != nil { value := DbError{Kind: DbErrorKindQuery, Message: \"database transaction failed to roll back\"}; return &value }; return nil }")
+	g.line("if transaction.connection != nil { _, err := transaction.connection.ExecContext(trbcontext.Background(), \"ROLLBACK\"); _ = transaction.connection.Close(); if err != nil { value := DbError{Kind: DbErrorKindQuery, Message: \"database transaction failed to roll back\"}; return &value }; return nil }")
 	g.line("if err := transaction.transaction.Rollback(); err != nil { value := DbError{Kind: DbErrorKindQuery, Message: \"database transaction failed to roll back\"}; return &value }")
 	g.line("return nil")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func (transaction *TrbOrmTransaction) Exec(statement string, arguments ...any) (sql.Result, error) { if transaction.connection != nil { return transaction.connection.ExecContext(context.Background(), statement, arguments...) }; return transaction.transaction.Exec(statement, arguments...) }")
-	g.line("func (transaction *TrbOrmTransaction) Query(statement string, arguments ...any) (*sql.Rows, error) { if transaction.connection != nil { return transaction.connection.QueryContext(context.Background(), statement, arguments...) }; return transaction.transaction.Query(statement, arguments...) }")
-	g.line("func (transaction *TrbOrmTransaction) QueryRow(statement string, arguments ...any) *sql.Row { if transaction.connection != nil { return transaction.connection.QueryRowContext(context.Background(), statement, arguments...) }; return transaction.transaction.QueryRow(statement, arguments...) }")
+	g.line("func (transaction *TrbOrmTransaction) ExecContext(scope trbcontext.Context, statement string, arguments ...any) (sql.Result, error) { if scope == nil { scope = transaction.scope }; if scope == nil { scope = trbcontext.Background() }; if transaction.connection != nil { return transaction.connection.ExecContext(scope, statement, arguments...) }; return transaction.transaction.ExecContext(scope, statement, arguments...) }")
+	g.line("func (transaction *TrbOrmTransaction) QueryContext(scope trbcontext.Context, statement string, arguments ...any) (*sql.Rows, error) { if scope == nil { scope = transaction.scope }; if scope == nil { scope = trbcontext.Background() }; if transaction.connection != nil { return transaction.connection.QueryContext(scope, statement, arguments...) }; return transaction.transaction.QueryContext(scope, statement, arguments...) }")
+	g.line("func (transaction *TrbOrmTransaction) QueryRowContext(scope trbcontext.Context, statement string, arguments ...any) *sql.Row { if scope == nil { scope = transaction.scope }; if scope == nil { scope = trbcontext.Background() }; if transaction.connection != nil { return transaction.connection.QueryRowContext(scope, statement, arguments...) }; return transaction.transaction.QueryRowContext(scope, statement, arguments...) }")
+	g.line("func (transaction *TrbOrmTransaction) Exec(statement string, arguments ...any) (sql.Result, error) { return transaction.ExecContext(transaction.scope, statement, arguments...) }")
+	g.line("func (transaction *TrbOrmTransaction) Query(statement string, arguments ...any) (*sql.Rows, error) { return transaction.QueryContext(transaction.scope, statement, arguments...) }")
+	g.line("func (transaction *TrbOrmTransaction) QueryRow(statement string, arguments ...any) *sql.Row { return transaction.QueryRowContext(transaction.scope, statement, arguments...) }")
+	g.line("func (transaction *TrbOrmTransaction) ExecutionScope() trbcontext.Context { if transaction == nil || transaction.scope == nil { return trbcontext.Background() }; return transaction.scope }")
 	g.b.WriteByte('\n')
 }
 
@@ -1452,7 +1479,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	}
 	g.line(prefix + "func() " + g.goType(rawType) + " {")
 	g.indent++
-	begin := g.ormLifecycleAlias() + ".TrbOrmBeginTransaction()"
+	begin := g.ormLifecycleAlias() + ".TrbOrmBeginTransaction(__trbScope)"
 	if member, ok := block.Call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Name == "Transaction" {
 		begin = g.ormLifecycleAlias() + ".TrbOrmBeginNestedTransaction(" + g.expr(member.Receiver) + ")"
 	}
@@ -1504,7 +1531,7 @@ func (g *generator) ormDialectRuntime(adapter ormintegration.Adapter) {
 	g.line("func trbOrmError(err error, fallback " + errorKind + ", message string) " + errorType + " {")
 	g.indent++
 	g.line("kind := fallback")
-	g.line("if errors.Is(err, context.DeadlineExceeded) {")
+	g.line("if errors.Is(err, trbcontext.DeadlineExceeded) || errors.Is(err, trbcontext.Canceled) {")
 	g.indent++
 	g.line("kind = " + g.ormErrorKind("Timeout"))
 	g.indent--
@@ -1584,13 +1611,14 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("type " + preloadType + " struct {")
 	g.indent++
 	g.line("name string")
-	g.line("load func(*" + g.ormLifecycleAlias() + ".TrbOrmTransaction, []*" + goIdentifier(model.Name, true) + ") *" + g.goType(types.FromName("DbError")))
+	g.line("load func(trbcontext.Context, *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, []*" + goIdentifier(model.Name, true) + ") *" + g.goType(types.FromName("DbError")))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 
 	g.line("type " + queryType + " struct {")
 	g.indent++
+	g.line("scope trbcontext.Context")
 	g.line("transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction")
 	g.line("predicate *" + predicateType)
 	g.line("orders []" + orderType)
@@ -1605,7 +1633,14 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.b.WriteByte('\n')
 	g.line("func " + goORMUsing(model) + "(transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction) " + queryType + " {")
 	g.indent++
-	g.line("return " + queryType + "{transaction: transaction}")
+	g.line("query := " + queryType + "{transaction: transaction}; if transaction != nil { query.scope = transaction.ExecutionScope() }; return query")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMExecutionScope(model) + "(query " + queryType + ", scope trbcontext.Context) " + queryType + " {")
+	g.indent++
+	g.line("query.scope = scope")
+	g.line("return query")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1838,7 +1873,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.b.WriteByte('\n')
 	g.line("func " + goORMDistinct(model) + "(query " + queryType + ") " + queryType + " { query.distinct = true; return query }")
 	g.b.WriteByte('\n')
-	g.line("func " + goORMPreload(model) + "(query " + queryType + ", association string, load func(*" + g.ormLifecycleAlias() + ".TrbOrmTransaction, []*" + goIdentifier(model.Name, true) + ") *" + g.goType(types.FromName("DbError")) + ") " + queryType + " {")
+	g.line("func " + goORMPreload(model) + "(query " + queryType + ", association string, load func(trbcontext.Context, *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, []*" + goIdentifier(model.Name, true) + ") *" + g.goType(types.FromName("DbError")) + ") " + queryType + " {")
 	g.indent++
 	g.line("result := query")
 	g.line("result.preloads = append([]" + preloadType + "(nil), query.preloads...)")
@@ -1962,7 +1997,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	stringType := types.FromName("String")
 	g.line("func " + goORMExplain(model) + "(query " + queryType + ") " + g.ormResultType(stringType) + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(stringType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
 	explainPrefix := "EXPLAIN QUERY PLAN "
@@ -2004,7 +2039,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	modelsType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{modelType}}
 	g.line("func " + goORMLoader(model) + "(query " + queryType + ") " + g.ormResultType(modelsType) + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(modelsType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, " + strconv.Quote(strings.Join(columns, ", ")) + ")")
 	g.line("rows, err := database.Query(statement, arguments...)")
@@ -2024,7 +2059,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("for _, preload := range query.preloads {")
 	g.indent++
 	g.line("if preload.load == nil { panic(\"unsupported ORM preload \" + preload.name) }")
-	g.line("if preloadError := preload.load(query.transaction, result); preloadError != nil { return " + g.ormResultErr(modelsType, "*preloadError") + " }")
+	g.line("if preloadError := preload.load(query.scope, query.transaction, result); preloadError != nil { return " + g.ormResultErr(modelsType, "*preloadError") + " }")
 	g.indent--
 	g.line("}")
 	g.line("return " + g.ormResultOK(modelsType, "result"))
@@ -2068,7 +2103,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	integerType := types.FromName("Integer")
 	g.line("func " + goORMCount(model) + "(query " + queryType + ") " + g.ormResultType(integerType) + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
 	g.line("projection := \"1\"; if query.distinct { projection = " + strconv.Quote(strings.Join(columns, ", ")) + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, projection)")
@@ -2083,7 +2118,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	booleanType := types.FromName("Boolean")
 	g.line("func " + goORMExists(model) + "(query " + queryType + ") " + g.ormResultType(booleanType) + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForQuery(query.transaction, query.lock)")
+	g.line("database, databaseError := trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(booleanType, "*databaseError") + " }")
 	g.line("statement, arguments := " + goORMStatement(model) + "(query, \"1\")")
 	g.line("row := database.QueryRow(\"SELECT EXISTS(\"+statement+\")\", arguments...)")
@@ -2125,16 +2160,16 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, m
 
 	g.line("func " + goORMTypedPreload(model, association) + "(query " + sourceQueryType + ", targetQuery " + targetQueryType + ") " + sourceQueryType + " {")
 	g.indent++
-	g.line("return " + goORMPreload(model) + "(query, " + strconv.Quote(association.Name) + ", func(transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ") *" + g.goType(types.FromName("DbError")) + " {")
+	g.line("return " + goORMPreload(model) + "(query, " + strconv.Quote(association.Name) + ", func(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ") *" + g.goType(types.FromName("DbError")) + " {")
 	g.indent++
-	g.line("return " + function + "(transaction, values, targetQuery)")
+	g.line("return " + function + "(scope, transaction, values, targetQuery)")
 	g.indent--
 	g.line("})")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 
-	g.line("func " + function + "(transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ", targetQuery " + targetQueryType + ") *" + g.goType(types.FromName("DbError")) + " {")
+	g.line("func " + function + "(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ", targetQuery " + targetQueryType + ") *" + g.goType(types.FromName("DbError")) + " {")
 	g.indent++
 	g.line("if targetQuery.transaction != nil { databaseError := " + g.ormErrorValue("InvalidData", "ORM preload query must not have a transaction scope; scope the base query instead") + "; return &databaseError }")
 	g.line("if targetQuery.limit != nil || targetQuery.offset != nil || targetQuery.lock { databaseError := " + g.ormErrorValue("InvalidData", "ORM preload query does not accept limit, offset, or lock") + "; return &databaseError }")
@@ -2161,7 +2196,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, m
 	g.line("return nil")
 	g.indent--
 	g.line("}")
-	g.line("targetQuery.transaction = transaction")
+	g.line("targetQuery.scope = scope; targetQuery.transaction = transaction")
 	g.line("targetQuery = " + g.ormModelQualifier(target) + goORMQueryWhere(target) + "(targetQuery, []string{" + strconv.Quote(association.TargetColumn) + "}, []string{\"IN\"}, []any{arguments})")
 	g.line("loaded := " + g.ormModelQualifier(target) + goORMLoader(target) + "(targetQuery)")
 	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return &loaded.ErrError }")
@@ -2252,16 +2287,16 @@ func (g *generator) ormThroughAssociationPreloader(manifest *ormintegration.Mani
 
 	g.line("func " + goORMTypedPreload(model, association) + "(query " + sourceQueryType + ", targetQuery " + targetQueryType + ") " + sourceQueryType + " {")
 	g.indent++
-	g.line("return " + goORMPreload(model) + "(query, " + strconv.Quote(association.Name) + ", func(transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ") *" + g.goType(types.FromName("DbError")) + " {")
+	g.line("return " + goORMPreload(model) + "(query, " + strconv.Quote(association.Name) + ", func(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ") *" + g.goType(types.FromName("DbError")) + " {")
 	g.indent++
-	g.line("return " + function + "(transaction, values, targetQuery)")
+	g.line("return " + function + "(scope, transaction, values, targetQuery)")
 	g.indent--
 	g.line("})")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 
-	g.line("func " + function + "(transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ", targetQuery " + targetQueryType + ") *" + g.goType(types.FromName("DbError")) + " {")
+	g.line("func " + function + "(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, values []" + sourceType + ", targetQuery " + targetQueryType + ") *" + g.goType(types.FromName("DbError")) + " {")
 	g.indent++
 	g.line("if targetQuery.transaction != nil { databaseError := " + g.ormErrorValue("InvalidData", "ORM preload query must not have a transaction scope; scope the base query instead") + "; return &databaseError }")
 	g.line("if targetQuery.limit != nil || targetQuery.offset != nil || targetQuery.lock { databaseError := " + g.ormErrorValue("InvalidData", "ORM preload query does not accept limit, offset, or lock") + "; return &databaseError }")
@@ -2285,7 +2320,7 @@ func (g *generator) ormThroughAssociationPreloader(manifest *ormintegration.Mani
 	g.line("return nil")
 	g.indent--
 	g.line("}")
-	g.line("middleQuery := " + middleQualifier + goORMUsing(middle) + "(transaction)")
+	g.line("middleQuery := " + middleQualifier + goORMExecutionScope(middle) + "(" + middleQualifier + goORMUsing(middle) + "(transaction), scope)")
 	g.line("middleQuery = " + middleQualifier + goORMQueryWhere(middle) + "(middleQuery, []string{" + strconv.Quote(middleParentColumn.Name) + "}, []string{\"IN\"}, []any{parentArguments})")
 	g.line("loadedMiddle := " + middleQualifier + goORMLoader(middle) + "(middleQuery)")
 	g.line("if loadedMiddle.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return &loadedMiddle.ErrError }")
@@ -2319,7 +2354,7 @@ func (g *generator) ormThroughAssociationPreloader(manifest *ormintegration.Mani
 	g.line("related := map[" + g.goType(targetKeyType) + "]" + targetType + "{}")
 	g.line("if len(targetArguments) > 0 {")
 	g.indent++
-	g.line("targetQuery.transaction = transaction")
+	g.line("targetQuery.scope = scope; targetQuery.transaction = transaction")
 	g.line("targetQuery = " + targetQualifier + goORMQueryWhere(target) + "(targetQuery, []string{" + strconv.Quote(targetColumn.Name) + "}, []string{\"IN\"}, []any{targetArguments})")
 	g.line("loadedTargets := " + targetQualifier + goORMLoader(target) + "(targetQuery)")
 	g.line("if loadedTargets.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return &loadedTargets.ErrError }")
@@ -2401,6 +2436,10 @@ func goORMWhere(model ormintegration.Model) string {
 
 func goORMUsing(model ormintegration.Model) string {
 	return "TrbOrm" + goIdentifier(model.Name, true) + "Using"
+}
+
+func goORMExecutionScope(model ormintegration.Model) string {
+	return "TrbOrm" + goIdentifier(model.Name, true) + "ExecutionScope"
 }
 
 func goORMQueryWhere(model ormintegration.Model) string {

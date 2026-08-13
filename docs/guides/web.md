@@ -182,6 +182,28 @@ minimum size. The shared implementation respects quality values,
 encodings, and compressible media types. It also maintains `Vary` and removes
 representation metadata invalidated by compression.
 
+Request deadlines are also opt-in middleware:
+
+```trb
+import { Context, Next, Response } from trb/web
+import trb/web/middleware/timeout
+import { TimeoutOptions } from trb/web/middleware/timeout
+
+OPTIONS := TimeoutOptions.new(milliseconds: 5000)
+
+def call(context: Context, next_handler: Next): Response
+	return timeout.call(context, next_handler, OPTIONS)
+end
+```
+
+The default deadline is 30 seconds. An expired request returns a portable JSON
+504 response with `{"error":"gateway_timeout"}`. TypeRB keeps cancellation out
+of application signatures: the compiler forwards a hidden execution scope to
+downstream handlers, ORM operations, and browser HTTP requests. Generated loop
+checkpoints stop TypeRB CPU work cooperatively. Native operations receive the
+target runtime's cancellation signal when their API supports one and otherwise
+observe cancellation at the next generated boundary.
+
 `text`, `bytes`, `json`, `empty`, and `redirect` remain the standard response
 builders. Server host, port, body limit, and shutdown timeout are configured
 with `configure_server`.

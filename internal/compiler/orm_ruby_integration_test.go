@@ -113,6 +113,7 @@ end
 	}
 	for _, expected := range []string{
 		`require "sequel"`, `TrbOrmRuntime.configure(adapter: "sqlite"`, "class Query", "def destroy_model_result",
+		`when Timeout::Error, TrbExecutionCancelled then "Timeout"`,
 	} {
 		if !strings.Contains(ormOutput, expected) {
 			t.Fatalf("generated Ruby ORM package is missing %q:\n%s", expected, ormOutput)

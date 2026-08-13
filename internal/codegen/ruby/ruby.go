@@ -5,29 +5,46 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/types"
+	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
 type generator struct {
-	b            strings.Builder
-	indent       int
-	loader       string
-	modulePath   string
-	topFunctions map[string]bool
-	topTargets   map[string]string
-	nativeSyntax bool
-	temporary    int
-	orm          *ormintegration.Manifest
-	breakTarget  string
+	b               strings.Builder
+	indent          int
+	loader          string
+	modulePath      string
+	topFunctions    map[string]bool
+	topTargets      map[string]string
+	nativeSyntax    bool
+	temporary       int
+	orm             *ormintegration.Manifest
+	breakTarget     string
+	execution       *effectplan.Plan
+	executionActive bool
 }
 
 func Generate(program *ir.Program) string {
+	return GenerateProject([]*ir.Program{program})[0]
+}
+
+func GenerateProject(programs []*ir.Program) []string {
+	execution := effectplan.ExecutionScope(programs)
+	result := make([]string, len(programs))
+	for index, program := range programs {
+		result[index] = generate(program, execution)
+	}
+	return result
+}
+
+func generate(program *ir.Program, execution *effectplan.Plan) string {
 	g := &generator{
 		loader: program.RubyLoader, modulePath: program.ModulePath,
 		topFunctions: map[string]bool{}, topTargets: map[string]string{},
-		orm: ormintegration.ManifestFrom(program.Extensions),
+		orm: ormintegration.ManifestFrom(program.Extensions), execution: execution,
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
@@ -40,18 +57,29 @@ func Generate(program *ir.Program) string {
 			g.nativeSyntax = true
 		}
 	}
+	if g.programUsesExecutionScope(program.Statements) || webintegration.ManifestFrom(program.Extensions) != nil {
+		g.executionScopeRuntime()
+	}
 	g.statements(program.Statements)
 	g.integrations(program.Extensions)
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
 		}
-		g.line("main()", "")
+		main := topLevelRubyMethod(program.Statements, "main")
+		if g.methodUsesExecutionScope(main) {
+			g.line("main(TrbExecutionScope.root)", "")
+		} else {
+			g.line("main()", "")
+		}
 	}
 	return strings.TrimRight(g.b.String(), "\n") + "\n"
 }
 
 func (g *generator) statements(statements []ir.Statement) {
+	if g.executionActive && len(statements) > 0 {
+		g.line("__trb_scope.check!", "")
+	}
 	for i, statement := range statements {
 		if i > 0 && wantsSeparation(statements[i-1], statement) {
 			g.b.WriteByte('\n')
@@ -178,7 +206,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("module "+n.Name, n.TrailingComment)
 		g.indent++
 		for _, method := range n.Methods {
-			g.line("def "+method.Name+"("+g.parameters(method.Parameters)+")", method.TrailingComment)
+			g.line("def "+method.Name+"("+g.methodParameters(method)+")", method.TrailingComment)
 			g.indent++
 			g.line("raise NotImplementedError", "")
 			g.indent--
@@ -469,14 +497,50 @@ func (g *generator) method(method *ir.Method, fields []*ir.Field) {
 	if method.Class {
 		name = "self." + name
 	}
-	g.line("def "+name+"("+g.parameters(method.Parameters)+")", method.TrailingComment)
+	g.line("def "+name+"("+g.methodParameters(method)+")", method.TrailingComment)
 	g.indent++
 	if method.Name == "initialize" {
 		g.fieldDefaults(fields)
 	}
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
+	g.executionActive = previousExecution
 	g.indent--
 	g.line("end", "")
+}
+
+func topLevelRubyMethod(statements []ir.Statement, name string) *ir.Method {
+	for _, statement := range statements {
+		if method, ok := statement.(*ir.Method); ok && method.Name == name {
+			return method
+		}
+	}
+	return nil
+}
+
+func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
+	return method != nil && (strings.HasPrefix(method.TargetName, "trb_web_route_") ||
+		strings.HasPrefix(method.TargetName, "trb_web_middleware_") ||
+		g.execution != nil && g.execution.Methods[method])
+}
+
+func (g *generator) methodParameters(method *ir.Method) string {
+	parameters := g.parameters(method.Parameters)
+	if !g.methodUsesExecutionScope(method) {
+		return parameters
+	}
+	if parameters == "" {
+		return "__trb_scope"
+	}
+	return "__trb_scope, " + parameters
+}
+
+func (g *generator) executionArguments(call *ir.Call, arguments []string) []string {
+	if g.execution == nil || !g.execution.Calls[call] {
+		return arguments
+	}
+	return append([]string{"__trb_scope"}, arguments...)
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
@@ -638,6 +702,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
+		parts = g.executionArguments(n, parts)
 		callee := g.expr(n.Callee)
 		if n.Callee.ExprType().Kind == types.Function {
 			return callee + ".call(" + strings.Join(parts, ", ") + ")"
@@ -659,6 +724,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			message := strconv.Quote("unknown raw value for " + n.EnumName)
 			return "begin; value = " + parts[0] + "; case value; " + strings.Join(branches, "; ") + "; else Result::Err.new(EnumValueError.new(value: value, message: " + message + ")); end; end"
 		default:
+			if g.execution != nil && g.execution.EnumCalls[n] {
+				parts = append([]string{"__trb_scope"}, parts...)
+			}
 			return g.expr(n.Receiver) + "." + n.Method + "(" + strings.Join(parts, ", ") + ")"
 		}
 	case *ir.EnumConstruct:
@@ -699,13 +767,15 @@ func (g *generator) rubyClassName(name string, reference *ir.Reference) string {
 
 func (g *generator) ifExpression(node *ir.If) string {
 	child := &generator{
-		loader:       g.loader,
-		modulePath:   g.modulePath,
-		topFunctions: g.topFunctions,
-		nativeSyntax: g.nativeSyntax,
-		temporary:    g.temporary,
-		orm:          g.orm,
-		breakTarget:  g.breakTarget,
+		loader:          g.loader,
+		modulePath:      g.modulePath,
+		topFunctions:    g.topFunctions,
+		nativeSyntax:    g.nativeSyntax,
+		temporary:       g.temporary,
+		orm:             g.orm,
+		breakTarget:     g.breakTarget,
+		execution:       g.execution,
+		executionActive: g.executionActive,
 	}
 	child.line("begin", "")
 	child.indent++
@@ -741,14 +811,16 @@ func (g *generator) ifExpression(node *ir.If) string {
 
 func (g *generator) attemptExpression(node *ir.Attempt) string {
 	child := &generator{
-		loader:       g.loader,
-		modulePath:   g.modulePath,
-		topFunctions: g.topFunctions,
-		topTargets:   g.topTargets,
-		nativeSyntax: g.nativeSyntax,
-		temporary:    g.temporary,
-		orm:          g.orm,
-		breakTarget:  g.breakTarget,
+		loader:          g.loader,
+		modulePath:      g.modulePath,
+		topFunctions:    g.topFunctions,
+		topTargets:      g.topTargets,
+		nativeSyntax:    g.nativeSyntax,
+		temporary:       g.temporary,
+		orm:             g.orm,
+		breakTarget:     g.breakTarget,
+		execution:       g.execution,
+		executionActive: g.executionActive,
 	}
 	child.line("-> do", "")
 	child.indent++
@@ -766,13 +838,15 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 
 func (g *generator) caseExpression(node *ir.Case) string {
 	child := &generator{
-		loader:       g.loader,
-		modulePath:   g.modulePath,
-		topFunctions: g.topFunctions,
-		nativeSyntax: g.nativeSyntax,
-		temporary:    g.temporary,
-		orm:          g.orm,
-		breakTarget:  g.breakTarget,
+		loader:          g.loader,
+		modulePath:      g.modulePath,
+		topFunctions:    g.topFunctions,
+		nativeSyntax:    g.nativeSyntax,
+		temporary:       g.temporary,
+		orm:             g.orm,
+		breakTarget:     g.breakTarget,
+		execution:       g.execution,
+		executionActive: g.executionActive,
 	}
 	child.line("begin", "")
 	child.indent++

@@ -32,7 +32,14 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 			g.typeAliases[symbol] = "http"
 		}
 	}
+	// Headers owns an Array<Header>. The element type can therefore occur in
+	// generated code even when callers only import Headers explicitly.
+	if g.typeAliases["Headers"] != "" && g.typeAliases["Header"] == "" {
+		g.typeAliases["Header"] = "http"
+		g.typeKinds["Header"] = "record"
+	}
 	g.requireImport("net/url", "neturl")
+	g.requireImport("context", "trbcontext")
 	g.requireImport("strings", "")
 	g.requireImport("unicode/utf8", "")
 	if len(routes) > 0 {
@@ -72,13 +79,13 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	g.webProtocolResponses()
 
-	g.line("func trbWebDispatch(request *web.Request) *web.Response {")
+	g.line("func trbWebDispatch(scope trbcontext.Context, request *web.Request) *web.Response {")
 	g.indent++
-	g.line("return trbWebDispatchWithBodyLimit(request, trbWebDefaultMaxBodyBytes)")
+	g.line("return trbWebDispatchWithBodyLimit(scope, request, trbWebDefaultMaxBodyBytes)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func trbWebDispatchWithBodyLimit(request *web.Request, maxBodyBytes int) (response *web.Response) {")
+	g.line("func trbWebDispatchWithBodyLimit(scope trbcontext.Context, request *web.Request, maxBodyBytes int) (response *web.Response) {")
 	g.indent++
 	g.line("request = trbWebNormalizeRequest(request)")
 	g.line("headRequest := request.TrbFieldMethod.ToS() == \"HEAD\"")
@@ -86,6 +93,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent++
 	g.line("if recovered := recover(); recovered != nil {")
 	g.indent++
+	g.line("if err, ok := recovered.(error); ok && (errors.Is(err, trbcontext.Canceled) || errors.Is(err, trbcontext.DeadlineExceeded)) { panic(recovered) }")
 	g.line("response = trbWebInternalServerError()")
 	g.indent--
 	g.line("}")
@@ -104,22 +112,22 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("normalizedPath, validPath := trbWebNormalizePath(request.TrbFieldPath)")
 	g.line("if !validPath {")
 	g.indent++
-	g.line("return trbWebDispatchProtocolResponse(request, trbWebBadRequest())")
+	g.line("return trbWebDispatchProtocolResponse(scope, request, trbWebBadRequest())")
 	g.indent--
 	g.line("}")
 	g.line("request = web.NewRequest(request.TrbFieldMethod, normalizedPath, request.TrbFieldQueryString, request.TrbFieldHeaders, request.TrbFieldBody)")
 	g.line("context := web.NewContext(request, map[string]string{})")
-	g.line("handler := func(context *web.Context) *web.Response {")
+	g.line("handler := func(scope trbcontext.Context, context *web.Context) *web.Response {")
 	g.indent++
-	g.line("return trbWebDispatchCore(context.TrbFieldRequest, maxBodyBytes)")
+	g.line("return trbWebDispatchCore(scope, context.TrbFieldRequest, maxBodyBytes)")
 	g.indent--
 	g.line("}")
 	g.webMiddlewareChain(rootMiddlewares, "handler", "rootNextHandler", directories)
-	g.line("return handler(context)")
+	g.line("return handler(scope, context)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func trbWebDispatchProtocolResponse(request *web.Request, protocolResponse *web.Response) (response *web.Response) {")
+	g.line("func trbWebDispatchProtocolResponse(scope trbcontext.Context, request *web.Request, protocolResponse *web.Response) (response *web.Response) {")
 	g.indent++
 	g.line("request = trbWebNormalizeRequest(request)")
 	g.line("if normalizedPath, validPath := trbWebNormalizePath(request.TrbFieldPath); validPath {")
@@ -130,7 +138,12 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("headRequest := request.TrbFieldMethod.ToS() == \"HEAD\"")
 	g.line("defer func() {")
 	g.indent++
-	g.line("if recovered := recover(); recovered != nil || !trbWebValidResponse(response) {")
+	g.line("if recovered := recover(); recovered != nil {")
+	g.indent++
+	g.line("if err, ok := recovered.(error); ok && (errors.Is(err, trbcontext.Canceled) || errors.Is(err, trbcontext.DeadlineExceeded)) { panic(recovered) }")
+	g.line("response = trbWebInternalServerError()")
+	g.indent--
+	g.line("} else if !trbWebValidResponse(response) {")
 	g.indent++
 	g.line("response = trbWebInternalServerError()")
 	g.indent--
@@ -143,17 +156,22 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("}()")
 	g.line("context := web.NewContext(request, map[string]string{})")
-	g.line("handler := func(_ *web.Context) *web.Response { return protocolResponse }")
+	g.line("handler := func(_ trbcontext.Context, _ *web.Context) *web.Response { return protocolResponse }")
 	g.webMiddlewareChain(rootMiddlewares, "handler", "protocolNextHandler", directories)
-	g.line("return handler(context)")
+	g.line("return handler(scope, context)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func trbWebDispatchCore(request *web.Request, maxBodyBytes int) (response *web.Response) {")
+	g.line("func trbWebDispatchCore(scope trbcontext.Context, request *web.Request, maxBodyBytes int) (response *web.Response) {")
 	g.indent++
 	g.line("defer func() {")
 	g.indent++
-	g.line("if recovered := recover(); recovered != nil || !trbWebValidResponse(response) {")
+	g.line("if recovered := recover(); recovered != nil {")
+	g.indent++
+	g.line("if err, ok := recovered.(error); ok && (errors.Is(err, trbcontext.Canceled) || errors.Is(err, trbcontext.DeadlineExceeded)) { panic(recovered) }")
+	g.line("response = trbWebInternalServerError()")
+	g.indent--
+	g.line("} else if !trbWebValidResponse(response) {")
 	g.indent++
 	g.line("response = trbWebInternalServerError()")
 	g.indent--
@@ -225,13 +243,13 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		contextName := "routeContext" + strconv.Itoa(routeIndex)
 		handlerName := "routeHandler" + strconv.Itoa(routeIndex)
 		g.line(contextName + " := web.NewContext(request, pathParameters)")
-		g.line(handlerName + " := func(context *web.Context) *web.Response {")
+		g.line(handlerName + " := func(scope trbcontext.Context, context *web.Context) *web.Response {")
 		g.indent++
-		g.line("return " + g.webCallee(route.ModulePath, route.TargetHandler, directories) + "(context)")
+		g.line("return " + g.webCallee(route.ModulePath, route.TargetHandler, directories) + "(scope, context)")
 		g.indent--
 		g.line("}")
 		g.webMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "nextHandler"+strconv.Itoa(routeIndex)+"_", directories)
-		g.line("return " + handlerName + "(" + contextName + ")")
+		g.line("return " + handlerName + "(scope, " + contextName + ")")
 		g.indent--
 		g.line("}")
 	}
@@ -251,13 +269,13 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		contextName := "optionsContext" + strconv.Itoa(routeIndex)
 		handlerName := "optionsHandler" + strconv.Itoa(routeIndex)
 		g.line(contextName + " := web.NewContext(request, pathParameters)")
-		g.line(handlerName + " := func(context *web.Context) *web.Response {")
+		g.line(handlerName + " := func(_ trbcontext.Context, context *web.Context) *web.Response {")
 		g.indent++
 		g.line("return web.NewResponse(204, trbWebHeaders(http.Header{Name: \"allow\", Value: strings.Join(allowedMethods, \", \")}), http.BodyEmpty())")
 		g.indent--
 		g.line("}")
 		g.webMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "optionsNextHandler"+strconv.Itoa(routeIndex)+"_", directories)
-		g.line("return " + handlerName + "(" + contextName + ")")
+		g.line("return " + handlerName + "(scope, " + contextName + ")")
 		g.indent--
 		g.line("}")
 	}
@@ -277,9 +295,9 @@ func (g *generator) webMiddlewareChain(middlewares []webintegration.Middleware, 
 		middleware := middlewares[middlewareIndex]
 		nextName := nextPrefix + strconv.Itoa(middlewareIndex)
 		g.line(nextName + " := " + handlerName)
-		g.line(handlerName + " = func(context *web.Context) *web.Response {")
+		g.line(handlerName + " = func(scope trbcontext.Context, context *web.Context) *web.Response {")
 		g.indent++
-		g.line("return " + g.webCallee(middleware.ModulePath, middleware.TargetHandler, directories) + "(context, &trbWebNext{handler: " + nextName + "})")
+		g.line("return " + g.webCallee(middleware.ModulePath, middleware.TargetHandler, directories) + "(scope, context, &trbWebNext{handler: " + nextName + "})")
 		g.indent--
 		g.line("}")
 	}
@@ -420,11 +438,11 @@ func (g *generator) webNext() {
 	g.line("type trbWebNext struct {")
 	g.indent++
 	g.line("called bool")
-	g.line("handler func(*web.Context) *web.Response")
+	g.line("handler func(trbcontext.Context, *web.Context) *web.Response")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func (next *trbWebNext) Call(context *web.Context) *web.Response {")
+	g.line("func (next *trbWebNext) Call(scope trbcontext.Context, context *web.Context) *web.Response {")
 	g.indent++
 	g.line("if next.called {")
 	g.indent++
@@ -432,7 +450,7 @@ func (g *generator) webNext() {
 	g.indent--
 	g.line("}")
 	g.line("next.called = true")
-	g.line("return next.handler(context)")
+	g.line("return next.handler(scope, context)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -462,7 +480,7 @@ func goWebRouteConditions(segments []string) []string {
 }
 
 func (g *generator) webServer() {
-	g.requireImport("context", "")
+	g.requireImport("context", "trbcontext")
 	g.requireImport("errors", "")
 	g.requireImport("io", "")
 	g.requireImport("net", "")
@@ -486,17 +504,17 @@ func (g *generator) webServer() {
 	g.line("var maxBytesError *nethttp.MaxBytesError")
 	g.line("if errors.As(err, &maxBytesError) {")
 	g.indent++
-	g.line("response = trbWebDispatchProtocolResponse(webRequest, trbWebPayloadTooLarge())")
+	g.line("response = trbWebDispatchProtocolResponse(request.Context(), webRequest, trbWebPayloadTooLarge())")
 	g.indent--
 	g.line("} else {")
 	g.indent++
-	g.line("response = trbWebDispatchProtocolResponse(webRequest, trbWebBadRequest())")
+	g.line("response = trbWebDispatchProtocolResponse(request.Context(), webRequest, trbWebBadRequest())")
 	g.indent--
 	g.line("}")
 	g.indent--
 	g.line("} else {")
 	g.indent++
-	g.line("response = trbWebDispatchWithBodyLimit(webRequest, config.BodyLimitBytes)")
+	g.line("response = trbWebDispatchWithBodyLimit(request.Context(), webRequest, config.BodyLimitBytes)")
 	g.indent--
 	g.line("}")
 	g.line("for _, header := range response.TrbFieldHeaders.Entries() {")
@@ -509,7 +527,7 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("})")
 	g.line("server := &nethttp.Server{Addr: net.JoinHostPort(config.Host, strconv.Itoa(config.Port)), Handler: handler}")
-	g.line("signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)")
+	g.line("signalContext, stopSignals := signal.NotifyContext(trbcontext.Background(), os.Interrupt, syscall.SIGTERM)")
 	g.line("defer stopSignals()")
 	g.line("serveErrors := make(chan error, 1)")
 	g.line("go func() {")
@@ -528,7 +546,7 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("case <-signalContext.Done():")
 	g.indent++
-	g.line("shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), time.Duration(config.ShutdownTimeoutMilliseconds)*time.Millisecond)")
+	g.line("shutdownContext, cancelShutdown := trbcontext.WithTimeout(trbcontext.Background(), time.Duration(config.ShutdownTimeoutMilliseconds)*time.Millisecond)")
 	g.line("shutdownErr := server.Shutdown(shutdownContext)")
 	g.line("cancelShutdown()")
 	g.line("if shutdownErr != nil {")

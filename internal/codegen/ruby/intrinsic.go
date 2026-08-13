@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -16,7 +17,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "raise " + arguments[0]
 	}
 	if strings.HasPrefix(name, "trb.orm.") {
-		return g.ormIntrinsic(name, call, arguments)
+		value := g.ormIntrinsic(name, call, arguments)
+		if effectplan.ORMOperation(name, call.Fails) {
+			return "TrbOrmRuntime.with_scope(__trb_scope) { " + value + " }"
+		}
+		return value
 	}
 	unicodeCall := func(symbol string) string {
 		if _, named := call.Callee.(*ir.Identifier); named {
@@ -163,9 +168,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return "trb_web_serve(" + config + ")"
 	case "trb.web.testing.dispatch":
-		return "trb_web_dispatch(" + arguments[0] + ")"
+		return "trb_web_dispatch(__trb_scope, " + arguments[0] + ")"
 	case "trb.web.middleware.logger.call":
 		return rubyWebLogger(arguments)
+	case "trb.web.middleware.timeout.call":
+		return rubyWebTimeout(arguments)
 	case "trb.web.middleware.compression.gzip":
 		return rubyWebGzip(arguments[0])
 	case "trb.std.strings.length":
@@ -476,7 +483,11 @@ func rubyWebLogger(arguments []string) string {
 	if len(arguments) > 2 {
 		options = "logger_options = " + arguments[2] + "; "
 	}
-	return "-> { require \"json\"; logger_context = " + arguments[0] + "; logger_next_handler = " + arguments[1] + "; " + options + "excluded = logger_options && logger_options.exclude_paths.include?(logger_context.__trb_field_request.__trb_field_path); if excluded; logger_next_handler.call(logger_context); else; started = Process.clock_gettime(Process::CLOCK_MONOTONIC); status = 500; begin; response = logger_next_handler.call(logger_context); status = response.__trb_field_status; response; ensure; level = status >= 500 ? \"error\" : \"info\"; entry = { timestamp: Time.now.utc.strftime(\"%Y-%m-%dT%H:%M:%S.%9NZ\"), level: level, event: \"http_request\", method: logger_context.__trb_field_request.__trb_field_method.to_s, path: logger_context.__trb_field_request.__trb_field_path, status: status, duration_ms: (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0 }; output = logger_options && logger_options.stderr ? $stderr : $stdout; output.puts(JSON.generate(entry)); end; end }.call"
+	return "-> { require \"json\"; logger_context = " + arguments[0] + "; logger_next_handler = " + arguments[1] + "; " + options + "excluded = logger_options && logger_options.exclude_paths.include?(logger_context.__trb_field_request.__trb_field_path); if excluded; logger_next_handler.call(__trb_scope, logger_context); else; started = Process.clock_gettime(Process::CLOCK_MONOTONIC); status = 500; begin; response = logger_next_handler.call(__trb_scope, logger_context); status = response.__trb_field_status; response; ensure; level = status >= 500 ? \"error\" : \"info\"; entry = { timestamp: Time.now.utc.strftime(\"%Y-%m-%dT%H:%M:%S.%9NZ\"), level: level, event: \"http_request\", method: logger_context.__trb_field_request.__trb_field_method.to_s, path: logger_context.__trb_field_request.__trb_field_path, status: status, duration_ms: (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0 }; output = logger_options && logger_options.stderr ? $stderr : $stdout; output.puts(JSON.generate(entry)); end; end }.call"
+}
+
+func rubyWebTimeout(arguments []string) string {
+	return "-> { timeout_scope = __trb_scope.child; outcomes = Queue.new; worker = Thread.new { begin; outcomes << [:ok, " + arguments[1] + ".call(timeout_scope, " + arguments[0] + ")]; rescue StandardError => error; outcomes << [:error, error]; end }; begin; if worker.join(" + arguments[2] + ".to_f / 1000.0); kind, value = outcomes.pop; raise value if kind == :error; value; else; timeout_scope.cancel; worker.raise(TrbExecutionCancelled.new); worker.join(0.05); worker.kill if worker.alive?; " + arguments[3] + "; end; ensure; timeout_scope.cancel; end }.call"
 }
 
 func rubyWebGzip(value string) string {
