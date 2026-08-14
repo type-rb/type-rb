@@ -1520,12 +1520,15 @@ func localSourceUnit(config *project.Config, packageName, packageRoot, filename 
 		directory := filepath.ToSlash(filepath.Dir(modulePath))
 		goPackage = filepath.Base(directory)
 	}
-	return compiler.SourceUnit{Filename: absolute, Source: source, ModulePath: modulePath, Package: goPackage}, nil
+	return compiler.SourceUnit{Filename: absolute, Source: source, ModulePath: modulePath, Package: goPackage, ExternalPackage: true}, nil
 }
 
 func generatedRelative(config *project.Config, filename string, artifact *compiler.Artifact) (string, bool) {
 	extension := generatedExtension(config, artifact)
 	if artifact.CompilerOwned || artifact.Official {
+		return filepath.FromSlash(artifact.IR.ModulePath) + extension, true
+	}
+	if artifact.ExternalPackage {
 		return filepath.FromSlash(artifact.IR.ModulePath) + extension, true
 	}
 	relative, err := filepath.Rel(config.SourcePath(), filename)

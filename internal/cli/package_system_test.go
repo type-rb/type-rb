@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -194,6 +195,75 @@ func TestReplLoadsLockedTypeRBPackages(t *testing.T) {
 	}
 }
 
+func TestRunLockedGitTypeRBPackagesAcrossBackends(t *testing.T) {
+	workspace := t.TempDir()
+	sharedRoot := filepath.Join(workspace, "shared")
+	writeCLIRemotePackageFixture(t, sharedRoot, packageManager.TypeRBManifest{
+		FormatVersion: 1, Name: "github.com/acme/shared", Version: "1.0.0", SourceDir: "src",
+	}, "record Label\n\tvalue: String\nend\n\ndef shared_label(): Label\n\treturn Label.new(value: \"shared\")\nend\n")
+	commitAndTagCLIPackageFixture(t, sharedRoot, "v1.0.0")
+
+	contractsRoot := filepath.Join(workspace, "contracts")
+	writeCLIRemotePackageFixture(t, contractsRoot, packageManager.TypeRBManifest{
+		FormatVersion: 1, Name: "github.com/acme/contracts", Version: "1.1.0", SourceDir: "src",
+		Packages: map[string]project.PackageRequirement{
+			"acme/shared": {Source: "file://" + sharedRoot, Version: "v1.0.0"},
+		},
+	}, "import { Label, shared_label } from acme/shared\n\nrecord Message\n\tlabel: Label\nend\n\ndef default_message(): Message\n\treturn Message.new(label: shared_label())\nend\n")
+	commitAndTagCLIPackageFixture(t, contractsRoot, "v1.1.0")
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			if mode == "ruby" {
+				if _, err := exec.LookPath("ruby"); err != nil {
+					t.Skip("ruby is not installed")
+				}
+			}
+			if mode == "typescript" {
+				if _, err := exec.LookPath("node"); err != nil {
+					t.Skip("node is not installed")
+				}
+			}
+			appRoot := filepath.Join(workspace, "apps", mode)
+			if err := os.MkdirAll(appRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			config := project.New(appRoot, mode)
+			if config.Go != nil {
+				config.Go.Module = "example.com/package-run"
+			}
+			config.Packages["acme/contracts"] = project.PackageRequirement{Source: "file://" + contractsRoot, Version: "latest"}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(appRoot, "main.trb"), []byte("import { default_message } from acme/contracts\n\ndef main()\n\tputs(default_message().label.value)\n\treturn\nend\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{}); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+				t.Fatalf("build status=%d stderr=%s", status, stderr.String())
+			}
+			packageOutput := filepath.Join(config.OutputPath(), "github.com", "acme", "contracts", "index"+codegen.Extension(mode))
+			if _, err := os.Stat(packageOutput); err != nil {
+				t.Fatalf("remote package output is missing: %v", err)
+			}
+			stdout.Reset()
+			stderr.Reset()
+			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			if stdout.String() != "shared\n" {
+				t.Fatalf("unexpected package run output: %q", stdout.String())
+			}
+		})
+	}
+}
+
 func writeCLIPackageFixture(t *testing.T, root string, native map[string]map[string]string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
@@ -226,6 +296,35 @@ end
 	}
 	if err := os.WriteFile(filepath.Join(sharedRoot, "src", "index.trb"), []byte("def shared_text(): String\n\treturn \"shared\"\nend\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func writeCLIRemotePackageFixture(t *testing.T, root string, manifest packageManager.TypeRBManifest, source string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCLIPackageManifest(t, root, manifest)
+	if err := os.WriteFile(filepath.Join(root, "src", "index.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func commitAndTagCLIPackageFixture(t *testing.T, root, tag string) {
+	t.Helper()
+	for _, arguments := range [][]string{
+		{"init", "--quiet"},
+		{"config", "user.email", "packages@example.com"},
+		{"config", "user.name", "TypeRB package test"},
+		{"add", "."},
+		{"commit", "--quiet", "-m", "Initial package"},
+		{"tag", tag},
+	} {
+		command := exec.Command("git", arguments...)
+		command.Dir = root
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(arguments, " "), err, output)
+		}
 	}
 }
 
