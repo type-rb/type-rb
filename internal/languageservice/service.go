@@ -55,6 +55,7 @@ type CallInfo struct {
 
 type CallParameter struct {
 	Name                 string
+	Label                string
 	Keyword              bool
 	LiteralValues        []string
 	LiteralArrays        [][]string
@@ -87,6 +88,35 @@ type CompletionRequest struct {
 	Cursor  int
 	Mode    string
 	Context Context
+}
+
+// SemanticRequest identifies a source position using the same checked context
+// as completion while keeping editor protocol details outside this package.
+type SemanticRequest struct {
+	Source  string
+	Cursor  int
+	Mode    string
+	Context Context
+}
+
+type HoverInfo struct {
+	Range  OffsetRange
+	Detail string
+}
+
+type SignatureParameter struct {
+	Label string
+}
+
+type SignatureInfo struct {
+	Label      string
+	Parameters []SignatureParameter
+}
+
+type SignatureHelp struct {
+	Signatures      []SignatureInfo
+	ActiveSignature int
+	ActiveParameter int
 }
 
 type HighlightKind string
@@ -149,6 +179,20 @@ func (s *Service) Complete(source string, cursor int) []CompletionItem {
 	request := CompletionRequest{Source: source, Cursor: cursor, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
 	s.mu.RUnlock()
 	return Complete(request)
+}
+
+func (s *Service) Hover(source string, cursor int) (HoverInfo, bool) {
+	s.mu.RLock()
+	request := SemanticRequest{Source: source, Cursor: cursor, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
+	s.mu.RUnlock()
+	return Hover(request)
+}
+
+func (s *Service) Signatures(source string, cursor int) (SignatureHelp, bool) {
+	s.mu.RLock()
+	request := SemanticRequest{Source: source, Cursor: cursor, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
+	s.mu.RUnlock()
+	return Signatures(request)
 }
 
 func (s *Service) Highlight(source string) []HighlightSpan {

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Show checked hover information and call signatures from `trb lsp`.
+
 ## 0.1.0
 
 - Add TypeRB syntax highlighting and starter snippets.

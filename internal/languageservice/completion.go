@@ -79,7 +79,9 @@ func Complete(request CompletionRequest) []CompletionItem {
 	for _, name := range builtInTypes {
 		byName[name] = Symbol{Name: name, Kind: CompletionType, Detail: "built-in type", Type: types.FromName(name)}
 	}
-	byName["puts"] = Symbol{Name: "puts", Kind: CompletionFunction, Detail: "puts(value: Any)", Type: types.FromName("Void"), Call: &CallInfo{ParameterCount: 1}}
+	byName["puts"] = Symbol{Name: "puts", Kind: CompletionFunction, Detail: "puts(value: Any)", Type: types.FromName("Void"), Call: &CallInfo{
+		ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: Any"}},
+	}}
 	for name, detail := range keywordDetails {
 		if _, exists := byName[name]; !exists {
 			byName[name] = Symbol{Name: name, Kind: CompletionKeyword, Detail: detail}
@@ -263,20 +265,7 @@ func completionCallSymbol(tokens []token.Token, open int, request CompletionRequ
 	if callee.Kind != token.Identifier {
 		return Symbol{}, false
 	}
-	symbols := lexicalSymbols(request.Source, request.Cursor, request.Context)
-	lookup := func(name string) (Symbol, bool) {
-		for index := len(symbols) - 1; index >= 0; index-- {
-			if symbols[index].Name == name {
-				return symbols[index], true
-			}
-		}
-		for _, symbol := range request.Context.Symbols {
-			if symbol.Name == name {
-				return symbol, true
-			}
-		}
-		return Symbol{}, false
-	}
+	lookup := checkedSymbolLookup(request.Source, request.Cursor, request.Context)
 	if open < 3 || tokens[open-2].Lexeme != "." && tokens[open-2].Lexeme != "&." {
 		return lookup(callee.Lexeme)
 	}
@@ -287,6 +276,39 @@ func completionCallSymbol(tokens []token.Token, open int, request CompletionRequ
 		return Symbol{}, false
 	}
 	return completionMember(receiver, callee.Lexeme, request.Context)
+}
+
+func checkedSymbolLookup(source string, cursor int, context Context) func(string) (Symbol, bool) {
+	lexical := lexicalSymbols(source, cursor, context)
+	return func(name string) (Symbol, bool) {
+		for _, symbol := range lexical {
+			if symbol.Name == name && (symbol.Kind == CompletionVariable || symbol.Kind == CompletionParameter || symbol.Kind == CompletionConstant) {
+				return symbol, true
+			}
+		}
+		for _, symbol := range context.Symbols {
+			if symbol.Name == name {
+				return symbol, true
+			}
+		}
+		for _, symbol := range lexical {
+			if symbol.Name == name {
+				return symbol, true
+			}
+		}
+		for _, builtIn := range builtInTypes {
+			if builtIn == name {
+				return Symbol{Name: name, Kind: CompletionType, Detail: "built-in type", Type: types.FromName(name)}, true
+			}
+		}
+		if name == "puts" {
+			return Symbol{
+				Name: "puts", Kind: CompletionFunction, Detail: "puts(value: Any)", Type: types.FromName("Void"),
+				Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: Any"}}},
+			}, true
+		}
+		return Symbol{}, false
+	}
 }
 
 func splitCompletionArguments(tokens []token.Token) [][]token.Token {

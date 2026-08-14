@@ -51,12 +51,11 @@ than detailed syntax.
 
 ## 4. Editor tooling
 
-- Extend the initial reusable `trb lsp` diagnostics, formatting, completion,
-  and quick fixes with hover types, signature help, go to definition,
-  references, rename, document symbols, semantic tokens, and richer code
-  actions.
-- Extend the initial thin VS Code client with semantic navigation, test
-  discovery, marketplace distribution, and additional editor integrations.
+- Extend the reusable `trb lsp` diagnostics, formatting, completion, hover,
+  signature help, and quick fixes with go to definition, references, rename,
+  document symbols, semantic tokens, and richer code actions.
+- Extend the published preview VS Code client with semantic navigation, test
+  discovery, and additional editor integrations.
 - Add debugger/DAP support later, after source maps and runtime stack mapping
   are reliable.
 

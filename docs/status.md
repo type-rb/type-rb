@@ -306,14 +306,14 @@ Concurrent edits invalidate obsolete analysis before it can become current.
 `trb check` already consumes this service; dependency-aware incremental phase
 reuse remains future work.
 
-`trb lsp` exposes that service over standard LSP framing. Its initial
-capabilities are project-wide live diagnostics, completion, deterministic
-formatting, and quick fixes from structured diagnostic edits. Full-document
-updates and UTF-16 protocol positions are translated at the adapter boundary;
-the compiler and formatter continue to use UTF-8 source offsets. The initial
-Visual Studio Code extension is a packaged thin client over this boundary.
-Semantic hover, signature help, navigation, rename, and editor marketplace
-distribution remain follow-up work.
+`trb lsp` exposes that service over standard LSP framing. Its capabilities are
+project-wide live diagnostics, completion, checked hover information, signature
+help, deterministic formatting, and quick fixes from structured diagnostic
+edits. Full-document updates and UTF-16 protocol positions are translated at
+the adapter boundary; the compiler and formatter continue to use UTF-8 source
+offsets. The preview Visual Studio Code extension is a published thin client
+over this boundary. Navigation, references, rename, and semantic tokens remain
+follow-up work.
 
 ## Current limitations
 
