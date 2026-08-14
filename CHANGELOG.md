@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.8 - 2026-08-15
+
+### Editor tooling
+
+- The Visual Studio Code extension now runs TypeRB projects through the
+  standard Run and Debug interface. Native restart and stop controls manage the
+  complete process tree, while the Debug Console immediately reports the
+  launch command, process identifier, program output, and exit status.
+  ([#255](https://github.com/type-rb/type-rb/pull/255))
+
 ## 0.2.7 - 2026-08-15
 
 ### Editor tooling
