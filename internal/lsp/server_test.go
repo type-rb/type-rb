@@ -209,6 +209,81 @@ func TestServerNavigatesToImportedTypeAndMemberDefinitions(t *testing.T) {
 	}
 }
 
+func TestServerFindsReferencesAndRenamesAcrossProjectFiles(t *testing.T) {
+	root := t.TempDir()
+	modelPath := cleanPath(filepath.Join(root, "models", "user.trb"))
+	mainPath := cleanPath(filepath.Join(root, "main.trb"))
+	modelSource := "record User\n\tname: String\nend\n"
+	mainSource := "import { User } from models/user\n\ndef user_name(user: User): String\n\tlocal_name := user.name\n\treturn local_name\nend\n\ndef main()\n\tuser := User.new(name: \"Ada\")\n\tputs(user_name(user))\n\treturn\nend\n"
+	uri := uriFromPath(mainPath)
+	memberOffset := strings.Index(mainSource, "user.name") + len("user.na")
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: mainSource}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/references", Params: rawParams(t, referenceParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(mainSource), memberOffset), Context: referenceContext{IncludeDeclaration: true}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "textDocument/prepareRename", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(mainSource), memberOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("4"), Method: "textDocument/rename", Params: rawParams(t, renameParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(mainSource), memberOffset), NewName: "display_name"})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("5"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Version: "test", Input: bytes.NewReader(input), Output: &output,
+		Units: []compiler.SourceUnit{
+			{Filename: modelPath, ModulePath: "models/user", Package: "main", Source: []byte(modelSource)},
+			{Filename: mainPath, ModulePath: "main", Package: "main", Source: []byte(mainSource)},
+		},
+		CompilerOptions: compiler.Options{Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 6 {
+		t.Fatalf("response count=%d, want 6: %s", len(frames), output.String())
+	}
+	var initialized initializeResult
+	decodeResult(t, frames[0], &initialized)
+	if !initialized.Capabilities.ReferencesProvider || !initialized.Capabilities.RenameProvider.PrepareProvider {
+		t.Fatalf("semantic navigation capabilities=%#v", initialized.Capabilities)
+	}
+	var references []location
+	decodeResult(t, frames[2], &references)
+	if len(references) != 3 {
+		t.Fatalf("references=%#v, want field declaration, member use, and constructor keyword", references)
+	}
+	var prepare prepareRenameResult
+	decodeResult(t, frames[3], &prepare)
+	if prepare.Placeholder != "name" || prepare.Range != offsetRange([]byte(mainSource), memberOffset-len("na"), memberOffset+len("me")) {
+		t.Fatalf("prepare rename=%#v", prepare)
+	}
+	var edit workspaceEdit
+	decodeResult(t, frames[4], &edit)
+	if len(edit.Changes[uriFromPath(modelPath)]) != 1 || len(edit.Changes[uri]) != 2 {
+		t.Fatalf("rename changes=%#v", edit.Changes)
+	}
+	for _, edits := range edit.Changes {
+		for _, item := range edits {
+			if item.NewText != "display_name" {
+				t.Fatalf("rename edit=%#v", item)
+			}
+		}
+	}
+}
+
+func TestRenameIdentifierValidationRejectsKeywordsAndPunctuation(t *testing.T) {
+	for _, name := range []string{"", "class", "user-name", "@name", "two words"} {
+		if validRenameIdentifier(name) {
+			t.Fatalf("validRenameIdentifier(%q)=true", name)
+		}
+	}
+	for _, name := range []string{"user", "User", "ready?", "save!", "利用者"} {
+		if !validRenameIdentifier(name) {
+			t.Fatalf("validRenameIdentifier(%q)=false", name)
+		}
+	}
+}
+
 func TestServerPublishesProjectDiagnosticsAfterInitialized(t *testing.T) {
 	filename := cleanPath("broken.trb")
 	source := "def broken(): String\n\treturn missing()\nend\n"

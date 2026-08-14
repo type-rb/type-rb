@@ -368,10 +368,11 @@ func recordMembers(statements []ir.Statement, owner, sourcePath string, ownerDef
 		if !ok || privateName(field.Name) {
 			continue
 		}
-		instance = append(instance, Symbol{Name: field.Name, Kind: CompletionField, Detail: field.Type.String(), Type: field.Type, Definition: sourceDefinition(sourcePath, field.Name, field.SourceSpan())})
+		definition := sourceDefinition(sourcePath, field.Name, field.SourceSpan())
+		instance = append(instance, Symbol{Name: field.Name, Kind: CompletionField, Detail: field.Type.String(), Type: field.Type, Definition: definition})
 		label := field.Name + ": " + field.Type.String()
 		parameters = append(parameters, label)
-		callParameters = append(callParameters, CallParameter{Name: field.Name, Label: label, Keyword: true})
+		callParameters = append(callParameters, CallParameter{Name: field.Name, Label: label, Keyword: true, Definition: definition})
 	}
 	sortSymbols(instance)
 	namespace := []Symbol{{Name: "new", Kind: CompletionMethod, Detail: "new(" + strings.Join(parameters, ", ") + "): " + owner, Type: types.FromName(owner), Call: &CallInfo{ParameterCount: len(parameters), Parameters: callParameters}, Definition: ownerDefinition}}

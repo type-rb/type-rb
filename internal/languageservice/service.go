@@ -69,6 +69,7 @@ type CallParameter struct {
 	Name                 string
 	Label                string
 	Keyword              bool
+	Definition           *DefinitionLocation
 	LiteralValues        []string
 	LiteralArrays        [][]string
 	LiteralArrayElements []string
@@ -123,6 +124,22 @@ type DefinitionInfo struct {
 	Name  string
 	Path  string
 	Range OffsetRange
+}
+
+// SemanticDocument supplies one checked project file to project-wide semantic
+// queries without exposing compiler snapshots or editor protocol types.
+type SemanticDocument struct {
+	Path    string
+	Source  string
+	Mode    string
+	Context Context
+}
+
+type ReferenceInfo struct {
+	ID          SymbolID
+	Path        string
+	Range       OffsetRange
+	Declaration bool
 }
 
 type SignatureParameter struct {

@@ -96,6 +96,8 @@ func (s *Server) handle(request message) (bool, error) {
 				HoverProvider:              true,
 				SignatureHelpProvider:      signatureOptions{TriggerCharacters: []string{"(", ","}},
 				DefinitionProvider:         true,
+				ReferencesProvider:         true,
+				RenameProvider:             renameOptions{PrepareProvider: true},
 				DocumentFormattingProvider: true, CodeActionProvider: true,
 			},
 			ServerInfo: serverInfo{Name: "TypeRB", Version: s.version},
@@ -134,6 +136,12 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.signatureHelp(request)
 	case "textDocument/definition":
 		return false, s.definition(request)
+	case "textDocument/references":
+		return false, s.references(request)
+	case "textDocument/prepareRename":
+		return false, s.prepareRename(request)
+	case "textDocument/rename":
+		return false, s.rename(request)
 	case "textDocument/formatting":
 		return false, s.format(request)
 	case "textDocument/codeAction":
@@ -309,6 +317,102 @@ func (s *Server) definition(request message) error {
 	return s.stream.write(success(request.ID, location{URI: uriFromPath(targetPath), Range: range_}))
 }
 
+func (s *Server) references(request message) error {
+	params, err := decodeParams[referenceParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, []location{}))
+	}
+	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	items, ok := languageservice.References(languageservice.SemanticRequest{
+		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
+	}, s.semanticDocuments(), params.Context.IncludeDeclaration)
+	if !ok {
+		return s.stream.write(success(request.ID, []location{}))
+	}
+	result := make([]location, 0, len(items))
+	for _, item := range items {
+		source, exists := s.source(item.Path)
+		if !exists {
+			continue
+		}
+		result = append(result, location{URI: uriFromPath(item.Path), Range: offsetRange(source, item.Range.Start, item.Range.End)})
+	}
+	return s.stream.write(success(request.ID, result))
+}
+
+func (s *Server) prepareRename(request message) error {
+	params, err := decodeParams[documentPositionParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	cursor := offsetAt(document.source, params.Position)
+	items, ok := languageservice.References(languageservice.SemanticRequest{
+		Path: path, Source: string(document.source), Cursor: cursor, Mode: s.mode, Context: context,
+	}, s.semanticDocuments(), true)
+	if !ok || len(items) == 0 {
+		return s.stream.write(success(request.ID, nil))
+	}
+	tokens, _ := lexer.Lex(document.source)
+	item, ok := semanticTokenAtOffset(tokens, cursor)
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	range_ := identifierProtocolRange(document.source, item)
+	return s.stream.write(success(request.ID, prepareRenameResult{Range: range_, Placeholder: strings.TrimPrefix(item.Lexeme, "@")}))
+}
+
+func (s *Server) rename(request message) error {
+	params, err := decodeParams[renameParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	if !validRenameIdentifier(params.NewName) {
+		return s.stream.write(failure(request.ID, -32602, fmt.Errorf("%q is not a valid TypeRB identifier", params.NewName)))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	items, ok := languageservice.References(languageservice.SemanticRequest{
+		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
+	}, s.semanticDocuments(), true)
+	if !ok || len(items) == 0 {
+		return s.stream.write(success(request.ID, nil))
+	}
+	changes := map[string][]textEdit{}
+	for _, item := range items {
+		source, exists := s.source(item.Path)
+		if !exists {
+			continue
+		}
+		uri := uriFromPath(item.Path)
+		changes[uri] = append(changes[uri], textEdit{Range: offsetRange(source, item.Range.Start, item.Range.End), NewText: params.NewName})
+	}
+	return s.stream.write(success(request.ID, workspaceEdit{Changes: changes}))
+}
+
 func (s *Server) format(request message) error {
 	params, err := decodeParams[formattingParams](request.Params)
 	if err != nil {
@@ -476,6 +580,33 @@ func (s *Server) source(path string) ([]byte, bool) {
 	return document.source, exists
 }
 
+func (s *Server) semanticDocuments() []languageservice.SemanticDocument {
+	paths := make(map[string]bool, len(s.base)+len(s.documents))
+	for path := range s.base {
+		paths[path] = true
+	}
+	for path := range s.documents {
+		paths[path] = true
+	}
+	ordered := make([]string, 0, len(paths))
+	for path := range paths {
+		ordered = append(ordered, path)
+	}
+	sort.Strings(ordered)
+	result := make([]languageservice.SemanticDocument, 0, len(ordered))
+	for _, path := range ordered {
+		document, exists := s.document(path)
+		if !exists {
+			continue
+		}
+		context, _ := s.snapshot.Context(document.unit.ModulePath)
+		result = append(result, languageservice.SemanticDocument{
+			Path: path, Source: string(document.source), Mode: s.mode, Context: context,
+		})
+	}
+	return result
+}
+
 func (s *Server) showError(err error) error {
 	return s.stream.write(notification{JSONRPC: "2.0", Method: "window/showMessage", Params: map[string]interface{}{"type": 1, "message": err.Error()}})
 }
@@ -573,11 +704,57 @@ func refineDefinitionRange(source []byte, info languageservice.DefinitionInfo) r
 		if item.Kind != token.Identifier || item.Span.Start.Offset < start || item.Span.End.Offset > end {
 			continue
 		}
-		if item.Lexeme == info.Name || item.Lexeme == strings.TrimPrefix(info.Name, "@") {
-			return offsetRange(source, item.Span.Start.Offset, item.Span.End.Offset)
+		if sameIdentifierName(item.Lexeme, info.Name) {
+			return identifierProtocolRange(source, item)
 		}
 	}
 	return offsetRange(source, start, end)
+}
+
+func semanticTokenAtOffset(tokens []token.Token, cursor int) (token.Token, bool) {
+	for _, item := range tokens {
+		if item.Kind == token.Identifier && item.Span.Start.Offset <= cursor && cursor < item.Span.End.Offset {
+			return item, true
+		}
+	}
+	for _, item := range tokens {
+		if item.Kind == token.Identifier && item.Span.End.Offset == cursor {
+			return item, true
+		}
+	}
+	return token.Token{}, false
+}
+
+func identifierProtocolRange(source []byte, item token.Token) rangeValue {
+	start := item.Span.Start.Offset
+	if strings.HasPrefix(item.Lexeme, "@") {
+		start++
+	}
+	return offsetRange(source, start, item.Span.End.Offset)
+}
+
+func sameIdentifierName(left, right string) bool {
+	return strings.TrimPrefix(left, "@") == strings.TrimPrefix(right, "@")
+}
+
+func validRenameIdentifier(name string) bool {
+	if name == "" || strings.HasPrefix(name, "@") || renameReservedWords[name] {
+		return false
+	}
+	tokens, diagnostics := lexer.Lex([]byte(name))
+	return len(diagnostics) == 0 && len(tokens) == 2 && tokens[0].Kind == token.Identifier &&
+		tokens[0].Lexeme == name && tokens[0].Span.Start.Offset == 0 && tokens[0].Span.End.Offset == len(name)
+}
+
+var renameReservedWords = map[string]bool{
+	"and": true, "attempt": true, "begin": true, "break": true, "case": true,
+	"class": true, "def": true, "defer": true, "do": true, "else": true,
+	"elsif": true, "end": true, "enum": true, "false": true, "fails": true,
+	"fn": true, "for": true, "if": true, "implements": true, "import": true,
+	"interface": true, "module": true, "mut": true, "next": true, "nil": true,
+	"not": true, "or": true, "readonly": true, "record": true, "return": true,
+	"self": true, "then": true, "true": true, "try": true, "type": true,
+	"unless": true, "until": true, "when": true, "while": true,
 }
 
 func offsetRange(source []byte, start, end int) rangeValue {
