@@ -25,11 +25,12 @@ for target in darwin_arm64 darwin_amd64 linux_arm64 linux_amd64; do
   target_os=${target%_*}
   target_arch=${target#*_}
   staging_dir="$staging_root/$target"
+  target_cache="$staging_root/go-cache-$target"
   archive="trb_${version}_${target}.tar.gz"
-  mkdir -p "$staging_dir"
+  mkdir -p "$staging_dir" "$target_cache"
   (
     cd "$repository_root"
-    CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" \
+    CGO_ENABLED=0 GOCACHE="$target_cache" GOOS="$target_os" GOARCH="$target_arch" \
       go build -trimpath -buildvcs=false \
       -ldflags "-s -w -X github.com/type-rb/type-rb/internal/cli.Version=$version" \
       -o "$staging_dir/trb" ./cmd/trb
