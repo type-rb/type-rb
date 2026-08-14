@@ -22,4 +22,18 @@ function resolveServerOptions(settings, workspaceRoot) {
 	return { command, args };
 }
 
-module.exports = { resolveServerOptions };
+function resolveRunOptions(settings, workspaceRoot) {
+	const command = resolveFromWorkspace(settings.path.trim() || "trb", workspaceRoot);
+	const config = resolveFromWorkspace(settings.config.trim(), workspaceRoot);
+	const args = ["run"];
+	if (config !== "") {
+		args.push("--config", config);
+	}
+	return { command, args };
+}
+
+function runCodeLensTitle(running) {
+	return running ? "↻ Restart" : "▶ Run";
+}
+
+module.exports = { resolveRunOptions, resolveServerOptions, runCodeLensTitle };

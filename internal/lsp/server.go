@@ -44,16 +44,17 @@ type document struct {
 }
 
 type Server struct {
-	mode        string
-	version     string
-	stream      *rpcStream
-	compiler    *compilerservice.Service
-	resolveUnit UnitResolver
-	sourceRoot  string
-	documents   map[string]document
-	base        map[string]compiler.SourceUnit
-	published   map[string]bool
-	snapshot    compilerservice.Snapshot
+	mode         string
+	version      string
+	stream       *rpcStream
+	compiler     *compilerservice.Service
+	resolveUnit  UnitResolver
+	sourceRoot   string
+	documents    map[string]document
+	base         map[string]compiler.SourceUnit
+	published    map[string]bool
+	snapshot     compilerservice.Snapshot
+	runSupported bool
 }
 
 const textDocumentSyncIncremental = 2
@@ -79,6 +80,7 @@ func New(options Options) *Server {
 		stream:   newRPCStream(options.Input, options.Output),
 		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit, sourceRoot: sourceRoot,
 		documents: map[string]document{}, base: base, published: map[string]bool{},
+		runSupported: options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
 	}
 }
 
@@ -123,6 +125,7 @@ func (s *Server) handle(request message) (bool, error) {
 					Full:   true,
 				},
 				DocumentFormattingProvider: true, CodeActionProvider: true,
+				CodeLensProvider: &codeLensOptions{ResolveProvider: false},
 			},
 			ServerInfo: serverInfo{Name: "TypeRB", Version: s.version},
 		}))
@@ -188,12 +191,44 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.format(request)
 	case "textDocument/codeAction":
 		return false, s.codeActions(request)
+	case "textDocument/codeLens":
+		return false, s.codeLenses(request)
 	default:
 		if len(request.ID) == 0 {
 			return false, nil
 		}
 		return false, s.stream.write(failure(request.ID, -32601, fmt.Errorf("method %s is not supported", request.Method)))
 	}
+}
+
+func (s *Server) codeLenses(request message) error {
+	params, err := decodeParams[documentParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok || !s.runSupported {
+		return s.stream.write(success(request.ID, []codeLens{}))
+	}
+	items := languageservice.RunnableDeclarations(string(document.source))
+	result := make([]codeLens, 0, len(items))
+	for _, item := range items {
+		if item.Kind != languageservice.RunnableDeclarationMain {
+			continue
+		}
+		result = append(result, codeLens{
+			Range: offsetRange(document.source, item.Range.Start, item.Range.End),
+			Command: command{
+				Title: "▶ Run", Command: "typerb.runProject",
+				Arguments: []interface{}{params.TextDocument.URI},
+			},
+		})
+	}
+	return s.stream.write(success(request.ID, result))
 }
 
 func (s *Server) workspaceSymbols(request message) error {

@@ -49,7 +49,7 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 
 	var initialized initializeResult
 	decodeResult(t, frames[0], &initialized)
-	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != textDocumentSyncIncremental || !initialized.Capabilities.CodeActionProvider || !initialized.Capabilities.FoldingRangeProvider || !initialized.Capabilities.DocumentHighlightProvider || !initialized.Capabilities.SelectionRangeProvider {
+	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != textDocumentSyncIncremental || !initialized.Capabilities.CodeActionProvider || !initialized.Capabilities.FoldingRangeProvider || !initialized.Capabilities.DocumentHighlightProvider || !initialized.Capabilities.SelectionRangeProvider || initialized.Capabilities.CodeLensProvider == nil || initialized.Capabilities.CodeLensProvider.ResolveProvider {
 		t.Fatalf("unexpected initialize result: %#v", initialized)
 	}
 	var opened publishDiagnosticsParams
@@ -75,6 +75,69 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 	}
 	if string(frames[5]["result"]) != "null" {
 		t.Fatalf("shutdown result=%s, want null", frames[5]["result"])
+	}
+}
+
+func TestServerReturnsRunCodeLensForTopLevelMain(t *testing.T) {
+	filename := cleanPath("main.trb")
+	source := "def main()\n\treturn\nend\n"
+	uri := uriFromPath(filename)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/codeLens", Params: rawParams(t, documentParams{TextDocument: textDocumentIdentifier{URI: uri}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var initialized initializeResult
+	decodeResult(t, frames[0], &initialized)
+	if initialized.Capabilities.CodeLensProvider == nil || initialized.Capabilities.CodeLensProvider.ResolveProvider {
+		t.Fatalf("code lens capability=%#v", initialized.Capabilities.CodeLensProvider)
+	}
+	var lenses []codeLens
+	decodeResult(t, frames[2], &lenses)
+	if len(lenses) != 1 || lenses[0].Range.Start != (position{Line: 0, Character: 4}) || lenses[0].Range.End != (position{Line: 0, Character: 8}) {
+		t.Fatalf("code lenses=%#v", lenses)
+	}
+	if lenses[0].Command.Title != "▶ Run" || lenses[0].Command.Command != "typerb.runProject" || !reflect.DeepEqual(lenses[0].Command.Arguments, []interface{}{uri}) {
+		t.Fatalf("run command=%#v", lenses[0].Command)
+	}
+}
+
+func TestServerOmitsRunCodeLensForBrowserProjects(t *testing.T) {
+	filename := cleanPath("main.trb")
+	source := "def main()\n\treturn\nend\n"
+	uri := uriFromPath(filename)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/codeLens", Params: rawParams(t, documentParams{TextDocument: textDocumentIdentifier{URI: uri}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "typescript", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "typescript", TypeScriptRuntime: "browser"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var lenses []codeLens
+	decodeResult(t, frames[1], &lenses)
+	if len(lenses) != 0 {
+		t.Fatalf("browser code lenses=%#v", lenses)
 	}
 }
 

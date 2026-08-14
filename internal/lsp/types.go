@@ -213,6 +213,17 @@ type codeAction struct {
 	Edit  workspaceEdit `json:"edit"`
 }
 
+type command struct {
+	Title     string        `json:"title"`
+	Command   string        `json:"command"`
+	Arguments []interface{} `json:"arguments,omitempty"`
+}
+
+type codeLens struct {
+	Range   rangeValue `json:"range"`
+	Command command    `json:"command"`
+}
+
 type initializeResult struct {
 	Capabilities serverCapabilities `json:"capabilities"`
 	ServerInfo   serverInfo         `json:"serverInfo"`
@@ -239,6 +250,7 @@ type serverCapabilities struct {
 	SemanticTokensProvider     semanticTokensOptions `json:"semanticTokensProvider"`
 	DocumentFormattingProvider bool                  `json:"documentFormattingProvider"`
 	CodeActionProvider         bool                  `json:"codeActionProvider"`
+	CodeLensProvider           *codeLensOptions      `json:"codeLensProvider"`
 }
 
 type completionOptions struct {
@@ -257,6 +269,10 @@ type renameOptions struct {
 type semanticTokensOptions struct {
 	Legend semanticTokensLegend `json:"legend"`
 	Full   bool                 `json:"full"`
+}
+
+type codeLensOptions struct {
+	ResolveProvider bool `json:"resolveProvider"`
 }
 
 type semanticTokensLegend struct {

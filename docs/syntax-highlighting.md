@@ -8,10 +8,11 @@ canonical TextMate grammar and snippets, and starts `trb lsp` from `PATH`.
 Diagnostics, completion, hover information, signature help, definition and
 reference navigation, symbol rename and search, occurrence highlighting,
 document outlines, folding, expanding selections, semantic highlighting,
-formatting, and quick fixes therefore use the same compiler and language
-services as the CLI instead of editor-specific language logic. Project symbols
-and diagnostics also follow `.trb` files created, changed, or deleted outside
-the active editor.
+formatting, quick fixes, and runnable `main()` locations therefore use the same
+compiler and language services as the CLI instead of editor-specific language
+logic. Project symbols and diagnostics also follow `.trb` files created,
+changed, or deleted outside the active editor. The VS Code client owns the
+integrated-terminal run and restart lifecycle.
 
 Install [TypeRB from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=type-rb.typerb),
 or run:
