@@ -116,6 +116,15 @@ type completionItem struct {
 	TextEdit textEdit `json:"textEdit"`
 }
 
+type documentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           int              `json:"kind"`
+	Range          rangeValue       `json:"range"`
+	SelectionRange rangeValue       `json:"selectionRange"`
+	Children       []documentSymbol `json:"children,omitempty"`
+}
+
 type markupContent struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
@@ -174,6 +183,7 @@ type serverCapabilities struct {
 	DefinitionProvider         bool              `json:"definitionProvider"`
 	ReferencesProvider         bool              `json:"referencesProvider"`
 	RenameProvider             renameOptions     `json:"renameProvider"`
+	DocumentSymbolProvider     bool              `json:"documentSymbolProvider"`
 	DocumentFormattingProvider bool              `json:"documentFormattingProvider"`
 	CodeActionProvider         bool              `json:"codeActionProvider"`
 }
