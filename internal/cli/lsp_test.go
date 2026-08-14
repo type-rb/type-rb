@@ -32,7 +32,7 @@ func TestLSPCommandServesConfiguredProjectOverStandardIO(t *testing.T) {
 	if status := command.Run([]string{"lsp", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	if stderr.Len() != 0 || !strings.Contains(stdout.String(), `"name":"TypeRB"`) || !strings.Contains(stdout.String(), `"textDocumentSync":1`) {
+	if stderr.Len() != 0 || !strings.Contains(stdout.String(), `"name":"TypeRB"`) || !strings.Contains(stdout.String(), `"textDocumentSync":2`) {
 		t.Fatalf("unexpected LSP output stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }

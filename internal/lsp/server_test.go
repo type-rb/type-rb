@@ -48,7 +48,7 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 
 	var initialized initializeResult
 	decodeResult(t, frames[0], &initialized)
-	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != 1 || !initialized.Capabilities.CodeActionProvider {
+	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != textDocumentSyncIncremental || !initialized.Capabilities.CodeActionProvider {
 		t.Fatalf("unexpected initialize result: %#v", initialized)
 	}
 	var opened publishDiagnosticsParams
@@ -148,6 +148,64 @@ func TestServerReturnsNestedDocumentSymbols(t *testing.T) {
 	}
 	if symbols[0].SelectionRange.Start != (position{Line: 0, Character: 7}) || symbols[0].SelectionRange.End != (position{Line: 0, Character: 11}) {
 		t.Fatalf("record selection=%#v", symbols[0].SelectionRange)
+	}
+}
+
+func TestServerAppliesOrderedIncrementalDocumentChanges(t *testing.T) {
+	filename := cleanPath("incremental.trb")
+	source := "record User\n\tname: String\nend\n"
+	uri := uriFromPath(filename)
+	userRange := rangeValue{Start: position{Line: 0, Character: 7}, End: position{Line: 0, Character: 11}}
+	fieldRange := rangeValue{Start: position{Line: 1, Character: 1}, End: position{Line: 1, Character: 5}}
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", Method: "textDocument/didChange", Params: rawParams(t, didChangeParams{
+			TextDocument: versionedTextDocumentIdentifier{URI: uri, Version: 2},
+			ContentChanges: []contentChange{
+				{Range: &userRange, Text: "Account"},
+				{Range: &fieldRange, Text: "display_name"},
+			},
+		})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/documentSymbol", Params: rawParams(t, documentParams{TextDocument: textDocumentIdentifier{URI: uri}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "incremental", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var symbols []documentSymbol
+	decodeResult(t, frames[3], &symbols)
+	if len(symbols) != 1 || symbols[0].Name != "Account" || len(symbols[0].Children) != 1 || symbols[0].Children[0].Name != "display_name" {
+		t.Fatalf("incremental document symbols=%#v", symbols)
+	}
+}
+
+func TestApplyContentChangesUsesUTF16Ranges(t *testing.T) {
+	source := []byte("value := \"😀\"\nputs(value)\n")
+	emoji := rangeValue{Start: position{Line: 0, Character: 10}, End: position{Line: 0, Character: 12}}
+	call := rangeValue{Start: position{Line: 1, Character: 0}, End: position{Line: 1, Character: 4}}
+	result, err := applyContentChanges(source, []contentChange{
+		{Range: &emoji, Text: "Ada"},
+		{Range: &call, Text: "print"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result) != "value := \"Ada\"\nprint(value)\n" {
+		t.Fatalf("result=%q", result)
+	}
+
+	insideSurrogate := rangeValue{Start: position{Line: 0, Character: 11}, End: position{Line: 0, Character: 12}}
+	if _, err := applyContentChanges(source, []contentChange{{Range: &insideSurrogate, Text: "x"}}); err == nil {
+		t.Fatal("expected a range inside a UTF-16 surrogate pair to fail")
 	}
 }
 

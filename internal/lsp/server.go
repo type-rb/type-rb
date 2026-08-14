@@ -54,6 +54,8 @@ type Server struct {
 	snapshot    compilerservice.Snapshot
 }
 
+const textDocumentSyncIncremental = 2
+
 func New(options Options) *Server {
 	base := make(map[string]compiler.SourceUnit, len(options.Units))
 	for _, unit := range options.Units {
@@ -92,7 +94,7 @@ func (s *Server) handle(request message) (bool, error) {
 	case "initialize":
 		return false, s.stream.write(success(request.ID, initializeResult{
 			Capabilities: serverCapabilities{
-				TextDocumentSync:        1,
+				TextDocumentSync:        textDocumentSyncIncremental,
 				CompletionProvider:      completionOptions{TriggerCharacters: []string{".", ":"}},
 				HoverProvider:           true,
 				SignatureHelpProvider:   signatureOptions{TriggerCharacters: []string{"(", ","}},
@@ -395,13 +397,22 @@ func (s *Server) change(params didChangeParams) error {
 	if err != nil {
 		return err
 	}
+	current, exists := s.documents[path]
+	if !exists {
+		return s.showError(fmt.Errorf("cannot change unopened document %s", path))
+	}
 	if len(params.ContentChanges) == 0 {
+		current.version = params.TextDocument.Version
+		s.documents[path] = current
 		return nil
 	}
-	if current, exists := s.documents[path]; exists && current.version > 0 && params.TextDocument.Version > 0 && params.TextDocument.Version <= current.version {
+	if current.version > 0 && params.TextDocument.Version > 0 && params.TextDocument.Version <= current.version {
 		return nil
 	}
-	source := []byte(params.ContentChanges[len(params.ContentChanges)-1].Text)
+	source, err := applyContentChanges(current.source, params.ContentChanges)
+	if err != nil {
+		return s.showError(fmt.Errorf("cannot apply changes to %s: %w", path, err))
+	}
 	unit, err := s.unit(path, source)
 	if err != nil {
 		return s.showError(err)
@@ -409,6 +420,33 @@ func (s *Server) change(params didChangeParams) error {
 	s.documents[path] = document{unit: unit, source: source, version: params.TextDocument.Version}
 	s.compiler.SetDocument(unit)
 	return s.publish()
+}
+
+func applyContentChanges(source []byte, changes []contentChange) ([]byte, error) {
+	result := append([]byte(nil), source...)
+	for _, change := range changes {
+		if change.Range == nil {
+			result = []byte(change.Text)
+			continue
+		}
+		start, ok := exactOffsetAt(result, change.Range.Start)
+		if !ok {
+			return nil, fmt.Errorf("change start %d:%d is outside the document", change.Range.Start.Line, change.Range.Start.Character)
+		}
+		end, ok := exactOffsetAt(result, change.Range.End)
+		if !ok {
+			return nil, fmt.Errorf("change end %d:%d is outside the document", change.Range.End.Line, change.Range.End.Character)
+		}
+		if end < start {
+			return nil, fmt.Errorf("change range ends before it starts")
+		}
+		next := make([]byte, 0, len(result)-(end-start)+len(change.Text))
+		next = append(next, result[:start]...)
+		next = append(next, change.Text...)
+		next = append(next, result[end:]...)
+		result = next
+	}
+	return result, nil
 }
 
 func (s *Server) close(uri string) error {
@@ -882,6 +920,39 @@ func offsetAt(source []byte, target position) int {
 		offset += size
 	}
 	return len(source)
+}
+
+func exactOffsetAt(source []byte, target position) (int, bool) {
+	if target.Line < 0 || target.Character < 0 {
+		return 0, false
+	}
+	line, character := 0, 0
+	for offset := 0; offset < len(source); {
+		if line == target.Line && character == target.Character {
+			return offset, true
+		}
+		r, size := utf8.DecodeRune(source[offset:])
+		if r == '\n' {
+			if line == target.Line {
+				return 0, false
+			}
+			line++
+			character = 0
+			offset += size
+			continue
+		}
+		if line == target.Line {
+			character += utf16.RuneLen(r)
+			if character > target.Character {
+				return 0, false
+			}
+		}
+		offset += size
+	}
+	if line == target.Line && character == target.Character {
+		return len(source), true
+	}
+	return 0, false
 }
 
 func positionAt(source []byte, target int) position {

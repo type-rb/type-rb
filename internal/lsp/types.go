@@ -33,7 +33,9 @@ type didOpenParams struct {
 }
 
 type contentChange struct {
-	Text string `json:"text"`
+	Range       *rangeValue `json:"range,omitempty"`
+	RangeLength *int        `json:"rangeLength,omitempty"`
+	Text        string      `json:"text"`
 }
 
 type didChangeParams struct {
