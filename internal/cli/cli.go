@@ -85,6 +85,8 @@ func (c *CLI) Run(args []string) int {
 		err = c.runProgram(args[1:])
 	case "repl":
 		err = c.runRepl(args[1:])
+	case "lsp":
+		err = c.runLSP(args[1:])
 	case "play":
 		err = c.runPlay(args[1:])
 	case "tour":
@@ -2006,6 +2008,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--outfile FILE]")
 	fmt.Fprintln(c.Stdout, "  trb run [FILE.trb] [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb lsp [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb play [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb tour [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb db plan|apply|export|lock|check [options]")
