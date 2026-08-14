@@ -296,6 +296,65 @@ func TestCompletionOffersImportCandidatesWithoutChangingCheckedContext(t *testin
 	}
 }
 
+func TestCompletionAddsExplicitStandardImport(t *testing.T) {
+	service := languageservice.New("go")
+	service.SetCandidates(languageservice.StandardImportCandidates("go"))
+	item, ok := findCompletion(service.Complete("# Values\nRes", len("# Values\nRes")), "Result")
+	if !ok {
+		t.Fatal("Result import candidate was not completed")
+	}
+	want := languageservice.TextEdit{
+		Range:   languageservice.OffsetRange{Start: len("# Values\n"), End: len("# Values\n")},
+		NewText: "import { Result } from trb/std/result\n",
+	}
+	if len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0] != want {
+		t.Fatalf("additional edits=%#v, want %#v", item.AdditionalEdits, want)
+	}
+
+	source := "import { Date } from trb/std/time\nRes"
+	item, ok = findCompletion(service.Complete(source, len(source)), "Result")
+	if !ok || len(item.AdditionalEdits) != 1 {
+		t.Fatalf("Result completion=%#v, ok=%v", item, ok)
+	}
+	if got := item.AdditionalEdits[0]; got.Range.Start != len("import { Date } from trb/std/time\n") || got.NewText != "import { Result } from trb/std/result\n" {
+		t.Fatalf("additional edit=%#v", got)
+	}
+}
+
+func TestCompletionMergesAnExistingNamedImport(t *testing.T) {
+	service := languageservice.New("go")
+	service.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{{
+		Name: "Result", Kind: languageservice.CompletionType,
+		Import: &languageservice.Import{Path: "trb/std/result", Symbol: "Result"},
+	}}})
+	source := "import { Other } from trb/std/result\nRes"
+	item, ok := findCompletion(service.Complete(source, len(source)), "Result")
+	if !ok || len(item.AdditionalEdits) != 1 {
+		t.Fatalf("Result completion=%#v, ok=%v", item, ok)
+	}
+	if got := item.AdditionalEdits[0]; got.NewText != ", Result" || source[got.Range.Start:got.Range.End] != "" {
+		t.Fatalf("additional edit=%#v", got)
+	}
+}
+
+func TestProjectImportCandidatesOmitAmbiguousNames(t *testing.T) {
+	programs := []*ir.Program{
+		{ModulePath: "app/main"},
+		{ModulePath: "models/user", Statements: []ir.Statement{&ir.Record{Name: "User"}, &ir.Record{Name: "Unique"}}},
+		{ModulePath: "admin/user", Statements: []ir.Statement{&ir.Record{Name: "User"}}},
+	}
+	candidates := languageservice.BuildImportCandidates(programs, "app/main")
+	service := languageservice.New("go")
+	service.SetCandidates(candidates)
+	if _, ok := findCompletion(service.Complete("Us", 2), "User"); ok {
+		t.Fatal("ambiguous User candidate was completed")
+	}
+	item, ok := findCompletion(service.Complete("Uni", 3), "Unique")
+	if !ok || item.AdditionalEdits[0].NewText != "import { Unique } from models/user\n" {
+		t.Fatalf("Unique completion=%#v, ok=%v", item, ok)
+	}
+}
+
 func TestCompletionReplacesTheIdentifierAroundTheCursor(t *testing.T) {
 	service := languageservice.New("go")
 	items := service.Complete("retxx", 3)

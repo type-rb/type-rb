@@ -33,14 +33,28 @@ type OffsetRange struct {
 	End   int
 }
 
+// TextEdit is an editor-independent source change applied together with a
+// completion. Protocol adapters translate byte offsets to their wire format.
+type TextEdit struct {
+	Range   OffsetRange
+	NewText string
+}
+
+// Import identifies the explicit source import required by a completion.
+type Import struct {
+	Path   string
+	Symbol string
+}
+
 // CompletionItem separates the displayed label from the exact source text
 // that replaces Replacement.
 type CompletionItem struct {
-	Label       string
-	InsertText  string
-	Kind        CompletionKind
-	Detail      string
-	Replacement OffsetRange
+	Label           string
+	InsertText      string
+	Kind            CompletionKind
+	Detail          string
+	Replacement     OffsetRange
+	AdditionalEdits []TextEdit
 }
 
 // SymbolID is a project-stable identity derived from a source declaration.
@@ -88,6 +102,7 @@ type Symbol struct {
 	Call       *CallInfo
 	Members    []Symbol
 	Definition *DefinitionLocation
+	Import     *Import
 }
 
 // Context is the checked project information available at a cursor position.
@@ -247,7 +262,9 @@ func (s *Service) Highlight(source string) []HighlightSpan {
 	return Highlight(request)
 }
 
-func mergeCandidateContext(current, candidates Context) Context {
+// MergeContexts adds completion-only declarations without overriding symbols
+// already visible in checked source.
+func MergeContexts(current, candidates Context) Context {
 	result := current
 	result.Symbols = append([]Symbol(nil), current.Symbols...)
 	visible := make(map[string]bool, len(current.Symbols))
@@ -260,6 +277,10 @@ func mergeCandidateContext(current, candidates Context) Context {
 		}
 	}
 	return result
+}
+
+func mergeCandidateContext(current, candidates Context) Context {
+	return MergeContexts(current, candidates)
 }
 
 func emptyContext() Context {

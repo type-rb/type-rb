@@ -188,6 +188,91 @@ func TestServerDiagnosesUnknownTypesAndCompletesCanonicalNames(t *testing.T) {
 	}
 }
 
+func TestServerDiagnosesAndAutoImportsStandardTypes(t *testing.T) {
+	filename := cleanPath("result.trb")
+	source := "def checked(value: Integer): Result<Integer, String>\n\treturn Result<Integer, String>::Ok(value)\nend\n"
+	uri := uriFromPath(filename)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/completion", Params: rawParams(t, documentPositionParams{
+			TextDocument: textDocumentIdentifier{URI: uri}, Position: position{Line: 0, Character: 35},
+		})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "result", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var published publishDiagnosticsParams
+	decodeParamsFrame(t, frames[1], &published)
+	if len(published.Diagnostics) == 0 || !strings.Contains(published.Diagnostics[0].Message, "Result is not declared or imported") {
+		t.Fatalf("missing import diagnostics=%#v", published.Diagnostics)
+	}
+	var completions []completionItem
+	decodeResult(t, frames[2], &completions)
+	for _, item := range completions {
+		if item.Label != "Result" {
+			continue
+		}
+		if len(item.AdditionalTextEdits) != 1 || item.AdditionalTextEdits[0].NewText != "import { Result } from trb/std/result\n" || item.AdditionalTextEdits[0].Range != (rangeValue{}) {
+			t.Fatalf("Result completion=%#v", item)
+		}
+		return
+	}
+	t.Fatalf("Result completion is missing: %#v", completions)
+}
+
+func TestServerAutoImportsAnUnambiguousProjectType(t *testing.T) {
+	userFilename := cleanPath("models/user.trb")
+	mainFilename := cleanPath("main.trb")
+	userSource := "record User\n\tname: String\nend\n"
+	valid := "import { User } from models/user\n\ndef inspect(user: User)\n\tputs(user.name)\n\treturn\nend\n"
+	invalid := "def inspect(user: User)\n\tputs(user.name)\n\treturn\nend\n"
+	uri := uriFromPath(mainFilename)
+	cursor := positionAt([]byte(invalid), strings.Index(invalid, "User")+len("User"))
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: valid}})},
+		message{JSONRPC: "2.0", Method: "textDocument/didChange", Params: rawParams(t, didChangeParams{
+			TextDocument: versionedTextDocumentIdentifier{URI: uri, Version: 2}, ContentChanges: []contentChange{{Text: invalid}},
+		})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/completion", Params: rawParams(t, documentPositionParams{
+			TextDocument: textDocumentIdentifier{URI: uri}, Position: cursor,
+		})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units: []compiler.SourceUnit{
+			{Filename: userFilename, ModulePath: "models/user", Package: "models", Source: []byte(userSource)},
+			{Filename: mainFilename, ModulePath: "main", Package: "main", Source: []byte(valid)},
+		},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var completions []completionItem
+	decodeResult(t, frames[3], &completions)
+	for _, item := range completions {
+		if item.Label == "User" && len(item.AdditionalTextEdits) == 1 && item.AdditionalTextEdits[0].NewText == "import { User } from models/user\n" {
+			return
+		}
+	}
+	t.Fatalf("project auto-import completion is missing: %#v", completions)
+}
+
 func TestServerReturnsNestedDocumentSymbols(t *testing.T) {
 	filename := cleanPath("outline.trb")
 	source := "record User\n\tname: String\nend\n\ndef main()\n\tuser := User.new(name: \"Ada\")\n\tputs(user.name)\n\treturn\nend\n"

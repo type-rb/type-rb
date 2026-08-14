@@ -8,7 +8,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/lexer"
+	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
@@ -94,7 +96,7 @@ func Complete(request CompletionRequest) []CompletionItem {
 		if typePosition && symbol.Kind != CompletionType {
 			continue
 		}
-		items = append(items, completionFromSymbol(symbol, replacement))
+		items = append(items, completionFromSymbol(symbol, replacement, request.Source))
 	}
 	return filterCompletions(items, prefix)
 }
@@ -556,7 +558,7 @@ func literalCompletionContext(source string, cursor int, tokens []token.Token, k
 }
 
 func completeMembers(receiver, marker string, request CompletionRequest, replacement OffsetRange) []CompletionItem {
-	return completionItems(memberSymbols(receiver, marker, request), replacement)
+	return completionItems(memberSymbols(receiver, marker, request), replacement, request.Source)
 }
 
 func memberSymbols(receiver, marker string, request CompletionRequest) []Symbol {
@@ -725,20 +727,79 @@ func receiverMembers(receiver types.Type, context Context) []Symbol {
 	return result
 }
 
-func completionItems(symbols []Symbol, replacement OffsetRange) []CompletionItem {
+func completionItems(symbols []Symbol, replacement OffsetRange, source string) []CompletionItem {
 	result := make([]CompletionItem, 0, len(symbols))
 	for _, symbol := range symbols {
-		result = append(result, completionFromSymbol(symbol, replacement))
+		result = append(result, completionFromSymbol(symbol, replacement, source))
 	}
 	return result
 }
 
-func completionFromSymbol(symbol Symbol, replacement OffsetRange) CompletionItem {
+func completionFromSymbol(symbol Symbol, replacement OffsetRange, source string) CompletionItem {
 	insertText := symbol.Name
 	if symbol.Call != nil && symbol.Call.ParameterCount == 0 && !symbol.Call.ExplicitTypeArguments {
 		insertText += "()"
 	}
-	return CompletionItem{Label: symbol.Name, InsertText: insertText, Kind: symbol.Kind, Detail: symbol.Detail, Replacement: replacement}
+	item := CompletionItem{Label: symbol.Name, InsertText: insertText, Kind: symbol.Kind, Detail: symbol.Detail, Replacement: replacement}
+	if symbol.Import != nil {
+		if edit, ok := autoImportEdit(source, *symbol.Import); ok {
+			item.AdditionalEdits = []TextEdit{edit}
+		}
+	}
+	return item
+}
+
+func autoImportEdit(source string, required Import) (TextEdit, bool) {
+	program, _ := parser.Parse([]byte(source))
+	lastImportEnd := -1
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ast.ImportStatement)
+		if !ok {
+			continue
+		}
+		for _, name := range imported.Symbols {
+			if imported.Path == required.Path && name == required.Symbol {
+				return TextEdit{}, false
+			}
+		}
+		span := imported.Span()
+		lastImportEnd = lineEnd(source, span.End.Offset)
+		if imported.Path == required.Path && len(imported.Symbols) > 0 {
+			line := source[span.Start.Offset:span.End.Offset]
+			if close := strings.LastIndex(line, "}"); close >= 0 {
+				offset := span.Start.Offset + close
+				return TextEdit{Range: OffsetRange{Start: offset, End: offset}, NewText: ", " + required.Symbol}, true
+			}
+		}
+	}
+	text := "import { " + required.Symbol + " } from " + required.Path + "\n"
+	if lastImportEnd >= 0 {
+		return TextEdit{Range: OffsetRange{Start: lastImportEnd, End: lastImportEnd}, NewText: text}, true
+	}
+	insertion := 0
+	for _, statement := range program.Statements {
+		switch statement.(type) {
+		case *ast.CommentStatement, *ast.BlankStatement:
+			continue
+		default:
+			insertion = statement.Span().Start.Offset
+		}
+		break
+	}
+	return TextEdit{Range: OffsetRange{Start: insertion, End: insertion}, NewText: text}, true
+}
+
+func lineEnd(source string, offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	if offset > len(source) {
+		offset = len(source)
+	}
+	if next := strings.IndexByte(source[offset:], '\n'); next >= 0 {
+		return offset + next + 1
+	}
+	return len(source)
 }
 
 func filterCompletions(items []CompletionItem, prefix string) []CompletionItem {
