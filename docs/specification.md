@@ -196,10 +196,15 @@ end
 - Reassignment invalidates the narrowing immediately. The assignment itself is
   checked against the binding's declared nullable type, and subsequent uses
   must narrow again.
-- Initial narrowing is deliberately limited to stable lexical identifiers.
-  Member, index, and call expressions are not assumed to produce the same
-  value when evaluated again. Typed IR records each nullable unwrap explicitly
-  so Go, Ruby, TypeScript, and the REPL use the same checked flow facts.
+- A direct nullable data field may also narrow when its receiver is a stable
+  lexical binding and the field cannot change: record fields are always
+  stable, and class fields must be declared `readonly`. Reassigning the
+  receiver invalidates every field fact derived from it. Imported record and
+  class fields retain the same stability metadata.
+- Mutable class fields, indexes, calls, and chained member paths are not
+  assumed to produce the same value when evaluated again. Typed IR records
+  each nullable unwrap explicitly so Go, Ruby, TypeScript, and the REPL use the
+  same checked flow facts.
 
 #### Literal types and discriminated unions
 

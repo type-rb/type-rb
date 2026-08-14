@@ -576,15 +576,12 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 		return nil
 	}
 	result := l.expressionWithoutConversion(node)
-	if identifierNode, identifierExpression := node.(*ast.Identifier); identifierExpression && result != nil {
-		if source, ok := l.checked.NullableUnwraps[identifierNode]; ok {
-			identifier := result.(*ir.Identifier)
-			value := *identifier
-			value.ExprBase.Type = source
+	if source, ok := l.checked.NullableUnwraps[node]; ok && result != nil {
+		if value := expressionWithType(result, source); value != nil {
 			result = &ir.Conversion{
-				ExprBase: ir.NewExprBase(node.Span(), identifier.ExprType()),
+				ExprBase: ir.NewExprBase(node.Span(), result.ExprType()),
 				Kind:     ir.NullableToNonNullableConversion,
-				Value:    &value,
+				Value:    value,
 			}
 		}
 	}
@@ -617,6 +614,21 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 		}
 	}
 	return result
+}
+
+func expressionWithType(expression ir.Expression, typ types.Type) ir.Expression {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		copy := *node
+		copy.ExprBase.Type = typ
+		return &copy
+	case *ir.Member:
+		copy := *node
+		copy.ExprBase.Type = typ
+		return &copy
+	default:
+		return nil
+	}
 }
 
 func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression {

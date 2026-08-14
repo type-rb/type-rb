@@ -157,6 +157,22 @@ the remaining `elsif` or `else` path of `name == nil`, in `while`, and on the
 right side of a compatible short-circuit `and` or `or`. Reassigning the binding
 invalidates the narrowed type.
 
+A direct nullable record field or `readonly` class field follows the same
+rule when its receiver is a lexical binding:
+
+```trb
+def display_profile(profile: Profile): String
+	if profile.nickname == nil
+		return "Anonymous"
+	end
+	return profile.nickname
+end
+```
+
+Reassigning `profile` invalidates the field narrowing. Mutable class fields,
+indexes, calls, and chained member paths must be read into a local binding
+before narrowing.
+
 Identifiers beginning with an uppercase letter are immutable constants. They
 are allowed at top level or directly inside a module or class:
 
