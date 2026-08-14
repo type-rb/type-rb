@@ -92,6 +92,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "({ index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("IndexLookupError") + ")"
 		return resultError(value)
 	}
+	sliceRangeError := func(start, end, exclusive, size, message string) string {
+		value := "({ start: " + start + ", finish: " + end + ", exclusive: " + exclusive + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("SliceRangeError") + ")"
+		return resultError(value)
+	}
 	keyLookupError := func(key, message string) string {
 		value := "({ key: " + key + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("KeyLookupError") + ")"
 		return resultError(value)
@@ -255,11 +259,23 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Array.from(" + arguments[0] + ")"
 	case "trb.std.strings.reverse":
 		return "Array.from(" + arguments[0] + ").reverse().join(\"\")"
-	case "trb.std.strings.fetch":
-		return "((): string => { const __trbValue = Array.from(" + arguments[0] + "); const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValue.length) { throw new Error(\"String index is out of bounds\"); } return __trbValue[__trbIndex]!; })()"
 	case "trb.std.strings.try_fetch":
 		resultType, _, _ := filesystemResultType()
 		return "((): " + resultType + " => { const __trbValue = Array.from(" + arguments[0] + "); const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValue.length) { return " + indexLookupError("__trbIndex", "__trbValue.length", "String index is out of bounds") + "; } return " + filesystemOK("__trbValue[__trbIndex]!") + "; })()"
+	case "trb.std.strings.slice", "trb.std.strings.try_slice":
+		safe := name == "trb.std.strings.try_slice"
+		returnType := "string"
+		invalid := "throw new RangeError(\"String slice range is out of bounds\");"
+		success := "return characters.slice(start, stop).join(\"\");"
+		if safe {
+			returnType, _, _ = filesystemResultType()
+			invalid = "return " + sliceRangeError("start", "end", "exclusive", "characters.length", "String slice range is out of bounds") + ";"
+			success = "return " + filesystemOK("characters.slice(start, stop).join(\"\")") + ";"
+		}
+		return "((): " + returnType + " => { const characters = Array.from(" + arguments[0] + "); const [start, end, exclusive] = " + arguments[1] + "; const valid = start >= 0 && end >= 0 && start <= end && (exclusive ? end <= characters.length : end < characters.length); if (!valid) { " + invalid + " } const stop = exclusive ? end : end + 1; " + success + " })()"
+	case "trb.std.strings.index", "trb.std.strings.rindex":
+		reverse := name == "trb.std.strings.rindex"
+		return "((value: string, substring: string): number | null => { const characters = Array.from(value); const needle = Array.from(substring); if (needle.length === 0) return " + map[bool]string{false: "0", true: "characters.length"}[reverse] + "; if (needle.length > characters.length) return null; let index = " + map[bool]string{false: "0", true: "characters.length - needle.length"}[reverse] + "; const stop = " + map[bool]string{false: "characters.length - needle.length", true: "0"}[reverse] + "; const step = " + map[bool]string{false: "1", true: "-1"}[reverse] + "; for (;; index += step) { if (needle.every((character, offset) => characters[index + offset] === character)) return index; if (index === stop) break; } return null; })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.unicode.version":
 		return unicodeCall("version") + "()"
 	case "trb.std.unicode.valid_scalar":
@@ -357,11 +373,20 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".length"
 	case "trb.std.arrays.empty":
 		return arguments[0] + ".length === 0"
-	case "trb.std.arrays.fetch":
-		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { throw new Error(\"Array index is out of bounds\"); } return __trbValues[__trbIndex]!; })()"
 	case "trb.std.arrays.try_fetch":
 		resultType, _, _ := filesystemResultType()
 		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { return " + indexLookupError("__trbIndex", "__trbValues.length", "Array index is out of bounds") + "; } return " + filesystemOK("__trbValues[__trbIndex]!") + "; })()"
+	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
+		safe := name == "trb.std.arrays.try_slice"
+		returnType := g.tsType(call.ExprType())
+		invalid := "throw new RangeError(\"Array slice range is out of bounds\");"
+		success := "return values.slice(start, stop);"
+		if safe {
+			returnType, _, _ = filesystemResultType()
+			invalid = "return " + sliceRangeError("start", "end", "exclusive", "values.length", "Array slice range is out of bounds") + ";"
+			success = "return " + filesystemOK("values.slice(start, stop)") + ";"
+		}
+		return "((): " + returnType + " => { const values = " + arguments[0] + "; const [start, end, exclusive] = " + arguments[1] + "; const valid = start >= 0 && end >= 0 && start <= end && (exclusive ? end <= values.length : end < values.length); if (!valid) { " + invalid + " } const stop = exclusive ? end : end + 1; " + success + " })()"
 	case "trb.std.arrays.first":
 		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[0]!; })()"
 	case "trb.std.arrays.last":

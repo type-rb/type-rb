@@ -184,10 +184,11 @@ func (g *generator) ormPredicateValue(value ir.Expression) string {
 		return "null"
 	}
 	if value.ExprType().Kind == types.Range {
-		rangeValue, ok := value.(*ir.Range)
-		if ok {
+		if rangeValue, ok := value.(*ir.Range); ok {
 			return "__trbOrm.range(" + g.expr(rangeValue.Start) + ", " + g.expr(rangeValue.End) + ", " + strconv.FormatBool(rangeValue.Exclusive) + ")"
 		}
+		bounds := g.expr(value)
+		return "((bounds: [number, number, boolean]) => __trbOrm.range(bounds[0], bounds[1], bounds[2]))(" + bounds + ")"
 	}
 	return g.expr(value)
 }

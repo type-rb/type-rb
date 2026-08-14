@@ -51,8 +51,12 @@ safe_number := "123".try_to_i()
 decimal := "12.5".to_f()
 safe_decimal := "+.5e1".try_to_f()
 length := "Hello".size()
-character := "A😀".fetch(1)
+character := "A😀"[1]
 safe_character := "A😀".try_fetch(2)
+middle := "A😀BC".slice(1...3)
+safe_middle := "A😀BC".try_slice(1..2)
+first_emoji := "A😀B😀".index("😀")
+last_emoji := "A😀B😀".rindex("😀")
 characters := "A😀".chars()
 reversed := "A😀".reverse()
 replaced := "a😀a".replace_all("a", "$&")
@@ -99,10 +103,17 @@ infinity. Exponentiation remains the `**` operator.
 `numbers.clamp`, `numbers.floor`, `numbers.ceil`, `numbers.round`,
 `numbers.truncate`, and `booleans.to_string`.
 
-`String#size`, `fetch`, and `try_fetch` operate on Unicode code points rather
-than encoded bytes. Indexes are zero-based and nonnegative. `fetch()` raises
-when the index is outside the string, while `try_fetch()` returns
-`Result<String, IndexLookupError>`. Additional receiver operations include
+`String#size`, `[]`, `try_fetch`, `slice`, `try_slice`, `index`, and `rindex`
+operate on Unicode code points rather than encoded bytes. Indexes are
+zero-based and nonnegative. `value[index]` is the sole strict single-element
+form; it raises outside the string, while `try_fetch()` returns
+`Result<String, IndexLookupError>`. `slice(range)` accepts an inclusive `..` or
+exclusive `...` `Range<Integer>` and raises for negative, reversed, or
+out-of-bounds limits. `try_slice()` returns
+`Result<String, SliceRangeError>` instead. An exclusive `size...size` range is
+a valid empty slice. `index()` and `rindex()` search for literal substrings and
+return a code-point offset as `Integer?`; an empty substring is found at zero
+or at the string size, respectively. Additional receiver operations include
 `chars`, `codepoints`, `reverse`, `empty?`, `strip`, `lstrip`, `rstrip`,
 `include?`, `start_with?`, `end_with?`, `split`, `replace_all`, `upcase`, and
 `downcase`.
@@ -332,7 +343,8 @@ end
 removed := hashes.delete(labels, 1)
 ```
 
-Arrays provide size, emptiness, strict `fetch`, safe `try_fetch`, `first`,
+Arrays provide size, emptiness, strict `[]`, safe `try_fetch`, `slice`,
+`try_slice`, `first`,
 `last`, shallow `dup`, mutable `push`/`unshift`, mutable strict `pop`/`shift`,
 non-destructive shallow `reverse`, stable non-destructive sorting, value
 membership, and occurrence counting. `Array<String>` also provides `join`.
@@ -375,9 +387,13 @@ and value types. `each` binds the key and value with their respective generic
 types and traverses a shallow entry snapshot. Hash enumeration order is
 unspecified.
 
-Strict operations fail at runtime for missing keys, invalid indexes, or empty
-edge removals. Array safe fetch returns `Result<T, IndexLookupError>` with the
-requested index and collection size. Hash safe fetch returns
+Strict operations fail at runtime for missing keys, invalid indexes, ranges,
+or empty edge removals. Array element access uses `value[index]`; safe fetch
+returns `Result<T, IndexLookupError>` with the requested index and collection
+size. Array subsequences use `slice(range)` and `try_slice(range)` with the same
+range rules as String. The safe form returns
+`Result<Array<T>, SliceRangeError>` and both forms return a new shallow Array.
+Hash safe fetch returns
 `Result<V, KeyLookupError>` with the missing `String | Integer` key. Both errors
 also carry a stable message.
 

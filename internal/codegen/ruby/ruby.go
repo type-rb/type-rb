@@ -637,6 +637,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
+		case ir.RangeToIterableConversion:
+			return g.expr(n.Value)
 		case ir.PureFunctionToFallibleConversion:
 			return g.pureFunctionToFallible(n)
 		case ir.IntegerToFloatConversion:
@@ -752,6 +754,12 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			return g.expr(n.Receiver) + ".fetch(" + g.expr(n.Index) + ")"
+		}
+		if n.Receiver.ExprType().Kind == types.String {
+			return "->(value, index) { characters = value.each_char.to_a; raise IndexError, \"String index is out of bounds\" if index < 0 || index >= characters.length; characters.fetch(index) }.call(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+		}
+		if n.Receiver.ExprType().Kind == types.Array {
+			return "->(values, index) { raise IndexError, \"Array index is out of bounds\" if index < 0 || index >= values.length; values.fetch(index) }.call(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	case *ir.NativeExpression:

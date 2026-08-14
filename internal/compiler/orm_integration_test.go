@@ -579,7 +579,8 @@ class Product < Model
 end
 def main()
 	ids := [1, 2, 3]
-	puts(attempt Product.where("price", ">=", 10).where(id: ids).not(id: 3...5).where(discount: nil).not(discount: nil).all())
+	bounds := 6...8
+	puts(attempt Product.where("price", ">=", 10).where(id: ids).not(id: 3...5).not(id: bounds).where(discount: nil).not(discount: nil).all())
 end
 `
 	artifacts, err := compile(valid)
@@ -589,7 +590,8 @@ end
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
 		`[]string{"price"}`, `[]string{">="}`, `[]string{"id"}`, `[]string{"IN"}`,
-		`[]string{"RANGE_EXCLUSIVE"}`, `trbOrmRange{start: 3, end: 5}`,
+		`[]string{"RANGE_EXCLUSIVE"}`, `trbOrmRange{start: 3, end: 5, exclusive: true}`,
+		`return trbOrmRange{start: bounds[0], end: bounds[1], exclusive: bounds[2] != 0}`,
 		`if values.Len() == 0 {`, `return "1 = 0"`,
 	} {
 		if !strings.Contains(output, expected) {

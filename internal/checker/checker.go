@@ -2872,6 +2872,10 @@ func (c *Checker) classImplements(className, interfaceName string, seen map[stri
 }
 
 func (c *Checker) recordAssignableConversion(expression ast.Expression, target, actual types.Type) {
+	if expression != nil && target.Kind == types.Iterable && actual.Kind == types.Range {
+		c.result.Conversions[expression] = target
+		return
+	}
 	if expression != nil && target.Kind == types.Function && actual.Kind == types.Function &&
 		types.FunctionFailure(target).Kind != types.Never && types.FunctionFailure(actual).Kind == types.Never {
 		_, success, ok := types.FunctionSignature(target)
@@ -4539,6 +4543,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Index.Span(), fmt.Sprintf("Array index must be Integer, got %s", indexType))
 			}
 			typ = receiver.Args[0]
+		} else if receiver.Kind == types.String {
+			if indexType.Kind != types.Int || indexType.Nullable {
+				c.error(n.Index.Span(), fmt.Sprintf("String index must be Integer, got %s", indexType))
+			}
+			typ = types.FromName("String")
 		} else if receiver.Kind == types.Hash {
 			if len(receiver.Args) != 2 {
 				c.error(n.Receiver.Span(), "cannot index an untyped Hash; add Hash<K, V> annotation")

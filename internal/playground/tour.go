@@ -54,7 +54,7 @@ var tourLessons = []Lesson{
 	},
 	{
 		ID: "collections", Chapter: "Write programs", Title: "Collections", Eyebrow: "06 · Write programs",
-		Description: "Array and Hash element types are inferred. map, select, and reduce transform values, while fetch performs a checked lookup.",
+		Description: "Array and Hash element types are inferred. map, select, and reduce transform values, while Hash fetch performs a checked key lookup.",
 		Source:      "numbers := [1, 2, 3, 4]\nlabels := {\"language\" => \"TypeRB\"}\n\ndoubled := numbers.map do |number|\n\tnumber * 2\nend\neven := numbers.select do |number|\n\tnumber % 2 == 0\nend\ntotal := even.reduce(0) do |sum, number|\n\tsum + number\nend\n\nputs(doubled)\nputs(even)\nputs(total)\nputs(labels.fetch(\"language\"))\n",
 		Expected:    "[2, 4, 6, 8]\n[2, 4]\n6\nTypeRB\n",
 		Hint:        "Change the select predicate, or add another key and fetch it from labels.",

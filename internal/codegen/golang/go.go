@@ -451,7 +451,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		end := "__trbEnd" + suffix
 		g.line("{")
 		g.indent++
-		g.line(items + " := " + g.expr(iteration.Source))
+		g.line(items + " := " + g.iterableExpr(iteration.Source))
 		g.line(size + " := " + g.expr(iteration.SliceSize))
 		g.line("if " + size + " <= 0 {")
 		g.indent++
@@ -482,13 +482,13 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	}
 	indexBinding := binding(1)
 	if iteration.WithIndex && indexBinding.Name != "_" && itemBinding.Name != "_" {
-		g.line("for " + goBindingIdentifier(indexBinding.Name) + ", " + item + " := range " + g.expr(iteration.Source) + " {")
+		g.line("for " + goBindingIdentifier(indexBinding.Name) + ", " + item + " := range " + g.iterableExpr(iteration.Source) + " {")
 	} else if iteration.WithIndex && indexBinding.Name != "_" {
-		g.line("for " + goBindingIdentifier(indexBinding.Name) + " := range " + g.expr(iteration.Source) + " {")
+		g.line("for " + goBindingIdentifier(indexBinding.Name) + " := range " + g.iterableExpr(iteration.Source) + " {")
 	} else if itemBinding.Name != "_" {
-		g.line("for _, " + item + " := range " + g.expr(iteration.Source) + " {")
+		g.line("for _, " + item + " := range " + g.iterableExpr(iteration.Source) + " {")
 	} else {
-		g.line("for range " + g.expr(iteration.Source) + " {")
+		g.line("for range " + g.iterableExpr(iteration.Source) + " {")
 	}
 	g.indent++
 	if itemBinding.Name != "_" {
@@ -500,6 +500,14 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	g.statements(iteration.Body)
 	g.indent--
 	g.line("}")
+}
+
+func (g *generator) iterableExpr(expression ir.Expression) string {
+	value := g.expr(expression)
+	if expression.ExprType().Kind != types.Range {
+		return value
+	}
+	return "func(bounds [3]int) []int { start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; values := []int{}; for current := start; current < end; current++ { values = append(values, current) }; if !exclusive && start <= end { values = append(values, end) }; return values }(" + value + ")"
 }
 
 func (g *generator) exprExpected(expression ir.Expression, expected types.Type) string {
@@ -1120,6 +1128,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
+		case ir.RangeToIterableConversion:
+			return g.iterableExpr(n.Value)
 		case ir.PureFunctionToFallibleConversion:
 			return g.pureFunctionToFallible(n)
 		case ir.IntegerToFloatConversion:
@@ -1166,11 +1176,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return left + " " + op + " " + right
 	case *ir.Range:
-		inclusiveEnd := ""
-		if !n.Exclusive {
-			inclusiveEnd = "; if start <= end { values = append(values, end) }"
+		exclusive := "0"
+		if n.Exclusive {
+			exclusive = "1"
 		}
-		return "func() []int { start, end := " + g.expr(n.Start) + ", " + g.expr(n.End) + "; values := []int{}; for value := start; value < end; value++ { values = append(values, value) }" + inclusiveEnd + "; return values }()"
+		return "[3]int{" + g.expr(n.Start) + ", " + g.expr(n.End) + ", " + exclusive + "}"
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
@@ -1336,6 +1346,12 @@ func (g *generator) expr(expression ir.Expression) string {
 			keyType := g.goType(hashType.Args[0])
 			valueType := g.goType(hashType.Args[1])
 			return "func(values " + g.goType(hashType) + ", key " + keyType + ") " + valueType + " { value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; return value }(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+		}
+		if n.Receiver.ExprType().Kind == types.String {
+			return "func(value string, index int) string { characters := []rune(value); if index < 0 || index >= len(characters) { panic(\"String index is out of bounds\") }; return string(characters[index]) }(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+		}
+		if n.Receiver.ExprType().Kind == types.Array {
+			return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
@@ -1621,7 +1637,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 	if strings.HasPrefix(transform.Item, "_") {
 		itemUse = "_ = " + item + "; "
 	}
-	source := g.expr(transform.Source)
+	source := g.iterableExpr(transform.Source)
 	value := g.expr(transform.Result)
 	switch transform.Operation {
 	case "sort_by", "sort_by_descending":
@@ -2333,11 +2349,7 @@ func (g *generator) goType(t types.Type) string {
 		}
 		result = "[]" + element
 	case types.Range:
-		element := "int"
-		if len(t.Args) > 0 {
-			element = g.goType(t.Args[0])
-		}
-		result = "[]" + element
+		result = "[3]int"
 	case types.Hash:
 		key := "any"
 		value := "any"

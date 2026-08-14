@@ -581,7 +581,9 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 	}
 	if target, ok := l.checked.Conversions[node]; ok && result != nil {
 		kind := ir.IntegerToFloatConversion
-		if target.Kind == types.Function && result.ExprType().Kind == types.Function &&
+		if target.Kind == types.Iterable && result.ExprType().Kind == types.Range {
+			kind = ir.RangeToIterableConversion
+		} else if target.Kind == types.Function && result.ExprType().Kind == types.Function &&
 			types.FunctionFailure(target).Kind != types.Never && types.FunctionFailure(result.ExprType()).Kind == types.Never {
 			kind = ir.PureFunctionToFallibleConversion
 		} else if target.Nullable && !result.ExprType().Nullable && result.ExprType().Kind != types.Nil {

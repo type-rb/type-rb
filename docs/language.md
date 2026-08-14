@@ -503,9 +503,12 @@ scores.each do |name, score|
 end
 ```
 
-Index and hash lookup are strict and fail at runtime when the value is absent.
-Hash deletion is strict as well. Safe `Result`-returning lookup is available in
-the standard library with `IndexLookupError` and `KeyLookupError` values from
+Array and String element lookup uses the single canonical strict form
+`value[index]` and fails at runtime when the value is absent. Hash lookup and
+deletion are strict as well. Safe `Result`-returning lookup is available with
+`try_fetch`. Subsequences deliberately use `slice(range)` rather than
+`value[range]`; `try_slice(range)` is its safe counterpart. Lookup failures use
+`IndexLookupError`, `SliceRangeError`, and `KeyLookupError` values from
 `trb/std/errors`. `merge` is non-destructive; `update` and `delete` require a
 `mut` receiver.
 Destructive Array operations require a `mut` binding, while `reverse` returns

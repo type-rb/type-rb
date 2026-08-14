@@ -1393,7 +1393,7 @@ end
 
 def array_value(): Integer
 	values := [1, 2, 3]
-	return arrays.copy(values).fetch(1) + values.first() + values.last()
+	return arrays.copy(values)[1] + values.first() + values.last()
 end
 
 def array_state(): Boolean
@@ -1491,7 +1491,7 @@ end
 	wants := map[string][]string{
 		"go": {
 			`slices.Clone(values)`,
-			`panic("Array index is out of bounds")`,
+			`slices.Clone(values)[1]`,
 			`values = append(values, 2)`,
 			`values = values[1:]`,
 			`copy(values[1:], values[:len(values)-1])`,
@@ -1536,7 +1536,7 @@ end
 		},
 		"typescript": {
 			`[...values]`,
-			`throw new Error("Array index is out of bounds")`,
+			`throw new RangeError("Array index is out of bounds")`,
 			`values.push(2)`,
 			`values.shift()`,
 			`values.unshift(1)`,
@@ -2357,6 +2357,121 @@ end
 			if output := string(errorRuntime.Output); !strings.Contains(output, want) {
 				t.Fatalf("generated %s error runtime is missing %q:\n%s", mode, want, output)
 			}
+		}
+	}
+}
+
+func TestPortableSliceAndStringSearchLowerAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { Result } from trb/std/result
+import { SliceRangeError } from trb/std/errors
+
+def values_slice(values: Array<Integer>, bounds: Range<Integer>): Array<Integer>
+	return values.slice(bounds)
+end
+
+def safe_values_slice(values: Array<Integer>, bounds: Range<Integer>): Result<Array<Integer>, SliceRangeError>
+	return values.try_slice(bounds)
+end
+
+def text_slice(value: String, bounds: Range<Integer>): String
+	return value.slice(bounds)
+end
+
+def safe_text_slice(value: String, bounds: Range<Integer>): Result<String, SliceRangeError>
+	return value.try_slice(bounds)
+end
+
+def first(value: String, substring: String): Integer?
+	return value.index(substring)
+end
+
+def last(value: String, substring: String): Integer?
+	return value.rindex(substring)
+end
+
+def character(value: String, index: Integer): String
+	return value[index]
+end
+`),
+	}
+	wants := map[string][]string{
+		"go": {
+			`bounds [3]int`,
+			`SliceRangeError{Start: start, Finish: end`,
+			`characters, needle := []rune(value), []rune(substring)`,
+			`characters := []rune(value)`,
+		},
+		"ruby": {
+			`range.exclude_end?`,
+			`SliceRangeError.new(start: start, finish: finish`,
+			`needle = substring.each_char.to_a`,
+			`characters = value.each_char.to_a`,
+		},
+		"typescript": {
+			`bounds: [number, number, boolean]`,
+			`{ start: start, finish: end, exclusive: exclusive`,
+			`const needle = Array.from(substring)`,
+			`const characters = Array.from(value)`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/slices", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected portable slicing: %v", mode, err)
+		}
+		var consumer, errorsRuntime *Artifact
+		for _, artifact := range artifacts {
+			switch artifact.IR.ModulePath {
+			case "main":
+				consumer = artifact
+			case "trb/std/errors/index":
+				errorsRuntime = artifact
+			}
+		}
+		if consumer == nil || errorsRuntime == nil {
+			t.Fatalf("%s did not compile slice consumer and error runtime", mode)
+		}
+		for _, want := range wants[mode] {
+			if output := string(consumer.Output); !strings.Contains(output, want) {
+				t.Fatalf("generated %s slicing is missing %q:\n%s", mode, want, output)
+			}
+		}
+		if output := string(errorsRuntime.Output); !strings.Contains(output, "SliceRangeError") {
+			t.Fatalf("generated %s errors runtime lacks SliceRangeError:\n%s", mode, output)
+		}
+	}
+}
+
+func TestPortableSliceAPIsRejectNonCanonicalFormsAcrossBackends(t *testing.T) {
+	tests := []struct {
+		name       string
+		expression string
+		returnType string
+		want       string
+	}{
+		{name: "range index", expression: `"abc"[0...1]`, returnType: "String", want: "String index must be Integer"},
+		{name: "integer slice", expression: `"abc".slice(0)`, returnType: "String", want: "expected Range<Integer>"},
+		{name: "removed string fetch", expression: `"abc".fetch(0)`, returnType: "String", want: "type String has no member fetch"},
+		{name: "removed array fetch", expression: `[1].fetch(0)`, returnType: "Integer", want: "type Array<Integer> has no member fetch"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				source := SourceUnit{
+					Filename:   "/project/main.trb",
+					ModulePath: "main",
+					Package:    "main",
+					Source:     []byte("def value(): " + test.returnType + "\n\treturn " + test.expression + "\nend\n"),
+				}
+				_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/slice-diagnostics", RubyLoader: "require_relative"})
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("expected %q diagnostic, got %v", test.want, err)
+				}
+			})
 		}
 	}
 }

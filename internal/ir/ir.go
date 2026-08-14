@@ -548,6 +548,7 @@ const NonNullableToNullableConversion ConversionKind = "non_nullable_to_nullable
 const NullableToNonNullableConversion ConversionKind = "nullable_to_non_nullable"
 const PureFunctionToFallibleConversion ConversionKind = "pure_function_to_fallible"
 const ResultFunctionToPromiseRejectionConversion ConversionKind = "result_function_to_promise_rejection"
+const RangeToIterableConversion ConversionKind = "range_to_iterable"
 
 type Conversion struct {
 	ExprBase
