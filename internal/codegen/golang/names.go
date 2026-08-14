@@ -136,3 +136,48 @@ func goFunctionFallback(declaration goFunctionDeclaration) string {
 	identity := declaration.modulePath + "\x00" + declaration.sourceName + "\x00" + declaration.targetName
 	return prefix + hex.EncodeToString([]byte(identity))
 }
+
+// analyzeGoBindingNames reserves the package identifiers required by one
+// generated file. Go imports live in the file block and can otherwise be
+// shadowed by a source-visible local in any generated function. Only actual
+// collisions receive a compiler-owned target name, so ordinary output remains
+// stable.
+func analyzeGoBindingNames(sourceNames map[string]bool, imports map[string]string) map[string]string {
+	importNames := map[string]bool{}
+	for importPath, alias := range imports {
+		if alias == "_" {
+			continue
+		}
+		if alias == "" {
+			alias = pathpkg.Base(importPath)
+		}
+		importNames[goImportAlias(alias)] = true
+	}
+	if len(importNames) == 0 {
+		return nil
+	}
+
+	occupied := map[string]bool{}
+	for sourceName := range sourceNames {
+		occupied[goBindingIdentifier(sourceName)] = true
+	}
+
+	ordered := make([]string, 0, len(sourceNames))
+	for sourceName := range sourceNames {
+		ordered = append(ordered, sourceName)
+	}
+	sort.Strings(ordered)
+	result := map[string]string{}
+	for _, sourceName := range ordered {
+		if !importNames[goBindingIdentifier(sourceName)] {
+			continue
+		}
+		target := "__trbBinding_" + hex.EncodeToString([]byte(sourceName))
+		for occupied[target] || importNames[target] {
+			target += "_"
+		}
+		occupied[target] = true
+		result[sourceName] = target
+	}
+	return result
+}

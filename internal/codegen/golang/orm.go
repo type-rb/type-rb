@@ -727,7 +727,7 @@ func (g *generator) ormAssociationScope(association ormintegration.Association, 
 	if !ok {
 		return query
 	}
-	parameter := goBindingIdentifier(association.Scope.Parameters[0])
+	parameter := g.bindingIdentifier(association.Scope.Parameters[0])
 	queryType := g.ormModelQualifier(target) + goORMQueryType(target)
 	return "func(" + parameter + " " + queryType + ") " + queryType + " { return " + g.expr(result.Expression) + " }(" + query + ")"
 }
@@ -893,7 +893,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		resultType := g.goType(iteration.Result.Type)
 		switch {
 		case iteration.Result.Variable != nil:
-			resultTarget = goBindingIdentifier(iteration.Result.Variable.Name)
+			resultTarget = g.bindingIdentifier(iteration.Result.Variable.Name)
 			g.line(resultTarget + " := func() " + resultType + " {")
 		case iteration.Result.Target != nil:
 			resultTarget = g.assignmentTarget(iteration.Result.Target)
@@ -903,7 +903,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		}
 		g.indent++
 	} else if iteration.Result != nil && iteration.Result.Variable != nil {
-		resultTarget = goBindingIdentifier(iteration.Result.Variable.Name)
+		resultTarget = g.bindingIdentifier(iteration.Result.Variable.Name)
 		g.line("var " + resultTarget + " " + g.goType(iteration.Result.Type))
 	} else if iteration.Result != nil && iteration.Result.Target != nil {
 		resultTarget = g.assignmentTarget(iteration.Result.Target)
@@ -967,12 +967,12 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		if binding.Name == "_" {
 			g.line("for range " + batch + " {")
 		} else {
-			g.line("for _, " + goBindingIdentifier(binding.Name) + " := range " + batch + " {")
+			g.line("for _, " + g.bindingIdentifier(binding.Name) + " := range " + batch + " {")
 		}
 		g.indent++
 		g.line(processed + "++")
 		if binding.Name != "_" {
-			g.line("_ = " + goBindingIdentifier(binding.Name))
+			g.line("_ = " + g.bindingIdentifier(binding.Name))
 		}
 		previousBreakTarget := g.breakTarget
 		g.breakTarget = breakTarget
@@ -983,8 +983,8 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	} else {
 		g.line(processed + " += len(" + batch + ")")
 		if binding.Name != "_" {
-			g.line(goBindingIdentifier(binding.Name) + " := " + batch)
-			g.line("_ = " + goBindingIdentifier(binding.Name))
+			g.line(g.bindingIdentifier(binding.Name) + " := " + batch)
+			g.line("_ = " + g.bindingIdentifier(binding.Name))
 		}
 		previousBreakTarget := g.breakTarget
 		g.breakTarget = breakTarget
@@ -1466,7 +1466,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	}
 	target := ""
 	if block.Result.Variable != nil {
-		target = goBindingIdentifier(block.Result.Variable.Name)
+		target = g.bindingIdentifier(block.Result.Variable.Name)
 	} else if block.Result.Target != nil {
 		target = g.assignmentTarget(block.Result.Target)
 	}
@@ -1498,7 +1498,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	g.line(committed + " := false")
 	g.line("defer func() { if !" + committed + " { _ = " + transaction + ".Rollback() } }()")
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
-		binding := goBindingIdentifier(block.Bindings[0].Name)
+		binding := g.bindingIdentifier(block.Bindings[0].Name)
 		g.line(binding + " := " + transaction)
 		g.line("_ = " + binding)
 	}
