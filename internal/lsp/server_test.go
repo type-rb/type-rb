@@ -151,6 +151,45 @@ func TestServerReturnsNestedDocumentSymbols(t *testing.T) {
 	}
 }
 
+func TestServerReturnsFilteredWorkspaceSymbols(t *testing.T) {
+	accountsFilename := cleanPath("accounts.trb")
+	accountsSource := "module Accounts\n\tclass User\n\tend\nend\n"
+	productsFilename := cleanPath("products.trb")
+	productsSource := "record Product\n\tname: String\nend\n"
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "workspace/symbol", Params: rawParams(t, workspaceSymbolParams{Query: "us"})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units: []compiler.SourceUnit{
+			{Filename: accountsFilename, ModulePath: "accounts", Package: "main", Source: []byte(accountsSource)},
+			{Filename: productsFilename, ModulePath: "products", Package: "main", Source: []byte(productsSource)},
+		},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var initialized initializeResult
+	decodeResult(t, frames[0], &initialized)
+	if !initialized.Capabilities.WorkspaceSymbolProvider {
+		t.Fatalf("workspace symbol capability=%#v", initialized.Capabilities)
+	}
+	var symbols []symbolInformation
+	decodeResult(t, frames[1], &symbols)
+	if len(symbols) != 1 || symbols[0].Name != "User" || symbols[0].Kind != 5 || symbols[0].ContainerName != "Accounts" {
+		t.Fatalf("workspace symbols=%#v", symbols)
+	}
+	if symbols[0].Location.URI != uriFromPath(accountsFilename) || symbols[0].Location.Range.Start != (position{Line: 1, Character: 7}) {
+		t.Fatalf("workspace symbol location=%#v", symbols[0].Location)
+	}
+}
+
 func TestServerReturnsSemanticTokensWithUTF16Positions(t *testing.T) {
 	filename := cleanPath("semantic.trb")
 	source := "puts(\"😀\")\nMAX := 1\nrecord User\n\tname: String\nend\n"

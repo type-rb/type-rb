@@ -228,12 +228,12 @@ protocol boundary while the compiler keeps UTF-8 byte spans internally.
 Editors send full-document updates for now; incremental text synchronization
 and dependency-level recompilation remain performance follow-ups. Definition,
 reference, and rename queries follow checked project declarations, receiver
-members, parameters, and local bindings rather than textual name matches. The
-document outline follows the lossless syntax tree, so classes, records, enums,
-modules, interfaces, fields, and methods remain visible while a file has type
-errors. Full-document semantic tokens classify TypeRB types, constants,
-functions, methods, literals, comments, and keywords using the same shared
-language service as the REPL and browser tools.
+members, parameters, and local bindings rather than textual name matches.
+Project-wide symbol search and the document outline follow the lossless syntax
+tree, so classes, records, enums, modules, interfaces, fields, and methods
+remain visible while a file has type errors. Full-document semantic tokens
+classify TypeRB types, constants, functions, methods, literals, comments, and
+keywords using the same shared language service as the REPL and browser tools.
 
 The thin Visual Studio Code client in `editors/vscode` starts this command and
 packages the canonical TypeRB TextMate grammar. It defaults to `trb` on `PATH`;
