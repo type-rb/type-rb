@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-14
+Last updated: 2026-08-15
 
 ## 1. Language Goals
 
@@ -697,6 +697,13 @@ end
   names that interface with `implements`, or inherits that declaration from a
   superclass. Matching members alone do not create structural conformance.
   The rule applies to parameters, returns, bindings, and imported classes.
+- Interfaces may declare invariant type parameters, such as
+  `interface Repository<T>`. Classes implement a concrete application such as
+  `class MemoryRepository implements Repository<User>`, and every interface
+  method signature is checked after substituting those arguments. A generic
+  class may implement an interface using its own parameter. Generic interface
+  methods, interface inheritance, constraints, and variance are not implied by
+  this declaration model.
 - A fresh collection literal is contextually typed when an interface element
   type is expected, so `Array<Named> := [User.new()]` is valid when `User`
   implements `Named`. Existing mutable collection values remain invariant;
@@ -720,9 +727,11 @@ inferred from Go, Ruby, or TypeScript:
 ## 4. User-defined generics
 
 - Generic declarations include payload enums, transparent type aliases,
-  records, classes, top-level functions, and instance methods: `enum Result<T,
+  records, classes, interfaces, top-level functions, and instance methods:
+  `enum Result<T,
   E>`, `type DbResult<T> = Result<T, DbError>`, `record Pair<T, U>`, `class
-  Response<T>`, `def identity<T>(value: T): T`, and `response.json<T>()`.
+  Response<T>`, `interface Repository<T>`, `def identity<T>(value: T): T`, and
+  `response.json<T>()`.
 - `type Alias<T> = Target<T, ...>` creates a transparent alias rather than a
   nominal type. Assignment and member checking use the expanded target, while
   diagnostics, completion, imports, and generated signatures retain the alias.
@@ -747,9 +756,9 @@ inferred from Go, Ruby, or TypeScript:
   arguments are compile-time errors in every mode. A method type parameter may
   not duplicate one owned by its class.
 - Payloadless variants of generic enums are reserved until typed singleton
-  construction has a portable representation. Generic class methods, generic
-  interfaces, constraints, variance declarations, and type-argument inference
-  are staged work rather than implicit target-language behavior. A portable
+  construction has a portable representation. Generic class and interface
+  methods, constraints, variance declarations, and type-argument inference are
+  staged work rather than implicit target-language behavior. A portable
   generic instance method remains callable even when a target lacks native
   generic methods; that backend lowers the checked operation through an
   equivalent generated helper.

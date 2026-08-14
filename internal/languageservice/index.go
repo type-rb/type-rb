@@ -388,6 +388,10 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, typeMem
 			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "type " + qualified + " = " + node.Target.String(), Type: types.FromName(qualified), Members: members, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		case *ir.Interface:
 			qualified := qualify(owner, node.Name)
+			displayName := qualified
+			if len(node.TypeParameters) > 0 {
+				displayName += "<" + strings.Join(node.TypeParameters, ", ") + ">"
+			}
 			methods := make([]Symbol, 0, len(node.Methods))
 			for _, method := range node.Methods {
 				if !privateName(method.Name) {
@@ -396,7 +400,7 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, typeMem
 			}
 			typeMembers[qualified] = methods
 			typeMembers[node.Name] = methods
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "interface " + qualified, Type: types.FromName(qualified), Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "interface " + displayName, Type: types.FromName(qualified), Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		case *ir.Module:
 			qualified := qualify(owner, node.Name)
 			members := collectSymbols(node.Body, qualified, sourcePath, typeMembers)

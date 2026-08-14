@@ -52,10 +52,10 @@ and `set(value)` members while generated TSX uses React `useState`.
 
 The implemented language includes functions, typed first-class function values
 with lexical capture and checked fallible effects, and classes, modules and
-interfaces, records, ordinary and raw-value enums, payload enums as sum types,
-enum instance methods, explicit generics for enums, aliases, records, classes,
-top-level functions and instance methods, normalized unions, immutable and
-mutable bindings, typed collections and iteration, exhaustive pattern
+generic interfaces, records, ordinary and raw-value enums, payload enums as sum
+types, enum instance methods, explicit generics for enums, aliases, records,
+classes, top-level functions and instance methods, normalized unions, immutable
+and mutable bindings, typed collections and iteration, exhaustive pattern
 matching, value-producing `if` and `case` expressions, and explicit fallible
 effects with `fails` and `attempt`. See the
 [language guide](language.md) and [specification](specification.md) for the

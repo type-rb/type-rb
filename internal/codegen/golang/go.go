@@ -263,7 +263,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.statement(member)
 		}
 	case *ir.Interface:
-		g.line("type " + goIdentifier(n.Name, true) + " interface {")
+		g.line("type " + goIdentifier(n.Name, true) + goTypeParameterDeclarations(n.TypeParameters) + " interface {")
 		g.indent++
 		for _, method := range n.Methods {
 			g.line(goMethodName(method.Name) + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType))
@@ -874,8 +874,18 @@ func (g *generator) class(class *ir.Class) {
 	}
 	g.indent--
 	g.line("}")
-	for _, interfaceName := range class.Implements {
-		g.line("var _ " + g.goType(types.FromName(interfaceName)) + " = (*" + name + typeArguments + ")(nil)")
+	if len(class.Implements) > 0 && len(class.TypeParameters) > 0 {
+		g.line("func __trbAssert" + name + "Interfaces" + typeDeclarations + "() {")
+		g.indent++
+		for _, implemented := range class.Implements {
+			g.line("var _ " + g.goType(implemented) + " = (*" + name + typeArguments + ")(nil)")
+		}
+		g.indent--
+		g.line("}")
+	} else {
+		for _, implemented := range class.Implements {
+			g.line("var _ " + g.goType(implemented) + " = (*" + name + typeArguments + ")(nil)")
+		}
 	}
 	g.b.WriteByte('\n')
 

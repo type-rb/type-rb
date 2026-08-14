@@ -858,6 +858,103 @@ end
 	}
 }
 
+func TestGenericInterfacesAreSpecializedAcrossBackends(t *testing.T) {
+	source := []byte(`enum LoadError
+	Unavailable
+end
+
+interface Store<T>
+	get(): T
+	put(value: T): T
+end
+
+interface Loader<T, E>
+	load(): T fails E
+end
+
+class StringStore implements Store<String>, Loader<String, LoadError>
+	@value: String
+
+	def initialize(value: String)
+		@value = value
+		return
+	end
+
+	def get(): String
+		return @value
+	end
+
+	def put(value: String): String
+		@value = value
+		return @value
+	end
+
+	def load(): String fails LoadError
+		return @value
+	end
+end
+
+def read(store: Store<String>): String
+	return store.get()
+end
+
+def build(): Store<String>
+	return StringStore.new("initial")
+end
+
+def load(loader: Loader<String, LoadError>): String fails LoadError
+	return loader.load()
+end
+`)
+	wants := map[string][]string{
+		"go":         {"type Store[T any] interface", "type Loader[T any, E any] interface", "var _ Store[string] = (*StringStore)(nil)", "var _ Loader[string, LoadError] = (*StringStore)(nil)"},
+		"ruby":       {"class StringStore", "def read(store)"},
+		"typescript": {"export interface Store<T>", "export interface Loader<T, E>", "export class StringStore implements Store<string>, Loader<string, LoadError>"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("generic_interface.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected generic interface values: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		for _, want := range wants[mode] {
+			if !strings.Contains(output, want) {
+				t.Fatalf("%s output is missing %q:\n%s", mode, want, output)
+			}
+		}
+	}
+}
+
+func TestGenericInterfaceImplementationChecksSpecializedSignatures(t *testing.T) {
+	wrongMethod := []byte(`interface Store<T>
+	get(): T
+end
+
+class InvalidStore implements Store<String>
+	def get(): Integer
+		return 1
+	end
+end
+`)
+	if _, err := Compile("wrong_generic_interface.trb", wrongMethod, "go"); err == nil || !strings.Contains(err.Error(), "does not match interface Store<String>") {
+		t.Fatalf("expected specialized interface signature diagnostic, got %v", err)
+	}
+
+	wrongArity := []byte(`interface Store<T>
+	get(): T
+end
+
+class InvalidStore implements Store
+	def get(): String
+		return "value"
+	end
+end
+`)
+	if _, err := Compile("wrong_generic_interface_arity.trb", wrongArity, "go"); err == nil || !strings.Contains(err.Error(), "Store expects 1 type argument(s), got 0") {
+		t.Fatalf("expected generic interface arity diagnostic, got %v", err)
+	}
+}
+
 func TestGoConstructorPreservesMultiwordClassNames(t *testing.T) {
 	source := []byte(`class TraceMiddleware
 end

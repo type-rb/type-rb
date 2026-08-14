@@ -43,7 +43,7 @@ type methodContext struct {
 
 type classContext struct {
 	name       string
-	implements []string
+	implements []types.Type
 }
 
 type analyzer struct {
@@ -131,7 +131,7 @@ func (a *analyzer) collect(module, owner string, statements []ir.Statement, inte
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Class:
-			a.classes = append(a.classes, classContext{name: node.Name, implements: append([]string(nil), node.Implements...)})
+			a.classes = append(a.classes, classContext{name: node.Name, implements: append([]types.Type(nil), node.Implements...)})
 			a.collect(module, node.Name, node.Body, false)
 		case *ir.Enum:
 			a.collect(module, node.Name, node.Body, false)
@@ -173,7 +173,8 @@ func (a *analyzer) addMethod(method methodContext, interfaceMethod bool) {
 func (a *analyzer) propagateInterfaces() bool {
 	changed := false
 	for _, class := range a.classes {
-		for _, interfaceName := range class.implements {
+		for _, implemented := range class.implements {
+			interfaceName := implemented.Name
 			for key, declarations := range a.interfaceMethods {
 				prefix := interfaceName + "\x00"
 				if !strings.HasPrefix(key, prefix) {

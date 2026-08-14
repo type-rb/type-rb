@@ -344,7 +344,11 @@ func (g *generator) statement(statement ir.Statement) {
 			header += " extends " + g.expr(n.Superclass)
 		}
 		if len(n.Implements) > 0 {
-			header += " implements " + strings.Join(n.Implements, ", ")
+			implemented := make([]string, len(n.Implements))
+			for index, item := range n.Implements {
+				implemented[index] = g.tsType(item)
+			}
+			header += " implements " + strings.Join(implemented, ", ")
 		}
 		g.line(header + " {")
 		g.indent++
@@ -413,7 +417,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("}")
 	case *ir.Interface:
-		g.line("export interface " + n.Name + " {")
+		g.line("export interface " + n.Name + tsTypeParameterDeclarations(n.TypeParameters) + " {")
 		g.indent++
 		for _, method := range n.Methods {
 			returnType := g.tsType(method.ReturnType)
