@@ -102,6 +102,7 @@ func (s *Server) handle(request message) (bool, error) {
 				ReferencesProvider:      true,
 				RenameProvider:          renameOptions{PrepareProvider: true},
 				DocumentSymbolProvider:  true,
+				FoldingRangeProvider:    true,
 				WorkspaceSymbolProvider: true,
 				SemanticTokensProvider: semanticTokensOptions{
 					Legend: semanticTokensLegend{TokenTypes: semanticTokenTypes, TokenModifiers: semanticTokenModifiers},
@@ -153,6 +154,8 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.rename(request)
 	case "textDocument/documentSymbol":
 		return false, s.documentSymbols(request)
+	case "textDocument/foldingRange":
+		return false, s.foldingRanges(request)
 	case "textDocument/semanticTokens/full":
 		return false, s.semanticTokens(request)
 	case "workspace/symbol":
@@ -329,6 +332,35 @@ func (s *Server) documentSymbols(request message) error {
 	result := make([]documentSymbol, 0, len(items))
 	for _, item := range items {
 		result = append(result, protocolDocumentSymbol(document.source, item))
+	}
+	return s.stream.write(success(request.ID, result))
+}
+
+func (s *Server) foldingRanges(request message) error {
+	params, err := decodeParams[documentParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, []foldingRange{}))
+	}
+	items := languageservice.FoldingRanges(string(document.source))
+	result := make([]foldingRange, 0, len(items))
+	for _, item := range items {
+		start := positionAt(document.source, item.Range.Start)
+		end := positionAt(document.source, item.Range.End)
+		if end.Line <= start.Line {
+			continue
+		}
+		result = append(result, foldingRange{
+			StartLine: start.Line, StartCharacter: start.Character,
+			EndLine: end.Line, EndCharacter: end.Character,
+		})
 	}
 	return s.stream.write(success(request.ID, result))
 }
