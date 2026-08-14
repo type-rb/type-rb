@@ -324,6 +324,8 @@ Full-document semantic tokens reuse the compiler-aware highlighting service
 and translate UTF-8 byte spans to the UTF-16 positions required by editors.
 The VS Code client watches project `.trb` files, and the language server updates
 the saved workspace snapshot beneath any active editor overlays.
+Canonical type-name diagnostics carry structured fixes, so editors can replace
+aliases such as `Int` with `Integer` without reconstructing source text.
 
 ## Current limitations
 

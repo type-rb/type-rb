@@ -88,7 +88,10 @@ func TestServerDiagnosesUnknownTypesAndCompletesCanonicalNames(t *testing.T) {
 		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/completion", Params: rawParams(t, documentPositionParams{
 			TextDocument: textDocumentIdentifier{URI: uri}, Position: position{Line: 1, Character: 8},
 		})},
-		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "textDocument/codeAction", Params: rawParams(t, codeActionParams{
+			TextDocument: textDocumentIdentifier{URI: uri}, Range: rangeValue{Start: position{Line: 1, Character: 5}, End: position{Line: 1, Character: 8}},
+		})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("4"), Method: "shutdown", Params: json.RawMessage(`null`)},
 		message{JSONRPC: "2.0", Method: "exit"},
 	)
 	var output bytes.Buffer
@@ -110,6 +113,15 @@ func TestServerDiagnosesUnknownTypesAndCompletesCanonicalNames(t *testing.T) {
 	decodeResult(t, frames[2], &completions)
 	if !containsCompletion(completions, "Integer") {
 		t.Fatalf("type completion response=%#v", completions)
+	}
+	var actions []codeAction
+	decodeResult(t, frames[3], &actions)
+	if len(actions) != 1 || actions[0].Kind != "quickfix" {
+		t.Fatalf("canonical type actions=%#v", actions)
+	}
+	edits := actions[0].Edit.Changes[uri]
+	if len(edits) != 1 || edits[0].NewText != "Integer" || edits[0].Range != (rangeValue{Start: position{Line: 1, Character: 5}, End: position{Line: 1, Character: 8}}) {
+		t.Fatalf("canonical type edits=%#v", edits)
 	}
 }
 
