@@ -51,9 +51,9 @@ than detailed syntax.
 
 ## 4. Editor tooling
 
-- Implement a reusable language-server package and `trb lsp`.
-- Support live diagnostics, formatting, hover types, completion, go to
-  definition, references, rename, document symbols, semantic tokens, and code
+- Extend the initial reusable `trb lsp` diagnostics, formatting, completion,
+  and quick fixes with hover types, signature help, go to definition,
+  references, rename, document symbols, semantic tokens, and richer code
   actions.
 - Ship a VS Code extension as a thin LSP client with syntax highlighting,
   snippets, formatter integration, and test discovery.

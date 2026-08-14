@@ -1,0 +1,138 @@
+package lsp
+
+import "encoding/json"
+
+type position struct {
+	Line      int `json:"line"`
+	Character int `json:"character"`
+}
+
+type rangeValue struct {
+	Start position `json:"start"`
+	End   position `json:"end"`
+}
+
+type textDocumentIdentifier struct {
+	URI string `json:"uri"`
+}
+
+type versionedTextDocumentIdentifier struct {
+	URI     string `json:"uri"`
+	Version int    `json:"version"`
+}
+
+type textDocumentItem struct {
+	URI        string `json:"uri"`
+	LanguageID string `json:"languageId"`
+	Version    int    `json:"version"`
+	Text       string `json:"text"`
+}
+
+type didOpenParams struct {
+	TextDocument textDocumentItem `json:"textDocument"`
+}
+
+type contentChange struct {
+	Text string `json:"text"`
+}
+
+type didChangeParams struct {
+	TextDocument   versionedTextDocumentIdentifier `json:"textDocument"`
+	ContentChanges []contentChange                 `json:"contentChanges"`
+}
+
+type didCloseParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+}
+
+type documentPositionParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Position     position               `json:"position"`
+}
+
+type documentParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+}
+
+type formattingParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+}
+
+type codeActionParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Range        rangeValue             `json:"range"`
+}
+
+type publishDiagnosticsParams struct {
+	URI         string               `json:"uri"`
+	Diagnostics []protocolDiagnostic `json:"diagnostics"`
+}
+
+type protocolDiagnostic struct {
+	Range              rangeValue             `json:"range"`
+	Severity           int                    `json:"severity"`
+	Code               string                 `json:"code"`
+	Source             string                 `json:"source"`
+	Message            string                 `json:"message"`
+	RelatedInformation []relatedInformation   `json:"relatedInformation,omitempty"`
+	Data               map[string]interface{} `json:"data,omitempty"`
+}
+
+type relatedInformation struct {
+	Location location `json:"location"`
+	Message  string   `json:"message"`
+}
+
+type location struct {
+	URI   string     `json:"uri"`
+	Range rangeValue `json:"range"`
+}
+
+type textEdit struct {
+	Range   rangeValue `json:"range"`
+	NewText string     `json:"newText"`
+}
+
+type completionItem struct {
+	Label    string   `json:"label"`
+	Kind     int      `json:"kind,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
+	TextEdit textEdit `json:"textEdit"`
+}
+
+type workspaceEdit struct {
+	Changes map[string][]textEdit `json:"changes"`
+}
+
+type codeAction struct {
+	Title string        `json:"title"`
+	Kind  string        `json:"kind"`
+	Edit  workspaceEdit `json:"edit"`
+}
+
+type initializeResult struct {
+	Capabilities serverCapabilities `json:"capabilities"`
+	ServerInfo   serverInfo         `json:"serverInfo"`
+}
+
+type serverInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+}
+
+type serverCapabilities struct {
+	TextDocumentSync           int               `json:"textDocumentSync"`
+	CompletionProvider         completionOptions `json:"completionProvider"`
+	DocumentFormattingProvider bool              `json:"documentFormattingProvider"`
+	CodeActionProvider         bool              `json:"codeActionProvider"`
+}
+
+type completionOptions struct {
+	TriggerCharacters []string `json:"triggerCharacters"`
+}
+
+func decodeParams[T any](raw json.RawMessage) (T, error) {
+	var result T
+	err := json.Unmarshal(raw, &result)
+	return result, err
+}

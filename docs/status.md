@@ -303,6 +303,14 @@ Concurrent edits invalidate obsolete analysis before it can become current.
 `trb check` already consumes this service; dependency-aware incremental phase
 reuse remains future work.
 
+`trb lsp` exposes that service over standard LSP framing. Its initial
+capabilities are project-wide live diagnostics, completion, deterministic
+formatting, and quick fixes from structured diagnostic edits. Full-document
+updates and UTF-16 protocol positions are translated at the adapter boundary;
+the compiler and formatter continue to use UTF-8 source offsets. Semantic
+hover, signature help, navigation, rename, and a packaged editor client remain
+follow-up work.
+
 ## Current limitations
 
 The current alpha does not yet provide:
@@ -319,7 +327,8 @@ The current alpha does not yet provide:
 - semantic package version constraints, publishing or audit services, or a
   stable external compiler-extension protocol;
 - namespace-stable public type identities across independent packages;
-- a language-level test runner, LSP, or editor extension; or
+- a language-level test runner, packaged editor extension, or semantic editor
+  navigation; or
 - compatibility guarantees for production use.
 
 Future outcomes are tracked in the [roadmap](roadmap.md); executable scoped work
