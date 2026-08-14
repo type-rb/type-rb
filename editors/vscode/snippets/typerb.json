@@ -1,0 +1,49 @@
+{
+	"Function": {
+		"prefix": "def",
+		"body": [
+			"def ${1:name}(${2})",
+			"\t${0}",
+			"end"
+		],
+		"description": "Define a TypeRB function"
+	},
+	"Function with return type": {
+		"prefix": "defr",
+		"body": [
+			"def ${1:name}(${2}): ${3:Type}",
+			"\t${0}",
+			"end"
+		],
+		"description": "Define a TypeRB function with an explicit return type"
+	},
+	"Class": {
+		"prefix": "class",
+		"body": [
+			"class ${1:Name}",
+			"\t${0}",
+			"end"
+		],
+		"description": "Define a TypeRB class"
+	},
+	"Record": {
+		"prefix": "record",
+		"body": [
+			"record ${1:Name}",
+			"\t${2:field}: ${3:Type}",
+			"end",
+			"${0}"
+		],
+		"description": "Define a TypeRB record"
+	},
+	"Enum": {
+		"prefix": "enum",
+		"body": [
+			"enum ${1:Name}",
+			"\t${2:Value}",
+			"end",
+			"${0}"
+		],
+		"description": "Define a TypeRB enum"
+	}
+}

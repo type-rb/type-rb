@@ -1,0 +1,447 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "TypeRB",
+  "scopeName": "source.trb",
+  "fileTypes": [
+    "trb"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#heredocs"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#imports"
+    },
+    {
+      "include": "#declarations"
+    },
+    {
+      "include": "#qualified-members"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#symbols"
+    },
+    {
+      "include": "#variables"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#callables"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.trb",
+          "begin": "#",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.trb"
+            }
+          },
+          "end": "$"
+        }
+      ]
+    },
+    "heredocs": {
+      "patterns": [
+        {
+          "name": "string.unquoted.heredoc.trb",
+          "begin": "(<<[-~]?)(['\"`]?)([\\p{L}_][\\p{L}\\p{N}_]*)(\\2)\\s*$",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.begin.trb"
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.trb"
+            },
+            "3": {
+              "name": "entity.name.tag.heredoc.trb"
+            },
+            "4": {
+              "name": "punctuation.definition.string.begin.trb"
+            }
+          },
+          "end": "^\\s*\\3\\s*$",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.trb"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escapes"
+            },
+            {
+              "include": "#interpolations"
+            }
+          ]
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.trb",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.trb"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.trb"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escapes"
+            },
+            {
+              "include": "#interpolations"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.trb",
+          "begin": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.trb"
+            }
+          },
+          "end": "'",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.trb"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escapes"
+            }
+          ]
+        },
+        {
+          "name": "string.interpolated.command.trb",
+          "begin": "`",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.trb"
+            }
+          },
+          "end": "`",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.trb"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#escapes"
+            },
+            {
+              "include": "#interpolations"
+            }
+          ]
+        }
+      ]
+    },
+    "escapes": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.trb",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "interpolations": {
+      "patterns": [
+        {
+          "name": "meta.interpolation.trb",
+          "begin": "#\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.interpolation.begin.trb"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.interpolation.end.trb"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#balanced-braces"
+            },
+            {
+              "include": "$self"
+            }
+          ]
+        }
+      ]
+    },
+    "balanced-braces": {
+      "patterns": [
+        {
+          "name": "meta.braces.trb",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.braces.begin.trb"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.braces.end.trb"
+            }
+          },
+          "patterns": [
+            {
+              "include": "$self"
+            }
+          ]
+        }
+      ]
+    },
+    "imports": {
+      "patterns": [
+        {
+          "match": "\\b(import)\\s+(?!\\{)([\\p{L}_][\\p{L}\\p{N}_-]*(?:/[\\p{L}_][\\p{L}\\p{N}_-]*)*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.trb"
+            },
+            "2": {
+              "name": "string.unquoted.import-path.trb"
+            }
+          }
+        },
+        {
+          "match": "\\b(from)\\s+([\\p{L}_][\\p{L}\\p{N}_-]*(?:/[\\p{L}_][\\p{L}\\p{N}_-]*)*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.trb"
+            },
+            "2": {
+              "name": "string.unquoted.import-path.trb"
+            }
+          }
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(class|record|enum|module|interface)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.trb"
+            },
+            "2": {
+              "name": "entity.name.type.trb"
+            }
+          }
+        },
+        {
+          "match": "\\b(def)\\s+(?:(self)(\\.))?([\\p{L}_][\\p{L}\\p{N}_]*(?:[?!])?|\\[\\])",
+          "captures": {
+            "1": {
+              "name": "storage.type.function.trb"
+            },
+            "2": {
+              "name": "variable.language.self.trb"
+            },
+            "3": {
+              "name": "punctuation.accessor.dot.trb"
+            },
+            "4": {
+              "name": "entity.name.function.trb"
+            }
+          }
+        }
+      ]
+    },
+    "qualified-members": {
+      "patterns": [
+        {
+          "match": "\\b([A-Z][A-Za-z0-9_]*)(::)([A-Z][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.trb"
+            },
+            "2": {
+              "name": "punctuation.accessor.namespace.trb"
+            },
+            "3": {
+              "name": "constant.other.enum-member.trb"
+            }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "storage.modifier.trb",
+          "match": "\\b(?:mut|readonly|implements)\\b"
+        },
+        {
+          "name": "storage.type.trb",
+          "match": "\\b(?:class|record|enum|module|interface|def|fn)\\b"
+        },
+        {
+          "name": "keyword.control.import.trb",
+          "match": "\\b(?:import|from|as)\\b"
+        },
+        {
+          "name": "keyword.control.trb",
+          "match": "\\b(?:if|elsif|else|then|case|when|while|do|return|break|next|end)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.trb",
+          "match": "\\b(?:and|or|not)\\b"
+        },
+        {
+          "name": "constant.language.boolean.trb",
+          "match": "\\b(?:true|false)\\b"
+        },
+        {
+          "name": "constant.language.nil.trb",
+          "match": "\\bnil\\b"
+        },
+        {
+          "name": "variable.language.self.trb",
+          "match": "\\bself\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.trb",
+          "match": "\\b[0-9](?:_?[0-9])*(?:\\.[0-9](?:_?[0-9])*)?\\b"
+        }
+      ]
+    },
+    "symbols": {
+      "patterns": [
+        {
+          "name": "constant.other.symbol.trb",
+          "match": "(?<!:):(?![:=])[\\p{L}_][\\p{L}\\p{N}_]*[?!]?"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.instance.trb",
+          "match": "@[\\p{L}_][\\p{L}\\p{N}_]*"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.builtin.trb",
+          "match": "\\b(?:Any|Array|Boolean|Bytes|Float|Hash|Integer|Iterable|Range|String|StringBuilder)\\b"
+        },
+        {
+          "name": "entity.name.type.parameter.trb",
+          "match": "\\b[A-Z]\\b"
+        },
+        {
+          "name": "entity.name.type.trb",
+          "match": "\\b(?=[A-Z][A-Za-z0-9_]*\\b)(?=[A-Za-z0-9_]*[a-z])[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.other.trb",
+          "match": "\\b[A-Z][A-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "callables": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.trb",
+          "match": "\\bputs(?=\\s*\\()"
+        },
+        {
+          "match": "(\\.|&\\.)([\\p{L}_][\\p{L}\\p{N}_]*[?!]?)(?=\\s*(?:\\(|\\b))",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.dot.trb"
+            },
+            "2": {
+              "name": "entity.name.function.method.trb"
+            }
+          }
+        },
+        {
+          "name": "entity.name.function.call.trb",
+          "match": "\\b[\\p{L}_][\\p{L}\\p{N}_]*[?!]?(?=\\s*\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.trb",
+          "match": "<=>|\\.\\.\\.|\\.\\.|\\*\\*=|&&=|\\|\\|=|&\\.|::|:=|->|==|!=|<=|>=|=>|&&|\\|\\||\\*\\*|<<|>>|[=+\\-*/%<>!&|^~?]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.parens.trb",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.section.brackets.trb",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.section.braces.trb",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.separator.trb",
+          "match": "[,;:]"
+        }
+      ]
+    }
+  }
+}

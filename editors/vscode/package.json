@@ -1,0 +1,96 @@
+{
+	"name": "typerb",
+	"displayName": "TypeRB",
+	"description": "Language support for TypeRB",
+	"version": "0.0.1",
+	"publisher": "type-rb",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/type-rb/type-rb.git",
+		"directory": "editors/vscode"
+	},
+	"engines": {
+		"vscode": "^1.91.0"
+	},
+	"categories": [
+		"Programming Languages",
+		"Formatters",
+		"Linters"
+	],
+	"keywords": [
+		"typerb",
+		"trb",
+		"language-server"
+	],
+	"activationEvents": [
+		"onLanguage:trb"
+	],
+	"extensionKind": [
+		"workspace"
+	],
+	"main": "./dist/extension.js",
+	"files": [
+		"dist/extension.js",
+		"language-configuration.json",
+		"snippets/",
+		"syntaxes/",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"build": "esbuild extension.js --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
+		"test": "node --test test/*.test.js",
+		"package": "npm run build && vsce package --out dist/typerb.vsix"
+	},
+	"dependencies": {
+		"vscode-languageclient": "10.1.0"
+	},
+	"devDependencies": {
+		"@vscode/vsce": "3.9.2",
+		"esbuild": "0.28.2"
+	},
+	"contributes": {
+		"languages": [
+			{
+				"id": "trb",
+				"aliases": [
+					"TypeRB",
+					"trb"
+				],
+				"extensions": [
+					".trb"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "trb",
+				"scopeName": "source.trb",
+				"path": "./syntaxes/typerb.tmLanguage.json"
+			}
+		],
+		"snippets": [
+			{
+				"language": "trb",
+				"path": "./snippets/typerb.json"
+			}
+		],
+		"configuration": {
+			"title": "TypeRB",
+			"properties": {
+				"typerb.server.path": {
+					"type": "string",
+					"default": "trb",
+					"description": "Path to the trb executable used for language services. Relative paths are resolved from the workspace folder."
+				},
+				"typerb.server.config": {
+					"type": "string",
+					"default": "",
+					"description": "Optional path to trbconfig.jsonc. Relative paths are resolved from the workspace folder."
+				}
+			}
+		}
+	}
+}

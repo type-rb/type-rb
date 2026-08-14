@@ -96,7 +96,10 @@ completion menus, project declaration auto-import, suggestions, syntax
 highlighting, interrupts, and type inspection.
 The same compiler and evaluator power the local and hosted playground and tour.
 The repository also publishes a reusable TextMate grammar for lexical editor
-highlighting. Command details belong in the [CLI reference](cli.md).
+highlighting. Its thin Visual Studio Code client packages that grammar and
+snippets, starts `trb lsp`, and exposes compiler-backed diagnostics, completion,
+formatting, and quick fixes without duplicating semantic logic. Command details
+belong in the [CLI reference](cli.md).
 
 The early official `trb/web` package discovers file-based routes at compile
 time and runs typed request, path-parameter, JSON decode, and JSON response
@@ -307,9 +310,10 @@ reuse remains future work.
 capabilities are project-wide live diagnostics, completion, deterministic
 formatting, and quick fixes from structured diagnostic edits. Full-document
 updates and UTF-16 protocol positions are translated at the adapter boundary;
-the compiler and formatter continue to use UTF-8 source offsets. Semantic
-hover, signature help, navigation, rename, and a packaged editor client remain
-follow-up work.
+the compiler and formatter continue to use UTF-8 source offsets. The initial
+Visual Studio Code extension is a packaged thin client over this boundary.
+Semantic hover, signature help, navigation, rename, and editor marketplace
+distribution remain follow-up work.
 
 ## Current limitations
 
@@ -327,8 +331,8 @@ The current alpha does not yet provide:
 - semantic package version constraints, publishing or audit services, or a
   stable external compiler-extension protocol;
 - namespace-stable public type identities across independent packages;
-- a language-level test runner, packaged editor extension, or semantic editor
-  navigation; or
+- a language-level test runner, published editor marketplace extension, or
+  semantic editor navigation; or
 - compatibility guarantees for production use.
 
 Future outcomes are tracked in the [roadmap](roadmap.md); executable scoped work
