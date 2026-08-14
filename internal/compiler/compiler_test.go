@@ -11,6 +11,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -24,6 +25,41 @@ func TestCompileCarriesTypeScriptRuntimeToTypedIR(t *testing.T) {
 	}
 	if artifact.IR.TypeScriptRuntime != "bun" {
 		t.Fatalf("TypeScript runtime was not carried to typed IR: %#v", artifact.IR)
+	}
+}
+
+func TestCompileMapsGeneratedStatementsBackToTypeRBSource(t *testing.T) {
+	source := []byte(`def main()
+	message := "mapped"
+	puts(message)
+	return
+end
+`)
+	targets := map[string]string{
+		"go":         "fmt.Println(message)",
+		"ruby":       "puts(message)",
+		"typescript": "console.log(message);",
+	}
+	for mode, target := range targets {
+		artifact, err := Compile("src/main.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s compilation failed: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		if strings.Contains(output, "__trb_source_") {
+			t.Fatalf("%s source marker leaked into generated output:\n%s", mode, output)
+		}
+		offset := strings.Index(output, target)
+		if offset < 0 {
+			t.Fatalf("%s generated output is missing %q:\n%s", mode, target, output)
+		}
+		location, found := artifact.SourceMap.SourceAt(sourcemap.PositionAt(output, offset))
+		if !found || location.Path != "src/main.trb" || location.Span.Start.Line != 3 {
+			t.Fatalf("%s generated statement mapped to %#v, found=%t", mode, location, found)
+		}
+		if artifact.SourceMap.Version != sourcemap.Version {
+			t.Fatalf("%s source map version=%d, want %d", mode, artifact.SourceMap.Version, sourcemap.Version)
+		}
 	}
 }
 

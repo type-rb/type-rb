@@ -15,6 +15,7 @@ import (
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -45,23 +46,40 @@ type generator struct {
 	execution       *effectplan.Plan
 	executionActive bool
 	oidcRuntime     bool
+	recordSources   bool
+	sourceMarker    int
+	sourceLocations map[int]sourcemap.Location
+	sourcePath      string
 }
 
 func Generate(program *ir.Program) string {
-	return GenerateProject([]*ir.Program{program})[0]
+	return GenerateMapped(program).Output
 }
 
 func GenerateProject(programs []*ir.Program) []string {
+	mapped := GenerateProjectMapped(programs)
+	result := make([]string, len(mapped))
+	for index, generated := range mapped {
+		result[index] = generated.Output
+	}
+	return result
+}
+
+func GenerateMapped(program *ir.Program) sourcemap.Generated {
+	return GenerateProjectMapped([]*ir.Program{program})[0]
+}
+
+func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
 	projectNames := analyzeGoProjectNames(programs)
 	execution := effectplan.ExecutionScope(programs)
-	result := make([]string, len(programs))
+	result := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
 		result[index] = generate(program, projectNames, execution)
 	}
 	return result
 }
 
-func generate(program *ir.Program, projectNames *goProjectNames, execution *effectplan.Plan) string {
+func generate(program *ir.Program, projectNames *goProjectNames, execution *effectplan.Plan) sourcemap.Generated {
 	generated, imports, bindings := generatePass(program, projectNames, execution, nil)
 	bindingNames := analyzeGoBindingNames(bindings, imports)
 	if len(bindingNames) == 0 {
@@ -71,24 +89,27 @@ func generate(program *ir.Program, projectNames *goProjectNames, execution *effe
 	return generated
 }
 
-func generatePass(program *ir.Program, projectNames *goProjectNames, execution *effectplan.Plan, bindingNames map[string]string) (string, map[string]string, map[string]bool) {
+func generatePass(program *ir.Program, projectNames *goProjectNames, execution *effectplan.Plan, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
 	g := &generator{
-		topMethods:     map[string]bool{},
-		staticMethods:  map[string]map[string]bool{},
-		records:        map[string]bool{},
-		classes:        map[string]bool{},
-		typeAliases:    map[string]string{},
-		typeKinds:      map[string]string{},
-		imports:        map[string]string{},
-		bindingNames:   bindingNames,
-		bindingSources: map[string]bool{},
-		modulePath:     program.ModulePath,
-		goModule:       program.GoModule,
-		jobs:           jobsintegration.ManifestFrom(program.Extensions),
-		jobsSQL:        jobssql.ManifestFrom(program.Extensions),
-		orm:            ormintegration.ManifestFrom(program.Extensions),
-		projectNames:   projectNames,
-		execution:      execution,
+		topMethods:      map[string]bool{},
+		staticMethods:   map[string]map[string]bool{},
+		records:         map[string]bool{},
+		classes:         map[string]bool{},
+		typeAliases:     map[string]string{},
+		typeKinds:       map[string]string{},
+		imports:         map[string]string{},
+		bindingNames:    bindingNames,
+		bindingSources:  map[string]bool{},
+		modulePath:      program.ModulePath,
+		goModule:        program.GoModule,
+		jobs:            jobsintegration.ManifestFrom(program.Extensions),
+		jobsSQL:         jobssql.ManifestFrom(program.Extensions),
+		orm:             ormintegration.ManifestFrom(program.Extensions),
+		projectNames:    projectNames,
+		execution:       execution,
+		recordSources:   true,
+		sourceLocations: map[int]sourcemap.Location{},
+		sourcePath:      program.SourcePath,
 	}
 	for _, statement := range program.Statements {
 		switch n := statement.(type) {
@@ -153,9 +174,11 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, execution *
 	output.WriteString(g.b.String())
 	generated := strings.TrimRight(output.String(), "\n") + "\n"
 	if formatted, err := format.Source([]byte(generated)); err == nil {
-		return string(formatted), g.imports, g.bindingSources
+		output, mapping := sourcemap.ExtractMarkers(string(formatted), g.sourceLocations)
+		return sourcemap.Generated{Output: output, Map: mapping}, g.imports, g.bindingSources
 	}
-	return generated, g.imports, g.bindingSources
+	generated, mapping := sourcemap.ExtractMarkers(generated, g.sourceLocations)
+	return sourcemap.Generated{Output: generated, Map: mapping}, g.imports, g.bindingSources
 }
 
 func (g *generator) importStatement(imported *ir.Import) {
@@ -208,9 +231,21 @@ func (g *generator) requireImport(importPath, alias string) {
 }
 
 func (g *generator) statement(statement ir.Statement) {
+	marker := -1
+	if g.recordSources && statement.SourceSpan().Start.Line > 0 {
+		marker = g.sourceMarker
+		g.sourceMarker++
+		g.sourceLocations[marker] = sourcemap.Location{Path: g.sourcePath, Span: statement.SourceSpan()}
+		g.line(sourcemap.StartMarker(marker))
+		defer g.line(sourcemap.EndMarker(marker))
+	}
 	switch n := statement.(type) {
 	case *ir.Comment:
-		g.line("//" + strings.TrimPrefix(strings.TrimSpace(n.Text), "#"))
+		text := "//" + strings.TrimPrefix(strings.TrimSpace(n.Text), "#")
+		if sourcemap.IsMarkerLine(text) {
+			text = strings.Replace(text, "// ", "//  ", 1)
+		}
+		g.line(text)
 	case *ir.Class:
 		if n.External {
 			break
@@ -1062,6 +1097,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		child := *g
 		child.b = strings.Builder{}
+		child.recordSources = false
 		child.indent = g.indent + 1
 		child.statements(n.Body)
 		return header + " {\n" + child.b.String() + strings.Repeat("\t", g.indent) + "}"
@@ -1744,6 +1780,7 @@ func (g *generator) transformResult(transform *ir.Transform) string {
 	}
 	child := *g
 	child.b = strings.Builder{}
+	child.recordSources = false
 	child.indent = 0
 	child.line("func() " + child.goType(transform.Result.ExprType()) + " {")
 	child.indent++
@@ -1879,6 +1916,7 @@ func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []
 func (g *generator) unionMemberExpression(member *ir.Member) string {
 	child := *g
 	child.b = strings.Builder{}
+	child.recordSources = false
 	child.indent = 1
 	resultType := g.goType(member.ExprType())
 	field := goMethodName(member.Name)

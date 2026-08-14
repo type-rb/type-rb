@@ -275,8 +275,16 @@ target code, and browser tools.
 
 Nullable lexical bindings narrow through direct `nil` comparisons in
 conditional branches, loops, compatible short-circuit expressions, and
-returning guards. Reassignment invalidates the flow fact, while typed IR keeps
-the required unwrap explicit for every backend and the REPL.
+returning guards. Direct record fields and `readonly` class fields narrow when
+their receiver is a stable lexical binding. Reassignment invalidates the flow
+fact, while typed IR keeps the required unwrap explicit for every backend and
+the REPL.
+
+Compiler artifacts carry a versioned, backend-independent mapping from
+generated statement ranges to original `.trb` paths and spans. Go mappings are
+retained through target formatting; Ruby and TypeScript use the same internal
+model. Emitting target-standard map files and translating runtime stack traces
+remain follow-up work.
 
 ## Current limitations
 
@@ -289,8 +297,8 @@ The current alpha does not yet provide:
 - complete superclass construction, override, and mutation-effect semantics;
 - general first-class call blocks;
 - concise `Result` propagation syntax;
-- stable source maps, runtime stack mapping, incremental builds, or a
-  persistent build cache;
+- emitted target-standard source maps, runtime stack mapping, incremental
+  builds, or a persistent build cache;
 - semantic package version constraints, publishing or audit services, or a
   stable external compiler-extension protocol;
 - namespace-stable public type identities across independent packages;

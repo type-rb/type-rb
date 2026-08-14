@@ -41,7 +41,8 @@ than detailed syntax.
 
 - Add stable diagnostic codes, recovery after multiple errors, related spans,
   and actionable suggestions.
-- Add source maps from generated Go, Ruby, and TypeScript back to `.trb` spans.
+- Emit target-standard source maps from the shared generated-range-to-`.trb`
+  mapping model, then use them for runtime stack traces and coverage.
 - Add incremental project compilation, dependency-aware invalidation, and a
   persistent build cache.
 - Maintain target-conformance suites that run equivalent TypeRB programs in all
