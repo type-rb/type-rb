@@ -92,14 +92,15 @@ func (s *Server) handle(request message) (bool, error) {
 	case "initialize":
 		return false, s.stream.write(success(request.ID, initializeResult{
 			Capabilities: serverCapabilities{
-				TextDocumentSync:       1,
-				CompletionProvider:     completionOptions{TriggerCharacters: []string{".", ":"}},
-				HoverProvider:          true,
-				SignatureHelpProvider:  signatureOptions{TriggerCharacters: []string{"(", ","}},
-				DefinitionProvider:     true,
-				ReferencesProvider:     true,
-				RenameProvider:         renameOptions{PrepareProvider: true},
-				DocumentSymbolProvider: true,
+				TextDocumentSync:        1,
+				CompletionProvider:      completionOptions{TriggerCharacters: []string{".", ":"}},
+				HoverProvider:           true,
+				SignatureHelpProvider:   signatureOptions{TriggerCharacters: []string{"(", ","}},
+				DefinitionProvider:      true,
+				ReferencesProvider:      true,
+				RenameProvider:          renameOptions{PrepareProvider: true},
+				DocumentSymbolProvider:  true,
+				WorkspaceSymbolProvider: true,
 				SemanticTokensProvider: semanticTokensOptions{
 					Legend: semanticTokensLegend{TokenTypes: semanticTokenTypes, TokenModifiers: semanticTokenModifiers},
 					Full:   true,
@@ -152,6 +153,8 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.documentSymbols(request)
 	case "textDocument/semanticTokens/full":
 		return false, s.semanticTokens(request)
+	case "workspace/symbol":
+		return false, s.workspaceSymbols(request)
 	case "textDocument/formatting":
 		return false, s.format(request)
 	case "textDocument/codeAction":
@@ -161,6 +164,52 @@ func (s *Server) handle(request message) (bool, error) {
 			return false, nil
 		}
 		return false, s.stream.write(failure(request.ID, -32601, fmt.Errorf("method %s is not supported", request.Method)))
+	}
+}
+
+func (s *Server) workspaceSymbols(request message) error {
+	params, err := decodeParams[workspaceSymbolParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	query := strings.ToLower(params.Query)
+	result := []symbolInformation{}
+	for _, document := range s.semanticDocuments() {
+		source := []byte(document.Source)
+		uri := uriFromPath(document.Path)
+		for _, item := range languageservice.DocumentSymbols(document.Source) {
+			appendWorkspaceSymbols(&result, source, uri, query, "", item)
+		}
+	}
+	sort.SliceStable(result, func(left, right int) bool {
+		leftName := strings.ToLower(result[left].Name)
+		rightName := strings.ToLower(result[right].Name)
+		if leftName != rightName {
+			return leftName < rightName
+		}
+		if result[left].Location.URI != result[right].Location.URI {
+			return result[left].Location.URI < result[right].Location.URI
+		}
+		leftStart := result[left].Location.Range.Start
+		rightStart := result[right].Location.Range.Start
+		return leftStart.Line < rightStart.Line || leftStart.Line == rightStart.Line && leftStart.Character < rightStart.Character
+	})
+	return s.stream.write(success(request.ID, result))
+}
+
+func appendWorkspaceSymbols(result *[]symbolInformation, source []byte, uri, query, container string, item languageservice.DocumentSymbol) {
+	if query == "" || strings.Contains(strings.ToLower(item.Name), query) {
+		*result = append(*result, symbolInformation{
+			Name: item.Name, Kind: documentSymbolKind(item.Kind), ContainerName: container,
+			Location: location{URI: uri, Range: offsetRange(source, item.SelectionRange.Start, item.SelectionRange.End)},
+		})
+	}
+	childContainer := item.Name
+	if container != "" {
+		childContainer = container + "." + item.Name
+	}
+	for _, child := range item.Children {
+		appendWorkspaceSymbols(result, source, uri, query, childContainer, child)
 	}
 }
 

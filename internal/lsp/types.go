@@ -70,6 +70,10 @@ type documentParams struct {
 	TextDocument textDocumentIdentifier `json:"textDocument"`
 }
 
+type workspaceSymbolParams struct {
+	Query string `json:"query"`
+}
+
 type formattingParams struct {
 	TextDocument textDocumentIdentifier `json:"textDocument"`
 }
@@ -127,6 +131,13 @@ type documentSymbol struct {
 
 type semanticTokens struct {
 	Data []int `json:"data"`
+}
+
+type symbolInformation struct {
+	Name          string   `json:"name"`
+	Kind          int      `json:"kind"`
+	Location      location `json:"location"`
+	ContainerName string   `json:"containerName,omitempty"`
 }
 
 type markupContent struct {
@@ -188,6 +199,7 @@ type serverCapabilities struct {
 	ReferencesProvider         bool                  `json:"referencesProvider"`
 	RenameProvider             renameOptions         `json:"renameProvider"`
 	DocumentSymbolProvider     bool                  `json:"documentSymbolProvider"`
+	WorkspaceSymbolProvider    bool                  `json:"workspaceSymbolProvider"`
 	SemanticTokensProvider     semanticTokensOptions `json:"semanticTokensProvider"`
 	DocumentFormattingProvider bool                  `json:"documentFormattingProvider"`
 	CodeActionProvider         bool                  `json:"codeActionProvider"`
