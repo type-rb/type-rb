@@ -94,16 +94,17 @@ func (s *Server) handle(request message) (bool, error) {
 	case "initialize":
 		return false, s.stream.write(success(request.ID, initializeResult{
 			Capabilities: serverCapabilities{
-				TextDocumentSync:        textDocumentSyncIncremental,
-				CompletionProvider:      completionOptions{TriggerCharacters: []string{".", ":"}},
-				HoverProvider:           true,
-				SignatureHelpProvider:   signatureOptions{TriggerCharacters: []string{"(", ","}},
-				DefinitionProvider:      true,
-				ReferencesProvider:      true,
-				RenameProvider:          renameOptions{PrepareProvider: true},
-				DocumentSymbolProvider:  true,
-				FoldingRangeProvider:    true,
-				WorkspaceSymbolProvider: true,
+				TextDocumentSync:          textDocumentSyncIncremental,
+				CompletionProvider:        completionOptions{TriggerCharacters: []string{".", ":"}},
+				HoverProvider:             true,
+				SignatureHelpProvider:     signatureOptions{TriggerCharacters: []string{"(", ","}},
+				DefinitionProvider:        true,
+				ReferencesProvider:        true,
+				DocumentHighlightProvider: true,
+				RenameProvider:            renameOptions{PrepareProvider: true},
+				DocumentSymbolProvider:    true,
+				FoldingRangeProvider:      true,
+				WorkspaceSymbolProvider:   true,
 				SemanticTokensProvider: semanticTokensOptions{
 					Legend: semanticTokensLegend{TokenTypes: semanticTokenTypes, TokenModifiers: semanticTokenModifiers},
 					Full:   true,
@@ -148,6 +149,8 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.definition(request)
 	case "textDocument/references":
 		return false, s.references(request)
+	case "textDocument/documentHighlight":
+		return false, s.documentHighlights(request)
 	case "textDocument/prepareRename":
 		return false, s.prepareRename(request)
 	case "textDocument/rename":
@@ -636,6 +639,39 @@ func (s *Server) references(request message) error {
 			continue
 		}
 		result = append(result, location{URI: uriFromPath(item.Path), Range: offsetRange(source, item.Range.Start, item.Range.End)})
+	}
+	return s.stream.write(success(request.ID, result))
+}
+
+func (s *Server) documentHighlights(request message) error {
+	params, err := decodeParams[documentPositionParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, []documentHighlight{}))
+	}
+	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	items, ok := languageservice.References(languageservice.SemanticRequest{
+		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
+	}, s.semanticDocuments(), true)
+	if !ok {
+		return s.stream.write(success(request.ID, []documentHighlight{}))
+	}
+	result := []documentHighlight{}
+	for _, item := range items {
+		if cleanPath(item.Path) != path {
+			continue
+		}
+		result = append(result, documentHighlight{
+			Range: offsetRange(document.source, item.Range.Start, item.Range.End),
+			Kind:  1,
+		})
 	}
 	return s.stream.write(success(request.ID, result))
 }

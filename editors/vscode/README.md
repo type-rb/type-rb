@@ -12,6 +12,7 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Checked completion for declarations, members, and call arguments
 - Hover information and signature help
 - Go to definition, references, symbol rename, and project-wide symbol search
+- Checked symbol occurrence highlighting within the current document
 - Document outline for types, fields, functions, and methods
 - Structural code folding for declarations and expression blocks
 - Compiler-aware semantic highlighting
