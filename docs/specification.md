@@ -11,6 +11,9 @@ Design principles:
 
 - Keep the source concise while removing implicit behavior.
 - Prefer explicit, simple, Go-like rules.
+- Prefer one canonical spelling for each common operation. Add alternatives
+  only when they express a meaningful semantic distinction or application
+  experience demonstrates substantial value.
 - Keep syntax and semantics consistent across transpile targets.
 
 ## 2. Project Target Modes

@@ -11,6 +11,10 @@ behavior.
 Preserve these invariants:
 
 - Keep one grammar and portable semantics across every mode. Let `mode` select only the backend, toolchain, and package ecosystem.
+- For new syntax and APIs, identify one canonical user-facing spelling. Avoid
+  synonymous aliases and overlapping overloads unless they have a distinct
+  semantic role or concrete application evidence. When alternatives are
+  necessary, document which spelling public examples should prefer.
 - Gate target-specific APIs and native compatibility behind an explicit `trb/platform/<mode>/*` import. Never relax checking merely because a project uses that mode.
 - Carry behavior through syntax AST, checked types, typed IR, and each affected backend; do not bypass the pipeline with source-text rewrites.
 - Keep `trb fmt` deterministic and preserve comments.
