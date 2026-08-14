@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use TypeRB"
+  short_description: "Build, debug, and learn TypeRB applications"
+  default_prompt: "Use $use-typerb to build or learn a TypeRB application with compiler feedback."
