@@ -63,6 +63,7 @@ func Complete(request CompletionRequest) []CompletionItem {
 	}
 	replacement := completionRange(request.Source, request.Cursor)
 	prefix := request.Source[replacement.Start:request.Cursor]
+	typePosition := typeCompletionPosition(request.Source, replacement.Start)
 
 	if marker, receiver := memberReceiver(request.Source, replacement.Start); marker != "" {
 		members := completeMembers(receiver, marker, request, replacement)
@@ -90,9 +91,104 @@ func Complete(request CompletionRequest) []CompletionItem {
 
 	items := make([]CompletionItem, 0, len(byName))
 	for _, symbol := range byName {
+		if typePosition && symbol.Kind != CompletionType {
+			continue
+		}
 		items = append(items, completionFromSymbol(symbol, replacement))
 	}
 	return filterCompletions(items, prefix)
+}
+
+func typeCompletionPosition(source string, wordStart int) bool {
+	tokens, _ := lexer.Lex([]byte(source[:wordStart]))
+	significant := completionTokens(tokens)
+	if len(significant) == 0 {
+		return false
+	}
+	last := significant[len(significant)-1].Lexeme
+	switch last {
+	case "fails", "implements", "|", "->":
+		return true
+	case "=":
+		return currentLineStartsWith(significant, "type")
+	case ":":
+		if unclosedDelimiter(significant, "{", "}") >= 0 {
+			return false
+		}
+		open := unclosedDelimiter(significant, "(", ")")
+		if open < 0 {
+			return true
+		}
+		return declarationParameterList(significant, open)
+	case "<", ",":
+		return unclosedTypeArguments(significant)
+	default:
+		return false
+	}
+}
+
+func currentLineStartsWith(tokens []token.Token, lexeme string) bool {
+	for index := len(tokens) - 1; index >= 0; index-- {
+		if index > 0 && tokens[index-1].Span.End.Line < tokens[index].Span.Start.Line {
+			return tokens[index].Lexeme == lexeme
+		}
+	}
+	return len(tokens) > 0 && tokens[0].Lexeme == lexeme
+}
+
+func unclosedDelimiter(tokens []token.Token, opening, closing string) int {
+	depth := 0
+	for index := len(tokens) - 1; index >= 0; index-- {
+		switch tokens[index].Lexeme {
+		case closing:
+			depth++
+		case opening:
+			if depth == 0 {
+				return index
+			}
+			depth--
+		}
+	}
+	return -1
+}
+
+func declarationParameterList(tokens []token.Token, open int) bool {
+	if open > 0 && tokens[open-1].Lexeme == "fn" {
+		return true
+	}
+	if open >= 2 && tokens[open-1].Kind == token.Identifier && tokens[open-2].Lexeme == "def" {
+		return true
+	}
+	if open > 3 && tokens[open-1].Lexeme == ">" {
+		for index := open - 2; index >= 1; index-- {
+			if tokens[index].Lexeme == "<" {
+				return tokens[index-1].Kind == token.Identifier && index >= 2 && tokens[index-2].Lexeme == "def"
+			}
+		}
+	}
+	return false
+}
+
+func unclosedTypeArguments(tokens []token.Token) bool {
+	depth := 0
+	for index := len(tokens) - 1; index >= 0; index-- {
+		switch tokens[index].Lexeme {
+		case ">":
+			depth++
+		case "<":
+			if depth > 0 {
+				depth--
+				continue
+			}
+			if index == 0 || tokens[index-1].Kind != token.Identifier {
+				return false
+			}
+			name := tokens[index-1].Lexeme
+			first, _ := utf8.DecodeRuneInString(name)
+			return unicode.IsUpper(first) || slices.Contains(builtInTypes, name)
+		}
+	}
+	return false
 }
 
 func completeCallArgumentLiterals(request CompletionRequest) ([]CompletionItem, bool) {
@@ -794,6 +890,7 @@ func lexicalSymbols(source string, cursor int, context Context) []Symbol {
 		case "class", "record", "enum", "interface", "type":
 			if name, ok := tokenAt(significant, index+1); ok && name.Kind == token.Identifier {
 				known[name.Lexeme] = Symbol{Name: name.Lexeme, Kind: CompletionType, Detail: item.Lexeme, Type: types.FromName(name.Lexeme)}
+				collectTypeParameters(significant, index+2, known)
 			}
 		case "module":
 			if name, ok := tokenAt(significant, index+1); ok && name.Kind == token.Identifier {
@@ -802,6 +899,7 @@ func lexicalSymbols(source string, cursor int, context Context) []Symbol {
 		case "def":
 			if name, ok := tokenAt(significant, index+1); ok && name.Kind == token.Identifier {
 				known[name.Lexeme] = Symbol{Name: name.Lexeme, Kind: CompletionFunction, Detail: "function"}
+				collectTypeParameters(significant, index+2, known)
 				collectParameters(significant, index+2, known)
 			}
 		case "fn":
@@ -818,6 +916,19 @@ func lexicalSymbols(source string, cursor int, context Context) []Symbol {
 	}
 	sortSymbols(result)
 	return result
+}
+
+func collectTypeParameters(tokens []token.Token, start int, symbols map[string]Symbol) {
+	if start >= len(tokens) || tokens[start].Lexeme != "<" {
+		return
+	}
+	for index := start + 1; index < len(tokens) && tokens[index].Lexeme != ">"; index++ {
+		if tokens[index].Kind != token.Identifier {
+			continue
+		}
+		name := tokens[index].Lexeme
+		symbols[name] = Symbol{Name: name, Kind: CompletionType, Detail: "type parameter", Type: types.FromName(name)}
+	}
 }
 
 func collectParameters(tokens []token.Token, start int, symbols map[string]Symbol) {

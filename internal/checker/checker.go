@@ -428,7 +428,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		}
 	}
 	c.collect(program.Statements)
-	c.validateTypeReferences(program.Statements)
+	c.validateTypeReferences(program.Statements, nil)
 	c.checkStatements(program.Statements, &scope{values: map[string]symbol{}, constantsAllowed: true, enumsAllowed: true})
 	if !c.allowUnusedImports {
 		c.checkUnusedImports(program.Statements)
@@ -436,183 +436,184 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 	return c.result, diagnostic.Normalize(c.diags, "", diagnostic.TypeError)
 }
 
-func (c *Checker) validateTypeReferences(statements []ast.Statement) {
+func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParameters map[string]bool) {
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ast.ClassStatement:
-			c.validateTypeReferences(node.Body)
+			c.validateTypeReferences(node.Body, extendTypeParameters(typeParameters, node.TypeParameters))
 		case *ast.RecordStatement:
-			c.validateTypeReferences(node.Body)
+			c.validateTypeReferences(node.Body, extendTypeParameters(typeParameters, node.TypeParameters))
 		case *ast.EnumStatement:
-			c.validateTypeReferences(node.Body)
+			c.validateTypeReferences(node.Body, extendTypeParameters(typeParameters, node.TypeParameters))
 		case *ast.TypeAliasStatement:
-			c.validateTypeReference(node.Target)
+			c.validateTypeReferenceInScope(node.Target, extendTypeParameters(typeParameters, node.TypeParameters))
 		case *ast.EnumMemberStatement:
 			for _, parameter := range node.Parameters {
-				c.validateTypeReference(parameter.Type)
+				c.validateTypeReferenceInScope(parameter.Type, typeParameters)
 			}
-			c.validateExpressionTypeReferences(node.RawValue)
+			c.validateExpressionTypeReferences(node.RawValue, typeParameters)
 		case *ast.RecordFieldStatement:
-			c.validateTypeReference(node.Type)
+			c.validateTypeReferenceInScope(node.Type, typeParameters)
 		case *ast.ModuleStatement:
-			c.validateTypeReferences(node.Body)
+			c.validateTypeReferences(node.Body, typeParameters)
 		case *ast.InterfaceStatement:
 			for _, method := range node.Methods {
-				c.validateMethodTypes(method)
+				c.validateMethodTypes(method, extendTypeParameters(typeParameters, method.TypeParameters))
 			}
 		case *ast.FieldStatement:
-			c.validateTypeReference(node.Type)
-			c.validateExpressionTypeReferences(node.Value)
+			c.validateTypeReferenceInScope(node.Type, typeParameters)
+			c.validateExpressionTypeReferences(node.Value, typeParameters)
 		case *ast.MethodStatement:
-			c.validateMethodTypes(node)
-			c.validateTypeReferences(node.Body)
+			methodTypes := extendTypeParameters(typeParameters, node.TypeParameters)
+			c.validateMethodTypes(node, methodTypes)
+			c.validateTypeReferences(node.Body, methodTypes)
 		case *ast.VariableStatement:
-			c.validateTypeReference(node.Type)
-			c.validateExpressionTypeReferences(node.Value)
+			c.validateTypeReferenceInScope(node.Type, typeParameters)
+			c.validateExpressionTypeReferences(node.Value, typeParameters)
 		case *ast.AssignmentStatement:
-			c.validateExpressionTypeReferences(node.Target)
-			c.validateExpressionTypeReferences(node.Value)
+			c.validateExpressionTypeReferences(node.Target, typeParameters)
+			c.validateExpressionTypeReferences(node.Value, typeParameters)
 		case *ast.ReturnStatement:
-			c.validateExpressionTypeReferences(node.Value)
+			c.validateExpressionTypeReferences(node.Value, typeParameters)
 		case *ast.IfStatement:
-			c.validateExpressionTypeReferences(node.Condition)
-			c.validateTypeReferences(node.Then)
+			c.validateExpressionTypeReferences(node.Condition, typeParameters)
+			c.validateTypeReferences(node.Then, typeParameters)
 			for _, branch := range node.ElseIf {
-				c.validateExpressionTypeReferences(branch.Condition)
-				c.validateTypeReferences(branch.Body)
+				c.validateExpressionTypeReferences(branch.Condition, typeParameters)
+				c.validateTypeReferences(branch.Body, typeParameters)
 			}
-			c.validateTypeReferences(node.Else)
+			c.validateTypeReferences(node.Else, typeParameters)
 		case *ast.CaseStatement:
-			c.validateExpressionTypeReferences(node.Value)
-			c.validateTypeReferences(node.Leading)
+			c.validateExpressionTypeReferences(node.Value, typeParameters)
+			c.validateTypeReferences(node.Leading, typeParameters)
 			for _, branch := range node.Branches {
-				c.validateTypeReferences(branch.Body)
+				c.validateTypeReferences(branch.Body, typeParameters)
 			}
-			c.validateTypeReferences(node.Else)
+			c.validateTypeReferences(node.Else, typeParameters)
 		case *ast.WhileStatement:
-			c.validateExpressionTypeReferences(node.Condition)
-			c.validateTypeReferences(node.Body)
+			c.validateExpressionTypeReferences(node.Condition, typeParameters)
+			c.validateTypeReferences(node.Body, typeParameters)
 		case *ast.ExpressionStatement:
-			c.validateExpressionTypeReferences(node.Expression)
+			c.validateExpressionTypeReferences(node.Expression, typeParameters)
 		case *ast.NativeBlock:
-			c.validateTypeReferences(node.Body)
+			c.validateTypeReferences(node.Body, typeParameters)
 		}
 	}
 }
 
-func (c *Checker) validateExpressionTypeReferences(expression ast.Expression) {
+func (c *Checker) validateExpressionTypeReferences(expression ast.Expression, typeParameters map[string]bool) {
 	switch node := expression.(type) {
 	case nil:
 		return
 	case *ast.IfStatement:
-		c.validateExpressionTypeReferences(node.Condition)
-		c.validateTypeReferences(node.Then)
+		c.validateExpressionTypeReferences(node.Condition, typeParameters)
+		c.validateTypeReferences(node.Then, typeParameters)
 		for _, branch := range node.ElseIf {
-			c.validateExpressionTypeReferences(branch.Condition)
-			c.validateTypeReferences(branch.Body)
+			c.validateExpressionTypeReferences(branch.Condition, typeParameters)
+			c.validateTypeReferences(branch.Body, typeParameters)
 		}
-		c.validateTypeReferences(node.Else)
+		c.validateTypeReferences(node.Else, typeParameters)
 	case *ast.CaseStatement:
-		c.validateExpressionTypeReferences(node.Value)
-		c.validateTypeReferences(node.Leading)
+		c.validateExpressionTypeReferences(node.Value, typeParameters)
+		c.validateTypeReferences(node.Leading, typeParameters)
 		for _, branch := range node.Branches {
-			c.validateExpressionTypeReferences(branch.Value)
-			c.validateTypeReferences(branch.Body)
+			c.validateExpressionTypeReferences(branch.Value, typeParameters)
+			c.validateTypeReferences(branch.Body, typeParameters)
 		}
-		c.validateTypeReferences(node.Else)
+		c.validateTypeReferences(node.Else, typeParameters)
 	case *ast.IterationExpression:
-		c.validateExpressionTypeReferences(node.Source)
-		c.validateExpressionTypeReferences(node.SliceSize)
-		c.validateExpressionTypeReferences(node.Initial)
+		c.validateExpressionTypeReferences(node.Source, typeParameters)
+		c.validateExpressionTypeReferences(node.SliceSize, typeParameters)
+		c.validateExpressionTypeReferences(node.Initial, typeParameters)
 		if node.Block != nil {
-			c.validateTypeReferences(node.Block.Body)
+			c.validateTypeReferences(node.Block.Body, typeParameters)
 		}
 	case *ast.ArrayLiteral:
 		for _, element := range node.Elements {
-			c.validateExpressionTypeReferences(element)
+			c.validateExpressionTypeReferences(element, typeParameters)
 		}
 	case *ast.HashLiteral:
 		for _, entry := range node.Entries {
-			c.validateExpressionTypeReferences(entry.Key)
-			c.validateExpressionTypeReferences(entry.Value)
+			c.validateExpressionTypeReferences(entry.Key, typeParameters)
+			c.validateExpressionTypeReferences(entry.Value, typeParameters)
 		}
 	case *ast.JSXElement:
-		c.validateExpressionTypeReferences(node.Component)
+		c.validateExpressionTypeReferences(node.Component, typeParameters)
 		for _, attribute := range node.Attributes {
-			c.validateExpressionTypeReferences(attribute.Value)
+			c.validateExpressionTypeReferences(attribute.Value, typeParameters)
 		}
 		for _, child := range node.Children {
 			switch item := child.(type) {
 			case *ast.JSXElement:
-				c.validateExpressionTypeReferences(item)
+				c.validateExpressionTypeReferences(item, typeParameters)
 			case *ast.JSXExpression:
-				c.validateExpressionTypeReferences(item.Value)
+				c.validateExpressionTypeReferences(item.Value, typeParameters)
 			}
 		}
 	case *ast.UnaryExpression:
-		c.validateExpressionTypeReferences(node.Operand)
+		c.validateExpressionTypeReferences(node.Operand, typeParameters)
 	case *ast.BinaryExpression:
-		c.validateExpressionTypeReferences(node.Left)
-		c.validateExpressionTypeReferences(node.Right)
+		c.validateExpressionTypeReferences(node.Left, typeParameters)
+		c.validateExpressionTypeReferences(node.Right, typeParameters)
 	case *ast.RangeExpression:
-		c.validateExpressionTypeReferences(node.Start)
-		c.validateExpressionTypeReferences(node.End)
+		c.validateExpressionTypeReferences(node.Start, typeParameters)
+		c.validateExpressionTypeReferences(node.End, typeParameters)
 	case *ast.AttemptExpression:
-		c.validateExpressionTypeReferences(node.Value)
-		c.validateTypeReferences(node.Body)
+		c.validateExpressionTypeReferences(node.Value, typeParameters)
+		c.validateTypeReferences(node.Body, typeParameters)
 	case *ast.LambdaExpression:
 		for _, parameter := range node.Parameters {
-			c.validateTypeReference(parameter.Type)
+			c.validateTypeReferenceInScope(parameter.Type, typeParameters)
 		}
-		c.validateTypeReference(node.ReturnType)
-		c.validateTypeReference(node.Fails)
-		c.validateTypeReferences(node.Body)
+		c.validateTypeReferenceInScope(node.ReturnType, typeParameters)
+		c.validateTypeReferenceInScope(node.Fails, typeParameters)
+		c.validateTypeReferences(node.Body, typeParameters)
 	case *ast.CallExpression:
-		c.validateExpressionTypeReferences(node.Callee)
+		c.validateExpressionTypeReferences(node.Callee, typeParameters)
 		for _, argument := range node.Arguments {
-			c.validateExpressionTypeReferences(argument.Value)
+			c.validateExpressionTypeReferences(argument.Value, typeParameters)
 		}
 	case *ast.MemberExpression:
-		c.validateExpressionTypeReferences(node.Receiver)
+		c.validateExpressionTypeReferences(node.Receiver, typeParameters)
 	case *ast.GenericExpression:
-		c.validateExpressionTypeReferences(node.Receiver)
+		c.validateExpressionTypeReferences(node.Receiver, typeParameters)
 		for _, argument := range node.Arguments {
-			c.validateTypeReference(argument)
+			c.validateTypeReferenceInScope(argument, typeParameters)
 		}
 	case *ast.IndexExpression:
-		c.validateExpressionTypeReferences(node.Receiver)
-		c.validateExpressionTypeReferences(node.Index)
+		c.validateExpressionTypeReferences(node.Receiver, typeParameters)
+		c.validateExpressionTypeReferences(node.Index, typeParameters)
 	case *ast.BlockExpression:
-		c.validateTypeReferences(node.Body)
+		c.validateTypeReferences(node.Body, typeParameters)
 	}
 }
 
-func (c *Checker) validateMethodTypes(method *ast.MethodStatement) {
-	c.validateTypeReference(method.ReturnType)
-	c.validateTypeReference(method.Fails)
+func (c *Checker) validateMethodTypes(method *ast.MethodStatement, typeParameters map[string]bool) {
+	c.validateTypeReferenceInScope(method.ReturnType, typeParameters)
+	c.validateTypeReferenceInScope(method.Fails, typeParameters)
 	for _, parameter := range method.Parameters {
-		c.validateTypeReference(parameter.Type)
-		c.validateExpressionTypeReferences(parameter.Default)
+		c.validateTypeReferenceInScope(parameter.Type, typeParameters)
+		c.validateExpressionTypeReferences(parameter.Default, typeParameters)
 	}
 }
 
-func (c *Checker) validateTypeReference(ref ast.TypeRef) {
+func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters map[string]bool) {
 	if ref.Empty() {
 		return
 	}
 	if len(ref.Union) > 0 {
 		for _, alternative := range ref.Union {
-			c.validateTypeReference(alternative)
+			c.validateTypeReferenceInScope(alternative, typeParameters)
 		}
 		return
 	}
 	if ref.FunctionReturn != nil {
 		for _, parameter := range ref.FunctionParameters {
-			c.validateTypeReference(parameter)
+			c.validateTypeReferenceInScope(parameter, typeParameters)
 		}
-		c.validateTypeReference(*ref.FunctionReturn)
+		c.validateTypeReferenceInScope(*ref.FunctionReturn, typeParameters)
 		if ref.FunctionFails != nil {
-			c.validateTypeReference(*ref.FunctionFails)
+			c.validateTypeReferenceInScope(*ref.FunctionFails, typeParameters)
 		}
 		return
 	}
@@ -626,17 +627,20 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 		c.error(ref.Span(), "Never is an internal compiler type and cannot be written in source")
 		return
 	}
-	if _, _, compilerOwned := stdlib.LookupRuntimeExport(ref.Name); compilerOwned {
-		_, declared := c.declaredTypes[ref.Name]
-		_, imported := c.resolution.ImportedType(ref.Name)
-		if !declared && !imported {
-			c.error(ref.Span(), fmt.Sprintf("type %s is not declared or imported", ref.Name))
-		}
+	semantic := types.FromName(ref.Name)
+	if semantic.Kind != types.Named && semantic.Name != ref.Name {
+		c.error(ref.Span(), fmt.Sprintf("type name %s is not canonical; use %s", ref.Name, semantic.Name))
 	}
 	for _, argument := range ref.Arguments {
-		c.validateTypeReference(argument)
+		c.validateTypeReferenceInScope(argument, typeParameters)
 	}
-	if binding, imported := c.resolution.ImportedType(ref.Name); imported {
+	_, declared := c.declaredTypes[ref.Name]
+	binding, imported := c.resolution.ImportedType(ref.Name)
+	_, parameter := typeParameters[ref.Name]
+	if semantic.Kind == types.Named && !declared && !imported && !parameter {
+		c.error(ref.Span(), fmt.Sprintf("type %s is not declared or imported", ref.Name))
+	}
+	if imported {
 		c.markImportUsed(binding)
 	}
 	if expected, generic := c.genericTypeArity(ref.Name); generic {
@@ -662,6 +666,20 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef) {
 	if !portableHashKey(key) {
 		c.error(ref.Arguments[0].Span(), fmt.Sprintf("Hash key type must be String or Integer, got %s", key))
 	}
+}
+
+func extendTypeParameters(parent map[string]bool, parameters []ast.TypeParameter) map[string]bool {
+	if len(parameters) == 0 {
+		return parent
+	}
+	result := make(map[string]bool, len(parent)+len(parameters))
+	for name := range parent {
+		result[name] = true
+	}
+	for _, parameter := range parameters {
+		result[parameter.Name] = true
+	}
+	return result
 }
 
 func (c *Checker) genericTypeArity(name string) (int, bool) {
@@ -4206,9 +4224,6 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = types.Type{Kind: types.Void, Name: "Void"}
 		}
 	case *ast.GenericExpression:
-		for _, argument := range n.Arguments {
-			c.validateTypeReference(argument)
-		}
 		receiverType := c.checkExpression(n.Receiver, sc)
 		application, ok := c.resolveGenericApplication(n)
 		if !ok {

@@ -126,6 +126,11 @@ names: Array<String> := ["Ada", "Grace"]
 scores: Hash<String, Integer> := {ada: 10}
 ```
 
+Type names are case-sensitive and have one canonical spelling. Use
+`Integer`, `Boolean`, `String`, `Float`, `Array`, and `Hash`; aliases from
+target languages such as `Int`, `int`, `bool`, `number`, and `Map` are errors.
+User-defined types must be declared in the project or imported explicitly.
+
 Bindings declared with `:=` are immutable. Add `mut` at declaration time when
 the binding will be reassigned or used by a destructive collection operation:
 

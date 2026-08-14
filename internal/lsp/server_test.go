@@ -75,6 +75,41 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 	}
 }
 
+func TestServerDiagnosesUnknownTypesAndCompletesCanonicalNames(t *testing.T) {
+	filename := cleanPath("user.trb")
+	source := "record User\n\tid: Int\nend\n"
+	uri := uriFromPath(filename)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/completion", Params: rawParams(t, documentPositionParams{
+			TextDocument: textDocumentIdentifier{URI: uri}, Position: position{Line: 1, Character: 8},
+		})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "user", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var published publishDiagnosticsParams
+	decodeParamsFrame(t, frames[1], &published)
+	if len(published.Diagnostics) != 1 || !strings.Contains(published.Diagnostics[0].Message, "use Integer") {
+		t.Fatalf("type diagnostics=%#v", published.Diagnostics)
+	}
+	var completions []completionItem
+	decodeResult(t, frames[2], &completions)
+	if !containsCompletion(completions, "Integer") {
+		t.Fatalf("type completion response=%#v", completions)
+	}
+}
+
 func TestServerOffersDiagnosticFixesAsCodeActions(t *testing.T) {
 	filename := cleanPath("unused.trb")
 	source := "import trb/std/strings\n\ndef main()\n\treturn\nend\n"
