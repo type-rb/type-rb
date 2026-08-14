@@ -22,12 +22,15 @@ function resolveServerOptions(settings, workspaceRoot) {
 	return { command, args };
 }
 
-function resolveRunOptions(settings, workspaceRoot) {
+function resolveRunOptions(settings, workspaceRoot, programArgs = []) {
 	const command = resolveFromWorkspace(settings.path.trim() || "trb", workspaceRoot);
 	const config = resolveFromWorkspace(settings.config.trim(), workspaceRoot);
 	const args = ["run"];
 	if (config !== "") {
 		args.push("--config", config);
+	}
+	if (programArgs.length > 0) {
+		args.push("--", ...programArgs);
 	}
 	return { command, args };
 }

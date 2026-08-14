@@ -72,9 +72,11 @@ function projectPaths(configPath, source) {
 		throw new TypeError("sourceDir and outDir must be strings");
 	}
 	return {
+		name: typeof config.name === "string" ? config.name.trim() : "",
 		root,
 		sourceRoot: path.resolve(root, sourceDir),
-		outputRoot: path.resolve(root, outDir)
+		outputRoot: path.resolve(root, outDir),
+		runnable: config.mode !== "typescript" || config.typescript?.runtime !== "browser"
 	};
 }
 

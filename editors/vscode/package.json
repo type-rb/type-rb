@@ -2,7 +2,7 @@
 	"name": "typerb",
 	"displayName": "TypeRB",
 	"description": "Language support for TypeRB",
-	"version": "0.2.2",
+	"version": "0.2.3",
 	"preview": true,
 	"publisher": "type-rb",
 	"license": "MIT",
@@ -25,7 +25,8 @@
 		"language-server"
 	],
 	"activationEvents": [
-		"onLanguage:trb"
+		"onLanguage:trb",
+		"onDebug:typerb"
 	],
 	"extensionKind": [
 		"workspace"
@@ -46,6 +47,7 @@
 		"package": "npm run build && vsce package --out dist/typerb.vsix"
 	},
 	"dependencies": {
+		"@vscode/debugadapter": "^1.68.0",
 		"vscode-languageclient": "10.1.0"
 	},
 	"devDependencies": {
@@ -65,6 +67,61 @@
 				"title": "Stop Project",
 				"category": "TypeRB",
 				"icon": "$(debug-stop)"
+			}
+		],
+		"debuggers": [
+			{
+				"type": "typerb",
+				"label": "TypeRB",
+				"languages": [
+					"trb"
+				],
+				"configurationAttributes": {
+					"launch": {
+						"type": "object",
+						"properties": {
+							"config": {
+								"type": "string",
+								"description": "Path to trbconfig.jsonc. The active TypeRB project is used when omitted."
+							},
+							"args": {
+								"type": "array",
+								"description": "Arguments passed to the TypeRB program.",
+								"items": {
+									"type": "string"
+								},
+								"default": []
+							},
+							"env": {
+								"type": "object",
+								"description": "Environment variables passed to the TypeRB program.",
+								"additionalProperties": {
+									"type": "string"
+								},
+								"default": {}
+							}
+						}
+					}
+				},
+				"initialConfigurations": [
+					{
+						"type": "typerb",
+						"request": "launch",
+						"name": "Run TypeRB"
+					}
+				],
+				"configurationSnippets": [
+					{
+						"label": "TypeRB: Run project",
+						"description": "Run a configured TypeRB project.",
+						"body": {
+							"type": "typerb",
+							"request": "launch",
+							"name": "Run TypeRB",
+							"config": "${workspaceFolder}/trbconfig.jsonc"
+						}
+					}
+				]
 			}
 		],
 		"languages": [

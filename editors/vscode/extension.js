@@ -4,21 +4,31 @@ const { readFile } = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
 const { LanguageClient } = require("vscode-languageclient/node");
+const { TypeRBDebugSession } = require("./debug-session");
 const { excludeGeneratedProjects, projectForPath, projectPaths } = require("./project-options");
 const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("./server-options");
 
 let projectManager;
-let runTerminal;
 let runCodeLensProvider;
+const debugSessions = new Map();
 
 async function activate(context) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand("typerb.runProject", runProject),
 		vscode.commands.registerCommand("typerb.stopProject", stopProject),
-		vscode.window.onDidCloseTerminal((terminal) => {
-			if (terminal === runTerminal) {
-				runTerminal = undefined;
-				runCodeLensProvider?.setRunning(undefined);
+		vscode.debug.onDidStartDebugSession((session) => {
+			if (session.type === "typerb" && typeof session.configuration.configPath === "string") {
+				debugSessions.set(path.resolve(session.configuration.configPath), session);
+				runCodeLensProvider?.refresh();
+			}
+		}),
+		vscode.debug.onDidTerminateDebugSession((session) => {
+			if (session.type === "typerb" && typeof session.configuration.configPath === "string") {
+				const configPath = path.resolve(session.configuration.configPath);
+				if (debugSessions.get(configPath) === session) {
+					debugSessions.delete(configPath);
+					runCodeLensProvider?.refresh();
+				}
 			}
 		})
 	);
@@ -29,6 +39,18 @@ async function activate(context) {
 		}
 	});
 	await projectManager.start();
+	context.subscriptions.push(
+		vscode.debug.registerDebugConfigurationProvider(
+			"typerb",
+			new TypeRBDebugConfigurationProvider(projectManager),
+			vscode.DebugConfigurationProviderTriggerKind.Dynamic
+		),
+		vscode.debug.registerDebugAdapterDescriptorFactory("typerb", {
+			createDebugAdapterDescriptor() {
+				return new vscode.DebugAdapterInlineImplementation(new TypeRBDebugSession());
+			}
+		})
+	);
 	runCodeLensProvider = new RunCodeLensProvider(projectManager);
 	context.subscriptions.push(
 		runCodeLensProvider,
@@ -108,7 +130,12 @@ class ProjectManager {
 	}
 
 	firstProject() {
-		return this.projects[0];
+		return this.projects.find((project) => project.runnable);
+	}
+
+	projectForConfigPath(configPath) {
+		const resolved = path.resolve(configPath);
+		return this.projects.find((project) => project.configPath === resolved);
 	}
 
 	async stop() {
@@ -159,7 +186,7 @@ async function discoverProjects() {
 				...candidate,
 				...paths,
 				configPath,
-				label: relative
+				label: paths.name || relative
 			});
 		} catch (error) {
 			void vscode.window.showErrorMessage(`Cannot load TypeRB project ${configPath}: ${error.message}`);
@@ -171,16 +198,11 @@ async function discoverProjects() {
 class RunCodeLensProvider {
 	constructor(manager) {
 		this.manager = manager;
-		this.runningProject = undefined;
 		this.changed = new vscode.EventEmitter();
 		this.onDidChangeCodeLenses = this.changed.event;
 	}
 
-	setRunning(configPath) {
-		if (configPath === this.runningProject) {
-			return;
-		}
-		this.runningProject = configPath;
+	refresh() {
 		this.changed.fire();
 	}
 
@@ -199,7 +221,7 @@ class RunCodeLensProvider {
 		} catch {
 			return [];
 		}
-		const running = project.configPath === this.runningProject;
+		const running = debugSessions.has(project.configPath);
 		return items.map((item) => {
 			const range = new vscode.Range(
 				item.range.start.line,
@@ -236,25 +258,16 @@ async function runProject(uriValue) {
 		void vscode.window.showErrorMessage("Save TypeRB project files before running main().");
 		return;
 	}
-	const settings = vscode.workspace.getConfiguration("typerb", uri);
-	const workspaceRoot = project.workspaceFolder?.uri.fsPath;
-	const run = resolveRunOptions(
-		{
-			path: settings.get("server.path", "trb"),
-			config: project.configPath
-		},
-		workspaceRoot
-	);
-	await stopProject();
-	runTerminal = vscode.window.createTerminal({
-		name: "TypeRB: Run",
-		cwd: project.root,
-		shellPath: run.command,
-		shellArgs: run.args,
-		iconPath: new vscode.ThemeIcon("play")
-	});
-	runCodeLensProvider?.setRunning(project.configPath);
-	runTerminal.show(true);
+	const running = debugSessions.get(project.configPath);
+	if (running !== undefined) {
+		await running.customRequest("restart");
+		return;
+	}
+	const configuration = debugConfigurationForProject(project);
+	const started = await vscode.debug.startDebugging(project.workspaceFolder, configuration);
+	if (!started) {
+		void vscode.window.showErrorMessage(`Cannot start TypeRB project ${project.label}.`);
+	}
 }
 
 function runURI(value) {
@@ -278,39 +291,105 @@ async function saveTypeRBDocuments(project) {
 	return saved.every(Boolean);
 }
 
-async function stopProject() {
-	if (runTerminal === undefined) {
+async function stopProject(uriValue) {
+	const uri = runURI(uriValue);
+	const project = uri === undefined ? undefined : projectManager?.projectForURI(uri);
+	const session = project === undefined
+		? vscode.debug.activeDebugSession
+		: debugSessions.get(project.configPath);
+	if (session?.type !== "typerb") {
 		return;
 	}
-	const terminal = runTerminal;
-	runTerminal = undefined;
-	runCodeLensProvider?.setRunning(undefined);
-	await new Promise((resolve) => {
-		let finished = false;
-		const complete = () => {
-			if (finished) {
-				return;
-			}
-			finished = true;
-			listener.dispose();
-			clearTimeout(timeout);
-			resolve();
-		};
-		const listener = vscode.window.onDidCloseTerminal((closed) => {
-			if (closed === terminal) {
-				complete();
-			}
-		});
-		const timeout = setTimeout(complete, 1000);
-		terminal.dispose();
-	});
+	await vscode.debug.stopDebugging(session);
 }
 
 async function deactivate() {
-	await stopProject();
+	await Promise.all([...debugSessions.values()].map((session) => vscode.debug.stopDebugging(session)));
+	debugSessions.clear();
 	await projectManager?.stop();
 	projectManager = undefined;
 	runCodeLensProvider = undefined;
+}
+
+class TypeRBDebugConfigurationProvider {
+	constructor(manager) {
+		this.manager = manager;
+	}
+
+	provideDebugConfigurations(folder) {
+		return this.manager.projects
+			.filter((project) => project.runnable && (folder === undefined || project.workspaceFolder === folder))
+			.map((project) => debugConfigurationForProject(project));
+	}
+
+	resolveDebugConfiguration(folder, configuration) {
+		const project = this.selectProject(folder, configuration);
+		if (project === undefined) {
+			void vscode.window.showErrorMessage("TypeRB could not find a runnable project for this debug configuration.");
+			return undefined;
+		}
+		if (!project.runnable) {
+			void vscode.window.showErrorMessage("TypeRB browser projects are started by their browser toolchain, not trb run.");
+			return undefined;
+		}
+		const programArgs = Array.isArray(configuration.args) ? configuration.args : [];
+		return {
+			...configuration,
+			...debugConfigurationForProject(project, programArgs),
+			name: configuration.name || `TypeRB: ${project.label}`,
+			env: configuration.env ?? {},
+		};
+	}
+
+	selectProject(folder, configuration) {
+		const configured = configuration.config ?? configuration.configPath;
+		if (typeof configured === "string" && configured !== "") {
+			const root = folder?.uri.fsPath;
+			const workspaceRelative = root === undefined
+				? configured
+				: configured.replace(/^\$\{workspaceFolder\}[\\/]/, "");
+			const configPath = path.isAbsolute(workspaceRelative) || root === undefined
+				? workspaceRelative
+				: path.resolve(root, workspaceRelative);
+			return this.manager.projectForConfigPath(configPath);
+		}
+		const editor = vscode.window.activeTextEditor;
+		const active = editor?.document.languageId === "trb"
+			? this.manager.projectForURI(editor.document.uri)
+			: undefined;
+		if (active !== undefined && (folder === undefined || active.workspaceFolder === folder)) {
+			return active;
+		}
+		return this.manager.projects.find((project) =>
+			project.runnable && (folder === undefined || project.workspaceFolder === folder)
+		);
+	}
+}
+
+function debugConfigurationForProject(project, programArgs = []) {
+	const settings = vscode.workspace.getConfiguration("typerb", project.configUri);
+	const workspaceRoot = project.workspaceFolder?.uri.fsPath;
+	const run = resolveRunOptions(
+		{
+			path: settings.get("server.path", "trb"),
+			config: project.configPath,
+		},
+		workspaceRoot,
+		programArgs
+	);
+	return {
+		type: "typerb",
+		request: "launch",
+		name: `TypeRB: ${project.label}`,
+		config: project.configPath,
+		configPath: project.configPath,
+		command: run.command,
+		commandArgs: run.args,
+		cwd: project.root,
+		projectName: project.label,
+		args: [...programArgs],
+		internalConsoleOptions: "openOnSessionStart",
+	};
 }
 
 module.exports = { activate, deactivate };

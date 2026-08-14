@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.3 - 2026-08-15
+
+- Run TypeRB projects through Visual Studio Code's standard Run and Debug
+  lifecycle, including native Stop and Restart controls.
+- Show the launch command, process identifier, program output, and exit status
+  in the Debug Console from session startup.
+
 ## 0.2.2 - 2026-08-15
 
 - Run a project's top-level `main()` from the editor. The CodeLens changes from

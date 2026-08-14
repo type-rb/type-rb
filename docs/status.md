@@ -330,11 +330,14 @@ Canonical type-name diagnostics carry structured fixes, so editors can replace
 aliases such as `Int` with `Integer` without reconstructing source text.
 Top-level `main()` declarations expose a compiler-owned run CodeLens in
 non-browser projects. The VS Code client saves dirty TypeRB project files and
-starts `trb run` in an integrated terminal; invoking it again replaces the
-active process. Its CodeLens changes from `▶ Run` to `↻ Restart` while the
-project is active. Test discovery remains staged with the language-level test
-runner and will use the editor's native Testing API rather than source-shaped
-run commands.
+starts `trb run` through an initial Debug Adapter Protocol session. Visual
+Studio Code owns the standard start, stop, and restart lifecycle, while the
+Debug Console reports the launch command, process identifier, program output,
+and exit status immediately. Invoking the CodeLens again requests a DAP
+restart. This first adapter deliberately exposes no source breakpoints,
+stepping, frames, or variables before target-standard source maps are emitted.
+Test discovery remains staged with the language-level test runner and will use
+the editor's native Testing API rather than source-shaped run commands.
 
 ## Current limitations
 
