@@ -10,6 +10,7 @@ import (
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/types"
 	webintegration "github.com/type-rb/type-rb/internal/web"
 )
@@ -30,28 +31,43 @@ type generator struct {
 	execution       *effectplan.Plan
 	executionActive bool
 	oidcRuntime     bool
+	sourceRecorder  *sourcemap.Recorder
 }
 
 func Generate(program *ir.Program) string {
-	return GenerateProject([]*ir.Program{program})[0]
+	return GenerateMapped(program).Output
 }
 
 func GenerateProject(programs []*ir.Program) []string {
+	mapped := GenerateProjectMapped(programs)
+	result := make([]string, len(mapped))
+	for index, generated := range mapped {
+		result[index] = generated.Output
+	}
+	return result
+}
+
+func GenerateMapped(program *ir.Program) sourcemap.Generated {
+	return GenerateProjectMapped([]*ir.Program{program})[0]
+}
+
+func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
 	execution := effectplan.ExecutionScope(programs)
-	result := make([]string, len(programs))
+	result := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
 		result[index] = generate(program, execution)
 	}
 	return result
 }
 
-func generate(program *ir.Program, execution *effectplan.Plan) string {
+func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generated {
 	g := &generator{
 		loader: program.RubyLoader, modulePath: program.ModulePath,
 		topFunctions: map[string]bool{}, topTargets: map[string]string{},
 		jobs:    jobsintegration.ManifestFrom(program.Extensions),
 		jobsSQL: jobssql.ManifestFrom(program.Extensions),
 		orm:     ormintegration.ManifestFrom(program.Extensions), execution: execution,
+		sourceRecorder: sourcemap.NewRecorder(program.SourcePath),
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
@@ -87,7 +103,8 @@ func generate(program *ir.Program, execution *effectplan.Plan) string {
 			g.line(call, "")
 		}
 	}
-	return strings.TrimRight(g.b.String(), "\n") + "\n"
+	output := strings.TrimRight(g.b.String(), "\n") + "\n"
+	return sourcemap.Generated{Output: output, Map: g.sourceRecorder.Build(output)}
 }
 
 func (g *generator) statements(statements []ir.Statement) {
@@ -114,6 +131,12 @@ func wantsSeparation(previous, current ir.Statement) bool {
 }
 
 func (g *generator) statement(statement ir.Statement) {
+	start := g.b.Len()
+	defer func() {
+		if g.sourceRecorder != nil {
+			g.sourceRecorder.Record(start, g.b.Len(), statement.SourceSpan())
+		}
+	}()
 	switch n := statement.(type) {
 	case *ir.Comment:
 		g.line(n.Text, "")
@@ -599,6 +622,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		child := *g
 		child.b = strings.Builder{}
+		child.sourceRecorder = nil
 		child.indent = g.indent + 1
 		child.statements(n.Body)
 		return "->(" + strings.Join(parts, ", ") + ") do\n" + child.b.String() + strings.Repeat("  ", g.indent) + "end"
@@ -965,6 +989,7 @@ func (g *generator) transformResult(transform *ir.Transform) string {
 	}
 	child := *g
 	child.b = strings.Builder{}
+	child.sourceRecorder = nil
 	child.indent = 0
 	child.line("-> do", "")
 	child.indent++

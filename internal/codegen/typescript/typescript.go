@@ -12,6 +12,7 @@ import (
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -43,17 +44,38 @@ type generator struct {
 	orm              *ormintegration.Manifest
 	breakTarget      string
 	enumReceiver     string
+	sourceRecorder   *sourcemap.Recorder
 }
 
 func Generate(program *ir.Program) string {
-	generated, err := GenerateProject([]*ir.Program{program})
+	generated, err := GenerateProjectMapped([]*ir.Program{program})
 	if err != nil || len(generated) == 0 {
 		return ""
 	}
-	return generated[0]
+	return generated[0].Output
 }
 
 func GenerateProject(programs []*ir.Program) ([]string, error) {
+	mapped, err := GenerateProjectMapped(programs)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, len(mapped))
+	for index, generated := range mapped {
+		result[index] = generated.Output
+	}
+	return result, nil
+}
+
+func GenerateMapped(program *ir.Program) (sourcemap.Generated, error) {
+	generated, err := GenerateProjectMapped([]*ir.Program{program})
+	if err != nil || len(generated) == 0 {
+		return sourcemap.Generated{}, err
+	}
+	return generated[0], nil
+}
+
+func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error) {
 	interactive := false
 	for _, program := range programs {
 		// The REPL executes ORM operations through its shared host runtime; it does
@@ -83,15 +105,15 @@ func GenerateProject(programs []*ir.Program) ([]string, error) {
 			moduleExtensions[program.ModulePath] = ".tsx"
 		}
 	}
-	generated := make([]string, len(programs))
+	generated := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
 		generated[index] = generate(program, plan, execution, moduleExtensions)
 	}
 	return generated, nil
 }
 
-func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string) string {
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions)}
+func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string) sourcemap.Generated {
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), sourceRecorder: sourcemap.NewRecorder(program.SourcePath)}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -132,7 +154,8 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 			g.line(call + ";")
 		}
 	}
-	return strings.TrimRight(g.b.String(), "\n") + "\n"
+	output := strings.TrimRight(g.b.String(), "\n") + "\n"
+	return sourcemap.Generated{Output: output, Map: g.sourceRecorder.Build(output)}
 }
 
 func (g *generator) ensureHTTPRuntime() string {
@@ -184,6 +207,12 @@ func (g *generator) statements(statements []ir.Statement) {
 }
 
 func (g *generator) statement(statement ir.Statement) {
+	start := g.b.Len()
+	defer func() {
+		if g.sourceRecorder != nil {
+			g.sourceRecorder.Record(start, g.b.Len(), statement.SourceSpan())
+		}
+	}()
 	switch n := statement.(type) {
 	case *ir.Comment:
 		g.line(comment(n.Text))
@@ -961,6 +990,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		child := *g
 		child.b = strings.Builder{}
+		child.sourceRecorder = nil
 		child.indent = g.indent + 1
 		child.statements(n.Body)
 		prefix := ""
@@ -1544,6 +1574,7 @@ func (g *generator) transformResult(transform *ir.Transform) string {
 	}
 	child := *g
 	child.b = strings.Builder{}
+	child.sourceRecorder = nil
 	child.indent = 0
 	child.line("((): " + child.tsType(transform.Result.ExprType()) + " => {")
 	child.indent++
@@ -1558,6 +1589,7 @@ func (g *generator) transformResult(transform *ir.Transform) string {
 func (g *generator) suspendingTransform(transform *ir.Transform) string {
 	child := *g
 	child.b = strings.Builder{}
+	child.sourceRecorder = nil
 	child.indent = 0
 	child.temporary++
 	suffix := strconv.Itoa(child.temporary)

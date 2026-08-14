@@ -11,6 +11,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -24,6 +25,41 @@ func TestCompileCarriesTypeScriptRuntimeToTypedIR(t *testing.T) {
 	}
 	if artifact.IR.TypeScriptRuntime != "bun" {
 		t.Fatalf("TypeScript runtime was not carried to typed IR: %#v", artifact.IR)
+	}
+}
+
+func TestCompileMapsGeneratedStatementsBackToTypeRBSource(t *testing.T) {
+	source := []byte(`def main()
+	message := "mapped"
+	puts(message)
+	return
+end
+`)
+	targets := map[string]string{
+		"go":         "fmt.Println(message)",
+		"ruby":       "puts(message)",
+		"typescript": "console.log(message);",
+	}
+	for mode, target := range targets {
+		artifact, err := Compile("src/main.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s compilation failed: %v", mode, err)
+		}
+		output := string(artifact.Output)
+		if strings.Contains(output, "__trb_source_") {
+			t.Fatalf("%s source marker leaked into generated output:\n%s", mode, output)
+		}
+		offset := strings.Index(output, target)
+		if offset < 0 {
+			t.Fatalf("%s generated output is missing %q:\n%s", mode, target, output)
+		}
+		location, found := artifact.SourceMap.SourceAt(sourcemap.PositionAt(output, offset))
+		if !found || location.Path != "src/main.trb" || location.Span.Start.Line != 3 {
+			t.Fatalf("%s generated statement mapped to %#v, found=%t", mode, location, found)
+		}
+		if artifact.SourceMap.Version != sourcemap.Version {
+			t.Fatalf("%s source map version=%d, want %d", mode, artifact.SourceMap.Version, sourcemap.Version)
+		}
 	}
 }
 
@@ -1190,6 +1226,111 @@ end
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if _, err := Compile("nullable_assignment.trb", source, mode); err == nil || !strings.Contains(err.Error(), "type String? has no member size") {
 			t.Fatalf("%s expected invalidated nullable narrowing diagnostic, got %v", mode, err)
+		}
+	}
+}
+
+func TestReadonlyDataFieldsNarrowAcrossPortableControlFlow(t *testing.T) {
+	source := []byte(`record Profile
+	nickname: String?
+end
+
+class Account
+	readonly @email: String?
+
+	def initialize(email: String?)
+		@email = email
+		return
+	end
+end
+
+def profile_name(profile: Profile): String
+	if profile.nickname == nil
+		return "missing"
+	end
+	return profile.nickname
+end
+
+def email_size(account: Account): Integer
+	if nil != account.email
+		return account.email.size()
+	else
+		return 0
+	end
+end
+
+def has_name(profile: Profile): Boolean
+	return profile.nickname != nil and profile.nickname.size() > 0
+end
+`)
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("readonly_field_narrowing.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected readonly field narrowing: %v", mode, err)
+		}
+		var profileReturn ir.Expression
+		for _, statement := range artifact.IR.Statements {
+			method, ok := statement.(*ir.Method)
+			if ok && method.Name == "profile_name" {
+				profileReturn = method.Body[1].(*ir.Return).Value
+			}
+		}
+		conversion, ok := profileReturn.(*ir.Conversion)
+		if !ok || conversion.Kind != ir.NullableToNonNullableConversion || conversion.ExprType().Nullable || !conversion.Value.ExprType().Nullable {
+			t.Fatalf("%s did not retain readonly field unwrap in typed IR: %#v", mode, profileReturn)
+		}
+		if _, ok := conversion.Value.(*ir.Member); !ok {
+			t.Fatalf("%s nullable field unwrap did not retain its member expression: %#v", mode, conversion.Value)
+		}
+	}
+}
+
+func TestNullableFieldNarrowingRequiresStableReceiverAndReadonlyField(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "mutable class field",
+			source: `class Account
+	@email: String?
+
+	def initialize(email: String?)
+		@email = email
+		return
+	end
+end
+
+def invalid(account: Account): Integer
+	if account.email != nil
+		return account.email.size()
+	end
+	return 0
+end
+`,
+		},
+		{
+			name: "reassigned receiver",
+			source: `record Profile
+	nickname: String?
+end
+
+def invalid(profile: Profile): Integer
+	if profile.nickname == nil
+		return 0
+	end
+	profile = Profile.new(nickname: nil)
+	return profile.nickname.size()
+end
+`,
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("invalid_readonly_field_narrowing.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), "type String? has no member size") {
+				t.Fatalf("%s %s: expected nullable member diagnostic, got %v", mode, test.name, err)
+			}
 		}
 	}
 }

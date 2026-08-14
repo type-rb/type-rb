@@ -17,6 +17,7 @@ import (
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/projectintegration"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/typeprovider"
@@ -28,6 +29,7 @@ type Artifact struct {
 	AST             *ast.Program
 	IR              *ir.Program
 	Output          []byte
+	SourceMap       sourcemap.Map
 	CompilerOwned   bool
 	Official        bool
 	ExternalPackage bool
@@ -115,11 +117,12 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 		return nil, &CompileError{Filename: filename, Diagnostics: diagnostics}
 	}
 	lowered := lower.Program(checked)
-	output, err := codegen.Generate(lowered)
+	lowered.SourcePath = filename
+	generated, err := codegen.Generate(lowered)
 	if err != nil {
 		return nil, err
 	}
-	return &Artifact{Filename: filename, Mode: options.Mode, AST: program, IR: lowered, Output: output}, nil
+	return &Artifact{Filename: filename, Mode: options.Mode, AST: program, IR: lowered, Output: generated.Output, SourceMap: generated.SourceMap}, nil
 }
 
 // CompileProject parses every unit before resolving or checking any body. This
@@ -271,6 +274,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	for _, source := range units {
 		checked := checkedPrograms[source.ModulePath]
 		lowered := lower.Program(checked)
+		lowered.SourcePath = source.Filename
 		integrations.Apply(lowered, source.ModulePath == ownerModule)
 		loweredPrograms = append(loweredPrograms, lowered)
 	}
@@ -282,7 +286,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	artifacts := make([]*Artifact, 0, len(units))
 	for index, source := range units {
 		program := programs[source.ModulePath]
-		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], Output: outputs[index], CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage})
+		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], Output: outputs[index].Output, SourceMap: outputs[index].SourceMap, CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage})
 	}
 	return artifacts, nil
 }

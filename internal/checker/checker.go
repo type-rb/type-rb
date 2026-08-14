@@ -22,7 +22,7 @@ type Result struct {
 	Program             *ast.Program
 	Expressions         map[ast.Expression]types.Type
 	Conversions         map[ast.Expression]types.Type
-	NullableUnwraps     map[*ast.Identifier]types.Type
+	NullableUnwraps     map[ast.Expression]types.Type
 	NativeEffectBridges map[ast.Expression]NativeEffectBridge
 	Variables           map[*ast.VariableStatement]types.Type
 	Iterations          map[*ast.IterationExpression]types.Type
@@ -190,9 +190,21 @@ func tracksUnusedBinding(name string) bool {
 type scope struct {
 	parent           *scope
 	values           map[string]symbol
+	nullableMembers  map[nullableMemberKey]nullableMemberFact
 	constantsAllowed bool
 	constantOwner    string
 	enumsAllowed     bool
+}
+
+type nullableMemberKey struct {
+	rootName   string
+	rootOffset int
+	member     string
+}
+
+type nullableMemberFact struct {
+	source types.Type
+	valid  bool
 }
 
 func (s *scope) lookup(name string) (symbol, bool) {
@@ -226,6 +238,42 @@ func (s *scope) resetNarrowing(name string) {
 			current.values[name] = value
 		}
 		return
+	}
+}
+
+func (s *scope) nullableMember(key nullableMemberKey) (nullableMemberFact, bool) {
+	for current := s; current != nil; current = current.parent {
+		if fact, ok := current.nullableMembers[key]; ok {
+			return fact, fact.valid
+		}
+	}
+	return nullableMemberFact{}, false
+}
+
+func (s *scope) setNullableMember(key nullableMemberKey, source types.Type) {
+	if s.nullableMembers == nil {
+		s.nullableMembers = map[nullableMemberKey]nullableMemberFact{}
+	}
+	s.nullableMembers[key] = nullableMemberFact{source: source, valid: true}
+}
+
+func (s *scope) resetNullableMembers(rootName string, rootOffset int) {
+	invalidated := map[nullableMemberKey]bool{}
+	for current := s; current != nil; current = current.parent {
+		for key := range current.nullableMembers {
+			if key.rootName == rootName && key.rootOffset == rootOffset {
+				invalidated[key] = true
+			}
+		}
+	}
+	if len(invalidated) == 0 {
+		return
+	}
+	if s.nullableMembers == nil {
+		s.nullableMembers = map[nullableMemberKey]nullableMemberFact{}
+	}
+	for key := range invalidated {
+		s.nullableMembers[key] = nullableMemberFact{}
 	}
 }
 
@@ -327,7 +375,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			Program:             program,
 			Expressions:         map[ast.Expression]types.Type{},
 			Conversions:         map[ast.Expression]types.Type{},
-			NullableUnwraps:     map[*ast.Identifier]types.Type{},
+			NullableUnwraps:     map[ast.Expression]types.Type{},
 			NativeEffectBridges: map[ast.Expression]NativeEffectBridge{},
 			Variables:           map[*ast.VariableStatement]types.Type{},
 			Iterations:          map[*ast.IterationExpression]types.Type{},
@@ -1055,6 +1103,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			if identifier, ok := n.Target.(*ast.Identifier); ok {
 				sc.resetNarrowing(identifier.Name)
+				if binding, exists := sc.lookup(identifier.Name); exists {
+					sc.resetNullableMembers(identifier.Name, binding.span.Start.Offset)
+				}
 			}
 		case *ast.ReturnStatement:
 			actual := types.Type{Kind: types.Void, Name: "Void"}
@@ -1270,38 +1321,75 @@ func (c *Checker) nullableConditionScopes(expression ast.Expression, sc *scope) 
 	if !ok || binary.Operator != "==" && binary.Operator != "!=" {
 		return matched, unmatched
 	}
-	identifier, nilComparison := nullableComparisonIdentifier(binary.Left, binary.Right)
+	valueExpression, nilComparison := nullableComparisonValue(binary.Left, binary.Right)
 	if !nilComparison {
-		identifier, nilComparison = nullableComparisonIdentifier(binary.Right, binary.Left)
+		valueExpression, nilComparison = nullableComparisonValue(binary.Right, binary.Left)
 	}
 	if !nilComparison {
 		return matched, unmatched
 	}
-	value, ok := sc.lookup(identifier.Name)
-	if !ok || !value.typ.Nullable {
+	if identifier, ok := valueExpression.(*ast.Identifier); ok {
+		value, found := sc.lookup(identifier.Name)
+		if !found || !value.typ.Nullable {
+			return matched, unmatched
+		}
+		if value.declared.Kind == "" {
+			value.declared = value.typ
+		}
+		nonnull := value.typ
+		nonnull.Nullable = false
+		value.typ = nonnull
+		if binary.Operator == "!=" {
+			matched.values[identifier.Name] = value
+		} else {
+			unmatched = &scope{parent: sc, values: map[string]symbol{identifier.Name: value}}
+		}
 		return matched, unmatched
 	}
-	if value.declared.Kind == "" {
-		value.declared = value.typ
+	member, ok := valueExpression.(*ast.MemberExpression)
+	if !ok {
+		return matched, unmatched
 	}
-	nonnull := value.typ
-	nonnull.Nullable = false
-	value.typ = nonnull
+	key, source, stable := c.nullableMemberNarrowing(member, sc)
+	if !stable || !source.Nullable {
+		return matched, unmatched
+	}
 	if binary.Operator == "!=" {
-		matched.values[identifier.Name] = value
+		matched.setNullableMember(key, source)
 	} else {
-		unmatched = &scope{parent: sc, values: map[string]symbol{identifier.Name: value}}
+		unmatched = &scope{parent: sc, values: map[string]symbol{}}
+		unmatched.setNullableMember(key, source)
 	}
 	return matched, unmatched
 }
 
-func nullableComparisonIdentifier(value, nilValue ast.Expression) (*ast.Identifier, bool) {
-	identifier, ok := value.(*ast.Identifier)
-	if !ok {
-		return nil, false
-	}
+func nullableComparisonValue(value, nilValue ast.Expression) (ast.Expression, bool) {
 	literal, ok := nilValue.(*ast.Literal)
-	return identifier, ok && literal.Kind == ast.NilLiteral
+	return value, ok && literal.Kind == ast.NilLiteral
+}
+
+func (c *Checker) nullableMemberNarrowing(member *ast.MemberExpression, sc *scope) (nullableMemberKey, types.Type, bool) {
+	if member.Namespace || member.Safe {
+		return nullableMemberKey{}, types.Type{}, false
+	}
+	root, ok := member.Receiver.(*ast.Identifier)
+	if !ok {
+		return nullableMemberKey{}, types.Type{}, false
+	}
+	binding, ok := sc.lookup(root.Name)
+	if !ok {
+		return nullableMemberKey{}, types.Type{}, false
+	}
+	receiverType, ok := c.result.Expressions[member.Receiver]
+	if !ok || receiverType.Nullable || receiverType.Kind == types.Invalid {
+		return nullableMemberKey{}, types.Type{}, false
+	}
+	fieldType, readonly, _, found := c.dataMember(receiverType, member.Name)
+	if !found || !readonly {
+		return nullableMemberKey{}, types.Type{}, false
+	}
+	key := nullableMemberKey{rootName: root.Name, rootOffset: binding.span.Start.Offset, member: member.Name}
+	return key, fieldType, true
 }
 
 func (c *Checker) promoteNullableNarrowings(target, narrowed *scope) {
@@ -1309,6 +1397,11 @@ func (c *Checker) promoteNullableNarrowings(target, narrowed *scope) {
 		for name, value := range current.values {
 			if value.declared.Nullable && !value.typ.Nullable {
 				target.values[name] = value
+			}
+		}
+		for key, fact := range current.nullableMembers {
+			if fact.valid && fact.source.Nullable {
+				target.setNullableMember(key, fact.source)
 			}
 		}
 	}
@@ -4576,6 +4669,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.error(n.Span(), "unsupported expression syntax in portable TypeRB")
 		} else if !c.resolution.NativeSyntax {
 			c.error(n.Span(), "Ruby-native syntax requires import trb/platform/ruby/native or trb/platform/ruby/rails")
+		}
+	}
+	if member, ok := expression.(*ast.MemberExpression); ok && typ.Nullable {
+		if key, _, stable := c.nullableMemberNarrowing(member, sc); stable {
+			if fact, narrowed := sc.nullableMember(key); narrowed {
+				typ.Nullable = false
+				c.result.NullableUnwraps[member] = fact.source
+			}
 		}
 	}
 	c.result.Expressions[expression] = typ

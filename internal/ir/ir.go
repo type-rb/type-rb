@@ -14,8 +14,11 @@ type Base struct {
 	TrailingComment string
 }
 
+func (b Base) SourceSpan() token.Span { return b.Span }
+
 type Program struct {
 	Mode              string
+	SourcePath        string
 	Package           string
 	ModulePath        string
 	GoModule          string
@@ -33,10 +36,14 @@ type Extension interface {
 	ExtensionName() string
 }
 
-type Statement interface{ irStatement() }
+type Statement interface {
+	irStatement()
+	SourceSpan() token.Span
+}
 type Expression interface {
 	irExpression()
 	ExprType() types.Type
+	SourceSpan() token.Span
 }
 
 type Comment struct {
