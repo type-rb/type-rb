@@ -18,7 +18,8 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Structural code folding for declarations and expression blocks
 - Compiler-aware semantic highlighting
 - Deterministic, comment-preserving document formatting
-- Run and restart a project's top-level `main()` from the editor
+- Run, stop, and restart a project's top-level `main()` through Visual Studio
+  Code's Run and Debug interface
 
 The extension discovers every `trbconfig.jsonc` in the opened workspace and
 keeps each project in an independent language-server session. A repository may
@@ -40,11 +41,16 @@ trb version
 Open a folder containing `trbconfig.jsonc`, then open or create a `.trb` file.
 The extension starts the TypeRB language server automatically.
 
-Select **▶ Run** above a top-level `main()` to save the project's TypeRB files
-and start `trb run` in an integrated terminal. The action changes to
-**↻ Restart** while the project is running; selecting it stops the active
-process before starting it again. Use **TypeRB: Stop Project** from the Command
-Palette to stop it without restarting.
+Select **▶ Run** above a top-level `main()`, press `F5`, or choose a TypeRB
+project in Run and Debug. The extension saves the project's TypeRB files and
+starts `trb run` as a standard debug session. Startup, program output, and exit
+status appear in the Debug Console. Use Visual Studio Code's standard Restart
+and Stop controls, or press `Shift+F5` to stop the process. **TypeRB: Stop
+Project** remains available from the Command Palette.
+
+The initial adapter manages project launch and process lifecycle. Source-level
+breakpoints, stepping, stack frames, and variable inspection remain staged
+until TypeRB emits target-standard source maps.
 
 Create a small Go-targeted project from a terminal with:
 
@@ -63,6 +69,23 @@ the language.
 - `typerb.server.config` adds an explicit `trbconfig.jsonc` when automatic
   workspace discovery is not sufficient. Relative paths are resolved from the
   workspace folder.
+
+Run and Debug selects the active TypeRB project automatically. A `launch.json`
+configuration may set `config`, `args`, and `env` when explicit control is
+needed:
+
+```json
+{
+	"type": "typerb",
+	"request": "launch",
+	"name": "Run API",
+	"config": "${workspaceFolder}/apps/api/trbconfig.jsonc",
+	"args": ["serve"],
+	"env": {
+		"PORT": "4000"
+	}
+}
+```
 
 If Visual Studio Code cannot find a Homebrew installation, set
 `typerb.server.path` to the result of `command -v trb`.

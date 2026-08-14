@@ -10,15 +10,17 @@ const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require(".
 const extensionRoot = path.resolve(__dirname, "..");
 const repositoryRoot = path.resolve(extensionRoot, "../..");
 
-test("registers the canonical TypeRB language and grammar", async () => {
+test("registers the canonical TypeRB language, grammar, and debugger", async () => {
 	const manifest = JSON.parse(await readFile(path.join(extensionRoot, "package.json"), "utf8"));
-	assert.deepEqual(manifest.activationEvents, ["onLanguage:trb"]);
+	assert.deepEqual(manifest.activationEvents, ["onLanguage:trb", "onDebug:typerb"]);
 	assert.deepEqual(manifest.contributes.languages[0].extensions, [".trb"]);
 	assert.equal(manifest.contributes.grammars[0].scopeName, "source.trb");
 	assert.deepEqual(
 		manifest.contributes.commands.map((command) => command.command),
 		["typerb.runProject", "typerb.stopProject"]
 	);
+	assert.equal(manifest.contributes.debuggers[0].type, "typerb");
+	assert.deepEqual(manifest.contributes.debuggers[0].languages, ["trb"]);
 
 	const canonical = await readFile(path.join(repositoryRoot, "syntaxes/typerb.tmLanguage.json"));
 	const packaged = await readFile(path.join(extensionRoot, "syntaxes/typerb.tmLanguage.json"));
@@ -44,6 +46,13 @@ test("runs the project with the configured TypeRB compiler", () => {
 		{
 			command: path.resolve("/workspace/bin/trb"),
 			args: ["run", "--config", path.resolve("/workspace/apps/api/trbconfig.jsonc")]
+		}
+	);
+	assert.deepEqual(
+		resolveRunOptions({ path: "trb", config: "/workspace/trbconfig.jsonc" }, "/workspace", ["serve", "4000"]),
+		{
+			command: "trb",
+			args: ["run", "--config", "/workspace/trbconfig.jsonc", "--", "serve", "4000"]
 		}
 	);
 });
@@ -73,7 +82,7 @@ test("derives independent project roots from JSONC configuration", () => {
 		configPath: path.resolve("/workspace/apps/api/trbconfig.jsonc"),
 		...projectPaths(
 			"/workspace/apps/api/trbconfig.jsonc",
-			'{\n  // API source\n  "sourceDir": "src",\n  "outDir": "generated"\n}\n'
+			'{\n  // API source\n  "name": "todo-api",\n  "sourceDir": "src",\n  "outDir": "generated"\n}\n'
 		)
 	};
 	const web = {
@@ -84,11 +93,22 @@ test("derives independent project roots from JSONC configuration", () => {
 		)
 	};
 	assert.equal(api.sourceRoot, path.resolve("/workspace/apps/api/src"));
+	assert.equal(api.name, "todo-api");
 	assert.equal(api.outputRoot, path.resolve("/workspace/apps/api/generated"));
+	assert.equal(api.runnable, true);
 	assert.equal(web.outputRoot, path.resolve("/workspace/apps/web/build"));
+	assert.equal(web.runnable, true);
 	assert.equal(projectForPath([api, web], "/workspace/apps/api/src/models/todo.trb"), api);
 	assert.equal(projectForPath([api, web], "/workspace/apps/web/src/models/todo.trb"), web);
 	assert.equal(projectForPath([api, web], "/workspace/shared/todo.trb"), undefined);
+});
+
+test("marks TypeScript browser projects as non-runnable", () => {
+	const project = projectPaths(
+		"/workspace/apps/web/trbconfig.jsonc",
+		'{"mode":"typescript","typescript":{"runtime":"browser"}}'
+	);
+	assert.equal(project.runnable, false);
 });
 
 test("does not start language servers for copied build projects", () => {

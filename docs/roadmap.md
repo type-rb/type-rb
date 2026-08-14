@@ -56,8 +56,9 @@ than detailed syntax.
   with richer code actions and additional editor workflows.
 - Extend the published preview VS Code client with test discovery and
   additional editor integrations.
-- Add debugger/DAP support later, after source maps and runtime stack mapping
-  are reliable.
+- Extend the initial DAP launch and process-lifecycle adapter with source-level
+  breakpoints, stepping, frames, variables, and evaluation after source maps
+  and runtime stack mapping are reliable.
 
 ## 5. Standard library and package ecosystem
 
