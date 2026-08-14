@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.2 - 2026-08-15
+
 - Run a project's top-level `main()` from the editor. The CodeLens changes from
   `▶ Run` to `↻ Restart` while its project is running.
 - Keep nested TypeRB projects in independent language-server sessions, so API

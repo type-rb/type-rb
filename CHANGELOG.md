@@ -2,6 +2,20 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.7 - 2026-08-15
+
+### Editor tooling
+
+- The Visual Studio Code extension can run, restart, and stop non-browser
+  projects directly from a top-level `main()`, saving dirty TypeRB source before
+  launching `trb run` in an integrated terminal.
+  ([#251](https://github.com/type-rb/type-rb/pull/251))
+- Workspaces may contain independent TypeRB API and frontend projects with
+  overlapping declaration names. The extension starts one language server per
+  `trbconfig.jsonc`, routes editor actions to the owning project, and prevents
+  files outside that project's source tree from contaminating diagnostics.
+  ([#252](https://github.com/type-rb/type-rb/pull/252))
+
 ## 0.2.6 - 2026-08-14
 
 ### Language
