@@ -74,7 +74,6 @@ jobs:
         run: |
           set -euo pipefail
           version="$(go run ./cmd/trb version)"
-          version="${version#trb }"
           ./scripts/build-playground-site.sh dist/playground "$version"
           test -s dist/playground/play/index.html
           test -s dist/playground/tour/index.html

@@ -30,7 +30,7 @@ class Trb < Formula
   end
 
   test do
-    assert_match "trb #{version}", shell_output("#{bin}/trb version")
+    assert_equal version.to_s, shell_output("#{bin}/trb version").strip
 
     (testpath/"trbconfig.jsonc").write <<~JSON
       {
