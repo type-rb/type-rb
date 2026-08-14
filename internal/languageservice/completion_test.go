@@ -116,6 +116,40 @@ func TestCompletionHandlesIncompleteFunctionParameters(t *testing.T) {
 	}
 }
 
+func TestCompletionOffersOnlyTypesAtTypePositions(t *testing.T) {
+	service := languageservice.New("go")
+	for _, test := range []struct {
+		source string
+		want   string
+	}{
+		{source: "record User\n\tid: Int", want: "Integer"},
+		{source: "def render(value: Str", want: "String"},
+		{source: "type Names = Array<Str", want: "String"},
+		{source: "record Box<T>\n\tvalue: T", want: "T"},
+		{source: "def identity<T>(value: T", want: "T"},
+	} {
+		items := service.Complete(test.source, len(test.source))
+		if _, ok := findCompletion(items, test.want); !ok {
+			t.Errorf("Complete(%q)=%v, want %q", test.source, labels(items), test.want)
+		}
+		for _, item := range items {
+			if item.Kind != languageservice.CompletionType {
+				t.Errorf("Complete(%q) included non-type item %#v", test.source, item)
+			}
+		}
+	}
+}
+
+func TestCompletionDoesNotTreatValueArgumentsAsTypePositions(t *testing.T) {
+	service := languageservice.New("go")
+	for _, source := range []string{"send(name: ", "values := {name: "} {
+		items := service.Complete(source, len(source))
+		if _, ok := findCompletion(items, "puts"); !ok {
+			t.Errorf("Complete(%q) incorrectly filtered value completions: %v", source, labels(items))
+		}
+	}
+}
+
 func TestCompletionShowsSourceReturnAndEffectSignature(t *testing.T) {
 	artifact := compile(t, "go", `record LoadError
 end

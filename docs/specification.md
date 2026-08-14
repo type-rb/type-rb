@@ -144,6 +144,12 @@ and typed IR signatures, and must not create mode-dependent source semantics.
 - Local variable initialization uses `:=`.
 - Type inference is enabled for `:=`.
 - Explicit type with initialization is allowed: `x: T := expr`.
+- Type names are case-sensitive. Portable built-in type names use exactly one
+  source spelling: `Any`, `Boolean`, `Integer`, `Float`, `String`, `Bytes`,
+  `StringBuilder`, `Array`, `Hash`, `Range`, and `Iterable`. Target-language
+  spellings and shorthand aliases such as `bool`, `Int`, `int`, `number`, and
+  `Map` are not TypeRB type names. Every other type reference must name a type
+  parameter, a declaration in the project, or an explicitly imported type.
 
 #### Union types
 
