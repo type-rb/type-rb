@@ -238,11 +238,16 @@ classify TypeRB types, constants, functions, methods, literals, comments, and
 keywords using the same shared language service as the REPL and browser tools.
 Workspace file notifications update the compiler snapshot when `.trb` files
 are created, changed, or deleted outside an open editor buffer.
+Non-browser projects expose a run CodeLens for each valid top-level `main()`.
+The LSP command identifies the runnable declaration; an editor client owns the
+process lifecycle and presentation.
 
 The thin Visual Studio Code client in `editors/vscode` starts this command and
 packages the canonical TypeRB TextMate grammar. It defaults to `trb` on `PATH`;
 `typerb.server.path` and `typerb.server.config` override the executable and
-project configuration when needed.
+project configuration when needed. Its CodeLens starts `trb run` in an
+integrated terminal and changes from `▶ Run` to `↻ Restart` while the project
+is active.
 
 ## Database schema
 

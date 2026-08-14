@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Run a project's top-level `main()` from the editor. The CodeLens changes from
+  `▶ Run` to `↻ Restart` while its project is running.
+
 ## 0.2.1 - 2026-08-14
 
 - Add compiler-aware semantic highlighting, document outlines, and project-wide

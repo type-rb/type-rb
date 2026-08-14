@@ -326,6 +326,13 @@ The VS Code client watches project `.trb` files, and the language server updates
 the saved workspace snapshot beneath any active editor overlays.
 Canonical type-name diagnostics carry structured fixes, so editors can replace
 aliases such as `Int` with `Integer` without reconstructing source text.
+Top-level `main()` declarations expose a compiler-owned run CodeLens in
+non-browser projects. The VS Code client saves dirty TypeRB project files and
+starts `trb run` in an integrated terminal; invoking it again replaces the
+active process. Its CodeLens changes from `▶ Run` to `↻ Restart` while the
+project is active. Test discovery remains staged with the language-level test
+runner and will use the editor's native Testing API rather than source-shaped
+run commands.
 
 ## Current limitations
 

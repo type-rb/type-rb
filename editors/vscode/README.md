@@ -18,6 +18,7 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Structural code folding for declarations and expression blocks
 - Compiler-aware semantic highlighting
 - Deterministic, comment-preserving document formatting
+- Run and restart a project's top-level `main()` from the editor
 
 The extension works with ordinary `.trb` files and uses the project's
 `trbconfig.jsonc` to select the target mode and package configuration. Project
@@ -37,6 +38,12 @@ trb version
 
 Open a folder containing `trbconfig.jsonc`, then open or create a `.trb` file.
 The extension starts the TypeRB language server automatically.
+
+Select **▶ Run** above a top-level `main()` to save the project's TypeRB files
+and start `trb run` in an integrated terminal. The action changes to
+**↻ Restart** while the project is running; selecting it stops the active
+process before starting it again. Use **TypeRB: Stop Project** from the Command
+Palette to stop it without restarting.
 
 Create a small Go-targeted project from a terminal with:
 

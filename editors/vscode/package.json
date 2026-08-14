@@ -53,6 +53,20 @@
 		"esbuild": "0.28.2"
 	},
 	"contributes": {
+		"commands": [
+			{
+				"command": "typerb.runProject",
+				"title": "Run Project",
+				"category": "TypeRB",
+				"icon": "$(play)"
+			},
+			{
+				"command": "typerb.stopProject",
+				"title": "Stop Project",
+				"category": "TypeRB",
+				"icon": "$(debug-stop)"
+			}
+		],
 		"languages": [
 			{
 				"id": "trb",
