@@ -101,6 +101,7 @@ func (s *Server) handle(request message) (bool, error) {
 				DefinitionProvider:        true,
 				ReferencesProvider:        true,
 				DocumentHighlightProvider: true,
+				SelectionRangeProvider:    true,
 				RenameProvider:            renameOptions{PrepareProvider: true},
 				DocumentSymbolProvider:    true,
 				FoldingRangeProvider:      true,
@@ -151,6 +152,8 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.references(request)
 	case "textDocument/documentHighlight":
 		return false, s.documentHighlights(request)
+	case "textDocument/selectionRange":
+		return false, s.selectionRanges(request)
 	case "textDocument/prepareRename":
 		return false, s.prepareRename(request)
 	case "textDocument/rename":
@@ -674,6 +677,40 @@ func (s *Server) documentHighlights(request message) error {
 		})
 	}
 	return s.stream.write(success(request.ID, result))
+}
+
+func (s *Server) selectionRanges(request message) error {
+	params, err := decodeParams[selectionRangeParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, []selectionRange{}))
+	}
+	cursors := make([]int, 0, len(params.Positions))
+	for _, item := range params.Positions {
+		cursors = append(cursors, offsetAt(document.source, item))
+	}
+	items := languageservice.SelectionRanges(string(document.source), cursors)
+	result := make([]selectionRange, 0, len(items))
+	for _, item := range items {
+		result = append(result, protocolSelectionRange(document.source, item))
+	}
+	return s.stream.write(success(request.ID, result))
+}
+
+func protocolSelectionRange(source []byte, item languageservice.SelectionRange) selectionRange {
+	result := selectionRange{Range: offsetRange(source, item.Range.Start, item.Range.End)}
+	if item.Parent != nil {
+		parent := protocolSelectionRange(source, *item.Parent)
+		result.Parent = &parent
+	}
+	return result
 }
 
 func (s *Server) prepareRename(request message) error {
