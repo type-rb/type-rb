@@ -19,18 +19,22 @@ import (
 	"github.com/type-rb/type-rb/internal/project"
 )
 
-func TestVersionCommandUsesBuildVersion(t *testing.T) {
+func TestVersionCommandsPrintBuildVersion(t *testing.T) {
 	previous := Version
 	Version = "9.8.7-test"
 	t.Cleanup(func() { Version = previous })
 
-	var stdout, stderr bytes.Buffer
-	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"version"}); status != 0 {
-		t.Fatalf("status=%d stderr=%s", status, stderr.String())
-	}
-	if stdout.String() != "trb 9.8.7-test\n" {
-		t.Fatalf("unexpected version output %q", stdout.String())
+	for _, argument := range []string{"version", "--version", "-v"} {
+		t.Run(argument, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{argument}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			if stdout.String() != "9.8.7-test\n" {
+				t.Fatalf("unexpected version output %q", stdout.String())
+			}
+		})
 	}
 }
 

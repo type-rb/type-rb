@@ -108,7 +108,7 @@ func (c *CLI) Run(args []string) int {
 	case "install":
 		err = c.runInstall(args[1:])
 	case "version", "--version", "-v":
-		_, err = fmt.Fprintln(c.Stdout, "trb "+Version)
+		_, err = fmt.Fprintln(c.Stdout, Version)
 	case "help", "--help", "-h":
 		c.usage()
 		return 0

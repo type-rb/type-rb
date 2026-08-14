@@ -6,7 +6,6 @@ output_dir="${1:-dist/playground}"
 version="${2:-}"
 if [[ -z "$version" ]]; then
 	version="$(go run ./cmd/trb version)"
-	version="${version#trb }"
 fi
 
 go run ./cmd/trb-playground-site --out "$output_dir" --version "$version"
