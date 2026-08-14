@@ -3,17 +3,16 @@
 TypeRB is in alpha. Public behavior may change as the language is exercised in
 larger applications.
 
-## Start here
+## Learn
 
 - [Install and try TypeRB](../README.md#install)
-- [Command-line reference](cli.md)
-- [Project configuration](configuration.md)
-
-## Language and libraries
-
+- [Learning path](learning.md)
+- [A Tour of TypeRB](https://type-rb.github.io/tour/)
 - [Language guide](language.md)
-- [Language specification](specification.md)
-- [Standard library](standard-library.md)
+- [AI-assisted TypeRB development](ai-assisted-development.md)
+
+## Build applications
+
 - [Package system](guides/packages.md)
 - [Shared HTTP values](guides/http.md)
 - [Portable web applications](guides/web.md)
@@ -24,6 +23,13 @@ larger applications.
 - [`trb/orm` guide](guides/orm.md)
 - [Portable background Jobs](guides/jobs.md)
 - [Experimental React and JSX](guides/react.md)
+
+## Reference
+
+- [Command-line reference](cli.md)
+- [Project configuration](configuration.md)
+- [Language specification](specification.md)
+- [Standard library](standard-library.md)
 
 ## Project
 
@@ -37,6 +43,7 @@ larger applications.
 
 - `language.md` teaches implemented syntax; `specification.md` defines its
   normative semantics.
+- `learning.md` orders existing material; it does not redefine syntax or APIs.
 - `standard-library.md`, `cli.md`, and `configuration.md` are the references for
   those public surfaces.
 - `status.md` records current capability and limitations; `roadmap.md` contains

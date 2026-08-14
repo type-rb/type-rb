@@ -114,8 +114,9 @@ require explicit imports.
 
 ## Documentation
 
-Read the [documentation](docs/README.md) for the CLI, configuration, language,
-standard library, target guides, current status, and roadmap.
+Follow the [learning path](docs/learning.md), or browse the
+[documentation](docs/README.md) for application guides, references, current
+status, and the roadmap.
 
 ## License
 
