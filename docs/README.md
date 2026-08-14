@@ -19,7 +19,7 @@ larger applications.
 - [Portable web applications](guides/web.md)
 - [OIDC bearer authentication](guides/authentication.md)
 - [Browser HTTP client](guides/browser-http.md)
-- [Syntax highlighting](syntax-highlighting.md)
+- [Editor support and syntax highlighting](syntax-highlighting.md)
 - [Database schema workflow](guides/database.md)
 - [`trb/orm` guide](guides/orm.md)
 - [Portable background Jobs](guides/jobs.md)

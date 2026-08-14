@@ -229,6 +229,11 @@ incremental text synchronization and dependency-level recompilation remain
 performance follow-ups. Hover, signature help, navigation, references, rename,
 and semantic tokens are not yet advertised.
 
+The thin Visual Studio Code client in `editors/vscode` starts this command and
+packages the canonical TypeRB TextMate grammar. It defaults to `trb` on `PATH`;
+`typerb.server.path` and `typerb.server.config` override the executable and
+project configuration when needed.
+
 ## Database schema
 
 ```sh

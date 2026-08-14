@@ -55,8 +55,8 @@ than detailed syntax.
   and quick fixes with hover types, signature help, go to definition,
   references, rename, document symbols, semantic tokens, and richer code
   actions.
-- Ship a VS Code extension as a thin LSP client with syntax highlighting,
-  snippets, formatter integration, and test discovery.
+- Extend the initial thin VS Code client with semantic navigation, test
+  discovery, marketplace distribution, and additional editor integrations.
 - Add debugger/DAP support later, after source maps and runtime stack mapping
   are reliable.
 
