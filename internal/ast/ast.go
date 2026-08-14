@@ -67,7 +67,7 @@ type ClassStatement struct {
 	Name           string
 	TypeParameters []TypeParameter
 	Superclass     Expression
-	Implements     []string
+	Implements     []TypeRef
 	Body           []Statement
 }
 
@@ -142,8 +142,9 @@ func (*ModuleStatement) statementNode() {}
 
 type InterfaceStatement struct {
 	Base
-	Name    string
-	Methods []*MethodStatement
+	Name           string
+	TypeParameters []TypeParameter
+	Methods        []*MethodStatement
 }
 
 func (*InterfaceStatement) statementNode() {}

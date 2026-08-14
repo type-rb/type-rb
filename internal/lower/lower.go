@@ -253,9 +253,12 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		return result
 	case *ast.ClassStatement:
-		result := &ir.Class{Base: base(n.Base), Name: n.Name, Superclass: l.expression(n.Superclass), Implements: append([]string(nil), n.Implements...), Body: l.statements(n.Body)}
+		result := &ir.Class{Base: base(n.Base), Name: n.Name, Superclass: l.expression(n.Superclass), Body: l.statements(n.Body)}
 		for _, parameter := range n.TypeParameters {
 			result.TypeParameters = append(result.TypeParameters, parameter.Name)
+		}
+		for _, implemented := range n.Implements {
+			result.Implements = append(result.Implements, lowerType(implemented))
 		}
 		return result
 	case *ast.RecordStatement:
@@ -308,6 +311,9 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return &ir.Module{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
 	case *ast.InterfaceStatement:
 		result := &ir.Interface{Base: base(n.Base), Name: n.Name}
+		for _, parameter := range n.TypeParameters {
+			result.TypeParameters = append(result.TypeParameters, parameter.Name)
+		}
 		for _, method := range n.Methods {
 			if lowered, ok := l.statement(method).(*ir.Method); ok {
 				result.Methods = append(result.Methods, lowered)

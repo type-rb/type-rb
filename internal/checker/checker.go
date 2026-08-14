@@ -281,7 +281,7 @@ type classInfo struct {
 	name           string
 	typeParameters []string
 	superclass     string
-	interfaces     []string
+	interfaces     []types.Type
 	mixins         []string
 	fields         map[string]*ast.FieldStatement
 	methods        map[string]*ast.MethodStatement
@@ -440,7 +440,11 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParamet
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ast.ClassStatement:
-			c.validateTypeReferences(node.Body, extendTypeParameters(typeParameters, node.TypeParameters))
+			classTypes := extendTypeParameters(typeParameters, node.TypeParameters)
+			for _, implemented := range node.Implements {
+				c.validateTypeReferenceInScope(implemented, classTypes)
+			}
+			c.validateTypeReferences(node.Body, classTypes)
 		case *ast.RecordStatement:
 			c.validateTypeReferences(node.Body, extendTypeParameters(typeParameters, node.TypeParameters))
 		case *ast.EnumStatement:
@@ -457,8 +461,9 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParamet
 		case *ast.ModuleStatement:
 			c.validateTypeReferences(node.Body, typeParameters)
 		case *ast.InterfaceStatement:
+			interfaceTypes := extendTypeParameters(typeParameters, node.TypeParameters)
 			for _, method := range node.Methods {
-				c.validateMethodTypes(method, extendTypeParameters(typeParameters, method.TypeParameters))
+				c.validateMethodTypes(method, extendTypeParameters(interfaceTypes, method.TypeParameters))
 			}
 		case *ast.FieldStatement:
 			c.validateTypeReferenceInScope(node.Type, typeParameters)
@@ -710,9 +715,12 @@ func (c *Checker) collect(statements []ast.Statement) {
 			if !c.declareType(n.Name, "class", n.Span()) {
 				continue
 			}
-			info := &classInfo{name: n.Name, superclass: expressionTypeName(n.Superclass), interfaces: append([]string(nil), n.Implements...), fields: map[string]*ast.FieldStatement{}, methods: map[string]*ast.MethodStatement{}}
+			info := &classInfo{name: n.Name, superclass: expressionTypeName(n.Superclass), fields: map[string]*ast.FieldStatement{}, methods: map[string]*ast.MethodStatement{}}
 			for _, parameter := range n.TypeParameters {
 				info.typeParameters = append(info.typeParameters, parameter.Name)
+			}
+			for _, implemented := range n.Implements {
+				info.interfaces = append(info.interfaces, fromTypeRef(implemented))
 			}
 			declaration := c.declaredTypes[n.Name]
 			declaration.typeParameters = append([]string(nil), info.typeParameters...)
@@ -821,6 +829,11 @@ func (c *Checker) collect(statements []ast.Statement) {
 			c.aliases[n.Name] = info
 		case *ast.InterfaceStatement:
 			if c.declareType(n.Name, "interface", n.Span()) {
+				declaration := c.declaredTypes[n.Name]
+				for _, parameter := range n.TypeParameters {
+					declaration.typeParameters = append(declaration.typeParameters, parameter.Name)
+				}
+				c.declaredTypes[n.Name] = declaration
 				c.interfaces[n.Name] = n
 			}
 		case *ast.ModuleStatement:
@@ -1020,6 +1033,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner, enumsAllowed: true})
 			c.moduleDepth--
 		case *ast.InterfaceStatement:
+			c.checkTypeParameters(n.TypeParameters)
 			c.interfaceDepth++
 			for _, method := range n.Methods {
 				c.checkMethod(method, sc)
@@ -2959,7 +2973,7 @@ func (c *Checker) typesAssignable(target, actual types.Type) bool {
 		}
 		return true
 	}
-	return target.Kind == types.Named && actual.Kind == types.Named && c.isInterface(target.Name) && c.classImplements(actual.Name, target.Name, map[string]bool{})
+	return target.Kind == types.Named && actual.Kind == types.Named && c.isInterface(target.Name) && c.classImplements(actual, target, map[string]bool{})
 }
 
 func (c *Checker) typesEquivalent(left, right types.Type) bool {
@@ -2976,25 +2990,32 @@ func (c *Checker) isInterface(name string) bool {
 	return ok && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport
 }
 
-func (c *Checker) classImplements(className, interfaceName string, seen map[string]bool) bool {
-	if className == "" || seen[className] {
+func (c *Checker) classImplements(classType, interfaceType types.Type, seen map[string]bool) bool {
+	className := classType.Name
+	if className == "" || seen[classType.String()] {
 		return false
 	}
-	seen[className] = true
+	seen[classType.String()] = true
 	if info := c.classes[className]; info != nil {
-		if slices.Contains(info.interfaces, interfaceName) {
-			return true
+		substitutions := typeSubstitutions(info.typeParameters, classType.Args)
+		for _, implemented := range info.interfaces {
+			if c.typesEquivalent(substituteType(implemented, substitutions), interfaceType) {
+				return true
+			}
 		}
-		return c.classImplements(info.superclass, interfaceName, seen)
+		return c.classImplements(types.FromName(info.superclass), interfaceType, seen)
 	}
 	binding, ok := c.resolution.ImportedType(className)
 	if !ok || binding.Export == nil || binding.Export.Kind != resolver.ClassExport {
 		return false
 	}
-	if slices.Contains(binding.Export.Interfaces, interfaceName) {
-		return true
+	substitutions := typeSubstitutions(binding.Export.TypeParameters, classType.Args)
+	for _, implemented := range binding.Export.Interfaces {
+		if c.typesEquivalent(substituteType(implemented, substitutions), interfaceType) {
+			return true
+		}
 	}
-	return c.classImplements(binding.Export.Superclass, interfaceName, seen)
+	return c.classImplements(types.FromName(binding.Export.Superclass), interfaceType, seen)
 }
 
 func (c *Checker) recordAssignableConversion(expression ast.Expression, target, actual types.Type) {
@@ -3371,16 +3392,24 @@ type methodSignature struct {
 }
 
 func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
-	for _, interfaceName := range class.Implements {
+	for _, reference := range class.Implements {
+		interfaceType := c.typeFromRef(reference)
+		interfaceName := interfaceType.Name
+		if interfaceType.Kind != types.Named || interfaceType.Nullable {
+			c.error(reference.Span(), fmt.Sprintf("implemented interface must be a non-nullable named type, got %s", interfaceType))
+			continue
+		}
 		required := map[string]methodSignature{}
 		if local := c.interfaces[interfaceName]; local != nil {
+			substitutions := typeSubstitutions(typeParameterNames(local.TypeParameters), interfaceType.Args)
 			for _, method := range local.Methods {
-				required[method.Name] = c.signatureFromMethod(method)
+				required[method.Name] = substituteMethodSignature(c.signatureFromMethod(method), substitutions)
 			}
 		} else if imported, ok := c.resolution.ImportedType(interfaceName); ok && imported.Export.Kind == resolver.InterfaceExport {
 			c.markImportUsed(imported)
+			substitutions := typeSubstitutions(imported.Export.TypeParameters, interfaceType.Args)
 			for name, member := range imported.Export.Members {
-				required[name] = signatureFromResolvedMember(member)
+				required[name] = substituteMethodSignature(signatureFromResolvedMember(member), substitutions)
 			}
 		} else {
 			c.error(class.Span(), fmt.Sprintf("interface %s is not declared or imported", interfaceName))
@@ -3389,14 +3418,32 @@ func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
 		for name, expected := range required {
 			actual, ok := c.classMethodSignature(class.Name, name, map[string]bool{})
 			if !ok {
-				c.error(class.Span(), fmt.Sprintf("class %s does not implement %s.%s", class.Name, interfaceName, name))
+				c.error(class.Span(), fmt.Sprintf("class %s does not implement %s.%s", class.Name, interfaceType, name))
 				continue
 			}
 			if !sameSignature(expected, actual) {
-				c.error(class.Span(), fmt.Sprintf("method %s.%s does not match interface %s", class.Name, name, interfaceName))
+				c.error(class.Span(), fmt.Sprintf("method %s.%s does not match interface %s", class.Name, name, interfaceType))
 			}
 		}
 	}
+}
+
+func typeParameterNames(parameters []ast.TypeParameter) []string {
+	names := make([]string, len(parameters))
+	for index, parameter := range parameters {
+		names[index] = parameter.Name
+	}
+	return names
+}
+
+func substituteMethodSignature(signature methodSignature, substitutions map[string]types.Type) methodSignature {
+	signature.returnType = substituteType(signature.returnType, substitutions)
+	signature.fails = substituteType(signature.fails, substitutions)
+	signature.parameters = append([]types.Type(nil), signature.parameters...)
+	for index := range signature.parameters {
+		signature.parameters[index] = substituteType(signature.parameters[index], substitutions)
+	}
+	return signature
 }
 
 func (c *Checker) classMethodSignature(className, memberName string, seen map[string]bool) (methodSignature, bool) {
@@ -3457,6 +3504,15 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 		return classMember{}, false
 	}
 	seen[className] = true
+	if info := c.interfaces[className]; info != nil && !class {
+		for _, method := range info.Methods {
+			if method.Name != memberName {
+				continue
+			}
+			signature := c.signatureFromMethod(method)
+			return classMember{typ: signature.returnType, method: method, sig: &signature}, true
+		}
+	}
 	if info := c.enums[className]; info != nil {
 		if method := info.methods[memberName]; method != nil && !class {
 			signature := c.signatureFromMethod(method)
@@ -3495,11 +3551,16 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 }
 
 func (c *Checker) specializeLocalClassMember(receiver types.Type, member classMember) classMember {
-	info := c.classes[receiver.Name]
-	if info == nil || len(info.typeParameters) == 0 {
+	parameters := []string{}
+	if info := c.classes[receiver.Name]; info != nil {
+		parameters = info.typeParameters
+	} else if info := c.interfaces[receiver.Name]; info != nil {
+		parameters = typeParameterNames(info.TypeParameters)
+	}
+	if len(parameters) == 0 {
 		return member
 	}
-	substitutions := typeSubstitutions(info.typeParameters, receiver.Args)
+	substitutions := typeSubstitutions(parameters, receiver.Args)
 	if member.sig != nil {
 		copy := *member.sig
 		copy.returnType = substituteType(copy.returnType, substitutions)

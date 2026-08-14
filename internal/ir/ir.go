@@ -101,7 +101,7 @@ type Class struct {
 	TypeParameters []string
 	External       bool
 	Superclass     Expression
-	Implements     []string
+	Implements     []types.Type
 	Body           []Statement
 }
 
@@ -169,8 +169,9 @@ func (*Module) irStatement() {}
 
 type Interface struct {
 	Base
-	Name    string
-	Methods []*Method
+	Name           string
+	TypeParameters []string
+	Methods        []*Method
 }
 
 func (*Interface) irStatement() {}

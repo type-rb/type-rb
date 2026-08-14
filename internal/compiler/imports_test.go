@@ -3717,6 +3717,62 @@ end
 	}
 }
 
+func TestProjectCompilerSpecializesImportedGenericInterfaces(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/contracts/store.trb",
+		ModulePath: "contracts/store",
+		Source:     []byte("interface Store<T>\n\tget(): T\n\tput(value: T): T\nend\n"),
+	}
+	implementation := SourceUnit{
+		Filename:   "/project/stores/user_store.trb",
+		ModulePath: "stores/user_store",
+		Source: []byte(`import { Store } from contracts/store
+
+record User
+	name: String
+end
+
+class UserStore implements Store<User>
+	@value: User
+
+	def initialize(value: User)
+		@value = value
+		return
+	end
+
+	def get(): User
+		return @value
+	end
+
+	def put(value: User): User
+		@value = value
+		return @value
+	end
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Source: []byte(`import { Store } from contracts/store
+import { User, UserStore } from stores/user_store
+
+def read(store: Store<User>): String
+	return store.get().name
+end
+
+def build(): Store<User>
+	return UserStore.new(User.new(name: "Ada"))
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := CompileProject([]SourceUnit{contract, implementation, consumer}, Options{Mode: mode, GoModule: "example.com/generic-interfaces", RubyLoader: "require_relative"}); err != nil {
+			t.Fatalf("%s rejected imported generic interface values: %v", mode, err)
+		}
+	}
+}
+
 func TestProjectCatalogLinksImportedInheritance(t *testing.T) {
 	base := SourceUnit{
 		Filename:   "/project/models/base.trb",

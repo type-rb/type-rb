@@ -8,7 +8,6 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,7 +63,7 @@ type Export struct {
 	AliasTarget       types.Type
 	AliasEnum         bool
 	Superclass        string
-	Interfaces        []string
+	Interfaces        []types.Type
 	Span              token.Span
 	UnsupportedFields map[string]string
 	// NativeExported distinguishes a real target-package type export from a
@@ -252,9 +251,9 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		state[name] = 1
 		if parent := typesByName[exported.Superclass]; parent != nil {
 			link(parent.Name)
-			for _, interfaceName := range parent.Interfaces {
-				if !slices.Contains(exported.Interfaces, interfaceName) {
-					exported.Interfaces = append(exported.Interfaces, interfaceName)
+			for _, implemented := range parent.Interfaces {
+				if !containsEquivalentType(exported.Interfaces, implemented) {
+					exported.Interfaces = append(exported.Interfaces, implemented)
 				}
 			}
 			for memberName, member := range parent.Members {
@@ -904,9 +903,12 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		switch node := statement.(type) {
 		case *ast.ClassStatement:
 			if public(node.Name) {
-				exported := Export{Name: node.Name, Kind: ClassExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Superclass: expressionName(node.Superclass), Interfaces: append([]string(nil), node.Implements...), Span: node.Span()}
+				exported := Export{Name: node.Name, Kind: ClassExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Superclass: expressionName(node.Superclass), Span: node.Span()}
 				for _, parameter := range node.TypeParameters {
 					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
+				}
+				for _, implemented := range node.Implements {
+					exported.Interfaces = append(exported.Interfaces, typeRef(implemented))
 				}
 				for _, member := range node.Body {
 					switch item := member.(type) {
@@ -1022,6 +1024,9 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		case *ast.InterfaceStatement:
 			if public(node.Name) {
 				exported := Export{Name: node.Name, Kind: InterfaceExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Span: node.Span()}
+				for _, parameter := range node.TypeParameters {
+					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
+				}
 				for _, method := range node.Methods {
 					parameterTypes, required, variadic := parameters(method.Parameters)
 					exported.Members[method.Name] = Member{Name: method.Name, Kind: FunctionExport, Type: returnTypeRef(method.ReturnType), Fails: failureTypeRef(method.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic}
@@ -1222,6 +1227,15 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 		result.Fails = &failure
 	}
 	return result
+}
+
+func containsEquivalentType(values []types.Type, candidate types.Type) bool {
+	for _, value := range values {
+		if types.Equivalent(value, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func substituteMembers(input map[string]Member, substitutions map[string]types.Type) map[string]Member {

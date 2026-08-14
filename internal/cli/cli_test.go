@@ -494,6 +494,56 @@ func TestReplAutomaticallyImportsUniqueProjectExportsAcrossModes(t *testing.T) {
 	}
 }
 
+func TestReplEvaluatesGenericInterfaceValuesAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/repl-generic-interface"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			contractPath := filepath.Join(root, "src", "stores", "string_store.trb")
+			if err := os.MkdirAll(filepath.Dir(contractPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			source := `interface Store<T>
+	get(): T
+end
+
+class MemoryStore<T> implements Store<T>
+	@value: T
+
+	def initialize(value: T)
+		@value = value
+		return
+	end
+
+	def get(): T
+		return @value
+	end
+end
+`
+			if err := os.WriteFile(contractPath, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			input := "store: Store<String> := MemoryStore<String>.new(\"generic\")\nstore.get()\n:quit\n"
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			if !strings.HasSuffix(stdout.String(), "\"generic\" : String\n") || stderr.Len() != 0 {
+				t.Fatalf("unexpected %s generic interface REPL output: stdout=%q stderr=%s", mode, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestReplAutomaticallyImportsPortableStandardTypesAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
@@ -3668,6 +3718,23 @@ class Person implements Named
 	end
 end
 
+interface Box<T>
+	value(): T
+end
+
+class ValueBox<T> implements Box<T>
+	@value: T
+
+	def initialize(value: T)
+		@value = value
+		return
+	end
+
+	def value(): T
+		return @value
+	end
+end
+
 def display(value: Named): String
 	return value.name()
 end
@@ -3677,6 +3744,8 @@ def main()
 	values.each do |value|
 		puts(display(value))
 	end
+	box: Box<String> := ValueBox<String>.new("generic")
+	puts(box.value())
 	return
 end
 `
@@ -3688,7 +3757,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if stdout.String() != "Ada\nGrace\n" {
+		if stdout.String() != "Ada\nGrace\ngeneric\n" {
 			t.Fatalf("unexpected %s interface-value output %q", mode, stdout.String())
 		}
 	}

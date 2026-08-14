@@ -1016,7 +1016,12 @@ func (p *Parser) parseClass() ast.Statement {
 	if implementsAt >= 0 {
 		for _, part := range splitTopLevel(line[implementsAt+1:], ",") {
 			if len(part) > 0 {
-				c.Implements = append(c.Implements, joinLexemes(part))
+				implemented := parseType(part)
+				if implemented.Empty() {
+					p.errorAt(spanOf(part), "implemented interface must be a type")
+					continue
+				}
+				c.Implements = append(c.Implements, implemented)
 			}
 		}
 	}
@@ -1047,11 +1052,7 @@ func (p *Parser) parseInterface() ast.Statement {
 	start, end, next, comment := p.logicalLine(p.pos)
 	line := p.codeTokens(start, end)
 	i := &ast.InterfaceStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
-	if len(line) > 1 {
-		i.Name = line[1].Lexeme
-	} else {
-		p.errorAt(line[0].Span, "interface name is required")
-	}
+	i.Name, i.TypeParameters = p.parseGenericDeclaration(line, "interface")
 	p.pos = next
 	for !p.atEOF() {
 		p.skipSeparators()

@@ -247,6 +247,10 @@ interface Named
 	name(): String
 end
 
+interface Repository<T>
+	find(id: Integer): T?
+end
+
 class User implements Named
 	readonly @id: Integer
 	@_name: String
@@ -267,14 +271,21 @@ Instance fields are declared at class scope. Names beginning with `_` and
 `@_` are private. `readonly` fields can be assigned during initialization but
 not externally. Class methods use `def self.name()`.
 
-Classes support inheritance, interfaces, modules, class constants, and checked
-instance/class member access. Superclass construction, override rules, generic
-classes, and a final field/method collision rule remain alpha design work.
+Classes support inheritance, generic interfaces, modules, class constants, and
+checked instance/class member access. Superclass construction, override rules,
+generic interface methods, and a final field/method collision rule remain alpha
+design work.
+
 Classes explicitly marked with `implements` can be passed and returned through
 that interface type. Subclasses inherit the declared conformance, while a class
 with merely matching methods does not conform implicitly. Fresh literals such
 as `values: Array<Named> := [User.new(...)]` use the expected interface element
 type; existing mutable arrays remain invariant.
+
+Generic interface arguments specialize every method in the contract. A class
+may implement a concrete application such as `Repository<User>`, or a generic
+class may pass through one of its own type parameters. Generic interfaces are
+invariant and conformance remains explicit.
 
 ## Records
 
