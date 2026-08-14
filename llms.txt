@@ -1,0 +1,39 @@
+# TypeRB
+
+> TypeRB is an alpha, statically typed programming language that compiles one portable source grammar to Go, Ruby, and TypeScript.
+
+TypeRB source uses canonical, case-sensitive type names and explicit imports. Target-specific APIs require `trb/platform/<mode>/*`. Prefer the linked documentation over inferring TypeRB behavior from a target language.
+
+## Learn
+
+- [Learning TypeRB](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/learning.md): The shortest path from installation to a small application.
+- [Language guide](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/language.md): Practical syntax and semantics with examples.
+- [A Tour of TypeRB](https://type-rb.github.io/tour/): Executable browser lessons.
+
+## Reference
+
+- [Language specification](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/specification.md): The normative language reference.
+- [Standard library](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/standard-library.md): Portable standard packages and APIs.
+- [Command-line interface](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/cli.md): Commands, options, and workflows.
+- [Project configuration](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/configuration.md): `trbconfig.jsonc` and backend configuration.
+
+## Build applications
+
+- [Web applications](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/guides/web.md): Portable routing, requests, responses, and middleware.
+- [Database access](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/guides/orm.md): Portable ORM models, queries, relations, and transactions.
+- [Background jobs](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/guides/jobs.md): Portable job contracts and SQL-backed workers.
+- [React and JSX](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/guides/react.md): Browser applications in TypeScript mode.
+- [Browser HTTP](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/guides/browser-http.md): Typed frontend HTTP clients.
+- [Packages](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/guides/packages.md): Distributed TypeRB packages and native dependencies.
+
+## Tooling and implementation
+
+- [AI-assisted development](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/ai-assisted-development.md): A reliable tool loop for coding agents.
+- [Compiler development](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/development.md): Compiler architecture and contribution workflow.
+- [Current status](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/status.md): Implemented features and known limits.
+
+## Optional
+
+- [Roadmap](https://raw.githubusercontent.com/type-rb/type-rb/main/docs/roadmap.md): Direction beyond the current alpha.
+- [Playground](https://type-rb.github.io/play/): Run TypeRB in a browser.
+- [Source repository](https://github.com/type-rb/type-rb): Compiler, packages, editor support, and documentation.

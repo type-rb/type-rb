@@ -9,6 +9,7 @@ if [[ -z "$version" ]]; then
 fi
 
 go run ./cmd/trb-playground-site --out "$output_dir" --version "$version"
+cp llms.txt "$output_dir/llms.txt"
 GOOS=js GOARCH=wasm go build \
 	-o "$output_dir/assets/trb.wasm" \
 	./cmd/trb-wasm

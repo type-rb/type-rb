@@ -77,6 +77,7 @@ jobs:
           ./scripts/build-playground-site.sh dist/playground "$version"
           test -s dist/playground/play/index.html
           test -s dist/playground/tour/index.html
+          test -s dist/playground/llms.txt
           test -s dist/playground/assets/trb.wasm
           test -s dist/playground/assets/wasm_exec.js
           grep -F 'url=/' dist/playground/type-rb/index.html
@@ -84,6 +85,8 @@ jobs:
           grep -F 'url=/play/' dist/playground/type-rb/play/index.html
           grep -F '"transport": "wasm"' dist/playground/runtime.json
           grep -F '"version": "'"$version"'"' dist/playground/runtime.json
+          grep -F '# TypeRB' dist/playground/llms.txt
+          grep -F 'docs/specification.md' dist/playground/llms.txt
 
       - name: Prepare legacy Pages redirects
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
