@@ -629,7 +629,18 @@ func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters m
 	}
 	semantic := types.FromName(ref.Name)
 	if semantic.Kind != types.Named && semantic.Name != ref.Name {
-		c.error(ref.Span(), fmt.Sprintf("type name %s is not canonical; use %s", ref.Name, semantic.Name))
+		span := ref.Span()
+		span.End = span.Start
+		span.End.Offset += len(ref.Name)
+		span.End.Column += len(ref.Name)
+		c.diags = append(c.diags, diagnostic.Diagnostic{
+			Code: diagnostic.TypeError, Severity: diagnostic.Error,
+			Message: fmt.Sprintf("type name %s is not canonical; use %s", ref.Name, semantic.Name), Span: ref.Span(),
+			Fixes: []diagnostic.Fix{{
+				Message: fmt.Sprintf("replace %s with %s", ref.Name, semantic.Name),
+				Edits:   []diagnostic.TextEdit{{Location: diagnostic.Location{Span: span}, Replacement: semantic.Name}},
+			}},
+		})
 	}
 	for _, argument := range ref.Arguments {
 		c.validateTypeReferenceInScope(argument, typeParameters)

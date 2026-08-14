@@ -23,6 +23,18 @@ func TestTypeNamesRequireCanonicalSpellingAcrossModes(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), test.wanted) {
 					t.Fatalf("Compile() error=%v, want %q", err, test.wanted)
 				}
+				compilation, ok := err.(*CompileError)
+				if !ok || len(compilation.Diagnostics) != 1 || len(compilation.Diagnostics[0].Fixes) != 1 {
+					t.Fatalf("Compile() diagnostics=%#v, want one canonical type fix", compilation)
+				}
+				fix := compilation.Diagnostics[0].Fixes[0]
+				if len(fix.Edits) != 1 || fix.Edits[0].Replacement != strings.Fields(test.wanted)[len(strings.Fields(test.wanted))-1] {
+					t.Fatalf("canonical type fix=%#v", fix)
+				}
+				edited := fix.Edits[0]
+				if selected := string(source[edited.Location.Span.Start.Offset:edited.Location.Span.End.Offset]); selected != strings.Fields(test.wanted)[2] {
+					t.Fatalf("canonical type fix selected %q", selected)
+				}
 			})
 		}
 	}
