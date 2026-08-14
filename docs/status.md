@@ -312,13 +312,13 @@ help, deterministic formatting, and quick fixes from structured diagnostic
 edits. Ordered incremental updates and UTF-16 protocol positions are translated
 at the adapter boundary; the compiler and formatter continue to use complete
 UTF-8 source snapshots and offsets. The preview Visual Studio Code extension is
-a published thin client over this boundary. Definition, reference, and rename
-queries follow stable source declaration identities across project imports,
-receiver types, and common lexical bindings. Document symbols expose the
-structural outline from
-the lossless syntax tree even while a file has type errors, and workspace
-symbol queries search the same declarations across project files. Structural
-folding ranges cover declarations and expression blocks from that syntax tree.
+a published thin client over this boundary. Definition, reference, document
+highlight, and rename queries follow stable source declaration identities
+across project imports, receiver types, and common lexical bindings. Document
+symbols expose the structural outline from the lossless syntax tree even while
+a file has type errors, and workspace symbol queries search the same
+declarations across project files. Structural folding ranges cover declarations
+and expression blocks from that syntax tree.
 Full-document semantic tokens reuse the compiler-aware highlighting service
 and translate UTF-8 byte spans to the UTF-16 positions required by editors.
 

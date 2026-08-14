@@ -110,6 +110,11 @@ type location struct {
 	Range rangeValue `json:"range"`
 }
 
+type documentHighlight struct {
+	Range rangeValue `json:"range"`
+	Kind  int        `json:"kind,omitempty"`
+}
+
 type textEdit struct {
 	Range   rangeValue `json:"range"`
 	NewText string     `json:"newText"`
@@ -206,6 +211,7 @@ type serverCapabilities struct {
 	SignatureHelpProvider      signatureOptions      `json:"signatureHelpProvider"`
 	DefinitionProvider         bool                  `json:"definitionProvider"`
 	ReferencesProvider         bool                  `json:"referencesProvider"`
+	DocumentHighlightProvider  bool                  `json:"documentHighlightProvider"`
 	RenameProvider             renameOptions         `json:"renameProvider"`
 	DocumentSymbolProvider     bool                  `json:"documentSymbolProvider"`
 	FoldingRangeProvider       bool                  `json:"foldingRangeProvider"`

@@ -226,9 +226,9 @@ hover information, signature help, document formatting, and quick fixes backed
 by structured compiler suggestions. It applies ordered incremental edits using
 UTF-16 LSP positions at the protocol boundary, then gives the compiler a
 complete UTF-8 source snapshot. Dependency-level recompilation remains a
-performance follow-up. Definition, reference, and rename queries follow checked
-project declarations, receiver members, parameters, and local bindings rather
-than textual name matches.
+performance follow-up. Definition, reference, document highlight, and rename
+queries follow checked project declarations, receiver members, parameters, and
+local bindings rather than textual name matches.
 Project-wide symbol search and the document outline follow the lossless syntax
 tree, so classes, records, enums, modules, interfaces, fields, and methods
 remain visible while a file has type errors. Structural folding ranges use the
