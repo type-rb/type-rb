@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-08-14
+
+- Add compiler-aware semantic highlighting, document outlines, and project-wide
+  symbol search.
+- Add structural folding, checked occurrence highlights, and syntax-aware
+  selection ranges.
+- Track TypeRB files created, changed, or deleted outside active editor buffers.
+- Add quick fixes that replace noncanonical type names with their TypeRB names.
+- Use incremental document synchronization with `trb lsp`.
+
 ## 0.2.0 - 2026-08-14
 
 - Show checked hover information and call signatures from `trb lsp`.

@@ -2,6 +2,46 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.6 - 2026-08-14
+
+### Language
+
+- Type annotations now require canonical, case-sensitive TypeRB names such as
+  `Integer`, `Boolean`, and `Hash`. Target-language aliases such as `Int`,
+  `int`, `bool`, and `Map` are no longer accepted, and unknown type names are
+  reported by the compiler and editors. Existing source that uses an alias
+  must replace it with the canonical TypeRB name.
+  ([#235](https://github.com/type-rb/type-rb/pull/235),
+  [#246](https://github.com/type-rb/type-rb/pull/246))
+
+### Editor tooling
+
+- TypeRB editors now provide hierarchical document outlines, project-wide
+  symbol search, and compiler-aware semantic highlighting for declarations,
+  types, constants, calls, literals, comments, and keywords.
+  ([#238](https://github.com/type-rb/type-rb/pull/238),
+  [#239](https://github.com/type-rb/type-rb/pull/239),
+  [#240](https://github.com/type-rb/type-rb/pull/240))
+- Editors can fold structural declarations and expressions, highlight checked
+  occurrences of a symbol, and expand or shrink selections through token,
+  line, and enclosing syntax ranges. These syntax-backed features remain
+  available while source is incomplete.
+  ([#242](https://github.com/type-rb/type-rb/pull/242),
+  [#243](https://github.com/type-rb/type-rb/pull/243),
+  [#244](https://github.com/type-rb/type-rb/pull/244))
+- The language server now accepts incremental document updates and tracks
+  project files created, changed, or deleted outside active editor buffers
+  while preserving unsaved editor contents.
+  ([#241](https://github.com/type-rb/type-rb/pull/241),
+  [#245](https://github.com/type-rb/type-rb/pull/245))
+
+### Documentation discovery
+
+- The TypeRB website now publishes an AI-readable documentation index that
+  points agents to the current learning path, language and package references,
+  application guides, and compiler documentation.
+  ([#237](https://github.com/type-rb/type-rb/pull/237))
+
 ## 0.2.5 - 2026-08-14
 
 ### Editor tooling
