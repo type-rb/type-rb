@@ -307,7 +307,8 @@ Concurrent edits invalidate obsolete analysis before it can become current.
 reuse remains future work.
 
 `trb lsp` exposes that service over standard LSP framing. Its capabilities are
-project-wide live diagnostics, completion, checked hover information, signature
+project-wide live diagnostics, completion with explicit import insertion for
+unambiguous standard and project types, checked hover information, signature
 help, deterministic formatting, and quick fixes from structured diagnostic
 edits. Ordered incremental updates and UTF-16 protocol positions are translated
 at the adapter boundary; the compiler and formatter continue to use complete
@@ -330,12 +331,15 @@ Canonical type-name diagnostics carry structured fixes, so editors can replace
 aliases such as `Int` with `Integer` without reconstructing source text.
 Top-level `main()` declarations expose a compiler-owned run CodeLens in
 non-browser projects. The VS Code client saves dirty TypeRB project files and
-starts `trb run` through an initial Debug Adapter Protocol session. Visual
+starts `trb run` through a Debug Adapter Protocol session when invoked without
+debugging. Visual
 Studio Code owns the standard start, stop, and restart lifecycle, while the
 Debug Console reports the launch command, process identifier, program output,
 and exit status immediately. Invoking the CodeLens again requests a DAP
-restart. This first adapter deliberately exposes no source breakpoints,
-stepping, frames, or variables before target-standard source maps are emitted.
+restart. Go debug builds project the shared source map into Go line directives,
+and the VS Code client connects directly to Delve DAP for TypeRB breakpoints,
+stepping, stack frames, variables, watches, and evaluation. Ruby and TypeScript
+source-debugger adapters remain staged; both modes retain Run Without Debugging.
 Test discovery remains staged with the language-level test runner and will use
 the editor's native Testing API rather than source-shaped run commands.
 
@@ -350,8 +354,8 @@ The current alpha does not yet provide:
 - complete superclass construction, override, and mutation-effect semantics;
 - general first-class call blocks;
 - concise `Result` propagation syntax;
-- emitted target-standard source maps, runtime stack mapping, incremental
-  builds, or a persistent build cache;
+- complete target-standard source maps and runtime stack mapping across Ruby
+  and TypeScript, incremental builds, or a persistent build cache;
 - semantic package version constraints, publishing or audit services, or a
   stable external compiler-extension protocol;
 - namespace-stable public type identities across independent packages;

@@ -3371,9 +3371,11 @@ func TestBuildCompileCreatesRunnableGoExecutable(t *testing.T) {
 		name     string
 		outfile  string
 		relative string
+		debug    bool
 	}{
 		{name: "default", relative: filepath.Join("bin", "hello-default")},
 		{name: "outfile", outfile: filepath.Join("dist", "hello"), relative: filepath.Join("dist", "hello")},
+		{name: "debug", relative: filepath.Join("bin", "hello-debug"), debug: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -3394,6 +3396,9 @@ func TestBuildCompileCreatesRunnableGoExecutable(t *testing.T) {
 			t.Setenv("CGO_ENABLED", "0")
 
 			args := []string{"build", "--config", config.Path, "--compile"}
+			if test.debug {
+				args = append(args, "--debug")
+			}
 			if test.outfile != "" {
 				args = append(args, "--outfile", test.outfile)
 			}
@@ -3420,6 +3425,12 @@ func TestBuildCompileCreatesRunnableGoExecutable(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(root, "build", "main.go")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("--compile retained generated source: %v", err)
 			}
+			if test.debug {
+				binary, err := os.ReadFile(output)
+				if err != nil || !bytes.Contains(binary, []byte(filepath.Join(root, "src", "main.trb"))) {
+					t.Fatalf("debug executable does not retain the TypeRB source path: err=%v", err)
+				}
+			}
 		})
 	}
 }
@@ -3434,6 +3445,7 @@ func TestBuildCompileValidatesModeAndFlags(t *testing.T) {
 		{name: "ruby", mode: "ruby", args: []string{"--compile"}, want: "--compile is supported only for mode go"},
 		{name: "typescript", mode: "typescript", args: []string{"--compile"}, want: "--compile is supported only for mode go"},
 		{name: "outfile", mode: "go", args: []string{"--outfile", "bin/app"}, want: "--outfile requires --compile"},
+		{name: "debug", mode: "go", args: []string{"--debug"}, want: "--debug requires --compile"},
 		{name: "path", mode: "go", args: []string{"--compile", "."}, want: "--compile builds the configured project"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

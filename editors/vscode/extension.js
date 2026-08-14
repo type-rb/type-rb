@@ -1,18 +1,23 @@
 "use strict";
 
 const { readFile } = require("node:fs/promises");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
 const path = require("node:path");
 const vscode = require("vscode");
 const { LanguageClient } = require("vscode-languageclient/node");
 const { TypeRBDebugSession } = require("./debug-session");
+const { DlvDAPProcess } = require("./go-debug-adapter");
 const { excludeGeneratedProjects, projectForPath, projectPaths } = require("./project-options");
 const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("./server-options");
 
 let projectManager;
 let runCodeLensProvider;
 const debugSessions = new Map();
+const executeFile = promisify(execFile);
 
 async function activate(context) {
+	const debugAdapterFactory = new TypeRBDebugAdapterFactory();
 	context.subscriptions.push(
 		vscode.commands.registerCommand("typerb.runProject", runProject),
 		vscode.commands.registerCommand("typerb.stopProject", stopProject),
@@ -46,10 +51,12 @@ async function activate(context) {
 			vscode.DebugConfigurationProviderTriggerKind.Dynamic
 		),
 		vscode.debug.registerDebugAdapterDescriptorFactory("typerb", {
-			createDebugAdapterDescriptor() {
-				return new vscode.DebugAdapterInlineImplementation(new TypeRBDebugSession());
+			createDebugAdapterDescriptor(session) {
+				return debugAdapterFactory.createDebugAdapterDescriptor(session);
 			}
-		})
+		}),
+		debugAdapterFactory,
+		vscode.debug.onDidTerminateDebugSession((session) => debugAdapterFactory.terminate(session))
 	);
 	runCodeLensProvider = new RunCodeLensProvider(projectManager);
 	context.subscriptions.push(
@@ -263,7 +270,7 @@ async function runProject(uriValue) {
 		await running.customRequest("restart");
 		return;
 	}
-	const configuration = debugConfigurationForProject(project);
+	const configuration = debugConfigurationForProject(project, [], true);
 	const started = await vscode.debug.startDebugging(project.workspaceFolder, configuration);
 	if (!started) {
 		void vscode.window.showErrorMessage(`Cannot start TypeRB project ${project.label}.`);
@@ -322,7 +329,7 @@ class TypeRBDebugConfigurationProvider {
 			.map((project) => debugConfigurationForProject(project));
 	}
 
-	resolveDebugConfiguration(folder, configuration) {
+	async resolveDebugConfiguration(folder, configuration) {
 		const project = this.selectProject(folder, configuration);
 		if (project === undefined) {
 			void vscode.window.showErrorMessage("TypeRB could not find a runnable project for this debug configuration.");
@@ -333,12 +340,38 @@ class TypeRBDebugConfigurationProvider {
 			return undefined;
 		}
 		const programArgs = Array.isArray(configuration.args) ? configuration.args : [];
-		return {
+		const noDebug = configuration.noDebug === true;
+		if (!noDebug && project.mode !== "go") {
+			void vscode.window.showErrorMessage(`Source debugging is not yet available for mode: ${project.mode}. Use Run Without Debugging instead.`);
+			return undefined;
+		}
+		if (!noDebug && !(await saveTypeRBDocuments(project))) {
+			void vscode.window.showErrorMessage("Save TypeRB project files before starting the debugger.");
+			return undefined;
+		}
+		const resolved = {
 			...configuration,
-			...debugConfigurationForProject(project, programArgs),
+			...debugConfigurationForProject(project, programArgs, noDebug),
 			name: configuration.name || `TypeRB: ${project.label}`,
 			env: configuration.env ?? {},
 		};
+		if (noDebug) {
+			return resolved;
+		}
+		try {
+			const program = await buildDebugExecutable(project);
+			const settings = vscode.workspace.getConfiguration("typerb", project.configUri);
+			return {
+				...resolved,
+				mode: "exec",
+				program,
+				cwd: project.root,
+				dlvToolPath: resolveDebugToolPath(settings.get("debug.go.path", "dlv"), project.workspaceFolder?.uri.fsPath),
+			};
+		} catch (error) {
+			void vscode.window.showErrorMessage(`Cannot prepare TypeRB debugger: ${debugBuildError(error)}`);
+			return undefined;
+		}
 	}
 
 	selectProject(folder, configuration) {
@@ -366,7 +399,7 @@ class TypeRBDebugConfigurationProvider {
 	}
 }
 
-function debugConfigurationForProject(project, programArgs = []) {
+function debugConfigurationForProject(project, programArgs = [], noDebug = false) {
 	const settings = vscode.workspace.getConfiguration("typerb", project.configUri);
 	const workspaceRoot = project.workspaceFolder?.uri.fsPath;
 	const run = resolveRunOptions(
@@ -388,8 +421,76 @@ function debugConfigurationForProject(project, programArgs = []) {
 		cwd: project.root,
 		projectName: project.label,
 		args: [...programArgs],
+		noDebug,
 		internalConsoleOptions: "openOnSessionStart",
 	};
+}
+
+class TypeRBDebugAdapterFactory {
+	constructor() {
+		this.processes = new Map();
+	}
+
+	async createDebugAdapterDescriptor(session) {
+		if (session.configuration.noDebug === true) {
+			return new vscode.DebugAdapterInlineImplementation(new TypeRBDebugSession());
+		}
+		if (session.configuration.mode !== "exec" || typeof session.configuration.program !== "string") {
+			throw new Error("TypeRB source debugging requires a prepared Go executable");
+		}
+		const process = new DlvDAPProcess(session.configuration.dlvToolPath || "dlv");
+		this.processes.set(session.id, process);
+		try {
+			const port = await process.start();
+			return new vscode.DebugAdapterServer(port, "127.0.0.1");
+		} catch (error) {
+			this.processes.delete(session.id);
+			throw error;
+		}
+	}
+
+	terminate(session) {
+		const process = this.processes.get(session.id);
+		process?.stop();
+		this.processes.delete(session.id);
+	}
+
+	dispose() {
+		for (const process of this.processes.values()) {
+			process.stop();
+		}
+		this.processes.clear();
+	}
+}
+
+async function buildDebugExecutable(project) {
+	const settings = vscode.workspace.getConfiguration("typerb", project.configUri);
+	const workspaceRoot = project.workspaceFolder?.uri.fsPath;
+	const run = resolveRunOptions({ path: settings.get("server.path", "trb"), config: project.configPath }, workspaceRoot);
+	const filename = process.platform === "win32" ? "app.exe" : "app";
+	const program = path.join(project.root, ".trb", "debug", filename);
+	try {
+		await executeFile(run.command, ["build", "--config", project.configPath, "--compile", "--debug", "--outfile", program], {
+			cwd: project.root,
+			maxBuffer: 10 * 1024 * 1024,
+		});
+	} catch (error) {
+		error.debugOutput = [error.stdout, error.stderr].filter(Boolean).join("\n");
+		throw error;
+	}
+	return program;
+}
+
+function resolveDebugToolPath(value, workspaceRoot) {
+	if (value === "" || path.isAbsolute(value) || workspaceRoot === undefined || (!value.includes("/") && !value.includes("\\"))) {
+		return value || "dlv";
+	}
+	return path.resolve(workspaceRoot, value);
+}
+
+function debugBuildError(error) {
+	const output = typeof error.debugOutput === "string" ? error.debugOutput.trim() : "";
+	return output || error.message;
 }
 
 module.exports = { activate, deactivate };

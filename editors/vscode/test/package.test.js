@@ -94,6 +94,7 @@ test("derives independent project roots from JSONC configuration", () => {
 	};
 	assert.equal(api.sourceRoot, path.resolve("/workspace/apps/api/src"));
 	assert.equal(api.name, "todo-api");
+	assert.equal(api.mode, "");
 	assert.equal(api.outputRoot, path.resolve("/workspace/apps/api/generated"));
 	assert.equal(api.runnable, true);
 	assert.equal(web.outputRoot, path.resolve("/workspace/apps/web/build"));
@@ -109,6 +110,7 @@ test("marks TypeScript browser projects as non-runnable", () => {
 		'{"mode":"typescript","typescript":{"runtime":"browser"}}'
 	);
 	assert.equal(project.runnable, false);
+	assert.equal(project.mode, "typescript");
 });
 
 test("does not start language servers for copied build projects", () => {

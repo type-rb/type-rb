@@ -5,8 +5,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
@@ -59,6 +62,122 @@ func BuildContext(programs []*ir.Program, modulePath string) Context {
 	}
 	sortSymbols(context.Symbols)
 	return context
+}
+
+// BuildImportCandidates indexes declarations from other project modules. A
+// name is offered only when its import path is unambiguous.
+func BuildImportCandidates(programs []*ir.Program, modulePath string) Context {
+	byName := map[string][]Symbol{}
+	for _, program := range programs {
+		if program == nil || program.ModulePath == modulePath {
+			continue
+		}
+		members := map[string][]Symbol{}
+		for _, symbol := range collectSymbols(program.Statements, "", program.SourcePath, members) {
+			byName[symbol.Name] = append(byName[symbol.Name], withImport(symbol, program.ModulePath))
+		}
+	}
+	result := emptyContext()
+	for _, origins := range byName {
+		if len(origins) == 1 {
+			result.Symbols = append(result.Symbols, origins[0])
+		}
+	}
+	sortSymbols(result.Symbols)
+	return result
+}
+
+// StandardImportCandidates returns portable runtime types that can be made
+// visible by inserting one explicit import. Duplicate export names are omitted.
+func StandardImportCandidates(mode string) Context {
+	byName := map[string][]Symbol{}
+	for _, definition := range stdlib.RuntimeExportPackages(mode) {
+		for _, symbol := range standardSymbols(definition) {
+			for _, exported := range definition.RuntimeExports {
+				if symbol.Name == exported.Name {
+					byName[symbol.Name] = append(byName[symbol.Name], withImport(symbol, definition.Path))
+					break
+				}
+			}
+		}
+	}
+	result := emptyContext()
+	for _, origins := range byName {
+		if len(origins) == 1 {
+			result.Symbols = append(result.Symbols, origins[0])
+		}
+	}
+	sortSymbols(result.Symbols)
+	return result
+}
+
+// MergeImportCandidateSets keeps only names with one possible source package.
+// Editors must not silently choose between a project and standard declaration.
+func MergeImportCandidateSets(contexts ...Context) Context {
+	byName := map[string][]Symbol{}
+	for _, context := range contexts {
+		for _, symbol := range context.Symbols {
+			byName[symbol.Name] = append(byName[symbol.Name], symbol)
+		}
+	}
+	result := emptyContext()
+	for _, origins := range byName {
+		if len(origins) == 1 {
+			result.Symbols = append(result.Symbols, origins[0])
+		}
+	}
+	sortSymbols(result.Symbols)
+	return result
+}
+
+// MergeImportCandidates replaces symbols retained from a stale checked
+// snapshot when the current source no longer declares or imports that name.
+// This lets completion repair a missing import without weakening diagnostics.
+func MergeImportCandidates(current, candidates Context, source string) Context {
+	visible := map[string]bool{}
+	program, _ := parser.Parse([]byte(source))
+	for name := range resolver.CollectExports(program.Statements) {
+		visible[name] = true
+	}
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ast.ImportStatement)
+		if !ok {
+			continue
+		}
+		for _, name := range imported.Symbols {
+			visible[name] = true
+		}
+		if imported.Alias != "" {
+			visible[imported.Alias] = true
+		}
+	}
+	result := current
+	byName := make(map[string]Symbol, len(current.Symbols)+len(candidates.Symbols))
+	for _, symbol := range current.Symbols {
+		byName[symbol.Name] = symbol
+	}
+	for _, symbol := range candidates.Symbols {
+		if !visible[symbol.Name] {
+			byName[symbol.Name] = symbol
+		}
+	}
+	result.Symbols = make([]Symbol, 0, len(byName))
+	for _, symbol := range byName {
+		result.Symbols = append(result.Symbols, symbol)
+	}
+	sortSymbols(result.Symbols)
+	return result
+}
+
+func withImport(symbol Symbol, path string) Symbol {
+	result := symbol
+	result.Import = &Import{Path: path, Symbol: symbol.Name}
+	result.Members = append([]Symbol(nil), symbol.Members...)
+	for index := range result.Members {
+		result.Members[index] = withImport(result.Members[index], path)
+		result.Members[index].Import.Symbol = symbol.Name
+	}
+	return result
 }
 
 func addDeclarationMembers(context *Context, catalog *declaration.Catalog) {

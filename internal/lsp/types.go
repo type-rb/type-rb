@@ -140,10 +140,11 @@ type textEdit struct {
 }
 
 type completionItem struct {
-	Label    string   `json:"label"`
-	Kind     int      `json:"kind,omitempty"`
-	Detail   string   `json:"detail,omitempty"`
-	TextEdit textEdit `json:"textEdit"`
+	Label               string     `json:"label"`
+	Kind                int        `json:"kind,omitempty"`
+	Detail              string     `json:"detail,omitempty"`
+	TextEdit            textEdit   `json:"textEdit"`
+	AdditionalTextEdits []textEdit `json:"additionalTextEdits,omitempty"`
 }
 
 type documentSymbol struct {

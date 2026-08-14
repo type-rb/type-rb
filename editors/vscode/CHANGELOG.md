@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add explicit standard-type imports when accepting compiler completion.
+- Debug Go-targeted TypeRB source with breakpoints, stepping, call stacks, and
+  variable inspection through Delve.
+
 ## 0.2.3 - 2026-08-15
 
 - Run TypeRB projects through Visual Studio Code's standard Run and Debug

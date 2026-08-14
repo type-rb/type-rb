@@ -20,6 +20,7 @@ import (
 	"github.com/type-rb/type-rb/internal/compilerservice"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/formatter"
+	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/token"
@@ -45,18 +46,19 @@ type document struct {
 }
 
 type Server struct {
-	mode          string
-	version       string
-	stream        *rpcStream
-	compiler      *compilerservice.Service
-	resolveUnit   UnitResolver
-	sourceRoot    string
-	excludedRoots []string
-	documents     map[string]document
-	base          map[string]compiler.SourceUnit
-	published     map[string]bool
-	snapshot      compilerservice.Snapshot
-	runSupported  bool
+	mode             string
+	version          string
+	stream           *rpcStream
+	compiler         *compilerservice.Service
+	resolveUnit      UnitResolver
+	sourceRoot       string
+	excludedRoots    []string
+	documents        map[string]document
+	base             map[string]compiler.SourceUnit
+	published        map[string]bool
+	snapshot         compilerservice.Snapshot
+	runSupported     bool
+	importCandidates languageservice.Context
 }
 
 const textDocumentSyncIncremental = 2
@@ -89,7 +91,8 @@ func New(options Options) *Server {
 		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit,
 		sourceRoot: sourceRoot, excludedRoots: excludedRoots,
 		documents: map[string]document{}, base: base, published: map[string]bool{},
-		runSupported: options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
+		runSupported:     options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
+		importCandidates: languageservice.StandardImportCandidates(options.Mode),
 	}
 }
 
@@ -642,15 +645,31 @@ func (s *Server) completion(request message) error {
 		return s.stream.write(success(request.ID, []completionItem{}))
 	}
 	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	programs := make([]*ir.Program, 0, len(s.snapshot.Artifacts))
+	for _, artifact := range s.snapshot.Artifacts {
+		if artifact != nil && !artifact.CompilerOwned && !artifact.Official && !artifact.ExternalPackage {
+			programs = append(programs, artifact.IR)
+		}
+	}
+	candidates := languageservice.MergeImportCandidateSets(
+		languageservice.BuildImportCandidates(programs, document.unit.ModulePath),
+		s.importCandidates,
+	)
+	context = languageservice.MergeImportCandidates(context, candidates, string(document.source))
 	cursor := offsetAt(document.source, params.Position)
 	items := languageservice.Complete(languageservice.CompletionRequest{
 		Source: string(document.source), Cursor: cursor, Mode: s.mode, Context: context,
 	})
 	result := make([]completionItem, 0, len(items))
 	for _, item := range items {
+		protocolEdits := make([]textEdit, 0, len(item.AdditionalEdits))
+		for _, edit := range item.AdditionalEdits {
+			protocolEdits = append(protocolEdits, textEdit{Range: offsetRange(document.source, edit.Range.Start, edit.Range.End), NewText: edit.NewText})
+		}
 		result = append(result, completionItem{
 			Label: item.Label, Kind: completionKind(item.Kind), Detail: item.Detail,
-			TextEdit: textEdit{Range: offsetRange(document.source, item.Replacement.Start, item.Replacement.End), NewText: item.InsertText},
+			TextEdit:            textEdit{Range: offsetRange(document.source, item.Replacement.Start, item.Replacement.End), NewText: item.InsertText},
+			AdditionalTextEdits: protocolEdits,
 		})
 	}
 	return s.stream.write(success(request.ID, result))

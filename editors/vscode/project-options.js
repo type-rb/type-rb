@@ -73,6 +73,7 @@ function projectPaths(configPath, source) {
 	}
 	return {
 		name: typeof config.name === "string" ? config.name.trim() : "",
+		mode: typeof config.mode === "string" ? config.mode : "",
 		root,
 		sourceRoot: path.resolve(root, sourceDir),
 		outputRoot: path.resolve(root, outDir),

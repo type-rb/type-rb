@@ -56,9 +56,9 @@ than detailed syntax.
   with richer code actions and additional editor workflows.
 - Extend the published preview VS Code client with test discovery and
   additional editor integrations.
-- Extend the initial DAP launch and process-lifecycle adapter with source-level
-  breakpoints, stepping, frames, variables, and evaluation after source maps
-  and runtime stack mapping are reliable.
+- Extend Go source debugging through Delve with Ruby and TypeScript adapters
+  after their target-standard source maps and runtime stack mapping are
+  reliable. Add test discovery with the language-level test runner.
 
 ## 5. Standard library and package ecosystem
 
