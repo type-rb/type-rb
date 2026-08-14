@@ -68,11 +68,14 @@ and preserves comments and opaque literal contents.
 ## Build and run
 
 ```sh
+# Check the configured project without writing generated source.
+trb check
+
+# Emit stable, machine-readable diagnostics for editors and agents.
+trb check --diagnostic-format json
+
 # Compile a project to its configured output directory.
 trb build
-
-# Compile without writing output.
-trb build --check
 
 # Choose a project output directory.
 trb build --out-dir dist .
@@ -93,6 +96,18 @@ trb run -- first-argument
 # Explicitly choose a source file for a one-off run.
 trb run test.trb
 ```
+
+`trb check` is the canonical validation command. It parses, resolves, type
+checks, and validates the complete project without writing generated files or
+starting a target toolchain. Human-readable diagnostics are the default.
+`--diagnostic-format json` writes a versioned report to standard output and
+returns a nonzero status when errors exist. Locations use one-based lines and
+columns plus zero-based UTF-8 byte offsets. Each diagnostic has a stable
+`TRBxxxx` code; messages may improve without changing that code. Related
+locations and atomic source-edit suggestions are included when available.
+The initial code families are `TRB1xxx` for syntax, `TRB2xxx` for resolution
+and imports, `TRB3xxx` for types and flow, `TRB4xxx` for project integration,
+and `TRB5xxx` for backend generation.
 
 A runnable project defines exactly one top-level `def main()`. `trb run`
 compiles before every execution, so a separate build step is unnecessary.

@@ -55,6 +55,13 @@ type CLI struct {
 	terminal func(io.Reader, io.Writer) bool
 }
 
+type reportedError struct {
+	cause error
+}
+
+func (e *reportedError) Error() string { return e.cause.Error() }
+func (e *reportedError) Unwrap() error { return e.cause }
+
 func New() *CLI { return &CLI{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr} }
 
 func (c *CLI) Run(args []string) int {
@@ -69,6 +76,8 @@ func (c *CLI) Run(args []string) int {
 	switch args[0] {
 	case "fmt":
 		err = c.runFmt(args[1:])
+	case "check":
+		err = c.runCheck(args[1:])
 	case "build":
 		err = c.runBuild(args[1:])
 	case "run":
@@ -104,18 +113,114 @@ func (c *CLI) Run(args []string) int {
 		err = fmt.Errorf("unknown command %q", args[0])
 	}
 	if err != nil {
-		fmt.Fprintln(c.Stderr, "trb:", err)
-		if compilation, ok := err.(*compiler.CompileError); ok {
-			for i, item := range compilation.Diagnostics {
-				if i == 0 {
-					continue
-				}
-				fmt.Fprintf(c.Stderr, "%s:%d:%d: %s: %s\n", compilation.Filename, item.Span.Start.Line, item.Span.Start.Column, item.Severity, item.Message)
-			}
+		var reported *reportedError
+		if errors.As(err, &reported) {
+			return 1
+		}
+		var compilation *compiler.CompileError
+		if errors.As(err, &compilation) {
+			c.writeHumanDiagnostics(compilation.Diagnostics)
+		} else {
+			fmt.Fprintln(c.Stderr, "trb:", err)
 		}
 		return 1
 	}
 	return 0
+}
+
+func (c *CLI) runCheck(args []string) error {
+	flags := flag.NewFlagSet("check", flag.ContinueOnError)
+	flags.SetOutput(c.Stderr)
+	configPath := flags.String("config", "", "path to trbconfig.jsonc")
+	format := flags.String("diagnostic-format", "human", "diagnostic output: human or json")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("check does not accept source paths; it checks the configured project")
+	}
+	if *format != "human" && *format != "json" {
+		return fmt.Errorf("--diagnostic-format must be human or json; got %q", *format)
+	}
+
+	config, err := loadConfig(*configPath, ".")
+	if err != nil {
+		return c.reportCheckError(*format, diagnostic.ProjectError, err)
+	}
+	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+	if err != nil {
+		return c.reportCheckError(*format, diagnostic.ProjectError, err)
+	}
+	if len(files) == 0 {
+		return c.reportCheckError(*format, diagnostic.ProjectError, errors.New("no .trb files found"))
+	}
+	units, options, err := projectCompilation(config, files)
+	if err != nil {
+		return c.reportCheckError(*format, diagnostic.ProjectError, err)
+	}
+	_, err = compiler.CompileProject(units, options)
+	if err != nil {
+		fallback := diagnostic.BackendError
+		var compilation *compiler.CompileError
+		if errors.As(err, &compilation) {
+			fallback = diagnostic.TypeError
+		}
+		return c.reportCheckError(*format, fallback, err)
+	}
+	if *format == "json" {
+		return c.writeJSONDiagnostics(nil)
+	}
+	_, err = fmt.Fprintf(c.Stdout, "checked %d file(s) for mode %s\n", len(files), config.Mode)
+	return err
+}
+
+func (c *CLI) reportCheckError(format string, fallback diagnostic.Code, err error) error {
+	var items []diagnostic.Diagnostic
+	var compilation *compiler.CompileError
+	if errors.As(err, &compilation) {
+		items = diagnostic.Normalize(append([]diagnostic.Diagnostic(nil), compilation.Diagnostics...), compilation.Filename, fallback)
+	} else {
+		items = []diagnostic.Diagnostic{{Code: fallback, Severity: diagnostic.Error, Message: err.Error()}}
+	}
+	if format == "json" {
+		if writeErr := c.writeJSONDiagnostics(items); writeErr != nil {
+			return writeErr
+		}
+	} else {
+		c.writeHumanDiagnostics(items)
+	}
+	return &reportedError{cause: err}
+}
+
+func (c *CLI) writeJSONDiagnostics(items []diagnostic.Diagnostic) error {
+	encoder := json.NewEncoder(c.Stdout)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(diagnostic.NewJSONReport(items))
+}
+
+func (c *CLI) writeHumanDiagnostics(items []diagnostic.Diagnostic) {
+	for _, item := range items {
+		path := item.Path
+		if path == "" {
+			path = "<project>"
+		}
+		if item.Span.Start.Line > 0 {
+			fmt.Fprintf(c.Stderr, "%s:%d:%d: %s[%s]: %s\n", path, item.Span.Start.Line, item.Span.Start.Column, item.Severity, item.Code, item.Message)
+		} else {
+			fmt.Fprintf(c.Stderr, "%s: %s[%s]: %s\n", path, item.Severity, item.Code, item.Message)
+		}
+		for _, related := range item.Related {
+			relatedPath := related.Location.Path
+			if relatedPath == "" {
+				relatedPath = path
+			}
+			fmt.Fprintf(c.Stderr, "  %s:%d:%d: note: %s\n", relatedPath, related.Location.Span.Start.Line, related.Location.Span.Start.Column, related.Message)
+		}
+		for _, fix := range item.Fixes {
+			fmt.Fprintf(c.Stderr, "  help: %s\n", fix.Message)
+		}
+	}
 }
 
 func (c *CLI) runFmt(args []string) error {
@@ -193,7 +298,6 @@ func (c *CLI) runBuild(args []string) error {
 	outDirFlag := flags.String("out-dir", "", "override config outDir")
 	flags.StringVar(outDirFlag, "o", "", "override config outDir")
 	stdout := flags.Bool("stdout", false, "write one compiled file to stdout")
-	check := flags.Bool("check", false, "compile without writing output")
 	copyFlag := flags.String("copy", "", "override config copyFiles (true or false)")
 	compile := flags.Bool("compile", false, "produce an executable with the target toolchain")
 	outfile := flags.String("outfile", "", "executable output path relative to the project root")
@@ -216,8 +320,8 @@ func (c *CLI) runBuild(args []string) error {
 		if len(paths) != 0 {
 			return errors.New("--compile builds the configured project and does not accept source paths")
 		}
-		if *stdout || *check || *copyFlag != "" || *outDirFlag != "" {
-			return errors.New("--compile cannot be combined with --stdout, --check, --copy, or --out-dir")
+		if *stdout || *copyFlag != "" || *outDirFlag != "" {
+			return errors.New("--compile cannot be combined with --stdout, --copy, or --out-dir")
 		}
 		return c.buildGoExecutable(config, *outfile)
 	}
@@ -297,10 +401,6 @@ func (c *CLI) runBuild(args []string) error {
 			continue
 		}
 		artifacts = append(artifacts, built{input: name, output: filepath.Join(outDir, relative), data: artifact.Output})
-	}
-	if *check {
-		fmt.Fprintf(c.Stdout, "checked %d file(s) for mode %s\n", len(artifacts), config.Mode)
-		return nil
 	}
 	manifest := ""
 	if config.ManagesPackages() {
@@ -779,14 +879,26 @@ func hideReplPreludeDiagnostics(err error, filename string, lines, bytes int) er
 	}
 	adjusted := &compiler.CompileError{Filename: compilation.Filename, Diagnostics: append([]diagnostic.Diagnostic(nil), compilation.Diagnostics...)}
 	for index := range adjusted.Diagnostics {
-		span := &adjusted.Diagnostics[index].Span
-		if span.Start.Line <= lines {
-			continue
+		adjustReplLocation := func(path string, span *token.Span) {
+			if path != "" && path != filename || span.Start.Line <= lines {
+				return
+			}
+			span.Start.Line -= lines
+			span.End.Line -= lines
+			span.Start.Offset -= bytes
+			span.End.Offset -= bytes
 		}
-		span.Start.Line -= lines
-		span.End.Line -= lines
-		span.Start.Offset -= bytes
-		span.End.Offset -= bytes
+		adjustReplLocation(adjusted.Diagnostics[index].Path, &adjusted.Diagnostics[index].Span)
+		for relatedIndex := range adjusted.Diagnostics[index].Related {
+			related := &adjusted.Diagnostics[index].Related[relatedIndex].Location
+			adjustReplLocation(related.Path, &related.Span)
+		}
+		for fixIndex := range adjusted.Diagnostics[index].Fixes {
+			for editIndex := range adjusted.Diagnostics[index].Fixes[fixIndex].Edits {
+				edit := &adjusted.Diagnostics[index].Fixes[fixIndex].Edits[editIndex].Location
+				adjustReplLocation(edit.Path, &edit.Span)
+			}
+		}
 	}
 	return adjusted
 }
@@ -1889,7 +2001,8 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb")
 	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [--runtime browser|bun|node] [--template web] [directory]")
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
-	fmt.Fprintln(c.Stdout, "  trb build [--check] [paths...]")
+	fmt.Fprintln(c.Stdout, "  trb check [--diagnostic-format human|json] [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--outfile FILE]")
 	fmt.Fprintln(c.Stdout, "  trb run [FILE.trb] [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")

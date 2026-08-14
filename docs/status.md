@@ -286,6 +286,14 @@ retained through target formatting; Ruby and TypeScript use the same internal
 model. Emitting target-standard map files and translating runtime stack traces
 remain follow-up work.
 
+`trb check` validates a configured project without writing generated source or
+starting a target toolchain. Its human diagnostics and versioned JSON report
+share stable `TRBxxxx` codes, one-based source locations, related locations,
+and atomic source-edit suggestions. Parser, resolver, checker, and project
+integration errors use the same model, and independent errors across project
+files are reported in one run. This model is the diagnostic boundary for the
+future language server and other machine clients.
+
 ## Current limitations
 
 The current alpha does not yet provide:

@@ -39,8 +39,8 @@ than detailed syntax.
 
 ## 3. Production diagnostics and compiler reliability
 
-- Add stable diagnostic codes, recovery after multiple errors, related spans,
-  and actionable suggestions.
+- Expand the initial stable diagnostic catalog and source-edit suggestions as
+  application and editor usage exposes useful semantic-specific actions.
 - Emit target-standard source maps from the shared generated-range-to-`.trb`
   mapping model, then use them for runtime stack traces and coverage.
 - Add incremental project compilation, dependency-aware invalidation, and a

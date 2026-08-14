@@ -433,7 +433,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 	if !c.allowUnusedImports {
 		c.checkUnusedImports(program.Statements)
 	}
-	return c.result, c.diags
+	return c.result, diagnostic.Normalize(c.diags, "", diagnostic.TypeError)
 }
 
 func (c *Checker) validateTypeReferences(statements []ast.Statement) {
@@ -1036,7 +1036,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				variableType.Readonly = true
 			}
 			if previous, exists := sc.values[n.Name]; exists {
-				c.error(n.Span(), fmt.Sprintf("%s was already declared at %s; use = to reassign", n.Name, previous.span.Start))
+				c.errorRelated(diagnostic.DuplicateBinding, n.Span(), fmt.Sprintf("%s was already declared; use = to reassign", n.Name), "first declaration", previous.span)
 			} else {
 				if n.Constant {
 					variableType.Readonly = true
@@ -1182,7 +1182,7 @@ func (c *Checker) checkUnusedBindings(sc *scope) {
 		return left < right
 	})
 	for _, binding := range tracked {
-		c.error(binding.value.span, fmt.Sprintf("%s %s is not used", binding.value.useKind, binding.name))
+		c.errorCode(diagnostic.UnusedBinding, binding.value.span, fmt.Sprintf("%s %s is not used", binding.value.useKind, binding.name))
 	}
 }
 
@@ -1250,13 +1250,17 @@ func (c *Checker) checkUnusedImports(statements []ast.Statement) {
 		used := c.usedImports[node]
 		if len(node.Symbols) == 0 {
 			if !used[""] {
-				c.error(node.Span(), fmt.Sprintf("import %s is not used", node.Path))
+				c.diags = append(c.diags, diagnostic.Diagnostic{
+					Code: diagnostic.UnusedBinding, Severity: diagnostic.Error,
+					Message: fmt.Sprintf("import %s is not used", node.Path), Span: node.Span(),
+					Fixes: []diagnostic.Fix{{Message: "remove unused import", Edits: []diagnostic.TextEdit{{Location: diagnostic.Location{Span: node.Span()}, Replacement: ""}}}},
+				})
 			}
 			continue
 		}
 		for _, name := range node.Symbols {
 			if !used[name] {
-				c.error(node.Span(), fmt.Sprintf("imported symbol %s is not used", name))
+				c.errorCode(diagnostic.UnusedBinding, node.Span(), fmt.Sprintf("imported symbol %s is not used", name))
 			}
 		}
 	}
@@ -6133,5 +6137,16 @@ func isConstant(name string) bool {
 }
 
 func (c *Checker) error(span token.Span, message string) {
-	c.diags = append(c.diags, diagnostic.Diagnostic{Severity: diagnostic.Error, Message: message, Span: span})
+	c.errorCode(diagnostic.TypeError, span, message)
+}
+
+func (c *Checker) errorCode(code diagnostic.Code, span token.Span, message string) {
+	c.diags = append(c.diags, diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message, Span: span})
+}
+
+func (c *Checker) errorRelated(code diagnostic.Code, span token.Span, message, relatedMessage string, relatedSpan token.Span) {
+	c.diags = append(c.diags, diagnostic.Diagnostic{
+		Code: code, Severity: diagnostic.Error, Message: message, Span: span,
+		Related: []diagnostic.RelatedInformation{{Message: relatedMessage, Location: diagnostic.Location{Span: relatedSpan}}},
+	})
 }
