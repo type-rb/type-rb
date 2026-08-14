@@ -23,23 +23,25 @@ import (
 )
 
 type Artifact struct {
-	Filename      string
-	Mode          string
-	AST           *ast.Program
-	IR            *ir.Program
-	Output        []byte
-	CompilerOwned bool
-	Official      bool
+	Filename        string
+	Mode            string
+	AST             *ast.Program
+	IR              *ir.Program
+	Output          []byte
+	CompilerOwned   bool
+	Official        bool
+	ExternalPackage bool
 }
 
 type SourceUnit struct {
-	Filename       string
-	Source         []byte
-	ModulePath     string
-	Package        string
-	PackageAliases map[string]string
-	CompilerOwned  bool
-	Official       bool
+	Filename        string
+	Source          []byte
+	ModulePath      string
+	Package         string
+	PackageAliases  map[string]string
+	CompilerOwned   bool
+	Official        bool
+	ExternalPackage bool
 }
 
 type CompileError struct {
@@ -280,7 +282,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	artifacts := make([]*Artifact, 0, len(units))
 	for index, source := range units {
 		program := programs[source.ModulePath]
-		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], Output: outputs[index], CompilerOwned: source.CompilerOwned, Official: source.Official})
+		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], Output: outputs[index], CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage})
 	}
 	return artifacts, nil
 }

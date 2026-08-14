@@ -30,6 +30,23 @@ func TestGeneratedRelativeUsesTSXOnlyForJSXModules(t *testing.T) {
 	}
 }
 
+func TestGeneratedRelativeUsesCanonicalPathForExternalPackage(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "typescript")
+	filename := filepath.Join(config.SourcePath(), ".trb", "packages", "checksum", "src", "index.trb")
+	artifact := &compiler.Artifact{
+		ExternalPackage: true,
+		IR:              &ir.Program{ModulePath: "github.com/acme/contracts/index"},
+	}
+	relative, packageOutput := generatedRelative(config, filename, artifact)
+	if !packageOutput {
+		t.Fatal("external package artifact was classified as application source")
+	}
+	if relative != filepath.FromSlash("github.com/acme/contracts/index.ts") {
+		t.Fatalf("external package output = %q", relative)
+	}
+}
+
 func TestReactImportContributesManagedNativeDependencies(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "typescript")
