@@ -32,6 +32,7 @@ type Options struct {
 	Version         string
 	Units           []compiler.SourceUnit
 	CompilerOptions compiler.Options
+	ExcludedRoots   []string
 	ResolveUnit     UnitResolver
 	Input           io.Reader
 	Output          io.Writer
@@ -44,17 +45,18 @@ type document struct {
 }
 
 type Server struct {
-	mode         string
-	version      string
-	stream       *rpcStream
-	compiler     *compilerservice.Service
-	resolveUnit  UnitResolver
-	sourceRoot   string
-	documents    map[string]document
-	base         map[string]compiler.SourceUnit
-	published    map[string]bool
-	snapshot     compilerservice.Snapshot
-	runSupported bool
+	mode          string
+	version       string
+	stream        *rpcStream
+	compiler      *compilerservice.Service
+	resolveUnit   UnitResolver
+	sourceRoot    string
+	excludedRoots []string
+	documents     map[string]document
+	base          map[string]compiler.SourceUnit
+	published     map[string]bool
+	snapshot      compilerservice.Snapshot
+	runSupported  bool
 }
 
 const textDocumentSyncIncremental = 2
@@ -75,10 +77,17 @@ func New(options Options) *Server {
 	if options.CompilerOptions.SourceRoot != "" {
 		sourceRoot = cleanPath(options.CompilerOptions.SourceRoot)
 	}
+	excludedRoots := make([]string, 0, len(options.ExcludedRoots))
+	for _, root := range options.ExcludedRoots {
+		if root != "" {
+			excludedRoots = append(excludedRoots, cleanPath(root))
+		}
+	}
 	return &Server{
 		mode: options.Mode, version: options.Version,
 		stream:   newRPCStream(options.Input, options.Output),
-		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit, sourceRoot: sourceRoot,
+		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit,
+		sourceRoot: sourceRoot, excludedRoots: excludedRoots,
 		documents: map[string]document{}, base: base, published: map[string]bool{},
 		runSupported: options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
 	}
@@ -474,6 +483,9 @@ func (s *Server) open(item textDocumentItem) error {
 	if err != nil {
 		return err
 	}
+	if !s.workspaceSourcePath(path) {
+		return nil
+	}
 	unit, err := s.unit(path, []byte(item.Text))
 	if err != nil {
 		return s.showError(err)
@@ -487,6 +499,9 @@ func (s *Server) change(params didChangeParams) error {
 	path, err := pathFromURI(params.TextDocument.URI)
 	if err != nil {
 		return err
+	}
+	if !s.workspaceSourcePath(path) {
+		return nil
 	}
 	current, exists := s.documents[path]
 	if !exists {
@@ -545,6 +560,9 @@ func (s *Server) close(uri string) error {
 	if err != nil {
 		return err
 	}
+	if !s.workspaceSourcePath(path) {
+		return nil
+	}
 	delete(s.documents, path)
 	s.compiler.CloseDocument(path)
 	return s.publish()
@@ -593,10 +611,20 @@ func (s *Server) changeWorkspaceFiles(params didChangeWatchedFilesParams) error 
 }
 
 func (s *Server) workspaceSourcePath(path string) bool {
+	path = cleanPath(path)
+	for _, root := range s.excludedRoots {
+		if pathWithin(root, path) {
+			return false
+		}
+	}
 	if s.sourceRoot == "" {
 		return true
 	}
-	relative, err := filepath.Rel(s.sourceRoot, path)
+	return pathWithin(s.sourceRoot, path)
+}
+
+func pathWithin(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 

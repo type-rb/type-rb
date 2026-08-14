@@ -11,8 +11,11 @@ document outlines, folding, expanding selections, semantic highlighting,
 formatting, quick fixes, and runnable `main()` locations therefore use the same
 compiler and language services as the CLI instead of editor-specific language
 logic. Project symbols and diagnostics also follow `.trb` files created,
-changed, or deleted outside the active editor. The VS Code client owns the
-integrated-terminal run and restart lifecycle.
+changed, or deleted outside the active editor. The client discovers nested
+`trbconfig.jsonc` files and gives each project an independent language-server
+session, including repositories that contain API and frontend applications in
+different target modes. The VS Code client owns the integrated-terminal run
+and restart lifecycle.
 
 Install [TypeRB from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=type-rb.typerb),
 or run:
@@ -29,9 +32,10 @@ npm run package --prefix editors/vscode
 code --install-extension editors/vscode/dist/typerb.vsix
 ```
 
-Set `typerb.server.path` when `trb` is not on `PATH`. Set
-`typerb.server.config` to select a specific `trbconfig.jsonc`; relative paths
-are resolved from the workspace folder.
+Set `typerb.server.path` when `trb` is not on `PATH`. Automatic discovery uses
+ordinary `trbconfig.jsonc` files. Set `typerb.server.config` only to add a
+configuration that discovery cannot find; relative paths are resolved from the
+workspace folder.
 
 ## Portable grammar
 

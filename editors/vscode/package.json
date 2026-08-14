@@ -104,7 +104,7 @@
 				"typerb.server.config": {
 					"type": "string",
 					"default": "",
-					"description": "Optional path to trbconfig.jsonc. Relative paths are resolved from the workspace folder."
+					"description": "Optional additional path to trbconfig.jsonc when automatic workspace discovery is not sufficient. Relative paths are resolved from the workspace folder."
 				}
 			}
 		}

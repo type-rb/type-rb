@@ -322,8 +322,10 @@ and expression blocks from that syntax tree. Selection ranges expand from tokens
 through source lines and enclosing structural blocks.
 Full-document semantic tokens reuse the compiler-aware highlighting service
 and translate UTF-8 byte spans to the UTF-16 positions required by editors.
-The VS Code client watches project `.trb` files, and the language server updates
-the saved workspace snapshot beneath any active editor overlays.
+The VS Code client discovers nested `trbconfig.jsonc` files, starts one language
+server per project, and watches each project's `.trb` files independently. The
+language server rejects editor overlays outside its configured source root and
+updates the saved project snapshot beneath active overlays.
 Canonical type-name diagnostics carry structured fixes, so editors can replace
 aliases such as `Int` with `Integer` without reconstructing source text.
 Top-level `main()` declarations expose a compiler-owned run CodeLens in
