@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -48,6 +49,7 @@ type Server struct {
 	stream      *rpcStream
 	compiler    *compilerservice.Service
 	resolveUnit UnitResolver
+	sourceRoot  string
 	documents   map[string]document
 	base        map[string]compiler.SourceUnit
 	published   map[string]bool
@@ -56,16 +58,26 @@ type Server struct {
 
 const textDocumentSyncIncremental = 2
 
+const (
+	fileChangeCreated = 1
+	fileChangeChanged = 2
+	fileChangeDeleted = 3
+)
+
 func New(options Options) *Server {
 	base := make(map[string]compiler.SourceUnit, len(options.Units))
 	for _, unit := range options.Units {
 		unit.Filename = cleanPath(unit.Filename)
 		base[unit.Filename] = unit
 	}
+	sourceRoot := ""
+	if options.CompilerOptions.SourceRoot != "" {
+		sourceRoot = cleanPath(options.CompilerOptions.SourceRoot)
+	}
 	return &Server{
 		mode: options.Mode, version: options.Version,
 		stream:   newRPCStream(options.Input, options.Output),
-		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit,
+		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit, sourceRoot: sourceRoot,
 		documents: map[string]document{}, base: base, published: map[string]bool{},
 	}
 }
@@ -118,6 +130,12 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.publish()
 	case "$/cancelRequest", "workspace/didChangeConfiguration":
 		return false, nil
+	case "workspace/didChangeWatchedFiles":
+		params, err := decodeParams[didChangeWatchedFilesParams](request.Params)
+		if err != nil {
+			return false, err
+		}
+		return false, s.changeWorkspaceFiles(params)
 	case "shutdown":
 		return false, s.stream.write(success(request.ID, nil))
 	case "exit":
@@ -495,6 +513,56 @@ func (s *Server) close(uri string) error {
 	delete(s.documents, path)
 	s.compiler.CloseDocument(path)
 	return s.publish()
+}
+
+func (s *Server) changeWorkspaceFiles(params didChangeWatchedFilesParams) error {
+	changed := false
+	for _, event := range params.Changes {
+		path, err := pathFromURI(event.URI)
+		if err != nil {
+			return s.showError(err)
+		}
+		if !s.workspaceSourcePath(path) {
+			continue
+		}
+		switch event.Type {
+		case fileChangeDeleted:
+			delete(s.base, path)
+			s.compiler.RemoveWorkspaceDocument(path)
+			changed = true
+		case fileChangeCreated, fileChangeChanged:
+			source, err := os.ReadFile(path)
+			if os.IsNotExist(err) {
+				delete(s.base, path)
+				s.compiler.RemoveWorkspaceDocument(path)
+				changed = true
+				continue
+			}
+			if err != nil {
+				return s.showError(fmt.Errorf("cannot read changed TypeRB file %s: %w", path, err))
+			}
+			unit, err := s.unit(path, source)
+			if err != nil {
+				return s.showError(err)
+			}
+			unit.Filename = path
+			s.base[path] = unit
+			s.compiler.SetWorkspaceDocument(unit)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.publish()
+}
+
+func (s *Server) workspaceSourcePath(path string) bool {
+	if s.sourceRoot == "" {
+		return true
+	}
+	relative, err := filepath.Rel(s.sourceRoot, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func (s *Server) completion(request message) error {

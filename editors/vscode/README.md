@@ -20,7 +20,9 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Deterministic, comment-preserving document formatting
 
 The extension works with ordinary `.trb` files and uses the project's
-`trbconfig.jsonc` to select the target mode and package configuration.
+`trbconfig.jsonc` to select the target mode and package configuration. Project
+diagnostics and symbols update when TypeRB files are created, changed, or
+deleted outside the active editor.
 
 ## Requirements
 

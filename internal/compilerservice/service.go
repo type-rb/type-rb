@@ -74,6 +74,51 @@ func (s *Service) SetDocument(unit compiler.SourceUnit) {
 	s.snapshot = nil
 }
 
+// SetWorkspaceDocument updates the on-disk project input beneath any open
+// editor overlay. Closing an overlay therefore restores the latest saved file.
+func (s *Service) SetWorkspaceDocument(unit compiler.SourceUnit) {
+	unit = cloneUnit(unit)
+	key := cleanPath(unit.Filename)
+	unit.Filename = key
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.base {
+		if cleanPath(s.base[index].Filename) != key {
+			continue
+		}
+		previous := cloneUnit(s.base[index])
+		previous.Filename = key
+		if equalUnit(previous, unit) {
+			return
+		}
+		s.base[index] = unit
+		s.generation++
+		s.snapshot = nil
+		return
+	}
+	s.base = append(s.base, unit)
+	s.generation++
+	s.snapshot = nil
+}
+
+// RemoveWorkspaceDocument removes an on-disk project input while preserving an
+// open editor overlay until the editor closes it.
+func (s *Service) RemoveWorkspaceDocument(filename string) {
+	key := cleanPath(filename)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.base {
+		if cleanPath(s.base[index].Filename) != key {
+			continue
+		}
+		s.base = append(s.base[:index], s.base[index+1:]...)
+		s.generation++
+		s.snapshot = nil
+		return
+	}
+}
+
 // CloseDocument removes an unsaved overlay and restores the on-disk project
 // unit, if one exists.
 func (s *Service) CloseDocument(filename string) {

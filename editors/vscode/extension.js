@@ -10,6 +10,8 @@ async function activate(context) {
 	const settings = vscode.workspace.getConfiguration("typerb");
 	const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 	const workspaceRoot = workspaceFolder?.uri.fsPath;
+	const fileWatcher = vscode.workspace.createFileSystemWatcher("**/*.trb");
+	context.subscriptions.push(fileWatcher);
 	const server = resolveServerOptions(
 		{
 			path: settings.get("server.path", "trb"),
@@ -27,7 +29,8 @@ async function activate(context) {
 			options: workspaceRoot === undefined ? {} : { cwd: workspaceRoot }
 		},
 		{
-			documentSelector: [{ scheme: "file", language: "trb" }]
+			documentSelector: [{ scheme: "file", language: "trb" }],
+			synchronize: { fileEvents: fileWatcher }
 		}
 	);
 

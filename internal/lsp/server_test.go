@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -293,6 +294,53 @@ func TestApplyContentChangesUsesUTF16Ranges(t *testing.T) {
 	insideSurrogate := rangeValue{Start: position{Line: 0, Character: 11}, End: position{Line: 0, Character: 12}}
 	if _, err := applyContentChanges(source, []contentChange{{Range: &insideSurrogate, Text: "x"}}); err == nil {
 		t.Fatal("expected a range inside a UTF-16 surrogate pair to fail")
+	}
+}
+
+func TestServerTracksCreatedAndDeletedWorkspaceFiles(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "src")
+	filename := filepath.Join(sourceRoot, "models", "account.trb")
+	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte("record Account\n\tname: String\nend\n")
+	if err := os.WriteFile(filename, source, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: &output,
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp", SourceRoot: sourceRoot},
+		ResolveUnit: func(path string, contents []byte) (compiler.SourceUnit, error) {
+			return compiler.SourceUnit{Filename: path, ModulePath: "models/account", Package: "models", Source: contents}, nil
+		},
+	})
+	outside := filepath.Join(root, "other.trb")
+	if err := os.WriteFile(outside, []byte("record Outside\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.changeWorkspaceFiles(didChangeWatchedFilesParams{Changes: []fileEvent{
+		{URI: uriFromPath(outside), Type: fileChangeCreated},
+		{URI: uriFromPath(filename), Type: fileChangeCreated},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := server.base[cleanPath(outside)]; exists {
+		t.Fatal("workspace watcher added a TypeRB file outside sourceRoot")
+	}
+	context, ok := server.snapshot.Context("models/account")
+	if !ok || !containsLanguageCompletion(languageservice.Complete(languageservice.CompletionRequest{Source: "Acc", Cursor: 3, Mode: "go", Context: context}), "Account") {
+		t.Fatalf("created workspace file context=%#v", context)
+	}
+	if err := os.Remove(filename); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.changeWorkspaceFiles(didChangeWatchedFilesParams{Changes: []fileEvent{{URI: uriFromPath(filename), Type: fileChangeDeleted}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := server.base[cleanPath(filename)]; exists || len(server.snapshot.Artifacts) != 0 {
+		t.Fatalf("deleted workspace file remains: base=%#v snapshot=%#v", server.base, server.snapshot)
 	}
 }
 
@@ -753,6 +801,15 @@ func decodeParamsFrame(t *testing.T, frame map[string]json.RawMessage, target an
 }
 
 func containsCompletion(items []completionItem, label string) bool {
+	for _, item := range items {
+		if item.Label == label {
+			return true
+		}
+	}
+	return false
+}
+
+func containsLanguageCompletion(items []languageservice.CompletionItem, label string) bool {
 	for _, item := range items {
 		if item.Label == label {
 			return true

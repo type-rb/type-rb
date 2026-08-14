@@ -236,6 +236,8 @@ same syntax tree for declarations and expression blocks, while selection ranges
 expand from tokens through lines and enclosing blocks. Full-document semantic tokens
 classify TypeRB types, constants, functions, methods, literals, comments, and
 keywords using the same shared language service as the REPL and browser tools.
+Workspace file notifications update the compiler snapshot when `.trb` files
+are created, changed, or deleted outside an open editor buffer.
 
 The thin Visual Studio Code client in `editors/vscode` starts this command and
 packages the canonical TypeRB TextMate grammar. It defaults to `trb` on `PATH`;
