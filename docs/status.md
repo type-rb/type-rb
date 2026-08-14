@@ -343,8 +343,7 @@ The current alpha does not yet provide:
 - semantic package version constraints, publishing or audit services, or a
   stable external compiler-extension protocol;
 - namespace-stable public type identities across independent packages;
-- a language-level test runner, published editor marketplace extension, or
-  semantic editor navigation; or
+- a language-level test runner; or
 - compatibility guarantees for production use.
 
 Future outcomes are tracked in the [roadmap](roadmap.md); executable scoped work
