@@ -125,6 +125,10 @@ type documentSymbol struct {
 	Children       []documentSymbol `json:"children,omitempty"`
 }
 
+type semanticTokens struct {
+	Data []int `json:"data"`
+}
+
 type markupContent struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
@@ -176,16 +180,17 @@ type serverInfo struct {
 }
 
 type serverCapabilities struct {
-	TextDocumentSync           int               `json:"textDocumentSync"`
-	CompletionProvider         completionOptions `json:"completionProvider"`
-	HoverProvider              bool              `json:"hoverProvider"`
-	SignatureHelpProvider      signatureOptions  `json:"signatureHelpProvider"`
-	DefinitionProvider         bool              `json:"definitionProvider"`
-	ReferencesProvider         bool              `json:"referencesProvider"`
-	RenameProvider             renameOptions     `json:"renameProvider"`
-	DocumentSymbolProvider     bool              `json:"documentSymbolProvider"`
-	DocumentFormattingProvider bool              `json:"documentFormattingProvider"`
-	CodeActionProvider         bool              `json:"codeActionProvider"`
+	TextDocumentSync           int                   `json:"textDocumentSync"`
+	CompletionProvider         completionOptions     `json:"completionProvider"`
+	HoverProvider              bool                  `json:"hoverProvider"`
+	SignatureHelpProvider      signatureOptions      `json:"signatureHelpProvider"`
+	DefinitionProvider         bool                  `json:"definitionProvider"`
+	ReferencesProvider         bool                  `json:"referencesProvider"`
+	RenameProvider             renameOptions         `json:"renameProvider"`
+	DocumentSymbolProvider     bool                  `json:"documentSymbolProvider"`
+	SemanticTokensProvider     semanticTokensOptions `json:"semanticTokensProvider"`
+	DocumentFormattingProvider bool                  `json:"documentFormattingProvider"`
+	CodeActionProvider         bool                  `json:"codeActionProvider"`
 }
 
 type completionOptions struct {
@@ -199,6 +204,16 @@ type signatureOptions struct {
 
 type renameOptions struct {
 	PrepareProvider bool `json:"prepareProvider"`
+}
+
+type semanticTokensOptions struct {
+	Legend semanticTokensLegend `json:"legend"`
+	Full   bool                 `json:"full"`
+}
+
+type semanticTokensLegend struct {
+	TokenTypes     []string `json:"tokenTypes"`
+	TokenModifiers []string `json:"tokenModifiers"`
 }
 
 func decodeParams[T any](raw json.RawMessage) (T, error) {

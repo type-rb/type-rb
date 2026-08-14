@@ -13,6 +13,7 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Hover information and signature help
 - Go to definition, references, and symbol rename across project files
 - Document outline for types, fields, functions, and methods
+- Compiler-aware semantic highlighting
 - Deterministic, comment-preserving document formatting
 
 The extension works with ordinary `.trb` files and uses the project's

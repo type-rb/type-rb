@@ -3,6 +3,7 @@
 package lsp
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -91,14 +92,18 @@ func (s *Server) handle(request message) (bool, error) {
 	case "initialize":
 		return false, s.stream.write(success(request.ID, initializeResult{
 			Capabilities: serverCapabilities{
-				TextDocumentSync:           1,
-				CompletionProvider:         completionOptions{TriggerCharacters: []string{".", ":"}},
-				HoverProvider:              true,
-				SignatureHelpProvider:      signatureOptions{TriggerCharacters: []string{"(", ","}},
-				DefinitionProvider:         true,
-				ReferencesProvider:         true,
-				RenameProvider:             renameOptions{PrepareProvider: true},
-				DocumentSymbolProvider:     true,
+				TextDocumentSync:       1,
+				CompletionProvider:     completionOptions{TriggerCharacters: []string{".", ":"}},
+				HoverProvider:          true,
+				SignatureHelpProvider:  signatureOptions{TriggerCharacters: []string{"(", ","}},
+				DefinitionProvider:     true,
+				ReferencesProvider:     true,
+				RenameProvider:         renameOptions{PrepareProvider: true},
+				DocumentSymbolProvider: true,
+				SemanticTokensProvider: semanticTokensOptions{
+					Legend: semanticTokensLegend{TokenTypes: semanticTokenTypes, TokenModifiers: semanticTokenModifiers},
+					Full:   true,
+				},
 				DocumentFormattingProvider: true, CodeActionProvider: true,
 			},
 			ServerInfo: serverInfo{Name: "TypeRB", Version: s.version},
@@ -145,6 +150,8 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.rename(request)
 	case "textDocument/documentSymbol":
 		return false, s.documentSymbols(request)
+	case "textDocument/semanticTokens/full":
+		return false, s.semanticTokens(request)
 	case "textDocument/formatting":
 		return false, s.format(request)
 	case "textDocument/codeAction":
@@ -155,6 +162,103 @@ func (s *Server) handle(request message) (bool, error) {
 		}
 		return false, s.stream.write(failure(request.ID, -32601, fmt.Errorf("method %s is not supported", request.Method)))
 	}
+}
+
+var semanticTokenTypes = []string{"type", "variable", "string", "number", "comment", "function", "method", "keyword"}
+var semanticTokenModifiers = []string{"readonly"}
+
+func (s *Server) semanticTokens(request message) error {
+	params, err := decodeParams[documentParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, semanticTokens{Data: []int{}}))
+	}
+	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	spans := languageservice.Highlight(languageservice.HighlightRequest{
+		Source: string(document.source), Mode: s.mode, Context: context,
+	})
+	return s.stream.write(success(request.ID, semanticTokens{Data: semanticTokenData(document.source, spans)}))
+}
+
+func semanticTokenData(source []byte, spans []languageservice.HighlightSpan) []int {
+	data := []int{}
+	previousLine := 0
+	previousStart := 0
+	for _, span := range spans {
+		typeIndex, modifiers, ok := semanticTokenClassification(span.Kind)
+		if !ok {
+			continue
+		}
+		for _, segment := range semanticTokenSegments(source, span.Range) {
+			length := segment.End.Character - segment.Start.Character
+			if length <= 0 {
+				continue
+			}
+			deltaLine := segment.Start.Line - previousLine
+			deltaStart := segment.Start.Character
+			if deltaLine == 0 {
+				deltaStart -= previousStart
+			}
+			data = append(data, deltaLine, deltaStart, length, typeIndex, modifiers)
+			previousLine = segment.Start.Line
+			previousStart = segment.Start.Character
+		}
+	}
+	return data
+}
+
+func semanticTokenClassification(kind languageservice.HighlightKind) (typeIndex, modifiers int, ok bool) {
+	switch kind {
+	case languageservice.HighlightType:
+		return 0, 0, true
+	case languageservice.HighlightConstant:
+		return 1, 1, true
+	case languageservice.HighlightString:
+		return 2, 0, true
+	case languageservice.HighlightNumber:
+		return 3, 0, true
+	case languageservice.HighlightComment:
+		return 4, 0, true
+	case languageservice.HighlightFunction:
+		return 5, 0, true
+	case languageservice.HighlightMethod:
+		return 6, 0, true
+	case languageservice.HighlightKeyword, languageservice.HighlightBoolean:
+		return 7, 0, true
+	default:
+		return 0, 0, false
+	}
+}
+
+func semanticTokenSegments(source []byte, range_ languageservice.OffsetRange) []rangeValue {
+	start := max(range_.Start, 0)
+	end := min(range_.End, len(source))
+	segments := []rangeValue{}
+	for start < end {
+		lineEnd := end
+		if relative := bytes.IndexByte(source[start:end], '\n'); relative >= 0 {
+			lineEnd = start + relative
+		}
+		contentEnd := lineEnd
+		if contentEnd > start && source[contentEnd-1] == '\r' {
+			contentEnd--
+		}
+		if contentEnd > start {
+			segments = append(segments, offsetRange(source, start, contentEnd))
+		}
+		if lineEnd == end {
+			break
+		}
+		start = lineEnd + 1
+	}
+	return segments
 }
 
 func (s *Server) documentSymbols(request message) error {
