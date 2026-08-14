@@ -32,6 +32,8 @@ type generator struct {
 	typeAliases     map[string]string
 	typeKinds       map[string]string
 	imports         map[string]string
+	bindingNames    map[string]string
+	bindingSources  map[string]bool
 	modulePath      string
 	goModule        string
 	temporary       int
@@ -59,21 +61,33 @@ func GenerateProject(programs []*ir.Program) []string {
 }
 
 func generate(program *ir.Program, projectNames *goProjectNames, execution *effectplan.Plan) string {
+	generated, imports, bindings := generatePass(program, projectNames, execution, nil)
+	bindingNames := analyzeGoBindingNames(bindings, imports)
+	if len(bindingNames) == 0 {
+		return generated
+	}
+	generated, _, _ = generatePass(program, projectNames, execution, bindingNames)
+	return generated
+}
+
+func generatePass(program *ir.Program, projectNames *goProjectNames, execution *effectplan.Plan, bindingNames map[string]string) (string, map[string]string, map[string]bool) {
 	g := &generator{
-		topMethods:    map[string]bool{},
-		staticMethods: map[string]map[string]bool{},
-		records:       map[string]bool{},
-		classes:       map[string]bool{},
-		typeAliases:   map[string]string{},
-		typeKinds:     map[string]string{},
-		imports:       map[string]string{},
-		modulePath:    program.ModulePath,
-		goModule:      program.GoModule,
-		jobs:          jobsintegration.ManifestFrom(program.Extensions),
-		jobsSQL:       jobssql.ManifestFrom(program.Extensions),
-		orm:           ormintegration.ManifestFrom(program.Extensions),
-		projectNames:  projectNames,
-		execution:     execution,
+		topMethods:     map[string]bool{},
+		staticMethods:  map[string]map[string]bool{},
+		records:        map[string]bool{},
+		classes:        map[string]bool{},
+		typeAliases:    map[string]string{},
+		typeKinds:      map[string]string{},
+		imports:        map[string]string{},
+		bindingNames:   bindingNames,
+		bindingSources: map[string]bool{},
+		modulePath:     program.ModulePath,
+		goModule:       program.GoModule,
+		jobs:           jobsintegration.ManifestFrom(program.Extensions),
+		jobsSQL:        jobssql.ManifestFrom(program.Extensions),
+		orm:            ormintegration.ManifestFrom(program.Extensions),
+		projectNames:   projectNames,
+		execution:      execution,
 	}
 	for _, statement := range program.Statements {
 		switch n := statement.(type) {
@@ -135,9 +149,9 @@ func generate(program *ir.Program, projectNames *goProjectNames, execution *effe
 	output.WriteString(g.b.String())
 	generated := strings.TrimRight(output.String(), "\n") + "\n"
 	if formatted, err := format.Source([]byte(generated)); err == nil {
-		return string(formatted)
+		return string(formatted), g.imports, g.bindingSources
 	}
-	return generated
+	return generated, g.imports, g.bindingSources
 }
 
 func (g *generator) importStatement(imported *ir.Import) {
@@ -222,13 +236,13 @@ func (g *generator) statement(statement ir.Statement) {
 		g.topLevelMethod(n)
 	case *ir.Variable:
 		if g.functionDepth == 0 {
-			name := goBindingIdentifier(n.Name)
+			name := g.bindingIdentifier(n.Name)
 			if n.Constant {
 				name = goConstantIdentifier(n.Owner, n.Name)
 			}
 			g.line("var " + name + " " + g.goType(n.Type) + " = " + g.expr(n.Value))
 		} else {
-			name := goBindingIdentifier(n.Name)
+			name := g.bindingIdentifier(n.Name)
 			g.line(name + " := " + g.exprExpected(n.Value, n.Type))
 			if namedUnusedBinding(n.Name) {
 				g.line("_ = " + name)
@@ -315,7 +329,7 @@ func (g *generator) statement(statement ir.Statement) {
 					continue
 				}
 				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
-				name := goCaseBindingIdentifier(binding)
+				name := g.caseBindingIdentifier(binding)
 				g.line(name + " := " + value + "." + field)
 				if namedUnusedBinding(binding.Name) {
 					g.line("_ = " + name)
@@ -376,7 +390,7 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 			if binding.Name == "_" {
 				continue
 			}
-			name := goCaseBindingIdentifier(binding)
+			name := g.caseBindingIdentifier(binding)
 			g.line(name + " := " + typed)
 			if namedUnusedBinding(binding.Name) {
 				g.line("_ = " + name)
@@ -416,8 +430,8 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.requireImport("maps", "")
 		keyBinding := binding(0)
 		valueBinding := binding(1)
-		key := goBindingIdentifier(keyBinding.Name)
-		value := goBindingIdentifier(valueBinding.Name)
+		key := g.bindingIdentifier(keyBinding.Name)
+		value := g.bindingIdentifier(valueBinding.Name)
 		switch {
 		case keyBinding.Name != "_" && valueBinding.Name != "_":
 			g.line("for " + key + ", " + value + " := range maps.Clone(" + g.expr(iteration.Source) + ") {")
@@ -441,7 +455,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		return
 	}
 	itemBinding := binding(0)
-	item := goBindingIdentifier(itemBinding.Name)
+	item := g.bindingIdentifier(itemBinding.Name)
 	if iteration.Operation == "each_slice" {
 		g.temporary++
 		suffix := strconv.Itoa(g.temporary)
@@ -468,7 +482,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		if iteration.WithIndex {
 			indexBinding := binding(1)
 			if indexBinding.Name != "_" {
-				index := goBindingIdentifier(indexBinding.Name)
+				index := g.bindingIdentifier(indexBinding.Name)
 				g.line(index + " := " + offset + " / " + size)
 				g.line("_ = " + index)
 			}
@@ -482,9 +496,9 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	}
 	indexBinding := binding(1)
 	if iteration.WithIndex && indexBinding.Name != "_" && itemBinding.Name != "_" {
-		g.line("for " + goBindingIdentifier(indexBinding.Name) + ", " + item + " := range " + g.iterableExpr(iteration.Source) + " {")
+		g.line("for " + g.bindingIdentifier(indexBinding.Name) + ", " + item + " := range " + g.iterableExpr(iteration.Source) + " {")
 	} else if iteration.WithIndex && indexBinding.Name != "_" {
-		g.line("for " + goBindingIdentifier(indexBinding.Name) + " := range " + g.iterableExpr(iteration.Source) + " {")
+		g.line("for " + g.bindingIdentifier(indexBinding.Name) + " := range " + g.iterableExpr(iteration.Source) + " {")
 	} else if itemBinding.Name != "_" {
 		g.line("for _, " + item + " := range " + g.iterableExpr(iteration.Source) + " {")
 	} else {
@@ -495,7 +509,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.line("_ = " + item)
 	}
 	if iteration.WithIndex && indexBinding.Name != "_" {
-		g.line("_ = " + goBindingIdentifier(indexBinding.Name))
+		g.line("_ = " + g.bindingIdentifier(indexBinding.Name))
 	}
 	g.statements(iteration.Body)
 	g.indent--
@@ -653,7 +667,7 @@ func (g *generator) typeAlias(alias *ir.TypeAlias) {
 		}
 		values := make([]string, len(variant.Fields))
 		for index, field := range variant.Fields {
-			values[index] = goBindingIdentifier(field.Name)
+			values[index] = g.bindingIdentifier(field.Name)
 		}
 		g.line("return " + targetConstructor + "(" + strings.Join(values, ", ") + ")")
 		g.indent--
@@ -721,7 +735,7 @@ func (g *generator) payloadEnum(enum *ir.Enum, name string) {
 		fields := []string{"Kind: " + constant + "Tag"}
 		for _, field := range member.Fields {
 			fieldName := goIdentifier(member.Name, true) + goIdentifier(field.Name, true)
-			fields = append(fields, fieldName+": "+goBindingIdentifier(field.Name))
+			fields = append(fields, fieldName+": "+g.bindingIdentifier(field.Name))
 		}
 		g.line("return " + name + genericArguments + "{" + strings.Join(fields, ", ") + "}")
 		g.indent--
@@ -960,7 +974,7 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 	}
 	parts := make([]string, 0, optionalStart+1)
 	for _, parameter := range parameters[:optionalStart] {
-		name := goBindingIdentifier(parameter.Name)
+		name := g.bindingIdentifier(parameter.Name)
 		typ := g.goType(parameter.Type)
 		if parameter.Rest {
 			typ = "..." + strings.TrimPrefix(typ, "[]")
@@ -995,7 +1009,7 @@ func (g *generator) parameterDefaults(parameters []ir.Parameter) {
 		return
 	}
 	for index, parameter := range parameters[start:] {
-		name := goBindingIdentifier(parameter.Name)
+		name := g.bindingIdentifier(parameter.Name)
 		typ := g.goType(parameter.Type)
 		g.line("var " + name + " " + typ + " = " + g.expr(parameter.Default))
 		g.line("if len(__trbOptional) > " + strconv.Itoa(index) + " {")
@@ -1036,7 +1050,7 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Lambda:
 		parts := make([]string, len(n.Parameters))
 		for index, parameter := range n.Parameters {
-			parts[index] = goBindingIdentifier(parameter.Name) + " " + g.goType(parameter.Type)
+			parts[index] = g.bindingIdentifier(parameter.Name) + " " + g.goType(parameter.Type)
 		}
 		header := "func(" + strings.Join(parts, ", ") + ")"
 		if returned := g.goType(n.ReturnType); returned != "" {
@@ -1060,7 +1074,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "self"
 		}
 		if n.Lexical {
-			return goBindingIdentifier(n.Name)
+			return g.bindingIdentifier(n.Name)
 		}
 		if strings.HasPrefix(n.Name, "_") && g.receiver != "" {
 			return g.receiver + "." + goMethodName(n.Name)
@@ -1426,6 +1440,8 @@ func (g *generator) ifExpression(node *ir.If) string {
 		typeAliases:     g.typeAliases,
 		typeKinds:       g.typeKinds,
 		imports:         g.imports,
+		bindingNames:    g.bindingNames,
+		bindingSources:  g.bindingSources,
 		modulePath:      g.modulePath,
 		goModule:        g.goModule,
 		temporary:       g.temporary,
@@ -1482,6 +1498,8 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		typeAliases:     g.typeAliases,
 		typeKinds:       g.typeKinds,
 		imports:         g.imports,
+		bindingNames:    g.bindingNames,
+		bindingSources:  g.bindingSources,
 		modulePath:      g.modulePath,
 		goModule:        g.goModule,
 		temporary:       g.temporary,
@@ -1510,7 +1528,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 				if binding.Name == "_" {
 					continue
 				}
-				name := goCaseBindingIdentifier(binding)
+				name := child.caseBindingIdentifier(binding)
 				child.line(name + " := " + typed)
 				if namedUnusedBinding(binding.Name) {
 					child.line("_ = " + name)
@@ -1554,7 +1572,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 					continue
 				}
 				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
-				name := goCaseBindingIdentifier(binding)
+				name := child.caseBindingIdentifier(binding)
 				child.line(name + " := " + value + "." + field)
 				if namedUnusedBinding(binding.Name) {
 					child.line("_ = " + name)
@@ -1599,6 +1617,8 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 		typeAliases:     g.typeAliases,
 		typeKinds:       g.typeKinds,
 		imports:         g.imports,
+		bindingNames:    g.bindingNames,
+		bindingSources:  g.bindingSources,
 		modulePath:      g.modulePath,
 		goModule:        g.goModule,
 		temporary:       g.temporary,
@@ -1629,7 +1649,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 	suffix := strconv.Itoa(g.temporary)
 	items := "__trbItems" + suffix
 	result := "__trbResult" + suffix
-	item := goBindingIdentifier(transform.Item)
+	item := g.bindingIdentifier(transform.Item)
 	if item == "" || item == "_" {
 		item = "__trbItem" + suffix
 	}
@@ -1651,7 +1671,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 		index := "_"
 		indexUse := ""
 		if transform.WithIndex {
-			index = goBindingIdentifier(transform.Index)
+			index = g.bindingIdentifier(transform.Index)
 			if index == "" {
 				index = "_"
 			}
@@ -1664,7 +1684,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 		index := "_"
 		indexUse := ""
 		if transform.WithIndex {
-			index = goBindingIdentifier(transform.Index)
+			index = g.bindingIdentifier(transform.Index)
 			if index == "" {
 				index = "_"
 			}
@@ -1700,7 +1720,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 		index := "__trbIndex" + suffix
 		return "func() " + g.goType(transform.ExprType()) + " { for " + index + ", " + item + " := range " + source + " { " + itemUse + "if " + value + " { " + result + " := " + index + "; return &" + result + " } }; return nil }()"
 	case "reduce":
-		accumulator := goBindingIdentifier(transform.Accumulator)
+		accumulator := g.bindingIdentifier(transform.Accumulator)
 		binding := ""
 		if accumulator != "" && accumulator != "_" {
 			binding = accumulator + " := " + result + "; "
@@ -1747,11 +1767,21 @@ func namedUnusedBinding(name string) bool {
 	return name != "_" && strings.HasPrefix(name, "_")
 }
 
-func goCaseBindingIdentifier(binding ir.CaseBinding) string {
+func (g *generator) caseBindingIdentifier(binding ir.CaseBinding) string {
 	if binding.Generated {
 		return binding.Name
 	}
-	return goBindingIdentifier(binding.Name)
+	return g.bindingIdentifier(binding.Name)
+}
+
+func (g *generator) bindingIdentifier(name string) string {
+	if name != "" && name != "_" {
+		g.bindingSources[name] = true
+	}
+	if target := g.bindingNames[name]; target != "" {
+		return target
+	}
+	return goBindingIdentifier(name)
 }
 
 func goBindingIdentifier(name string) string {
@@ -1857,7 +1887,7 @@ func (g *generator) unionMemberExpression(member *ir.Member) string {
 
 func (g *generator) caseNarrowings(narrowings []ir.CaseBinding) {
 	for _, narrowing := range narrowings {
-		name := goBindingIdentifier(narrowing.Name)
+		name := g.bindingIdentifier(narrowing.Name)
 		value := name
 		if narrowing.Type.Kind != types.Union {
 			value = name + ".(" + g.goType(narrowing.Type) + ")"

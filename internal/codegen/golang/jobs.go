@@ -420,7 +420,7 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		parameters := make([]string, len(job.Parameters))
 		arguments := make([]string, len(job.Parameters))
 		for index, parameter := range job.Parameters {
-			name := goBindingIdentifier(parameter.Name)
+			name := g.bindingIdentifier(parameter.Name)
 			parameters[index] = name + " " + g.goType(parameter.Type)
 			arguments[index] = name
 		}
