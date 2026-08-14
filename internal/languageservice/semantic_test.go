@@ -158,3 +158,155 @@ end
 		})
 	}
 }
+
+func TestReferencesUseCheckedIdentityAcrossProjectFiles(t *testing.T) {
+	root := t.TempDir()
+	modelPath := filepath.Join(root, "models", "user.trb")
+	mainPath := filepath.Join(root, "main.trb")
+	modelSource := "record User\n\tname: String\nend\n\nrecord Product\n\tname: String\nend\n"
+	mainSource := `import { Product, User } from models/user
+
+def user_name(user: User): String
+	local_name := user.name
+	return local_name
+end
+
+def main()
+	user := User.new(name: "Ada")
+	product := Product.new(name: "Book")
+	puts(user_name(user))
+	puts(product.name)
+	return
+end
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			packageName := ""
+			options := compiler.Options{Mode: mode, ModulePath: "main"}
+			if mode == "go" {
+				packageName = "main"
+				options.Package = "main"
+				options.GoModule = "example.com/references"
+			}
+			artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
+				{Filename: modelPath, ModulePath: "models/user", Package: packageName, Source: []byte(modelSource)},
+				{Filename: mainPath, ModulePath: "main", Package: packageName, Source: []byte(mainSource)},
+			}, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			programs := make([]*ir.Program, 0, len(artifacts))
+			for _, artifact := range artifacts {
+				programs = append(programs, artifact.IR)
+			}
+			documents := []languageservice.SemanticDocument{
+				{Path: modelPath, Source: modelSource, Mode: mode, Context: languageservice.BuildContext(programs, "models/user")},
+				{Path: mainPath, Source: mainSource, Mode: mode, Context: languageservice.BuildContext(programs, "main")},
+			}
+
+			fieldCursor := strings.Index(mainSource, "user.name") + len("user.na")
+			fieldReferences, ok := languageservice.References(languageservice.SemanticRequest{
+				Path: mainPath, Source: mainSource, Cursor: fieldCursor, Mode: mode, Context: documents[1].Context,
+			}, documents, true)
+			if !ok || len(fieldReferences) != 3 {
+				t.Fatalf("field references=(%#v, %v), want declaration, member, and constructor keyword", fieldReferences, ok)
+			}
+			if declarationCount(fieldReferences, modelPath) != 1 {
+				t.Fatalf("field references have no unique model declaration: %#v", fieldReferences)
+			}
+
+			typeCursor := strings.LastIndex(mainSource, "User.new") + len("Us")
+			typeReferences, ok := languageservice.References(languageservice.SemanticRequest{
+				Path: mainPath, Source: mainSource, Cursor: typeCursor, Mode: mode, Context: documents[1].Context,
+			}, documents, true)
+			if !ok || len(typeReferences) != 4 || declarationCount(typeReferences, modelPath) != 1 {
+				t.Fatalf("type references=(%#v, %v), want four checked occurrences", typeReferences, ok)
+			}
+			constructorCursor := strings.LastIndex(mainSource, "User.new") + len("User.ne")
+			if references, renameable := languageservice.References(languageservice.SemanticRequest{
+				Path: mainPath, Source: mainSource, Cursor: constructorCursor, Mode: mode, Context: documents[1].Context,
+			}, documents, true); renameable {
+				t.Fatalf("generated constructor is renameable: %#v", references)
+			}
+
+			localCursor := strings.Index(mainSource, "return local_name") + len("return loc")
+			localReferences, ok := languageservice.References(languageservice.SemanticRequest{
+				Path: mainPath, Source: mainSource, Cursor: localCursor, Mode: mode, Context: documents[1].Context,
+			}, documents, false)
+			if !ok || len(localReferences) != 1 || localReferences[0].Declaration {
+				t.Fatalf("local references=(%#v, %v), want one use without declaration", localReferences, ok)
+			}
+		})
+	}
+}
+
+func declarationCount(references []languageservice.ReferenceInfo, path string) int {
+	count := 0
+	for _, reference := range references {
+		if reference.Declaration && reference.Path == path {
+			count++
+		}
+	}
+	return count
+}
+
+func TestReferencesKeepShadowedBlockBindingsSeparate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.trb")
+	source := `def main()
+	value := 1
+	[1, 2].each do |value|
+		puts(value)
+	end
+	puts(value)
+	return
+end
+`
+	document := languageservice.SemanticDocument{Path: path, Source: source, Mode: "go", Context: languageservice.Context{TypeMembers: map[string][]languageservice.Symbol{}}}
+
+	outerCursor := strings.LastIndex(source, "puts(value)") + len("puts(val")
+	outer, ok := languageservice.References(languageservice.SemanticRequest{
+		Path: path, Source: source, Cursor: outerCursor, Mode: "go", Context: document.Context,
+	}, []languageservice.SemanticDocument{document}, true)
+	if !ok || len(outer) != 2 {
+		t.Fatalf("outer references=(%#v, %v), want declaration and final use", outer, ok)
+	}
+
+	innerCursor := strings.Index(source, "puts(value)") + len("puts(val")
+	inner, ok := languageservice.References(languageservice.SemanticRequest{
+		Path: path, Source: source, Cursor: innerCursor, Mode: "go", Context: document.Context,
+	}, []languageservice.SemanticDocument{document}, true)
+	if !ok || len(inner) != 2 {
+		t.Fatalf("inner references=(%#v, %v), want block parameter and block use", inner, ok)
+	}
+	if outer[0].ID == inner[0].ID {
+		t.Fatalf("shadowed bindings share identity %q", outer[0].ID)
+	}
+}
+
+func TestReferencesRenameClassFieldWithoutRemovingInstanceMarker(t *testing.T) {
+	source := `class Box
+	readonly @label: String := "items"
+end
+
+def main()
+	box := Box.new()
+	puts(box.label)
+	return
+end
+`
+	artifact := compile(t, "go", source)
+	path := artifact.IR.SourcePath
+	context := languageservice.BuildContext([]*ir.Program{artifact.IR}, "repl")
+	document := languageservice.SemanticDocument{Path: path, Source: source, Mode: "go", Context: context}
+	cursor := strings.Index(source, "box.label") + len("box.lab")
+	references, ok := languageservice.References(languageservice.SemanticRequest{
+		Path: path, Source: source, Cursor: cursor, Mode: "go", Context: context,
+	}, []languageservice.SemanticDocument{document}, true)
+	if !ok || len(references) != 2 {
+		t.Fatalf("class field references=(%#v, %v)", references, ok)
+	}
+	declarationStart := strings.Index(source, "@label") + 1
+	if references[0].Range.Start != declarationStart || source[references[0].Range.Start:references[0].Range.End] != "label" {
+		t.Fatalf("class field declaration range=%#v", references[0])
+	}
+}

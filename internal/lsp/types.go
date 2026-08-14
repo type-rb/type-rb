@@ -50,6 +50,22 @@ type documentPositionParams struct {
 	Position     position               `json:"position"`
 }
 
+type referenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
+type referenceParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Position     position               `json:"position"`
+	Context      referenceContext       `json:"context"`
+}
+
+type renameParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Position     position               `json:"position"`
+	NewName      string                 `json:"newName"`
+}
+
 type documentParams struct {
 	TextDocument textDocumentIdentifier `json:"textDocument"`
 }
@@ -129,6 +145,11 @@ type workspaceEdit struct {
 	Changes map[string][]textEdit `json:"changes"`
 }
 
+type prepareRenameResult struct {
+	Range       rangeValue `json:"range"`
+	Placeholder string     `json:"placeholder"`
+}
+
 type codeAction struct {
 	Title string        `json:"title"`
 	Kind  string        `json:"kind"`
@@ -151,6 +172,8 @@ type serverCapabilities struct {
 	HoverProvider              bool              `json:"hoverProvider"`
 	SignatureHelpProvider      signatureOptions  `json:"signatureHelpProvider"`
 	DefinitionProvider         bool              `json:"definitionProvider"`
+	ReferencesProvider         bool              `json:"referencesProvider"`
+	RenameProvider             renameOptions     `json:"renameProvider"`
 	DocumentFormattingProvider bool              `json:"documentFormattingProvider"`
 	CodeActionProvider         bool              `json:"codeActionProvider"`
 }
@@ -162,6 +185,10 @@ type completionOptions struct {
 type signatureOptions struct {
 	TriggerCharacters   []string `json:"triggerCharacters"`
 	RetriggerCharacters []string `json:"retriggerCharacters,omitempty"`
+}
+
+type renameOptions struct {
+	PrepareProvider bool `json:"prepareProvider"`
 }
 
 func decodeParams[T any](raw json.RawMessage) (T, error) {

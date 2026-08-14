@@ -5,9 +5,9 @@
 The repository ships a thin Visual Studio Code extension in
 [`editors/vscode`](../editors/vscode). It registers `.trb` files, packages the
 canonical TextMate grammar and snippets, and starts `trb lsp` from `PATH`.
-Diagnostics, completion, hover information, signature help, definition
-navigation, formatting, and quick fixes therefore use the same compiler
-service as the CLI instead of editor-specific language logic.
+Diagnostics, completion, hover information, signature help, definition and
+reference navigation, symbol rename, formatting, and quick fixes therefore use
+the same compiler service as the CLI instead of editor-specific language logic.
 
 Build and install a local VSIX with:
 
