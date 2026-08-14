@@ -81,6 +81,7 @@ jobs:
               dist/trb.rb \
               --clobber
             gh release edit "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
               --notes-file dist/release-notes.md
           else
             gh release create "$GITHUB_REF_NAME" \
@@ -88,6 +89,7 @@ jobs:
               dist/checksums.txt \
               dist/trb.rb \
               --verify-tag \
+              --title "$GITHUB_REF_NAME" \
               --notes-file dist/release-notes.md
           fi
 
