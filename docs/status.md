@@ -318,7 +318,8 @@ across project imports, receiver types, and common lexical bindings. Document
 symbols expose the structural outline from the lossless syntax tree even while
 a file has type errors, and workspace symbol queries search the same
 declarations across project files. Structural folding ranges cover declarations
-and expression blocks from that syntax tree.
+and expression blocks from that syntax tree. Selection ranges expand from tokens
+through source lines and enclosing structural blocks.
 Full-document semantic tokens reuse the compiler-aware highlighting service
 and translate UTF-8 byte spans to the UTF-16 positions required by editors.
 

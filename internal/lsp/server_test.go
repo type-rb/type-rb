@@ -48,7 +48,7 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 
 	var initialized initializeResult
 	decodeResult(t, frames[0], &initialized)
-	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != textDocumentSyncIncremental || !initialized.Capabilities.CodeActionProvider || !initialized.Capabilities.FoldingRangeProvider || !initialized.Capabilities.DocumentHighlightProvider {
+	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != textDocumentSyncIncremental || !initialized.Capabilities.CodeActionProvider || !initialized.Capabilities.FoldingRangeProvider || !initialized.Capabilities.DocumentHighlightProvider || !initialized.Capabilities.SelectionRangeProvider {
 		t.Fatalf("unexpected initialize result: %#v", initialized)
 	}
 	var opened publishDiagnosticsParams
@@ -204,6 +204,37 @@ func TestServerHighlightsCheckedReferencesInTheCurrentDocument(t *testing.T) {
 	decodeResult(t, frames[2], &highlights)
 	if len(highlights) != 2 || highlights[0].Range.Start != (position{Line: 1, Character: 1}) || highlights[1].Range.Start != (position{Line: 2, Character: 6}) {
 		t.Fatalf("document highlights=%#v", highlights)
+	}
+}
+
+func TestServerReturnsNestedSelectionRanges(t *testing.T) {
+	filename := cleanPath("selection.trb")
+	source := "class User\n\tdef name(): String\n\t\tvalue := \"Ada\"\n\t\treturn value\n\tend\nend\n"
+	uri := uriFromPath(filename)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/selectionRange", Params: rawParams(t, selectionRangeParams{TextDocument: textDocumentIdentifier{URI: uri}, Positions: []position{{Line: 3, Character: 10}}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "selection", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var ranges []selectionRange
+	decodeResult(t, frames[2], &ranges)
+	if len(ranges) != 1 || ranges[0].Range.Start != (position{Line: 3, Character: 9}) || ranges[0].Parent == nil || ranges[0].Parent.Parent == nil {
+		t.Fatalf("selection ranges=%#v", ranges)
+	}
+	if ranges[0].Parent.Range.Start != (position{Line: 3, Character: 0}) || ranges[0].Parent.Parent.Range.Start != (position{Line: 1, Character: 1}) {
+		t.Fatalf("selection hierarchy=%#v", ranges[0])
 	}
 }
 

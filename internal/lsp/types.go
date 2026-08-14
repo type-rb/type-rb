@@ -52,6 +52,11 @@ type documentPositionParams struct {
 	Position     position               `json:"position"`
 }
 
+type selectionRangeParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Positions    []position             `json:"positions"`
+}
+
 type referenceContext struct {
 	IncludeDeclaration bool `json:"includeDeclaration"`
 }
@@ -113,6 +118,11 @@ type location struct {
 type documentHighlight struct {
 	Range rangeValue `json:"range"`
 	Kind  int        `json:"kind,omitempty"`
+}
+
+type selectionRange struct {
+	Range  rangeValue      `json:"range"`
+	Parent *selectionRange `json:"parent,omitempty"`
 }
 
 type textEdit struct {
@@ -212,6 +222,7 @@ type serverCapabilities struct {
 	DefinitionProvider         bool                  `json:"definitionProvider"`
 	ReferencesProvider         bool                  `json:"referencesProvider"`
 	DocumentHighlightProvider  bool                  `json:"documentHighlightProvider"`
+	SelectionRangeProvider     bool                  `json:"selectionRangeProvider"`
 	RenameProvider             renameOptions         `json:"renameProvider"`
 	DocumentSymbolProvider     bool                  `json:"documentSymbolProvider"`
 	FoldingRangeProvider       bool                  `json:"foldingRangeProvider"`
