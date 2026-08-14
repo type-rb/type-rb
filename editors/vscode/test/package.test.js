@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { readFile } = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
+const { excludeGeneratedProjects, projectForPath, projectPaths } = require("../project-options");
 const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("../server-options");
 
 const extensionRoot = path.resolve(__dirname, "..");
@@ -65,4 +66,41 @@ test("resolves configured paths from the workspace", () => {
 			args: ["lsp", "--config", path.resolve("/workspace/apps/api/trbconfig.jsonc")]
 		}
 	);
+});
+
+test("derives independent project roots from JSONC configuration", () => {
+	const api = {
+		configPath: path.resolve("/workspace/apps/api/trbconfig.jsonc"),
+		...projectPaths(
+			"/workspace/apps/api/trbconfig.jsonc",
+			'{\n  // API source\n  "sourceDir": "src",\n  "outDir": "generated"\n}\n'
+		)
+	};
+	const web = {
+		configPath: path.resolve("/workspace/apps/web/trbconfig.jsonc"),
+		...projectPaths(
+			"/workspace/apps/web/trbconfig.jsonc",
+			'{\n  "sourceDir": "src",\n  "homepage": "https://type-rb.github.io/"\n}\n'
+		)
+	};
+	assert.equal(api.sourceRoot, path.resolve("/workspace/apps/api/src"));
+	assert.equal(api.outputRoot, path.resolve("/workspace/apps/api/generated"));
+	assert.equal(web.outputRoot, path.resolve("/workspace/apps/web/build"));
+	assert.equal(projectForPath([api, web], "/workspace/apps/api/src/models/todo.trb"), api);
+	assert.equal(projectForPath([api, web], "/workspace/apps/web/src/models/todo.trb"), web);
+	assert.equal(projectForPath([api, web], "/workspace/shared/todo.trb"), undefined);
+});
+
+test("does not start language servers for copied build projects", () => {
+	const project = {
+		configPath: path.resolve("/workspace/apps/api/trbconfig.jsonc"),
+		sourceRoot: path.resolve("/workspace/apps/api/src"),
+		outputRoot: path.resolve("/workspace/apps/api/build")
+	};
+	const generated = {
+		configPath: path.resolve("/workspace/apps/api/build/trbconfig.jsonc"),
+		sourceRoot: path.resolve("/workspace/apps/api/build/src"),
+		outputRoot: path.resolve("/workspace/apps/api/build/build")
+	};
+	assert.deepEqual(excludeGeneratedProjects([project, generated]), [project]);
 });

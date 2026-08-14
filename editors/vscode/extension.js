@@ -1,19 +1,17 @@
 "use strict";
 
+const { readFile } = require("node:fs/promises");
+const path = require("node:path");
 const vscode = require("vscode");
 const { LanguageClient } = require("vscode-languageclient/node");
+const { excludeGeneratedProjects, projectForPath, projectPaths } = require("./project-options");
 const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("./server-options");
 
-let client;
+let projectManager;
 let runTerminal;
 let runCodeLensProvider;
 
 async function activate(context) {
-	const settings = vscode.workspace.getConfiguration("typerb");
-	const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-	const workspaceRoot = workspaceFolder?.uri.fsPath;
-	const fileWatcher = vscode.workspace.createFileSystemWatcher("**/*.trb");
-	context.subscriptions.push(fileWatcher);
 	context.subscriptions.push(
 		vscode.commands.registerCommand("typerb.runProject", runProject),
 		vscode.commands.registerCommand("typerb.stopProject", stopProject),
@@ -24,40 +22,14 @@ async function activate(context) {
 			}
 		})
 	);
-	const server = resolveServerOptions(
-		{
-			path: settings.get("server.path", "trb"),
-			config: settings.get("server.config", "")
-		},
-		workspaceRoot
-	);
-
-	client = new LanguageClient(
-		"typerb",
-		"TypeRB Language Server",
-		{
-			command: server.command,
-			args: server.args,
-			options: workspaceRoot === undefined ? {} : { cwd: workspaceRoot }
-		},
-		{
-			documentSelector: [{ scheme: "file", language: "trb" }],
-			synchronize: { fileEvents: fileWatcher },
-			middleware: {
-				provideCodeLenses() {
-					return [];
-				}
-			}
-		}
-	);
-
+	projectManager = new ProjectManager();
 	context.subscriptions.push({
 		dispose() {
-			void stopClient();
+			void projectManager?.stop();
 		}
 	});
-	await client.start();
-	runCodeLensProvider = new RunCodeLensProvider(client);
+	await projectManager.start();
+	runCodeLensProvider = new RunCodeLensProvider(projectManager);
 	context.subscriptions.push(
 		runCodeLensProvider,
 		vscode.languages.registerCodeLensProvider(
@@ -67,26 +39,159 @@ async function activate(context) {
 	);
 }
 
+class ProjectManager {
+	constructor() {
+		this.projects = [];
+	}
+
+	async start() {
+		this.projects = await discoverProjects();
+		if (this.projects.length === 0) {
+			void vscode.window.showErrorMessage("TypeRB could not find trbconfig.jsonc in the opened workspace.");
+			return;
+		}
+		await Promise.all(this.projects.map(async (project, index) => {
+			try {
+				await this.startProject(project, index);
+			} catch (error) {
+				project.watcher?.dispose();
+				project.watcher = undefined;
+				project.client = undefined;
+				void vscode.window.showErrorMessage(`Cannot start TypeRB project ${project.configPath}: ${error.message}`);
+			}
+		}));
+	}
+
+	async startProject(project, index) {
+		const settings = vscode.workspace.getConfiguration("typerb", project.configUri);
+		const workspaceRoot = project.workspaceFolder?.uri.fsPath;
+		const server = resolveServerOptions(
+			{
+				path: settings.get("server.path", "trb"),
+				config: project.configPath
+			},
+			workspaceRoot
+		);
+		project.watcher = vscode.workspace.createFileSystemWatcher(
+			new vscode.RelativePattern(project.sourceRoot, "**/*.trb")
+		);
+		project.client = new LanguageClient(
+			`typerb-${index}`,
+			`TypeRB Language Server (${project.label})`,
+			{
+				command: server.command,
+				args: server.args,
+				options: { cwd: project.root }
+			},
+			{
+				documentSelector: [{
+					scheme: "file",
+					language: "trb",
+					pattern: new vscode.RelativePattern(project.sourceRoot, "**/*.trb")
+				}],
+				synchronize: { fileEvents: project.watcher },
+				middleware: {
+					provideCodeLenses() {
+						return [];
+					}
+				}
+			}
+		);
+		await project.client.start();
+	}
+
+	projectForURI(uri) {
+		if (uri?.scheme !== "file") {
+			return undefined;
+		}
+		return projectForPath(this.projects, uri.fsPath);
+	}
+
+	firstProject() {
+		return this.projects[0];
+	}
+
+	async stop() {
+		const projects = this.projects;
+		this.projects = [];
+		await Promise.all(projects.map(async (project) => {
+			project.watcher?.dispose();
+			if (project.client !== undefined) {
+				await project.client.stop();
+			}
+		}));
+	}
+}
+
+async function discoverProjects() {
+	const candidates = new Map();
+	const found = await vscode.workspace.findFiles(
+		"**/trbconfig.jsonc",
+		"**/{.git,.trb,node_modules}/**"
+	);
+	for (const configUri of found) {
+		const workspaceFolder = vscode.workspace.getWorkspaceFolder(configUri);
+		candidates.set(path.resolve(configUri.fsPath), { configUri, workspaceFolder });
+	}
+	for (const workspaceFolder of vscode.workspace.workspaceFolders ?? []) {
+		const settings = vscode.workspace.getConfiguration("typerb", workspaceFolder.uri);
+		const configured = settings.get("server.config", "").trim();
+		if (configured === "") {
+			continue;
+		}
+		const configPath = path.isAbsolute(configured)
+			? configured
+			: path.resolve(workspaceFolder.uri.fsPath, configured);
+		candidates.set(path.resolve(configPath), {
+			configUri: vscode.Uri.file(configPath),
+			workspaceFolder
+		});
+	}
+	const projects = [];
+	for (const [configPath, candidate] of candidates) {
+		try {
+			const source = await readFile(configPath, "utf8");
+			const paths = projectPaths(configPath, source);
+			const relative = candidate.workspaceFolder === undefined
+				? configPath
+				: path.relative(candidate.workspaceFolder.uri.fsPath, paths.root) || ".";
+			projects.push({
+				...candidate,
+				...paths,
+				configPath,
+				label: relative
+			});
+		} catch (error) {
+			void vscode.window.showErrorMessage(`Cannot load TypeRB project ${configPath}: ${error.message}`);
+		}
+	}
+	return excludeGeneratedProjects(projects).sort((left, right) => left.configPath.localeCompare(right.configPath));
+}
+
 class RunCodeLensProvider {
-	constructor(languageClient) {
-		this.client = languageClient;
-		this.runningRoot = undefined;
+	constructor(manager) {
+		this.manager = manager;
+		this.runningProject = undefined;
 		this.changed = new vscode.EventEmitter();
 		this.onDidChangeCodeLenses = this.changed.event;
 	}
 
-	setRunning(workspaceRoot) {
-		if (workspaceRoot === this.runningRoot) {
+	setRunning(configPath) {
+		if (configPath === this.runningProject) {
 			return;
 		}
-		this.runningRoot = workspaceRoot;
+		this.runningProject = configPath;
 		this.changed.fire();
 	}
 
 	async provideCodeLenses(document, token) {
+		const project = this.manager.projectForURI(document.uri);
+		if (project?.client === undefined) {
+			return [];
+		}
 		let items;
 		try {
-			items = await this.client.sendRequest(
+			items = await project.client.sendRequest(
 				"textDocument/codeLens",
 				{ textDocument: { uri: document.uri.toString() } },
 				token
@@ -94,8 +199,7 @@ class RunCodeLensProvider {
 		} catch {
 			return [];
 		}
-		const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.toString();
-		const running = workspaceRoot !== undefined && workspaceRoot === this.runningRoot;
+		const running = project.configPath === this.runningProject;
 		return items.map((item) => {
 			const range = new vscode.Range(
 				item.range.start.line,
@@ -121,34 +225,35 @@ class RunCodeLensProvider {
 
 async function runProject(uriValue) {
 	const uri = runURI(uriValue);
-	const workspaceFolder = uri === undefined
-		? vscode.workspace.workspaceFolders?.[0]
-		: vscode.workspace.getWorkspaceFolder(uri) ?? vscode.workspace.workspaceFolders?.[0];
-	if (workspaceFolder === undefined) {
+	const project = uri === undefined
+		? projectManager?.firstProject()
+		: projectManager?.projectForURI(uri);
+	if (project === undefined) {
 		void vscode.window.showErrorMessage("Open a TypeRB project folder before running main().");
 		return;
 	}
-	if (!(await saveTypeRBDocuments(workspaceFolder))) {
+	if (!(await saveTypeRBDocuments(project))) {
 		void vscode.window.showErrorMessage("Save TypeRB project files before running main().");
 		return;
 	}
 	const settings = vscode.workspace.getConfiguration("typerb", uri);
+	const workspaceRoot = project.workspaceFolder?.uri.fsPath;
 	const run = resolveRunOptions(
 		{
 			path: settings.get("server.path", "trb"),
-			config: settings.get("server.config", "")
+			config: project.configPath
 		},
-		workspaceFolder.uri.fsPath
+		workspaceRoot
 	);
 	await stopProject();
 	runTerminal = vscode.window.createTerminal({
 		name: "TypeRB: Run",
-		cwd: workspaceFolder.uri.fsPath,
+		cwd: project.root,
 		shellPath: run.command,
 		shellArgs: run.args,
 		iconPath: new vscode.ThemeIcon("play")
 	});
-	runCodeLensProvider?.setRunning(workspaceFolder.uri.toString());
+	runCodeLensProvider?.setRunning(project.configPath);
 	runTerminal.show(true);
 }
 
@@ -163,11 +268,11 @@ function runURI(value) {
 	return undefined;
 }
 
-async function saveTypeRBDocuments(workspaceFolder) {
+async function saveTypeRBDocuments(project) {
 	const documents = vscode.workspace.textDocuments.filter((document) =>
 		document.languageId === "trb" &&
 		document.isDirty &&
-		vscode.workspace.getWorkspaceFolder(document.uri) === workspaceFolder
+		projectManager?.projectForURI(document.uri) === project
 	);
 	const saved = await Promise.all(documents.map((document) => document.save()));
 	return saved.every(Boolean);
@@ -201,18 +306,10 @@ async function stopProject() {
 	});
 }
 
-async function stopClient() {
-	if (client === undefined) {
-		return;
-	}
-	const activeClient = client;
-	client = undefined;
-	await activeClient.stop();
-}
-
 async function deactivate() {
 	await stopProject();
-	await stopClient();
+	await projectManager?.stop();
+	projectManager = undefined;
 	runCodeLensProvider = undefined;
 }
 

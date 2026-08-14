@@ -20,10 +20,11 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Deterministic, comment-preserving document formatting
 - Run and restart a project's top-level `main()` from the editor
 
-The extension works with ordinary `.trb` files and uses the project's
-`trbconfig.jsonc` to select the target mode and package configuration. Project
-diagnostics and symbols update when TypeRB files are created, changed, or
-deleted outside the active editor.
+The extension discovers every `trbconfig.jsonc` in the opened workspace and
+keeps each project in an independent language-server session. A repository may
+therefore contain Go, Ruby, and TypeScript applications with overlapping type
+names. Project diagnostics and symbols update when TypeRB files are created,
+changed, or deleted outside the active editor.
 
 ## Requirements
 
@@ -59,8 +60,9 @@ the language.
 
 - `typerb.server.path` selects the `trb` executable. The default is `trb` from
   `PATH`; relative paths are resolved from the workspace folder.
-- `typerb.server.config` selects a specific `trbconfig.jsonc`. Relative paths
-  are resolved from the workspace folder.
+- `typerb.server.config` adds an explicit `trbconfig.jsonc` when automatic
+  workspace discovery is not sufficient. Relative paths are resolved from the
+  workspace folder.
 
 If Visual Studio Code cannot find a Homebrew installation, set
 `typerb.server.path` to the result of `command -v trb`.

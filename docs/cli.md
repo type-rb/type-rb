@@ -244,10 +244,12 @@ process lifecycle and presentation.
 
 The thin Visual Studio Code client in `editors/vscode` starts this command and
 packages the canonical TypeRB TextMate grammar. It defaults to `trb` on `PATH`;
-`typerb.server.path` and `typerb.server.config` override the executable and
-project configuration when needed. Its CodeLens starts `trb run` in an
-integrated terminal and changes from `▶ Run` to `↻ Restart` while the project
-is active.
+`typerb.server.path` overrides the executable and `typerb.server.config` adds
+an explicit project configuration when needed. It discovers ordinary
+`trbconfig.jsonc` files below the workspace and starts one server per project,
+so declarations from different applications are never combined. Its CodeLens
+starts `trb run` for the owning project in an integrated terminal and changes
+from `▶ Run` to `↻ Restart` while that project is active.
 
 ## Database schema
 

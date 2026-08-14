@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"flag"
+	"path/filepath"
 
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/lsp"
@@ -35,6 +36,12 @@ func (c *CLI) runLSP(args []string) error {
 	}
 	server := lsp.New(lsp.Options{
 		Mode: config.Mode, Version: Version, Units: units, CompilerOptions: options,
+		ExcludedRoots: []string{
+			config.OutputPath(),
+			filepath.Join(config.Root, ".git"),
+			filepath.Join(config.Root, ".trb"),
+			filepath.Join(config.Root, "node_modules"),
+		},
 		ResolveUnit: func(filename string, source []byte) (compiler.SourceUnit, error) {
 			return sourceUnit(config, filename, source)
 		},

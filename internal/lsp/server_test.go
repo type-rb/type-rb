@@ -419,6 +419,48 @@ func TestServerTracksCreatedAndDeletedWorkspaceFiles(t *testing.T) {
 	}
 }
 
+func TestServerIgnoresOpenDocumentsOutsideSourceRoot(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "src")
+	outside := filepath.Join(root, "web", "todo.trb")
+	generated := filepath.Join(sourceRoot, "build", "todo.trb")
+	resolved := false
+	server := New(Options{
+		Mode: "go",
+		CompilerOptions: compiler.Options{
+			Mode: "go", GoModule: "example.com/lsp", SourceRoot: sourceRoot,
+		},
+		ExcludedRoots: []string{filepath.Join(sourceRoot, "build")},
+		ResolveUnit: func(path string, contents []byte) (compiler.SourceUnit, error) {
+			resolved = true
+			return compiler.SourceUnit{Filename: path, ModulePath: "web/todo", Package: "web", Source: contents}, nil
+		},
+	})
+	item := textDocumentItem{
+		URI: uriFromPath(outside), LanguageID: "trb", Version: 1,
+		Text: "record Todo\n\tid: Integer\nend\n",
+	}
+	if err := server.open(item); err != nil {
+		t.Fatal(err)
+	}
+	item.URI = uriFromPath(generated)
+	if err := server.open(item); err != nil {
+		t.Fatal(err)
+	}
+	if resolved || len(server.documents) != 0 {
+		t.Fatalf("outside document entered project: resolved=%v documents=%#v", resolved, server.documents)
+	}
+	if err := server.change(didChangeParams{
+		TextDocument:   versionedTextDocumentIdentifier{URI: item.URI, Version: 2},
+		ContentChanges: []contentChange{{Text: item.Text}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.close(item.URI); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestServerReturnsFilteredWorkspaceSymbols(t *testing.T) {
 	accountsFilename := cleanPath("accounts.trb")
 	accountsSource := "module Accounts\n\tclass User\n\tend\nend\n"
