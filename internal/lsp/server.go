@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/languageservice"
+	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
@@ -93,6 +95,7 @@ func (s *Server) handle(request message) (bool, error) {
 				CompletionProvider:         completionOptions{TriggerCharacters: []string{".", ":"}},
 				HoverProvider:              true,
 				SignatureHelpProvider:      signatureOptions{TriggerCharacters: []string{"(", ","}},
+				DefinitionProvider:         true,
 				DocumentFormattingProvider: true, CodeActionProvider: true,
 			},
 			ServerInfo: serverInfo{Name: "TypeRB", Version: s.version},
@@ -129,6 +132,8 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.hover(request)
 	case "textDocument/signatureHelp":
 		return false, s.signatureHelp(request)
+	case "textDocument/definition":
+		return false, s.definition(request)
 	case "textDocument/formatting":
 		return false, s.format(request)
 	case "textDocument/codeAction":
@@ -273,6 +278,35 @@ func (s *Server) signatureHelp(request message) error {
 		result.Signatures = append(result.Signatures, converted)
 	}
 	return s.stream.write(success(request.ID, result))
+}
+
+func (s *Server) definition(request message) error {
+	params, err := decodeParams[documentPositionParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	info, ok := languageservice.Definition(languageservice.SemanticRequest{
+		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
+	})
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	targetPath := cleanPath(info.Path)
+	targetSource, ok := s.source(targetPath)
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	range_ := refineDefinitionRange(targetSource, info)
+	return s.stream.write(success(request.ID, location{URI: uriFromPath(targetPath), Range: range_}))
 }
 
 func (s *Server) format(request message) error {
@@ -529,6 +563,21 @@ func sourceSpan(source []byte, span token.Span) rangeValue {
 		}
 	}
 	return offsetRange(source, span.Start.Offset, span.End.Offset)
+}
+
+func refineDefinitionRange(source []byte, info languageservice.DefinitionInfo) rangeValue {
+	start := max(info.Range.Start, 0)
+	end := min(info.Range.End, len(source))
+	tokens, _ := lexer.Lex(source)
+	for _, item := range tokens {
+		if item.Kind != token.Identifier || item.Span.Start.Offset < start || item.Span.End.Offset > end {
+			continue
+		}
+		if item.Lexeme == info.Name || item.Lexeme == strings.TrimPrefix(info.Name, "@") {
+			return offsetRange(source, item.Span.Start.Offset, item.Span.End.Offset)
+		}
+	}
+	return offsetRange(source, start, end)
 }
 
 func offsetRange(source []byte, start, end int) rangeValue {

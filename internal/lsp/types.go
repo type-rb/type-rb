@@ -150,6 +150,7 @@ type serverCapabilities struct {
 	CompletionProvider         completionOptions `json:"completionProvider"`
 	HoverProvider              bool              `json:"hoverProvider"`
 	SignatureHelpProvider      signatureOptions  `json:"signatureHelpProvider"`
+	DefinitionProvider         bool              `json:"definitionProvider"`
 	DocumentFormattingProvider bool              `json:"documentFormattingProvider"`
 	CodeActionProvider         bool              `json:"codeActionProvider"`
 }

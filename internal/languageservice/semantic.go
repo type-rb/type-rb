@@ -104,6 +104,38 @@ func Signatures(request SemanticRequest) (SignatureHelp, bool) {
 	}, true
 }
 
+// Definition resolves project declarations, imported declarations, receiver
+// members, and common lexical bindings to their TypeRB source location.
+func Definition(request SemanticRequest) (DefinitionInfo, bool) {
+	if request.Cursor < 0 || request.Cursor > len(request.Source) {
+		return DefinitionInfo{}, false
+	}
+	tokens, _ := lexer.Lex([]byte(request.Source))
+	item, ok := semanticTokenAt(tokens, request.Cursor)
+	if !ok || item.Kind != token.Identifier {
+		return DefinitionInfo{}, false
+	}
+	analysisCursor := semanticLineEnd(request.Source, item.Span.End.Offset)
+	completionRequest := CompletionRequest{
+		Source: request.Source, Cursor: analysisCursor, Mode: request.Mode, Context: request.Context,
+	}
+	if marker, receiver := memberReceiver(request.Source, item.Span.Start.Offset); marker != "" {
+		for _, member := range memberSymbols(receiver, marker, completionRequest) {
+			if member.Name == item.Lexeme && member.Definition != nil {
+				return definitionInfo(member.Definition), true
+			}
+		}
+		return DefinitionInfo{}, false
+	}
+	if symbol, found := semanticSymbol(item.Lexeme, request.Source, analysisCursor, request.Context); found && symbol.Definition != nil {
+		return definitionInfo(symbol.Definition), true
+	}
+	if definition, found := lexicalDefinition(request.Path, tokens, item); found {
+		return definitionInfo(definition), true
+	}
+	return DefinitionInfo{}, false
+}
+
 func semanticTokenAt(tokens []token.Token, cursor int) (token.Token, bool) {
 	for _, item := range tokens {
 		if item.Kind == token.Comment || item.Kind == token.Newline || item.Kind == token.EOF {
@@ -119,6 +151,110 @@ func semanticTokenAt(tokens []token.Token, cursor int) (token.Token, bool) {
 		}
 	}
 	return token.Token{}, false
+}
+
+func definitionInfo(location *DefinitionLocation) DefinitionInfo {
+	return DefinitionInfo{ID: location.ID, Name: location.Name, Path: location.Path, Range: location.Range}
+}
+
+func lexicalDefinition(path string, tokens []token.Token, reference token.Token) (*DefinitionLocation, bool) {
+	if path == "" {
+		return nil, false
+	}
+	var found *DefinitionLocation
+	for index, item := range tokens {
+		if item.Span.Start.Offset > reference.Span.Start.Offset {
+			break
+		}
+		if item.Kind != token.Identifier || item.Lexeme != reference.Lexeme {
+			continue
+		}
+		if lexicalAssignmentDeclaration(tokens, index) || lexicalParameterDeclaration(tokens, index) || lexicalBlockDeclaration(tokens, index) {
+			found = sourceDefinition(path, item.Lexeme, item.Span)
+		}
+	}
+	return found, found != nil
+}
+
+func lexicalAssignmentDeclaration(tokens []token.Token, index int) bool {
+	for next := index + 1; next < len(tokens); next++ {
+		if tokens[next].Kind == token.Comment {
+			continue
+		}
+		if tokens[next].Kind == token.Newline || tokens[next].Kind == token.EOF {
+			return false
+		}
+		if tokens[next].Lexeme == ":=" {
+			return true
+		}
+		if tokens[next].Lexeme != ":" && tokens[next].Kind != token.Identifier && tokens[next].Lexeme != "<" && tokens[next].Lexeme != ">" && tokens[next].Lexeme != "?" && tokens[next].Lexeme != "," {
+			return false
+		}
+	}
+	return false
+}
+
+func lexicalParameterDeclaration(tokens []token.Token, index int) bool {
+	if next := nextSemanticToken(tokens, index+1); next < 0 || tokens[next].Lexeme != ":" {
+		return false
+	}
+	depth := 0
+	for previous := index - 1; previous >= 0; previous-- {
+		switch tokens[previous].Lexeme {
+		case ")":
+			depth++
+		case "(":
+			if depth > 0 {
+				depth--
+				continue
+			}
+			callee := previousSemanticToken(tokens, previous-1)
+			if callee < 0 {
+				return false
+			}
+			if tokens[callee].Lexeme == "fn" {
+				return true
+			}
+			declaration := previousSemanticToken(tokens, callee-1)
+			return declaration >= 0 && tokens[declaration].Lexeme == "def"
+		}
+	}
+	return false
+}
+
+func lexicalBlockDeclaration(tokens []token.Token, index int) bool {
+	left := previousSemanticToken(tokens, index-1)
+	for left >= 0 && tokens[left].Kind != token.Newline && tokens[left].Lexeme != "|" {
+		left = previousSemanticToken(tokens, left-1)
+	}
+	if left < 0 || tokens[left].Lexeme != "|" {
+		return false
+	}
+	right := nextSemanticToken(tokens, index+1)
+	for right >= 0 && right < len(tokens) && tokens[right].Kind != token.Newline && tokens[right].Lexeme != "|" {
+		right = nextSemanticToken(tokens, right+1)
+	}
+	return right >= 0 && right < len(tokens) && tokens[right].Lexeme == "|"
+}
+
+func previousSemanticToken(tokens []token.Token, index int) int {
+	for index >= 0 {
+		if tokens[index].Kind != token.Comment {
+			return index
+		}
+		index--
+	}
+	return -1
+}
+
+func nextSemanticToken(tokens []token.Token, index int) int {
+	for index < len(tokens) {
+		if tokens[index].Kind != token.Comment {
+			return index
+		}
+		index++
+	}
+	return -1
 }
 
 func semanticLineEnd(source string, offset int) int {

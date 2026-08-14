@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -155,6 +156,56 @@ func TestServerProvidesHoverAndSignatureHelp(t *testing.T) {
 	decodeResult(t, frames[3], &signatures)
 	if len(signatures.Signatures) != 1 || signatures.ActiveParameter != 1 || signatures.Signatures[0].Parameters[1].Label != "suffix: String" {
 		t.Fatalf("signature help=%#v", signatures)
+	}
+}
+
+func TestServerNavigatesToImportedTypeAndMemberDefinitions(t *testing.T) {
+	root := t.TempDir()
+	modelPath := cleanPath(filepath.Join(root, "models", "user.trb"))
+	mainPath := cleanPath(filepath.Join(root, "main.trb"))
+	modelSource := "record User\n\tname: String\nend\n"
+	mainSource := "import { User } from models/user\n\ndef user_name(user: User): String\n\treturn user.name\nend\n\ndef main()\n\tuser := User.new(name: \"Ada\")\n\tputs(user_name(user))\n\treturn\nend\n"
+	uri := uriFromPath(mainPath)
+	typeOffset := strings.LastIndex(mainSource, "User.new") + len("Us")
+	memberOffset := strings.Index(mainSource, "user.name") + len("user.na")
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: mainSource}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/definition", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(mainSource), typeOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "textDocument/definition", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(mainSource), memberOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("4"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Version: "test", Input: bytes.NewReader(input), Output: &output,
+		Units: []compiler.SourceUnit{
+			{Filename: modelPath, ModulePath: "models/user", Package: "main", Source: []byte(modelSource)},
+			{Filename: mainPath, ModulePath: "main", Package: "main", Source: []byte(mainSource)},
+		},
+		CompilerOptions: compiler.Options{Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 5 {
+		t.Fatalf("response count=%d, want 5: %s", len(frames), output.String())
+	}
+	var initialized initializeResult
+	decodeResult(t, frames[0], &initialized)
+	if !initialized.Capabilities.DefinitionProvider {
+		t.Fatalf("definition capability=%#v", initialized.Capabilities)
+	}
+	var typeLocation location
+	decodeResult(t, frames[2], &typeLocation)
+	if typeLocation.URI != uriFromPath(modelPath) || typeLocation.Range.Start != (position{Line: 0, Character: 7}) {
+		t.Fatalf("type definition=%#v", typeLocation)
+	}
+	var memberLocation location
+	decodeResult(t, frames[3], &memberLocation)
+	if memberLocation.URI != uriFromPath(modelPath) || memberLocation.Range.Start != (position{Line: 1, Character: 1}) {
+		t.Fatalf("member definition=%#v", memberLocation)
 	}
 }
 

@@ -312,8 +312,9 @@ help, deterministic formatting, and quick fixes from structured diagnostic
 edits. Full-document updates and UTF-16 protocol positions are translated at
 the adapter boundary; the compiler and formatter continue to use UTF-8 source
 offsets. The preview Visual Studio Code extension is a published thin client
-over this boundary. Navigation, references, rename, and semantic tokens remain
-follow-up work.
+over this boundary. Go to definition follows stable source declaration
+identities across project imports and common lexical bindings. References,
+rename, and semantic tokens remain follow-up work.
 
 ## Current limitations
 

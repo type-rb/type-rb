@@ -460,45 +460,31 @@ func literalCompletionContext(source string, cursor int, tokens []token.Token, k
 }
 
 func completeMembers(receiver, marker string, request CompletionRequest, replacement OffsetRange) []CompletionItem {
-	symbols := lexicalSymbols(request.Source, request.Cursor, request.Context)
-	lookup := func(name string) (Symbol, bool) {
-		for index := len(symbols) - 1; index >= 0; index-- {
-			if symbols[index].Name == name {
-				return symbols[index], true
-			}
-		}
-		for _, symbol := range request.Context.Symbols {
-			if symbol.Name == name {
-				return symbol, true
-			}
-		}
-		for _, name := range builtInTypes {
-			if name == receiver {
-				return Symbol{Name: name, Kind: CompletionType, Type: types.FromName(name)}, true
-			}
-		}
-		return Symbol{}, false
-	}
+	return completionItems(memberSymbols(receiver, marker, request), replacement)
+}
+
+func memberSymbols(receiver, marker string, request CompletionRequest) []Symbol {
+	lookup := checkedSymbolLookup(request.Source, request.Cursor, request.Context)
 
 	if marker == "::" {
 		if symbol, ok := resolveNamespace(receiver, lookup); ok {
-			return completionItems(symbol.Members, replacement)
+			return append([]Symbol(nil), symbol.Members...)
 		}
 		return nil
 	}
 
 	if symbol, ok := resolveCompletionExpression(receiver, lookup, request.Context); ok {
 		if symbol.Kind == CompletionModule || symbol.Kind == CompletionType && len(symbol.Members) > 0 {
-			return completionItems(symbol.Members, replacement)
+			return append([]Symbol(nil), symbol.Members...)
 		}
 		members := append([]Symbol(nil), symbol.Members...)
 		if symbol.Type.Kind != "" {
 			members = append(members, receiverMembers(symbol.Type, request.Context)...)
 		}
-		return completionItems(members, replacement)
+		return members
 	}
 	if typ, ok := literalReceiverType(receiver); ok {
-		return completionItems(receiverMembers(typ, request.Context), replacement)
+		return receiverMembers(typ, request.Context)
 	}
 	return nil
 }

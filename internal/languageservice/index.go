@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -23,7 +24,7 @@ func BuildContext(programs []*ir.Program, modulePath string) Context {
 			continue
 		}
 		programsByPath[program.ModulePath] = program
-		exportsByPath[program.ModulePath] = collectSymbols(program.Statements, "", context.TypeMembers)
+		exportsByPath[program.ModulePath] = collectSymbols(program.Statements, "", program.SourcePath, context.TypeMembers)
 		if program.ModulePath == modulePath {
 			session = program
 		}
@@ -117,7 +118,7 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 	}
 	if len(exports) == 0 {
 		if program := programsByPath[imported.Path]; program != nil {
-			exports = collectSymbols(program.Statements, "", map[string][]Symbol{})
+			exports = collectSymbols(program.Statements, "", program.SourcePath, map[string][]Symbol{})
 		}
 	}
 
@@ -220,7 +221,7 @@ func standardSymbols(definition *stdlib.Package) []Symbol {
 	return result
 }
 
-func collectSymbols(statements []ir.Statement, owner string, typeMembers map[string][]Symbol) []Symbol {
+func collectSymbols(statements []ir.Statement, owner, sourcePath string, typeMembers map[string][]Symbol) []Symbol {
 	result := []Symbol{}
 	for _, statement := range statements {
 		switch node := statement.(type) {
@@ -232,59 +233,62 @@ func collectSymbols(statements []ir.Statement, owner string, typeMembers map[str
 			if node.Constant {
 				kind = CompletionConstant
 			}
-			result = append(result, Symbol{Name: node.Name, Kind: kind, Detail: node.Type.String(), Type: node.Type})
+			result = append(result, Symbol{Name: node.Name, Kind: kind, Detail: node.Type.String(), Type: node.Type, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		case *ir.Method:
 			if privateName(node.Name) {
 				continue
 			}
-			result = append(result, methodSymbol(node, CompletionFunction))
+			result = append(result, methodSymbol(node, CompletionFunction, sourcePath))
 		case *ir.Class:
 			qualified := qualify(owner, node.Name)
-			instance, namespace := classMembers(node.Body, qualified, typeMembers)
+			definition := sourceDefinition(sourcePath, node.Name, node.SourceSpan())
+			instance, namespace := classMembers(node.Body, qualified, sourcePath, definition, typeMembers)
 			typeMembers[qualified] = append(typeMembers[qualified], instance...)
 			typeMembers[node.Name] = append(typeMembers[node.Name], instance...)
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "class " + qualified, Type: types.FromName(qualified), Members: namespace})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "class " + qualified, Type: types.FromName(qualified), Members: namespace, Definition: definition})
 		case *ir.Record:
 			qualified := qualify(owner, node.Name)
-			instance, namespace := recordMembers(node.Body, qualified)
+			definition := sourceDefinition(sourcePath, node.Name, node.SourceSpan())
+			instance, namespace := recordMembers(node.Body, qualified, sourcePath, definition)
 			typeMembers[qualified] = append(typeMembers[qualified], instance...)
 			typeMembers[node.Name] = append(typeMembers[node.Name], instance...)
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "record " + qualified, Type: types.FromName(qualified), Members: namespace})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "record " + qualified, Type: types.FromName(qualified), Members: namespace, Definition: definition})
 		case *ir.Enum:
 			qualified := qualify(owner, node.Name)
-			instance, namespace := enumMembers(node, qualified)
+			definition := sourceDefinition(sourcePath, node.Name, node.SourceSpan())
+			instance, namespace := enumMembers(node, qualified, sourcePath, definition)
 			typeMembers[qualified] = append(typeMembers[qualified], instance...)
 			typeMembers[node.Name] = append(typeMembers[node.Name], instance...)
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "enum " + qualified, Type: types.FromName(qualified), Members: namespace})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "enum " + qualified, Type: types.FromName(qualified), Members: namespace, Definition: definition})
 		case *ir.TypeAlias:
 			qualified := qualify(owner, node.Name)
 			members := make([]Symbol, 0, len(node.Variants))
 			for _, variant := range node.Variants {
-				members = append(members, Symbol{Name: variant.Name, Kind: CompletionConstant, Detail: node.Target.String()})
+				members = append(members, Symbol{Name: variant.Name, Kind: CompletionConstant, Detail: node.Target.String(), Definition: sourceDefinition(sourcePath, variant.Name, variant.SourceSpan())})
 			}
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "type " + qualified + " = " + node.Target.String(), Type: types.FromName(qualified), Members: members})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "type " + qualified + " = " + node.Target.String(), Type: types.FromName(qualified), Members: members, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		case *ir.Interface:
 			qualified := qualify(owner, node.Name)
 			methods := make([]Symbol, 0, len(node.Methods))
 			for _, method := range node.Methods {
 				if !privateName(method.Name) {
-					methods = append(methods, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: methodSignature(method), Type: methodValueType(method), Call: methodCallInfo(method)})
+					methods = append(methods, methodSymbol(method, CompletionMethod, sourcePath))
 				}
 			}
 			typeMembers[qualified] = methods
 			typeMembers[node.Name] = methods
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "interface " + qualified, Type: types.FromName(qualified)})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "interface " + qualified, Type: types.FromName(qualified), Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		case *ir.Module:
 			qualified := qualify(owner, node.Name)
-			members := collectSymbols(node.Body, qualified, typeMembers)
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionModule, Detail: "module " + qualified, Members: members})
+			members := collectSymbols(node.Body, qualified, sourcePath, typeMembers)
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionModule, Detail: "module " + qualified, Members: members, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		}
 	}
 	sortSymbols(result)
 	return result
 }
 
-func classMembers(statements []ir.Statement, owner string, typeMembers map[string][]Symbol) ([]Symbol, []Symbol) {
+func classMembers(statements []ir.Statement, owner, sourcePath string, ownerDefinition *DefinitionLocation, typeMembers map[string][]Symbol) ([]Symbol, []Symbol) {
 	instance := []Symbol{}
 	namespace := []Symbol{}
 	constructor := "new()"
@@ -296,7 +300,7 @@ func classMembers(statements []ir.Statement, owner string, typeMembers map[strin
 			if privateName(name) {
 				continue
 			}
-			instance = append(instance, Symbol{Name: name, Kind: CompletionField, Detail: node.Type.String(), Type: node.Type})
+			instance = append(instance, Symbol{Name: name, Kind: CompletionField, Detail: node.Type.String(), Type: node.Type, Definition: sourceDefinition(sourcePath, name, node.SourceSpan())})
 		case *ir.Method:
 			if node.Name == "initialize" {
 				constructor = constructorSignature(node, owner)
@@ -306,49 +310,56 @@ func classMembers(statements []ir.Statement, owner string, typeMembers map[strin
 			if privateName(node.Name) {
 				continue
 			}
-			symbol := methodSymbol(node, CompletionMethod)
+			symbol := methodSymbol(node, CompletionMethod, sourcePath)
 			if node.Class {
 				namespace = append(namespace, symbol)
 			} else {
 				instance = append(instance, symbol)
 			}
 		case *ir.Class, *ir.Record, *ir.Enum, *ir.Module, *ir.Interface:
-			namespace = append(namespace, collectSymbols([]ir.Statement{statement}, owner, typeMembers)...)
+			namespace = append(namespace, collectSymbols([]ir.Statement{statement}, owner, sourcePath, typeMembers)...)
 		}
 	}
-	namespace = append(namespace, Symbol{Name: "new", Kind: CompletionMethod, Detail: constructor, Type: types.FromName(owner), Call: constructorCall})
+	constructorDefinition := ownerDefinition
+	for _, statement := range statements {
+		if method, ok := statement.(*ir.Method); ok && method.Name == "initialize" {
+			constructorDefinition = sourceDefinition(sourcePath, method.Name, method.SourceSpan())
+			break
+		}
+	}
+	namespace = append(namespace, Symbol{Name: "new", Kind: CompletionMethod, Detail: constructor, Type: types.FromName(owner), Call: constructorCall, Definition: constructorDefinition})
 	sortSymbols(instance)
 	sortSymbols(namespace)
 	return instance, namespace
 }
 
-func methodSymbol(method *ir.Method, kind CompletionKind) Symbol {
-	symbol := Symbol{Name: method.Name, Kind: kind, Detail: methodSignature(method), Type: methodValueType(method), Call: methodCallInfo(method)}
+func methodSymbol(method *ir.Method, kind CompletionKind, sourcePath string) Symbol {
+	symbol := Symbol{Name: method.Name, Kind: kind, Detail: methodSignature(method), Type: methodValueType(method), Call: methodCallInfo(method), Definition: sourceDefinition(sourcePath, method.Name, method.SourceSpan())}
 	if method.Property {
 		symbol.Kind = CompletionField
 		symbol.Call = nil
 	}
 	if method.Loadable {
-		symbol.Members = loadablePropertyMembers(symbol.Type, method.Fails)
+		symbol.Members = loadablePropertyMembers(symbol.Type, method.Fails, symbol.Definition)
 	}
 	return symbol
 }
 
-func loadablePropertyMembers(valueType, failureType types.Type) []Symbol {
+func loadablePropertyMembers(valueType, failureType types.Type, definition *DefinitionLocation) []Symbol {
 	load := func(name string) Symbol {
 		return Symbol{
 			Name: name, Kind: CompletionMethod, Detail: name + "(): " + valueType.String() + " fails " + failureType.String(),
-			Type: valueType, Call: &CallInfo{},
+			Type: valueType, Call: &CallInfo{}, Definition: definition,
 		}
 	}
 	return []Symbol{
 		load("load"),
-		{Name: "loaded?", Kind: CompletionMethod, Detail: "loaded?(): Boolean", Type: types.FromName("Boolean"), Call: &CallInfo{}},
+		{Name: "loaded?", Kind: CompletionMethod, Detail: "loaded?(): Boolean", Type: types.FromName("Boolean"), Call: &CallInfo{}, Definition: definition},
 		load("reload"),
 	}
 }
 
-func recordMembers(statements []ir.Statement, owner string) ([]Symbol, []Symbol) {
+func recordMembers(statements []ir.Statement, owner, sourcePath string, ownerDefinition *DefinitionLocation) ([]Symbol, []Symbol) {
 	instance := []Symbol{}
 	parameters := []string{}
 	callParameters := []CallParameter{}
@@ -357,17 +368,17 @@ func recordMembers(statements []ir.Statement, owner string) ([]Symbol, []Symbol)
 		if !ok || privateName(field.Name) {
 			continue
 		}
-		instance = append(instance, Symbol{Name: field.Name, Kind: CompletionField, Detail: field.Type.String(), Type: field.Type})
+		instance = append(instance, Symbol{Name: field.Name, Kind: CompletionField, Detail: field.Type.String(), Type: field.Type, Definition: sourceDefinition(sourcePath, field.Name, field.SourceSpan())})
 		label := field.Name + ": " + field.Type.String()
 		parameters = append(parameters, label)
 		callParameters = append(callParameters, CallParameter{Name: field.Name, Label: label, Keyword: true})
 	}
 	sortSymbols(instance)
-	namespace := []Symbol{{Name: "new", Kind: CompletionMethod, Detail: "new(" + strings.Join(parameters, ", ") + "): " + owner, Type: types.FromName(owner), Call: &CallInfo{ParameterCount: len(parameters), Parameters: callParameters}}}
+	namespace := []Symbol{{Name: "new", Kind: CompletionMethod, Detail: "new(" + strings.Join(parameters, ", ") + "): " + owner, Type: types.FromName(owner), Call: &CallInfo{ParameterCount: len(parameters), Parameters: callParameters}, Definition: ownerDefinition}}
 	return instance, namespace
 }
 
-func enumMembers(enum *ir.Enum, owner string) ([]Symbol, []Symbol) {
+func enumMembers(enum *ir.Enum, owner, sourcePath string, ownerDefinition *DefinitionLocation) ([]Symbol, []Symbol) {
 	instance := []Symbol{}
 	namespace := []Symbol{}
 	for _, statement := range enum.Body {
@@ -384,17 +395,17 @@ func enumMembers(enum *ir.Enum, owner string) ([]Symbol, []Symbol) {
 			if len(parameters) > 0 {
 				detail += "(" + strings.Join(parameters, ", ") + ")"
 			}
-			namespace = append(namespace, Symbol{Name: member.Name, Kind: CompletionEnumMember, Detail: detail})
+			namespace = append(namespace, Symbol{Name: member.Name, Kind: CompletionEnumMember, Detail: detail, Definition: sourceDefinition(sourcePath, member.Name, member.SourceSpan())})
 		case *ir.Method:
 			if !privateName(member.Name) {
-				instance = append(instance, methodSymbol(member, CompletionMethod))
+				instance = append(instance, methodSymbol(member, CompletionMethod, sourcePath))
 			}
 		}
 	}
 	if enum.RawType.Kind != "" {
-		instance = append(instance, Symbol{Name: "raw_value", Kind: CompletionMethod, Detail: "raw_value(): " + enum.RawType.String(), Type: enum.RawType, Call: &CallInfo{}})
+		instance = append(instance, Symbol{Name: "raw_value", Kind: CompletionMethod, Detail: "raw_value(): " + enum.RawType.String(), Type: enum.RawType, Call: &CallInfo{}, Definition: ownerDefinition})
 		resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName(owner), types.FromName("EnumValueError")}}
-		namespace = append(namespace, Symbol{Name: "from_raw", Kind: CompletionMethod, Detail: "from_raw(value: " + enum.RawType.String() + "): " + resultType.String(), Type: resultType, Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: " + enum.RawType.String()}}}})
+		namespace = append(namespace, Symbol{Name: "from_raw", Kind: CompletionMethod, Detail: "from_raw(value: " + enum.RawType.String() + "): " + resultType.String(), Type: resultType, Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: " + enum.RawType.String()}}}, Definition: ownerDefinition})
 	}
 	sortSymbols(instance)
 	sortSymbols(namespace)
@@ -538,4 +549,19 @@ func inferredNamedType(name string, kind CompletionKind) types.Type {
 		return types.Type{}
 	}
 	return types.FromName(name)
+}
+
+func sourceDefinition(path, name string, span token.Span) *DefinitionLocation {
+	if path == "" {
+		return nil
+	}
+	return &DefinitionLocation{
+		ID:   SymbolID(path + "#" + strconv.Itoa(span.Start.Offset) + ":" + strconv.Itoa(span.End.Offset)),
+		Name: name,
+		Path: path,
+		Range: OffsetRange{
+			Start: span.Start.Offset,
+			End:   span.End.Offset,
+		},
+	}
 }

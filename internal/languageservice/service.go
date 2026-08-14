@@ -43,6 +43,18 @@ type CompletionItem struct {
 	Replacement OffsetRange
 }
 
+// SymbolID is a project-stable identity derived from a source declaration.
+// Protocol adapters use it indirectly through semantic queries; generated and
+// built-in symbols intentionally have no identity or source location.
+type SymbolID string
+
+type DefinitionLocation struct {
+	ID    SymbolID
+	Name  string
+	Path  string
+	Range OffsetRange
+}
+
 // CallInfo records structured call syntax without making adapters parse the
 // human-readable signature in Detail.
 type CallInfo struct {
@@ -68,12 +80,13 @@ type CallSignature struct {
 
 // Symbol is the UI-independent semantic shape consumed by completion.
 type Symbol struct {
-	Name    string
-	Kind    CompletionKind
-	Detail  string
-	Type    types.Type
-	Call    *CallInfo
-	Members []Symbol
+	Name       string
+	Kind       CompletionKind
+	Detail     string
+	Type       types.Type
+	Call       *CallInfo
+	Members    []Symbol
+	Definition *DefinitionLocation
 }
 
 // Context is the checked project information available at a cursor position.
@@ -93,6 +106,7 @@ type CompletionRequest struct {
 // SemanticRequest identifies a source position using the same checked context
 // as completion while keeping editor protocol details outside this package.
 type SemanticRequest struct {
+	Path    string
 	Source  string
 	Cursor  int
 	Mode    string
@@ -102,6 +116,13 @@ type SemanticRequest struct {
 type HoverInfo struct {
 	Range  OffsetRange
 	Detail string
+}
+
+type DefinitionInfo struct {
+	ID    SymbolID
+	Name  string
+	Path  string
+	Range OffsetRange
 }
 
 type SignatureParameter struct {
@@ -193,6 +214,13 @@ func (s *Service) Signatures(source string, cursor int) (SignatureHelp, bool) {
 	request := SemanticRequest{Source: source, Cursor: cursor, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
 	s.mu.RUnlock()
 	return Signatures(request)
+}
+
+func (s *Service) Definition(path, source string, cursor int) (DefinitionInfo, bool) {
+	s.mu.RLock()
+	request := SemanticRequest{Path: path, Source: source, Cursor: cursor, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
+	s.mu.RUnlock()
+	return Definition(request)
 }
 
 func (s *Service) Highlight(source string) []HighlightSpan {

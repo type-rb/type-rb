@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Show checked hover information and call signatures from `trb lsp`.
+- Navigate to project and lexical declarations with Go to Definition.
 
 ## 0.1.0
 
