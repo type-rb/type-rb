@@ -1496,8 +1496,11 @@ func namedUnusedBinding(name string) bool {
 }
 
 func (g *generator) transform(transform *ir.Transform) string {
+	if g.suspension != nil && g.suspension.Expressions[transform] {
+		return g.suspendingTransform(transform)
+	}
 	source := g.iterableExpr(transform.Source)
-	result := g.expr(transform.Result)
+	result := g.transformResult(transform)
 	switch transform.Operation {
 	case "sort_by", "sort_by_descending":
 		comparison := tsPortableSortComparison("left.key", "right.key", transform.Result.ExprType(), transform.Operation == "sort_by_descending")
@@ -1533,6 +1536,136 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "undefined"
 	}
+}
+
+func (g *generator) transformResult(transform *ir.Transform) string {
+	if len(transform.Body) == 0 {
+		return g.expr(transform.Result)
+	}
+	child := *g
+	child.b = strings.Builder{}
+	child.indent = 0
+	child.line("((): " + child.tsType(transform.Result.ExprType()) + " => {")
+	child.indent++
+	child.statements(transform.Body)
+	child.line("return " + child.expr(transform.Result) + ";")
+	child.indent--
+	child.line("})()")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
+}
+
+func (g *generator) suspendingTransform(transform *ir.Transform) string {
+	child := *g
+	child.b = strings.Builder{}
+	child.indent = 0
+	child.temporary++
+	suffix := strconv.Itoa(child.temporary)
+	items := "__trbItems" + suffix
+	result := "__trbResult" + suffix
+	index := "__trbIndex" + suffix
+	item := transform.Item
+	if item == "" {
+		item = "__trbItem" + suffix
+	}
+	child.line("(async (): Promise<" + child.tsType(transform.ExprType()) + "> => {")
+	child.indent++
+	child.line("const " + items + " = " + child.iterableExpr(transform.Source) + ";")
+
+	emitBindings := func(includeIndex bool) {
+		child.line("let " + item + " = " + items + "[" + index + "]!;")
+		if includeIndex {
+			name := transform.Index
+			if name == "" {
+				name = "__trbSourceIndex" + suffix
+			}
+			child.line("let " + name + " = " + index + ";")
+		}
+	}
+	emitValue := func() string {
+		child.statements(transform.Body)
+		return child.expr(transform.Result)
+	}
+
+	switch transform.Operation {
+	case "sort_by", "sort_by_descending":
+		keyType := child.tsType(transform.Result.ExprType())
+		itemType := child.tsType(transform.ItemType)
+		decorated := "__trbDecorated" + suffix
+		child.line("const " + decorated + ": Array<{ value: " + itemType + "; key: " + keyType + "; index: number }> = [];")
+		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
+		child.indent++
+		emitBindings(false)
+		value := emitValue()
+		child.line(decorated + ".push({ value: " + item + ", key: " + value + ", index: " + index + " });")
+		child.indent--
+		child.line("}")
+		comparison := tsPortableSortComparison("left.key", "right.key", transform.Result.ExprType(), transform.Operation == "sort_by_descending")
+		child.line(decorated + ".sort((left, right) => { const compared = " + comparison + "; return compared === 0 ? left.index - right.index : compared; });")
+		child.line("return " + decorated + ".map((entry) => entry.value);")
+	case "map", "select":
+		child.line("const " + result + ": " + child.tsType(transform.ExprType()) + " = [];")
+		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
+		child.indent++
+		emitBindings(transform.WithIndex)
+		value := emitValue()
+		if transform.Operation == "map" {
+			child.line(result + ".push(" + value + ");")
+		} else {
+			child.line("if (" + value + ") " + result + ".push(" + item + ");")
+		}
+		child.indent--
+		child.line("}")
+		child.line("return " + result + ";")
+	case "any?", "all?", "none?", "find", "find_index":
+		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
+		child.indent++
+		emitBindings(false)
+		value := emitValue()
+		switch transform.Operation {
+		case "any?":
+			child.line("if (" + value + ") return true;")
+		case "all?":
+			child.line("if (!(" + value + ")) return false;")
+		case "none?":
+			child.line("if (" + value + ") return false;")
+		case "find":
+			child.line("if (" + value + ") return " + item + ";")
+		case "find_index":
+			child.line("if (" + value + ") return " + index + ";")
+		}
+		child.indent--
+		child.line("}")
+		switch transform.Operation {
+		case "any?":
+			child.line("return false;")
+		case "all?", "none?":
+			child.line("return true;")
+		default:
+			child.line("return null;")
+		}
+	case "reduce":
+		child.line("let " + result + " = " + child.expr(transform.Initial) + ";")
+		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
+		child.indent++
+		emitBindings(false)
+		accumulator := transform.Accumulator
+		if accumulator == "" {
+			accumulator = "__trbAccumulator" + suffix
+		}
+		child.line("let " + accumulator + " = " + result + ";")
+		value := emitValue()
+		child.line(result + " = " + value + ";")
+		child.indent--
+		child.line("}")
+		child.line("return " + result + ";")
+	default:
+		child.line("throw new Error(\"unsupported TypeRB collection transformation\");")
+	}
+	child.indent--
+	child.line("})()")
+	g.temporary = child.temporary
+	return "(await " + strings.TrimSpace(child.b.String()) + ")"
 }
 
 func tsPortableSortComparison(left, right string, typ types.Type, descending bool) string {

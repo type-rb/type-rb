@@ -1662,7 +1662,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 		itemUse = "_ = " + item + "; "
 	}
 	source := g.iterableExpr(transform.Source)
-	value := g.expr(transform.Result)
+	value := g.transformResult(transform)
 	switch transform.Operation {
 	case "sort_by", "sort_by_descending":
 		g.requireImport("slices", "")
@@ -1736,6 +1736,23 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) transformResult(transform *ir.Transform) string {
+	if len(transform.Body) == 0 {
+		return g.expr(transform.Result)
+	}
+	child := *g
+	child.b = strings.Builder{}
+	child.indent = 0
+	child.line("func() " + child.goType(transform.Result.ExprType()) + " {")
+	child.indent++
+	child.statements(transform.Body)
+	child.line("return " + child.expr(transform.Result))
+	child.indent--
+	child.line("}()")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) portableSortComparison(left, right string, typ types.Type, descending bool) string {

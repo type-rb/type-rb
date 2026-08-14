@@ -1093,7 +1093,7 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 			iterationScope := &scope{parent: sc, values: map[string]Value{}}
 			iterationScope.values[node.Accumulator] = accumulator
 			iterationScope.values[node.Item] = item
-			accumulator, err = e.expression(node.Result, module, iterationScope)
+			accumulator, err = e.transformResult(node, module, iterationScope)
 			if err != nil {
 				return Value{}, err
 			}
@@ -1112,7 +1112,7 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 				return Value{}, err
 			}
 			iterationScope := &scope{parent: sc, values: map[string]Value{node.Item: item}}
-			key, err := e.expression(node.Result, module, iterationScope)
+			key, err := e.transformResult(node, module, iterationScope)
 			if err != nil {
 				return Value{}, err
 			}
@@ -1150,7 +1150,7 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 		if node.WithIndex {
 			iterationScope.values[node.Index] = Value{Type: types.FromName("Integer"), Data: int64(index)}
 		}
-		value, err := e.expression(node.Result, module, iterationScope)
+		value, err := e.transformResult(node, module, iterationScope)
 		if err != nil {
 			return Value{}, err
 		}
@@ -1201,6 +1201,20 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 		return Value{Type: node.ExprType(), Data: nil}, nil
 	}
 	return Value{Type: node.ExprType(), Data: result}, nil
+}
+
+func (e *Evaluator) transformResult(node *ir.Transform, module string, sc *scope) (Value, error) {
+	flow, err := e.evaluate(node.Body, module, sc)
+	if err != nil {
+		return Value{}, err
+	}
+	if flow.Returned {
+		return Value{}, errors.New("return escaped a value-producing collection transformation")
+	}
+	if flow.Loop != loopNone {
+		return Value{}, errors.New("loop transfer escaped a value-producing collection transformation")
+	}
+	return e.expression(node.Result, module, sc)
 }
 
 func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowResult, error) {

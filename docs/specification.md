@@ -462,15 +462,22 @@ unless their package declaration explicitly provides structured lowering.
 Portable Array transformations `map`, `select`, and `reduce` use the same
 typed-IR boundary. The short-circuit predicates `any?`, `all?`, and `none?`
 and searches `find` and `find_index` require one non-nullable Boolean result
-expression. They evaluate from left to right and stop when the result is known.
+expression at the end of their block. Transformation blocks may contain
+ordinary statements before that final expression; their locals are scoped to
+one element evaluation. They evaluate from left to right and stop when the
+result is known.
 Empty Arrays produce `false`, `true`, and `true` for the predicates;
 `find` and `find_index` return a nullable element and nullable `Integer`, with
-`nil` for no match. Indexed predicate blocks are not currently enabled.
+`nil` for no match. `return`, `break`, and `next` are not accepted inside a
+value-producing transformation block; use `each` when control must leave or
+skip the enclosing iteration. Indexed predicate blocks are not currently
+enabled.
 
 Array sorting is stable and non-destructive. `sort()` and
 `sort_descending()` use the element's portable natural order. `sort_by` and
-`sort_by_descending` accept one expression whose key is evaluated exactly once
-per element; the key expression cannot use an operation that may fail. Equal
+`sort_by_descending` use their block's final expression as a key evaluated
+exactly once per element; no statement in the block may use an operation that
+may fail. Equal
 elements or keys retain their input order in both directions. Portable natural
 order currently covers non-nullable `Integer`, `Float`, and `String`: numeric
 values use numeric order, Strings use Unicode code point order without locale
@@ -642,10 +649,10 @@ end
   statements and compiler-owned temporaries, preserving the function or loop
   that owns `return`, `break`, or `next`. Ruby uses native value-producing
   control flow, and the REPL propagates the same transfer directly.
-- Divergence is supported in ordinary expression positions. The single-result
-  blocks of `map`, `select`, and `reduce` are still lowered as target callbacks
-  and therefore reject an enclosing `return`; explicit `each` remains the
-  portable alternative until multi-statement transformations are designed.
+- Divergence is supported in ordinary expression positions. Value-producing
+  collection transformations accept statements followed by one final result
+  expression, but still reject an enclosing `return`; explicit `each` remains
+  the portable alternative when control must leave the transformation.
   This rule does not make loops into expressions, add values to `break` or
   `next`, or introduce additional unreachable-code diagnostics.
 

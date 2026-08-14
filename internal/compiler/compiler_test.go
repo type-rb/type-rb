@@ -1630,7 +1630,11 @@ func TestPortableCollectionTransformationDiagnosticsAcrossModes(t *testing.T) {
 		},
 		{
 			source: "def bad(): Array<Integer>\n\treturn [1].map do |value|\n\t\tvalue\n\t\tvalue + 1\n\tend\nend\n",
-			want:   "map block must contain exactly one result expression in v0.1",
+			want:   "",
+		},
+		{
+			source: "def bad(): Array<Integer>\n\treturn [1].map do |value|\n\t\tdoubled := value * 2\n\tend\nend\n",
+			want:   "map block must end with a result expression",
 		},
 		{
 			source: "def bad(): Integer\n\treturn [1].reduce(0) do |_, value|\n\t\tvalue.to_s()\n\tend\nend\n",
@@ -1647,7 +1651,11 @@ func TestPortableCollectionTransformationDiagnosticsAcrossModes(t *testing.T) {
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for _, test := range tests {
-			if _, err := Compile("bad.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+			_, err := Compile("bad.trb", []byte(test.source), mode)
+			if test.want == "" && err != nil {
+				t.Fatalf("%s: expected multi-statement collection transformation to compile, got %v", mode, err)
+			}
+			if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
 				t.Fatalf("%s: expected %q collection-transformation diagnostic, got %v", mode, test.want, err)
 			}
 		}

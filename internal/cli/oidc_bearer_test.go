@@ -144,14 +144,22 @@ def get(_context: Context): Response
 	return text("ok")
 end
 `,
-		"routes/protected/_middleware.trb": fmt.Sprintf(`import { bearer_options } from trb/auth/oidc
-import { Context, Next, Response } from trb/web
+		"routes/protected/_middleware.trb": fmt.Sprintf(`import { OidcAuthError, OidcBearerOptions, OidcPrincipal, bearer_options } from trb/auth/oidc
+import { Result } from trb/std/result
+import { Context, Next, Request, Response } from trb/web
 import trb/web/auth/bearer
 
 AUTH := bearer_options(
 	issuer: %q,
 	audience: "api",
 )
+
+def verify_all(requests: Array<Request>, options: OidcBearerOptions): Array<Result<OidcPrincipal, OidcAuthError>>
+	return requests.map do |request|
+		verified := bearer.verify(request, options)
+		verified
+	end
+end
 
 def call(context: Context, next_handler: Next): Response
 	return bearer.authenticate(context, next_handler, AUTH)

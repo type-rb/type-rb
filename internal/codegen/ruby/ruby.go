@@ -939,7 +939,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 	if _, rangeSource := transform.Source.(*ir.Range); rangeSource {
 		source = "(" + source + ")"
 	}
-	result := g.expr(transform.Result)
+	result := g.transformResult(transform)
 	switch transform.Operation {
 	case "sort_by", "sort_by_descending":
 		comparison := rubyPortableSortComparison("left[1]", "right[1]", transform.Result.ExprType(), transform.Operation == "sort_by_descending")
@@ -957,6 +957,23 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) transformResult(transform *ir.Transform) string {
+	if len(transform.Body) == 0 {
+		return g.expr(transform.Result)
+	}
+	child := *g
+	child.b = strings.Builder{}
+	child.indent = 0
+	child.line("-> do", "")
+	child.indent++
+	child.statements(transform.Body)
+	child.line(child.expr(transform.Result), "")
+	child.indent--
+	child.line("end.call", "")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
 }
 
 func rubyPortableSortComparison(left, right string, typ types.Type, descending bool) string {

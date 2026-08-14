@@ -1892,7 +1892,7 @@ func TestReplEvaluatesPortableCollectionTransformationsAcrossModes(t *testing.T)
 			t.Fatal(err)
 		}
 
-		input := "[1, 2, 3].map { |value| value * 2 }\n[1, 2, 3].select.with_index { |value, index| value > 1 and index < 2 }\n[1, 2, 3].reduce(10) { |sum, value| sum + value }\n[1, 2, 3].any? { |value| value > 2 }\n[1, 2, 3].all?() { |value| value > 0 }\n[1, 2, 3].none? { |value| value < 0 }\n[1, 2, 3].find { |value| value > 1 }\n[1, 2, 3].find_index() { |value| value == 3 }\n[1, 2, 3].find { |value| value > 9 }\n:quit\n"
+		input := "[1, 2, 3].map do |value|\ndoubled := value * 2\ndoubled\nend\n[1, 2, 3].select.with_index { |value, index| value > 1 and index < 2 }\n[1, 2, 3].reduce(10) { |sum, value| sum + value }\n[1, 2, 3].any? { |value| value > 2 }\n[1, 2, 3].all?() { |value| value > 0 }\n[1, 2, 3].none? { |value| value < 0 }\n[1, 2, 3].find { |value| value > 1 }\n[1, 2, 3].find_index() { |value| value == 3 }\n[1, 2, 3].find { |value| value > 9 }\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -4542,16 +4542,20 @@ end
 
 def main()
 	mapped := [1, 2, 3].map do |value|
-		value * 2
+		doubled := value * 2
+		doubled
 	end
 	selected := mapped.select.with_index do |value, index|
-		value > 2 and index < 2
+		large_enough := value > 2
+		large_enough and index < 2
 	end
 	total := selected.reduce(10) do |sum, value|
-		sum + value
+		next_sum := sum + value
+		next_sum
 	end
 	any_large := mapped.any? do |value|
-		value > 5
+		minimum := 5
+		value > minimum
 	end
 	all_positive := selected.all?() do |value|
 		value > 0
@@ -4598,7 +4602,8 @@ def main()
 	descending := original.sort_descending()
 	key := SortKey.new()
 	stable := [[2, 0], [1, 1], [2, 2]].sort_by do |value|
-		key.rank(value)
+		rank := key.rank(value)
+		rank
 	end
 	stable_descending := [[2, 0], [1, 1], [2, 2]].sort_by_descending do |value|
 		value[0]
