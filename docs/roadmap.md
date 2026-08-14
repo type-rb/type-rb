@@ -53,9 +53,9 @@ than detailed syntax.
 
 - Extend the reusable `trb lsp` diagnostics, formatting, completion, hover,
   signature help, checked navigation, rename, document symbols, and quick fixes
-  with semantic tokens and richer code actions.
-- Extend the published preview VS Code client with semantic tokens, test
-  discovery, and additional editor integrations.
+  with workspace symbols, richer code actions, and incremental synchronization.
+- Extend the published preview VS Code client with test discovery and
+  additional editor integrations.
 - Add debugger/DAP support later, after source maps and runtime stack mapping
   are reliable.
 

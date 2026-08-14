@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/compiler"
+	"github.com/type-rb/type-rb/internal/languageservice"
 )
 
 func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T) {
@@ -146,6 +148,101 @@ func TestServerReturnsNestedDocumentSymbols(t *testing.T) {
 	}
 	if symbols[0].SelectionRange.Start != (position{Line: 0, Character: 7}) || symbols[0].SelectionRange.End != (position{Line: 0, Character: 11}) {
 		t.Fatalf("record selection=%#v", symbols[0].SelectionRange)
+	}
+}
+
+func TestServerReturnsSemanticTokensWithUTF16Positions(t *testing.T) {
+	filename := cleanPath("semantic.trb")
+	source := "puts(\"😀\")\nMAX := 1\nrecord User\n\tname: String\nend\n"
+	uri := uriFromPath(filename)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/semanticTokens/full", Params: rawParams(t, documentParams{TextDocument: textDocumentIdentifier{URI: uri}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "semantic", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var initialized initializeResult
+	decodeResult(t, frames[0], &initialized)
+	provider := initialized.Capabilities.SemanticTokensProvider
+	if !provider.Full || len(provider.Legend.TokenTypes) != len(semanticTokenTypes) || len(provider.Legend.TokenModifiers) != 1 {
+		t.Fatalf("semantic token capability=%#v", provider)
+	}
+	var result semanticTokens
+	decodeResult(t, frames[2], &result)
+	tokens := decodeSemanticTokenData(t, result.Data)
+	if !containsSemanticToken(tokens, decodedSemanticToken{Line: 0, Start: 5, Length: 4, Type: 2}) {
+		t.Fatalf("UTF-16 string token missing: %#v", tokens)
+	}
+	if !containsSemanticToken(tokens, decodedSemanticToken{Line: 1, Start: 0, Length: 3, Type: 1, Modifiers: 1}) {
+		t.Fatalf("readonly constant token missing: %#v", tokens)
+	}
+	if !containsSemanticToken(tokens, decodedSemanticToken{Line: 2, Start: 7, Length: 4, Type: 0}) {
+		t.Fatalf("type token missing: %#v", tokens)
+	}
+}
+
+type decodedSemanticToken struct {
+	Line      int
+	Start     int
+	Length    int
+	Type      int
+	Modifiers int
+}
+
+func decodeSemanticTokenData(t *testing.T, data []int) []decodedSemanticToken {
+	t.Helper()
+	if len(data)%5 != 0 {
+		t.Fatalf("semantic token data has %d entries", len(data))
+	}
+	result := make([]decodedSemanticToken, 0, len(data)/5)
+	line := 0
+	start := 0
+	for index := 0; index < len(data); index += 5 {
+		line += data[index]
+		if data[index] == 0 {
+			start += data[index+1]
+		} else {
+			start = data[index+1]
+		}
+		result = append(result, decodedSemanticToken{
+			Line: line, Start: start, Length: data[index+2], Type: data[index+3], Modifiers: data[index+4],
+		})
+	}
+	return result
+}
+
+func containsSemanticToken(tokens []decodedSemanticToken, expected decodedSemanticToken) bool {
+	for _, token := range tokens {
+		if token == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSemanticTokenDataSplitsMultilineSpans(t *testing.T) {
+	source := []byte("# one\n# 二")
+	data := semanticTokenData(source, []languageservice.HighlightSpan{{
+		Range: languageservice.OffsetRange{Start: 0, End: len(source)}, Kind: languageservice.HighlightComment,
+	}})
+	tokens := decodeSemanticTokenData(t, data)
+	expected := []decodedSemanticToken{
+		{Line: 0, Start: 0, Length: 5, Type: 4},
+		{Line: 1, Start: 0, Length: 3, Type: 4},
+	}
+	if !reflect.DeepEqual(tokens, expected) {
+		t.Fatalf("semantic tokens=%#v, want %#v", tokens, expected)
 	}
 }
 

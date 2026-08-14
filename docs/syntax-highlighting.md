@@ -6,8 +6,9 @@ The repository ships a thin Visual Studio Code extension in
 [`editors/vscode`](../editors/vscode). It registers `.trb` files, packages the
 canonical TextMate grammar and snippets, and starts `trb lsp` from `PATH`.
 Diagnostics, completion, hover information, signature help, definition and
-reference navigation, symbol rename, formatting, and quick fixes therefore use
-the same compiler service as the CLI instead of editor-specific language logic.
+reference navigation, symbol rename, document outlines, semantic highlighting,
+formatting, and quick fixes therefore use the same compiler and language
+services as the CLI instead of editor-specific language logic.
 
 Build and install a local VSIX with:
 
@@ -44,7 +45,9 @@ this metadata.
 TextMate highlighting is a lexical approximation. The compiler lexer, parser,
 and type checker remain authoritative. The REPL, playground, language server,
 and editor clients use compiler-aware language services when semantic context
-is available.
+is available. Visual Studio Code combines the TextMate grammar with semantic
+tokens from `trb lsp`; the lexical grammar still provides immediate colors
+while the server starts.
 
 Target-specific packages do not change the portable TypeRB grammar. They expose
 target capabilities through explicit imports.

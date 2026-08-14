@@ -315,8 +315,9 @@ offsets. The preview Visual Studio Code extension is a published thin client
 over this boundary. Definition, reference, and rename queries follow stable
 source declaration identities across project imports, receiver types, and
 common lexical bindings. Document symbols expose the structural outline from
-the lossless syntax tree even while a file has type errors. Semantic tokens
-remain follow-up work.
+the lossless syntax tree even while a file has type errors. Full-document
+semantic tokens reuse the compiler-aware highlighting service and translate
+UTF-8 byte spans to the UTF-16 positions required by editors.
 
 ## Current limitations
 
