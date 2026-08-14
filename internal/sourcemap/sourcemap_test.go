@@ -47,3 +47,24 @@ func TestExtractMarkersKeepsUnknownMarkerShapedComments(t *testing.T) {
 		t.Fatalf("unknown marker-shaped comment changed: output=%q map=%#v", output, mapping)
 	}
 }
+
+func TestGoLineDirectivesExposeTypeRBSourceLocations(t *testing.T) {
+	output := "package main\n\nfunc main() {\n\tanswer := 42\n\tprintln(answer)\n}\n"
+	start := strings.Index(output, "\tanswer")
+	end := strings.Index(output, "\tprintln") + len("\tprintln(answer)\n")
+	recorder := NewRecorder("/workspace/src/main.trb")
+	recorder.Record(start, end, token.Span{
+		Start: token.Position{Line: 7, Column: 2},
+		End:   token.Position{Line: 8, Column: 14},
+	})
+	generated := WithGoLineDirectives(output, "/tmp/generated/main.go", recorder.Build(output))
+	for _, want := range []string{
+		"//line /workspace/src/main.trb:7:2\n\tanswer := 42",
+		"//line /workspace/src/main.trb:8:1\n\tprintln(answer)",
+		"//line /tmp/generated/main.go:6:1\n}",
+	} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("generated output does not contain %q:\n%s", want, generated)
+		}
+	}
+}

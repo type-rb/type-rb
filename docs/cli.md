@@ -89,6 +89,9 @@ trb build --compile
 # Choose the executable output file.
 trb build --compile --outfile bin/api
 
+# Include TypeRB source locations and unoptimized Go debug information.
+trb build --compile --debug --outfile .trb/debug/api
+
 # Build in a temporary directory and run the project's main().
 trb run
 trb run -- first-argument
@@ -128,6 +131,11 @@ invokes `go build`, and keeps only the executable. The default output is
 resolved from the project root. `--compile` builds the complete configured
 project, requires a top-level `main()`, and cannot be combined with source
 paths, `--check`, `--stdout`, `--copy`, or `--out-dir`.
+
+`--debug` is available with `--compile` in Go mode. It disables Go compiler
+optimizations and records the original `.trb` paths and lines for source
+debuggers such as Delve. The VS Code extension prepares this executable
+automatically when starting a Go debug session.
 
 Ruby and TypeScript executable packaging is not implemented. `--compile`
 reports an unsupported-mode error for those projects. The Go executable

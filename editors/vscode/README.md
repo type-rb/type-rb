@@ -10,6 +10,7 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Syntax highlighting and declaration snippets
 - Project-wide diagnostics and quick fixes
 - Checked completion for declarations, members, and call arguments
+- Explicit import insertion for compiler-owned standard types such as `Result`
 - Hover information and signature help
 - Go to definition, references, symbol rename, and project-wide symbol search
 - Checked symbol occurrence highlighting within the current document
@@ -20,6 +21,8 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Deterministic, comment-preserving document formatting
 - Run, stop, and restart a project's top-level `main()` through Visual Studio
   Code's Run and Debug interface
+- Source breakpoints, stepping, stack frames, and variable inspection for
+  `mode: go`
 
 The extension discovers every `trbconfig.jsonc` in the opened workspace and
 keeps each project in an independent language-server session. A repository may
@@ -41,16 +44,18 @@ trb version
 Open a folder containing `trbconfig.jsonc`, then open or create a `.trb` file.
 The extension starts the TypeRB language server automatically.
 
-Select **▶ Run** above a top-level `main()`, press `F5`, or choose a TypeRB
-project in Run and Debug. The extension saves the project's TypeRB files and
-starts `trb run` as a standard debug session. Startup, program output, and exit
-status appear in the Debug Console. Use Visual Studio Code's standard Restart
-and Stop controls, or press `Shift+F5` to stop the process. **TypeRB: Stop
-Project** remains available from the Command Palette.
+Select **▶ Run** above a top-level `main()` to run without debugging. Startup,
+program output, and exit status appear in the Debug Console. Use Visual Studio
+Code's standard Restart and Stop controls, or press `Shift+F5` to stop the
+process. **TypeRB: Stop Project** remains available from the Command Palette.
 
-The initial adapter manages project launch and process lifecycle. Source-level
-breakpoints, stepping, stack frames, and variable inspection remain staged
-until TypeRB emits target-standard source maps.
+For a `mode: go` project, install [Delve](https://github.com/go-delve/delve),
+set breakpoints in `.trb` files, and press `F5` or select **Debug TypeRB** in
+Run and Debug. TypeRB emits Go debug information that refers directly to the
+original TypeRB source, so Visual Studio Code's standard stepping, call stack,
+variables, watches, and debug console are available. Ruby and TypeScript
+projects currently support Run Without Debugging while their source-debugger
+adapters are developed.
 
 Create a small Go-targeted project from a terminal with:
 
@@ -69,6 +74,8 @@ the language.
 - `typerb.server.config` adds an explicit `trbconfig.jsonc` when automatic
   workspace discovery is not sufficient. Relative paths are resolved from the
   workspace folder.
+- `typerb.debug.go.path` selects the Delve executable for Go source debugging.
+  The default is `dlv` from `PATH`.
 
 Run and Debug selects the active TypeRB project automatically. A `launch.json`
 configuration may set `config`, `args`, and `env` when explicit control is
@@ -78,7 +85,7 @@ needed:
 {
 	"type": "typerb",
 	"request": "launch",
-	"name": "Run API",
+	"name": "Debug API",
 	"config": "${workspaceFolder}/apps/api/trbconfig.jsonc",
 	"args": ["serve"],
 	"env": {

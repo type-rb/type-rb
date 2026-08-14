@@ -34,6 +34,7 @@ import (
 	"github.com/type-rb/type-rb/internal/project"
 	"github.com/type-rb/type-rb/internal/repl"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
 )
@@ -302,6 +303,7 @@ func (c *CLI) runBuild(args []string) error {
 	stdout := flags.Bool("stdout", false, "write one compiled file to stdout")
 	copyFlag := flags.String("copy", "", "override config copyFiles (true or false)")
 	compile := flags.Bool("compile", false, "produce an executable with the target toolchain")
+	debug := flags.Bool("debug", false, "include source-level debugger information in an executable")
 	outfile := flags.String("outfile", "", "executable output path relative to the project root")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -325,7 +327,10 @@ func (c *CLI) runBuild(args []string) error {
 		if *stdout || *copyFlag != "" || *outDirFlag != "" {
 			return errors.New("--compile cannot be combined with --stdout, --copy, or --out-dir")
 		}
-		return c.buildGoExecutable(config, *outfile)
+		return c.buildGoExecutable(config, *outfile, *debug)
+	}
+	if *debug {
+		return errors.New("--debug requires --compile")
 	}
 	if *outfile != "" {
 		return errors.New("--outfile requires --compile")
@@ -438,7 +443,7 @@ func (c *CLI) runBuild(args []string) error {
 	return nil
 }
 
-func (c *CLI) buildGoExecutable(config *project.Config, outfile string) error {
+func (c *CLI) buildGoExecutable(config *project.Config, outfile string, debug bool) error {
 	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
 	if err != nil {
 		return err
@@ -468,7 +473,7 @@ func (c *CLI) buildGoExecutable(config *project.Config, outfile string) error {
 		return err
 	}
 	defer os.RemoveAll(buildRoot)
-	generated, err := writeCompiledTree(config, compiled, buildRoot)
+	generated, err := writeCompiledTree(config, compiled, buildRoot, debug)
 	if err != nil {
 		return err
 	}
@@ -487,7 +492,12 @@ func (c *CLI) buildGoExecutable(config *project.Config, outfile string) error {
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		return err
 	}
-	command := exec.Command("go", "build", "-mod=mod", "-o", output, ".")
+	arguments := []string{"build", "-mod=mod"}
+	if debug {
+		arguments = append(arguments, "-gcflags=all=-N -l")
+	}
+	arguments = append(arguments, "-o", output, ".")
+	command := exec.Command("go", arguments...)
 	command.Dir = filepath.Dir(target)
 	command.Stdout = c.Stdout
 	command.Stderr = c.Stderr
@@ -576,7 +586,7 @@ func (c *CLI) runProgram(args []string) error {
 			return errors.New("project has no top-level main(); define def main() or pass a .trb file explicitly")
 		}
 	}
-	generated, err := writeCompiledTree(config, compiled, runRoot)
+	generated, err := writeCompiledTree(config, compiled, runRoot, false)
 	if err != nil {
 		return err
 	}
@@ -1800,7 +1810,7 @@ func jobsSQLNativeOptions(config *project.Config) (json.RawMessage, error) {
 	return json.Marshal(map[string]string{"dialect": SQLConfig.Dialect})
 }
 
-func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Artifact, root string) (map[string]string, error) {
+func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Artifact, root string, debug bool) (map[string]string, error) {
 	generated := make(map[string]string, len(compiled))
 	for _, sourceName := range sortedArtifactNames(compiled) {
 		artifact := compiled[sourceName]
@@ -1809,7 +1819,11 @@ func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Art
 		if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(output, artifact.Output, 0o644); err != nil {
+		data := artifact.Output
+		if debug && config.Mode == "go" {
+			data = []byte(sourcemap.WithGoLineDirectives(string(data), output, artifact.SourceMap))
+		}
+		if err := os.WriteFile(output, data, 0o644); err != nil {
 			return nil, err
 		}
 		generated[sourceName] = output
@@ -2005,7 +2019,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb check [--diagnostic-format human|json] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
-	fmt.Fprintln(c.Stdout, "  trb build --compile [--outfile FILE]")
+	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE]")
 	fmt.Fprintln(c.Stdout, "  trb run [FILE.trb] [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb lsp [--config trbconfig.jsonc]")

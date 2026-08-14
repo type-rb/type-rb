@@ -4,6 +4,7 @@
 package sourcemap
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -213,6 +214,63 @@ func ExtractMarkers(marked string, locations map[int]Location) (string, Map) {
 func IsMarkerLine(line string) bool {
 	_, _, marker := parseMarker(line)
 	return marker
+}
+
+// WithGoLineDirectives projects the shared map into Go's compiler-recognized
+// line directives. Delve then sees TypeRB source paths without needing a
+// TypeRB-specific breakpoint or stack-frame translation layer.
+func WithGoLineDirectives(output, generatedPath string, mapping Map) string {
+	if len(mapping.Mappings) == 0 {
+		return output
+	}
+	lines := strings.SplitAfter(output, "\n")
+	var result strings.Builder
+	previousMapped := false
+	for index, line := range lines {
+		if line == "" && index == len(lines)-1 {
+			continue
+		}
+		lineNumber := index + 1
+		location, found := sourceForGeneratedLine(mapping, lineNumber)
+		if found {
+			sourceLine := location.Source.Span.Start.Line + lineNumber - location.Generated.Start.Line
+			if end := location.Source.Span.End.Line; end > 0 && sourceLine > end {
+				sourceLine = end
+			}
+			column := 1
+			if lineNumber == location.Generated.Start.Line && location.Source.Span.Start.Column > 0 {
+				column = location.Source.Span.Start.Column
+			}
+			fmt.Fprintf(&result, "//line %s:%d:%d\n", location.Source.Path, sourceLine, column)
+			previousMapped = true
+		} else if previousMapped {
+			fmt.Fprintf(&result, "//line %s:%d:1\n", generatedPath, lineNumber)
+			previousMapped = false
+		}
+		result.WriteString(line)
+	}
+	return result.String()
+}
+
+func sourceForGeneratedLine(mapping Map, line int) (Mapping, bool) {
+	best := Mapping{}
+	found := false
+	bestWidth := 0
+	for _, candidate := range mapping.Mappings {
+		if line < candidate.Generated.Start.Line || line > candidate.Generated.End.Line {
+			continue
+		}
+		if line == candidate.Generated.End.Line && candidate.Generated.End.Column <= 1 {
+			continue
+		}
+		width := candidate.Generated.End.Offset - candidate.Generated.Start.Offset
+		if !found || width < bestWidth {
+			best = candidate
+			bestWidth = width
+			found = true
+		}
+	}
+	return best, found
 }
 
 func parseMarker(line string) (string, int, bool) {

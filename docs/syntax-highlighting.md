@@ -5,7 +5,8 @@
 The repository ships a thin Visual Studio Code extension in
 [`editors/vscode`](../editors/vscode). It registers `.trb` files, packages the
 canonical TextMate grammar and snippets, and starts `trb lsp` from `PATH`.
-Diagnostics, completion, hover information, signature help, definition and
+Diagnostics, completion with explicit import insertion, hover information,
+signature help, definition and
 reference navigation, symbol rename and search, occurrence highlighting,
 document outlines, folding, expanding selections, semantic highlighting,
 formatting, quick fixes, and runnable `main()` locations therefore use the same
@@ -35,7 +36,9 @@ code --install-extension editors/vscode/dist/typerb.vsix
 Set `typerb.server.path` when `trb` is not on `PATH`. Automatic discovery uses
 ordinary `trbconfig.jsonc` files. Set `typerb.server.config` only to add a
 configuration that discovery cannot find; relative paths are resolved from the
-workspace folder.
+workspace folder. Go projects may use TypeRB source breakpoints, stepping,
+stack frames, and variables through Delve; `typerb.debug.go.path` selects its
+executable when `dlv` is not on `PATH`.
 
 ## Portable grammar
 

@@ -107,17 +107,17 @@
 					{
 						"type": "typerb",
 						"request": "launch",
-						"name": "Run TypeRB"
+						"name": "Debug TypeRB"
 					}
 				],
 				"configurationSnippets": [
 					{
-						"label": "TypeRB: Run project",
-						"description": "Run a configured TypeRB project.",
+						"label": "TypeRB: Debug project",
+						"description": "Debug a configured TypeRB Go project.",
 						"body": {
 							"type": "typerb",
 							"request": "launch",
-							"name": "Run TypeRB",
+							"name": "Debug TypeRB",
 							"config": "${workspaceFolder}/trbconfig.jsonc"
 						}
 					}
@@ -162,6 +162,11 @@
 					"type": "string",
 					"default": "",
 					"description": "Optional additional path to trbconfig.jsonc when automatic workspace discovery is not sufficient. Relative paths are resolved from the workspace folder."
+				},
+				"typerb.debug.go.path": {
+					"type": "string",
+					"default": "dlv",
+					"description": "Path to the Delve executable used for source debugging in mode: go."
 				}
 			}
 		}
