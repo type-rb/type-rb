@@ -295,7 +295,7 @@ share stable `TRBxxxx` codes, one-based source locations, related locations,
 and atomic source-edit suggestions. Parser, resolver, checker, and project
 integration errors use the same model, and independent errors across project
 files are reported in one run. This model is the diagnostic boundary for the
-future language server and other machine clients.
+language server and other machine clients.
 
 The reusable compiler service owns versioned project snapshots and unsaved
 document overlays above the ordinary compiler pipeline. Successful snapshots
@@ -314,7 +314,9 @@ the adapter boundary; the compiler and formatter continue to use UTF-8 source
 offsets. The preview Visual Studio Code extension is a published thin client
 over this boundary. Definition, reference, and rename queries follow stable
 source declaration identities across project imports, receiver types, and
-common lexical bindings. Semantic tokens remain follow-up work.
+common lexical bindings. Document symbols expose the structural outline from
+the lossless syntax tree even while a file has type errors. Semantic tokens
+remain follow-up work.
 
 ## Current limitations
 

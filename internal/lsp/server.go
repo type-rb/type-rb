@@ -98,6 +98,7 @@ func (s *Server) handle(request message) (bool, error) {
 				DefinitionProvider:         true,
 				ReferencesProvider:         true,
 				RenameProvider:             renameOptions{PrepareProvider: true},
+				DocumentSymbolProvider:     true,
 				DocumentFormattingProvider: true, CodeActionProvider: true,
 			},
 			ServerInfo: serverInfo{Name: "TypeRB", Version: s.version},
@@ -142,6 +143,8 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.prepareRename(request)
 	case "textDocument/rename":
 		return false, s.rename(request)
+	case "textDocument/documentSymbol":
+		return false, s.documentSymbols(request)
 	case "textDocument/formatting":
 		return false, s.format(request)
 	case "textDocument/codeAction":
@@ -151,6 +154,72 @@ func (s *Server) handle(request message) (bool, error) {
 			return false, nil
 		}
 		return false, s.stream.write(failure(request.ID, -32601, fmt.Errorf("method %s is not supported", request.Method)))
+	}
+}
+
+func (s *Server) documentSymbols(request message) error {
+	params, err := decodeParams[documentParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, []documentSymbol{}))
+	}
+	items := languageservice.DocumentSymbols(string(document.source))
+	result := make([]documentSymbol, 0, len(items))
+	for _, item := range items {
+		result = append(result, protocolDocumentSymbol(document.source, item))
+	}
+	return s.stream.write(success(request.ID, result))
+}
+
+func protocolDocumentSymbol(source []byte, item languageservice.DocumentSymbol) documentSymbol {
+	children := make([]documentSymbol, 0, len(item.Children))
+	for _, child := range item.Children {
+		children = append(children, protocolDocumentSymbol(source, child))
+	}
+	return documentSymbol{
+		Name: item.Name, Detail: item.Detail, Kind: documentSymbolKind(item.Kind),
+		Range:          offsetRange(source, item.Range.Start, item.Range.End),
+		SelectionRange: offsetRange(source, item.SelectionRange.Start, item.SelectionRange.End),
+		Children:       children,
+	}
+}
+
+func documentSymbolKind(kind languageservice.DocumentSymbolKind) int {
+	// LSP SymbolKind values are stable protocol constants.
+	switch kind {
+	case languageservice.DocumentSymbolModule:
+		return 2
+	case languageservice.DocumentSymbolClass:
+		return 5
+	case languageservice.DocumentSymbolMethod:
+		return 6
+	case languageservice.DocumentSymbolField:
+		return 8
+	case languageservice.DocumentSymbolEnum:
+		return 10
+	case languageservice.DocumentSymbolInterface:
+		return 11
+	case languageservice.DocumentSymbolFunction:
+		return 12
+	case languageservice.DocumentSymbolVariable:
+		return 13
+	case languageservice.DocumentSymbolConstant:
+		return 14
+	case languageservice.DocumentSymbolEnumMember:
+		return 22
+	case languageservice.DocumentSymbolRecord:
+		return 23
+	case languageservice.DocumentSymbolType:
+		return 26
+	default:
+		return 13
 	}
 }
 

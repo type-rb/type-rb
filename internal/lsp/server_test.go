@@ -110,6 +110,45 @@ func TestServerDiagnosesUnknownTypesAndCompletesCanonicalNames(t *testing.T) {
 	}
 }
 
+func TestServerReturnsNestedDocumentSymbols(t *testing.T) {
+	filename := cleanPath("outline.trb")
+	source := "record User\n\tname: String\nend\n\ndef main()\n\tuser := User.new(name: \"Ada\")\n\tputs(user.name)\n\treturn\nend\n"
+	uri := uriFromPath(filename)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/documentSymbol", Params: rawParams(t, documentParams{TextDocument: textDocumentIdentifier{URI: uri}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "outline", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var initialized initializeResult
+	decodeResult(t, frames[0], &initialized)
+	if !initialized.Capabilities.DocumentSymbolProvider {
+		t.Fatalf("document symbol capability=%#v", initialized.Capabilities)
+	}
+	var symbols []documentSymbol
+	decodeResult(t, frames[2], &symbols)
+	if len(symbols) != 2 || symbols[0].Name != "User" || symbols[0].Kind != 23 || len(symbols[0].Children) != 1 {
+		t.Fatalf("document symbols=%#v", symbols)
+	}
+	if symbols[0].Children[0].Name != "name" || symbols[0].Children[0].Kind != 8 || symbols[1].Name != "main" || symbols[1].Kind != 12 {
+		t.Fatalf("document symbols=%#v", symbols)
+	}
+	if symbols[0].SelectionRange.Start != (position{Line: 0, Character: 7}) || symbols[0].SelectionRange.End != (position{Line: 0, Character: 11}) {
+		t.Fatalf("record selection=%#v", symbols[0].SelectionRange)
+	}
+}
+
 func TestServerOffersDiagnosticFixesAsCodeActions(t *testing.T) {
 	filename := cleanPath("unused.trb")
 	source := "import trb/std/strings\n\ndef main()\n\treturn\nend\n"

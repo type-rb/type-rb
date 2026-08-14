@@ -44,8 +44,9 @@ def label(ready: Boolean): String
 end
 ```
 
-Writing `: Void` is an error. `Void` is an internal compiler type, not source
-syntax.
+Writing `: Void` on a `def` or `fn` declaration is an error; omit the return
+annotation instead. `Void` appears in function types when a stored callable
+has no result, for example `(String) -> Void`.
 
 Typed function values use `fn` and capture their lexical environment:
 
