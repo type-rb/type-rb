@@ -29,6 +29,7 @@ type generator struct {
 	breakTarget     string
 	execution       *effectplan.Plan
 	executionActive bool
+	oidcRuntime     bool
 }
 
 func Generate(program *ir.Program) string {
@@ -68,6 +69,9 @@ func generate(program *ir.Program, execution *effectplan.Plan) string {
 	}
 	g.statements(program.Statements)
 	g.integrations(program.Extensions)
+	if g.oidcRuntime {
+		g.oidcBearerRuntimeSupport()
+	}
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')

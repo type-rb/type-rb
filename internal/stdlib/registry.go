@@ -218,6 +218,27 @@ end
 			},
 		},
 	},
+	"trb/internal/auth/oidc": {
+		Path:     "trb/internal/auth/oidc",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"verify_bearer": {
+				Name:               "verify_bearer",
+				Intrinsic:          "trb.internal.auth.oidc.verify_bearer",
+				RuntimeIndependent: true,
+				Parameters: []Parameter{
+					{Name: "request", Type: types.FromName("Request")},
+					{Name: "options", Type: types.FromName("OidcBearerOptions")},
+				},
+				Return: types.Type{
+					Kind: types.Named,
+					Name: "Result",
+					Args: []types.Type{types.FromName("OidcPrincipal"), types.FromName("OidcAuthError")},
+				},
+			},
+		},
+	},
 	"trb/internal/web/logger": {
 		Path:     "trb/internal/web/logger",
 		Kind:     Portable,

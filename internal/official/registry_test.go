@@ -179,6 +179,28 @@ func TestBundledWebPackage(t *testing.T) {
 	}
 }
 
+func TestBundledOidcBearerPackages(t *testing.T) {
+	contract, ok := Lookup("trb/auth/oidc")
+	if !ok {
+		t.Fatal("OIDC contract package is not registered")
+	}
+	if contract.Definition.Kind != "portable" || contract.Definition.ModulePath != "trb/auth/oidc/index" || contract.Definition.Source == "" {
+		t.Fatalf("unexpected OIDC contract package: %#v", contract.Definition)
+	}
+	bearer, ok := Lookup("trb/web/auth/bearer")
+	if !ok {
+		t.Fatal("OIDC bearer web package is not registered")
+	}
+	if bearer.Definition.Kind != "portable" || bearer.Definition.ModulePath != "trb/web/auth/bearer/index" || bearer.Definition.Source == "" {
+		t.Fatalf("unexpected OIDC bearer package: %#v", bearer.Definition)
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if !contract.Definition.Supports(mode) || !bearer.Definition.Supports(mode) {
+			t.Fatalf("OIDC bearer packages do not support %s", mode)
+		}
+	}
+}
+
 func TestBundledHTTPPackage(t *testing.T) {
 	packageDefinition, ok := Lookup("trb/http")
 	if !ok {

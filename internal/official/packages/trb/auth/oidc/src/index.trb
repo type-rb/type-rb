@@ -1,0 +1,39 @@
+enum OidcAuthErrorKind
+	MissingCredentials
+	InvalidCredentials
+	Provider
+	Configuration
+end
+
+record OidcAuthError
+	kind: OidcAuthErrorKind
+	message: String
+end
+
+record OidcPrincipal
+	subject: String
+	name: String?
+	email: String?
+	roles: Array<String>
+end
+
+record OidcBearerOptions
+	issuer: String
+	audience: String
+	jwks_uri: String?
+	roles_claim: String
+	clock_skew_seconds: Integer
+end
+
+def bearer_options(
+		issuer:: String,
+		audience:: String,
+	): OidcBearerOptions
+	return OidcBearerOptions.new(
+		issuer: issuer,
+		audience: audience,
+		jwks_uri: nil,
+		roles_claim: "roles",
+		clock_skew_seconds: 60,
+	)
+end

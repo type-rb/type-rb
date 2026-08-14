@@ -1,0 +1,8 @@
+{
+	"name": "trb/web/auth/bearer",
+	"version": "0.1.0",
+	"module": "trb/web/auth/bearer/index",
+	"source": "src/index.trb",
+	"kind": "portable",
+	"nativeDependencies": {}
+}

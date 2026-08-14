@@ -101,6 +101,9 @@ than detailed syntax.
 - Continue representative backend, server-rendered, and browser application
   slices with authentication, validation, transactions, background work, and
   realistic failure paths.
+- Harden the initial portable OIDC bearer profile, then add a separately
+  reviewed server-session profile with authorization-code PKCE, cookie-key
+  rotation, and pluggable session storage.
 - Evolve the initial buffered TypeScript browser HTTP client with generated
   endpoint-contract adapters, external contract import, streaming, cancellation
   handles, and established server-state package interop without introducing a

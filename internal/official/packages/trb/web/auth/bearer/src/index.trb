@@ -1,0 +1,46 @@
+import { OidcAuthError, OidcAuthErrorKind, OidcBearerOptions, OidcPrincipal } from trb/auth/oidc
+import { Result } from trb/std/result
+import { Body, Header, Headers } from trb/http
+import { Context, ContextKey, ContextValueError, Next, Request, Response } from trb/web
+import trb/internal/auth/oidc as native_oidc
+
+PRINCIPAL_KEY := ContextKey<OidcPrincipal>.new("oidc_principal")
+
+def verify(request: Request, options: OidcBearerOptions): Result<OidcPrincipal, OidcAuthError>
+	return native_oidc.verify_bearer(request, options)
+end
+
+def authenticate(context: Context, next_handler: Next, options: OidcBearerOptions): Response
+	case verify(context.request, options)
+	when Result::Ok(value)
+		return next_handler.call(context.with(PRINCIPAL_KEY, value))
+	when Result::Err(_error)
+		return _unauthorized()
+	end
+end
+
+def principal(context: Context): Result<OidcPrincipal, OidcAuthError>
+	fetched: Result<OidcPrincipal, ContextValueError> := context.fetch(PRINCIPAL_KEY)
+	case fetched
+	when Result::Ok(value)
+		return Result<OidcPrincipal, OidcAuthError>::Ok(value)
+	when Result::Err(_error)
+		return Result<OidcPrincipal, OidcAuthError>::Err(
+			OidcAuthError.new(
+				kind: OidcAuthErrorKind::MissingCredentials,
+				message: "OIDC principal is not available in this request context",
+			),
+		)
+	end
+end
+
+def _unauthorized(): Response
+	return Response.new(
+		status: 401,
+		headers: Headers.new([
+				Header.new(name: "content-type", value: "application/json; charset=utf-8"),
+				Header.new(name: "www-authenticate", value: "Bearer"),
+			]),
+		body: Body.new("{\"error\":\"unauthorized\"}".to_bytes()),
+	)
+end
