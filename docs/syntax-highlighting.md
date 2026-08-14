@@ -6,11 +6,21 @@ The repository ships a thin Visual Studio Code extension in
 [`editors/vscode`](../editors/vscode). It registers `.trb` files, packages the
 canonical TextMate grammar and snippets, and starts `trb lsp` from `PATH`.
 Diagnostics, completion, hover information, signature help, definition and
-reference navigation, symbol rename, document outlines, semantic highlighting,
+reference navigation, symbol rename and search, occurrence highlighting,
+document outlines, folding, expanding selections, semantic highlighting,
 formatting, and quick fixes therefore use the same compiler and language
-services as the CLI instead of editor-specific language logic.
+services as the CLI instead of editor-specific language logic. Project symbols
+and diagnostics also follow `.trb` files created, changed, or deleted outside
+the active editor.
 
-Build and install a local VSIX with:
+Install [TypeRB from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=type-rb.typerb),
+or run:
+
+```sh
+code --install-extension type-rb.typerb
+```
+
+To test an unpublished extension change, build and install a local VSIX with:
 
 ```sh
 npm ci --prefix editors/vscode
