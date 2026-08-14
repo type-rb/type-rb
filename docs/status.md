@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-12
+Last updated: 2026-08-14
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -68,7 +68,9 @@ available for untyped external values that have no endpoint or data contract.
 
 The compiler-owned portable library covers scalar and collection foundations,
 including stable Array sorting, typed short-circuit predicates and nullable
-searches, stable deduplication and non-destructive concatenation, `Result`,
+searches, stable deduplication and non-destructive concatenation, canonical
+strict and safe element access, Range-based Array and Unicode String slicing,
+code-point substring search, `Result`,
 bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
 SHA-256/SHA-512 hashing and HMAC, non-cryptographic and secure randomness,
 constant-time byte comparison, Unicode text, logical paths,

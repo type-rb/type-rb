@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-13
+Last updated: 2026-08-14
 
 ## 1. Language Goals
 
@@ -254,6 +254,30 @@ representations. TypeScript output retains them in generated types. Go and
 Ruby erase them to the corresponding scalar while typed IR preserves the
 discriminant and Go lowers erased-union field access through checked type
 switches.
+
+#### Indexes, ranges, and subsequences
+
+- Array and String single-element access uses `value[index]`. The index is a
+  nonnegative, zero-based Integer and a missing element fails at runtime.
+  String indexing counts Unicode code points rather than encoded bytes.
+- The safe single-element form is `value.try_fetch(index)`, returning a
+  structured `IndexLookupError`. Array and String do not provide a second
+  strict `fetch` spelling.
+- Subsequence access uses `value.slice(range)`. `value[range]`,
+  `slice(start, length)`, and a one-argument tail slice are not part of the
+  initial language. `try_slice(range)` is the safe counterpart and returns a
+  structured `SliceRangeError`.
+- Both `start..finish` and `start...finish` are accepted. Bounds must be
+  nonnegative, ordered, and within the collection. The exclusive
+  `size...size` range is a valid empty slice; an inclusive finish always names
+  an existing element. Array slices return a new shallow Array.
+- Range values retain their bounds and inclusivity through variables and
+  function boundaries. Converting `Range<Integer>` to `Iterable<Integer>`
+  enumerates the represented values without changing slice semantics.
+- String `index(substring)` and `rindex(substring)` search literal substrings
+  and return a code-point position as `Integer?`. They return `nil` when the
+  substring is absent. An empty substring is found at position zero for
+  `index` and at the String size for `rindex`.
 
 ### 3.3 Access Rules (Private)
 

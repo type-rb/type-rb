@@ -479,13 +479,21 @@ func (g *generator) ormPredicateArguments(call *ir.Call) string {
 	for index, predicate := range predicates {
 		columns[index] = strconv.Quote(predicate.Column)
 		operators[index] = strconv.Quote(string(predicate.Operator))
-		if bounds, ok := predicate.Value.(*ir.Range); ok {
-			values[index] = "trbOrmRange{start: " + g.expr(bounds.Start) + ", end: " + g.expr(bounds.End) + "}"
+		if predicate.Value.ExprType().Kind == types.Range {
+			values[index] = g.ormRangePredicateValue(predicate.Value)
 		} else {
 			values[index] = g.expr(predicate.Value)
 		}
 	}
 	return "[]string{" + strings.Join(columns, ", ") + "}, []string{" + strings.Join(operators, ", ") + "}, []any{" + strings.Join(values, ", ") + "}"
+}
+
+func (g *generator) ormRangePredicateValue(value ir.Expression) string {
+	if bounds, ok := value.(*ir.Range); ok {
+		return "trbOrmRange{start: " + g.expr(bounds.Start) + ", end: " + g.expr(bounds.End) + ", exclusive: " + strconv.FormatBool(bounds.Exclusive) + "}"
+	}
+	bounds := g.expr(value)
+	return "func(bounds [3]int) trbOrmRange { return trbOrmRange{start: bounds[0], end: bounds[1], exclusive: bounds[2] != 0} }(" + bounds + ")"
 }
 
 func (g *generator) ormQueryModel(call *ir.Call, arguments []string) (ormintegration.Model, string, bool) {
@@ -1062,7 +1070,7 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	if adapter.NumberedBinds {
 		g.requireImport("strconv", "")
 	}
-	g.line("type trbOrmRange struct { start any; end any }")
+	g.line("type trbOrmRange struct { start any; end any; exclusive bool }")
 	g.b.WriteByte('\n')
 	g.line("type trbOrmExecutorTarget interface {")
 	g.indent++
@@ -1782,7 +1790,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("bounds, ok := condition.value.(trbOrmRange); if !ok { panic(\"ORM range predicate requires a Range\") }")
 	g.line("lower := trbOrmPlaceholder(len(*arguments)+1); *arguments = append(*arguments, bounds.start)")
 	g.line("upper := trbOrmPlaceholder(len(*arguments)+1); *arguments = append(*arguments, bounds.end)")
-	g.line("upperOperator := \"<=\"; if condition.operator == \"RANGE_EXCLUSIVE\" { upperOperator = \"<\" }")
+	g.line("upperOperator := \"<=\"; if bounds.exclusive { upperOperator = \"<\" }")
 	g.line("return \"(\" + column + \" >= \" + lower + \" AND \" + column + \" \" + upperOperator + \" \" + upper + \")\"")
 	g.indent--
 	g.line("}")

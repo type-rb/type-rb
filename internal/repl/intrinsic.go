@@ -536,27 +536,55 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		characters := []rune(value)
 		slices.Reverse(characters)
 		return Value{Type: typ, Data: string(characters)}, nil
-	case "trb.std.strings.fetch", "trb.std.strings.try_fetch":
+	case "trb.std.strings.try_fetch":
 		if err := require(2); err != nil {
 			return Value{}, err
 		}
 		value, valueOK := values[0].Data.(string)
 		index, indexOK := values[1].Data.(int64)
 		if !valueOK || !indexOK {
-			return Value{}, errors.New("strings.fetch expects String and Integer")
+			return Value{}, errors.New("strings.try_fetch expects String and Integer")
 		}
 		characters := []rune(value)
 		if index < 0 || index >= int64(len(characters)) {
-			if name == "trb.std.strings.try_fetch" {
-				return e.indexLookupResultErr(typ, index, int64(len(characters)), "String index is out of bounds")
-			}
-			return Value{}, errors.New("String index is out of bounds")
+			return e.indexLookupResultErr(typ, index, int64(len(characters)), "String index is out of bounds")
 		}
 		result := Value{Type: types.FromName("String"), Data: string(characters[index])}
-		if name == "trb.std.strings.try_fetch" {
+		return e.filesystemOK(typ, result)
+	case "trb.std.strings.slice", "trb.std.strings.try_slice":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		value, valueOK := values[0].Data.(string)
+		bounds, boundsOK := values[1].Data.(*rangeValue)
+		if !valueOK || !boundsOK {
+			return Value{}, errors.New("strings.slice expects String and Range<Integer>")
+		}
+		characters := []rune(value)
+		stop, valid := sliceStop(bounds, int64(len(characters)))
+		if !valid {
+			if name == "trb.std.strings.try_slice" {
+				return e.sliceRangeResultErr(typ, bounds, int64(len(characters)), "String slice range is out of bounds")
+			}
+			return Value{}, errors.New("String slice range is out of bounds")
+		}
+		result := Value{Type: types.FromName("String"), Data: string(characters[bounds.Start:stop])}
+		if name == "trb.std.strings.try_slice" {
 			return e.filesystemOK(typ, result)
 		}
 		return result, nil
+	case "trb.std.strings.index", "trb.std.strings.rindex":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		value, valueOK := values[0].Data.(string)
+		substring, substringOK := values[1].Data.(string)
+		if !valueOK || !substringOK {
+			return Value{}, errors.New("strings.index expects String arguments")
+		}
+		characters, needle := []rune(value), []rune(substring)
+		found := codepointIndex(characters, needle, name == "trb.std.strings.rindex")
+		return Value{Type: typ, Data: found}, nil
 	case "trb.std.unicode.version":
 		return Value{Type: typ, Data: unicode.Version}, nil
 	case "trb.std.unicode.valid_scalar":
@@ -921,29 +949,46 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return Value{}, errors.New("arrays.empty expects Array")
 		}
 		return Value{Type: typ, Data: len(array.Items) == 0}, nil
-	case "trb.std.arrays.fetch":
-		if err := require(2); err != nil {
-			return Value{}, err
-		}
-		array, ok := values[0].Data.(*arrayValue)
-		index, integer := values[1].Data.(int64)
-		if !ok || !integer || index < 0 || index >= int64(len(array.Items)) {
-			return Value{}, errors.New("Array index is out of bounds")
-		}
-		result := array.Items[index]
-		result.Type = typ
-		return result, nil
 	case "trb.std.arrays.try_fetch":
 		if err := require(2); err != nil {
 			return Value{}, err
 		}
 		array, ok := values[0].Data.(*arrayValue)
 		index, integer := values[1].Data.(int64)
-		if !ok || !integer || index < 0 || index >= int64(len(array.Items)) {
+		if !ok || !integer {
+			return Value{}, errors.New("arrays.try_fetch expects Array and Integer")
+		}
+		if index < 0 || index >= int64(len(array.Items)) {
 			return e.indexLookupResultErr(typ, index, int64(len(array.Items)), "Array index is out of bounds")
 		}
 		result := array.Items[index]
 		return e.filesystemOK(typ, result)
+	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		array, arrayOK := values[0].Data.(*arrayValue)
+		bounds, boundsOK := values[1].Data.(*rangeValue)
+		if !arrayOK || !boundsOK {
+			return Value{}, errors.New("arrays.slice expects Array and Range<Integer>")
+		}
+		stop, valid := sliceStop(bounds, int64(len(array.Items)))
+		if !valid {
+			if name == "trb.std.arrays.try_slice" {
+				return e.sliceRangeResultErr(typ, bounds, int64(len(array.Items)), "Array slice range is out of bounds")
+			}
+			return Value{}, errors.New("Array slice range is out of bounds")
+		}
+		items := append([]Value(nil), array.Items[bounds.Start:stop]...)
+		resultType := typ
+		if name == "trb.std.arrays.try_slice" && len(typ.Args) == 2 {
+			resultType = typ.Args[0]
+		}
+		result := Value{Type: resultType, Data: &arrayValue{Items: items}}
+		if name == "trb.std.arrays.try_slice" {
+			return e.filesystemOK(typ, result)
+		}
+		return result, nil
 	case "trb.std.arrays.first", "trb.std.arrays.last":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1506,4 +1551,48 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 	default:
 		return Value{}, fmt.Errorf("intrinsic %s is type-checked for mode %s but has no REPL runtime adapter", name, e.mode)
 	}
+}
+
+func sliceStop(bounds *rangeValue, size int64) (int64, bool) {
+	if bounds == nil || bounds.Start < 0 || bounds.End < 0 || bounds.Start > bounds.End {
+		return 0, false
+	}
+	if bounds.Exclusive {
+		return bounds.End, bounds.End <= size
+	}
+	return bounds.End + 1, bounds.End < size
+}
+
+func codepointIndex(characters, needle []rune, reverse bool) any {
+	if len(needle) == 0 {
+		if reverse {
+			return int64(len(characters))
+		}
+		return int64(0)
+	}
+	if len(needle) > len(characters) {
+		return nil
+	}
+	start, stop, step := 0, len(characters)-len(needle), 1
+	if reverse {
+		start, stop, step = stop, 0, -1
+	}
+	for index := start; ; index += step {
+		if index >= 0 && index+len(needle) <= len(characters) {
+			matched := true
+			for offset := range needle {
+				if characters[index+offset] != needle[offset] {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return int64(index)
+			}
+		}
+		if index == stop {
+			break
+		}
+	}
+	return nil
 }

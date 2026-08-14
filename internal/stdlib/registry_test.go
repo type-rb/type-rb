@@ -45,15 +45,15 @@ func TestRuntimeExportPackagesArePublicPortableAndSorted(t *testing.T) {
 
 func TestGenericReceiverContractsSpecializeReturnTypes(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
-	_, fetch, ok := LookupReceiverMethod(arrayType, "fetch")
+	_, slice, ok := LookupReceiverMethod(arrayType, "slice")
 	if !ok {
-		t.Fatal("Array#fetch is missing")
+		t.Fatal("Array#slice is missing")
 	}
-	if got := fetch.Return.String(); got != "String" {
-		t.Fatalf("Array#fetch return was not specialized: %s", got)
+	if got := slice.Return.String(); got != "Array<String>" {
+		t.Fatalf("Array#slice return was not specialized: %s", got)
 	}
-	if len(fetch.Parameters) != 1 || fetch.Parameters[0].Type.Kind != types.Int {
-		t.Fatalf("Array#fetch parameters are wrong: %#v", fetch.Parameters)
+	if len(slice.Parameters) != 1 || slice.Parameters[0].Type.Kind != types.Range {
+		t.Fatalf("Array#slice parameters are wrong: %#v", slice.Parameters)
 	}
 
 	hashType := types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("Integer"), types.FromName("String")}}
@@ -88,7 +88,9 @@ func TestSafeReceiverContractsUseStructuredErrors(t *testing.T) {
 		{receiver: types.FromName("String"), name: "try_to_i", want: "Result<Integer, NumberParseError>"},
 		{receiver: types.FromName("String"), name: "try_to_f", want: "Result<Float, NumberParseError>"},
 		{receiver: types.FromName("String"), name: "try_fetch", want: "Result<String, IndexLookupError>"},
+		{receiver: types.FromName("String"), name: "try_slice", want: "Result<String, SliceRangeError>"},
 		{receiver: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}, name: "try_fetch", want: "Result<String, IndexLookupError>"},
+		{receiver: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}, name: "try_slice", want: "Result<Array<String>, SliceRangeError>"},
 		{receiver: types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("Integer"), types.FromName("String")}}, name: "try_fetch", want: "Result<String, KeyLookupError>"},
 	}
 	for _, test := range tests {
@@ -110,6 +112,9 @@ func TestStringCharacterReceiverContracts(t *testing.T) {
 		{name: "chars", want: "Array<String>"},
 		{name: "reverse", want: "String"},
 		{name: "replace_all", want: "String"},
+		{name: "slice", want: "String"},
+		{name: "index", want: "Integer?"},
+		{name: "rindex", want: "Integer?"},
 	} {
 		_, method, ok := LookupReceiverMethod(types.FromName("String"), test.name)
 		if !ok || method.Return.String() != test.want {

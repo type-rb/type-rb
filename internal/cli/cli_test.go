@@ -1342,8 +1342,15 @@ math.log10(100)
 math.sqrt(-1).nan?()
 math.log(0).infinite?()
 "a😀".size()
-"A😀".fetch(1)
+"A😀"[1]
 "A😀".try_fetch(2)
+bounds := 1...3
+"A😀BC".slice(bounds)
+"A😀BC".try_slice(4...4)
+"A😀BC".index("😀")
+"A😀B😀".rindex("😀")
+[10, 20, 30, 40].slice(bounds)
+[10, 20].try_slice(1...3)
 "A😀".chars()
 "A😀".reverse()
 :quit
@@ -1396,6 +1403,13 @@ true : Boolean
 2 : Integer
 "😀" : String
 Result::Err(error: IndexLookupError(index: 2, size: 2, message: "String index is out of bounds")) : Result<String, IndexLookupError>
+1...3 : Range<Integer>
+"😀B" : String
+Result::Ok(value: "") : Result<String, SliceRangeError>
+1 : Integer?
+3 : Integer?
+[20, 30] : Array<Integer>
+Result::Err(error: SliceRangeError(start: 1, finish: 3, exclusive: true, size: 2, message: "Array slice range is out of bounds")) : Result<Array<Integer>, SliceRangeError>
 ["A", "😀"] : Array<String>
 "😀A" : String
 `
@@ -1850,7 +1864,7 @@ func TestReplEvaluatesPortableArrayAndHashOperationsAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/arrays\nimport trb/std/hashes\nmut numbers := [1, 2]\nnumbers.first()\nnumbers.last()\nnumbers.fetch(1)\nnumbers.try_fetch(1)\nmissing := numbers.try_fetch(9)\nnumbers.empty?()\nnumbers.dup()\narrays.push(numbers, 3)\nnumbers\nnumbers.shift()\nnumbers.unshift(0)\narrays.reverse(numbers)\nnumbers\narrays.shift(numbers)\narrays.unshift(numbers, 1)\nnumbers.reverse()\nnumbers\nnumbers.include?(2)\nnumbers.count(2)\narrays.contains(numbers, 9)\narrays.count(numbers, 1)\nlabels: Hash<Integer, String> := {1 => \"one\", 2 => \"two\"}\nlabels.fetch(2)\nlabels.try_fetch(2)\nlabels.try_fetch(9)\nlabels.key?(3)\nlabels.keys()\nlabels.values()\nhashes.copy(labels)\nlabels.merge({2 => \"TWO\", 3 => \"three\"})\nlabels\nmut editable := labels.dup()\neditable.update({2 => \"TWO\", 3 => \"three\"})\nhashes.update(editable, {4 => \"four\"})\neditable.delete(1)\nhashes.delete(editable, 2)\neditable\n\"a/b/\".split(\"/\")\n\"TypeRB\".start_with?(\"Type\")\n\"TypeRB\".end_with?(\"RB\")\nmut words := [\"root\", \"leaf\"]\nwords.pop()\nwords.join(\"/\")\n:quit\n"
+		input := "import trb/std/arrays\nimport trb/std/hashes\nmut numbers := [1, 2]\nnumbers.first()\nnumbers.last()\nnumbers[1]\nnumbers.try_fetch(1)\nmissing := numbers.try_fetch(9)\nnumbers.empty?()\nnumbers.dup()\narrays.push(numbers, 3)\nnumbers\nnumbers.shift()\nnumbers.unshift(0)\narrays.reverse(numbers)\nnumbers\narrays.shift(numbers)\narrays.unshift(numbers, 1)\nnumbers.reverse()\nnumbers\nnumbers.include?(2)\nnumbers.count(2)\narrays.contains(numbers, 9)\narrays.count(numbers, 1)\nlabels: Hash<Integer, String> := {1 => \"one\", 2 => \"two\"}\nlabels.fetch(2)\nlabels.try_fetch(2)\nlabels.try_fetch(9)\nlabels.key?(3)\nlabels.keys()\nlabels.values()\nhashes.copy(labels)\nlabels.merge({2 => \"TWO\", 3 => \"three\"})\nlabels\nmut editable := labels.dup()\neditable.update({2 => \"TWO\", 3 => \"three\"})\nhashes.update(editable, {4 => \"four\"})\neditable.delete(1)\nhashes.delete(editable, 2)\neditable\n\"a/b/\".split(\"/\")\n\"TypeRB\".start_with?(\"Type\")\n\"TypeRB\".end_with?(\"RB\")\nmut words := [\"root\", \"leaf\"]\nwords.pop()\nwords.join(\"/\")\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -4426,7 +4440,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"\tputs(float_result(\"1.2x\".try_to_f()))\n" +
 			"\tputs(float_result(\"1e9999\".try_to_f()))\n" +
 			"\tputs(float_result(\"1e-9999\".try_to_f()))\n" +
-			"\tputs(\"A😀\".fetch(1))\n" +
+			"\tputs(\"A😀\"[1])\n" +
 			"\tputs(string_index_result(\"A😀\".try_fetch(0)))\n" +
 			"\tputs(string_index_result(\"A😀\".try_fetch(2)))\n" +
 			"\tputs(string_index_result(\"A😀\".try_fetch(-1)))\n" +
@@ -4501,7 +4515,7 @@ class SortKey
 
 	def rank(value: Array<Integer>): Integer
 		@calls += 1
-		return value.fetch(0)
+		return value[0]
 	end
 
 	def calls(): Integer
@@ -4587,7 +4601,7 @@ def main()
 		key.rank(value)
 	end
 	stable_descending := [[2, 0], [1, 1], [2, 2]].sort_by_descending do |value|
-		value.fetch(0)
+		value[0]
 	end
 	ordered_strings := ["😀", ""].sort()
 	ordered_strings_descending := ["😀", ""].sort_descending()
@@ -4598,7 +4612,7 @@ def main()
 	unique_values := repeated.uniq()
 	concatenated := repeated.concat([4, 5])
 	unique_states := [UniqueState::Ready, UniqueState::Ready, UniqueState::Done].uniq()
-	puts(mapped.fetch(2))
+	puts(mapped[2])
 	puts(selected.size())
 	puts(total)
 	puts(any_large)
@@ -4623,27 +4637,27 @@ def main()
 	if found_box != nil
 		puts(found_box.value())
 	end
-	puts(original.fetch(0))
-	puts(ascending.fetch(0))
-	puts(descending.fetch(0))
-	puts(stable.fetch(1).fetch(1))
-	puts(stable.fetch(2).fetch(1))
-	puts(stable_descending.fetch(0).fetch(1))
-	puts(stable_descending.fetch(1).fetch(1))
+	puts(original[0])
+	puts(ascending[0])
+	puts(descending[0])
+	puts(stable[1][1])
+	puts(stable[2][1])
+	puts(stable_descending[0][1])
+	puts(stable_descending[1][1])
 	puts(key.calls())
-	puts(ordered_strings.fetch(0))
-	puts(ordered_strings_descending.fetch(0))
-	puts(floats_ascending.fetch(0))
-	puts(floats_ascending.fetch(2).nan?())
-	puts(floats_descending.fetch(0))
-	puts(floats_descending.fetch(2).nan?())
+	puts(ordered_strings[0])
+	puts(ordered_strings_descending[0])
+	puts(floats_ascending[0])
+	puts(floats_ascending[2].nan?())
+	puts(floats_descending[0])
+	puts(floats_descending[2].nan?())
 	puts(repeated.size())
 	puts(unique_values.size())
-	puts(unique_values.fetch(0))
-	puts(unique_values.fetch(1))
-	puts(unique_values.fetch(2))
+	puts(unique_values[0])
+	puts(unique_values[1])
+	puts(unique_values[2])
 	puts(concatenated.size())
-	puts(concatenated.fetch(6))
+	puts(concatenated[6])
 	puts(unique_states.size())
 	return
 end
@@ -4658,6 +4672,94 @@ end
 		}
 		if want := "6\n1\n14\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\n5\ntrue\n2\n1\n7\n3\n1\n3\n0\n2\n0\n2\n3\n\n😀\n-1.0\ntrue\n1.0\ntrue\n5\n3\n3\n1\n2\n7\n5\n2\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s collection-transformation output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunPortableSlicingAndStringSearchAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby slice run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript slice run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-slice-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { Result } from trb/std/result
+import { SliceRangeError } from trb/std/errors
+
+def numbers_text(items: Array<Integer>): String
+	texts := items.map do |item|
+		item.to_s()
+	end
+	return texts.join(",")
+end
+
+def array_slice(value: Result<Array<Integer>, SliceRangeError>): String
+	case value
+	when Result::Ok(items)
+		return numbers_text(items)
+	when Result::Err(error)
+		return "error:" + error.start.to_s() + ":" + error.finish.to_s() + ":" + error.size.to_s()
+	end
+end
+
+def string_slice(value: Result<String, SliceRangeError>): String
+	case value
+	when Result::Ok(text)
+		return text
+	when Result::Err(error)
+		return "error:" + error.message
+	end
+end
+
+def main()
+	bounds := 1...3
+	puts(numbers_text([10, 20, 30, 40].slice(bounds)))
+	puts(numbers_text([10, 20, 30, 40].slice(1..2)))
+	puts([10, 20, 30, 40].slice(4...4).size())
+	puts(array_slice([10, 20].try_slice(1...3)))
+	puts("A😀BC"[1])
+	puts("A😀BC".slice(bounds))
+	puts("A😀BC".slice(1..2))
+	puts("A😀BC".slice(4...4).size())
+	puts(string_slice("A😀".try_slice(-1...1)))
+	puts("A😀B😀".index("😀"))
+	puts("A😀B😀".rindex("😀"))
+	puts("A😀B😀".index("missing") == nil)
+	puts("A😀B😀".index(""))
+	puts("A😀B😀".rindex(""))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "20,30\n20,30\n0\nerror:1:3:2\n😀\n😀B\n😀B\n0\nerror:String slice range is out of bounds\n1\n3\ntrue\n0\n4\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s slice output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

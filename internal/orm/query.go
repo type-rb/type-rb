@@ -46,7 +46,11 @@ func Predicates(call *ir.Call) []Predicate {
 				operator = RangeExclusive
 			}
 		default:
-			if argument.Value.ExprType().Name == "Subquery" {
+			if argument.Value.ExprType().Kind == types.Range {
+				// The runtime range value retains whether its upper bound is
+				// exclusive. The inclusive operator is only a static marker here.
+				operator = RangeInclusive
+			} else if argument.Value.ExprType().Name == "Subquery" {
 				operator = In
 			} else if argument.Value.ExprType().Kind == types.Array {
 				operator = In

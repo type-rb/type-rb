@@ -116,6 +116,7 @@ var numberParseErrorType = types.FromName("NumberParseError")
 var hexDecodeErrorType = types.FromName("HexDecodeError")
 var base64DecodeErrorType = types.FromName("Base64DecodeError")
 var indexLookupErrorType = types.FromName("IndexLookupError")
+var sliceRangeErrorType = types.FromName("SliceRangeError")
 var keyLookupErrorType = types.FromName("KeyLookupError")
 var percentDecodeErrorType = types.FromName("PercentDecodeError")
 var queryParameterType = types.FromName("QueryParameter")
@@ -159,6 +160,7 @@ end
 			{Name: "NumberParseErrorKind", Kind: "enum"},
 			{Name: "NumberParseError", Kind: "record"},
 			{Name: "IndexLookupError", Kind: "record"},
+			{Name: "SliceRangeError", Kind: "record"},
 			{Name: "KeyLookupError", Kind: "record"},
 			{Name: "EnumValueError", Kind: "record"},
 		},
@@ -483,17 +485,35 @@ end
 				Return:     arrayOf(stringType),
 			},
 			"reverse": unary("reverse", "trb.std.strings.reverse", stringType, stringType),
-			"fetch": {
-				Name:       "fetch",
-				Intrinsic:  "trb.std.strings.fetch",
-				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "index", Type: integerType}},
-				Return:     stringType,
-			},
 			"try_fetch": {
 				Name:       "try_fetch",
 				Intrinsic:  "trb.std.strings.try_fetch",
 				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "index", Type: integerType}},
 				Return:     structuredErrorResult(stringType, indexLookupErrorType),
+			},
+			"slice": {
+				Name:       "slice",
+				Intrinsic:  "trb.std.strings.slice",
+				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "range", Type: rangeOf(integerType)}},
+				Return:     stringType,
+			},
+			"try_slice": {
+				Name:       "try_slice",
+				Intrinsic:  "trb.std.strings.try_slice",
+				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "range", Type: rangeOf(integerType)}},
+				Return:     structuredErrorResult(stringType, sliceRangeErrorType),
+			},
+			"index": {
+				Name:       "index",
+				Intrinsic:  "trb.std.strings.index",
+				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "substring", Type: stringType}},
+				Return:     nullable(integerType),
+			},
+			"rindex": {
+				Name:       "rindex",
+				Intrinsic:  "trb.std.strings.rindex",
+				Parameters: []Parameter{{Name: "value", Type: stringType}, {Name: "substring", Type: stringType}},
+				Return:     nullable(integerType),
 			},
 			"contains": {
 				Name:      "contains",
@@ -723,16 +743,6 @@ end
 		Symbols: map[string]Symbol{
 			"length": genericUnary("length", "trb.std.arrays.length", []string{"T"}, arrayOf(typeT), integerType),
 			"empty":  genericUnary("empty", "trb.std.arrays.empty", []string{"T"}, arrayOf(typeT), booleanType),
-			"fetch": {
-				Name:           "fetch",
-				Intrinsic:      "trb.std.arrays.fetch",
-				TypeParameters: []string{"T"},
-				Parameters: []Parameter{
-					{Name: "values", Type: arrayOf(typeT)},
-					{Name: "index", Type: integerType},
-				},
-				Return: typeT,
-			},
 			"try_fetch": {
 				Name:           "try_fetch",
 				Intrinsic:      "trb.std.arrays.try_fetch",
@@ -742,6 +752,26 @@ end
 					{Name: "index", Type: integerType},
 				},
 				Return: structuredErrorResult(typeT, indexLookupErrorType),
+			},
+			"slice": {
+				Name:           "slice",
+				Intrinsic:      "trb.std.arrays.slice",
+				TypeParameters: []string{"T"},
+				Parameters: []Parameter{
+					{Name: "values", Type: arrayOf(typeT)},
+					{Name: "range", Type: rangeOf(integerType)},
+				},
+				Return: arrayOf(typeT),
+			},
+			"try_slice": {
+				Name:           "try_slice",
+				Intrinsic:      "trb.std.arrays.try_slice",
+				TypeParameters: []string{"T"},
+				Parameters: []Parameter{
+					{Name: "values", Type: arrayOf(typeT)},
+					{Name: "range", Type: rangeOf(integerType)},
+				},
+				Return: structuredErrorResult(arrayOf(typeT), sliceRangeErrorType),
 			},
 			"first": genericUnary("first", "trb.std.arrays.first", []string{"T"}, arrayOf(typeT), typeT),
 			"last":  genericUnary("last", "trb.std.arrays.last", []string{"T"}, arrayOf(typeT), typeT),
@@ -1095,8 +1125,11 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"chars":       {PackagePath: "trb/std/strings", Symbol: "characters"},
 		"reverse":     {PackagePath: "trb/std/strings", Symbol: "reverse"},
 		"replace_all": {PackagePath: "trb/std/strings", Symbol: "replace_all"},
-		"fetch":       {PackagePath: "trb/std/strings", Symbol: "fetch"},
 		"try_fetch":   {PackagePath: "trb/std/strings", Symbol: "try_fetch"},
+		"slice":       {PackagePath: "trb/std/strings", Symbol: "slice"},
+		"try_slice":   {PackagePath: "trb/std/strings", Symbol: "try_slice"},
+		"index":       {PackagePath: "trb/std/strings", Symbol: "index"},
+		"rindex":      {PackagePath: "trb/std/strings", Symbol: "rindex"},
 		"to_bytes":    {PackagePath: "trb/std/bytes", Symbol: "from_string"},
 	},
 	types.Bytes: {
@@ -1117,8 +1150,9 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 	types.Array: {
 		"size":            {PackagePath: "trb/std/arrays", Symbol: "length"},
 		"empty?":          {PackagePath: "trb/std/arrays", Symbol: "empty"},
-		"fetch":           {PackagePath: "trb/std/arrays", Symbol: "fetch"},
 		"try_fetch":       {PackagePath: "trb/std/arrays", Symbol: "try_fetch"},
+		"slice":           {PackagePath: "trb/std/arrays", Symbol: "slice"},
+		"try_slice":       {PackagePath: "trb/std/arrays", Symbol: "try_slice"},
 		"first":           {PackagePath: "trb/std/arrays", Symbol: "first"},
 		"last":            {PackagePath: "trb/std/arrays", Symbol: "last"},
 		"dup":             {PackagePath: "trb/std/arrays", Symbol: "copy"},
@@ -1184,6 +1218,10 @@ func genericUnary(name, intrinsic string, typeParameters []string, parameter, re
 
 func arrayOf(element types.Type) types.Type {
 	return types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{element}}
+}
+
+func rangeOf(element types.Type) types.Type {
+	return types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{element}}
 }
 
 func hashOf(key, value types.Type) types.Type {

@@ -855,6 +855,9 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		switch node.Kind {
+		case ir.RangeToIterableConversion:
+			value.Type = node.ExprType()
+			return value, nil
 		case ir.PureFunctionToFallibleConversion:
 			function, ok := value.Data.(*callable)
 			if !ok {
@@ -2105,6 +2108,16 @@ func (e *Evaluator) indexLookupResultErr(resultType types.Type, index, size int6
 		"index":   {Type: types.FromName("Integer"), Data: index},
 		"size":    {Type: types.FromName("Integer"), Data: size},
 		"message": {Type: types.FromName("String"), Data: message},
+	})
+}
+
+func (e *Evaluator) sliceRangeResultErr(resultType types.Type, bounds *rangeValue, size int64, message string) (Value, error) {
+	return e.structuredResultErr(resultType, "SliceRangeError", map[string]Value{
+		"start":     {Type: types.FromName("Integer"), Data: bounds.Start},
+		"finish":    {Type: types.FromName("Integer"), Data: bounds.End},
+		"exclusive": {Type: types.FromName("Boolean"), Data: bounds.Exclusive},
+		"size":      {Type: types.FromName("Integer"), Data: size},
+		"message":   {Type: types.FromName("String"), Data: message},
 	})
 }
 

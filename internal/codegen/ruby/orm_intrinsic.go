@@ -6,6 +6,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 func (g *generator) ormAssociationDeclaration(call *ir.Call) bool {
@@ -255,8 +256,12 @@ func (g *generator) rubyORMPredicates(call *ir.Call) string {
 	parts := make([]string, 0, len(predicates))
 	for _, predicate := range predicates {
 		value := g.expr(predicate.Value)
-		if bounds, ok := predicate.Value.(*ir.Range); ok {
-			value = "TrbOrmRuntime::Bounds.new(" + g.expr(bounds.Start) + ", " + g.expr(bounds.End) + ", " + strconv.FormatBool(bounds.Exclusive) + ")"
+		if predicate.Value.ExprType().Kind == types.Range {
+			if bounds, ok := predicate.Value.(*ir.Range); ok {
+				value = "TrbOrmRuntime::Bounds.new(" + g.expr(bounds.Start) + ", " + g.expr(bounds.End) + ", " + strconv.FormatBool(bounds.Exclusive) + ")"
+			} else {
+				value = "->(bounds) { TrbOrmRuntime::Bounds.new(bounds.begin, bounds.end, bounds.exclude_end?) }.call(" + value + ")"
+			}
 		}
 		parts = append(parts, "["+strconv.Quote(predicate.Column)+", "+strconv.Quote(string(predicate.Operator))+", "+value+"]")
 	}

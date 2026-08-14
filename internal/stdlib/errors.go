@@ -18,6 +18,14 @@ record IndexLookupError
 	message: String
 end
 
+record SliceRangeError
+	start: Integer
+	finish: Integer
+	exclusive: Boolean
+	size: Integer
+	message: String
+end
+
 record KeyLookupError
 	key: String | Integer
 	message: String

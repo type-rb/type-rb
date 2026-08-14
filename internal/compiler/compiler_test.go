@@ -401,7 +401,7 @@ end
 		t.Fatalf("generated Go does not type-check: %v\n%s", err, goArtifact.Output)
 	}
 	goOutput := string(goArtifact.Output)
-	for _, expected := range []string{"for _, value := range []int{1, 2, 3}", "for index, value := range func() []int", "__trbItems1 := []int{1, 2, 3, 4, 5}", "slice := __trbItems1[", "func Sum(values []int) int", "return Sum(func() []int"} {
+	for _, expected := range []string{"for _, value := range []int{1, 2, 3}", "for index, value := range func(bounds [3]int) []int", "__trbItems1 := []int{1, 2, 3, 4, 5}", "slice := __trbItems1[", "func Sum(values []int) int", "return Sum(func(bounds [3]int) []int"} {
 		if !strings.Contains(goOutput, expected) {
 			t.Fatalf("missing %q in generated Go:\n%s", expected, goOutput)
 		}
@@ -412,7 +412,7 @@ end
 		t.Fatal(err)
 	}
 	tsOutput := string(tsArtifact.Output)
-	for _, expected := range []string{"for (let value of [1, 2, 3])", ".entries()) {", "const __trbItems1 = [1, 2, 3, 4, 5];", "let slice = __trbItems1.slice(", "function sum(values: Array<number>): number", "return sum(((start: number"} {
+	for _, expected := range []string{"for (let value of [1, 2, 3])", ".entries()) {", "const __trbItems1 = [1, 2, 3, 4, 5];", "let slice = __trbItems1.slice(", "function sum(values: Array<number>): number", "return sum(((bounds: [number, number, boolean])"} {
 		if !strings.Contains(tsOutput, expected) {
 			t.Fatalf("missing %q in generated TypeScript:\n%s", expected, tsOutput)
 		}

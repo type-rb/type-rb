@@ -69,6 +69,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "IndexLookupError.new(index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
 	}
+	sliceRangeError := func(start, end, exclusive, size, message string) string {
+		value := "SliceRangeError.new(start: " + start + ", finish: " + end + ", exclusive: " + exclusive + ", size: " + size + ", message: " + strconv.Quote(message) + ")"
+		return "Result::Err.new(" + value + ")"
+	}
 	keyLookupError := func(key, message string) string {
 		value := "KeyLookupError.new(key: " + key + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
@@ -212,10 +216,20 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".each_char.to_a"
 	case "trb.std.strings.reverse":
 		return arguments[0] + ".each_char.to_a.reverse.join"
-	case "trb.std.strings.fetch":
-		return "->(value, index) { characters = value.each_char.to_a; raise IndexError, \"String index is out of bounds\" if index < 0 || index >= characters.length; characters.fetch(index) }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.strings.try_fetch":
 		return "->(value, index) { characters = value.each_char.to_a; index < 0 || index >= characters.length ? " + indexLookupError("index", "characters.length", "String index is out of bounds") + " : Result::Ok.new(characters.fetch(index)) }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.strings.slice", "trb.std.strings.try_slice":
+		safe := name == "trb.std.strings.try_slice"
+		invalid := "raise IndexError, \"String slice range is out of bounds\""
+		success := "characters.slice(start...stop).join"
+		if safe {
+			invalid = sliceRangeError("start", "finish", "exclusive", "characters.length", "String slice range is out of bounds")
+			success = "Result::Ok.new(characters.slice(start...stop).join)"
+		}
+		return "->(value, range) { characters = value.each_char.to_a; start = range.begin; finish = range.end; exclusive = range.exclude_end?; valid = start >= 0 && finish >= 0 && start <= finish && (exclusive ? finish <= characters.length : finish < characters.length); unless valid; " + invalid + "; else; stop = exclusive ? finish : finish + 1; " + success + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.strings.index", "trb.std.strings.rindex":
+		reverse := name == "trb.std.strings.rindex"
+		return "->(value, substring) { characters = value.each_char.to_a; needle = substring.each_char.to_a; if needle.empty?; " + map[bool]string{false: "0", true: "characters.length"}[reverse] + "; elsif needle.length > characters.length; nil; else; indexes = (0..(characters.length - needle.length)).to_a; indexes.reverse! if " + strconv.FormatBool(reverse) + "; indexes.find { |index| characters.slice(index, needle.length) == needle }; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.unicode.version":
 		return unicodeCall("version") + "()"
 	case "trb.std.unicode.valid_scalar":
@@ -310,10 +324,17 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".length"
 	case "trb.std.arrays.empty":
 		return arguments[0] + ".empty?"
-	case "trb.std.arrays.fetch":
-		return "->(values, index) { raise IndexError, \"Array index is out of bounds\" if index < 0 || index >= values.length; values.fetch(index) }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.try_fetch":
 		return "->(values, index) { index < 0 || index >= values.length ? " + indexLookupError("index", "values.length", "Array index is out of bounds") + " : Result::Ok.new(values.fetch(index)) }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
+		safe := name == "trb.std.arrays.try_slice"
+		invalid := "raise IndexError, \"Array slice range is out of bounds\""
+		success := "values.slice(start...stop)"
+		if safe {
+			invalid = sliceRangeError("start", "finish", "exclusive", "values.length", "Array slice range is out of bounds")
+			success = "Result::Ok.new(values.slice(start...stop))"
+		}
+		return "->(values, range) { start = range.begin; finish = range.end; exclusive = range.exclude_end?; valid = start >= 0 && finish >= 0 && start <= finish && (exclusive ? finish <= values.length : finish < values.length); unless valid; " + invalid + "; else; stop = exclusive ? finish : finish + 1; " + success + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.first":
 		return "->(values) { raise IndexError, \"Array is empty\" if values.empty?; values.fetch(0) }.call(" + arguments[0] + ")"
 	case "trb.std.arrays.last":

@@ -692,7 +692,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		offset := "__trbOffset" + suffix
 		g.line("{")
 		g.indent++
-		g.line("const " + items + " = " + g.expr(iteration.Source) + ";")
+		g.line("const " + items + " = " + g.iterableExpr(iteration.Source) + ";")
 		g.line("const " + size + " = " + g.expr(iteration.SliceSize) + ";")
 		g.line("if (" + size + " <= 0) throw new Error(\"each_slice size must be greater than zero\");")
 		g.line("for (let " + offset + " = 0; " + offset + " < " + items + ".length; " + offset + " += " + size + ") {")
@@ -713,9 +713,9 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	}
 	indexBinding := binding(1)
 	if iteration.WithIndex {
-		g.line("for (let [" + indexBinding.Name + ", " + itemBinding.Name + "] of " + g.expr(iteration.Source) + ".entries()) {")
+		g.line("for (let [" + indexBinding.Name + ", " + itemBinding.Name + "] of " + g.iterableExpr(iteration.Source) + ".entries()) {")
 	} else {
-		g.line("for (let " + itemBinding.Name + " of " + g.expr(iteration.Source) + ") {")
+		g.line("for (let " + itemBinding.Name + " of " + g.iterableExpr(iteration.Source) + ") {")
 	}
 	g.indent++
 	g.line("void " + itemBinding.Name + ";")
@@ -725,6 +725,14 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	g.statements(iteration.Body)
 	g.indent--
 	g.line("}")
+}
+
+func (g *generator) iterableExpr(expression ir.Expression) string {
+	value := g.expr(expression)
+	if expression.ExprType().Kind != types.Range {
+		return value
+	}
+	return "((bounds: [number, number, boolean]): Array<number> => { const [start, end, exclusive] = bounds; return Array.from({ length: Math.max(0, end - start + (exclusive ? 0 : 1)) }, (_, index) => start + index); })(" + value + ")"
 }
 
 func enumHasPayload(enum *ir.Enum) bool {
@@ -1026,6 +1034,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
+		case ir.RangeToIterableConversion:
+			return g.iterableExpr(n.Value)
 		case ir.ResultFunctionToPromiseRejectionConversion:
 			return g.resultFunctionToPromiseRejection(n)
 		case ir.PureFunctionToFallibleConversion:
@@ -1061,11 +1071,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return left + " " + op + " " + right
 	case *ir.Range:
-		extra := "1"
+		exclusive := "false"
 		if n.Exclusive {
-			extra = "0"
+			exclusive = "true"
 		}
-		return "((start: number, end: number) => Array.from({ length: Math.max(0, end - start + " + extra + ") }, (_, index) => start + index))(" + g.expr(n.Start) + ", " + g.expr(n.End) + ")"
+		return "([" + g.expr(n.Start) + ", " + g.expr(n.End) + ", " + exclusive + "] as [number, number, boolean])"
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
@@ -1183,6 +1193,12 @@ func (g *generator) expr(expression ir.Expression) string {
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()
 			return "((values: " + g.tsType(hashType) + ", key: " + g.tsType(hashType.Args[0]) + "): " + g.tsType(hashType.Args[1]) + " => { if (!Object.prototype.hasOwnProperty.call(values, key)) { throw new Error(\"Hash key is missing\"); } return values[key]; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+		}
+		if n.Receiver.ExprType().Kind == types.String {
+			return "((value: string, index: number): string => { const characters = Array.from(value); if (index < 0 || index >= characters.length) throw new RangeError(\"String index is out of bounds\"); return characters[index]!; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+		}
+		if n.Receiver.ExprType().Kind == types.Array {
+			return "((values: " + g.tsType(n.Receiver.ExprType()) + ", index: number): " + g.tsType(n.ExprType()) + " => { if (index < 0 || index >= values.length) throw new RangeError(\"Array index is out of bounds\"); return values[index]!; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
@@ -1476,7 +1492,7 @@ func namedUnusedBinding(name string) bool {
 }
 
 func (g *generator) transform(transform *ir.Transform) string {
-	source := g.expr(transform.Source)
+	source := g.iterableExpr(transform.Source)
 	result := g.expr(transform.Result)
 	switch transform.Operation {
 	case "sort_by", "sort_by_descending":
@@ -2010,7 +2026,7 @@ func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[st
 		}
 		result = "Array<" + element + ">"
 	case types.Range:
-		result = "Array<number>"
+		result = "[number, number, boolean]"
 	case types.Hash:
 		key := "string"
 		value := "unknown"
