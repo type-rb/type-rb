@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/compiler"
+	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/project"
 )
 
@@ -30,6 +31,72 @@ func TestVersionCommandUsesBuildVersion(t *testing.T) {
 	}
 	if stdout.String() != "trb 9.8.7-test\n" {
 		t.Fatalf("unexpected version output %q", stdout.String())
+	}
+}
+
+func TestCheckEmitsVersionedJSONDiagnosticsAcrossFiles(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/check"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]string{
+		"alpha.trb": "def alpha(): Integer\n\treturn missing_alpha()\nend\n",
+		"beta.trb":  "def beta(): Integer\n\treturn missing_beta()\nend\n",
+	} {
+		if err := os.WriteFile(filepath.Join(config.SourcePath(), name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"check", "--config", config.Path, "--diagnostic-format", "json"}); status != 1 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("JSON diagnostics wrote to stderr: %s", stderr.String())
+	}
+	var report diagnostic.JSONReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON diagnostics: %v\n%s", err, stdout.String())
+	}
+	if report.SchemaVersion != diagnostic.JSONSchemaVersion || report.Summary.Errors != 2 || len(report.Diagnostics) != 2 {
+		t.Fatalf("unexpected report: %#v", report)
+	}
+	for _, item := range report.Diagnostics {
+		if item.Code != diagnostic.TypeError || item.Location == nil || item.Location.Span.Start.Line != 2 {
+			t.Fatalf("unexpected diagnostic: %#v", item)
+		}
+	}
+}
+
+func TestCheckEmitsEmptyJSONReportForValidProject(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.Go.Module = "example.com/type-rb/check-valid"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.trb"), []byte("def main()\n\treturn\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"check", "--config", config.Path, "--diagnostic-format", "json"}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	var report diagnostic.JSONReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.SchemaVersion != diagnostic.JSONSchemaVersion || report.Summary.Errors != 0 || len(report.Diagnostics) != 0 {
+		t.Fatalf("unexpected report: %#v", report)
 	}
 }
 
@@ -173,8 +240,8 @@ func TestInitWebTemplateBuildsAcrossModes(t *testing.T) {
 			if status := command.Run([]string{"fmt", "--check", config.SourcePath()}); status != 0 {
 				t.Fatalf("fmt status=%d stderr=%s", status, stderr.String())
 			}
-			if status := command.Run([]string{"build", "--check", "--config", config.Path}); status != 0 {
-				t.Fatalf("build status=%d stderr=%s", status, stderr.String())
+			if status := command.Run([]string{"check", "--config", config.Path}); status != 0 {
+				t.Fatalf("check status=%d stderr=%s", status, stderr.String())
 			}
 		})
 	}
@@ -540,7 +607,7 @@ func TestReplAutoImportsDoNotShiftUserDiagnostics(t *testing.T) {
 	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), ".trb-repl.trb:1:1: error:") {
+	if !strings.Contains(stderr.String(), ".trb-repl.trb:1:1: error[TRB3000]:") {
 		t.Fatalf("hidden imports shifted the user diagnostic: %s", stderr.String())
 	}
 }
@@ -3363,7 +3430,6 @@ func TestBuildCompileValidatesModeAndFlags(t *testing.T) {
 		{name: "ruby", mode: "ruby", args: []string{"--compile"}, want: "--compile is supported only for mode go"},
 		{name: "typescript", mode: "typescript", args: []string{"--compile"}, want: "--compile is supported only for mode go"},
 		{name: "outfile", mode: "go", args: []string{"--outfile", "bin/app"}, want: "--outfile requires --compile"},
-		{name: "check", mode: "go", args: []string{"--compile", "--check"}, want: "--compile cannot be combined"},
 		{name: "path", mode: "go", args: []string{"--compile", "."}, want: "--compile builds the configured project"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

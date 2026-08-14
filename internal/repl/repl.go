@@ -266,7 +266,21 @@ func printCompileError(output io.Writer, err error, colored bool) {
 		if colored {
 			severity = colorize(true, colorError, severity)
 		}
-		fmt.Fprintf(output, "%s:%d:%d: %s: %s\n", compilation.Filename, item.Span.Start.Line, item.Span.Start.Column, severity, item.Message)
+		path := item.Path
+		if path == "" {
+			path = compilation.Filename
+		}
+		fmt.Fprintf(output, "%s:%d:%d: %s[%s]: %s\n", path, item.Span.Start.Line, item.Span.Start.Column, severity, item.Code, item.Message)
+		for _, related := range item.Related {
+			relatedPath := related.Location.Path
+			if relatedPath == "" {
+				relatedPath = path
+			}
+			fmt.Fprintf(output, "  %s:%d:%d: note: %s\n", relatedPath, related.Location.Span.Start.Line, related.Location.Span.Start.Column, related.Message)
+		}
+		for _, fix := range item.Fixes {
+			fmt.Fprintf(output, "  help: %s\n", fix.Message)
+		}
 	}
 }
 

@@ -127,8 +127,8 @@ func TestDatabaseLockLetsORMCompileWithoutLiveDatabase(t *testing.T) {
 			}
 			stdout.Reset()
 			stderr.Reset()
-			if status := command.Run([]string{"build", "--check", "--config", configPath}); status != 0 {
-				t.Fatalf("build status=%d stderr=%s", status, stderr.String())
+			if status := command.Run([]string{"check", "--config", configPath}); status != 0 {
+				t.Fatalf("check status=%d stderr=%s", status, stderr.String())
 			}
 		})
 	}

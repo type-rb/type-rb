@@ -317,6 +317,9 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 			catalog.CompilerOwnedTypes[name] = *exported
 		}
 	}
+	for filename, items := range diagnostics {
+		diagnostics[filename] = diagnostic.Normalize(items, filename, diagnostic.ResolutionError)
+	}
 	return catalog, diagnostics
 }
 
@@ -366,7 +369,7 @@ func Resolve(program *ast.Program, options Options) (Result, []diagnostic.Diagno
 		}
 	}
 	addPrelude(&result)
-	return result, diagnostics
+	return result, diagnostic.Normalize(diagnostics, options.Filename, diagnostic.ResolutionError)
 }
 
 // CompilerOwnedType returns declarations that were inferred from a portable
@@ -599,6 +602,9 @@ func ValidateImportGraph(catalog *Catalog, results map[string]Result) map[string
 		if state[modulePath] == 0 {
 			visit(modulePath)
 		}
+	}
+	for filename, items := range diagnostics {
+		diagnostics[filename] = diagnostic.Normalize(items, filename, diagnostic.ResolutionError)
 	}
 	return diagnostics
 }

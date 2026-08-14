@@ -43,7 +43,7 @@ func Parse(source []byte) (*ast.Program, []diagnostic.Diagnostic) {
 			}
 		}
 	}
-	return program, p.diags
+	return program, diagnostic.Normalize(p.diags, "", diagnostic.SyntaxError)
 }
 
 func (p *Parser) parseStatements(stop map[string]bool) []ast.Statement {

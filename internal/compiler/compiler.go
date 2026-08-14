@@ -51,6 +51,14 @@ type CompileError struct {
 	Diagnostics []diagnostic.Diagnostic
 }
 
+func NewCompileError(filename string, fallback diagnostic.Code, items []diagnostic.Diagnostic) *CompileError {
+	items = diagnostic.Normalize(items, filename, fallback)
+	if filename == "" && len(items) > 0 {
+		filename = items[0].Path
+	}
+	return &CompileError{Filename: filename, Diagnostics: items}
+}
+
 type Options struct {
 	Mode               string
 	Package            string
@@ -75,7 +83,11 @@ func (e *CompileError) Error() string {
 		return "compilation failed"
 	}
 	first := e.Diagnostics[0]
-	return fmt.Sprintf("%s:%d:%d: %s: %s", e.Filename, first.Span.Start.Line, first.Span.Start.Column, first.Severity, first.Message)
+	path := first.Path
+	if path == "" {
+		path = e.Filename
+	}
+	return fmt.Sprintf("%s:%d:%d: %s[%s]: %s", path, first.Span.Start.Line, first.Span.Start.Column, first.Severity, first.Code, first.Message)
 }
 
 func Compile(filename string, source []byte, mode string) (*Artifact, error) {
@@ -91,12 +103,14 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 	configureProgram(program, options, options.ModulePath, options.Package)
 	if options.Mode == "" {
 		diagnostics = append(diagnostics, diagnostic.Diagnostic{
+			Code:     diagnostic.ProjectError,
 			Severity: diagnostic.Error,
 			Message:  "project mode is missing from trbconfig.jsonc",
 			Span:     token.Span{Start: token.Position{Line: 1, Column: 1}, End: token.Position{Line: 1, Column: 1}},
 		})
 	} else if options.Mode != "ruby" && options.Mode != "typescript" && options.Mode != "go" {
 		diagnostics = append(diagnostics, diagnostic.Diagnostic{
+			Code:     diagnostic.ProjectError,
 			Severity: diagnostic.Error,
 			Message:  fmt.Sprintf("unsupported mode %q", options.Mode),
 			Span:     program.Span(),
@@ -114,7 +128,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 	})
 	diagnostics = append(diagnostics, checkDiagnostics...)
 	if hasErrors(diagnostics) {
-		return nil, &CompileError{Filename: filename, Diagnostics: diagnostics}
+		return nil, NewCompileError(filename, diagnostic.TypeError, diagnostics)
 	}
 	lowered := lower.Program(checked)
 	lowered.SourcePath = filename
@@ -132,36 +146,41 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	units := append([]SourceUnit(nil), sources...)
 	sort.Slice(units, func(i, j int) bool { return units[i].ModulePath < units[j].ModulePath })
 	programs := make(map[string]*ast.Program, len(units))
+	var parseDiagnostics []diagnostic.Diagnostic
 	for _, source := range units {
 		program, diagnostics := parser.Parse(source.Source)
 		configureProgram(program, options, source.ModulePath, source.Package)
 		if official.OwnsModule(source.ModulePath) && !source.Official {
 			diagnostics = append(diagnostics, diagnostic.Diagnostic{
+				Code:     diagnostic.ProjectError,
 				Severity: diagnostic.Error,
 				Message:  fmt.Sprintf("module path %s is reserved for TypeRB packages", source.ModulePath),
 				Span:     program.Span(),
 			})
 		}
 		diagnostics = append(diagnostics, modeDiagnostics(program, options.Mode)...)
-		if hasErrors(diagnostics) {
-			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
-		}
+		parseDiagnostics = append(parseDiagnostics, diagnostic.Normalize(diagnostics, source.Filename, diagnostic.SyntaxError)...)
 		programs[source.ModulePath] = program
+	}
+	if hasErrors(parseDiagnostics) {
+		return nil, NewCompileError("", diagnostic.SyntaxError, parseDiagnostics)
 	}
 	for {
 		dependencies := dependencySourceUnits(programs, options)
 		if len(dependencies) == 0 {
 			break
 		}
+		var dependencyDiagnostics []diagnostic.Diagnostic
 		for _, source := range dependencies {
 			program, diagnostics := parser.Parse(source.Source)
 			configureProgram(program, options, source.ModulePath, source.Package)
 			diagnostics = append(diagnostics, modeDiagnostics(program, options.Mode)...)
-			if hasErrors(diagnostics) {
-				return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
-			}
+			dependencyDiagnostics = append(dependencyDiagnostics, diagnostic.Normalize(diagnostics, source.Filename, diagnostic.SyntaxError)...)
 			units = append(units, source)
 			programs[source.ModulePath] = program
+		}
+		if hasErrors(dependencyDiagnostics) {
+			return nil, NewCompileError("", diagnostic.SyntaxError, dependencyDiagnostics)
 		}
 	}
 	sort.Slice(units, func(i, j int) bool { return units[i].ModulePath < units[j].ModulePath })
@@ -171,10 +190,12 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		modules = append(modules, resolver.Module{Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath], CompilerOwned: source.CompilerOwned, Official: source.Official})
 	}
 	catalog, catalogDiagnostics := resolver.NewCatalog(modules)
+	var catalogErrors []diagnostic.Diagnostic
 	for _, source := range units {
-		if diagnostics := catalogDiagnostics[source.Filename]; hasErrors(diagnostics) {
-			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
-		}
+		catalogErrors = append(catalogErrors, catalogDiagnostics[source.Filename]...)
+	}
+	if hasErrors(catalogErrors) {
+		return nil, NewCompileError("", diagnostic.ResolutionError, catalogErrors)
 	}
 	providerPrograms := make([]*ast.Program, 0, len(units))
 	for _, source := range units {
@@ -186,6 +207,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	}
 
 	resolutions := make(map[string]resolver.Result, len(units))
+	var resolveErrors []diagnostic.Diagnostic
 	for _, source := range units {
 		packageAliases := options.PackageAliases
 		if source.PackageAliases != nil {
@@ -202,16 +224,19 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 			Declarations:   declarations,
 			NativePackages: options.NativePackages,
 		})
-		if hasErrors(diagnostics) {
-			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
-		}
+		resolveErrors = append(resolveErrors, diagnostic.Normalize(diagnostics, source.Filename, diagnostic.ResolutionError)...)
 		resolutions[source.ModulePath] = resolved
 	}
+	if hasErrors(resolveErrors) {
+		return nil, NewCompileError("", diagnostic.ResolutionError, resolveErrors)
+	}
 	graphDiagnostics := resolver.ValidateImportGraph(catalog, resolutions)
+	var graphErrors []diagnostic.Diagnostic
 	for _, source := range units {
-		if diagnostics := graphDiagnostics[source.Filename]; hasErrors(diagnostics) {
-			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
-		}
+		graphErrors = append(graphErrors, graphDiagnostics[source.Filename]...)
+	}
+	if hasErrors(graphErrors) {
+		return nil, NewCompileError("", diagnostic.ResolutionError, graphErrors)
 	}
 
 	owner := ""
@@ -219,8 +244,11 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	for _, source := range units {
 		if hasTopLevelMethod(programs[source.ModulePath], MainFunction) {
 			if owner != "" {
-				item := diagnostic.Diagnostic{Severity: diagnostic.Error, Message: fmt.Sprintf("main is already declared in %s", owner), Span: programs[source.ModulePath].Span()}
-				return nil, &CompileError{Filename: source.Filename, Diagnostics: []diagnostic.Diagnostic{item}}
+				item := diagnostic.Diagnostic{
+					Code: diagnostic.DuplicateBinding, Severity: diagnostic.Error, Message: "main is already declared", Path: source.Filename, Span: programs[source.ModulePath].Span(),
+					Related: []diagnostic.RelatedInformation{{Message: "first declaration", Location: diagnostic.Location{Path: owner, Span: programs[ownerModule].Span()}}},
+				}
+				return nil, NewCompileError(source.Filename, diagnostic.TypeError, []diagnostic.Diagnostic{item})
 			}
 			owner = source.Filename
 			ownerModule = source.ModulePath
@@ -241,10 +269,12 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	if runtimeUnits := compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options); len(runtimeUnits) > 0 {
 		return CompileProject(append(units, runtimeUnits...), options)
 	}
+	var typeErrors []diagnostic.Diagnostic
 	for _, source := range units {
-		if diagnostics := checkDiagnostics[source.ModulePath]; hasErrors(diagnostics) {
-			return nil, &CompileError{Filename: source.Filename, Diagnostics: diagnostics}
-		}
+		typeErrors = append(typeErrors, diagnostic.Normalize(checkDiagnostics[source.ModulePath], source.Filename, diagnostic.TypeError)...)
+	}
+	if hasErrors(typeErrors) {
+		return nil, NewCompileError("", diagnostic.TypeError, typeErrors)
 	}
 	integrationSources := make([]projectintegration.Source, 0, len(units))
 	for _, source := range units {
@@ -266,8 +296,11 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		return nil, err
 	}
 	if len(integrationIssues) > 0 {
-		issue := integrationIssues[0]
-		return nil, &CompileError{Filename: issue.Filename, Diagnostics: []diagnostic.Diagnostic{{Severity: diagnostic.Error, Message: issue.Message, Span: issue.Span}}}
+		items := make([]diagnostic.Diagnostic, 0, len(integrationIssues))
+		for _, issue := range integrationIssues {
+			items = append(items, diagnostic.Diagnostic{Code: diagnostic.ProjectIntegration, Severity: diagnostic.Error, Message: issue.Message, Path: issue.Filename, Span: issue.Span})
+		}
+		return nil, NewCompileError("", diagnostic.ProjectIntegration, items)
 	}
 
 	loweredPrograms := make([]*ir.Program, 0, len(units))
@@ -396,13 +429,14 @@ func configureProgram(program *ast.Program, options Options, modulePath, package
 func modeDiagnostics(program *ast.Program, mode string) []diagnostic.Diagnostic {
 	if mode == "" {
 		return []diagnostic.Diagnostic{{
+			Code:     diagnostic.ProjectError,
 			Severity: diagnostic.Error,
 			Message:  "project mode is missing from trbconfig.jsonc",
 			Span:     token.Span{Start: token.Position{Line: 1, Column: 1}, End: token.Position{Line: 1, Column: 1}},
 		}}
 	}
 	if mode != "ruby" && mode != "typescript" && mode != "go" {
-		return []diagnostic.Diagnostic{{Severity: diagnostic.Error, Message: fmt.Sprintf("unsupported mode %q", mode), Span: program.Span()}}
+		return []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: fmt.Sprintf("unsupported mode %q", mode), Span: program.Span()}}
 	}
 	return nil
 }

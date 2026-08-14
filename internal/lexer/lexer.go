@@ -24,7 +24,7 @@ type Lexer struct {
 func Lex(source []byte) ([]token.Token, []diagnostic.Diagnostic) {
 	l := &Lexer{source: source, line: 1, column: 1}
 	l.run()
-	return l.tokens, l.diags
+	return l.tokens, diagnostic.Normalize(l.diags, "", diagnostic.SyntaxError)
 }
 
 func (l *Lexer) run() {
