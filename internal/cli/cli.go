@@ -19,6 +19,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/codegen"
 	"github.com/type-rb/type-rb/internal/compiler"
+	"github.com/type-rb/type-rb/internal/compilerservice"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/ir"
@@ -158,14 +159,9 @@ func (c *CLI) runCheck(args []string) error {
 	if err != nil {
 		return c.reportCheckError(*format, diagnostic.ProjectError, err)
 	}
-	_, err = compiler.CompileProject(units, options)
-	if err != nil {
-		fallback := diagnostic.BackendError
-		var compilation *compiler.CompileError
-		if errors.As(err, &compilation) {
-			fallback = diagnostic.TypeError
-		}
-		return c.reportCheckError(*format, fallback, err)
+	snapshot := compilerservice.New(units, options).Analyze()
+	if snapshot.HasErrors() {
+		return c.reportCheckDiagnostics(*format, snapshot.Diagnostics)
 	}
 	if *format == "json" {
 		return c.writeJSONDiagnostics(nil)
@@ -182,6 +178,10 @@ func (c *CLI) reportCheckError(format string, fallback diagnostic.Code, err erro
 	} else {
 		items = []diagnostic.Diagnostic{{Code: fallback, Severity: diagnostic.Error, Message: err.Error()}}
 	}
+	return c.reportCheckDiagnostics(format, items)
+}
+
+func (c *CLI) reportCheckDiagnostics(format string, items []diagnostic.Diagnostic) error {
 	if format == "json" {
 		if writeErr := c.writeJSONDiagnostics(items); writeErr != nil {
 			return writeErr
@@ -189,7 +189,7 @@ func (c *CLI) reportCheckError(format string, fallback diagnostic.Code, err erro
 	} else {
 		c.writeHumanDiagnostics(items)
 	}
-	return &reportedError{cause: err}
+	return &reportedError{cause: errors.New("project check failed")}
 }
 
 func (c *CLI) writeJSONDiagnostics(items []diagnostic.Diagnostic) error {

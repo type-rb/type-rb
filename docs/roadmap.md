@@ -43,8 +43,8 @@ than detailed syntax.
   application and editor usage exposes useful semantic-specific actions.
 - Emit target-standard source maps from the shared generated-range-to-`.trb`
   mapping model, then use them for runtime stack traces and coverage.
-- Add incremental project compilation, dependency-aware invalidation, and a
-  persistent build cache.
+- Extend the initial versioned compiler service with phase-level incremental
+  compilation, dependency-aware invalidation, and a persistent build cache.
 - Maintain target-conformance suites that run equivalent TypeRB programs in all
   three modes.
 - Define compatibility and deprecation rules before the first beta release.

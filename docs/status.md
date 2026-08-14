@@ -294,6 +294,15 @@ integration errors use the same model, and independent errors across project
 files are reported in one run. This model is the diagnostic boundary for the
 future language server and other machine clients.
 
+The reusable compiler service owns versioned project snapshots and unsaved
+document overlays above the ordinary compiler pipeline. Successful snapshots
+carry checked artifacts and per-module completion contexts. When an incomplete
+edit fails, the service publishes current diagnostics while retaining the last
+successful context, so editor completion does not disappear during typing.
+Concurrent edits invalidate obsolete analysis before it can become current.
+`trb check` already consumes this service; dependency-aware incremental phase
+reuse remains future work.
+
 ## Current limitations
 
 The current alpha does not yet provide:
