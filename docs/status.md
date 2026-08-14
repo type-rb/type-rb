@@ -134,6 +134,13 @@ request identifiers, and other request-scoped state to handlers without casts
 or string-key collisions. `Context#with` returns a new context and
 `Context#fetch` infers `Result<T, ContextValueError>` from the key; the same
 identity-based behavior runs in generated applications and the typed-IR REPL.
+The experimental `trb/auth/oidc` and `trb/web/auth/bearer` packages build on
+that context boundary with the same OIDC bearer-token profile in all three
+backends. They discover provider metadata, cache JWKS documents, verify RS256
+signatures and standard issuer, audience, time, and subject claims, refresh an
+unknown signing key through a rate-limited path, and attach a typed
+`OidcPrincipal` to authenticated requests. Server-managed browser sessions and
+authorization-code flows remain future package work.
 Typed `Request#json<T>()` accepts `application/json` and `application/*+json`,
 rejects ambiguous content types and invalid UTF-8, and reports each failure as
 a `RequestError` without exposing backend parser behavior. Root and nested

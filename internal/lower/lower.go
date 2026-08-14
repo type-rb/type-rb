@@ -45,7 +45,7 @@ func Program(checked checker.Result) *ir.Program {
 	}
 }
 
-func nativeContractTypeSymbols(imported *resolver.Import) []string {
+func contractTypeSymbols(imported *resolver.Import, native bool) []string {
 	if imported == nil {
 		return nil
 	}
@@ -62,8 +62,10 @@ func nativeContractTypeSymbols(imported *resolver.Import) []string {
 			return
 		}
 		visiting[name] = true
-		if exported.NativeExported && !sourceSymbols[name] {
-			generated[name] = true
+		if !sourceSymbols[name] {
+			if native && exported.NativeExported || !native && contractTypeExport(exported.Kind) {
+				generated[name] = true
+			}
 		}
 		visitType(exported.Type)
 		visitType(exported.AliasTarget)
@@ -97,6 +99,15 @@ func nativeContractTypeSymbols(imported *resolver.Import) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func contractTypeExport(kind resolver.ExportKind) bool {
+	switch kind {
+	case resolver.ClassExport, resolver.RecordExport, resolver.EnumExport, resolver.TypeAliasExport, resolver.InterfaceExport:
+		return true
+	default:
+		return false
+	}
 }
 
 func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
@@ -211,9 +222,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 				result.SymbolParameters[name] = append([]types.Type(nil), exported.Parameters...)
 				result.SymbolTypeParameters[name] = append([]string(nil), exported.TypeParameters...)
 			}
-			if resolved.Kind == resolver.NativeImport {
-				result.GeneratedTypeSymbols = nativeContractTypeSymbols(resolved)
-			}
+			result.GeneratedTypeSymbols = contractTypeSymbols(resolved, resolved.Kind == resolver.NativeImport)
 			if resolved.Definition != nil {
 				for name, symbol := range resolved.Definition.Symbols {
 					if result.SymbolTypes[name].Kind == "" {

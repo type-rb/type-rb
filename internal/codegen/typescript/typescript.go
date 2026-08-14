@@ -33,6 +33,7 @@ type generator struct {
 	webRuntime       bool
 	jsonRuntime      bool
 	reactStateHelper bool
+	oidcRuntime      bool
 	temporary        int
 	suspension       *SuspensionPlan
 	execution        *effectplan.Plan
@@ -110,6 +111,9 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		g.statement(statement)
 	}
 	g.integrations(program.Extensions)
+	if g.oidcRuntime {
+		g.oidcBearerRuntimeSupport()
+	}
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')

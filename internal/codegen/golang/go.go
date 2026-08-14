@@ -44,6 +44,7 @@ type generator struct {
 	projectNames    *goProjectNames
 	execution       *effectplan.Plan
 	executionActive bool
+	oidcRuntime     bool
 }
 
 func Generate(program *ir.Program) string {
@@ -124,6 +125,9 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, execution *
 		g.timeDatabaseInterop()
 	}
 	g.integrations(program.Extensions)
+	if g.oidcRuntime {
+		g.oidcBearerRuntimeSupport()
+	}
 	packageName := program.Package
 	if packageName == "" {
 		packageName = "main"
@@ -177,7 +181,7 @@ func (g *generator) importStatement(imported *ir.Import) {
 		alias = pathpkg.Base(directory)
 	}
 	g.requireImport(importPath, alias)
-	for _, symbol := range imported.Symbols {
+	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
 		g.typeAliases[symbol] = goImportAlias(alias)
 		g.typeKinds[symbol] = imported.SymbolKinds[symbol]
 	}
