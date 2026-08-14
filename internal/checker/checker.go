@@ -4037,28 +4037,30 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				blockScope.values[name] = declared
 			}
 			if transform {
-				if len(n.Block.Body) != 1 {
-					c.error(n.Block.Span(), fmt.Sprintf("%s block must contain exactly one result expression in v0.1", n.Operation))
-				}
 				blockType := types.Type{Kind: types.Any, Name: "Any"}
 				var resultExpression ast.Expression
-				if len(n.Block.Body) == 1 {
-					if result, ok := n.Block.Body[0].(*ast.ExpressionStatement); ok {
+				if len(n.Block.Body) == 0 {
+					c.error(n.Block.Span(), fmt.Sprintf("%s block must end with a result expression", n.Operation))
+				} else {
+					lastIndex := len(n.Block.Body) - 1
+					last := n.Block.Body[lastIndex]
+					if result, ok := last.(*ast.ExpressionStatement); ok {
 						resultExpression = result.Expression
-						c.checkStatements(n.Block.Body, blockScope)
-					} else if result, ok := n.Block.Body[0].(ast.Expression); ok {
+						c.checkStatementSequence(n.Block.Body[:lastIndex], blockScope)
+						c.checkExpression(resultExpression, blockScope)
+						c.checkUnusedBindings(blockScope)
+					} else if result, ok := last.(ast.Expression); ok {
 						resultExpression = result
-						blockType = c.checkExpression(result, blockScope)
+						c.checkStatementSequence(n.Block.Body[:lastIndex], blockScope)
+						c.checkExpression(resultExpression, blockScope)
 						c.checkUnusedBindings(blockScope)
 					} else {
+						c.error(last.Span(), fmt.Sprintf("%s block must end with a result expression", n.Operation))
 						c.checkStatements(n.Block.Body, blockScope)
-						c.error(n.Block.Body[0].Span(), fmt.Sprintf("%s block result must be an expression", n.Operation))
 					}
-				} else {
-					c.checkStatements(n.Block.Body, blockScope)
 				}
 				if resultExpression != nil {
-					if transfer := expressionReturn(resultExpression); transfer != nil {
+					if transfer := statementsReturn(n.Block.Body); transfer != nil {
 						c.error(transfer.Span(), "return is not supported inside value-producing collection transformations yet")
 					}
 					blockType = c.result.Expressions[resultExpression]
@@ -4068,7 +4070,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				case "map":
 					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{blockType}}
 				case "select", "any?", "all?", "none?", "find", "find_index":
-					if blockType.Kind != types.Bool || blockType.Nullable {
+					if resultExpression != nil && (blockType.Kind != types.Bool || blockType.Nullable) {
 						c.error(n.Block.Span(), fmt.Sprintf("%s block result must be Boolean, got %s", n.Operation, blockType))
 					}
 					if n.Operation == "select" {
@@ -4083,12 +4085,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 						typ = types.FromName("Boolean")
 					}
 				case "reduce":
-					if !c.assignable(resultExpression, accumulatorType, blockType) {
+					if resultExpression != nil && !c.assignable(resultExpression, accumulatorType, blockType) {
 						c.error(n.Block.Span(), fmt.Sprintf("reduce block result is %s, expected %s", blockType, accumulatorType))
 					}
 					typ = accumulatorType
 				case "sort_by", "sort_by_descending":
-					if !portableOrderType(blockType) {
+					if resultExpression != nil && !portableOrderType(blockType) {
 						c.error(n.Block.Span(), fmt.Sprintf("%s block result must have portable natural order, got %s", n.Operation, blockType))
 					}
 					if len(c.result.ExpressionEffects) != effectsBeforeBlock {

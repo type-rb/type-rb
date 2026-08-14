@@ -61,6 +61,13 @@ effects with `fails` and `attempt`. See the
 [language guide](language.md) and [specification](specification.md) for the
 current semantics.
 
+Array transformations such as `map`, `select`, `reduce`, predicate searches,
+and key-based sorting accept ordinary statements followed by one final result
+expression. Their structured typed IR runs the same block scope in generated
+Go, Ruby, TypeScript, and the REPL. TypeScript lowers a transformation that
+reaches a suspending platform operation to a sequential async loop without
+adding `async` or `await` to TypeRB source.
+
 Integer and String literal types support status- and kind-indexed data.
 Exhaustive `case` over a readonly literal field narrows the complete record or
 class union in every backend and in the REPL. Ordinary scalar `case` remains
@@ -280,7 +287,7 @@ The current alpha does not yet provide:
   and non-discriminated structured union alternatives;
 - inferred type arguments, generic interfaces, or generic class methods;
 - complete superclass construction, override, and mutation-effect semantics;
-- first-class call blocks or multi-statement collection transformations;
+- general first-class call blocks;
 - concise `Result` propagation syntax;
 - stable source maps, runtime stack mapping, incremental builds, or a
   persistent build cache;

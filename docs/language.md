@@ -413,10 +413,10 @@ end
 
 The ordinary placement rules still apply: `return` requires a function or
 method, while `break` and `next` require a loop. The internal `Never` type used
-to model these paths is not source syntax. A `return` inside the single-result
-block of `map`, `select`, or `reduce` remains unsupported; use explicit `each`
-when a transformation needs enclosing control flow. The statement forms remain
-available when no value is needed.
+to model these paths is not source syntax. A `return` inside a value-producing
+collection block remains unsupported; use explicit `each` when a transformation
+needs enclosing control flow. The statement forms remain available when no
+value is needed.
 
 ## Literal types and discriminated unions
 
@@ -583,7 +583,8 @@ Value-producing collection blocks are part of the typed IR:
 
 ```trb
 labels := [1, 2, 3].map do |value|
-	"item-" + value.to_s()
+	prefix := "item-"
+	prefix + value.to_s()
 end
 
 visible := labels.select.with_index do |label, index|
@@ -591,7 +592,8 @@ visible := labels.select.with_index do |label, index|
 end
 
 total := [1, 2, 3].reduce(0) do |sum, value|
-	sum + value
+	next_sum := sum + value
+	next_sum
 end
 
 has_large := [1, 20, 3].any? do |value|
@@ -615,10 +617,10 @@ first_large_index := [1, 20, 3].find_index do |value|
 end
 ```
 
-These transformations currently operate on Arrays. The current alpha accepts
-one result expression in transformation blocks. General structured
-multi-statement transformation blocks remain planned; first-class `fn` values
-are available independently.
+These transformations currently operate on Arrays. A block may contain
+ordinary statements and must end with the expression that produces its value.
+The block locals are evaluated separately for each element. First-class `fn`
+values are available independently.
 
 `any?`, `all?`, and `none?` short-circuit and require a non-nullable Boolean
 result. On an empty Array, they return `false`, `true`, and `true`,
