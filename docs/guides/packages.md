@@ -5,6 +5,40 @@ registry. A package contains TypeRB source and a strict `trbpackage.json`
 manifest. Application and package source share the same grammar, type checker,
 typed IR, and three backends.
 
+## Package categories
+
+TypeRB uses three package boundaries and one distribution term:
+
+| Term | Purpose | Versioning |
+| --- | --- | --- |
+| Standard library | Foundational portable APIs below `trb/std/*` | Released with the compiler |
+| Compiler-integrated package | An official package that currently requires compiler providers, typed-IR operations, or backend integration, such as `trb/web`, `trb/orm`, or `trb/jobs` | Released with the compiler while integration is required |
+| TypeRB package | An ordinary package resolved from Git or a local path | Independently versioned and locked |
+| Bundled package | An ordinary TypeRB package included in the TypeRB distribution for availability or offline use | Independently versioned and locked |
+
+Compiler integration is a capability boundary, not a mark of importance. An
+official package does not receive compiler privileges merely because TypeRB
+maintains or bundles it. Compiler-integrated packages may move to ordinary
+packages as the versioned extension protocol gains the capabilities they need.
+
+A bundled package still has to be declared as a project dependency. Bundling
+does not make its APIs implicit, couple its version to the compiler, or exempt
+it from `trb.lock`.
+
+The following labels describe independent properties rather than additional
+package boundaries:
+
+- **official** or **community** identifies who maintains the package;
+- **portable** or **platform** identifies whether it supports shared TypeRB
+  semantics or an explicit target ecosystem; and
+- **bundled** or **downloaded** describes distribution of an ordinary TypeRB
+  package, not its privileges.
+
+For example, a future `trb/csv` could be an official, portable, bundled TypeRB
+package without becoming part of the standard library or gaining compiler
+privileges. A React router integration could instead be a downloaded platform
+package maintained by TypeRB or the community.
+
 ## Install a package
 
 The short name `acme/contracts` defaults to
