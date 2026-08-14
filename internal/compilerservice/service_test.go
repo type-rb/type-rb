@@ -66,6 +66,40 @@ func TestServiceAddsAndRemovesNewDocumentOverlays(t *testing.T) {
 	}
 }
 
+func TestServiceTracksWorkspaceDocumentsBeneathOpenOverlays(t *testing.T) {
+	filename := "models/user.trb"
+	base := compiler.SourceUnit{
+		Filename: filename, ModulePath: "models/user", Package: "models",
+		Source: []byte("record User\n\tname: String\nend\n"),
+	}
+	service := New([]compiler.SourceUnit{base}, compiler.Options{Mode: "go", GoModule: "example.com/service"})
+	overlay := base
+	overlay.Source = []byte("record EditingUser\n\tname: String\nend\n")
+	service.SetDocument(overlay)
+
+	saved := base
+	saved.Source = []byte("record SavedUser\n\tname: String\nend\n")
+	service.SetWorkspaceDocument(saved)
+	withOverlay := service.Analyze()
+	context, ok := withOverlay.Context("models/user")
+	if !ok || !hasCompletion(context, "EditingUser") || hasCompletion(context, "SavedUser") {
+		t.Fatalf("workspace update replaced the open overlay: %#v", context)
+	}
+
+	service.CloseDocument(filename)
+	restored := service.Analyze()
+	context, ok = restored.Context("models/user")
+	if !ok || !hasCompletion(context, "SavedUser") || hasCompletion(context, "EditingUser") {
+		t.Fatalf("closing overlay did not restore the saved workspace unit: %#v", context)
+	}
+
+	service.RemoveWorkspaceDocument(filename)
+	removed := service.Analyze()
+	if removed.HasErrors() || len(removed.Artifacts) != 0 {
+		t.Fatalf("removed workspace unit remains in snapshot: %#v", removed)
+	}
+}
+
 func hasCompletion(context languageservice.Context, name string) bool {
 	items := languageservice.Complete(languageservice.CompletionRequest{Source: name[:1], Cursor: 1, Mode: "go", Context: context})
 	for _, item := range items {
