@@ -131,6 +131,13 @@ type documentSymbol struct {
 	Children       []documentSymbol `json:"children,omitempty"`
 }
 
+type foldingRange struct {
+	StartLine      int `json:"startLine"`
+	StartCharacter int `json:"startCharacter"`
+	EndLine        int `json:"endLine"`
+	EndCharacter   int `json:"endCharacter"`
+}
+
 type semanticTokens struct {
 	Data []int `json:"data"`
 }
@@ -201,6 +208,7 @@ type serverCapabilities struct {
 	ReferencesProvider         bool                  `json:"referencesProvider"`
 	RenameProvider             renameOptions         `json:"renameProvider"`
 	DocumentSymbolProvider     bool                  `json:"documentSymbolProvider"`
+	FoldingRangeProvider       bool                  `json:"foldingRangeProvider"`
 	WorkspaceSymbolProvider    bool                  `json:"workspaceSymbolProvider"`
 	SemanticTokensProvider     semanticTokensOptions `json:"semanticTokensProvider"`
 	DocumentFormattingProvider bool                  `json:"documentFormattingProvider"`

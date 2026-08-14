@@ -48,7 +48,7 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 
 	var initialized initializeResult
 	decodeResult(t, frames[0], &initialized)
-	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != textDocumentSyncIncremental || !initialized.Capabilities.CodeActionProvider {
+	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != textDocumentSyncIncremental || !initialized.Capabilities.CodeActionProvider || !initialized.Capabilities.FoldingRangeProvider {
 		t.Fatalf("unexpected initialize result: %#v", initialized)
 	}
 	var opened publishDiagnosticsParams
@@ -148,6 +148,34 @@ func TestServerReturnsNestedDocumentSymbols(t *testing.T) {
 	}
 	if symbols[0].SelectionRange.Start != (position{Line: 0, Character: 7}) || symbols[0].SelectionRange.End != (position{Line: 0, Character: 11}) {
 		t.Fatalf("record selection=%#v", symbols[0].SelectionRange)
+	}
+}
+
+func TestServerReturnsStructuralFoldingRanges(t *testing.T) {
+	filename := cleanPath("folding.trb")
+	source := "class User\n\tdef name(): String\n\t\treturn \"Ada\"\n\tend\nend\n"
+	uri := uriFromPath(filename)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/foldingRange", Params: rawParams(t, documentParams{TextDocument: textDocumentIdentifier{URI: uri}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "folding", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var ranges []foldingRange
+	decodeResult(t, frames[2], &ranges)
+	if len(ranges) != 2 || ranges[0].StartLine != 0 || ranges[0].EndLine != 4 || ranges[1].StartLine != 1 || ranges[1].EndLine != 3 {
+		t.Fatalf("folding ranges=%#v", ranges)
 	}
 }
 
