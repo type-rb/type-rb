@@ -49,7 +49,7 @@ func BuildContext(programs []*ir.Program, modulePath string) Context {
 		Kind:   CompletionFunction,
 		Detail: "puts(value: Any)",
 		Type:   types.FromName("Void"),
-		Call:   &CallInfo{ParameterCount: 1},
+		Call:   &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: Any"}}},
 	}
 
 	context.Symbols = make([]Symbol, 0, len(visible))
@@ -98,7 +98,7 @@ func declarationSymbol(member declaration.Member) Symbol {
 	callParameters := make([]CallParameter, len(member.Parameters))
 	for index, parameter := range member.Parameters {
 		parameters[index] = parameter.Name + ": " + parameter.Type.String()
-		callParameters[index] = CallParameter{Name: parameter.Name, Keyword: parameter.Keyword}
+		callParameters[index] = CallParameter{Name: parameter.Name, Label: parameters[index], Keyword: parameter.Keyword}
 	}
 	detail := member.Name + "(" + strings.Join(parameters, ", ") + "): " + member.Return.String()
 	if member.Fails.Kind != "" && member.Fails.Kind != types.Never {
@@ -154,7 +154,7 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 			callParameters := make([]CallParameter, len(parameters))
 			for index, parameter := range parameters {
 				parts[index] = parameter.String()
-				callParameters[index] = CallParameter{Name: "arg" + strconv.Itoa(index)}
+				callParameters[index] = CallParameter{Name: "arg" + strconv.Itoa(index), Label: parts[index]}
 			}
 			detail = name + genericSuffix + "(" + strings.Join(parts, ", ") + "): " + typ.String()
 			call = &CallInfo{
@@ -200,12 +200,16 @@ func standardSymbols(definition *stdlib.Package) []Symbol {
 	}
 	result := make([]Symbol, 0, len(definition.Symbols)+len(definition.RuntimeExports))
 	for _, library := range definition.Symbols {
+		parameters := make([]CallParameter, len(library.Parameters))
+		for index, parameter := range library.Parameters {
+			parameters[index] = CallParameter{Name: parameter.Name, Label: parameter.Name + ": " + parameter.Type.String()}
+		}
 		result = append(result, Symbol{
 			Name:   library.Name,
 			Kind:   CompletionFunction,
 			Detail: librarySignature(library),
 			Type:   library.Return,
-			Call:   &CallInfo{ParameterCount: len(library.Parameters)},
+			Call:   &CallInfo{ParameterCount: len(library.Parameters), Parameters: parameters},
 		})
 	}
 	for _, exported := range definition.RuntimeExports {
@@ -347,16 +351,19 @@ func loadablePropertyMembers(valueType, failureType types.Type) []Symbol {
 func recordMembers(statements []ir.Statement, owner string) ([]Symbol, []Symbol) {
 	instance := []Symbol{}
 	parameters := []string{}
+	callParameters := []CallParameter{}
 	for _, statement := range statements {
 		field, ok := statement.(*ir.RecordField)
 		if !ok || privateName(field.Name) {
 			continue
 		}
 		instance = append(instance, Symbol{Name: field.Name, Kind: CompletionField, Detail: field.Type.String(), Type: field.Type})
-		parameters = append(parameters, field.Name+": "+field.Type.String())
+		label := field.Name + ": " + field.Type.String()
+		parameters = append(parameters, label)
+		callParameters = append(callParameters, CallParameter{Name: field.Name, Label: label, Keyword: true})
 	}
 	sortSymbols(instance)
-	namespace := []Symbol{{Name: "new", Kind: CompletionMethod, Detail: "new(" + strings.Join(parameters, ", ") + "): " + owner, Type: types.FromName(owner), Call: &CallInfo{ParameterCount: len(parameters)}}}
+	namespace := []Symbol{{Name: "new", Kind: CompletionMethod, Detail: "new(" + strings.Join(parameters, ", ") + "): " + owner, Type: types.FromName(owner), Call: &CallInfo{ParameterCount: len(parameters), Parameters: callParameters}}}
 	return instance, namespace
 }
 
@@ -387,7 +394,7 @@ func enumMembers(enum *ir.Enum, owner string) ([]Symbol, []Symbol) {
 	if enum.RawType.Kind != "" {
 		instance = append(instance, Symbol{Name: "raw_value", Kind: CompletionMethod, Detail: "raw_value(): " + enum.RawType.String(), Type: enum.RawType, Call: &CallInfo{}})
 		resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName(owner), types.FromName("EnumValueError")}}
-		namespace = append(namespace, Symbol{Name: "from_raw", Kind: CompletionMethod, Detail: "from_raw(value: " + enum.RawType.String() + "): " + resultType.String(), Type: resultType, Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value"}}}})
+		namespace = append(namespace, Symbol{Name: "from_raw", Kind: CompletionMethod, Detail: "from_raw(value: " + enum.RawType.String() + "): " + resultType.String(), Type: resultType, Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: " + enum.RawType.String()}}}})
 	}
 	sortSymbols(instance)
 	sortSymbols(namespace)
@@ -446,8 +453,14 @@ func methodCallInfo(method *ir.Method) *CallInfo {
 }
 
 func callParameter(parameter ir.Parameter) CallParameter {
+	label := parameter.Name + ": " + parameter.Type.String()
+	if parameter.Rest {
+		label = "*" + label
+	} else if parameter.KeywordRest {
+		label = "**" + label
+	}
 	return CallParameter{
-		Name: parameter.Name, Keyword: parameter.Keyword,
+		Name: parameter.Name, Label: label, Keyword: parameter.Keyword,
 		LiteralValues:        append([]string(nil), parameter.LiteralValues...),
 		LiteralArrays:        copyLiteralArrays(parameter.LiteralArrays),
 		LiteralArrayElements: append([]string(nil), parameter.LiteralArrayElements...),

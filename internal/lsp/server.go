@@ -91,6 +91,8 @@ func (s *Server) handle(request message) (bool, error) {
 			Capabilities: serverCapabilities{
 				TextDocumentSync:           1,
 				CompletionProvider:         completionOptions{TriggerCharacters: []string{".", ":"}},
+				HoverProvider:              true,
+				SignatureHelpProvider:      signatureOptions{TriggerCharacters: []string{"(", ","}},
 				DocumentFormattingProvider: true, CodeActionProvider: true,
 			},
 			ServerInfo: serverInfo{Name: "TypeRB", Version: s.version},
@@ -123,6 +125,10 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.close(params.TextDocument.URI)
 	case "textDocument/completion":
 		return false, s.completion(request)
+	case "textDocument/hover":
+		return false, s.hover(request)
+	case "textDocument/signatureHelp":
+		return false, s.signatureHelp(request)
 	case "textDocument/formatting":
 		return false, s.format(request)
 	case "textDocument/codeAction":
@@ -204,6 +210,67 @@ func (s *Server) completion(request message) error {
 			Label: item.Label, Kind: completionKind(item.Kind), Detail: item.Detail,
 			TextEdit: textEdit{Range: offsetRange(document.source, item.Replacement.Start, item.Replacement.End), NewText: item.InsertText},
 		})
+	}
+	return s.stream.write(success(request.ID, result))
+}
+
+func (s *Server) hover(request message) error {
+	params, err := decodeParams[documentPositionParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	info, ok := languageservice.Hover(languageservice.SemanticRequest{
+		Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
+	})
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	result := hoverResult{
+		Contents: markupContent{Kind: "markdown", Value: "```trb\n" + info.Detail + "\n```"},
+		Range:    offsetRange(document.source, info.Range.Start, info.Range.End),
+	}
+	return s.stream.write(success(request.ID, result))
+}
+
+func (s *Server) signatureHelp(request message) error {
+	params, err := decodeParams[documentPositionParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	info, ok := languageservice.Signatures(languageservice.SemanticRequest{
+		Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
+	})
+	if !ok {
+		return s.stream.write(success(request.ID, nil))
+	}
+	result := signatureHelpResult{
+		Signatures:      make([]signatureInformation, 0, len(info.Signatures)),
+		ActiveSignature: info.ActiveSignature, ActiveParameter: info.ActiveParameter,
+	}
+	for _, signature := range info.Signatures {
+		converted := signatureInformation{Label: signature.Label, Parameters: make([]parameterInformation, 0, len(signature.Parameters))}
+		for _, parameter := range signature.Parameters {
+			converted.Parameters = append(converted.Parameters, parameterInformation{Label: parameter.Label})
+		}
+		result.Signatures = append(result.Signatures, converted)
 	}
 	return s.stream.write(success(request.ID, result))
 }

@@ -100,6 +100,31 @@ type completionItem struct {
 	TextEdit textEdit `json:"textEdit"`
 }
 
+type markupContent struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+}
+
+type hoverResult struct {
+	Contents markupContent `json:"contents"`
+	Range    rangeValue    `json:"range"`
+}
+
+type parameterInformation struct {
+	Label string `json:"label"`
+}
+
+type signatureInformation struct {
+	Label      string                 `json:"label"`
+	Parameters []parameterInformation `json:"parameters,omitempty"`
+}
+
+type signatureHelpResult struct {
+	Signatures      []signatureInformation `json:"signatures"`
+	ActiveSignature int                    `json:"activeSignature"`
+	ActiveParameter int                    `json:"activeParameter"`
+}
+
 type workspaceEdit struct {
 	Changes map[string][]textEdit `json:"changes"`
 }
@@ -123,12 +148,19 @@ type serverInfo struct {
 type serverCapabilities struct {
 	TextDocumentSync           int               `json:"textDocumentSync"`
 	CompletionProvider         completionOptions `json:"completionProvider"`
+	HoverProvider              bool              `json:"hoverProvider"`
+	SignatureHelpProvider      signatureOptions  `json:"signatureHelpProvider"`
 	DocumentFormattingProvider bool              `json:"documentFormattingProvider"`
 	CodeActionProvider         bool              `json:"codeActionProvider"`
 }
 
 type completionOptions struct {
 	TriggerCharacters []string `json:"triggerCharacters"`
+}
+
+type signatureOptions struct {
+	TriggerCharacters   []string `json:"triggerCharacters"`
+	RetriggerCharacters []string `json:"retriggerCharacters,omitempty"`
 }
 
 func decodeParams[T any](raw json.RawMessage) (T, error) {

@@ -113,6 +113,51 @@ func TestServerOffersDiagnosticFixesAsCodeActions(t *testing.T) {
 	}
 }
 
+func TestServerProvidesHoverAndSignatureHelp(t *testing.T) {
+	filename := cleanPath("semantic.trb")
+	source := "def greet(name: String, suffix: String): String\n\treturn \"Hello, \" + name + suffix\nend\n\ngreet(\"Ada\", \"!\")\n"
+	uri := uriFromPath(filename)
+	hoverOffset := strings.LastIndex(source, "greet") + len("gr")
+	signatureOffset := strings.LastIndex(source, `"!"`) + len(`"!"`)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/hover", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(source), hoverOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "textDocument/signatureHelp", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(source), signatureOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("4"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Version: "test", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "semantic", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", Package: "main", ModulePath: "semantic", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 5 {
+		t.Fatalf("response count=%d, want 5: %s", len(frames), output.String())
+	}
+
+	var initialized initializeResult
+	decodeResult(t, frames[0], &initialized)
+	if !initialized.Capabilities.HoverProvider || len(initialized.Capabilities.SignatureHelpProvider.TriggerCharacters) != 2 {
+		t.Fatalf("semantic capabilities=%#v", initialized.Capabilities)
+	}
+	var hover hoverResult
+	decodeResult(t, frames[2], &hover)
+	if !strings.Contains(hover.Contents.Value, "greet(name: String, suffix: String): String") {
+		t.Fatalf("hover=%#v", hover)
+	}
+	var signatures signatureHelpResult
+	decodeResult(t, frames[3], &signatures)
+	if len(signatures.Signatures) != 1 || signatures.ActiveParameter != 1 || signatures.Signatures[0].Parameters[1].Label != "suffix: String" {
+		t.Fatalf("signature help=%#v", signatures)
+	}
+}
+
 func TestServerPublishesProjectDiagnosticsAfterInitialized(t *testing.T) {
 	filename := cleanPath("broken.trb")
 	source := "def broken(): String\n\treturn missing()\nend\n"

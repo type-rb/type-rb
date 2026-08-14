@@ -221,13 +221,13 @@ trb lsp
 trb lsp --config path/to/trbconfig.jsonc
 ```
 
-The initial language server provides project-wide live diagnostics, completion,
-document formatting, and quick fixes backed by structured compiler suggestions.
-It uses UTF-16 LSP positions at the protocol boundary while the compiler keeps
-UTF-8 byte spans internally. Editors send full-document updates for now;
-incremental text synchronization and dependency-level recompilation remain
-performance follow-ups. Hover, signature help, navigation, references, rename,
-and semantic tokens are not yet advertised.
+The language server provides project-wide live diagnostics, completion, checked
+hover information, signature help, document formatting, and quick fixes backed
+by structured compiler suggestions. It uses UTF-16 LSP positions at the
+protocol boundary while the compiler keeps UTF-8 byte spans internally.
+Editors send full-document updates for now; incremental text synchronization
+and dependency-level recompilation remain performance follow-ups. Navigation,
+references, rename, and semantic tokens are not yet advertised.
 
 The thin Visual Studio Code client in `editors/vscode` starts this command and
 packages the canonical TypeRB TextMate grammar. It defaults to `trb` on `PATH`;
