@@ -2,6 +2,24 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.5 - 2026-08-14
+
+### Editor tooling
+
+- TypeRB editors can now show checked hover information and call signatures,
+  navigate to project and lexical definitions, find references, and rename
+  declarations and uses across project files. Symbol identity preserves
+  receiver types and lexical scope instead of relying on matching text.
+  ([#229](https://github.com/type-rb/type-rb/pull/229),
+  [#230](https://github.com/type-rb/type-rb/pull/230),
+  [#231](https://github.com/type-rb/type-rb/pull/231))
+
+### CLI
+
+- `trb version`, `trb --version`, and `trb -v` now print only the semantic
+  version. Scripts that expected a `trb ` prefix must consume the bare version
+  instead. ([#228](https://github.com/type-rb/type-rb/pull/228))
+
 ## 0.2.4 - 2026-08-14
 
 ### Editor and compiler tooling
