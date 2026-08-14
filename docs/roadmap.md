@@ -52,7 +52,7 @@ than detailed syntax.
 ## 4. Editor tooling
 
 - Extend the reusable `trb lsp` diagnostics, formatting, completion, hover,
-  signature help, and quick fixes with go to definition, references, rename,
+  signature help, go to definition, and quick fixes with references, rename,
   document symbols, semantic tokens, and richer code actions.
 - Extend the published preview VS Code client with semantic navigation, test
   discovery, and additional editor integrations.
