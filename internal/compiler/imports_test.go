@@ -2987,16 +2987,39 @@ func TestImportedTransparentAliasesUseUnderlyingReceiverMethods(t *testing.T) {
 		Package:    "ids",
 		Source: []byte(`type UserId = Integer
 type MemberId = Integer
+
+record MemberRef
+	member_id: MemberId?
+end
 `),
 	}
 	consumer := SourceUnit{
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { MemberId } from contracts/ids
+		Source: []byte(`import { MemberId, MemberRef } from contracts/ids
+
+record QueryResult<T>
+	data: T
+end
 
 def member_id_text(id: MemberId): String
 	return id.to_s()
+end
+
+def optional_member_id_text(ref: MemberRef): String
+	if ref.member_id == nil
+		return ""
+	end
+	return ref.member_id.to_s()
+end
+
+
+def nested_optional_member_id_text(query: QueryResult<MemberRef>): String
+	if query.data.member_id == nil
+		return ""
+	end
+	return query.data.member_id.to_s()
 end
 `),
 	}
@@ -3019,6 +3042,22 @@ end
 		}[mode]
 		if !strings.Contains(output, want) {
 			t.Fatalf("%s did not lower the alias receiver through Integer.to_s():\n%s", mode, output)
+		}
+		narrowedWant := map[string]string{
+			"go":         "strconv.Itoa(*(ref.MemberId))",
+			"ruby":       "ref.member_id.to_s",
+			"typescript": "String(ref.member_id)",
+		}[mode]
+		if !strings.Contains(output, narrowedWant) {
+			t.Fatalf("%s did not lower the narrowed nullable alias receiver through Integer.to_s():\n%s", mode, output)
+		}
+		nestedWant := map[string]string{
+			"go":         "strconv.Itoa(*(query.Data.MemberId))",
+			"ruby":       "query.data.member_id.to_s",
+			"typescript": "String(query.data.member_id)",
+		}[mode]
+		if !strings.Contains(output, nestedWant) {
+			t.Fatalf("%s did not lower the nested narrowed alias receiver through Integer.to_s():\n%s", mode, output)
 		}
 	}
 }

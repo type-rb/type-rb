@@ -62,6 +62,82 @@ end
 	}
 }
 
+func TestBuildNarrowsNullableAliasThroughNativeDiscriminatedUnion(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "typescript")
+	config.SourceDir = "src"
+	config.OutDir = "build"
+	config.PackageManagement = project.ExternalPackages
+	config.TypeScript.Runtime = project.TypeScriptRuntimeBrowser
+	config.Dependencies["query"] = "1.0.0"
+	copyFiles := false
+	config.CopyFiles = &copyFiles
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { QueryResult } from "query"
+
+type MemberId = Integer
+
+record UserView
+	member_id: MemberId?
+end
+
+def member_id_text(query: QueryResult<UserView>): String
+	case query.status
+	when "pending"
+		return ""
+	when "success"
+		if query.data.member_id == nil
+			return ""
+		end
+		return query.data.member_id.to_s()
+	end
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	typeParameter := nativepackage.Type{Kind: "named", Name: "TData"}
+	pending := nativepackage.Type{Kind: "named", Name: "QueryPending", Args: []nativepackage.Type{typeParameter}}
+	success := nativepackage.Type{Kind: "named", Name: "QuerySuccess", Args: []nativepackage.Type{typeParameter}}
+	aliasTarget := nativepackage.Type{Kind: "union", Name: "Union", Args: []nativepackage.Type{pending, success}}
+	catalog := &nativepackage.Catalog{
+		FormatVersion: nativepackage.FormatVersion,
+		Dependencies:  map[string]string{"query": "1.0.0"},
+		Modules: map[string]nativepackage.Module{
+			"query": {
+				Exports: map[string]nativepackage.Export{
+					"QueryResult": {Kind: "type_alias", Type: nativepackage.Type{Kind: "named", Name: "QueryResult", Args: []nativepackage.Type{typeParameter}}, AliasTarget: &aliasTarget, TypeParameters: []string{"TData"}},
+				},
+				Records: map[string]nativepackage.Export{
+					"QueryPending": {Kind: "record", Type: pending, TypeParameters: []string{"TData"}, Fields: []nativepackage.Field{{Name: "status", Type: nativepackage.Type{Kind: "string_literal", Name: `"pending"`}}}},
+					"QuerySuccess": {Kind: "record", Type: success, TypeParameters: []string{"TData"}, Fields: []nativepackage.Field{{Name: "status", Type: nativepackage.Type{Kind: "string_literal", Name: `"success"`}}, {Name: "data", Type: typeParameter}}},
+				},
+			},
+		},
+	}
+	if err := nativepackage.Write(root, catalog); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	generated, err := os.ReadFile(filepath.Join(config.OutputPath(), "main.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(generated), "String(query.data.member_id)") {
+		t.Fatalf("narrowed alias did not use the Integer receiver intrinsic:\n%s", generated)
+	}
+}
+
 func TestBuildRejectsStaleNativeTypeScriptPackageIndex(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "typescript")

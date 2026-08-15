@@ -1419,14 +1419,6 @@ func (c *Checker) nullableMemberNarrowing(member *ast.MemberExpression, sc *scop
 	if member.Namespace || member.Safe {
 		return nullableMemberKey{}, types.Type{}, false
 	}
-	root, ok := member.Receiver.(*ast.Identifier)
-	if !ok {
-		return nullableMemberKey{}, types.Type{}, false
-	}
-	binding, ok := sc.lookup(root.Name)
-	if !ok {
-		return nullableMemberKey{}, types.Type{}, false
-	}
 	receiverType, ok := c.result.Expressions[member.Receiver]
 	if !ok || receiverType.Nullable || receiverType.Kind == types.Invalid {
 		return nullableMemberKey{}, types.Type{}, false
@@ -1435,8 +1427,60 @@ func (c *Checker) nullableMemberNarrowing(member *ast.MemberExpression, sc *scop
 	if !found || !readonly {
 		return nullableMemberKey{}, types.Type{}, false
 	}
-	key := nullableMemberKey{rootName: root.Name, rootOffset: binding.span.Start.Offset, member: member.Name}
+	rootName, rootOffset, path, stable := c.readonlyMemberPath(member.Receiver, sc)
+	if !stable {
+		return nullableMemberKey{}, types.Type{}, false
+	}
+	path = append(path, member.Name)
+	key := nullableMemberKey{rootName: rootName, rootOffset: rootOffset, member: strings.Join(path, ".")}
 	return key, fieldType, true
+}
+
+func (c *Checker) readonlyMemberPath(expression ast.Expression, sc *scope) (string, int, []string, bool) {
+	switch value := expression.(type) {
+	case *ast.Identifier:
+		binding, ok := sc.lookup(value.Name)
+		if !ok {
+			return "", 0, nil, false
+		}
+		return value.Name, binding.span.Start.Offset, nil, true
+	case *ast.MemberExpression:
+		if value.Namespace || value.Safe {
+			return "", 0, nil, false
+		}
+		receiverType, ok := c.result.Expressions[value.Receiver]
+		if !ok || receiverType.Nullable || receiverType.Kind == types.Invalid {
+			return "", 0, nil, false
+		}
+		if !c.readonlyDataMember(receiverType, value.Name) {
+			return "", 0, nil, false
+		}
+		rootName, rootOffset, path, stable := c.readonlyMemberPath(value.Receiver, sc)
+		if !stable {
+			return "", 0, nil, false
+		}
+		return rootName, rootOffset, append(path, value.Name), true
+	default:
+		return "", 0, nil, false
+	}
+}
+
+func (c *Checker) readonlyDataMember(receiver types.Type, name string) bool {
+	receiver = c.expandAlias(receiver, map[string]bool{})
+	if receiver.Kind != types.Union {
+		_, readonly, _, found := c.dataMember(receiver, name)
+		return found && readonly
+	}
+	if len(receiver.Args) == 0 {
+		return false
+	}
+	for _, alternative := range receiver.Args {
+		_, readonly, _, found := c.dataMember(alternative, name)
+		if !found || !readonly {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Checker) promoteNullableNarrowings(target, narrowed *scope) {
