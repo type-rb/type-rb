@@ -43,7 +43,7 @@ import (
 
 // Version is a variable so release builds can inject the tag with Go's -X
 // linker flag while local source builds retain a useful development version.
-var Version = "0.2.22-dev"
+var Version = "0.2.23-dev"
 
 type buildArtifactKind string
 
