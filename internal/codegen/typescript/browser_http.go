@@ -33,7 +33,7 @@ func (g *generator) browserHTTPIntrinsic(name string, call *ir.Call, arguments [
 
 func (g *generator) browserResponseNoBody(call *ir.Call, argument string) string {
 	resultType, successType, _ := g.browserResultParts(call)
-	return "((): " + resultType + " => { const response = " + argument + "; if (response.__trb_body.bytes().byteLength !== 0) { const message = \"expected an empty response body\"; return " + g.browserError(call, "Contract", "message", "response") + "; } return " + g.browserOK(call, g.browserResponseValue("response", "({} satisfies "+g.runtimeName("NoBody")+")", successType)) + "; })()"
+	return "((response): " + resultType + " => { if (response.__trb_body.bytes().byteLength !== 0) { const message = \"expected an empty response body\"; return " + g.browserError(call, "Contract", "message", "response") + "; } return " + g.browserOK(call, g.browserResponseValue("response", "({} satisfies "+g.runtimeName("NoBody")+")", successType)) + "; })(" + argument + ")"
 }
 
 func (g *generator) browserRuntimeName(name string) string {
@@ -124,10 +124,10 @@ func (g *generator) browserResponseJSON(call *ir.Call, argument string) string {
 	decoder := builder.decoder(call.Codec)
 	jsonValue := "JsonValue"
 	contractError := g.browserError(call, "Contract", "message", "response")
-	return "((): " + resultType + " => { const response = " + argument + "; const source = new TextDecoder(\"utf-8\", { fatal: true }); " +
+	return "((response): " + resultType + " => { const source = new TextDecoder(\"utf-8\", { fatal: true }); " +
 		"const fail = (path: string, detail: string): never => { throw new Error((path.length === 0 ? \"/\" : path) + \": \" + detail); }; " + builder.source.String() +
 		"const convert = (value: unknown, path: string): " + jsonValue + " => { if (value === null) return JsonValue.Null; if (typeof value === \"boolean\") return JsonValue.Boolean(value); if (typeof value === \"string\") return JsonValue.String(value); if (typeof value === \"number\") { if (!Number.isFinite(value)) return fail(path, \"JSON number is not finite\"); if (Number.isInteger(value)) { if (!Number.isSafeInteger(value)) return fail(path, \"JSON integer is outside the portable range\"); return JsonValue.Integer(value); } return JsonValue.Float(value); } if (Array.isArray(value)) return JsonValue.Array(value.map((item, index) => convert(item, path + \"/\" + String(index)))); if (typeof value === \"object\") { const fields: Record<string, JsonValue> = {}; for (const [key, item] of Object.entries(value)) fields[key] = convert(item, path + \"/\" + key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\")); return JsonValue.Object(fields); } return fail(path, \"unsupported JSON value\"); }; " +
-		"try { const parsed: unknown = JSON.parse(source.decode(response.__trb_body.bytes())); const value = " + decoder + "(convert(parsed, \"\"), \"\"); return " + g.browserOK(call, g.browserResponseValue("response", "value", successType)) + "; } catch (error) { const message = error instanceof Error ? error.message : String(error); return " + contractError + "; } })()"
+		"try { const parsed: unknown = JSON.parse(source.decode(response.__trb_body.bytes())); const value = " + decoder + "(convert(parsed, \"\"), \"\"); return " + g.browserOK(call, g.browserResponseValue("response", "value", successType)) + "; } catch (error) { const message = error instanceof Error ? error.message : String(error); return " + contractError + "; } })(" + argument + ")"
 }
 
 func (g *generator) browserJSONBody(call *ir.Call, argument string) string {
