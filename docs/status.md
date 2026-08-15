@@ -247,6 +247,8 @@ those shared methods and headers, repeated query parameters, text, bytes, form,
 JSON, and native browser `File` bodies, and timeouts. Indexed native component
 callbacks can pass a DOM `File` through the platform package's checked metadata
 boundary and into a request without losing the underlying browser object.
+`File#read()` and `File#read_text()` expose its buffered contents as fallible,
+generated-TypeScript-only browser operations.
 Fetch responses retain status, headers, final URL, and buffered bytes; explicit
 JSON decoding produces `Response<T>` and preserves
 the raw response in a classified `RequestError` when the contract is invalid.

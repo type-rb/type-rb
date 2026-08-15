@@ -4,6 +4,10 @@ import { QueryParameter } from trb/std/url
 record NoBody
 end
 
+record FileReadError
+	message: String
+end
+
 record File
 	name: String
 	size: Integer

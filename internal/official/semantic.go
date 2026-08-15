@@ -63,6 +63,20 @@ func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 	requestError := types.FromName("RequestError")
 	jsonRuntime := []types.Type{types.FromName("JsonValue")}
 	return map[string]stdlib.Symbol{
+		"read": {
+			Name:      "read",
+			Intrinsic: "trb.platform.typescript.browser.file_read",
+			Receiver:  types.FromName("File"),
+			Return:    types.FromName("Bytes"),
+			Fails:     types.FromName("FileReadError"),
+		},
+		"read_text": {
+			Name:      "read_text",
+			Intrinsic: "trb.platform.typescript.browser.file_read_text",
+			Receiver:  types.FromName("File"),
+			Return:    types.FromName("String"),
+			Fails:     types.FromName("FileReadError"),
+		},
 		"request": {
 			Name:      "request",
 			Intrinsic: "trb.platform.typescript.browser.request",
