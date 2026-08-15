@@ -127,6 +127,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
 - Within JSX only, a lowercase name is an intrinsic element and an uppercase
   name is a component reference. This rule does not change ordinary TypeRB
   function or constant naming.
+- A component may be a checked member of another imported component, such as
+  `Table.Row` or `Sidebar.Item`. Package-owned native type providers declare
+  these compound component members and their props; generated TSX retains the
+  member expression unchanged.
 - JSX attribute names retain their source spelling. The compiler does not
   translate names such as `className` or `onClick` to or from snake case.
 - A JSX provider may declare checked intrinsic attributes. The initial React

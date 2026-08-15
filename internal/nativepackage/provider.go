@@ -184,6 +184,31 @@ func validateProviderModule(moduleName string, module Module) error {
 				return fmt.Errorf("export %s.%s from %s: %w", name, field.Name, moduleName, err)
 			}
 		}
+		for memberName, member := range exported.Members {
+			if strings.TrimSpace(memberName) == "" {
+				return fmt.Errorf("export %s from %s contains an empty member name", name, moduleName)
+			}
+			if member.Kind != "component" && member.Kind != "function" {
+				return fmt.Errorf("member %s.%s from %s has unsupported kind %q", name, memberName, moduleName, member.Kind)
+			}
+			if len(member.Members) != 0 {
+				return fmt.Errorf("member %s.%s from %s cannot declare nested members", name, memberName, moduleName)
+			}
+			if err := validateProviderTypeParameters(member.TypeParameters); err != nil {
+				return fmt.Errorf("member %s.%s from %s: %w", name, memberName, moduleName, err)
+			}
+			if err := validateProviderType(member.Type); err != nil {
+				return fmt.Errorf("member %s.%s from %s: %w", name, memberName, moduleName, err)
+			}
+			for _, parameter := range member.Parameters {
+				if err := validateProviderType(parameter); err != nil {
+					return fmt.Errorf("member %s.%s from %s: %w", name, memberName, moduleName, err)
+				}
+			}
+			if member.Required < 0 || member.Required > len(member.Parameters) {
+				return fmt.Errorf("member %s.%s from %s has invalid required parameter count", name, memberName, moduleName)
+			}
+		}
 	}
 	for name, record := range module.Records {
 		if strings.TrimSpace(name) == "" || record.Kind != "record" {
