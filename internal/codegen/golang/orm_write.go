@@ -79,7 +79,7 @@ func (g *generator) ormCreateRuntime(adapter ormintegration.Adapter, model ormin
 		if primaryKey.Generated {
 			g.line("written, err := database.Exec(statement, values...)")
 		} else {
-			g.line("_, err = database.Exec(statement, values...)")
+			g.line("_, err := database.Exec(statement, values...)")
 		}
 		g.line("if err != nil { return " + g.ormResultErr(modelType, "trbOrmError(err, "+g.ormErrorKind("Constraint")+", \"database insert failed\")") + " }")
 		g.line("var primaryKeyValue any")

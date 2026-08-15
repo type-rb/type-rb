@@ -168,7 +168,7 @@ func TestMySQLORMCreateUsesApplicationPrimaryKeyWhenNotGenerated(t *testing.T) {
 	manifest.Augment(program)
 	output := Generate(program)
 	for _, want := range []string{
-		`_, err = database.Exec(statement, values...)`, `if column == "id" {`, `primaryKeyValue = values[index]`,
+		`_, err := database.Exec(statement, values...)`, `if column == "id" {`, `primaryKeyValue = values[index]`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("generated MySQL application-key create is missing %q:\n%s", want, output)
@@ -176,5 +176,8 @@ func TestMySQLORMCreateUsesApplicationPrimaryKeyWhenNotGenerated(t *testing.T) {
 	}
 	if strings.Contains(output, "written.LastInsertId") {
 		t.Fatalf("generated MySQL application-key create requests a generated key:\n%s", output)
+	}
+	if strings.Contains(output, `_, err = database.Exec(statement, values...)`) {
+		t.Fatalf("generated MySQL application-key create assigns to an undeclared error variable:\n%s", output)
 	}
 }
