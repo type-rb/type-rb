@@ -124,8 +124,16 @@ end
 		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
 		{Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte("def main()\n\treturn\nend\n")},
 	}
-	if _, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"}); err != nil {
+	artifacts, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"})
+	if err != nil {
 		t.Fatal(err)
+	}
+	contracts := artifactForModule(artifacts, "contracts/index")
+	if contracts == nil {
+		t.Fatal("contracts artifact was not generated")
+	}
+	if strings.Contains(string(contracts.Output), "trb/jobs/sql") {
+		t.Fatalf("unrelated module imports the jobs runtime:\n%s", contracts.Output)
 	}
 }
 
