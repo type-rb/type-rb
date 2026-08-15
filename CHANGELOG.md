@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.17 - 2026-08-16
+
+### Language
+
+- Transparent aliases now behave like their underlying scalar types in unary
+  and binary expressions and as JSX children. Imported aliases can therefore
+  be rendered and combined without explicit conversion.
+  ([#294](https://github.com/type-rb/type-rb/pull/294))
+
 ## 0.2.16 - 2026-08-16
 
 ### ORM
