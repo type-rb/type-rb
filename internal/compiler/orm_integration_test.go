@@ -165,6 +165,82 @@ end
 	assertORMLiteralCompletions(t, context)
 }
 
+func TestPortableORMEmitsSharedGoRuntimeOncePerPackage(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL)`,
+	} {
+		if _, err := database.Exec(statement); err != nil {
+			database.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TRB_TEST_DATABASE_URL", databasePath)
+
+	artifacts, err := CompileProject([]SourceUnit{
+		{
+			Filename:   filepath.Join(root, "src", "models", "product.trb"),
+			ModulePath: "models/product",
+			Package:    "models",
+			Source: []byte(`import { Model } from trb/orm
+
+class Product < Model
+end
+`),
+		},
+		{
+			Filename:   filepath.Join(root, "src", "models", "user.trb"),
+			ModulePath: "models/user",
+			Package:    "models",
+			Source: []byte(`import { Model } from trb/orm
+
+class User < Model
+end
+`),
+		},
+	}, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{
+			"trb/orm": []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_DATABASE_URL"}}`),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outputs := map[string]string{}
+	sharedRuntimeCount := 0
+	for _, artifact := range artifacts {
+		if artifact.AST.Package != "models" {
+			continue
+		}
+		output := string(artifact.Output)
+		outputs[artifact.AST.ModulePath] = output
+		sharedRuntimeCount += strings.Count(output, "type trbOrmExecutorTarget interface")
+		if _, err := parser.ParseFile(token.NewFileSet(), artifact.AST.ModulePath+".go", output, parser.AllErrors); err != nil {
+			t.Fatalf("generated %s is invalid Go: %v\n%s", artifact.AST.ModulePath, err, output)
+		}
+	}
+	if sharedRuntimeCount != 1 {
+		t.Fatalf("shared ORM runtime was generated %d times, want 1", sharedRuntimeCount)
+	}
+	if !strings.Contains(outputs["models/product"], "type TrbOrmProductQuery struct") {
+		t.Fatal("product-specific ORM runtime was not generated")
+	}
+	if !strings.Contains(outputs["models/user"], "type TrbOrmUserQuery struct") {
+		t.Fatal("user-specific ORM runtime was not generated")
+	}
+}
+
 func TestPortableORMCompilesExplicitTransactionScope(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "application.sqlite3")
