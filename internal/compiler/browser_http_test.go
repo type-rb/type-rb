@@ -7,8 +7,10 @@ import (
 
 func TestTypeScriptBrowserHTTPClient(t *testing.T) {
 	source := []byte(`import {
+	File,
 	HttpClient,
 	NoBody,
+	RequestBody,
 	RequestError,
 	Response,
 	json_body,
@@ -48,6 +50,10 @@ def raw_body(client: HttpClient): Body fails RequestError
 	return client.request("/health").body
 end
 
+def upload_file(client: HttpClient, file: File): Response<Body> fails RequestError
+	return client.request("/uploads", method: HttpMethod.put(), body: RequestBody::File(file))
+end
+
 def text_response(raw: Response<Body>): Response<String>
 	return raw.text()
 end
@@ -81,6 +87,9 @@ end
 		`JSON.stringify`,
 		`__trb_browser.Response<Todo>`,
 		`expected an empty response body`,
+		`case "File"`,
+		`as unknown as globalThis.File`,
+		`__trbRequestBody.value.type.length > 0`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("generated TypeScript is missing %q:\n%s", want, output)
@@ -194,7 +203,7 @@ end
 		}
 		found = true
 		output := string(artifact.Output)
-		for _, want := range []string{"export class Response<T>", "export class RequestError", "export class HttpClient"} {
+		for _, want := range []string{"export interface File", "export class Response<T>", "export class RequestError", "export class HttpClient"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("generated browser package is missing %q:\n%s", want, output)
 			}

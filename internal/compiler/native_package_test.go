@@ -182,6 +182,72 @@ end
 	}
 }
 
+func TestCompileTypeScriptBridgesDOMFileFromNativeComponent(t *testing.T) {
+	propsName := "Native_ui_FileUploadProps"
+	catalog := &nativepackage.Catalog{
+		FormatVersion: nativepackage.FormatVersion,
+		Dependencies:  map[string]string{"ui": "1.0.0"},
+		Modules: map[string]nativepackage.Module{
+			"ui": {
+				Exports: map[string]nativepackage.Export{
+					"FileUpload": {
+						Kind:       "component",
+						Type:       nativepackage.Type{Kind: "named", Name: "ReactNode"},
+						Parameters: []nativepackage.Type{{Kind: "named", Name: propsName}},
+						Required:   1,
+					},
+				},
+				Records: map[string]nativepackage.Export{
+					propsName: {
+						Kind: "record",
+						Type: nativepackage.Type{Kind: "named", Name: propsName},
+						Fields: []nativepackage.Field{{
+							Name: "onFileSelect",
+							Type: nativepackage.Type{Kind: "function", Name: "Function", Args: []nativepackage.Type{
+								{Kind: "named", Name: "File"},
+								{Kind: "void", Name: "Void"},
+							}},
+						}},
+					},
+				},
+			},
+		},
+	}
+	source := []byte(`import { File } from trb/platform/typescript/browser
+import { ReactNode } from trb/platform/typescript/react
+import { FileUpload } from ui
+
+def Upload(): ReactNode
+	on_select := fn(file: File)
+		puts(file.name)
+		return
+	end
+	return <FileUpload onFileSelect={on_select} />
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "upload.trb", ModulePath: "app/upload", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: catalog,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "upload.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		`import { FileUpload } from "ui";`,
+		`const on_select: (arg0: __trb_browser.File) => void`,
+		`return <FileUpload onFileSelect={on_select} />;`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated DOM File bridge is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
 func TestCompileTypeScriptUsesIndexedCompoundNativeComponent(t *testing.T) {
 	source := []byte(`import { ReactNode } from trb/platform/typescript/react
 import { Table } from ui

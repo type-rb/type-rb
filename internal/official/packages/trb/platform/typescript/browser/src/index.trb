@@ -4,6 +4,13 @@ import { QueryParameter } from trb/std/url
 record NoBody
 end
 
+record File
+	name: String
+	size: Integer
+	type: String
+	lastModified: Integer
+end
+
 class Response<T>
 	readonly @status: Integer
 	readonly @headers: Headers
@@ -42,6 +49,7 @@ end
 enum RequestBody
 	Text(value: String)
 	Bytes(value: Bytes)
+	File(value: File)
 	Form(value: Array<QueryParameter>)
 	Json(value: String)
 end

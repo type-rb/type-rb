@@ -80,9 +80,13 @@ the original `Response<Body>` in `error.response`, so diagnostics and explicit
 fallback handling do not lose the status, headers, or body.
 
 Use `RequestBody::Text`, `RequestBody::Bytes`, or `RequestBody::Form` for those
-wire formats. `json_body(value)` runs the checked JSON encoder and produces a
-JSON request body. Query parameters and headers are ordered arrays, so repeated
-names have an unambiguous representation.
+wire formats. `RequestBody::File` sends a browser `File` as the request body and
+uses its media type as the default `Content-Type`; explicitly supplied headers
+still take precedence. The platform `File` type exposes checked `name`, `size`,
+`type`, and `lastModified` fields and can cross a supported native component
+callback boundary. `json_body(value)` runs the checked JSON encoder and
+produces a JSON request body. Query parameters and headers are ordered arrays,
+so repeated names have an unambiguous representation.
 
 The initial client is buffered and intentionally omits streaming, retry policy,
 progress events, interceptors, and generated endpoint contracts. Contractless
