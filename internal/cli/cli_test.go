@@ -3604,6 +3604,53 @@ func TestBuildCopiesRailsProjectAndTranspilesTRBTree(t *testing.T) {
 	}
 }
 
+func TestBuildRemovesOutputsForDeletedSources(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.SourceDir = "src"
+	config.OutDir = "build"
+	copyFiles := false
+	config.CopyFiles = &copyFiles
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldSource := filepath.Join(config.SourcePath(), "old.trb")
+	if err := os.WriteFile(oldSource, []byte("def old_value(): Integer\n\treturn 1\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+		t.Fatalf("initial build status=%d stderr=%s", status, stderr.String())
+	}
+	oldOutput := filepath.Join(config.OutputPath(), "old.rb")
+	if _, err := os.Stat(oldOutput); err != nil {
+		t.Fatalf("initial output was not generated: %v", err)
+	}
+	if err := os.Remove(oldSource); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "current.trb"), []byte("def current_value(): Integer\n\treturn 2\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+		t.Fatalf("second build status=%d stderr=%s", status, stderr.String())
+	}
+	if _, err := os.Stat(oldOutput); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted source left stale generated output: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(config.OutputPath(), "current.rb")); err != nil {
+		t.Fatalf("current output was not generated: %v", err)
+	}
+}
+
 func TestBuildCompileCreatesRunnableGoExecutable(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not installed")
