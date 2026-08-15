@@ -105,6 +105,74 @@ end
 	}
 }
 
+func TestCompileProjectAcceptsImportedTransparentScalarAliasJobArgument(t *testing.T) {
+	sources := []SourceUnit{
+		{Filename: "/project/src/contracts/index.trb", ModulePath: "contracts/index", Package: "contracts", Source: []byte("type OrderId = Integer\n")},
+		{
+			Filename: "/project/src/jobs/send_receipt_job.trb", ModulePath: "jobs/send_receipt_job", Package: "jobs",
+			Source: []byte(`import { OrderId } from contracts
+import { Job } from trb/jobs
+
+class SendReceiptJob < Job
+	def perform(order_id: OrderId)
+		puts(order_id)
+		return
+	end
+end
+`),
+		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
+		{Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte("def main()\n\treturn\nend\n")},
+	}
+	artifacts, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contracts := artifactForModule(artifacts, "contracts/index")
+	if contracts == nil {
+		t.Fatal("contracts artifact was not generated")
+	}
+	if strings.Contains(string(contracts.Output), "trb/jobs/sql") {
+		t.Fatalf("unrelated module imports the jobs runtime:\n%s", contracts.Output)
+	}
+}
+
+func TestCompileProjectDoesNotStartAJobsWorkerFromTheTestRunner(t *testing.T) {
+	sources := []SourceUnit{
+		{
+			Filename: "/project/src/jobs/example_job.trb", ModulePath: "jobs/example_job", Package: "jobs",
+			Source: []byte(`import { Job } from trb/jobs
+
+class ExampleJob < Job
+	def perform(id: Integer)
+		puts(id)
+		return
+	end
+end
+`),
+		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
+		{Filename: "/project/src/__trb_test_main.trb", ModulePath: "trb_test_main", Package: "main", CompilerOwned: true, Source: []byte("def main()\n\treturn\nend\n")},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		options := Options{Mode: mode, GoModule: "example.com/jobs", RubyLoader: "require_relative", TypeScriptRuntime: "bun", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"}
+		artifacts, err := CompileProject(sources, options)
+		if err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		runner := artifactForModule(artifacts, "trb_test_main")
+		if runner == nil {
+			t.Fatalf("%s test runner was not generated", mode)
+		}
+		output := string(runner.Output)
+		for _, unexpected := range []string{"trbJobsDispatch", "trb_jobs_run_worker_or_command", "trbJobsRunWorkerOrCommand", "trb/jobs/sql"} {
+			if strings.Contains(output, unexpected) {
+				t.Fatalf("%s test runner starts or imports the jobs runtime through %q:\n%s", mode, unexpected, output)
+			}
+		}
+	}
+}
+
 func TestCompileProjectRequiresTypedJobAdapterConfiguration(t *testing.T) {
 	sources := []SourceUnit{{
 		Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",

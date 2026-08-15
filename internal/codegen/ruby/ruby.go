@@ -101,7 +101,7 @@ func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generat
 		if g.methodUsesExecutionScope(main) {
 			call = "main(TrbExecutionScope.root)"
 		}
-		if g.jobs != nil && len(g.jobs.Jobs) > 0 {
+		if g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
 			g.line(call+" unless trb_jobs_run_worker_or_command", "")
 		} else {
 			g.line(call, "")

@@ -29,7 +29,7 @@ func (g *generator) jobsIntegrationImports(manifest *jobs.Manifest) {
 		g.line("import * as __trbJobResult from " + strconv.Quote(tsImportPath(g.modulePath, "trb/std/result/index")) + ";")
 		g.line("import * as __trbJobsRuntime from " + strconv.Quote(tsImportPath(g.modulePath, jobssql.ModulePath)) + ";")
 	}
-	if !g.topFunctions["main"] {
+	if !g.topFunctions["main"] || g.modulePath == "trb_test_main" {
 		return
 	}
 	if !jobModule {
@@ -84,7 +84,7 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	if g.modulePath == jobssql.ModulePath {
 		g.jobsStorage(g.jobsSQL.Config)
 	}
-	if g.topFunctions["main"] {
+	if g.topFunctions["main"] && g.modulePath != "trb_test_main" {
 		g.jobsWorker(manifest, g.jobsSQL.Config)
 	}
 }

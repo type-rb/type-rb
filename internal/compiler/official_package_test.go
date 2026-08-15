@@ -208,6 +208,32 @@ end
 	}
 }
 
+func TestOfficialWebTypedParameterBindingAcceptsTransparentScalarAliases(t *testing.T) {
+	source := SourceUnit{
+		Filename: "/project/main.trb", ModulePath: "main", Package: "main",
+		Source: []byte(`import { ParameterError, Request } from trb/web
+import { Result } from trb/std/result
+
+type InsurerId = Integer
+
+record Query
+	insurer_id: InsurerId
+end
+
+def read(request: Request): Result<Query, ParameterError>
+	return request.query<Query>()
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			if _, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestOfficialWebTypedContextKeysCompileAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",

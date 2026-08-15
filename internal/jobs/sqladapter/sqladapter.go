@@ -82,6 +82,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 	if strings.HasPrefix(program.ModulePath, "trb/") {
 		return
 	}
+	if !needsRuntime(program) {
+		return
+	}
 	for _, statement := range program.Statements {
 		if imported, ok := statement.(*ir.Import); ok && imported.Path == ModulePath {
 			imported.RuntimeRequired = true
@@ -91,6 +94,26 @@ func (m *Manifest) Augment(program *ir.Program) {
 	program.Statements = append([]ir.Statement{&ir.Import{
 		Path: ModulePath, Implicit: true, Runtime: true, RuntimeRequired: true, Official: true,
 	}}, program.Statements...)
+}
+
+func needsRuntime(program *ir.Program) bool {
+	if program.ModulePath == "trb_test_main" {
+		return false
+	}
+	for _, statement := range program.Statements {
+		switch node := statement.(type) {
+		case *ir.Method:
+			if node.Name == "main" {
+				return true
+			}
+		case *ir.Class:
+			superclass, ok := node.Superclass.(*ir.Identifier)
+			if ok && superclass.Name == "Job" && superclass.Reference != nil && superclass.Reference.Package == "trb/jobs/index" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func contains(values []string, target string) bool {

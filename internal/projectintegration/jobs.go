@@ -19,7 +19,7 @@ func analyzeJobs(context Context) (Contribution, []Issue) {
 	for _, source := range context.Sources {
 		programs = append(programs, source.Program)
 	}
-	manifest, err := jobsintegration.Analyze(programs)
+	manifest, err := jobsintegration.Analyze(programs, context.Resolutions)
 	if err != nil {
 		return Contribution{}, []Issue{{Message: err.Error()}}
 	}

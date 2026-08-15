@@ -59,7 +59,7 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 		return
 	}
 	g.jobsClassEnqueueMethods(manifest)
-	if g.topMethods["main"] {
+	if g.topMethods["main"] && g.modulePath != "trb_test_main" {
 		g.jobsWorker(manifest, g.jobsSQL.Config)
 	}
 	if g.modulePath != jobssql.ModulePath {
