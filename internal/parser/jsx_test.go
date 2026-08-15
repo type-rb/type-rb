@@ -33,6 +33,23 @@ end
 	}
 }
 
+func TestParseJSXMemberComponent(t *testing.T) {
+	program, diagnostics := Parse([]byte(`def view(): ReactNode
+	return <Table.Row><Table.Cell>value</Table.Cell></Table.Row>
+end
+`))
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	method := program.Statements[0].(*ast.MethodStatement)
+	returned := method.Body[0].(*ast.ReturnStatement)
+	row := returned.Value.(*ast.JSXElement)
+	member, ok := row.Component.(*ast.MemberExpression)
+	if !ok || member.Name != "Row" || row.Name != "Table.Row" {
+		t.Fatalf("unexpected JSX member component: %#v", row)
+	}
+}
+
 func TestParseRejectsMismatchedJSXClosingElement(t *testing.T) {
 	_, diagnostics := Parse([]byte("def view(): Any\n\treturn <div><span /></main>\nend\n"))
 	if len(diagnostics) == 0 || !strings.Contains(diagnostics[0].Message, "mismatched JSX closing element") {

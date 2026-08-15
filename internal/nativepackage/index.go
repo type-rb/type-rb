@@ -46,6 +46,7 @@ type Export struct {
 	Variadic          bool              `json:"variadic,omitempty"`
 	TypeParameters    []string          `json:"typeParameters,omitempty"`
 	Fields            []Field           `json:"fields,omitempty"`
+	Members           map[string]Export `json:"members,omitempty"`
 	UnsupportedFields map[string]string `json:"unsupportedFields,omitempty"`
 }
 

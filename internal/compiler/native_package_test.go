@@ -9,9 +9,11 @@ import (
 
 func nativeComponentCatalog() *nativepackage.Catalog {
 	propsName := "Native_react_spinners_ClipLoaderProps"
+	tablePropsName := "Native_ui_TableProps"
+	childrenPropsName := "Native_ui_ChildrenProps"
 	return &nativepackage.Catalog{
 		FormatVersion: 1,
-		Dependencies:  map[string]string{"react-spinners": "^0.17.0"},
+		Dependencies:  map[string]string{"react-spinners": "^0.17.0", "ui": "1.0.0"},
 		Modules: map[string]nativepackage.Module{
 			"react-spinners": {
 				Exports: map[string]nativepackage.Export{
@@ -34,6 +36,42 @@ func nativeComponentCatalog() *nativepackage.Catalog {
 							{Name: "loading", Type: nativepackage.Type{Kind: "bool", Name: "Boolean", Nullable: true}, Optional: true},
 							{Name: "size", Type: nativepackage.Type{Kind: "union", Name: "Union", Args: []nativepackage.Type{{Kind: "string", Name: "String"}, {Kind: "float", Name: "Float"}}, Nullable: true}, Optional: true},
 						},
+					},
+				},
+			},
+			"ui": {
+				Exports: map[string]nativepackage.Export{
+					"Table": {
+						Kind:       "component",
+						Type:       nativepackage.Type{Kind: "named", Name: "ReactNode"},
+						Parameters: []nativepackage.Type{{Kind: "named", Name: tablePropsName}},
+						Required:   1,
+						Members: map[string]nativepackage.Export{
+							"Row": {
+								Kind:       "component",
+								Type:       nativepackage.Type{Kind: "named", Name: "ReactNode"},
+								Parameters: []nativepackage.Type{{Kind: "named", Name: childrenPropsName}},
+								Required:   1,
+							},
+							"Cell": {
+								Kind:       "component",
+								Type:       nativepackage.Type{Kind: "named", Name: "ReactNode"},
+								Parameters: []nativepackage.Type{{Kind: "named", Name: childrenPropsName}},
+								Required:   1,
+							},
+						},
+					},
+				},
+				Records: map[string]nativepackage.Export{
+					tablePropsName: {
+						Kind:   "record",
+						Type:   nativepackage.Type{Kind: "named", Name: tablePropsName},
+						Fields: []nativepackage.Field{{Name: "children", Type: nativepackage.Type{Kind: "named", Name: "ReactNode"}}},
+					},
+					childrenPropsName: {
+						Kind:   "record",
+						Type:   nativepackage.Type{Kind: "named", Name: childrenPropsName},
+						Fields: []nativepackage.Field{{Name: "children", Type: nativepackage.Type{Kind: "named", Name: "ReactNode"}}},
 					},
 				},
 			},
@@ -141,6 +179,56 @@ end
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated native component TSX is missing %q:\n%s", expected, output)
 		}
+	}
+}
+
+func TestCompileTypeScriptUsesIndexedCompoundNativeComponent(t *testing.T) {
+	source := []byte(`import { ReactNode } from trb/platform/typescript/react
+import { Table } from ui
+
+def Results(): ReactNode
+	return <Table><Table.Row><Table.Cell>value</Table.Cell></Table.Row></Table>
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "results.trb", ModulePath: "app/results", Source: source}}, Options{
+		Mode:              "typescript",
+		TypeScriptRuntime: "browser",
+		NativePackages:    nativeComponentCatalog(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "results.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		`import { Table } from "ui";`,
+		`return <Table><Table.Row><Table.Cell>value</Table.Cell></Table.Row></Table>;`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated compound native component TSX is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
+func TestCompileTypeScriptDiagnosesUnknownCompoundNativeComponent(t *testing.T) {
+	source := []byte(`import { ReactNode } from trb/platform/typescript/react
+import { Table } from ui
+
+def Results(): ReactNode
+	return <Table.Unknown />
+end
+`)
+	_, err := CompileProject([]SourceUnit{{Filename: "results.trb", ModulePath: "app/results", Source: source}}, Options{
+		Mode:              "typescript",
+		TypeScriptRuntime: "browser",
+		NativePackages:    nativeComponentCatalog(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "native component Table has no member Unknown") {
+		t.Fatalf("expected unknown compound component diagnostic, got %v", err)
 	}
 }
 

@@ -2645,9 +2645,29 @@ func (c *Checker) codecRecord(name string) ([]resolver.RecordField, string, *res
 }
 
 func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type) ([]resolver.RecordField, map[string]string, bool) {
-	identifier, ok := element.Component.(*ast.Identifier)
-	if !ok {
-		return nil, nil, false
+	identifier, identifierComponent := element.Component.(*ast.Identifier)
+	if !identifierComponent {
+		binding, imported := c.result.References[element.Component]
+		if !imported || binding.Member == nil || binding.Member.Kind != resolver.FunctionExport {
+			return nil, nil, false
+		}
+		if !c.typesAssignable(nodeType, binding.Member.Type) {
+			c.error(element.Component.Span(), fmt.Sprintf("JSX component %s must return %s", element.Name, nodeType))
+			return nil, nil, false
+		}
+		if len(binding.Member.Parameters) == 0 {
+			return nil, binding.Member.UnsupportedFields, true
+		}
+		if len(binding.Member.Parameters) != 1 {
+			c.error(element.Component.Span(), fmt.Sprintf("JSX component %s must accept no parameters or one record parameter", element.Name))
+			return nil, nil, false
+		}
+		fields, _, _, found := c.codecRecord(binding.Member.Parameters[0].Name)
+		if !found {
+			c.error(element.Component.Span(), fmt.Sprintf("JSX component %s props must be a record", element.Name))
+			return nil, nil, false
+		}
+		return fields, binding.Member.UnsupportedFields, true
 	}
 	if method := c.functions[identifier.Name]; method != nil {
 		if !c.typesAssignable(nodeType, c.methodReturnType(method)) {
@@ -4405,6 +4425,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
+		if identifier, ok := n.Receiver.(*ast.Identifier); ok && !n.Namespace {
+			if owner, imported := c.result.References[identifier]; imported && owner.Export != nil && owner.Export.NativeExported && owner.Export.Kind == resolver.FunctionExport {
+				if member, found := owner.Export.Members[n.Name]; found {
+					binding := resolver.Binding{Import: owner.Import, Export: owner.Export, Member: &member, Name: member.Name}
+					typ = binding.Type()
+					c.recordReference(n, binding)
+				} else {
+					c.error(n.Span(), fmt.Sprintf("native component %s has no member %s", identifier.Name, n.Name))
+					typ = invalidType()
+				}
+				break
+			}
+		}
 		if identifier, ok := n.Receiver.(*ast.Identifier); ok {
 			if imported := c.resolution.Packages[identifier.Name]; imported != nil {
 				c.markImportNodeUsed(imported, "")

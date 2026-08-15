@@ -86,18 +86,19 @@ type EnumVariant struct {
 }
 
 type Member struct {
-	Name           string
-	Kind           ExportKind
-	Type           types.Type
-	Fails          types.Type
-	TypeParameters []string
-	Parameters     []types.Type
-	Required       int
-	Variadic       bool
-	Class          bool
-	Readonly       bool
-	EnumOwner      string
-	Generated      string
+	Name              string
+	Kind              ExportKind
+	Type              types.Type
+	Fails             types.Type
+	TypeParameters    []string
+	Parameters        []types.Type
+	Required          int
+	Variadic          bool
+	Class             bool
+	Readonly          bool
+	EnumOwner         string
+	Generated         string
+	UnsupportedFields map[string]string
 }
 
 type Import struct {
@@ -696,6 +697,21 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 	for _, field := range exported.Fields {
 		result.Fields = append(result.Fields, RecordField{Name: field.Name, JSONName: field.Name, Type: field.Type.Semantic(), Optional: field.Optional, EffectBridge: field.Type.EffectBridge})
 		result.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: field.Type.Semantic(), Readonly: true}
+	}
+	for name, exportedMember := range exported.Members {
+		memberExport := nativeExport(name, exportedMember, false)
+		result.Members[name] = Member{
+			Name:              name,
+			Kind:              memberExport.Kind,
+			Type:              memberExport.Type,
+			Fails:             memberExport.Fails,
+			TypeParameters:    append([]string(nil), memberExport.TypeParameters...),
+			Parameters:        append([]types.Type(nil), memberExport.Parameters...),
+			Required:          memberExport.Required,
+			Variadic:          memberExport.Variadic,
+			Class:             true,
+			UnsupportedFields: cloneStrings(memberExport.UnsupportedFields),
+		}
 	}
 	return result
 }
