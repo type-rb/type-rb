@@ -156,12 +156,12 @@ func TestFormatPreservesRailsRegexAndPercentLiterals(t *testing.T) {
 }
 
 func TestFormatKeepsExplicitImportPathsCompact(t *testing.T) {
-	source := []byte("import  trb / std / io # portable output\nimport {User} from app / models / user\n")
+	source := []byte("import  trb / std / io # portable output\nimport {User} from app / models / user\nimport {\nFirst,\nSecond,\n} from domain / insurer\n")
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
 	}
-	want := "import trb/std/io # portable output\nimport { User } from app/models/user\n"
+	want := "import trb/std/io # portable output\nimport { User } from app/models/user\nimport {\n\tFirst,\n\tSecond,\n} from domain/insurer\n"
 	if string(formatted) != want {
 		t.Fatalf("unexpected import formatting:\n%s", formatted)
 	}

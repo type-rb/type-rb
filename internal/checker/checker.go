@@ -2422,7 +2422,11 @@ func (c *Checker) parameterValueSchema(typ types.Type, allowArray bool) (CodecSc
 
 func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[string]bool) (CodecSchema, bool) {
 	schema := CodecSchema{Type: typ}
-	base := typ
+	// Transparent aliases retain their source name in the checked schema but
+	// use the expanded target when deciding whether and how a value is encoded.
+	// This keeps aliases usable at JSON, path, and query boundaries without
+	// giving them nominal conversion semantics.
+	base := c.expandAlias(typ, map[string]bool{})
 	base.Nullable = false
 	switch base.Kind {
 	case types.Bool:
@@ -3421,7 +3425,7 @@ func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
 				c.error(class.Span(), fmt.Sprintf("class %s does not implement %s.%s", class.Name, interfaceType, name))
 				continue
 			}
-			if !sameSignature(expected, actual) {
+			if !c.sameSignature(expected, actual) {
 				c.error(class.Span(), fmt.Sprintf("method %s.%s does not match interface %s", class.Name, name, interfaceType))
 			}
 		}
@@ -3481,10 +3485,14 @@ func signatureFromResolvedMember(member resolver.Member) methodSignature {
 	return methodSignature{returnType: member.Type, fails: member.Fails, parameters: append([]types.Type(nil), member.Parameters...), required: member.Required, variadic: member.Variadic}
 }
 
-func sameSignature(left, right methodSignature) bool {
+func (c *Checker) sameSignature(left, right methodSignature) bool {
 	if left.required != right.required || left.variadic != right.variadic || len(left.parameters) != len(right.parameters) {
 		return false
 	}
+	left.returnType = c.expandAlias(left.returnType, map[string]bool{})
+	right.returnType = c.expandAlias(right.returnType, map[string]bool{})
+	left.fails = c.expandAlias(left.fails, map[string]bool{})
+	right.fails = c.expandAlias(right.fails, map[string]bool{})
 	if !types.Assignable(left.returnType, right.returnType) || !types.Assignable(right.returnType, left.returnType) {
 		return false
 	}
@@ -3492,6 +3500,8 @@ func sameSignature(left, right methodSignature) bool {
 		return false
 	}
 	for i := range left.parameters {
+		left.parameters[i] = c.expandAlias(left.parameters[i], map[string]bool{})
+		right.parameters[i] = c.expandAlias(right.parameters[i], map[string]bool{})
 		if !types.Assignable(left.parameters[i], right.parameters[i]) || !types.Assignable(right.parameters[i], left.parameters[i]) {
 			return false
 		}
