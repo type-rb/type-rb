@@ -564,6 +564,9 @@ func (g *generator) statement(statement ir.Statement) {
 				header = "} else if ("
 			}
 			condition := value + " === " + g.expr(branch.Value)
+			for _, alternative := range branch.Alternatives {
+				condition += " || " + value + " === " + g.expr(alternative)
+			}
 			if branch.PayloadEnum {
 				condition = value + ".kind === " + strconv.Quote(branch.Member)
 			}
@@ -1508,6 +1511,9 @@ func (g *generator) caseExpression(node *ir.Case) string {
 			header = "} else if ("
 		}
 		condition := value + " === " + child.expr(branch.Value)
+		for _, alternative := range branch.Alternatives {
+			condition += " || " + value + " === " + child.expr(alternative)
+		}
 		if branch.PayloadEnum {
 			condition = value + ".kind === " + strconv.Quote(branch.Member)
 		} else if branch.TypePattern {

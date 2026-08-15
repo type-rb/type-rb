@@ -335,6 +335,32 @@ func TestEvaluateCaseExpression(t *testing.T) {
 	}
 }
 
+func TestEvaluateLiteralCaseAlternatives(t *testing.T) {
+	stringType := types.FromName("String")
+	literal := func(value string) *ir.Literal {
+		return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, stringType), Kind: "string", Raw: `"` + value + `"`}
+	}
+	caseExpression := &ir.Case{
+		ExprBase: ir.NewExprBase(token.Span{}, stringType),
+		Value:    literal("receipt_detail"),
+		Branches: []ir.CaseBranch{{
+			Value:        literal("receipts"),
+			Alternatives: []ir.Expression{literal("receipt_detail")},
+			Result:       literal("receipts"),
+		}},
+		ElseResult: literal("other"),
+		HasElse:    true,
+	}
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	result, err := evaluator.Evaluate([]ir.Statement{&ir.ExpressionStatement{Expression: caseExpression}}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Display || Inspect(result.Value) != `"receipts"` {
+		t.Fatalf("unexpected literal case result: %#v", result)
+	}
+}
+
 func TestEvaluateUnhandledEffectAtInteractiveTopLevel(t *testing.T) {
 	integerType := types.FromName("Integer")
 	errorType := types.FromName("String")

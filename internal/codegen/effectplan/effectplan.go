@@ -241,6 +241,9 @@ func (a *analyzer) statementsReach(statements []ir.Statement, context methodCont
 			branchSuspends := a.statementsReach(node.Leading, context, record) || a.expressionReaches(node.Value, context, record)
 			for _, branch := range node.Branches {
 				branchSuspends = a.expressionReaches(branch.Value, context, record) || a.statementsReach(branch.Body, context, record) || a.expressionReaches(branch.Result, context, record) || branchSuspends
+				for _, alternative := range branch.Alternatives {
+					branchSuspends = a.expressionReaches(alternative, context, record) || branchSuspends
+				}
 			}
 			branchSuspends = a.statementsReach(node.Else, context, record) || a.expressionReaches(node.ElseResult, context, record) || branchSuspends
 			if record && branchSuspends {

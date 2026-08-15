@@ -954,6 +954,9 @@ func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
 			Result:   branchResult,
 			Diverges: diverges,
 		}
+		for _, alternative := range branch.Alternatives {
+			lowered.Alternatives = append(lowered.Alternatives, l.expression(alternative))
+		}
 		if pattern, ok := l.checked.CasePatterns[branch.Value]; ok {
 			lowered.TypePattern = pattern.TypeUnion
 			lowered.MatchType = pattern.MatchType

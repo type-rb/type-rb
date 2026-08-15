@@ -492,6 +492,10 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParamet
 			c.validateExpressionTypeReferences(node.Value, typeParameters)
 			c.validateTypeReferences(node.Leading, typeParameters)
 			for _, branch := range node.Branches {
+				c.validateExpressionTypeReferences(branch.Value, typeParameters)
+				for _, alternative := range branch.Alternatives {
+					c.validateExpressionTypeReferences(alternative, typeParameters)
+				}
 				c.validateTypeReferences(branch.Body, typeParameters)
 			}
 			c.validateTypeReferences(node.Else, typeParameters)
@@ -523,6 +527,9 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression, ty
 		c.validateTypeReferences(node.Leading, typeParameters)
 		for _, branch := range node.Branches {
 			c.validateExpressionTypeReferences(branch.Value, typeParameters)
+			for _, alternative := range branch.Alternatives {
+				c.validateExpressionTypeReferences(alternative, typeParameters)
+			}
 			c.validateTypeReferences(branch.Body, typeParameters)
 		}
 		c.validateTypeReferences(node.Else, typeParameters)
@@ -1520,6 +1527,12 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool)
 	seen := map[string]bool{}
 	results := []controlFlowBranchResult{}
 	for _, branch := range node.Branches {
+		if len(branch.Alternatives) > 0 {
+			for _, alternative := range branch.Alternatives {
+				c.checkExpression(alternative, sc)
+			}
+			c.error(branch.Span(), "case alternatives are supported only for Integer or String literals")
+		}
 		previousPatternType := c.enumPatternType
 		c.enumPatternType = selectorType
 		c.enumPattern++
@@ -1633,22 +1646,26 @@ func (c *Checker) checkLiteralCase(node *ast.CaseStatement, sc *scope, selectorT
 	seen := map[string]bool{}
 	results := []controlFlowBranchResult{}
 	for _, branch := range node.Branches {
-		c.checkExpression(branch.Value, sc)
-		literal, ok := literalExpressionType(branch.Value)
-		if !ok {
-			c.error(branch.Value.Span(), "when value must be an explicit Integer or String literal")
-			literal = invalidType()
-		} else {
-			c.result.Expressions[branch.Value] = literal
+		values := append([]ast.Expression{branch.Value}, branch.Alternatives...)
+		matchedLiterals := []types.Type{}
+		for _, value := range values {
+			c.checkExpression(value, sc)
+			literal, ok := literalExpressionType(value)
+			if !ok {
+				c.error(value.Span(), "when value must be an explicit Integer or String literal")
+				continue
+			}
+			c.result.Expressions[value] = literal
+			matchedLiterals = append(matchedLiterals, literal)
 			if exhaustive {
 				if _, exists := wanted[literal.String()]; !exists {
-					c.error(branch.Value.Span(), fmt.Sprintf("when value %s is not an alternative of %s", literal, selectorType))
+					c.error(value.Span(), fmt.Sprintf("when value %s is not an alternative of %s", literal, selectorType))
 				}
 			} else if !types.Equivalent(scalarType(literal), selectorBase) {
-				c.error(branch.Value.Span(), fmt.Sprintf("when value has type %s, expected %s", scalarType(literal), selectorBase))
+				c.error(value.Span(), fmt.Sprintf("when value has type %s, expected %s", scalarType(literal), selectorBase))
 			}
 			if seen[literal.String()] {
-				c.error(branch.Value.Span(), fmt.Sprintf("literal %s is handled more than once", literal))
+				c.error(value.Span(), fmt.Sprintf("literal %s is handled more than once", literal))
 			} else {
 				seen[literal.String()] = true
 				delete(wanted, literal.String())
@@ -1656,8 +1673,15 @@ func (c *Checker) checkLiteralCase(node *ast.CaseStatement, sc *scope, selectorT
 		}
 
 		branchScope := &scope{parent: sc, values: map[string]symbol{}}
-		if narrows && ok {
-			if narrowed, found := narrowing.typeForLiteral(literal); found {
+		if narrows && len(matchedLiterals) > 0 {
+			narrowedTypes := []types.Type{}
+			for _, literal := range matchedLiterals {
+				if narrowed, found := narrowing.typeForLiteral(literal); found {
+					narrowedTypes = append(narrowedTypes, narrowed)
+				}
+			}
+			if len(narrowedTypes) > 0 {
+				narrowed := types.UnionOf(narrowedTypes...)
 				value, _ := sc.lookup(narrowing.Name)
 				value.typ = narrowed
 				branchScope.values[narrowing.Name] = value
@@ -1765,6 +1789,12 @@ func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorTyp
 	seen := map[string]bool{}
 	results := []controlFlowBranchResult{}
 	for _, branch := range node.Branches {
+		if len(branch.Alternatives) > 0 {
+			for _, alternative := range branch.Alternatives {
+				c.checkExpression(alternative, sc)
+			}
+			c.error(branch.Span(), "case alternatives are supported only for Integer or String literals")
+		}
 		identifier, ok := branch.Value.(*ast.Identifier)
 		matchType := types.Type{Kind: types.Invalid, Name: "Invalid"}
 		if ok {
@@ -3324,8 +3354,10 @@ func (c *Checker) caseCoversSelector(node *ast.CaseStatement) bool {
 			return false
 		}
 		for _, branch := range node.Branches {
-			if literal, ok := literalExpressionType(branch.Value); ok {
-				delete(wanted, literal.String())
+			for _, value := range append([]ast.Expression{branch.Value}, branch.Alternatives...) {
+				if literal, ok := literalExpressionType(value); ok {
+					delete(wanted, literal.String())
+				}
 			}
 		}
 	} else if selectorType.Kind == types.Union {

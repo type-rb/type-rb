@@ -248,9 +248,10 @@ func (*IfStatement) expressionNode() {}
 
 type CaseBranch struct {
 	Base
-	Value    Expression
-	Bindings []PatternBinding
-	Body     []Statement
+	Value        Expression
+	Alternatives []Expression
+	Bindings     []PatternBinding
+	Body         []Statement
 }
 
 // PatternBinding is a name introduced by a payload enum pattern. The payload

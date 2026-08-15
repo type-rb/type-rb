@@ -1331,34 +1331,47 @@ func (p *Parser) parseCase() ast.Statement {
 		s, e, nx, trailing := p.logicalLine(p.pos)
 		parts := p.codeTokens(s, e)
 		branch := ast.CaseBranch{Base: ast.Base{SourceSpan: spanOf(parts), TrailingComment: trailing}}
-		branch.Value, _ = parseExpressionTokens(parts[1:])
-		if branch.Value == nil {
-			p.errorAt(spanOf(parts), "when requires exactly one enum member")
-		} else if call, ok := branch.Value.(*ast.CallExpression); ok {
-			member, enumPattern := call.Callee.(*ast.MemberExpression)
-			_, typePattern := call.Callee.(*ast.Identifier)
-			if call.Block != nil || !typePattern && (!enumPattern || !member.Namespace) {
-				p.errorAt(call.Span(), "case pattern must be Variant(name, ...) or Type(name)")
+		for _, alternativeTokens := range splitTopLevel(parts[1:], ",") {
+			alternative, ok := parseExpressionTokens(alternativeTokens)
+			if !ok || alternative == nil {
+				p.errorAt(spanOf(alternativeTokens), "when requires a valid value")
+				continue
+			}
+			if branch.Value == nil {
+				branch.Value = alternative
 			} else {
-				valid := true
-				if typePattern && len(call.Arguments) != 1 {
-					p.errorAt(call.Span(), "union type pattern expects exactly one binding")
-					valid = false
-				}
-				for _, argument := range call.Arguments {
-					identifier, identifierOK := argument.Value.(*ast.Identifier)
-					if !identifierOK || argument.Name != "" || argument.Splat != "" {
-						p.errorAt(argument.Value.Span(), "case pattern bindings must be identifiers")
+				branch.Alternatives = append(branch.Alternatives, alternative)
+			}
+		}
+		if branch.Value == nil {
+			p.errorAt(spanOf(parts), "when requires a value")
+		} else if len(branch.Alternatives) == 0 {
+			if call, ok := branch.Value.(*ast.CallExpression); ok {
+				member, enumPattern := call.Callee.(*ast.MemberExpression)
+				_, typePattern := call.Callee.(*ast.Identifier)
+				if call.Block != nil || !typePattern && (!enumPattern || !member.Namespace) {
+					p.errorAt(call.Span(), "case pattern must be Variant(name, ...) or Type(name)")
+				} else {
+					valid := true
+					if typePattern && len(call.Arguments) != 1 {
+						p.errorAt(call.Span(), "union type pattern expects exactly one binding")
 						valid = false
-						continue
 					}
-					branch.Bindings = append(branch.Bindings, ast.PatternBinding{
-						Base: ast.Base{SourceSpan: identifier.Span()},
-						Name: identifier.Name,
-					})
-				}
-				if valid {
-					branch.Value = call.Callee
+					for _, argument := range call.Arguments {
+						identifier, identifierOK := argument.Value.(*ast.Identifier)
+						if !identifierOK || argument.Name != "" || argument.Splat != "" {
+							p.errorAt(argument.Value.Span(), "case pattern bindings must be identifiers")
+							valid = false
+							continue
+						}
+						branch.Bindings = append(branch.Bindings, ast.PatternBinding{
+							Base: ast.Base{SourceSpan: identifier.Span()},
+							Name: identifier.Name,
+						})
+					}
+					if valid {
+						branch.Value = call.Callee
+					}
 				}
 			}
 		}

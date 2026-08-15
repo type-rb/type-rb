@@ -248,6 +248,18 @@ func TestFormatCaseExpressionUsesCanonicalIndentationAndPreservesComments(t *tes
 	}
 }
 
+func TestFormatLiteralCaseAlternatives(t *testing.T) {
+	source := []byte("def label(value:String):String\nreturn case value\nwhen \"receipts\",\"receipt_detail\" # shared\n\"receipts\"\nelse\n\"other\"\nend\nend\n")
+	want := "def label(value: String): String\n\treturn case value\n\twhen \"receipts\", \"receipt_detail\" # shared\n\t\t\"receipts\"\n\telse\n\t\t\"other\"\n\tend\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected literal case formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
 func TestFormatIfExpressionUsesCanonicalIndentationAndPreservesComments(t *testing.T) {
 	source := []byte("def label(enabled:Boolean):String\nresult:=if enabled # choose\n\"on\" # yes\nelsif false\n\"never\"\nelse # fallback\n\"off\"\nend\nreturn result\nend\n")
 	want := "def label(enabled: Boolean): String\n\tresult := if enabled # choose\n\t\t\"on\" # yes\n\telsif false\n\t\t\"never\"\n\telse # fallback\n\t\t\"off\"\n\tend\n\treturn result\nend\n"

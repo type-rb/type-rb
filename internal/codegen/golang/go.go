@@ -375,6 +375,9 @@ func (g *generator) statement(statement ir.Statement) {
 				header = "} else if "
 			}
 			condition := value + " == " + g.expr(branch.Value)
+			for _, alternative := range branch.Alternatives {
+				condition += " || " + value + " == " + g.expr(alternative)
+			}
 			if branch.PayloadEnum {
 				condition = value + ".Kind == " + g.enumTag(branch)
 			}
@@ -1629,6 +1632,9 @@ func (g *generator) caseExpression(node *ir.Case) string {
 				header = "} else if "
 			}
 			condition := value + " == " + child.expr(branch.Value)
+			for _, alternative := range branch.Alternatives {
+				condition += " || " + value + " == " + child.expr(alternative)
+			}
 			if branch.PayloadEnum {
 				condition = value + ".Kind == " + child.enumTag(branch)
 			}
@@ -2744,7 +2750,7 @@ func usesInterpolation(statements []ir.Statement) bool {
 				return true
 			}
 			for _, branch := range n.Branches {
-				if expressionUsesInterpolation(branch.Value) || usesInterpolation(branch.Body) {
+				if expressionUsesInterpolation(branch.Value) || expressionsUseInterpolation(branch.Alternatives) || usesInterpolation(branch.Body) {
 					return true
 				}
 			}
@@ -2816,9 +2822,18 @@ func expressionUsesInterpolation(expression ir.Expression) bool {
 			return true
 		}
 		for _, branch := range n.Branches {
-			if expressionUsesInterpolation(branch.Value) || expressionUsesInterpolation(branch.Result) || usesInterpolation(branch.Body) {
+			if expressionUsesInterpolation(branch.Value) || expressionsUseInterpolation(branch.Alternatives) || expressionUsesInterpolation(branch.Result) || usesInterpolation(branch.Body) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func expressionsUseInterpolation(expressions []ir.Expression) bool {
+	for _, expression := range expressions {
+		if expressionUsesInterpolation(expression) {
+			return true
 		}
 	}
 	return false
