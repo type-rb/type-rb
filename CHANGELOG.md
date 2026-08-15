@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.13 - 2026-08-15
+
+### Frontend and package integration
+
+- TypeScript browser applications can read the contents of a native `File` as
+  `Bytes` or `String` through fallible `read()` and `read_text()` operations.
+  The compiler lowers both operations to the asynchronous browser File API
+  without exposing target-specific `async` syntax. ([#282](https://github.com/type-rb/type-rb/pull/282))
+
 ## 0.2.12 - 2026-08-15
 
 ### Frontend and package integration
