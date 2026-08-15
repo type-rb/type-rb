@@ -159,6 +159,10 @@ function sourceLooksReact(symbol) {
 	return !!symbol?.declarations?.some((declaration) => /(?:@types[/\\]react|react[/\\])/.test(declaration.getSourceFile().fileName));
 }
 
+function sourceLooksDOM(symbol) {
+	return !!symbol?.declarations?.some((declaration) => /(?:^|[/\\])lib\.dom\.d\.ts$/.test(declaration.getSourceFile().fileName));
+}
+
 function reactType(type) {
 	const symbol = type.aliasSymbol || type.getSymbol?.();
 	const name = symbol?.getName?.() || "";
@@ -173,10 +177,19 @@ function reactType(type) {
 	return null;
 }
 
+function browserType(type) {
+	const symbol = type.aliasSymbol || type.getSymbol?.();
+	const name = symbol?.getName?.() || "";
+	if (name === "File" && sourceLooksDOM(symbol)) return wire("named", "File");
+	return null;
+}
+
 function portableType(type, state, depth = 0) {
 	if (depth > 12) return { error: "type nesting exceeds the native bridge limit" };
 	const react = reactType(type);
 	if (react) return { type: react };
+	const browser = browserType(type);
+	if (browser) return { type: browser };
 	if (type.flags & ts.TypeFlags.Any) return { error: "uses TypeScript any" };
 	if (type.flags & ts.TypeFlags.Unknown) return { error: "uses TypeScript unknown" };
 	if (type.flags & ts.TypeFlags.Never) return { error: "uses TypeScript never" };

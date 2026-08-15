@@ -103,3 +103,14 @@ func TestTypeScriptIndexerUsesSyntaxNodesForSyntheticSymbols(t *testing.T) {
 		t.Fatal("native TypeScript indexer does not retain a source-file fallback for synthetic symbols")
 	}
 }
+
+func TestTypeScriptIndexerRecognizesTheDOMFileBoundary(t *testing.T) {
+	for _, want := range []string{
+		`name === "File" && sourceLooksDOM(symbol)`,
+		`return wire("named", "File")`,
+	} {
+		if !strings.Contains(typeScriptIndexer, want) {
+			t.Fatalf("native TypeScript indexer is missing the DOM File boundary %q", want)
+		}
+	}
+}
