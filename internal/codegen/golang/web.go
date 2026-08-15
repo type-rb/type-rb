@@ -488,7 +488,7 @@ func (g *generator) webServer() {
 	g.requireImport("os/signal", "signal")
 	g.requireImport("strconv", "")
 	g.requireImport("syscall", "")
-	g.requireImport("time", "")
+	g.requireImport("time", "stdtime")
 
 	g.line("func trbWebServe(config web.ServerConfig) {")
 	g.indent++
@@ -545,7 +545,7 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("case <-signalContext.Done():")
 	g.indent++
-	g.line("shutdownContext, cancelShutdown := trbcontext.WithTimeout(trbcontext.Background(), time.Duration(config.ShutdownTimeoutMilliseconds)*time.Millisecond)")
+	g.line("shutdownContext, cancelShutdown := trbcontext.WithTimeout(trbcontext.Background(), stdtime.Duration(config.ShutdownTimeoutMilliseconds)*stdtime.Millisecond)")
 	g.line("shutdownErr := server.Shutdown(shutdownContext)")
 	g.line("cancelShutdown()")
 	g.line("if shutdownErr != nil {")

@@ -23,8 +23,9 @@ const (
 )
 
 type Parameter struct {
-	Name string
-	Type types.Type
+	Name     string
+	Type     types.Type
+	WireType types.Type
 }
 
 type Job struct {
@@ -193,6 +194,7 @@ func Declarations(programs []*ast.Program) (*declaration.Catalog, error) {
 }
 
 func Analyze(programs []*ast.Program, resolutions map[string]resolver.Result) (*Manifest, error) {
+	aliases := newAliasResolver(programs)
 	jobs, err := discoverJobs(programs, func(program *ast.Program, typ types.Type, aliases aliasResolver) bool {
 		expanded := aliases.expand(program, typ, map[string]bool{})
 		if initialArgumentType(expanded) {
@@ -204,6 +206,25 @@ func Analyze(programs []*ast.Program, resolutions map[string]resolver.Result) (*
 	})
 	if err != nil {
 		return nil, err
+	}
+	for jobIndex := range jobs {
+		job := &jobs[jobIndex]
+		program := aliases.programs[job.ModulePath]
+		if program == nil {
+			continue
+		}
+		resolution := resolutions[program.ModulePath]
+		for parameterIndex := range job.Parameters {
+			parameter := &job.Parameters[parameterIndex]
+			parameter.WireType = aliases.expand(program, parameter.Type, map[string]bool{})
+			if initialArgumentType(parameter.WireType) {
+				continue
+			}
+			binding, exists := resolution.ImportedType(parameter.Type.Name)
+			if exists && binding.Export != nil && binding.Export.Kind == resolver.TypeAliasExport {
+				parameter.WireType = binding.Export.AliasTarget
+			}
+		}
 	}
 	return &Manifest{Jobs: jobs}, nil
 }

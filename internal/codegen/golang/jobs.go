@@ -286,7 +286,11 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 		for index, parameter := range job.Parameters {
 			argumentName := "argument" + strconv.Itoa(index)
 			argumentNames[index] = argumentName
-			g.line("var " + argumentName + " " + g.goType(parameter.Type))
+			wireType := parameter.WireType
+			if wireType.Kind == "" {
+				wireType = parameter.Type
+			}
+			g.line("var " + argumentName + " " + g.goType(wireType))
 			g.line("if err := json.Unmarshal(arguments[" + strconv.Itoa(index) + "], &" + argumentName + "); err != nil { return fmt.Errorf(\"decode " + job.Name + "." + parameter.Name + ": %w\", err) }")
 		}
 		qualifier := aliases[job.ModulePath]
@@ -390,7 +394,7 @@ func (g *generator) jobsModuleAliases(manifest *jobs.Manifest) map[string]string
 			alias = g.typeAliases[job.Name]
 		}
 		if alias == "" {
-			alias = "trb_job_" + strconv.Itoa(len(directories))
+			alias = goImportAlias("trb_job_" + strconv.Itoa(len(directories)))
 			g.requireImport(pathpkg.Join(g.goModule, directory), alias)
 		}
 		directories[directory] = alias
