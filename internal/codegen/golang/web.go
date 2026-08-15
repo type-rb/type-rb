@@ -30,16 +30,11 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	rootMiddlewares := webintegration.RootMiddlewares(manifest.Middlewares)
 	webPath := pathpkg.Join(g.goModule, "trb/web")
 	g.requireImport(webPath, "web")
-	g.requireImport(pathpkg.Join(g.goModule, "trb/http"), "http")
-	for _, symbol := range []string{"Body", "Header", "Headers", "HeaderValueError", "HttpMethod"} {
-		if g.typeAliases[symbol] != "" {
-			g.typeAliases[symbol] = "http"
-		}
-	}
+	g.requireImport(pathpkg.Join(g.goModule, "trb/http"), "__trb_http")
 	// Headers owns an Array<Header>. The element type can therefore occur in
 	// generated code even when callers only import Headers explicitly.
 	if g.typeAliases["Headers"] != "" && g.typeAliases["Header"] == "" {
-		g.typeAliases["Header"] = "http"
+		g.typeAliases["Header"] = "__trb_http"
 		g.typeKinds["Header"] = "record"
 	}
 	g.requireImport("net/url", "neturl")
@@ -108,7 +103,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("}")
 	g.line("if headRequest {")
 	g.indent++
-	g.line("response = web.NewResponse(response.TrbFieldStatus, response.TrbFieldHeaders, http.BodyEmpty())")
+	g.line("response = web.NewResponse(response.TrbFieldStatus, response.TrbFieldHeaders, __trb_http.BodyEmpty())")
 	g.indent--
 	g.line("}")
 	g.indent--
@@ -154,7 +149,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("}")
 	g.line("if headRequest {")
 	g.indent++
-	g.line("response = web.NewResponse(response.TrbFieldStatus, response.TrbFieldHeaders, http.BodyEmpty())")
+	g.line("response = web.NewResponse(response.TrbFieldStatus, response.TrbFieldHeaders, __trb_http.BodyEmpty())")
 	g.indent--
 	g.line("}")
 	g.indent--
@@ -188,7 +183,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("}")
 	if len(routes) == 0 {
-		g.line("return web.NewResponse(404, trbWebHeaders(http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), http.NewBody([]byte(\"{\\\"error\\\":\\\"not_found\\\"}\")))")
+		g.line("return web.NewResponse(404, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"not_found\\\"}\")))")
 		g.indent--
 		g.line("}")
 		g.b.WriteByte('\n')
@@ -275,7 +270,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		g.line(contextName + " := web.NewContext(request, pathParameters)")
 		g.line(handlerName + " := func(_ trbcontext.Context, context *web.Context) *web.Response {")
 		g.indent++
-		g.line("return web.NewResponse(204, trbWebHeaders(http.Header{Name: \"allow\", Value: strings.Join(allowedMethods, \", \")}), http.BodyEmpty())")
+		g.line("return web.NewResponse(204, trbWebHeaders(__trb_http.Header{Name: \"allow\", Value: strings.Join(allowedMethods, \", \")}), __trb_http.BodyEmpty())")
 		g.indent--
 		g.line("}")
 		g.webMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "optionsNextHandler"+strconv.Itoa(routeIndex)+"_", directories)
@@ -285,10 +280,10 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	g.line("if len(allowedMethods) > 0 {")
 	g.indent++
-	g.line("return web.NewResponse(405, trbWebHeaders(http.Header{Name: \"allow\", Value: strings.Join(allowedMethods, \", \")}, http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), http.NewBody([]byte(\"{\\\"error\\\":\\\"method_not_allowed\\\"}\")))")
+	g.line("return web.NewResponse(405, trbWebHeaders(__trb_http.Header{Name: \"allow\", Value: strings.Join(allowedMethods, \", \")}, __trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"method_not_allowed\\\"}\")))")
 	g.indent--
 	g.line("}")
-	g.line("return web.NewResponse(404, trbWebHeaders(http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), http.NewBody([]byte(\"{\\\"error\\\":\\\"not_found\\\"}\")))")
+	g.line("return web.NewResponse(404, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"not_found\\\"}\")))")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -310,37 +305,37 @@ func (g *generator) webMiddlewareChain(middlewares []webintegration.Middleware, 
 func (g *generator) webProtocolResponses() {
 	g.line("const trbWebDefaultMaxBodyBytes = " + strconv.Itoa(webintegration.MaxBodyBytes))
 	g.b.WriteByte('\n')
-	g.line("func trbWebHeaders(entries ...http.Header) *http.Headers {")
+	g.line("func trbWebHeaders(entries ...__trb_http.Header) *__trb_http.Headers {")
 	g.indent++
-	g.line("return http.NewHeaders(entries)")
+	g.line("return __trb_http.NewHeaders(entries)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func trbWebHeadersFromMap(values map[string][]string) *http.Headers {")
+	g.line("func trbWebHeadersFromMap(values map[string][]string) *__trb_http.Headers {")
 	g.indent++
-	g.line("entries := []http.Header{}")
+	g.line("entries := []__trb_http.Header{}")
 	g.line("for name, headerValues := range values {")
 	g.indent++
 	g.line("for _, value := range headerValues {")
 	g.indent++
-	g.line("entries = append(entries, http.Header{Name: name, Value: value})")
+	g.line("entries = append(entries, __trb_http.Header{Name: name, Value: value})")
 	g.indent--
 	g.line("}")
 	g.indent--
 	g.line("}")
-	g.line("return http.NewHeaders(entries)")
+	g.line("return __trb_http.NewHeaders(entries)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.line("func trbWebNormalizeRequest(request *web.Request) *web.Request {")
 	g.indent++
-	g.line("headers := []http.Header{}")
+	g.line("headers := []__trb_http.Header{}")
 	g.line("for _, header := range request.TrbFieldHeaders.Entries() {")
 	g.indent++
-	g.line("headers = append(headers, http.Header{Name: strings.ToLower(header.Name), Value: header.Value})")
+	g.line("headers = append(headers, __trb_http.Header{Name: strings.ToLower(header.Name), Value: header.Value})")
 	g.indent--
 	g.line("}")
-	g.line("return web.NewRequest(http.NewHttpMethod(strings.ToUpper(request.TrbFieldMethod.ToS())), request.TrbFieldPath, request.TrbFieldQueryString, http.NewHeaders(headers), request.TrbFieldBody)")
+	g.line("return web.NewRequest(__trb_http.NewHttpMethod(strings.ToUpper(request.TrbFieldMethod.ToS())), request.TrbFieldPath, request.TrbFieldQueryString, __trb_http.NewHeaders(headers), request.TrbFieldBody)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -369,19 +364,19 @@ func (g *generator) webProtocolResponses() {
 	g.b.WriteByte('\n')
 	g.line("func trbWebInternalServerError() *web.Response {")
 	g.indent++
-	g.line("return web.NewResponse(500, trbWebHeaders(http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")))")
+	g.line("return web.NewResponse(500, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")))")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.line("func trbWebBadRequest() *web.Response {")
 	g.indent++
-	g.line("return web.NewResponse(400, trbWebHeaders(http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), http.NewBody([]byte(\"{\\\"error\\\":\\\"bad_request\\\"}\")))")
+	g.line("return web.NewResponse(400, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"bad_request\\\"}\")))")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.line("func trbWebPayloadTooLarge() *web.Response {")
 	g.indent++
-	g.line("return web.NewResponse(413, trbWebHeaders(http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), http.NewBody([]byte(\"{\\\"error\\\":\\\"payload_too_large\\\"}\")))")
+	g.line("return web.NewResponse(413, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"payload_too_large\\\"}\")))")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -501,7 +496,7 @@ func (g *generator) webServer() {
 	g.line("handler := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {")
 	g.indent++
 	g.line("body, err := io.ReadAll(nethttp.MaxBytesReader(writer, request.Body, int64(config.BodyLimitBytes)))")
-	g.line("webRequest := web.NewRequest(http.NewHttpMethod(request.Method), request.URL.EscapedPath(), request.URL.RawQuery, trbWebHeadersFromMap(map[string][]string(request.Header.Clone())), http.NewBody(body))")
+	g.line("webRequest := web.NewRequest(__trb_http.NewHttpMethod(request.Method), request.URL.EscapedPath(), request.URL.RawQuery, trbWebHeadersFromMap(map[string][]string(request.Header.Clone())), __trb_http.NewBody(body))")
 	g.line("var response *web.Response")
 	g.line("if err != nil {")
 	g.indent++

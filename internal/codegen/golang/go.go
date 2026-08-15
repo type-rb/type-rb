@@ -206,6 +206,12 @@ func (g *generator) importStatement(imported *ir.Import) {
 	if alias == "" {
 		alias = pathpkg.Base(directory)
 	}
+	// Compiler-owned portable HTTP types participate in generated dispatcher
+	// code. Keep their Go import binding independent from user package names
+	// such as presentation/http.
+	if strings.TrimSuffix(imported.Path, "/index") == "trb/http" {
+		alias = "__trb_http"
+	}
 	g.requireImport(importPath, alias)
 	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
 		g.typeAliases[symbol] = goImportAlias(alias)
@@ -2386,6 +2392,9 @@ func referenceIntrinsic(expression ir.Expression) string {
 func (g *generator) referenceAlias(reference *ir.Reference) string {
 	if reference == nil || reference.Intrinsic != "" || reference.Package == "" {
 		return ""
+	}
+	if strings.TrimSuffix(reference.Package, "/index") == "trb/http" {
+		return "__trb_http"
 	}
 	directory := pathpkg.Dir(reference.Package)
 	if directory == "." {

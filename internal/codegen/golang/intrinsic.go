@@ -1194,10 +1194,10 @@ func (g *generator) webJSON(call *ir.Call, arguments []string) string {
 		}
 	}
 	builder := &goJSONCodecBuilder{generator: g, jsonAlias: jsonAlias, errorType: jsonAlias + ".JsonError"}
-	g.requireImport(pathpkg.Join(g.goModule, "trb/http"), "http")
+	g.requireImport(pathpkg.Join(g.goModule, "trb/http"), "__trb_http")
 	encoder := builder.encoder(call.Codec)
 	encoded := jsonAlias + ".Stringify(" + encoder + "(" + arguments[0] + "))"
 	responseType := "*" + webAlias + ".Response"
-	headers := "http.NewHeaders([]http.Header{{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}})"
-	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + webAlias + ".NewResponse(500, " + headers + ", http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))) }; return " + webAlias + ".NewResponse(" + status + ", " + headers + ", http.NewBody([]byte(encoded.OkValue))) }()"
+	headers := "__trb_http.NewHeaders([]__trb_http.Header{{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}})"
+	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + webAlias + ".NewResponse(500, " + headers + ", __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))) }; return " + webAlias + ".NewResponse(" + status + ", " + headers + ", __trb_http.NewBody([]byte(encoded.OkValue))) }()"
 }

@@ -400,13 +400,16 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 		if node.Reference != nil && node.Reference.Intrinsic != "" {
 			return false
 		}
+		owner := node.Receiver.ExprType().Name
+		if candidates := a.memberMethods[memberKey(owner, node.Name)]; len(candidates) > 0 {
+			return anyReached(a.plan.Methods, candidates)
+		}
 		if node.Reference != nil && node.Reference.Package != "" && node.Reference.ExportKind == "function" {
 			return anyReached(a.plan.Methods, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
 		if member, ok := node.Receiver.(*ir.Identifier); ok && member.Reference != nil && member.Reference.Package != "" {
 			return anyReached(a.plan.Methods, a.topMethods[callableKey(member.Reference.Package, node.Name)])
 		}
-		owner := node.Receiver.ExprType().Name
 		if owner == "" {
 			return false
 		}

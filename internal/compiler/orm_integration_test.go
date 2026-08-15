@@ -712,6 +712,79 @@ end
 	}
 }
 
+func TestPortableORMPropagatesExecutionScopeThroughImportedInterface(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sources := []SourceUnit{
+		{
+			Filename: filepath.Join(root, "src", "application", "repository.trb"), ModulePath: "application/repository", Package: "application",
+			Source: []byte(`import { DbError } from trb/orm
+
+interface Repository
+	count(): Integer fails DbError
+end
+`),
+		},
+		{
+			Filename: filepath.Join(root, "src", "infrastructure", "repository.trb"), ModulePath: "infrastructure/repository", Package: "infrastructure",
+			Source: []byte(`import { DbError, Model } from trb/orm
+import { Repository } from application/repository
+
+class Product < Model
+end
+
+class SQLRepository implements Repository
+	def count(): Integer fails DbError
+		return Product.count()
+	end
+end
+`),
+		},
+		{
+			Filename: filepath.Join(root, "src", "application", "count.trb"), ModulePath: "application/count", Package: "application",
+			Source: []byte(`import { DbError } from trb/orm
+import { Repository } from application/repository
+
+def count_products(repository: Repository): Integer fails DbError
+	return repository.count()
+end
+`),
+		},
+	}
+	artifacts, err := CompileProject(sources, Options{
+		Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var application string
+	for _, artifact := range artifacts {
+		if artifact.AST.ModulePath == "application/count" {
+			application = string(artifact.Output)
+			break
+		}
+	}
+	for _, expected := range []string{
+		"func CountProducts(__trbScope trbcontext.Context, repository Repository)",
+		"repository.Count(__trbScope)",
+	} {
+		if !strings.Contains(application, expected) {
+			t.Fatalf("generated interface call is missing %q:\n%s", expected, application)
+		}
+	}
+}
+
 func TestPortableORMFindsAndIteratesInPrimaryKeyBatches(t *testing.T) {
 	root := t.TempDir()
 	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))

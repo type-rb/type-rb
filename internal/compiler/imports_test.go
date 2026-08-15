@@ -2966,13 +2966,16 @@ end
 			}
 		}
 		for _, want := range map[string][]string{
-			"go":         {"func DecodeUser", "JsonErrorKindDecode", "Id: field0"},
+			"go":         {"func DecodeUser", "JsonErrorKindDecode", "Id: field0", "func(value int)"},
 			"ruby":       {"JsonErrorKind::Decode", `User.new(id: field0`},
 			"typescript": {"JsonErrorKind.Decode", "return { id: field0"},
 		}[mode] {
 			if !strings.Contains(output, want) {
 				t.Fatalf("%s typed JSON codec output does not contain %q:\n%s", mode, want, output)
 			}
+		}
+		if mode == "go" && strings.Contains(output, "func(value UserId)") {
+			t.Fatalf("Go JSON codec leaked an unqualified transparent alias across packages:\n%s", output)
 		}
 	}
 }

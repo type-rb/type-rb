@@ -104,6 +104,53 @@ end
 	}
 }
 
+func TestGoWebJSONReservesPortableHTTPImportAlias(t *testing.T) {
+	sources := []SourceUnit{
+		{
+			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
+			Source: []byte("import { serve } from trb/web\n\ndef main()\n\tserve()\n\treturn\nend\n"),
+		},
+		{
+			Filename: "/project/src/presentation/http/response.trb", ModulePath: "presentation/http/response", Package: "http",
+			Source: []byte(`import { Response } from trb/web
+
+def render(response: Response): Response
+	return response
+end
+`),
+		},
+		{
+			Filename: "/project/src/routes/index.trb", ModulePath: "routes/index", Package: "routes",
+			Source: []byte(`import { Context, Response, json } from trb/web
+import { render } from presentation/http/response
+
+def get(_context: Context): Response
+	return render(json({ "status" => "ok" }))
+end
+`),
+		},
+	}
+	artifacts, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/web-routes", SourceRoot: "/project/src", ProjectRoot: "/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := artifactForModule(artifacts, "routes/index")
+	if route == nil {
+		t.Fatal("route artifact was not generated")
+	}
+	output := string(route.Output)
+	for _, expected := range []string{
+		`import "example.com/web-routes/presentation/http"`,
+		`import __trb_http "example.com/web-routes/trb/http"`,
+		`http.Render(`,
+		`__trb_http.NewHeaders`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated route is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
 func TestCompileProjectGeneratesDefaultWebServerPort(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/src/main.trb",
