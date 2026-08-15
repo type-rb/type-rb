@@ -1276,7 +1276,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.unionMemberExpression(n)
 		}
 		if n.Reference != nil && n.Reference.Intrinsic == "trb.orm.column" {
-			return g.expr(n.Receiver) + "." + goORMColumnGetter(n.Name) + "()"
+			return g.memberReceiver(n.Receiver) + "." + goORMColumnGetter(n.Name) + "()"
 		}
 		if n.Namespace && isUpper(n.Name) {
 			owner := n.Receiver.ExprType().Name
@@ -1290,9 +1290,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			return name
 		}
 		if n.ClassField {
-			return g.expr(n.Receiver) + "." + goFieldName(n.Name)
+			return g.memberReceiver(n.Receiver) + "." + goFieldName(n.Name)
 		}
-		return g.expr(n.Receiver) + "." + goMethodName(n.Name)
+		return g.memberReceiver(n.Receiver) + "." + goMethodName(n.Name)
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
 		for i, argument := range n.Arguments {
@@ -2037,6 +2037,16 @@ func (g *generator) unaryOperand(expression ir.Expression) string {
 	value := g.expr(expression)
 	switch expression.(type) {
 	case *ir.Binary, *ir.Range:
+		return "(" + value + ")"
+	default:
+		return value
+	}
+}
+
+func (g *generator) memberReceiver(expression ir.Expression) string {
+	value := g.expr(expression)
+	switch expression.(type) {
+	case *ir.Conversion:
 		return "(" + value + ")"
 	default:
 		return value
