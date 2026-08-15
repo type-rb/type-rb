@@ -265,7 +265,17 @@ function recordFields(type, state, hint) {
 			}
 			optional ||= !!(property.flags & ts.SymbolFlags.Optional);
 			const declaration = property.valueDeclaration || property.declarations?.[0];
-			const converted = portableType(checker.getTypeOfSymbolAtLocation(property, declaration || state.fallbackNode), state, 1);
+			// Mapped and synthetic properties may not have a declaration. Recent
+			// TypeScript 6.x releases reject a source-file fallback for those symbols,
+			// so ask the containing object type for the property type instead.
+			const propertyType = declaration
+				? checker.getTypeOfSymbolAtLocation(property, declaration)
+				: checker.getTypeOfPropertyOfType(alternative, name);
+			if (!propertyType) {
+				issue = "has no resolvable type";
+				break;
+			}
+			const converted = portableType(propertyType, state, 1);
 			if (converted.error) {
 				issue = converted.error;
 				break;
