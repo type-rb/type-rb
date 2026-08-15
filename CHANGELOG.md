@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.14 - 2026-08-16
+
+### Compiler and package integration
+
+- Transparent scalar aliases now work as typed `trb/web` request parameters
+  and `trb/jobs` payloads. Job-enabled projects avoid unused runtime imports in
+  unrelated Go modules, `trb test` remains an application test runner instead
+  of starting a worker, and named-unused ORM transaction results compile
+  correctly. ([#285](https://github.com/type-rb/type-rb/pull/285))
+
 ## 0.2.13 - 2026-08-15
 
 ### Frontend and package integration
