@@ -2421,12 +2421,11 @@ func (c *Checker) parameterValueSchema(typ types.Type, allowArray bool) (CodecSc
 }
 
 func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[string]bool) (CodecSchema, bool) {
-	schema := CodecSchema{Type: typ}
-	// Transparent aliases retain their source name in the checked schema but
-	// use the expanded target when deciding whether and how a value is encoded.
-	// This keeps aliases usable at JSON, path, and query boundaries without
-	// giving them nominal conversion semantics.
+	// Codecs use the expanded representation of transparent aliases. Generated
+	// helpers can then cross a package boundary without importing an alias that
+	// appeared only inside an imported record definition.
 	base := c.expandAlias(typ, map[string]bool{})
+	schema := CodecSchema{Type: base}
 	base.Nullable = false
 	switch base.Kind {
 	case types.Bool:
