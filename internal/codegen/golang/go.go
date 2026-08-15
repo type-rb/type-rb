@@ -995,7 +995,7 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 		g.line("__trbScope := trbcontext.Background()")
 	}
 	g.parameterDefaults(method.Parameters)
-	if method.Name == "main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
+	if method.Name == "main" && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
 		g.line("if trbJobsRunWorkerIfRequested() { return }")
 	}
 	if method.Name == "main" && g.orm != nil && len(g.orm.Models) > 0 {

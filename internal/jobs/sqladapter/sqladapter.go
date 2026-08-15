@@ -97,6 +97,9 @@ func (m *Manifest) Augment(program *ir.Program) {
 }
 
 func needsRuntime(program *ir.Program) bool {
+	if program.ModulePath == "trb_test_main" {
+		return false
+	}
 	for _, statement := range program.Statements {
 		switch node := statement.(type) {
 		case *ir.Method:
