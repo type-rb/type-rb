@@ -2927,6 +2927,11 @@ record Address
 	city: String
 end
 
+enum UserStatus
+	Active = "ACTIVE"
+	Disabled = "DISABLED"
+end
+
 record User
 	id: UserId @json("user_id")
 	name: String
@@ -2934,6 +2939,7 @@ record User
 	scores: Array<Float>
 	metadata: Hash<String, Integer>
 	address: Address
+	status: UserStatus
 end
 `),
 	}
@@ -2968,7 +2974,7 @@ end
 		for _, want := range map[string][]string{
 			"go":         {"func DecodeUser", "JsonErrorKindDecode", "Id: field0", "func(value int)"},
 			"ruby":       {"JsonErrorKind::Decode", `User.new(id: field0`},
-			"typescript": {"JsonErrorKind.Decode", "return { id: field0"},
+			"typescript": {"import { UserStatus }", "JsonErrorKind.Decode", "case \"ACTIVE\": return UserStatus.Active", "return { id: field0"},
 		}[mode] {
 			if !strings.Contains(output, want) {
 				t.Fatalf("%s typed JSON codec output does not contain %q:\n%s", mode, want, output)
