@@ -973,6 +973,9 @@ func (g *generator) caseExpression(node *ir.Case) string {
 }
 
 func (g *generator) transform(transform *ir.Transform) string {
+	if transform.Fails.Kind != "" && transform.Fails.Kind != types.Never {
+		return g.effectfulTransform(transform)
+	}
 	source := g.expr(transform.Source)
 	if _, rangeSource := transform.Source.(*ir.Range); rangeSource {
 		source = "(" + source + ")"
@@ -995,6 +998,98 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) effectfulTransform(transform *ir.Transform) string {
+	child := *g
+	child.b = strings.Builder{}
+	child.sourceRecorder = nil
+	child.indent = 0
+	child.temporary++
+	suffix := strconv.Itoa(child.temporary)
+	items := "__trb_items_" + suffix
+	result := "__trb_result_" + suffix
+	index := "__trb_index_" + suffix
+	item := transform.Item
+	if item == "" || item == "_" {
+		item = "__trb_item_" + suffix
+	}
+	ok := func(value string) string { return "Result::Ok.new(" + value + ")" }
+	emitValue := func() string {
+		child.statements(transform.Body)
+		return child.expr(transform.Result)
+	}
+
+	child.line("-> do", "")
+	child.indent++
+	child.line(items+" = "+child.expr(transform.Source), "")
+	switch transform.Operation {
+	case "map", "select":
+		child.line(result+" = []", "")
+		parameters := item
+		operation := "each"
+		if transform.WithIndex {
+			operation = "each_with_index"
+			parameters += ", " + transform.Index
+		}
+		child.line(items+"."+operation+" do |"+parameters+"|", "")
+		child.indent++
+		value := emitValue()
+		if transform.Operation == "map" {
+			child.line(result+" << "+value, "")
+		} else {
+			child.line(result+" << "+item+" if "+value, "")
+		}
+		child.indent--
+		child.line("end", "")
+		child.line(ok(result), "")
+	case "any?", "all?", "none?", "find", "find_index":
+		child.line(items+".each_with_index do |"+item+", "+index+"|", "")
+		child.indent++
+		value := emitValue()
+		switch transform.Operation {
+		case "any?":
+			child.line("return "+ok("true")+" if "+value, "")
+		case "all?":
+			child.line("return "+ok("false")+" unless "+value, "")
+		case "none?":
+			child.line("return "+ok("false")+" if "+value, "")
+		case "find":
+			child.line("return "+ok(item)+" if "+value, "")
+		case "find_index":
+			child.line("return "+ok(index)+" if "+value, "")
+		}
+		child.indent--
+		child.line("end", "")
+		switch transform.Operation {
+		case "any?":
+			child.line(ok("false"), "")
+		case "all?", "none?":
+			child.line(ok("true"), "")
+		default:
+			child.line(ok("nil"), "")
+		}
+	case "reduce":
+		child.line(result+" = "+child.expr(transform.Initial), "")
+		child.line(items+".each do |"+item+"|", "")
+		child.indent++
+		accumulator := transform.Accumulator
+		if accumulator == "" || accumulator == "_" {
+			accumulator = "__trb_accumulator_" + suffix
+		}
+		child.line(accumulator+" = "+result, "")
+		value := emitValue()
+		child.line(result+" = "+value, "")
+		child.indent--
+		child.line("end", "")
+		child.line(ok(result), "")
+	default:
+		child.line(`raise "unsupported effectful TypeRB collection transformation"`, "")
+	}
+	child.indent--
+	child.line("end.call", "")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) transformResult(transform *ir.Transform) string {

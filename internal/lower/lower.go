@@ -747,13 +747,25 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		return result
 	case *ast.IterationExpression:
+		successType := typ
+		fails := l.checked.ExpressionEffects[n]
+		transformType := successType
+		source := l.expression(n.Source)
+		initial := l.expression(n.Initial)
+		if fails.Kind != "" && fails.Kind != types.Never {
+			transformType = resultType(effectSuccessType(successType), fails)
+			boundary := effectBoundary{success: effectSuccessType(successType), fails: fails, result: transformType}
+			l.effectBoundaries = append(l.effectBoundaries, boundary)
+		}
 		result := &ir.Transform{
-			ExprBase:  base,
-			Source:    l.expression(n.Source),
-			Operation: n.Operation,
-			Initial:   l.expression(n.Initial),
-			WithIndex: n.WithIndex,
-			ItemType:  l.checked.Iterations[n],
+			ExprBase:    ir.NewExprBase(n.Span(), transformType),
+			Source:      source,
+			Operation:   n.Operation,
+			Initial:     initial,
+			WithIndex:   n.WithIndex,
+			ItemType:    l.checked.Iterations[n],
+			SuccessType: successType,
+			Fails:       fails,
 		}
 		if n.Block != nil {
 			if n.Operation == "reduce" {
@@ -782,6 +794,15 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				} else {
 					result.Body = l.statements(n.Block.Body)
 				}
+			}
+		}
+		if fails.Kind != "" && fails.Kind != types.Never {
+			l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
+			if boundary, ok := l.currentEffectBoundary(); ok {
+				return l.effectPropagation(n.Span(), result, successType, fails, boundary)
+			}
+			if l.checked.UnhandledEffects[n] {
+				return &ir.UnhandledEffect{ExprBase: base, Value: result, Fails: fails}
 			}
 		}
 		return result
