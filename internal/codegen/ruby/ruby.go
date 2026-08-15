@@ -331,7 +331,11 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line("case "+caseValue, n.TrailingComment)
 		for _, branch := range n.Branches {
-			g.line("when "+g.expr(branch.Value), branch.TrailingComment)
+			patterns := []string{g.expr(branch.Value)}
+			for _, alternative := range branch.Alternatives {
+				patterns = append(patterns, g.expr(alternative))
+			}
+			g.line("when "+strings.Join(patterns, ", "), branch.TrailingComment)
 			g.indent++
 			for _, binding := range branch.Bindings {
 				if binding.Name == "_" {
@@ -925,6 +929,12 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		pattern := child.expr(branch.Value)
 		if node.TypeUnion {
 			pattern = rubyTypePattern(branch.MatchType)
+		} else if len(branch.Alternatives) > 0 {
+			patterns := []string{pattern}
+			for _, alternative := range branch.Alternatives {
+				patterns = append(patterns, child.expr(alternative))
+			}
+			pattern = strings.Join(patterns, ", ")
 		}
 		child.line("when "+pattern, branch.TrailingComment)
 		child.indent++

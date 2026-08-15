@@ -642,6 +642,15 @@ func (e *Evaluator) selectCaseBranch(node *ir.Case, module string, sc *scope) ([
 		if equal(value, candidate) {
 			return branch.Body, branch.Result, branchScope, nil
 		}
+		for _, alternative := range branch.Alternatives {
+			candidate, err = e.expression(alternative, module, sc)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if equal(value, candidate) {
+				return branch.Body, branch.Result, branchScope, nil
+			}
+		}
 	}
 	if node.HasElse {
 		return node.Else, node.ElseResult, &scope{parent: sc, values: map[string]Value{}}, nil

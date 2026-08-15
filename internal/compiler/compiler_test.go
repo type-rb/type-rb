@@ -2353,6 +2353,57 @@ end
 	}
 }
 
+func TestLiteralCaseAlternativesAcrossModes(t *testing.T) {
+	source := []byte(`def label(value: String): String
+	return case value
+	when "receipts", "receipt_detail"
+		"receipts"
+	else
+		"other"
+	end
+end
+`)
+
+	artifacts := map[string]*Artifact{}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("case_alternatives.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected literal case alternatives: %v", mode, err)
+		}
+		artifacts[mode] = artifact
+	}
+
+	for mode, want := range map[string]string{
+		"go":         `__trbCase1 == "receipts" || __trbCase1 == "receipt_detail"`,
+		"ruby":       `when "receipts", "receipt_detail"`,
+		"typescript": `__trbCase1 === "receipts" || __trbCase1 === "receipt_detail"`,
+	} {
+		if output := string(artifacts[mode].Output); !strings.Contains(output, want) {
+			t.Fatalf("generated %s literal case is missing %q:\n%s", mode, want, output)
+		}
+	}
+
+	method := artifacts["go"].IR.Statements[0].(*ir.Method)
+	caseExpression := method.Body[0].(*ir.Return).Value.(*ir.Case)
+	if got := len(caseExpression.Branches[0].Alternatives); got != 1 {
+		t.Fatalf("typed IR retained %d alternatives, want 1", got)
+	}
+	astMethod := artifacts["go"].AST.Statements[0].(*ast.MethodStatement)
+	astCase := astMethod.Body[0].(*ast.ReturnStatement).Value.(*ast.CaseStatement)
+	if got := len(astCase.Branches[0].Alternatives); got != 1 {
+		t.Fatalf("syntax AST retained %d alternatives, want 1", got)
+	}
+}
+
+func TestCaseAlternativesRejectPatternsAcrossModes(t *testing.T) {
+	source := []byte("enum State\n\tOpen\n\tClosed\nend\ndef show(state: State)\n\tcase state\n\twhen State::Open, State::Closed\n\t\treturn\n\tend\nend\n")
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("bad_case_alternatives.trb", source, mode); err == nil || !strings.Contains(err.Error(), "case alternatives are supported only for Integer or String literals") {
+			t.Fatalf("%s: expected a portable case-alternative diagnostic, got %v", mode, err)
+		}
+	}
+}
+
 func TestCaseExpressionDiagnosticsAreModeIndependent(t *testing.T) {
 	tests := []struct {
 		name   string

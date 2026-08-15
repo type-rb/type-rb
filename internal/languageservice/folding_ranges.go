@@ -222,6 +222,9 @@ func (c *foldingCollector) caseExpression(node *ast.CaseStatement) {
 	c.statements(node.Leading)
 	for _, branch := range node.Branches {
 		c.expression(branch.Value)
+		for _, alternative := range branch.Alternatives {
+			c.expression(alternative)
+		}
 		c.statements(branch.Body)
 	}
 	c.statements(node.Else)

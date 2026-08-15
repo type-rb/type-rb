@@ -303,17 +303,18 @@ func (*If) irExpression() {}
 
 type CaseBranch struct {
 	Base
-	Value       Expression
-	EnumName    string
-	Member      string
-	Bindings    []CaseBinding
-	PayloadEnum bool
-	TypePattern bool
-	MatchType   types.Type
-	Narrowings  []CaseBinding
-	Body        []Statement
-	Result      Expression
-	Diverges    bool
+	Value        Expression
+	Alternatives []Expression
+	EnumName     string
+	Member       string
+	Bindings     []CaseBinding
+	PayloadEnum  bool
+	TypePattern  bool
+	MatchType    types.Type
+	Narrowings   []CaseBinding
+	Body         []Statement
+	Result       Expression
+	Diverges     bool
 }
 
 type CaseBinding struct {

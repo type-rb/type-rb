@@ -229,6 +229,9 @@ end
 - `case` accepts explicit Integer and String values. A case over an ordinary
   scalar may be open and normally uses `else`; a case over a literal union is
   exhaustive and may omit `else` after handling every alternative.
+- One literal branch may list multiple comma-separated values, such as
+  `when "index", "show"`. The values share one body. Enum and union patterns,
+  including payload bindings, use separate `when` branches.
 - A union of records or classes exposes a data member only when every
   alternative exposes that member through the same storage model. The member
   type is the normalized union of the alternative field types. This rule does

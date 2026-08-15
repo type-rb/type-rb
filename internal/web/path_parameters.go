@@ -283,6 +283,9 @@ func walkCase(node *ast.CaseStatement, visit func(*ast.CallExpression)) {
 	walkStatements(node.Leading, visit)
 	for _, branch := range node.Branches {
 		walkExpression(branch.Value, visit)
+		for _, alternative := range branch.Alternatives {
+			walkExpression(alternative, visit)
+		}
 		walkStatements(branch.Body, visit)
 	}
 	walkStatements(node.Else, visit)
