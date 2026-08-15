@@ -36,6 +36,14 @@ def create_todo(client: HttpClient, input: CreateTodoInput): Response<Todo> fail
 	return raw.json<Todo>()
 end
 
+def fetch_with_local_request_names(client: HttpClient, id: Integer): Response<Todo> fails RequestError
+	path := "/todos"
+	query := [QueryParameter.new(name: "id", value: id.to_s())]
+	headers := Headers.new([Header.new(name: "accept", value: "application/json")])
+	timeout := 1000
+	return client.request(path, query: query, headers: headers, timeout_milliseconds: timeout).json<Todo>()
+end
+
 def raw_body(client: HttpClient): Body fails RequestError
 	return client.request("/health").body
 end
@@ -66,7 +74,7 @@ end
 		`import * as __trb_browser from "./trb/platform/typescript/browser/index.ts";`,
 		`async function fetch_todo`,
 		`globalThis.fetch`,
-		`nativeResponse.arrayBuffer()`,
+		`__trbNativeResponse.arrayBuffer()`,
 		`__trb_browser.RequestErrorKind.Contract`,
 		`new __trb_browser.RequestError(__trb_browser.RequestErrorKind.Contract, message, response)`,
 		`JSON.parse`,
@@ -83,6 +91,16 @@ end
 	}
 	if strings.Contains(output, "const response = response") {
 		t.Fatalf("browser response conversion shadows a source binding:\n%s", output)
+	}
+	for _, shadow := range []string{"const path = path", "const query = query", "const headers = headers", "const timeout: number | null = timeout"} {
+		if strings.Contains(output, shadow) {
+			t.Fatalf("browser request generation shadows a source binding with %q:\n%s", shadow, output)
+		}
+	}
+	for _, want := range []string{"const __trbPath = path", "const __trbQuery = query", "const __trbRequestHeaders = headers", "const __trbTimeout: number | null = timeout"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("browser request generation is missing hygienic binding %q:\n%s", want, output)
+		}
 	}
 }
 
