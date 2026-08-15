@@ -12,12 +12,12 @@ const repositoryRoot = path.resolve(extensionRoot, "../..");
 
 test("registers the canonical TypeRB language, grammar, and debugger", async () => {
 	const manifest = JSON.parse(await readFile(path.join(extensionRoot, "package.json"), "utf8"));
-	assert.deepEqual(manifest.activationEvents, ["onLanguage:trb", "onDebug:typerb"]);
+	assert.deepEqual(manifest.activationEvents, ["onLanguage:trb", "onDebug:typerb", "workspaceContains:trbconfig.jsonc"]);
 	assert.deepEqual(manifest.contributes.languages[0].extensions, [".trb"]);
 	assert.equal(manifest.contributes.grammars[0].scopeName, "source.trb");
 	assert.deepEqual(
 		manifest.contributes.commands.map((command) => command.command),
-		["typerb.runProject", "typerb.stopProject"]
+		["typerb.runProject", "typerb.runTest", "typerb.debugTest", "typerb.stopProject"]
 	);
 	assert.equal(manifest.contributes.debuggers[0].type, "typerb");
 	assert.deepEqual(manifest.contributes.debuggers[0].languages, ["trb"]);

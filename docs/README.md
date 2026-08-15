@@ -23,6 +23,7 @@ larger applications.
 - [`trb/orm` guide](guides/orm.md)
 - [Portable background Jobs](guides/jobs.md)
 - [Experimental React and JSX](guides/react.md)
+- [Testing TypeRB applications](guides/testing.md)
 
 ## Reference
 

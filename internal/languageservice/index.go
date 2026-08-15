@@ -320,6 +320,9 @@ func standardSymbols(definition *stdlib.Package) []Symbol {
 	}
 	result := make([]Symbol, 0, len(definition.Symbols)+len(definition.RuntimeExports))
 	for _, library := range definition.Symbols {
+		if library.CompilerOnly {
+			continue
+		}
 		parameters := make([]CallParameter, len(library.Parameters))
 		for index, parameter := range library.Parameters {
 			parameters[index] = CallParameter{Name: parameter.Name, Label: parameter.Name + ": " + parameter.Type.String()}

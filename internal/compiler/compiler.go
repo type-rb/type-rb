@@ -19,6 +19,7 @@ import (
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/testsuite"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/typeprovider"
 )
@@ -44,6 +45,12 @@ type SourceUnit struct {
 	CompilerOwned   bool
 	Official        bool
 	ExternalPackage bool
+	// TestRegistration moves top-level test suites into this generated
+	// function. An empty value keeps ordinary source behavior.
+	TestRegistration string
+	// MainReplacement disables automatic application startup while preserving
+	// the rest of a module for a test build.
+	MainReplacement string
 }
 
 type CompileError struct {
@@ -150,6 +157,11 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	for _, source := range units {
 		program, diagnostics := parser.Parse(source.Source)
 		configureProgram(program, options, source.ModulePath, source.Package)
+		if source.MainReplacement != "" {
+			renameTopLevelMethod(program, MainFunction, source.MainReplacement)
+		}
+		_, testDiagnostics := testsuite.Prepare(program, source.Filename, source.TestRegistration)
+		diagnostics = append(diagnostics, testDiagnostics...)
 		if official.OwnsModule(source.ModulePath) && !source.Official {
 			diagnostics = append(diagnostics, diagnostic.Diagnostic{
 				Code:     diagnostic.ProjectError,
@@ -448,6 +460,14 @@ func hasTopLevelMethod(program *ast.Program, name string) bool {
 		}
 	}
 	return false
+}
+
+func renameTopLevelMethod(program *ast.Program, name, replacement string) {
+	for _, statement := range program.Statements {
+		if method, ok := statement.(*ast.MethodStatement); ok && method.Name == name {
+			method.Name = replacement
+		}
+	}
 }
 
 func projectRoot(options Options) string {

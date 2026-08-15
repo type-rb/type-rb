@@ -27,5 +27,5 @@ func isSuspendingORM(intrinsic string, fails types.Type) bool {
 }
 
 func isSuspendingIntrinsic(intrinsic string, fails types.Type) bool {
-	return intrinsic == "trb.jobs.perform_later" || intrinsic == "trb.jobs.perform_in" || intrinsic == "trb.jobs.perform_at" || isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || intrinsic == "trb.web.middleware.timeout.call" || intrinsic == "trb.platform.typescript.browser.request" || intrinsic == "trb.internal.auth.oidc.verify_bearer"
+	return intrinsic == "trb.std.test.describe" || intrinsic == "trb.std.test.test" || intrinsic == "trb.jobs.perform_later" || intrinsic == "trb.jobs.perform_in" || intrinsic == "trb.jobs.perform_at" || isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || intrinsic == "trb.web.middleware.timeout.call" || intrinsic == "trb.platform.typescript.browser.request" || intrinsic == "trb.internal.auth.oidc.verify_bearer"
 }

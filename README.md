@@ -83,6 +83,25 @@ trb fmt
 trb run
 ```
 
+Add `calculator_test.trb` beside application source and run portable tests:
+
+```trb
+import { describe, expect, test } from trb/std/test
+
+describe("Calculator") do
+	test("adds numbers") do
+		expect(1 + 2).to_equal(3)
+	end
+end
+```
+
+```sh
+trb test
+```
+
+The VS Code extension discovers the same suites in Test Explorer. See the
+[testing guide](docs/guides/testing.md) for filtering and assertion APIs.
+
 `trb run` builds in a temporary directory before executing the program. Use
 `trb build` when you want to keep the generated source.
 

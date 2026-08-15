@@ -23,6 +23,8 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
   Code's Run and Debug interface
 - Source breakpoints, stepping, stack frames, and variable inspection for
   `mode: go`
+- Native Test Explorer discovery and execution for `*_test.trb` suites
+- Test debugging with TypeRB breakpoints and variables for `mode: go`
 
 The extension discovers every `trbconfig.jsonc` in the opened workspace and
 keeps each project in an independent language-server session. A repository may
@@ -56,6 +58,13 @@ original TypeRB source, so Visual Studio Code's standard stepping, call stack,
 variables, watches, and debug console are available. Ruby and TypeScript
 projects currently support Run Without Debugging while their source-debugger
 adapters are developed.
+
+Open the Testing view to run every TypeRB test, a nested `describe` suite, or
+one `test` case. The extension also shows **▶ Run Test** above individual test
+declarations. For Go projects, choose the Testing view's **Debug Test** action
+or the CodeLens action to stop at `.trb` breakpoints and inspect variables.
+Failures link to the original assertion in the `.trb` source. The project must
+use a process runtime; TypeScript browser test hosting is not yet available.
 
 Create a small Go-targeted project from a terminal with:
 

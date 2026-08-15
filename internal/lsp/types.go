@@ -90,6 +90,16 @@ type workspaceSymbolParams struct {
 	Query string `json:"query"`
 }
 
+type testItem struct {
+	ID       string     `json:"id"`
+	ParentID string     `json:"parentId,omitempty"`
+	Kind     string     `json:"kind"`
+	Name     string     `json:"name"`
+	FullName string     `json:"fullName"`
+	URI      string     `json:"uri"`
+	Range    rangeValue `json:"range"`
+}
+
 type formattingParams struct {
 	TextDocument textDocumentIdentifier `json:"textDocument"`
 }

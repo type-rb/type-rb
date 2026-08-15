@@ -26,7 +26,8 @@
 	],
 	"activationEvents": [
 		"onLanguage:trb",
-		"onDebug:typerb"
+		"onDebug:typerb",
+		"workspaceContains:trbconfig.jsonc"
 	],
 	"extensionKind": [
 		"workspace"
@@ -61,6 +62,18 @@
 				"title": "Run Project",
 				"category": "TypeRB",
 				"icon": "$(play)"
+			},
+			{
+				"command": "typerb.runTest",
+				"title": "Run Test",
+				"category": "TypeRB",
+				"icon": "$(testing-run-icon)"
+			},
+			{
+				"command": "typerb.debugTest",
+				"title": "Debug Test",
+				"category": "TypeRB",
+				"icon": "$(debug-alt)"
 			},
 			{
 				"command": "typerb.stopProject",

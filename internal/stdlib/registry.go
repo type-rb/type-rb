@@ -27,9 +27,20 @@ type Parameter struct {
 	Exact    bool
 }
 
+// Block describes the callback accepted by a compiler-owned package
+// function. It deliberately models only ordinary callback blocks; structured
+// control-flow blocks remain declaration-provider functionality.
+type Block struct {
+	Parameters []types.Type
+}
+
 type Symbol struct {
 	Name      string
 	Intrinsic string
+	// CompilerOnly keeps runner protocol operations out of user imports and
+	// language-service completion while allowing compiler-owned source to use
+	// the same checked package boundary.
+	CompilerOnly bool
 	// RuntimeIndependent marks an intrinsic that is fully lowered by every
 	// backend even when its public package also provides a source wrapper.
 	RuntimeIndependent  bool
@@ -45,6 +56,7 @@ type Symbol struct {
 	Variadic            bool
 	Inference           string
 	RuntimeDependencies []types.Type
+	Block               *Block
 }
 
 type RuntimeExport struct {
@@ -62,6 +74,19 @@ type JSXProvider struct {
 
 func (s Symbol) HasReceiver() bool {
 	return s.Receiver.Kind != "" && s.Receiver.Kind != types.Invalid
+}
+
+func testAssertion(name string, expected bool) Symbol {
+	parameters := []Parameter{{Name: "actual", Type: anyType}}
+	if expected {
+		parameters = append(parameters, Parameter{Name: "expected", Type: anyType})
+	}
+	parameters = append(parameters,
+		Parameter{Name: "path", Type: stringType},
+		Parameter{Name: "line", Type: integerType},
+		Parameter{Name: "column", Type: integerType},
+	)
+	return Symbol{Name: name, Intrinsic: "trb.internal.test." + name, RuntimeIndependent: true, Parameters: parameters, Return: voidType}
 }
 
 type receiverMethodTarget struct {
@@ -127,6 +152,7 @@ var instantType = types.FromName("Instant")
 var durationType = types.FromName("Duration")
 var timeZoneType = types.FromName("TimeZone")
 var dateTimeErrorType = types.FromName("DateTimeError")
+var expectationTType = types.Type{Kind: types.Named, Name: "Expectation", Args: []types.Type{typeT}}
 
 var registry = map[string]*Package{
 	"trb/std/unit": {
@@ -151,6 +177,78 @@ end
 `,
 		Kind:    Portable,
 		Symbols: map[string]Symbol{},
+	},
+	"trb/std/test": {
+		Path:         "trb/std/test",
+		ModulePath:   "trb/std/test/index",
+		RuntimeAlias: "__trb_test",
+		RuntimeExports: []RuntimeExport{
+			{Name: "Expectation", Kind: "class"},
+		},
+		Source: `import { assert_equal, assert_false, assert_nil, assert_not_equal, assert_true } from trb/internal/test
+
+class Expectation<T>
+	readonly @actual: T
+	readonly @path: String
+	readonly @line: Integer
+	readonly @column: Integer
+
+	def initialize(actual: T, path: String, line: Integer, column: Integer)
+		@actual = actual
+		@path = path
+		@line = line
+		@column = column
+		return
+	end
+
+	def to_equal(expected: T)
+		assert_equal(@actual, expected, @path, @line, @column)
+		return
+	end
+
+	def to_not_equal(expected: T)
+		assert_not_equal(@actual, expected, @path, @line, @column)
+		return
+	end
+
+	def to_be_true()
+		assert_true(@actual, @path, @line, @column)
+		return
+	end
+
+	def to_be_false()
+		assert_false(@actual, @path, @line, @column)
+		return
+	end
+
+	def to_be_nil()
+		assert_nil(@actual, @path, @line, @column)
+		return
+	end
+end
+`,
+		Kind: Portable,
+		Symbols: map[string]Symbol{
+			"describe": {Name: "describe", Intrinsic: "trb.std.test.describe", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{}},
+			"test":     {Name: "test", Intrinsic: "trb.std.test.test", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{}},
+			"expect": {
+				Name: "expect", Intrinsic: "trb.std.test.expect", RequiredSymbols: []string{"Expectation"}, TypeParameters: []string{"T"},
+				Parameters: []Parameter{{Name: "actual", Type: typeT}}, Return: expectationTType,
+			},
+			"finish": {Name: "finish", Intrinsic: "trb.std.test.finish", CompilerOnly: true, Return: voidType},
+		},
+	},
+	"trb/internal/test": {
+		Path:     "trb/internal/test",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
+			"assert_equal":     testAssertion("assert_equal", true),
+			"assert_not_equal": testAssertion("assert_not_equal", true),
+			"assert_true":      testAssertion("assert_true", false),
+			"assert_false":     testAssertion("assert_false", false),
+			"assert_nil":       testAssertion("assert_nil", false),
+		},
 	},
 	"trb/std/errors": {
 		Path:         "trb/std/errors",
@@ -1492,6 +1590,14 @@ func Instantiate(symbol Symbol, arguments []types.Type) Symbol {
 		result.Parameters[index].Type = substituteType(result.Parameters[index].Type, bindings)
 	}
 	result.Return = substituteType(result.Return, bindings)
+	if symbol.Block != nil {
+		block := *symbol.Block
+		block.Parameters = append([]types.Type(nil), symbol.Block.Parameters...)
+		for index := range block.Parameters {
+			block.Parameters[index] = substituteType(block.Parameters[index], bindings)
+		}
+		result.Block = &block
+	}
 	result.EqualityTypes = append([]types.Type(nil), symbol.EqualityTypes...)
 	for index := range result.EqualityTypes {
 		result.EqualityTypes[index] = substituteType(result.EqualityTypes[index], bindings)

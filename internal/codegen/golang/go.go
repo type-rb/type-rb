@@ -145,6 +145,9 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, execution *
 	if g.modulePath == "trb/std/time/index" {
 		g.timeDatabaseInterop()
 	}
+	if g.modulePath == "trb/std/test/index" {
+		g.testRuntimeSupport()
+	}
 	g.integrations(program.Extensions)
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
@@ -317,6 +320,9 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Next:
 		g.line("continue")
 	case *ir.ExpressionStatement:
+		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil && g.testCallBlock(call) {
+			break
+		}
 		if identifier, ok := n.Expression.(*ir.Identifier); ok && identifier.Generated {
 			g.line("_ = " + g.expr(identifier))
 		} else {

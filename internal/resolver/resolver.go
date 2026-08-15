@@ -760,7 +760,10 @@ func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package,
 		resolved.Symbols = append([]string(nil), node.Symbols...)
 	} else {
 		seen := map[string]bool{}
-		for name := range definition.Symbols {
+		for name, symbol := range definition.Symbols {
+			if symbol.CompilerOnly {
+				continue
+			}
 			resolved.Symbols = append(resolved.Symbols, name)
 			seen[name] = true
 		}
@@ -772,10 +775,13 @@ func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package,
 		}
 	}
 	for _, name := range resolved.Symbols {
-		_, librarySymbol := definition.Symbols[name]
+		symbol, librarySymbol := definition.Symbols[name]
 		_, sourceExport := resolved.Exports[name]
 		if !librarySymbol && !sourceExport {
 			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not export %s", node.Path, name))}
+		}
+		if librarySymbol && symbol.CompilerOnly && !options.CompilerOwned {
+			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("%s.%s is internal to the TypeRB compiler", node.Path, name))}
 		}
 	}
 	sort.Strings(resolved.Symbols)
