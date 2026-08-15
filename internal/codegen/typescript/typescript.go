@@ -318,8 +318,16 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 			}
 			for _, symbol := range n.GeneratedTypeSymbols {
-				if !containsString(types, symbol) {
-					types = append(types, symbol)
+				target := &types
+				switch n.SymbolKinds[symbol] {
+				case "enum", "enum_alias":
+					// Generated codecs construct enum values at runtime. Keep
+					// transitive enum dependencies as value imports even when the
+					// source only names their enclosing record.
+					target = &values
+				}
+				if !containsString(*target, symbol) {
+					*target = append(*target, symbol)
 				}
 			}
 			if intrinsicRuntime && !browserRuntime && !webRuntime && !(jsonRuntime && g.jsonRuntime) {
