@@ -2,6 +2,36 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.9 - 2026-08-15
+
+### Language
+
+- TypeRB now supports invariant generic interfaces and explicit specialized
+  implementations across Go, Ruby, TypeScript, and the REPL.
+  ([#259](https://github.com/type-rb/type-rb/pull/259))
+
+### Testing and editor tooling
+
+- Projects can define portable test suites with `describe`, `test`, and
+  `expect` from `trb/std/test`, run them with `trb test`, and inspect them in
+  VS Code Test Explorer. Go-mode tests additionally support source debugging
+  from `.trb` files. ([#260](https://github.com/type-rb/type-rb/pull/260))
+- VS Code completion can add explicit imports for unambiguous types, and Go
+  applications support `.trb` source breakpoints, stepping, stack frames,
+  variables, watches, and evaluation through the standard debugger UI.
+  ([#258](https://github.com/type-rb/type-rb/pull/258))
+
+### Compiler reliability
+
+- Transparent aliases now behave like their target types in JSON, path, and
+  query codecs and in interface signatures. Formatting multiline named
+  imports also preserves slash-separated package paths.
+  ([#261](https://github.com/type-rb/type-rb/pull/261))
+- Generated Go applications now preserve ORM execution scope through imported
+  interfaces and avoid collisions between `trb/http` and user packages named
+  `http`. JSON codecs also handle aliases declared inside imported records.
+  ([#262](https://github.com/type-rb/type-rb/pull/262))
+
 ## 0.2.8 - 2026-08-15
 
 ### Editor tooling
