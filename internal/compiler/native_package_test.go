@@ -11,6 +11,7 @@ func nativeComponentCatalog() *nativepackage.Catalog {
 	propsName := "Native_react_spinners_ClipLoaderProps"
 	tablePropsName := "Native_ui_TableProps"
 	childrenPropsName := "Native_ui_ChildrenProps"
+	labelPropsName := "Native_ui_LabelProps"
 	return &nativepackage.Catalog{
 		FormatVersion: 1,
 		Dependencies:  map[string]string{"react-spinners": "^0.17.0", "ui": "1.0.0"},
@@ -41,6 +42,12 @@ func nativeComponentCatalog() *nativepackage.Catalog {
 			},
 			"ui": {
 				Exports: map[string]nativepackage.Export{
+					"Label": {
+						Kind:       "component",
+						Type:       nativepackage.Type{Kind: "named", Name: "ReactNode"},
+						Parameters: []nativepackage.Type{{Kind: "named", Name: labelPropsName}},
+						Required:   1,
+					},
 					"Table": {
 						Kind:       "component",
 						Type:       nativepackage.Type{Kind: "named", Name: "ReactNode"},
@@ -73,9 +80,44 @@ func nativeComponentCatalog() *nativepackage.Catalog {
 						Type:   nativepackage.Type{Kind: "named", Name: childrenPropsName},
 						Fields: []nativepackage.Field{{Name: "children", Type: nativepackage.Type{Kind: "named", Name: "ReactNode"}}},
 					},
+					labelPropsName: {
+						Kind:   "record",
+						Type:   nativepackage.Type{Kind: "named", Name: labelPropsName},
+						Fields: []nativepackage.Field{{Name: "label", Type: nativepackage.Type{Kind: "named", Name: "ReactNode"}}},
+					},
 				},
 			},
 		},
+	}
+}
+
+func TestCompileTypeScriptAcceptsRenderableValuesForNativeReactNodeProps(t *testing.T) {
+	source := []byte(`import { ReactNode } from trb/platform/typescript/react
+import { Label } from ui
+
+def Page(): ReactNode
+	return <div>
+		<Label label="Name" />
+		<Label label={42} />
+	</div>
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "page.trb", ModulePath: "app/page", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeComponentCatalog(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "page.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{`<Label label={"Name"} />`, `<Label label={42} />`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated native component TSX is missing %q:\n%s", expected, output)
+		}
 	}
 }
 

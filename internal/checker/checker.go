@@ -2766,7 +2766,7 @@ func (c *Checker) jsxProvider(span token.Span) *stdlib.JSXProvider {
 	return provider
 }
 
-func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.RecordField, unsupported map[string]string, attributes map[string]types.Type) {
+func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.RecordField, unsupported map[string]string, attributes map[string]types.Type, nodeType types.Type) {
 	declared := map[string]resolver.RecordField{}
 	for _, field := range fields {
 		declared[field.Name] = field
@@ -2784,7 +2784,7 @@ func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.Recor
 			c.error(element.Span(), fmt.Sprintf("JSX component %s has no prop %s", element.Name, name))
 			continue
 		}
-		if !c.typesAssignable(field.Type, actual) {
+		if !c.typesAssignable(field.Type, actual) && !c.jsxNodePropAssignable(field.Type, actual, nodeType) {
 			c.error(element.Span(), fmt.Sprintf("JSX prop %s expects %s, got %s", name, field.Type, actual))
 		}
 	}
@@ -2802,6 +2802,16 @@ func (c *Checker) checkJSXProps(element *ast.JSXElement, fields []resolver.Recor
 			c.error(element.Span(), fmt.Sprintf("JSX component %s does not accept children", element.Name))
 		}
 	}
+}
+
+func (c *Checker) jsxNodePropAssignable(expected, actual, nodeType types.Type) bool {
+	expected = c.expandAlias(expected, map[string]bool{})
+	expected.Nullable = false
+	nodeType.Nullable = false
+	if !types.Equivalent(expected, nodeType) {
+		return false
+	}
+	return jsxRenderableType(c.expandAlias(actual, map[string]bool{}), nodeType)
 }
 
 func checkerRecordJSONName(field *ast.RecordFieldStatement) string {
@@ -4181,7 +4191,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if componentHasTypedProps {
-			c.checkJSXProps(n, props, unsupportedProps, attributeTypes)
+			c.checkJSXProps(n, props, unsupportedProps, attributeTypes, nodeType)
 		}
 		for _, child := range n.Children {
 			switch item := child.(type) {
@@ -4921,6 +4931,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 }
 
 func jsxRenderableType(typ, nodeType types.Type) bool {
+	if base, literal := types.LiteralBase(typ); literal {
+		typ = base
+	}
 	if typ.Nullable {
 		typ.Nullable = false
 	}
