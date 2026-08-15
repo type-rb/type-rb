@@ -2,6 +2,14 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.16 - 2026-08-16
+
+### ORM
+
+- Go applications can create ORM records whose primary key is supplied by the
+  application, including string identifiers such as email addresses, without
+  generating invalid Go code. ([#291](https://github.com/type-rb/type-rb/pull/291))
+
 ## 0.2.15 - 2026-08-16
 
 ### Compiler and package integration
