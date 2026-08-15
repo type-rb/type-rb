@@ -290,6 +290,39 @@ end
 	}
 }
 
+func TestCompileTypeScriptJSXRendersImportedTransparentAliases(t *testing.T) {
+	contracts := SourceUnit{
+		Filename:   "contracts.trb",
+		ModulePath: "contracts",
+		Source: []byte(`type EmailAddress = String
+
+record Contact
+	email_address: EmailAddress
+end
+`),
+	}
+	page := SourceUnit{
+		Filename:   "page.trb",
+		ModulePath: "app/page",
+		Source: []byte(`import { Contact } from contracts
+import { ReactNode } from trb/platform/typescript/react
+
+def ContactEmail(contact: Contact): ReactNode
+	return <span>{contact.email_address}</span>
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{contracts, page}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Filename == page.Filename && !strings.Contains(string(artifact.Output), "{contact.email_address}") {
+			t.Fatalf("generated TSX did not render the imported transparent alias:\n%s", artifact.Output)
+		}
+	}
+}
+
 func TestCompileTypeScriptJSXChecksPurposeSpecificReactEvents(t *testing.T) {
 	source := []byte(`import {
 	ChangeEvent,

@@ -2843,7 +2843,7 @@ func (c *Checker) checkTypedArguments(span token.Span, name string, parameters [
 }
 
 func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand types.Type) types.Type {
-	operand = scalarType(operand)
+	operand = scalarType(c.expandAlias(operand, map[string]bool{}))
 	if operand.Kind == types.Invalid {
 		return invalidType()
 	}
@@ -2880,8 +2880,8 @@ func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand t
 }
 
 func (c *Checker) checkBinaryOperator(span token.Span, operator string, left, right types.Type) types.Type {
-	left = scalarType(left)
-	right = scalarType(right)
+	left = scalarType(c.expandAlias(left, map[string]bool{}))
+	right = scalarType(c.expandAlias(right, map[string]bool{}))
 	if left.Kind == types.Invalid || right.Kind == types.Invalid {
 		return invalidType()
 	}
@@ -4189,7 +4189,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.checkExpression(item, sc)
 			case *ast.JSXExpression:
 				childType := c.checkExpression(item.Value, sc)
-				if provider != nil && !jsxRenderableType(childType, nodeType) {
+				if provider != nil && !jsxRenderableType(c.expandAlias(childType, map[string]bool{}), nodeType) {
 					c.error(item.Span(), fmt.Sprintf("JSX child must be renderable, got %s", childType))
 				}
 			}
