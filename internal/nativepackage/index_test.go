@@ -102,6 +102,9 @@ func TestTypeScriptIndexerUsesSyntaxNodesForSyntheticSymbols(t *testing.T) {
 	if !strings.Contains(typeScriptIndexer, "fallbackNode: source") || !strings.Contains(typeScriptIndexer, "declaration || state.fallbackNode") {
 		t.Fatal("native TypeScript indexer does not retain a source-file fallback for synthetic symbols")
 	}
+	if !strings.Contains(typeScriptIndexer, "checker.getTypeOfPropertyOfType(alternative, name)") {
+		t.Fatal("native TypeScript indexer does not resolve declarationless object properties from their containing type")
+	}
 }
 
 func TestTypeScriptIndexerRecognizesTheDOMFileBoundary(t *testing.T) {
