@@ -190,3 +190,55 @@ end
 		t.Fatalf("missing retry status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 }
+
+func TestGoJobWorkerBuildsWithWebAndImportedAliasPayload(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/jobs-web-integration"
+	configureSQLJobs(t, config, "sqlite", filepath.Join(root, "jobs.sqlite3"))
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{"domain", "jobs", "routes"} {
+		if err := os.MkdirAll(filepath.Join(config.SourcePath(), directory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sources := map[string]string{
+		"domain/item_id.trb": "type ItemId = Integer\n",
+		"jobs/sync_item_job.trb": `import { ItemId } from domain/item_id
+import { Job } from trb/jobs
+
+class SyncItemJob < Job
+	def perform(item_id: ItemId)
+		puts(item_id)
+		return
+	end
+end
+`,
+		"routes/index.trb": `import { Context, Response, text } from trb/web
+
+def get(_context: Context): Response
+	return text("ok")
+end
+`,
+		"main.trb": `import { configure_server, serve } from trb/web
+
+def main()
+	serve(configure_server(host: "127.0.0.1", port: 0))
+end
+`,
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(config.SourcePath(), name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"jobs", "start", "--once", "--config", config.Path}); status != 0 {
+		t.Fatalf("worker status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+}
