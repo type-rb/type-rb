@@ -94,3 +94,12 @@ func TestGenerateModulesRejectsUnsupportedTypeScriptMajor(t *testing.T) {
 		t.Fatalf("unexpected TypeScript compatibility diagnostic: %v", err)
 	}
 }
+
+func TestTypeScriptIndexerUsesSyntaxNodesForSyntheticSymbols(t *testing.T) {
+	if strings.Contains(typeScriptIndexer, "declaration || containingFile") {
+		t.Fatal("native TypeScript indexer passes a file path where the compiler API requires a syntax node")
+	}
+	if !strings.Contains(typeScriptIndexer, "fallbackNode: source") || !strings.Contains(typeScriptIndexer, "declaration || state.fallbackNode") {
+		t.Fatal("native TypeScript indexer does not retain a source-file fallback for synthetic symbols")
+	}
+}
