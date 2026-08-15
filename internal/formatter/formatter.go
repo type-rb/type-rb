@@ -166,7 +166,7 @@ func formatTokens(tokens []token.Token) string {
 	var beforePrevious *token.Token
 	inBlockParameters := false
 	lineKind := firstCode(tokens)
-	importLine := lineKind == "import"
+	importLine := lineKind == "import" || importFromLine(tokens)
 	genericDepth := 0
 	classInheritance := false
 	for i := range tokens {
@@ -244,6 +244,25 @@ func formatTokens(tokens []token.Token) string {
 		previous = &current
 	}
 	return strings.TrimSpace(out.String())
+}
+
+func importFromLine(tokens []token.Token) bool {
+	from := -1
+	for index, item := range tokens {
+		if item.Kind != token.Comment && item.Lexeme == "from" {
+			from = index
+			break
+		}
+	}
+	if from < 0 {
+		return false
+	}
+	for _, item := range tokens[from+1:] {
+		if item.Kind != token.Comment && item.Lexeme == "/" {
+			return true
+		}
+	}
+	return false
 }
 
 func classTypeParameterOpen(tokens []token.Token, open int) bool {

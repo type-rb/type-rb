@@ -2921,12 +2921,14 @@ func TestTypedJSONRecordCodecsLowerAcrossBackends(t *testing.T) {
 		Filename:   "/project/contracts/user.trb",
 		ModulePath: "contracts/user",
 		Package:    "user",
-		Source: []byte(`record Address
+		Source: []byte(`type UserId = Integer
+
+record Address
 	city: String
 end
 
 record User
-	id: Integer @json("user_id")
+	id: UserId @json("user_id")
 	name: String
 	nickname: String?
 	scores: Array<Float>
@@ -3714,6 +3716,62 @@ end
 	invalid.Source = []byte("import contracts/named\n\nclass User implements Named\n  def name(): Integer\n    return 1\n  end\nend\n")
 	if _, err := CompileProject([]SourceUnit{contract, invalid}, Options{Mode: "typescript"}); err == nil || !strings.Contains(err.Error(), "does not match interface Named") {
 		t.Fatalf("expected imported interface signature diagnostic, got %v", err)
+	}
+}
+
+func TestProjectCompilerExpandsImportedAliasesInInterfaceSignatures(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/contracts/repository.trb",
+		ModulePath: "contracts/repository",
+		Source: []byte(`import { Result } from trb/std/result
+
+record Entity
+	id: Integer
+end
+
+enum RepositoryError
+	NotFound
+end
+
+type EntityResult = Result<Entity, RepositoryError>
+
+interface Repository
+	find(id: Integer): EntityResult
+end
+`),
+	}
+	implementation := SourceUnit{
+		Filename:   "/project/repositories/memory.trb",
+		ModulePath: "repositories/memory",
+		Source: []byte(`import { Entity, EntityResult, Repository } from contracts/repository
+
+class MemoryRepository implements Repository
+	def find(id: Integer): EntityResult
+		return EntityResult::Ok(Entity.new(id: id))
+	end
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Source: []byte(`import { EntityResult } from contracts/repository
+import { MemoryRepository } from repositories/memory
+
+def read(): Integer
+	case MemoryRepository.new().find(1)
+	when EntityResult::Err(_error)
+		return 0
+	when EntityResult::Ok(entity)
+		return entity.id
+	end
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := CompileProject([]SourceUnit{contract, implementation, consumer}, Options{Mode: mode, GoModule: "example.com/alias-interface", RubyLoader: "require_relative"}); err != nil {
+			t.Fatalf("%s rejected imported aliases in interface signatures: %v", mode, err)
+		}
 	}
 }
 
