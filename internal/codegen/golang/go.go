@@ -1722,6 +1722,9 @@ func (g *generator) attemptExpression(node *ir.Attempt) string {
 }
 
 func (g *generator) transform(transform *ir.Transform) string {
+	if transform.Fails.Kind != "" && transform.Fails.Kind != types.Never {
+		return g.effectfulTransform(transform)
+	}
 	g.temporary++
 	suffix := strconv.Itoa(g.temporary)
 	items := "__trbItems" + suffix
@@ -1809,6 +1812,130 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) effectfulTransform(transform *ir.Transform) string {
+	child := *g
+	child.b = strings.Builder{}
+	child.recordSources = false
+	child.indent = 0
+	child.temporary++
+	suffix := strconv.Itoa(child.temporary)
+	items := "__trbItems" + suffix
+	result := "__trbResult" + suffix
+	item := child.bindingIdentifier(transform.Item)
+	if item == "" || item == "_" {
+		item = "__trbItem" + suffix
+	}
+	index := "_"
+	if transform.WithIndex {
+		index = child.bindingIdentifier(transform.Index)
+		if index == "" || index == "_" {
+			index = "__trbIndex" + suffix
+		}
+	}
+	success := transform.SuccessType
+	resultAlias := child.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+	}
+	ok := func(value string) string {
+		return resultAlias + ".NewResultOk[" + child.goType(success) + ", " + child.goType(transform.Fails) + "](" + value + ")"
+	}
+	emitBindings := func(includeIndex bool) {
+		if namedUnusedBinding(transform.Item) {
+			child.line("_ = " + item)
+		}
+		if includeIndex && namedUnusedBinding(transform.Index) {
+			child.line("_ = " + index)
+		}
+	}
+	emitValue := func() string {
+		child.statements(transform.Body)
+		return child.expr(transform.Result)
+	}
+
+	child.line("func() " + child.goType(transform.ExprType()) + " {")
+	child.indent++
+	child.line(items + " := " + child.iterableExpr(transform.Source))
+	switch transform.Operation {
+	case "map", "select":
+		child.line(result + " := make(" + child.goType(success) + ", 0, len(" + items + "))")
+		child.line("for " + index + ", " + item + " := range " + items + " {")
+		child.indent++
+		emitBindings(transform.WithIndex)
+		value := emitValue()
+		if transform.Operation == "map" {
+			child.line(result + " = append(" + result + ", " + value + ")")
+		} else {
+			child.line("if " + value + " { " + result + " = append(" + result + ", " + item + ") }")
+		}
+		child.indent--
+		child.line("}")
+		child.line("return " + ok(result))
+	case "any?", "all?", "none?", "find", "find_index":
+		loopIndex := "_"
+		if transform.Operation == "find_index" {
+			loopIndex = "__trbIndex" + suffix
+		}
+		child.line("for " + loopIndex + ", " + item + " := range " + items + " {")
+		child.indent++
+		emitBindings(false)
+		value := emitValue()
+		switch transform.Operation {
+		case "any?":
+			child.line("if " + value + " { return " + ok("true") + " }")
+		case "all?":
+			child.line("if !(" + value + ") { return " + ok("false") + " }")
+		case "none?":
+			child.line("if " + value + " { return " + ok("false") + " }")
+		case "find":
+			found := "&" + item
+			if len(transform.Source.ExprType().Args) > 0 {
+				elementType := transform.Source.ExprType().Args[0]
+				if child.goType(elementType) == child.goType(success) {
+					found = item
+				}
+			}
+			child.line("if " + value + " { return " + ok(found) + " }")
+		case "find_index":
+			child.line("if " + value + " { " + result + " := " + loopIndex + "; return " + ok("&"+result) + " }")
+		}
+		child.indent--
+		child.line("}")
+		switch transform.Operation {
+		case "any?":
+			child.line("return " + ok("false"))
+		case "all?", "none?":
+			child.line("return " + ok("true"))
+		default:
+			child.line("return " + ok("nil"))
+		}
+	case "reduce":
+		child.line(result + " := " + child.expr(transform.Initial))
+		child.line("for _, " + item + " := range " + items + " {")
+		child.indent++
+		emitBindings(false)
+		accumulator := child.bindingIdentifier(transform.Accumulator)
+		if accumulator == "" || accumulator == "_" {
+			accumulator = "__trbAccumulator" + suffix
+		}
+		child.line(accumulator + " := " + result)
+		if namedUnusedBinding(transform.Accumulator) {
+			child.line("_ = " + accumulator)
+		}
+		value := emitValue()
+		child.line(result + " = " + value)
+		child.indent--
+		child.line("}")
+		child.line("return " + ok(result))
+	default:
+		child.line("panic(\"unsupported effectful TypeRB collection transformation\")")
+	}
+	child.indent--
+	child.line("}()")
+	g.temporary = child.temporary
+	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) transformResult(transform *ir.Transform) string {

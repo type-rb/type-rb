@@ -422,6 +422,8 @@ type Transform struct {
 	Index       string
 	Accumulator string
 	ItemType    types.Type
+	SuccessType types.Type
+	Fails       types.Type
 	Body        []Statement
 	Result      Expression
 }

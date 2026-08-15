@@ -1586,6 +1586,9 @@ func (g *generator) transform(transform *ir.Transform) string {
 	if g.suspension != nil && g.suspension.Expressions[transform] {
 		return g.suspendingTransform(transform)
 	}
+	if transform.Fails.Kind != "" && transform.Fails.Kind != types.Never {
+		return g.imperativeTransform(transform, false)
+	}
 	source := g.iterableExpr(transform.Source)
 	result := g.transformResult(transform)
 	switch transform.Operation {
@@ -1644,6 +1647,10 @@ func (g *generator) transformResult(transform *ir.Transform) string {
 }
 
 func (g *generator) suspendingTransform(transform *ir.Transform) string {
+	return g.imperativeTransform(transform, true)
+}
+
+func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) string {
 	child := *g
 	child.b = strings.Builder{}
 	child.sourceRecorder = nil
@@ -1657,7 +1664,22 @@ func (g *generator) suspendingTransform(transform *ir.Transform) string {
 	if item == "" {
 		item = "__trbItem" + suffix
 	}
-	child.line("(async (): Promise<" + child.tsType(transform.ExprType()) + "> => {")
+	success := transform.SuccessType
+	if success.Kind == "" {
+		success = transform.ExprType()
+	}
+	hasEffect := transform.Fails.Kind != "" && transform.Fails.Kind != types.Never
+	complete := func(value string) string {
+		if !hasEffect {
+			return value
+		}
+		return child.runtimeName("Result") + ".Ok<" + child.tsType(success) + ", " + child.tsType(transform.Fails) + ">(" + value + ")"
+	}
+	if suspends {
+		child.line("(async (): Promise<" + child.tsType(transform.ExprType()) + "> => {")
+	} else {
+		child.line("((): " + child.tsType(transform.ExprType()) + " => {")
+	}
 	child.indent++
 	child.line("const " + items + " = " + child.iterableExpr(transform.Source) + ";")
 
@@ -1691,9 +1713,9 @@ func (g *generator) suspendingTransform(transform *ir.Transform) string {
 		child.line("}")
 		comparison := tsPortableSortComparison("left.key", "right.key", transform.Result.ExprType(), transform.Operation == "sort_by_descending")
 		child.line(decorated + ".sort((left, right) => { const compared = " + comparison + "; return compared === 0 ? left.index - right.index : compared; });")
-		child.line("return " + decorated + ".map((entry) => entry.value);")
+		child.line("return " + complete(decorated+".map((entry) => entry.value)") + ";")
 	case "map", "select":
-		child.line("const " + result + ": " + child.tsType(transform.ExprType()) + " = [];")
+		child.line("const " + result + ": " + child.tsType(success) + " = [];")
 		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
 		child.indent++
 		emitBindings(transform.WithIndex)
@@ -1705,7 +1727,7 @@ func (g *generator) suspendingTransform(transform *ir.Transform) string {
 		}
 		child.indent--
 		child.line("}")
-		child.line("return " + result + ";")
+		child.line("return " + complete(result) + ";")
 	case "any?", "all?", "none?", "find", "find_index":
 		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
 		child.indent++
@@ -1713,25 +1735,25 @@ func (g *generator) suspendingTransform(transform *ir.Transform) string {
 		value := emitValue()
 		switch transform.Operation {
 		case "any?":
-			child.line("if (" + value + ") return true;")
+			child.line("if (" + value + ") return " + complete("true") + ";")
 		case "all?":
-			child.line("if (!(" + value + ")) return false;")
+			child.line("if (!(" + value + ")) return " + complete("false") + ";")
 		case "none?":
-			child.line("if (" + value + ") return false;")
+			child.line("if (" + value + ") return " + complete("false") + ";")
 		case "find":
-			child.line("if (" + value + ") return " + item + ";")
+			child.line("if (" + value + ") return " + complete(item) + ";")
 		case "find_index":
-			child.line("if (" + value + ") return " + index + ";")
+			child.line("if (" + value + ") return " + complete(index) + ";")
 		}
 		child.indent--
 		child.line("}")
 		switch transform.Operation {
 		case "any?":
-			child.line("return false;")
+			child.line("return " + complete("false") + ";")
 		case "all?", "none?":
-			child.line("return true;")
+			child.line("return " + complete("true") + ";")
 		default:
-			child.line("return null;")
+			child.line("return " + complete("null") + ";")
 		}
 	case "reduce":
 		child.line("let " + result + " = " + child.expr(transform.Initial) + ";")
@@ -1747,14 +1769,18 @@ func (g *generator) suspendingTransform(transform *ir.Transform) string {
 		child.line(result + " = " + value + ";")
 		child.indent--
 		child.line("}")
-		child.line("return " + result + ";")
+		child.line("return " + complete(result) + ";")
 	default:
 		child.line("throw new Error(\"unsupported TypeRB collection transformation\");")
 	}
 	child.indent--
 	child.line("})()")
 	g.temporary = child.temporary
-	return "(await " + strings.TrimSpace(child.b.String()) + ")"
+	generated := strings.TrimSpace(child.b.String())
+	if suspends {
+		return "(await " + generated + ")"
+	}
+	return generated
 }
 
 func tsPortableSortComparison(left, right string, typ types.Type, descending bool) string {

@@ -4229,6 +4229,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.AttemptExpression:
 		typ = c.checkAttempt(n, sc)
 	case *ast.IterationExpression:
+		predicate := n.Operation == "any?" || n.Operation == "all?" || n.Operation == "none?" || n.Operation == "find" || n.Operation == "find_index"
+		sortBy := n.Operation == "sort_by" || n.Operation == "sort_by_descending"
+		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce" || predicate || sortBy
+		var transformEffects *effectCapture
 		sourceType := c.checkExpression(n.Source, sc)
 		if sourceType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
@@ -4259,9 +4263,6 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.error(n.Span(), "Hash#each.with_index is not supported in v0.1")
 		}
 		itemType := elementType
-		predicate := n.Operation == "any?" || n.Operation == "all?" || n.Operation == "none?" || n.Operation == "find" || n.Operation == "find_index"
-		sortBy := n.Operation == "sort_by" || n.Operation == "sort_by_descending"
-		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce" || predicate || sortBy
 		if sortBy && sourceType.Kind != types.Array {
 			c.error(n.Source.Span(), fmt.Sprintf("%s is available only on Array, got %s", n.Operation, sourceType))
 		}
@@ -4298,6 +4299,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				} else {
 					accumulatorType = c.checkExpression(n.Initial, sc)
 				}
+			}
+			if transform {
+				transformEffects = &effectCapture{}
+				c.effectCaptures = append(c.effectCaptures, transformEffects)
 			}
 			bindingTypes := []types.Type{itemType}
 			switch {
@@ -4403,6 +4408,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if !transform {
 			typ = types.Type{Kind: types.Void, Name: "Void"}
+		} else if transformEffects != nil {
+			c.effectCaptures = c.effectCaptures[:len(c.effectCaptures)-1]
+			if len(transformEffects.effects) > 0 {
+				c.recordEffect(n, types.UnionOf(transformEffects.effects...))
+			}
 		}
 	case *ast.GenericExpression:
 		receiverType := c.checkExpression(n.Receiver, sc)
