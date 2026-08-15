@@ -2980,6 +2980,49 @@ end
 	}
 }
 
+func TestImportedTransparentAliasesUseUnderlyingReceiverMethods(t *testing.T) {
+	contracts := SourceUnit{
+		Filename:   "/project/contracts/ids.trb",
+		ModulePath: "contracts/ids",
+		Package:    "ids",
+		Source: []byte(`type UserId = Integer
+type MemberId = Integer
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { MemberId } from contracts/ids
+
+def member_id_text(id: MemberId): String
+	return id.to_s()
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{contracts, consumer}, Options{Mode: mode, GoModule: "example.com/alias-methods", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s rejected a receiver method on an imported transparent alias: %v", mode, err)
+		}
+		var output string
+		for _, artifact := range artifacts {
+			if artifact.IR.ModulePath == "main" {
+				output = string(artifact.Output)
+				break
+			}
+		}
+		want := map[string]string{
+			"go":         "strconv.Itoa(id)",
+			"ruby":       "id.to_s",
+			"typescript": "String(id)",
+		}[mode]
+		if !strings.Contains(output, want) {
+			t.Fatalf("%s did not lower the alias receiver through Integer.to_s():\n%s", mode, output)
+		}
+	}
+}
+
 func TestTypedJSONRecordCodecsReportDiagnosticsAcrossBackends(t *testing.T) {
 	tests := []struct {
 		name   string
