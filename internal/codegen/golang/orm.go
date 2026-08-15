@@ -1054,8 +1054,10 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	if len(models) == 0 && len(enums) == 0 {
 		return
 	}
-	g.requireImport("database/sql/driver", "driver")
-	g.requireImport("errors", "")
+	if len(enums) > 0 {
+		g.requireImport("database/sql/driver", "driver")
+		g.requireImport("errors", "")
+	}
 	for _, enum := range enums {
 		g.ormEnumColumnRuntime(enum)
 	}
@@ -1064,47 +1066,51 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 	}
 	g.requireImport("context", "trbcontext")
 	g.requireImport("database/sql", "sql")
-	g.requireImport("net", "")
+	g.requireImport("errors", "")
 	g.requireImport("reflect", "")
 	g.requireImport("strings", "")
 	if adapter.NumberedBinds {
 		g.requireImport("strconv", "")
 	}
-	g.line("type trbOrmRange struct { start any; end any; exclusive bool }")
-	g.b.WriteByte('\n')
-	g.line("type trbOrmExecutorTarget interface {")
-	g.indent++
-	g.line("ExecContext(trbcontext.Context, string, ...any) (sql.Result, error)")
-	g.line("QueryContext(trbcontext.Context, string, ...any) (*sql.Rows, error)")
-	g.line("QueryRowContext(trbcontext.Context, string, ...any) *sql.Row")
-	g.indent--
-	g.line("}")
-	g.b.WriteByte('\n')
-	g.line("type trbOrmExecutor struct { target trbOrmExecutorTarget; scope trbcontext.Context }")
-	g.line("func (executor trbOrmExecutor) context() trbcontext.Context { if executor.scope != nil { return executor.scope }; return trbcontext.Background() }")
-	g.line("func (executor trbOrmExecutor) Exec(statement string, arguments ...any) (sql.Result, error) { return executor.target.ExecContext(executor.context(), statement, arguments...) }")
-	g.line("func (executor trbOrmExecutor) Query(statement string, arguments ...any) (*sql.Rows, error) { return executor.target.QueryContext(executor.context(), statement, arguments...) }")
-	g.line("func (executor trbOrmExecutor) QueryRow(statement string, arguments ...any) *sql.Row { return executor.target.QueryRowContext(executor.context(), statement, arguments...) }")
-	g.b.WriteByte('\n')
-	g.line("func trbOrmExecutorForTransaction(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction) (trbOrmExecutor, *" + g.goType(types.FromName("DbError")) + ") {")
-	g.indent++
-	g.line("if transaction != nil { return trbOrmExecutor{target: transaction, scope: scope}, nil }")
-	g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
-	g.line("if err != nil { value := trbOrmError(err, " + g.ormErrorKind("Connection") + ", \"database connection failed\"); return trbOrmExecutor{}, &value }")
-	g.line("return trbOrmExecutor{target: database, scope: scope}, nil")
-	g.indent--
-	g.line("}")
-	g.b.WriteByte('\n')
-	g.line("func trbOrmExecutorForQuery(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, lock bool) (trbOrmExecutor, *" + g.goType(types.FromName("DbError")) + ") {")
-	g.indent++
-	g.line("if lock && transaction == nil { value := " + g.ormErrorValue("InvalidData", "database lock requires an explicit transaction scope") + "; return trbOrmExecutor{}, &value }")
-	g.line("return trbOrmExecutorForTransaction(scope, transaction)")
-	g.indent--
-	g.line("}")
-	g.b.WriteByte('\n')
-	g.ormDialectRuntime(adapter)
-	if ormModelsUsePortableTime(models) {
-		g.ormTemporalRuntime(models)
+	if g.ormCommonRuntime {
+		g.requireImport("database/sql/driver", "driver")
+		g.requireImport("net", "")
+		g.line("type trbOrmRange struct { start any; end any; exclusive bool }")
+		g.b.WriteByte('\n')
+		g.line("type trbOrmExecutorTarget interface {")
+		g.indent++
+		g.line("ExecContext(trbcontext.Context, string, ...any) (sql.Result, error)")
+		g.line("QueryContext(trbcontext.Context, string, ...any) (*sql.Rows, error)")
+		g.line("QueryRowContext(trbcontext.Context, string, ...any) *sql.Row")
+		g.indent--
+		g.line("}")
+		g.b.WriteByte('\n')
+		g.line("type trbOrmExecutor struct { target trbOrmExecutorTarget; scope trbcontext.Context }")
+		g.line("func (executor trbOrmExecutor) context() trbcontext.Context { if executor.scope != nil { return executor.scope }; return trbcontext.Background() }")
+		g.line("func (executor trbOrmExecutor) Exec(statement string, arguments ...any) (sql.Result, error) { return executor.target.ExecContext(executor.context(), statement, arguments...) }")
+		g.line("func (executor trbOrmExecutor) Query(statement string, arguments ...any) (*sql.Rows, error) { return executor.target.QueryContext(executor.context(), statement, arguments...) }")
+		g.line("func (executor trbOrmExecutor) QueryRow(statement string, arguments ...any) *sql.Row { return executor.target.QueryRowContext(executor.context(), statement, arguments...) }")
+		g.b.WriteByte('\n')
+		g.line("func trbOrmExecutorForTransaction(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction) (trbOrmExecutor, *" + g.goType(types.FromName("DbError")) + ") {")
+		g.indent++
+		g.line("if transaction != nil { return trbOrmExecutor{target: transaction, scope: scope}, nil }")
+		g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
+		g.line("if err != nil { value := trbOrmError(err, " + g.ormErrorKind("Connection") + ", \"database connection failed\"); return trbOrmExecutor{}, &value }")
+		g.line("return trbOrmExecutor{target: database, scope: scope}, nil")
+		g.indent--
+		g.line("}")
+		g.b.WriteByte('\n')
+		g.line("func trbOrmExecutorForQuery(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction, lock bool) (trbOrmExecutor, *" + g.goType(types.FromName("DbError")) + ") {")
+		g.indent++
+		g.line("if lock && transaction == nil { value := " + g.ormErrorValue("InvalidData", "database lock requires an explicit transaction scope") + "; return trbOrmExecutor{}, &value }")
+		g.line("return trbOrmExecutorForTransaction(scope, transaction)")
+		g.indent--
+		g.line("}")
+		g.b.WriteByte('\n')
+		g.ormDialectRuntime(adapter)
+		if ormModelsUsePortableTime(g.ormPackageModels) {
+			g.ormTemporalRuntime(g.ormPackageModels)
+		}
 	}
 	for _, model := range models {
 		g.ormModelRuntime(manifest, adapter, model)

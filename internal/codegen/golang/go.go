@@ -20,36 +20,38 @@ import (
 )
 
 type generator struct {
-	b               strings.Builder
-	indent          int
-	functionDepth   int
-	receiver        string
-	inConstructor   bool
-	methods         map[string]bool
-	topMethods      map[string]bool
-	staticMethods   map[string]map[string]bool
-	records         map[string]bool
-	classes         map[string]bool
-	typeAliases     map[string]string
-	typeKinds       map[string]string
-	imports         map[string]string
-	bindingNames    map[string]string
-	bindingSources  map[string]bool
-	modulePath      string
-	goModule        string
-	temporary       int
-	breakTarget     string
-	jobs            *jobsintegration.Manifest
-	jobsSQL         *jobssql.Manifest
-	orm             *ormintegration.Manifest
-	projectNames    *goProjectNames
-	execution       *effectplan.Plan
-	executionActive bool
-	oidcRuntime     bool
-	recordSources   bool
-	sourceMarker    int
-	sourceLocations map[int]sourcemap.Location
-	sourcePath      string
+	b                strings.Builder
+	indent           int
+	functionDepth    int
+	receiver         string
+	inConstructor    bool
+	methods          map[string]bool
+	topMethods       map[string]bool
+	staticMethods    map[string]map[string]bool
+	records          map[string]bool
+	classes          map[string]bool
+	typeAliases      map[string]string
+	typeKinds        map[string]string
+	imports          map[string]string
+	bindingNames     map[string]string
+	bindingSources   map[string]bool
+	modulePath       string
+	goModule         string
+	temporary        int
+	breakTarget      string
+	jobs             *jobsintegration.Manifest
+	jobsSQL          *jobssql.Manifest
+	orm              *ormintegration.Manifest
+	ormCommonRuntime bool
+	ormPackageModels []ormintegration.Model
+	projectNames     *goProjectNames
+	execution        *effectplan.Plan
+	executionActive  bool
+	oidcRuntime      bool
+	recordSources    bool
+	sourceMarker     int
+	sourceLocations  map[int]sourcemap.Location
+	sourcePath       string
 }
 
 func Generate(program *ir.Program) string {
@@ -71,45 +73,49 @@ func GenerateMapped(program *ir.Program) sourcemap.Generated {
 
 func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
 	projectNames := analyzeGoProjectNames(programs)
+	ormRuntime := analyzeGoORMRuntime(programs)
 	execution := effectplan.ExecutionScope(programs)
 	result := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
-		result[index] = generate(program, projectNames, execution)
+		result[index] = generate(program, projectNames, ormRuntime, execution)
 	}
 	return result
 }
 
-func generate(program *ir.Program, projectNames *goProjectNames, execution *effectplan.Plan) sourcemap.Generated {
-	generated, imports, bindings := generatePass(program, projectNames, execution, nil)
+func generate(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan) sourcemap.Generated {
+	generated, imports, bindings := generatePass(program, projectNames, ormRuntime, execution, nil)
 	bindingNames := analyzeGoBindingNames(bindings, imports)
 	if len(bindingNames) == 0 {
 		return generated
 	}
-	generated, _, _ = generatePass(program, projectNames, execution, bindingNames)
+	generated, _, _ = generatePass(program, projectNames, ormRuntime, execution, bindingNames)
 	return generated
 }
 
-func generatePass(program *ir.Program, projectNames *goProjectNames, execution *effectplan.Plan, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
+func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
+	ormPackageKey := goORMPackageKey(program)
 	g := &generator{
-		topMethods:      map[string]bool{},
-		staticMethods:   map[string]map[string]bool{},
-		records:         map[string]bool{},
-		classes:         map[string]bool{},
-		typeAliases:     map[string]string{},
-		typeKinds:       map[string]string{},
-		imports:         map[string]string{},
-		bindingNames:    bindingNames,
-		bindingSources:  map[string]bool{},
-		modulePath:      program.ModulePath,
-		goModule:        program.GoModule,
-		jobs:            jobsintegration.ManifestFrom(program.Extensions),
-		jobsSQL:         jobssql.ManifestFrom(program.Extensions),
-		orm:             ormintegration.ManifestFrom(program.Extensions),
-		projectNames:    projectNames,
-		execution:       execution,
-		recordSources:   true,
-		sourceLocations: map[int]sourcemap.Location{},
-		sourcePath:      program.SourcePath,
+		topMethods:       map[string]bool{},
+		staticMethods:    map[string]map[string]bool{},
+		records:          map[string]bool{},
+		classes:          map[string]bool{},
+		typeAliases:      map[string]string{},
+		typeKinds:        map[string]string{},
+		imports:          map[string]string{},
+		bindingNames:     bindingNames,
+		bindingSources:   map[string]bool{},
+		modulePath:       program.ModulePath,
+		goModule:         program.GoModule,
+		jobs:             jobsintegration.ManifestFrom(program.Extensions),
+		jobsSQL:          jobssql.ManifestFrom(program.Extensions),
+		orm:              ormintegration.ManifestFrom(program.Extensions),
+		ormCommonRuntime: ormRuntime.owners[ormPackageKey] == program.ModulePath,
+		ormPackageModels: ormRuntime.models[ormPackageKey],
+		projectNames:     projectNames,
+		execution:        execution,
+		recordSources:    true,
+		sourceLocations:  map[int]sourcemap.Location{},
+		sourcePath:       program.SourcePath,
 	}
 	for _, statement := range program.Statements {
 		switch n := statement.(type) {
