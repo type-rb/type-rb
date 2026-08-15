@@ -1525,6 +1525,9 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	g.line("}()")
 
 	if !sourceResult || block.Result.Return {
+		if block.Result.Variable != nil && namedUnusedBinding(block.Result.Variable.Name) {
+			g.line("_ = " + target)
+		}
 		return
 	}
 	outerSuccess := block.PropagateSuccess
@@ -1534,6 +1537,9 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	g.line("if " + raw + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(outerSuccess, raw+".ErrError") + " }")
 	if block.Result.Variable != nil {
 		g.line(target + " := " + raw + ".OkValue")
+		if namedUnusedBinding(block.Result.Variable.Name) {
+			g.line("_ = " + target)
+		}
 	} else {
 		g.line(target + " = " + raw + ".OkValue")
 	}

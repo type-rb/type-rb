@@ -282,9 +282,19 @@ def create_nested_product(): Integer fails DbError
 	end
 end
 
+def create_and_ignore_product() fails DbError
+	_result := Database.transaction() do |tx|
+		products := Product.using(tx)
+		products.create(name: "Ignored result")
+		0
+	end
+	return
+end
+
 def main()
 	puts(attempt create_product())
 	puts(attempt create_nested_product())
+	puts(attempt create_and_ignore_product())
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -311,7 +321,7 @@ end
 		"TrbOrmProductUsing(tx)", "TrbOrmProductCreateScoped(products", "defer func()",
 		"TrbOrmProductLock(TrbOrmProductExecutionScope(TrbOrmProductQueryWhere(products", "trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)",
 		"orm.TrbOrmBeginNestedTransaction(tx)", "TrbOrmProductUsing(nested)",
-		".Rollback()", ".Commit()", "orm.DbResultErrTag",
+		".Rollback()", ".Commit()", "orm.DbResultErrTag", "_ = __trb_unused_5f726573756c74",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated transaction is missing %q:\n%s", expected, output)
