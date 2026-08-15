@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.15 - 2026-08-16
+
+### Compiler and package integration
+
+- Go applications can combine `trb/web` and `trb/jobs` in one entrypoint while
+  using imported transparent scalar aliases as job payloads. Generated worker
+  imports and standard-library aliases now remain consistent in this setup.
+  ([#288](https://github.com/type-rb/type-rb/pull/288))
+
 ## 0.2.14 - 2026-08-16
 
 ### Compiler and package integration
