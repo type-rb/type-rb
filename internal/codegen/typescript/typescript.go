@@ -924,16 +924,28 @@ func (g *generator) function(method *ir.Method) {
 		prefix = strings.Replace(prefix, "function ", "async function ", 1)
 		returnType = "Promise<" + returnType + ">"
 	}
-	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.methodParameters(method) + "): " + returnType + " {")
+	parameters := g.methodParameters(method)
+	component := isReactComponent(method)
+	if component {
+		parameters = g.parameters(method.Parameters)
+	}
+	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + parameters + "): " + returnType + " {")
 	g.indent++
 	g.functionDepth++
 	previousExecution := g.executionActive
 	g.executionActive = g.methodUsesExecutionScope(method)
+	if component && g.executionActive {
+		g.line("const __trbScope: AbortSignal | undefined = undefined;")
+	}
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
 	g.indent--
 	g.line("}")
+}
+
+func isReactComponent(method *ir.Method) bool {
+	return method != nil && method.ReturnType.Name == "ReactNode"
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
@@ -973,7 +985,27 @@ func (g *generator) executionArguments(call *ir.Call, arguments []string) []stri
 	if g.execution == nil || !g.execution.Calls[call] {
 		return arguments
 	}
+	// React invokes components with their props as the first argument. Keep the
+	// compiler-owned execution scope inside that public boundary instead of
+	// exposing it as part of the component's JavaScript calling convention.
+	if g.isReactComponentCall(call) {
+		return arguments
+	}
 	return append([]string{"__trbScope"}, arguments...)
+}
+
+func (g *generator) isReactComponentCall(call *ir.Call) bool {
+	if call == nil || call.ExprType().Name != "ReactNode" {
+		return false
+	}
+	identifier, ok := call.Callee.(*ir.Identifier)
+	if !ok || identifier.Lexical {
+		return false
+	}
+	if g.topFunctions[identifier.Name] {
+		return true
+	}
+	return identifier.Reference != nil && (identifier.Reference.ExportKind == "function" || identifier.Reference.ExportKind == "component")
 }
 
 func (g *generator) awaitCall(call *ir.Call, value string) string {
