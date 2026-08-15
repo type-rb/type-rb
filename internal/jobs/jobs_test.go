@@ -110,6 +110,23 @@ end
 	}
 }
 
+func TestDiscoverAcceptsTransparentScalarAliasPayload(t *testing.T) {
+	program := parseJobsTest(t, `type OrderId = Integer
+class SendReceiptJob < Job
+	def perform(order_id: OrderId)
+		return
+	end
+end
+`)
+	jobs, err := Discover([]*ast.Program{program})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || len(jobs[0].Parameters) != 1 || jobs[0].Parameters[0].Type.String() != "OrderId" {
+		t.Fatalf("unexpected aliased Job payload: %#v", jobs)
+	}
+}
+
 func TestDiscoverRejectsInvalidQueueAndPriorityDefaults(t *testing.T) {
 	tests := []struct {
 		name    string

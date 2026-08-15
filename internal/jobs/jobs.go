@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -156,7 +157,9 @@ func contains(values []string, target string) bool {
 }
 
 func Declarations(programs []*ast.Program) (*declaration.Catalog, error) {
-	jobs, err := Discover(programs)
+	jobs, err := discoverJobs(programs, func(_ *ast.Program, typ types.Type, _ aliasResolver) bool {
+		return initialArgumentType(typ) || potentialAliasType(typ)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +192,16 @@ func Declarations(programs []*ast.Program) (*declaration.Catalog, error) {
 	return catalog, nil
 }
 
-func Analyze(programs []*ast.Program) (*Manifest, error) {
-	jobs, err := Discover(programs)
+func Analyze(programs []*ast.Program, resolutions map[string]resolver.Result) (*Manifest, error) {
+	jobs, err := discoverJobs(programs, func(program *ast.Program, typ types.Type, aliases aliasResolver) bool {
+		expanded := aliases.expand(program, typ, map[string]bool{})
+		if initialArgumentType(expanded) {
+			return true
+		}
+		resolution := resolutions[program.ModulePath]
+		binding, exists := resolution.ImportedType(typ.Name)
+		return exists && binding.Export != nil && binding.Export.Kind == resolver.TypeAliasExport && initialArgumentType(binding.Export.AliasTarget)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -198,6 +209,13 @@ func Analyze(programs []*ast.Program) (*Manifest, error) {
 }
 
 func Discover(programs []*ast.Program) ([]Job, error) {
+	return discoverJobs(programs, func(program *ast.Program, typ types.Type, aliases aliasResolver) bool {
+		return initialArgumentType(aliases.expand(program, typ, map[string]bool{}))
+	})
+}
+
+func discoverJobs(programs []*ast.Program, argumentType func(*ast.Program, types.Type, aliasResolver) bool) ([]Job, error) {
+	aliases := newAliasResolver(programs)
 	seen := map[string]bool{}
 	result := []Job{}
 	for _, program := range programs {
@@ -210,7 +228,7 @@ func Discover(programs []*ast.Program) ([]Job, error) {
 				return nil, fmt.Errorf("trb/jobs Job %s is declared more than once", class.Name)
 			}
 			seen[class.Name] = true
-			job, err := discoverJob(program.ModulePath, class)
+			job, err := discoverJob(program, class, aliases, argumentType)
 			if err != nil {
 				return nil, err
 			}
@@ -226,7 +244,7 @@ func Discover(programs []*ast.Program) ([]Job, error) {
 	return result, nil
 }
 
-func discoverJob(modulePath string, class *ast.ClassStatement) (Job, error) {
+func discoverJob(program *ast.Program, class *ast.ClassStatement, aliases aliasResolver, argumentType func(*ast.Program, types.Type, aliasResolver) bool) (Job, error) {
 	var perform *ast.MethodStatement
 	for _, statement := range class.Body {
 		method, ok := statement.(*ast.MethodStatement)
@@ -250,7 +268,7 @@ func discoverJob(modulePath string, class *ast.ClassStatement) (Job, error) {
 	if !perform.ReturnType.Empty() {
 		return Job{}, fmt.Errorf("trb/jobs Job %s perform must not return a value", class.Name)
 	}
-	job := Job{Name: class.Name, ModulePath: modulePath, Fails: typeRef(perform.Fails), Queue: "default"}
+	job := Job{Name: class.Name, ModulePath: program.ModulePath, Fails: typeRef(perform.Fails), Queue: "default"}
 	if err := discoverJobDefaults(&job, class); err != nil {
 		return Job{}, err
 	}
@@ -259,12 +277,82 @@ func discoverJob(modulePath string, class *ast.ClassStatement) (Job, error) {
 			return Job{}, fmt.Errorf("trb/jobs Job %s perform initially accepts required positional parameters only", class.Name)
 		}
 		typ := typeRef(parameter.Type)
-		if !initialArgumentType(typ) {
+		if !argumentType(program, typ, aliases) {
 			return Job{}, fmt.Errorf("trb/jobs Job %s parameter %s must initially be Boolean, Integer, Float, or String", class.Name, parameter.Name)
 		}
 		job.Parameters = append(job.Parameters, Parameter{Name: parameter.Name, Type: typ})
 	}
 	return job, nil
+}
+
+func potentialAliasType(typ types.Type) bool {
+	return typ.Kind == types.Named && !typ.Nullable && len(typ.Args) == 0
+}
+
+type aliasResolver struct {
+	programs map[string]*ast.Program
+	aliases  map[string]map[string]*ast.TypeAliasStatement
+	imports  map[string]map[string]string
+}
+
+func newAliasResolver(programs []*ast.Program) aliasResolver {
+	result := aliasResolver{
+		programs: map[string]*ast.Program{},
+		aliases:  map[string]map[string]*ast.TypeAliasStatement{},
+		imports:  map[string]map[string]string{},
+	}
+	for _, program := range programs {
+		result.programs[program.ModulePath] = program
+		result.aliases[program.ModulePath] = map[string]*ast.TypeAliasStatement{}
+		result.imports[program.ModulePath] = map[string]string{}
+		for _, statement := range program.Statements {
+			switch node := statement.(type) {
+			case *ast.TypeAliasStatement:
+				result.aliases[program.ModulePath][node.Name] = node
+			case *ast.ImportStatement:
+				for _, symbol := range node.Symbols {
+					result.imports[program.ModulePath][symbol] = node.Path
+				}
+			}
+		}
+	}
+	return result
+}
+
+func (r aliasResolver) expand(program *ast.Program, typ types.Type, visiting map[string]bool) types.Type {
+	if typ.Kind != types.Named || typ.Nullable || len(typ.Args) != 0 {
+		return typ
+	}
+	modulePath := program.ModulePath
+	alias := r.aliases[modulePath][typ.Name]
+	if alias == nil {
+		importPath := r.imports[modulePath][typ.Name]
+		modulePath = r.modulePath(importPath)
+		alias = r.aliases[modulePath][typ.Name]
+	}
+	if alias == nil || len(alias.TypeParameters) != 0 {
+		return typ
+	}
+	key := modulePath + "\x00" + typ.Name
+	if visiting[key] {
+		return typ
+	}
+	visiting[key] = true
+	targetProgram := r.programs[modulePath]
+	if targetProgram == nil {
+		return typ
+	}
+	return r.expand(targetProgram, typeRef(alias.Target), visiting)
+}
+
+func (r aliasResolver) modulePath(importPath string) string {
+	if _, exists := r.programs[importPath]; exists {
+		return importPath
+	}
+	if _, exists := r.programs[importPath+"/index"]; exists {
+		return importPath + "/index"
+	}
+	return importPath
 }
 
 func discoverJobDefaults(job *Job, class *ast.ClassStatement) error {

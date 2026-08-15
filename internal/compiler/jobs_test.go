@@ -105,6 +105,30 @@ end
 	}
 }
 
+func TestCompileProjectAcceptsImportedTransparentScalarAliasJobArgument(t *testing.T) {
+	sources := []SourceUnit{
+		{Filename: "/project/src/contracts/index.trb", ModulePath: "contracts/index", Package: "contracts", Source: []byte("type OrderId = Integer\n")},
+		{
+			Filename: "/project/src/jobs/send_receipt_job.trb", ModulePath: "jobs/send_receipt_job", Package: "jobs",
+			Source: []byte(`import { OrderId } from contracts
+import { Job } from trb/jobs
+
+class SendReceiptJob < Job
+	def perform(order_id: OrderId)
+		puts(order_id)
+		return
+	end
+end
+`),
+		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
+		{Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte("def main()\n\treturn\nend\n")},
+	}
+	if _, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCompileProjectRequiresTypedJobAdapterConfiguration(t *testing.T) {
 	sources := []SourceUnit{{
 		Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",

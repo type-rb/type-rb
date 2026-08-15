@@ -2439,8 +2439,9 @@ func (c *Checker) parameterSchema(span token.Span, typ types.Type, operation str
 }
 
 func (c *Checker) parameterValueSchema(typ types.Type, allowArray bool) (CodecSchema, bool) {
-	schema := CodecSchema{Type: typ}
-	base := typ
+	expanded := c.expandAlias(typ, map[string]bool{})
+	schema := CodecSchema{Type: expanded}
+	base := expanded
 	base.Nullable = false
 	switch base.Kind {
 	case types.Bool:
