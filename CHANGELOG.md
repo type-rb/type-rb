@@ -2,6 +2,40 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.10 - 2026-08-15
+
+### Frontend and package integration
+
+- Native TypeScript package bridges can expose typed compound JSX components
+  such as `Table.Row` and `Sidebar.Item`. TypeRB checks their props and reports
+  undeclared component members while preserving the native TSX API.
+  ([#273](https://github.com/type-rb/type-rb/pull/273))
+- React components with browser effects now keep compiler-owned cancellation
+  scope internal, and browser response conversion, native component indexing,
+  and TypeScript HTTP request bindings avoid generated-name collisions.
+  ([#265](https://github.com/type-rb/type-rb/pull/265),
+  [#266](https://github.com/type-rb/type-rb/pull/266),
+  [#268](https://github.com/type-rb/type-rb/pull/268))
+
+### Language and compiler reliability
+
+- Nil checks now narrow nested readonly nullable fields, including fields
+  reached through discriminated native package result types. Transparent aliases
+  also inherit portable receiver methods from their underlying types.
+  ([#269](https://github.com/type-rb/type-rb/pull/269),
+  [#271](https://github.com/type-rb/type-rb/pull/271))
+- TypeScript JSON decoding now retains runtime imports for raw-value enums inside
+  imported records. Full builds also remove generated target files whose TypeRB
+  sources were deleted.
+  ([#270](https://github.com/type-rb/type-rb/pull/270),
+  [#272](https://github.com/type-rb/type-rb/pull/272))
+
+### ORM
+
+- Go applications can place multiple TypeRB ORM models in the same package
+  without generated runtime helper declarations colliding.
+  ([#267](https://github.com/type-rb/type-rb/pull/267))
+
 ## 0.2.9 - 2026-08-15
 
 ### Language
