@@ -26,8 +26,8 @@ record CreateTodoInput
 end
 
 def fetch_todo(client: HttpClient, id: Integer): Response<Todo> fails RequestError
-	raw := client.request("/todos", query: [QueryParameter.new(name: "id", value: id.to_s())], headers: Headers.new([Header.new(name: "accept", value: "application/json")]), timeout_milliseconds: 1000)
-	return raw.json<Todo>()
+	response := client.request("/todos", query: [QueryParameter.new(name: "id", value: id.to_s())], headers: Headers.new([Header.new(name: "accept", value: "application/json")]), timeout_milliseconds: 1000)
+	return response.json<Todo>()
 end
 
 def create_todo(client: HttpClient, input: CreateTodoInput): Response<Todo> fails RequestError
@@ -50,6 +50,10 @@ end
 
 def empty_response(raw: Response<Body>): Response<NoBody> fails RequestError
 	return raw.no_body()
+end
+
+def empty_named_response(response: Response<Body>): Response<NoBody> fails RequestError
+	return response.no_body()
 end
 `)
 
@@ -76,6 +80,9 @@ end
 	}
 	if strings.Contains(output, "response.ok") {
 		t.Fatalf("declared HTTP status responses must not be converted into transport errors:\n%s", output)
+	}
+	if strings.Contains(output, "const response = response") {
+		t.Fatalf("browser response conversion shadows a source binding:\n%s", output)
 	}
 }
 

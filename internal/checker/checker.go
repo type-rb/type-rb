@@ -4073,6 +4073,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				attributeTypes[attribute.Name] = types.FromName("Boolean")
 			} else {
 				attributeTypes[attribute.Name] = c.checkExpression(attribute.Value, sc)
+				if literalType, literal := literalExpressionType(attribute.Value); literal {
+					attributeTypes[attribute.Name] = literalType
+				}
 			}
 			if n.Component == nil && provider != nil {
 				if expected, checked := provider.IntrinsicAttributes[attribute.Name]; checked && !c.typesAssignable(expected, attributeTypes[attribute.Name]) {

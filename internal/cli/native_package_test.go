@@ -189,7 +189,7 @@ func cliNativeComponentCatalog() *nativepackage.Catalog {
 						Kind: "record",
 						Type: nativepackage.Type{Kind: "named", Name: propsName},
 						Fields: []nativepackage.Field{
-							{Name: "color", Type: nativepackage.Type{Kind: "string", Name: "String", Nullable: true}, Optional: true},
+							{Name: "color", Type: nativepackage.Type{Kind: "union", Name: "Union", Args: []nativepackage.Type{{Kind: "string_literal", Name: `"#4f46e5"`}, {Kind: "string_literal", Name: `"#ffffff"`}}, Nullable: true}, Optional: true},
 							{Name: "loading", Type: nativepackage.Type{Kind: "bool", Name: "Boolean", Nullable: true}, Optional: true},
 							{Name: "size", Type: nativepackage.Type{Kind: "union", Name: "Union", Args: []nativepackage.Type{{Kind: "string", Name: "String"}, {Kind: "float", Name: "Float"}}, Nullable: true}, Optional: true},
 						},

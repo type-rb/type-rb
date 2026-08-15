@@ -220,7 +220,7 @@ function portableType(type, state, depth = 0) {
 			if (parameter.flags & ts.SymbolFlags.Optional) return { error: "uses optional callback parameters" };
 			const declaration = parameter.valueDeclaration || parameter.declarations?.[0];
 			if (declaration?.dotDotDotToken) return { error: "uses rest callback parameters" };
-			const converted = portableType(checker.getTypeOfSymbolAtLocation(parameter, declaration || containingFile), state, depth + 1);
+			const converted = portableType(checker.getTypeOfSymbolAtLocation(parameter, declaration || state.fallbackNode), state, depth + 1);
 			if (converted.error) return converted;
 			parameters.push(converted.type);
 		}
@@ -252,7 +252,7 @@ function recordFields(type, state, hint) {
 			}
 			optional ||= !!(property.flags & ts.SymbolFlags.Optional);
 			const declaration = property.valueDeclaration || property.declarations?.[0];
-			const converted = portableType(checker.getTypeOfSymbolAtLocation(property, declaration || containingFile), state, 1);
+			const converted = portableType(checker.getTypeOfSymbolAtLocation(property, declaration || state.fallbackNode), state, 1);
 			if (converted.error) {
 				issue = converted.error;
 				break;
@@ -301,7 +301,7 @@ function componentExport(type, state, exportName) {
 	if (parameters.length === 0) return { export: { kind: "component", type: wire("named", "ReactNode") } };
 	const parameter = parameters[0];
 	const declaration = parameter.valueDeclaration || parameter.declarations?.[0];
-	const propsType = checker.getTypeOfSymbolAtLocation(parameter, declaration || containingFile);
+	const propsType = checker.getTypeOfSymbolAtLocation(parameter, declaration || state.fallbackNode);
 	const props = recordFields(propsType, state, exportName + "Props");
 	if (props.error) return props;
 	const recordName = "Native_" + state.moduleSlug + "_" + exportName + "Props";
@@ -329,7 +329,7 @@ function ordinaryExport(type, state, exportName) {
 		const declaration = parameter.valueDeclaration || parameter.declarations?.[0];
 		variadic ||= !!declaration?.dotDotDotToken;
 		if (!(parameter.flags & ts.SymbolFlags.Optional) && !declaration?.questionToken && !declaration?.initializer && !declaration?.dotDotDotToken) required++;
-		const converted = portableType(checker.getTypeOfSymbolAtLocation(parameter, declaration || containingFile), state, 0);
+		const converted = portableType(checker.getTypeOfSymbolAtLocation(parameter, declaration || state.fallbackNode), state, 0);
 		if (converted.error) return { error: "parameter " + parameter.getName() + " " + converted.error };
 		parameters.push(converted.type);
 	}
@@ -350,7 +350,7 @@ for (const moduleName of request.modules) {
 		modules[moduleName] = { exports: {}, unsupported: { "*": "TypeScript could not read this package declaration" } };
 		continue;
 	}
-	const state = { records: {}, moduleSlug: moduleSlug(moduleName) };
+	const state = { records: {}, moduleSlug: moduleSlug(moduleName), fallbackNode: source };
 	const exports = {};
 	const unsupported = {};
 	for (const original of checker.getExportsOfModule(moduleSymbol).sort((left, right) => left.getName().localeCompare(right.getName()))) {
