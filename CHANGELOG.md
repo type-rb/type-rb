@@ -2,6 +2,14 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.11 - 2026-08-15
+
+### Language
+
+- A `case` branch can now match multiple comma-separated Integer or String
+  literals consistently across Go, Ruby, TypeScript, and the REPL. Previously,
+  only the first value was retained. ([#276](https://github.com/type-rb/type-rb/pull/276))
+
 ## 0.2.10 - 2026-08-15
 
 ### Frontend and package integration
