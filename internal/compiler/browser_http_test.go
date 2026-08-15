@@ -8,6 +8,7 @@ import (
 func TestTypeScriptBrowserHTTPClient(t *testing.T) {
 	source := []byte(`import {
 	File,
+	FileReadError,
 	HttpClient,
 	NoBody,
 	RequestBody,
@@ -54,6 +55,14 @@ def upload_file(client: HttpClient, file: File): Response<Body> fails RequestErr
 	return client.request("/uploads", method: HttpMethod.put(), body: RequestBody::File(file))
 end
 
+def file_bytes(file: File): Bytes fails FileReadError
+	return file.read()
+end
+
+def file_text(file: File): String fails FileReadError
+	return file.read_text()
+end
+
 def text_response(raw: Response<Body>): Response<String>
 	return raw.text()
 end
@@ -90,6 +99,9 @@ end
 		`case "File"`,
 		`as unknown as globalThis.File`,
 		`__trbRequestBody.value.type.length > 0`,
+		`await __trbFile.arrayBuffer()`,
+		`await __trbFile.text()`,
+		`{ message: __trbMessage } satisfies __trb_browser.FileReadError`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("generated TypeScript is missing %q:\n%s", want, output)

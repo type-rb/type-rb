@@ -341,6 +341,14 @@ func TestBundledTypeScriptBrowserPackage(t *testing.T) {
 	if request.Parameters[3].Type.String() != "Headers" {
 		t.Fatalf("unexpected browser request headers contract: %#v", request.Parameters[3])
 	}
+	read := definition.Symbols["read"]
+	if read.Intrinsic != "trb.platform.typescript.browser.file_read" || read.Receiver.String() != "File" || read.Return.String() != "Bytes" || read.Fails.String() != "FileReadError" {
+		t.Fatalf("unexpected browser file read contract: %#v", read)
+	}
+	readText := definition.Symbols["read_text"]
+	if readText.Intrinsic != "trb.platform.typescript.browser.file_read_text" || readText.Receiver.String() != "File" || readText.Return.String() != "String" || readText.Fails.String() != "FileReadError" {
+		t.Fatalf("unexpected browser file text contract: %#v", readText)
+	}
 	json := definition.Symbols["json"]
 	if json.Receiver.String() != "Response<Body>" || json.Return.String() != "Response<T>" || len(json.TypeParameters) != 1 || json.Fails.String() != "RequestError" {
 		t.Fatalf("unexpected response JSON contract: %#v", json)

@@ -481,6 +481,8 @@ func ExecutionScope(programs []*ir.Program) *Plan {
 			return strings.HasPrefix(intrinsic, "trb.orm.") ||
 				strings.HasPrefix(intrinsic, "trb.jobs.") ||
 				intrinsic == "trb.platform.typescript.browser.request" ||
+				intrinsic == "trb.platform.typescript.browser.file_read" ||
+				intrinsic == "trb.platform.typescript.browser.file_read_text" ||
 				intrinsic == "trb.web.middleware.logger.call" ||
 				intrinsic == "trb.web.middleware.timeout.call" ||
 				intrinsic == "trb.web.testing.dispatch"

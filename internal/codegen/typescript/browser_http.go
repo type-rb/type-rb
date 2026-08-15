@@ -14,6 +14,10 @@ func (g *generator) browserHTTPIntrinsic(name string, call *ir.Call, arguments [
 		return "", false
 	}
 	switch name {
+	case browserHTTPPrefix + "file_read":
+		return g.browserFileRead(call, arguments[0], false), true
+	case browserHTTPPrefix + "file_read_text":
+		return g.browserFileRead(call, arguments[0], true), true
 	case browserHTTPPrefix + "request":
 		return g.browserRequest(call, arguments), true
 	case browserHTTPPrefix + "response_json":
@@ -29,6 +33,15 @@ func (g *generator) browserHTTPIntrinsic(name string, call *ir.Call, arguments [
 	default:
 		return "undefined", true
 	}
+}
+
+func (g *generator) browserFileRead(call *ir.Call, file string, text bool) string {
+	resultType, successType, failureType := g.browserResultParts(call)
+	read := "new Uint8Array(await __trbFile.arrayBuffer())"
+	if text {
+		read = "await __trbFile.text()"
+	}
+	return "(async (): Promise<" + resultType + "> => { const __trbFile = " + file + " as unknown as globalThis.File; try { const __trbValue: " + successType + " = " + read + "; return " + g.runtimeName("Result") + ".Ok<" + successType + ", " + failureType + ">(__trbValue); } catch (__trbError) { const __trbMessage = __trbError instanceof Error ? __trbError.message : String(__trbError); const __trbFailure = { message: __trbMessage } satisfies " + failureType + "; return " + g.runtimeName("Result") + ".Err<" + successType + ", " + failureType + ">(__trbFailure); } })()"
 }
 
 func (g *generator) browserResponseNoBody(call *ir.Call, argument string) string {
