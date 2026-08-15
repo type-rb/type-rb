@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.19 - 2026-08-16
+
+### Language
+
+- Fallible operations inside `map`, `select`, `reduce`, and predicate-based
+  collection transformations now propagate through a typed transformation
+  boundary across Go, Ruby, and TypeScript. This fixes invalid generated code
+  when application mapping logic performs database or other fallible work.
+  ([#300](https://github.com/type-rb/type-rb/pull/300))
+
 ## 0.2.18 - 2026-08-16
 
 ### Go backend
