@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.21 - 2026-08-16
+
+### Package integration
+
+- Native TypeScript package indexing now handles synthetic object properties
+  without declarations. Libraries built from mapped or inferred prop types can
+  be installed and checked without crashing the compiler.
+  ([#306](https://github.com/type-rb/type-rb/pull/306))
+
 ## 0.2.20 - 2026-08-16
 
 ### Frontend and package integration
