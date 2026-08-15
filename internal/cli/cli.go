@@ -578,6 +578,7 @@ func (c *CLI) runBuild(args []string) error {
 		return errors.New("--outfile requires --compile")
 	}
 	sourceRoot := config.SourcePath()
+	fullProjectBuild := len(paths) == 0
 	if len(paths) == 0 {
 		paths = []string{sourceRoot}
 	}
@@ -667,6 +668,11 @@ func (c *CLI) runBuild(args []string) error {
 			return fmt.Errorf("--copy: %w", err)
 		}
 	}
+	if fullProjectBuild {
+		if err := cleanBuildOutput(config, outDir); err != nil {
+			return err
+		}
+	}
 	if copyFiles {
 		if err := copyProjectFiles(config.Root, outDir); err != nil {
 			return err
@@ -685,6 +691,29 @@ func (c *CLI) runBuild(args []string) error {
 		fmt.Fprintf(c.Stdout, "packages -> %s\n", manifest)
 	}
 	return nil
+}
+
+func cleanBuildOutput(config *project.Config, outDir string) error {
+	root, err := filepath.Abs(config.Root)
+	if err != nil {
+		return err
+	}
+	source, err := filepath.Abs(config.SourcePath())
+	if err != nil {
+		return err
+	}
+	output, err := filepath.Abs(outDir)
+	if err != nil {
+		return err
+	}
+	if output == root || output == source {
+		return nil
+	}
+	relative, err := filepath.Rel(root, output)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	return os.RemoveAll(output)
 }
 
 func (c *CLI) buildGoExecutable(config *project.Config, outfile string, debug bool) error {
