@@ -4326,7 +4326,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = types.Type{Kind: types.Never, Name: "Never"}
 			break
 		}
-		methodReceiverType := scalarType(receiverType)
+		methodReceiverType := scalarType(c.expandAlias(receiverType, map[string]bool{}))
 		dataReceiverType := c.expandAlias(receiverType, map[string]bool{})
 		if dataReceiverType.Kind == types.Union && scalarType(dataReceiverType).Kind == types.Union && !n.Namespace && !n.Safe {
 			memberType, alternatives, classField, found := c.unionDataMember(dataReceiverType, n.Name)
