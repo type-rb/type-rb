@@ -2,6 +2,13 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.22 - 2026-08-16
+
+### Go backend
+
+- Member access on a nullable value now compiles correctly after a successful
+  non-`nil` narrowing. ([#309](https://github.com/type-rb/type-rb/pull/309))
+
 ## 0.2.21 - 2026-08-16
 
 ### Package integration
