@@ -588,6 +588,9 @@ func (g *generator) exprExpected(expression ir.Expression, expected types.Type) 
 	if array, ok := expression.(*ir.Array); ok && len(array.Elements) == 0 && expected.Kind == types.Array {
 		return g.goType(expected) + "{}"
 	}
+	if literal, ok := expression.(*ir.Literal); ok && literal.Kind == "nil" && expected.Nullable {
+		return "(" + g.goType(expected) + ")(nil)"
+	}
 	return g.expr(expression)
 }
 
