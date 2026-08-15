@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.12 - 2026-08-15
+
+### Frontend and package integration
+
+- TypeScript browser applications can receive a checked DOM `File` from an
+  indexed native component callback and send the original file as an HTTP
+  request body. The browser platform type exposes file metadata, supplies the
+  media type by default, and preserves explicit request headers.
+  ([#279](https://github.com/type-rb/type-rb/pull/279))
+
 ## 0.2.11 - 2026-08-15
 
 ### Language
