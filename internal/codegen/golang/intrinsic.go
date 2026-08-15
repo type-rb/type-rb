@@ -10,6 +10,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if generated, ok := g.testIntrinsic(name, call, arguments); ok {
+		return generated
+	}
 	if generated, ok := g.oidcIntrinsic(name, call, arguments); ok {
 		return generated
 	}

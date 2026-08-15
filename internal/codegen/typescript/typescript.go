@@ -45,6 +45,7 @@ type generator struct {
 	breakTarget      string
 	enumReceiver     string
 	sourceRecorder   *sourcemap.Recorder
+	sourcePath       string
 }
 
 func Generate(program *ir.Program) string {
@@ -113,7 +114,7 @@ func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error
 }
 
 func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string) sourcemap.Generated {
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), sourceRecorder: sourcemap.NewRecorder(program.SourcePath)}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -133,6 +134,9 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		g.statement(statement)
 	}
 	g.integrations(program.Extensions)
+	if g.modulePath == "trb/std/test/index" {
+		g.testRuntimeSupport()
+	}
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
 	}
@@ -505,6 +509,9 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Next:
 		g.line("continue;")
 	case *ir.ExpressionStatement:
+		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil && g.testCallBlock(call) {
+			return
+		}
 		if g.inClass > 0 {
 			if call, ok := n.Expression.(*ir.Call); ok {
 				if identifier, identifierOK := call.Callee.(*ir.Identifier); identifierOK && (identifier.Name == "belongs_to" || identifier.Name == "has_many" || identifier.Name == "has_one" || identifier.Name == "enum_column") || g.jobsDeclaration(call) {

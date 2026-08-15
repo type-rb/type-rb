@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -36,6 +37,7 @@ import (
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/testsuite"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
@@ -80,6 +82,8 @@ func (c *CLI) Run(args []string) int {
 		err = c.runFmt(args[1:])
 	case "check":
 		err = c.runCheck(args[1:])
+	case "test":
+		err = c.runTest(args[1:])
 	case "build":
 		err = c.runBuild(args[1:])
 	case "run":
@@ -171,6 +175,244 @@ func (c *CLI) runCheck(args []string) error {
 	}
 	_, err = fmt.Fprintf(c.Stdout, "checked %d file(s) for mode %s\n", len(files), config.Mode)
 	return err
+}
+
+func (c *CLI) runTest(args []string) error {
+	flags := flag.NewFlagSet("test", flag.ContinueOnError)
+	flags.SetOutput(c.Stderr)
+	configPath := flags.String("config", "", "path to trbconfig.jsonc")
+	filter := flags.String("filter", "", "run tests whose full name contains this text")
+	testFile := flags.String("file", "", "run tests declared in this project file")
+	reporter := flags.String("reporter", "human", "test output: human or json")
+	compile := flags.Bool("compile", false, "produce a test executable with the target toolchain")
+	debug := flags.Bool("debug", false, "include source-level debugger information in a test executable")
+	outfile := flags.String("outfile", "", "test executable output path relative to the project root")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("test does not accept source paths; it discovers *_test.trb files in the configured project")
+	}
+	if *reporter != "human" && *reporter != "json" {
+		return fmt.Errorf("--reporter must be human or json; got %q", *reporter)
+	}
+	if *debug && !*compile {
+		return errors.New("--debug requires --compile")
+	}
+	if *outfile != "" && !*compile {
+		return errors.New("--outfile requires --compile")
+	}
+	if *compile && (*filter != "" || *testFile != "" || *reporter != "human") {
+		return errors.New("--filter, --file, and --reporter select a test execution and cannot be combined with --compile")
+	}
+	config, err := loadConfig(*configPath, ".")
+	if err != nil {
+		return err
+	}
+	if *compile && config.Mode != "go" {
+		return fmt.Errorf("test --compile is supported only for mode go; project mode is %s", config.Mode)
+	}
+	selectedFile := ""
+	if *testFile != "" {
+		selectedFile = *testFile
+		if !filepath.IsAbs(selectedFile) {
+			selectedFile = filepath.Join(config.Root, selectedFile)
+		}
+		selectedFile, err = filepath.Abs(selectedFile)
+		if err != nil {
+			return err
+		}
+	}
+	if config.Mode == "typescript" && config.TypeScript != nil && config.TypeScript.Runtime == project.TypeScriptRuntimeBrowser {
+		return errors.New("trb test requires typescript.runtime bun or node; browser test execution is not available yet")
+	}
+	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+	if err != nil {
+		return err
+	}
+	var testFiles []string
+	for _, filename := range files {
+		if testsuite.IsTestFile(filename) {
+			testFiles = append(testFiles, filename)
+		}
+	}
+	if len(testFiles) == 0 {
+		return errors.New("no *_test.trb files found")
+	}
+	if selectedFile != "" {
+		found := false
+		for _, filename := range testFiles {
+			absolute, absoluteErr := filepath.Abs(filename)
+			if absoluteErr == nil && filepath.Clean(absolute) == filepath.Clean(selectedFile) {
+				selectedFile = absolute
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("test file %s was not found in the configured project", *testFile)
+		}
+	}
+	if config.ManagesPackages() {
+		if _, err := syncProjectPackages(config, files); err != nil {
+			return err
+		}
+	}
+	units, options, err := projectCompilation(config, files)
+	if err != nil {
+		return err
+	}
+	var registrations []compiler.SourceUnit
+	for index := range units {
+		if units[index].ExternalPackage || units[index].CompilerOwned || units[index].Official {
+			continue
+		}
+		if units[index].TestRegistration != "" {
+			registrations = append(registrations, units[index])
+		}
+		sum := sha256.Sum256([]byte(units[index].ModulePath))
+		units[index].MainReplacement = fmt.Sprintf("trb_test_application_main_%x", sum[:6])
+	}
+	sort.Slice(registrations, func(i, j int) bool { return registrations[i].ModulePath < registrations[j].ModulePath })
+	runnerFilename := filepath.Join(config.SourcePath(), "__trb_test_main.trb")
+	runnerModule := "trb_test_main"
+	runnerPackage := ""
+	if config.Go != nil {
+		runnerPackage = config.Go.RootPackage
+	}
+	var runner strings.Builder
+	runner.WriteString("import { finish } from trb/std/test\n")
+	for _, unit := range registrations {
+		fmt.Fprintf(&runner, "import { %s } from %s\n", unit.TestRegistration, unit.ModulePath)
+	}
+	runner.WriteString("\ndef main()\n")
+	for _, unit := range registrations {
+		fmt.Fprintf(&runner, "\t%s()\n", unit.TestRegistration)
+	}
+	runner.WriteString("\tfinish()\n\treturn\nend\n")
+	units = append(units, compiler.SourceUnit{Filename: runnerFilename, Source: []byte(runner.String()), ModulePath: runnerModule, Package: runnerPackage, CompilerOwned: true})
+	artifacts, err := compiler.CompileProject(units, options)
+	if err != nil {
+		return err
+	}
+	compiled := make(map[string]*compiler.Artifact, len(artifacts))
+	for _, artifact := range artifacts {
+		absolute, _ := filepath.Abs(artifact.Filename)
+		outputKey := absolute
+		if config.Mode == "go" && testsuite.IsTestFile(absolute) {
+			stem := strings.TrimSuffix(filepath.Base(absolute), filepath.Ext(absolute))
+			outputKey = filepath.Join(filepath.Dir(absolute), stem+"_trb.trb")
+		}
+		compiled[outputKey] = artifact
+	}
+	if *compile {
+		return c.buildGoTestExecutable(config, compiled, runnerFilename, *outfile, *debug)
+	}
+	runRoot, err := os.MkdirTemp(config.Root, "trb-test-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(runRoot)
+	generated, err := writeCompiledTree(config, compiled, runRoot, false)
+	if err != nil {
+		return err
+	}
+	target := generated[runnerFilename]
+	if target == "" {
+		return errors.New("compiler did not produce the test runner")
+	}
+	if config.Mode == "go" {
+		if err := copyGoModuleFiles(config, runRoot); err != nil {
+			return err
+		}
+		if config.Go.Sqldef != nil {
+			if err := c.applySqldef(config); err != nil {
+				return err
+			}
+		}
+	}
+	var command *exec.Cmd
+	switch config.Mode {
+	case "ruby":
+		command = rubyRunCommand(target, nil)
+	case "go":
+		command = exec.Command("go", "run", "-mod=mod", ".")
+	case "typescript":
+		command, err = typeScriptRunCommand(config.TypeScript.Runtime, target, nil)
+		if err != nil {
+			return err
+		}
+	}
+	command.Dir = runRoot
+	if config.Mode == "go" {
+		command.Dir = filepath.Dir(target)
+	}
+	if config.Mode == "ruby" {
+		command.Dir = config.Root
+	}
+	command.Stdin = c.Stdin
+	command.Stdout = c.Stdout
+	command.Stderr = c.Stderr
+	command.Env = append(os.Environ(), "TRB_TEST_REPORTER="+*reporter, "TRB_TEST_FILTER="+*filter, "TRB_TEST_FILE="+selectedFile)
+	if config.Mode == "go" && config.Go.Sqldef != nil {
+		command.Env = append(command.Env, "TRB_DATABASE="+filepath.Join(config.Root, config.Go.Sqldef.Database))
+	}
+	if err := command.Run(); err != nil {
+		return &reportedError{cause: err}
+	}
+	return nil
+}
+
+func (c *CLI) buildGoTestExecutable(config *project.Config, compiled map[string]*compiler.Artifact, runnerFilename, outfile string, debug bool) error {
+	if outfile == "" {
+		name := strings.TrimSpace(config.Name)
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\\`) {
+			return fmt.Errorf("project name %q cannot be used as a test executable filename; pass --outfile", config.Name)
+		}
+		outfile = filepath.Join("bin", name+"-test")
+	}
+	output, err := executableOutputPath(config, outfile)
+	if err != nil {
+		return err
+	}
+	buildRoot, err := os.MkdirTemp("", "trb-test-build-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(buildRoot)
+	generated, err := writeCompiledTree(config, compiled, buildRoot, debug)
+	if err != nil {
+		return err
+	}
+	if err := copyGoModuleFiles(config, buildRoot); err != nil {
+		return err
+	}
+	target := generated[runnerFilename]
+	if target == "" {
+		return errors.New("compiler did not produce the test runner")
+	}
+	if info, statErr := os.Stat(output); statErr == nil && info.IsDir() {
+		return fmt.Errorf("--outfile must name a file; %s is a directory", output)
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return err
+	}
+	arguments := []string{"build", "-mod=mod"}
+	if debug {
+		arguments = append(arguments, "-gcflags=all=-N -l")
+	}
+	arguments = append(arguments, "-o", output, ".")
+	command := exec.Command("go", arguments...)
+	command.Dir = filepath.Dir(target)
+	command.Stdout = c.Stdout
+	command.Stderr = c.Stderr
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("go build test: %w", err)
+	}
+	fmt.Fprintf(c.Stdout, "test executable -> %s\n", output)
+	return nil
 }
 
 func (c *CLI) reportCheckError(format string, fallback diagnostic.Code, err error) error {
@@ -351,6 +593,7 @@ func (c *CLI) runBuild(args []string) error {
 	if err != nil {
 		return err
 	}
+	files = productionTRBFiles(files)
 	if len(files) == 0 {
 		return errors.New("no .trb files found")
 	}
@@ -361,6 +604,7 @@ func (c *CLI) runBuild(args []string) error {
 	if err != nil {
 		return err
 	}
+	projectFiles = productionTRBFiles(projectFiles)
 	compiled, err := compileProject(config, projectFiles)
 	if err != nil {
 		return err
@@ -448,6 +692,7 @@ func (c *CLI) buildGoExecutable(config *project.Config, outfile string, debug bo
 	if err != nil {
 		return err
 	}
+	files = productionTRBFiles(files)
 	if len(files) == 0 {
 		return errors.New("no .trb files found")
 	}
@@ -564,6 +809,7 @@ func (c *CLI) runProgram(args []string) error {
 	if err != nil {
 		return err
 	}
+	files = productionTRBFiles(files)
 	if config.ManagesPackages() {
 		if _, err := syncProjectPackages(config, files); err != nil {
 			return err
@@ -671,6 +917,7 @@ func (c *CLI) runRepl(args []string) error {
 		if err != nil {
 			return err
 		}
+		files = productionTRBFiles(files)
 	}
 	sessionFilename := filepath.Join(config.SourcePath(), ".trb-repl.trb")
 	sessionModule := "__trb_repl__"
@@ -1748,7 +1995,12 @@ func sourceUnit(config *project.Config, filename string, source []byte) (compile
 			packageName = filepath.Base(directory)
 		}
 	}
-	return compiler.SourceUnit{Filename: absolute, Source: source, ModulePath: modulePath, Package: packageName}, nil
+	unit := compiler.SourceUnit{Filename: absolute, Source: source, ModulePath: modulePath, Package: packageName}
+	if testsuite.IsTestFile(absolute) {
+		sum := sha256.Sum256([]byte(modulePath))
+		unit.TestRegistration = fmt.Sprintf("trb_test_register_%x", sum[:6])
+	}
+	return unit, nil
 }
 
 func compilerOptions(config *project.Config) (compiler.Options, error) {
@@ -1957,6 +2209,16 @@ func collectTRB(paths []string, excluded string) ([]string, error) {
 	return unique(files), nil
 }
 
+func productionTRBFiles(files []string) []string {
+	result := make([]string, 0, len(files))
+	for _, filename := range files {
+		if !testsuite.IsTestFile(filename) {
+			result = append(result, filename)
+		}
+	}
+	return result
+}
+
 func copyProjectFiles(root, outDir string) error {
 	outAbs, _ := filepath.Abs(outDir)
 	rootAbs, _ := filepath.Abs(root)
@@ -2018,6 +2280,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [--runtime browser|bun|node] [--template web] [directory]")
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb check [--diagnostic-format human|json] [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb test [--filter TEXT] [--file FILE] [--reporter human|json] [--compile [--debug] [--outfile FILE]] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE]")
 	fmt.Fprintln(c.Stdout, "  trb run [FILE.trb] [-- arguments...]")

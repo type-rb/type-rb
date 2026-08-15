@@ -845,3 +845,27 @@ end
 - Typed IR represents propagation and capture explicitly. Backends may use a
   native result representation internally, but TypeRB source has identical
   control flow in Go, Ruby, and TypeScript modes.
+
+### 4.3 Test declarations
+
+- A project test file has the suffix `_test.trb`. Ordinary builds and runs do
+  not emit or execute these files; `trb check`, `trb lsp`, and `trb test`
+  validate them with the complete project.
+- The portable `trb/std/test` package exports `describe`, `test`, and `expect`.
+  Test DSL functions are available only through explicit named imports.
+- A test file has one or more top-level `describe("literal") do ... end`
+  declarations. A suite contains only nested `describe` and `test`
+  declarations. A `test` must be nested inside a suite.
+- Suite and test names are nonempty String literals. Their slash-separated
+  nesting path is the stable full test name used by filters and tools.
+  Duplicate full names in one file are an error.
+- Suite and test blocks take no parameters. Test bodies otherwise use ordinary
+  statements, helpers, effects, and imports. Effects retain the language's
+  normal `fails` and `attempt` rules. The test package does not change language
+  scoping or introduce implicit setup state.
+- `expect<T>(actual)` preserves `T` in `Expectation<T>`. An assertion failure
+  aborts the current case, records the assertion's `.trb` location, and does
+  not abort subsequent cases.
+- `trb test` creates a temporary entrypoint, invokes each test module in
+  deterministic module order, and returns a nonzero status when a case fails.
+  It suppresses application `main()` entrypoints for this compilation only.

@@ -4473,6 +4473,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 	case *ast.CallExpression:
+		libraryBlockChecked := false
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee++
 		}
@@ -4584,6 +4585,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 				c.checkLibraryEqualityRequirements(n.Span(), binding.Name, *library)
 				c.checkLibraryOrderingRequirements(n.Span(), binding.Name, *library)
+				if library.Block != nil {
+					member := declaration.Member{
+						Name:   binding.Name,
+						Return: typ,
+						Block: &declaration.Block{
+							Parameters: append([]types.Type(nil), library.Block.Parameters...),
+						},
+					}
+					if blockType, checked := c.checkDeclarationBlock(n, member, sc, nil); checked {
+						typ = blockType
+					}
+					libraryBlockChecked = true
+				}
 			}
 		}
 		if member, ok := c.external[n.Callee]; ok {
@@ -4705,7 +4719,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(identifier.Span(), fmt.Sprintf("Ruby function %s requires an explicit platform import", identifier.Name))
 			}
 		}
-		if n.Block != nil {
+		if n.Block != nil && !libraryBlockChecked {
 			if _, declared := c.external[n.Callee]; !declared {
 				if blockMember, provided := c.declarationFunctionBlock(n, argumentTypes); provided {
 					if blockType, checked := c.checkDeclarationBlock(n, blockMember, sc, nil); checked {

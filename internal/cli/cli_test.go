@@ -38,6 +38,197 @@ func TestVersionCommandsPrintBuildVersion(t *testing.T) {
 	}
 }
 
+func TestTestRunsPortableSuiteAcrossBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			required := map[string]string{"go": "go", "ruby": "ruby", "typescript": "bun"}[mode]
+			if _, err := exec.LookPath(required); err != nil {
+				t.Skipf("%s is unavailable: %v", required, err)
+			}
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if mode == "go" {
+				config.Go.Module = "example.com/type-rb/test-suite"
+			}
+			if mode == "typescript" {
+				config.TypeScript.Runtime = project.TypeScriptRuntimeBun
+				config.TypeScript.PackageManager = "bun"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "go" {
+				if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-suite\n\ngo 1.26\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			applicationSource := "def add(left: Integer, right: Integer): Integer\n\treturn left + right\nend\n\ndef main()\n\tputs(\"APPLICATION MAIN RAN\")\n\treturn\nend\n"
+			if err := os.WriteFile(filepath.Join(config.SourcePath(), "calculator.trb"), []byte(applicationSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			testSource := `import { add } from calculator
+import { describe, expect, test } from trb/std/test
+
+record Point
+	x: Integer
+	y: Integer
+end
+
+describe("Calculator") do
+	test("adds numbers") do
+		expect(add(1, 2)).to_equal(3)
+		expect([1, 2]).to_equal([1, 2])
+		expect({ a: 1, b: 2 }).to_equal({ b: 2, a: 1 })
+		expect(Point.new(x: 1, y: 2)).to_equal(Point.new(x: 1, y: 2))
+		expect(true).to_be_true()
+		expect(false).to_be_false()
+		expect(nil).to_be_nil()
+	end
+end
+`
+			if err := os.WriteFile(filepath.Join(config.SourcePath(), "calculator_test.trb"), []byte(testSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"test", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "PASS Calculator / adds numbers") || !strings.Contains(stdout.String(), "1 test(s), 0 failure(s)") {
+				t.Fatalf("unexpected test output:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+			}
+			if strings.Contains(stdout.String(), "APPLICATION MAIN RAN") {
+				t.Fatalf("trb test executed the application main():\n%s", stdout.String())
+			}
+		})
+	}
+}
+
+func TestTestReturnsFailureAndJSONEvents(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("go is unavailable: %v", err)
+	}
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/test-failure"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-failure\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { describe, expect, test } from trb/std/test
+
+describe("Failure") do
+	test("reports its source") do
+		expect(1).to_equal(2)
+	end
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "failure_test.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"test", "--config", config.Path, "--reporter", "json"}); status != 1 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"type":"test_failed"`) || !strings.Contains(stdout.String(), `"name":"Failure / reports its source"`) || !strings.Contains(stdout.String(), `"test_file":`) || !strings.Contains(stdout.String(), `expected 1 to equal 2`) {
+		t.Fatalf("unexpected JSON event output:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `{"failed":1,"total":1,"type":"test_summary"}`) {
+		t.Fatalf("JSON summary does not expose total and failed counts:\n%s", stdout.String())
+	}
+}
+
+func TestTestCompileCreatesDebuggableGoExecutable(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("go is unavailable: %v", err)
+	}
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.Name = "debug-tests"
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/debug-tests"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/debug-tests\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testPath := filepath.Join(config.SourcePath(), "calculator_test.trb")
+	source := "import { describe, expect, test } from trb/std/test\n\ndescribe(\"Calculator\") do\n\ttest(\"adds numbers\") do\n\t\texpect(1 + 2).to_equal(3)\n\tend\nend\n"
+	if err := os.WriteFile(testPath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(root, ".trb", "debug", "tests")
+	actualOutput := output
+	if runtime.GOOS == "windows" {
+		actualOutput += ".exe"
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"test", "--config", config.Path, "--compile", "--debug", "--outfile", output}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if want := "test executable -> " + actualOutput + "\n"; stdout.String() != want {
+		t.Fatalf("unexpected output: want %q, got %q", want, stdout.String())
+	}
+	binary, err := os.ReadFile(actualOutput)
+	if err != nil || !bytes.Contains(binary, []byte(testPath)) {
+		t.Fatalf("debug test executable does not retain the TypeRB source path: err=%v", err)
+	}
+	result, err := exec.Command(actualOutput).CombinedOutput()
+	if err != nil || !strings.Contains(string(result), "PASS Calculator / adds numbers") {
+		t.Fatalf("compiled tests failed: err=%v output=%q", err, result)
+	}
+}
+
+func TestTestFileFilterDisambiguatesDuplicateNames(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("go is unavailable: %v", err)
+	}
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/test-file-filter"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-file-filter\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := "import { describe, expect, test } from trb/std/test\n\ndescribe(\"Duplicate\") do\n\ttest(\"same name\") do\n\t\texpect(1).to_equal(1)\n\tend\nend\n"
+	selected := filepath.Join(config.SourcePath(), "first_test.trb")
+	for _, filename := range []string{selected, filepath.Join(config.SourcePath(), "second_test.trb")} {
+		if err := os.WriteFile(filename, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"test", "--config", config.Path, "--file", selected, "--reporter", "json"}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if strings.Count(stdout.String(), `"type":"test_started"`) != 1 || !strings.Contains(stdout.String(), `"test_file":`) {
+		t.Fatalf("file filter did not select one declaration:\n%s", stdout.String())
+	}
+}
+
 func TestCheckEmitsVersionedJSONDiagnosticsAcrossFiles(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

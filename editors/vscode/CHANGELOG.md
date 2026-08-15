@@ -5,6 +5,9 @@
 - Add explicit standard-type imports when accepting compiler completion.
 - Debug Go-targeted TypeRB source with breakpoints, stepping, call stacks, and
   variable inspection through Delve.
+- Discover and run portable TypeRB suites through Visual Studio Code Test
+  Explorer and test CodeLens actions.
+- Debug Go-targeted tests with TypeRB breakpoints, stepping, and variables.
 
 ## 0.2.3 - 2026-08-15
 

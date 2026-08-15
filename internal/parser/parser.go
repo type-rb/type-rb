@@ -309,7 +309,11 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 		return nil
 	}
 	if !brace {
-		parameters, valid := p.blockParameters(line[blockAt+1:])
+		parameters := []string(nil)
+		valid := true
+		if blockAt+1 < len(line) {
+			parameters, valid = p.blockParameters(line[blockAt+1:])
+		}
 		if !valid {
 			if syntheticCall && blockAt+1 == len(line) {
 				return nil

@@ -23,6 +23,8 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/lexer"
+	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/testsuite"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
@@ -199,6 +201,8 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.semanticTokens(request)
 	case "workspace/symbol":
 		return false, s.workspaceSymbols(request)
+	case "typerb/discoverTests":
+		return false, s.discoverTests(request)
 	case "textDocument/formatting":
 		return false, s.format(request)
 	case "textDocument/codeAction":
@@ -239,6 +243,44 @@ func (s *Server) codeLenses(request message) error {
 				Arguments: []interface{}{params.TextDocument.URI},
 			},
 		})
+	}
+	if testsuite.IsTestFile(path) {
+		program, _ := parser.Parse(document.source)
+		tests, _ := testsuite.Prepare(program, path, "")
+		for _, item := range tests {
+			if item.Kind != testsuite.Case {
+				continue
+			}
+			result = append(result, codeLens{
+				Range:   offsetRange(document.source, item.Span.Start.Offset, item.Span.End.Offset),
+				Command: command{Title: "▶ Run Test", Command: "typerb.runTest", Arguments: []interface{}{params.TextDocument.URI, item.FullName}},
+			})
+			if s.mode == "go" {
+				result = append(result, codeLens{
+					Range:   offsetRange(document.source, item.Span.Start.Offset, item.Span.End.Offset),
+					Command: command{Title: "Debug Test", Command: "typerb.debugTest", Arguments: []interface{}{params.TextDocument.URI, item.FullName}},
+				})
+			}
+		}
+	}
+	return s.stream.write(success(request.ID, result))
+}
+
+func (s *Server) discoverTests(request message) error {
+	result := []testItem{}
+	for _, semantic := range s.semanticDocuments() {
+		if !testsuite.IsTestFile(semantic.Path) {
+			continue
+		}
+		source := []byte(semantic.Source)
+		program, _ := parser.Parse(source)
+		items, _ := testsuite.Prepare(program, semantic.Path, "")
+		for _, item := range items {
+			result = append(result, testItem{
+				ID: item.ID, ParentID: item.ParentID, Kind: string(item.Kind), Name: item.Name, FullName: item.FullName,
+				URI: uriFromPath(semantic.Path), Range: offsetRange(source, item.Span.Start.Offset, item.Span.End.Offset),
+			})
+		}
 	}
 	return s.stream.write(success(request.ID, result))
 }

@@ -29,11 +29,12 @@ than detailed syntax.
 
 ## 2. Make testing a language-level workflow
 
-- Add `trb/std/test` with suites, test cases, assertions, setup/teardown, and
-  expected-error helpers.
-- Add `trb test` with project discovery, name/location filters, deterministic
-  output, non-zero failure status, and target-specific runtime adapters.
-- Preserve `.trb` locations in failures and stack traces.
+- Evolve the initial portable `trb/std/test`, `trb test`, source-location
+  failures, and VS Code Test Explorer from application evidence.
+- Add lifecycle and expected-error helpers only after their semantics remain
+  explicit and portable; keep data-driven tests in ordinary TypeRB meanwhile.
+- Add a browser test host without adding async syntax to TypeRB.
+- Extend assertion locations into complete cross-backend runtime stack traces.
 - Add coverage reporting after generated-code locations can be mapped back to
   TypeRB source.
 
@@ -54,11 +55,11 @@ than detailed syntax.
 - Extend the reusable `trb lsp` diagnostics, formatting, completion, hover,
   signature help, checked navigation, rename, document symbols, and quick fixes
   with richer code actions and additional editor workflows.
-- Extend the published preview VS Code client with test discovery and
-  additional editor integrations.
+- Extend the published preview VS Code client beyond its initial Test Explorer
+  integration with additional editor workflows.
 - Extend Go source debugging through Delve with Ruby and TypeScript adapters
   after their target-standard source maps and runtime stack mapping are
-  reliable. Add test discovery with the language-level test runner.
+  reliable.
 
 ## 5. Standard library and package ecosystem
 

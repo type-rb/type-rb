@@ -32,6 +32,7 @@ type generator struct {
 	executionActive bool
 	oidcRuntime     bool
 	sourceRecorder  *sourcemap.Recorder
+	sourcePath      string
 }
 
 func Generate(program *ir.Program) string {
@@ -67,7 +68,7 @@ func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generat
 		jobs:    jobsintegration.ManifestFrom(program.Extensions),
 		jobsSQL: jobssql.ManifestFrom(program.Extensions),
 		orm:     ormintegration.ManifestFrom(program.Extensions), execution: execution,
-		sourceRecorder: sourcemap.NewRecorder(program.SourcePath),
+		sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath,
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
@@ -85,6 +86,9 @@ func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generat
 	}
 	g.statements(program.Statements)
 	g.integrations(program.Extensions)
+	if g.modulePath == "trb/std/test/index" {
+		g.testRuntimeSupport()
+	}
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
 	}

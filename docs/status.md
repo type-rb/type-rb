@@ -340,8 +340,15 @@ restart. Go debug builds project the shared source map into Go line directives,
 and the VS Code client connects directly to Delve DAP for TypeRB breakpoints,
 stepping, stack frames, variables, watches, and evaluation. Ruby and TypeScript
 source-debugger adapters remain staged; both modes retain Run Without Debugging.
-Test discovery remains staged with the language-level test runner and will use
-the editor's native Testing API rather than source-shaped run commands.
+Portable colocated tests use `*_test.trb`, nested `describe` suites, explicit
+`test` cases, and typed expectations from `trb/std/test`. `trb test` executes
+the same source through Go, Ruby, and TypeScript process backends, supports
+file/name filtering and JSON Lines events, preserves assertion locations, and
+returns a nonzero failure status. The VS Code extension consumes compiler-owned
+LSP discovery through the native Test Explorer and test CodeLens. Go test
+selections can use the same Delve-backed TypeRB source debugger as application
+entrypoints. Browser-hosted TypeScript execution, lifecycle hooks, and
+higher-level testing packages remain staged.
 
 ## Current limitations
 
@@ -359,7 +366,6 @@ The current alpha does not yet provide:
 - semantic package version constraints, publishing or audit services, or a
   stable external compiler-extension protocol;
 - namespace-stable public type identities across independent packages;
-- a language-level test runner; or
 - compatibility guarantees for production use.
 
 Future outcomes are tracked in the [roadmap](roadmap.md); executable scoped work

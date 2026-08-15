@@ -593,6 +593,19 @@ application payload.
 conversion. `from_raw()` infers this error type and its runtime dependency; an
 explicit import is needed only when source code names `EnumValueError` itself.
 
+## Tests
+
+`trb/std/test` exports `describe`, `test`, and `expect`. Suites and cases take
+literal names and parameterless blocks so the compiler, CLI, language server,
+and editor use one deterministic discovery model. `expect()` returns a typed
+`Expectation<T>` with equality, inequality, Boolean, and nil assertions.
+
+The package is portable compiler-owned source plus a small target runtime.
+Assertion failures retain their original `.trb` path, line, and column. The
+runtime protocol is consumed by `trb test` and editor integrations; application
+code should use the public assertion API rather than its internal functions.
+See the [testing guide](guides/testing.md).
+
 ## Package index
 
 The current portable standard library includes:
@@ -622,6 +635,7 @@ The current portable standard library includes:
 - `trb/std/result`
 - `trb/std/errors`
 - `trb/std/unit`
+- `trb/std/test`
 
 Platform packages are mode checked and remain separate from the portable
 standard library. Portable official application packages are documented in the

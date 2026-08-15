@@ -114,6 +114,48 @@ func TestServerReturnsRunCodeLensForTopLevelMain(t *testing.T) {
 	}
 }
 
+func TestServerDiscoversTestsAndReturnsTestCodeLens(t *testing.T) {
+	filename := cleanPath("calculator_test.trb")
+	source := `import { describe, expect, test } from trb/std/test
+
+describe("Calculator") do
+	test("adds numbers") do
+		expect(1 + 2).to_equal(3)
+	end
+end
+`
+	uri := uriFromPath(filename)
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "typerb/discoverTests", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "textDocument/codeLens", Params: rawParams(t, documentParams{TextDocument: textDocumentIdentifier{URI: uri}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("4"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "calculator_test", Package: "main", Source: []byte(source), TestRegistration: "trb_test_register_sample"}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var items []testItem
+	decodeResult(t, frames[1], &items)
+	if len(items) != 2 || items[0].Kind != "suite" || items[0].FullName != "Calculator" || items[1].Kind != "test" || items[1].FullName != "Calculator / adds numbers" || items[1].ParentID != items[0].ID {
+		t.Fatalf("test discovery=%#v", items)
+	}
+	var lenses []codeLens
+	decodeResult(t, frames[2], &lenses)
+	if len(lenses) != 2 || lenses[0].Command.Command != "typerb.runTest" || lenses[1].Command.Command != "typerb.debugTest" ||
+		!reflect.DeepEqual(lenses[0].Command.Arguments, []interface{}{uri, "Calculator / adds numbers"}) ||
+		!reflect.DeepEqual(lenses[1].Command.Arguments, []interface{}{uri, "Calculator / adds numbers"}) {
+		t.Fatalf("test code lenses=%#v", lenses)
+	}
+}
+
 func TestServerOmitsRunCodeLensForBrowserProjects(t *testing.T) {
 	filename := cleanPath("main.trb")
 	source := "def main()\n\treturn\nend\n"

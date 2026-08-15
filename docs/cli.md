@@ -151,6 +151,37 @@ Output names follow the project mode:
 - `main.go.trb` becomes `main.go`, without duplicating an existing target
   suffix.
 
+## Test
+
+```sh
+# Discover and run colocated *_test.trb files.
+trb test
+
+# Run one suite or case by a substring of its full name.
+trb test --filter "Calculator / adds numbers"
+
+# Restrict discovery to one colocated test file.
+trb test --file src/calculator_test.trb
+
+# Emit JSON Lines events for editors and automation.
+trb test --reporter json
+
+# Build a Go test executable with TypeRB source-debug information.
+trb test --compile --debug --outfile .trb/debug/tests
+```
+
+`trb test` compiles the complete project together with its test files and a
+temporary test entrypoint. An application `main()` is not started during a
+test build. The selected target backend executes each case, preserves `.trb`
+assertion locations, and returns a nonzero status when any case fails.
+`--compile` produces a Go test executable instead of running it; `--debug`
+retains source mappings for debuggers such as Delve.
+
+Tests use the explicit portable API from `trb/std/test`; see the
+[testing guide](guides/testing.md). TypeScript browser projects report that a
+process test host is unavailable. Select Bun or Node for `trb test` while
+browser-hosted test execution remains staged.
+
 To run a standalone `test.trb` below a configured project:
 
 ```sh
