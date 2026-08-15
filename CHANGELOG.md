@@ -2,6 +2,14 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.18 - 2026-08-16
+
+### Go backend
+
+- Explicitly typed nullable local variables initialized with `nil` now emit a
+  typed Go nil, so declarations such as `mut value: String? := nil` compile in
+  generated Go applications. ([#297](https://github.com/type-rb/type-rb/pull/297))
+
 ## 0.2.17 - 2026-08-16
 
 ### Language
