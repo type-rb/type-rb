@@ -122,6 +122,53 @@ def Counter(): ReactNode
 	}
 }
 
+func TestCompileTypeScriptReactComponentKeepsExecutionScopeInternal(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "page.trb",
+		ModulePath: "app/page",
+		Source: []byte(`import { ReactNode } from trb/platform/typescript/react
+import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+
+API := HttpClient.new("https://api.example.test")
+
+type Loader = () -> Response<String> fails RequestError
+
+def make_loader(): Loader
+	return fn(): Response<String> fails RequestError
+		return API.request("/message").text()
+	end
+end
+
+def Page(): ReactNode
+	_loader := make_loader()
+	return <p>Ready</p>
+end
+
+def Wrapper(): ReactNode
+	return Page()
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifacts[0].Output)
+	for _, expected := range []string{
+		"export function Page(): React.ReactNode {",
+		"const __trbScope: AbortSignal | undefined = undefined;",
+		"const _loader: () => Result<__trb_browser.Response<string>, __trb_browser.RequestError> | Promise<Result<__trb_browser.Response<string>, __trb_browser.RequestError>> = make_loader(__trbScope);",
+		"return Page();",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated component is missing %q:\n%s", expected, output)
+		}
+	}
+	if strings.Contains(output, "function Page(__trbScope") || strings.Contains(output, "Page(__trbScope)") {
+		t.Fatalf("generated component exposes its internal execution scope:\n%s", output)
+	}
+}
+
 func TestCompileTypeScriptJSXChecksStateUpdates(t *testing.T) {
 	source := []byte(`import { ReactNode, use_state } from trb/platform/typescript/react
 
