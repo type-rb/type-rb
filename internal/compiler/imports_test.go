@@ -2993,6 +2993,7 @@ func TestImportedTransparentAliasesUseUnderlyingReceiverMethods(t *testing.T) {
 		Package:    "ids",
 		Source: []byte(`type UserId = Integer
 type MemberId = Integer
+type EmailAddress = String
 
 record MemberRef
 	member_id: MemberId?
@@ -3003,7 +3004,7 @@ end
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { MemberId, MemberRef } from contracts/ids
+		Source: []byte(`import { EmailAddress, MemberId, MemberRef } from contracts/ids
 
 record QueryResult<T>
 	data: T
@@ -3011,6 +3012,10 @@ end
 
 def member_id_text(id: MemberId): String
 	return id.to_s()
+end
+
+def email_label(email: EmailAddress): String
+	return "Email: " + email
 end
 
 def optional_member_id_text(ref: MemberRef): String
@@ -3048,6 +3053,9 @@ end
 		}[mode]
 		if !strings.Contains(output, want) {
 			t.Fatalf("%s did not lower the alias receiver through Integer.to_s():\n%s", mode, output)
+		}
+		if !strings.Contains(output, `"Email: " + email`) {
+			t.Fatalf("%s did not use the imported String alias in concatenation:\n%s", mode, output)
 		}
 		narrowedWant := map[string]string{
 			"go":         "strconv.Itoa(*(ref.MemberId))",
