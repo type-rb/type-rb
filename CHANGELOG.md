@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.20 - 2026-08-16
+
+### Frontend and package integration
+
+- Native React component props typed as `ReactNode` now accept directly
+  renderable strings, numbers, booleans, and other supported values. Ordinary
+  props such as `label="Name"` no longer require a wrapper element.
+  ([#303](https://github.com/type-rb/type-rb/pull/303))
+
 ## 0.2.19 - 2026-08-16
 
 ### Language
