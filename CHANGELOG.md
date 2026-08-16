@@ -2,6 +2,18 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.25 - 2026-08-16
+
+### CLI
+
+- `trb run` and `trb test` now keep generated target trees below the
+  compiler-owned `.trb` directory, forward shutdown signals, and recover
+  abandoned workspaces without disturbing concurrent commands.
+- `trb run --keep-generated` retains generated source for inspection, while
+  `trb clean` can remove abandoned workspaces and optionally clean retained
+  source, build output, or compiler caches.
+  ([#319](https://github.com/type-rb/type-rb/pull/319))
+
 ## 0.2.24 - 2026-08-16
 
 ### Language and compiler reliability
