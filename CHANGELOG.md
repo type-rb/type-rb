@@ -2,6 +2,18 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.23 - 2026-08-16
+
+### Language and compiler reliability
+
+- Transparent aliases now remain transparent when used as standard-library
+  collection element types, including `push()` and `include?()`, and imported
+  result aliases produce valid nullable Go values.
+- Backend effect analysis now visits every child of structured control flow.
+  Fallible helpers called from ORM transaction blocks therefore receive the
+  compiler-owned execution scope correctly.
+  ([#312](https://github.com/type-rb/type-rb/pull/312))
+
 ## 0.2.22 - 2026-08-16
 
 ### Go backend
