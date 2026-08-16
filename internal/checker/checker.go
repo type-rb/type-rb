@@ -3871,6 +3871,22 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 	return false
 }
 
+func (c *Checker) constructorType(name string) bool {
+	if declaration, exists := c.declaredTypes[name]; exists {
+		return declaration.kind == "class" || declaration.kind == "record"
+	}
+	if _, exists := c.declarations().Type(name); exists {
+		return true
+	}
+	if binding, exists := c.resolution.ImportedType(name); exists && binding.Export != nil {
+		return binding.Export.Kind == resolver.ClassExport || binding.Export.Kind == resolver.RecordExport
+	}
+	if exported, exists := c.resolution.CompilerOwnedType(name); exists {
+		return exported.Kind == resolver.ClassExport || exported.Kind == resolver.RecordExport
+	}
+	return false
+}
+
 func (c *Checker) memberKindMismatch(span token.Span, className, memberName string, class bool) {
 	if class {
 		c.error(span, fmt.Sprintf("class %s has no class member %s; %s is an instance member", className, memberName, memberName))
@@ -4529,11 +4545,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			break
 		}
 		if n.Name == "new" && !classAccess {
-			constructorType := c.classes[receiverType.Name] != nil || c.records[receiverType.Name] != nil
-			if imported, exists := c.resolution.ImportedType(receiverType.Name); exists && imported.Export != nil {
-				constructorType = constructorType || imported.Export.Kind == resolver.ClassExport || imported.Export.Kind == resolver.RecordExport
-			}
-			if constructorType {
+			if c.constructorType(receiverType.Name) {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, false)
 				break
 			}
@@ -4592,7 +4604,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			} else if n.Name != "new" {
 				c.error(n.Span(), fmt.Sprintf("type %s has no member %s", receiverType.Name, n.Name))
 			}
-		} else if n.Name != "new" {
+		} else if n.Name == "new" && classAccess && c.constructorType(receiverType.Name) {
+			// Constructors are validated against their initialize method or record
+			// fields when the surrounding call expression is checked.
+		} else {
 			if _, exists := c.localMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
 			} else if _, exists := c.importedAncestorMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
