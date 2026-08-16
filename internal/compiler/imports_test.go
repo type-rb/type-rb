@@ -699,6 +699,7 @@ func TestPortableBytesDiagnosticsAreModeIndependent(t *testing.T) {
 		{source: "import trb/std/bytes\ndef bad(): Integer\n\treturn bytes.at(bytes.from_string(\"A\"), \"0\")\nend\n", want: "argument 2 to at() has type String, expected Integer"},
 		{source: "def bad(): Bytes\n\treturn \"A\"\nend\n", want: "return type is String, expected Bytes"},
 		{source: "def bad(): Integer\n\treturn \"A\".to_bytes().missing()\nend\n", want: "type Bytes has no member missing"},
+		{source: "def bad(): Bytes\n\treturn Bytes.new([])\nend\n", want: "type Bytes has no member new"},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for _, test := range tests {
