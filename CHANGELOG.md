@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.24 - 2026-08-16
+
+### Language and compiler reliability
+
+- Unsupported primitive constructors such as `Bytes.new()` are now rejected
+  during type checking instead of producing invalid backend code. Use the
+  standard conversion APIs, such as `String#to_bytes()`, for primitive values.
+  ([#315](https://github.com/type-rb/type-rb/pull/315))
+
 ## 0.2.23 - 2026-08-16
 
 ### Language and compiler reliability
