@@ -88,6 +88,8 @@ func (c *CLI) Run(args []string) int {
 		err = c.runBuild(args[1:])
 	case "run":
 		err = c.runProgram(args[1:])
+	case "clean":
+		err = c.runClean(args[1:])
 	case "repl":
 		err = c.runRepl(args[1:])
 	case "lsp":
@@ -177,7 +179,7 @@ func (c *CLI) runCheck(args []string) error {
 	return err
 }
 
-func (c *CLI) runTest(args []string) error {
+func (c *CLI) runTest(args []string) (resultErr error) {
 	flags := flag.NewFlagSet("test", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
@@ -308,11 +310,14 @@ func (c *CLI) runTest(args []string) error {
 	if *compile {
 		return c.buildGoTestExecutable(config, compiled, runnerFilename, *outfile, *debug)
 	}
-	runRoot, err := os.MkdirTemp(config.Root, "trb-test-*")
+	relay := newCommandSignalRelay()
+	defer relay.Close()
+	workspace, err := createGeneratedWorkspace(config.Root, "test")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(runRoot)
+	defer c.closeGeneratedWorkspace(workspace, &resultErr)
+	runRoot := workspace.Path()
 	generated, err := writeCompiledTree(config, compiled, runRoot, false)
 	if err != nil {
 		return err
@@ -357,7 +362,7 @@ func (c *CLI) runTest(args []string) error {
 	if config.Mode == "go" && config.Go.Sqldef != nil {
 		command.Env = append(command.Env, "TRB_DATABASE="+filepath.Join(config.Root, config.Go.Sqldef.Database))
 	}
-	if err := command.Run(); err != nil {
+	if err := relay.Run(command); err != nil {
 		return &reportedError{cause: err}
 	}
 	return nil
@@ -799,10 +804,11 @@ func executableOutputPath(config *project.Config, outfile string) (string, error
 	return filepath.Abs(outfile)
 }
 
-func (c *CLI) runProgram(args []string) error {
+func (c *CLI) runProgram(args []string) (resultErr error) {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
+	keepGenerated := flags.Bool("keep-generated", false, "retain generated target source below .trb/generated")
 	flagArgs := args
 	var programArgs []string
 	for index, argument := range args {
@@ -848,11 +854,17 @@ func (c *CLI) runProgram(args []string) error {
 	if err != nil {
 		return err
 	}
-	runRoot, err := os.MkdirTemp(config.Root, "trb-run-*")
+	relay := newCommandSignalRelay()
+	defer relay.Close()
+	workspace, err := createGeneratedWorkspace(config.Root, "run")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(runRoot)
+	if *keepGenerated {
+		workspace.Keep()
+	}
+	defer c.closeGeneratedWorkspace(workspace, &resultErr)
+	runRoot := workspace.Path()
 	target := ""
 	entrySource := filename
 	if entrySource == "" {
@@ -905,7 +917,7 @@ func (c *CLI) runProgram(args []string) error {
 	command.Stdin = c.Stdin
 	command.Stdout = c.Stdout
 	command.Stderr = c.Stderr
-	return command.Run()
+	return relay.Run(command)
 }
 
 func rubyRunCommand(target string, programArgs []string) *exec.Cmd {
@@ -2257,7 +2269,8 @@ func copyProjectFiles(root, outDir string) error {
 		}
 		absolute, _ := filepath.Abs(name)
 		if entry.IsDir() {
-			if name != rootAbs && (entry.Name() == ".git" || entry.Name() == ".trb" || entry.Name() == "node_modules" || absolute == outAbs) {
+			legacyGenerated := strings.HasPrefix(entry.Name(), "trb-run-") || strings.HasPrefix(entry.Name(), "trb-test-")
+			if name != rootAbs && (entry.Name() == ".git" || entry.Name() == ".trb" || entry.Name() == "node_modules" || legacyGenerated || absolute == outAbs) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -2312,7 +2325,8 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb test [--filter TEXT] [--file FILE] [--reporter human|json] [--compile [--debug] [--outfile FILE]] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE]")
-	fmt.Fprintln(c.Stdout, "  trb run [FILE.trb] [-- arguments...]")
+	fmt.Fprintln(c.Stdout, "  trb run [--keep-generated] [FILE.trb] [-- arguments...]")
+	fmt.Fprintln(c.Stdout, "  trb clean [--build] [--cache] [--generated] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb lsp [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb play [--mode ruby|go|typescript] [--port PORT] [--no-open]")

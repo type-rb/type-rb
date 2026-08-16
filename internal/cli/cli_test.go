@@ -104,6 +104,10 @@ end
 			if strings.Contains(stdout.String(), "APPLICATION MAIN RAN") {
 				t.Fatalf("trb test executed the application main():\n%s", stdout.String())
 			}
+			entries, err := os.ReadDir(filepath.Join(root, ".trb", "test"))
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("test workspace leaked: entries=%v err=%v", entries, err)
+			}
 		})
 	}
 }
@@ -3826,7 +3830,11 @@ func TestRunCompilesProjectImportClosure(t *testing.T) {
 	}
 	matches, err := filepath.Glob(filepath.Join(root, "trb-run-*"))
 	if err != nil || len(matches) != 0 {
-		t.Fatalf("run directory leaked: matches=%v err=%v", matches, err)
+		t.Fatalf("legacy run directory leaked: matches=%v err=%v", matches, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".trb", "run"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("run workspace leaked: entries=%v err=%v", entries, err)
 	}
 }
 
