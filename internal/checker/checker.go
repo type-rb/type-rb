@@ -5497,10 +5497,16 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		actual[i] = actualType
 		assignable := c.assignable(arguments[i].Value, expected, actualType)
 		if library != nil {
-			assignable = libraryAssignable(expected, actualType)
+			assignable = libraryAssignable(
+				c.expandAlias(expected, map[string]bool{}),
+				c.expandAlias(actualType, map[string]bool{}),
+			)
 		}
 		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Exact {
-			assignable = types.Equivalent(expected, actualType)
+			assignable = types.Equivalent(
+				c.expandAlias(expected, map[string]bool{}),
+				c.expandAlias(actualType, map[string]bool{}),
+			)
 		}
 		if !assignable {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, name, actualType, expected))

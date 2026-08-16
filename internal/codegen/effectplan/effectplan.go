@@ -222,44 +222,61 @@ func (a *analyzer) statementsReach(statements []ir.Statement, context methodCont
 				a.lambdaBindings[functionBindingKey{module: context.module, method: context.method, name: node.Name}] = lambda
 			}
 		case *ir.Assignment:
-			suspends = a.expressionReaches(node.Target, context, record) || a.expressionReaches(node.Value, context, record) || suspends
+			suspends = a.expressionReaches(node.Target, context, record) || suspends
+			suspends = a.expressionReaches(node.Value, context, record) || suspends
 		case *ir.Return:
 			suspends = a.expressionReaches(node.Value, context, record) || suspends
 		case *ir.ExpressionStatement:
 			suspends = a.expressionReaches(node.Expression, context, record) || suspends
 		case *ir.If:
-			branchSuspends := a.expressionReaches(node.Condition, context, record) || a.statementsReach(node.Then, context, record) || a.expressionReaches(node.ThenResult, context, record)
+			branchSuspends := a.expressionReaches(node.Condition, context, record)
+			branchSuspends = a.statementsReach(node.Then, context, record) || branchSuspends
+			branchSuspends = a.expressionReaches(node.ThenResult, context, record) || branchSuspends
 			for _, branch := range node.ElseIf {
-				branchSuspends = a.expressionReaches(branch.Condition, context, record) || a.statementsReach(branch.Body, context, record) || a.expressionReaches(branch.Result, context, record) || branchSuspends
+				branchSuspends = a.expressionReaches(branch.Condition, context, record) || branchSuspends
+				branchSuspends = a.statementsReach(branch.Body, context, record) || branchSuspends
+				branchSuspends = a.expressionReaches(branch.Result, context, record) || branchSuspends
 			}
-			branchSuspends = a.statementsReach(node.Else, context, record) || a.expressionReaches(node.ElseResult, context, record) || branchSuspends
+			branchSuspends = a.statementsReach(node.Else, context, record) || branchSuspends
+			branchSuspends = a.expressionReaches(node.ElseResult, context, record) || branchSuspends
 			if record && branchSuspends {
 				a.plan.Expressions[node] = true
 			}
 			suspends = branchSuspends || suspends
 		case *ir.Case:
-			branchSuspends := a.statementsReach(node.Leading, context, record) || a.expressionReaches(node.Value, context, record)
+			branchSuspends := a.statementsReach(node.Leading, context, record)
+			branchSuspends = a.expressionReaches(node.Value, context, record) || branchSuspends
 			for _, branch := range node.Branches {
-				branchSuspends = a.expressionReaches(branch.Value, context, record) || a.statementsReach(branch.Body, context, record) || a.expressionReaches(branch.Result, context, record) || branchSuspends
+				branchSuspends = a.expressionReaches(branch.Value, context, record) || branchSuspends
+				branchSuspends = a.statementsReach(branch.Body, context, record) || branchSuspends
+				branchSuspends = a.expressionReaches(branch.Result, context, record) || branchSuspends
 				for _, alternative := range branch.Alternatives {
 					branchSuspends = a.expressionReaches(alternative, context, record) || branchSuspends
 				}
 			}
-			branchSuspends = a.statementsReach(node.Else, context, record) || a.expressionReaches(node.ElseResult, context, record) || branchSuspends
+			branchSuspends = a.statementsReach(node.Else, context, record) || branchSuspends
+			branchSuspends = a.expressionReaches(node.ElseResult, context, record) || branchSuspends
 			if record && branchSuspends {
 				a.plan.Expressions[node] = true
 			}
 			suspends = branchSuspends || suspends
 		case *ir.While:
-			suspends = a.expressionReaches(node.Condition, context, record) || a.statementsReach(node.Body, context, record) || suspends
+			suspends = a.expressionReaches(node.Condition, context, record) || suspends
+			suspends = a.statementsReach(node.Body, context, record) || suspends
 		case *ir.Iterate:
-			iterationSuspends := a.intrinsicReaches(node.Intrinsic, node.Fails) || a.expressionReaches(node.Source, context, record) || a.expressionReaches(node.SliceSize, context, record) || a.statementsReach(node.Body, context, record)
+			iterationSuspends := a.intrinsicReaches(node.Intrinsic, node.Fails)
+			iterationSuspends = a.expressionReaches(node.Source, context, record) || iterationSuspends
+			iterationSuspends = a.expressionReaches(node.SliceSize, context, record) || iterationSuspends
+			iterationSuspends = a.statementsReach(node.Body, context, record) || iterationSuspends
 			if record && iterationSuspends {
 				a.plan.Iterations[node] = true
 			}
 			suspends = iterationSuspends || suspends
 		case *ir.StructuredBlock:
-			blockSuspends := a.intrinsicReaches(node.Intrinsic, node.Fails) || a.expressionReaches(node.Call, context, record) || a.statementsReach(node.Body, context, record) || a.expressionReaches(node.Value, context, record)
+			blockSuspends := a.intrinsicReaches(node.Intrinsic, node.Fails)
+			blockSuspends = a.expressionReaches(node.Call, context, record) || blockSuspends
+			blockSuspends = a.statementsReach(node.Body, context, record) || blockSuspends
+			blockSuspends = a.expressionReaches(node.Value, context, record) || blockSuspends
 			if record && blockSuspends {
 				a.plan.StructuredBlocks[node] = true
 			}
@@ -293,7 +310,8 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		}
 	case *ir.Hash:
 		for _, entry := range node.Entries {
-			suspends = a.expressionReaches(entry.Key, context, record) || a.expressionReaches(entry.Value, context, record) || suspends
+			suspends = a.expressionReaches(entry.Key, context, record) || suspends
+			suspends = a.expressionReaches(entry.Value, context, record) || suspends
 		}
 	case *ir.JSXElement:
 		suspends = a.expressionReaches(node.Component, context, record)
@@ -313,11 +331,16 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 	case *ir.Conversion:
 		suspends = a.expressionReaches(node.Value, context, record)
 	case *ir.Binary:
-		suspends = a.expressionReaches(node.Left, context, record) || a.expressionReaches(node.Right, context, record)
+		suspends = a.expressionReaches(node.Left, context, record)
+		suspends = a.expressionReaches(node.Right, context, record) || suspends
 	case *ir.Range:
-		suspends = a.expressionReaches(node.Start, context, record) || a.expressionReaches(node.End, context, record)
+		suspends = a.expressionReaches(node.Start, context, record)
+		suspends = a.expressionReaches(node.End, context, record) || suspends
 	case *ir.Transform:
-		suspends = a.expressionReaches(node.Source, context, record) || a.expressionReaches(node.Initial, context, record) || a.statementsReach(node.Body, context, record) || a.expressionReaches(node.Result, context, record)
+		suspends = a.expressionReaches(node.Source, context, record)
+		suspends = a.expressionReaches(node.Initial, context, record) || suspends
+		suspends = a.statementsReach(node.Body, context, record) || suspends
+		suspends = a.expressionReaches(node.Result, context, record) || suspends
 	case *ir.Call:
 		suspends = a.expressionReaches(node.Callee, context, record)
 		for _, argument := range node.Arguments {
@@ -332,7 +355,9 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		}
 		suspends = callSuspends || suspends
 	case *ir.Attempt:
-		suspends = a.expressionReaches(node.Value, context, record) || a.statementsReach(node.Body, context, record) || a.expressionReaches(node.BodyResult, context, record)
+		suspends = a.expressionReaches(node.Value, context, record)
+		suspends = a.statementsReach(node.Body, context, record) || suspends
+		suspends = a.expressionReaches(node.BodyResult, context, record) || suspends
 	case *ir.UnhandledEffect:
 		suspends = a.expressionReaches(node.Value, context, record)
 	case *ir.EnumConstruct:
@@ -354,7 +379,8 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 	case *ir.Member:
 		suspends = a.expressionReaches(node.Receiver, context, record)
 	case *ir.Index:
-		suspends = a.expressionReaches(node.Receiver, context, record) || a.expressionReaches(node.Index, context, record)
+		suspends = a.expressionReaches(node.Receiver, context, record)
+		suspends = a.expressionReaches(node.Index, context, record) || suspends
 	case *ir.Block:
 		suspends = a.statementsReach(node.Body, context, record)
 	case *ir.If:
