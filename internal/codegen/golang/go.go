@@ -135,6 +135,8 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 			g.records[n.Name] = true
 		case *ir.Enum:
 			g.typeKinds[n.Name] = "enum"
+		case *ir.TypeAlias:
+			g.typeKinds[n.Name] = "type_alias"
 		}
 	}
 	for _, statement := range program.Statements {
@@ -1228,11 +1230,19 @@ func (g *generator) expr(expression ir.Expression) string {
 			value := g.expr(n.Value)
 			base := n.ExprType()
 			base.Nullable = false
+			nullable := n.ExprType()
+			valueBase := n.Value.ExprType()
+			valueBase.Nullable = false
+			if kind := g.typeKinds[valueBase.Name]; kind == "type_alias" || kind == "enum_alias" {
+				base = valueBase
+				nullable = valueBase
+				nullable.Nullable = true
+			}
 			if n.Value.ExprType().Kind == types.Int && base.Kind == types.Float {
 				value = "float64(" + value + ")"
 			}
 			baseType := g.goType(base)
-			nullableType := g.goType(n.ExprType())
+			nullableType := g.goType(nullable)
 			if baseType == nullableType {
 				return value
 			}

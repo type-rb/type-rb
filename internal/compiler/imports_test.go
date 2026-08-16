@@ -2991,20 +2991,24 @@ func TestImportedTransparentAliasesUseUnderlyingReceiverMethods(t *testing.T) {
 		Filename:   "/project/contracts/ids.trb",
 		ModulePath: "contracts/ids",
 		Package:    "ids",
-		Source: []byte(`type UserId = Integer
+		Source: []byte(`import { Result } from trb/std/result
+
+type UserId = Integer
 type MemberId = Integer
 type EmailAddress = String
 
 record MemberRef
 	member_id: MemberId?
 end
+
+type MemberResult = Result<MemberRef, String>
 `),
 	}
 	consumer := SourceUnit{
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { EmailAddress, MemberId, MemberRef } from contracts/ids
+		Source: []byte(`import { EmailAddress, MemberId, MemberRef, MemberResult } from contracts/ids
 
 record QueryResult<T>
 	data: T
@@ -3031,6 +3035,16 @@ def nested_optional_member_id_text(query: QueryResult<MemberRef>): String
 		return ""
 	end
 	return query.data.member_id.to_s()
+end
+
+def alias_collection_operations(id: MemberId): Boolean
+	mut ids: Array<MemberId> := []
+	ids.push(id)
+	return ids.include?(id)
+end
+
+def optional_member_error(): MemberResult?
+	return MemberResult::Err("missing")
 end
 `),
 	}
@@ -3064,6 +3078,11 @@ end
 		}[mode]
 		if !strings.Contains(output, narrowedWant) {
 			t.Fatalf("%s did not lower the narrowed nullable alias receiver through Integer.to_s():\n%s", mode, output)
+		}
+		if mode == "go" {
+			if !strings.Contains(output, "func(value contracts.MemberResult) *contracts.MemberResult") || strings.Contains(output, "func(value Result[") {
+				t.Fatalf("Go nullable conversion did not preserve the imported transparent alias:\n%s", output)
+			}
 		}
 		nestedWant := map[string]string{
 			"go":         "strconv.Itoa(*(query.Data.MemberId))",

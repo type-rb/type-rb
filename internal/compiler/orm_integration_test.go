@@ -256,9 +256,14 @@ func TestPortableORMCompilesExplicitTransactionScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	source := []byte(`import { Database, DbError, Model } from trb/orm
+	source := []byte(`import { Database, DbError, Model, Transaction } from trb/orm
 
 class Product < Model
+end
+
+def persist_product(transaction: Transaction, name: String): Integer fails DbError
+	product := Product.using(transaction).create(name: name)
+	return product.id
 end
 
 def create_product(): Integer fails DbError
@@ -267,6 +272,7 @@ def create_product(): Integer fails DbError
 		product := products.create(name: "Created")
 		locked_products := products.where(id: product.id).lock().all()
 		puts(locked_products.size())
+		puts(persist_product(tx, "Created by helper"))
 		product.id
 	end
 end
@@ -319,6 +325,7 @@ end
 	for _, expected := range []string{
 		"func CreateProduct(__trbScope trbcontext.Context) __trb_result.Result[int, orm.DbError]", "orm.TrbOrmBeginTransaction(__trbScope)",
 		"TrbOrmProductUsing(tx)", "TrbOrmProductCreateScoped(products", "defer func()",
+		"PersistProduct(__trbScope, tx, \"Created by helper\")",
 		"TrbOrmProductLock(TrbOrmProductExecutionScope(TrbOrmProductQueryWhere(products", "trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)",
 		"orm.TrbOrmBeginNestedTransaction(tx)", "TrbOrmProductUsing(nested)",
 		".Rollback()", ".Commit()", "orm.DbResultErrTag", "_ = __trb_unused_5f726573756c74",
