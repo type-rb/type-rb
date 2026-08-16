@@ -98,6 +98,9 @@ trb run -- first-argument
 
 # Explicitly choose a source file for a one-off run.
 trb run test.trb
+
+# Retain the exact generated target tree for inspection.
+trb run --keep-generated
 ```
 
 `trb check` is the canonical validation command. It parses, resolves, type
@@ -115,6 +118,14 @@ and `TRB5xxx` for backend generation.
 A runnable project defines exactly one top-level `def main()`. `trb run`
 compiles before every execution, so a separate build step is unnecessary.
 Library projects may omit `main`, but cannot be run directly.
+
+`trb run` writes target source below `.trb/run` and removes it after the child
+process exits. TypeRB forwards interrupts and termination signals to the child
+process group, waits for it to stop, and then removes the workspace. A lease
+protects every active workspace; the next run removes abandoned workspaces
+left by a forced process or system shutdown without disturbing concurrent
+runs. `--keep-generated` moves the completed target tree to `.trb/generated`
+and prints its path instead of deleting it.
 
 TypeScript projects execute with the configured `typescript.runtime`. Node is
 the compatibility default; Bun projects use `bun run`. Browser projects are
@@ -151,6 +162,29 @@ Output names follow the project mode:
 - `main.go.trb` becomes `main.go`, without duplicating an existing target
   suffix.
 
+## Clean
+
+```sh
+# Remove abandoned run and test workspaces. Active workspaces are preserved.
+trb clean
+
+# Also remove output retained by trb run --keep-generated.
+trb clean --generated
+
+# Also remove the configured outDir.
+trb clean --build
+
+# Also remove downloaded TypeRB packages and the native declaration index.
+trb clean --cache
+```
+
+Clean options may be combined. The default command removes only compiler-owned
+temporary run and test workspaces whose leases are inactive. `--generated`
+removes `.trb/generated`; `--build` removes the configured project output after
+the same project-boundary safety check used by a full build; and `--cache`
+removes `.trb/packages` plus `.trb/native-types.json`. A later `trb install`
+restores those caches. Cleaning never removes `.trb/repl_history`.
+
 ## Test
 
 ```sh
@@ -176,6 +210,10 @@ test build. The selected target backend executes each case, preserves `.trb`
 assertion locations, and returns a nonzero status when any case fails.
 `--compile` produces a Go test executable instead of running it; `--debug`
 retains source mappings for debuggers such as Delve.
+
+The temporary target tree lives below `.trb/test`, uses the same process lease
+and signal handling as `trb run`, and is recovered by the next test or
+`trb clean` after an unclean shutdown.
 
 Tests use the explicit portable API from `trb/std/test`; see the
 [testing guide](guides/testing.md). TypeScript browser projects report that a
