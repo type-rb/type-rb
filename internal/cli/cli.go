@@ -555,22 +555,47 @@ func (c *CLI) runBuild(args []string) error {
 	copyFlag := flags.String("copy", "", "override config copyFiles (true or false)")
 	compile := flags.Bool("compile", false, "produce an executable with the target toolchain")
 	debug := flags.Bool("debug", false, "include source-level debugger information in an executable")
-	outfile := flags.String("outfile", "", "executable output path relative to the project root")
+	outfile := flags.String("outfile", "", "executable output path relative to the project or entry directory")
+	mode := flags.String("mode", "", "standalone executable mode (only go is supported)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	paths := flags.Args()
-	config, err := loadConfig(*configPath, firstOr(paths, "."))
-	if err != nil {
-		return err
-	}
 	kind := buildArtifactSource
 	if *compile {
 		kind = buildArtifactExecutable
 	}
+	var config *project.Config
+	var sourceGraph *fileRootSourceGraph
+	var err error
+	if kind == buildArtifactExecutable && len(paths) == 1 && filepath.Ext(paths[0]) == ".trb" {
+		filename, absoluteErr := filepath.Abs(paths[0])
+		if absoluteErr != nil {
+			return absoluteErr
+		}
+		var standalone bool
+		config, standalone, err = loadCommandConfig("build --compile", *configPath, filename, filename, *mode, "")
+		if err == nil && standalone {
+			sourceGraph, err = loadFileRootSourceGraph(filename, os.ReadFile)
+		}
+	} else {
+		if *mode != "" {
+			return errors.New("--mode requires --compile FILE.trb")
+		}
+		config, err = loadConfig(*configPath, firstOr(paths, "."))
+	}
+	if err != nil {
+		return err
+	}
 	if kind == buildArtifactExecutable {
 		if config.Mode != "go" {
-			return fmt.Errorf("--compile is supported only for mode go; project mode is %s", config.Mode)
+			return fmt.Errorf("--compile is supported only for mode go; selected mode is %s", config.Mode)
+		}
+		if sourceGraph != nil {
+			if *stdout || *copyFlag != "" || *outDirFlag != "" {
+				return errors.New("--compile cannot be combined with --stdout, --copy, or --out-dir")
+			}
+			return c.buildGoFileRootExecutable(config, sourceGraph, *outfile, *debug)
 		}
 		if len(paths) != 0 {
 			return errors.New("--compile builds the configured project and does not accept source paths")
@@ -767,28 +792,7 @@ func (c *CLI) buildGoExecutable(config *project.Config, outfile string, debug bo
 	if target == "" {
 		return errors.New("compiler did not produce the top-level main() artifact")
 	}
-	if info, statErr := os.Stat(output); statErr == nil && info.IsDir() {
-		return fmt.Errorf("--outfile must name a file; %s is a directory", output)
-	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return statErr
-	}
-	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
-		return err
-	}
-	arguments := []string{"build", "-mod=mod"}
-	if debug {
-		arguments = append(arguments, "-gcflags=all=-N -l")
-	}
-	arguments = append(arguments, "-o", output, ".")
-	command := exec.Command("go", arguments...)
-	command.Dir = filepath.Dir(target)
-	command.Stdout = c.Stdout
-	command.Stderr = c.Stderr
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("go build: %w", err)
-	}
-	fmt.Fprintf(c.Stdout, "executable -> %s\n", output)
-	return nil
+	return c.buildGoTarget(target, output, debug)
 }
 
 func executableOutputPath(config *project.Config, outfile string) (string, error) {
@@ -2454,6 +2458,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb test [--filter TEXT] [--file FILE] [--reporter human|json] [--compile [--debug] [--outfile FILE]] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE]")
+	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE] [--mode go] FILE.trb")
 	fmt.Fprintln(c.Stdout, "  trb run [--keep-generated] [--mode MODE] [--runtime RUNTIME] [FILE.trb] [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb FILE.trb [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb clean [--build] [--cache] [--generated] [--config trbconfig.jsonc]")

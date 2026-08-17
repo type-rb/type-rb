@@ -74,6 +74,12 @@
 				"icon": "$(play)"
 			},
 			{
+				"command": "typerb.debugFile",
+				"title": "Debug File",
+				"category": "TypeRB",
+				"icon": "$(debug-alt)"
+			},
+			{
 				"command": "typerb.runTest",
 				"title": "Run Test",
 				"category": "TypeRB",

@@ -92,6 +92,10 @@ trb build --compile --outfile bin/api
 # Include TypeRB source locations and unoptimized Go debug information.
 trb build --compile --debug --outfile .trb/debug/api
 
+# Build a config-free Go file-root program and its explicit imports.
+trb build --compile report.trb
+trb build --compile --debug --outfile /tmp/report-debug report.trb
+
 # Build in a temporary directory and run the project's main().
 trb run
 trb run -- first-argument
@@ -159,9 +163,11 @@ builds copy non-`.trb` files by default, producing a runnable project tree. Use
 In Go mode, `trb build --compile` generates Go source in a temporary directory,
 invokes `go build`, and keeps only the executable. The default output is
 `bin/<project-name>` below the project root. A relative `--outfile` is also
-resolved from the project root. `--compile` builds the complete configured
-project, requires a top-level `main()`, and cannot be combined with source
-paths, `--check`, `--stdout`, `--copy`, or `--out-dir`.
+resolved from the project root. With one config-free `.trb` path, `--compile`
+builds that file-root program and its explicit import closure; its default
+output is `<entry-directory>/bin/<source-stem>`, and a relative `--outfile` is
+resolved from the entry directory. Both forms require a top-level `main()` and
+cannot be combined with `--stdout`, `--copy`, or `--out-dir`.
 
 `--debug` is available with `--compile` in Go mode. It disables Go compiler
 optimizations and records the original `.trb` paths and lines for source
@@ -169,10 +175,11 @@ debuggers such as Delve. The VS Code extension prepares this executable
 automatically when starting a Go debug session.
 
 Ruby and TypeScript executable packaging is not implemented. `--compile`
-reports an unsupported-mode error for those projects. The Go executable
-contains compiled code and linked dependencies, but TypeRB does not embed
-application files, run schema-management commands, or remove system-library
-requirements introduced by a dependency.
+reports an unsupported-mode error for configured projects and file-root
+programs in those modes. The Go executable contains compiled code and linked
+dependencies, but TypeRB does not embed application files, run
+schema-management commands, or remove system-library requirements introduced
+by a dependency.
 
 Output names follow the project mode:
 
@@ -366,6 +373,9 @@ starts `trb run` for the owning project or file through Visual Studio Code's
 Run and Debug lifecycle and changes from `▶ Run` to `↻ Restart` while that
 program is active. Imported files share live editor overlays with every open
 standalone entry that depends on them. Output appears in the Debug Console.
+Go-mode standalone entries also support source debugging; the extension builds
+a private executable for each debug session and removes it when the session
+ends.
 
 ## Database schema
 

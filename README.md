@@ -70,7 +70,15 @@ trb run --mode typescript --runtime bun hello.trb
 When a configuration exists above the file, TypeRB follows that project
 instead. Standalone execution follows the selected file's explicit local
 imports without compiling unrelated siblings and leaves no generated files
-beside it.
+beside it. A config-free Go entry can also be built for distribution or source
+debugging:
+
+```sh
+trb build --compile --debug --outfile ./hello-debug hello.trb
+```
+
+Inside a configured project, omit the file argument and use
+`trb build --compile` to build the project entrypoint.
 
 ## Create a project
 

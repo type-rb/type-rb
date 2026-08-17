@@ -50,6 +50,18 @@ function resolveRunOptions(settings, workspaceRoot, programArgs = []) {
 	return { command, args };
 }
 
+function resolveStandaloneDebugBuildOptions(settings, workspaceRoot, outfile) {
+	const command = resolveFromWorkspace(String(settings.path ?? "").trim() || "trb", workspaceRoot);
+	const file = resolveFileFromWorkspace(String(settings.file ?? "").trim(), workspaceRoot);
+	if (file === "") {
+		throw new TypeError("A standalone TypeRB file is required for a debug build");
+	}
+	return {
+		command,
+		args: ["build", "--compile", "--debug", "--outfile", outfile, file]
+	};
+}
+
 function appendStandaloneOptions(args, settings) {
 	const mode = String(settings.mode ?? "go").trim() || "go";
 	args.push("--mode", mode);
@@ -63,4 +75,4 @@ function runCodeLensTitle(running) {
 	return running ? "↻ Restart" : "▶ Run";
 }
 
-module.exports = { resolveRunOptions, resolveServerOptions, runCodeLensTitle };
+module.exports = { resolveRunOptions, resolveServerOptions, resolveStandaloneDebugBuildOptions, runCodeLensTitle };

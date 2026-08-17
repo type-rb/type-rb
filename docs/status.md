@@ -109,7 +109,8 @@ outside configured projects receive isolated file-root language-server
 sessions that follow explicit local imports and editor overlays without
 including unrelated siblings. Local Extension Development Host tests exercise
 standalone language services and execution against current Stable and Insiders
-builds without a Marketplace install. Command details belong in the
+builds without a Marketplace install. Focused unit tests cover private Go debug
+artifact creation and cleanup. Command details belong in the
 [CLI reference](cli.md).
 
 The early official `trb/web` package discovers file-based routes at compile
@@ -357,7 +358,8 @@ sessions with configurable Go, Ruby, or TypeScript mode. Each session follows
 the selected entry's explicit local import closure and rebuilds it from saved
 files and unsaved editor overlays. Its top-level `main()` CodeLens runs the
 file-root program through the same Debug Adapter Protocol process lifecycle
-used by projects.
+used by projects. A Go-mode standalone entry can also build a private,
+session-scoped executable for source debugging through Delve.
 Canonical type-name diagnostics carry structured fixes, so editors can replace
 aliases such as `Int` with `Integer` without reconstructing source text.
 Top-level `main()` declarations expose a compiler-owned run CodeLens in

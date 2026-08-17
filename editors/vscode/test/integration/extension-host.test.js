@@ -1,7 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { readFile, rm } = require("node:fs/promises");
+const { access, readFile, rm } = require("node:fs/promises");
+const { spawnSync } = require("node:child_process");
 const path = require("node:path");
 const vscode = require("vscode");
 
@@ -73,6 +74,8 @@ suite("TypeRB Extension Host", () => {
 		);
 		assert.ok(hovers?.length > 0, "the standalone LSP should provide checked hover information");
 		assert.deepEqual(vscode.languages.getDiagnostics(siblingURI), [], "a sibling file must not enter the standalone session");
+		const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", sourceURI, 10);
+		assert.ok(lenses?.some((lens) => lens.command?.command === "typerb.debugFile"), "a Go standalone entry should offer Debug File");
 	});
 
 	test("hands an imported helper from its graph owner to an exact feature client", async () => {
@@ -309,6 +312,51 @@ end
 			await replaceDocument(document, originalSource);
 			await document.save();
 		}
+	});
+
+	test("debugs the standalone file with a session-private executable", async function() {
+		if (spawnSync("dlv", ["version"], { stdio: "ignore" }).status !== 0) {
+			this.skip();
+			return;
+		}
+		const started = eventPromise(
+			vscode.debug.onDidStartDebugSession,
+			(session) => session.type === "typerb" && session.configuration.standaloneDebugBuild === true,
+			"standalone source debug session start"
+		);
+		const terminated = eventPromise(
+			vscode.debug.onDidTerminateDebugSession,
+			(session) => session.type === "typerb" && session.configuration.standaloneDebugBuild === true,
+			"standalone source debug session termination",
+			30000
+		);
+		await vscode.commands.executeCommand("typerb.debugFile", sourceURI.toString());
+		const session = await started;
+		const program = session.configuration.program;
+		assert.equal(typeof program, "string");
+		await waitFor(
+			async () => {
+				try {
+					await access(program);
+					return true;
+				} catch {
+					return false;
+				}
+			},
+			"standalone debug executable",
+			30000
+		);
+		assert.notEqual(path.dirname(program), workspaceRoot);
+		assert.ok(path.basename(path.dirname(program)).startsWith("typerb-vscode-debug-"));
+		await terminated;
+		await waitFor(async () => {
+			try {
+				await access(path.dirname(program));
+				return false;
+			} catch (error) {
+				return error.code === "ENOENT";
+			}
+		}, "standalone debug artifact cleanup");
 	});
 
 });
