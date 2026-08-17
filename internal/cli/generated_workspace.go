@@ -76,6 +76,27 @@ func createGeneratedWorkspace(projectRoot, kind string) (*generatedWorkspace, er
 	return workspace, nil
 }
 
+func createStandaloneGeneratedWorkspace(projectRoot, kind string) (*generatedWorkspace, error) {
+	if kind != "run" {
+		return nil, fmt.Errorf("unsupported standalone generated workspace kind %q", kind)
+	}
+	root, err := os.MkdirTemp("", "trb-standalone-run-*")
+	if err != nil {
+		return nil, err
+	}
+	workspace := &generatedWorkspace{projectRoot: projectRoot, kind: kind, path: root}
+	metadata := generatedWorkspaceMetadata{
+		FormatVersion: generatedWorkspaceFormatVersion,
+		Kind:          kind,
+		PID:           os.Getpid(),
+		CreatedAt:     time.Now().UTC(),
+	}
+	if err := writeGeneratedWorkspaceMetadata(root, metadata); err != nil {
+		return nil, errors.Join(err, os.RemoveAll(root))
+	}
+	return workspace, nil
+}
+
 func (w *generatedWorkspace) Path() string { return w.path }
 
 func (w *generatedWorkspace) Keep() { w.retain = true }

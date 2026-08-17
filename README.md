@@ -58,6 +58,19 @@ trb repl --mode ruby
 trb repl --mode typescript
 ```
 
+Run a single file without creating `trbconfig.jsonc`. Standalone execution uses
+Go by default; select Ruby or TypeScript explicitly when needed:
+
+```sh
+trb hello.trb
+trb run --mode ruby hello.trb
+trb run --mode typescript --runtime bun hello.trb
+```
+
+When a configuration exists above the file, TypeRB follows that project
+instead. Standalone execution compiles only the selected file and leaves no
+generated files beside it.
+
 ## Create a project
 
 Create and run a Go project:

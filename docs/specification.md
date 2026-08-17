@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.2
 
-Last updated: 2026-08-15
+Last updated: 2026-08-17
 
 ## 1. Language Goals
 
@@ -19,7 +19,10 @@ Design principles:
 ## 2. Project Target Modes
 
 A project declares exactly one output mode in `trbconfig.jsonc`: `go`, `ruby`,
-or `typescript`. Source files do not contain mode declarations.
+or `typescript`. Source files do not contain mode declarations. A standalone
+CLI or editor session without a discoverable project configuration may select
+the same mode as session metadata; Go is the default. This selection does not
+create a fourth configuration source or change the source language.
 
 Mode selection controls transpilation output and target package/toolchain
 integration. The concrete manifest and toolchain settings belong to the
@@ -409,6 +412,8 @@ switches.
 ### 3.8 Program Entry
 
 - A runnable project defines exactly one top-level `def main()`.
+- A standalone executable file also defines one top-level `def main()` and is
+  compiled as the complete program rather than discovering sibling files.
 - `main` is a language convention and is not configurable in
   `trbconfig.jsonc`.
 - Projects intended only as libraries may omit `main`.

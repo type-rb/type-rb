@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-14
+Last updated: 2026-08-17
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -12,6 +12,12 @@ output. Projects have deterministic formatting, package configuration,
 project-wide checking, source generation, temporary build-and-run, and Go
 executable compilation. Target-specific behavior remains behind explicit
 `trb/platform/<mode>/*` imports.
+
+The CLI can also run one self-contained `.trb` file without creating project
+configuration. It defaults to Go, can explicitly select Ruby or TypeScript,
+and isolates generated target source in an operating-system temporary
+directory. A discoverable `trbconfig.jsonc` always restores project-wide
+compilation and owns mode and runtime selection.
 
 The initial distributed package system resolves TypeRB source directly from
 Git repositories or explicit local paths. Short imports default to GitHub but
