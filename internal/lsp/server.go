@@ -30,16 +30,22 @@ import (
 
 type UnitResolver func(filename string, source []byte) (compiler.SourceUnit, error)
 
+// WorkspaceResolver rebuilds a complete workspace snapshot. Open document
+// contents are keyed by clean absolute filenames and take precedence over
+// filesystem contents when the adapter loads the snapshot.
+type WorkspaceResolver func(overlays map[string][]byte) ([]compiler.SourceUnit, error)
+
 type Options struct {
-	Mode            string
-	Version         string
-	Units           []compiler.SourceUnit
-	CompilerOptions compiler.Options
-	ExcludedRoots   []string
-	IncludedFiles   []string
-	ResolveUnit     UnitResolver
-	Input           io.Reader
-	Output          io.Writer
+	Mode             string
+	Version          string
+	Units            []compiler.SourceUnit
+	CompilerOptions  compiler.Options
+	ExcludedRoots    []string
+	IncludedFiles    []string
+	ResolveUnit      UnitResolver
+	ResolveWorkspace WorkspaceResolver
+	Input            io.Reader
+	Output           io.Writer
 }
 
 type document struct {
@@ -54,11 +60,13 @@ type Server struct {
 	stream           *rpcStream
 	compiler         *compilerservice.Service
 	resolveUnit      UnitResolver
+	resolveWorkspace WorkspaceResolver
 	sourceRoot       string
 	excludedRoots    []string
 	includedFiles    map[string]bool
 	documents        map[string]document
 	base             map[string]compiler.SourceUnit
+	fileRootFiles    map[string]bool
 	published        map[string]bool
 	snapshot         compilerservice.Snapshot
 	runSupported     bool
@@ -99,11 +107,23 @@ func New(options Options) *Server {
 		mode: options.Mode, version: options.Version,
 		stream:   newRPCStream(options.Input, options.Output),
 		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit,
-		sourceRoot: sourceRoot, excludedRoots: excludedRoots, includedFiles: includedFiles,
-		documents: map[string]document{}, base: base, published: map[string]bool{},
+		resolveWorkspace: options.ResolveWorkspace,
+		sourceRoot:       sourceRoot, excludedRoots: excludedRoots, includedFiles: includedFiles,
+		documents: map[string]document{}, base: base, fileRootFiles: initialFileRootFiles(base, options.ResolveWorkspace != nil), published: map[string]bool{},
 		runSupported:     options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
 		importCandidates: languageservice.StandardImportCandidates(options.Mode),
 	}
+}
+
+func initialFileRootFiles(base map[string]compiler.SourceUnit, dynamic bool) map[string]bool {
+	if !dynamic {
+		return nil
+	}
+	files := make(map[string]bool, len(base))
+	for path := range base {
+		files[path] = true
+	}
+	return files
 }
 
 func (s *Server) Run() error {
@@ -130,7 +150,7 @@ func (s *Server) handle(request message) (bool, error) {
 	case "initialize":
 		return false, s.stream.write(success(request.ID, initializeResult{
 			Capabilities: serverCapabilities{
-				TextDocumentSync:          textDocumentSyncIncremental,
+				TextDocumentSync:          textDocumentSyncOptions{OpenClose: true, Change: textDocumentSyncIncremental, Save: true},
 				CompletionProvider:        completionOptions{TriggerCharacters: []string{".", ":"}},
 				HoverProvider:             true,
 				SignatureHelpProvider:     signatureOptions{TriggerCharacters: []string{"(", ","}},
@@ -162,6 +182,8 @@ func (s *Server) handle(request message) (bool, error) {
 			return false, err
 		}
 		return false, s.changeWorkspaceFiles(params)
+	case "typerb/fileRootFiles":
+		return false, s.stream.write(success(request.ID, s.currentFileRootFiles()))
 	case "shutdown":
 		return false, s.stream.write(success(request.ID, nil))
 	case "exit":
@@ -178,6 +200,12 @@ func (s *Server) handle(request message) (bool, error) {
 			return false, err
 		}
 		return false, s.change(params)
+	case "textDocument/didSave":
+		params, err := decodeParams[didSaveParams](request.Params)
+		if err != nil {
+			return false, err
+		}
+		return false, s.save(params)
 	case "textDocument/didClose":
 		params, err := decodeParams[didCloseParams](request.Params)
 		if err != nil {
@@ -244,7 +272,7 @@ func (s *Server) codeLenses(request message) error {
 	items := languageservice.RunnableDeclarations(string(document.source))
 	result := make([]codeLens, 0, len(items))
 	for _, item := range items {
-		if item.Kind != languageservice.RunnableDeclarationMain {
+		if item.Kind != languageservice.RunnableDeclarationMain || s.resolveWorkspace != nil && !s.includedFiles[path] {
 			continue
 		}
 		result = append(result, codeLens{
@@ -547,6 +575,9 @@ func (s *Server) open(item textDocumentItem) error {
 		return s.showError(err)
 	}
 	s.documents[path] = document{unit: unit, source: []byte(item.Text), version: item.Version}
+	if s.resolveWorkspace != nil {
+		return s.refreshFileRootWorkspace()
+	}
 	s.compiler.SetDocument(unit)
 	return s.publish()
 }
@@ -580,8 +611,37 @@ func (s *Server) change(params didChangeParams) error {
 		return s.showError(err)
 	}
 	s.documents[path] = document{unit: unit, source: source, version: params.TextDocument.Version}
+	if s.resolveWorkspace != nil {
+		return s.refreshFileRootWorkspace()
+	}
 	s.compiler.SetDocument(unit)
 	return s.publish()
+}
+
+func (s *Server) save(params didSaveParams) error {
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return err
+	}
+	if !s.workspaceSourcePath(path) {
+		return nil
+	}
+	if current, exists := s.documents[path]; exists && params.Text != nil {
+		source := []byte(*params.Text)
+		unit, err := s.unit(path, source)
+		if err != nil {
+			return s.showError(err)
+		}
+		s.documents[path] = document{unit: unit, source: source, version: current.version}
+		if s.resolveWorkspace == nil {
+			s.compiler.SetDocument(unit)
+			return s.publish()
+		}
+	}
+	if s.resolveWorkspace != nil {
+		return s.refreshFileRootWorkspace()
+	}
+	return nil
 }
 
 func applyContentChanges(source []byte, changes []contentChange) ([]byte, error) {
@@ -620,11 +680,30 @@ func (s *Server) close(uri string) error {
 		return nil
 	}
 	delete(s.documents, path)
+	if s.resolveWorkspace != nil {
+		return s.refreshFileRootWorkspace()
+	}
 	s.compiler.CloseDocument(path)
 	return s.publish()
 }
 
 func (s *Server) changeWorkspaceFiles(params didChangeWatchedFilesParams) error {
+	if s.resolveWorkspace != nil {
+		changed := false
+		for _, event := range params.Changes {
+			path, err := pathFromURI(event.URI)
+			if err != nil {
+				return s.showError(err)
+			}
+			if s.workspaceSourcePath(path) {
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+		return s.refreshFileRootWorkspace()
+	}
 	changed := false
 	for _, event := range params.Changes {
 		path, err := pathFromURI(event.URI)
@@ -668,7 +747,7 @@ func (s *Server) changeWorkspaceFiles(params didChangeWatchedFilesParams) error 
 
 func (s *Server) workspaceSourcePath(path string) bool {
 	path = cleanPath(path)
-	if len(s.includedFiles) > 0 && !s.includedFiles[path] {
+	if s.resolveWorkspace == nil && len(s.includedFiles) > 0 && !s.includedFiles[path] {
 		return false
 	}
 	for _, root := range s.excludedRoots {
@@ -680,6 +759,69 @@ func (s *Server) workspaceSourcePath(path string) bool {
 		return true
 	}
 	return pathWithin(s.sourceRoot, path)
+}
+
+func (s *Server) refreshFileRootWorkspace() error {
+	overlays := make(map[string][]byte, len(s.documents))
+	for path, current := range s.documents {
+		overlays[path] = append([]byte(nil), current.source...)
+	}
+	units, err := s.resolveWorkspace(overlays)
+	if err != nil {
+		return s.showError(err)
+	}
+	nextBase := make(map[string]compiler.SourceUnit, len(units))
+	nextFiles := make(map[string]bool, len(units))
+	for _, unit := range units {
+		unit.Filename = cleanPath(unit.Filename)
+		unit.Source = append([]byte(nil), unit.Source...)
+		nextBase[unit.Filename] = unit
+		nextFiles[unit.Filename] = true
+	}
+	filesChanged := !equalPathSets(s.fileRootFiles, nextFiles)
+	s.base = nextBase
+	s.fileRootFiles = nextFiles
+	for path, current := range s.documents {
+		if unit, exists := nextBase[path]; exists {
+			unit.Source = append([]byte(nil), current.source...)
+			current.unit = unit
+			s.documents[path] = current
+		}
+	}
+	// Dynamic sessions keep editor buffers in Server.documents only. Feeding
+	// them to Service.SetDocument would keep an open helper in compilation
+	// after the entry removes its import.
+	s.compiler.ReplaceWorkspaceDocuments(units)
+	if filesChanged {
+		if err := s.stream.write(notification{
+			JSONRPC: "2.0", Method: "typerb/fileRootFilesChanged",
+			Params: fileRootFilesChangedParams{Files: s.currentFileRootFiles()},
+		}); err != nil {
+			return err
+		}
+	}
+	return s.publish()
+}
+
+func (s *Server) currentFileRootFiles() []string {
+	files := make([]string, 0, len(s.fileRootFiles))
+	for path := range s.fileRootFiles {
+		files = append(files, path)
+	}
+	sort.Strings(files)
+	return files
+}
+
+func equalPathSets(left, right map[string]bool) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for path := range left {
+		if !right[path] {
+			return false
+		}
+	}
+	return true
 }
 
 func pathWithin(root, path string) bool {
@@ -1099,7 +1241,9 @@ func (s *Server) publish() error {
 		targets[path] = true
 	}
 	for path := range s.documents {
-		targets[path] = true
+		if s.resolveWorkspace == nil || s.fileRootFiles[path] {
+			targets[path] = true
+		}
 	}
 	paths := make([]string, 0, len(targets))
 	for path := range targets {
@@ -1168,6 +1312,9 @@ func (s *Server) unit(path string, source []byte) (compiler.SourceUnit, error) {
 
 func (s *Server) document(path string) (document, bool) {
 	path = cleanPath(path)
+	if s.resolveWorkspace != nil && !s.fileRootFiles[path] {
+		return document{}, false
+	}
 	if current, exists := s.documents[path]; exists {
 		return current, true
 	}
@@ -1189,7 +1336,9 @@ func (s *Server) semanticDocuments() []languageservice.SemanticDocument {
 		paths[path] = true
 	}
 	for path := range s.documents {
-		paths[path] = true
+		if s.resolveWorkspace == nil || s.fileRootFiles[path] {
+			paths[path] = true
+		}
 	}
 	ordered := make([]string, 0, len(paths))
 	for path := range paths {

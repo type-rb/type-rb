@@ -43,6 +43,11 @@ type didChangeParams struct {
 	ContentChanges []contentChange                 `json:"contentChanges"`
 }
 
+type didSaveParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Text         *string                `json:"text,omitempty"`
+}
+
 type didCloseParams struct {
 	TextDocument textDocumentIdentifier `json:"textDocument"`
 }
@@ -54,6 +59,10 @@ type fileEvent struct {
 
 type didChangeWatchedFilesParams struct {
 	Changes []fileEvent `json:"changes"`
+}
+
+type fileRootFilesChangedParams struct {
+	Files []string `json:"files"`
 }
 
 type documentPositionParams struct {
@@ -246,23 +255,29 @@ type serverInfo struct {
 }
 
 type serverCapabilities struct {
-	TextDocumentSync           int                   `json:"textDocumentSync"`
-	CompletionProvider         completionOptions     `json:"completionProvider"`
-	HoverProvider              bool                  `json:"hoverProvider"`
-	SignatureHelpProvider      signatureOptions      `json:"signatureHelpProvider"`
-	DefinitionProvider         bool                  `json:"definitionProvider"`
-	ImplementationProvider     bool                  `json:"implementationProvider"`
-	ReferencesProvider         bool                  `json:"referencesProvider"`
-	DocumentHighlightProvider  bool                  `json:"documentHighlightProvider"`
-	SelectionRangeProvider     bool                  `json:"selectionRangeProvider"`
-	RenameProvider             renameOptions         `json:"renameProvider"`
-	DocumentSymbolProvider     bool                  `json:"documentSymbolProvider"`
-	FoldingRangeProvider       bool                  `json:"foldingRangeProvider"`
-	WorkspaceSymbolProvider    bool                  `json:"workspaceSymbolProvider"`
-	SemanticTokensProvider     semanticTokensOptions `json:"semanticTokensProvider"`
-	DocumentFormattingProvider bool                  `json:"documentFormattingProvider"`
-	CodeActionProvider         bool                  `json:"codeActionProvider"`
-	CodeLensProvider           *codeLensOptions      `json:"codeLensProvider"`
+	TextDocumentSync           textDocumentSyncOptions `json:"textDocumentSync"`
+	CompletionProvider         completionOptions       `json:"completionProvider"`
+	HoverProvider              bool                    `json:"hoverProvider"`
+	SignatureHelpProvider      signatureOptions        `json:"signatureHelpProvider"`
+	DefinitionProvider         bool                    `json:"definitionProvider"`
+	ImplementationProvider     bool                    `json:"implementationProvider"`
+	ReferencesProvider         bool                    `json:"referencesProvider"`
+	DocumentHighlightProvider  bool                    `json:"documentHighlightProvider"`
+	SelectionRangeProvider     bool                    `json:"selectionRangeProvider"`
+	RenameProvider             renameOptions           `json:"renameProvider"`
+	DocumentSymbolProvider     bool                    `json:"documentSymbolProvider"`
+	FoldingRangeProvider       bool                    `json:"foldingRangeProvider"`
+	WorkspaceSymbolProvider    bool                    `json:"workspaceSymbolProvider"`
+	SemanticTokensProvider     semanticTokensOptions   `json:"semanticTokensProvider"`
+	DocumentFormattingProvider bool                    `json:"documentFormattingProvider"`
+	CodeActionProvider         bool                    `json:"codeActionProvider"`
+	CodeLensProvider           *codeLensOptions        `json:"codeLensProvider"`
+}
+
+type textDocumentSyncOptions struct {
+	OpenClose bool `json:"openClose"`
+	Change    int  `json:"change"`
+	Save      bool `json:"save"`
 }
 
 type completionOptions struct {

@@ -114,6 +114,25 @@ func (s *Service) SetWorkspaceDocument(unit compiler.SourceUnit) {
 	s.snapshot = nil
 }
 
+// ReplaceWorkspaceDocuments atomically replaces the on-disk workspace input.
+// Open document overlays are preserved and continue to take precedence over
+// the replacement units.
+func (s *Service) ReplaceWorkspaceDocuments(units []compiler.SourceUnit) {
+	next := cloneUnits(units)
+	for index := range next {
+		next[index].Filename = cleanPath(next[index].Filename)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if equalUnits(s.base, next) {
+		return
+	}
+	s.base = next
+	s.generation++
+	s.snapshot = nil
+}
+
 // RemoveWorkspaceDocument removes an on-disk project input while preserving an
 // open editor overlay until the editor closes it.
 func (s *Service) RemoveWorkspaceDocument(filename string) {
@@ -259,6 +278,20 @@ func equalUnit(left, right compiler.SourceUnit) bool {
 	return left.Filename == right.Filename && left.ModulePath == right.ModulePath && left.Package == right.Package &&
 		left.CompilerOwned == right.CompilerOwned && left.Official == right.Official && left.ExternalPackage == right.ExternalPackage &&
 		bytes.Equal(left.Source, right.Source)
+}
+
+func equalUnits(left, right []compiler.SourceUnit) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		previous := cloneUnit(left[index])
+		previous.Filename = cleanPath(previous.Filename)
+		if !equalUnit(previous, right[index]) {
+			return false
+		}
+	}
+	return true
 }
 
 func cleanPath(path string) string {

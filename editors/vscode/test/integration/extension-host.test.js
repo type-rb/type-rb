@@ -5,19 +5,22 @@ const { readFile, rm } = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
 
-const originalSource = `def greet(name: String): String
-\treturn "Hello, " + name
-end
+const originalSource = `import { greet } from "./helper.trb"
 
 def main()
 \tputs(greet("Extension Host"))
 \treturn
 end
 `;
+const originalHelper = `def greet(name: String): String
+\treturn "Hello, " + name
+end
+`;
 
 suite("TypeRB Extension Host", () => {
 	let document;
 	let extension;
+	let helperURI;
 	let sourceURI;
 	let siblingURI;
 	let workspaceRoot;
@@ -27,6 +30,7 @@ suite("TypeRB Extension Host", () => {
 		assert.ok(folder, "the standalone fixture workspace must be open");
 		workspaceRoot = folder.uri.fsPath;
 		sourceURI = vscode.Uri.file(path.join(workspaceRoot, "hello.trb"));
+		helperURI = vscode.Uri.file(path.join(workspaceRoot, "helper.trb"));
 		siblingURI = vscode.Uri.file(path.join(workspaceRoot, "sibling.trb"));
 		extension = vscode.extensions.getExtension("type-rb.typerb");
 		assert.ok(extension, "the local TypeRB development extension must be available");
@@ -65,10 +69,160 @@ suite("TypeRB Extension Host", () => {
 		const hovers = await vscode.commands.executeCommand(
 			"vscode.executeHoverProvider",
 			sourceURI,
-			new vscode.Position(5, 7)
+			new vscode.Position(3, 7)
 		);
 		assert.ok(hovers?.length > 0, "the standalone LSP should provide checked hover information");
 		assert.deepEqual(vscode.languages.getDiagnostics(siblingURI), [], "a sibling file must not enter the standalone session");
+	});
+
+	test("hands an imported helper from its graph owner to an exact feature client", async () => {
+		const invalidHelper = "def greet(name: String): String\n\treturn missing(name)\nend\ngre\n";
+		let helper;
+		await vscode.workspace.fs.writeFile(helperURI, Buffer.from(invalidHelper));
+		try {
+			await waitFor(
+				() => vscode.languages.getDiagnostics(helperURI).some((item) => item.severity === vscode.DiagnosticSeverity.Error),
+				"closed imported helper diagnostics"
+			);
+			helper = await vscode.workspace.openTextDocument(helperURI);
+			await waitFor(async () => {
+				const hovers = await vscode.commands.executeCommand(
+					"vscode.executeHoverProvider",
+					helperURI,
+					new vscode.Position(0, 5)
+				);
+				return hovers?.length > 0;
+			}, "exact helper hover provider");
+			const completions = await vscode.commands.executeCommand(
+				"vscode.executeCompletionItemProvider",
+				helperURI,
+				new vscode.Position(3, 3)
+			);
+			assert.ok(
+				completions?.items?.some((item) => item.label === "greet" || item.label?.label === "greet"),
+				"the exact helper client should provide completion"
+			);
+			const definitions = await vscode.commands.executeCommand(
+				"vscode.executeDefinitionProvider",
+				sourceURI,
+				new vscode.Position(3, 7)
+			);
+			assert.ok(definitions?.some((item) => item.uri.toString() === helperURI.toString()), "entry definition should resolve to its helper");
+			await waitFor(() => vscode.languages.getDiagnostics(helperURI).length > 0, "exact helper diagnostics");
+			const diagnostics = vscode.languages.getDiagnostics(helperURI);
+			assert.equal(new Set(diagnosticIdentities(diagnostics)).size, diagnostics.length, "diagnostic ownership handoff must not duplicate errors");
+			await replaceDocument(helper, originalHelper);
+			await waitFor(() => vscode.languages.getDiagnostics(helperURI).length === 0, "cleared exact helper diagnostics");
+			assert.equal(await helper.save(), true);
+		} finally {
+			if (helper === undefined) {
+				await vscode.workspace.fs.writeFile(helperURI, Buffer.from(originalHelper));
+			} else if (helper.getText() !== originalHelper || helper.isDirty) {
+				await replaceDocument(helper, originalHelper);
+				await helper.save();
+			}
+		}
+	});
+
+	test("hands closed-helper diagnostics to the remaining importing graph", async () => {
+		const firstURI = vscode.Uri.file(path.join(workspaceRoot, "handoff-first.trb"));
+		const secondURI = vscode.Uri.file(path.join(workspaceRoot, "handoff-second.trb"));
+		const sharedURI = vscode.Uri.file(path.join(workspaceRoot, "handoff-shared.trb"));
+		const importingSource = `import { shared_value } from "./handoff-shared.trb"
+
+def main()
+\tputs(shared_value())
+\treturn
+end
+`;
+		const simpleSource = "def main()\n\treturn\nend\n";
+		const missingImportSource = `import { absent } from "./handoff-missing.trb"
+
+def main()
+\tabsent()
+\treturn
+end
+`;
+		let first;
+		let second;
+		await vscode.workspace.fs.writeFile(firstURI, Buffer.from(importingSource));
+		await vscode.workspace.fs.writeFile(secondURI, Buffer.from(importingSource));
+		await vscode.workspace.fs.writeFile(sharedURI, Buffer.from("def shared_value(): MissingType\n\treturn missing\nend\n"));
+		try {
+			first = await vscode.workspace.openTextDocument(firstURI);
+			second = await vscode.workspace.openTextDocument(secondURI);
+			await waitFor(() => vscode.languages.getDiagnostics(sharedURI).length > 0, "shared helper diagnostics from the first graph");
+			await replaceDocument(first, missingImportSource);
+			await waitFor(() => vscode.languages.getDiagnostics(firstURI).length > 0, "first graph import error");
+			await replaceDocument(first, simpleSource);
+			await waitFor(() => vscode.languages.getDiagnostics(firstURI).length === 0, "first graph import removal");
+			await vscode.workspace.fs.writeFile(sharedURI, Buffer.from("def shared_value(): OtherMissingType\n\treturn other_missing\nend\n"));
+			await waitFor(
+				() => vscode.languages.getDiagnostics(sharedURI).some((item) => item.message.includes("OtherMissingType")),
+				"shared helper diagnostics from the remaining graph"
+			);
+			const diagnostics = vscode.languages.getDiagnostics(sharedURI);
+			assert.equal(new Set(diagnosticIdentities(diagnostics)).size, diagnostics.length, "graph ownership handoff must not duplicate errors");
+		} finally {
+			await closeDocumentAndSave(first);
+			await closeDocumentAndSave(second);
+			await Promise.all([
+				rm(firstURI.fsPath, { force: true }),
+				rm(secondURI.fsPath, { force: true }),
+				rm(sharedURI.fsPath, { force: true })
+			]);
+		}
+	});
+
+	test("discovers an imported helper from an open overlay after its file is removed", async () => {
+		const dynamicURI = vscode.Uri.file(path.join(workspaceRoot, "dynamic-helper.trb"));
+		const numberSource = "def dynamic_value(): Number\n\treturn 41\nend\n";
+		const stringSource = "def dynamic_value(): String\n\treturn \"overlay\"\nend\n";
+		const importingSource = `import { dynamic_value } from "./dynamic-helper.trb"
+
+def main()
+\tputs(dynamic_value() + 1)
+\treturn
+end
+`;
+		await vscode.workspace.fs.writeFile(dynamicURI, Buffer.from(numberSource));
+		const dynamic = await vscode.workspace.openTextDocument(dynamicURI);
+		await waitFor(async () => {
+			const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", dynamicURI);
+			return symbols?.some((symbol) => symbol.name === "dynamic_value");
+		}, "candidate helper standalone client");
+		await replaceDocument(dynamic, stringSource);
+		await vscode.workspace.fs.delete(dynamicURI);
+		try {
+			await replaceDocument(document, importingSource);
+			await waitFor(
+				() => vscode.languages.getDiagnostics(sourceURI).some((item) => item.severity === vscode.DiagnosticSeverity.Error),
+				"entry diagnostics from a missing-on-disk helper overlay"
+			);
+			await replaceDocument(dynamic, numberSource);
+			await waitFor(() => vscode.languages.getDiagnostics(sourceURI).length === 0, "entry diagnostics refreshed from helper overlay");
+			const baselineHelperDiagnostics = diagnosticIdentities(vscode.languages.getDiagnostics(dynamicURI));
+			await replaceDocument(dynamic, "def dynamic_value(): MissingType\n\treturn missing\nend\n");
+			await waitFor(
+				() => JSON.stringify(diagnosticIdentities(vscode.languages.getDiagnostics(dynamicURI))) !== JSON.stringify(baselineHelperDiagnostics),
+				"helper diagnostics from overlapping graphs"
+			);
+			const diagnostics = vscode.languages.getDiagnostics(dynamicURI);
+			const identities = diagnosticIdentities(diagnostics);
+			assert.equal(new Set(identities).size, diagnostics.length, "only the deterministic standalone owner should publish helper diagnostics");
+			await replaceDocument(dynamic, numberSource);
+			await waitFor(
+				() => JSON.stringify(diagnosticIdentities(vscode.languages.getDiagnostics(dynamicURI))) === JSON.stringify(baselineHelperDiagnostics),
+				"restored helper diagnostics from its owner"
+			);
+		} finally {
+			await replaceDocument(document, originalSource);
+			await vscode.workspace.fs.writeFile(dynamicURI, Buffer.from(numberSource));
+			await replaceDocument(dynamic, numberSource);
+			await dynamic.save();
+			await closeDocumentAndSave(dynamic);
+			await rm(dynamicURI.fsPath, { force: true });
+		}
 	});
 
 	test("publishes and clears diagnostics for unsaved standalone edits", async () => {
@@ -156,6 +310,7 @@ end
 			await document.save();
 		}
 	});
+
 });
 
 async function replaceDocument(document, source) {
@@ -163,6 +318,21 @@ async function replaceDocument(document, source) {
 	const lastLine = document.lineAt(document.lineCount - 1);
 	edit.replace(document.uri, new vscode.Range(new vscode.Position(0, 0), lastLine.range.end), source);
 	assert.equal(await vscode.workspace.applyEdit(edit), true);
+}
+
+async function closeDocumentAndSave(document) {
+	if (document === undefined || document.isClosed) return;
+	if (document.isDirty) {
+		await document.save();
+	}
+	await vscode.window.showTextDocument(document, { preview: false });
+	await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+}
+
+function diagnosticIdentities(diagnostics) {
+	return diagnostics
+		.map((item) => `${item.range.start.line}:${item.range.start.character}:${item.message}`)
+		.sort();
 }
 
 async function waitFor(predicate, description, timeout = 15000) {

@@ -15,8 +15,10 @@ logic. Project symbols and diagnostics also follow `.trb` files created,
 changed, or deleted outside the active editor. The client discovers nested
 `trbconfig.jsonc` files and gives each project an independent language-server
 session, including repositories that contain API and frontend applications in
-different target modes. The VS Code client owns the integrated-terminal run
-and restart lifecycle.
+different target modes. A config-free `.trb` entry receives a file-root session
+that follows its explicit local imports and shares unsaved helper buffers
+without compiling unrelated siblings. The VS Code client owns the Debug
+Adapter Protocol run, restart, and Debug Console lifecycle.
 
 Install [TypeRB from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=type-rb.typerb),
 or run:

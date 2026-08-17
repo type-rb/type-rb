@@ -114,6 +114,31 @@ func TestServiceTracksWorkspaceDocumentsBeneathOpenOverlays(t *testing.T) {
 	}
 }
 
+func TestServiceAtomicallyReplacesWorkspaceDocuments(t *testing.T) {
+	first := compiler.SourceUnit{
+		Filename: "first.trb", ModulePath: "first", Package: "main",
+		Source: []byte("def first(): Integer\n\treturn 1\nend\n"),
+	}
+	service := New([]compiler.SourceUnit{first}, compiler.Options{Mode: "go", GoModule: "example.com/service"})
+	initial := service.Analyze()
+
+	second := compiler.SourceUnit{
+		Filename: "second.trb", ModulePath: "second", Package: "main",
+		Source: []byte("def second(): Integer\n\treturn 2\nend\n"),
+	}
+	service.ReplaceWorkspaceDocuments([]compiler.SourceUnit{second})
+	replaced := service.Analyze()
+	if replaced.Version != initial.Version+1 || replaced.HasErrors() || len(replaced.Artifacts) != 1 || replaced.Artifacts[0].Filename != cleanPath(second.Filename) {
+		t.Fatalf("unexpected replaced snapshot: %#v", replaced)
+	}
+
+	service.ReplaceWorkspaceDocuments([]compiler.SourceUnit{second})
+	unchanged := service.Analyze()
+	if unchanged.Version != replaced.Version {
+		t.Fatalf("equal replacement advanced snapshot version from %d to %d", replaced.Version, unchanged.Version)
+	}
+}
+
 func hasCompletion(context languageservice.Context, name string) bool {
 	items := languageservice.Complete(languageservice.CompletionRequest{Source: name[:1], Cursor: 1, Mode: "go", Context: context})
 	for _, item := range items {

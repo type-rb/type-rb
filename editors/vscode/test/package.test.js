@@ -6,6 +6,7 @@ const path = require("node:path");
 const test = require("node:test");
 const { excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("../project-options");
 const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("../server-options");
+const { transitionStandaloneClient } = require("../standalone-client-state");
 
 const extensionRoot = path.resolve(__dirname, "..");
 const repositoryRoot = path.resolve(extensionRoot, "../..");
@@ -173,4 +174,19 @@ test("does not start language servers for copied build projects", () => {
 
 test("matches standalone filenames literally in language client selectors", () => {
 	assert.equal(literalGlobPattern("[slug] {draft}*.trb"), "[[]slug[]] [{]draft[}][*].trb");
+});
+
+test("replays manually forwarded helpers after a standalone language server restart", () => {
+	const project = {
+		clientStarted: false,
+		clientRunning: false,
+		forwardedDocuments: new Set()
+	};
+	assert.equal(transitionStandaloneClient(project, true), false, "initial startup is reconciled by activation");
+	project.forwardedDocuments.add("/workspace/helper.trb");
+	assert.equal(transitionStandaloneClient(project, false), false);
+	assert.deepEqual([...project.forwardedDocuments], []);
+	assert.equal(project.clientRunning, false);
+	assert.equal(transitionStandaloneClient(project, true), true, "a restarted client needs full didOpen replay");
+	assert.equal(project.clientRunning, true);
 });

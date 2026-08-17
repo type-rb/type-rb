@@ -37,8 +37,9 @@ names. Project diagnostics and symbols update when TypeRB files are created,
 changed, or deleted outside the active editor.
 
 An open `.trb` file that is not owned by a discovered project receives its own
-single-file language-server session. No `trbconfig.jsonc` is created, sibling
-files are not compiled, and Go is the default target mode.
+file-root language-server session. No `trbconfig.jsonc` is created. Explicitly
+imported local files participate in diagnostics and editor overlays, unrelated
+sibling files are not compiled, and Go is the default target mode.
 
 ## Requirements
 
