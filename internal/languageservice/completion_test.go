@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/nativepackage"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 const completionProgram = `class User
@@ -260,6 +261,55 @@ func TestCompletionUsesIndexedNativePackageContracts(t *testing.T) {
 	}
 	if item.InsertText != "identity" || item.Detail != "identity<T>(T): T" {
 		t.Fatalf("generic native package completion=%#v", item)
+	}
+}
+
+func TestCompletionInstantiatesGenericUnionAliasMembers(t *testing.T) {
+	typeParameter := types.FromName("TData")
+	named := func(name string, arguments ...types.Type) types.Type {
+		return types.Type{Kind: types.Named, Name: name, Args: arguments}
+	}
+	program := &ir.Program{Mode: "typescript", ModulePath: "app", Statements: []ir.Statement{
+		&ir.Record{Name: "Page", Body: []ir.Statement{
+			&ir.RecordField{Name: "total", Type: types.FromName("Integer")},
+		}},
+		&ir.Record{Name: "PendingResult", TypeParameters: []string{"TData"}, Body: []ir.Statement{
+			&ir.RecordField{Name: "status", Type: types.FromName(`"pending"`)},
+		}},
+		&ir.Record{Name: "SuccessResult", TypeParameters: []string{"TData"}, Body: []ir.Statement{
+			&ir.RecordField{Name: "status", Type: types.FromName(`"success"`)},
+			&ir.RecordField{Name: "data", Type: typeParameter},
+		}},
+		&ir.TypeAlias{
+			Name:           "QueryResult",
+			TypeParameters: []string{"TData"},
+			Target: types.UnionOf(
+				named("PendingResult", typeParameter),
+				named("SuccessResult", typeParameter),
+			),
+		},
+		&ir.Method{
+			Name:           "useQuery",
+			TypeParameters: []string{"TData"},
+			ReturnType:     named("QueryResult", typeParameter),
+		},
+	}}
+	service := languageservice.New("typescript")
+	service.Update([]*ir.Program{program}, "app")
+
+	bare := "query := useQuery<Page>()\nquery."
+	bareItems := service.Complete(bare, len(bare))
+	if _, ok := findCompletion(bareItems, "status"); !ok {
+		t.Fatalf("generic union completion labels=%v, want status", labels(bareItems))
+	}
+	if _, ok := findCompletion(bareItems, "data"); ok {
+		t.Fatalf("generic union completion labels=%v, data is not common to every alternative", labels(bareItems))
+	}
+
+	narrowed := "query := useQuery<Page>()\nquery.data."
+	narrowedItems := service.Complete(narrowed, len(narrowed))
+	if _, ok := findCompletion(narrowedItems, "total"); !ok {
+		t.Fatalf("instantiated nested member completion labels=%v, want total", labels(narrowedItems))
 	}
 }
 

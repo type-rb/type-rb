@@ -87,6 +87,9 @@ type Import struct {
 	SymbolTypes          map[string]types.Type
 	SymbolParameters     map[string][]types.Type
 	SymbolTypeParameters map[string][]string
+	// TypeContracts retain the structural declarations referenced by native
+	// package signatures so editor tooling can instantiate their members.
+	TypeContracts map[string]TypeContract
 	// GeneratedTypeSymbols are target-package type exports referenced only by
 	// imported declaration contracts. They are emitted as type-only imports but
 	// stay invisible to source name resolution and editor completion.
@@ -94,6 +97,24 @@ type Import struct {
 }
 
 func (*Import) irStatement() {}
+
+type TypeContract struct {
+	TypeParameters []string
+	AliasTarget    *types.Type
+	Members        map[string]MemberContract
+}
+
+type MemberContract struct {
+	Kind           string
+	Type           types.Type
+	Fails          types.Type
+	TypeParameters []string
+	Parameters     []types.Type
+	Required       int
+	Variadic       bool
+	Class          bool
+	Readonly       bool
+}
 
 type Class struct {
 	Base

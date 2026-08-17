@@ -1,0 +1,3 @@
+interface MessageRenderer
+	render(input: String): String
+end

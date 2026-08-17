@@ -18,50 +18,178 @@ import (
 // BuildContext indexes only declarations visible from modulePath. Other
 // project modules contribute names through explicit imports.
 func BuildContext(programs []*ir.Program, modulePath string) Context {
-	context := emptyContext()
+	if context, ok := BuildContexts(programs)[modulePath]; ok {
+		return context
+	}
+	return emptyContext()
+}
+
+// BuildContexts indexes project-wide type metadata once, then derives the
+// declarations visible from each module through its explicit imports.
+func BuildContexts(programs []*ir.Program) map[string]Context {
+	metadata := emptyContext()
 	programsByPath := make(map[string]*ir.Program, len(programs))
 	exportsByPath := make(map[string][]Symbol, len(programs))
-	var session *ir.Program
 	for _, program := range programs {
 		if program == nil {
 			continue
 		}
 		programsByPath[program.ModulePath] = program
-		exportsByPath[program.ModulePath] = collectSymbols(program.Statements, "", program.SourcePath, context.TypeMembers)
-		if program.ModulePath == modulePath {
-			session = program
-		}
+		exportsByPath[program.ModulePath] = collectSymbols(program.Statements, "", program.SourcePath, &metadata)
 	}
-	if session == nil {
-		return context
-	}
-	addDeclarationMembers(&context, session.Declarations)
-
-	visible := map[string]Symbol{}
-	for _, symbol := range exportsByPath[session.ModulePath] {
-		visible[symbol.Name] = symbol
-	}
-	for _, statement := range session.Statements {
-		imported, ok := statement.(*ir.Import)
-		if !ok || imported.Implicit {
+	for _, program := range programs {
+		if program == nil {
 			continue
 		}
-		addImportSymbols(visible, imported, programsByPath, exportsByPath)
+		addDeclarationMembers(&metadata, program.Declarations)
+		for _, statement := range program.Statements {
+			if imported, ok := statement.(*ir.Import); ok && !imported.Implicit {
+				addImportContracts(&metadata, imported)
+			}
+		}
 	}
-	visible["puts"] = Symbol{
-		Name:   "puts",
-		Kind:   CompletionFunction,
-		Detail: "puts(value: Any)",
-		Type:   types.FromName("Void"),
-		Call:   &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: Any"}}},
-	}
+	indexImplementations(programs, &metadata)
 
-	context.Symbols = make([]Symbol, 0, len(visible))
-	for _, symbol := range visible {
-		context.Symbols = append(context.Symbols, symbol)
+	result := make(map[string]Context, len(programsByPath))
+	for _, session := range programsByPath {
+		visible := map[string]Symbol{}
+		for _, symbol := range exportsByPath[session.ModulePath] {
+			visible[symbol.Name] = symbol
+		}
+		for _, statement := range session.Statements {
+			imported, ok := statement.(*ir.Import)
+			if !ok || imported.Implicit {
+				continue
+			}
+			addImportSymbols(visible, imported, programsByPath, exportsByPath)
+		}
+		visible["puts"] = Symbol{
+			Name:   "puts",
+			Kind:   CompletionFunction,
+			Detail: "puts(value: Any)",
+			Type:   types.FromName("Void"),
+			Call:   &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: Any"}}},
+		}
+
+		context := Context{
+			TypeMembers:     metadata.TypeMembers,
+			Types:           metadata.Types,
+			Implementations: metadata.Implementations,
+		}
+		context.Symbols = make([]Symbol, 0, len(visible))
+		for _, symbol := range visible {
+			context.Symbols = append(context.Symbols, symbol)
+		}
+		sortSymbols(context.Symbols)
+		result[session.ModulePath] = context
 	}
-	sortSymbols(context.Symbols)
-	return context
+	return result
+}
+
+type indexedInterface struct {
+	definition DefinitionLocation
+	methods    map[string]DefinitionLocation
+}
+
+type indexedImplementation struct {
+	definition DefinitionLocation
+	interfaces []types.Type
+	methods    map[string]DefinitionLocation
+}
+
+func indexImplementations(programs []*ir.Program, context *Context) {
+	if context == nil {
+		return
+	}
+	interfaces := map[string][]indexedInterface{}
+	implementations := []indexedImplementation{}
+	var visit func([]ir.Statement, string, string)
+	visit = func(statements []ir.Statement, owner, sourcePath string) {
+		if sourcePath == "" {
+			return
+		}
+		for _, statement := range statements {
+			switch node := statement.(type) {
+			case *ir.Interface:
+				qualified := qualify(owner, node.Name)
+				item := indexedInterface{
+					definition: *sourceDefinition(sourcePath, node.Name, node.SourceSpan()),
+					methods:    map[string]DefinitionLocation{},
+				}
+				for _, method := range node.Methods {
+					item.methods[method.Name] = *sourceDefinition(sourcePath, method.Name, method.SourceSpan())
+				}
+				interfaces[qualified] = append(interfaces[qualified], item)
+				if qualified != node.Name {
+					interfaces[node.Name] = append(interfaces[node.Name], item)
+				}
+			case *ir.Class:
+				qualified := qualify(owner, node.Name)
+				item := indexedImplementation{
+					definition: *sourceDefinition(sourcePath, node.Name, node.SourceSpan()),
+					interfaces: append([]types.Type(nil), node.Implements...),
+					methods:    map[string]DefinitionLocation{},
+				}
+				for _, member := range node.Body {
+					if method, ok := member.(*ir.Method); ok && !method.Class {
+						item.methods[method.Name] = *sourceDefinition(sourcePath, method.Name, method.SourceSpan())
+					}
+				}
+				implementations = append(implementations, item)
+				visitNestedDeclarations(node.Body, qualified, sourcePath, visit)
+			case *ir.Module:
+				visit(node.Body, qualify(owner, node.Name), sourcePath)
+			}
+		}
+	}
+	for _, program := range programs {
+		if program != nil {
+			visit(program.Statements, "", program.SourcePath)
+		}
+	}
+	for _, implementation := range implementations {
+		for _, implemented := range implementation.interfaces {
+			candidates := interfaces[implemented.Name]
+			if len(candidates) != 1 {
+				continue
+			}
+			contract := candidates[0]
+			appendImplementation(context, contract.definition.ID, implementation.definition)
+			for name, declaration := range contract.methods {
+				method, ok := implementation.methods[name]
+				if ok {
+					appendImplementation(context, declaration.ID, method)
+				}
+			}
+		}
+	}
+	for id := range context.Implementations {
+		sort.Slice(context.Implementations[id], func(left, right int) bool {
+			items := context.Implementations[id]
+			return items[left].Path < items[right].Path || items[left].Path == items[right].Path && items[left].Range.Start < items[right].Range.Start
+		})
+	}
+}
+
+func visitNestedDeclarations(statements []ir.Statement, owner, sourcePath string, visit func([]ir.Statement, string, string)) {
+	for _, statement := range statements {
+		switch statement.(type) {
+		case *ir.Class, *ir.Interface, *ir.Module:
+			visit([]ir.Statement{statement}, owner, sourcePath)
+		}
+	}
+}
+
+func appendImplementation(context *Context, id SymbolID, implementation DefinitionLocation) {
+	if id == "" || implementation.ID == "" {
+		return
+	}
+	for _, current := range context.Implementations[id] {
+		if current.ID == implementation.ID {
+			return
+		}
+	}
+	context.Implementations[id] = append(context.Implementations[id], implementation)
 }
 
 // BuildImportCandidates indexes declarations from other project modules. A
@@ -72,8 +200,8 @@ func BuildImportCandidates(programs []*ir.Program, modulePath string) Context {
 		if program == nil || program.ModulePath == modulePath {
 			continue
 		}
-		members := map[string][]Symbol{}
-		for _, symbol := range collectSymbols(program.Statements, "", program.SourcePath, members) {
+		metadata := emptyContext()
+		for _, symbol := range collectSymbols(program.Statements, "", program.SourcePath, &metadata) {
 			byName[symbol.Name] = append(byName[symbol.Name], withImport(symbol, program.ModulePath))
 		}
 	}
@@ -230,6 +358,67 @@ func declarationSymbol(member declaration.Member) Symbol {
 	}
 }
 
+func addImportContracts(context *Context, imported *ir.Import) {
+	if context == nil || imported == nil {
+		return
+	}
+	for name, contract := range imported.TypeContracts {
+		context.Types[name] = TypeInfo{
+			TypeParameters: append([]string(nil), contract.TypeParameters...),
+			AliasTarget:    contract.AliasTarget,
+		}
+		for memberName, member := range contract.Members {
+			if member.Class {
+				continue
+			}
+			context.TypeMembers[name] = appendUniqueSymbol(context.TypeMembers[name], contractMemberSymbol(memberName, member))
+		}
+		sortSymbols(context.TypeMembers[name])
+	}
+}
+
+func contractMemberSymbol(name string, member ir.MemberContract) Symbol {
+	kind := CompletionMethod
+	if member.Kind == string(resolver.ValueExport) {
+		kind = CompletionField
+	}
+	parameters := make([]string, len(member.Parameters))
+	callParameters := make([]CallParameter, len(member.Parameters))
+	for index, parameter := range member.Parameters {
+		parameters[index] = parameter.String()
+		callParameters[index] = CallParameter{Name: "arg" + strconv.Itoa(index), Label: parameters[index]}
+	}
+	detail := member.Type.String()
+	var call *CallInfo
+	if kind == CompletionMethod {
+		genericSuffix := ""
+		if len(member.TypeParameters) > 0 {
+			genericSuffix = "<" + strings.Join(member.TypeParameters, ", ") + ">"
+		}
+		detail = name + genericSuffix + "(" + strings.Join(parameters, ", ") + "): " + member.Type.String()
+		if member.Fails.Kind != "" && member.Fails.Kind != types.Never {
+			detail += " fails " + member.Fails.String()
+		}
+		call = &CallInfo{
+			ParameterCount:        len(member.Parameters),
+			ExplicitTypeArguments: len(member.TypeParameters) > 0,
+			TypeParameters:        append([]string(nil), member.TypeParameters...),
+			Parameters:            callParameters,
+		}
+	}
+	return Symbol{Name: name, Kind: kind, Detail: detail, Type: member.Type, Call: call}
+}
+
+func appendUniqueSymbol(symbols []Symbol, candidate Symbol) []Symbol {
+	for index, symbol := range symbols {
+		if symbol.Name == candidate.Name {
+			symbols[index] = mergeMemberSymbols(symbol, candidate)
+			return symbols
+		}
+	}
+	return append(symbols, candidate)
+}
+
 func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsByPath map[string]*ir.Program, exportsByPath map[string][]Symbol) {
 	exports := exportsByPath[imported.Path]
 	if definition, ok := stdlib.Lookup(imported.Path); ok {
@@ -237,7 +426,8 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 	}
 	if len(exports) == 0 {
 		if program := programsByPath[imported.Path]; program != nil {
-			exports = collectSymbols(program.Statements, "", program.SourcePath, map[string][]Symbol{})
+			metadata := emptyContext()
+			exports = collectSymbols(program.Statements, "", program.SourcePath, &metadata)
 		}
 	}
 
@@ -287,6 +477,19 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 			detail += " " + name + genericSuffix
 		}
 		byName[name] = Symbol{Name: name, Kind: kind, Detail: detail, Type: typ, Call: call}
+	}
+	for name, contract := range imported.TypeContracts {
+		symbol, exists := byName[name]
+		if !exists {
+			continue
+		}
+		for memberName, member := range contract.Members {
+			if member.Class {
+				symbol.Members = appendUniqueSymbol(symbol.Members, contractMemberSymbol(memberName, member))
+			}
+		}
+		sortSymbols(symbol.Members)
+		byName[name] = symbol
 	}
 
 	if imported.Namespace && imported.Alias != "" {
@@ -343,7 +546,7 @@ func standardSymbols(definition *stdlib.Package) []Symbol {
 	return result
 }
 
-func collectSymbols(statements []ir.Statement, owner, sourcePath string, typeMembers map[string][]Symbol) []Symbol {
+func collectSymbols(statements []ir.Statement, owner, sourcePath string, context *Context) []Symbol {
 	result := []Symbol{}
 	for _, statement := range statements {
 		switch node := statement.(type) {
@@ -364,26 +567,31 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, typeMem
 		case *ir.Class:
 			qualified := qualify(owner, node.Name)
 			definition := sourceDefinition(sourcePath, node.Name, node.SourceSpan())
-			instance, namespace := classMembers(node.Body, qualified, sourcePath, definition, typeMembers)
-			typeMembers[qualified] = append(typeMembers[qualified], instance...)
-			typeMembers[node.Name] = append(typeMembers[node.Name], instance...)
+			rememberType(context, qualified, node.Name, node.TypeParameters, nil)
+			instance, namespace := classMembers(node.Body, qualified, sourcePath, definition, context)
+			context.TypeMembers[qualified] = append(context.TypeMembers[qualified], instance...)
+			context.TypeMembers[node.Name] = append(context.TypeMembers[node.Name], instance...)
 			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "class " + qualified, Type: types.FromName(qualified), Members: namespace, Definition: definition})
 		case *ir.Record:
 			qualified := qualify(owner, node.Name)
 			definition := sourceDefinition(sourcePath, node.Name, node.SourceSpan())
+			rememberType(context, qualified, node.Name, node.TypeParameters, nil)
 			instance, namespace := recordMembers(node.Body, qualified, sourcePath, definition)
-			typeMembers[qualified] = append(typeMembers[qualified], instance...)
-			typeMembers[node.Name] = append(typeMembers[node.Name], instance...)
+			context.TypeMembers[qualified] = append(context.TypeMembers[qualified], instance...)
+			context.TypeMembers[node.Name] = append(context.TypeMembers[node.Name], instance...)
 			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "record " + qualified, Type: types.FromName(qualified), Members: namespace, Definition: definition})
 		case *ir.Enum:
 			qualified := qualify(owner, node.Name)
 			definition := sourceDefinition(sourcePath, node.Name, node.SourceSpan())
+			rememberType(context, qualified, node.Name, node.TypeParameters, nil)
 			instance, namespace := enumMembers(node, qualified, sourcePath, definition)
-			typeMembers[qualified] = append(typeMembers[qualified], instance...)
-			typeMembers[node.Name] = append(typeMembers[node.Name], instance...)
+			context.TypeMembers[qualified] = append(context.TypeMembers[qualified], instance...)
+			context.TypeMembers[node.Name] = append(context.TypeMembers[node.Name], instance...)
 			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "enum " + qualified, Type: types.FromName(qualified), Members: namespace, Definition: definition})
 		case *ir.TypeAlias:
 			qualified := qualify(owner, node.Name)
+			target := node.Target
+			rememberType(context, qualified, node.Name, node.TypeParameters, &target)
 			members := make([]Symbol, 0, len(node.Variants))
 			for _, variant := range node.Variants {
 				members = append(members, Symbol{Name: variant.Name, Kind: CompletionConstant, Detail: node.Target.String(), Definition: sourceDefinition(sourcePath, variant.Name, variant.SourceSpan())})
@@ -391,6 +599,7 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, typeMem
 			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "type " + qualified + " = " + node.Target.String(), Type: types.FromName(qualified), Members: members, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		case *ir.Interface:
 			qualified := qualify(owner, node.Name)
+			rememberType(context, qualified, node.Name, node.TypeParameters, nil)
 			displayName := qualified
 			if len(node.TypeParameters) > 0 {
 				displayName += "<" + strings.Join(node.TypeParameters, ", ") + ">"
@@ -401,12 +610,12 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, typeMem
 					methods = append(methods, methodSymbol(method, CompletionMethod, sourcePath))
 				}
 			}
-			typeMembers[qualified] = methods
-			typeMembers[node.Name] = methods
+			context.TypeMembers[qualified] = methods
+			context.TypeMembers[node.Name] = methods
 			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "interface " + displayName, Type: types.FromName(qualified), Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		case *ir.Module:
 			qualified := qualify(owner, node.Name)
-			members := collectSymbols(node.Body, qualified, sourcePath, typeMembers)
+			members := collectSymbols(node.Body, qualified, sourcePath, context)
 			result = append(result, Symbol{Name: node.Name, Kind: CompletionModule, Detail: "module " + qualified, Members: members, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		}
 	}
@@ -414,7 +623,20 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, typeMem
 	return result
 }
 
-func classMembers(statements []ir.Statement, owner, sourcePath string, ownerDefinition *DefinitionLocation, typeMembers map[string][]Symbol) ([]Symbol, []Symbol) {
+func rememberType(context *Context, qualified, name string, parameters []string, alias *types.Type) {
+	if context == nil {
+		return
+	}
+	info := TypeInfo{TypeParameters: append([]string(nil), parameters...)}
+	if alias != nil {
+		copy := *alias
+		info.AliasTarget = &copy
+	}
+	context.Types[qualified] = info
+	context.Types[name] = info
+}
+
+func classMembers(statements []ir.Statement, owner, sourcePath string, ownerDefinition *DefinitionLocation, context *Context) ([]Symbol, []Symbol) {
 	instance := []Symbol{}
 	namespace := []Symbol{}
 	constructor := "new()"
@@ -443,7 +665,7 @@ func classMembers(statements []ir.Statement, owner, sourcePath string, ownerDefi
 				instance = append(instance, symbol)
 			}
 		case *ir.Class, *ir.Record, *ir.Enum, *ir.Module, *ir.Interface:
-			namespace = append(namespace, collectSymbols([]ir.Statement{statement}, owner, sourcePath, typeMembers)...)
+			namespace = append(namespace, collectSymbols([]ir.Statement{statement}, owner, sourcePath, context)...)
 		}
 	}
 	constructorDefinition := ownerDefinition

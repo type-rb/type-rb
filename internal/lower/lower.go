@@ -110,6 +110,51 @@ func contractTypeExport(kind resolver.ExportKind) bool {
 	}
 }
 
+func typeContracts(imported *resolver.Import, generated []string) map[string]ir.TypeContract {
+	if imported == nil {
+		return nil
+	}
+	names := append([]string(nil), generated...)
+	for _, name := range imported.Symbols {
+		if exported, ok := imported.Exports[name]; ok && contractTypeExport(exported.Kind) {
+			names = append(names, name)
+		}
+	}
+	result := map[string]ir.TypeContract{}
+	for _, name := range names {
+		exported, ok := imported.Exports[name]
+		if !ok || !contractTypeExport(exported.Kind) {
+			continue
+		}
+		contract := ir.TypeContract{
+			TypeParameters: append([]string(nil), exported.TypeParameters...),
+			Members:        map[string]ir.MemberContract{},
+		}
+		if exported.AliasTarget.Kind != "" {
+			target := exported.AliasTarget
+			contract.AliasTarget = &target
+		}
+		for memberName, member := range exported.Members {
+			contract.Members[memberName] = ir.MemberContract{
+				Kind:           string(member.Kind),
+				Type:           member.Type,
+				Fails:          member.Fails,
+				TypeParameters: append([]string(nil), member.TypeParameters...),
+				Parameters:     append([]types.Type(nil), member.Parameters...),
+				Required:       member.Required,
+				Variadic:       member.Variadic,
+				Class:          member.Class,
+				Readonly:       member.Readonly,
+			}
+		}
+		result[name] = contract
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 	loaded := map[string]*ir.Import{}
 	for _, statement := range statements {
@@ -223,6 +268,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 				result.SymbolTypeParameters[name] = append([]string(nil), exported.TypeParameters...)
 			}
 			result.GeneratedTypeSymbols = contractTypeSymbols(resolved, resolved.Kind == resolver.NativeImport)
+			result.TypeContracts = typeContracts(resolved, result.GeneratedTypeSymbols)
 			if resolved.Definition != nil {
 				for name, symbol := range resolved.Definition.Symbols {
 					if result.SymbolTypes[name].Kind == "" {

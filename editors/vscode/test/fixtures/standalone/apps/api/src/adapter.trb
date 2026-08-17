@@ -1,0 +1,7 @@
+import { MessageRenderer } from ports
+
+class PlainMessageRenderer implements MessageRenderer
+	def render(input: String): String
+		return input
+	end
+end

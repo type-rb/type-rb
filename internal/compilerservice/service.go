@@ -66,6 +66,18 @@ func (s *Service) SetDocument(unit compiler.SourceUnit) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, base := range s.base {
+		base.Filename = cleanPath(base.Filename)
+		if base.Filename != key || !equalUnit(base, unit) {
+			continue
+		}
+		if _, exists := s.overlays[key]; exists {
+			delete(s.overlays, key)
+			s.generation++
+			s.snapshot = nil
+		}
+		return
+	}
 	if previous, exists := s.overlays[key]; exists && equalUnit(previous, unit) {
 		return
 	}
@@ -216,11 +228,7 @@ func buildContexts(artifacts []*compiler.Artifact) map[string]languageservice.Co
 			programs = append(programs, artifact.IR)
 		}
 	}
-	contexts := make(map[string]languageservice.Context, len(programs))
-	for _, program := range programs {
-		contexts[program.ModulePath] = languageservice.BuildContext(programs, program.ModulePath)
-	}
-	return contexts
+	return languageservice.BuildContexts(programs)
 }
 
 func cloneUnits(units []compiler.SourceUnit) []compiler.SourceUnit {

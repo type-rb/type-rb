@@ -889,6 +889,67 @@ func TestServerNavigatesToImportedTypeAndMemberDefinitions(t *testing.T) {
 	}
 }
 
+func TestServerFindsInterfaceImplementations(t *testing.T) {
+	filename := cleanPath(filepath.Join(t.TempDir(), "renderers.trb"))
+	source := `interface Renderer
+	render(input: String): String
+end
+
+class HTMLRenderer implements Renderer
+	def render(input: String): String
+		return "<p>" + input + "</p>"
+	end
+end
+
+class TextRenderer implements Renderer
+	def render(input: String): String
+		return input
+	end
+end
+`
+	uri := uriFromPath(filename)
+	methodOffset := strings.Index(source, "render(input") + len("render")
+	typeOffset := strings.Index(source, "Renderer") + len("Ren")
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/implementation", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(source), methodOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "textDocument/implementation", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(source), typeOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("4"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Version: "test", Input: bytes.NewReader(input), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "renderers", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", Package: "main", ModulePath: "renderers", GoModule: "example.com/lsp"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 5 {
+		t.Fatalf("response count=%d, want 5: %s", len(frames), output.String())
+	}
+	var initialized initializeResult
+	decodeResult(t, frames[0], &initialized)
+	if !initialized.Capabilities.ImplementationProvider {
+		t.Fatalf("implementation capability=%#v", initialized.Capabilities)
+	}
+	for index, wantLines := range [][]int{{5, 11}, {4, 10}} {
+		var locations []location
+		decodeResult(t, frames[index+2], &locations)
+		if len(locations) != 2 {
+			t.Fatalf("implementations[%d]=%#v", index, locations)
+		}
+		for locationIndex, wantLine := range wantLines {
+			if locations[locationIndex].URI != uri || locations[locationIndex].Range.Start.Line != wantLine {
+				t.Fatalf("implementations[%d][%d]=%#v, want line %d", index, locationIndex, locations[locationIndex], wantLine)
+			}
+		}
+	}
+}
+
 func TestServerFindsReferencesAndRenamesAcrossProjectFiles(t *testing.T) {
 	root := t.TempDir()
 	modelPath := cleanPath(filepath.Join(root, "models", "user.trb"))

@@ -66,6 +66,20 @@ func TestServiceAddsAndRemovesNewDocumentOverlays(t *testing.T) {
 	}
 }
 
+func TestServiceDoesNotInvalidateWhenOpeningAnUnchangedWorkspaceDocument(t *testing.T) {
+	unit := compiler.SourceUnit{
+		Filename: "main.trb", ModulePath: "main", Package: "main",
+		Source: []byte("def main()\n\treturn\nend\n"),
+	}
+	service := New([]compiler.SourceUnit{unit}, compiler.Options{Mode: "go", GoModule: "example.com/service"})
+	initial := service.Analyze()
+	service.SetDocument(unit)
+	unchanged := service.Analyze()
+	if unchanged.Version != initial.Version {
+		t.Fatalf("opening unchanged document advanced snapshot version from %d to %d", initial.Version, unchanged.Version)
+	}
+}
+
 func TestServiceTracksWorkspaceDocumentsBeneathOpenOverlays(t *testing.T) {
 	filename := "models/user.trb"
 	base := compiler.SourceUnit{

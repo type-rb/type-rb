@@ -251,6 +251,7 @@ type serverCapabilities struct {
 	HoverProvider              bool                  `json:"hoverProvider"`
 	SignatureHelpProvider      signatureOptions      `json:"signatureHelpProvider"`
 	DefinitionProvider         bool                  `json:"definitionProvider"`
+	ImplementationProvider     bool                  `json:"implementationProvider"`
 	ReferencesProvider         bool                  `json:"referencesProvider"`
 	DocumentHighlightProvider  bool                  `json:"documentHighlightProvider"`
 	SelectionRangeProvider     bool                  `json:"selectionRangeProvider"`
