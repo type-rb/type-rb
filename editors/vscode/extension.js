@@ -9,21 +9,27 @@ const { LanguageClient, State } = require("vscode-languageclient/node");
 const { TypeRBDebugSession, TypeRBProcess } = require("./debug-session");
 const { DlvDAPProcess } = require("./go-debug-adapter");
 const { containsPath, excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("./project-options");
-const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("./server-options");
+const { DebugArtifactSessions, DebugArtifactStore, reserveDebugArtifact } = require("./debug-artifacts");
+const { resolveRunOptions, resolveServerOptions, resolveStandaloneDebugBuildOptions, runCodeLensTitle } = require("./server-options");
 const { transitionStandaloneClient } = require("./standalone-client-state");
 const { decodeTestEvent } = require("./test-events");
 
 let projectManager;
 let runCodeLensProvider;
 let typeRBTests;
+let debugArtifacts;
+let debugAdapterFactory;
 const debugSessions = new Map();
 const executeFile = promisify(execFile);
 const clearDebugConsoleCommand = "workbench.debug.panel.action.clearReplAction";
 
 async function activate(context) {
-	const debugAdapterFactory = new TypeRBDebugAdapterFactory();
+	debugArtifacts = new DebugArtifactStore();
+	debugAdapterFactory = new TypeRBDebugAdapterFactory(debugArtifacts);
+	const factory = debugAdapterFactory;
 	context.subscriptions.push(
 		vscode.commands.registerCommand("typerb.runProject", runProject),
+		vscode.commands.registerCommand("typerb.debugFile", debugFile),
 		vscode.commands.registerCommand("typerb.runTest", (uri, fullName) => typeRBTests?.runByName(uri, fullName)),
 		vscode.commands.registerCommand("typerb.debugTest", (uri, fullName) => typeRBTests?.debugByName(uri, fullName)),
 		vscode.commands.registerCommand("typerb.stopProject", stopProject),
@@ -73,11 +79,15 @@ async function activate(context) {
 		),
 		vscode.debug.registerDebugAdapterDescriptorFactory("typerb", {
 			createDebugAdapterDescriptor(session) {
-				return debugAdapterFactory.createDebugAdapterDescriptor(session);
+				return factory.createDebugAdapterDescriptor(session);
 			}
 		}),
-		debugAdapterFactory,
-		vscode.debug.onDidTerminateDebugSession((session) => debugAdapterFactory.terminate(session))
+		factory,
+		vscode.debug.onDidTerminateDebugSession((session) => {
+			void factory.terminate(session).catch((error) => {
+				console.error("Cannot clean up TypeRB debug session:", error);
+			});
+		})
 	);
 	runCodeLensProvider = new RunCodeLensProvider(projectManager);
 	context.subscriptions.push(
@@ -570,7 +580,7 @@ class RunCodeLensProvider {
 		}
 		const session = debugSessions.get(projectSessionKey(project));
 		const running = session !== undefined && typeof session.configuration.testFilter !== "string";
-		return items.map((item) => {
+		return items.flatMap((item) => {
 			const range = new vscode.Range(
 				item.range.start.line,
 				item.range.start.character,
@@ -578,13 +588,21 @@ class RunCodeLensProvider {
 				item.range.end.character
 			);
 			if (item.command?.command !== "typerb.runProject") {
-				return new vscode.CodeLens(range, item.command);
+				return [new vscode.CodeLens(range, item.command)];
 			}
-			return new vscode.CodeLens(range, {
+			const run = new vscode.CodeLens(range, {
 				title: runCodeLensTitle(running),
 				command: item.command.command,
 				arguments: item.command.arguments
 			});
+			if (!project.standalone || project.mode !== "go") {
+				return [run];
+			}
+			return [run, new vscode.CodeLens(range, {
+				title: "$(debug-alt) Debug",
+				command: "typerb.debugFile",
+				arguments: item.command.arguments
+			})];
 		});
 	}
 
@@ -914,6 +932,38 @@ async function runProject(uriValue) {
 	}
 }
 
+async function debugFile(uriValue) {
+	const uri = runURI(uriValue);
+	const project = uri === undefined ? undefined : projectManager?.projectForURI(uri);
+	if (
+		project?.standalone !== true ||
+		uri.scheme !== "file" ||
+		path.resolve(uri.fsPath) !== project.filename
+	) {
+		void vscode.window.showErrorMessage("Open a standalone TypeRB file with main() before debugging it.");
+		return;
+	}
+	if (project.mode !== "go") {
+		void vscode.window.showErrorMessage(`Source debugging is not yet available for mode: ${project.mode}.`);
+		return;
+	}
+	if (!(await saveTypeRBDocuments(project))) {
+		void vscode.window.showErrorMessage("Save the standalone TypeRB file before debugging it.");
+		return;
+	}
+	const running = debugSessions.get(projectSessionKey(project));
+	if (running !== undefined) {
+		await vscode.debug.stopDebugging(running);
+	}
+	const started = await vscode.debug.startDebugging(
+		project.workspaceFolder,
+		debugConfigurationForProject(project)
+	);
+	if (!started) {
+		void vscode.window.showErrorMessage(`Cannot debug TypeRB file ${project.label}.`);
+	}
+}
+
 function runURI(value) {
 	if (typeof value === "string" && value !== "") {
 		return vscode.Uri.parse(value);
@@ -955,8 +1005,24 @@ async function stopProject(uriValue) {
 async function deactivate() {
 	await Promise.all([...debugSessions.values()].map((session) => vscode.debug.stopDebugging(session)));
 	debugSessions.clear();
-	await projectManager?.stop();
+	try {
+		await debugAdapterFactory?.stop();
+	} catch (error) {
+		console.error("Cannot fully stop the TypeRB debugger during deactivation:", error);
+	}
+	try {
+		await projectManager?.stop();
+	} catch (error) {
+		console.error("Cannot fully stop TypeRB language servers during deactivation:", error);
+	}
+	try {
+		await debugArtifacts?.dispose();
+	} catch (error) {
+		console.error("Cannot fully remove TypeRB debug artifacts during deactivation:", error);
+	}
+	debugAdapterFactory = undefined;
 	projectManager = undefined;
+	debugArtifacts = undefined;
 	typeRBTests = undefined;
 	runCodeLensProvider = undefined;
 }
@@ -969,10 +1035,14 @@ class TypeRBDebugConfigurationProvider {
 	provideDebugConfigurations(folder) {
 		return this.manager.allProjects()
 			.filter((project) => project.runnable && (folder === undefined || project.workspaceFolder === folder))
-			.map((project) => debugConfigurationForProject(project, [], project.standalone));
+			.map((project) => debugConfigurationForProject(
+				project,
+				[],
+				project.standalone && project.mode !== "go"
+			));
 	}
 
-	async resolveDebugConfiguration(folder, configuration) {
+	async resolveDebugConfiguration(folder, configuration, token) {
 		const project = this.selectProject(folder, configuration);
 		if (project === undefined) {
 			void vscode.window.showErrorMessage("TypeRB could not find a runnable project for this debug configuration.");
@@ -984,10 +1054,6 @@ class TypeRBDebugConfigurationProvider {
 		}
 		const programArgs = Array.isArray(configuration.args) ? configuration.args : [];
 		const noDebug = configuration.noDebug === true;
-		if (!noDebug && project.standalone) {
-			void vscode.window.showErrorMessage("Source debugging is not yet available for standalone TypeRB files. Use Run Without Debugging instead.");
-			return undefined;
-		}
 		if (!noDebug && project.mode !== "go") {
 			void vscode.window.showErrorMessage(`Source debugging is not yet available for mode: ${project.mode}. Use Run Without Debugging instead.`);
 			return undefined;
@@ -1006,18 +1072,32 @@ class TypeRBDebugConfigurationProvider {
 			return resolved;
 		}
 		try {
-			const program = typeof configuration.testFilter === "string"
-				? await buildDebugTestExecutable(project)
-				: await buildDebugExecutable(project);
 			const settings = vscode.workspace.getConfiguration("typerb", project.configUri);
+			if (project.standalone && typeof configuration.testFilter !== "string") {
+				const artifact = reserveDebugArtifact(process.platform === "win32" ? "app.exe" : "app");
+				return {
+					...resolved,
+					mode: "exec",
+					standaloneDebugBuild: true,
+					program: artifact.program,
+					debugArtifactDirectory: artifact.directory,
+					dlvToolPath: resolveDebugToolPath(settings.get("debug.go.path", "dlv"), project.workspaceFolder?.uri.fsPath),
+				};
+			}
+			const prepared = typeof configuration.testFilter === "string"
+				? { program: await buildDebugTestExecutable(project) }
+				: { program: await buildDebugExecutable(project) };
 			return {
 				...resolved,
+				...prepared,
 				mode: "exec",
-				program,
 				cwd: project.root,
 				dlvToolPath: resolveDebugToolPath(settings.get("debug.go.path", "dlv"), project.workspaceFolder?.uri.fsPath),
 			};
 		} catch (error) {
+			if (token?.isCancellationRequested || error.name === "AbortError") {
+				return undefined;
+			}
 			void vscode.window.showErrorMessage(`Cannot prepare TypeRB debugger: ${debugBuildError(error)}`);
 			return undefined;
 		}
@@ -1117,7 +1197,8 @@ function debugConfigurationForTest(project, filter, file) {
 }
 
 class TypeRBDebugAdapterFactory {
-	constructor() {
+	constructor(artifacts) {
+		this.artifactSessions = new DebugArtifactSessions(artifacts);
 		this.processes = new Map();
 	}
 
@@ -1125,32 +1206,173 @@ class TypeRBDebugAdapterFactory {
 		if (session.configuration.noDebug === true) {
 			return new vscode.DebugAdapterInlineImplementation(new TypeRBDebugSession());
 		}
-		if (session.configuration.mode !== "exec" || typeof session.configuration.program !== "string") {
+		const standaloneBuild = session.configuration.standaloneDebugBuild === true;
+		if (
+			session.configuration.mode !== "exec" ||
+			(!standaloneBuild && typeof session.configuration.program !== "string")
+		) {
 			throw new Error("TypeRB source debugging requires a prepared Go executable");
 		}
-		const process = new DlvDAPProcess(session.configuration.dlvToolPath || "dlv");
-		this.processes.set(session.id, process);
+		if (standaloneBuild) {
+			try {
+				const artifact = await this.artifactSessions.prepare(
+					session.id,
+					process.platform === "win32" ? "app.exe" : "app",
+					(program, signal) => buildStandaloneDebugExecutable(
+						session.configuration,
+						program,
+						signal
+					),
+					{
+						directory: session.configuration.debugArtifactDirectory,
+						program: session.configuration.program
+					}
+				);
+				session.configuration.program = artifact.program;
+				session.configuration.debugArtifactDirectory = artifact.directory;
+			} catch (error) {
+				if (error.name === "AbortError") {
+					throw error;
+				}
+				throw new Error(`Cannot prepare TypeRB debugger: ${debugBuildError(error)}`, { cause: error });
+			}
+		}
+		const debuggerProcess = new DlvDAPProcess(session.configuration.dlvToolPath || "dlv");
+		this.processes.set(session.id, debuggerProcess);
 		try {
-			const port = await process.start();
+			const port = await debuggerProcess.start();
 			return new vscode.DebugAdapterServer(port, "127.0.0.1");
 		} catch (error) {
 			this.processes.delete(session.id);
+			try {
+				await this.releaseAfterProcess(session, debuggerProcess);
+			} catch (cleanupError) {
+				console.error("Cannot clean up failed TypeRB debugger startup:", cleanupError);
+			}
 			throw error;
 		}
 	}
 
-	terminate(session) {
+	async terminate(session) {
 		const process = this.processes.get(session.id);
-		process?.stop();
 		this.processes.delete(session.id);
+		await this.releaseAfterProcess(session, process);
+	}
+
+	async releaseAfterProcess(session, process) {
+		const errors = [];
+		try {
+			await process?.stop();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			await this.artifactSessions.release(session.id);
+		} catch (error) {
+			errors.push(error);
+		}
+		if (errors.length > 0) {
+			throw new AggregateError(errors, "Cannot fully clean up the TypeRB debug session");
+		}
+	}
+
+	async stop() {
+		const processes = [...this.processes.values()];
+		this.processes.clear();
+		const results = await Promise.allSettled([
+			...processes.map((process) => process.stop()),
+			this.artifactSessions.dispose()
+		]);
+		const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+		if (errors.length > 0) {
+			throw new AggregateError(errors, "Cannot fully stop the TypeRB debugger");
+		}
 	}
 
 	dispose() {
-		for (const process of this.processes.values()) {
-			process.stop();
-		}
-		this.processes.clear();
+		void this.stop().catch((error) => {
+			console.error("Cannot dispose TypeRB debugger:", error);
+		});
 	}
+}
+
+async function buildStandaloneDebugExecutable(configuration, program, signal) {
+	const build = resolveStandaloneDebugBuildOptions({
+		path: configuration.command,
+		file: configuration.file,
+	}, undefined, program);
+	await executeDebugBuild(build.command, build.args, {
+		cwd: configuration.cwd,
+		maxBuffer: 10 * 1024 * 1024,
+	}, signal);
+}
+
+async function executeDebugBuild(command, args, options, signal) {
+	if (signal.aborted) {
+		throw debugBuildAbortError();
+	}
+	const runner = new TypeRBProcess({
+		command,
+		args,
+		cwd: options.cwd,
+		env: process.env,
+	});
+	let stdout = "";
+	let stderr = "";
+	let failure;
+	const maxBuffer = options.maxBuffer ?? 10 * 1024 * 1024;
+	const collect = (category, output) => {
+		if (category === "stdout") stdout += output;
+		else stderr += output;
+		if (failure === undefined && Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > maxBuffer) {
+			failure = new Error(`TypeRB debug build output exceeded ${maxBuffer} bytes`);
+			stopRunner();
+		}
+	};
+	let rejectStopFailure;
+	const stopFailure = new Promise((_, reject) => {
+		rejectStopFailure = reject;
+	});
+	const stopRunner = () => {
+		void runner.stop().catch(rejectStopFailure);
+	};
+	const exited = new Promise((resolve) => {
+		runner.on("output", collect);
+		runner.once("error", (error) => {
+			failure = error;
+			stopRunner();
+		});
+		runner.once("exit", (code, exitSignal) => resolve({ code, signal: exitSignal }));
+	});
+	const completed = Promise.race([exited, stopFailure]);
+	const cancel = () => stopRunner();
+	signal.addEventListener("abort", cancel, { once: true });
+	try {
+		runner.start();
+		const result = await completed;
+		if (signal.aborted) {
+			await runner.stop();
+			throw debugBuildAbortError();
+		}
+		if (failure !== undefined) {
+			throw failure;
+		}
+		if (result.code !== 0) {
+			throw new Error(`TypeRB debug build exited with status ${result.code}`);
+		}
+	} catch (error) {
+		await runner.stop().catch(() => {});
+		error.debugOutput = [stdout, stderr].filter(Boolean).join("\n");
+		throw error;
+	} finally {
+		signal.removeEventListener("abort", cancel);
+	}
+}
+
+function debugBuildAbortError() {
+	const error = new Error("TypeRB debug build was cancelled");
+	error.name = "AbortError";
+	return error;
 }
 
 async function buildDebugExecutable(project) {

@@ -5,7 +5,7 @@ const { readFile } = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
 const { excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("../project-options");
-const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("../server-options");
+const { resolveRunOptions, resolveServerOptions, resolveStandaloneDebugBuildOptions, runCodeLensTitle } = require("../server-options");
 const { transitionStandaloneClient } = require("../standalone-client-state");
 
 const extensionRoot = path.resolve(__dirname, "..");
@@ -18,7 +18,7 @@ test("registers the canonical TypeRB language, grammar, and debugger", async () 
 	assert.equal(manifest.contributes.grammars[0].scopeName, "source.trb");
 	assert.deepEqual(
 		manifest.contributes.commands.map((command) => command.command),
-		["typerb.runProject", "typerb.runTest", "typerb.debugTest", "typerb.stopProject"]
+		["typerb.runProject", "typerb.debugFile", "typerb.runTest", "typerb.debugTest", "typerb.stopProject"]
 	);
 	assert.equal(manifest.contributes.debuggers[0].type, "typerb");
 	assert.deepEqual(manifest.contributes.debuggers[0].languages, ["trb"]);
@@ -78,6 +78,27 @@ test("runs a standalone file with its configured mode and runtime", () => {
 		{
 			command: "trb",
 			args: ["run", "--mode", "typescript", "--runtime", "bun", "/workspace/hello.trb", "--", "Ada"]
+		}
+	);
+});
+
+test("builds a standalone Go debug executable at the session-private path", () => {
+	assert.deepEqual(
+		resolveStandaloneDebugBuildOptions(
+			{ path: "./bin/trb", file: "src/hello.trb" },
+			"/workspace",
+			"/private/session-42/app"
+		),
+		{
+			command: path.resolve("/workspace/bin/trb"),
+			args: [
+				"build",
+				"--compile",
+				"--debug",
+				"--outfile",
+				"/private/session-42/app",
+				path.resolve("/workspace/src/hello.trb")
+			]
 		}
 	);
 });

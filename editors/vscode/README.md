@@ -26,7 +26,7 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Run, stop, and restart a project or standalone file's top-level `main()`
   through Visual Studio Code's Run and Debug interface
 - Source breakpoints, stepping, stack frames, and variable inspection for
-  `mode: go`
+  Go-mode projects and standalone file-root programs
 - Native Test Explorer discovery and execution for `*_test.trb` suites
 - Test debugging with TypeRB breakpoints and variables for `mode: go`
 
@@ -63,12 +63,16 @@ program output, and exit status appear in the Debug Console. Use Visual Studio
 Code's standard Restart and Stop controls, or press `Shift+F5` to stop the
 process. **TypeRB: Stop Project** remains available from the Command Palette.
 
-For a `mode: go` project, install [Delve](https://github.com/go-delve/delve),
-set breakpoints in `.trb` files, and press `F5` or select **Debug TypeRB** in
-Run and Debug. TypeRB emits Go debug information that refers directly to the
-original TypeRB source, so Visual Studio Code's standard stepping, call stack,
-variables, watches, and debug console are available. Ruby and TypeScript
-projects currently support Run Without Debugging while their source-debugger
+For a Go-mode project or standalone file, install
+[Delve](https://github.com/go-delve/delve) and set breakpoints in `.trb` files.
+Configured projects start source debugging with `F5` or **Debug TypeRB** in Run
+and Debug. A standalone entry additionally provides **Debug** above its
+`main()` and **TypeRB: Debug File** in the Command Palette. TypeRB emits Go
+debug information that refers directly to the original TypeRB source, so
+Visual Studio Code's standard stepping, call stack, variables, watches, and
+debug console are available. Each standalone debug session uses a private
+temporary executable that is removed after the session. Ruby and TypeScript
+programs currently support Run Without Debugging while their source-debugger
 adapters are developed.
 
 Open the Testing view to run every TypeRB test, a nested `describe` suite, or
@@ -136,10 +140,11 @@ npm run test:integration:insiders --prefix editors/vscode
 npm run package --prefix editors/vscode
 ```
 
-The Stable and Insiders suites cover standalone language service activation,
-unsaved-file diagnostics, and execution through the real debug adapter
-lifecycle. Pull requests run the Stable suite only when the extension or its
-CLI and language-service boundaries change. Insiders remains a local
+The Stable and Insiders suites cover standalone import graphs, unsaved-file
+diagnostics, and execution through the real language-client and debug-adapter
+lifecycle. Focused unit tests cover private Go debug artifact creation and
+cleanup. Pull requests run the Stable suite only when the extension or its CLI
+and language-service boundaries change. Insiders remains a local
 forward-compatibility check.
 
 ## Documentation

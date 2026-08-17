@@ -188,6 +188,28 @@ test("waits for process creation before stopping an immediate launch", async () 
 	assert.deepEqual(signals, ["SIGINT"]);
 });
 
+test("bounds process-tree shutdown when a child never exits", async () => {
+	const child = new EventEmitter();
+	child.pid = 99;
+	child.stdout = new EventEmitter();
+	child.stderr = new EventEmitter();
+	const signals = [];
+	const processRunner = new TypeRBProcess(
+		{ command: "trb", args: ["build"], cwd: "/workspace", env: {} },
+		{
+			spawnProcess: () => child,
+			signalProcess(_processValue, signal) {
+				signals.push(signal);
+			},
+			stopTimeoutMilliseconds: 5,
+		}
+	);
+	processRunner.start();
+	child.emit("spawn");
+	await assert.rejects(processRunner.stop(), /Timed out stopping the TypeRB process tree/);
+	assert.deepEqual(signals, ["SIGINT", "SIGTERM", "SIGKILL"]);
+});
+
 test("formats the displayed command without invoking a shell", () => {
 	assert.equal(formatCommand("/path with space/trb", ["run", "--config", "/project/a b.jsonc"]),
 		'"/path with space/trb" run --config "/project/a b.jsonc"');

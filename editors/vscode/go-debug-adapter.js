@@ -9,7 +9,10 @@ class DlvDAPProcess {
 		this.toolPath = toolPath;
 		this.spawnProcess = options.spawnProcess ?? spawn;
 		this.timeoutMilliseconds = options.timeoutMilliseconds ?? 10000;
+		this.shutdownTimeoutMilliseconds = options.shutdownTimeoutMilliseconds ?? 5000;
 		this.child = undefined;
+		this.exited = false;
+		this.stopping = undefined;
 	}
 
 	start() {
@@ -38,12 +41,16 @@ class DlvDAPProcess {
 			};
 			child.stdout?.on("data", inspect);
 			child.stderr?.on("data", inspect);
-			child.once("error", (error) => finish(reject, new Error(`Cannot start Delve (${this.toolPath}): ${error.message}`)));
+			child.once("error", (error) => {
+				this.exited = true;
+				finish(reject, new Error(`Cannot start Delve (${this.toolPath}): ${error.message}`));
+			});
 			child.once("exit", (code) => {
+				this.exited = true;
 				finish(reject, new Error(`Delve exited before opening its debug adapter (code ${code ?? 1}). ${output.trim()}`.trim()));
 			});
 			const timer = setTimeout(() => {
-				this.stop();
+				void this.stop().catch(() => {});
 				finish(reject, new Error(`Delve did not open its debug adapter within ${this.timeoutMilliseconds}ms. ${output.trim()}`.trim()));
 			}, this.timeoutMilliseconds);
 			timer.unref?.();
@@ -51,9 +58,52 @@ class DlvDAPProcess {
 	}
 
 	stop() {
-		if (this.child !== undefined && this.child.exitCode === null && this.child.signalCode === null) {
-			this.child.kill("SIGTERM");
+		this.stopping ??= this.stopOnce();
+		return this.stopping;
+	}
+
+	async stopOnce() {
+		const child = this.child;
+		if (child === undefined || this.exited || child.exitCode !== null || child.signalCode !== null) {
+			return;
 		}
+		await new Promise((resolve, reject) => {
+			let settled = false;
+			let force;
+			let giveUp;
+			const stopped = () => finish();
+			const finish = (error) => {
+				if (settled) return;
+				settled = true;
+				this.exited = true;
+				clearTimeout(force);
+				clearTimeout(giveUp);
+				child.off?.("exit", stopped);
+				child.off?.("error", stopped);
+				if (error === undefined) resolve();
+				else reject(error);
+			};
+			child.once("exit", stopped);
+			child.once("error", stopped);
+			try {
+				child.kill("SIGTERM");
+			} catch {
+				finish();
+				return;
+			}
+			force = setTimeout(() => {
+				try {
+					child.kill("SIGKILL");
+				} catch {
+					finish();
+				}
+			}, this.shutdownTimeoutMilliseconds);
+			force.unref?.();
+			giveUp = setTimeout(
+				() => finish(new Error(`Timed out stopping Delve (${this.toolPath})`)),
+				this.shutdownTimeoutMilliseconds * 2
+			);
+		});
 	}
 }
 

@@ -19,6 +19,7 @@ class TypeRBProcess extends EventEmitter {
 		this.specification = specification;
 		this.spawnProcess = options.spawnProcess ?? spawn;
 		this.signalProcess = options.signalProcess ?? signalProcessTree;
+		this.stopTimeoutMilliseconds = options.stopTimeoutMilliseconds ?? stopTimeout;
 		this.child = undefined;
 		this.closed = false;
 		this.stopPromise = undefined;
@@ -57,31 +58,45 @@ class TypeRBProcess extends EventEmitter {
 			return;
 		}
 		const closed = new Promise((resolve) => this.once("closed", resolve));
-		if (child.pid === undefined) {
-			await Promise.race([
-				new Promise((resolve) => this.once("started", resolve)),
-				closed,
-			]);
-		}
-		if (this.closed) {
-			return;
-		}
-		this.signalProcess(child, "SIGINT");
-		const terminate = setTimeout(() => {
-			if (!this.closed) {
-				this.signalProcess(child, "SIGTERM");
+		let terminate;
+		let force;
+		let giveUp;
+		const timedOut = new Promise((_, reject) => {
+			giveUp = setTimeout(
+				() => reject(new Error("Timed out stopping the TypeRB process tree")),
+				this.stopTimeoutMilliseconds * 4
+			);
+		});
+		try {
+			if (child.pid === undefined) {
+				await Promise.race([
+					new Promise((resolve) => this.once("started", resolve)),
+					closed,
+					timedOut,
+				]);
 			}
-		}, stopTimeout);
-		terminate.unref?.();
-		const force = setTimeout(() => {
-			if (!this.closed) {
-				this.signalProcess(child, "SIGKILL");
+			if (this.closed) {
+				return;
 			}
-		}, stopTimeout * 2);
-		force.unref?.();
-		await closed;
-		clearTimeout(terminate);
-		clearTimeout(force);
+			this.signalProcess(child, "SIGINT");
+			terminate = setTimeout(() => {
+				if (!this.closed) {
+					this.signalProcess(child, "SIGTERM");
+				}
+			}, this.stopTimeoutMilliseconds);
+			terminate.unref?.();
+			force = setTimeout(() => {
+				if (!this.closed) {
+					this.signalProcess(child, "SIGKILL");
+				}
+			}, this.stopTimeoutMilliseconds * 2);
+			force.unref?.();
+			await Promise.race([closed, timedOut]);
+		} finally {
+			clearTimeout(terminate);
+			clearTimeout(force);
+			clearTimeout(giveUp);
+		}
 	}
 
 	finish(code, signal) {
@@ -100,7 +115,24 @@ function signalProcessTree(child, signal) {
 	}
 	try {
 		if (process.platform === "win32") {
-			child.kill(signal);
+			let fellBack = false;
+			const fallback = () => {
+				if (fellBack) return;
+				fellBack = true;
+				try {
+					child.kill(signal);
+				} catch {
+					// The process already exited.
+				}
+			};
+			const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+				stdio: "ignore",
+				windowsHide: true,
+			});
+			killer.once("error", fallback);
+			killer.once("close", (code) => {
+				if (code !== 0) fallback();
+			});
 		} else {
 			process.kill(-child.pid, signal);
 		}

@@ -38,9 +38,11 @@ code --install-extension editors/vscode/dist/typerb.vsix
 Set `typerb.server.path` when `trb` is not on `PATH`. Automatic discovery uses
 ordinary `trbconfig.jsonc` files. Set `typerb.server.config` only to add a
 configuration that discovery cannot find; relative paths are resolved from the
-workspace folder. Go projects may use TypeRB source breakpoints, stepping,
-stack frames, and variables through Delve; `typerb.debug.go.path` selects its
-executable when `dlv` is not on `PATH`.
+workspace folder. Go projects and config-free Go entries may use TypeRB source
+breakpoints, stepping, stack frames, and variables through Delve;
+`typerb.debug.go.path` selects its executable when `dlv` is not on `PATH`.
+Each standalone debug session builds a private temporary executable and removes
+it after the session ends.
 
 ## Portable grammar
 
