@@ -13,19 +13,37 @@ func (c *CLI) runLSP(args []string) error {
 	flags := flag.NewFlagSet("lsp", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
+	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
+	typeScriptRuntime := flags.String("runtime", "", "standalone TypeScript runtime: node or bun")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 {
-		return errors.New("lsp does not accept source arguments; it serves the configured project")
+	if flags.NArg() > 1 {
+		return errors.New("lsp accepts at most one standalone .trb file")
 	}
-	config, err := loadConfig(*configPath, ".")
+	filename := ""
+	configStart := "."
+	if flags.NArg() == 1 {
+		if filepath.Ext(flags.Arg(0)) != ".trb" {
+			return errors.New("standalone LSP source must be a .trb file")
+		}
+		var err error
+		filename, err = filepath.Abs(flags.Arg(0))
+		if err != nil {
+			return err
+		}
+		configStart = filename
+	}
+	config, standalone, err := loadCommandConfig("lsp", *configPath, configStart, filename, *mode, *typeScriptRuntime)
 	if err != nil {
 		return err
 	}
-	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
-	if err != nil {
-		return err
+	files := []string{filename}
+	if !standalone {
+		files, err = collectTRB([]string{config.SourcePath()}, config.OutputPath())
+		if err != nil {
+			return err
+		}
 	}
 	if len(files) == 0 {
 		return errors.New("no .trb files found")
@@ -34,8 +52,13 @@ func (c *CLI) runLSP(args []string) error {
 	if err != nil {
 		return err
 	}
+	var includedFiles []string
+	if standalone {
+		includedFiles = []string{filename}
+	}
 	server := lsp.New(lsp.Options{
 		Mode: config.Mode, Version: Version, Units: units, CompilerOptions: options,
+		IncludedFiles: includedFiles,
 		ExcludedRoots: []string{
 			config.OutputPath(),
 			filepath.Join(config.Root, ".git"),

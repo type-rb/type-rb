@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { readFile } = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
-const { excludeGeneratedProjects, projectForPath, projectPaths } = require("../project-options");
+const { excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("../project-options");
 const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("../server-options");
 
 const extensionRoot = path.resolve(__dirname, "..");
@@ -21,6 +21,9 @@ test("registers the canonical TypeRB language, grammar, and debugger", async () 
 	);
 	assert.equal(manifest.contributes.debuggers[0].type, "typerb");
 	assert.deepEqual(manifest.contributes.debuggers[0].languages, ["trb"]);
+	assert.equal(manifest.contributes.configuration.properties["typerb.standalone.mode"].default, "go");
+	assert.deepEqual(manifest.contributes.configuration.properties["typerb.standalone.mode"].enum, ["go", "ruby", "typescript"]);
+	assert.equal(manifest.contributes.configuration.properties["typerb.standalone.typescript.runtime"].default, "node");
 
 	const canonical = await readFile(path.join(repositoryRoot, "syntaxes/typerb.tmLanguage.json"));
 	const packaged = await readFile(path.join(extensionRoot, "syntaxes/typerb.tmLanguage.json"));
@@ -57,11 +60,52 @@ test("runs the project with the configured TypeRB compiler", () => {
 	);
 });
 
+test("runs a standalone file with its configured mode and runtime", () => {
+	assert.deepEqual(
+		resolveRunOptions(
+			{ path: "trb", config: "", file: "/workspace/hello.trb", mode: "go" },
+			"/workspace"
+		),
+		{ command: "trb", args: ["run", "--mode", "go", "/workspace/hello.trb"] }
+	);
+	assert.deepEqual(
+		resolveRunOptions(
+			{ path: "trb", config: "", file: "hello.trb", mode: "typescript", runtime: "bun" },
+			"/workspace",
+			["Ada"]
+		),
+		{
+			command: "trb",
+			args: ["run", "--mode", "typescript", "--runtime", "bun", "/workspace/hello.trb", "--", "Ada"]
+		}
+	);
+});
+
 test("starts trb lsp from PATH by default", () => {
 	assert.deepEqual(resolveServerOptions({ path: "trb", config: "" }, "/workspace"), {
 		command: "trb",
 		args: ["lsp"]
 	});
+});
+
+test("starts a standalone language server for one file", () => {
+	assert.deepEqual(
+		resolveServerOptions(
+			{ path: "trb", config: "", file: "/workspace/hello.trb", mode: "ruby" },
+			"/workspace"
+		),
+		{ command: "trb", args: ["lsp", "--mode", "ruby", "/workspace/hello.trb"] }
+	);
+	assert.deepEqual(
+		resolveServerOptions(
+			{ path: "trb", config: "", file: "hello.trb", mode: "typescript", runtime: "node" },
+			"/workspace"
+		),
+		{
+			command: "trb",
+			args: ["lsp", "--mode", "typescript", "--runtime", "node", "/workspace/hello.trb"]
+		}
+	);
 });
 
 test("resolves configured paths from the workspace", () => {
@@ -125,4 +169,8 @@ test("does not start language servers for copied build projects", () => {
 		outputRoot: path.resolve("/workspace/apps/api/build/build")
 	};
 	assert.deepEqual(excludeGeneratedProjects([project, generated]), [project]);
+});
+
+test("matches standalone filenames literally in language client selectors", () => {
+	assert.equal(literalGlobPattern("[slug] {draft}*.trb"), "[[]slug[]] [{]draft[}][*].trb");
 });

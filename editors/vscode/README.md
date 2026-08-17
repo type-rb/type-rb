@@ -19,8 +19,8 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Structural code folding for declarations and expression blocks
 - Compiler-aware semantic highlighting
 - Deterministic, comment-preserving document formatting
-- Run, stop, and restart a project's top-level `main()` through Visual Studio
-  Code's Run and Debug interface
+- Run, stop, and restart a project or standalone file's top-level `main()`
+  through Visual Studio Code's Run and Debug interface
 - Source breakpoints, stepping, stack frames, and variable inspection for
   `mode: go`
 - Native Test Explorer discovery and execution for `*_test.trb` suites
@@ -31,6 +31,10 @@ keeps each project in an independent language-server session. A repository may
 therefore contain Go, Ruby, and TypeScript applications with overlapping type
 names. Project diagnostics and symbols update when TypeRB files are created,
 changed, or deleted outside the active editor.
+
+An open `.trb` file that is not owned by a discovered project receives its own
+single-file language-server session. No `trbconfig.jsonc` is created, sibling
+files are not compiled, and Go is the default target mode.
 
 ## Requirements
 
@@ -43,8 +47,9 @@ trb version
 
 ## Getting started
 
-Open a folder containing `trbconfig.jsonc`, then open or create a `.trb` file.
-The extension starts the TypeRB language server automatically.
+Open or create a `.trb` file. The extension starts a standalone TypeRB language
+server automatically. Opening a folder containing `trbconfig.jsonc` enables
+project-wide analysis instead.
 
 Select **▶ Run** above a top-level `main()` to run without debugging. Startup,
 program output, and exit status appear in the Debug Console. Use Visual Studio
@@ -83,6 +88,10 @@ the language.
 - `typerb.server.config` adds an explicit `trbconfig.jsonc` when automatic
   workspace discovery is not sufficient. Relative paths are resolved from the
   workspace folder.
+- `typerb.standalone.mode` selects `go`, `ruby`, or `typescript` for files
+  outside discovered projects. The default is `go`.
+- `typerb.standalone.typescript.runtime` selects `node` or `bun` for a
+  standalone TypeScript-mode file. The default is `node`.
 - `typerb.debug.go.path` selects the Delve executable for Go source debugging.
   The default is `dlv` from `PATH`.
 

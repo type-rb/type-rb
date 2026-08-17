@@ -338,6 +338,10 @@ The VS Code client discovers nested `trbconfig.jsonc` files, starts one language
 server per project, and watches each project's `.trb` files independently. The
 language server rejects editor overlays outside its configured source root and
 updates the saved project snapshot beneath active overlays.
+Files outside discovered projects receive isolated, configless language-server
+sessions with configurable Go, Ruby, or TypeScript mode. Their top-level
+`main()` CodeLens runs that single file through the same Debug Adapter Protocol
+process lifecycle used by projects.
 Canonical type-name diagnostics carry structured fixes, so editors can replace
 aliases such as `Int` with `Integer` without reconstructing source text.
 Top-level `main()` declarations expose a compiler-owned run CodeLens in

@@ -59,7 +59,7 @@
 		"commands": [
 			{
 				"command": "typerb.runProject",
-				"title": "Run Project",
+				"title": "Run Project or File",
 				"category": "TypeRB",
 				"icon": "$(play)"
 			},
@@ -175,6 +175,18 @@
 					"type": "string",
 					"default": "",
 					"description": "Optional additional path to trbconfig.jsonc when automatic workspace discovery is not sufficient. Relative paths are resolved from the workspace folder."
+				},
+				"typerb.standalone.mode": {
+					"type": "string",
+					"enum": ["go", "ruby", "typescript"],
+					"default": "go",
+					"description": "Target mode for TypeRB files that are not owned by trbconfig.jsonc."
+				},
+				"typerb.standalone.typescript.runtime": {
+					"type": "string",
+					"enum": ["node", "bun"],
+					"default": "node",
+					"description": "Runtime for standalone TypeScript-mode files."
 				},
 				"typerb.debug.go.path": {
 					"type": "string",
