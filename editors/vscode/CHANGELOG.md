@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.4 - 2026-08-17
+
 - Complete members through instantiated generic results, transparent aliases,
   and union-backed native package contracts.
 - Navigate from interface types and methods to their concrete class
