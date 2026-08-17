@@ -1,0 +1,12 @@
+{
+  "name": "fixture-worker",
+  "version": "0.1.0",
+  "mode": "go",
+  "sourceDir": "src",
+  "outDir": "build",
+  "go": {
+    "module": "example.com/fixture/worker",
+    "version": "1.26",
+    "rootPackage": "main"
+  }
+}

@@ -147,6 +147,24 @@ func Definition(request SemanticRequest) (DefinitionInfo, bool) {
 	return DefinitionInfo{}, false
 }
 
+// Implementations resolves an interface type or method to the concrete class
+// declarations that explicitly implement it.
+func Implementations(request SemanticRequest) ([]DefinitionInfo, bool) {
+	target, ok := Definition(request)
+	if !ok {
+		return nil, false
+	}
+	locations := request.Context.Implementations[target.ID]
+	if len(locations) == 0 {
+		return nil, false
+	}
+	result := make([]DefinitionInfo, len(locations))
+	for index := range locations {
+		result[index] = definitionInfo(&locations[index])
+	}
+	return result, true
+}
+
 func enclosingTypeMemberDefinition(context Context, path string, item token.Token) (*DefinitionLocation, bool) {
 	var owner *Symbol
 	for index := range context.Symbols {
@@ -260,6 +278,14 @@ func References(request SemanticRequest, documents []SemanticDocument, includeDe
 }
 
 func semanticTokenAt(tokens []token.Token, cursor int) (token.Token, bool) {
+	// Editor requests commonly place the cursor immediately after a symbol.
+	// Prefer that identifier over adjacent punctuation beginning at the same
+	// offset, such as the opening parenthesis in method(...).
+	for _, item := range tokens {
+		if item.Kind == token.Identifier && item.Span.End.Offset == cursor {
+			return item, true
+		}
+	}
 	for _, item := range tokens {
 		if item.Kind == token.Comment || item.Kind == token.Newline || item.Kind == token.EOF {
 			continue

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Complete members through instantiated generic results, transparent aliases,
+  and union-backed native package contracts.
+- Navigate from interface types and methods to their concrete class
+  implementations.
+- Reduce initial language-service readiness for large monorepos by indexing
+  project contexts once and avoiding recompilation when unchanged files open.
+- Verify completion, auto-import edits, formatting, and navigation in nested
+  monorepo projects through Extension Host integration tests.
+- Clear prior Debug Console output before restarting a running TypeRB project.
 - Require VS Code 1.130 or newer and verify local development builds in Stable
   and Insiders Extension Development Hosts.
 - Analyze and run standalone `.trb` files without requiring

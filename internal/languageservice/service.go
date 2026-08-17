@@ -105,11 +105,20 @@ type Symbol struct {
 	Import     *Import
 }
 
+// TypeInfo retains generic parameters and transparent alias targets needed to
+// instantiate checked member types for editor queries.
+type TypeInfo struct {
+	TypeParameters []string
+	AliasTarget    *types.Type
+}
+
 // Context is the checked project information available at a cursor position.
 // REPL contexts are rebuilt from typed IR after every accepted submission.
 type Context struct {
-	Symbols     []Symbol
-	TypeMembers map[string][]Symbol
+	Symbols         []Symbol
+	TypeMembers     map[string][]Symbol
+	Types           map[string]TypeInfo
+	Implementations map[SymbolID][]DefinitionLocation
 }
 
 type CompletionRequest struct {
@@ -255,6 +264,13 @@ func (s *Service) Definition(path, source string, cursor int) (DefinitionInfo, b
 	return Definition(request)
 }
 
+func (s *Service) Implementations(path, source string, cursor int) ([]DefinitionInfo, bool) {
+	s.mu.RLock()
+	request := SemanticRequest{Path: path, Source: source, Cursor: cursor, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
+	s.mu.RUnlock()
+	return Implementations(request)
+}
+
 func (s *Service) Highlight(source string) []HighlightSpan {
 	s.mu.RLock()
 	request := HighlightRequest{Source: source, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
@@ -284,5 +300,9 @@ func mergeCandidateContext(current, candidates Context) Context {
 }
 
 func emptyContext() Context {
-	return Context{TypeMembers: map[string][]Symbol{}}
+	return Context{
+		TypeMembers:     map[string][]Symbol{},
+		Types:           map[string]TypeInfo{},
+		Implementations: map[SymbolID][]DefinitionLocation{},
+	}
 }

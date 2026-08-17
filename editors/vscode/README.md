@@ -9,10 +9,14 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 
 - Syntax highlighting and declaration snippets
 - Project-wide diagnostics and quick fixes
-- Checked completion for declarations, members, and call arguments
-- Explicit import insertion for compiler-owned standard types such as `Result`
+- Checked completion for declarations, instantiated generic and transparent
+  alias members, and call arguments
+- Auto-imports for unambiguous project declarations and compiler-owned
+  standard types such as `Result`
 - Hover information and signature help
-- Go to definition, references, symbol rename, and project-wide symbol search
+- Go to definition and implementation, references, symbol rename, and
+  project-wide symbol search
+- Independent language servers for nested projects in monorepo workspaces
 - Checked symbol occurrence highlighting within the current document
 - Syntax-aware expanding and shrinking selections
 - Document outline for types, fields, functions, and methods

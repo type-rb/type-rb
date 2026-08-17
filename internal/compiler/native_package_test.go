@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/nativepackage"
 )
 
@@ -446,10 +447,19 @@ end
 		t.Fatal(err)
 	}
 	var output string
+	var queryImport *ir.Import
 	for _, artifact := range artifacts {
 		if artifact.Filename == "app.trb" {
 			output = string(artifact.Output)
+			for _, statement := range artifact.IR.Statements {
+				if imported, ok := statement.(*ir.Import); ok && imported.Path == "@tanstack/react-query" {
+					queryImport = imported
+				}
+			}
 		}
+	}
+	if queryImport == nil || queryImport.TypeContracts["UseQueryResult"].AliasTarget == nil || queryImport.TypeContracts["QueryObserverSuccessResult"].Members["data"].Type.Name != "TData" {
+		t.Fatalf("native query import is missing editor type contracts: %#v", queryImport)
 	}
 	for _, expected := range []string{
 		`import { QueryClient, QueryClientProvider, queryOptions, useQuery } from "@tanstack/react-query";`,

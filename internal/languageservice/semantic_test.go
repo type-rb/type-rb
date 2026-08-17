@@ -159,6 +159,78 @@ end
 	}
 }
 
+func TestImplementationsResolveInterfaceTypesAndMethods(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "renderers.trb")
+	source := `interface Renderer
+	render(input: String): String
+end
+
+class HTMLRenderer implements Renderer
+	def render(input: String): String
+		return "<p>" + input + "</p>"
+	end
+end
+
+class TextRenderer implements Renderer
+	def render(input: String): String
+		return input
+	end
+end
+`
+	artifact := compile(t, "go", source)
+	artifact.IR.SourcePath = path
+	service := languageservice.New("go")
+	service.Update([]*ir.Program{artifact.IR}, "repl")
+
+	methodCursor := strings.Index(source, "render(input") + len("render")
+	methods, ok := service.Implementations(path, source, methodCursor)
+	if !ok || len(methods) != 2 {
+		t.Fatalf("method implementations=(%#v, %v), want two", methods, ok)
+	}
+	for _, implementation := range methods {
+		if implementation.Path != path || implementation.Name != "render" {
+			t.Fatalf("method implementation=%#v", implementation)
+		}
+	}
+
+	typeCursor := strings.Index(source, "Renderer") + len("Ren")
+	types, ok := service.Implementations(path, source, typeCursor)
+	if !ok || len(types) != 2 || types[0].Name != "HTMLRenderer" || types[1].Name != "TextRenderer" {
+		t.Fatalf("type implementations=(%#v, %v), want HTMLRenderer and TextRenderer", types, ok)
+	}
+}
+
+func TestImplementationsResolveImportedInterfaceMethods(t *testing.T) {
+	root := t.TempDir()
+	contractPath := filepath.Join(root, "contracts", "renderer.trb")
+	htmlPath := filepath.Join(root, "renderers", "html.trb")
+	textPath := filepath.Join(root, "renderers", "text.trb")
+	contractSource := "interface Renderer\n\trender(input: String): String\nend\n"
+	implementationSource := func(name, body string) string {
+		return "import { Renderer } from contracts/renderer\n\nclass " + name + " implements Renderer\n\tdef render(input: String): String\n\t\treturn " + body + "\n\tend\nend\n"
+	}
+	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
+		{Filename: contractPath, ModulePath: "contracts/renderer", Package: "main", Source: []byte(contractSource)},
+		{Filename: htmlPath, ModulePath: "renderers/html", Package: "main", Source: []byte(implementationSource("HTMLRenderer", `"<p>" + input + "</p>"`))},
+		{Filename: textPath, ModulePath: "renderers/text", Package: "main", Source: []byte(implementationSource("TextRenderer", "input"))},
+	}, compiler.Options{Mode: "go", GoModule: "example.com/implementations"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	programs := make([]*ir.Program, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		programs = append(programs, artifact.IR)
+	}
+	service := languageservice.New("go")
+	service.Update(programs, "contracts/renderer")
+	methodCursor := strings.Index(contractSource, "render") + len("render")
+	implementations, ok := service.Implementations(contractPath, contractSource, methodCursor)
+	if !ok || len(implementations) != 2 || implementations[0].Path != htmlPath || implementations[1].Path != textPath {
+		t.Fatalf("imported method implementations=(%#v, %v)", implementations, ok)
+	}
+}
+
 func TestReferencesUseCheckedIdentityAcrossProjectFiles(t *testing.T) {
 	root := t.TempDir()
 	modelPath := filepath.Join(root, "models", "user.trb")

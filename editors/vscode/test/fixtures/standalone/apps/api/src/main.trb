@@ -1,0 +1,9 @@
+record ApiMessage
+	text: String
+end
+
+def main()
+	message := ApiMessage.new(text: "api")
+	puts(message.text)
+	return
+end

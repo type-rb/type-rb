@@ -1,0 +1,9 @@
+record WorkerMessage
+	text: String
+end
+
+def main()
+	message := WorkerMessage.new(text: "worker")
+	puts(message.text)
+	return
+end

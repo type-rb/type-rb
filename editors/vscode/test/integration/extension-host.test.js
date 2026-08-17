@@ -81,7 +81,57 @@ suite("TypeRB Extension Host", () => {
 		await waitFor(() => vscode.languages.getDiagnostics(sourceURI).length === 0, "cleared standalone diagnostics");
 	});
 
+	test("routes language features to nested monorepo projects from the workspace root", async () => {
+		const apiURI = vscode.Uri.file(path.join(workspaceRoot, "apps", "api", "src", "main.trb"));
+		const workerURI = vscode.Uri.file(path.join(workspaceRoot, "apps", "worker", "src", "main.trb"));
+		const interfaceURI = vscode.Uri.file(path.join(workspaceRoot, "apps", "api", "src", "ports.trb"));
+		const apiDocument = await vscode.workspace.openTextDocument(apiURI);
+		const workerDocument = await vscode.workspace.openTextDocument(workerURI);
+		await vscode.workspace.openTextDocument(interfaceURI);
+		await vscode.window.showTextDocument(apiDocument, { preview: false });
+		await waitFor(async () => {
+			const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", apiURI);
+			return symbols?.some((symbol) => symbol.name === "ApiMessage");
+		}, "nested API project symbols");
+		assert.deepEqual(vscode.languages.getDiagnostics(apiURI), []);
+		assert.deepEqual(vscode.languages.getDiagnostics(workerURI), []);
+
+		const definition = await vscode.commands.executeCommand(
+			"vscode.executeDefinitionProvider",
+			apiURI,
+			new vscode.Position(5, 15)
+		);
+		assert.ok(definition?.some((item) => item.uri.toString() === apiURI.toString()), "ApiMessage should resolve within the nested API project");
+		const completions = await vscode.commands.executeCommand(
+			"vscode.executeCompletionItemProvider",
+			apiURI,
+			new vscode.Position(6, 14),
+			"."
+		);
+		assert.ok(completions?.items?.some((item) => item.label === "text"), "nested API member completion should be routed to its project");
+		const implementations = await vscode.commands.executeCommand(
+			"vscode.executeImplementationProvider",
+			interfaceURI,
+			new vscode.Position(1, 7)
+		);
+		assert.ok(implementations?.some((item) => item.uri.fsPath.endsWith(path.join("apps", "api", "src", "adapter.trb"))), "interface methods should navigate to nested project implementations");
+
+		const original = apiDocument.getText();
+		await replaceDocument(apiDocument, original.replace("\tmessage :=", "  message :="));
+		try {
+			const edits = await vscode.commands.executeCommand("vscode.executeFormatDocumentProvider", apiURI, {
+				tabSize: 4,
+				insertSpaces: false,
+			});
+			assert.ok(edits?.length > 0, "the nested API formatter should repair indentation");
+		} finally {
+			await replaceDocument(apiDocument, original);
+		}
+	});
+
 	test("runs the standalone file through the real debug adapter lifecycle", async () => {
+		const commands = await vscode.commands.getCommands(true);
+		assert.ok(commands.includes("workbench.debug.panel.action.clearReplAction"), "the supported VS Code host should expose Debug Console clearing");
 		const marker = path.join(workspaceRoot, "extension-host-run.txt");
 		const runSource = `import { write_text } from trb/std/filesystem
 

@@ -135,6 +135,7 @@ func (s *Server) handle(request message) (bool, error) {
 				HoverProvider:             true,
 				SignatureHelpProvider:     signatureOptions{TriggerCharacters: []string{"(", ","}},
 				DefinitionProvider:        true,
+				ImplementationProvider:    true,
 				ReferencesProvider:        true,
 				DocumentHighlightProvider: true,
 				SelectionRangeProvider:    true,
@@ -191,6 +192,8 @@ func (s *Server) handle(request message) (bool, error) {
 		return false, s.signatureHelp(request)
 	case "textDocument/definition":
 		return false, s.definition(request)
+	case "textDocument/implementation":
+		return false, s.implementation(request)
 	case "textDocument/references":
 		return false, s.references(request)
 	case "textDocument/documentHighlight":
@@ -816,6 +819,38 @@ func (s *Server) definition(request message) error {
 	}
 	range_ := refineDefinitionRange(targetSource, info)
 	return s.stream.write(success(request.ID, location{URI: uriFromPath(targetPath), Range: range_}))
+}
+
+func (s *Server) implementation(request message) error {
+	params, err := decodeParams[documentPositionParams](request.Params)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	path, err := pathFromURI(params.TextDocument.URI)
+	if err != nil {
+		return s.stream.write(failure(request.ID, -32602, err))
+	}
+	document, ok := s.document(path)
+	if !ok {
+		return s.stream.write(success(request.ID, []location{}))
+	}
+	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	items, ok := languageservice.Implementations(languageservice.SemanticRequest{
+		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
+	})
+	if !ok {
+		return s.stream.write(success(request.ID, []location{}))
+	}
+	result := make([]location, 0, len(items))
+	for _, item := range items {
+		targetPath := cleanPath(item.Path)
+		targetSource, exists := s.source(targetPath)
+		if !exists {
+			continue
+		}
+		result = append(result, location{URI: uriFromPath(targetPath), Range: refineDefinitionRange(targetSource, item)})
+	}
+	return s.stream.write(success(request.ID, result))
 }
 
 func (s *Server) references(request message) error {

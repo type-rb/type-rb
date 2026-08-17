@@ -17,6 +17,7 @@ let runCodeLensProvider;
 let typeRBTests;
 const debugSessions = new Map();
 const executeFile = promisify(execFile);
+const clearDebugConsoleCommand = "workbench.debug.panel.action.clearReplAction";
 
 async function activate(context) {
 	const debugAdapterFactory = new TypeRBDebugAdapterFactory();
@@ -668,6 +669,7 @@ async function runProject(uriValue) {
 	const running = debugSessions.get(projectSessionKey(project));
 	if (running !== undefined) {
 		if (typeof running.configuration.testFilter !== "string") {
+			await vscode.commands.executeCommand(clearDebugConsoleCommand);
 			await running.customRequest("restart");
 			return;
 		}

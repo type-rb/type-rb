@@ -608,6 +608,19 @@ func resolveCompletionTokens(tokens []token.Token, lookup func(string) (Symbol, 
 		return Symbol{}, false
 	}
 	for index := 1; index < len(tokens); {
+		if tokens[index].Lexeme == "<" && current.Call != nil && len(current.Call.TypeParameters) > 0 {
+			next := completionMatchingTypeClose(tokens, index)
+			if next < 0 {
+				return current, true
+			}
+			arguments, parsed := completionTypeArguments(tokens[index+1 : next])
+			if !parsed {
+				return Symbol{}, false
+			}
+			current = instantiateSymbol(current, current.Call.TypeParameters, arguments)
+			index = next + 1
+			continue
+		}
 		if tokens[index].Lexeme == "(" {
 			next := completionMatchingClose(tokens, index)
 			if next < 0 {
@@ -644,6 +657,122 @@ func completionMatchingClose(tokens []token.Token, open int) int {
 	return -1
 }
 
+func completionMatchingTypeClose(tokens []token.Token, open int) int {
+	depth := 0
+	for index := open; index < len(tokens); index++ {
+		switch tokens[index].Lexeme {
+		case "<":
+			depth++
+		case ">":
+			depth--
+			if depth == 0 {
+				return index
+			}
+		}
+	}
+	return -1
+}
+
+func completionTypeArguments(tokens []token.Token) ([]types.Type, bool) {
+	parts := splitCompletionTypeArguments(tokens)
+	result := make([]types.Type, 0, len(parts))
+	for _, part := range parts {
+		argument, ok := completionType(part)
+		if !ok {
+			return nil, false
+		}
+		result = append(result, argument)
+	}
+	return result, len(result) > 0
+}
+
+func splitCompletionTypeArguments(tokens []token.Token) [][]token.Token {
+	result := [][]token.Token{{}}
+	depth := 0
+	for _, item := range tokens {
+		switch item.Lexeme {
+		case "<", "(", "[", "{":
+			depth++
+		case ">", ")", "]", "}":
+			if depth > 0 {
+				depth--
+			}
+		case ",":
+			if depth == 0 {
+				result = append(result, []token.Token{})
+				continue
+			}
+		}
+		result[len(result)-1] = append(result[len(result)-1], item)
+	}
+	return result
+}
+
+func completionType(tokens []token.Token) (types.Type, bool) {
+	if len(tokens) == 0 {
+		return types.Type{}, false
+	}
+	nullable := tokens[len(tokens)-1].Lexeme == "?"
+	if nullable {
+		tokens = tokens[:len(tokens)-1]
+	}
+	depth := 0
+	unionStart := 0
+	var alternatives []types.Type
+	for index, item := range tokens {
+		switch item.Lexeme {
+		case "<", "(", "[", "{":
+			depth++
+		case ">", ")", "]", "}":
+			depth--
+		case "|":
+			if depth == 0 {
+				alternative, ok := completionType(tokens[unionStart:index])
+				if !ok {
+					return types.Type{}, false
+				}
+				alternatives = append(alternatives, alternative)
+				unionStart = index + 1
+			}
+		}
+	}
+	if len(alternatives) > 0 {
+		last, ok := completionType(tokens[unionStart:])
+		if !ok {
+			return types.Type{}, false
+		}
+		result := types.UnionOf(append(alternatives, last)...)
+		result.Nullable = nullable
+		return result, true
+	}
+	if len(tokens) == 0 || tokens[0].Kind != token.Identifier && tokens[0].Kind != token.String && tokens[0].Kind != token.Number {
+		return types.Type{}, false
+	}
+	name := tokens[0].Lexeme
+	index := 1
+	for index+1 < len(tokens) && tokens[index].Lexeme == "::" && tokens[index+1].Kind == token.Identifier {
+		name += "::" + tokens[index+1].Lexeme
+		index += 2
+	}
+	result := types.FromName(name)
+	if index < len(tokens) {
+		if tokens[index].Lexeme != "<" {
+			return types.Type{}, false
+		}
+		close := completionMatchingTypeClose(tokens, index)
+		if close != len(tokens)-1 {
+			return types.Type{}, false
+		}
+		arguments, ok := completionTypeArguments(tokens[index+1 : close])
+		if !ok {
+			return types.Type{}, false
+		}
+		result.Args = arguments
+	}
+	result.Nullable = nullable
+	return result, true
+}
+
 func completionMember(receiver Symbol, name string, context Context) (Symbol, bool) {
 	if len(receiver.Members) > 0 {
 		for _, member := range receiver.Members {
@@ -653,10 +782,8 @@ func completionMember(receiver Symbol, name string, context Context) (Symbol, bo
 		}
 	}
 	if receiver.Type.Kind != "" {
-		for _, member := range receiverMembers(receiver.Type, context) {
-			if member.Name == name {
-				return member, true
-			}
+		if member, ok := resolveReceiverMember(receiver.Type, name, context, map[string]bool{}); ok {
+			return member, true
 		}
 	}
 	return Symbol{}, false
@@ -688,10 +815,35 @@ func resolveNamespace(receiver string, lookup func(string) (Symbol, bool)) (Symb
 }
 
 func receiverMembers(receiver types.Type, context Context) []Symbol {
+	return receiverMembersSeen(receiver, context, map[string]bool{})
+}
+
+func receiverMembersSeen(receiver types.Type, context Context, seen map[string]bool) []Symbol {
+	key := receiver.String()
+	if seen[key] {
+		return nil
+	}
+	seen[key] = true
+	defer delete(seen, key)
+	if target, ok := aliasTarget(receiver, context); ok {
+		return receiverMembersSeen(target, context, seen)
+	}
+	if receiver.Kind == types.Union {
+		return commonReceiverMembers(receiver.Args, context, seen)
+	}
+	result := directReceiverMembers(receiver, context)
+	sortSymbols(result)
+	return result
+}
+
+func directReceiverMembers(receiver types.Type, context Context) []Symbol {
 	result := append([]Symbol(nil), context.TypeMembers[receiver.Name]...)
 	if len(result) == 0 && strings.Contains(receiver.Name, "::") {
 		parts := strings.Split(receiver.Name, "::")
 		result = append(result, context.TypeMembers[parts[len(parts)-1]]...)
+	}
+	if info, ok := context.Types[receiver.Name]; ok && len(info.TypeParameters) > 0 {
+		result = instantiateSymbols(result, info.TypeParameters, receiver.Args)
 	}
 	for _, method := range stdlib.ReceiverMethods(receiver) {
 		result = append(result, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: librarySignature(method), Type: method.Return, Call: &CallInfo{ParameterCount: len(method.Parameters)}})
@@ -723,7 +875,143 @@ func receiverMembers(receiver types.Type, context Context) []Symbol {
 	for _, symbol := range byName {
 		result = append(result, symbol)
 	}
+	return result
+}
+
+func commonReceiverMembers(alternatives []types.Type, context Context, seen map[string]bool) []Symbol {
+	if len(alternatives) == 0 {
+		return nil
+	}
+	common := map[string]Symbol{}
+	for _, member := range receiverMembersSeen(alternatives[0], context, seen) {
+		common[member.Name] = member
+	}
+	for _, alternative := range alternatives[1:] {
+		current := map[string]Symbol{}
+		for _, member := range receiverMembersSeen(alternative, context, seen) {
+			current[member.Name] = member
+		}
+		for name, member := range common {
+			candidate, ok := current[name]
+			if !ok {
+				delete(common, name)
+				continue
+			}
+			common[name] = mergeMemberSymbols(member, candidate)
+		}
+	}
+	result := make([]Symbol, 0, len(common))
+	for _, member := range common {
+		result = append(result, member)
+	}
 	sortSymbols(result)
+	return result
+}
+
+func resolveReceiverMember(receiver types.Type, name string, context Context, seen map[string]bool) (Symbol, bool) {
+	key := receiver.String() + "." + name
+	if seen[key] {
+		return Symbol{}, false
+	}
+	seen[key] = true
+	defer delete(seen, key)
+	if target, ok := aliasTarget(receiver, context); ok {
+		return resolveReceiverMember(target, name, context, seen)
+	}
+	if receiver.Kind == types.Union {
+		var result Symbol
+		found := false
+		for _, alternative := range receiver.Args {
+			member, ok := resolveReceiverMember(alternative, name, context, seen)
+			if !ok {
+				continue
+			}
+			if found {
+				result = mergeMemberSymbols(result, member)
+			} else {
+				result = member
+				found = true
+			}
+		}
+		return result, found
+	}
+	for _, member := range directReceiverMembers(receiver, context) {
+		if member.Name == name {
+			return member, true
+		}
+	}
+	return Symbol{}, false
+}
+
+func aliasTarget(receiver types.Type, context Context) (types.Type, bool) {
+	info, ok := context.Types[receiver.Name]
+	if !ok && strings.Contains(receiver.Name, "::") {
+		parts := strings.Split(receiver.Name, "::")
+		info, ok = context.Types[parts[len(parts)-1]]
+	}
+	if !ok || info.AliasTarget == nil {
+		return types.Type{}, false
+	}
+	target := substituteCompletionType(*info.AliasTarget, completionTypeSubstitutions(info.TypeParameters, receiver.Args))
+	target.Nullable = target.Nullable || receiver.Nullable
+	target.Readonly = target.Readonly || receiver.Readonly
+	return target, true
+}
+
+func instantiateSymbols(symbols []Symbol, parameters []string, arguments []types.Type) []Symbol {
+	result := make([]Symbol, len(symbols))
+	for index, symbol := range symbols {
+		result[index] = instantiateSymbol(symbol, parameters, arguments)
+	}
+	return result
+}
+
+func instantiateSymbol(symbol Symbol, parameters []string, arguments []types.Type) Symbol {
+	result := symbol
+	substitutions := completionTypeSubstitutions(parameters, arguments)
+	result.Type = substituteCompletionType(symbol.Type, substitutions)
+	result.Members = instantiateSymbols(symbol.Members, parameters, arguments)
+	return result
+}
+
+func completionTypeSubstitutions(parameters []string, arguments []types.Type) map[string]types.Type {
+	result := map[string]types.Type{}
+	for index, parameter := range parameters {
+		if index < len(arguments) {
+			result[parameter] = arguments[index]
+		}
+	}
+	return result
+}
+
+func substituteCompletionType(input types.Type, substitutions map[string]types.Type) types.Type {
+	if replacement, ok := substitutions[input.Name]; ok && input.Kind == types.Named && len(input.Args) == 0 {
+		replacement.Nullable = replacement.Nullable || input.Nullable
+		replacement.Readonly = replacement.Readonly || input.Readonly
+		return replacement
+	}
+	result := input
+	result.Args = make([]types.Type, len(input.Args))
+	for index, argument := range input.Args {
+		result.Args[index] = substituteCompletionType(argument, substitutions)
+	}
+	if input.Fails != nil {
+		failure := substituteCompletionType(*input.Fails, substitutions)
+		result.Fails = &failure
+	}
+	return result
+}
+
+func mergeMemberSymbols(left, right Symbol) Symbol {
+	result := left
+	if left.Type.Kind == "" {
+		result.Type = right.Type
+	} else if right.Type.Kind != "" && !types.Equivalent(left.Type, right.Type) {
+		result.Type = types.UnionOf(left.Type, right.Type)
+	}
+	if result.Kind == CompletionField && result.Type.Kind != "" {
+		result.Detail = result.Type.String()
+	}
 	return result
 }
 
