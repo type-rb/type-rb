@@ -2,6 +2,17 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.28 - 2026-08-17
+
+### ORM
+
+- Models in separate files within one source directory can now declare typed
+  `belongs_to`, `has_many`, and `has_one` associations without mutual source
+  imports. Cross-directory associations and runtime bootstrap cycles produce
+  located compiler diagnostics, while completion and navigation understand
+  association model references without inserting imports.
+  ([#333](https://github.com/type-rb/type-rb/pull/333))
+
 ## 0.2.27 - 2026-08-17
 
 ### ORM
