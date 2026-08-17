@@ -14,7 +14,7 @@ func analyzeORM(context Context) (Contribution, []Issue) {
 	for _, source := range context.Sources {
 		programs = append(programs, source.Program)
 	}
-	manifest, err := ormintegration.Analyze(programs, context.ProjectRoot, context.PackageOptions)
+	manifest, err := ormintegration.Analyze(programs, context.ProjectRoot, context.PackageOptions, context.PackageAliasesByModule)
 	if err != nil {
 		return Contribution{}, []Issue{{Message: err.Error()}}
 	}

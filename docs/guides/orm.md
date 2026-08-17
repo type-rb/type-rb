@@ -123,6 +123,8 @@ use lower snake case, so `PendingReview` maps to `pending_review`. Every mapping
 is checked against the schema or schema lock during compilation. Nullability
 still comes from the database column, and an unknown stored value is reported
 as `DbErrorKind::InvalidData` instead of being accepted as an enum member.
+The enum may be declared in the application or imported from a TypeRB package;
+package aliases use the same resolution rules as ordinary imports.
 
 ## Queries and effects
 

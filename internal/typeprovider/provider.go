@@ -14,8 +14,9 @@ import (
 )
 
 type Context struct {
-	ProjectRoot    string
-	PackageOptions map[string][]byte
+	ProjectRoot            string
+	PackageOptions         map[string][]byte
+	PackageAliasesByModule map[string]map[string]string
 }
 
 type loader func([]*ast.Program, Context) (*declaration.Catalog, error)

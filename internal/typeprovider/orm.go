@@ -11,5 +11,5 @@ func init() {
 }
 
 func loadORM(programs []*ast.Program, context Context) (*declaration.Catalog, error) {
-	return ormintegration.Declarations(programs, context.ProjectRoot, context.PackageOptions)
+	return ormintegration.Declarations(programs, context.ProjectRoot, context.PackageOptions, context.PackageAliasesByModule)
 }

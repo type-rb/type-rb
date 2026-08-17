@@ -123,7 +123,11 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 			Span:     program.Span(),
 		})
 	}
-	declarations, providerErr := typeprovider.Load([]*ast.Program{program}, typeprovider.Context{ProjectRoot: projectRoot(options), PackageOptions: options.PackageOptions})
+	declarations, providerErr := typeprovider.Load([]*ast.Program{program}, typeprovider.Context{
+		ProjectRoot:            projectRoot(options),
+		PackageOptions:         options.PackageOptions,
+		PackageAliasesByModule: map[string]map[string]string{program.ModulePath: options.PackageAliases},
+	})
 	if providerErr != nil {
 		return nil, providerErr
 	}
@@ -213,7 +217,12 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	for _, source := range units {
 		providerPrograms = append(providerPrograms, programs[source.ModulePath])
 	}
-	declarations, providerErr := typeprovider.Load(providerPrograms, typeprovider.Context{ProjectRoot: projectRoot(options), PackageOptions: options.PackageOptions})
+	packageAliasesByModule := sourcePackageAliases(units, options.PackageAliases)
+	declarations, providerErr := typeprovider.Load(providerPrograms, typeprovider.Context{
+		ProjectRoot:            projectRoot(options),
+		PackageOptions:         options.PackageOptions,
+		PackageAliasesByModule: packageAliasesByModule,
+	})
 	if providerErr != nil {
 		return nil, providerErr
 	}
@@ -297,12 +306,13 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		})
 	}
 	integrations, integrationIssues, err := projectintegration.Analyze(projectintegration.Context{
-		Sources:           integrationSources,
-		Resolutions:       resolutions,
-		SourceRoot:        options.SourceRoot,
-		ProjectRoot:       projectRoot(options),
-		PackageOptions:    options.PackageOptions,
-		JobsConfiguration: options.JobsConfiguration,
+		Sources:                integrationSources,
+		Resolutions:            resolutions,
+		SourceRoot:             options.SourceRoot,
+		ProjectRoot:            projectRoot(options),
+		PackageOptions:         options.PackageOptions,
+		PackageAliasesByModule: packageAliasesByModule,
+		JobsConfiguration:      options.JobsConfiguration,
 	})
 	if err != nil {
 		return nil, err
@@ -334,6 +344,18 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], Output: outputs[index].Output, SourceMap: outputs[index].SourceMap, CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage})
 	}
 	return artifacts, nil
+}
+
+func sourcePackageAliases(units []SourceUnit, defaults map[string]string) map[string]map[string]string {
+	aliases := make(map[string]map[string]string, len(units))
+	for _, source := range units {
+		moduleAliases := defaults
+		if source.PackageAliases != nil {
+			moduleAliases = source.PackageAliases
+		}
+		aliases[source.ModulePath] = moduleAliases
+	}
+	return aliases
 }
 
 func dependencySourceUnits(programs map[string]*ast.Program, options Options) []SourceUnit {

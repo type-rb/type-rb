@@ -809,7 +809,7 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || pathpkg.IsAbs(clean) {
 		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("invalid project import path %q", node.Path))}
 	}
-	canonical := canonicalPackageImport(clean, options.PackageAliases)
+	canonical := CanonicalPackageImport(clean, options.PackageAliases)
 	resolved := &Import{Node: node, Kind: ProjectImport, Path: canonical, Alias: node.Alias, Exports: map[string]Export{}}
 	if options.Catalog != nil {
 		module := options.Catalog.Modules[canonical]
@@ -869,7 +869,10 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 	return finalizeProjectImport(resolved)
 }
 
-func canonicalPackageImport(importPath string, aliases map[string]string) string {
+// CanonicalPackageImport applies the longest matching TypeRB package alias to
+// a source import path. Compile-time providers use the same mapping before the
+// ordinary resolver has produced its import graph.
+func CanonicalPackageImport(importPath string, aliases map[string]string) string {
 	selected := ""
 	canonical := ""
 	for alias, packageName := range aliases {
