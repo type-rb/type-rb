@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -34,8 +35,29 @@ func TestRunStandaloneFileAcrossBackends(t *testing.T) {
 			}
 			root := t.TempDir()
 			filename := filepath.Join(root, "hello.trb")
-			source := "def main()\n\tputs(\"standalone-ok\")\n\treturn\nend\n"
+			source := `import { imported_message } from helper
+import { puts } from trb/std/io
+
+def initialize_message(): String
+	puts("initializer")
+	return "value"
+end
+
+puts("standalone-ok")
+puts(imported_message())
+message := initialize_message()
+puts(message)
+
+def main<T>(value: T): T
+	return value
+end
+
+puts(main<String>("explicit-main"))
+`
 			if err := os.WriteFile(filename, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "helper.trb"), []byte("def imported_message(): String\n\treturn \"imported\"\nend\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(root, "broken.trb"), []byte("this is not valid TypeRB"), 0o644); err != nil {
@@ -47,7 +69,7 @@ func TestRunStandaloneFileAcrossBackends(t *testing.T) {
 			if status := command.Run(test.args(filename)); status != 0 {
 				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 			}
-			if stdout.String() != "standalone-ok\n" || stderr.Len() != 0 {
+			if stdout.String() != "standalone-ok\nimported\ninitializer\nvalue\nexplicit-main\n" || stderr.Len() != 0 {
 				t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
 			}
 			for _, path := range []string{filepath.Join(root, project.ConfigName), filepath.Join(root, ".trb")} {
@@ -59,10 +81,26 @@ func TestRunStandaloneFileAcrossBackends(t *testing.T) {
 	}
 }
 
-func TestRunStandaloneValidatesEntrypointAndOptions(t *testing.T) {
+func TestRunStandaloneAllowsFilesWithoutMain(t *testing.T) {
 	root := t.TempDir()
 	filename := filepath.Join(root, "library.trb")
 	if err := os.WriteFile(filename, []byte("def answer(): Integer\n\treturn 42\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", filename}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunStandaloneValidatesOptions(t *testing.T) {
+	root := t.TempDir()
+	filename := filepath.Join(root, "library.trb")
+	if err := os.WriteFile(filename, []byte("puts(\"ready\")\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tests := []struct {
@@ -70,7 +108,6 @@ func TestRunStandaloneValidatesEntrypointAndOptions(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "main", args: []string{"run", filename}, want: "standalone file has no top-level main()"},
 		{name: "mode", args: []string{"run", "--mode", "python", filename}, want: "standalone mode must be ruby, go, or typescript"},
 		{name: "runtime-mode", args: []string{"run", "--runtime", "bun", filename}, want: "--runtime requires --mode typescript"},
 		{name: "runtime-name", args: []string{"run", "--mode", "typescript", "--runtime", "deno", filename}, want: "standalone TypeScript runtime must be node or bun"},
@@ -86,6 +123,38 @@ func TestRunStandaloneValidatesEntrypointAndOptions(t *testing.T) {
 				t.Fatalf("diagnostic %q does not contain %q", stderr.String(), test.want)
 			}
 		})
+	}
+}
+
+func TestBuildStandaloneDebugExecutable(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not installed")
+	}
+	root := t.TempDir()
+	filename := filepath.Join(root, "hello.trb")
+	if err := os.WriteFile(filename, []byte("puts(\"standalone-debug\")\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(root, "debug-app")
+	t.Setenv("CGO_ENABLED", "0")
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--compile", "--debug", "--outfile", output, filename}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if runtime.GOOS == "windows" {
+		output += ".exe"
+	}
+	result, err := exec.Command(output).CombinedOutput()
+	if err != nil || string(result) != "standalone-debug\n" {
+		t.Fatalf("compiled executable failed: err=%v output=%q", err, result)
+	}
+	binary, err := os.ReadFile(output)
+	if err != nil || !bytes.Contains(binary, []byte(filename)) {
+		t.Fatalf("debug executable does not retain the TypeRB source path: err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, project.ConfigName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("standalone build wrote project config: %v", err)
 	}
 }
 

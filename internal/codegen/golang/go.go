@@ -36,6 +36,7 @@ type generator struct {
 	bindingNames     map[string]string
 	bindingSources   map[string]bool
 	modulePath       string
+	script           bool
 	goModule         string
 	temporary        int
 	breakTarget      string
@@ -105,6 +106,7 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 		bindingNames:     bindingNames,
 		bindingSources:   map[string]bool{},
 		modulePath:       program.ModulePath,
+		script:           program.Script,
 		goModule:         program.GoModule,
 		jobs:             jobsintegration.ManifestFrom(program.Extensions),
 		jobsSQL:          jobssql.ManifestFrom(program.Extensions),
@@ -144,11 +146,15 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 			g.importStatement(imp)
 		}
 	}
-	for _, statement := range program.Statements {
-		if _, ok := statement.(*ir.Import); ok {
-			continue
+	if program.Script {
+		g.scriptProgram(program.Statements)
+	} else {
+		for _, statement := range program.Statements {
+			if _, ok := statement.(*ir.Import); ok {
+				continue
+			}
+			g.statement(statement)
 		}
-		g.statement(statement)
 	}
 	if g.modulePath == "trb/std/time/index" {
 		g.timeDatabaseInterop()
@@ -431,6 +437,82 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.StructuredBlock:
 		g.structuredBlock(n)
 	}
+}
+
+func (g *generator) scriptProgram(statements []ir.Statement) {
+	previousRecordSources := g.recordSources
+	g.recordSources = false
+	for _, statement := range statements {
+		variable, ok := statement.(*ir.Variable)
+		if !ok {
+			continue
+		}
+		name := g.bindingIdentifier(variable.Name)
+		if variable.Constant {
+			name = goConstantIdentifier(variable.Owner, variable.Name)
+		}
+		g.line("var " + name + " " + g.goType(variable.Type))
+	}
+	g.recordSources = previousRecordSources
+	if len(statements) > 0 {
+		g.b.WriteByte('\n')
+	}
+
+	for _, statement := range statements {
+		if _, imported := statement.(*ir.Import); imported || !scriptDeclaration(statement) {
+			continue
+		}
+		g.statement(statement)
+	}
+
+	g.requireImport("context", "trbcontext")
+	g.line("func main() {")
+	g.indent++
+	g.functionDepth++
+	g.line("__trbScope := trbcontext.Background()")
+	g.line("_ = __trbScope")
+	previousExecution := g.executionActive
+	g.executionActive = true
+	for _, statement := range statements {
+		if scriptDeclaration(statement) {
+			continue
+		}
+		if variable, ok := statement.(*ir.Variable); ok {
+			g.scriptVariableInitialization(variable)
+			continue
+		}
+		g.statement(statement)
+	}
+	g.executionActive = previousExecution
+	g.functionDepth--
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+}
+
+func scriptDeclaration(statement ir.Statement) bool {
+	switch statement.(type) {
+	case *ir.Import, *ir.Comment, *ir.Class, *ir.Record, *ir.Enum, *ir.TypeAlias, *ir.Module, *ir.Interface, *ir.Method:
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *generator) scriptVariableInitialization(variable *ir.Variable) {
+	marker := -1
+	if g.recordSources && variable.SourceSpan().Start.Line > 0 {
+		marker = g.sourceMarker
+		g.sourceMarker++
+		g.sourceLocations[marker] = sourcemap.Location{Path: g.sourcePath, Span: variable.SourceSpan()}
+		g.line(sourcemap.StartMarker(marker))
+		defer g.line(sourcemap.EndMarker(marker))
+	}
+	name := g.bindingIdentifier(variable.Name)
+	if variable.Constant {
+		name = goConstantIdentifier(variable.Owner, variable.Name)
+	}
+	g.line(name + " = " + g.exprExpected(variable.Value, variable.Type))
 }
 
 func (g *generator) typeUnionCase(node *ir.Case) {
@@ -990,20 +1072,20 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 func (g *generator) topLevelMethod(method *ir.Method) {
 	name := g.projectFunctionName(g.modulePath, method.Name)
 	parameters := g.methodParameters(method)
-	if method.Name == "main" {
+	if method.Name == "main" && !g.script {
 		parameters = g.parameters(method.Parameters)
 	}
 	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 	g.indent++
-	if method.Name == "main" && g.methodUsesExecutionScope(method) {
+	if method.Name == "main" && !g.script && g.methodUsesExecutionScope(method) {
 		g.requireImport("context", "trbcontext")
 		g.line("__trbScope := trbcontext.Background()")
 	}
 	g.parameterDefaults(method.Parameters)
-	if method.Name == "main" && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
+	if method.Name == "main" && !g.script && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
 		g.line("if trbJobsRunWorkerIfRequested() { return }")
 	}
-	if method.Name == "main" && g.orm != nil && len(g.orm.Models) > 0 {
+	if method.Name == "main" && !g.script && g.orm != nil && len(g.orm.Models) > 0 {
 		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
 	}
 	g.functionDepth++

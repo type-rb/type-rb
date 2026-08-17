@@ -127,9 +127,12 @@ Passing a `.trb` file starts standalone execution only when no
 `trbconfig.jsonc` can be discovered from that file's directory. The short form
 `trb FILE.trb` is equivalent to `trb run FILE.trb`. Standalone execution uses
 Go when `--mode` is omitted, accepts `ruby`, `go`, or `typescript`, and accepts
-`--runtime node|bun` for TypeScript. It compiles only the selected file, which
-must define `main()`. Project and native dependencies, local source imports,
-and multi-file programs require `trbconfig.jsonc`.
+`--runtime node|bun` for TypeScript. It resolves imports and then executes the
+selected file's top-level statements in source order. A function named `main`
+is ordinary and runs only after an explicit call. Local files reached by
+explicit imports are compiled recursively, while unrelated sibling files are
+ignored. Configuration-defined package aliases, dependencies, and project
+integrations still require `trbconfig.jsonc`.
 
 If a configuration is discovered or passed through `--config`, its mode and
 runtime always win. Supplying standalone `--mode` or `--runtime` options in
@@ -160,6 +163,11 @@ invokes `go build`, and keeps only the executable. The default output is
 resolved from the project root. `--compile` builds the complete configured
 project, requires a top-level `main()`, and cannot be combined with source
 paths, `--check`, `--stdout`, `--copy`, or `--out-dir`.
+
+Without a discoverable configuration, `trb build --compile --mode go FILE.trb`
+builds the same standalone script semantics into an executable. This form is
+used by editor source debugging and accepts `--debug` and `--outfile` without
+creating project configuration or generated source beside the script.
 
 `--debug` is available with `--compile` in Go mode. It disables Go compiler
 optimizations and records the original `.trb` paths and lines for source
@@ -344,7 +352,8 @@ classify TypeRB types, constants, functions, methods, literals, comments, and
 keywords using the same shared language service as the REPL and browser tools.
 Workspace file notifications update the compiler snapshot when `.trb` files
 are created, changed, or deleted outside an open editor buffer.
-Non-browser projects expose a run CodeLens for each valid top-level `main()`.
+Non-browser configured projects expose a run CodeLens for each valid top-level
+`main()`.
 The LSP command identifies the runnable declaration; an editor client owns the
 process lifecycle and presentation.
 
@@ -355,11 +364,13 @@ an explicit project configuration when needed. It discovers ordinary
 `trbconfig.jsonc` files below the workspace and starts one server per project,
 so declarations from different applications are never combined. An open
 `.trb` file outside every discovered project receives an independent
-single-file language-server session. `typerb.standalone.mode` selects its mode
-and `typerb.standalone.typescript.runtime` selects Node or Bun. Its CodeLens
-starts `trb run` for the owning project or file through Visual Studio Code's
-Run and Debug lifecycle and changes from `▶ Run` to `↻ Restart` while that
-program is active. Output appears in the Debug Console.
+standalone language-server session that includes its explicit local import
+closure. `typerb.standalone.mode` selects its mode and
+`typerb.standalone.typescript.runtime` selects Node or Bun. Its file-level
+CodeLens starts `trb run` through Visual Studio Code's Run and Debug lifecycle
+and changes from `▶ Run File` to `↻ Restart File` while that program is active.
+Go mode also exposes `Debug File` through Delve. Output appears in the Debug
+Console.
 
 ## Database schema
 

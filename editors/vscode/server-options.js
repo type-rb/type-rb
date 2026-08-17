@@ -50,6 +50,22 @@ function resolveRunOptions(settings, workspaceRoot, programArgs = []) {
 	return { command, args };
 }
 
+function resolveDebugBuildOptions(settings, workspaceRoot, outfile) {
+	const command = resolveFromWorkspace(String(settings.path ?? "").trim() || "trb", workspaceRoot);
+	const config = resolveFromWorkspace(String(settings.config ?? "").trim(), workspaceRoot);
+	const file = resolveFileFromWorkspace(String(settings.file ?? "").trim(), workspaceRoot);
+	const args = ["build"];
+	if (config !== "") {
+		args.push("--config", config);
+	}
+	args.push("--compile", "--debug", "--outfile", outfile);
+	if (config === "" && file !== "") {
+		appendStandaloneOptions(args, settings);
+		args.push(file);
+	}
+	return { command, args };
+}
+
 function appendStandaloneOptions(args, settings) {
 	const mode = String(settings.mode ?? "go").trim() || "go";
 	args.push("--mode", mode);
@@ -59,8 +75,11 @@ function appendStandaloneOptions(args, settings) {
 	}
 }
 
-function runCodeLensTitle(running) {
+function runCodeLensTitle(running, standalone = false) {
+	if (standalone) {
+		return running ? "↻ Restart File" : "▶ Run File";
+	}
 	return running ? "↻ Restart" : "▶ Run";
 }
 
-module.exports = { resolveRunOptions, resolveServerOptions, runCodeLensTitle };
+module.exports = { resolveDebugBuildOptions, resolveRunOptions, resolveServerOptions, runCodeLensTitle };

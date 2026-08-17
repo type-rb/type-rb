@@ -1,18 +1,19 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { execFile } = require("node:child_process");
 const { readFile, rm } = require("node:fs/promises");
 const path = require("node:path");
+const { promisify } = require("node:util");
 const vscode = require("vscode");
+
+const executeFile = promisify(execFile);
 
 const originalSource = `def greet(name: String): String
 \treturn "Hello, " + name
 end
 
-def main()
-\tputs(greet("Extension Host"))
-\treturn
-end
+puts(greet("Extension Host"))
 `;
 
 suite("TypeRB Extension Host", () => {
@@ -46,7 +47,8 @@ suite("TypeRB Extension Host", () => {
 		await extension.activate();
 		await waitFor(async () => {
 			const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", sourceURI, 10);
-			return lenses?.some((lens) => lens.command?.command === "typerb.runProject");
+			return lenses?.some((lens) => lens.command?.command === "typerb.runProject" && lens.command.title === "▶ Run File") &&
+				lenses.some((lens) => lens.command?.command === "typerb.debugFile" && lens.command.title === "Debug File");
 		}, "standalone Run CodeLens");
 	});
 
@@ -65,14 +67,14 @@ suite("TypeRB Extension Host", () => {
 		const hovers = await vscode.commands.executeCommand(
 			"vscode.executeHoverProvider",
 			sourceURI,
-			new vscode.Position(5, 7)
+			new vscode.Position(4, 7)
 		);
 		assert.ok(hovers?.length > 0, "the standalone LSP should provide checked hover information");
 		assert.deepEqual(vscode.languages.getDiagnostics(siblingURI), [], "a sibling file must not enter the standalone session");
 	});
 
 	test("publishes and clears diagnostics for unsaved standalone edits", async () => {
-		await replaceDocument(document, "def main()\n\tmissing()\n\treturn\nend\n");
+		await replaceDocument(document, "missing()\n");
 		await waitFor(
 			() => vscode.languages.getDiagnostics(sourceURI).some((item) => item.severity === vscode.DiagnosticSeverity.Error),
 			"standalone diagnostics"
@@ -135,10 +137,7 @@ suite("TypeRB Extension Host", () => {
 		const marker = path.join(workspaceRoot, "extension-host-run.txt");
 		const runSource = `import { write_text } from trb/std/filesystem
 
-def main()
-\twrite_text(${JSON.stringify(marker)}, "extension-host-ok")
-\treturn
-end
+write_text(${JSON.stringify(marker)}, "extension-host-ok")
 `;
 		await replaceDocument(document, runSource);
 		assert.equal(await document.save(), true);
@@ -149,6 +148,43 @@ end
 			const session = await started;
 			assert.deepEqual(session.configuration.commandArgs, ["run", "--mode", "go", sourceURI.fsPath]);
 			await waitFor(async () => (await readFile(marker, "utf8")) === "extension-host-ok", "standalone program output marker");
+			await terminated;
+		} finally {
+			await rm(marker, { force: true });
+			await replaceDocument(document, originalSource);
+			await document.save();
+		}
+	});
+
+	test("debugs a standalone Go file through Delve when available", async function() {
+		try {
+			await executeFile(process.platform === "win32" ? "where" : "which", ["dlv"]);
+		} catch {
+			this.skip();
+		}
+		const marker = path.join(workspaceRoot, "extension-host-debug.txt");
+		const debugSource = `import { write_text } from trb/std/filesystem
+
+write_text(${JSON.stringify(marker)}, "extension-host-debug-ok")
+`;
+		await replaceDocument(document, debugSource);
+		assert.equal(await document.save(), true);
+		const started = eventPromise(
+			vscode.debug.onDidStartDebugSession,
+			(session) => session.type === "typerb" && session.configuration.noDebug === false,
+			"Delve debug session start"
+		);
+		const terminated = eventPromise(
+			vscode.debug.onDidTerminateDebugSession,
+			(session) => session.type === "typerb" && session.configuration.noDebug === false,
+			"Delve debug session termination"
+		);
+		try {
+			await vscode.commands.executeCommand("typerb.debugFile", sourceURI.toString());
+			const session = await started;
+			assert.equal(session.configuration.mode, "exec");
+			assert.equal(session.configuration.file, sourceURI.fsPath);
+			await waitFor(async () => (await readFile(marker, "utf8")) === "extension-host-debug-ok", "standalone debug output marker");
 			await terminated;
 		} finally {
 			await rm(marker, { force: true });

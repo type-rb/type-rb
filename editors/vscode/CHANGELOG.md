@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.5 - 2026-08-17
+
+- Run config-free standalone files from their top-level statements with
+  **Run File**, including explicit local imports and files without `main()`.
+- Debug standalone Go-mode files from **Debug File** with TypeRB breakpoints,
+  stepping, call stacks, and variables through Delve.
+
 ## 0.2.4 - 2026-08-17
 
 - Complete members through instantiated generic results, transparent aliases,

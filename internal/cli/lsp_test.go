@@ -42,7 +42,10 @@ func TestLSPCommandServesStandaloneFileAcrossModes(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			filename := filepath.Join(root, "hello.trb")
-			if err := os.WriteFile(filename, []byte("def main()\n\tputs(\"hello\")\n\treturn\nend\n"), 0o644); err != nil {
+			if err := os.WriteFile(filename, []byte("import { message } from helper\n\nputs(message())\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "helper.trb"), []byte("def message(): String\n\treturn \"hello\"\nend\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(root, "broken.trb"), []byte("not valid TypeRB"), 0o644); err != nil {
@@ -68,6 +71,9 @@ func TestLSPCommandServesStandaloneFileAcrossModes(t *testing.T) {
 			}
 			if strings.Contains(stdout.String(), "broken.trb") {
 				t.Fatalf("standalone LSP compiled a sibling file: %s", stdout.String())
+			}
+			if strings.Contains(stdout.String(), "cannot resolve import helper") {
+				t.Fatalf("standalone LSP did not resolve an explicit local import: %s", stdout.String())
 			}
 		})
 	}

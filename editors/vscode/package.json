@@ -2,7 +2,7 @@
 	"name": "typerb",
 	"displayName": "TypeRB",
 	"description": "Language support for TypeRB",
-	"version": "0.2.4",
+	"version": "0.2.5",
 	"preview": true,
 	"publisher": "type-rb",
 	"license": "MIT",
@@ -72,6 +72,12 @@
 				"title": "Run Project or File",
 				"category": "TypeRB",
 				"icon": "$(play)"
+			},
+			{
+				"command": "typerb.debugFile",
+				"title": "Debug File",
+				"category": "TypeRB",
+				"icon": "$(debug-alt)"
 			},
 			{
 				"command": "typerb.runTest",

@@ -5,7 +5,7 @@ const { readFile } = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
 const { excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("../project-options");
-const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("../server-options");
+const { resolveDebugBuildOptions, resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("../server-options");
 
 const extensionRoot = path.resolve(__dirname, "..");
 const repositoryRoot = path.resolve(extensionRoot, "../..");
@@ -17,7 +17,7 @@ test("registers the canonical TypeRB language, grammar, and debugger", async () 
 	assert.equal(manifest.contributes.grammars[0].scopeName, "source.trb");
 	assert.deepEqual(
 		manifest.contributes.commands.map((command) => command.command),
-		["typerb.runProject", "typerb.runTest", "typerb.debugTest", "typerb.stopProject"]
+		["typerb.runProject", "typerb.debugFile", "typerb.runTest", "typerb.debugTest", "typerb.stopProject"]
 	);
 	assert.equal(manifest.contributes.debuggers[0].type, "typerb");
 	assert.deepEqual(manifest.contributes.debuggers[0].languages, ["trb"]);
@@ -37,6 +37,8 @@ test("registers the canonical TypeRB language, grammar, and debugger", async () 
 test("runs the project with the configured TypeRB compiler", () => {
 	assert.equal(runCodeLensTitle(false), "▶ Run");
 	assert.equal(runCodeLensTitle(true), "↻ Restart");
+	assert.equal(runCodeLensTitle(false, true), "▶ Run File");
+	assert.equal(runCodeLensTitle(true, true), "↻ Restart File");
 	assert.deepEqual(resolveRunOptions({ path: "trb", config: "" }, "/workspace"), {
 		command: "trb",
 		args: ["run"]
@@ -56,6 +58,23 @@ test("runs the project with the configured TypeRB compiler", () => {
 		{
 			command: "trb",
 			args: ["run", "--config", "/workspace/trbconfig.jsonc", "--", "serve", "4000"]
+		}
+	);
+});
+
+test("builds a standalone Go file for source debugging", () => {
+	assert.deepEqual(
+		resolveDebugBuildOptions(
+			{ path: "./bin/trb", file: "hello.trb", mode: "go" },
+			"/workspace",
+			"/tmp/typerb-debug/app"
+		),
+		{
+			command: path.resolve("/workspace/bin/trb"),
+			args: [
+				"build", "--compile", "--debug", "--outfile", "/tmp/typerb-debug/app",
+				"--mode", "go", "/workspace/hello.trb"
+			]
 		}
 	);
 });

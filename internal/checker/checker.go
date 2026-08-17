@@ -349,6 +349,7 @@ type Checker struct {
 	usedImports           map[*ast.ImportStatement]map[string]bool
 	allowUnusedImports    bool
 	allowUnhandledEffects bool
+	script                bool
 	aliasCycles           map[string]bool
 	declaredEffects       []types.Type
 	effectCaptures        []*effectCapture
@@ -415,6 +416,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		usedImports:           importUses,
 		allowUnusedImports:    options.AllowUnusedImports,
 		allowUnhandledEffects: options.AllowUnhandledEffects,
+		script:                program.Script,
 		aliasCycles:           map[string]bool{},
 	}
 	if resolution.Declarations != nil {
@@ -3217,7 +3219,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	c.checkTypeParameters(method.TypeParameters)
 	if len(method.TypeParameters) > 0 {
 		switch {
-		case method.Name == "main":
+		case method.Name == "main" && !c.script:
 			c.error(method.Span(), "main() cannot be generic")
 		case c.current != nil && method.Class:
 			c.error(method.Span(), "generic class methods are not supported; use a top-level generic function")
@@ -3273,7 +3275,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	}
 	failureType := c.methodFailureType(method)
 	if failureType.Kind != types.Never {
-		if method.Name == "main" {
+		if method.Name == "main" && !c.script {
 			c.error(method.Span(), "main() cannot declare fails; handle fallible operations with attempt")
 		}
 		c.requireEffectRuntime(returnType, failureType)

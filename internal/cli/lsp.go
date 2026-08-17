@@ -39,7 +39,12 @@ func (c *CLI) runLSP(args []string) error {
 		return err
 	}
 	files := []string{filename}
-	if !standalone {
+	if standalone {
+		files, err = standaloneSourceFiles(filename)
+		if err != nil {
+			return err
+		}
+	} else {
 		files, err = collectTRB([]string{config.SourcePath()}, config.OutputPath())
 		if err != nil {
 			return err
@@ -55,6 +60,13 @@ func (c *CLI) runLSP(args []string) error {
 	var includedFiles []string
 	if standalone {
 		includedFiles = []string{filename}
+		entry, _ := filepath.Abs(filename)
+		for index := range units {
+			candidate, _ := filepath.Abs(units[index].Filename)
+			if candidate == entry {
+				units[index].Script = true
+			}
+		}
 	}
 	server := lsp.New(lsp.Options{
 		Mode: config.Mode, Version: Version, Units: units, CompilerOptions: options,
@@ -66,7 +78,13 @@ func (c *CLI) runLSP(args []string) error {
 			filepath.Join(config.Root, "node_modules"),
 		},
 		ResolveUnit: func(filename string, source []byte) (compiler.SourceUnit, error) {
-			return sourceUnit(config, filename, source)
+			unit, err := sourceUnit(config, filename, source)
+			if err == nil && standalone {
+				candidate, _ := filepath.Abs(filename)
+				entry, _ := filepath.Abs(includedFiles[0])
+				unit.Script = candidate == entry
+			}
+			return unit, err
 		},
 		Input: c.Stdin, Output: c.Stdout,
 	})

@@ -105,10 +105,13 @@ The repository also publishes a reusable TextMate grammar for lexical editor
 highlighting. Its thin Visual Studio Code client packages that grammar and
 snippets, starts `trb lsp`, and exposes compiler-backed diagnostics, completion,
 formatting, and quick fixes without duplicating semantic logic. Open files
-outside configured projects receive isolated single-file language-server
-sessions. Local Extension Development Host tests exercise standalone language
-services and execution against current Stable and Insiders builds without a
-Marketplace install. Command details belong in the [CLI reference](cli.md).
+outside configured projects receive isolated standalone language-server
+sessions with explicit local import closure. They run top-level statements
+directly, and the Visual Studio Code extension offers file-level run actions
+plus Go source debugging without a project configuration. Local Extension
+Development Host tests exercise these language services and execution against
+current Stable and Insiders builds without a Marketplace install. Command
+details belong in the [CLI reference](cli.md).
 
 The early official `trb/web` package discovers file-based routes at compile
 time and runs typed request, path-parameter, JSON decode, and JSON response

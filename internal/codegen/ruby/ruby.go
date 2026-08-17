@@ -20,6 +20,7 @@ type generator struct {
 	indent          int
 	loader          string
 	modulePath      string
+	script          bool
 	topFunctions    map[string]bool
 	topTargets      map[string]string
 	nativeSyntax    bool
@@ -63,7 +64,7 @@ func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
 
 func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generated {
 	g := &generator{
-		loader: program.RubyLoader, modulePath: program.ModulePath,
+		loader: program.RubyLoader, modulePath: program.ModulePath, script: program.Script,
 		topFunctions: map[string]bool{}, topTargets: map[string]string{},
 		jobs:    jobsintegration.ManifestFrom(program.Extensions),
 		jobsSQL: jobssql.ManifestFrom(program.Extensions),
@@ -81,8 +82,12 @@ func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generat
 			g.nativeSyntax = true
 		}
 	}
-	if g.programUsesExecutionScope(program.Statements) || webintegration.ManifestFrom(program.Extensions) != nil || g.jobs != nil {
+	if program.Script || g.programUsesExecutionScope(program.Statements) || webintegration.ManifestFrom(program.Extensions) != nil || g.jobs != nil {
 		g.executionScopeRuntime()
+	}
+	if program.Script {
+		g.line("__trb_scope = TrbExecutionScope.root", "")
+		g.b.WriteByte('\n')
 	}
 	g.statements(program.Statements)
 	g.integrations(program.Extensions)
@@ -92,7 +97,7 @@ func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generat
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
 	}
-	if g.topFunctions["main"] {
+	if !program.Script && g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
 		}

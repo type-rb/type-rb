@@ -2,6 +2,8 @@
 
 const { readFile } = require("node:fs/promises");
 const { execFile } = require("node:child_process");
+const { createHash } = require("node:crypto");
+const os = require("node:os");
 const { promisify } = require("node:util");
 const path = require("node:path");
 const vscode = require("vscode");
@@ -9,7 +11,7 @@ const { LanguageClient } = require("vscode-languageclient/node");
 const { TypeRBDebugSession, TypeRBProcess } = require("./debug-session");
 const { DlvDAPProcess } = require("./go-debug-adapter");
 const { containsPath, excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("./project-options");
-const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("./server-options");
+const { resolveDebugBuildOptions, resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("./server-options");
 const { decodeTestEvent } = require("./test-events");
 
 let projectManager;
@@ -23,6 +25,7 @@ async function activate(context) {
 	const debugAdapterFactory = new TypeRBDebugAdapterFactory();
 	context.subscriptions.push(
 		vscode.commands.registerCommand("typerb.runProject", runProject),
+		vscode.commands.registerCommand("typerb.debugFile", debugFile),
 		vscode.commands.registerCommand("typerb.runTest", (uri, fullName) => typeRBTests?.runByName(uri, fullName)),
 		vscode.commands.registerCommand("typerb.debugTest", (uri, fullName) => typeRBTests?.debugByName(uri, fullName)),
 		vscode.commands.registerCommand("typerb.stopProject", stopProject),
@@ -338,6 +341,22 @@ class RunCodeLensProvider {
 		}
 		const session = debugSessions.get(projectSessionKey(project));
 		const running = session !== undefined && typeof session.configuration.testFilter !== "string";
+		if (project.standalone) {
+			const range = new vscode.Range(0, 0, 0, 0);
+			const lenses = [new vscode.CodeLens(range, {
+				title: runCodeLensTitle(running, true),
+				command: "typerb.runProject",
+				arguments: [document.uri.toString()]
+			})];
+			if (project.mode === "go") {
+				lenses.push(new vscode.CodeLens(range, {
+					title: "Debug File",
+					command: "typerb.debugFile",
+					arguments: [document.uri.toString()]
+				}));
+			}
+			return lenses;
+		}
 		return items.map((item) => {
 			const range = new vscode.Range(
 				item.range.start.line,
@@ -659,11 +678,11 @@ async function runProject(uriValue) {
 		? projectManager?.firstProject()
 		: projectManager?.projectForURI(uri);
 	if (project === undefined) {
-		void vscode.window.showErrorMessage("Open a TypeRB project or standalone file before running main().");
+		void vscode.window.showErrorMessage("Open a runnable TypeRB project or file first.");
 		return;
 	}
 	if (!(await saveTypeRBDocuments(project))) {
-		void vscode.window.showErrorMessage("Save TypeRB files before running main().");
+		void vscode.window.showErrorMessage("Save TypeRB files before running.");
 		return;
 	}
 	const running = debugSessions.get(projectSessionKey(project));
@@ -679,6 +698,34 @@ async function runProject(uriValue) {
 	const started = await vscode.debug.startDebugging(project.workspaceFolder, configuration);
 	if (!started) {
 		void vscode.window.showErrorMessage(`Cannot start TypeRB ${project.standalone ? "file" : "project"} ${project.label}.`);
+	}
+}
+
+async function debugFile(uriValue) {
+	const uri = runURI(uriValue);
+	const project = uri === undefined ? undefined : projectManager?.projectForURI(uri);
+	if (project === undefined || !project.standalone) {
+		void vscode.window.showErrorMessage("Open a standalone TypeRB file before using Debug File.");
+		return;
+	}
+	if (project.mode !== "go") {
+		void vscode.window.showErrorMessage(`Debug File is available only for mode: go; current mode is ${project.mode}.`);
+		return;
+	}
+	if (!(await saveTypeRBDocuments(project))) {
+		void vscode.window.showErrorMessage("Save the TypeRB file before debugging.");
+		return;
+	}
+	const running = debugSessions.get(projectSessionKey(project));
+	if (running !== undefined) {
+		await vscode.debug.stopDebugging(running);
+	}
+	const started = await vscode.debug.startDebugging(
+		project.workspaceFolder,
+		debugConfigurationForProject(project, [], false)
+	);
+	if (!started) {
+		void vscode.window.showErrorMessage(`Cannot debug TypeRB file ${project.label}.`);
 	}
 }
 
@@ -732,7 +779,7 @@ class TypeRBDebugConfigurationProvider {
 	provideDebugConfigurations(folder) {
 		return this.manager.allProjects()
 			.filter((project) => project.runnable && (folder === undefined || project.workspaceFolder === folder))
-			.map((project) => debugConfigurationForProject(project, [], project.standalone));
+			.map((project) => debugConfigurationForProject(project, [], project.standalone && project.mode !== "go"));
 	}
 
 	async resolveDebugConfiguration(folder, configuration) {
@@ -747,10 +794,6 @@ class TypeRBDebugConfigurationProvider {
 		}
 		const programArgs = Array.isArray(configuration.args) ? configuration.args : [];
 		const noDebug = configuration.noDebug === true;
-		if (!noDebug && project.standalone) {
-			void vscode.window.showErrorMessage("Source debugging is not yet available for standalone TypeRB files. Use Run Without Debugging instead.");
-			return undefined;
-		}
 		if (!noDebug && project.mode !== "go") {
 			void vscode.window.showErrorMessage(`Source debugging is not yet available for mode: ${project.mode}. Use Run Without Debugging instead.`);
 			return undefined;
@@ -919,11 +962,21 @@ class TypeRBDebugAdapterFactory {
 async function buildDebugExecutable(project) {
 	const settings = vscode.workspace.getConfiguration("typerb", project.configUri);
 	const workspaceRoot = project.workspaceFolder?.uri.fsPath;
-	const run = resolveRunOptions({ path: settings.get("server.path", "trb"), config: project.configPath }, workspaceRoot);
 	const filename = process.platform === "win32" ? "app.exe" : "app";
-	const program = path.join(project.root, ".trb", "debug", filename);
+	const program = project.standalone
+		? path.join(os.tmpdir(), "typerb-vscode-debug", createHash("sha256").update(project.filename).digest("hex").slice(0, 16), filename)
+		: path.join(project.root, ".trb", "debug", filename);
+	const build = resolveDebugBuildOptions(project.standalone ? {
+		path: settings.get("server.path", "trb"),
+		file: project.filename,
+		mode: project.mode,
+		runtime: project.runtime,
+	} : {
+		path: settings.get("server.path", "trb"),
+		config: project.configPath,
+	}, workspaceRoot, program);
 	try {
-		await executeFile(run.command, ["build", "--config", project.configPath, "--compile", "--debug", "--outfile", program], {
+		await executeFile(build.command, build.args, {
 			cwd: project.root,
 			maxBuffer: 10 * 1024 * 1024,
 		});

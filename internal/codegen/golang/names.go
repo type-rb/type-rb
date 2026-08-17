@@ -36,6 +36,9 @@ func analyzeGoProjectNames(programs []*ir.Program) *goProjectNames {
 		if functions[group] == nil {
 			functions[group] = map[string][]goFunctionDeclaration{}
 		}
+		if program.Script {
+			occupied[group]["main"] = true
+		}
 		collectGoProjectDeclarations(program.ModulePath, program.Statements, occupied[group], functions[group])
 	}
 

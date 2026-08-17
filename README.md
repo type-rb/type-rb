@@ -68,8 +68,10 @@ trb run --mode typescript --runtime bun hello.trb
 ```
 
 When a configuration exists above the file, TypeRB follows that project
-instead. Standalone execution compiles only the selected file and leaves no
-generated files beside it.
+instead. Standalone execution runs the selected file's top-level statements,
+includes files reached by explicit local imports, ignores unrelated siblings,
+and leaves no generated files beside it. A function named `main` runs only
+when the script calls it explicitly.
 
 ## Create a project
 

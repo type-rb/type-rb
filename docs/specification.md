@@ -412,10 +412,14 @@ switches.
 ### 3.8 Program Entry
 
 - A runnable project defines exactly one top-level `def main()`.
-- A standalone executable file also defines one top-level `def main()` and is
-  compiled as the complete program rather than discovering sibling files.
-- `main` is a language convention and is not configurable in
-  `trbconfig.jsonc`.
+- A standalone executable file without a discoverable `trbconfig.jsonc` is a
+  script. Its imports are resolved first, then its top-level executable
+  statements run in source order. Explicit local imports are included without
+  compiling unrelated sibling files.
+- `main` is the fixed project entry convention and is not configurable in
+  `trbconfig.jsonc`. In a standalone script, `main` is an ordinary function:
+  its presence does not change top-level execution and it runs only when the
+  script calls it explicitly.
 - Projects intended only as libraries may omit `main`.
 
 Build and execution behavior belongs to the [CLI reference](cli.md).
@@ -850,7 +854,10 @@ end
 - `attempt expression` captures an effect as `Result<T, E>`. `attempt do ... end`
   captures every compatible effect in the block and uses the block's final
   expression as `T`. A block without a final value produces `Result<Unit, E>`.
-- `main()` cannot declare `fails`; it must capture fallible work explicitly.
+- A configured project's entry `main()` cannot declare `fails`; it must
+  capture fallible work explicitly. A standalone script's function named
+  `main` is ordinary and may declare the same effect as any other function;
+  its explicit caller must propagate or capture that effect.
   The REPL top level is the deliberate exception: it executes a fallible call,
   prints its success or error value, and keeps the session alive. Functions
   defined in the REPL follow the ordinary declaration rule.

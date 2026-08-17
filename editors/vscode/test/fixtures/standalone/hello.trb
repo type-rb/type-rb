@@ -2,7 +2,4 @@ def greet(name: String): String
 	return "Hello, " + name
 end
 
-def main()
-	puts(greet("Extension Host"))
-	return
-end
+puts(greet("Extension Host"))

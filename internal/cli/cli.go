@@ -556,21 +556,43 @@ func (c *CLI) runBuild(args []string) error {
 	compile := flags.Bool("compile", false, "produce an executable with the target toolchain")
 	debug := flags.Bool("debug", false, "include source-level debugger information in an executable")
 	outfile := flags.String("outfile", "", "executable output path relative to the project root")
+	mode := flags.String("mode", "", "standalone mode (only go supports --compile)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	paths := flags.Args()
-	config, err := loadConfig(*configPath, firstOr(paths, "."))
-	if err != nil {
-		return err
-	}
 	kind := buildArtifactSource
 	if *compile {
 		kind = buildArtifactExecutable
 	}
+	var config *project.Config
+	standalone := false
+	standaloneFile := ""
+	var err error
+	if kind == buildArtifactExecutable && len(paths) == 1 && filepath.Ext(paths[0]) == ".trb" {
+		standaloneFile, err = filepath.Abs(paths[0])
+		if err != nil {
+			return err
+		}
+		config, standalone, err = loadCommandConfig("build --compile", *configPath, standaloneFile, standaloneFile, *mode, "")
+	} else {
+		if *mode != "" {
+			return errors.New("--mode requires --compile FILE.trb")
+		}
+		config, err = loadConfig(*configPath, firstOr(paths, "."))
+	}
+	if err != nil {
+		return err
+	}
 	if kind == buildArtifactExecutable {
 		if config.Mode != "go" {
 			return fmt.Errorf("--compile is supported only for mode go; project mode is %s", config.Mode)
+		}
+		if standalone {
+			if *stdout || *copyFlag != "" || *outDirFlag != "" {
+				return errors.New("--compile cannot be combined with --stdout, --copy, or --out-dir")
+			}
+			return c.buildGoStandaloneExecutable(config, standaloneFile, *outfile, *debug)
 		}
 		if len(paths) != 0 {
 			return errors.New("--compile builds the configured project and does not accept source paths")
@@ -791,6 +813,59 @@ func (c *CLI) buildGoExecutable(config *project.Config, outfile string, debug bo
 	return nil
 }
 
+func (c *CLI) buildGoStandaloneExecutable(config *project.Config, filename, outfile string, debug bool) error {
+	files, err := standaloneSourceFiles(filename)
+	if err != nil {
+		return err
+	}
+	compiled, err := compileScript(config, files, filename)
+	if err != nil {
+		return err
+	}
+	output, err := executableOutputPath(config, outfile)
+	if err != nil {
+		return err
+	}
+	buildRoot, err := os.MkdirTemp("", "trb-standalone-build-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(buildRoot)
+	generated, err := writeCompiledTree(config, compiled, buildRoot, debug)
+	if err != nil {
+		return err
+	}
+	if err := writeStandaloneGoModule(config, buildRoot); err != nil {
+		return err
+	}
+	target := generated[filename]
+	if target == "" {
+		return errors.New("compiler did not produce the standalone file artifact")
+	}
+	if info, statErr := os.Stat(output); statErr == nil && info.IsDir() {
+		return fmt.Errorf("--outfile must name a file; %s is a directory", output)
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return err
+	}
+	arguments := []string{"build", "-mod=mod"}
+	if debug {
+		arguments = append(arguments, "-gcflags=all=-N -l")
+	}
+	arguments = append(arguments, "-o", output, ".")
+	command := exec.Command("go", arguments...)
+	command.Dir = filepath.Dir(target)
+	command.Stdout = c.Stdout
+	command.Stderr = c.Stderr
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("go build: %w", err)
+	}
+	fmt.Fprintf(c.Stdout, "executable -> %s\n", output)
+	return nil
+}
+
 func executableOutputPath(config *project.Config, outfile string) (string, error) {
 	if outfile == "" {
 		name := strings.TrimSpace(config.Name)
@@ -847,7 +922,12 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 		return err
 	}
 	files := []string{filename}
-	if !standalone {
+	if standalone {
+		files, err = standaloneSourceFiles(filename)
+		if err != nil {
+			return err
+		}
+	} else {
 		files, err = collectTRB([]string{config.SourcePath()}, config.OutputPath())
 		if err != nil {
 			return err
@@ -859,7 +939,12 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 			return err
 		}
 	}
-	compiled, err := compileProject(config, files)
+	var compiled map[string]*compiler.Artifact
+	if standalone {
+		compiled, err = compileScript(config, files, filename)
+	} else {
+		compiled, err = compileProject(config, files)
+	}
 	if err != nil {
 		return err
 	}
@@ -886,9 +971,6 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 		if entrySource == "" {
 			return errors.New("project has no top-level main(); define def main() or pass a .trb file explicitly")
 		}
-	}
-	if standalone && !artifactHasMain(compiled[entrySource]) {
-		return errors.New("standalone file has no top-level main(); define def main()")
 	}
 	generated, err := writeCompiledTree(config, compiled, runRoot, false)
 	if err != nil {
@@ -1893,6 +1975,78 @@ func compileProject(config *project.Config, files []string) (map[string]*compile
 	if err != nil {
 		return nil, err
 	}
+	return compileUnits(units, options)
+}
+
+func compileScript(config *project.Config, files []string, filename string) (map[string]*compiler.Artifact, error) {
+	units, options, err := projectCompilation(config, files)
+	if err != nil {
+		return nil, err
+	}
+	entry, err := filepath.Abs(filename)
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for index := range units {
+		candidate, _ := filepath.Abs(units[index].Filename)
+		if candidate == entry {
+			units[index].Script = true
+			found = true
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("standalone source %s was not included in compilation", filename)
+	}
+	return compileUnits(units, options)
+}
+
+func standaloneSourceFiles(filename string) ([]string, error) {
+	entry, err := filepath.Abs(filename)
+	if err != nil {
+		return nil, err
+	}
+	root := filepath.Dir(entry)
+	queue := []string{entry}
+	seen := map[string]bool{entry: true}
+	result := make([]string, 0, 1)
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		result = append(result, current)
+		source, err := os.ReadFile(current)
+		if err != nil {
+			return nil, err
+		}
+		program, _ := parser.Parse(source)
+		for _, statement := range program.Statements {
+			imported, ok := statement.(*ast.ImportStatement)
+			if !ok || strings.HasPrefix(imported.Path, "trb/") {
+				continue
+			}
+			candidate := filepath.Clean(filepath.Join(root, filepath.FromSlash(imported.Path)+".trb"))
+			relative, relErr := filepath.Rel(root, candidate)
+			if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				continue
+			}
+			info, statErr := os.Stat(candidate)
+			if errors.Is(statErr, os.ErrNotExist) || statErr == nil && info.IsDir() {
+				continue
+			}
+			if statErr != nil {
+				return nil, statErr
+			}
+			candidate, _ = filepath.Abs(candidate)
+			if !seen[candidate] {
+				seen[candidate] = true
+				queue = append(queue, candidate)
+			}
+		}
+	}
+	return result, nil
+}
+
+func compileUnits(units []compiler.SourceUnit, options compiler.Options) (map[string]*compiler.Artifact, error) {
 	artifacts, err := compiler.CompileProject(units, options)
 	if err != nil {
 		return nil, err
@@ -2403,6 +2557,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb test [--filter TEXT] [--file FILE] [--reporter human|json] [--compile [--debug] [--outfile FILE]] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE]")
+	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE] [--mode go] FILE.trb")
 	fmt.Fprintln(c.Stdout, "  trb run [--keep-generated] [--mode MODE] [--runtime RUNTIME] [FILE.trb] [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb FILE.trb [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb clean [--build] [--cache] [--generated] [--config trbconfig.jsonc]")
