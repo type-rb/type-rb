@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.5 - 2026-08-18
+
 - Follow explicit local imports in standalone language-server sessions and
   keep imported diagnostics synchronized with unsaved editor changes.
 - Debug Go-mode standalone files and their imported helpers with session-local
