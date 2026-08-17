@@ -127,9 +127,11 @@ Passing a `.trb` file starts standalone execution only when no
 `trbconfig.jsonc` can be discovered from that file's directory. The short form
 `trb FILE.trb` is equivalent to `trb run FILE.trb`. Standalone execution uses
 Go when `--mode` is omitted, accepts `ruby`, `go`, or `typescript`, and accepts
-`--runtime node|bun` for TypeScript. It compiles only the selected file, which
-must define `main()`. Project and native dependencies, local source imports,
-and multi-file programs require `trbconfig.jsonc`.
+`--runtime node|bun` for TypeScript. The selected entry file must define
+`main()`. Its explicit local imports are resolved transitively from the entry
+directory. Unrelated siblings are ignored, and imports of `*_test.trb` modules
+are excluded from the production closure. TypeRB package and native
+dependencies still require `trbconfig.jsonc`.
 
 If a configuration is discovered or passed through `--config`, its mode and
 runtime always win. Supplying standalone `--mode` or `--runtime` options in
@@ -238,7 +240,7 @@ Tests use the explicit portable API from `trb/std/test`; see the
 process test host is unavailable. Select Bun or Node for `trb test` while
 browser-hosted test execution remains staged.
 
-To run a standalone `test.trb` below a configured project:
+To format and run an explicitly selected entry below a configured project:
 
 ```sh
 trb fmt test.trb

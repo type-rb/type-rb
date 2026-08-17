@@ -418,8 +418,13 @@ switches.
 ### 3.8 Program Entry
 
 - A runnable project defines exactly one top-level `def main()`.
-- A standalone executable file also defines one top-level `def main()` and is
-  compiled as the complete program rather than discovering sibling files.
+- A standalone file-root program also starts from one top-level `def main()`
+  in its selected entry file. The entry and the transitive closure of its
+  explicit project imports form the program; unrelated sibling files are not
+  discovered implicitly.
+- Project and standalone entrypoints have the same signature, effect, and
+  startup rules. Selecting a file never turns top-level statements into a
+  second script execution model or makes a function named `main` ordinary.
 - `main` is a language convention and is not configurable in
   `trbconfig.jsonc`.
 - Projects intended only as libraries may omit `main`.
@@ -867,8 +872,10 @@ end
 ### 4.3 Test declarations
 
 - A project test file has the suffix `_test.trb`. Ordinary builds and runs do
-  not emit or execute these files; `trb check`, `trb lsp`, and `trb test`
-  validate them with the complete project.
+  not emit or execute these files; configured-project `trb check`, `trb lsp`,
+  and `trb test` validate them with the complete project. A config-free
+  file-root closure excludes imported test modules, while a test file selected
+  as the language-server entry is still analyzed.
 - The portable `trb/std/test` package exports `describe`, `test`, and `expect`.
   Test DSL functions are available only through explicit named imports.
 - A test file has one or more top-level `describe("literal") do ... end`

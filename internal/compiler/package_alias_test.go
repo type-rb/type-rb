@@ -42,3 +42,34 @@ end
 		t.Fatal(err)
 	}
 }
+
+func TestDirectoryIndexFallbackDoesNotApplyANestedAlias(t *testing.T) {
+	sources := []SourceUnit{
+		{
+			Filename:   "/project/shared/index.trb",
+			ModulePath: "shared/index",
+			Source:     []byte("def local_value(): Integer\n\treturn 1\nend\n"),
+		},
+		{
+			Filename:   "/packages/external.trb",
+			ModulePath: "external/package",
+			Source:     []byte("def external_value(): Integer\n\treturn 2\nend\n"),
+		},
+		{
+			Filename:       "/project/main.trb",
+			ModulePath:     "main",
+			PackageAliases: map[string]string{"shared/index": "external/package"},
+			Source: []byte(`import { local_value } from shared
+
+def main()
+	puts(local_value())
+	return
+end
+`),
+		},
+	}
+
+	if _, err := CompileProject(sources, Options{Mode: "typescript"}); err != nil {
+		t.Fatal(err)
+	}
+}
