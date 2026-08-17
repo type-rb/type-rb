@@ -2,21 +2,23 @@ package orm
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-func Declarations(programs []*ast.Program, projectRoot string, options map[string][]byte) (*declaration.Catalog, error) {
+func Declarations(programs []*ast.Program, projectRoot string, options map[string][]byte, packageAliasesByModule map[string]map[string]string) (*declaration.Catalog, error) {
 	schema, err := LoadSchema(projectRoot, options)
 	if err != nil {
 		return nil, err
 	}
-	models, err := discoverModels(programs, schema)
+	models, err := discoverModels(programs, schema, packageAliasesByModule)
 	if err != nil {
 		return nil, err
 	}
@@ -774,7 +776,7 @@ func comparisonSignatures(column Column, queryType string) []declaration.Signatu
 	return result
 }
 
-func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
+func discoverModels(programs []*ast.Program, schema *Schema, packageAliasesByModule map[string]map[string]string) ([]Model, error) {
 	var models []Model
 	seen := map[string]bool{}
 	classes := map[string]*ast.ClassStatement{}
@@ -803,7 +805,7 @@ func discoverModels(programs []*ast.Program, schema *Schema) ([]Model, error) {
 				ModulePath: program.ModulePath, Columns: append([]Column(nil), table.Columns...),
 				UniqueConstraints: append([]UniqueConstraint(nil), table.UniqueConstraints...),
 			}
-			if err := applyEnumColumns(&model, class, program, enums); err != nil {
+			if err := applyEnumColumns(&model, class, program, enums, packageAliasesByModule); err != nil {
 				return nil, err
 			}
 			models = append(models, model)
@@ -887,7 +889,7 @@ func discoverORMEnums(programs []*ast.Program) (map[string]map[string]*ormEnumDe
 	return result, nil
 }
 
-func applyEnumColumns(model *Model, class *ast.ClassStatement, program *ast.Program, enums map[string]map[string]*ormEnumDefinition) error {
+func applyEnumColumns(model *Model, class *ast.ClassStatement, program *ast.Program, enums map[string]map[string]*ormEnumDefinition, packageAliasesByModule map[string]map[string]string) error {
 	seen := map[string]bool{}
 	for _, statement := range class.Body {
 		expression, ok := statement.(*ast.ExpressionStatement)
@@ -927,7 +929,7 @@ func applyEnumColumns(model *Model, class *ast.ClassStatement, program *ast.Prog
 		if enumName == "" {
 			return fmt.Errorf("trb/orm %s.enum_column enum type must be an enum name", model.Name)
 		}
-		definition := resolveORMEnum(program, enumName, enums)
+		definition := resolveORMEnum(program, enumName, enums, packageAliasesByModule)
 		if definition == nil {
 			return fmt.Errorf("trb/orm %s.enum_column references unknown enum %s", model.Name, enumName)
 		}
@@ -951,7 +953,7 @@ func applyEnumColumns(model *Model, class *ast.ClassStatement, program *ast.Prog
 	return nil
 }
 
-func resolveORMEnum(program *ast.Program, name string, enums map[string]map[string]*ormEnumDefinition) *ormEnumDefinition {
+func resolveORMEnum(program *ast.Program, name string, enums map[string]map[string]*ormEnumDefinition, packageAliasesByModule map[string]map[string]string) *ormEnumDefinition {
 	if local := enums[program.ModulePath][name]; local != nil {
 		return local
 	}
@@ -962,7 +964,11 @@ func resolveORMEnum(program *ast.Program, name string, enums map[string]map[stri
 		}
 		for _, symbol := range imported.Symbols {
 			if symbol == name {
-				return enums[imported.Path][name]
+				modulePath := resolver.CanonicalPackageImport(imported.Path, packageAliasesByModule[program.ModulePath])
+				if definition := enums[modulePath][name]; definition != nil {
+					return definition
+				}
+				return enums[path.Join(modulePath, "index")][name]
 			}
 		}
 	}

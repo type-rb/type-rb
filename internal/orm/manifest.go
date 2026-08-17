@@ -273,12 +273,12 @@ type Manifest struct {
 	Models              []Model
 }
 
-func Analyze(programs []*ast.Program, projectRoot string, options map[string][]byte) (*Manifest, error) {
+func Analyze(programs []*ast.Program, projectRoot string, options map[string][]byte, packageAliasesByModule map[string]map[string]string) (*Manifest, error) {
 	schema, err := LoadSchema(projectRoot, options)
 	if err != nil {
 		return nil, err
 	}
-	models, err := discoverModels(programs, schema)
+	models, err := discoverModels(programs, schema, packageAliasesByModule)
 	if err != nil {
 		return nil, err
 	}

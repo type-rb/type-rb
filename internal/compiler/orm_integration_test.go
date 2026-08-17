@@ -165,6 +165,71 @@ end
 	assertORMLiteralCompletions(t, context)
 }
 
+func TestPortableORMEnumColumnResolvesPackageAlias(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	contracts := SourceUnit{
+		Filename:        filepath.Join(root, "packages", "contracts", "src", "index.trb"),
+		ModulePath:      "github.com/acme/contracts/index",
+		Package:         "contracts",
+		PackageAliases:  map[string]string{},
+		ExternalPackage: true,
+		Source: []byte(`enum PackageOrderStatus
+	Pending = "PENDING"
+	Completed = "COMPLETED"
+end
+`),
+	}
+	model := SourceUnit{
+		Filename:   filepath.Join(root, "src", "models", "order.trb"),
+		ModulePath: "models/order",
+		Package:    "models",
+		Source: []byte(`import { PackageOrderStatus } from contracts
+import { DbError, Model, enum_column } from trb/orm
+
+class Order < Model
+	enum_column(:status, PackageOrderStatus)
+end
+
+def create_order(status: PackageOrderStatus): Order fails DbError
+	return Order.create(status: status)
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		mode := mode
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject([]SourceUnit{contracts, model}, Options{
+				Mode:              mode,
+				GoModule:          "example.com/orm-package-enum",
+				RubyLoader:        "require_relative",
+				TypeScriptRuntime: "bun",
+				SourceRoot:        filepath.Join(root, "src"),
+				ProjectRoot:       root,
+				PackageAliases:    map[string]string{"contracts": "github.com/acme/contracts"},
+				PackageOptions: map[string][]byte{
+					"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`),
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestPortableORMEmitsSharedGoRuntimeOncePerPackage(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "application.sqlite3")

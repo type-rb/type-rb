@@ -40,7 +40,7 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	assertUniqueConstraints(t, products.UniqueConstraints, []string{"id"}, []string{"name", "active"})
 
 	program := parseModel(t)
-	catalog, err := Declarations([]*ast.Program{program}, root, options)
+	catalog, err := Declarations([]*ast.Program{program}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ end
 	}
 	program.ModulePath = "models/product"
 	options := map[string][]byte{PackageName: encoded}
-	manifest, err := Analyze([]*ast.Program{program}, root, options)
+	manifest, err := Analyze([]*ast.Program{program}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ end
 	if phase.Type.String() != "FulfillmentPhase" || phase.Enum == nil || phase.Enum.Values[0].StringValue != "pending_review" || phase.Enum.Values[1].StringValue != "ready_to_ship" {
 		t.Fatalf("unexpected conventional enum column: %#v", phase)
 	}
-	catalog, err := Declarations([]*ast.Program{program}, root, options)
+	catalog, err := Declarations([]*ast.Program{program}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ end
 		t.Fatalf("model parse diagnostics: %#v", diagnostics)
 	}
 	model.ModulePath = "models/product"
-	manifest, err := Analyze([]*ast.Program{enums, model}, root, options)
+	manifest, err := Analyze([]*ast.Program{enums, model}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestEnumColumnsRejectInvalidMappings(t *testing.T) {
 				t.Fatalf("parse diagnostics: %#v", diagnostics)
 			}
 			program.ModulePath = "models/product"
-			_, err = Analyze([]*ast.Program{program}, root, map[string][]byte{PackageName: encoded})
+			_, err = Analyze([]*ast.Program{program}, root, map[string][]byte{PackageName: encoded}, nil)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("expected %q, got %v", test.want, err)
 			}
@@ -410,7 +410,7 @@ func TestModelDeclarationsArePortableAcrossModes(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			program := parseModel(t)
 			program.Mode = mode
-			catalog, err := Declarations([]*ast.Program{program}, root, options)
+			catalog, err := Declarations([]*ast.Program{program}, root, options, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -471,7 +471,7 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := Analyze([]*ast.Program{program}, root, map[string][]byte{PackageName: encoded})
+	manifest, err := Analyze([]*ast.Program{program}, root, map[string][]byte{PackageName: encoded}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +589,7 @@ func TestMySQLColumnTypes(t *testing.T) {
 func TestManifestAugmentsModelIRWithoutOwningCompilerIR(t *testing.T) {
 	root, options := sqliteFixture(t)
 	program := parseModel(t)
-	manifest, err := Analyze([]*ast.Program{program}, root, options)
+	manifest, err := Analyze([]*ast.Program{program}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -675,7 +675,7 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	if !ok || len(products.ForeignKeys) != 1 || products.ForeignKeys[0].Column != "category_id" || products.ForeignKeys[0].ReferencedTable != "categories" {
 		t.Fatalf("unexpected product foreign keys: %#v", products.ForeignKeys)
 	}
-	catalog, err := Declarations([]*ast.Program{program}, root, options)
+	catalog, err := Declarations([]*ast.Program{program}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,7 +735,7 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	if productNotExists.Intrinsic != "trb.orm.where_not_exists" || !productNotExists.Class || len(productNotExists.Alternatives) != 2 {
 		t.Fatalf("unexpected Product.where_not_exists declaration: %#v", productNotExists)
 	}
-	manifest, err := Analyze([]*ast.Program{program}, root, options)
+	manifest, err := Analyze([]*ast.Program{program}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -781,7 +781,7 @@ func TestSQLiteHasOneRecognizesUniqueForeignKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, map[string][]byte{PackageName: encoded})
+	manifest, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, map[string][]byte{PackageName: encoded}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -803,7 +803,7 @@ func productQueryMember(t *testing.T, catalog *declaration.Catalog, typeName, na
 
 func TestSQLiteAssociationRejectsMissingForeignKey(t *testing.T) {
 	root, options := sqliteAssociationFixture(t, false)
-	_, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, options)
+	_, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, options, nil)
 	if err == nil || !strings.Contains(err.Error(), "requires foreign key products.category_id -> categories.id") {
 		t.Fatalf("expected missing foreign key diagnostic, got %v", err)
 	}
@@ -824,7 +824,7 @@ func TestSQLiteDatabaseEnvironmentIsResolvedWithoutEmbeddingItsValue(t *testing.
 	}
 	manifest, err := Analyze([]*ast.Program{parseModel(t)}, root, map[string][]byte{
 		PackageName: []byte(`{"adapter":"sqlite","database":{"environment":"TRB_TEST_DATABASE_URL"}}`),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
