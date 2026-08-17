@@ -2,6 +2,30 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.26 - 2026-08-17
+
+### CLI and standalone workflows
+
+- A self-contained `.trb` file can now run without `trbconfig.jsonc` by using
+  `trb FILE.trb`. Standalone execution defaults to Go and supports explicit
+  Ruby or TypeScript selection, while a discovered project configuration
+  remains authoritative. ([#322](https://github.com/type-rb/type-rb/pull/322))
+
+### Editor tooling
+
+- Visual Studio Code can analyze and run standalone TypeRB files with
+  configurable Go, Ruby, or TypeScript mode. Configured and standalone files
+  keep independent language-server sessions.
+  ([#323](https://github.com/type-rb/type-rb/pull/323))
+- Completion now follows instantiated generic results, transparent aliases,
+  and native package contracts. Interface types and methods support Go to
+  Implementation, large monorepos become ready substantially faster, and
+  restarting a project clears prior Debug Console output.
+  ([#326](https://github.com/type-rb/type-rb/pull/326))
+- **Breaking:** Extension 0.2.4 requires Visual Studio Code 1.130 or newer.
+  Upgrade Visual Studio Code before installing this extension version.
+  ([#324](https://github.com/type-rb/type-rb/pull/324))
+
 ## 0.2.25 - 2026-08-16
 
 ### CLI
