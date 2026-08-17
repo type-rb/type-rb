@@ -120,7 +120,11 @@ func (c *CLI) Run(args []string) int {
 		c.usage()
 		return 0
 	default:
-		err = fmt.Errorf("unknown command %q", args[0])
+		if filepath.Ext(args[0]) == ".trb" {
+			err = c.runProgram(args)
+		} else {
+			err = fmt.Errorf("unknown command %q", args[0])
+		}
 	}
 	if err != nil {
 		var reported *reportedError
@@ -809,6 +813,8 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
 	keepGenerated := flags.Bool("keep-generated", false, "retain generated target source below .trb/generated")
+	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
+	typeScriptRuntime := flags.String("runtime", "", "standalone TypeScript runtime: node or bun")
 	flagArgs := args
 	var programArgs []string
 	for index, argument := range args {
@@ -836,15 +842,18 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 		configStart = filename
 		programArgs = append(remaining[1:], programArgs...)
 	}
-	config, err := loadConfig(*configPath, configStart)
+	config, standalone, err := loadRunConfig(*configPath, configStart, filename, *mode, *typeScriptRuntime)
 	if err != nil {
 		return err
 	}
-	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
-	if err != nil {
-		return err
+	files := []string{filename}
+	if !standalone {
+		files, err = collectTRB([]string{config.SourcePath()}, config.OutputPath())
+		if err != nil {
+			return err
+		}
+		files = productionTRBFiles(files)
 	}
-	files = productionTRBFiles(files)
 	if config.ManagesPackages() {
 		if _, err := syncProjectPackages(config, files); err != nil {
 			return err
@@ -856,7 +865,12 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 	}
 	relay := newCommandSignalRelay()
 	defer relay.Close()
-	workspace, err := createGeneratedWorkspace(config.Root, "run")
+	var workspace *generatedWorkspace
+	if standalone {
+		workspace, err = createStandaloneGeneratedWorkspace(config.Root, "run")
+	} else {
+		workspace, err = createGeneratedWorkspace(config.Root, "run")
+	}
 	if err != nil {
 		return err
 	}
@@ -873,6 +887,9 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 			return errors.New("project has no top-level main(); define def main() or pass a .trb file explicitly")
 		}
 	}
+	if standalone && !artifactHasMain(compiled[entrySource]) {
+		return errors.New("standalone file has no top-level main(); define def main()")
+	}
 	generated, err := writeCompiledTree(config, compiled, runRoot, false)
 	if err != nil {
 		return err
@@ -882,7 +899,12 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 		return fmt.Errorf("%s is outside configured sourceDir %s", entrySource, config.SourceDir)
 	}
 	if config.Mode == "go" {
-		if err := copyGoModuleFiles(config, runRoot); err != nil {
+		if standalone {
+			err = writeStandaloneGoModule(config, runRoot)
+		} else {
+			err = copyGoModuleFiles(config, runRoot)
+		}
+		if err != nil {
 			return err
 		}
 		if config.Go.Sqldef != nil {
@@ -911,13 +933,69 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 	if config.Mode == "go" {
 		command.Dir = filepath.Dir(target)
 	}
-	if config.Mode == "ruby" {
+	if config.Mode == "ruby" && !standalone {
 		command.Dir = config.Root
 	}
 	command.Stdin = c.Stdin
 	command.Stdout = c.Stdout
 	command.Stderr = c.Stderr
 	return relay.Run(command)
+}
+
+func loadRunConfig(explicit, start, filename, mode, runtimeName string) (*project.Config, bool, error) {
+	config, err := loadConfig(explicit, start)
+	if err == nil {
+		if mode != "" || runtimeName != "" {
+			return nil, false, errors.New("--mode and --runtime are available only when trbconfig.jsonc is unavailable")
+		}
+		return config, false, nil
+	}
+	if !errors.Is(err, project.ErrConfigNotFound) {
+		return nil, false, err
+	}
+	if explicit != "" {
+		return nil, false, err
+	}
+	if filename == "" {
+		return nil, false, errors.New("run requires FILE.trb when trbconfig.jsonc is unavailable")
+	}
+	if mode == "" {
+		mode = "go"
+	}
+	if mode != "ruby" && mode != "go" && mode != "typescript" {
+		return nil, false, fmt.Errorf("standalone mode must be ruby, go, or typescript; got %q", mode)
+	}
+	if runtimeName != "" && mode != "typescript" {
+		return nil, false, errors.New("--runtime requires --mode typescript")
+	}
+	if runtimeName != "" && runtimeName != project.TypeScriptRuntimeNode && runtimeName != project.TypeScriptRuntimeBun {
+		return nil, false, fmt.Errorf("standalone TypeScript runtime must be node or bun; got %q", runtimeName)
+	}
+	config = project.New(filepath.Dir(filename), mode)
+	config.Name = "standalone"
+	config.PackageManagement = project.ExternalPackages
+	if config.Go != nil {
+		config.Go.Module = "trb.local/standalone"
+	}
+	if config.TypeScript != nil && runtimeName != "" {
+		config.TypeScript.Runtime = runtimeName
+		if runtimeName == project.TypeScriptRuntimeBun {
+			config.TypeScript.PackageManager = "bun"
+		}
+	}
+	if err := config.Validate(); err != nil {
+		return nil, false, err
+	}
+	return config, true, nil
+}
+
+func writeStandaloneGoModule(config *project.Config, root string) error {
+	version := "1.26"
+	if config.Go != nil && config.Go.Version != "" {
+		version = config.Go.Version
+	}
+	module := fmt.Sprintf("module trb.local/standalone\n\ngo %s\n", version)
+	return os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0o644)
 }
 
 func rubyRunCommand(target string, programArgs []string) *exec.Cmd {
@@ -2325,7 +2403,8 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb test [--filter TEXT] [--file FILE] [--reporter human|json] [--compile [--debug] [--outfile FILE]] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE]")
-	fmt.Fprintln(c.Stdout, "  trb run [--keep-generated] [FILE.trb] [-- arguments...]")
+	fmt.Fprintln(c.Stdout, "  trb run [--keep-generated] [--mode MODE] [--runtime RUNTIME] [FILE.trb] [-- arguments...]")
+	fmt.Fprintln(c.Stdout, "  trb FILE.trb [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb clean [--build] [--cache] [--generated] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb lsp [--config trbconfig.jsonc]")

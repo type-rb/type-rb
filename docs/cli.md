@@ -96,8 +96,12 @@ trb build --compile --debug --outfile .trb/debug/api
 trb run
 trb run -- first-argument
 
-# Explicitly choose a source file for a one-off run.
+# Run one file without a project, using Go by default.
+trb test.trb
 trb run test.trb
+trb run --mode ruby test.trb
+trb run --mode typescript --runtime node test.trb
+trb run --mode typescript --runtime bun test.trb
 
 # Retain the exact generated target tree for inspection.
 trb run --keep-generated
@@ -119,13 +123,27 @@ A runnable project defines exactly one top-level `def main()`. `trb run`
 compiles before every execution, so a separate build step is unnecessary.
 Library projects may omit `main`, but cannot be run directly.
 
-`trb run` writes target source below `.trb/run` and removes it after the child
-process exits. TypeRB forwards interrupts and termination signals to the child
-process group, waits for it to stop, and then removes the workspace. A lease
-protects every active workspace; the next run removes abandoned workspaces
-left by a forced process or system shutdown without disturbing concurrent
-runs. `--keep-generated` moves the completed target tree to `.trb/generated`
-and prints its path instead of deleting it.
+Passing a `.trb` file starts standalone execution only when no
+`trbconfig.jsonc` can be discovered from that file's directory. The short form
+`trb FILE.trb` is equivalent to `trb run FILE.trb`. Standalone execution uses
+Go when `--mode` is omitted, accepts `ruby`, `go`, or `typescript`, and accepts
+`--runtime node|bun` for TypeScript. It compiles only the selected file, which
+must define `main()`. Project and native dependencies, local source imports,
+and multi-file programs require `trbconfig.jsonc`.
+
+If a configuration is discovered or passed through `--config`, its mode and
+runtime always win. Supplying standalone `--mode` or `--runtime` options in
+that case is an error instead of an implicit project override.
+
+Project execution writes target source below `.trb/run`; standalone execution
+uses an operating-system temporary directory. Both remove generated source
+after the child process exits. TypeRB forwards interrupts and termination
+signals to the child process group, waits for it to stop, and then removes the
+workspace. A lease protects every active project workspace; the next run
+removes abandoned project workspaces left by a forced process or system
+shutdown without disturbing concurrent runs. `--keep-generated` moves the
+completed target tree to `.trb/generated` beside the project or standalone
+file and prints its path instead of deleting it.
 
 TypeScript projects execute with the configured `typescript.runtime`. Node is
 the compatibility default; Bun projects use `bun run`. Browser projects are
