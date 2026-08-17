@@ -57,7 +57,16 @@ puts(main<String>("explicit-main"))
 			if err := os.WriteFile(filename, []byte(source), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "helper.trb"), []byte("def imported_message(): String\n\treturn \"imported\"\nend\n"), 0o644); err != nil {
+			helper := `def imported_message(): String
+	return "imported"
+end
+
+def main()
+	puts("imported-main-must-not-run")
+	return
+end
+`
+			if err := os.WriteFile(filepath.Join(root, "helper.trb"), []byte(helper), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(root, "broken.trb"), []byte("this is not valid TypeRB"), 0o644); err != nil {

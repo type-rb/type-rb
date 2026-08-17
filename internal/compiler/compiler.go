@@ -45,9 +45,11 @@ type SourceUnit struct {
 	CompilerOwned   bool
 	Official        bool
 	ExternalPackage bool
-	// Script executes this unit's top-level statements instead of treating a
-	// top-level main() as the program entry point.
-	Script bool
+	// Standalone removes configured-project entrypoint behavior from this unit.
+	Standalone bool
+	// ScriptEntry executes this unit's top-level statements as the selected
+	// standalone file.
+	ScriptEntry bool
 	// TestRegistration moves top-level test suites into this generated
 	// function. An empty value keeps ordinary source behavior.
 	TestRegistration string
@@ -71,7 +73,8 @@ func NewCompileError(filename string, fallback diagnostic.Code, items []diagnost
 
 type Options struct {
 	Mode               string
-	Script             bool
+	Standalone         bool
+	ScriptEntry        bool
 	Package            string
 	ModulePath         string
 	GoModule           string
@@ -112,7 +115,8 @@ func Compile(filename string, source []byte, mode string) (*Artifact, error) {
 func CompileWithOptions(filename string, source []byte, options Options) (*Artifact, error) {
 	program, diagnostics := parser.Parse(source)
 	configureProgram(program, options, options.ModulePath, options.Package)
-	program.Script = options.Script
+	program.Standalone = options.Standalone
+	program.ScriptEntry = options.ScriptEntry
 	if options.Mode == "" {
 		diagnostics = append(diagnostics, diagnostic.Diagnostic{
 			Code:     diagnostic.ProjectError,
@@ -166,7 +170,8 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	for _, source := range units {
 		program, diagnostics := parser.Parse(source.Source)
 		configureProgram(program, options, source.ModulePath, source.Package)
-		program.Script = source.Script
+		program.Standalone = source.Standalone
+		program.ScriptEntry = source.ScriptEntry
 		if source.MainReplacement != "" {
 			renameTopLevelMethod(program, MainFunction, source.MainReplacement)
 		}
@@ -269,7 +274,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	owner := ""
 	ownerModule := ""
 	for _, source := range units {
-		if !source.Script && hasTopLevelMethod(programs[source.ModulePath], MainFunction) {
+		if !source.Standalone && hasTopLevelMethod(programs[source.ModulePath], MainFunction) {
 			if owner != "" {
 				item := diagnostic.Diagnostic{
 					Code: diagnostic.DuplicateBinding, Severity: diagnostic.Error, Message: "main is already declared", Path: source.Filename, Span: programs[source.ModulePath].Span(),

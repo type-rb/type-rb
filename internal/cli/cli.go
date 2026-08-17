@@ -789,28 +789,7 @@ func (c *CLI) buildGoExecutable(config *project.Config, outfile string, debug bo
 	if target == "" {
 		return errors.New("compiler did not produce the top-level main() artifact")
 	}
-	if info, statErr := os.Stat(output); statErr == nil && info.IsDir() {
-		return fmt.Errorf("--outfile must name a file; %s is a directory", output)
-	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return statErr
-	}
-	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
-		return err
-	}
-	arguments := []string{"build", "-mod=mod"}
-	if debug {
-		arguments = append(arguments, "-gcflags=all=-N -l")
-	}
-	arguments = append(arguments, "-o", output, ".")
-	command := exec.Command("go", arguments...)
-	command.Dir = filepath.Dir(target)
-	command.Stdout = c.Stdout
-	command.Stderr = c.Stderr
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("go build: %w", err)
-	}
-	fmt.Fprintf(c.Stdout, "executable -> %s\n", output)
-	return nil
+	return c.buildGoTarget(target, output, debug)
 }
 
 func (c *CLI) buildGoStandaloneExecutable(config *project.Config, filename, outfile string, debug bool) error {
@@ -842,6 +821,10 @@ func (c *CLI) buildGoStandaloneExecutable(config *project.Config, filename, outf
 	if target == "" {
 		return errors.New("compiler did not produce the standalone file artifact")
 	}
+	return c.buildGoTarget(target, output, debug)
+}
+
+func (c *CLI) buildGoTarget(target, output string, debug bool) error {
 	if info, statErr := os.Stat(output); statErr == nil && info.IsDir() {
 		return fmt.Errorf("--outfile must name a file; %s is a directory", output)
 	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
@@ -1983,22 +1966,30 @@ func compileScript(config *project.Config, files []string, filename string) (map
 	if err != nil {
 		return nil, err
 	}
+	if err := markStandaloneSourceUnits(units, filename); err != nil {
+		return nil, err
+	}
+	return compileUnits(units, options)
+}
+
+func markStandaloneSourceUnits(units []compiler.SourceUnit, filename string) error {
 	entry, err := filepath.Abs(filename)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	found := false
 	for index := range units {
+		units[index].Standalone = true
 		candidate, _ := filepath.Abs(units[index].Filename)
 		if candidate == entry {
-			units[index].Script = true
+			units[index].ScriptEntry = true
 			found = true
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("standalone source %s was not included in compilation", filename)
+		return fmt.Errorf("standalone source %s was not included in compilation", filename)
 	}
-	return compileUnits(units, options)
+	return nil
 }
 
 func standaloneSourceFiles(filename string) ([]string, error) {

@@ -34,7 +34,8 @@ func Program(checked checker.Result) *ir.Program {
 	statements = append(l.runtimeImports(statements), statements...)
 	return &ir.Program{
 		Mode:              checked.Program.Mode,
-		Script:            checked.Program.Script,
+		Standalone:        checked.Program.Standalone,
+		ScriptEntry:       checked.Program.ScriptEntry,
 		Package:           checked.Program.Package,
 		ModulePath:        checked.Program.ModulePath,
 		GoModule:          checked.Program.GoModule,

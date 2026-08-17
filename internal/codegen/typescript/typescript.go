@@ -23,7 +23,7 @@ type generator struct {
 	functionDepth    int
 	methods          map[string]bool
 	modulePath       string
-	script           bool
+	standalone       bool
 	moduleExtensions map[string]string
 	topFunctions     map[string]bool
 	topTargets       map[string]string
@@ -115,7 +115,7 @@ func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error
 }
 
 func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string) sourcemap.Generated {
-	g := &generator{modulePath: program.ModulePath, script: program.Script, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{modulePath: program.ModulePath, standalone: program.Standalone, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -128,7 +128,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		}
 	}
 	g.integrationImports(program.Extensions)
-	if program.Script {
+	if program.ScriptEntry {
 		g.line("const __trbScope: AbortSignal | undefined = undefined;")
 	}
 	for i, statement := range program.Statements {
@@ -144,7 +144,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
 	}
-	if !program.Script && g.topFunctions["main"] {
+	if !program.Standalone && g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
 		}

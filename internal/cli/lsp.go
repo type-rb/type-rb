@@ -60,12 +60,8 @@ func (c *CLI) runLSP(args []string) error {
 	var includedFiles []string
 	if standalone {
 		includedFiles = []string{filename}
-		entry, _ := filepath.Abs(filename)
-		for index := range units {
-			candidate, _ := filepath.Abs(units[index].Filename)
-			if candidate == entry {
-				units[index].Script = true
-			}
+		if err := markStandaloneSourceUnits(units, filename); err != nil {
+			return err
 		}
 	}
 	server := lsp.New(lsp.Options{
@@ -82,7 +78,8 @@ func (c *CLI) runLSP(args []string) error {
 			if err == nil && standalone {
 				candidate, _ := filepath.Abs(filename)
 				entry, _ := filepath.Abs(includedFiles[0])
-				unit.Script = candidate == entry
+				unit.Standalone = true
+				unit.ScriptEntry = candidate == entry
 			}
 			return unit, err
 		},

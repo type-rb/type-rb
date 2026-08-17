@@ -36,7 +36,7 @@ type generator struct {
 	bindingNames     map[string]string
 	bindingSources   map[string]bool
 	modulePath       string
-	script           bool
+	standalone       bool
 	goModule         string
 	temporary        int
 	breakTarget      string
@@ -106,7 +106,7 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 		bindingNames:     bindingNames,
 		bindingSources:   map[string]bool{},
 		modulePath:       program.ModulePath,
-		script:           program.Script,
+		standalone:       program.Standalone,
 		goModule:         program.GoModule,
 		jobs:             jobsintegration.ManifestFrom(program.Extensions),
 		jobsSQL:          jobssql.ManifestFrom(program.Extensions),
@@ -146,7 +146,7 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 			g.importStatement(imp)
 		}
 	}
-	if program.Script {
+	if program.ScriptEntry {
 		g.scriptProgram(program.Statements)
 	} else {
 		for _, statement := range program.Statements {
@@ -1072,20 +1072,20 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 func (g *generator) topLevelMethod(method *ir.Method) {
 	name := g.projectFunctionName(g.modulePath, method.Name)
 	parameters := g.methodParameters(method)
-	if method.Name == "main" && !g.script {
+	if method.Name == "main" && !g.standalone {
 		parameters = g.parameters(method.Parameters)
 	}
 	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 	g.indent++
-	if method.Name == "main" && !g.script && g.methodUsesExecutionScope(method) {
+	if method.Name == "main" && !g.standalone && g.methodUsesExecutionScope(method) {
 		g.requireImport("context", "trbcontext")
 		g.line("__trbScope := trbcontext.Background()")
 	}
 	g.parameterDefaults(method.Parameters)
-	if method.Name == "main" && !g.script && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
+	if method.Name == "main" && !g.standalone && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
 		g.line("if trbJobsRunWorkerIfRequested() { return }")
 	}
-	if method.Name == "main" && !g.script && g.orm != nil && len(g.orm.Models) > 0 {
+	if method.Name == "main" && !g.standalone && g.orm != nil && len(g.orm.Models) > 0 {
 		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
 	}
 	g.functionDepth++

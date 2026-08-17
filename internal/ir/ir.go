@@ -18,7 +18,8 @@ func (b Base) SourceSpan() token.Span { return b.Span }
 
 type Program struct {
 	Mode              string
-	Script            bool
+	Standalone        bool
+	ScriptEntry       bool
 	SourcePath        string
 	Package           string
 	ModulePath        string

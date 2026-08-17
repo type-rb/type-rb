@@ -45,7 +45,7 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	if g.modulePath == jobssql.ModulePath {
 		g.jobsStorage(g.jobsSQL.Config)
 	}
-	if !g.script && g.topFunctions["main"] && g.modulePath != "trb_test_main" {
+	if !g.standalone && g.topFunctions["main"] && g.modulePath != "trb_test_main" {
 		g.jobsWorker(manifest, g.jobsSQL.Config)
 	}
 }
