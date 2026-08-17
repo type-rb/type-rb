@@ -350,6 +350,12 @@ switches.
 ### 3.7 Imports and Formatting
 
 - Imports are explicit in every mode and are resolved before type checking.
+- A package provider may define a declaration-only reference position for a
+  declarative API. The initial case is the first model argument of
+  `trb/orm`'s `belongs_to`, `has_many`, and `has_one`: model declarations in
+  the same source directory resolve there without an import. The name is not
+  made visible to ordinary expressions or type annotations, and a subdirectory
+  begins a different ORM model group.
 - Every ordinary import must be used. A package import is used by referencing
   one of its members; every symbol in a named import list must be referenced.
   Imports that explicitly activate a compiler integration, such as a native

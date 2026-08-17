@@ -84,9 +84,18 @@ type CallParameter struct {
 	Label                string
 	Keyword              bool
 	Definition           *DefinitionLocation
+	ReferenceScopes      []ReferenceScope
 	LiteralValues        []string
 	LiteralArrays        [][]string
 	LiteralArrayElements []string
+}
+
+// ReferenceScope makes provider-owned project declarations visible only in a
+// declarative call argument owned by one source declaration.
+type ReferenceScope struct {
+	Owner   string
+	Range   OffsetRange
+	Symbols []Symbol
 }
 
 type CallSignature struct {

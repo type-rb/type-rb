@@ -290,10 +290,24 @@ func Analyze(programs []*ast.Program, projectRoot string, options map[string][]b
 func (*Manifest) ExtensionName() string { return ProjectProvider }
 
 func (m *Manifest) Augment(program *ir.Program) {
+	m.augmentProgram(program, false)
+}
+
+// AugmentProgram receives entrypoint ownership from the project pipeline so
+// Ruby and TypeScript can bootstrap model registration without creating
+// model-to-model initialization cycles.
+func (m *Manifest) AugmentProgram(program *ir.Program, entrypoint bool) {
+	m.augmentProgram(program, entrypoint)
+}
+
+func (m *Manifest) augmentProgram(program *ir.Program, entrypoint bool) {
 	if m == nil || program == nil {
 		return
 	}
 	m.captureAssociationScopes(program)
+	if entrypoint && program.Mode != "go" {
+		m.ensureModelRuntimeImports(program)
+	}
 	ensureRuntimeTypes(program)
 	if program.ModulePath == "trb/orm/index" {
 		for _, statement := range program.Statements {
@@ -541,6 +555,44 @@ func (m *Manifest) Augment(program *ir.Program) {
 		}
 	}
 	applyPortableIREffects(program.Statements)
+}
+
+// Association targets are compiler-resolved declarations rather than runtime
+// source expressions. Loading every model from the runnable root lets Ruby and
+// TypeScript register the manifest in source-import order without adding
+// initialization edges between model modules. Go resolves associations inside
+// each generated model-group package and needs no registration bootstrap.
+func (m *Manifest) ensureModelRuntimeImports(program *ir.Program) {
+	loaded := map[string]*ir.Import{}
+	for _, statement := range program.Statements {
+		if imported, ok := statement.(*ir.Import); ok {
+			loaded[imported.Path] = imported
+		}
+	}
+	targets := map[string]bool{}
+	for _, model := range m.Models {
+		if model.ModulePath != program.ModulePath {
+			targets[model.ModulePath] = true
+		}
+	}
+	paths := make([]string, 0, len(targets))
+	for modulePath := range targets {
+		paths = append(paths, modulePath)
+	}
+	sort.Strings(paths)
+	imports := make([]ir.Statement, 0, len(paths))
+	for _, modulePath := range paths {
+		if imported := loaded[modulePath]; imported != nil {
+			imported.Runtime = true
+			imported.RuntimeRequired = true
+			continue
+		}
+		imports = append(imports, &ir.Import{
+			Path: modulePath, Kind: "project", Runtime: true,
+			RuntimeRequired: true, Implicit: true,
+		})
+	}
+	program.Statements = append(imports, program.Statements...)
 }
 
 func applyPortableIREffects(statements []ir.Statement) {

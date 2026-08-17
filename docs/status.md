@@ -232,6 +232,12 @@ Go, Ruby, and TypeScript; TypeScript server applications currently select Bun.
 It reads SQLite, PostgreSQL, or MySQL schema metadata directly and exposes typed
 models, immutable queries, associations and preload, aggregates, transactions,
 batching, writes, conflict handling, and destroy lifecycles.
+Each source directory is an ORM model group: separate model files can declare
+typed direct and through associations without mutual imports, while ordinary
+model references still require explicit imports. Cross-group object navigation
+is a located project diagnostic; foreign-key based repository queries remain
+available across the boundary. Runnable roots bootstrap Ruby and TypeScript
+model registration without adding cyclic imports between model modules.
 String- and Integer-backed enum columns preserve nominal enum types throughout
 queries and writes, while ordinary enums use a checked lower-snake-case storage
 convention. Unknown stored values become structured invalid-data errors.
@@ -329,7 +335,10 @@ at the adapter boundary; the compiler and formatter continue to use complete
 UTF-8 source snapshots and offsets. The preview Visual Studio Code extension is
 a published thin client over this boundary. Definition, reference, document
 highlight, and rename queries follow stable source declaration identities
-across project imports, receiver types, and common lexical bindings. Document
+across project imports, receiver types, and common lexical bindings.
+Association model references supplied by declarative package providers also
+participate in completion, hover, definition, references, and rename without
+adding ordinary source imports. Document
 symbols expose the structural outline from the lossless syntax tree even while
 a file has type errors, and workspace symbol queries search the same
 declarations across project files. Structural folding ranges cover declarations

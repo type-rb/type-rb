@@ -63,6 +63,7 @@ func BuildContexts(programs []*ir.Program) map[string]Context {
 			}
 			addImportSymbols(visible, imported, programsByPath, exportsByPath)
 		}
+		addFunctionArgumentReferences(visible, session, programsByPath, exportsByPath)
 		visible["puts"] = Symbol{
 			Name:   "puts",
 			Kind:   CompletionFunction,
@@ -83,6 +84,114 @@ func BuildContexts(programs []*ir.Program) map[string]Context {
 		sortSymbols(context.Symbols)
 		result[session.ModulePath] = context
 	}
+	return result
+}
+
+func addFunctionArgumentReferences(visible map[string]Symbol, session *ir.Program, programsByPath map[string]*ir.Program, exportsByPath map[string][]Symbol) {
+	if session == nil || session.Declarations == nil {
+		return
+	}
+	for _, rule := range session.Declarations.FunctionArgumentReferenceRules {
+		if rule.Owner.ModulePath != session.ModulePath || !importsFunction(session, rule.Package, rule.Function) {
+			continue
+		}
+		symbol, ok := visible[rule.Function]
+		if !ok || symbol.Call == nil {
+			continue
+		}
+		parameter := positionalCallParameter(symbol.Call, rule.Argument)
+		if parameter == nil {
+			continue
+		}
+		owner, found := declarationOwnerRange(session.Statements, rule.Owner.Name)
+		if !found {
+			continue
+		}
+		updated := cloneSymbolCall(symbol)
+		parameter = positionalCallParameter(updated.Call, rule.Argument)
+		scope := ReferenceScope{Owner: rule.Owner.Name, Range: owner}
+		for _, reference := range rule.Targets {
+			for _, candidate := range exportsByPath[reference.ModulePath] {
+				if candidate.Name != reference.Name || candidate.Kind != CompletionType {
+					continue
+				}
+				candidate.Import = nil
+				scope.Symbols = appendUniqueSymbol(scope.Symbols, candidate)
+				break
+			}
+		}
+		sortSymbols(scope.Symbols)
+		parameter.ReferenceScopes = append(parameter.ReferenceScopes, scope)
+		visible[rule.Function] = updated
+	}
+}
+
+func importsFunction(program *ir.Program, packagePath, function string) bool {
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ir.Import)
+		if !ok || imported.Implicit || strings.TrimSuffix(imported.Path, "/index") != strings.TrimSuffix(packagePath, "/index") {
+			continue
+		}
+		for _, symbol := range imported.Symbols {
+			if symbol == function {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func declarationOwnerRange(statements []ir.Statement, name string) (OffsetRange, bool) {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Class:
+			if node.Name == name {
+				span := node.SourceSpan()
+				return OffsetRange{Start: span.Start.Offset, End: span.End.Offset}, true
+			}
+			if result, found := declarationOwnerRange(node.Body, name); found {
+				return result, true
+			}
+		case *ir.Module:
+			if result, found := declarationOwnerRange(node.Body, name); found {
+				return result, true
+			}
+		}
+	}
+	return OffsetRange{}, false
+}
+
+func positionalCallParameter(call *CallInfo, position int) *CallParameter {
+	if call == nil || position < 0 {
+		return nil
+	}
+	positional := 0
+	for index := range call.Parameters {
+		if call.Parameters[index].Keyword {
+			continue
+		}
+		if positional == position {
+			return &call.Parameters[index]
+		}
+		positional++
+	}
+	return nil
+}
+
+func cloneSymbolCall(symbol Symbol) Symbol {
+	result := symbol
+	if symbol.Call == nil {
+		return result
+	}
+	call := *symbol.Call
+	call.Parameters = append([]CallParameter(nil), symbol.Call.Parameters...)
+	for index := range call.Parameters {
+		call.Parameters[index].ReferenceScopes = append([]ReferenceScope(nil), call.Parameters[index].ReferenceScopes...)
+		for scopeIndex := range call.Parameters[index].ReferenceScopes {
+			call.Parameters[index].ReferenceScopes[scopeIndex].Symbols = append([]Symbol(nil), call.Parameters[index].ReferenceScopes[scopeIndex].Symbols...)
+		}
+	}
+	result.Call = &call
 	return result
 }
 

@@ -65,8 +65,9 @@ type Import struct {
 	Platform  bool
 	Native    bool
 	Runtime   bool
-	// RuntimeRequired records that generated code must load the compiler-owned
-	// source module. Fully lowered intrinsics can leave this false.
+	// RuntimeRequired records that generated code must load the source module
+	// for compiler-owned runtime behavior. Fully lowered intrinsics can leave
+	// this false.
 	RuntimeRequired bool
 	// Implicit identifies compiler-injected runtime dependencies that are not
 	// source-visible imports. Language tooling must not offer their exports as

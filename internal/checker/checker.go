@@ -352,6 +352,8 @@ type Checker struct {
 	aliasCycles           map[string]bool
 	declaredEffects       []types.Type
 	effectCaptures        []*effectCapture
+	declarationReferences int
+	declarationCalls      map[*ast.CallExpression]string
 }
 
 type effectCapture struct {
@@ -416,6 +418,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		allowUnusedImports:    options.AllowUnusedImports,
 		allowUnhandledEffects: options.AllowUnhandledEffects,
 		aliasCycles:           map[string]bool{},
+		declarationCalls:      map[*ast.CallExpression]string{},
 	}
 	if resolution.Declarations != nil {
 		for _, runtimeType := range resolution.Declarations.RuntimeTypesByModule[program.ModulePath] {
@@ -734,6 +737,10 @@ func (c *Checker) collect(statements []ast.Statement) {
 			c.declaredTypes[n.Name] = declaration
 			for _, member := range n.Body {
 				switch m := member.(type) {
+				case *ast.ExpressionStatement:
+					if call, ok := m.Expression.(*ast.CallExpression); ok {
+						c.declarationCalls[call] = n.Name
+					}
 				case *ast.FieldStatement:
 					if previous, exists := info.fields[m.Name]; exists {
 						c.error(m.Span(), fmt.Sprintf("field %s was already declared at %s", m.Name, previous.Span().Start))
@@ -3480,7 +3487,7 @@ func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
 		c.markImportUsed(imported)
 		return
 	}
-	if _, ok := c.declarations().Type(name); ok {
+	if c.declarationTypeVisible(name) {
 		return
 	}
 	if c.mode == "ruby" {
@@ -3856,7 +3863,7 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 		if declared, exists := c.declaredTypes[node.Name]; exists {
 			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum"
 		}
-		if _, exists := c.declarations().Type(node.Name); exists {
+		if c.declarationTypeVisible(node.Name) {
 			return true
 		}
 		if binding, exists := c.result.References[node]; exists && binding.Export != nil {
@@ -3875,7 +3882,7 @@ func (c *Checker) constructorType(name string) bool {
 	if declaration, exists := c.declaredTypes[name]; exists {
 		return declaration.kind == "class" || declaration.kind == "record"
 	}
-	if _, exists := c.declarations().Type(name); exists {
+	if c.declarationTypeVisible(name) {
 		return true
 	}
 	if binding, exists := c.resolution.ImportedType(name); exists && binding.Export != nil {
@@ -3900,6 +3907,60 @@ func (c *Checker) declarations() *declaration.Catalog {
 		return declaration.NewCatalog()
 	}
 	return c.resolution.Declarations
+}
+
+func (c *Checker) declarationTypeVisible(name string) bool {
+	declared, exists := c.declarations().Type(name)
+	if !exists {
+		return false
+	}
+	if declared.SourceModule == "" || c.result.Program == nil || declared.SourceModule == c.result.Program.ModulePath {
+		return true
+	}
+	if _, local := c.declaredTypes[name]; local {
+		return true
+	}
+	_, imported := c.resolution.ImportedType(name)
+	return imported
+}
+
+func (c *Checker) declarationFunctionArgumentReference(call *ast.CallExpression, argumentIndex int) bool {
+	if call == nil || argumentIndex < 0 || argumentIndex >= len(call.Arguments) || call.Arguments[argumentIndex].Name != "" || c.current == nil || c.result.Program == nil {
+		return false
+	}
+	if c.declarationCalls[call] != c.current.name {
+		return false
+	}
+	target, ok := call.Arguments[argumentIndex].Value.(*ast.Identifier)
+	if !ok {
+		return false
+	}
+	binding, referenced := c.result.References[call.Callee]
+	if !referenced || binding.Import == nil {
+		return false
+	}
+	position := -1
+	for index := range call.Arguments {
+		if call.Arguments[index].Name != "" {
+			continue
+		}
+		position++
+		if index == argumentIndex {
+			break
+		}
+	}
+	packagePath := strings.TrimSuffix(binding.Import.RuntimePath(), "/index")
+	for _, rule := range c.declarations().FunctionArgumentReferenceRules {
+		if rule.Package == packagePath && rule.Function == binding.Name && rule.Argument == position &&
+			rule.Owner.ModulePath == c.result.Program.ModulePath && rule.Owner.Name == c.current.name {
+			for _, reference := range rule.Targets {
+				if reference.Name == target.Name {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (c *Checker) declarationMember(className, memberName string, class bool, seen map[string]bool) (declaration.Member, bool) {
@@ -4119,6 +4180,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		} else if isConstant(n.Name) {
 			typ = types.FromName(n.Name)
+			if c.declarationReferences == 0 && !c.declarationTypeVisible(n.Name) {
+				if declared, exists := c.declarations().Type(n.Name); exists && declared.SourceModule != "" {
+					c.error(n.Span(), fmt.Sprintf("type %s is not declared or imported", n.Name))
+					typ = invalidType()
+				}
+			}
 		}
 	case *ast.Literal:
 		switch n.Kind {
@@ -4639,8 +4706,15 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.enumCallee--
 		}
 		argumentTypes := make([]types.Type, 0, len(n.Arguments))
-		for _, arg := range n.Arguments {
+		for index, arg := range n.Arguments {
+			declarationReference := c.declarationFunctionArgumentReference(n, index)
+			if declarationReference {
+				c.declarationReferences++
+			}
 			argumentTypes = append(argumentTypes, c.checkExpression(arg.Value, sc))
+			if declarationReference {
+				c.declarationReferences--
+			}
 		}
 		typ = calleeType
 		if parameters, returned, callable := types.FunctionSignature(calleeType); callable {

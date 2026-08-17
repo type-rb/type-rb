@@ -2,6 +2,7 @@
 package compiler
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -129,7 +130,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 		PackageAliasesByModule: map[string]map[string]string{program.ModulePath: options.PackageAliases},
 	})
 	if providerErr != nil {
-		return nil, providerErr
+		return nil, compileProviderError(providerErr, []SourceUnit{{Filename: filename, ModulePath: options.ModulePath}})
 	}
 	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: filename, PackageAliases: options.PackageAliases, Declarations: declarations, NativePackages: options.NativePackages})
 	diagnostics = append(diagnostics, resolveDiagnostics...)
@@ -224,7 +225,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		PackageAliasesByModule: packageAliasesByModule,
 	})
 	if providerErr != nil {
-		return nil, providerErr
+		return nil, compileProviderError(providerErr, units)
 	}
 
 	resolutions := make(map[string]resolver.Result, len(units))
@@ -308,6 +309,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	integrations, integrationIssues, err := projectintegration.Analyze(projectintegration.Context{
 		Sources:                integrationSources,
 		Resolutions:            resolutions,
+		EntrypointModule:       ownerModule,
 		SourceRoot:             options.SourceRoot,
 		ProjectRoot:            projectRoot(options),
 		PackageOptions:         options.PackageOptions,
@@ -344,6 +346,35 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], Output: outputs[index].Output, SourceMap: outputs[index].SourceMap, CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage})
 	}
 	return artifacts, nil
+}
+
+type providerDiagnosticError interface {
+	Diagnostics() []diagnostic.Diagnostic
+}
+
+func compileProviderError(err error, sources []SourceUnit) error {
+	var diagnosed providerDiagnosticError
+	if !errors.As(err, &diagnosed) {
+		return err
+	}
+	filenames := make(map[string]string, len(sources))
+	for _, source := range sources {
+		filenames[source.ModulePath] = source.Filename
+	}
+	items := diagnosed.Diagnostics()
+	for index := range items {
+		items[index].Related = append([]diagnostic.RelatedInformation(nil), items[index].Related...)
+		if filename, ok := filenames[items[index].Path]; ok {
+			items[index].Path = filename
+		}
+		for relatedIndex := range items[index].Related {
+			location := &items[index].Related[relatedIndex].Location
+			if filename, ok := filenames[location.Path]; ok {
+				location.Path = filename
+			}
+		}
+	}
+	return NewCompileError("", diagnostic.ProjectIntegration, items)
 }
 
 func sourcePackageAliases(units []SourceUnit, defaults map[string]string) map[string]map[string]string {
