@@ -2,6 +2,31 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.29 - 2026-08-17
+
+### CLI and standalone workflows
+
+- Config-free `.trb` entries now resolve explicit local imports transitively
+  when running in Go, Ruby, or TypeScript mode, without compiling unrelated
+  sibling or imported `*_test.trb` files.
+  ([#338](https://github.com/type-rb/type-rb/pull/338))
+- Config-free Go entries can now build standalone executables with
+  `trb build --compile FILE.trb`. Output defaults to
+  `<entry-directory>/bin/<source-stem>`, while `--debug` retains TypeRB source
+  mappings for debuggers.
+  ([#336](https://github.com/type-rb/type-rb/pull/336))
+
+### Editor tooling
+
+- Standalone language-server sessions now keep explicit local import closures
+  synchronized with unsaved editor changes and filesystem events, so imported
+  helpers participate in diagnostics and language features.
+  ([#337](https://github.com/type-rb/type-rb/pull/337))
+- Visual Studio Code can now debug config-free Go entries and their imported
+  TypeRB helpers through Delve, using private session executables that are
+  removed when debugging ends.
+  ([#336](https://github.com/type-rb/type-rb/pull/336))
+
 ## 0.2.28 - 2026-08-17
 
 ### ORM
