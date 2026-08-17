@@ -38,6 +38,8 @@ files are not compiled, and Go is the default target mode.
 
 ## Requirements
 
+Use Visual Studio Code 1.130 or newer.
+
 Install the TypeRB compiler and make `trb` available on `PATH`:
 
 ```sh
@@ -114,6 +116,24 @@ needed:
 
 If Visual Studio Code cannot find a Homebrew installation, set
 `typerb.server.path` to the result of `command -v trb`.
+
+## Local development
+
+The integration suite builds the extension and compiler from the current
+checkout, then starts an isolated Extension Development Host. It does not
+install or update the Marketplace extension.
+
+```sh
+npm ci --prefix editors/vscode
+npm test --prefix editors/vscode
+npm run test:integration --prefix editors/vscode
+npm run test:integration:insiders --prefix editors/vscode
+npm run package --prefix editors/vscode
+```
+
+The Stable and Insiders suites cover standalone language service activation,
+unsaved-file diagnostics, and execution through the real debug adapter
+lifecycle.
 
 ## Documentation
 
