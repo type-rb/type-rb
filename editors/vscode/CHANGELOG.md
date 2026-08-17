@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Follow explicit local imports in standalone language-server sessions and
+  keep imported diagnostics synchronized with unsaved editor changes.
+
 ## 0.2.4 - 2026-08-17
 
 - Complete members through instantiated generic results, transparent aliases,

@@ -1,6 +1,4 @@
-def greet(name: String): String
-	return "Hello, " + name
-end
+import { greet } from "./helper.trb"
 
 def main()
 	puts(greet("Extension Host"))

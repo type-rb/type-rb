@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"flag"
+	"os"
 	"path/filepath"
 
 	"github.com/type-rb/type-rb/internal/compiler"
@@ -38,17 +39,55 @@ func (c *CLI) runLSP(args []string) error {
 	if err != nil {
 		return err
 	}
-	files := []string{filename}
-	if !standalone {
-		files, err = collectTRB([]string{config.SourcePath()}, config.OutputPath())
+	var (
+		units            []compiler.SourceUnit
+		options          compiler.Options
+		resolveWorkspace lsp.WorkspaceResolver
+	)
+	if standalone {
+		resolveWorkspace = func(overlays map[string][]byte) ([]compiler.SourceUnit, error) {
+			graph, err := loadFileRootSourceGraph(filename, func(path string) ([]byte, error) {
+				path = filepath.Clean(path)
+				if source, exists := overlays[path]; exists {
+					return append([]byte(nil), source...), nil
+				}
+				return os.ReadFile(path)
+			})
+			if err != nil {
+				// A standalone editor client can outlive an unsaved file after its
+				// backing path is deleted. Keep the LSP transport available until
+				// didOpen supplies that selected entry as an overlay. Other commands
+				// continue to require a readable entry through the shared graph loader.
+				if errors.Is(err, os.ErrNotExist) {
+					return nil, nil
+				}
+				return nil, err
+			}
+			result := make([]compiler.SourceUnit, 0, len(graph.Sources))
+			for _, snapshot := range graph.Sources {
+				unit, err := sourceUnit(config, snapshot.Filename, snapshot.Source)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, unit)
+			}
+			return result, nil
+		}
+		units, err = resolveWorkspace(nil)
 		if err != nil {
 			return err
 		}
+		options, err = compilerOptions(config)
+	} else {
+		files, collectErr := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+		if collectErr != nil {
+			return collectErr
+		}
+		if len(files) == 0 {
+			return errors.New("no .trb files found")
+		}
+		units, options, err = projectCompilation(config, files)
 	}
-	if len(files) == 0 {
-		return errors.New("no .trb files found")
-	}
-	units, options, err := projectCompilation(config, files)
 	if err != nil {
 		return err
 	}
@@ -68,7 +107,8 @@ func (c *CLI) runLSP(args []string) error {
 		ResolveUnit: func(filename string, source []byte) (compiler.SourceUnit, error) {
 			return sourceUnit(config, filename, source)
 		},
-		Input: c.Stdin, Output: c.Stdout,
+		ResolveWorkspace: resolveWorkspace,
+		Input:            c.Stdin, Output: c.Stdout,
 	})
 	return server.Run()
 }

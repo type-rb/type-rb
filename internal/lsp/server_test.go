@@ -9,12 +9,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/languageservice"
+	"github.com/type-rb/type-rb/internal/parser"
 )
 
 func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T) {
@@ -49,7 +52,7 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 
 	var initialized initializeResult
 	decodeResult(t, frames[0], &initialized)
-	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != textDocumentSyncIncremental || !initialized.Capabilities.CodeActionProvider || !initialized.Capabilities.FoldingRangeProvider || !initialized.Capabilities.DocumentHighlightProvider || !initialized.Capabilities.SelectionRangeProvider || initialized.Capabilities.CodeLensProvider == nil || initialized.Capabilities.CodeLensProvider.ResolveProvider {
+	if initialized.ServerInfo.Name != "TypeRB" || initialized.Capabilities.TextDocumentSync != (textDocumentSyncOptions{OpenClose: true, Change: textDocumentSyncIncremental, Save: true}) || !initialized.Capabilities.CodeActionProvider || !initialized.Capabilities.FoldingRangeProvider || !initialized.Capabilities.DocumentHighlightProvider || !initialized.Capabilities.SelectionRangeProvider || initialized.Capabilities.CodeLensProvider == nil || initialized.Capabilities.CodeLensProvider.ResolveProvider {
 		t.Fatalf("unexpected initialize result: %#v", initialized)
 	}
 	var opened publishDiagnosticsParams
@@ -1054,6 +1057,188 @@ func TestServerPublishesProjectDiagnosticsAfterInitialized(t *testing.T) {
 	}
 }
 
+func TestFileRootServerRebuildsImportsFromOpenBuffers(t *testing.T) {
+	root := t.TempDir()
+	entry := cleanPath(filepath.Join(root, "main.trb"))
+	helper := cleanPath(filepath.Join(root, "helper.trb"))
+	entrySource := "def main()\n\treturn\nend\n"
+	importedEntry := "import { helper } from helper\n\ndef main()\n\tputs(helper())\n\treturn\nend\n"
+	helperSource := "def helper(): Integer\n\treturn 1\nend\n"
+	workspace := &testFileRootWorkspace{
+		root: root, entry: entry,
+		disk: map[string][]byte{entry: []byte(entrySource)},
+	}
+	var output bytes.Buffer
+	server := newTestFileRootServer(t, workspace, &output)
+
+	if err := server.open(textDocumentItem{URI: uriFromPath(helper), LanguageID: "trb", Version: 1, Text: helperSource}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.open(textDocumentItem{URI: uriFromPath(entry), LanguageID: "trb", Version: 1, Text: entrySource}); err != nil {
+		t.Fatal(err)
+	}
+	if len(server.base) != 1 || server.fileRootFiles[helper] {
+		t.Fatalf("unimported open helper entered file-root graph: base=%#v files=%#v", server.base, server.currentFileRootFiles())
+	}
+
+	output.Reset()
+	if err := server.change(didChangeParams{
+		TextDocument:   versionedTextDocumentIdentifier{URI: uriFromPath(entry), Version: 2},
+		ContentChanges: []contentChange{{Text: importedEntry}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(server.base) != 2 || !server.fileRootFiles[helper] || server.snapshot.HasErrors() {
+		t.Fatalf("entry import did not add helper: base=%#v snapshot=%#v", server.base, server.snapshot)
+	}
+	if countMethod(decodeFrames(t, output.Bytes()), "typerb/fileRootFilesChanged") != 1 {
+		t.Fatalf("adding an import did not emit one graph notification: %s", output.String())
+	}
+
+	invalidHelper := "def helper(): Integer\n\treturn \"dirty\"\nend\n"
+	output.Reset()
+	if err := server.change(didChangeParams{
+		TextDocument:   versionedTextDocumentIdentifier{URI: uriFromPath(helper), Version: 2},
+		ContentChanges: []contentChange{{Text: invalidHelper}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !server.snapshot.HasErrors() || string(server.base[helper].Source) != invalidHelper {
+		t.Fatalf("dirty helper overlay was not compiled: base=%q snapshot=%#v", server.base[helper].Source, server.snapshot)
+	}
+	if countMethod(decodeFrames(t, output.Bytes()), "typerb/fileRootFilesChanged") != 0 {
+		t.Fatalf("content-only helper edit emitted a graph notification: %s", output.String())
+	}
+
+	savedHelper := "def helper(): Integer\n\treturn 2\nend\n"
+	if _, err := server.handle(message{
+		JSONRPC: "2.0", Method: "textDocument/didSave",
+		Params: rawParams(t, didSaveParams{TextDocument: textDocumentIdentifier{URI: uriFromPath(helper)}, Text: &savedHelper}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if server.snapshot.HasErrors() || string(server.base[helper].Source) != savedHelper {
+		t.Fatalf("saved helper text was not compiled from the open buffer: base=%q snapshot=%#v", server.base[helper].Source, server.snapshot)
+	}
+
+	output.Reset()
+	if err := server.change(didChangeParams{
+		TextDocument:   versionedTextDocumentIdentifier{URI: uriFromPath(entry), Version: 3},
+		ContentChanges: []contentChange{{Text: entrySource}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := server.documents[helper]; !exists {
+		t.Fatal("removing an import discarded the helper's open-buffer state")
+	}
+	if _, exists := server.base[helper]; exists || server.fileRootFiles[helper] {
+		t.Fatalf("open helper remained in compilation after import removal: base=%#v files=%#v", server.base, server.currentFileRootFiles())
+	}
+	if server.snapshot.HasErrors() || len(server.snapshot.Artifacts) != 1 {
+		t.Fatalf("removed helper remained in compiler snapshot: %#v", server.snapshot)
+	}
+	if _, visible := server.document(helper); visible {
+		t.Fatal("unreachable helper remained visible to language-service requests")
+	}
+	if countMethod(decodeFrames(t, output.Bytes()), "typerb/fileRootFilesChanged") != 1 {
+		t.Fatalf("removing an import did not emit one graph notification: %s", output.String())
+	}
+
+	output.Reset()
+	if _, err := server.handle(message{JSONRPC: "2.0", ID: json.RawMessage("7"), Method: "typerb/fileRootFiles"}); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var files []string
+	decodeResult(t, frames[0], &files)
+	if !reflect.DeepEqual(files, []string{entry}) {
+		t.Fatalf("file-root ownership response=%#v", files)
+	}
+}
+
+func TestFileRootServerRebuildsOnHelperCreateAndDelete(t *testing.T) {
+	root := t.TempDir()
+	entry := cleanPath(filepath.Join(root, "main.trb"))
+	helper := cleanPath(filepath.Join(root, "helper.trb"))
+	entrySource := "import { helper } from helper\n\ndef main()\n\tputs(helper())\n\treturn\nend\n"
+	helperSource := "def helper(): Integer\n\treturn 1\nend\n"
+	workspace := &testFileRootWorkspace{
+		root: root, entry: entry,
+		disk: map[string][]byte{entry: []byte(entrySource)},
+	}
+	var output bytes.Buffer
+	server := newTestFileRootServer(t, workspace, &output)
+	if server.fileRootFiles[helper] {
+		t.Fatal("missing helper entered the initial graph")
+	}
+
+	workspace.disk[helper] = []byte(helperSource)
+	if err := server.changeWorkspaceFiles(didChangeWatchedFilesParams{Changes: []fileEvent{{URI: uriFromPath(helper), Type: fileChangeCreated}}}); err != nil {
+		t.Fatal(err)
+	}
+	if !server.fileRootFiles[helper] || len(server.base) != 2 || server.snapshot.HasErrors() || len(server.snapshot.Artifacts) != 2 {
+		t.Fatalf("created helper was not added: files=%#v snapshot=%#v", server.currentFileRootFiles(), server.snapshot)
+	}
+
+	delete(workspace.disk, helper)
+	if err := server.changeWorkspaceFiles(didChangeWatchedFilesParams{Changes: []fileEvent{{URI: uriFromPath(helper), Type: fileChangeDeleted}}}); err != nil {
+		t.Fatal(err)
+	}
+	if server.fileRootFiles[helper] || len(server.base) != 1 || !server.snapshot.HasErrors() {
+		t.Fatalf("deleted helper was not removed: files=%#v snapshot=%#v", server.currentFileRootFiles(), server.snapshot)
+	}
+}
+
+func TestFileRootServerHandlesImportCycles(t *testing.T) {
+	root := t.TempDir()
+	entry := cleanPath(filepath.Join(root, "main.trb"))
+	helper := cleanPath(filepath.Join(root, "helper.trb"))
+	entrySource := "import { helper_value } from helper\n\ndef entry_value(): Integer\n\treturn 1\nend\n\ndef main()\n\tputs(helper_value())\n\treturn\nend\n"
+	helperSource := "import { entry_value } from main\n\ndef helper_value(): Integer\n\treturn entry_value()\nend\n"
+	workspace := &testFileRootWorkspace{
+		root: root, entry: entry,
+		disk: map[string][]byte{entry: []byte(entrySource), helper: []byte(helperSource)},
+	}
+	var output bytes.Buffer
+	server := newTestFileRootServer(t, workspace, &output)
+	if err := server.open(textDocumentItem{URI: uriFromPath(entry), LanguageID: "trb", Version: 1, Text: entrySource}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(server.currentFileRootFiles(), []string{helper, entry}) {
+		t.Fatalf("cyclic graph files=%#v", server.currentFileRootFiles())
+	}
+	if workspace.resolutions != 2 {
+		t.Fatalf("cyclic graph resolution count=%d, want initial load plus open refresh", workspace.resolutions)
+	}
+}
+
+func TestFileRootServerOmitsRunCodeLensFromImportedHelper(t *testing.T) {
+	root := t.TempDir()
+	entry := cleanPath(filepath.Join(root, "main.trb"))
+	helper := cleanPath(filepath.Join(root, "helper.trb"))
+	entrySource := "import { value } from helper\n\ndef answer(): Integer\n\treturn value()\nend\n"
+	helperSource := "def value(): Integer\n\treturn 1\nend\n\ndef main()\n\treturn\nend\n"
+	workspace := &testFileRootWorkspace{
+		root: root, entry: entry,
+		disk: map[string][]byte{entry: []byte(entrySource), helper: []byte(helperSource)},
+	}
+	var output bytes.Buffer
+	server := newTestFileRootServer(t, workspace, &output)
+	request := message{
+		JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "textDocument/codeLens",
+		Params: rawParams(t, documentParams{TextDocument: textDocumentIdentifier{URI: uriFromPath(helper)}}),
+	}
+	if err := server.codeLenses(request); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	var lenses []codeLens
+	decodeResult(t, frames[0], &lenses)
+	if len(lenses) != 0 {
+		t.Fatalf("imported helper code lenses=%#v", lenses)
+	}
+}
+
 func TestProtocolPositionsUseUTF16CharactersAndByteOffsets(t *testing.T) {
 	source := []byte("value := \"😀\"\n")
 	offset := len("value := \"😀")
@@ -1064,6 +1249,108 @@ func TestProtocolPositionsUseUTF16CharactersAndByteOffsets(t *testing.T) {
 	if restored := offsetAt(source, position); restored != offset {
 		t.Fatalf("offsetAt(%#v)=%d, want %d", position, restored, offset)
 	}
+}
+
+type testFileRootWorkspace struct {
+	root        string
+	entry       string
+	disk        map[string][]byte
+	resolutions int
+}
+
+func (w *testFileRootWorkspace) resolve(overlays map[string][]byte) ([]compiler.SourceUnit, error) {
+	w.resolutions++
+	read := func(path string) ([]byte, bool) {
+		path = cleanPath(path)
+		if source, exists := overlays[path]; exists {
+			return append([]byte(nil), source...), true
+		}
+		source, exists := w.disk[path]
+		return append([]byte(nil), source...), exists
+	}
+	entrySource, exists := read(w.entry)
+	if !exists {
+		return nil, fmt.Errorf("missing test entry %s", w.entry)
+	}
+	sources := map[string][]byte{w.entry: entrySource}
+	queue := []string{w.entry}
+	for len(queue) > 0 {
+		path := queue[0]
+		queue = queue[1:]
+		program, _ := parser.Parse(sources[path])
+		for _, statement := range program.Statements {
+			imported, ok := statement.(*ast.ImportStatement)
+			if !ok || strings.HasPrefix(imported.Path, "trb/") {
+				continue
+			}
+			module := filepath.Clean(filepath.FromSlash(strings.TrimSuffix(imported.Path, ".trb")))
+			if module == "." || module == ".." || strings.HasPrefix(module, ".."+string(filepath.Separator)) || filepath.IsAbs(module) {
+				continue
+			}
+			candidates := []string{filepath.Join(w.root, module+".trb"), filepath.Join(w.root, module, "index.trb")}
+			for _, candidate := range candidates {
+				candidate = cleanPath(candidate)
+				source, found := read(candidate)
+				if !found {
+					continue
+				}
+				if _, seen := sources[candidate]; !seen {
+					sources[candidate] = source
+					queue = append(queue, candidate)
+				}
+				break
+			}
+		}
+	}
+	paths := make([]string, 0, len(sources))
+	for path := range sources {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	units := make([]compiler.SourceUnit, 0, len(paths))
+	for _, path := range paths {
+		unit, err := w.unit(path, sources[path])
+		if err != nil {
+			return nil, err
+		}
+		units = append(units, unit)
+	}
+	return units, nil
+}
+
+func (w *testFileRootWorkspace) unit(path string, source []byte) (compiler.SourceUnit, error) {
+	relative, err := filepath.Rel(w.root, cleanPath(path))
+	if err != nil {
+		return compiler.SourceUnit{}, err
+	}
+	return compiler.SourceUnit{
+		Filename: cleanPath(path), ModulePath: filepath.ToSlash(strings.TrimSuffix(relative, filepath.Ext(relative))),
+		Package: "main", Source: append([]byte(nil), source...),
+	}, nil
+}
+
+func newTestFileRootServer(t *testing.T, workspace *testFileRootWorkspace, output io.Writer) *Server {
+	t.Helper()
+	units, err := workspace.resolve(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(Options{
+		Mode: "go", Units: units, Output: output,
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/file-root-lsp", SourceRoot: workspace.root},
+		IncludedFiles:   []string{workspace.entry}, ResolveUnit: workspace.unit, ResolveWorkspace: workspace.resolve,
+	})
+}
+
+func countMethod(frames []map[string]json.RawMessage, method string) int {
+	count := 0
+	for _, frame := range frames {
+		var current string
+		if err := json.Unmarshal(frame["method"], &current); err == nil && current == method {
+			count++
+		}
+	}
+	return count
 }
 
 func framedMessages(t *testing.T, messages ...message) []byte {

@@ -5,11 +5,12 @@ const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const path = require("node:path");
 const vscode = require("vscode");
-const { LanguageClient } = require("vscode-languageclient/node");
+const { LanguageClient, State } = require("vscode-languageclient/node");
 const { TypeRBDebugSession, TypeRBProcess } = require("./debug-session");
 const { DlvDAPProcess } = require("./go-debug-adapter");
 const { containsPath, excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("./project-options");
 const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("./server-options");
+const { transitionStandaloneClient } = require("./standalone-client-state");
 const { decodeTestEvent } = require("./test-events");
 
 let projectManager;
@@ -52,6 +53,8 @@ async function activate(context) {
 	await projectManager.start();
 	context.subscriptions.push(
 		vscode.workspace.onDidOpenTextDocument((document) => void projectManager?.openDocument(document)),
+		vscode.workspace.onDidChangeTextDocument((event) => void projectManager?.changeDocument(event)),
+		vscode.workspace.onDidSaveTextDocument((document) => void projectManager?.saveDocument(document)),
 		vscode.workspace.onDidCloseTextDocument((document) => void projectManager?.closeDocument(document))
 	);
 	typeRBTests = new TypeRBTestController(projectManager);
@@ -91,6 +94,8 @@ class ProjectManager {
 		this.projects = [];
 		this.standalones = new Map();
 		this.nextStandaloneID = 0;
+		this.documentQueue = Promise.resolve();
+		this.standaloneDiagnostics = vscode.languages.createDiagnosticCollection("typerb-standalone");
 	}
 
 	async start() {
@@ -147,7 +152,13 @@ class ProjectManager {
 		await project.client.start();
 	}
 
-	async openDocument(document) {
+	openDocument(document) {
+		const queued = this.documentQueue.then(() => this.openDocumentNow(document));
+		this.documentQueue = queued.catch(() => {});
+		return queued;
+	}
+
+	async openDocumentNow(document) {
 		if (document.languageId !== "trb" || document.uri.scheme !== "file") {
 			return;
 		}
@@ -159,6 +170,7 @@ class ProjectManager {
 		) {
 			return;
 		}
+		await this.reconcileStandaloneDocuments();
 		const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
 		const settings = vscode.workspace.getConfiguration("typerb", document.uri);
 		const mode = settings.get("standalone.mode", "go");
@@ -176,8 +188,12 @@ class ProjectManager {
 			mode,
 			runtime,
 			runnable: true,
+			files: new Set([filename]),
+			forwardedDocuments: new Set(),
+			diagnostics: new Map(),
 		};
 		this.standalones.set(filename, project);
+		this.refreshStandaloneDiagnostics();
 		try {
 			const workspaceRoot = workspaceFolder?.uri.fsPath;
 			const server = resolveServerOptions({
@@ -187,6 +203,9 @@ class ProjectManager {
 				mode,
 				runtime,
 			}, workspaceRoot);
+			project.watcher = vscode.workspace.createFileSystemWatcher(
+				new vscode.RelativePattern(root, "**/*.trb")
+			);
 			project.client = new LanguageClient(
 				`typerb-standalone-${this.nextStandaloneID++}`,
 				`TypeRB Language Server (${project.label})`,
@@ -201,7 +220,12 @@ class ProjectManager {
 						language: "trb",
 						pattern: new vscode.RelativePattern(root, literalGlobPattern(path.basename(filename)))
 					}],
+					synchronize: { fileEvents: project.watcher },
 					middleware: {
+						handleDiagnostics: (uri, diagnostics, next) => {
+							next(uri, []);
+							this.cacheStandaloneDiagnostics(project, uri, diagnostics);
+						},
 						provideCodeLenses() {
 							return [];
 						}
@@ -209,26 +233,107 @@ class ProjectManager {
 				}
 			);
 			project.testCommand = server.command;
+			project.clientStarted = false;
+			project.clientRunning = false;
+			project.clientState = project.client.onDidChangeState((event) => {
+				const running = event.newState === State.Running;
+				const replay = transitionStandaloneClient(project, running);
+				if (!running) {
+					project.diagnostics.clear();
+					this.refreshStandaloneDiagnostics();
+				}
+				if (!replay) {
+					return;
+				}
+				void (async () => {
+					await this.refreshStandaloneFiles(project);
+					await this.reconcileStandaloneDocuments();
+				})().catch((error) => {
+					console.error(`Cannot replay TypeRB helper documents for ${project.filename}:`, error);
+				});
+			});
+			project.fileRootNotification = project.client.onNotification(
+				"typerb/fileRootFilesChanged",
+				(params) => void this.updateStandaloneFiles(project, params?.files)
+			);
 			await project.client.start();
+			await this.refreshStandaloneFiles(project);
+			await this.reconcileStandaloneDocuments();
 		} catch (error) {
 			this.standalones.delete(filename);
+			this.refreshStandaloneDiagnostics();
+			project.clientState?.dispose();
+			project.fileRootNotification?.dispose();
+			project.watcher?.dispose();
 			project.client = undefined;
 			void vscode.window.showErrorMessage(`Cannot start TypeRB standalone file ${filename}: ${error.message}`);
 		}
 	}
 
-	async closeDocument(document) {
+	async changeDocument(event) {
+		const document = event.document;
+		if (document.languageId !== "trb" || document.uri.scheme !== "file") {
+			return;
+		}
+		const filename = path.resolve(document.uri.fsPath);
+		await Promise.all([...this.standalones.values()].map(async (project) => {
+			if (project.filename === filename || !project.forwardedDocuments.has(filename)) {
+				return;
+			}
+			await project.client?.sendNotification("textDocument/didChange", {
+				textDocument: { uri: document.uri.toString(), version: document.version },
+				contentChanges: event.contentChanges.map(textDocumentContentChange)
+			});
+		}));
+	}
+
+	async saveDocument(document) {
+		if (document.languageId !== "trb" || document.uri.scheme !== "file") {
+			return;
+		}
+		const filename = path.resolve(document.uri.fsPath);
+		await Promise.all([...this.standalones.values()].map(async (project) => {
+			if (project.filename === filename || !project.forwardedDocuments.has(filename)) {
+				return;
+			}
+			await project.client?.sendNotification("textDocument/didSave", {
+				textDocument: { uri: document.uri.toString() },
+				text: document.getText()
+			});
+		}));
+	}
+
+	closeDocument(document) {
+		const queued = this.documentQueue.then(() => this.closeDocumentNow(document));
+		this.documentQueue = queued.catch(() => {});
+		return queued;
+	}
+
+	async closeDocumentNow(document) {
 		if (document.uri.scheme !== "file") {
 			return;
 		}
 		const filename = path.resolve(document.uri.fsPath);
 		const project = this.standalones.get(filename);
+		if (project !== undefined) {
+			this.standalones.delete(filename);
+			this.refreshStandaloneDiagnostics();
+		}
+		await Promise.all([...this.standalones.values()].map((candidate) =>
+			this.closeForwardedDocument(candidate, document)
+		));
 		if (project === undefined) {
 			return;
 		}
-		this.standalones.delete(filename);
+		project.fileRootNotification?.dispose();
+		project.clientState?.dispose();
+		project.watcher?.dispose();
 		if (project.client !== undefined) {
 			await project.client.stop();
+		}
+		await this.reconcileStandaloneDocuments();
+		for (const candidate of vscode.workspace.textDocuments) {
+			await this.openDocumentNow(candidate);
 		}
 	}
 
@@ -236,7 +341,113 @@ class ProjectManager {
 		if (uri?.scheme !== "file") {
 			return undefined;
 		}
-		return projectForPath(this.projects, uri.fsPath) ?? this.standalones.get(path.resolve(uri.fsPath));
+		const filename = path.resolve(uri.fsPath);
+		return projectForPath(this.projects, filename)
+			?? this.standalones.get(filename)
+			?? this.standaloneProjectsForPath(filename)[0];
+	}
+
+	diagnosticProjectForURI(uri) {
+		return this.projectForURI(uri);
+	}
+
+	cacheStandaloneDiagnostics(project, uri, diagnostics) {
+		if (this.standalones.get(project.filename) !== project) {
+			return;
+		}
+		project.diagnostics.set(uri.toString(), { uri, diagnostics });
+		this.publishStandaloneDiagnostics(uri);
+	}
+
+	publishStandaloneDiagnostics(uri) {
+		const owner = this.diagnosticProjectForURI(uri);
+		const diagnostics = owner?.standalone
+			? owner.diagnostics.get(uri.toString())?.diagnostics
+			: undefined;
+		if (diagnostics === undefined || diagnostics.length === 0) {
+			this.standaloneDiagnostics.delete(uri);
+		} else {
+			this.standaloneDiagnostics.set(uri, diagnostics);
+		}
+	}
+
+	refreshStandaloneDiagnostics() {
+		const uris = new Map();
+		this.standaloneDiagnostics.forEach((uri) => uris.set(uri.toString(), uri));
+		for (const project of this.standalones.values()) {
+			for (const cached of project.diagnostics.values()) {
+				uris.set(cached.uri.toString(), cached.uri);
+			}
+		}
+		for (const uri of uris.values()) {
+			this.publishStandaloneDiagnostics(uri);
+		}
+	}
+
+	standaloneProjectsForPath(filename) {
+		const resolved = path.resolve(filename);
+		return [...this.standalones.values()].filter((project) => project.files.has(resolved));
+	}
+
+	async refreshStandaloneFiles(project) {
+		if (project.client === undefined) {
+			return;
+		}
+		try {
+			await this.updateStandaloneFiles(project, await project.client.sendRequest("typerb/fileRootFiles", {}));
+		} catch {
+			// Older language servers only report the standalone entry file.
+		}
+	}
+
+	async updateStandaloneFiles(project, values) {
+		if (!Array.isArray(values) || this.standalones.get(project.filename) !== project) {
+			return;
+		}
+		project.files = new Set([
+			project.filename,
+			...values.filter((value) => typeof value === "string").map((value) => path.resolve(value))
+		]);
+		this.refreshStandaloneDiagnostics();
+		await this.reconcileStandaloneDocuments();
+	}
+
+	async reconcileStandaloneDocuments() {
+		const documents = vscode.workspace.textDocuments.filter((document) =>
+			document.languageId === "trb" && document.uri.scheme === "file"
+		);
+		await Promise.all([...this.standalones.values()].flatMap((project) => documents.map(async (document) => {
+			const filename = path.resolve(document.uri.fsPath);
+			const shouldForward = project.filename !== filename && containsPath(project.root, filename);
+			if (shouldForward && !project.forwardedDocuments.has(filename) && project.clientRunning) {
+				project.forwardedDocuments.add(filename);
+				try {
+					await project.client.sendNotification("textDocument/didOpen", {
+						textDocument: {
+							uri: document.uri.toString(),
+							languageId: document.languageId,
+							version: document.version,
+							text: document.getText()
+						}
+					});
+				} catch (error) {
+					project.forwardedDocuments.delete(filename);
+					throw error;
+				}
+			} else if (!shouldForward && project.forwardedDocuments.has(filename)) {
+				await this.closeForwardedDocument(project, document);
+			}
+		})));
+	}
+
+	async closeForwardedDocument(project, document) {
+		const filename = path.resolve(document.uri.fsPath);
+		if (!project.forwardedDocuments.delete(filename)) {
+			return;
+		}
+		await project.client?.sendNotification("textDocument/didClose", {
+			textDocument: { uri: document.uri.toString() }
+		});
 	}
 
 	firstProject() {
@@ -253,16 +464,34 @@ class ProjectManager {
 	}
 
 	async stop() {
+		await this.documentQueue;
 		const projects = this.allProjects();
 		this.projects = [];
 		this.standalones.clear();
 		await Promise.all(projects.map(async (project) => {
+			project.clientState?.dispose();
+			project.fileRootNotification?.dispose();
 			project.watcher?.dispose();
 			if (project.client !== undefined) {
 				await project.client.stop();
 			}
 		}));
+		this.standaloneDiagnostics.dispose();
 	}
+}
+
+function textDocumentContentChange(change) {
+	if (change.range === undefined) {
+		return { text: change.text };
+	}
+	return {
+		range: {
+			start: { line: change.range.start.line, character: change.range.start.character },
+			end: { line: change.range.end.line, character: change.range.end.character }
+		},
+		rangeLength: change.rangeLength,
+		text: change.text
+	};
 }
 
 async function discoverProjects() {
@@ -324,6 +553,9 @@ class RunCodeLensProvider {
 	async provideCodeLenses(document, token) {
 		const project = this.manager.projectForURI(document.uri);
 		if (project?.client === undefined) {
+			return [];
+		}
+		if (project.standalone && path.resolve(document.uri.fsPath) !== project.filename) {
 			return [];
 		}
 		let items;
@@ -694,10 +926,15 @@ function runURI(value) {
 }
 
 async function saveTypeRBDocuments(project) {
+	if (project.standalone) {
+		await projectManager?.refreshStandaloneFiles(project);
+	}
 	const documents = vscode.workspace.textDocuments.filter((document) =>
 		document.languageId === "trb" &&
 		document.isDirty &&
-		projectManager?.projectForURI(document.uri) === project
+		(project.standalone
+			? document.uri.scheme === "file" && project.files.has(path.resolve(document.uri.fsPath))
+			: projectManager?.projectForURI(document.uri) === project)
 	);
 	const saved = await Promise.all(documents.map((document) => document.save()));
 	return saved.every(Boolean);

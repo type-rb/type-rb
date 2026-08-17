@@ -105,10 +105,12 @@ The repository also publishes a reusable TextMate grammar for lexical editor
 highlighting. Its thin Visual Studio Code client packages that grammar and
 snippets, starts `trb lsp`, and exposes compiler-backed diagnostics, completion,
 formatting, and quick fixes without duplicating semantic logic. Open files
-outside configured projects receive isolated single-file language-server
-sessions. Local Extension Development Host tests exercise standalone language
-services and execution against current Stable and Insiders builds without a
-Marketplace install. Command details belong in the [CLI reference](cli.md).
+outside configured projects receive isolated file-root language-server
+sessions that follow explicit local imports and editor overlays without
+including unrelated siblings. Local Extension Development Host tests exercise
+standalone language services and execution against current Stable and Insiders
+builds without a Marketplace install. Command details belong in the
+[CLI reference](cli.md).
 
 The early official `trb/web` package discovers file-based routes at compile
 time and runs typed request, path-parameter, JSON decode, and JSON response
@@ -351,9 +353,11 @@ server per project, and watches each project's `.trb` files independently. The
 language server rejects editor overlays outside its configured source root and
 updates the saved project snapshot beneath active overlays.
 Files outside discovered projects receive isolated, configless language-server
-sessions with configurable Go, Ruby, or TypeScript mode. Their top-level
-`main()` CodeLens runs that single file through the same Debug Adapter Protocol
-process lifecycle used by projects.
+sessions with configurable Go, Ruby, or TypeScript mode. Each session follows
+the selected entry's explicit local import closure and rebuilds it from saved
+files and unsaved editor overlays. Its top-level `main()` CodeLens runs the
+file-root program through the same Debug Adapter Protocol process lifecycle
+used by projects.
 Canonical type-name diagnostics carry structured fixes, so editors can replace
 aliases such as `Int` with `Integer` without reconstructing source text.
 Top-level `main()` declarations expose a compiler-owned run CodeLens in
