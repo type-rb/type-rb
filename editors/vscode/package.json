@@ -12,7 +12,7 @@
 		"directory": "editors/vscode"
 	},
 	"engines": {
-		"vscode": "^1.91.0"
+		"vscode": "^1.130.0"
 	},
 	"categories": [
 		"Programming Languages",
@@ -45,6 +45,10 @@
 	"scripts": {
 		"build": "esbuild extension.js --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
 		"test": "node --test test/*.test.js",
+		"test:integration:prepare": "npm run build && node test/integration/prepare.js",
+		"test:integration": "npm run test:integration:prepare && vscode-test --label stable",
+		"test:integration:insiders": "npm run test:integration:prepare && vscode-test --label insiders",
+		"test:integration:latest": "npm run test:integration:prepare && vscode-test --label stable && vscode-test --label insiders",
 		"package": "npm run build && vsce package --out dist/typerb.vsix"
 	},
 	"dependencies": {
@@ -52,8 +56,14 @@
 		"vscode-languageclient": "10.1.0"
 	},
 	"devDependencies": {
+		"@vscode/test-cli": "^0.0.15",
+		"@vscode/test-electron": "^3.1.0",
 		"@vscode/vsce": "3.9.2",
 		"esbuild": "0.28.2"
+	},
+	"overrides": {
+		"diff": "8.0.3",
+		"serialize-javascript": "7.0.5"
 	},
 	"contributes": {
 		"commands": [
@@ -178,13 +188,20 @@
 				},
 				"typerb.standalone.mode": {
 					"type": "string",
-					"enum": ["go", "ruby", "typescript"],
+					"enum": [
+						"go",
+						"ruby",
+						"typescript"
+					],
 					"default": "go",
 					"description": "Target mode for TypeRB files that are not owned by trbconfig.jsonc."
 				},
 				"typerb.standalone.typescript.runtime": {
 					"type": "string",
-					"enum": ["node", "bun"],
+					"enum": [
+						"node",
+						"bun"
+					],
 					"default": "node",
 					"description": "Runtime for standalone TypeScript-mode files."
 				},

@@ -9,6 +9,7 @@
 **/build/
 **/dist/
 **/node_modules/
+**/.vscode-test/
 **/todo.db
 *.test
 trb_run_*

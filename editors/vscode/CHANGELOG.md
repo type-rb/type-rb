@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Require VS Code 1.130 or newer and verify local development builds in Stable
+  and Insiders Extension Development Hosts.
 - Analyze and run standalone `.trb` files without requiring
   `trbconfig.jsonc`, with configurable Go, Ruby, or TypeScript mode.
 - Add explicit standard-type imports when accepting compiler completion.
