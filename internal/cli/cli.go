@@ -847,19 +847,34 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 		return err
 	}
 	files := []string{filename}
+	var sourceGraph *fileRootSourceGraph
 	if !standalone {
 		files, err = collectTRB([]string{config.SourcePath()}, config.OutputPath())
 		if err != nil {
 			return err
 		}
 		files = productionTRBFiles(files)
+	} else {
+		sourceGraph, err = loadFileRootSourceGraph(filename, os.ReadFile)
+		if err != nil {
+			return err
+		}
+		files = make([]string, 0, len(sourceGraph.Sources))
+		for _, source := range sourceGraph.Sources {
+			files = append(files, source.Filename)
+		}
 	}
 	if config.ManagesPackages() {
 		if _, err := syncProjectPackages(config, files); err != nil {
 			return err
 		}
 	}
-	compiled, err := compileProject(config, files)
+	var compiled map[string]*compiler.Artifact
+	if sourceGraph != nil {
+		compiled, err = compileProjectSources(config, sourceGraph.Sources)
+	} else {
+		compiled, err = compileProject(config, files)
+	}
 	if err != nil {
 		return err
 	}
@@ -1893,6 +1908,18 @@ func compileProject(config *project.Config, files []string) (map[string]*compile
 	if err != nil {
 		return nil, err
 	}
+	return compileSourceUnits(units, options)
+}
+
+func compileProjectSources(config *project.Config, sources []fileRootSource) (map[string]*compiler.Artifact, error) {
+	units, options, err := projectCompilationSources(config, sources)
+	if err != nil {
+		return nil, err
+	}
+	return compileSourceUnits(units, options)
+}
+
+func compileSourceUnits(units []compiler.SourceUnit, options compiler.Options) (map[string]*compiler.Artifact, error) {
 	artifacts, err := compiler.CompileProject(units, options)
 	if err != nil {
 		return nil, err
@@ -1921,14 +1948,38 @@ func projectCompilation(config *project.Config, files []string) ([]compiler.Sour
 	return units, options, nil
 }
 
+func projectCompilationSources(config *project.Config, sources []fileRootSource) ([]compiler.SourceUnit, compiler.Options, error) {
+	resolvedPackages, err := packageManager.LoadTypeRBPackages(config)
+	if err != nil {
+		return nil, compiler.Options{}, err
+	}
+	units, err := projectSourceUnitsFromSources(config, sources, resolvedPackages)
+	if err != nil {
+		return nil, compiler.Options{}, err
+	}
+	options, err := compilerOptionsWithPackages(config, resolvedPackages)
+	if err != nil {
+		return nil, compiler.Options{}, err
+	}
+	return units, options, nil
+}
+
 func projectSourceUnits(config *project.Config, files []string, resolvedPackages *packageManager.TypeRBPackages) ([]compiler.SourceUnit, error) {
-	units := make([]compiler.SourceUnit, 0, len(files))
+	sources := make([]fileRootSource, 0, len(files))
 	for _, filename := range files {
 		source, err := os.ReadFile(filename)
 		if err != nil {
 			return nil, err
 		}
-		unit, err := sourceUnit(config, filename, source)
+		sources = append(sources, fileRootSource{Filename: filename, Source: source})
+	}
+	return projectSourceUnitsFromSources(config, sources, resolvedPackages)
+}
+
+func projectSourceUnitsFromSources(config *project.Config, sources []fileRootSource, resolvedPackages *packageManager.TypeRBPackages) ([]compiler.SourceUnit, error) {
+	units := make([]compiler.SourceUnit, 0, len(sources))
+	for _, source := range sources {
+		unit, err := sourceUnit(config, source.Filename, source.Source)
 		if err != nil {
 			return nil, err
 		}

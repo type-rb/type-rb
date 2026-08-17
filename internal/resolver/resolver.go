@@ -805,15 +805,16 @@ func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package,
 }
 
 func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, []diagnostic.Diagnostic) {
-	clean := pathpkg.Clean(strings.TrimSuffix(node.Path, ".trb"))
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || pathpkg.IsAbs(clean) {
+	moduleCandidates, valid := ProjectImportModuleCandidates(node.Path)
+	if !valid {
 		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("invalid project import path %q", node.Path))}
 	}
+	clean := moduleCandidates[0]
 	canonical := CanonicalPackageImport(clean, options.PackageAliases)
 	resolved := &Import{Node: node, Kind: ProjectImport, Path: canonical, Alias: node.Alias, Exports: map[string]Export{}}
 	if options.Catalog != nil {
 		module := options.Catalog.Modules[canonical]
-		if module == nil {
+		if module == nil && len(moduleCandidates) > 1 {
 			module = options.Catalog.Modules[pathpkg.Join(canonical, "index")]
 		}
 		if module != nil {
@@ -834,12 +835,15 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 		resolved.Symbols = append([]string(nil), node.Symbols...)
 		return resolved, nil
 	}
-	candidates := []string{filepath.Join(options.SourceRoot, filepath.FromSlash(clean)+".trb")}
+	var fileCandidates []string
+	if options.Catalog == nil {
+		fileCandidates = append(fileCandidates, filepath.Join(options.SourceRoot, filepath.FromSlash(clean)+".trb"))
+	}
 	if options.Mode == "ruby" {
-		candidates = append(candidates, filepath.Join(options.SourceRoot, filepath.FromSlash(clean)+".rb"))
+		fileCandidates = append(fileCandidates, filepath.Join(options.SourceRoot, filepath.FromSlash(clean)+".rb"))
 	}
 	var data []byte
-	for _, candidate := range candidates {
+	for _, candidate := range fileCandidates {
 		contents, err := os.ReadFile(candidate)
 		if err == nil {
 			resolved.Filename = candidate
@@ -867,6 +871,21 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 	}
 
 	return finalizeProjectImport(resolved)
+}
+
+// ProjectImportModuleCandidates returns the canonical module identities that
+// may satisfy one project import. File-root discovery and the resolver share
+// this function so extension trimming, path validation, and directory-index
+// fallback cannot drift between the source graph and semantic resolution.
+func ProjectImportModuleCandidates(importPath string) ([]string, bool) {
+	if strings.ContainsAny(importPath, `\:`) {
+		return nil, false
+	}
+	clean := pathpkg.Clean(strings.TrimSuffix(importPath, ".trb"))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || pathpkg.IsAbs(clean) {
+		return nil, false
+	}
+	return []string{clean, pathpkg.Join(clean, "index")}, true
 }
 
 // CanonicalPackageImport applies the longest matching TypeRB package alias to
