@@ -2,12 +2,14 @@ package compiler
 
 import (
 	"database/sql"
+	"errors"
 	"go/parser"
 	"go/token"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	_ "modernc.org/sqlite"
@@ -1349,6 +1351,465 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		if _, err := parser.ParseFile(token.NewFileSet(), modulePath+".go", output, parser.AllErrors); err != nil {
 			t.Fatalf("generated invalid Go for %s: %v\n%s", modulePath, err, output)
 		}
+	}
+}
+
+func TestPortableORMResolvesAssociationTargetsAcrossModelModules(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE cross_module_categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE cross_module_products (
+			id INTEGER PRIMARY KEY,
+			category_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			FOREIGN KEY (category_id) REFERENCES cross_module_categories(id)
+		);
+		CREATE TABLE cross_module_profiles (
+			id INTEGER PRIMARY KEY,
+			category_id INTEGER NOT NULL UNIQUE,
+			FOREIGN KEY (category_id) REFERENCES cross_module_categories(id)
+		);
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	category := SourceUnit{
+		Filename: filepath.Join(root, "src", "models", "category.trb"), ModulePath: "models/category", Package: "models",
+		Source: []byte(`import { Model, has_many, has_one } from trb/orm
+
+class CrossModuleCategory < Model
+	has_many(CrossModuleProduct, foreign_key: :category_id, inverse: :cross_module_category, dependent: :destroy)
+	has_one(CrossModuleProfile, foreign_key: :category_id, inverse: :cross_module_category)
+end
+`),
+	}
+	product := SourceUnit{
+		Filename: filepath.Join(root, "src", "models", "product.trb"), ModulePath: "models/product", Package: "models",
+		Source: []byte(`import { Model, belongs_to } from trb/orm
+
+class CrossModuleProduct < Model
+	belongs_to(CrossModuleCategory, foreign_key: :category_id, inverse: :cross_module_products)
+end
+`),
+	}
+	profile := SourceUnit{
+		Filename: filepath.Join(root, "src", "models", "profile.trb"), ModulePath: "models/profile", Package: "models",
+		Source: []byte(`import { Model, belongs_to } from trb/orm
+
+record CrossModuleProfileSnapshot
+	id: Integer
+end
+
+class CrossModuleProfile < Model
+	belongs_to(CrossModuleCategory, foreign_key: :category_id, inverse: :cross_module_profile)
+end
+`),
+	}
+	main := SourceUnit{
+		Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
+		Source: []byte(`import { CrossModuleProduct } from models/product
+import { CrossModuleProfileSnapshot } from models/profile
+import { DbError } from trb/orm
+
+def snapshot_id(snapshot: CrossModuleProfileSnapshot): Integer
+	return snapshot.id
+end
+
+def load_associations(): Integer fails DbError
+	product := CrossModuleProduct.preload(:cross_module_category).all()[0]
+	category := product.cross_module_category
+	if category == nil
+		return 0
+	end
+	return category.cross_module_products.size()
+end
+
+def main()
+	return
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifacts, err := CompileProject([]SourceUnit{category, product, profile, main}, Options{
+				Mode: mode, GoModule: "example.com/orm", RubyLoader: "zeitwerk", TypeScriptRuntime: "bun",
+				SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+				PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			modules := map[string]*Artifact{}
+			for _, artifact := range artifacts {
+				modules[artifact.AST.ModulePath] = artifact
+			}
+			for _, modulePath := range []string{"models/category", "models/product", "models/profile"} {
+				artifact := modules[modulePath]
+				if artifact == nil {
+					t.Fatalf("missing artifact for %s", modulePath)
+				}
+				for _, statement := range artifact.IR.Statements {
+					imported, ok := statement.(*ir.Import)
+					if ok && imported.Implicit && strings.HasPrefix(imported.Path, "models/") {
+						t.Fatalf("model module %s received cyclic runtime import %s", modulePath, imported.Path)
+					}
+				}
+			}
+			entrypoint := modules["main"]
+			if mode != "go" {
+				loaded := map[string]bool{}
+				for _, statement := range entrypoint.IR.Statements {
+					if imported, ok := statement.(*ir.Import); ok && imported.RuntimeRequired {
+						loaded[imported.Path] = true
+					}
+				}
+				for _, modulePath := range []string{"models/category", "models/product", "models/profile"} {
+					if !loaded[modulePath] {
+						t.Fatalf("entrypoint did not bootstrap ORM model module %s", modulePath)
+					}
+				}
+			}
+			switch mode {
+			case "go":
+				if !strings.Contains(string(entrypoint.Output), `import "example.com/orm/models"`) {
+					t.Fatalf("Go entrypoint did not retain its model-group import:\n%s", entrypoint.Output)
+				}
+			case "ruby":
+				if !strings.Contains(string(entrypoint.Output), "models/category") || !strings.Contains(string(entrypoint.Output), "models/product") {
+					t.Fatalf("Ruby entrypoint did not retain ORM bootstrap requires:\n%s", entrypoint.Output)
+				}
+			case "typescript":
+				if !strings.Contains(string(entrypoint.Output), "models/category") || !strings.Contains(string(entrypoint.Output), "models/product") {
+					t.Fatalf("TypeScript entrypoint did not retain ORM bootstrap imports:\n%s", entrypoint.Output)
+				}
+				if !strings.Contains(string(entrypoint.Output), `import "./models/profile.ts";`) {
+					t.Fatalf("TypeScript type-only model import did not retain its runtime load:\n%s", entrypoint.Output)
+				}
+			}
+		})
+	}
+}
+
+func TestPortableORMResolvesThroughAssociationsAcrossModelModules(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE cross_file_users (id INTEGER PRIMARY KEY);
+		CREATE TABLE cross_file_projects (id INTEGER PRIMARY KEY);
+		CREATE TABLE cross_file_memberships (
+			id INTEGER PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			project_id INTEGER NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES cross_file_users(id),
+			FOREIGN KEY (project_id) REFERENCES cross_file_projects(id)
+		);
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sources := []SourceUnit{
+		{
+			Filename: filepath.Join(root, "src", "models", "user.trb"), ModulePath: "models/user", Package: "models",
+			Source: []byte(`import { Model, has_many } from trb/orm
+
+class CrossFileUser < Model
+	has_many(CrossFileMembership, foreign_key: :user_id)
+	has_many(CrossFileProject, through: :cross_file_memberships, source: :cross_file_project)
+end
+`),
+		},
+		{
+			Filename: filepath.Join(root, "src", "models", "project.trb"), ModulePath: "models/project", Package: "models",
+			Source: []byte(`import { Model, has_many } from trb/orm
+
+class CrossFileProject < Model
+	has_many(CrossFileMembership, foreign_key: :project_id)
+end
+`),
+		},
+		{
+			Filename: filepath.Join(root, "src", "models", "membership.trb"), ModulePath: "models/membership", Package: "models",
+			Source: []byte(`import { Model, belongs_to } from trb/orm
+
+class CrossFileMembership < Model
+	belongs_to(CrossFileUser, foreign_key: :user_id)
+	belongs_to(CrossFileProject, foreign_key: :project_id)
+end
+`),
+		},
+		{
+			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
+			Source: []byte(`import { CrossFileUser } from models/user
+import { DbError } from trb/orm
+
+def project_count(user: CrossFileUser): Integer fails DbError
+	return user.cross_file_projects.size()
+end
+
+def main()
+	return
+end
+`),
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			if _, err := CompileProject(sources, Options{
+				Mode: mode, GoModule: "example.com/orm", RubyLoader: "require_relative", TypeScriptRuntime: "bun",
+				SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+				PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestPortableORMRejectsModelImportsOfRunnableEntrypoint(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE bootstrap_products (id INTEGER PRIMARY KEY, state TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	main := SourceUnit{
+		Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
+		Source: []byte(`enum BootstrapState
+	Active
+end
+
+def main()
+	return
+end
+`),
+	}
+	model := SourceUnit{
+		Filename: filepath.Join(root, "src", "models", "product.trb"), ModulePath: "models/product", Package: "models",
+		Source: []byte(`import { BootstrapState } from main
+import { Model, enum_column } from trb/orm
+
+class BootstrapProduct < Model
+	enum_column(:state, BootstrapState)
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, compileErrValue := CompileProject([]SourceUnit{main, model}, Options{
+				Mode: mode, GoModule: "example.com/orm", TypeScriptRuntime: "bun",
+				SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+				PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+			})
+			var compileErr *CompileError
+			if !errors.As(compileErrValue, &compileErr) || len(compileErr.Diagnostics) != 1 {
+				t.Fatalf("expected one ORM bootstrap diagnostic, got %v", compileErrValue)
+			}
+			item := compileErr.Diagnostics[0]
+			if item.Code != diagnostic.ProjectIntegration || item.Path != model.Filename || item.Span.Start.Offset != 0 {
+				t.Fatalf("unexpected ORM bootstrap diagnostic: %#v", item)
+			}
+			if !strings.Contains(item.Message, "main -> models/product -> main") || !strings.Contains(item.Message, "move shared declarations into a separate module") {
+				t.Fatalf("ORM bootstrap diagnostic does not explain the cycle: %q", item.Message)
+			}
+		})
+	}
+}
+
+func TestPortableORMRejectsAssociationTargetsOutsideModelDirectory(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE cross_directory_categories (id INTEGER PRIMARY KEY);
+		CREATE TABLE cross_directory_products (
+			id INTEGER PRIMARY KEY,
+			category_id INTEGER NOT NULL,
+			FOREIGN KEY (category_id) REFERENCES cross_directory_categories(id)
+		);
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sources := []SourceUnit{
+		{
+			Filename: filepath.Join(root, "src", "models", "category.trb"), ModulePath: "models/category", Package: "models",
+			Source: []byte("import { Model, has_many } from trb/orm\n\nclass CrossDirectoryCategory < Model\n\thas_many(CrossDirectoryProduct, foreign_key: :category_id)\nend\n"),
+		},
+		{
+			Filename: filepath.Join(root, "src", "inventory", "product.trb"), ModulePath: "inventory/product", Package: "inventory",
+			Source: []byte("import { Model } from trb/orm\n\nclass CrossDirectoryProduct < Model\nend\n"),
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, compileErrValue := CompileProject(sources, Options{
+				Mode: mode, GoModule: "example.com/orm", TypeScriptRuntime: "bun",
+				SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+				PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+			})
+			var compileErr *CompileError
+			if !errors.As(compileErrValue, &compileErr) || len(compileErr.Diagnostics) != 1 {
+				t.Fatalf("expected one structured cross-directory diagnostic, got %v", compileErrValue)
+			}
+			item := compileErr.Diagnostics[0]
+			wantOffset := strings.Index(string(sources[0].Source), "CrossDirectoryProduct")
+			if item.Code != diagnostic.ProjectIntegration || item.Path != sources[0].Filename || item.Span.Start.Offset != wantOffset {
+				t.Fatalf("unexpected cross-directory diagnostic: %#v", item)
+			}
+			if len(item.Related) != 1 || item.Related[0].Location.Path != sources[1].Filename {
+				t.Fatalf("missing target model location: %#v", item.Related)
+			}
+			if !strings.Contains(item.Message, `model group "inventory"`) || !strings.Contains(item.Message, `is in "models"`) || !strings.Contains(item.Message, "query through an application repository") {
+				t.Fatalf("cross-directory diagnostic does not explain the boundary: %q", item.Message)
+			}
+		})
+	}
+}
+
+func TestPortableORMRequiresImportsOutsideAssociationTargets(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE reference_products (id INTEGER PRIMARY KEY)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sources := []SourceUnit{
+		{
+			Filename: filepath.Join(root, "src", "models", "product.trb"), ModulePath: "models/product", Package: "models",
+			Source: []byte("import { Model } from trb/orm\n\nclass ReferenceProduct < Model\nend\n"),
+		},
+		{
+			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "main", Package: "main",
+			Source: []byte("def products()\n\treturn ReferenceProduct.all()\nend\n"),
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject(sources, Options{
+				Mode: mode, GoModule: "example.com/orm", TypeScriptRuntime: "bun",
+				SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+				PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+			})
+			if err == nil || !strings.Contains(err.Error(), "type ReferenceProduct is not declared or imported") {
+				t.Fatalf("expected an explicit-import diagnostic, got %v", err)
+			}
+		})
+	}
+}
+
+func TestPortableORMDeclarationReferencesStayAtClassBody(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE nested_categories (id INTEGER PRIMARY KEY);
+		CREATE TABLE nested_products (id INTEGER PRIMARY KEY);
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sources := []SourceUnit{
+		{
+			Filename: filepath.Join(root, "src", "models", "category.trb"), ModulePath: "models/category", Package: "models",
+			Source: []byte(`import { Model, has_many } from trb/orm
+
+class NestedCategory < Model
+	def invalid_association()
+		has_many(NestedProduct)
+	end
+end
+`),
+		},
+		{
+			Filename: filepath.Join(root, "src", "models", "product.trb"), ModulePath: "models/product", Package: "models",
+			Source: []byte("import { Model } from trb/orm\n\nclass NestedProduct < Model\nend\n"),
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject(sources, Options{
+				Mode: mode, GoModule: "example.com/orm", TypeScriptRuntime: "bun",
+				SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+				PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+			})
+			if err == nil || !strings.Contains(err.Error(), "type NestedProduct is not declared or imported") {
+				t.Fatalf("expected declaration-only model reference to stay at class body, got %v", err)
+			}
+		})
+	}
+}
+
+func TestPortableORMAllowsForeignKeysAcrossModelGroupsWithoutNavigation(t *testing.T) {
+	root := t.TempDir()
+	database, err := sql.Open("sqlite", filepath.Join(root, "application.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		CREATE TABLE external_accounts (id INTEGER PRIMARY KEY);
+		CREATE TABLE audit_entries (
+			id INTEGER PRIMARY KEY,
+			external_account_id INTEGER NOT NULL,
+			FOREIGN KEY (external_account_id) REFERENCES external_accounts(id)
+		);
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sources := []SourceUnit{
+		{Filename: filepath.Join(root, "src", "accounts", "account.trb"), ModulePath: "accounts/account", Package: "accounts", Source: []byte("import { Model } from trb/orm\n\nclass ExternalAccount < Model\nend\n")},
+		{Filename: filepath.Join(root, "src", "audit", "entry.trb"), ModulePath: "audit/entry", Package: "audit", Source: []byte("import { Model } from trb/orm\n\nclass AuditEntry < Model\nend\n")},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			if _, err := CompileProject(sources, Options{
+				Mode: mode, GoModule: "example.com/orm", TypeScriptRuntime: "bun",
+				SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+				PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

@@ -70,17 +70,58 @@ Database precision remains controlled by the column declaration, such as
 Model and table names follow conventions. Fields, nullability, primary keys,
 unique constraints, and foreign keys come from the live schema.
 
+Each source directory is one ORM model group. Models in separate files within
+that directory reference one another in association declarations without
+source imports:
+
 ```trb
-import { Database, DbError, Model, belongs_to, has_many } from trb/orm
+# src/models/user.trb
+import { Model, has_many } from trb/orm
 
 class User < Model
 	has_many(Post, dependent: :destroy)
 end
+```
+
+```trb
+# src/models/post.trb
+import { Model, belongs_to } from trb/orm
 
 class Post < Model
 	belongs_to(User, name: :author)
 end
 ```
+
+The first argument of `belongs_to`, `has_many`, and `has_one` is a
+compiler-resolved declaration reference. This exception does not make the
+target model available to ordinary expressions or type annotations. Import it
+normally when using it as a query root, constructor, parameter, or return type:
+
+```trb
+import { Post } from models/post
+import { DbError } from trb/orm
+
+def recent_posts(): Array<Post> fails DbError
+	return Post.order(created_at: :desc).limit(20).all()
+end
+```
+
+A subdirectory starts another model group. Every model traversed by a direct or
+through association must remain in one group; direct association inverses and
+dependent lifecycle targets follow the same boundary. The compiler reports
+both declarations when that boundary is crossed. Database foreign-key columns
+may still cross groups. Keep the identifier and load the other record through
+an application query or repository instead of ORM object navigation. Model
+class names are currently unique across the project.
+
+Completion, hover, definition, references, and rename understand declaration
+references in association arguments and do not insert target-model imports.
+Generated runnable entrypoints bootstrap Ruby and TypeScript model registration
+without introducing model-to-model initialization imports; Go emits the group
+as one generated package. A model module must not import the runnable
+entrypoint directly or transitively, because the registration bootstrap would
+close an initialization cycle. Move declarations shared with the entrypoint
+into a separate module; the compiler reports the complete cycle.
 
 Use `name`, `foreign_key`, `references`, `inverse`, `through`, and `source`
 only when conventions are insufficient. Association scopes are typed blocks:

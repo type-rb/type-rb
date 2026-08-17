@@ -61,9 +61,14 @@ type Member struct {
 }
 
 type Type struct {
-	Name            string
-	TypeParameters  []string
-	Superclass      string
+	Name           string
+	TypeParameters []string
+	Superclass     string
+	// SourceModule identifies a provider declaration backed by a project
+	// source type. Outside that module, ordinary source references still need
+	// an explicit import even though provider members remain available after
+	// the type flows through another declaration.
+	SourceModule    string
 	InstanceMembers map[string]Member
 	ClassMembers    map[string]Member
 }
@@ -84,10 +89,30 @@ type FunctionBlockRule struct {
 	ParameterTypeSuffix string
 }
 
+// DeclarationReference identifies a project declaration that a provider makes
+// visible only in one declarative call position. It does not create a source
+// import or make the declaration generally visible in the module.
+type DeclarationReference struct {
+	ModulePath string
+	Name       string
+}
+
+// FunctionArgumentReferenceRule describes a positional argument whose values
+// are compiler-resolved project declarations. Language tooling uses the same
+// provider metadata as the compiler instead of hard-coding individual DSLs.
+type FunctionArgumentReferenceRule struct {
+	Package  string
+	Function string
+	Argument int
+	Owner    DeclarationReference
+	Targets  []DeclarationReference
+}
+
 type Catalog struct {
-	Types              map[string]*Type
-	Modules            map[string]*Module
-	FunctionBlockRules []FunctionBlockRule
+	Types                          map[string]*Type
+	Modules                        map[string]*Module
+	FunctionBlockRules             []FunctionBlockRule
+	FunctionArgumentReferenceRules []FunctionArgumentReferenceRule
 	// RuntimeTypesByModule names compiler-owned value representations required
 	// by generated declarations in a particular application module.
 	RuntimeTypesByModule map[string][]types.Type
@@ -108,6 +133,7 @@ func (c *Catalog) Merge(other *Catalog) {
 		c.Modules[name] = declaration
 	}
 	c.FunctionBlockRules = append(c.FunctionBlockRules, other.FunctionBlockRules...)
+	c.FunctionArgumentReferenceRules = append(c.FunctionArgumentReferenceRules, other.FunctionArgumentReferenceRules...)
 	for module, runtimeTypes := range other.RuntimeTypesByModule {
 		c.RuntimeTypesByModule[module] = append(c.RuntimeTypesByModule[module], runtimeTypes...)
 	}

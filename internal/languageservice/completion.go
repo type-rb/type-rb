@@ -60,6 +60,9 @@ func Complete(request CompletionRequest) []CompletionItem {
 	if request.Cursor < 0 || request.Cursor > len(request.Source) {
 		return nil
 	}
+	if items, ok := completeCallArgumentReferences(request); ok {
+		return items
+	}
 	if items, ok := completeCallArgumentLiterals(request); ok {
 		return items
 	}

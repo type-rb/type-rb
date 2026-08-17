@@ -43,6 +43,16 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 			TypeArgument: 0, ParameterTypeSuffix: "Query",
 		})
 	}
+	for _, model := range models {
+		targets := modelReferences(model, models)
+		for _, function := range []string{string(BelongsTo), string(HasMany), string(HasOne)} {
+			catalog.FunctionArgumentReferenceRules = append(catalog.FunctionArgumentReferenceRules, declaration.FunctionArgumentReferenceRule{
+				Package: PackageName, Function: function, Argument: 0,
+				Owner:   declaration.DeclarationReference{ModulePath: model.ModulePath, Name: model.Name},
+				Targets: append([]declaration.DeclarationReference(nil), targets...),
+			})
+		}
+	}
 	database := declaration.NewType("Database", "")
 	database.ClassMembers["transaction"] = transactionDeclaration(true)
 	catalog.Types["Database"] = database
@@ -51,6 +61,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 	catalog.Types["Transaction"] = transaction
 	for _, model := range models {
 		declared := declaration.NewType(model.Name, "Model")
+		declared.SourceModule = model.ModulePath
 		for _, column := range model.Columns {
 			declared.InstanceMembers[column.Name] = declaration.Member{
 				Name: column.Name, Kind: declaration.Property, Intrinsic: "trb.orm.column", Return: column.Type, Provider: PackageName,
@@ -305,6 +316,17 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 	}
 	applyPortableEffects(catalog)
 	return catalog, nil
+}
+
+func modelReferences(source Model, models []Model) []declaration.DeclarationReference {
+	result := []declaration.DeclarationReference{}
+	for _, target := range models {
+		if sameModelGroup(source, target) {
+			result = append(result, declaration.DeclarationReference{ModulePath: target.ModulePath, Name: target.Name})
+		}
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].Name < result[right].Name })
+	return result
 }
 
 func applyPortableEffects(catalog *declaration.Catalog) {
@@ -802,7 +824,8 @@ func discoverModels(programs []*ast.Program, schema *Schema, packageAliasesByMod
 			}
 			model := Model{
 				Name: class.Name, QueryType: class.Name + "Query", Table: table.Name,
-				ModulePath: program.ModulePath, Columns: append([]Column(nil), table.Columns...),
+				ModulePath:        program.ModulePath,
+				Columns:           append([]Column(nil), table.Columns...),
 				UniqueConstraints: append([]UniqueConstraint(nil), table.UniqueConstraints...),
 			}
 			if err := applyEnumColumns(&model, class, program, enums, packageAliasesByModule); err != nil {
@@ -817,7 +840,7 @@ func discoverModels(programs []*ast.Program, schema *Schema, packageAliasesByMod
 	}
 	specs := map[string][]associationSpec{}
 	for index := range models {
-		associations, err := discoverAssociationSpecs(models[index], classes[models[index].Name], byName)
+		associations, err := discoverAssociationSpecs(models[index], classes[models[index].Name], byName, classes)
 		if err != nil {
 			return nil, err
 		}
@@ -1085,7 +1108,7 @@ type associationSpec struct {
 	Scoped      bool
 }
 
-func discoverAssociationSpecs(source Model, class *ast.ClassStatement, models map[string]*Model) ([]associationSpec, error) {
+func discoverAssociationSpecs(source Model, class *ast.ClassStatement, models map[string]*Model, classes map[string]*ast.ClassStatement) ([]associationSpec, error) {
 	if class == nil {
 		return nil, nil
 	}
@@ -1108,8 +1131,12 @@ func discoverAssociationSpecs(source Model, class *ast.ClassStatement, models ma
 			return nil, fmt.Errorf("trb/orm %s.%s expects a model type as its first argument", source.Name, callee.Name)
 		}
 		targetName := expressionName(call.Arguments[0].Value)
-		if models[targetName] == nil {
+		target := models[targetName]
+		if target == nil {
 			return nil, fmt.Errorf("trb/orm %s.%s references unknown model %s", source.Name, callee.Name, targetName)
+		}
+		if !sameModelGroup(source, *target) {
+			return nil, associationModelGroupError(source, *target, classes[targetName], callee.Name, call.Arguments[0].Value.Span())
 		}
 		spec := associationSpec{Kind: AssociationKind(callee.Name), TargetModel: targetName}
 		if call.Block != nil {
@@ -1283,11 +1310,11 @@ func buildAssociation(source, target Model, spec associationSpec, schema *Schema
 			}
 		}
 		if spec.Kind == BelongsTo && foreignKey.Column == association.SourceColumn && foreignKey.ReferencedTable == target.Table && referencedColumn == association.TargetColumn {
-			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
+			association.Preloadable = sameModelGroup(source, target) && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
 		if (spec.Kind == HasMany || spec.Kind == HasOne) && foreignKey.Column == association.TargetColumn && foreignKey.ReferencedTable == source.Table && referencedColumn == association.SourceColumn {
-			association.Preloadable = source.ModulePath == target.ModulePath && preloadKeyCompatible(source, target, association)
+			association.Preloadable = sameModelGroup(source, target) && preloadKeyCompatible(source, target, association)
 			return association, nil
 		}
 	}
@@ -1337,8 +1364,20 @@ func buildThroughAssociation(source Model, spec associationSpec, models map[stri
 	return Association{
 		Name: name, Kind: spec.Kind, TargetModel: spec.TargetModel, TargetQuery: models[spec.TargetModel].QueryType,
 		Inverse: spec.Inverse, Through: spec.Through, Source: sourceName, Dependent: spec.Dependent, Scoped: spec.Scoped,
-		Preloadable: source.ModulePath == middle.ModulePath && middle.ModulePath == models[spec.TargetModel].ModulePath && through.Preloadable && via.Preloadable,
+		Preloadable: sameModelGroup(source, *middle) && sameModelGroup(*middle, *models[spec.TargetModel]) && through.Preloadable && via.Preloadable,
 	}, nil
+}
+
+func sameModelGroup(left, right Model) bool {
+	return modelGroup(left.ModulePath) == modelGroup(right.ModulePath)
+}
+
+func modelGroup(modulePath string) string {
+	group := path.Dir(path.Clean(modulePath))
+	if group == "." {
+		return ""
+	}
+	return group
 }
 
 func resolveAssociationInverses(source *Model, models map[string]*Model) error {

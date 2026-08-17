@@ -342,6 +342,12 @@ func (g *generator) statement(statement ir.Statement) {
 			if len(types) > 0 {
 				g.line("import type { " + strings.Join(types, ", ") + " } from " + strconv.Quote(importPath) + ";")
 			}
+			if n.RuntimeRequired && !n.Standard && !n.Official && len(values) == 0 && !intrinsicRuntime {
+				// A project type-only import does not execute its module. Keep the
+				// compiler-owned runtime load when that module also registers ORM
+				// models or provides another project integration side effect.
+				g.line("import " + strconv.Quote(importPath) + ";")
+			}
 		} else if n.Alias != "" {
 			g.line("import * as " + n.Alias + " from " + strconv.Quote(importPath) + ";")
 		} else {

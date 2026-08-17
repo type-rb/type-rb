@@ -681,6 +681,17 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	}
 	product, _ := catalog.Type("Product")
 	category, _ := catalog.Type("Category")
+	if product.SourceModule != program.ModulePath || category.SourceModule != program.ModulePath {
+		t.Fatalf("ORM project declarations lost their source modules: Product=%q Category=%q", product.SourceModule, category.SourceModule)
+	}
+	if len(catalog.FunctionArgumentReferenceRules) != 6 {
+		t.Fatalf("association reference rules=%#v, want two owners by three functions", catalog.FunctionArgumentReferenceRules)
+	}
+	for _, rule := range catalog.FunctionArgumentReferenceRules {
+		if rule.Package != PackageName || rule.Argument != 0 || rule.Owner.ModulePath != program.ModulePath || len(rule.Targets) != 2 || rule.Targets[0].Name != "Category" || rule.Targets[1].Name != "Product" {
+			t.Fatalf("unexpected association reference rule: %#v", rule)
+		}
+	}
 	if product.InstanceMembers["category"].Return.String() != "Category?" {
 		t.Fatalf("unexpected belongs_to declaration: %#v", product.InstanceMembers["category"])
 	}

@@ -81,9 +81,9 @@ func TestRunORMBackedWebJSONAcrossBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := database.Exec(`
-				CREATE TABLE web_conformance_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
+				CREATE TABLE web_conformance_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, state TEXT NOT NULL);
 				CREATE TABLE web_conformance_products (id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, name TEXT NOT NULL UNIQUE, FOREIGN KEY (category_id) REFERENCES web_conformance_categories(id));
-				INSERT INTO web_conformance_categories (name) VALUES ('books');
+				INSERT INTO web_conformance_categories (name, state) VALUES ('books', 'active');
 				INSERT INTO web_conformance_products (category_id, name) VALUES (1, 'first'), (1, 'second');
 			`); err != nil {
 				database.Close()
@@ -119,10 +119,18 @@ def main()
 	return
 end
 `,
-				"models/product.trb": `import { Model, belongs_to, has_many } from trb/orm
+				"models/category.trb": `import { WebConformanceState } from models/product
+import { Model, enum_column, has_many } from trb/orm
 
 class WebConformanceCategory < Model
+	enum_column(:state, WebConformanceState)
 	has_many(WebConformanceProduct, foreign_key: :category_id)
+end
+`,
+				"models/product.trb": `import { Model, belongs_to } from trb/orm
+
+enum WebConformanceState
+	Active
 end
 
 class WebConformanceProduct < Model

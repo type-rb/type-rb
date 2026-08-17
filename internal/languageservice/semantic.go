@@ -58,6 +58,9 @@ func Hover(request SemanticRequest) (HoverInfo, bool) {
 		}
 		return HoverInfo{}, false
 	}
+	if symbol, found := callArgumentReferenceSymbol(request, item); found {
+		return HoverInfo{Range: range_, Detail: semanticDetail(symbol)}, true
+	}
 
 	if symbol, found := semanticSymbol(item.Lexeme, request.Source, analysisCursor, request.Context); found {
 		return HoverInfo{Range: range_, Detail: semanticDetail(symbol)}, true
@@ -128,6 +131,9 @@ func Definition(request SemanticRequest) (DefinitionInfo, bool) {
 			}
 		}
 		return DefinitionInfo{}, false
+	}
+	if symbol, found := callArgumentReferenceSymbol(request, item); found && symbol.Definition != nil {
+		return definitionInfo(symbol.Definition), true
 	}
 	if definition, found := callArgumentDefinition(request, item); found {
 		return definitionInfo(definition), true

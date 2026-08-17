@@ -22,6 +22,7 @@ type Source struct {
 type Context struct {
 	Sources                []Source
 	Resolutions            map[string]resolver.Result
+	EntrypointModule       string
 	SourceRoot             string
 	ProjectRoot            string
 	PackageOptions         map[string][]byte
@@ -116,7 +117,11 @@ func (a Analysis) Apply(program *ir.Program, entrypoint bool) {
 			}
 		}
 		if contribution.Extension != nil {
-			if augmenter, ok := contribution.Extension.(interface{ Augment(*ir.Program) }); ok {
+			if augmenter, ok := contribution.Extension.(interface {
+				AugmentProgram(*ir.Program, bool)
+			}); ok {
+				augmenter.AugmentProgram(program, entrypoint)
+			} else if augmenter, ok := contribution.Extension.(interface{ Augment(*ir.Program) }); ok {
 				augmenter.Augment(program)
 			}
 		}
