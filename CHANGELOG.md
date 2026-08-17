@@ -2,6 +2,14 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.27 - 2026-08-17
+
+### ORM
+
+- `enum_column` now accepts enums imported through TypeRB package aliases,
+  including enums shared from local application packages.
+  ([#329](https://github.com/type-rb/type-rb/pull/329))
+
 ## 0.2.26 - 2026-08-17
 
 ### CLI and standalone workflows
