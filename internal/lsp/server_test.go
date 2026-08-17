@@ -588,6 +588,39 @@ func TestServerIgnoresOpenDocumentsOutsideSourceRoot(t *testing.T) {
 	}
 }
 
+func TestServerRestrictsStandaloneSessionToIncludedFile(t *testing.T) {
+	root := t.TempDir()
+	included := filepath.Join(root, "included.trb")
+	sibling := filepath.Join(root, "sibling.trb")
+	resolved := make([]string, 0, 1)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Output: &output,
+		CompilerOptions: compiler.Options{
+			Mode: "go", GoModule: "trb.local/standalone", SourceRoot: root,
+		},
+		IncludedFiles: []string{included},
+		ResolveUnit: func(path string, contents []byte) (compiler.SourceUnit, error) {
+			resolved = append(resolved, path)
+			return compiler.SourceUnit{Filename: path, ModulePath: "included", Package: "main", Source: contents}, nil
+		},
+	})
+	for _, filename := range []string{sibling, included} {
+		if err := server.open(textDocumentItem{
+			URI: uriFromPath(filename), LanguageID: "trb", Version: 1,
+			Text: "def main()\n\treturn\nend\n",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(resolved) != 1 || cleanPath(resolved[0]) != cleanPath(included) {
+		t.Fatalf("standalone resolver received files %v", resolved)
+	}
+	if len(server.documents) != 1 {
+		t.Fatalf("standalone documents=%#v", server.documents)
+	}
+}
+
 func TestServerReturnsFilteredWorkspaceSymbols(t *testing.T) {
 	accountsFilename := cleanPath("accounts.trb")
 	accountsSource := "module Accounts\n\tclass User\n\tend\nend\n"

@@ -8,7 +8,7 @@ const vscode = require("vscode");
 const { LanguageClient } = require("vscode-languageclient/node");
 const { TypeRBDebugSession, TypeRBProcess } = require("./debug-session");
 const { DlvDAPProcess } = require("./go-debug-adapter");
-const { excludeGeneratedProjects, projectForPath, projectPaths } = require("./project-options");
+const { containsPath, excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("./project-options");
 const { resolveRunOptions, resolveServerOptions, runCodeLensTitle } = require("./server-options");
 const { decodeTestEvent } = require("./test-events");
 
@@ -26,16 +26,17 @@ async function activate(context) {
 		vscode.commands.registerCommand("typerb.debugTest", (uri, fullName) => typeRBTests?.debugByName(uri, fullName)),
 		vscode.commands.registerCommand("typerb.stopProject", stopProject),
 		vscode.debug.onDidStartDebugSession((session) => {
-			if (session.type === "typerb" && typeof session.configuration.configPath === "string") {
-				debugSessions.set(path.resolve(session.configuration.configPath), session);
+			const key = debugSessionKey(session);
+			if (key !== undefined) {
+				debugSessions.set(key, session);
 				runCodeLensProvider?.refresh();
 			}
 		}),
 		vscode.debug.onDidTerminateDebugSession((session) => {
-			if (session.type === "typerb" && typeof session.configuration.configPath === "string") {
-				const configPath = path.resolve(session.configuration.configPath);
-				if (debugSessions.get(configPath) === session) {
-					debugSessions.delete(configPath);
+			const key = debugSessionKey(session);
+			if (key !== undefined) {
+				if (debugSessions.get(key) === session) {
+					debugSessions.delete(key);
 					runCodeLensProvider?.refresh();
 				}
 			}
@@ -48,6 +49,10 @@ async function activate(context) {
 		}
 	});
 	await projectManager.start();
+	context.subscriptions.push(
+		vscode.workspace.onDidOpenTextDocument((document) => void projectManager?.openDocument(document)),
+		vscode.workspace.onDidCloseTextDocument((document) => void projectManager?.closeDocument(document))
+	);
 	typeRBTests = new TypeRBTestController(projectManager);
 	context.subscriptions.push(typeRBTests);
 	await typeRBTests.refresh();
@@ -83,14 +88,12 @@ async function activate(context) {
 class ProjectManager {
 	constructor() {
 		this.projects = [];
+		this.standalones = new Map();
+		this.nextStandaloneID = 0;
 	}
 
 	async start() {
 		this.projects = await discoverProjects();
-		if (this.projects.length === 0) {
-			void vscode.window.showErrorMessage("TypeRB could not find trbconfig.jsonc in the opened workspace.");
-			return;
-		}
 		await Promise.all(this.projects.map(async (project, index) => {
 			try {
 				await this.startProject(project, index);
@@ -101,6 +104,7 @@ class ProjectManager {
 				void vscode.window.showErrorMessage(`Cannot start TypeRB project ${project.configPath}: ${error.message}`);
 			}
 		}));
+		await Promise.all(vscode.workspace.textDocuments.map((document) => this.openDocument(document)));
 	}
 
 	async startProject(project, index) {
@@ -142,15 +146,100 @@ class ProjectManager {
 		await project.client.start();
 	}
 
+	async openDocument(document) {
+		if (document.languageId !== "trb" || document.uri.scheme !== "file") {
+			return;
+		}
+		const filename = path.resolve(document.uri.fsPath);
+		if (
+			projectForPath(this.projects, filename) !== undefined ||
+			this.projects.some((project) => containsPath(project.root, filename)) ||
+			this.standalones.has(filename)
+		) {
+			return;
+		}
+		const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+		const settings = vscode.workspace.getConfiguration("typerb", document.uri);
+		const mode = settings.get("standalone.mode", "go");
+		const runtime = settings.get("standalone.typescript.runtime", "node");
+		const root = path.dirname(filename);
+		const project = {
+			standalone: true,
+			filename,
+			configUri: document.uri,
+			workspaceFolder,
+			root,
+			sourceRoot: root,
+			outputRoot: path.join(root, "build"),
+			label: path.basename(filename),
+			mode,
+			runtime,
+			runnable: true,
+		};
+		this.standalones.set(filename, project);
+		try {
+			const workspaceRoot = workspaceFolder?.uri.fsPath;
+			const server = resolveServerOptions({
+				path: settings.get("server.path", "trb"),
+				config: "",
+				file: filename,
+				mode,
+				runtime,
+			}, workspaceRoot);
+			project.client = new LanguageClient(
+				`typerb-standalone-${this.nextStandaloneID++}`,
+				`TypeRB Language Server (${project.label})`,
+				{
+					command: server.command,
+					args: server.args,
+					options: { cwd: root }
+				},
+				{
+					documentSelector: [{
+						scheme: "file",
+						language: "trb",
+						pattern: new vscode.RelativePattern(root, literalGlobPattern(path.basename(filename)))
+					}],
+					middleware: {
+						provideCodeLenses() {
+							return [];
+						}
+					}
+				}
+			);
+			project.testCommand = server.command;
+			await project.client.start();
+		} catch (error) {
+			this.standalones.delete(filename);
+			project.client = undefined;
+			void vscode.window.showErrorMessage(`Cannot start TypeRB standalone file ${filename}: ${error.message}`);
+		}
+	}
+
+	async closeDocument(document) {
+		if (document.uri.scheme !== "file") {
+			return;
+		}
+		const filename = path.resolve(document.uri.fsPath);
+		const project = this.standalones.get(filename);
+		if (project === undefined) {
+			return;
+		}
+		this.standalones.delete(filename);
+		if (project.client !== undefined) {
+			await project.client.stop();
+		}
+	}
+
 	projectForURI(uri) {
 		if (uri?.scheme !== "file") {
 			return undefined;
 		}
-		return projectForPath(this.projects, uri.fsPath);
+		return projectForPath(this.projects, uri.fsPath) ?? this.standalones.get(path.resolve(uri.fsPath));
 	}
 
 	firstProject() {
-		return this.projects.find((project) => project.runnable);
+		return this.allProjects().find((project) => project.runnable);
 	}
 
 	projectForConfigPath(configPath) {
@@ -158,9 +247,14 @@ class ProjectManager {
 		return this.projects.find((project) => project.configPath === resolved);
 	}
 
+	allProjects() {
+		return [...this.projects, ...this.standalones.values()];
+	}
+
 	async stop() {
-		const projects = this.projects;
+		const projects = this.allProjects();
 		this.projects = [];
+		this.standalones.clear();
 		await Promise.all(projects.map(async (project) => {
 			project.watcher?.dispose();
 			if (project.client !== undefined) {
@@ -241,7 +335,7 @@ class RunCodeLensProvider {
 		} catch {
 			return [];
 		}
-		const session = debugSessions.get(project.configPath);
+		const session = debugSessions.get(projectSessionKey(project));
 		const running = session !== undefined && typeof session.configuration.testFilter !== "string";
 		return items.map((item) => {
 			const range = new vscode.Range(
@@ -293,7 +387,7 @@ class TypeRBTestController {
 	}
 
 	async refreshProject(project) {
-		if (project?.client === undefined) {
+		if (project?.client === undefined || project.standalone) {
 			return;
 		}
 		let discovered;
@@ -564,14 +658,14 @@ async function runProject(uriValue) {
 		? projectManager?.firstProject()
 		: projectManager?.projectForURI(uri);
 	if (project === undefined) {
-		void vscode.window.showErrorMessage("Open a TypeRB project folder before running main().");
+		void vscode.window.showErrorMessage("Open a TypeRB project or standalone file before running main().");
 		return;
 	}
 	if (!(await saveTypeRBDocuments(project))) {
-		void vscode.window.showErrorMessage("Save TypeRB project files before running main().");
+		void vscode.window.showErrorMessage("Save TypeRB files before running main().");
 		return;
 	}
-	const running = debugSessions.get(project.configPath);
+	const running = debugSessions.get(projectSessionKey(project));
 	if (running !== undefined) {
 		if (typeof running.configuration.testFilter !== "string") {
 			await running.customRequest("restart");
@@ -582,7 +676,7 @@ async function runProject(uriValue) {
 	const configuration = debugConfigurationForProject(project, [], true);
 	const started = await vscode.debug.startDebugging(project.workspaceFolder, configuration);
 	if (!started) {
-		void vscode.window.showErrorMessage(`Cannot start TypeRB project ${project.label}.`);
+		void vscode.window.showErrorMessage(`Cannot start TypeRB ${project.standalone ? "file" : "project"} ${project.label}.`);
 	}
 }
 
@@ -612,7 +706,7 @@ async function stopProject(uriValue) {
 	const project = uri === undefined ? undefined : projectManager?.projectForURI(uri);
 	const session = project === undefined
 		? vscode.debug.activeDebugSession
-		: debugSessions.get(project.configPath);
+		: debugSessions.get(projectSessionKey(project));
 	if (session?.type !== "typerb") {
 		return;
 	}
@@ -634,9 +728,9 @@ class TypeRBDebugConfigurationProvider {
 	}
 
 	provideDebugConfigurations(folder) {
-		return this.manager.projects
+		return this.manager.allProjects()
 			.filter((project) => project.runnable && (folder === undefined || project.workspaceFolder === folder))
-			.map((project) => debugConfigurationForProject(project));
+			.map((project) => debugConfigurationForProject(project, [], project.standalone));
 	}
 
 	async resolveDebugConfiguration(folder, configuration) {
@@ -651,12 +745,16 @@ class TypeRBDebugConfigurationProvider {
 		}
 		const programArgs = Array.isArray(configuration.args) ? configuration.args : [];
 		const noDebug = configuration.noDebug === true;
+		if (!noDebug && project.standalone) {
+			void vscode.window.showErrorMessage("Source debugging is not yet available for standalone TypeRB files. Use Run Without Debugging instead.");
+			return undefined;
+		}
 		if (!noDebug && project.mode !== "go") {
 			void vscode.window.showErrorMessage(`Source debugging is not yet available for mode: ${project.mode}. Use Run Without Debugging instead.`);
 			return undefined;
 		}
-		if (!noDebug && !(await saveTypeRBDocuments(project))) {
-			void vscode.window.showErrorMessage("Save TypeRB project files before starting the debugger.");
+		if (!(await saveTypeRBDocuments(project))) {
+			void vscode.window.showErrorMessage("Save TypeRB files before starting Run and Debug.");
 			return undefined;
 		}
 		const resolved = {
@@ -698,6 +796,9 @@ class TypeRBDebugConfigurationProvider {
 				: path.resolve(root, workspaceRelative);
 			return this.manager.projectForConfigPath(configPath);
 		}
+		if (typeof configuration.file === "string" && configuration.file !== "") {
+			return this.manager.projectForURI(vscode.Uri.file(configuration.file));
+		}
 		const editor = vscode.window.activeTextEditor;
 		const active = editor?.document.languageId === "trb"
 			? this.manager.projectForURI(editor.document.uri)
@@ -705,7 +806,7 @@ class TypeRBDebugConfigurationProvider {
 		if (active !== undefined && (folder === undefined || active.workspaceFolder === folder)) {
 			return active;
 		}
-		return this.manager.projects.find((project) =>
+		return this.manager.allProjects().find((project) =>
 			project.runnable && (folder === undefined || project.workspaceFolder === folder)
 		);
 	}
@@ -715,7 +816,13 @@ function debugConfigurationForProject(project, programArgs = [], noDebug = false
 	const settings = vscode.workspace.getConfiguration("typerb", project.configUri);
 	const workspaceRoot = project.workspaceFolder?.uri.fsPath;
 	const run = resolveRunOptions(
-		{
+		project.standalone ? {
+			path: settings.get("server.path", "trb"),
+			config: "",
+			file: project.filename,
+			mode: project.mode,
+			runtime: project.runtime,
+		} : {
 			path: settings.get("server.path", "trb"),
 			config: project.configPath,
 		},
@@ -726,8 +833,15 @@ function debugConfigurationForProject(project, programArgs = [], noDebug = false
 		type: "typerb",
 		request: "launch",
 		name: `TypeRB: ${project.label}`,
-		config: project.configPath,
-		configPath: project.configPath,
+		...(project.standalone ? {
+			file: project.filename,
+			mode: project.mode,
+			runtime: project.runtime,
+		} : {
+			config: project.configPath,
+			configPath: project.configPath,
+		}),
+		projectKey: projectSessionKey(project),
 		command: run.command,
 		commandArgs: run.args,
 		cwd: project.root,
@@ -736,6 +850,18 @@ function debugConfigurationForProject(project, programArgs = [], noDebug = false
 		noDebug,
 		internalConsoleOptions: "openOnSessionStart",
 	};
+}
+
+function projectSessionKey(project) {
+	return path.resolve(project.standalone ? project.filename : project.configPath);
+}
+
+function debugSessionKey(session) {
+	if (session.type !== "typerb") {
+		return undefined;
+	}
+	const value = session.configuration.projectKey ?? session.configuration.configPath ?? session.configuration.file;
+	return typeof value === "string" && value !== "" ? path.resolve(value) : undefined;
 }
 
 function debugConfigurationForTest(project, filter, file) {

@@ -86,6 +86,11 @@ function containsPath(root, filename) {
 	return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
+function literalGlobPattern(value) {
+	const replacements = { "*": "[*]", "?": "[?]", "[": "[[]", "]": "[]]", "{": "[{]", "}": "[}]" };
+	return [...value].map((character) => replacements[character] ?? character).join("");
+}
+
 function projectForPath(projects, filename) {
 	let selected;
 	for (const project of projects) {
@@ -105,4 +110,4 @@ function excludeGeneratedProjects(projects) {
 	));
 }
 
-module.exports = { containsPath, excludeGeneratedProjects, projectForPath, projectPaths, stripJSONCComments };
+module.exports = { containsPath, excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths, stripJSONCComments };

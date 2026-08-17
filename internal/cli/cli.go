@@ -842,7 +842,7 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 		configStart = filename
 		programArgs = append(remaining[1:], programArgs...)
 	}
-	config, standalone, err := loadRunConfig(*configPath, configStart, filename, *mode, *typeScriptRuntime)
+	config, standalone, err := loadCommandConfig("run", *configPath, configStart, filename, *mode, *typeScriptRuntime)
 	if err != nil {
 		return err
 	}
@@ -942,7 +942,7 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 	return relay.Run(command)
 }
 
-func loadRunConfig(explicit, start, filename, mode, runtimeName string) (*project.Config, bool, error) {
+func loadCommandConfig(command, explicit, start, filename, mode, runtimeName string) (*project.Config, bool, error) {
 	config, err := loadConfig(explicit, start)
 	if err == nil {
 		if mode != "" || runtimeName != "" {
@@ -957,7 +957,7 @@ func loadRunConfig(explicit, start, filename, mode, runtimeName string) (*projec
 		return nil, false, err
 	}
 	if filename == "" {
-		return nil, false, errors.New("run requires FILE.trb when trbconfig.jsonc is unavailable")
+		return nil, false, fmt.Errorf("%s requires FILE.trb when trbconfig.jsonc is unavailable", command)
 	}
 	if mode == "" {
 		mode = "go"
@@ -2407,7 +2407,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb FILE.trb [-- arguments...]")
 	fmt.Fprintln(c.Stdout, "  trb clean [--build] [--cache] [--generated] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb repl [--mode ruby|go|typescript] [--config trbconfig.jsonc]")
-	fmt.Fprintln(c.Stdout, "  trb lsp [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb lsp [--config trbconfig.jsonc] [--mode MODE] [--runtime RUNTIME] [FILE.trb]")
 	fmt.Fprintln(c.Stdout, "  trb play [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb tour [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb db plan|apply|export|lock|check [options]")

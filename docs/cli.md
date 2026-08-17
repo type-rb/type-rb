@@ -314,7 +314,18 @@ trb lsp
 
 # Select a project explicitly.
 trb lsp --config path/to/trbconfig.jsonc
+
+# Serve one file without project configuration, using Go by default.
+trb lsp hello.trb
+trb lsp --mode ruby hello.trb
+trb lsp --mode typescript --runtime bun hello.trb
 ```
+
+Standalone LSP sessions compile only the selected file and ignore sibling
+`.trb` files. They use the same mode and runtime selection as standalone
+execution. If `trbconfig.jsonc` is discoverable, the language server serves
+that complete project instead and standalone mode or runtime overrides are
+rejected.
 
 The language server provides project-wide live diagnostics, completion, checked
 hover information, signature help, document formatting, and quick fixes backed
@@ -342,9 +353,13 @@ packages the canonical TypeRB TextMate grammar. It defaults to `trb` on `PATH`;
 `typerb.server.path` overrides the executable and `typerb.server.config` adds
 an explicit project configuration when needed. It discovers ordinary
 `trbconfig.jsonc` files below the workspace and starts one server per project,
-so declarations from different applications are never combined. Its CodeLens
-starts `trb run` for the owning project in an integrated terminal and changes
-from `▶ Run` to `↻ Restart` while that project is active.
+so declarations from different applications are never combined. An open
+`.trb` file outside every discovered project receives an independent
+single-file language-server session. `typerb.standalone.mode` selects its mode
+and `typerb.standalone.typescript.runtime` selects Node or Bun. Its CodeLens
+starts `trb run` for the owning project or file through Visual Studio Code's
+Run and Debug lifecycle and changes from `▶ Run` to `↻ Restart` while that
+program is active. Output appears in the Debug Console.
 
 ## Database schema
 

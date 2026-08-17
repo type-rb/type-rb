@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Analyze and run standalone `.trb` files without requiring
+  `trbconfig.jsonc`, with configurable Go, Ruby, or TypeScript mode.
 - Add explicit standard-type imports when accepting compiler completion.
 - Debug Go-targeted TypeRB source with breakpoints, stepping, call stacks, and
   variable inspection through Delve.

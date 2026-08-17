@@ -36,6 +36,7 @@ type Options struct {
 	Units           []compiler.SourceUnit
 	CompilerOptions compiler.Options
 	ExcludedRoots   []string
+	IncludedFiles   []string
 	ResolveUnit     UnitResolver
 	Input           io.Reader
 	Output          io.Writer
@@ -55,6 +56,7 @@ type Server struct {
 	resolveUnit      UnitResolver
 	sourceRoot       string
 	excludedRoots    []string
+	includedFiles    map[string]bool
 	documents        map[string]document
 	base             map[string]compiler.SourceUnit
 	published        map[string]bool
@@ -87,11 +89,17 @@ func New(options Options) *Server {
 			excludedRoots = append(excludedRoots, cleanPath(root))
 		}
 	}
+	includedFiles := make(map[string]bool, len(options.IncludedFiles))
+	for _, filename := range options.IncludedFiles {
+		if filename != "" {
+			includedFiles[cleanPath(filename)] = true
+		}
+	}
 	return &Server{
 		mode: options.Mode, version: options.Version,
 		stream:   newRPCStream(options.Input, options.Output),
 		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit,
-		sourceRoot: sourceRoot, excludedRoots: excludedRoots,
+		sourceRoot: sourceRoot, excludedRoots: excludedRoots, includedFiles: includedFiles,
 		documents: map[string]document{}, base: base, published: map[string]bool{},
 		runSupported:     options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
 		importCandidates: languageservice.StandardImportCandidates(options.Mode),
@@ -657,6 +665,9 @@ func (s *Server) changeWorkspaceFiles(params didChangeWatchedFilesParams) error 
 
 func (s *Server) workspaceSourcePath(path string) bool {
 	path = cleanPath(path)
+	if len(s.includedFiles) > 0 && !s.includedFiles[path] {
+		return false
+	}
 	for _, root := range s.excludedRoots {
 		if pathWithin(root, path) {
 			return false
