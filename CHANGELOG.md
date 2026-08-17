@@ -2,7 +2,7 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
-## 0.2.29 - 2026-08-17
+## 0.2.29 - 2026-08-18
 
 ### CLI and standalone workflows
 
