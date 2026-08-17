@@ -1,0 +1,73 @@
+name: VS Code
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/vscode.yml"
+      - "editors/vscode/**"
+      - "!editors/vscode/**/*.md"
+      - "!editors/vscode/LICENSE"
+      - "cmd/trb/main.go"
+      - "internal/cli/cli.go"
+      - "internal/cli/lsp.go"
+      - "internal/cli/child_process*.go"
+      - "internal/cli/generated_workspace*.go"
+      - "internal/compilerservice/**"
+      - "internal/languageservice/**"
+      - "internal/lsp/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/vscode.yml"
+      - "editors/vscode/**"
+      - "!editors/vscode/**/*.md"
+      - "!editors/vscode/LICENSE"
+      - "cmd/trb/main.go"
+      - "internal/cli/cli.go"
+      - "internal/cli/lsp.go"
+      - "internal/cli/child_process*.go"
+      - "internal/cli/generated_workspace*.go"
+      - "internal/compilerservice/**"
+      - "internal/languageservice/**"
+      - "internal/lsp/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install extension dependencies
+        run: npm ci --prefix editors/vscode
+
+      - name: Verify extension unit and package checks
+        run: |
+          npm test --prefix editors/vscode
+          npm run package --prefix editors/vscode
+          test -s editors/vscode/dist/typerb.vsix
+
+      - name: Verify Stable Extension Host
+        run: xvfb-run -a npm run test:integration --prefix editors/vscode

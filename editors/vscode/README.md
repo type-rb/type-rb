@@ -133,7 +133,9 @@ npm run package --prefix editors/vscode
 
 The Stable and Insiders suites cover standalone language service activation,
 unsaved-file diagnostics, and execution through the real debug adapter
-lifecycle.
+lifecycle. Pull requests run the Stable suite only when the extension or its
+CLI and language-service boundaries change. Insiders remains a local
+forward-compatibility check.
 
 ## Documentation
 

@@ -49,7 +49,6 @@ jobs:
           cache: npm
           cache-dependency-path: |
             tools/textmate/package-lock.json
-            editors/vscode/package-lock.json
 
       - name: Verify compiler and tour
         run: go test ./...
@@ -61,16 +60,6 @@ jobs:
         run: |
           npm ci --prefix tools/textmate
           npm test --prefix tools/textmate
-
-      - name: Verify VS Code extension
-        run: |
-          npm ci --prefix editors/vscode
-          npm test --prefix editors/vscode
-          npm run package --prefix editors/vscode
-          test -s editors/vscode/dist/typerb.vsix
-
-      - name: Verify VS Code Extension Host
-        run: xvfb-run -a npm run test:integration --prefix editors/vscode
 
       - name: Build browser playground
         shell: bash
