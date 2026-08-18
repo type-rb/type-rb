@@ -33,6 +33,8 @@ func parseExpressionTokensWithEmbedded(tokens []token.Token, embedded map[int]as
 	return expr, expr != nil && p.pos == len(p.tokens)
 }
 
+const highestBinaryPrecedence = 12
+
 var precedences = map[string]int{
 	"or": 1, "||": 1,
 	"and": 2, "&&": 2,
@@ -43,7 +45,7 @@ var precedences = map[string]int{
 	"<<": 9, ">>": 9,
 	"+": 10, "-": 10,
 	"*": 11, "/": 11, "%": 11,
-	"**": 12,
+	"**": highestBinaryPrecedence,
 }
 
 func (p *exprParser) parse(min int) ast.Expression {
@@ -175,6 +177,15 @@ func (p *exprParser) parsePrefix() ast.Expression {
 			return nil
 		}
 		return &ast.AttemptExpression{Base: ast.Base{SourceSpan: token.Span{Start: tok.Span.Start, End: operand.Span().End}}, Value: operand}
+	case "try":
+		// Propagation applies to the immediately following postfix chain. This
+		// makes `try result + 1` mean `(try result) + 1`, rather than requiring
+		// the complete arithmetic expression to produce a Result.
+		operand := p.parse(highestBinaryPrecedence)
+		if operand == nil {
+			return nil
+		}
+		return &ast.TryExpression{Base: ast.Base{SourceSpan: token.Span{Start: tok.Span.Start, End: operand.Span().End}}, Value: operand}
 	case "(":
 		expr := p.parse(0)
 		if expr == nil || !p.take(")") {

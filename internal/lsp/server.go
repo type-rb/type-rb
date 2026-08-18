@@ -1721,7 +1721,7 @@ func validRenameIdentifier(name string) bool {
 
 var renameReservedWords = map[string]bool{
 	"and": true, "attempt": true, "begin": true, "break": true, "case": true,
-	"class": true, "def": true, "defer": true, "do": true, "else": true,
+	"catch": true, "class": true, "def": true, "defer": true, "do": true, "else": true,
 	"elsif": true, "end": true, "enum": true, "false": true, "fails": true,
 	"fn": true, "for": true, "if": true, "implements": true, "import": true,
 	"interface": true, "module": true, "mut": true, "next": true, "nil": true,

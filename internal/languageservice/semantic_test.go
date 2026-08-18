@@ -355,6 +355,31 @@ end
 	}
 }
 
+func TestResultCatchBindingUsesItsOwnLexicalScope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.trb")
+	source := `value := load() catch |error|
+	puts(error)
+end
+puts(error)
+`
+	context := languageservice.Context{TypeMembers: map[string][]languageservice.Symbol{}}
+	bindingStart := strings.Index(source, "error")
+	insideCursor := strings.Index(source[bindingStart+len("error"):], "error") + bindingStart + len("error") + 1
+	definition, ok := languageservice.Definition(languageservice.SemanticRequest{
+		Path: path, Source: source, Cursor: insideCursor, Mode: "go", Context: context,
+	})
+	if !ok || definition.Range.Start != bindingStart || definition.Name != "error" {
+		t.Fatalf("inside definition=(%#v, %v), want catch binding at %d", definition, ok, bindingStart)
+	}
+
+	outsideCursor := strings.LastIndex(source, "error") + 1
+	if definition, ok := languageservice.Definition(languageservice.SemanticRequest{
+		Path: path, Source: source, Cursor: outsideCursor, Mode: "go", Context: context,
+	}); ok {
+		t.Fatalf("catch binding escaped its body: %#v", definition)
+	}
+}
+
 func TestReferencesRenameClassFieldWithoutRemovingInstanceMarker(t *testing.T) {
 	source := `class Box
 	readonly @label: String := "items"

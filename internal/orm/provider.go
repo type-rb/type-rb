@@ -341,6 +341,9 @@ func applyPortableEffects(catalog *declaration.Catalog) {
 }
 
 func portableEffectMember(member declaration.Member) declaration.Member {
+	if member.Block != nil && member.Block.ResultBoundary.Kind != "" && member.Block.ResultBoundary.Kind != types.Never {
+		return member
+	}
 	if success, ok := dbResultSuccess(member.Return); ok {
 		member.Return = success
 		member.Fails = types.FromName("DbError")
@@ -385,10 +388,12 @@ func transactionDeclaration(class bool) declaration.Member {
 	typeParameter := types.FromName("T")
 	return declaration.Member{
 		Name: "transaction", Kind: declaration.Method, Intrinsic: "trb.orm.transaction",
-		Return: typeParameter, Fails: types.FromName("DbError"), Class: class, TypeParameters: []string{"T"}, Provider: PackageName,
+		Return: dbResult(typeParameter), Class: class, TypeParameters: []string{"T"}, Provider: PackageName,
 		Block: &declaration.Block{
-			Parameters: []types.Type{types.FromName("Transaction")},
-			Return:     typeParameter, Structured: true,
+			Parameters:     []types.Type{types.FromName("Transaction")},
+			Return:         typeParameter,
+			ResultBoundary: types.FromName("DbError"),
+			Structured:     true,
 		},
 	}
 }

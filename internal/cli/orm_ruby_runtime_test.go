@@ -279,10 +279,12 @@ def exercise(): Integer fails DbError
 		inside := TrbRubyTestProduct.using(tx).count()
 		locked := TrbRubyTestProduct.using(tx).lock().first()
 		puts(locked.id > 0)
-		nested_count := tx.transaction() do |nested|
+		nested_count := try tx.transaction() do |nested|
 			TrbRubyTestProduct.using(nested).where(active: true).count()
 		end
 		inside + nested_count
+	end catch |_error|
+		-1
 	end
 	puts(transaction_count)
 	batch_count := TrbRubyTestProduct.find_each(batch_size: 2) do |_product|

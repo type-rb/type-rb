@@ -396,6 +396,12 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		sc.values[node.Name] = value
 		e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))] = value
 		return flowResult{Result: Result{Value: value, Display: true}}, nil
+	case *ir.Temporary:
+		// Compiler-owned temporaries are assigned by a following control-flow
+		// statement. A typed placeholder lets the REPL share the same expanded
+		// statement IR as generated backends without exposing an authored value.
+		sc.values[node.Name] = Value{Type: node.Type}
+		return flowResult{}, nil
 	case *ir.Assignment:
 		value, err := e.expression(node.Value, module, sc)
 		if err != nil {
@@ -516,7 +522,15 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 			return Value{}, errors.New("loop transfer escaped a structured block")
 		}
 		if flow.Returned {
-			return flow.Result.Value, nil
+			value := flow.Result.Value
+			if node.Fails.Kind != "" && node.Fails.Kind != types.Never {
+				// A Result-boundary block may expose an alias such as DbResult
+				// while its compiler-generated early return uses canonical Result.
+				// The runtime provider compares the callback value with the public
+				// call type to decide whether it must roll back.
+				value.Type = node.Call.ExprType()
+			}
+			return value, nil
 		}
 		return e.expression(node.Value, module, blockScope)
 	}

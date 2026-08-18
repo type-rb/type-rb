@@ -171,6 +171,12 @@ func (c *foldingCollector) expression(expression ast.Expression) {
 		} else {
 			c.expression(node.Value)
 		}
+	case *ast.TryExpression:
+		c.expression(node.Value)
+	case *ast.CatchExpression:
+		c.add(node)
+		c.expression(node.Value)
+		c.statements(node.Body)
 	case *ast.LambdaExpression:
 		c.add(node)
 		for _, parameter := range node.Parameters {

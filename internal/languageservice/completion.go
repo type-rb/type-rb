@@ -21,6 +21,7 @@ var keywordDetails = map[string]string{
 	"attempt":    "capture fallible operations as Result",
 	"break":      "exit the current loop",
 	"case":       "dispatch on an enum",
+	"catch":      "recover from a Result error",
 	"class":      "declare a reference type",
 	"def":        "declare a function or method",
 	"do":         "start an iterator block",
@@ -48,6 +49,7 @@ var keywordDetails = map[string]string{
 	"then":       "separate a condition from its branch",
 	"type":       "declare a transparent type alias",
 	"true":       "Boolean literal",
+	"try":        "propagate a Result error",
 	"when":       "handle an enum member",
 	"while":      "start a loop",
 }

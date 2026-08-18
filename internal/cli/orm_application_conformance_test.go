@@ -371,7 +371,7 @@ def exercise(): Integer fails DbError
 	puts(TrbConformanceCategory.where(name: "lifecycle").destroy_all())
 	puts(TrbConformanceProduct.count())
 	transaction_id := Database.transaction() do |outer|
-		nested_id := outer.transaction() do |inner|
+		nested_id := try outer.transaction() do |inner|
 			categories := TrbConformanceCategory.using(inner)
 			inside := categories.create(name: "transaction")
 			_locked := categories.lock().all()
@@ -379,6 +379,8 @@ def exercise(): Integer fails DbError
 			inside.id
 		end
 		nested_id
+	end catch |_error|
+		return 0
 	end
 	puts(transaction_id > 0)
 	puts(TrbConformanceCategory.where(id: transaction_id).delete_all())

@@ -165,3 +165,17 @@ func TestCompleteTracksValueProducingControlFlow(t *testing.T) {
 		}
 	}
 }
+
+func TestCompleteTracksResultCatch(t *testing.T) {
+	for _, source := range []string{
+		"value := source() catch |error|\n\terror.message",
+		"value := Database.transaction() do |tx|\n\twork(tx)\nend catch |error|\n\tfallback(error)",
+	} {
+		if Complete(source) {
+			t.Fatalf("open catch handler should be incomplete: %q", source)
+		}
+		if !Complete(source + "\nend") {
+			t.Fatalf("closed catch handler should be complete: %q", source)
+		}
+	}
+}

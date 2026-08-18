@@ -902,7 +902,7 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 
 	input := strings.Join([]string{
 		"import { Category, Product, Project, User } from main",
-		"import { Database, DbError } from trb/orm",
+		"import { Database, DbError, DbResult } from trb/orm",
 		"Product.where(id: [1, 2]).to_sql()",
 		`Product.join(:category, Category.where(name: "Featured")).to_sql()`,
 		`Product.join(:category, Category.where(name: "Featured")).count()`,
@@ -937,12 +937,12 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		"Product.where(id: 999).minimum(:price)",
 		"def first_product_name(): String fails DbError\n\tproducts := Product.where(id: 1).all()\n\treturn products[0].name\nend",
 		"first_product_name()",
-		"def locked_product_count(): Integer fails DbError\n\treturn Database.transaction() do |tx|\n\t\tproducts := Product.using(tx)\n\t\tlocked := products.lock().all()\n\t\tlocked.size()\n\tend\nend",
-		"locked_product_count()",
-		"def nested_product_count(): Integer fails DbError\n\treturn Database.transaction() do |tx|\n\t\tnested_result := tx.transaction() do |nested|\n\t\t\tproducts := Product.using(nested)\n\t\t\tloaded := products.all()\n\t\t\tloaded.size()\n\t\tend\n\t\tnested_result\n\tend\nend",
-		"nested_product_count()",
-		"def scoped_subquery_count(): Integer fails DbError\n\treturn Database.transaction() do |tx|\n\t\tcategory_ids := Category.using(tx).select(:id)\n\t\tcount := Product.using(tx).where(category_id: category_ids).count()\n\t\tcount\n\tend\nend",
-		"scoped_subquery_count()",
+		"def locked_product_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tproducts := Product.using(tx)\n\t\tlocked := products.lock().all()\n\t\tlocked.size()\n\tend\nend",
+		"locked_product_count() catch |_error|\n\t0\nend",
+		"def nested_product_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tnested_result := try tx.transaction() do |nested|\n\t\t\tproducts := Product.using(nested)\n\t\t\tloaded := products.all()\n\t\t\tloaded.size()\n\t\tend\n\t\tnested_result\n\tend\nend",
+		"nested_product_count() catch |_error|\n\t0\nend",
+		"def scoped_subquery_count(): DbResult<Integer>\n\treturn Database.transaction() do |tx|\n\t\tcategory_ids := Category.using(tx).select(:id)\n\t\tcount := Product.using(tx).where(category_id: category_ids).count()\n\t\tcount\n\tend\nend",
+		"scoped_subquery_count() catch |_error|\n\t0\nend",
 		"attempt Product.lock().all()",
 		":quit",
 	}, "\n") + "\n"

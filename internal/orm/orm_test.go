@@ -44,6 +44,18 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	database, exists := catalog.Type("Database")
+	if !exists {
+		t.Fatal("Database declaration was not generated")
+	}
+	transaction := database.ClassMembers["transaction"]
+	if transaction.Return.String() != "DbResult<T>" || transaction.Fails.Kind != "" || transaction.Block == nil || transaction.Block.Return.String() != "T" || transaction.Block.ResultBoundary.String() != "DbError" || !transaction.Block.Structured {
+		t.Fatalf("unexpected transaction declaration: %#v", transaction)
+	}
+	transactionType, exists := catalog.Type("Transaction")
+	if !exists || transactionType.InstanceMembers["transaction"].Return.String() != "DbResult<T>" || transactionType.InstanceMembers["transaction"].Block.ResultBoundary.String() != "DbError" {
+		t.Fatalf("unexpected nested transaction declaration: %#v", transactionType)
+	}
 	product, exists := catalog.Type("Product")
 	if !exists {
 		t.Fatal("Product declaration was not generated")

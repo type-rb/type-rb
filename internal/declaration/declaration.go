@@ -33,10 +33,15 @@ type Signature struct {
 
 type Block struct {
 	Parameters []types.Type
-	// Return makes the block a value-producing control-flow boundary. The
-	// final expression must be assignable to this type, and return or Result
-	// propagation exits the block rather than the enclosing method.
+	// Return makes the block value-producing. The final expression must be
+	// assignable to this type.
 	Return types.Type
+	// ResultBoundary makes prefix try return Result<Return, ResultBoundary>
+	// from this block rather than from the enclosing callable. It is the error
+	// payload type, not an additional authored block parameter. Authored return
+	// is rejected until lexical transfer and resource cleanup share one portable
+	// contract; use try to abort this boundary with Err.
+	ResultBoundary types.Type
 	// Structured keeps the block in typed IR instead of lowering it to a
 	// backend callback. Structured blocks may be assigned or returned while
 	// preserving return, break, and next in their lexical owner.

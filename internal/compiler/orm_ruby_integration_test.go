@@ -30,7 +30,7 @@ func TestPortableORMCompilesRubyRuntimeAndTypedIntrinsics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	source := []byte(`import { Database, DbError, Model, belongs_to, has_many } from trb/orm
+	source := []byte(`import { Database, DbError, DbResult, Model, belongs_to, has_many } from trb/orm
 
 class Category < Model
 	has_many(Product)
@@ -60,7 +60,7 @@ def mutate_products(): Integer fails DbError
 	return updated + deleted
 end
 
-def transaction_count(): Integer fails DbError
+def transaction_count(): DbResult<Integer>
 	return Database.transaction() do |tx|
 		Product.using(tx).lock().count()
 	end
@@ -76,7 +76,7 @@ def main()
 	puts(attempt query_products())
 	puts(attempt write_product())
 	puts(attempt mutate_products())
-	puts(attempt transaction_count())
+	puts(transaction_count())
 	puts(attempt batch_count())
 end
 `)

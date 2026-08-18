@@ -323,7 +323,7 @@ func TestPortableORMCompilesExplicitTransactionScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	source := []byte(`import { Database, DbError, Model, Transaction } from trb/orm
+	source := []byte(`import { Database, DbError, DbResult, Model, Transaction } from trb/orm
 
 class Product < Model
 end
@@ -333,7 +333,7 @@ def persist_product(transaction: Transaction, name: String): Integer fails DbErr
 	return product.id
 end
 
-def create_product(): Integer fails DbError
+def create_product(): DbResult<Integer>
 	return Database.transaction() do |tx|
 		products := Product.using(tx)
 		product := products.create(name: "Created")
@@ -344,9 +344,9 @@ def create_product(): Integer fails DbError
 	end
 end
 
-def create_nested_product(): Integer fails DbError
+def create_nested_product(): DbResult<Integer>
 	return Database.transaction() do |tx|
-		nested_result := tx.transaction() do |nested|
+		nested_result := try tx.transaction() do |nested|
 			products := Product.using(nested)
 			product := products.create(name: "Nested")
 			product.id
@@ -355,19 +355,18 @@ def create_nested_product(): Integer fails DbError
 	end
 end
 
-def create_and_ignore_product() fails DbError
-	_result := Database.transaction() do |tx|
+def create_and_ignore_product(): DbResult<Integer>
+	return Database.transaction() do |tx|
 		products := Product.using(tx)
 		products.create(name: "Ignored result")
 		0
 	end
-	return
 end
 
 def main()
-	puts(attempt create_product())
-	puts(attempt create_nested_product())
-	puts(attempt create_and_ignore_product())
+	puts(create_product())
+	puts(create_nested_product())
+	puts(create_and_ignore_product())
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -390,12 +389,12 @@ end
 		}
 	}
 	for _, expected := range []string{
-		"func CreateProduct(__trbScope trbcontext.Context) __trb_result.Result[int, orm.DbError]", "orm.TrbOrmBeginTransaction(__trbScope)",
+		"func CreateProduct(__trbScope trbcontext.Context) orm.DbResult[int]", "orm.TrbOrmBeginTransaction(__trbScope)",
 		"TrbOrmProductUsing(tx)", "TrbOrmProductCreateScoped(products", "defer func()",
 		"PersistProduct(__trbScope, tx, \"Created by helper\")",
 		"TrbOrmProductLock(TrbOrmProductExecutionScope(TrbOrmProductQueryWhere(products", "trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)",
 		"orm.TrbOrmBeginNestedTransaction(tx)", "TrbOrmProductUsing(nested)",
-		".Rollback()", ".Commit()", "orm.DbResultErrTag", "_ = __trb_unused_5f726573756c74",
+		".Rollback()", ".Commit()", "orm.DbResultErrTag",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated transaction is missing %q:\n%s", expected, output)

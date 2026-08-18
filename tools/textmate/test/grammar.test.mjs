@@ -124,3 +124,28 @@ test("keeps ambiguous and multiline constructs bounded", async () => {
   assertNotInScope(tokens, "after", "string.");
   assert.equal(ruleStack.depth, 1, "ambiguous fixture left an open TextMate rule");
 });
+
+test("scopes Result propagation and recovery keywords", () => {
+  const { tokens, ruleStack } = tokenize(`value := try load()
+fallback := load() catch |error|
+\treturn error.message
+end`);
+
+  assertScope(tokens, "try", "keyword.control.trb");
+  assertScope(tokens, "catch", "keyword.control.trb");
+  assert.equal(ruleStack.depth, 1, "Result control-flow fixture left an open TextMate rule");
+});
+
+test("does not highlight callable keyword prefixes as control flow", () => {
+  const { tokens, ruleStack } = tokenize(`def catch?(): Boolean
+\treturn true
+end
+
+def try!()
+\treturn
+end`);
+
+  assertNotInScope(tokens, "catch?", "keyword.control");
+  assertNotInScope(tokens, "try!", "keyword.control");
+  assert.equal(ruleStack.depth, 1, "callable suffix fixture left an open TextMate rule");
+});

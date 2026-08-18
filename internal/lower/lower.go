@@ -219,11 +219,108 @@ func contains(values []string, target string) bool {
 func (l *lowerer) statements(nodes []ast.Statement) []ir.Statement {
 	result := make([]ir.Statement, 0, len(nodes))
 	for _, node := range nodes {
+		if lowered, ok := l.structuredResultStatement(node); ok {
+			result = append(result, lowered...)
+			continue
+		}
 		if lowered := l.statement(node); lowered != nil {
 			result = append(result, lowered)
 		}
 	}
 	return result
+}
+
+// structuredResultStatement preserves a value-producing structured block when
+// its raw Result is consumed immediately by try or catch. Structured blocks are
+// statement IR because backends must control the resource lifetime, so the raw
+// Result is first assigned to a compiler-owned temporary and the ordinary
+// Result lowering consumes that temporary in the authored statement.
+func (l *lowerer) structuredResultStatement(node ast.Statement) ([]ir.Statement, bool) {
+	var value ast.Expression
+	switch n := node.(type) {
+	case *ast.VariableStatement:
+		value = n.Value
+	case *ast.ReturnStatement:
+		value = n.Value
+	default:
+		return nil, false
+	}
+
+	prefix, loweredValue, ok := l.structuredResultValue(value)
+	if !ok {
+		return nil, false
+	}
+
+	base := func(b ast.Base) ir.Base { return ir.Base{Span: b.SourceSpan, TrailingComment: b.TrailingComment} }
+	var statement ir.Statement
+	switch n := node.(type) {
+	case *ast.VariableStatement:
+		statement = &ir.Variable{
+			Base:     base(n.Base),
+			Name:     n.Name,
+			Type:     l.checked.Variables[n],
+			Value:    loweredValue,
+			Mutable:  n.Mutable,
+			Constant: n.Constant,
+			Owner:    l.checked.ConstantOwners[n],
+		}
+	case *ast.ReturnStatement:
+		if boundary, exists := l.currentEffectBoundary(); exists {
+			loweredValue = l.resultSuccess(n.Span(), boundary, loweredValue)
+		}
+		statement = &ir.Return{Base: base(n.Base), Value: loweredValue}
+	}
+	return append(prefix, statement), true
+}
+
+func (l *lowerer) structuredResultValue(expression ast.Expression) ([]ir.Statement, ir.Expression, bool) {
+	if expression == nil {
+		return nil, nil, false
+	}
+
+	var operand ast.Expression
+	switch node := expression.(type) {
+	case *ast.TryExpression:
+		operand = node.Value
+	case *ast.CatchExpression:
+		operand = node.Value
+	default:
+		return nil, nil, false
+	}
+	call, ok := operand.(*ast.CallExpression)
+	if !ok {
+		return nil, nil, false
+	}
+	semantic, ok := l.checked.StructuredBlocks[call]
+	if !ok || semantic.ResultBoundary.Kind == "" || semantic.ResultBoundary.Kind == types.Never || semantic.ResultType.Kind == "" {
+		return nil, nil, false
+	}
+	block, ok := l.structuredBlock(operand)
+	if !ok {
+		return nil, nil, false
+	}
+
+	l.temporary++
+	name := "__trbStructuredResult" + strconv.Itoa(l.temporary)
+	resultType := semantic.ResultType
+	temporary := &ir.Temporary{Base: ir.Base{Span: expression.Span()}, Name: name, Type: resultType}
+	identifier := &ir.Identifier{
+		ExprBase:  ir.NewExprBase(expression.Span(), resultType),
+		Name:      name,
+		Lexical:   true,
+		Generated: true,
+	}
+	block.Result = &ir.StructuredBlockResult{Target: identifier, Type: resultType}
+
+	var lowered ir.Expression
+	switch node := expression.(type) {
+	case *ast.TryExpression:
+		lowered = l.resultTryValue(node, identifier)
+	case *ast.CatchExpression:
+		lowered = l.resultCatchValue(node, identifier)
+	}
+	lowered = l.expressionConversions(expression, lowered)
+	return []ir.Statement{temporary, block}, lowered, true
 }
 
 func (l *lowerer) statement(node ast.Statement) ir.Statement {
@@ -567,8 +664,20 @@ func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBloc
 	fails := l.checked.ExpressionEffects[call]
 	success := l.checked.Expressions[call]
 	callType := success
-	if fails.Kind != "" && fails.Kind != types.Never {
+	boundaryType := callType
+	resultBoundary := semantic.ResultBoundary.Kind != "" && semantic.ResultBoundary.Kind != types.Never && semantic.ResultType.Kind != ""
+	if resultBoundary {
+		// Result-boundary blocks expose their raw Result as the call value while
+		// using the authored block return as the callback success type. Reusing
+		// the structured effect shape keeps rollback-aware backends portable,
+		// but CaptureEffect means the outer call remains an ordinary Result.
+		fails = semantic.ResultBoundary
+		success = semantic.Return
+		boundaryType = semantic.ResultType
+		captureEffect = true
+	} else if fails.Kind != "" && fails.Kind != types.Never {
 		callType = resultType(effectSuccessType(success), fails)
+		boundaryType = callType
 	}
 	loweredCall := &ir.Call{
 		ExprBase: ir.NewExprBase(call.Span(), callType),
@@ -594,7 +703,7 @@ func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBloc
 		Fails:           fails,
 		EffectSuccess:   success,
 		CaptureEffect:   captureEffect,
-		UnhandledEffect: l.checked.UnhandledEffects[call],
+		UnhandledEffect: !resultBoundary && l.checked.UnhandledEffects[call],
 	}
 	if fails.Kind != "" && fails.Kind != types.Never {
 		if !captureEffect {
@@ -602,7 +711,7 @@ func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBloc
 				result.PropagateSuccess = outer.success
 			}
 		}
-		boundary := effectBoundary{success: effectSuccessType(success), fails: fails, result: callType}
+		boundary := effectBoundary{success: effectSuccessType(success), fails: fails, result: boundaryType}
 		l.effectBoundaries = append(l.effectBoundaries, boundary)
 		result.Body = l.statements(call.Block.Body[:resultIndex])
 		result.Value = l.expression(semantic.Result)
@@ -627,7 +736,10 @@ func (l *lowerer) expression(node ast.Expression) ir.Expression {
 	if node == nil {
 		return nil
 	}
-	result := l.expressionWithoutConversion(node)
+	return l.expressionConversions(node, l.expressionWithoutConversion(node))
+}
+
+func (l *lowerer) expressionConversions(node ast.Expression, result ir.Expression) ir.Expression {
 	if source, ok := l.checked.NullableUnwraps[node]; ok && result != nil {
 		if value := expressionWithType(result, source); value != nil {
 			result = &ir.Conversion{
@@ -738,6 +850,10 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		return &ir.Binary{ExprBase: base, Left: l.expression(n.Left), Operator: n.Operator, Right: l.expression(n.Right)}
 	case *ast.RangeExpression:
 		return &ir.Range{ExprBase: base, Start: l.expression(n.Start), End: l.expression(n.End), Exclusive: n.Exclusive}
+	case *ast.TryExpression:
+		return l.resultTry(n)
+	case *ast.CatchExpression:
+		return l.resultCatch(n)
 	case *ast.AttemptExpression:
 		semantic, ok := l.checked.Attempts[n]
 		if !ok {
@@ -768,6 +884,8 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		return attempt
 	case *ast.LambdaExpression:
 		result := &ir.Lambda{ExprBase: base, SuccessType: types.FromName("Void"), ReturnType: types.FromName("Void"), Fails: types.Type{Kind: types.Never, Name: "Never"}}
+		previousEffectBoundaries := l.effectBoundaries
+		l.effectBoundaries = nil
 		if !n.ReturnType.Empty() {
 			result.SuccessType = lowerType(n.ReturnType)
 			result.ReturnType = result.SuccessType
@@ -791,6 +909,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		} else {
 			result.Body = l.statements(n.Body)
 		}
+		l.effectBoundaries = previousEffectBoundaries
 		return result
 	case *ast.IterationExpression:
 		successType := typ
@@ -1210,7 +1329,7 @@ func (l *lowerer) effectPropagation(span token.Span, value ir.Expression, succes
 
 	valueIdentifier := &ir.Identifier{ExprBase: ir.NewExprBase(span, effectSuccessType(success)), Name: valueName, Lexical: true, Generated: true}
 	errorIdentifier := &ir.Identifier{ExprBase: ir.NewExprBase(span, failure), Name: errorName, Lexical: true, Generated: true}
-	returnFailure := l.resultFailure(span, boundary, errorIdentifier)
+	returnFailure := l.resultFailure(span, boundary, assignableConversion(span, errorIdentifier, boundary.fails))
 
 	return &ir.Case{
 		ExprBase: ir.NewExprBase(span, effectSuccessType(success)),
@@ -1232,6 +1351,132 @@ func (l *lowerer) effectPropagation(span token.Span, value ir.Expression, succes
 				PayloadEnum: true,
 				Body:        []ir.Statement{&ir.Return{Value: returnFailure}},
 				Diverges:    true,
+			},
+		},
+	}
+}
+
+func assignableConversion(span token.Span, value ir.Expression, target types.Type) ir.Expression {
+	source := value.ExprType()
+	if types.Equivalent(target, source) {
+		return value
+	}
+	conversionType := target
+	kind := ir.ConversionKind("")
+	switch {
+	case target.Kind == types.Iterable && source.Kind == types.Range:
+		kind = ir.RangeToIterableConversion
+	case target.Kind == types.Function && source.Kind == types.Function &&
+		types.FunctionFailure(target).Kind != types.Never && types.FunctionFailure(source).Kind == types.Never:
+		kind = ir.PureFunctionToFallibleConversion
+	case target.Nullable && !source.Nullable && source.Kind != types.Nil:
+		kind = ir.NonNullableToNullableConversion
+	case target.Kind == types.Union && source.Kind == types.Union &&
+		unionContainsTypeKind(target, types.Float) && unionContainsTypeKind(source, types.Int):
+		kind = ir.UnionIntegerToFloatConversion
+	case target.Kind == types.Union && !target.Nullable && !source.Nullable &&
+		(source.Kind == types.Int || source.Kind == types.IntLiteral) && unionContainsNonNullableTypeKind(target, types.Float):
+		kind = ir.IntegerToFloatConversion
+		conversionType = types.FromName("Float")
+	case target.Kind == types.Float && (source.Kind == types.Int || source.Kind == types.IntLiteral):
+		kind = ir.IntegerToFloatConversion
+	}
+	if kind == "" {
+		return value
+	}
+	return &ir.Conversion{ExprBase: ir.NewExprBase(span, conversionType), Kind: kind, Value: value}
+}
+
+func unionContainsTypeKind(typ types.Type, kind types.Kind) bool {
+	for _, alternative := range typ.Args {
+		if alternative.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func unionContainsNonNullableTypeKind(typ types.Type, kind types.Kind) bool {
+	for _, alternative := range typ.Args {
+		if alternative.Kind == kind && !alternative.Nullable {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *lowerer) resultTry(node *ast.TryExpression) ir.Expression {
+	_, ok := l.checked.ResultTries[node]
+	if !ok {
+		return l.expression(node.Value)
+	}
+	return l.resultTryValue(node, l.expression(node.Value))
+}
+
+func (l *lowerer) resultTryValue(node *ast.TryExpression, value ir.Expression) ir.Expression {
+	semantic, ok := l.checked.ResultTries[node]
+	if !ok {
+		return value
+	}
+	boundary := effectBoundary{
+		success: semantic.ReturnSuccessType,
+		fails:   semantic.ReturnErrorType,
+		result:  semantic.ReturnType,
+	}
+	return l.effectPropagation(node.Span(), value, semantic.SuccessType, semantic.ErrorType, boundary)
+}
+
+func (l *lowerer) resultCatch(node *ast.CatchExpression) ir.Expression {
+	_, ok := l.checked.ResultCatches[node]
+	if !ok {
+		return l.expression(node.Value)
+	}
+	return l.resultCatchValue(node, l.expression(node.Value))
+}
+
+func (l *lowerer) resultCatchValue(node *ast.CatchExpression, value ir.Expression) ir.Expression {
+	semantic, ok := l.checked.ResultCatches[node]
+	if !ok {
+		return value
+	}
+	result := semantic.ResultType
+	success := semantic.SuccessType
+	failure := semantic.ErrorType
+
+	l.temporary++
+	valueName := "__trbCatchValue" + strconv.Itoa(l.temporary)
+	valueIdentifier := &ir.Identifier{
+		ExprBase:  ir.NewExprBase(node.Span(), success),
+		Name:      valueName,
+		Lexical:   true,
+		Generated: true,
+	}
+	handlerBody, handlerResult, _ := l.controlFlowBranch(node.Body, true)
+	handlerDiverges := semantic.HandlerDiverges
+	exprBase := ir.NewExprBase(node.Span(), success)
+	exprBase.TrailingComment = node.TrailingComment
+
+	return &ir.Case{
+		ExprBase: exprBase,
+		Value:    value,
+		Branches: []ir.CaseBranch{
+			{
+				Value:       l.resultPattern(node.Span(), result, "Ok"),
+				EnumName:    "Result",
+				Member:      "Ok",
+				Bindings:    []ir.CaseBinding{{Name: valueName, Field: "value", Type: success, Generated: true}},
+				PayloadEnum: true,
+				Result:      valueIdentifier,
+			},
+			{
+				Value:       l.resultPattern(node.Span(), result, "Err"),
+				EnumName:    "Result",
+				Member:      "Err",
+				Bindings:    []ir.CaseBinding{{Name: node.Binding.Name, Field: "error", Type: failure}},
+				PayloadEnum: true,
+				Body:        handlerBody,
+				Result:      handlerResult,
+				Diverges:    handlerDiverges,
 			},
 		},
 	}

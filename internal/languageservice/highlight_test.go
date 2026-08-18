@@ -48,6 +48,16 @@ func TestHighlightClassifiesEffectKeywords(t *testing.T) {
 	}
 }
 
+func TestHighlightClassifiesResultControlFlowKeywords(t *testing.T) {
+	source := "value := try load()\nreturn load() catch |error|\n\terror.message\nend"
+	spans := languageservice.Highlight(languageservice.HighlightRequest{Source: source, Mode: "go"})
+	for _, keyword := range []string{"try", "catch"} {
+		if !hasHighlight(source, spans, keyword, languageservice.HighlightKeyword) {
+			t.Errorf("missing keyword highlight for %q in %#v", keyword, spans)
+		}
+	}
+}
+
 func TestHighlightUsesByteOffsetsForUnicodeSource(t *testing.T) {
 	source := `puts("こんにちは")`
 	spans := languageservice.Highlight(languageservice.HighlightRequest{Source: source, Mode: "go"})

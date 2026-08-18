@@ -117,6 +117,9 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	}
 	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
+	if catch := p.tryCatchBlockStatement(line, next, base); catch != nil {
+		return catch
+	}
 	if lambda := p.tryLambdaExpressionStatement(line, next, base); lambda != nil {
 		return lambda
 	}
@@ -158,6 +161,25 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	p.pos = next
 	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
+}
+
+func (p *Parser) tryCatchBlockStatement(line []token.Token, next int, base ast.Base) ast.Statement {
+	catchAt := topLevelIndex(line, "catch")
+	if catchAt <= 0 {
+		return nil
+	}
+	prefix := line[:catchAt]
+	wrapper, valueTokens := expressionWrapper(prefix)
+	value, ok := parseExpressionTokens(valueTokens)
+	if !ok {
+		return nil
+	}
+
+	header := p.parseCatchHeader(line[catchAt], line[catchAt+1:], base.TrailingComment)
+	p.pos = next
+	value = p.parseCatchBody(value, header)
+	base.SourceSpan.End = value.Span().End
+	return p.wrapExpression(prefix, wrapper, base, value)
 }
 
 func (p *Parser) tryLambdaExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {
@@ -270,41 +292,12 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 		return nil
 	}
 	prefix := line[:blockAt]
-	header := prefix
-	wrapper := "expression"
-	if prefix[0].Lexeme == "return" {
-		wrapper = "return"
-		header = prefix[1:]
-	} else if assign := topLevelIndex(prefix, ":="); assign > 0 {
-		wrapper = "variable"
-		header = prefix[assign+1:]
-	} else if assign := topLevelIndex(prefix, "="); assign > 0 {
-		wrapper = "assignment"
-		header = prefix[assign+1:]
-	}
+	wrapper, header := expressionWrapper(prefix)
 	expression, ok := parseExpressionTokens(header)
 	if !ok {
 		return nil
 	}
-	callExpression := expression
-	attempt, attempted := expression.(*ast.AttemptExpression)
-	if attempted {
-		callExpression = attempt.Value
-	}
-	call, ok := callExpression.(*ast.CallExpression)
-	syntheticCall := false
-	if !ok {
-		if !attempted {
-			return nil
-		}
-		switch callExpression.(type) {
-		case *ast.Identifier, *ast.MemberExpression:
-			call = &ast.CallExpression{Base: ast.Base{SourceSpan: callExpression.Span()}, Callee: callExpression}
-			syntheticCall = true
-			attempt.Value = call
-			ok = true
-		}
-	}
+	call, syntheticCall, ok := callBlockTarget(expression)
 	if !ok {
 		return nil
 	}
@@ -323,22 +316,23 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 		p.pos = next
 		block := &ast.BlockExpression{Base: ast.Base{SourceSpan: spanOf(line[blockAt:])}, Parameters: parameters}
 		block.Body = p.parseStatements(map[string]bool{"end": true})
-		_, closeSpan := p.consumeTerminator("end")
+		closeSpan, catchHeader := p.consumeBlockTerminator()
 		block.SourceSpan.End = closeSpan.End
 		call.SourceSpan.End = closeSpan.End
 		call.Block = block
-		if attempt, attempted := expression.(*ast.AttemptExpression); attempted {
-			attempt.SourceSpan.End = closeSpan.End
+		extendWrapperSpan(expression, closeSpan.End)
+		if catchHeader != nil {
+			expression = p.parseCatchBody(expression, *catchHeader)
 		}
-		base.SourceSpan.End = closeSpan.End
-		return p.wrapCallBlock(prefix, wrapper, base, expression)
+		base.SourceSpan.End = expression.Span().End
+		return p.wrapExpression(prefix, wrapper, base, expression)
 	}
 
 	close := matchingIndex(line, blockAt, "{", "}")
 	if close < 0 {
 		p.errorAt(line[blockAt].Span, "unterminated call block; expected }")
 		p.pos = next
-		return p.wrapCallBlock(prefix, wrapper, base, expression)
+		return p.wrapExpression(prefix, wrapper, base, expression)
 	}
 	firstPipe, secondPipe := -1, -1
 	for index := blockAt + 1; index < close; index++ {
@@ -379,15 +373,13 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 	}
 	call.SourceSpan.End = line[close].Span.End
 	call.Block = block
-	if attempt, attempted := expression.(*ast.AttemptExpression); attempted {
-		attempt.SourceSpan.End = line[close].Span.End
-	}
+	extendWrapperSpan(expression, line[close].Span.End)
 	base.SourceSpan.End = line[close].Span.End
 	p.pos = next
-	return p.wrapCallBlock(prefix, wrapper, base, expression)
+	return p.wrapExpression(prefix, wrapper, base, expression)
 }
 
-func (p *Parser) wrapCallBlock(prefix []token.Token, wrapper string, base ast.Base, expression ast.Expression) ast.Statement {
+func (p *Parser) wrapExpression(prefix []token.Token, wrapper string, base ast.Base, expression ast.Expression) ast.Statement {
 	switch wrapper {
 	case "return":
 		return &ast.ReturnStatement{Base: base, Value: expression}
@@ -405,6 +397,128 @@ func (p *Parser) wrapCallBlock(prefix []token.Token, wrapper string, base ast.Ba
 		}
 	}
 	return &ast.ExpressionStatement{Base: base, Expression: expression}
+}
+
+func expressionWrapper(prefix []token.Token) (string, []token.Token) {
+	if len(prefix) == 0 {
+		return "expression", nil
+	}
+	if prefix[0].Lexeme == "return" {
+		return "return", prefix[1:]
+	}
+	if assign := topLevelIndex(prefix, ":="); assign > 0 {
+		return "variable", prefix[assign+1:]
+	}
+	if assign := topLevelIndex(prefix, "="); assign > 0 {
+		return "assignment", prefix[assign+1:]
+	}
+	return "expression", prefix
+}
+
+func callBlockTarget(expression ast.Expression) (*ast.CallExpression, bool, bool) {
+	current := expression
+	var replace func(ast.Expression)
+	wrapped := false
+	for {
+		switch node := current.(type) {
+		case *ast.AttemptExpression:
+			wrapped = true
+			replace = func(value ast.Expression) { node.Value = value }
+			current = node.Value
+		case *ast.TryExpression:
+			wrapped = true
+			replace = func(value ast.Expression) { node.Value = value }
+			current = node.Value
+		default:
+			goto unwrapped
+		}
+	}
+
+unwrapped:
+	if call, ok := current.(*ast.CallExpression); ok {
+		return call, false, true
+	}
+	if !wrapped {
+		return nil, false, false
+	}
+	switch current.(type) {
+	case *ast.Identifier, *ast.MemberExpression:
+		call := &ast.CallExpression{Base: ast.Base{SourceSpan: current.Span()}, Callee: current}
+		replace(call)
+		return call, true, true
+	default:
+		return nil, false, false
+	}
+}
+
+func extendWrapperSpan(expression ast.Expression, end token.Position) {
+	for {
+		switch node := expression.(type) {
+		case *ast.AttemptExpression:
+			node.SourceSpan.End = end
+			expression = node.Value
+		case *ast.TryExpression:
+			node.SourceSpan.End = end
+			expression = node.Value
+		default:
+			return
+		}
+	}
+}
+
+type catchHeader struct {
+	ast.Base
+	Binding ast.PatternBinding
+}
+
+func (p *Parser) parseCatchHeader(keyword token.Token, tokens []token.Token, comment string) catchHeader {
+	end := keyword.Span.End
+	if len(tokens) > 0 {
+		end = tokens[len(tokens)-1].Span.End
+	}
+	header := catchHeader{Base: ast.Base{SourceSpan: token.Span{Start: keyword.Span.Start, End: end}, TrailingComment: comment}}
+	if len(tokens) == 3 && tokens[0].Lexeme == "|" && tokens[1].Kind == token.Identifier && tokens[2].Lexeme == "|" {
+		header.Binding = ast.PatternBinding{Base: ast.Base{SourceSpan: tokens[1].Span}, Name: tokens[1].Lexeme}
+		return header
+	}
+
+	span := header.SourceSpan
+	p.errorAt(span, "catch binding must be written as |error|")
+	for _, item := range tokens {
+		if item.Kind == token.Identifier {
+			header.Binding = ast.PatternBinding{Base: ast.Base{SourceSpan: item.Span}, Name: item.Lexeme}
+			break
+		}
+	}
+	return header
+}
+
+func (p *Parser) parseCatchBody(value ast.Expression, header catchHeader) ast.Expression {
+	node := &ast.CatchExpression{
+		Base:    ast.Base{SourceSpan: token.Span{Start: value.Span().Start, End: header.SourceSpan.End}, TrailingComment: header.TrailingComment},
+		Value:   value,
+		Binding: header.Binding,
+	}
+	node.Body = p.parseStatements(map[string]bool{"end": true})
+	_, closeSpan := p.consumeTerminator("end")
+	node.SourceSpan.End = closeSpan.End
+	return node
+}
+
+func (p *Parser) consumeBlockTerminator() (token.Span, *catchHeader) {
+	if p.atEOF() || p.current().Lexeme != "end" {
+		_, span := p.consumeTerminator("end")
+		return span, nil
+	}
+	start, end, next, comment := p.logicalLine(p.pos)
+	line := p.codeTokens(start, end)
+	if len(line) >= 2 && line[1].Lexeme == "catch" {
+		header := p.parseCatchHeader(line[1], line[2:], comment)
+		p.pos = next
+		return line[0].Span, &header
+	}
+	_, span := p.consumeTerminator("end")
+	return span, nil
 }
 
 func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {

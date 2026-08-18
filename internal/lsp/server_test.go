@@ -1649,7 +1649,7 @@ func TestServerFindsReferencesAndRenamesAcrossProjectFiles(t *testing.T) {
 }
 
 func TestRenameIdentifierValidationRejectsKeywordsAndPunctuation(t *testing.T) {
-	for _, name := range []string{"", "class", "user-name", "@name", "two words"} {
+	for _, name := range []string{"", "class", "try", "catch", "user-name", "@name", "two words"} {
 		if validRenameIdentifier(name) {
 			t.Fatalf("validRenameIdentifier(%q)=true", name)
 		}

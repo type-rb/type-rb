@@ -41,6 +41,8 @@ type Result struct {
 	EnumCalls           map[*ast.CallExpression]EnumCall
 	TypeAliases         map[*ast.TypeAliasStatement]TypeAlias
 	Attempts            map[*ast.AttemptExpression]Attempt
+	ResultTries         map[*ast.TryExpression]ResultTry
+	ResultCatches       map[*ast.CatchExpression]ResultCatch
 	ExpressionEffects   map[ast.Expression]types.Type
 	UnhandledEffects    map[ast.Expression]bool
 	StructuredBlocks    map[*ast.CallExpression]StructuredBlock
@@ -86,15 +88,37 @@ type Attempt struct {
 	Result      ast.Expression
 }
 
+// ResultTry describes the two Result variants used by a prefix try expression
+// and the compatible Result boundary that receives its Err payload.
+type ResultTry struct {
+	SuccessType       types.Type
+	ErrorType         types.Type
+	ReturnSuccessType types.Type
+	ReturnErrorType   types.Type
+	ReturnType        types.Type
+}
+
+// ResultCatch describes the Result payload and the checked recovery branch of
+// a catch expression. A nil HandlerResult denotes a diverging handler.
+type ResultCatch struct {
+	SuccessType     types.Type
+	ErrorType       types.Type
+	ResultType      types.Type
+	HandlerResult   ast.Expression
+	HandlerDiverges bool
+}
+
 type NativeEffectBridge struct {
 	Kind string
 	Type types.Type
 }
 
 type StructuredBlock struct {
-	Parameters []types.Type
-	Return     types.Type
-	Result     ast.Expression
+	Parameters     []types.Type
+	Return         types.Type
+	Result         ast.Expression
+	ResultBoundary types.Type
+	ResultType     types.Type
 }
 
 type CodecSchema struct {
@@ -323,41 +347,57 @@ type typeDeclaration struct {
 }
 
 type Checker struct {
-	mode                  string
-	result                Result
-	diags                 []diagnostic.Diagnostic
-	classes               map[string]*classInfo
-	records               map[string]*recordInfo
-	enums                 map[string]*enumInfo
-	aliases               map[string]*aliasInfo
-	interfaces            map[string]*ast.InterfaceStatement
-	functions             map[string]*ast.MethodStatement
-	current               *classInfo
-	currentEnum           *enumInfo
-	classMethod           bool
-	initializing          int
-	loopDepth             int
-	moduleDepth           int
-	interfaceDepth        int
-	returns               []types.Type
-	resolution            resolver.Result
-	external              map[ast.Expression]declaration.Member
-	declaredTypes         map[string]typeDeclaration
-	enumCallee            int
-	enumPattern           int
-	enumPatternType       types.Type
-	usedImports           map[*ast.ImportStatement]map[string]bool
-	allowUnusedImports    bool
-	allowUnhandledEffects bool
-	aliasCycles           map[string]bool
-	declaredEffects       []types.Type
-	effectCaptures        []*effectCapture
-	declarationReferences int
-	declarationCalls      map[*ast.CallExpression]string
+	mode                        string
+	result                      Result
+	diags                       []diagnostic.Diagnostic
+	classes                     map[string]*classInfo
+	records                     map[string]*recordInfo
+	enums                       map[string]*enumInfo
+	aliases                     map[string]*aliasInfo
+	interfaces                  map[string]*ast.InterfaceStatement
+	functions                   map[string]*ast.MethodStatement
+	current                     *classInfo
+	currentEnum                 *enumInfo
+	classMethod                 bool
+	initializing                int
+	loopDepth                   int
+	valueTransformDepth         int
+	resultBoundaryBlockDepth    int
+	moduleDepth                 int
+	interfaceDepth              int
+	returns                     []types.Type
+	resolution                  resolver.Result
+	external                    map[ast.Expression]declaration.Member
+	declaredTypes               map[string]typeDeclaration
+	enumCallee                  int
+	enumPattern                 int
+	enumPatternType             types.Type
+	usedImports                 map[*ast.ImportStatement]map[string]bool
+	allowUnusedImports          bool
+	allowUnhandledEffects       bool
+	aliasCycles                 map[string]bool
+	declaredEffects             []types.Type
+	effectCaptures              []*effectCapture
+	resultBoundaries            []resultBoundary
+	directStructuredResultValue ast.Expression
+	directStructuredResultKind  string
+	declarationReferences       int
+	declarationCalls            map[*ast.CallExpression]string
 }
 
 type effectCapture struct {
 	effects []types.Type
+}
+
+// resultBoundary is the lexical destination for prefix try. A boundary entry
+// is pushed for every function-like scope, including scopes whose return type
+// is not Result, so propagation never leaks into an enclosing function.
+type resultBoundary struct {
+	success types.Type
+	failure types.Type
+	result  types.Type
+	valid   bool
+	tries   []*ast.TryExpression
 }
 
 type Options struct {
@@ -396,6 +436,8 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			EnumCalls:           map[*ast.CallExpression]EnumCall{},
 			TypeAliases:         map[*ast.TypeAliasStatement]TypeAlias{},
 			Attempts:            map[*ast.AttemptExpression]Attempt{},
+			ResultTries:         map[*ast.TryExpression]ResultTry{},
+			ResultCatches:       map[*ast.CatchExpression]ResultCatch{},
 			ExpressionEffects:   map[ast.Expression]types.Type{},
 			UnhandledEffects:    map[ast.Expression]bool{},
 			StructuredBlocks:    map[*ast.CallExpression]StructuredBlock{},
@@ -425,6 +467,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			c.requireRuntimeType(runtimeType)
 		}
 	}
+	c.validateReservedKeywords(program.Statements)
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ast.MethodStatement); ok {
 			c.functions[method.Name] = method
@@ -574,6 +617,11 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression, ty
 		c.validateExpressionTypeReferences(node.Start, typeParameters)
 		c.validateExpressionTypeReferences(node.End, typeParameters)
 	case *ast.AttemptExpression:
+		c.validateExpressionTypeReferences(node.Value, typeParameters)
+		c.validateTypeReferences(node.Body, typeParameters)
+	case *ast.TryExpression:
+		c.validateExpressionTypeReferences(node.Value, typeParameters)
+	case *ast.CatchExpression:
 		c.validateExpressionTypeReferences(node.Value, typeParameters)
 		c.validateTypeReferences(node.Body, typeParameters)
 	case *ast.LambdaExpression:
@@ -1065,7 +1113,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 		case *ast.MethodStatement:
 			c.checkMethod(n, sc)
 		case *ast.VariableStatement:
-			valueType := c.checkExpression(n.Value, sc)
+			valueType := c.checkDirectStructuredResultValue(n.Value, sc, "variable declaration")
 			c.checkStructuredBlockValue(n.Value)
 			variableType := valueType
 			if n.Name == "_" {
@@ -1119,8 +1167,13 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					delete(c.result.NullableUnwraps, identifier)
 				}
 			}
-			rightType := c.checkExpression(n.Value, sc)
+			rightType := c.checkDirectStructuredResultValue(n.Value, sc, "assignment")
 			c.checkStructuredBlockValue(n.Value)
+			if _, member, ok := c.structuredBlockCall(n.Value); ok && member.Block != nil && member.Block.Structured {
+				if _, identifier := n.Target.(*ast.Identifier); !identifier {
+					c.error(n.Target.Span(), "a structured block assignment target must be a variable name")
+				}
+			}
 			rightType = c.contextualizeCollectionLiteral(n.Value, leftType, rightType)
 			if identifier, ok := n.Target.(*ast.Identifier); ok && !strings.HasPrefix(identifier.Name, "@") {
 				if _, exists := sc.lookup(identifier.Name); !exists {
@@ -1165,9 +1218,12 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				}
 			}
 		case *ast.ReturnStatement:
+			if c.resultBoundaryBlockDepth > 0 {
+				c.error(n.Span(), "return is not supported inside Result-boundary structured blocks; use try to abort with Err or return after the block")
+			}
 			actual := types.Type{Kind: types.Void, Name: "Void"}
 			if n.Value != nil {
-				actual = c.checkExpression(n.Value, sc)
+				actual = c.checkDirectStructuredResultValue(n.Value, sc, "return")
 				c.checkStructuredBlockValue(n.Value)
 			}
 			if len(c.returns) == 0 {
@@ -3286,6 +3342,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		c.requireEffectRuntime(returnType, failureType)
 	}
 	c.returns = append(c.returns, returnType)
+	c.resultBoundaries = append(c.resultBoundaries, c.resultBoundaryFor(returnType))
 	c.declaredEffects = append(c.declaredEffects, failureType)
 	previousLoopDepth := c.loopDepth
 	c.loopDepth = 0
@@ -3301,6 +3358,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	}
 	c.loopDepth = previousLoopDepth
 	c.returns = c.returns[:len(c.returns)-1]
+	c.resultBoundaries = c.resultBoundaries[:len(c.resultBoundaries)-1]
 	c.declaredEffects = c.declaredEffects[:len(c.declaredEffects)-1]
 	c.classMethod = previousClassMethod
 }
@@ -4014,6 +4072,7 @@ func (c *Checker) specializeDeclarationMember(receiver types.Type, member declar
 		block := *member.Block
 		block.Parameters = instantiateDeclarationTypes(member.Block.Parameters, bindings)
 		block.Return = instantiateDeclarationType(member.Block.Return, bindings)
+		block.ResultBoundary = instantiateDeclarationType(member.Block.ResultBoundary, bindings)
 		result.Block = &block
 	}
 	return result
@@ -4138,15 +4197,26 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.requireEffectRuntime(returnType, failureType)
 		}
 		c.returns = append(c.returns, returnType)
+		c.resultBoundaries = append(c.resultBoundaries, c.resultBoundaryFor(returnType))
 		c.declaredEffects = append(c.declaredEffects, failureType)
+		previousEffectCaptures := c.effectCaptures
 		previousLoopDepth := c.loopDepth
+		previousValueTransformDepth := c.valueTransformDepth
+		previousResultBoundaryBlockDepth := c.resultBoundaryBlockDepth
 		c.loopDepth = 0
+		c.valueTransformDepth = 0
+		c.resultBoundaryBlockDepth = 0
+		c.effectCaptures = nil
 		c.checkStatements(n.Body, lambdaScope)
 		if returnType.Kind != types.Void && c.statementsFallThrough(n.Body) {
 			c.error(n.Span(), fmt.Sprintf("fn must return %s on every path", returnType))
 		}
 		c.loopDepth = previousLoopDepth
+		c.valueTransformDepth = previousValueTransformDepth
+		c.resultBoundaryBlockDepth = previousResultBoundaryBlockDepth
+		c.effectCaptures = previousEffectCaptures
 		c.returns = c.returns[:len(c.returns)-1]
+		c.resultBoundaries = c.resultBoundaries[:len(c.resultBoundaries)-1]
 		c.declaredEffects = c.declaredEffects[:len(c.declaredEffects)-1]
 		typ = types.FunctionWithEffect(parameterTypes, returnType, failureType)
 	case *ast.Identifier:
@@ -4321,6 +4391,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 	case *ast.AttemptExpression:
 		typ = c.checkAttempt(n, sc)
+	case *ast.TryExpression:
+		typ = c.checkResultTry(n, sc)
+	case *ast.CatchExpression:
+		typ = c.checkResultCatch(n, sc)
 	case *ast.IterationExpression:
 		predicate := n.Operation == "any?" || n.Operation == "all?" || n.Operation == "none?" || n.Operation == "find" || n.Operation == "find_index"
 		sortBy := n.Operation == "sort_by" || n.Operation == "sort_by_descending"
@@ -4431,8 +4505,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				blockScope.values[name] = declared
 			}
 			if transform {
+				c.valueTransformDepth++
+			}
+			if transform {
 				blockType := types.Type{Kind: types.Any, Name: "Any"}
 				var resultExpression ast.Expression
+				if transfer := statementsEscapingTransform(n.Block.Body, 0); transfer != nil {
+					c.error(transfer.Span(), fmt.Sprintf("%s is not supported inside value-producing collection transformations yet", controlTransferKeyword(transfer)))
+				}
 				if len(n.Block.Body) == 0 {
 					c.error(n.Block.Span(), fmt.Sprintf("%s block must end with a result expression", n.Operation))
 				} else {
@@ -4454,9 +4534,6 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					}
 				}
 				if resultExpression != nil {
-					if transfer := statementsReturn(n.Block.Body); transfer != nil {
-						c.error(transfer.Span(), "return is not supported inside value-producing collection transformations yet")
-					}
 					blockType = c.result.Expressions[resultExpression]
 				}
 				c.result.Expressions[n.Block] = blockType
@@ -4497,6 +4574,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.checkStatements(n.Block.Body, blockScope)
 				c.loopDepth--
 				c.result.Expressions[n.Block] = types.Type{Kind: types.Void, Name: "Void"}
+			}
+			if transform {
+				c.valueTransformDepth--
 			}
 		}
 		if !transform {
@@ -5165,6 +5245,156 @@ func (c *Checker) checkAttempt(node *ast.AttemptExpression, sc *scope) types.Typ
 	return resultType
 }
 
+func (c *Checker) checkResultTry(node *ast.TryExpression, sc *scope) types.Type {
+	resultType := c.checkExpression(node.Value, sc)
+	c.checkStructuredResultPlacement(node, node.Value, "try")
+	success, failure, expanded, ok := c.standardResultParts(resultType)
+	if !ok {
+		c.error(node.Value.Span(), fmt.Sprintf("try requires the standard Result<T, E>, got %s", resultType))
+		return invalidType()
+	}
+	if c.valueTransformDepth > 0 {
+		c.error(node.Span(), "try is not supported inside value-producing collection transformations; use each or handle the Result explicitly")
+	}
+	if len(c.resultBoundaries) == 0 {
+		c.error(node.Span(), "try is only valid inside a function or method that returns Result<T, E>")
+		return success
+	}
+	boundaryIndex := len(c.resultBoundaries) - 1
+	boundary := &c.resultBoundaries[boundaryIndex]
+	if !boundary.valid {
+		returnType := types.FromName("Void")
+		if len(c.returns) > 0 {
+			returnType = c.returns[len(c.returns)-1]
+		}
+		c.error(node.Span(), fmt.Sprintf("try requires the enclosing function to return Result<T, E>, got %s", returnType))
+		return success
+	}
+	if !c.typesAssignable(boundary.failure, failure) {
+		c.error(node.Span(), fmt.Sprintf("try cannot propagate %s through Result error type %s; use catch to convert the error explicitly", failure, boundary.failure))
+		return success
+	}
+	c.requireRuntimeType(expanded)
+	c.requireRuntimeType(boundary.result)
+	c.result.ResultTries[node] = ResultTry{
+		SuccessType:       success,
+		ErrorType:         failure,
+		ReturnSuccessType: boundary.success,
+		ReturnErrorType:   boundary.failure,
+		ReturnType:        boundary.result,
+	}
+	boundary.tries = append(boundary.tries, node)
+	return success
+}
+
+func (c *Checker) checkResultCatch(node *ast.CatchExpression, sc *scope) types.Type {
+	resultType := c.checkExpression(node.Value, sc)
+	c.checkStructuredResultPlacement(node, node.Value, "catch")
+	success, failure, expanded, ok := c.standardResultParts(resultType)
+	if !ok {
+		c.error(node.Value.Span(), fmt.Sprintf("catch requires the standard Result<T, E>, got %s", resultType))
+		return invalidType()
+	}
+	c.requireRuntimeType(expanded)
+
+	handlerScope := &scope{parent: sc, values: map[string]symbol{}}
+	if node.Binding.Name != "_" {
+		declared := symbol{typ: failure, span: node.Binding.Span()}
+		if tracksUnusedBinding(node.Binding.Name) {
+			used := false
+			declared.used = &used
+			declared.useKind = "catch binding"
+		}
+		handlerScope.values[node.Binding.Name] = declared
+	}
+
+	semantic := ResultCatch{SuccessType: success, ErrorType: failure, ResultType: expanded}
+	resultIndex, resultExpression := controlFlowBranchExpression(node.Body)
+	if resultExpression == nil {
+		c.checkStatements(node.Body, handlerScope)
+		c.checkUnusedBindings(handlerScope)
+		semantic.HandlerDiverges = terminalControlFlowTransfer(node.Body) != nil || !c.statementsFallThrough(node.Body)
+		if !semantic.HandlerDiverges {
+			c.error(node.Span(), fmt.Sprintf("catch handler must return %s or transfer control", success))
+		}
+	} else {
+		c.checkStatementSequence(node.Body[:resultIndex], handlerScope)
+		handlerType := c.checkExpression(resultExpression, handlerScope)
+		handlerType = c.contextualizeCollectionLiteral(resultExpression, success, handlerType)
+		c.checkStatementSequence(node.Body[resultIndex+1:], handlerScope)
+		c.checkUnusedBindings(handlerScope)
+		if handlerType.Kind == types.Never {
+			semantic.HandlerDiverges = true
+		} else {
+			if !c.assignable(resultExpression, success, handlerType) {
+				c.error(resultExpression.Span(), fmt.Sprintf("catch handler has type %s, expected %s", handlerType, success))
+			}
+			semantic.HandlerResult = resultExpression
+		}
+	}
+	c.result.ResultCatches[node] = semantic
+	return success
+}
+
+func (c *Checker) standardResultParts(typ types.Type) (types.Type, types.Type, types.Type, bool) {
+	expanded := c.expandAlias(typ, map[string]bool{})
+	if expanded.Nullable || expanded.Name != "Result" || len(expanded.Args) != 2 || !c.standardResultAvailable() {
+		return types.Type{}, types.Type{}, expanded, false
+	}
+	return expanded.Args[0], expanded.Args[1], expanded, true
+}
+
+func (c *Checker) resultBoundaryFor(returnType types.Type) resultBoundary {
+	success, failure, result, ok := c.standardResultParts(returnType)
+	return resultBoundary{success: success, failure: failure, result: result, valid: ok}
+}
+
+func (c *Checker) checkDirectStructuredResultValue(expression ast.Expression, sc *scope, kind string) types.Type {
+	previous := c.directStructuredResultValue
+	previousKind := c.directStructuredResultKind
+	c.directStructuredResultValue = expression
+	c.directStructuredResultKind = kind
+	result := c.checkExpression(expression, sc)
+	c.directStructuredResultValue = previous
+	c.directStructuredResultKind = previousKind
+	return result
+}
+
+func (c *Checker) checkStructuredResultPlacement(wrapper, operand ast.Expression, keyword string) {
+	call, member, ok := c.structuredBlockCall(operand)
+	if !ok || !member.Block.Structured {
+		return
+	}
+	semantic, checked := c.result.StructuredBlocks[call]
+	if !checked || semantic.ResultBoundary.Kind == "" || semantic.ResultBoundary.Kind == types.Never {
+		return
+	}
+	if c.directStructuredResultValue != wrapper || c.directStructuredResultKind == "assignment" {
+		c.error(wrapper.Span(), fmt.Sprintf("%s over a structured block must be the direct value of a variable declaration or return", keyword))
+	}
+}
+
+func (c *Checker) standardResultAvailable() bool {
+	const module = "trb/std/result/index"
+	if c.result.Program.ModulePath == module {
+		return true
+	}
+	// A source declaration named Result shadows the compiler-owned enum. Shape
+	// compatibility is not enough: try and catch are defined only for the
+	// standard failure representation.
+	if _, declared := c.declaredTypes["Result"]; declared {
+		return false
+	}
+	if binding, visible := c.resolution.Symbols["Result"]; visible {
+		return binding.Import != nil && binding.Import.RuntimePath() == module
+	}
+	if binding, inferred := c.resolution.InferredType("Result"); inferred {
+		return binding.Import != nil && binding.Import.RuntimePath() == module
+	}
+	_, ok := c.resolution.CompilerOwnedType("Result")
+	return ok
+}
+
 func (c *Checker) requireEffectRuntime(success, failure types.Type) {
 	if success.Kind == types.Void {
 		success = types.FromName("Unit")
@@ -5267,16 +5497,16 @@ func (c *Checker) currentInherits(name string) bool {
 	return false
 }
 
-func expressionReturn(expression ast.Expression) ast.Statement {
+func expressionEscapingTransform(expression ast.Expression, loopDepth int) ast.Statement {
 	if expression == nil {
 		return nil
 	}
 	switch node := expression.(type) {
 	case *ast.LambdaExpression:
-		// A lambda owns its returns; none escape into the enclosing expression.
+		// A lambda owns return and starts a separate loop-control context.
 		return nil
 	case *ast.IfStatement:
-		if result := expressionReturn(node.Condition); result != nil {
+		if result := expressionEscapingTransform(node.Condition, loopDepth); result != nil {
 			return result
 		}
 		groups := [][]ast.Statement{node.Then, node.Else}
@@ -5284,129 +5514,184 @@ func expressionReturn(expression ast.Expression) ast.Statement {
 			groups = append(groups, branch.Body)
 		}
 		for _, group := range groups {
-			if result := statementsReturn(group); result != nil {
+			if result := statementsEscapingTransform(group, loopDepth); result != nil {
 				return result
 			}
 		}
 	case *ast.CaseStatement:
-		if result := expressionReturn(node.Value); result != nil {
+		if result := expressionEscapingTransform(node.Value, loopDepth); result != nil {
 			return result
 		}
 		for _, branch := range node.Branches {
-			if result := statementsReturn(branch.Body); result != nil {
+			if result := statementsEscapingTransform(branch.Body, loopDepth); result != nil {
 				return result
 			}
 		}
-		return statementsReturn(node.Else)
+		return statementsEscapingTransform(node.Else, loopDepth)
 	case *ast.InterpolatedString:
 		for _, part := range node.Parts {
-			if result := expressionReturn(part.Expression); result != nil {
+			if result := expressionEscapingTransform(part.Expression, loopDepth); result != nil {
 				return result
 			}
 		}
 	case *ast.ArrayLiteral:
 		for _, element := range node.Elements {
-			if result := expressionReturn(element); result != nil {
+			if result := expressionEscapingTransform(element, loopDepth); result != nil {
 				return result
 			}
 		}
 	case *ast.HashLiteral:
 		for _, entry := range node.Entries {
-			if result := expressionReturn(entry.Key); result != nil {
+			if result := expressionEscapingTransform(entry.Key, loopDepth); result != nil {
 				return result
 			}
-			if result := expressionReturn(entry.Value); result != nil {
+			if result := expressionEscapingTransform(entry.Value, loopDepth); result != nil {
 				return result
 			}
 		}
 	case *ast.JSXElement:
-		if result := expressionReturn(node.Component); result != nil {
+		if result := expressionEscapingTransform(node.Component, loopDepth); result != nil {
 			return result
 		}
 		for _, attribute := range node.Attributes {
-			if result := expressionReturn(attribute.Value); result != nil {
+			if result := expressionEscapingTransform(attribute.Value, loopDepth); result != nil {
 				return result
 			}
 		}
 		for _, child := range node.Children {
 			switch item := child.(type) {
 			case *ast.JSXElement:
-				if result := expressionReturn(item); result != nil {
+				if result := expressionEscapingTransform(item, loopDepth); result != nil {
 					return result
 				}
 			case *ast.JSXExpression:
-				if result := expressionReturn(item.Value); result != nil {
+				if result := expressionEscapingTransform(item.Value, loopDepth); result != nil {
 					return result
 				}
 			}
 		}
 	case *ast.UnaryExpression:
-		return expressionReturn(node.Operand)
+		return expressionEscapingTransform(node.Operand, loopDepth)
 	case *ast.BinaryExpression:
-		if result := expressionReturn(node.Left); result != nil {
+		if result := expressionEscapingTransform(node.Left, loopDepth); result != nil {
 			return result
 		}
-		return expressionReturn(node.Right)
+		return expressionEscapingTransform(node.Right, loopDepth)
 	case *ast.RangeExpression:
-		if result := expressionReturn(node.Start); result != nil {
+		if result := expressionEscapingTransform(node.Start, loopDepth); result != nil {
 			return result
 		}
-		return expressionReturn(node.End)
+		return expressionEscapingTransform(node.End, loopDepth)
+	case *ast.AttemptExpression:
+		if result := expressionEscapingTransform(node.Value, loopDepth); result != nil {
+			return result
+		}
+		return statementsEscapingTransform(node.Body, loopDepth)
+	case *ast.TryExpression:
+		return expressionEscapingTransform(node.Value, loopDepth)
+	case *ast.CatchExpression:
+		if result := expressionEscapingTransform(node.Value, loopDepth); result != nil {
+			return result
+		}
+		return statementsEscapingTransform(node.Body, loopDepth)
+	case *ast.IterationExpression:
+		if result := expressionEscapingTransform(node.Source, loopDepth); result != nil {
+			return result
+		}
+		if result := expressionEscapingTransform(node.SliceSize, loopDepth); result != nil {
+			return result
+		}
+		if result := expressionEscapingTransform(node.Initial, loopDepth); result != nil {
+			return result
+		}
+		if node.Block != nil {
+			// The nested iteration owns break/next, while return still escapes it.
+			return statementsEscapingTransform(node.Block.Body, loopDepth+1)
+		}
 	case *ast.CallExpression:
-		if result := expressionReturn(node.Callee); result != nil {
+		if result := expressionEscapingTransform(node.Callee, loopDepth); result != nil {
 			return result
 		}
 		for _, argument := range node.Arguments {
-			if result := expressionReturn(argument.Value); result != nil {
+			if result := expressionEscapingTransform(argument.Value, loopDepth); result != nil {
 				return result
 			}
 		}
 		if node.Block != nil {
-			return statementsReturn(node.Block.Body)
+			return statementsEscapingTransform(node.Block.Body, loopDepth+1)
 		}
 	case *ast.GenericExpression:
-		return expressionReturn(node.Receiver)
+		return expressionEscapingTransform(node.Receiver, loopDepth)
 	case *ast.MemberExpression:
-		return expressionReturn(node.Receiver)
+		return expressionEscapingTransform(node.Receiver, loopDepth)
 	case *ast.IndexExpression:
-		if result := expressionReturn(node.Receiver); result != nil {
+		if result := expressionEscapingTransform(node.Receiver, loopDepth); result != nil {
 			return result
 		}
-		return expressionReturn(node.Index)
+		return expressionEscapingTransform(node.Index, loopDepth)
 	case *ast.BlockExpression:
-		return statementsReturn(node.Body)
+		return statementsEscapingTransform(node.Body, loopDepth)
 	}
 	return nil
 }
 
-func statementsReturn(statements []ast.Statement) ast.Statement {
+func statementsEscapingTransform(statements []ast.Statement, loopDepth int) ast.Statement {
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ast.ReturnStatement:
 			return node
+		case *ast.BreakStatement, *ast.NextStatement:
+			if loopDepth == 0 {
+				return node
+			}
+		case *ast.VariableStatement:
+			if result := expressionEscapingTransform(node.Value, loopDepth); result != nil {
+				return result
+			}
+		case *ast.AssignmentStatement:
+			if result := expressionEscapingTransform(node.Target, loopDepth); result != nil {
+				return result
+			}
+			if result := expressionEscapingTransform(node.Value, loopDepth); result != nil {
+				return result
+			}
 		case *ast.ExpressionStatement:
-			if result := expressionReturn(node.Expression); result != nil {
+			if result := expressionEscapingTransform(node.Expression, loopDepth); result != nil {
 				return result
 			}
 		case *ast.IfStatement:
-			if result := expressionReturn(node); result != nil {
+			if result := expressionEscapingTransform(node, loopDepth); result != nil {
 				return result
 			}
 		case *ast.CaseStatement:
-			if result := expressionReturn(node); result != nil {
+			if result := expressionEscapingTransform(node, loopDepth); result != nil {
 				return result
 			}
 		case *ast.WhileStatement:
-			if result := statementsReturn(node.Body); result != nil {
+			if result := expressionEscapingTransform(node.Condition, loopDepth); result != nil {
+				return result
+			}
+			if result := statementsEscapingTransform(node.Body, loopDepth+1); result != nil {
 				return result
 			}
 		case *ast.NativeBlock:
-			if result := statementsReturn(node.Body); result != nil {
+			if result := statementsEscapingTransform(node.Body, loopDepth); result != nil {
 				return result
 			}
 		}
 	}
 	return nil
+}
+
+func controlTransferKeyword(statement ast.Statement) string {
+	switch statement.(type) {
+	case *ast.BreakStatement:
+		return "break"
+	case *ast.NextStatement:
+		return "next"
+	default:
+		return "return"
+	}
 }
 
 func (c *Checker) inferCollectionType(expressions []ast.Expression, sc *scope) types.Type {
@@ -5904,6 +6189,19 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 	if member.Block.Structured && len(c.returns) == 0 {
 		c.error(call.Span(), fmt.Sprintf("structured block %s() is only valid inside a function or method", member.Name))
 	}
+	if member.Block.Structured && member.Block.Return.Name != "" {
+		direct := c.directStructuredResultValue == call
+		wrapped := false
+		switch wrapper := c.directStructuredResultValue.(type) {
+		case *ast.TryExpression:
+			wrapped = wrapper.Value == call
+		case *ast.CatchExpression:
+			wrapped = wrapper.Value == call
+		}
+		if !direct && !wrapped {
+			c.error(call.Span(), fmt.Sprintf("structured block %s() must be the direct value of a variable declaration, assignment, or return; a try or catch wrapper must also be direct", member.Name))
+		}
+	}
 	if len(call.Block.Parameters) != len(member.Block.Parameters) {
 		c.error(call.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", member.Name, len(member.Block.Parameters), len(call.Block.Parameters)))
 	}
@@ -5942,13 +6240,43 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 
 	blockReturn := instantiateDeclarationType(member.Block.Return, bindings)
 	c.returns = append(c.returns, blockReturn)
+	boundaryError := instantiateDeclarationType(member.Block.ResultBoundary, bindings)
+	boundary := resultBoundary{}
+	if boundaryError.Kind != "" && boundaryError.Kind != types.Never {
+		boundary = resultBoundary{
+			success: blockReturn,
+			failure: boundaryError,
+			result:  types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{blockReturn, boundaryError}},
+			valid:   true,
+		}
+	}
+	c.resultBoundaries = append(c.resultBoundaries, boundary)
+	boundaryIndex := len(c.resultBoundaries) - 1
+	var capturedEffects *effectCapture
+	if boundary.valid {
+		capturedEffects = &effectCapture{}
+		c.effectCaptures = append(c.effectCaptures, capturedEffects)
+	}
 	previousLoopDepth := c.loopDepth
+	previousResultBoundaryBlockDepth := c.resultBoundaryBlockDepth
 	c.loopDepth = 0
+	if boundary.valid {
+		c.resultBoundaryBlockDepth++
+	}
 	c.checkStatementSequence(call.Block.Body[:resultIndex], blockScope)
 	actual := c.checkExpression(resultExpression, blockScope)
 	c.checkStatementSequence(call.Block.Body[resultIndex+1:], blockScope)
 	c.checkUnusedBindings(blockScope)
 	c.loopDepth = previousLoopDepth
+	c.resultBoundaryBlockDepth = previousResultBoundaryBlockDepth
+	if capturedEffects != nil {
+		c.effectCaptures = c.effectCaptures[:len(c.effectCaptures)-1]
+		for _, effect := range capturedEffects.effects {
+			if !c.typesAssignable(boundary.failure, effect) {
+				c.error(call.Block.Span(), fmt.Sprintf("%s block may fail with %s, which is not assignable to its Result error type %s", member.Name, effect, boundary.failure))
+			}
+		}
+	}
 	c.returns = c.returns[:len(c.returns)-1]
 
 	typeParameters := map[string]bool{}
@@ -5962,14 +6290,29 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		bindings,
 	)
 	blockReturn = instantiateDeclarationType(member.Block.Return, bindings)
+	boundaryError = instantiateDeclarationType(member.Block.ResultBoundary, bindings)
+	resultBoundaryType := types.Type{}
+	if boundaryError.Kind != "" && boundaryError.Kind != types.Never {
+		resultBoundaryType = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{blockReturn, boundaryError}}
+		for _, try := range c.resultBoundaries[boundaryIndex].tries {
+			semantic := c.result.ResultTries[try]
+			semantic.ReturnSuccessType = blockReturn
+			semantic.ReturnErrorType = boundaryError
+			semantic.ReturnType = resultBoundaryType
+			c.result.ResultTries[try] = semantic
+		}
+	}
+	c.resultBoundaries = c.resultBoundaries[:boundaryIndex]
 	if !c.assignable(resultExpression, blockReturn, actual) {
 		c.error(resultExpression.Span(), fmt.Sprintf("%s block result has type %s, expected %s", member.Name, actual, blockReturn))
 	}
 	c.result.Expressions[call.Block] = blockReturn
 	c.result.StructuredBlocks[call] = StructuredBlock{
-		Parameters: instantiateDeclarationTypes(member.Block.Parameters, bindings),
-		Return:     blockReturn,
-		Result:     resultExpression,
+		Parameters:     instantiateDeclarationTypes(member.Block.Parameters, bindings),
+		Return:         blockReturn,
+		Result:         resultExpression,
+		ResultBoundary: boundaryError,
+		ResultType:     resultBoundaryType,
 	}
 	return instantiateDeclarationType(member.Return, bindings), true
 }

@@ -228,6 +228,19 @@ func walkExpression(expression ast.Expression, visit func(*ast.CallExpression)) 
 			walkExpression(entry.Key, visit)
 			walkExpression(entry.Value, visit)
 		}
+	case *ast.JSXElement:
+		walkExpression(node.Component, visit)
+		for _, attribute := range node.Attributes {
+			walkExpression(attribute.Value, visit)
+		}
+		for _, child := range node.Children {
+			switch child := child.(type) {
+			case *ast.JSXElement:
+				walkExpression(child, visit)
+			case *ast.JSXExpression:
+				walkExpression(child.Value, visit)
+			}
+		}
 	case *ast.UnaryExpression:
 		walkExpression(node.Operand, visit)
 	case *ast.BinaryExpression:
@@ -253,6 +266,19 @@ func walkExpression(expression ast.Expression, visit func(*ast.CallExpression)) 
 		walkExpression(node.Receiver, visit)
 		walkExpression(node.Index, visit)
 	case *ast.BlockExpression:
+		walkStatements(node.Body, visit)
+	case *ast.AttemptExpression:
+		walkExpression(node.Value, visit)
+		walkStatements(node.Body, visit)
+	case *ast.TryExpression:
+		walkExpression(node.Value, visit)
+	case *ast.CatchExpression:
+		walkExpression(node.Value, visit)
+		walkStatements(node.Body, visit)
+	case *ast.LambdaExpression:
+		for _, parameter := range node.Parameters {
+			walkExpression(parameter.Default, visit)
+		}
 		walkStatements(node.Body, visit)
 	case *ast.IterationExpression:
 		walkExpression(node.Source, visit)

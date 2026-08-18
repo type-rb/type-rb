@@ -118,6 +118,16 @@ func TestCompletionHandlesIncompleteFunctionParameters(t *testing.T) {
 	}
 }
 
+func TestCompletionOffersResultControlFlowKeywords(t *testing.T) {
+	service := languageservice.New("go")
+	for _, keyword := range []string{"try", "catch"} {
+		item, ok := findCompletion(service.Complete(keyword[:2], 2), keyword)
+		if !ok || item.Kind != languageservice.CompletionKeyword {
+			t.Errorf("%s completion=(%#v, %v), want keyword", keyword, item, ok)
+		}
+	}
+}
+
 func TestCompletionOffersOnlyTypesAtTypePositions(t *testing.T) {
 	service := languageservice.New("go")
 	for _, test := range []struct {
