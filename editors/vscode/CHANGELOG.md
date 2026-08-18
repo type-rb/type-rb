@@ -2,10 +2,13 @@
 
 ## Unreleased
 
+## 0.2.7 - 2026-08-18
+
 - Request TypeRB completions while identifiers are typed without requiring a
   trigger character to be retyped.
-- Offer project and standard-library imports from completion and the Quick Fix
-  menu for unresolved names.
+- Work with TypeRB 0.2.31 or newer to offer project and standard-library
+  imports from completion and the Quick Fix menu, clear stale diagnostics
+  immediately, and recalculate project diagnostics faster.
 
 ## 0.2.6 - 2026-08-18
 
