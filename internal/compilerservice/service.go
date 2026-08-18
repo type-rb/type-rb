@@ -66,13 +66,13 @@ type Service struct {
 	lastGood   []*compiler.Artifact
 	contexts   map[string]languageservice.Context
 	imports    languageservice.ProjectImportCandidates
-	compile    func([]compiler.SourceUnit, compiler.Options) ([]*compiler.Artifact, error)
+	analyze    func([]compiler.SourceUnit, compiler.Options) ([]*compiler.Artifact, error)
 }
 
 func New(units []compiler.SourceUnit, options compiler.Options) *Service {
 	return &Service{
 		base: cloneUnits(units), options: options, overlays: map[string]compiler.SourceUnit{},
-		generation: 1, contexts: map[string]languageservice.Context{}, compile: compiler.CompileProject,
+		generation: 1, contexts: map[string]languageservice.Context{}, analyze: compiler.AnalyzeProject,
 	}
 }
 
@@ -192,9 +192,10 @@ func (s *Service) CloseDocument(filename string) {
 	s.snapshot = nil
 }
 
-// Analyze returns the current immutable project snapshot. Compilation happens
-// outside the service lock. If inputs change concurrently, the obsolete result
-// is discarded and analysis restarts from the newer generation.
+// Analyze returns the current immutable project snapshot. Project analysis
+// happens outside the service lock. If inputs change concurrently, the
+// obsolete result is discarded and analysis restarts from the newer
+// generation.
 func (s *Service) Analyze() Snapshot {
 	for {
 		if result, current := s.AnalyzeOnce(); current {
@@ -203,9 +204,9 @@ func (s *Service) Analyze() Snapshot {
 	}
 }
 
-// AnalyzeOnce analyzes one captured input generation. Compilation happens
-// outside the service lock. If an input changes before compilation finishes,
-// the obsolete result is not committed and current is false.
+// AnalyzeOnce analyzes one captured input generation. Analysis happens outside
+// the service lock. If an input changes before it finishes, the obsolete result
+// is not committed and current is false.
 func (s *Service) AnalyzeOnce() (result Snapshot, current bool) {
 	s.mu.Lock()
 	if s.snapshot != nil {
@@ -219,10 +220,10 @@ func (s *Service) AnalyzeOnce() (result Snapshot, current bool) {
 	lastGood := append([]*compiler.Artifact(nil), s.lastGood...)
 	lastContexts := s.contexts
 	lastImports := s.imports
-	compile := s.compile
+	analyze := s.analyze
 	s.mu.Unlock()
 
-	artifacts, err := compile(units, options)
+	artifacts, err := analyze(units, options)
 	s.mu.Lock()
 	if s.generation != generation {
 		s.mu.Unlock()

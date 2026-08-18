@@ -76,7 +76,15 @@ func GenerateMapped(program *ir.Program) (sourcemap.Generated, error) {
 	return generated[0], nil
 }
 
-func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error) {
+// ValidateProject performs TypeScript-specific checks that depend on lowered
+// project IR but not on generated source. Compiler analysis and backend
+// generation share this boundary so editor diagnostics match builds.
+func ValidateProject(programs []*ir.Program) error {
+	_, err := analyzeProject(programs)
+	return err
+}
+
+func analyzeProject(programs []*ir.Program) (*SuspensionPlan, error) {
 	interactive := false
 	for _, program := range programs {
 		// The REPL executes ORM operations through its shared host runtime; it does
@@ -95,6 +103,14 @@ func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error
 		}
 	}
 	plan, err := AnalyzeSuspension(programs)
+	if err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error) {
+	plan, err := analyzeProject(programs)
 	if err != nil {
 		return nil, err
 	}

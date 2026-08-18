@@ -89,16 +89,25 @@ func TestORMRejectsUnsupportedTypeScriptRuntimes(t *testing.T) {
 			TypeScriptRuntime: runtime,
 			Extensions:        []ir.Extension{&ormintegration.Manifest{}},
 		}
+		if err := ValidateProject([]*ir.Program{program}); err == nil || !strings.Contains(err.Error(), `typescript.runtime: "bun"`) {
+			t.Fatalf("validation for runtime %q returned %v", runtime, err)
+		}
 		if _, err := GenerateProject([]*ir.Program{program}); err == nil || !strings.Contains(err.Error(), `typescript.runtime: "bun"`) {
-			t.Fatalf("runtime %q returned %v", runtime, err)
+			t.Fatalf("generation for runtime %q returned %v", runtime, err)
 		}
 	}
 	program := &ir.Program{Mode: "typescript", ModulePath: "main", TypeScriptRuntime: "bun", Extensions: []ir.Extension{&ormintegration.Manifest{}}}
+	if err := ValidateProject([]*ir.Program{program}); err != nil {
+		t.Fatalf("Bun runtime validation failed: %v", err)
+	}
 	if _, err := GenerateProject([]*ir.Program{program}); err != nil {
 		t.Fatalf("Bun runtime was rejected: %v", err)
 	}
 	repl := &ir.Program{Mode: "typescript", ModulePath: "__trb_repl__", TypeScriptRuntime: "node"}
 	project := &ir.Program{Mode: "typescript", ModulePath: "main", TypeScriptRuntime: "node", Extensions: []ir.Extension{&ormintegration.Manifest{}}}
+	if err := ValidateProject([]*ir.Program{project, repl}); err != nil {
+		t.Fatalf("shared-host REPL project validation failed: %v", err)
+	}
 	if _, err := GenerateProject([]*ir.Program{project, repl}); err != nil {
 		t.Fatalf("shared-host REPL project was rejected: %v", err)
 	}

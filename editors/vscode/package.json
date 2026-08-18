@@ -66,6 +66,16 @@
 		"serialize-javascript": "7.0.5"
 	},
 	"contributes": {
+		"configurationDefaults": {
+			"[trb]": {
+				"editor.quickSuggestions": {
+					"other": "on",
+					"comments": "off",
+					"strings": "off"
+				},
+				"editor.suggestOnTriggerCharacters": true
+			}
+		},
 		"commands": [
 			{
 				"command": "typerb.runProject",

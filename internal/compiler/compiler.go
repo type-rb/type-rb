@@ -151,10 +151,40 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 	return &Artifact{Filename: filename, Mode: options.Mode, AST: program, IR: lowered, Output: generated.Output, SourceMap: generated.SourceMap}, nil
 }
 
-// CompileProject parses every unit before resolving or checking any body. This
-// establishes a stable project catalog, import graph, and exported signature
-// environment shared by all files.
+// CompileProject analyzes every source unit and then generates target-language
+// output for the resulting typed IR. Editor integrations that do not consume
+// generated output should use AnalyzeProject so diagnostics and semantic
+// artifacts do not pay the backend generation cost.
 func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) {
+	artifacts, err := analyzeProject(sources, options, false)
+	if err != nil {
+		return nil, err
+	}
+	programs := make([]*ir.Program, len(artifacts))
+	for index, artifact := range artifacts {
+		programs[index] = artifact.IR
+	}
+	outputs, err := codegen.GenerateProject(programs)
+	if err != nil {
+		return nil, err
+	}
+	for index, output := range outputs {
+		artifacts[index].Output = output.Output
+		artifacts[index].SourceMap = output.SourceMap
+	}
+	return artifacts, nil
+}
+
+// AnalyzeProject parses every unit before resolving or checking any body. It
+// establishes the complete project catalog, import graph, exported signature
+// environment, package integrations, typed IR, and backend-owned validation
+// without generating backend source. Returned artifacts therefore have empty
+// Output and SourceMap fields.
+func AnalyzeProject(sources []SourceUnit, options Options) ([]*Artifact, error) {
+	return analyzeProject(sources, options, true)
+}
+
+func analyzeProject(sources []SourceUnit, options Options, validateBackend bool) ([]*Artifact, error) {
 	units := append([]SourceUnit(nil), sources...)
 	sort.Slice(units, func(i, j int) bool { return units[i].ModulePath < units[j].ModulePath })
 	programs := make(map[string]*ast.Program, len(units))
@@ -289,7 +319,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		checkDiagnostics[source.ModulePath] = diagnostics
 	}
 	if runtimeUnits := compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options); len(runtimeUnits) > 0 {
-		return CompileProject(append(units, runtimeUnits...), options)
+		return analyzeProject(append(units, runtimeUnits...), options, validateBackend)
 	}
 	var typeErrors []diagnostic.Diagnostic
 	for _, source := range units {
@@ -335,15 +365,15 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		integrations.Apply(lowered, source.ModulePath == ownerModule)
 		loweredPrograms = append(loweredPrograms, lowered)
 	}
-	outputs, err := codegen.GenerateProject(loweredPrograms)
-	if err != nil {
-		return nil, err
+	if validateBackend {
+		if err := codegen.ValidateProject(loweredPrograms); err != nil {
+			return nil, err
+		}
 	}
-
 	artifacts := make([]*Artifact, 0, len(units))
 	for index, source := range units {
 		program := programs[source.ModulePath]
-		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], Output: outputs[index].Output, SourceMap: outputs[index].SourceMap, CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage})
+		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage})
 	}
 	return artifacts, nil
 }

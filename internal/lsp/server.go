@@ -664,11 +664,22 @@ func (s *Server) change(params didChangeParams) error {
 	if err != nil {
 		return s.showError(err)
 	}
+	sourceChanged := !bytes.Equal(current.source, source)
 	s.documents[path] = document{unit: unit, source: source, version: params.TextDocument.Version}
 	if s.resolveWorkspace != nil {
+		if sourceChanged {
+			if err := s.clearPublishedDiagnostics(path, params.TextDocument.Version); err != nil {
+				return err
+			}
+		}
 		return s.refreshFileRootWorkspace()
 	}
 	s.compiler.SetDocument(unit)
+	if sourceChanged {
+		if err := s.clearPublishedDiagnostics(path, params.TextDocument.Version); err != nil {
+			return err
+		}
+	}
 	return s.requestDiagnostics()
 }
 
@@ -906,14 +917,10 @@ func (s *Server) completion(request message) error {
 	})
 	result := make([]completionItem, 0, len(items))
 	for _, item := range items {
-		protocolEdits := make([]textEdit, 0, len(item.AdditionalEdits))
-		for _, edit := range item.AdditionalEdits {
-			protocolEdits = append(protocolEdits, textEdit{Range: offsetRange(document.source, edit.Range.Start, edit.Range.End), NewText: edit.NewText})
-		}
 		result = append(result, completionItem{
 			Label: item.Label, Kind: completionKind(item.Kind), Detail: item.Detail,
 			TextEdit:            textEdit{Range: offsetRange(document.source, item.Replacement.Start, item.Replacement.End), NewText: item.InsertText},
-			AdditionalTextEdits: protocolEdits,
+			AdditionalTextEdits: protocolTextEdits(document.source, item.AdditionalEdits),
 		})
 	}
 	return s.stream.write(success(request.ID, completionList{IsIncomplete: isIncomplete, Items: result}))
@@ -1256,7 +1263,7 @@ func (s *Server) codeActions(request message) error {
 		return s.stream.write(success(request.ID, actions))
 	}
 	for _, item := range snapshot.Diagnostics {
-		if cleanPath(item.Path) != path || !overlaps(item.Span.Start.Offset, item.Span.End.Offset, requestStart, requestEnd) {
+		if cleanPath(item.Path) != path || !intersectsSelection(item.Span.Start.Offset, item.Span.End.Offset, requestStart, requestEnd) {
 			continue
 		}
 		for _, fix := range item.Fixes {
@@ -1277,7 +1284,53 @@ func (s *Server) codeActions(request message) error {
 			}
 		}
 	}
+	actions = append(actions, s.autoImportCodeActions(path, document, snapshot, requestStart, requestEnd)...)
 	return s.stream.write(success(request.ID, actions))
+}
+
+func (s *Server) autoImportCodeActions(path string, document document, snapshot compilerservice.Snapshot, requestStart, requestEnd int) []codeAction {
+	tokens, _ := lexer.Lex(document.source)
+	context, _ := snapshot.Context(document.unit.ModulePath)
+	candidates := s.candidatesForCompletion(snapshot, document.unit.ModulePath)
+	seen := map[string]bool{}
+	actions := []codeAction{}
+	for _, item := range snapshot.Diagnostics {
+		if item.Code != diagnostic.TypeError || item.Severity != diagnostic.Error || cleanPath(item.Path) != path ||
+			!intersectsSelection(item.Span.Start.Offset, item.Span.End.Offset, requestStart, requestEnd) {
+			continue
+		}
+		for _, identifier := range tokens {
+			if identifier.Kind != token.Identifier ||
+				!intersectsSelection(identifier.Span.Start.Offset, identifier.Span.End.Offset, requestStart, requestEnd) ||
+				!overlaps(identifier.Span.Start.Offset, identifier.Span.End.Offset, item.Span.Start.Offset, item.Span.End.Offset) {
+				continue
+			}
+			name := strings.TrimPrefix(identifier.Lexeme, "@")
+			if seen[name] || !strings.HasSuffix(item.Message, " "+name+" is not declared or imported") {
+				continue
+			}
+			completions := languageservice.Complete(languageservice.CompletionRequest{
+				Source: string(document.source), Cursor: identifier.Span.End.Offset, Mode: s.mode,
+				Context: context, Candidates: candidates, RepairImports: true,
+			})
+			for _, completion := range completions {
+				if completion.Label != name || len(completion.AdditionalEdits) == 0 {
+					continue
+				}
+				edits := protocolTextEdits(document.source, completion.AdditionalEdits)
+				if len(edits) == 0 {
+					continue
+				}
+				actions = append(actions, codeAction{
+					Title: fmt.Sprintf("Add import for %s", name), Kind: "quickfix",
+					Edit: workspaceEdit{Changes: map[string][]textEdit{uriFromPath(path): edits}},
+				})
+				seen[name] = true
+				break
+			}
+		}
+	}
+	return actions
 }
 
 func (s *Server) requestDiagnostics() error {
@@ -1359,6 +1412,21 @@ func (s *Server) applySnapshot(snapshot compilerservice.Snapshot, request diagno
 			s.published[path] = true
 		}
 	}
+	return nil
+}
+
+// clearPublishedDiagnostics invalidates diagnostics computed for an older
+// document version. Full analysis still republishes the diagnostics for the
+// new version, but stale ranges do not remain visible while that work runs.
+func (s *Server) clearPublishedDiagnostics(path string, version int) error {
+	if !s.published[path] {
+		return nil
+	}
+	params := publishDiagnosticsParams{URI: uriFromPath(path), Version: &version, Diagnostics: []protocolDiagnostic{}}
+	if err := s.stream.write(notification{JSONRPC: "2.0", Method: "textDocument/publishDiagnostics", Params: params}); err != nil {
+		return err
+	}
+	delete(s.published, path)
 	return nil
 }
 
@@ -1689,6 +1757,16 @@ func completionKind(kind languageservice.CompletionKind) int {
 	}
 }
 
+func protocolTextEdits(source []byte, edits []languageservice.TextEdit) []textEdit {
+	result := make([]textEdit, 0, len(edits))
+	for _, edit := range edits {
+		result = append(result, textEdit{
+			Range: offsetRange(source, edit.Range.Start, edit.Range.End), NewText: edit.NewText,
+		})
+	}
+	return result
+}
+
 func overlaps(leftStart, leftEnd, rightStart, rightEnd int) bool {
 	if leftEnd == leftStart {
 		leftEnd++
@@ -1697,6 +1775,13 @@ func overlaps(leftStart, leftEnd, rightStart, rightEnd int) bool {
 		rightEnd++
 	}
 	return leftStart < rightEnd && rightStart < leftEnd
+}
+
+func intersectsSelection(start, end, selectionStart, selectionEnd int) bool {
+	if selectionStart == selectionEnd {
+		return start <= selectionStart && selectionStart <= end
+	}
+	return overlaps(start, end, selectionStart, selectionEnd)
 }
 
 func hasErrors(items []diagnostic.Diagnostic) bool {
