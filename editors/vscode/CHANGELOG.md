@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.2.6 - 2026-08-18
+
+- Preserve nested project roots when registering language clients, restoring
+  format-on-save and correct language-feature routing from monorepo workspace
+  roots.
+- Work with TypeRB 0.2.30 or newer to keep completion and formatting
+  responsive while project diagnostics are recalculated.
+
 ## 0.2.5 - 2026-08-18
 
 - Follow explicit local imports in standalone language-server sessions and

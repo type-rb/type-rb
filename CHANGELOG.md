@@ -2,6 +2,19 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.30 - 2026-08-18
+
+### Editor tooling
+
+- Completion and formatting now remain responsive while `trb lsp` recalculates
+  full-project diagnostics. Rapid edits coalesce into one analysis, obsolete
+  results are discarded, and project import candidates are indexed once per
+  snapshot. ([#341](https://github.com/type-rb/type-rb/pull/341))
+- Visual Studio Code now preserves discovered project roots when a monorepo is
+  opened above its `trbconfig.jsonc` files, so nested completion,
+  format-on-save, and navigation use the correct language-server session.
+  ([#341](https://github.com/type-rb/type-rb/pull/341))
+
 ## 0.2.29 - 2026-08-18
 
 ### CLI and standalone workflows
