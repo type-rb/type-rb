@@ -19,6 +19,7 @@ type lowerer struct {
 	checked          checker.Result
 	temporary        int
 	effectBoundaries []effectBoundary
+	generatedTypes   map[string]map[string]resolver.Export
 	usesJSX          bool
 }
 
@@ -29,8 +30,9 @@ type effectBoundary struct {
 }
 
 func Program(checked checker.Result) *ir.Program {
-	l := &lowerer{checked: checked}
+	l := &lowerer{checked: checked, generatedTypes: map[string]map[string]resolver.Export{}}
 	statements := l.statements(checked.Program.Statements)
+	statements = l.generatedTypeImports(statements)
 	statements = append(l.runtimeImports(statements), statements...)
 	return &ir.Program{
 		Mode:              checked.Program.Mode,
@@ -43,6 +45,97 @@ func Program(checked checker.Result) *ir.Program {
 		Declarations:      checked.Resolution.Declarations,
 		Statements:        statements,
 	}
+}
+
+// requireGeneratedType records project types that lowering introduces even
+// though the source did not import their defining modules. Result control flow
+// is one such case: an imported function can expose a transparent Result alias
+// owned by a third module, and the generated branch carries the expanded
+// success and error types. Go and TypeScript must import those owner types for
+// their generated annotations without making the names source-visible.
+func (l *lowerer) requireGeneratedType(typ types.Type) {
+	for _, argument := range typ.Args {
+		l.requireGeneratedType(argument)
+	}
+	if typ.Fails != nil {
+		l.requireGeneratedType(*typ.Fails)
+	}
+	if typ.Kind != types.Named || typ.Name == "" || l.checked.Resolution.Catalog == nil {
+		return
+	}
+	for modulePath, module := range l.checked.Resolution.Catalog.Modules {
+		if module == nil || modulePath == l.checked.Program.ModulePath || module.CompilerOwned || module.Official {
+			continue
+		}
+		exported, exists := module.Exports[typ.Name]
+		if !exists || !contractTypeExport(exported.Kind) {
+			continue
+		}
+		if l.generatedTypes[modulePath] == nil {
+			l.generatedTypes[modulePath] = map[string]resolver.Export{}
+		}
+		l.generatedTypes[modulePath][typ.Name] = exported
+		return
+	}
+}
+
+// generatedTypeImports merges compiler-introduced project type dependencies
+// into authored imports where possible and otherwise creates generated-only
+// project imports.
+// GeneratedTypeSymbols deliberately stay separate from Symbols so resolver and
+// language-service visibility continue to match the authored program.
+func (l *lowerer) generatedTypeImports(statements []ir.Statement) []ir.Statement {
+	if len(l.generatedTypes) == 0 {
+		return statements
+	}
+	loaded := map[string]*ir.Import{}
+	for _, statement := range statements {
+		if imported, ok := statement.(*ir.Import); ok {
+			loaded[imported.Path] = imported
+		}
+	}
+	paths := make([]string, 0, len(l.generatedTypes))
+	for modulePath := range l.generatedTypes {
+		paths = append(paths, modulePath)
+	}
+	sort.Strings(paths)
+	generated := make([]ir.Statement, 0, len(paths))
+	for _, modulePath := range paths {
+		imported := loaded[modulePath]
+		if imported == nil {
+			imported = &ir.Import{
+				Path:                      modulePath,
+				Kind:                      string(resolver.ProjectImport),
+				Implicit:                  true,
+				IntrinsicSymbols:          map[string]bool{},
+				RuntimeIndependentSymbols: map[string]bool{},
+				SymbolKinds:               map[string]string{},
+				SymbolTypes:               map[string]types.Type{},
+				SymbolParameters:          map[string][]types.Type{},
+				SymbolTypeParameters:      map[string][]string{},
+			}
+			generated = append(generated, imported)
+		}
+		names := make([]string, 0, len(l.generatedTypes[modulePath]))
+		for name := range l.generatedTypes[modulePath] {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			exported := l.generatedTypes[modulePath][name]
+			if !contains(imported.Symbols, name) && !contains(imported.GeneratedTypeSymbols, name) {
+				imported.GeneratedTypeSymbols = append(imported.GeneratedTypeSymbols, name)
+			}
+			kind := string(exported.Kind)
+			if exported.Kind == resolver.TypeAliasExport && exported.AliasEnum {
+				kind = "enum_alias"
+			}
+			imported.SymbolKinds[name] = kind
+			imported.SymbolTypes[name] = exported.Type
+			imported.SymbolTypeParameters[name] = append([]string(nil), exported.TypeParameters...)
+		}
+	}
+	return append(generated, statements...)
 }
 
 func contractTypeSymbols(imported *resolver.Import, native bool) []string {
@@ -1418,6 +1511,11 @@ func (l *lowerer) resultTryValue(node *ast.TryExpression, value ir.Expression) i
 	if !ok {
 		return value
 	}
+	// The generated case IIFE returns the operand success type and constructs
+	// the boundary Result on error. Raw operand errors are only values and do
+	// not appear in a generated target-language type annotation.
+	l.requireGeneratedType(semantic.SuccessType)
+	l.requireGeneratedType(semantic.ReturnType)
 	boundary := effectBoundary{
 		success: semantic.ReturnSuccessType,
 		fails:   semantic.ReturnErrorType,
@@ -1439,6 +1537,9 @@ func (l *lowerer) resultCatchValue(node *ast.CatchExpression, value ir.Expressio
 	if !ok {
 		return value
 	}
+	// catch lowers to an IIFE whose generated return annotation is the unwrapped
+	// success type. The operand error remains an inferred local value.
+	l.requireGeneratedType(semantic.SuccessType)
 	result := semantic.ResultType
 	success := semantic.SuccessType
 	failure := semantic.ErrorType

@@ -383,6 +383,109 @@ func (r Result) CompilerOwnedType(name string) (Export, bool) {
 	return exported, ok
 }
 
+// CatalogTypeAlias resolves a transparent alias from the complete project
+// catalog for semantic expansion only. Imported value contracts retain their
+// declared alias names even when the alias is owned by another module, so the
+// checker needs this lookup to interpret the value without making the alias
+// name available to source annotations. NewCatalog rejects duplicate exported
+// type names, which keeps this lookup unambiguous.
+func (r Result) CatalogTypeAlias(name string) (Export, bool) {
+	if r.Catalog == nil {
+		return Export{}, false
+	}
+	for _, module := range r.Catalog.Modules {
+		exported, ok := module.Exports[name]
+		if ok && exported.Kind == TypeAliasExport {
+			return exported, true
+		}
+	}
+	return Export{}, false
+}
+
+// ContractTypeAlias resolves a catalog-owned transparent alias only when it
+// is reachable from a source-selected import contract. This is narrower than
+// source visibility: it lets the checker interpret a returned value while
+// preventing an unrelated project alias from changing an opaque native type
+// that happens to use the same name.
+func (r Result) ContractTypeAlias(name string) (Export, bool) {
+	alias, exists := r.CatalogTypeAlias(name)
+	if !exists {
+		return Export{}, false
+	}
+	seen := map[*Import]bool{}
+	for _, imported := range r.Imports {
+		if imported == nil || seen[imported] {
+			continue
+		}
+		seen[imported] = true
+		names := imported.Symbols
+		if len(names) == 0 {
+			names = make([]string, 0, len(imported.Exports))
+			for exportedName := range imported.Exports {
+				names = append(names, exportedName)
+			}
+		}
+		visiting := map[string]bool{}
+		for _, exportedName := range names {
+			exported, selected := imported.Exports[exportedName]
+			if selected && r.exportContractReferencesAlias(imported, exported, name, visiting) {
+				return alias, true
+			}
+		}
+	}
+	return Export{}, false
+}
+
+func (r Result) exportContractReferencesAlias(imported *Import, exported Export, name string, visiting map[string]bool) bool {
+	typesToVisit := []types.Type{exported.Type, exported.Fails, exported.AliasTarget}
+	typesToVisit = append(typesToVisit, exported.Parameters...)
+	for _, field := range exported.Fields {
+		typesToVisit = append(typesToVisit, field.Type)
+	}
+	for _, member := range exported.Members {
+		typesToVisit = append(typesToVisit, member.Type, member.Fails)
+		typesToVisit = append(typesToVisit, member.Parameters...)
+	}
+	for _, typ := range typesToVisit {
+		if r.contractTypeReferencesAlias(imported, typ, name, visiting) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r Result) contractTypeReferencesAlias(imported *Import, typ types.Type, name string, visiting map[string]bool) bool {
+	for _, argument := range typ.Args {
+		if r.contractTypeReferencesAlias(imported, argument, name, visiting) {
+			return true
+		}
+	}
+	if typ.Fails != nil && r.contractTypeReferencesAlias(imported, *typ.Fails, name, visiting) {
+		return true
+	}
+	if typ.Kind != types.Named || typ.Name == "" || visiting[typ.Name] {
+		return false
+	}
+	exported, directlyOwned := imported.Exports[typ.Name]
+	if directlyOwned && exported.Kind != TypeAliasExport {
+		return false
+	}
+	if !directlyOwned {
+		var exists bool
+		exported, exists = r.CatalogTypeAlias(typ.Name)
+		if !exists {
+			return false
+		}
+	}
+	if typ.Name == name {
+		return true
+	}
+	visiting[typ.Name] = true
+	result := r.contractTypeReferencesAlias(imported, exported.AliasTarget, name, visiting)
+	delete(visiting, typ.Name)
+	return result
+}
+
 // addPrelude exposes the small set of Ruby-like, target-independent helpers
 // that TypeRB programs can use without an import. The binding still points at
 // a standard package so lowering produces the same intrinsic as io.puts().

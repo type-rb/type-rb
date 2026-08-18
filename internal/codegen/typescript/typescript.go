@@ -313,7 +313,7 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 			}
 			g.line("import * as " + n.Alias + " from " + strconv.Quote(importPath) + ";")
-		} else if len(n.Symbols) > 0 {
+		} else if len(n.Symbols) > 0 || len(n.GeneratedTypeSymbols) > 0 {
 			values := make([]string, 0, len(n.Symbols))
 			types := make([]string, 0, len(n.Symbols))
 			intrinsicRuntime := false

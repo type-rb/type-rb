@@ -165,6 +165,103 @@ end
 	}
 }
 
+func TestResultCatchExpandsAliasFromImportedFunctionContractAcrossBackends(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/domain/result.trb",
+		ModulePath: "domain/result",
+		Package:    "domain",
+		Source: []byte(`import { Result } from trb/std/result
+
+enum AppError
+	Unavailable
+end
+
+type AppResult<T> = Result<T, AppError>
+`),
+	}
+	service := SourceUnit{
+		Filename:   "/project/application/service.trb",
+		ModulePath: "application/service",
+		Package:    "application",
+		Source: []byte(`import { AppError, AppResult } from domain/result
+
+def load_value(): AppResult<Integer>
+	return AppResult<Integer>::Err(AppError::Unavailable)
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { load_value } from application/service
+
+def recovered(): Integer
+	return load_value() catch |_error|
+		41
+	end
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			if _, err := CompileProject([]SourceUnit{contract, service, consumer}, Options{
+				Mode: mode, GoModule: "example.com/transitive-result-contract", RubyLoader: "require_relative",
+			}); err != nil {
+				t.Fatalf("%s rejected catch over a transitive Result alias contract: %v", mode, err)
+			}
+		})
+	}
+}
+
+func TestTransitiveContractAliasDoesNotBecomeSourceVisible(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/domain/result.trb",
+		ModulePath: "domain/result",
+		Package:    "domain",
+		Source: []byte(`import { Result } from trb/std/result
+
+enum AppError
+	Unavailable
+end
+
+type AppResult<T> = Result<T, AppError>
+`),
+	}
+	service := SourceUnit{
+		Filename:   "/project/application/service.trb",
+		ModulePath: "application/service",
+		Package:    "application",
+		Source: []byte(`import { AppResult } from domain/result
+
+def load_value(): AppResult<Integer>
+	return AppResult<Integer>::Ok(7)
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import { load_value } from application/service
+
+def invalid(_value: AppResult<Integer>): Integer
+	return load_value() catch |_error|
+		0
+	end
+end
+`),
+	}
+
+	_, err := CompileProject([]SourceUnit{contract, service, consumer}, Options{
+		Mode: "go", GoModule: "example.com/transitive-result-visibility",
+	})
+	if err == nil || !strings.Contains(err.Error(), "type AppResult is not declared or imported") {
+		t.Fatalf("expected transitive alias source-visibility diagnostic, got %v", err)
+	}
+}
+
 func TestResultTryAndCatchDiagnosticsAcrossBackends(t *testing.T) {
 	tests := []struct {
 		name   string

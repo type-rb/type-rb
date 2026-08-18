@@ -6764,6 +6764,9 @@ func (c *Checker) aliasDefinition(name string) ([]string, types.Type, bool) {
 	if exported, exists := c.resolution.CompilerOwnedType(name); exists && exported.Kind == resolver.TypeAliasExport {
 		return exported.TypeParameters, exported.AliasTarget, true
 	}
+	if exported, exists := c.resolution.ContractTypeAlias(name); exists {
+		return exported.TypeParameters, exported.AliasTarget, true
+	}
 	return nil, types.Type{}, false
 }
 
