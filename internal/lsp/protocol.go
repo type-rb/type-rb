@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type message struct {
@@ -37,6 +38,7 @@ type notification struct {
 type rpcStream struct {
 	reader *bufio.Reader
 	output io.Writer
+	mu     sync.Mutex
 }
 
 func newRPCStream(input io.Reader, output io.Writer) *rpcStream {
@@ -85,6 +87,8 @@ func (s *rpcStream) write(value any) error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, err := fmt.Fprintf(s.output, "Content-Length: %d\r\n\r\n", len(payload)); err != nil {
 		return err
 	}

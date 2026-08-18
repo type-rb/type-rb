@@ -107,8 +107,9 @@ func (c *CLI) runLSP(args []string) error {
 		ResolveUnit: func(filename string, source []byte) (compiler.SourceUnit, error) {
 			return sourceUnit(config, filename, source)
 		},
-		ResolveWorkspace: resolveWorkspace,
-		Input:            c.Stdin, Output: c.Stdout,
+		ResolveWorkspace:      resolveWorkspace,
+		BackgroundDiagnostics: true,
+		Input:                 c.Stdin, Output: c.Stdout,
 	})
 	return server.Run()
 }

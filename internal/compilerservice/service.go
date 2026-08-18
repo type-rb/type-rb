@@ -20,6 +20,8 @@ type Snapshot struct {
 	Artifacts   []*compiler.Artifact
 	Stale       bool
 	contexts    map[string]languageservice.Context
+	sources     map[string][]byte
+	imports     languageservice.ProjectImportCandidates
 }
 
 func (s Snapshot) HasErrors() bool {
@@ -36,6 +38,22 @@ func (s Snapshot) Context(modulePath string) (languageservice.Context, bool) {
 	return context, ok
 }
 
+// ImportCandidates returns project declarations with one unambiguous import
+// origin, excluding declarations owned by modulePath.
+func (s Snapshot) ImportCandidates(modulePath string) languageservice.Context {
+	return s.imports.ForModule(modulePath)
+}
+
+// Source returns the exact source input analyzed for path. The returned bytes
+// are a copy, so callers cannot mutate the snapshot or a later cached result.
+func (s Snapshot) Source(path string) ([]byte, bool) {
+	source, ok := s.sources[cleanPath(path)]
+	if !ok {
+		return nil, false
+	}
+	return append([]byte(nil), source...), true
+}
+
 // Service maintains immutable snapshots over project inputs and unsaved
 // document overlays. Any input change invalidates the current analysis.
 type Service struct {
@@ -47,13 +65,23 @@ type Service struct {
 	snapshot   *Snapshot
 	lastGood   []*compiler.Artifact
 	contexts   map[string]languageservice.Context
+	imports    languageservice.ProjectImportCandidates
+	compile    func([]compiler.SourceUnit, compiler.Options) ([]*compiler.Artifact, error)
 }
 
 func New(units []compiler.SourceUnit, options compiler.Options) *Service {
 	return &Service{
 		base: cloneUnits(units), options: options, overlays: map[string]compiler.SourceUnit{},
-		generation: 1, contexts: map[string]languageservice.Context{},
+		generation: 1, contexts: map[string]languageservice.Context{}, compile: compiler.CompileProject,
 	}
+}
+
+// Generation returns the current input generation. It advances whenever a
+// workspace input or editor overlay changes.
+func (s *Service) Generation() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.generation
 }
 
 // SetDocument installs an unsaved source unit. Existing project files and new
@@ -169,48 +197,68 @@ func (s *Service) CloseDocument(filename string) {
 // is discarded and analysis restarts from the newer generation.
 func (s *Service) Analyze() Snapshot {
 	for {
-		s.mu.Lock()
-		if s.snapshot != nil {
-			result := *s.snapshot
-			s.mu.Unlock()
+		if result, current := s.AnalyzeOnce(); current {
 			return result
 		}
-		generation := s.generation
-		units := s.currentUnitsLocked()
-		options := s.options
-		lastGood := append([]*compiler.Artifact(nil), s.lastGood...)
-		lastContexts := s.contexts
-		s.mu.Unlock()
-
-		artifacts, err := compiler.CompileProject(units, options)
-		diagnostics := diagnosticsFor(err)
-		contexts := lastContexts
-		stale := err != nil && len(lastGood) > 0
-		visibleArtifacts := lastGood
-		if err == nil {
-			visibleArtifacts = artifacts
-			contexts = buildContexts(artifacts)
-			stale = false
-		}
-		result := Snapshot{
-			Version: generation, Diagnostics: diagnostics,
-			Artifacts: append([]*compiler.Artifact(nil), visibleArtifacts...),
-			Stale:     stale, contexts: contexts,
-		}
-
-		s.mu.Lock()
-		if s.generation != generation {
-			s.mu.Unlock()
-			continue
-		}
-		if err == nil {
-			s.lastGood = append([]*compiler.Artifact(nil), artifacts...)
-			s.contexts = contexts
-		}
-		s.snapshot = &result
-		s.mu.Unlock()
-		return result
 	}
+}
+
+// AnalyzeOnce analyzes one captured input generation. Compilation happens
+// outside the service lock. If an input changes before compilation finishes,
+// the obsolete result is not committed and current is false.
+func (s *Service) AnalyzeOnce() (result Snapshot, current bool) {
+	s.mu.Lock()
+	if s.snapshot != nil {
+		result = *s.snapshot
+		s.mu.Unlock()
+		return result, true
+	}
+	generation := s.generation
+	units := s.currentUnitsLocked()
+	options := s.options
+	lastGood := append([]*compiler.Artifact(nil), s.lastGood...)
+	lastContexts := s.contexts
+	lastImports := s.imports
+	compile := s.compile
+	s.mu.Unlock()
+
+	artifacts, err := compile(units, options)
+	s.mu.Lock()
+	if s.generation != generation {
+		s.mu.Unlock()
+		return Snapshot{}, false
+	}
+	s.mu.Unlock()
+
+	diagnostics := diagnosticsFor(err)
+	contexts := lastContexts
+	imports := lastImports
+	stale := err != nil && len(lastGood) > 0
+	visibleArtifacts := lastGood
+	if err == nil {
+		visibleArtifacts = artifacts
+		contexts = buildContexts(artifacts)
+		imports = buildProjectImportCandidates(artifacts)
+		stale = false
+	}
+	result = Snapshot{
+		Version: generation, Diagnostics: diagnostics,
+		Artifacts: append([]*compiler.Artifact(nil), visibleArtifacts...),
+		Stale:     stale, contexts: contexts, sources: sourceSnapshot(units), imports: imports,
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.generation != generation {
+		return Snapshot{}, false
+	}
+	if err == nil {
+		s.lastGood = append([]*compiler.Artifact(nil), artifacts...)
+		s.contexts = contexts
+		s.imports = imports
+	}
+	s.snapshot = &result
+	return result, true
 }
 
 func (s *Service) currentUnitsLocked() []compiler.SourceUnit {
@@ -250,10 +298,32 @@ func buildContexts(artifacts []*compiler.Artifact) map[string]languageservice.Co
 	return languageservice.BuildContexts(programs)
 }
 
+func buildProjectImportCandidates(artifacts []*compiler.Artifact) languageservice.ProjectImportCandidates {
+	programs := make([]*ir.Program, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if artifact == nil || artifact.IR == nil || artifact.CompilerOwned || artifact.Official || artifact.ExternalPackage {
+			continue
+		}
+		programs = append(programs, artifact.IR)
+	}
+	return languageservice.BuildProjectImportCandidates(programs)
+}
+
 func cloneUnits(units []compiler.SourceUnit) []compiler.SourceUnit {
 	result := make([]compiler.SourceUnit, len(units))
 	for index, unit := range units {
 		result[index] = cloneUnit(unit)
+	}
+	return result
+}
+
+func sourceSnapshot(units []compiler.SourceUnit) map[string][]byte {
+	result := make(map[string][]byte, len(units))
+	for _, unit := range units {
+		// currentUnitsLocked already returns private clones. Transfer those
+		// immutable buffers into the snapshot and copy only when Source exposes
+		// one to a caller.
+		result[cleanPath(unit.Filename)] = unit.Source
 	}
 	return result
 }
@@ -276,8 +346,22 @@ func cloneStrings(values map[string]string) map[string]string {
 
 func equalUnit(left, right compiler.SourceUnit) bool {
 	return left.Filename == right.Filename && left.ModulePath == right.ModulePath && left.Package == right.Package &&
+		equalStrings(left.PackageAliases, right.PackageAliases) &&
 		left.CompilerOwned == right.CompilerOwned && left.Official == right.Official && left.ExternalPackage == right.ExternalPackage &&
+		left.TestRegistration == right.TestRegistration && left.MainReplacement == right.MainReplacement &&
 		bytes.Equal(left.Source, right.Source)
+}
+
+func equalStrings(left, right map[string]string) bool {
+	if (left == nil) != (right == nil) || len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if other, exists := right[key]; !exists || other != value {
+			return false
+		}
+	}
+	return true
 }
 
 func equalUnits(left, right []compiler.SourceUnit) bool {

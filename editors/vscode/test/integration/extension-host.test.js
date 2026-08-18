@@ -253,12 +253,14 @@ end
 		assert.deepEqual(vscode.languages.getDiagnostics(apiURI), []);
 		assert.deepEqual(vscode.languages.getDiagnostics(workerURI), []);
 
-		const definition = await vscode.commands.executeCommand(
-			"vscode.executeDefinitionProvider",
-			apiURI,
-			new vscode.Position(5, 15)
-		);
-		assert.ok(definition?.some((item) => item.uri.toString() === apiURI.toString()), "ApiMessage should resolve within the nested API project");
+		await waitFor(async () => {
+			const definition = await vscode.commands.executeCommand(
+				"vscode.executeDefinitionProvider",
+				apiURI,
+				new vscode.Position(5, 15)
+			);
+			return definition?.some((item) => item.uri.toString() === apiURI.toString());
+		}, "nested API checked definition");
 		const completions = await vscode.commands.executeCommand(
 			"vscode.executeCompletionItemProvider",
 			apiURI,
@@ -274,15 +276,46 @@ end
 		assert.ok(implementations?.some((item) => item.uri.fsPath.endsWith(path.join("apps", "api", "src", "adapter.trb"))), "interface methods should navigate to nested project implementations");
 
 		const original = apiDocument.getText();
-		await replaceDocument(apiDocument, original.replace("\tmessage :=", "  message :="));
+		const editorSettings = vscode.workspace.getConfiguration("editor", {
+			uri: apiURI,
+			languageId: "trb",
+		});
+		const previousFormatOnSave = editorSettings.inspect("formatOnSave")?.globalLanguageValue;
+		const previousDefaultFormatter = editorSettings.inspect("defaultFormatter")?.globalLanguageValue;
 		try {
-			const edits = await vscode.commands.executeCommand("vscode.executeFormatDocumentProvider", apiURI, {
-				tabSize: 4,
-				insertSpaces: false,
-			});
-			assert.ok(edits?.length > 0, "the nested API formatter should repair indentation");
+			await editorSettings.update("formatOnSave", true, vscode.ConfigurationTarget.Global, true);
+			await editorSettings.update("defaultFormatter", "type-rb.typerb", vscode.ConfigurationTarget.Global, true);
+			const activeEditorSettings = vscode.workspace.getConfiguration("editor", apiDocument);
+			assert.equal(activeEditorSettings.get("formatOnSave"), true, "format-on-save must be enabled for TypeRB");
+			assert.equal(activeEditorSettings.get("defaultFormatter"), "type-rb.typerb", "TypeRB must be the selected formatter");
+			assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), apiURI.toString(), "the nested API editor must remain active");
+			const malformed = original.replace("\tmessage :=", "  message :=");
+			assert.notEqual(malformed, original, "the format-on-save fixture must change indentation");
+			await replaceDocument(apiDocument, malformed);
+			await vscode.commands.executeCommand("editor.action.formatDocument");
+			assert.equal(apiDocument.getText(), original, "the configured default formatter should format the active nested API document");
+			await replaceDocument(apiDocument, malformed);
+			assert.equal(await apiDocument.save(), true, "the nested API document should save successfully");
+			assert.equal(apiDocument.getText(), original, "format-on-save should restore the canonical buffer");
+			assert.equal(await readFile(apiURI.fsPath, "utf8"), original, "format-on-save should write canonical source to disk");
 		} finally {
-			await replaceDocument(apiDocument, original);
+			try {
+				if (apiDocument.getText() !== original) {
+					await replaceDocument(apiDocument, original);
+				}
+				if (apiDocument.isDirty) {
+					await apiDocument.save();
+				}
+				if (await readFile(apiURI.fsPath, "utf8") !== original) {
+					await vscode.workspace.fs.writeFile(apiURI, Buffer.from(original));
+				}
+			} finally {
+				try {
+					await editorSettings.update("defaultFormatter", previousDefaultFormatter, vscode.ConfigurationTarget.Global, true);
+				} finally {
+					await editorSettings.update("formatOnSave", previousFormatOnSave, vscode.ConfigurationTarget.Global, true);
+				}
+			}
 		}
 	});
 
