@@ -2,6 +2,20 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.2.31 - 2026-08-18
+
+### Editor tooling
+
+- Visual Studio Code now requests TypeRB completion while identifiers are
+  typed, and unresolved project or standard-library names can add their import
+  from completion or the Quick Fix menu.
+  ([#344](https://github.com/type-rb/type-rb/pull/344))
+- The language server now clears stale diagnostics immediately, and semantic
+  project analysis no longer generates backend source. This substantially
+  reduces diagnostic latency in large workspaces while preserving backend
+  validation.
+  ([#344](https://github.com/type-rb/type-rb/pull/344))
+
 ## 0.2.30 - 2026-08-18
 
 ### Editor tooling

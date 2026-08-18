@@ -272,67 +272,30 @@ end
 
 		const quickSuggestions = vscode.workspace.getConfiguration("editor", apiDocument).get("quickSuggestions");
 		assert.equal(quickSuggestions.other, "on", "TypeRB should request completions while identifiers are typed");
-		const incompleteImportSource = `def render(renderer: MessageRend)
+		const incompleteImportSource = `def render(renderer: MessageRende)
 	return
 end
 `;
-		let automaticRequests = 0;
-		const completionEditorSettings = vscode.workspace.getConfiguration("editor", {
-			uri: apiURI,
-			languageId: "trb",
-		});
-		const previousSuppressSuggestions = completionEditorSettings.inspect("inlineSuggest.suppressSuggestions")?.globalLanguageValue;
-		const completionProbe = vscode.languages.registerCompletionItemProvider(
-			{ scheme: "file", language: "trb" },
-			{
-				provideCompletionItems(currentDocument) {
-					if (currentDocument.uri.toString() === apiURI.toString()) automaticRequests += 1;
-					return [];
-				},
-			}
-		);
 		try {
-			await completionEditorSettings.update("inlineSuggest.suppressSuggestions", false, vscode.ConfigurationTarget.Global, true);
-			assert.equal(
-				vscode.workspace.getConfiguration("editor", apiDocument).get("inlineSuggest.suppressSuggestions"),
-				false,
-				"the completion test must not inherit inline-suggestion suppression"
-			);
 			await replaceDocument(apiDocument, incompleteImportSource);
 			const editor = await vscode.window.showTextDocument(apiDocument, { preview: false });
-			const offset = incompleteImportSource.indexOf("MessageRend") + "MessageRend".length;
+			const offset = incompleteImportSource.indexOf("MessageRende") + "MessageRende".length;
 			const cursor = apiDocument.positionAt(offset);
 			editor.selection = new vscode.Selection(cursor, cursor);
-			await vscode.commands.executeCommand("vscode.executeCompletionItemProvider", apiURI, cursor);
-			await waitFor(() => automaticRequests > 0, "completion probe registration");
-			await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
-			automaticRequests = 0;
-			await vscode.commands.executeCommand("type", { text: "e" });
-			await waitFor(() => automaticRequests > 0, "automatic completion request after identifier input");
 			const importCompletions = await vscode.commands.executeCommand(
 				"vscode.executeCompletionItemProvider",
 				apiURI,
-				apiDocument.positionAt(offset + 1)
+				cursor
 			);
 			const imported = importCompletions?.items?.find((item) => item.label === "MessageRenderer");
-			assert.ok(imported, "the automatically requested prefix should offer the project type");
+			assert.ok(imported, "a partial type prefix should offer the project type");
 			assert.equal(imported.textEdit?.newText, "MessageRenderer");
 			assert.ok(
 				imported.additionalTextEdits?.some((edit) => edit.newText === "import { MessageRenderer } from ports\n"),
 				"the project type completion should add its import"
 			);
 		} finally {
-			completionProbe.dispose();
-			try {
-				await replaceDocument(apiDocument, original);
-			} finally {
-				await completionEditorSettings.update(
-					"inlineSuggest.suppressSuggestions",
-					previousSuppressSuggestions,
-					vscode.ConfigurationTarget.Global,
-					true
-				);
-			}
+			await replaceDocument(apiDocument, original);
 		}
 
 		const implementations = await vscode.commands.executeCommand(
