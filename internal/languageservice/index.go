@@ -301,12 +301,19 @@ func appendImplementation(context *Context, id SymbolID, implementation Definiti
 	context.Implementations[id] = append(context.Implementations[id], implementation)
 }
 
-// BuildImportCandidates indexes declarations from other project modules. A
-// name is offered only when its import path is unambiguous.
-func BuildImportCandidates(programs []*ir.Program, modulePath string) Context {
+// ProjectImportCandidates is an immutable project-wide index of declaration
+// import origins. Ambiguity is resolved after excluding the requesting module.
+type ProjectImportCandidates struct {
+	byName map[string][]Symbol
+}
+
+// BuildProjectImportCandidates indexes declaration origins once for a complete
+// project. Call ForModule to omit declarations owned by the module requesting
+// completion and resolve the remaining names.
+func BuildProjectImportCandidates(programs []*ir.Program) ProjectImportCandidates {
 	byName := map[string][]Symbol{}
 	for _, program := range programs {
-		if program == nil || program.ModulePath == modulePath {
+		if program == nil {
 			continue
 		}
 		metadata := emptyContext()
@@ -314,14 +321,35 @@ func BuildImportCandidates(programs []*ir.Program, modulePath string) Context {
 			byName[symbol.Name] = append(byName[symbol.Name], withImport(symbol, program.ModulePath))
 		}
 	}
+	return ProjectImportCandidates{byName: byName}
+}
+
+// ForModule returns names with exactly one origin after declarations from
+// modulePath have been excluded.
+func (c ProjectImportCandidates) ForModule(modulePath string) Context {
 	result := emptyContext()
-	for _, origins := range byName {
-		if len(origins) == 1 {
-			result.Symbols = append(result.Symbols, origins[0])
+	for _, origins := range c.byName {
+		var candidate Symbol
+		count := 0
+		for _, symbol := range origins {
+			if symbol.Import != nil && symbol.Import.Path == modulePath {
+				continue
+			}
+			candidate = symbol
+			count++
+		}
+		if count == 1 {
+			result.Symbols = append(result.Symbols, candidate)
 		}
 	}
 	sortSymbols(result.Symbols)
 	return result
+}
+
+// BuildImportCandidates indexes declarations from other project modules. A
+// name is offered only when its import path is unambiguous.
+func BuildImportCandidates(programs []*ir.Program, modulePath string) Context {
+	return BuildProjectImportCandidates(programs).ForModule(modulePath)
 }
 
 // StandardImportCandidates returns portable runtime types that can be made
@@ -371,6 +399,26 @@ func MergeImportCandidateSets(contexts ...Context) Context {
 // snapshot when the current source no longer declares or imports that name.
 // This lets completion repair a missing import without weakening diagnostics.
 func MergeImportCandidates(current, candidates Context, source string) Context {
+	visible := sourceVisibleNames(source)
+	result := current
+	byName := make(map[string]Symbol, len(current.Symbols)+len(candidates.Symbols))
+	for _, symbol := range current.Symbols {
+		byName[symbol.Name] = symbol
+	}
+	for _, symbol := range candidates.Symbols {
+		if !visible[symbol.Name] {
+			byName[symbol.Name] = symbol
+		}
+	}
+	result.Symbols = make([]Symbol, 0, len(byName))
+	for _, symbol := range byName {
+		result.Symbols = append(result.Symbols, symbol)
+	}
+	sortSymbols(result.Symbols)
+	return result
+}
+
+func sourceVisibleNames(source string) map[string]bool {
 	visible := map[string]bool{}
 	program, _ := parser.Parse([]byte(source))
 	for name := range resolver.CollectExports(program.Statements) {
@@ -388,22 +436,7 @@ func MergeImportCandidates(current, candidates Context, source string) Context {
 			visible[imported.Alias] = true
 		}
 	}
-	result := current
-	byName := make(map[string]Symbol, len(current.Symbols)+len(candidates.Symbols))
-	for _, symbol := range current.Symbols {
-		byName[symbol.Name] = symbol
-	}
-	for _, symbol := range candidates.Symbols {
-		if !visible[symbol.Name] {
-			byName[symbol.Name] = symbol
-		}
-	}
-	result.Symbols = make([]Symbol, 0, len(byName))
-	for _, symbol := range byName {
-		result.Symbols = append(result.Symbols, symbol)
-	}
-	sortSymbols(result.Symbols)
-	return result
+	return visible
 }
 
 func withImport(symbol Symbol, path string) Symbol {

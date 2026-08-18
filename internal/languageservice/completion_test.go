@@ -2,6 +2,7 @@ package languageservice_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/compiler"
@@ -387,13 +388,95 @@ func TestCompletionMergesAnExistingNamedImport(t *testing.T) {
 	}
 }
 
-func TestProjectImportCandidatesOmitAmbiguousNames(t *testing.T) {
+func TestCompletionCandidateRepairsAStaleCheckedImport(t *testing.T) {
+	checked := languageservice.Context{Symbols: []languageservice.Symbol{{
+		Name: "Result", Kind: languageservice.CompletionType, Detail: "stale checked import",
+	}}}
+	candidates := languageservice.Context{Symbols: []languageservice.Symbol{{
+		Name: "Result", Kind: languageservice.CompletionType,
+		Import: &languageservice.Import{Path: "trb/std/result", Symbol: "Result"},
+	}}}
+	items := languageservice.Complete(languageservice.CompletionRequest{
+		Source: "Res", Cursor: 3, Mode: "go", Context: checked, Candidates: candidates, RepairImports: true,
+	})
+	item, ok := findCompletion(items, "Result")
+	if !ok || len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0].NewText != "import { Result } from trb/std/result\n" {
+		t.Fatalf("repaired Result completion=%#v, ok=%v", item, ok)
+	}
+}
+
+func TestCompletionImportRepairKeepsCurrentLocalSymbols(t *testing.T) {
+	candidates := languageservice.Context{Symbols: []languageservice.Symbol{
+		{Name: "result", Kind: languageservice.CompletionFunction, Import: &languageservice.Import{Path: "support/result", Symbol: "result"}},
+		{Name: "RESULT", Kind: languageservice.CompletionConstant, Import: &languageservice.Import{Path: "support/result", Symbol: "RESULT"}},
+	}}
+	for _, test := range []struct {
+		name   string
+		source string
+		label  string
+	}{
+		{name: "local", source: "result := \"local\"\nres", label: "result"},
+		{name: "parameter", source: "def run(result: String)\n\tres\nend", label: "result"},
+		{name: "constant", source: "RESULT := \"local\"\nRES", label: "RESULT"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cursor := strings.LastIndex(test.source, test.label[:3]) + 3
+			items := languageservice.Complete(languageservice.CompletionRequest{
+				Source: test.source, Cursor: cursor, Mode: "go", Candidates: candidates, RepairImports: true,
+			})
+			item, ok := findCompletion(items, test.label)
+			if !ok || len(item.AdditionalEdits) != 0 {
+				t.Fatalf("current %s completion=%#v, ok=%v", test.name, item, ok)
+			}
+		})
+	}
+}
+
+func TestCompletionUsesCandidateCalleeArgumentMetadata(t *testing.T) {
+	candidates := languageservice.Context{Symbols: []languageservice.Symbol{
+		{
+			Name: "configure", Kind: languageservice.CompletionFunction,
+			Call: &languageservice.CallInfo{ParameterCount: 1, Parameters: []languageservice.CallParameter{{
+				Name: "mode", LiteralValues: []string{"fast", "safe"},
+			}}},
+		},
+		{
+			Name: "associate", Kind: languageservice.CompletionFunction,
+			Call: &languageservice.CallInfo{ParameterCount: 1, Parameters: []languageservice.CallParameter{{
+				Name: "target", ReferenceScopes: []languageservice.ReferenceScope{{
+					Owner: "Owner", Range: languageservice.OffsetRange{Start: 0, End: 1000},
+					Symbols: []languageservice.Symbol{{Name: "Target", Kind: languageservice.CompletionType}},
+				}},
+			}}},
+		},
+	}}
+
+	literalSource := `configure("fa`
+	literal, ok := findCompletion(languageservice.Complete(languageservice.CompletionRequest{
+		Source: literalSource, Cursor: len(literalSource), Mode: "go", Candidates: candidates,
+	}), "fast")
+	if !ok || literal.Kind != languageservice.CompletionValue {
+		t.Fatalf("candidate callee literal completion=%#v, ok=%v", literal, ok)
+	}
+
+	referenceSource := "class Owner\n\tassociate(Tar)\nend\n"
+	referenceCursor := strings.Index(referenceSource, "Tar") + len("Tar")
+	reference, ok := findCompletion(languageservice.Complete(languageservice.CompletionRequest{
+		Source: referenceSource, Cursor: referenceCursor, Mode: "go", Candidates: candidates,
+	}), "Target")
+	if !ok || reference.Kind != languageservice.CompletionType {
+		t.Fatalf("candidate callee reference completion=%#v, ok=%v", reference, ok)
+	}
+}
+
+func TestProjectImportCandidatesOmitAmbiguousAndSameModuleNames(t *testing.T) {
 	programs := []*ir.Program{
 		{ModulePath: "app/main"},
 		{ModulePath: "models/user", Statements: []ir.Statement{&ir.Record{Name: "User"}, &ir.Record{Name: "Unique"}}},
 		{ModulePath: "admin/user", Statements: []ir.Statement{&ir.Record{Name: "User"}}},
 	}
-	candidates := languageservice.BuildImportCandidates(programs, "app/main")
+	project := languageservice.BuildProjectImportCandidates(programs)
+	candidates := project.ForModule("app/main")
 	service := languageservice.New("go")
 	service.SetCandidates(candidates)
 	if _, ok := findCompletion(service.Complete("Us", 2), "User"); ok {
@@ -402,6 +485,15 @@ func TestProjectImportCandidatesOmitAmbiguousNames(t *testing.T) {
 	item, ok := findCompletion(service.Complete("Uni", 3), "Unique")
 	if !ok || item.AdditionalEdits[0].NewText != "import { Unique } from models/user\n" {
 		t.Fatalf("Unique completion=%#v, ok=%v", item, ok)
+	}
+
+	service.SetCandidates(project.ForModule("models/user"))
+	if _, ok := findCompletion(service.Complete("Uni", 3), "Unique"); ok {
+		t.Fatal("same-module Unique candidate was completed")
+	}
+	item, ok = findCompletion(service.Complete("Us", 2), "User")
+	if !ok || len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0].NewText != "import { User } from admin/user\n" {
+		t.Fatalf("external User completion after excluding current module=%#v, ok=%v", item, ok)
 	}
 }
 

@@ -148,7 +148,7 @@ class ProjectManager {
 				documentSelector: [{
 					scheme: "file",
 					language: "trb",
-					pattern: new vscode.RelativePattern(project.sourceRoot, "**/*.trb")
+					pattern: languageClientRelativePattern(project.sourceRoot, "**/*.trb")
 				}],
 				synchronize: { fileEvents: project.watcher },
 				middleware: {
@@ -228,7 +228,7 @@ class ProjectManager {
 					documentSelector: [{
 						scheme: "file",
 						language: "trb",
-						pattern: new vscode.RelativePattern(root, literalGlobPattern(path.basename(filename)))
+						pattern: languageClientRelativePattern(root, literalGlobPattern(path.basename(filename)))
 					}],
 					synchronize: { fileEvents: project.watcher },
 					middleware: {
@@ -488,6 +488,13 @@ class ProjectManager {
 		}));
 		this.standaloneDiagnostics.dispose();
 	}
+}
+
+function languageClientRelativePattern(root, pattern) {
+	// LanguageClient converts protocol selectors back to VS Code selectors.
+	// Supplying the protocol shape preserves the base URI; a vscode.RelativePattern
+	// instance is otherwise reduced to an unscoped language selector.
+	return { baseUri: vscode.Uri.file(root).toString(), pattern };
 }
 
 function textDocumentContentChange(change) {

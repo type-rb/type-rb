@@ -20,7 +20,6 @@ import (
 	"github.com/type-rb/type-rb/internal/compilerservice"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/formatter"
-	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/parser"
@@ -44,8 +43,12 @@ type Options struct {
 	IncludedFiles    []string
 	ResolveUnit      UnitResolver
 	ResolveWorkspace WorkspaceResolver
-	Input            io.Reader
-	Output           io.Writer
+	// BackgroundDiagnostics keeps full-project analysis off the JSON-RPC
+	// request path. Interactive editor transports should enable it; direct
+	// adapters and focused tests may keep synchronous diagnostics.
+	BackgroundDiagnostics bool
+	Input                 io.Reader
+	Output                io.Writer
 }
 
 type document struct {
@@ -55,22 +58,30 @@ type document struct {
 }
 
 type Server struct {
-	mode             string
-	version          string
-	stream           *rpcStream
-	compiler         *compilerservice.Service
-	resolveUnit      UnitResolver
-	resolveWorkspace WorkspaceResolver
-	sourceRoot       string
-	excludedRoots    []string
-	includedFiles    map[string]bool
-	documents        map[string]document
-	base             map[string]compiler.SourceUnit
-	fileRootFiles    map[string]bool
-	published        map[string]bool
-	snapshot         compilerservice.Snapshot
-	runSupported     bool
-	importCandidates languageservice.Context
+	mode                 string
+	version              string
+	stream               *rpcStream
+	compiler             *compilerservice.Service
+	resolveUnit          UnitResolver
+	resolveWorkspace     WorkspaceResolver
+	sourceRoot           string
+	excludedRoots        []string
+	includedFiles        map[string]bool
+	documents            map[string]document
+	base                 map[string]compiler.SourceUnit
+	fileRootFiles        map[string]bool
+	published            map[string]bool
+	snapshot             compilerservice.Snapshot
+	diagnostics          *diagnosticCoordinator
+	runSupported         bool
+	standardCandidates   languageservice.Context
+	completionCandidates completionCandidateCache
+}
+
+type completionCandidateCache struct {
+	modulePath string
+	context    languageservice.Context
+	valid      bool
 }
 
 const textDocumentSyncIncremental = 2
@@ -103,16 +114,20 @@ func New(options Options) *Server {
 			includedFiles[cleanPath(filename)] = true
 		}
 	}
-	return &Server{
+	server := &Server{
 		mode: options.Mode, version: options.Version,
 		stream:   newRPCStream(options.Input, options.Output),
 		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit,
 		resolveWorkspace: options.ResolveWorkspace,
 		sourceRoot:       sourceRoot, excludedRoots: excludedRoots, includedFiles: includedFiles,
 		documents: map[string]document{}, base: base, fileRootFiles: initialFileRootFiles(base, options.ResolveWorkspace != nil), published: map[string]bool{},
-		runSupported:     options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
-		importCandidates: languageservice.StandardImportCandidates(options.Mode),
+		runSupported:       options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
+		standardCandidates: languageservice.StandardImportCandidates(options.Mode),
 	}
+	if options.BackgroundDiagnostics {
+		server.diagnostics = newDiagnosticCoordinator(diagnosticDebounce, server.compiler.AnalyzeOnce, server.compiler.Generation)
+	}
+	return server
 }
 
 func initialFileRootFiles(base map[string]compiler.SourceUnit, dynamic bool) map[string]bool {
@@ -127,20 +142,59 @@ func initialFileRootFiles(base map[string]compiler.SourceUnit, dynamic bool) map
 }
 
 func (s *Server) Run() error {
+	s.diagnostics.Start()
+	defer s.diagnostics.Stop(diagnosticShutdownGrace)
+	type readResult struct {
+		request message
+		err     error
+	}
+	reads := make(chan readResult)
+	readAcknowledged := make(chan struct{}, 1)
+	readerStop := make(chan struct{})
+	defer close(readerStop)
+	go func() {
+		for {
+			request, err := s.stream.read()
+			select {
+			case reads <- readResult{request: request, err: err}:
+			case <-readerStop:
+				return
+			}
+			if err != nil {
+				return
+			}
+			select {
+			case <-readAcknowledged:
+			case <-readerStop:
+				return
+			}
+		}
+	}()
 	for {
-		request, err := s.stream.read()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		exit, err := s.handle(request)
-		if err != nil {
-			return err
-		}
-		if exit {
-			return nil
+		select {
+		case read := <-reads:
+			if errors.Is(read.err, io.EOF) {
+				return nil
+			}
+			if read.err != nil {
+				return read.err
+			}
+			exit, err := s.handle(read.request)
+			if err != nil {
+				return err
+			}
+			if exit {
+				return nil
+			}
+			readAcknowledged <- struct{}{}
+		case result, open := <-s.diagnostics.Results():
+			if !open {
+				s.diagnostics = nil
+				continue
+			}
+			if err := s.applyDiagnosticResult(result); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -173,7 +227,7 @@ func (s *Server) handle(request message) (bool, error) {
 			ServerInfo: serverInfo{Name: "TypeRB", Version: s.version},
 		}))
 	case "initialized":
-		return false, s.publish()
+		return false, s.requestDiagnostics()
 	case "$/cancelRequest", "workspace/didChangeConfiguration":
 		return false, nil
 	case "workspace/didChangeWatchedFiles":
@@ -307,7 +361,7 @@ func (s *Server) codeLenses(request message) error {
 
 func (s *Server) discoverTests(request message) error {
 	result := []testItem{}
-	for _, semantic := range s.semanticDocuments() {
+	for _, semantic := range s.semanticDocuments(s.currentSnapshot()) {
 		if !testsuite.IsTestFile(semantic.Path) {
 			continue
 		}
@@ -331,7 +385,7 @@ func (s *Server) workspaceSymbols(request message) error {
 	}
 	query := strings.ToLower(params.Query)
 	result := []symbolInformation{}
-	for _, document := range s.semanticDocuments() {
+	for _, document := range s.semanticDocuments(s.currentSnapshot()) {
 		source := []byte(document.Source)
 		uri := uriFromPath(document.Path)
 		for _, item := range languageservice.DocumentSymbols(document.Source) {
@@ -386,7 +440,7 @@ func (s *Server) semanticTokens(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, semanticTokens{Data: []int{}}))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	context, _ := s.currentSnapshot().Context(document.unit.ModulePath)
 	spans := languageservice.Highlight(languageservice.HighlightRequest{
 		Source: string(document.source), Mode: s.mode, Context: context,
 	})
@@ -579,7 +633,7 @@ func (s *Server) open(item textDocumentItem) error {
 		return s.refreshFileRootWorkspace()
 	}
 	s.compiler.SetDocument(unit)
-	return s.publish()
+	return s.requestDiagnostics()
 }
 
 func (s *Server) change(params didChangeParams) error {
@@ -594,13 +648,13 @@ func (s *Server) change(params didChangeParams) error {
 	if !exists {
 		return s.showError(fmt.Errorf("cannot change unopened document %s", path))
 	}
+	if current.version > 0 && params.TextDocument.Version > 0 && params.TextDocument.Version <= current.version {
+		return nil
+	}
 	if len(params.ContentChanges) == 0 {
 		current.version = params.TextDocument.Version
 		s.documents[path] = current
-		return nil
-	}
-	if current.version > 0 && params.TextDocument.Version > 0 && params.TextDocument.Version <= current.version {
-		return nil
+		return s.requestDiagnostics()
 	}
 	source, err := applyContentChanges(current.source, params.ContentChanges)
 	if err != nil {
@@ -615,7 +669,7 @@ func (s *Server) change(params didChangeParams) error {
 		return s.refreshFileRootWorkspace()
 	}
 	s.compiler.SetDocument(unit)
-	return s.publish()
+	return s.requestDiagnostics()
 }
 
 func (s *Server) save(params didSaveParams) error {
@@ -635,7 +689,7 @@ func (s *Server) save(params didSaveParams) error {
 		s.documents[path] = document{unit: unit, source: source, version: current.version}
 		if s.resolveWorkspace == nil {
 			s.compiler.SetDocument(unit)
-			return s.publish()
+			return s.requestDiagnostics()
 		}
 	}
 	if s.resolveWorkspace != nil {
@@ -684,7 +738,7 @@ func (s *Server) close(uri string) error {
 		return s.refreshFileRootWorkspace()
 	}
 	s.compiler.CloseDocument(path)
-	return s.publish()
+	return s.requestDiagnostics()
 }
 
 func (s *Server) changeWorkspaceFiles(params didChangeWatchedFilesParams) error {
@@ -742,7 +796,7 @@ func (s *Server) changeWorkspaceFiles(params didChangeWatchedFilesParams) error 
 	if !changed {
 		return nil
 	}
-	return s.publish()
+	return s.requestDiagnostics()
 }
 
 func (s *Server) workspaceSourcePath(path string) bool {
@@ -800,7 +854,7 @@ func (s *Server) refreshFileRootWorkspace() error {
 			return err
 		}
 	}
-	return s.publish()
+	return s.requestDiagnostics()
 }
 
 func (s *Server) currentFileRootFiles() []string {
@@ -840,23 +894,15 @@ func (s *Server) completion(request message) error {
 	}
 	document, ok := s.document(path)
 	if !ok {
-		return s.stream.write(success(request.ID, []completionItem{}))
+		return s.stream.write(success(request.ID, completionList{Items: []completionItem{}}))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
-	programs := make([]*ir.Program, 0, len(s.snapshot.Artifacts))
-	for _, artifact := range s.snapshot.Artifacts {
-		if artifact != nil && !artifact.CompilerOwned && !artifact.Official && !artifact.ExternalPackage {
-			programs = append(programs, artifact.IR)
-		}
-	}
-	candidates := languageservice.MergeImportCandidateSets(
-		languageservice.BuildImportCandidates(programs, document.unit.ModulePath),
-		s.importCandidates,
-	)
-	context = languageservice.MergeImportCandidates(context, candidates, string(document.source))
+	snapshot := s.currentSnapshot()
+	isIncomplete := snapshot.Version == 0 || snapshot.Version != s.compiler.Generation()
+	context, _ := snapshot.Context(document.unit.ModulePath)
+	candidates := s.candidatesForCompletion(snapshot, document.unit.ModulePath)
 	cursor := offsetAt(document.source, params.Position)
 	items := languageservice.Complete(languageservice.CompletionRequest{
-		Source: string(document.source), Cursor: cursor, Mode: s.mode, Context: context,
+		Source: string(document.source), Cursor: cursor, Mode: s.mode, Context: context, Candidates: candidates, RepairImports: true,
 	})
 	result := make([]completionItem, 0, len(items))
 	for _, item := range items {
@@ -870,7 +916,7 @@ func (s *Server) completion(request message) error {
 			AdditionalTextEdits: protocolEdits,
 		})
 	}
-	return s.stream.write(success(request.ID, result))
+	return s.stream.write(success(request.ID, completionList{IsIncomplete: isIncomplete, Items: result}))
 }
 
 func (s *Server) hover(request message) error {
@@ -886,7 +932,7 @@ func (s *Server) hover(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, nil))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	context, _ := s.currentSnapshot().Context(document.unit.ModulePath)
 	info, ok := languageservice.Hover(languageservice.SemanticRequest{
 		Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
 	})
@@ -913,7 +959,7 @@ func (s *Server) signatureHelp(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, nil))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	context, _ := s.currentSnapshot().Context(document.unit.ModulePath)
 	info, ok := languageservice.Signatures(languageservice.SemanticRequest{
 		Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
 	})
@@ -947,7 +993,7 @@ func (s *Server) definition(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, nil))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	context, _ := s.currentSnapshot().Context(document.unit.ModulePath)
 	info, ok := languageservice.Definition(languageservice.SemanticRequest{
 		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
 	})
@@ -976,7 +1022,7 @@ func (s *Server) implementation(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, []location{}))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	context, _ := s.currentSnapshot().Context(document.unit.ModulePath)
 	items, ok := languageservice.Implementations(languageservice.SemanticRequest{
 		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
 	})
@@ -1008,10 +1054,11 @@ func (s *Server) references(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, []location{}))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	snapshot := s.currentSnapshot()
+	context, _ := snapshot.Context(document.unit.ModulePath)
 	items, ok := languageservice.References(languageservice.SemanticRequest{
 		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
-	}, s.semanticDocuments(), params.Context.IncludeDeclaration)
+	}, s.semanticDocuments(snapshot), params.Context.IncludeDeclaration)
 	if !ok {
 		return s.stream.write(success(request.ID, []location{}))
 	}
@@ -1039,10 +1086,11 @@ func (s *Server) documentHighlights(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, []documentHighlight{}))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	snapshot := s.currentSnapshot()
+	context, _ := snapshot.Context(document.unit.ModulePath)
 	items, ok := languageservice.References(languageservice.SemanticRequest{
 		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
-	}, s.semanticDocuments(), true)
+	}, s.semanticDocuments(snapshot), true)
 	if !ok {
 		return s.stream.write(success(request.ID, []documentHighlight{}))
 	}
@@ -1106,11 +1154,15 @@ func (s *Server) prepareRename(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, nil))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	snapshot, current := s.currentAnalyzedSnapshot()
+	if !current {
+		return s.stream.write(success(request.ID, nil))
+	}
+	context, _ := snapshot.Context(document.unit.ModulePath)
 	cursor := offsetAt(document.source, params.Position)
 	items, ok := languageservice.References(languageservice.SemanticRequest{
 		Path: path, Source: string(document.source), Cursor: cursor, Mode: s.mode, Context: context,
-	}, s.semanticDocuments(), true)
+	}, s.semanticDocuments(snapshot), true)
 	if !ok || len(items) == 0 {
 		return s.stream.write(success(request.ID, nil))
 	}
@@ -1139,10 +1191,14 @@ func (s *Server) rename(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, nil))
 	}
-	context, _ := s.snapshot.Context(document.unit.ModulePath)
+	snapshot, current := s.currentAnalyzedSnapshot()
+	if !current {
+		return s.stream.write(success(request.ID, nil))
+	}
+	context, _ := snapshot.Context(document.unit.ModulePath)
 	items, ok := languageservice.References(languageservice.SemanticRequest{
 		Path: path, Source: string(document.source), Cursor: offsetAt(document.source, params.Position), Mode: s.mode, Context: context,
-	}, s.semanticDocuments(), true)
+	}, s.semanticDocuments(snapshot), true)
 	if !ok || len(items) == 0 {
 		return s.stream.write(success(request.ID, nil))
 	}
@@ -1195,7 +1251,11 @@ func (s *Server) codeActions(request message) error {
 	requestStart := offsetAt(document.source, params.Range.Start)
 	requestEnd := offsetAt(document.source, params.Range.End)
 	actions := []codeAction{}
-	for _, item := range s.snapshot.Diagnostics {
+	snapshot, current := s.currentAnalyzedSnapshot()
+	if !current {
+		return s.stream.write(success(request.ID, actions))
+	}
+	for _, item := range snapshot.Diagnostics {
 		if cleanPath(item.Path) != path || !overlaps(item.Span.Start.Offset, item.Span.End.Offset, requestStart, requestEnd) {
 			continue
 		}
@@ -1220,10 +1280,42 @@ func (s *Server) codeActions(request message) error {
 	return s.stream.write(success(request.ID, actions))
 }
 
+func (s *Server) requestDiagnostics() error {
+	if s.diagnostics == nil {
+		return s.publish()
+	}
+	s.diagnostics.Request(s.captureDiagnosticRequest())
+	return nil
+}
+
+func (s *Server) captureDiagnosticRequest() diagnosticRequest {
+	targets := make(map[string]bool, len(s.documents))
+	versions := make(map[string]int, len(s.documents))
+	for path, document := range s.documents {
+		versions[path] = document.version
+		if s.resolveWorkspace == nil || s.fileRootFiles[path] {
+			targets[path] = true
+		}
+	}
+	return diagnosticRequest{generation: s.compiler.Generation(), targets: targets, versions: versions}
+}
+
 func (s *Server) publish() error {
-	s.snapshot = s.compiler.Analyze()
+	snapshot := s.compiler.Analyze()
+	return s.applySnapshot(snapshot, s.captureDiagnosticRequest())
+}
+
+func (s *Server) applyDiagnosticResult(result diagnosticResult) error {
+	if result.snapshot.Version != result.request.generation || s.compiler.Generation() != result.request.generation {
+		return nil
+	}
+	return s.applySnapshot(result.snapshot, result.request)
+}
+
+func (s *Server) applySnapshot(snapshot compilerservice.Snapshot, request diagnosticRequest) error {
+	s.setSnapshot(snapshot)
 	grouped := map[string][]diagnostic.Diagnostic{}
-	for _, item := range s.snapshot.Diagnostics {
+	for _, item := range snapshot.Diagnostics {
 		if item.Path == "" {
 			if err := s.showError(errors.New(item.Message)); err != nil {
 				return err
@@ -1240,10 +1332,8 @@ func (s *Server) publish() error {
 	for path := range grouped {
 		targets[path] = true
 	}
-	for path := range s.documents {
-		if s.resolveWorkspace == nil || s.fileRootFiles[path] {
-			targets[path] = true
-		}
+	for path := range request.targets {
+		targets[path] = true
 	}
 	paths := make([]string, 0, len(targets))
 	for path := range targets {
@@ -1251,14 +1341,16 @@ func (s *Server) publish() error {
 	}
 	sort.Strings(paths)
 	for _, path := range paths {
-		source, _ := s.source(path)
+		source, _ := snapshot.Source(path)
 		items := make([]protocolDiagnostic, 0, len(grouped[path]))
 		for _, item := range grouped[path] {
-			items = append(items, s.protocolDiagnostic(source, item))
+			items = append(items, s.protocolDiagnostic(snapshot, source, item))
 		}
-		if err := s.stream.write(notification{JSONRPC: "2.0", Method: "textDocument/publishDiagnostics", Params: publishDiagnosticsParams{
-			URI: uriFromPath(path), Diagnostics: items,
-		}}); err != nil {
+		params := publishDiagnosticsParams{URI: uriFromPath(path), Diagnostics: items}
+		if version, ok := request.versions[path]; ok {
+			params.Version = &version
+		}
+		if err := s.stream.write(notification{JSONRPC: "2.0", Method: "textDocument/publishDiagnostics", Params: params}); err != nil {
 			return err
 		}
 		if len(items) == 0 {
@@ -1270,7 +1362,7 @@ func (s *Server) publish() error {
 	return nil
 }
 
-func (s *Server) protocolDiagnostic(source []byte, item diagnostic.Diagnostic) protocolDiagnostic {
+func (s *Server) protocolDiagnostic(snapshot compilerservice.Snapshot, source []byte, item diagnostic.Diagnostic) protocolDiagnostic {
 	severity := 1
 	if item.Severity == diagnostic.Warning {
 		severity = 2
@@ -1281,7 +1373,7 @@ func (s *Server) protocolDiagnostic(source []byte, item diagnostic.Diagnostic) p
 	}
 	for _, related := range item.Related {
 		relatedPath := cleanPath(related.Location.Path)
-		relatedSource, _ := s.source(relatedPath)
+		relatedSource, _ := snapshot.Source(relatedPath)
 		result.RelatedInformation = append(result.RelatedInformation, relatedInformation{
 			Location: location{URI: uriFromPath(relatedPath), Range: sourceSpan(relatedSource, related.Location.Span)},
 			Message:  related.Message,
@@ -1291,6 +1383,34 @@ func (s *Server) protocolDiagnostic(source []byte, item diagnostic.Diagnostic) p
 		result.Data = map[string]interface{}{"fixes": len(item.Fixes)}
 	}
 	return result
+}
+
+func (s *Server) currentSnapshot() compilerservice.Snapshot {
+	return s.snapshot
+}
+
+func (s *Server) setSnapshot(snapshot compilerservice.Snapshot) {
+	if s.snapshot.Version != snapshot.Version {
+		s.completionCandidates = completionCandidateCache{}
+	}
+	s.snapshot = snapshot
+}
+
+func (s *Server) candidatesForCompletion(snapshot compilerservice.Snapshot, modulePath string) languageservice.Context {
+	if s.completionCandidates.valid && s.completionCandidates.modulePath == modulePath {
+		return s.completionCandidates.context
+	}
+	candidates := languageservice.MergeImportCandidateSets(
+		snapshot.ImportCandidates(modulePath),
+		s.standardCandidates,
+	)
+	s.completionCandidates = completionCandidateCache{modulePath: modulePath, context: candidates, valid: true}
+	return candidates
+}
+
+func (s *Server) currentAnalyzedSnapshot() (compilerservice.Snapshot, bool) {
+	snapshot := s.currentSnapshot()
+	return snapshot, snapshot.Version != 0 && snapshot.Version == s.compiler.Generation()
 }
 
 func (s *Server) unit(path string, source []byte) (compiler.SourceUnit, error) {
@@ -1330,7 +1450,7 @@ func (s *Server) source(path string) ([]byte, bool) {
 	return document.source, exists
 }
 
-func (s *Server) semanticDocuments() []languageservice.SemanticDocument {
+func (s *Server) semanticDocuments(snapshot compilerservice.Snapshot) []languageservice.SemanticDocument {
 	paths := make(map[string]bool, len(s.base)+len(s.documents))
 	for path := range s.base {
 		paths[path] = true
@@ -1351,7 +1471,7 @@ func (s *Server) semanticDocuments() []languageservice.SemanticDocument {
 		if !exists {
 			continue
 		}
-		context, _ := s.snapshot.Context(document.unit.ModulePath)
+		context, _ := snapshot.Context(document.unit.ModulePath)
 		result = append(result, languageservice.SemanticDocument{
 			Path: path, Source: string(document.source), Mode: s.mode, Context: context,
 		})

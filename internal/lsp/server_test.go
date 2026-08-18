@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,10 +13,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/compiler"
+	"github.com/type-rb/type-rb/internal/compilerservice"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/parser"
 )
@@ -57,19 +61,19 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 	}
 	var opened publishDiagnosticsParams
 	decodeParamsFrame(t, frames[1], &opened)
-	if len(opened.Diagnostics) != 0 {
+	if opened.Version == nil || *opened.Version != 1 || len(opened.Diagnostics) != 0 {
 		t.Fatalf("valid document diagnostics=%#v", opened.Diagnostics)
 	}
 	var changed publishDiagnosticsParams
 	decodeParamsFrame(t, frames[2], &changed)
-	if len(changed.Diagnostics) == 0 || changed.Diagnostics[0].Code != "TRB3000" {
+	if changed.Version == nil || *changed.Version != 2 || len(changed.Diagnostics) == 0 || changed.Diagnostics[0].Code != "TRB3000" {
 		t.Fatalf("invalid document diagnostics=%#v", changed.Diagnostics)
 	}
 
-	var completions []completionItem
+	var completions completionList
 	decodeResult(t, frames[3], &completions)
-	if !containsCompletion(completions, "greet") {
-		t.Fatalf("completion response does not contain greet: %#v", completions)
+	if completions.IsIncomplete || !containsCompletion(completions.Items, "greet") {
+		t.Fatalf("completion response does not contain a complete greet result: %#v", completions)
 	}
 	var edits []textEdit
 	decodeResult(t, frames[4], &edits)
@@ -78,6 +82,460 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 	}
 	if string(frames[5]["result"]) != "null" {
 		t.Fatalf("shutdown result=%s, want null", frames[5]["result"])
+	}
+}
+
+func TestServerServesCompletionAndFormattingWhileDiagnosticsAreRunning(t *testing.T) {
+	filename := cleanPath("main.trb")
+	valid := "record Message\n\ttext: String\nend\n\ndef render(message: Message)\n\tputs(message.text)\n\treturn\nend\n"
+	changed := "record Message\n\ttext: String\nend\n\ndef render(message: Message)\n  puts(message.te)\n\treturn\nend\n"
+	uri := uriFromPath(filename)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Package: "main", Source: []byte(valid)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.open(textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: valid}); err != nil {
+		t.Fatal(err)
+	}
+	enableTestBackgroundDiagnostics(server)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	originalAnalyze := server.diagnostics.analyze
+	server.diagnostics.analyze = func() (compilerservice.Snapshot, bool) {
+		close(started)
+		<-release
+		return originalAnalyze()
+	}
+	server.diagnostics.Start()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		server.diagnostics.Stop(diagnosticShutdownGrace)
+	}()
+
+	output.Reset()
+	if err := server.change(didChangeParams{
+		TextDocument:   versionedTextDocumentIdentifier{URI: uri, Version: 2},
+		ContentChanges: []contentChange{{Text: changed}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitForTestSignal(t, started, "diagnostics analysis to start")
+	if server.documents[filename].version != 2 {
+		t.Fatalf("document version=%d, want 2", server.documents[filename].version)
+	}
+	cursor := positionAt([]byte(changed), strings.Index(changed, "message.te")+len("message.te"))
+	if err := server.completion(message{
+		JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "textDocument/completion",
+		Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: cursor}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.format(message{
+		JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/formatting",
+		Params: rawParams(t, formattingParams{TextDocument: textDocumentIdentifier{URI: uri}}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 2 {
+		t.Fatalf("response count=%d, want 2: %s", len(frames), output.String())
+	}
+	var completions completionList
+	decodeResult(t, frames[0], &completions)
+	if !completions.IsIncomplete || !containsCompletion(completions.Items, "text") {
+		t.Fatalf("completion response does not contain text: %#v", completions)
+	}
+	var edits []textEdit
+	decodeResult(t, frames[1], &edits)
+	if len(edits) != 1 || !strings.Contains(edits[0].NewText, "\tputs(message.te)") {
+		t.Fatalf("unexpected formatting edits: %#v", edits)
+	}
+}
+
+func TestServerServesLocalCompletionAndFormattingDuringInitialAnalysis(t *testing.T) {
+	filename := cleanPath("main.trb")
+	source := "def greet(name: String): String\n  return name\nend\n\ngre"
+	uri := uriFromPath(filename)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	enableTestBackgroundDiagnostics(server)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	originalAnalyze := server.diagnostics.analyze
+	server.diagnostics.analyze = func() (compilerservice.Snapshot, bool) {
+		close(started)
+		<-release
+		return originalAnalyze()
+	}
+	if err := server.open(textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}); err != nil {
+		t.Fatal(err)
+	}
+	server.diagnostics.Start()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		server.diagnostics.Stop(diagnosticShutdownGrace)
+	}()
+	waitForTestSignal(t, started, "initial diagnostics analysis to start")
+	if server.currentSnapshot().Version != 0 {
+		t.Fatal("initial analysis unexpectedly completed before the language requests")
+	}
+	if err := server.completion(message{
+		JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "textDocument/completion",
+		Params: rawParams(t, documentPositionParams{
+			TextDocument: textDocumentIdentifier{URI: uri},
+			Position:     positionAt([]byte(source), len(source)),
+		}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.format(message{
+		JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/formatting",
+		Params: rawParams(t, formattingParams{TextDocument: textDocumentIdentifier{URI: uri}}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 2 {
+		t.Fatalf("response count=%d, want 2: %s", len(frames), output.String())
+	}
+	var completions completionList
+	decodeResult(t, frames[0], &completions)
+	if !completions.IsIncomplete || !containsCompletion(completions.Items, "greet") {
+		t.Fatalf("cold local completion response does not contain greet: %#v", completions)
+	}
+	var edits []textEdit
+	decodeResult(t, frames[1], &edits)
+	if len(edits) != 1 || !strings.Contains(edits[0].NewText, "\treturn name") {
+		t.Fatalf("cold formatting edits=%#v", edits)
+	}
+}
+
+func TestServerCoalescesBackgroundDiagnostics(t *testing.T) {
+	filename := cleanPath("main.trb")
+	valid := "def run()\n\treturn\nend\n"
+	uri := uriFromPath(filename)
+	output := &synchronizedBuffer{}
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Package: "main", Source: []byte(valid)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.open(textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: valid}); err != nil {
+		t.Fatal(err)
+	}
+	enableTestBackgroundDiagnostics(server)
+	output.Reset()
+	sources := []string{
+		"def run()\n\tmissing_old()\n\treturn\nend\n",
+		valid,
+		"def run()\n\tmissing_final()\n\treturn\nend\n",
+	}
+	for index, source := range sources {
+		if err := server.change(didChangeParams{
+			TextDocument:   versionedTextDocumentIdentifier{URI: uri, Version: index + 2},
+			ContentChanges: []contentChange{{Text: source}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if queued := len(server.diagnostics.requests); queued != 1 {
+		t.Fatalf("queued analyses=%d, want one coalesced request", queued)
+	}
+	calls := 0
+	originalAnalyze := server.diagnostics.analyze
+	server.diagnostics.analyze = func() (compilerservice.Snapshot, bool) {
+		calls++
+		return originalAnalyze()
+	}
+	server.diagnostics.Start()
+	t.Cleanup(func() { server.diagnostics.Stop(diagnosticShutdownGrace) })
+	result := waitForDiagnosticResult(t, server.diagnostics.Results(), "coalesced diagnostics analysis")
+	if version := server.currentSnapshot().Version; version != 1 {
+		t.Fatalf("diagnostics worker applied snapshot version %d, want main-loop snapshot version 1", version)
+	}
+	if len(output.Bytes()) != 0 {
+		t.Fatalf("diagnostics worker wrote protocol output before the result was applied: %s", output.String())
+	}
+	if err := server.applyDiagnosticResult(result); err != nil {
+		t.Fatal(err)
+	}
+	server.diagnostics.Stop(diagnosticShutdownGrace)
+	if calls != 1 {
+		t.Fatalf("analysis calls=%d, want 1", calls)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 1 {
+		t.Fatalf("published frames=%d, want 1: %s", len(frames), output.String())
+	}
+	var published publishDiagnosticsParams
+	decodeParamsFrame(t, frames[0], &published)
+	if published.Version == nil || *published.Version != 4 || len(published.Diagnostics) != 1 || !strings.Contains(published.Diagnostics[0].Message, "missing_final") || strings.Contains(published.Diagnostics[0].Message, "missing_old") {
+		t.Fatalf("coalesced diagnostics=%#v", published.Diagnostics)
+	}
+}
+
+func TestServerDoesNotPublishObsoleteBackgroundDiagnostics(t *testing.T) {
+	filename := cleanPath("main.trb")
+	valid := "def run()\n\treturn\nend\n"
+	oldInvalid := "def run()\n\tmissing_old()\n\treturn\nend\n"
+	finalInvalid := "def run()\n\tmissing_final()\n\treturn\nend\n"
+	uri := uriFromPath(filename)
+	output := &synchronizedBuffer{}
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Package: "main", Source: []byte(valid)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.open(textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: valid}); err != nil {
+		t.Fatal(err)
+	}
+	enableTestBackgroundDiagnostics(server)
+	output.Reset()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	calls := 0
+	originalAnalyze := server.diagnostics.analyze
+	server.diagnostics.analyze = func() (compilerservice.Snapshot, bool) {
+		calls++
+		if calls == 1 {
+			generation := server.compiler.Generation()
+			close(started)
+			<-release
+			return compilerservice.Snapshot{Version: generation}, true
+		}
+		return originalAnalyze()
+	}
+	server.diagnostics.Start()
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		server.diagnostics.Stop(diagnosticShutdownGrace)
+	})
+	if err := server.change(didChangeParams{
+		TextDocument:   versionedTextDocumentIdentifier{URI: uri, Version: 2},
+		ContentChanges: []contentChange{{Text: oldInvalid}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitForTestSignal(t, started, "obsolete diagnostics analysis to start")
+	for index, source := range []string{valid, finalInvalid} {
+		if err := server.change(didChangeParams{
+			TextDocument:   versionedTextDocumentIdentifier{URI: uri, Version: index + 3},
+			ContentChanges: []contentChange{{Text: source}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	releaseOnce.Do(func() { close(release) })
+	result := waitForDiagnosticResult(t, server.diagnostics.Results(), "current diagnostics analysis")
+	if err := server.applyDiagnosticResult(result); err != nil {
+		t.Fatal(err)
+	}
+	server.diagnostics.Stop(diagnosticShutdownGrace)
+	if calls != 2 {
+		t.Fatalf("analysis calls=%d, want obsolete and current analyses", calls)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 1 {
+		t.Fatalf("published frames=%d, want only the current result: %s", len(frames), output.String())
+	}
+	var published publishDiagnosticsParams
+	decodeParamsFrame(t, frames[0], &published)
+	if published.Version == nil || *published.Version != 4 || len(published.Diagnostics) != 1 || !strings.Contains(published.Diagnostics[0].Message, "missing_final") || strings.Contains(published.Diagnostics[0].Message, "missing_old") {
+		t.Fatalf("published obsolete diagnostics: %#v", published.Diagnostics)
+	}
+}
+
+func TestServerSuppressesEditsFromAStaleSnapshot(t *testing.T) {
+	filename := cleanPath("user.trb")
+	original := "record User\n\tid: Int\nend\n"
+	changed := "\n" + original
+	uri := uriFromPath(filename)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "user", Package: "main", Source: []byte(original)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.open(textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: original}); err != nil {
+		t.Fatal(err)
+	}
+	enableTestBackgroundDiagnostics(server)
+	output.Reset()
+	if err := server.change(didChangeParams{
+		TextDocument:   versionedTextDocumentIdentifier{URI: uri, Version: 2},
+		ContentChanges: []contentChange{{Text: changed}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, current := server.currentAnalyzedSnapshot(); current {
+		t.Fatal("snapshot unexpectedly remained current after the edit")
+	}
+	if err := server.codeActions(message{
+		JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "textDocument/codeAction",
+		Params: rawParams(t, codeActionParams{
+			TextDocument: textDocumentIdentifier{URI: uri},
+			Range:        rangeValue{Start: position{Line: 2, Character: 5}, End: position{Line: 2, Character: 8}},
+		}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	userPosition := position{Line: 1, Character: 8}
+	if err := server.prepareRename(message{
+		JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/prepareRename",
+		Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: userPosition}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.rename(message{
+		JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "textDocument/rename",
+		Params: rawParams(t, renameParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: userPosition, NewName: "Account"}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 3 {
+		t.Fatalf("response count=%d, want 3: %s", len(frames), output.String())
+	}
+	var actions []codeAction
+	decodeResult(t, frames[0], &actions)
+	if len(actions) != 0 {
+		t.Fatalf("stale quick fixes=%#v, want none", actions)
+	}
+	if string(frames[1]["result"]) != "null" || string(frames[2]["result"]) != "null" {
+		t.Fatalf("stale rename results=%s / %s, want null", frames[1]["result"], frames[2]["result"])
+	}
+}
+
+func TestServerRepublishesDiagnosticsForAnAcceptedVersionOnlyChange(t *testing.T) {
+	filename := cleanPath("main.trb")
+	source := "missing()\n"
+	uri := uriFromPath(filename)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Package: "main", Source: []byte(source)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.open(textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := server.change(didChangeParams{TextDocument: versionedTextDocumentIdentifier{URI: uri, Version: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.change(didChangeParams{TextDocument: versionedTextDocumentIdentifier{URI: uri, Version: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if version := server.documents[filename].version; version != 2 {
+		t.Fatalf("document version=%d, want 2 after ignoring an out-of-order empty change", version)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 1 {
+		t.Fatalf("published frames=%d, want one accepted version-only update: %s", len(frames), output.String())
+	}
+	var published publishDiagnosticsParams
+	decodeParamsFrame(t, frames[0], &published)
+	if published.Version == nil || *published.Version != 2 || len(published.Diagnostics) != 1 {
+		t.Fatalf("version-only diagnostics=%#v", published)
+	}
+}
+
+func TestServerStopsWithoutWaitingForBlockedDiagnostics(t *testing.T) {
+	filename := cleanPath("main.trb")
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: io.Discard,
+		Units:                 []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Package: "main", Source: []byte("puts(\"ok\")\n")}},
+		CompilerOptions:       compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+		BackgroundDiagnostics: true,
+	})
+	server.diagnostics.delay = 0
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	server.diagnostics.analyze = func() (compilerservice.Snapshot, bool) {
+		close(started)
+		<-release
+		return compilerservice.Snapshot{}, false
+	}
+	server.diagnostics.Start()
+	if err := server.requestDiagnostics(); err != nil {
+		t.Fatal(err)
+	}
+	waitForTestSignal(t, started, "blocked diagnostics analysis to start")
+
+	stopped := make(chan struct{}, 1)
+	go func() {
+		server.diagnostics.Stop(diagnosticShutdownGrace)
+		stopped <- struct{}{}
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stopping the server waited for blocked diagnostics")
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	waitForTestSignal(t, server.diagnostics.done, "diagnostics worker to exit after release")
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+}
+
+func TestServerRunReturnsBackgroundOutputErrorWithoutMoreInput(t *testing.T) {
+	filename := cleanPath("main.trb")
+	source := "puts(\"ok\")\n"
+	uri := uriFromPath(filename)
+	inputReader, inputWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = inputWriter.Close()
+		_ = inputReader.Close()
+	})
+	outputError := errors.New("background output failed")
+	output := &failAfterWriter{successfulWrites: 2, err: outputError}
+	server := New(Options{
+		Mode: "go", Input: inputReader, Output: output,
+		Units:                 []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Package: "main", Source: []byte(source)}},
+		CompilerOptions:       compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+		BackgroundDiagnostics: true,
+	})
+	server.diagnostics.delay = 0
+
+	runResult := make(chan error, 1)
+	go func() { runResult <- server.Run() }()
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: source}})},
+	)
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := inputWriter.Write(input)
+		writeResult <- err
+	}()
+
+	select {
+	case err := <-runResult:
+		if !errors.Is(err, outputError) {
+			t.Fatalf("Run error=%v, want %v", err, outputError)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not observe the background output failure")
+	}
+	if err := <-writeResult; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -217,9 +675,9 @@ func TestServerDiagnosesUnknownTypesAndCompletesCanonicalNames(t *testing.T) {
 	if len(published.Diagnostics) != 1 || !strings.Contains(published.Diagnostics[0].Message, "use Integer") {
 		t.Fatalf("type diagnostics=%#v", published.Diagnostics)
 	}
-	var completions []completionItem
+	var completions completionList
 	decodeResult(t, frames[2], &completions)
-	if !containsCompletion(completions, "Integer") {
+	if !containsCompletion(completions.Items, "Integer") {
 		t.Fatalf("type completion response=%#v", completions)
 	}
 	var actions []codeAction
@@ -261,9 +719,9 @@ func TestServerDiagnosesAndAutoImportsStandardTypes(t *testing.T) {
 	if len(published.Diagnostics) == 0 || !strings.Contains(published.Diagnostics[0].Message, "Result is not declared or imported") {
 		t.Fatalf("missing import diagnostics=%#v", published.Diagnostics)
 	}
-	var completions []completionItem
+	var completions completionList
 	decodeResult(t, frames[2], &completions)
-	for _, item := range completions {
+	for _, item := range completions.Items {
 		if item.Label != "Result" {
 			continue
 		}
@@ -308,14 +766,42 @@ func TestServerAutoImportsAnUnambiguousProjectType(t *testing.T) {
 		t.Fatal(err)
 	}
 	frames := decodeFrames(t, output.Bytes())
-	var completions []completionItem
+	var completions completionList
 	decodeResult(t, frames[3], &completions)
-	for _, item := range completions {
+	for _, item := range completions.Items {
 		if item.Label == "User" && len(item.AdditionalTextEdits) == 1 && item.AdditionalTextEdits[0].NewText == "import { User } from models/user\n" {
 			return
 		}
 	}
 	t.Fatalf("project auto-import completion is missing: %#v", completions)
+}
+
+func TestServerBoundsCompletionCandidatesToTheMostRecentModule(t *testing.T) {
+	server := New(Options{
+		Mode: "typescript", Input: bytes.NewReader(nil), Output: io.Discard,
+		Units: []compiler.SourceUnit{
+			{Filename: cleanPath("first.trb"), ModulePath: "first", Source: []byte("record First\nend\n")},
+			{Filename: cleanPath("second.trb"), ModulePath: "second", Source: []byte("record Second\nend\n")},
+		},
+		CompilerOptions: compiler.Options{Mode: "typescript"},
+	})
+	if err := server.publish(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := server.currentSnapshot()
+	server.candidatesForCompletion(snapshot, "first")
+	if !server.completionCandidates.valid || server.completionCandidates.modulePath != "first" {
+		t.Fatalf("first completion cache=%#v", server.completionCandidates)
+	}
+	server.candidatesForCompletion(snapshot, "second")
+	if !server.completionCandidates.valid || server.completionCandidates.modulePath != "second" {
+		t.Fatalf("second completion cache=%#v", server.completionCandidates)
+	}
+
+	server.setSnapshot(compilerservice.Snapshot{Version: snapshot.Version + 1})
+	if server.completionCandidates.valid {
+		t.Fatalf("completion cache survived a snapshot change: %#v", server.completionCandidates)
+	}
 }
 
 func TestServerReturnsNestedDocumentSymbols(t *testing.T) {
@@ -1340,6 +1826,95 @@ func newTestFileRootServer(t *testing.T, workspace *testFileRootWorkspace, outpu
 		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/file-root-lsp", SourceRoot: workspace.root},
 		IncludedFiles:   []string{workspace.entry}, ResolveUnit: workspace.unit, ResolveWorkspace: workspace.resolve,
 	})
+}
+
+type synchronizedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+type failAfterWriter struct {
+	mu               sync.Mutex
+	writes           int
+	successfulWrites int
+	err              error
+}
+
+func (w *failAfterWriter) Write(contents []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.writes >= w.successfulWrites {
+		return 0, w.err
+	}
+	w.writes++
+	return len(contents), nil
+}
+
+func (b *synchronizedBuffer) Write(contents []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(contents)
+}
+
+func (b *synchronizedBuffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.buffer.Bytes()...)
+}
+
+func (b *synchronizedBuffer) Reset() {
+	b.mu.Lock()
+	b.buffer.Reset()
+	b.mu.Unlock()
+}
+
+func (b *synchronizedBuffer) String() string {
+	return string(b.Bytes())
+}
+
+func enableTestBackgroundDiagnostics(server *Server) {
+	server.diagnostics = newDiagnosticCoordinator(0, server.compiler.AnalyzeOnce, server.compiler.Generation)
+}
+
+func waitForDiagnosticResult(t *testing.T, results <-chan diagnosticResult, description string) diagnosticResult {
+	t.Helper()
+	select {
+	case result, ok := <-results:
+		if !ok {
+			t.Fatalf("diagnostics coordinator stopped while waiting for %s", description)
+		}
+		return result
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", description)
+		return diagnosticResult{}
+	}
+}
+
+func waitForTestSignal(t *testing.T, signal <-chan struct{}, description string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", description)
+	}
+}
+
+func waitForTestCondition(t *testing.T, description string, condition func() bool) {
+	t.Helper()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if condition() {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for %s", description)
+		case <-ticker.C:
+		}
+	}
 }
 
 func countMethod(frames []map[string]json.RawMessage, method string) int {

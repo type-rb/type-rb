@@ -60,10 +60,11 @@ func Complete(request CompletionRequest) []CompletionItem {
 	if request.Cursor < 0 || request.Cursor > len(request.Source) {
 		return nil
 	}
-	if items, ok := completeCallArgumentReferences(request); ok {
+	callRequest := withCallArgumentCandidate(request)
+	if items, ok := completeCallArgumentReferences(callRequest); ok {
 		return items
 	}
-	if items, ok := completeCallArgumentLiterals(request); ok {
+	if items, ok := completeCallArgumentLiterals(callRequest); ok {
 		return items
 	}
 	replacement := completionRange(request.Source, request.Cursor)
@@ -71,16 +72,30 @@ func Complete(request CompletionRequest) []CompletionItem {
 	typePosition := typeCompletionPosition(request.Source, replacement.Start)
 
 	if marker, receiver := memberReceiver(request.Source, replacement.Start); marker != "" {
+		request.Context = memberCandidateContext(request.Context, request.Candidates, request.Source, receiver, request.RepairImports)
 		members := completeMembers(receiver, marker, request, replacement)
 		return filterCompletions(members, prefix)
 	}
 
 	byName := map[string]Symbol{}
-	for _, symbol := range request.Context.Symbols {
+	lexical, localNames := lexicalSymbolsWithLocals(request.Source, request.Cursor, request.Context)
+	for _, symbol := range lexical {
 		byName[symbol.Name] = symbol
 	}
-	for _, symbol := range lexicalSymbols(request.Source, request.Cursor, request.Context) {
-		byName[symbol.Name] = symbol
+	if len(request.Candidates.Symbols) > 0 {
+		visible := sourceVisibleNames(request.Source)
+		for _, symbol := range request.Candidates.Symbols {
+			if !strings.HasPrefix(symbol.Name, prefix) || visible[symbol.Name] || localNames[symbol.Name] {
+				continue
+			}
+			if _, checked := byName[symbol.Name]; checked && !request.RepairImports {
+				continue
+			}
+			// A current-source import or declaration keeps its checked symbol.
+			// Otherwise the candidate replaces a stale checked symbol so accepting
+			// completion restores the missing import.
+			byName[symbol.Name] = symbol
+		}
 	}
 	for _, name := range builtInTypes {
 		byName[name] = Symbol{Name: name, Kind: CompletionType, Detail: "built-in type", Type: types.FromName(name)}
@@ -94,14 +109,93 @@ func Complete(request CompletionRequest) []CompletionItem {
 		}
 	}
 
-	items := make([]CompletionItem, 0, len(byName))
+	capacity := len(byName)
+	if prefix != "" {
+		capacity = 16
+	}
+	items := make([]CompletionItem, 0, capacity)
 	for _, symbol := range byName {
-		if typePosition && symbol.Kind != CompletionType {
+		if !strings.HasPrefix(symbol.Name, prefix) || typePosition && symbol.Kind != CompletionType {
 			continue
 		}
 		items = append(items, completionFromSymbol(symbol, replacement, request.Source))
 	}
 	return filterCompletions(items, prefix)
+}
+
+// withCallArgumentCandidate makes only the direct callee candidate available
+// to the early literal/reference completion paths. The full candidate set must
+// not become part of checked expression resolution.
+func withCallArgumentCandidate(request CompletionRequest) CompletionRequest {
+	if len(request.Candidates.Symbols) == 0 {
+		return request
+	}
+	tokens, _ := lexer.Lex([]byte(request.Source[:request.Cursor]))
+	significant := completionTokens(tokens)
+	open := innermostOpenCall(significant)
+	if open < 1 || significant[open-1].Kind != token.Identifier {
+		return request
+	}
+	if open >= 3 && (significant[open-2].Lexeme == "." || significant[open-2].Lexeme == "&.") {
+		return request
+	}
+	name := significant[open-1].Lexeme
+	var candidate Symbol
+	found := false
+	for _, symbol := range request.Candidates.Symbols {
+		if symbol.Name == name && symbol.Call != nil {
+			candidate = symbol
+			found = true
+			break
+		}
+	}
+	if !found || sourceVisibleNames(request.Source)[name] {
+		return request
+	}
+	_, localNames := lexicalSymbolsWithLocals(request.Source, request.Cursor, request.Context)
+	if localNames[name] {
+		return request
+	}
+
+	result := request.Context
+	result.Symbols = append([]Symbol(nil), request.Context.Symbols...)
+	for index, current := range result.Symbols {
+		if current.Name != name {
+			continue
+		}
+		if !request.RepairImports {
+			return request
+		}
+		result.Symbols[index] = candidate
+		request.Context = result
+		return request
+	}
+	result.Symbols = append(result.Symbols, candidate)
+	request.Context = result
+	return request
+}
+
+func memberCandidateContext(current, candidates Context, source, receiver string, repairImports bool) Context {
+	tokens, _ := lexer.Lex([]byte(receiver))
+	name := ""
+	for _, item := range tokens {
+		if item.Kind == token.Identifier {
+			name = item.Lexeme
+			break
+		}
+	}
+	if name == "" {
+		return current
+	}
+	for _, candidate := range candidates.Symbols {
+		if candidate.Name == name {
+			if !repairImports {
+				return MergeContexts(current, Context{Symbols: []Symbol{candidate}})
+			}
+			return MergeImportCandidates(current, Context{Symbols: []Symbol{candidate}}, source)
+		}
+	}
+	return current
 }
 
 func typeCompletionPosition(source string, wordStart int) bool {
@@ -1222,6 +1316,11 @@ func literalReceiverType(receiver string) (types.Type, bool) {
 }
 
 func lexicalSymbols(source string, cursor int, context Context) []Symbol {
+	result, _ := lexicalSymbolsWithLocals(source, cursor, context)
+	return result
+}
+
+func lexicalSymbolsWithLocals(source string, cursor int, context Context) ([]Symbol, map[string]bool) {
 	tokens, _ := lexer.Lex([]byte(source))
 	significant := make([]token.Token, 0, len(tokens))
 	for _, item := range tokens {
@@ -1231,6 +1330,7 @@ func lexicalSymbols(source string, cursor int, context Context) []Symbol {
 		significant = append(significant, item)
 	}
 	known := map[string]Symbol{}
+	locals := map[string]bool{}
 	for _, symbol := range context.Symbols {
 		known[symbol.Name] = symbol
 	}
@@ -1252,14 +1352,14 @@ func lexicalSymbols(source string, cursor int, context Context) []Symbol {
 			if name, ok := tokenAt(significant, index+1); ok && name.Kind == token.Identifier {
 				known[name.Lexeme] = Symbol{Name: name.Lexeme, Kind: CompletionFunction, Detail: "function"}
 				collectTypeParameters(significant, index+2, known)
-				collectParameters(significant, index+2, known)
+				collectParameters(significant, index+2, known, locals)
 			}
 		case "fn":
-			collectParameters(significant, index+1, known)
+			collectParameters(significant, index+1, known, locals)
 		case "import":
 			collectImportedNames(significant, index+1, known)
 		default:
-			collectVariable(significant, index, known, context)
+			collectVariable(significant, index, known, context, locals)
 		}
 	}
 	result := make([]Symbol, 0, len(known))
@@ -1267,7 +1367,7 @@ func lexicalSymbols(source string, cursor int, context Context) []Symbol {
 		result = append(result, symbol)
 	}
 	sortSymbols(result)
-	return result
+	return result, locals
 }
 
 func collectTypeParameters(tokens []token.Token, start int, symbols map[string]Symbol) {
@@ -1283,7 +1383,7 @@ func collectTypeParameters(tokens []token.Token, start int, symbols map[string]S
 	}
 }
 
-func collectParameters(tokens []token.Token, start int, symbols map[string]Symbol) {
+func collectParameters(tokens []token.Token, start int, symbols map[string]Symbol, locals map[string]bool) {
 	for index := start; index+2 < len(tokens); index++ {
 		if tokens[index].Lexeme == ")" {
 			return
@@ -1294,6 +1394,7 @@ func collectParameters(tokens []token.Token, start int, symbols map[string]Symbo
 		name := tokens[index].Lexeme
 		typ := types.FromName(tokens[index+2].Lexeme)
 		symbols[name] = Symbol{Name: name, Kind: CompletionParameter, Detail: typ.String(), Type: typ}
+		locals[name] = true
 	}
 }
 
@@ -1317,7 +1418,7 @@ func collectImportedNames(tokens []token.Token, start int, symbols map[string]Sy
 	}
 }
 
-func collectVariable(tokens []token.Token, index int, symbols map[string]Symbol, context Context) {
+func collectVariable(tokens []token.Token, index int, symbols map[string]Symbol, context Context, locals map[string]bool) {
 	name := tokens[index].Lexeme
 	if _, keyword := keywordDetails[name]; keyword || index > 0 && tokens[index-1].Lexeme == "def" {
 		return
@@ -1339,6 +1440,7 @@ func collectVariable(tokens []token.Token, index int, symbols map[string]Symbol,
 		kind = CompletionConstant
 	}
 	symbols[name] = Symbol{Name: name, Kind: kind, Detail: typ.String(), Type: typ}
+	locals[name] = true
 }
 
 func inferLexicalValue(tokens []token.Token, start int, symbols map[string]Symbol, context Context) types.Type {

@@ -131,10 +131,15 @@ type Context struct {
 }
 
 type CompletionRequest struct {
-	Source  string
-	Cursor  int
-	Mode    string
-	Context Context
+	Source     string
+	Cursor     int
+	Mode       string
+	Context    Context
+	Candidates Context
+	// RepairImports lets candidates replace checked symbols that are no longer
+	// declared or imported by the current editor source. LSP adapters use this
+	// while retaining a last-good checked context across invalid edits.
+	RepairImports bool
 }
 
 // SemanticRequest identifies a source position using the same checked context
@@ -247,7 +252,7 @@ func (s *Service) SetCandidates(context Context) {
 
 func (s *Service) Complete(source string, cursor int) []CompletionItem {
 	s.mu.RLock()
-	request := CompletionRequest{Source: source, Cursor: cursor, Mode: s.mode, Context: mergeCandidateContext(s.context, s.candidates)}
+	request := CompletionRequest{Source: source, Cursor: cursor, Mode: s.mode, Context: s.context, Candidates: s.candidates}
 	s.mu.RUnlock()
 	return Complete(request)
 }

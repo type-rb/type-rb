@@ -120,6 +120,7 @@ type codeActionParams struct {
 
 type publishDiagnosticsParams struct {
 	URI         string               `json:"uri"`
+	Version     *int                 `json:"version,omitempty"`
 	Diagnostics []protocolDiagnostic `json:"diagnostics"`
 }
 
@@ -164,6 +165,11 @@ type completionItem struct {
 	Detail              string     `json:"detail,omitempty"`
 	TextEdit            textEdit   `json:"textEdit"`
 	AdditionalTextEdits []textEdit `json:"additionalTextEdits,omitempty"`
+}
+
+type completionList struct {
+	IsIncomplete bool             `json:"isIncomplete"`
+	Items        []completionItem `json:"items"`
 }
 
 type documentSymbol struct {
