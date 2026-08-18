@@ -20,8 +20,10 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/compilerservice"
+	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/token"
 )
 
 func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T) {
@@ -289,6 +291,79 @@ func TestServerCoalescesBackgroundDiagnostics(t *testing.T) {
 	}
 }
 
+func TestServerClearsStaleDiagnosticsBeforeDeferredAnalysis(t *testing.T) {
+	filename := cleanPath("main.trb")
+	invalid := "def run()\n\tmissing()\n\treturn\nend\n"
+	valid := "def run()\n\treturn\nend\n"
+	uri := uriFromPath(filename)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: &output,
+		Units:           []compiler.SourceUnit{{Filename: filename, ModulePath: "main", Package: "main", Source: []byte(invalid)}},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	if err := server.open(textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: invalid}); err != nil {
+		t.Fatal(err)
+	}
+	if !server.published[filename] {
+		t.Fatal("initial error diagnostics were not published")
+	}
+
+	enableTestBackgroundDiagnostics(server)
+	output.Reset()
+	if err := server.change(didChangeParams{
+		TextDocument:   versionedTextDocumentIdentifier{URI: uri, Version: 2},
+		ContentChanges: []contentChange{{Text: invalid}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Bytes()) != 0 || !server.published[filename] {
+		t.Fatalf("an unchanged source invalidated diagnostics: %s", output.String())
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	originalAnalyze := server.diagnostics.analyze
+	server.diagnostics.analyze = func() (compilerservice.Snapshot, bool) {
+		close(started)
+		<-release
+		return originalAnalyze()
+	}
+	if err := server.change(didChangeParams{
+		TextDocument:   versionedTextDocumentIdentifier{URI: uri, Version: 3},
+		ContentChanges: []contentChange{{Text: valid}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 1 {
+		t.Fatalf("immediate diagnostic frames=%d, want one clear: %s", len(frames), output.String())
+	}
+	var cleared publishDiagnosticsParams
+	decodeParamsFrame(t, frames[0], &cleared)
+	if cleared.Version == nil || *cleared.Version != 3 || len(cleared.Diagnostics) != 0 || server.published[filename] {
+		t.Fatalf("stale diagnostics were not cleared for version 3: %#v", cleared)
+	}
+
+	server.diagnostics.Start()
+	defer server.diagnostics.Stop(diagnosticShutdownGrace)
+	waitForTestSignal(t, started, "deferred diagnostics analysis to start")
+	close(release)
+	result := waitForDiagnosticResult(t, server.diagnostics.Results(), "valid diagnostics analysis")
+	if err := server.applyDiagnosticResult(result); err != nil {
+		t.Fatal(err)
+	}
+	frames = decodeFrames(t, output.Bytes())
+	if len(frames) != 2 {
+		t.Fatalf("diagnostic frames=%d, want immediate and analyzed clears: %s", len(frames), output.String())
+	}
+	var analyzed publishDiagnosticsParams
+	decodeParamsFrame(t, frames[1], &analyzed)
+	if analyzed.Version == nil || *analyzed.Version != 3 || len(analyzed.Diagnostics) != 0 {
+		t.Fatalf("analyzed diagnostics=%#v", analyzed)
+	}
+}
+
 func TestServerDoesNotPublishObsoleteBackgroundDiagnostics(t *testing.T) {
 	filename := cleanPath("main.trb")
 	valid := "def run()\n\treturn\nend\n"
@@ -409,16 +484,21 @@ func TestServerSuppressesEditsFromAStaleSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	frames := decodeFrames(t, output.Bytes())
-	if len(frames) != 3 {
-		t.Fatalf("response count=%d, want 3: %s", len(frames), output.String())
+	if len(frames) != 4 {
+		t.Fatalf("response count=%d, want one diagnostic clear and three responses: %s", len(frames), output.String())
+	}
+	var cleared publishDiagnosticsParams
+	decodeParamsFrame(t, frames[0], &cleared)
+	if cleared.Version == nil || *cleared.Version != 2 || len(cleared.Diagnostics) != 0 {
+		t.Fatalf("stale diagnostic clear=%#v", cleared)
 	}
 	var actions []codeAction
-	decodeResult(t, frames[0], &actions)
+	decodeResult(t, frames[1], &actions)
 	if len(actions) != 0 {
 		t.Fatalf("stale quick fixes=%#v, want none", actions)
 	}
-	if string(frames[1]["result"]) != "null" || string(frames[2]["result"]) != "null" {
-		t.Fatalf("stale rename results=%s / %s, want null", frames[1]["result"], frames[2]["result"])
+	if string(frames[2]["result"]) != "null" || string(frames[3]["result"]) != "null" {
+		t.Fatalf("stale rename results=%s / %s, want null", frames[2]["result"], frames[3]["result"])
 	}
 }
 
@@ -740,7 +820,8 @@ func TestServerAutoImportsAnUnambiguousProjectType(t *testing.T) {
 	valid := "import { User } from models/user\n\ndef inspect(user: User)\n\tputs(user.name)\n\treturn\nend\n"
 	invalid := "def inspect(user: User)\n\tputs(user.name)\n\treturn\nend\n"
 	uri := uriFromPath(mainFilename)
-	cursor := positionAt([]byte(invalid), strings.Index(invalid, "User")+len("User"))
+	userOffset := strings.Index(invalid, "User")
+	cursor := positionAt([]byte(invalid), userOffset+len("User"))
 	input := framedMessages(t,
 		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
 		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: valid}})},
@@ -750,7 +831,10 @@ func TestServerAutoImportsAnUnambiguousProjectType(t *testing.T) {
 		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/completion", Params: rawParams(t, documentPositionParams{
 			TextDocument: textDocumentIdentifier{URI: uri}, Position: cursor,
 		})},
-		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "textDocument/codeAction", Params: rawParams(t, codeActionParams{
+			TextDocument: textDocumentIdentifier{URI: uri}, Range: rangeValue{Start: cursor, End: cursor},
+		})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("4"), Method: "shutdown", Params: json.RawMessage(`null`)},
 		message{JSONRPC: "2.0", Method: "exit"},
 	)
 	var output bytes.Buffer
@@ -770,10 +854,73 @@ func TestServerAutoImportsAnUnambiguousProjectType(t *testing.T) {
 	decodeResult(t, frames[3], &completions)
 	for _, item := range completions.Items {
 		if item.Label == "User" && len(item.AdditionalTextEdits) == 1 && item.AdditionalTextEdits[0].NewText == "import { User } from models/user\n" {
+			var actions []codeAction
+			decodeResult(t, frames[4], &actions)
+			if len(actions) != 1 || actions[0].Title != "Add import for User" || actions[0].Kind != "quickfix" {
+				t.Fatalf("project auto-import actions=%#v", actions)
+			}
+			edits := actions[0].Edit.Changes[uri]
+			if len(edits) != 1 || edits[0].NewText != "import { User } from models/user\n" || edits[0].Range != (rangeValue{}) {
+				t.Fatalf("project auto-import action edits=%#v", edits)
+			}
 			return
 		}
 	}
 	t.Fatalf("project auto-import completion is missing: %#v", completions)
+}
+
+func TestServerOnlyOffersAutoImportForUndeclaredNameDiagnostics(t *testing.T) {
+	userFilename := cleanPath("models/user.trb")
+	mainFilename := cleanPath("main.trb")
+	valid := "import { User } from models/user\n\ndef inspect(user: User)\n\treturn\nend\n"
+	invalid := "def inspect(user: User)\n\treturn\nend\n"
+	server := New(Options{
+		Mode: "go", Input: bytes.NewReader(nil), Output: io.Discard,
+		Units: []compiler.SourceUnit{
+			{Filename: userFilename, ModulePath: "models/user", Package: "models", Source: []byte("record User\n\tname: String\nend\n")},
+			{Filename: mainFilename, ModulePath: "main", Package: "main", Source: []byte(valid)},
+		},
+		CompilerOptions: compiler.Options{Mode: "go", GoModule: "example.com/lsp"},
+	})
+	snapshot := server.compiler.Analyze()
+	if snapshot.HasErrors() {
+		t.Fatalf("valid import snapshot has diagnostics: %#v", snapshot.Diagnostics)
+	}
+	offset := strings.Index(invalid, "User")
+	span := token.Span{Start: token.Position{Offset: offset}, End: token.Position{Offset: offset + len("User")}}
+	document := document{
+		unit:   compiler.SourceUnit{Filename: mainFilename, ModulePath: "main", Package: "main", Source: []byte(invalid)},
+		source: []byte(invalid), version: 2,
+	}
+
+	tests := []struct {
+		name       string
+		code       diagnostic.Code
+		message    string
+		wantAction bool
+	}{
+		{name: "undeclared name", code: diagnostic.TypeError, message: "type User is not declared or imported", wantAction: true},
+		{name: "unrelated type error", code: diagnostic.TypeError, message: "expected String but got User"},
+		{name: "different undeclared name", code: diagnostic.TypeError, message: "type AdminUser is not declared or imported"},
+		{name: "syntax error", code: diagnostic.SyntaxError, message: "type User is not declared or imported"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot.Diagnostics = []diagnostic.Diagnostic{{
+				Code: test.code, Severity: diagnostic.Error, Message: test.message, Path: mainFilename, Span: span,
+			}}
+			actions := server.autoImportCodeActions(mainFilename, document, snapshot, offset+len("User"), offset+len("User"))
+			if test.wantAction {
+				if len(actions) != 1 || actions[0].Title != "Add import for User" {
+					t.Fatalf("auto-import actions=%#v, want User quick fix", actions)
+				}
+				return
+			}
+			if len(actions) != 0 {
+				t.Fatalf("auto-import actions=%#v, want none", actions)
+			}
+		})
+	}
 }
 
 func TestServerBoundsCompletionCandidatesToTheMostRecentModule(t *testing.T) {

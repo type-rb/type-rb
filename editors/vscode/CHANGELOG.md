@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Request TypeRB completions while identifiers are typed without requiring a
+  trigger character to be retyped.
+- Offer project and standard-library imports from completion and the Quick Fix
+  menu for unresolved names.
+
 ## 0.2.6 - 2026-08-18
 
 - Preserve nested project roots when registering language clients, restoring

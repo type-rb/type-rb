@@ -106,6 +106,17 @@ the language.
 - `typerb.debug.go.path` selects the Delve executable for Go source debugging.
   The default is `dlv` from `PATH`.
 
+TypeRB enables quick suggestions while identifiers are typed. If an inline
+completion provider is configured to hide the suggestion widget whenever
+ghost text is available, keep that behavior for other languages while showing
+TypeRB completion with a language-specific override:
+
+```json
+"[trb]": {
+	"editor.inlineSuggest.suppressSuggestions": false
+}
+```
+
 Run and Debug selects the active TypeRB project automatically. A `launch.json`
 configuration may set `config`, `args`, and `env` when explicit control is
 needed:

@@ -83,6 +83,24 @@ func TestServiceDoesNotInvalidateWhenOpeningAnUnchangedWorkspaceDocument(t *test
 	}
 }
 
+func TestServiceBuildsSemanticSnapshotsWithoutBackendOutput(t *testing.T) {
+	unit := compiler.SourceUnit{
+		Filename: "main.trb", ModulePath: "main", Package: "main",
+		Source: []byte("def value(): Integer\n\treturn 1\nend\n"),
+	}
+	snapshot := New([]compiler.SourceUnit{unit}, compiler.Options{Mode: "go", GoModule: "example.com/service"}).Analyze()
+	if snapshot.HasErrors() || len(snapshot.Artifacts) != 1 {
+		t.Fatalf("unexpected semantic snapshot: %#v", snapshot)
+	}
+	artifact := snapshot.Artifacts[0]
+	if artifact.AST == nil || artifact.IR == nil {
+		t.Fatalf("semantic snapshot is missing AST or typed IR: %#v", artifact)
+	}
+	if len(artifact.Output) != 0 || artifact.SourceMap.Version != 0 || len(artifact.SourceMap.Mappings) != 0 {
+		t.Fatalf("semantic snapshot generated backend output: %#v", artifact)
+	}
+}
+
 func TestServiceTracksWorkspaceDocumentsBeneathOpenOverlays(t *testing.T) {
 	filename := "models/user.trb"
 	base := compiler.SourceUnit{
@@ -229,16 +247,16 @@ func TestServiceAnalyzeOnceRejectsObsoleteGeneration(t *testing.T) {
 		Source: []byte("def value(): Integer\n\treturn 1\nend\n"),
 	}
 	service := New([]compiler.SourceUnit{unit}, compiler.Options{Mode: "go", GoModule: "example.com/service"})
-	originalCompile := service.compile
+	originalAnalyze := service.analyze
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var calls atomic.Int32
-	service.compile = func(units []compiler.SourceUnit, options compiler.Options) ([]*compiler.Artifact, error) {
+	service.analyze = func(units []compiler.SourceUnit, options compiler.Options) ([]*compiler.Artifact, error) {
 		if calls.Add(1) == 1 {
 			close(started)
 			<-release
 		}
-		return originalCompile(units, options)
+		return originalAnalyze(units, options)
 	}
 
 	type analysisResult struct {

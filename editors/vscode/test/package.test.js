@@ -25,6 +25,10 @@ test("registers the canonical TypeRB language, grammar, and debugger", async () 
 	assert.equal(manifest.contributes.configuration.properties["typerb.standalone.mode"].default, "go");
 	assert.deepEqual(manifest.contributes.configuration.properties["typerb.standalone.mode"].enum, ["go", "ruby", "typescript"]);
 	assert.equal(manifest.contributes.configuration.properties["typerb.standalone.typescript.runtime"].default, "node");
+	assert.deepEqual(manifest.contributes.configurationDefaults["[trb]"], {
+		"editor.quickSuggestions": { other: "on", comments: "off", strings: "off" },
+		"editor.suggestOnTriggerCharacters": true,
+	});
 
 	const canonical = await readFile(path.join(repositoryRoot, "syntaxes/typerb.tmLanguage.json"));
 	const packaged = await readFile(path.join(extensionRoot, "syntaxes/typerb.tmLanguage.json"));

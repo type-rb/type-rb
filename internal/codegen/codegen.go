@@ -34,16 +34,30 @@ func Generate(program *ir.Program) (Generated, error) {
 	}
 }
 
+// ValidateProject performs backend-owned project validation without emitting
+// target source. Backends without generation-time validation return directly;
+// TypeScript receives the same normalized lowered IR as GenerateProject.
+func ValidateProject(programs []*ir.Program) error {
+	if len(programs) == 0 {
+		return nil
+	}
+	switch programs[0].Mode {
+	case "go", "ruby":
+		return nil
+	case "typescript":
+		return typescript.ValidateProject(normalizeProjectDivergingControlFlow(programs))
+	default:
+		return fmt.Errorf("unsupported mode %q (want ruby, typescript, or go)", programs[0].Mode)
+	}
+}
+
 // GenerateProject emits a set of already-lowered modules in project order.
 // Keeping the project boundary here lets a backend perform whole-project
 // analysis without leaking backend-specific concerns into parsing, checking,
 // or the shared IR.
 func GenerateProject(programs []*ir.Program) ([]Generated, error) {
 	if len(programs) > 0 && programs[0].Mode == "typescript" {
-		normalized := make([]*ir.Program, len(programs))
-		for index, program := range programs {
-			normalized[index] = normalizeDivergingControlFlow(program)
-		}
+		normalized := normalizeProjectDivergingControlFlow(programs)
 		generated, err := typescript.GenerateProjectMapped(normalized)
 		if err != nil {
 			return nil, err
@@ -55,10 +69,7 @@ func GenerateProject(programs []*ir.Program) ([]Generated, error) {
 		return outputs, nil
 	}
 	if len(programs) > 0 && programs[0].Mode == "go" {
-		normalized := make([]*ir.Program, len(programs))
-		for index, program := range programs {
-			normalized[index] = normalizeDivergingControlFlow(program)
-		}
+		normalized := normalizeProjectDivergingControlFlow(programs)
 		generated := golang.GenerateProjectMapped(normalized)
 		outputs := make([]Generated, len(generated))
 		for index, output := range generated {
@@ -83,6 +94,14 @@ func GenerateProject(programs []*ir.Program) ([]Generated, error) {
 		outputs[index] = output
 	}
 	return outputs, nil
+}
+
+func normalizeProjectDivergingControlFlow(programs []*ir.Program) []*ir.Program {
+	prepared := make([]*ir.Program, len(programs))
+	for index, program := range programs {
+		prepared[index] = normalizeDivergingControlFlow(program)
+	}
+	return prepared
 }
 
 func Extension(mode string) string {
