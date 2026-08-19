@@ -2,6 +2,50 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.0 - 2026-08-19
+
+### Language
+
+- **Breaking:** Recoverable failures now use the compiler-owned
+  `Result<T, E>` type as a single explicit model. Prefix `try` unwraps success
+  and propagates a compatible `Err`, while postfix
+  `catch |error| ... end` unwraps success and handles failure locally. The
+  previous authored `fails` and `attempt` syntax has been removed; the
+  compiler reports focused migration diagnostics for both forms.
+- Standard Result values must be handled rather than silently discarded.
+  Returning, passing, storing, exhaustively matching, using `try`, or using
+  `catch` counts as handling the value, while an unused `_result` binding is
+  still diagnosed.
+- `case/when` remains the value and enum branching construct, including enum
+  payload binding. TypeRB 0.3 does not add a separate `case/in` or `match`
+  syntax.
+
+### Official packages and runtime boundaries
+
+- **Breaking:** ORM terminal operations, lazy associations, writes, and
+  deletes return `DbResult<T>`. Transactions and streaming query blocks are
+  structured Result boundaries: propagated errors stop the block and complete
+  rollback or cleanup before an outer `catch` runs.
+- **Breaking:** Fallible jobs return `JobResult`, enqueue operations return
+  `Result<JobReference, EnqueueError>`, and browser request, response decoding,
+  and file APIs return Result values directly. A job `Err` follows the existing
+  retry and exhaustion policy with its portable `error.message`.
+- **Breaking:** Native TypeScript provider and cache format version 2 removes
+  the legacy `fails` and `effectBridge` fields. Promise rejection adapters use
+  the explicit `resultBridge` contract instead.
+- The affected bundled packages `trb/orm`, `trb/jobs`, `trb/jobs/sql`, and
+  `trb/platform/typescript/browser` are version 0.2.0.
+
+### Tooling and migration
+
+- Visual Studio Code extension 0.3.0 understands `try` and `catch`, removes the
+  retired failure syntax from language features, and requires a TypeRB 0.3
+  compiler.
+- The [TypeRB 0.3 Result-control migration guide](docs/migrations/0.3-result-control.md)
+  explains function signatures, call-site rewrites, structured blocks, jobs,
+  browser APIs, native providers, and intentional uses of `case/when`.
+  ([#347](https://github.com/type-rb/type-rb/pull/347))
+
 ## 0.2.31 - 2026-08-18
 
 ### Editor tooling
