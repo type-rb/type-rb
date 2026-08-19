@@ -216,6 +216,52 @@ func TestEvaluatePortableRangeIteration(t *testing.T) {
 	}
 }
 
+func TestNegativeIndexesCountFromTheEndAndRemainBoundsChecked(t *testing.T) {
+	integer := types.FromName("Integer")
+	stringType := types.FromName("String")
+	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{integer}}
+	array := Value{Type: arrayType, Data: &arrayValue{Items: []Value{
+		{Type: integer, Data: int64(10)},
+		{Type: integer, Data: int64(20)},
+		{Type: integer, Data: int64(30)},
+	}}}
+	index := func(value int64) Value { return Value{Type: integer, Data: value} }
+
+	for _, test := range []struct {
+		position int64
+		want     int64
+	}{
+		{position: -1, want: 30},
+		{position: -2, want: 20},
+		{position: -3, want: 10},
+	} {
+		got, err := indexValue(array, index(test.position), integer)
+		if err != nil || got.Data != test.want {
+			t.Fatalf("array[%d]=%#v, %v; want %d", test.position, got.Data, err, test.want)
+		}
+	}
+	if _, err := indexValue(array, index(-4), integer); err == nil || err.Error() != "array index is out of bounds" {
+		t.Fatalf("array[-4] error=%v", err)
+	}
+	if err := assignIndex(array, index(-1), Value{Type: integer, Data: int64(40)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := array.Data.(*arrayValue).Items[2].Data; got != int64(40) {
+		t.Fatalf("array[-1] assignment stored %#v, want 40", got)
+	}
+	if err := assignIndex(array, index(-4), Value{Type: integer, Data: int64(0)}); err == nil || err.Error() != "array index is out of bounds" {
+		t.Fatalf("array[-4] assignment error=%v", err)
+	}
+
+	text, err := indexValue(Value{Type: stringType, Data: "A😀"}, index(-1), stringType)
+	if err != nil || text.Data != "😀" {
+		t.Fatalf("string[-1]=%#v, %v; want emoji", text.Data, err)
+	}
+	if _, err := indexValue(Value{Type: stringType, Data: "A😀"}, index(-3), stringType); err == nil || err.Error() != "string index is out of bounds" {
+		t.Fatalf("string[-3] error=%v", err)
+	}
+}
+
 func TestEvaluatePortableHashIteration(t *testing.T) {
 	integer := types.FromName("Integer")
 	hashType := types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{integer, integer}}

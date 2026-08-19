@@ -20,38 +20,39 @@ import (
 )
 
 type generator struct {
-	b                strings.Builder
-	indent           int
-	functionDepth    int
-	receiver         string
-	inConstructor    bool
-	methods          map[string]bool
-	topMethods       map[string]bool
-	staticMethods    map[string]map[string]bool
-	records          map[string]bool
-	classes          map[string]bool
-	typeAliases      map[string]string
-	typeKinds        map[string]string
-	imports          map[string]string
-	bindingNames     map[string]string
-	bindingSources   map[string]bool
-	modulePath       string
-	goModule         string
-	temporary        int
-	breakTarget      string
-	jobs             *jobsintegration.Manifest
-	jobsSQL          *jobssql.Manifest
-	orm              *ormintegration.Manifest
-	ormCommonRuntime bool
-	ormPackageModels []ormintegration.Model
-	projectNames     *goProjectNames
-	execution        *effectplan.Plan
-	executionActive  bool
-	oidcRuntime      bool
-	recordSources    bool
-	sourceMarker     int
-	sourceLocations  map[int]sourcemap.Location
-	sourcePath       string
+	b                 strings.Builder
+	indent            int
+	functionDepth     int
+	receiver          string
+	inConstructor     bool
+	methods           map[string]bool
+	topMethods        map[string]bool
+	staticMethods     map[string]map[string]bool
+	records           map[string]bool
+	classes           map[string]bool
+	typeAliases       map[string]string
+	typeKinds         map[string]string
+	imports           map[string]string
+	bindingNames      map[string]string
+	bindingSources    map[string]bool
+	modulePath        string
+	goModule          string
+	temporary         int
+	breakTarget       string
+	jobs              *jobsintegration.Manifest
+	jobsSQL           *jobssql.Manifest
+	orm               *ormintegration.Manifest
+	ormCommonRuntime  bool
+	ormPackageModels  []ormintegration.Model
+	projectNames      *goProjectNames
+	execution         *effectplan.Plan
+	executionActive   bool
+	oidcRuntime       bool
+	arrayIndexRuntime bool
+	recordSources     bool
+	sourceMarker      int
+	sourceLocations   map[int]sourcemap.Location
+	sourcePath        string
 }
 
 func Generate(program *ir.Program) string {
@@ -159,6 +160,9 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	g.integrations(program.Extensions)
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
+	}
+	if g.arrayIndexRuntime {
+		g.arrayIndexRuntimeSupport()
 	}
 	packageName := program.Package
 	if packageName == "" {
@@ -1440,10 +1444,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "func(values " + g.goType(hashType) + ", key " + keyType + ") " + valueType + " { value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; return value }(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		if n.Receiver.ExprType().Kind == types.String {
-			return "func(value string, index int) string { characters := []rune(value); if index < 0 || index >= len(characters) { panic(\"String index is out of bounds\") }; return string(characters[index]) }(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+			return "func(value string, index int) string { characters := []rune(value); if index < 0 { index += len(characters) }; if index < 0 || index >= len(characters) { panic(\"String index is out of bounds\") }; return string(characters[index]) }(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		if n.Receiver.ExprType().Kind == types.Array {
-			return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
+			g.arrayIndexRuntime = true
+			return "trbArrayIndex(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
@@ -1823,9 +1828,20 @@ func goBindingIdentifier(name string) string {
 
 func (g *generator) assignmentTarget(expression ir.Expression) string {
 	if index, ok := expression.(*ir.Index); ok {
+		if index.Receiver.ExprType().Kind == types.Array {
+			g.arrayIndexRuntime = true
+			receiver := g.expr(index.Receiver)
+			position := "trbArrayIndexPosition(" + g.expr(index.Index) + ", len(" + receiver + "))"
+			return receiver + "[" + position + "]"
+		}
 		return g.expr(index.Receiver) + "[" + g.expr(index.Index) + "]"
 	}
 	return g.expr(expression)
+}
+
+func (g *generator) arrayIndexRuntimeSupport() {
+	g.line(`func trbArrayIndexPosition(index int, size int) int { if index < 0 { index += size }; if index < 0 || index >= size { panic("Array index is out of bounds") }; return index }`)
+	g.line(`func trbArrayIndex[T any](values []T, index int) T { return values[trbArrayIndexPosition(index, len(values))] }`)
 }
 
 func (g *generator) binaryOperand(expression ir.Expression) string {

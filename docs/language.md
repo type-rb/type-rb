@@ -538,9 +538,11 @@ end
 ```
 
 Array and String element lookup uses the single canonical strict form
-`value[index]` and fails at runtime when the value is absent. Hash lookup and
-deletion are strict as well. Safe `Result`-returning lookup is available with
-`try_fetch`. Subsequences deliberately use `slice(range)` rather than
+`value[index]`. Nonnegative indexes count from the start, while negative
+indexes count from the end (`-1` is the last element); lookup fails at runtime
+when the normalized position is absent. Hash lookup and deletion are strict as
+well. Safe `Result`-returning lookup is available with `try_fetch` and follows
+the same index rules. Subsequences deliberately use `slice(range)` rather than
 `value[range]`; `try_slice(range)` is its safe counterpart. Lookup failures use
 `IndexLookupError`, `SliceRangeError`, and `KeyLookupError` values from
 `trb/std/errors`. `merge` is non-destructive; `update` and `delete` require a
@@ -554,12 +556,15 @@ first := values.shift()
 values.unshift(1)
 reversed := values.reverse()
 known := values.include?(2)
+position := values.index(3)
 occurrences := values.count(3)
 ```
 
 Membership and occurrence counting use portable `==` and are therefore
 available for numeric, Boolean, String, and payloadless enum elements. They do
 not implicitly enable target-native structural equality for nested values.
+`index(value)` uses that same equality and returns the first position as
+`Integer?`, while the block-based `find_index` remains the predicate search.
 
 Array sorting is stable and returns a new Array:
 
@@ -596,6 +601,7 @@ Arrays, integer ranges, and hashes support structured iteration:
 end
 
 (0...10).each { |index| puts(index) }
+digits := (0...10).to_a()
 
 values.each_slice(2).with_index do |slice, index|
 	puts(index)

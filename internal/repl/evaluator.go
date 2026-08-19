@@ -2800,7 +2800,11 @@ func indexValue(receiver, index Value, typ types.Type) (Value, error) {
 	switch value := receiver.Data.(type) {
 	case *arrayValue:
 		position, ok := index.Data.(int64)
-		if !ok || position < 0 || position >= int64(len(value.Items)) {
+		if !ok {
+			return Value{}, errors.New("array index is out of bounds")
+		}
+		position, ok = normalizedPosition(position, int64(len(value.Items)))
+		if !ok {
 			return Value{}, errors.New("array index is out of bounds")
 		}
 		result := value.Items[position]
@@ -2818,7 +2822,11 @@ func indexValue(receiver, index Value, typ types.Type) (Value, error) {
 	case string:
 		position, ok := index.Data.(int64)
 		runes := []rune(value)
-		if !ok || position < 0 || position >= int64(len(runes)) {
+		if !ok {
+			return Value{}, errors.New("string index is out of bounds")
+		}
+		position, ok = normalizedPosition(position, int64(len(runes)))
+		if !ok {
 			return Value{}, errors.New("string index is out of bounds")
 		}
 		return Value{Type: typ, Data: string(runes[position])}, nil
@@ -2830,7 +2838,11 @@ func assignIndex(receiver, index, value Value) error {
 	switch target := receiver.Data.(type) {
 	case *arrayValue:
 		position, ok := index.Data.(int64)
-		if !ok || position < 0 || position >= int64(len(target.Items)) {
+		if !ok {
+			return errors.New("array index is out of bounds")
+		}
+		position, ok = normalizedPosition(position, int64(len(target.Items)))
+		if !ok {
 			return errors.New("array index is out of bounds")
 		}
 		target.Items[position] = value
@@ -2846,6 +2858,13 @@ func assignIndex(receiver, index, value Value) error {
 		return nil
 	}
 	return fmt.Errorf("%s is not index-assignable", receiver.Type)
+}
+
+func normalizedPosition(position, size int64) (int64, bool) {
+	if position < 0 {
+		position += size
+	}
+	return position, position >= 0 && position < size
 }
 
 func number(value Value) (float64, bool, bool) {

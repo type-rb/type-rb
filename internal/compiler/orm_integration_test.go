@@ -1273,9 +1273,10 @@ end
 	}
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
-		`TrbOrmMembershipQueryWhere(TrbOrmMembershipUsing(users[0].TrbOrmTransaction()), []string{"user_id"}, []string{"="}, []any{users[0].TrbOrmColumnId()})`,
+		`TrbOrmMembershipAssociationPredicate(TrbOrmMembershipQueryWhere(TrbOrmMembershipUsing(`,
 		`orm.TrbOrmJoin{Kind: "INNER JOIN", Table: "memberships", SourceColumn: "id", TargetColumn: "project_id"`,
-		`TrbOrmProjectJoin(TrbOrmProjectUsing(users[0].TrbOrmTransaction())`,
+		`TrbOrmProjectJoin(TrbOrmProjectUsing(`,
+		`trbArrayIndex(users, 0).TrbOrmTransaction())`,
 		`Build: func(arguments *[]any) string`,
 		`trbOrmQuoteIdentifier("memberships")`,
 		`func(projects TrbOrmProjectQuery) TrbOrmProjectQuery`,
