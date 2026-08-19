@@ -114,7 +114,7 @@ func writeStatement(out *strings.Builder, code []token.Token, indent, continuati
 
 	if dedent && isMidBlock(first) {
 		*indent++
-	} else if opensEndBlock(code) {
+	} else if opensEndBlock(code, *continuation) {
 		*indent++
 	}
 	*continuation += delimiterDelta(code)
@@ -470,7 +470,7 @@ func isMidBlock(first string) bool {
 	return false
 }
 
-func opensEndBlock(tokens []token.Token) bool {
+func opensEndBlock(tokens []token.Token, initialDepth int) bool {
 	first := firstCode(tokens)
 	switch first {
 	case "class", "record", "enum", "module", "interface", "def", "if", "unless", "case", "begin", "while", "until", "for":
@@ -481,7 +481,7 @@ func opensEndBlock(tokens []token.Token) bool {
 			return true
 		}
 	}
-	depth := 0
+	depth := initialDepth
 	for index, item := range tokens {
 		switch item.Lexeme {
 		case "(", "[", "{":

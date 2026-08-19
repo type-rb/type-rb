@@ -136,41 +136,41 @@ end
 			t.Fatalf("%s: %v", options.Mode, err)
 		}
 		manifest := jobsintegration.ManifestFrom(artifactForModule(artifacts, "jobs/example_job").IR.Extensions)
-		if manifest == nil || len(manifest.Jobs) != 1 || manifest.Jobs[0].PerformKind != jobsintegration.PerformJobResult || manifest.Jobs[0].Fails.Kind != "" {
+		if manifest == nil || len(manifest.Jobs) != 1 || manifest.Jobs[0].PerformKind != jobsintegration.PerformJobResult {
 			t.Fatalf("%s produced unexpected JobResult manifest: %#v", options.Mode, manifest)
 		}
 	}
 }
 
-func TestCompileProjectRejectsNonCanonicalJobResultPerform(t *testing.T) {
+func TestCompileProjectRejectsUnsupportedJobPerformContracts(t *testing.T) {
 	tests := []struct {
 		name    string
-		imports string
-		result  string
-		fails   string
+		source  string
 		message string
 	}{
 		{
 			name: "raw standard Result",
-			imports: "import { Job, JobError } from trb/jobs\n" +
+			source: "import { Job, JobError } from trb/jobs\n" +
 				"import { Result } from trb/std/result\n" +
-				"import { Unit } from trb/std/unit\n",
-			result:  "Result<Unit, JobError>",
+				"import { Unit } from trb/std/unit\n\n" +
+				"class InvalidJob < Job\n\tdef perform(): Result<Unit, JobError>\n\t\treturn Result<Unit, JobError>::Ok(Unit.new())\n\tend\nend\n",
 			message: "must omit its return type or return JobResult",
 		},
 		{
+			name:    "legacy effect",
+			source:  "import { Job } from trb/jobs\nrecord AppError\nend\n\nclass InvalidJob < Job\n\tdef perform() fails AppError\n\t\treturn\n\tend\nend\n",
+			message: "fails was removed in TypeRB 0.3",
+		},
+		{
 			name:    "mixed result and effect",
-			imports: "import { Job, JobResult } from trb/jobs\nrecord AppError\nend\n",
-			result:  "JobResult",
-			fails:   " fails AppError",
-			message: "cannot combine a return type with fails",
+			source:  "import { Job, JobResult } from trb/jobs\nrecord AppError\nend\n\nclass InvalidJob < Job\n\tdef perform(): JobResult fails AppError\n\t\treturn\n\tend\nend\n",
+			message: "fails was removed in TypeRB 0.3",
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			source := test.imports + "\nclass InvalidJob < Job\n\tdef perform(): " + test.result + test.fails + "\n\t\treturn\n\tend\nend\n"
 			_, err := CompileProject([]SourceUnit{{
-				Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte(source),
+				Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte(test.source),
 			}}, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project"})
 			if err == nil || !strings.Contains(err.Error(), test.message) {
 				t.Fatalf("expected %q, got %v", test.message, err)

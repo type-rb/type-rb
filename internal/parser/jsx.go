@@ -10,13 +10,14 @@ import (
 )
 
 type jsxParser struct {
-	raw  string
-	root token.Token
-	pos  int
+	raw    string
+	root   token.Token
+	pos    int
+	report func(token.Span, string)
 }
 
-func parseJSXExpression(root token.Token) (*ast.JSXElement, bool) {
-	parser := &jsxParser{raw: root.Lexeme, root: root}
+func parseJSXExpression(root token.Token, report func(token.Span, string)) (*ast.JSXElement, bool) {
+	parser := &jsxParser{raw: root.Lexeme, root: root, report: report}
 	element, ok := parser.element()
 	parser.skipSpace()
 	return element, ok && parser.pos == len(parser.raw)
@@ -146,7 +147,7 @@ func (p *jsxParser) expression(source string, relativeStart int) (ast.Expression
 		tokens[index].Span.Start = shiftJSXPosition(tokens[index].Span.Start, base)
 		tokens[index].Span.End = shiftJSXPosition(tokens[index].Span.End, base)
 	}
-	return parseExpressionTokens(tokens)
+	return parseExpressionTokensReporting(tokens, nil, p.report)
 }
 
 func shiftJSXPosition(position, base token.Position) token.Position {

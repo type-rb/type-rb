@@ -19,6 +19,11 @@ Preserve these invariants:
 - Carry behavior through syntax AST, checked types, typed IR, and each affected backend; do not bypass the pipeline with source-text rewrites.
 - Keep `trb fmt` deterministic and preserve comments.
 - Treat compiler-owned package declarations as the source of external types; do not require application authors to maintain signature files.
+- Keep recoverable failure on the compiler-owned `Result<T, E>` model. Prefix
+  `try` propagates compatible `Err` values, postfix `catch` handles them
+  locally, and exhaustive `case` remains the general inspection form. Do not
+  reintroduce a second checked-effect channel or map native exceptions and
+  Promise rejections implicitly outside an explicit Result bridge.
 
 Choose the narrowest package boundary that can implement a feature:
 
@@ -45,9 +50,11 @@ For each coherent change:
 
 1. Add positive and diagnostic tests, covering Ruby, Go, and TypeScript when the feature is portable.
 2. Exercise the typed-IR REPL when runtime expression semantics change.
-3. Run `GOCACHE=/tmp/type-rb-go-cache go test ./...` and
+3. Exercise Result success, propagation, recovery, and must-use diagnostics
+   across every affected structured block and native boundary.
+4. Run `GOCACHE=/tmp/type-rb-go-cache go test ./...` and
    `./trb fmt --check .`. Use the source-checkout launcher so an older released
    `trb` on `PATH` cannot validate current syntax with a stale formatter.
-4. Update `docs/specification.md`, `docs/status.md`, or `docs/roadmap.md` only
+5. Update `docs/specification.md`, `docs/status.md`, or `docs/roadmap.md` only
    where behavior or status changed.
-5. Commit the completed work unit. Use Go 1.26 and current target language features; legacy target versions are out of scope.
+6. Commit the completed work unit. Use Go 1.26 and current target language features; legacy target versions are out of scope.

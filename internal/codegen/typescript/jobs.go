@@ -219,8 +219,6 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 		switch job.PerformKind {
 		case jobs.PerformJobResult:
 			g.line("const execution = " + call + "; if (execution.kind === \"Err\") throw new Error(execution.error.message);")
-		case jobs.PerformLegacyEffect:
-			g.line("const execution = " + call + "; if (execution.kind === \"Err\") throw new Error(String(execution.error));")
 		default:
 			g.line(call + ";")
 		}

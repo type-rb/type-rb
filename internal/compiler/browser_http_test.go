@@ -17,6 +17,7 @@ func TestTypeScriptBrowserHTTPClient(t *testing.T) {
 	json_body,
 } from trb/platform/typescript/browser
 import { Body, Header, Headers, HttpMethod } from trb/http
+import { Result } from trb/std/result
 import { QueryParameter } from trb/std/url
 
 record Todo
@@ -28,38 +29,40 @@ record CreateTodoInput
 	title: String
 end
 
-def fetch_todo(client: HttpClient, id: Integer): Response<Todo> fails RequestError
-	response := client.request("/todos", query: [QueryParameter.new(name: "id", value: id.to_s())], headers: Headers.new([Header.new(name: "accept", value: "application/json")]), timeout_milliseconds: 1000)
+def fetch_todo(client: HttpClient, id: Integer): Result<Response<Todo>, RequestError>
+	response := try client.request("/todos", query: [QueryParameter.new(name: "id", value: id.to_s())], headers: Headers.new([Header.new(name: "accept", value: "application/json")]), timeout_milliseconds: 1000)
 	return response.json<Todo>()
 end
 
-def create_todo(client: HttpClient, input: CreateTodoInput): Response<Todo> fails RequestError
-	body := json_body(input)
-	raw := client.request("/todos", method: HttpMethod.post(), body: body)
+def create_todo(client: HttpClient, input: CreateTodoInput): Result<Response<Todo>, RequestError>
+	body := try json_body(input)
+	raw := try client.request("/todos", method: HttpMethod.post(), body: body)
 	return raw.json<Todo>()
 end
 
-def fetch_with_local_request_names(client: HttpClient, id: Integer): Response<Todo> fails RequestError
+def fetch_with_local_request_names(client: HttpClient, id: Integer): Result<Response<Todo>, RequestError>
 	path := "/todos"
 	query := [QueryParameter.new(name: "id", value: id.to_s())]
 	headers := Headers.new([Header.new(name: "accept", value: "application/json")])
 	timeout := 1000
-	return client.request(path, query: query, headers: headers, timeout_milliseconds: timeout).json<Todo>()
+	response := try client.request(path, query: query, headers: headers, timeout_milliseconds: timeout)
+	return response.json<Todo>()
 end
 
-def raw_body(client: HttpClient): Body fails RequestError
-	return client.request("/health").body
+def raw_body(client: HttpClient): Result<Body, RequestError>
+	response := try client.request("/health")
+	return Result<Body, RequestError>::Ok(response.body)
 end
 
-def upload_file(client: HttpClient, file: File): Response<Body> fails RequestError
+def upload_file(client: HttpClient, file: File): Result<Response<Body>, RequestError>
 	return client.request("/uploads", method: HttpMethod.put(), body: RequestBody::File(file))
 end
 
-def file_bytes(file: File): Bytes fails FileReadError
+def file_bytes(file: File): Result<Bytes, FileReadError>
 	return file.read()
 end
 
-def file_text(file: File): String fails FileReadError
+def file_text(file: File): Result<String, FileReadError>
 	return file.read_text()
 end
 
@@ -71,11 +74,11 @@ def bytes_response(raw: Response<Body>): Response<Bytes>
 	return raw.bytes()
 end
 
-def empty_response(raw: Response<Body>): Response<NoBody> fails RequestError
+def empty_response(raw: Response<Body>): Result<Response<NoBody>, RequestError>
 	return raw.no_body()
 end
 
-def empty_named_response(response: Response<Body>): Response<NoBody> fails RequestError
+def empty_named_response(response: Response<Body>): Result<Response<NoBody>, RequestError>
 	return response.no_body()
 end
 `)
@@ -127,15 +130,17 @@ end
 
 func TestBrowserHTTPInferredTypesRemainUsableWithoutTypeImports(t *testing.T) {
 	source := []byte(`import { HttpClient, RequestError } from trb/platform/typescript/browser
+import { Result } from trb/std/result
 
 record Todo
 	id: Integer
 	title: String
 end
 
-def title(client: HttpClient): String fails RequestError
-	response := client.request("/todo").json<Todo>()
-	return response.body.title
+def title(client: HttpClient): Result<String, RequestError>
+	raw := try client.request("/todo")
+	response := try raw.json<Todo>()
+	return Result<String, RequestError>::Ok(response.body.title)
 end
 `)
 	artifact, err := Compile("browser_http_inferred.trb", source, "typescript")
@@ -148,23 +153,18 @@ end
 	}
 }
 
-func TestBrowserHTTPCanSuspendInsideFallibleFunctionValue(t *testing.T) {
+func TestBrowserHTTPResultFunctionCanSuspend(t *testing.T) {
 	source := []byte(`import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { Result } from trb/std/result
 
 record Todo
 	id: Integer
 	title: String
 end
 
-def invoke(loader: () -> Response<Todo> fails RequestError): Response<Todo> fails RequestError
-	return loader()
-end
-
-def load(client: HttpClient): Response<Todo> fails RequestError
-	query_fn := fn(): Response<Todo> fails RequestError
-		return client.request("/todos/1").json<Todo>()
-	end
-	return invoke(query_fn)
+def load(client: HttpClient): Result<Response<Todo>, RequestError>
+	response := try client.request("/todos/1")
+	return response.json<Todo>()
 end
 `)
 	artifact, err := Compile("browser_http_callback.trb", source, "typescript")
@@ -173,8 +173,8 @@ end
 	}
 	output := string(artifact.Output)
 	for _, want := range []string{
-		"loader: () => Result<__trb_browser.Response<Todo>, __trb_browser.RequestError> | Promise<Result<__trb_browser.Response<Todo>, __trb_browser.RequestError>>",
-		"const query_fn: () => Promise<Result<__trb_browser.Response<Todo>, __trb_browser.RequestError>> = async ()",
+		"async function load",
+		"Promise<Result<__trb_browser.Response<Todo>, __trb_browser.RequestError>>",
 		"globalThis.fetch",
 	} {
 		if !strings.Contains(output, want) {

@@ -18,7 +18,6 @@ import (
 
 var keywordDetails = map[string]string{
 	"and":        "Boolean conjunction",
-	"attempt":    "capture fallible operations as Result",
 	"break":      "exit the current loop",
 	"case":       "dispatch on an enum",
 	"catch":      "recover from a Result error",
@@ -30,7 +29,6 @@ var keywordDetails = map[string]string{
 	"end":        "close a block",
 	"enum":       "declare a closed nominal type",
 	"false":      "Boolean literal",
-	"fails":      "declare a function error effect",
 	"fn":         "create a typed function value",
 	"if":         "start a conditional",
 	"implements": "declare implemented interfaces",
@@ -208,7 +206,7 @@ func typeCompletionPosition(source string, wordStart int) bool {
 	}
 	last := significant[len(significant)-1].Lexeme
 	switch last {
-	case "fails", "implements", "|", "->":
+	case "implements", "|", "->":
 		return true
 	case "=":
 		return currentLineStartsWith(significant, "type")
@@ -963,7 +961,7 @@ func directReceiverMembers(receiver types.Type, context Context) []Symbol {
 			if name == "sort_by" || name == "sort_by_descending" {
 				detailType = "ordered key"
 			}
-			result = append(result, Symbol{Name: name, Kind: CompletionMethod, Detail: name + " { |value| " + detailType + " }: " + returnType.String(), Type: returnType})
+			result = append(result, Symbol{Name: name, Kind: CompletionMethod, Detail: name + " { |value| " + detailType + " }: " + displayType(returnType), Type: returnType})
 		}
 	}
 	byName := map[string]Symbol{}
@@ -1094,10 +1092,6 @@ func substituteCompletionType(input types.Type, substitutions map[string]types.T
 	for index, argument := range input.Args {
 		result.Args[index] = substituteCompletionType(argument, substitutions)
 	}
-	if input.Fails != nil {
-		failure := substituteCompletionType(*input.Fails, substitutions)
-		result.Fails = &failure
-	}
 	return result
 }
 
@@ -1109,7 +1103,7 @@ func mergeMemberSymbols(left, right Symbol) Symbol {
 		result.Type = types.UnionOf(left.Type, right.Type)
 	}
 	if result.Kind == CompletionField && result.Type.Kind != "" {
-		result.Detail = result.Type.String()
+		result.Detail = displayType(result.Type)
 	}
 	return result
 }
@@ -1395,7 +1389,7 @@ func collectParameters(tokens []token.Token, start int, symbols map[string]Symbo
 		}
 		name := tokens[index].Lexeme
 		typ := types.FromName(tokens[index+2].Lexeme)
-		symbols[name] = Symbol{Name: name, Kind: CompletionParameter, Detail: typ.String(), Type: typ}
+		symbols[name] = Symbol{Name: name, Kind: CompletionParameter, Detail: displayType(typ), Type: typ}
 		locals[name] = true
 	}
 }
@@ -1441,7 +1435,7 @@ func collectVariable(tokens []token.Token, index int, symbols map[string]Symbol,
 	if isConstantName(name) {
 		kind = CompletionConstant
 	}
-	symbols[name] = Symbol{Name: name, Kind: kind, Detail: typ.String(), Type: typ}
+	symbols[name] = Symbol{Name: name, Kind: kind, Detail: displayType(typ), Type: typ}
 	locals[name] = true
 }
 

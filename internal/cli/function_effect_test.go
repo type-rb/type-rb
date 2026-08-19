@@ -11,7 +11,7 @@ import (
 	"github.com/type-rb/type-rb/internal/project"
 )
 
-func TestRunFallibleFunctionValuesAcrossAvailableBackends(t *testing.T) {
+func TestRunResultFunctionValuesAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			if mode == "ruby" {
@@ -44,11 +44,15 @@ record AppError
 	message: String
 end
 
-def read_number(): Integer fails AppError
-	return 7
+def read_number(): Result<Integer, AppError>
+	return Result<Integer, AppError>::Ok(7)
 end
 
-def invoke<T, E>(callback: () -> T fails E): T fails E
+def read_eight(): Result<Integer, AppError>
+	return Result<Integer, AppError>::Ok(8)
+end
+
+def invoke<T, E>(callback: () -> Result<T, E>): Result<T, E>
 	return callback()
 end
 
@@ -63,14 +67,14 @@ def print_result(result: Result<Integer, AppError>)
 end
 
 def main()
-	fallible: () -> Integer fails AppError := fn(): Integer fails AppError
+	first: () -> Result<Integer, AppError> := fn(): Result<Integer, AppError>
 		return read_number()
 	end
-	pure: () -> Integer fails AppError := fn(): Integer
-		return 8
+	second: () -> Result<Integer, AppError> := fn(): Result<Integer, AppError>
+		return read_eight()
 	end
-	print_result(attempt invoke<Integer, AppError>(fallible))
-	print_result(attempt invoke<Integer, AppError>(pure))
+	print_result(invoke<Integer, AppError>(first))
+	print_result(invoke<Integer, AppError>(second))
 	return
 end
 `
@@ -90,7 +94,7 @@ end
 	}
 }
 
-func TestRunFallibleCollectionTransformsAcrossAvailableBackends(t *testing.T) {
+func TestRunCollectionTransformsAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			if mode == "ruby" {
@@ -117,31 +121,25 @@ func TestRunFallibleCollectionTransformsAcrossAvailableBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			source := `import { Result } from trb/std/result
-
-record AppError
-	message: String
-end
-
-def render(value: Integer): String fails AppError
+			source := `def render(value: Integer): String
 	return value.to_s()
 end
 
-def positive?(value: Integer): Boolean fails AppError
+def positive?(value: Integer): Boolean
 	return value > 0
 end
 
-def add(left: Integer, right: Integer): Integer fails AppError
+def add(left: Integer, right: Integer): Integer
 	return left + right
 end
 
-def render_all(values: Array<Integer>): Array<String> fails AppError
+def render_all(values: Array<Integer>): Array<String>
 	return values.map do |value|
 		render(value)
 	end
 end
 
-def exercise_transforms(): Integer fails AppError
+def exercise_transforms(): Integer
 	[1, 2, 3].select do |value|
 		positive?(value)
 	end
@@ -167,20 +165,9 @@ def exercise_transforms(): Integer fails AppError
 end
 
 def main()
-	result := attempt render_all([1, 2, 3])
-	case result
-	when Result::Ok(values)
-		puts(values[0])
-	when Result::Err(error)
-		puts(error.message)
-	end
-	check := attempt exercise_transforms()
-	case check
-	when Result::Ok(value)
-		puts(value)
-	when Result::Err(error)
-		puts(error.message)
-	end
+	values := render_all([1, 2, 3])
+	puts(values[0])
+	puts(exercise_transforms())
 	return
 end
 `

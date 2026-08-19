@@ -279,7 +279,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line(text, n.TrailingComment)
 	case *ir.Break:
 		if g.breakTarget != "" {
-			g.line("throw "+strconv.Quote(g.breakTarget), n.TrailingComment)
+			g.line("throw :"+g.breakTarget, n.TrailingComment)
 		} else {
 			g.line("break", n.TrailingComment)
 		}
@@ -621,8 +621,6 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.ifExpression(n)
 	case *ir.Case:
 		return g.caseExpression(n)
-	case *ir.Attempt:
-		return g.attemptExpression(n)
 	case *ir.Lambda:
 		parts := make([]string, len(n.Parameters))
 		for index, parameter := range n.Parameters {
@@ -634,8 +632,6 @@ func (g *generator) expr(expression ir.Expression) string {
 		child.indent = g.indent + 1
 		child.statements(n.Body)
 		return "->(" + strings.Join(parts, ", ") + ") do\n" + child.b.String() + strings.Repeat("  ", g.indent) + "end"
-	case *ir.UnhandledEffect:
-		return g.expr(n.Value)
 	case *ir.Identifier:
 		if !n.Lexical && g.topTargets[n.Name] != "" {
 			return g.topTargets[n.Name]
@@ -675,8 +671,6 @@ func (g *generator) expr(expression ir.Expression) string {
 		switch n.Kind {
 		case ir.RangeToIterableConversion:
 			return g.expr(n.Value)
-		case ir.PureFunctionToFallibleConversion:
-			return g.pureFunctionToFallible(n)
 		case ir.IntegerToFloatConversion:
 			return "(" + g.expr(n.Value) + ").to_f"
 		case ir.UnionIntegerToFloatConversion:
@@ -867,35 +861,6 @@ func (g *generator) ifExpression(node *ir.If) string {
 	return strings.TrimSpace(child.b.String())
 }
 
-func (g *generator) attemptExpression(node *ir.Attempt) string {
-	child := &generator{
-		loader:          g.loader,
-		modulePath:      g.modulePath,
-		topFunctions:    g.topFunctions,
-		topTargets:      g.topTargets,
-		nativeSyntax:    g.nativeSyntax,
-		temporary:       g.temporary,
-		jobs:            g.jobs,
-		jobsSQL:         g.jobsSQL,
-		orm:             g.orm,
-		breakTarget:     g.breakTarget,
-		execution:       g.execution,
-		executionActive: g.executionActive,
-	}
-	child.line("-> do", "")
-	child.indent++
-	child.statements(node.Body)
-	result := node.Value
-	if result == nil {
-		result = node.BodyResult
-	}
-	child.line(child.expr(result), "")
-	child.indent--
-	child.line("end.call", "")
-	g.temporary = child.temporary
-	return strings.TrimSpace(child.b.String())
-}
-
 func (g *generator) caseExpression(node *ir.Case) string {
 	child := &generator{
 		loader:          g.loader,
@@ -973,9 +938,6 @@ func (g *generator) caseExpression(node *ir.Case) string {
 }
 
 func (g *generator) transform(transform *ir.Transform) string {
-	if transform.Fails.Kind != "" && transform.Fails.Kind != types.Never {
-		return g.effectfulTransform(transform)
-	}
 	source := g.expr(transform.Source)
 	if _, rangeSource := transform.Source.(*ir.Range); rangeSource {
 		source = "(" + source + ")"
@@ -998,98 +960,6 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
-}
-
-func (g *generator) effectfulTransform(transform *ir.Transform) string {
-	child := *g
-	child.b = strings.Builder{}
-	child.sourceRecorder = nil
-	child.indent = 0
-	child.temporary++
-	suffix := strconv.Itoa(child.temporary)
-	items := "__trb_items_" + suffix
-	result := "__trb_result_" + suffix
-	index := "__trb_index_" + suffix
-	item := transform.Item
-	if item == "" || item == "_" {
-		item = "__trb_item_" + suffix
-	}
-	ok := func(value string) string { return "Result::Ok.new(" + value + ")" }
-	emitValue := func() string {
-		child.statements(transform.Body)
-		return child.expr(transform.Result)
-	}
-
-	child.line("-> do", "")
-	child.indent++
-	child.line(items+" = "+child.expr(transform.Source), "")
-	switch transform.Operation {
-	case "map", "select":
-		child.line(result+" = []", "")
-		parameters := item
-		operation := "each"
-		if transform.WithIndex {
-			operation = "each_with_index"
-			parameters += ", " + transform.Index
-		}
-		child.line(items+"."+operation+" do |"+parameters+"|", "")
-		child.indent++
-		value := emitValue()
-		if transform.Operation == "map" {
-			child.line(result+" << "+value, "")
-		} else {
-			child.line(result+" << "+item+" if "+value, "")
-		}
-		child.indent--
-		child.line("end", "")
-		child.line(ok(result), "")
-	case "any?", "all?", "none?", "find", "find_index":
-		child.line(items+".each_with_index do |"+item+", "+index+"|", "")
-		child.indent++
-		value := emitValue()
-		switch transform.Operation {
-		case "any?":
-			child.line("return "+ok("true")+" if "+value, "")
-		case "all?":
-			child.line("return "+ok("false")+" unless "+value, "")
-		case "none?":
-			child.line("return "+ok("false")+" if "+value, "")
-		case "find":
-			child.line("return "+ok(item)+" if "+value, "")
-		case "find_index":
-			child.line("return "+ok(index)+" if "+value, "")
-		}
-		child.indent--
-		child.line("end", "")
-		switch transform.Operation {
-		case "any?":
-			child.line(ok("false"), "")
-		case "all?", "none?":
-			child.line(ok("true"), "")
-		default:
-			child.line(ok("nil"), "")
-		}
-	case "reduce":
-		child.line(result+" = "+child.expr(transform.Initial), "")
-		child.line(items+".each do |"+item+"|", "")
-		child.indent++
-		accumulator := transform.Accumulator
-		if accumulator == "" || accumulator == "_" {
-			accumulator = "__trb_accumulator_" + suffix
-		}
-		child.line(accumulator+" = "+result, "")
-		value := emitValue()
-		child.line(result+" = "+value, "")
-		child.indent--
-		child.line("end", "")
-		child.line(ok(result), "")
-	default:
-		child.line(`raise "unsupported effectful TypeRB collection transformation"`, "")
-	}
-	child.indent--
-	child.line("end.call", "")
-	g.temporary = child.temporary
-	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) transformResult(transform *ir.Transform) string {
@@ -1386,26 +1256,6 @@ func slashRelative(base, target string) (string, error) {
 	}
 	parts = append(parts, targetParts...)
 	return strings.Join(parts, "/"), nil
-}
-
-func (g *generator) pureFunctionToFallible(conversion *ir.Conversion) string {
-	parameters, success, ok := types.FunctionSignature(conversion.ExprType())
-	if !ok {
-		return g.expr(conversion.Value)
-	}
-	arguments := make([]string, len(parameters))
-	for index := range parameters {
-		arguments[index] = "__trb_arg" + strconv.Itoa(index)
-	}
-	call := "__trb_value.call(" + strings.Join(arguments, ", ") + ")"
-	value := call
-	prefix := ""
-	if success.Kind == types.Void {
-		prefix = call + "; "
-		value = "Unit.new"
-	}
-	wrapped := "->(" + strings.Join(arguments, ", ") + ") { " + prefix + "Result::Ok.new(" + value + ") }"
-	return "->(__trb_value) { " + wrapped + " }.call(" + g.expr(conversion.Value) + ")"
 }
 
 func classFields(statements []ir.Statement) []*ir.Field {

@@ -101,7 +101,6 @@ func (c *Checker) validateReservedKeywordStatement(statement ast.Statement) {
 		c.validateReservedKeywordTypeParameters(node.TypeParameters)
 		c.validateReservedKeywordParameters(node.Parameters, "a parameter name")
 		c.validateReservedKeywordType(node.ReturnType)
-		c.validateReservedKeywordType(node.Fails)
 		c.validateReservedKeywords(node.Body)
 	case *ast.VariableStatement:
 		c.validateReservedKeywordName(node.Name, "a variable name", node.Span())
@@ -180,7 +179,6 @@ func (c *Checker) validateReservedKeywordExpression(expression ast.Expression) {
 	case *ast.LambdaExpression:
 		c.validateReservedKeywordParameters(node.Parameters, "a function parameter")
 		c.validateReservedKeywordType(node.ReturnType)
-		c.validateReservedKeywordType(node.Fails)
 		c.validateReservedKeywords(node.Body)
 	case *ast.CallExpression:
 		c.validateReservedKeywordExpression(node.Callee)
@@ -267,8 +265,5 @@ func (c *Checker) validateReservedKeywordType(ref ast.TypeRef) {
 	}
 	if ref.FunctionReturn != nil {
 		c.validateReservedKeywordType(*ref.FunctionReturn)
-	}
-	if ref.FunctionFails != nil {
-		c.validateReservedKeywordType(*ref.FunctionFails)
 	}
 }

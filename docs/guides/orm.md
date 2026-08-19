@@ -99,9 +99,9 @@ normally when using it as a query root, constructor, parameter, or return type:
 
 ```trb
 import { Post } from models/post
-import { DbError } from trb/orm
+import { DbResult } from trb/orm
 
-def recent_posts(): Array<Post> fails DbError
+def recent_posts(): DbResult<Array<Post>>
 	return Post.order(created_at: :desc).limit(20).all()
 end
 ```
@@ -167,52 +167,99 @@ as `DbErrorKind::InvalidData` instead of being accepted as an enum member.
 The enum may be declared in the application or imported from a TypeRB package;
 package aliases use the same resolution rules as ordinary imports.
 
-## Queries and effects
+## Queries and Results
 
 Model classes are query roots; an empty `where()` is unnecessary. Query values
-are immutable, and database terminals declare `fails DbError`.
+are immutable, and database terminals return `DbResult<T>`, the package alias
+for `Result<T, DbError>`.
 
 ```trb
-def recent_posts(): Array<Post> fails DbError
+import { DbResult } from trb/orm
+
+def recent_posts(): DbResult<Array<Post>>
 	query := Post.where(published: true).order(created_at: :desc).limit(20)
 	return query.all()
 end
 ```
 
-Inside a compatible `fails DbError` function, errors propagate automatically.
-Use `attempt` only when the error must become a `Result` value:
+Use prefix `try` when a function performs more work after a successful
+database operation. Use `catch` when the caller resolves the database error
+locally:
 
 ```trb
 def main()
-	result := attempt recent_posts()
-	puts(result)
+	posts := recent_posts() catch |error|
+		puts(error.message)
+		return
+	end
+	puts(posts.size())
 end
 ```
 
-Associations use the same effect rules. `user.posts` and `post.author` load on
-first access and cache their values. Preload fills the same cache.
-`load()`, `reload()`, and `loaded?()` provide explicit cache control.
+Associations use the same Result rules. `user.posts` and `post.author` return a
+`DbResult` that loads on first access and caches its success value. Preload
+fills the same cache. `load()` and `reload()` also return `DbResult`; `loaded?()`
+remains an ordinary Boolean cache query.
 
 ```trb
-def print_posts(): Integer fails DbError
-	users := User.preload(:posts).all()
+import { DbResult } from trb/orm
+
+def print_posts(): DbResult<Integer>
+	users := try User.preload(:posts).all()
 	users.each do |user|
-		user.posts.each do |post|
+		posts := try user.posts
+		posts.each do |post|
 			puts(post.title)
 		end
 	end
-	return users.size()
+	return DbResult<Integer>::Ok(users.size())
 end
 ```
+
+### Streaming in batches
+
+`find_each()` and `find_in_batches()` are structured Result boundaries. They
+return `DbResult<Integer>`, where the success value is the number of records
+visited. Assign the raw Result when both outcomes matter, use prefix `try`
+inside a function returning a compatible Result, or use `catch` to recover at
+the call site:
+
+```trb
+import { DbResult } from trb/orm
+
+def print_recent_posts(): DbResult<Integer>
+	count := try Post.where(published: true).find_each(batch_size: 100) do |post|
+		puts(post.title)
+	end
+	return DbResult<Integer>::Ok(count)
+end
+
+def main()
+	count := print_recent_posts() catch |error|
+		puts(error.message)
+		0
+	end
+	puts(count)
+end
+```
+
+Prefix `try` inside the streaming block stops iteration and returns `Err` from
+the streaming operation. `break` and `next` keep their ordinary local
+iteration behavior. An authored `return` cannot cross this Result boundary;
+return after the operation instead. When streaming runs inside
+`Database.transaction()`, an Err propagated with `try` rolls the transaction
+back before an outer `catch` handler runs.
 
 ## Writes and transactions
 
 Drafts and pending changes keep inserts and updates distinct:
 
 ```trb
-def create_post(user: User): Post fails DbError
+import { DbResult } from trb/orm
+
+def create_post(user: User): DbResult<Post>
 	draft := Post.build(user_id: user.id, title: "First post")
-	post := draft.save()
+	post := try draft.save()
 	return post.with(title: "Updated post").save()
 end
 ```
@@ -222,13 +269,21 @@ aggregates, joins, subqueries, row locks, and destroy lifecycles are available.
 Transactions use an explicit scope:
 
 ```trb
-def publish_all(): Integer fails DbError
+import { DbResult } from trb/orm
+
+def publish_all(): DbResult<Integer>
 	return Database.transaction() do |transaction|
 		posts := Post.using(transaction)
-		posts.where(published: false).update_all(published: true)
+		try posts.where(published: false).update_all(published: true)
 	end
 end
 ```
+
+`Database.transaction()` is a structured Result boundary. A Result propagated
+with `try` from its body rolls the transaction back; an outer `catch` runs only
+after rollback completes. The block's final successful value becomes the
+transaction's `Ok` payload. An authored `return` cannot cross the transaction
+boundary.
 
 Model classes and filtered relations both support `update_all()`, `delete_all()`,
 and `destroy_all()`. Direct deletes skip lifecycle behavior; destroy operations
@@ -238,5 +293,7 @@ run the configured `dependent: destroy`, `delete`, `nullify`, or `restrict` rule
 
 Start `trb` or `trb repl` in the project. The REPL loads the same schema and can
 execute reads, associations, transactions, batching, writes, conflicts, and
-destroy lifecycles. A fallible top-level expression displays either its success
-value or its structured `DbError` without ending the session.
+destroy lifecycles. A top-level database Result displays `Ok` or its structured
+`DbError` without ending the session. Top-level `try` is rejected; inspect the
+Result directly or recover with `catch` so an error cannot terminate the
+interactive session implicitly.

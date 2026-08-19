@@ -481,21 +481,19 @@ func addDeclarationMembers(context *Context, catalog *declaration.Catalog) {
 }
 
 func declarationSymbol(member declaration.Member) Symbol {
+	valueType := member.Return
 	if member.Kind == declaration.Property {
-		return Symbol{Name: member.Name, Kind: CompletionField, Detail: member.Return.String(), Type: member.Return}
+		return Symbol{Name: member.Name, Kind: CompletionField, Detail: displayType(valueType), Type: valueType}
 	}
 	parameters := make([]string, len(member.Parameters))
 	callParameters := make([]CallParameter, len(member.Parameters))
 	for index, parameter := range member.Parameters {
-		parameters[index] = parameter.Name + ": " + parameter.Type.String()
+		parameters[index] = parameter.Name + ": " + displayType(parameter.Type)
 		callParameters[index] = CallParameter{Name: parameter.Name, Label: parameters[index], Keyword: parameter.Keyword}
 	}
-	detail := member.Name + "(" + strings.Join(parameters, ", ") + "): " + member.Return.String()
-	if member.Fails.Kind != "" && member.Fails.Kind != types.Never {
-		detail += " fails " + member.Fails.String()
-	}
+	detail := member.Name + "(" + strings.Join(parameters, ", ") + "): " + displayType(valueType)
 	return Symbol{
-		Name: member.Name, Kind: CompletionMethod, Detail: detail, Type: member.Return,
+		Name: member.Name, Kind: CompletionMethod, Detail: detail, Type: valueType,
 		Call: &CallInfo{ParameterCount: len(member.Parameters), Parameters: callParameters},
 	}
 }
@@ -520,6 +518,7 @@ func addImportContracts(context *Context, imported *ir.Import) {
 }
 
 func contractMemberSymbol(name string, member ir.MemberContract) Symbol {
+	valueType := member.Type
 	kind := CompletionMethod
 	if member.Kind == string(resolver.ValueExport) {
 		kind = CompletionField
@@ -527,20 +526,17 @@ func contractMemberSymbol(name string, member ir.MemberContract) Symbol {
 	parameters := make([]string, len(member.Parameters))
 	callParameters := make([]CallParameter, len(member.Parameters))
 	for index, parameter := range member.Parameters {
-		parameters[index] = parameter.String()
+		parameters[index] = displayType(parameter)
 		callParameters[index] = CallParameter{Name: "arg" + strconv.Itoa(index), Label: parameters[index]}
 	}
-	detail := member.Type.String()
+	detail := displayType(valueType)
 	var call *CallInfo
 	if kind == CompletionMethod {
 		genericSuffix := ""
 		if len(member.TypeParameters) > 0 {
 			genericSuffix = "<" + strings.Join(member.TypeParameters, ", ") + ">"
 		}
-		detail = name + genericSuffix + "(" + strings.Join(parameters, ", ") + "): " + member.Type.String()
-		if member.Fails.Kind != "" && member.Fails.Kind != types.Never {
-			detail += " fails " + member.Fails.String()
-		}
+		detail = name + genericSuffix + "(" + strings.Join(parameters, ", ") + "): " + displayType(valueType)
 		call = &CallInfo{
 			ParameterCount:        len(member.Parameters),
 			ExplicitTypeArguments: len(member.TypeParameters) > 0,
@@ -548,7 +544,7 @@ func contractMemberSymbol(name string, member ir.MemberContract) Symbol {
 			Parameters:            callParameters,
 		}
 	}
-	return Symbol{Name: name, Kind: kind, Detail: detail, Type: member.Type, Call: call}
+	return Symbol{Name: name, Kind: kind, Detail: detail, Type: valueType, Call: call}
 }
 
 func appendUniqueSymbol(symbols []Symbol, candidate Symbol) []Symbol {
@@ -605,10 +601,10 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 			parts := make([]string, len(parameters))
 			callParameters := make([]CallParameter, len(parameters))
 			for index, parameter := range parameters {
-				parts[index] = parameter.String()
+				parts[index] = displayType(parameter)
 				callParameters[index] = CallParameter{Name: "arg" + strconv.Itoa(index), Label: parts[index]}
 			}
-			detail = name + genericSuffix + "(" + strings.Join(parts, ", ") + "): " + typ.String()
+			detail = name + genericSuffix + "(" + strings.Join(parts, ", ") + "): " + displayType(typ)
 			call = &CallInfo{
 				ParameterCount:        len(parameters),
 				ExplicitTypeArguments: len(typeParameters) > 0,
@@ -670,7 +666,7 @@ func standardSymbols(definition *stdlib.Package) []Symbol {
 		}
 		parameters := make([]CallParameter, len(library.Parameters))
 		for index, parameter := range library.Parameters {
-			parameters[index] = CallParameter{Name: parameter.Name, Label: parameter.Name + ": " + parameter.Type.String()}
+			parameters[index] = CallParameter{Name: parameter.Name, Label: parameter.Name + ": " + displayType(parameter.Type)}
 		}
 		result = append(result, Symbol{
 			Name:   library.Name,
@@ -700,7 +696,7 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, context
 			if node.Constant {
 				kind = CompletionConstant
 			}
-			result = append(result, Symbol{Name: node.Name, Kind: kind, Detail: node.Type.String(), Type: node.Type, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
+			result = append(result, Symbol{Name: node.Name, Kind: kind, Detail: displayType(node.Type), Type: node.Type, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		case *ir.Method:
 			if privateName(node.Name) {
 				continue
@@ -736,9 +732,9 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, context
 			rememberType(context, qualified, node.Name, node.TypeParameters, &target)
 			members := make([]Symbol, 0, len(node.Variants))
 			for _, variant := range node.Variants {
-				members = append(members, Symbol{Name: variant.Name, Kind: CompletionConstant, Detail: node.Target.String(), Definition: sourceDefinition(sourcePath, variant.Name, variant.SourceSpan())})
+				members = append(members, Symbol{Name: variant.Name, Kind: CompletionConstant, Detail: displayType(node.Target), Definition: sourceDefinition(sourcePath, variant.Name, variant.SourceSpan())})
 			}
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "type " + qualified + " = " + node.Target.String(), Type: types.FromName(qualified), Members: members, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "type " + qualified + " = " + displayType(node.Target), Type: types.FromName(qualified), Members: members, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
 		case *ir.Interface:
 			qualified := qualify(owner, node.Name)
 			rememberType(context, qualified, node.Name, node.TypeParameters, nil)
@@ -790,7 +786,7 @@ func classMembers(statements []ir.Statement, owner, sourcePath string, ownerDefi
 			if privateName(name) {
 				continue
 			}
-			instance = append(instance, Symbol{Name: name, Kind: CompletionField, Detail: node.Type.String(), Type: node.Type, Definition: sourceDefinition(sourcePath, name, node.SourceSpan())})
+			instance = append(instance, Symbol{Name: name, Kind: CompletionField, Detail: displayType(node.Type), Type: node.Type, Definition: sourceDefinition(sourcePath, name, node.SourceSpan())})
 		case *ir.Method:
 			if node.Name == "initialize" {
 				constructor = constructorSignature(node, owner)
@@ -830,15 +826,15 @@ func methodSymbol(method *ir.Method, kind CompletionKind, sourcePath string) Sym
 		symbol.Call = nil
 	}
 	if method.Loadable {
-		symbol.Members = loadablePropertyMembers(symbol.Type, method.Fails, symbol.Definition)
+		symbol.Members = loadablePropertyMembers(symbol.Type, symbol.Definition)
 	}
 	return symbol
 }
 
-func loadablePropertyMembers(valueType, failureType types.Type, definition *DefinitionLocation) []Symbol {
+func loadablePropertyMembers(valueType types.Type, definition *DefinitionLocation) []Symbol {
 	load := func(name string) Symbol {
 		return Symbol{
-			Name: name, Kind: CompletionMethod, Detail: name + "(): " + valueType.String() + " fails " + failureType.String(),
+			Name: name, Kind: CompletionMethod, Detail: name + "(): " + displayType(valueType),
 			Type: valueType, Call: &CallInfo{}, Definition: definition,
 		}
 	}
@@ -859,8 +855,8 @@ func recordMembers(statements []ir.Statement, owner, sourcePath string, ownerDef
 			continue
 		}
 		definition := sourceDefinition(sourcePath, field.Name, field.SourceSpan())
-		instance = append(instance, Symbol{Name: field.Name, Kind: CompletionField, Detail: field.Type.String(), Type: field.Type, Definition: definition})
-		label := field.Name + ": " + field.Type.String()
+		instance = append(instance, Symbol{Name: field.Name, Kind: CompletionField, Detail: displayType(field.Type), Type: field.Type, Definition: definition})
+		label := field.Name + ": " + displayType(field.Type)
 		parameters = append(parameters, label)
 		callParameters = append(callParameters, CallParameter{Name: field.Name, Label: label, Keyword: true, Definition: definition})
 	}
@@ -880,7 +876,7 @@ func enumMembers(enum *ir.Enum, owner, sourcePath string, ownerDefinition *Defin
 			}
 			parameters := make([]string, 0, len(member.Fields))
 			for _, field := range member.Fields {
-				parameters = append(parameters, field.Name+": "+field.Type.String())
+				parameters = append(parameters, field.Name+": "+displayType(field.Type))
 			}
 			detail := member.Name
 			if len(parameters) > 0 {
@@ -894,9 +890,9 @@ func enumMembers(enum *ir.Enum, owner, sourcePath string, ownerDefinition *Defin
 		}
 	}
 	if enum.RawType.Kind != "" {
-		instance = append(instance, Symbol{Name: "raw_value", Kind: CompletionMethod, Detail: "raw_value(): " + enum.RawType.String(), Type: enum.RawType, Call: &CallInfo{}, Definition: ownerDefinition})
+		instance = append(instance, Symbol{Name: "raw_value", Kind: CompletionMethod, Detail: "raw_value(): " + displayType(enum.RawType), Type: enum.RawType, Call: &CallInfo{}, Definition: ownerDefinition})
 		resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName(owner), types.FromName("EnumValueError")}}
-		namespace = append(namespace, Symbol{Name: "from_raw", Kind: CompletionMethod, Detail: "from_raw(value: " + enum.RawType.String() + "): " + resultType.String(), Type: resultType, Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: " + enum.RawType.String()}}}, Definition: ownerDefinition})
+		namespace = append(namespace, Symbol{Name: "from_raw", Kind: CompletionMethod, Detail: "from_raw(value: " + displayType(enum.RawType) + "): " + displayType(resultType), Type: resultType, Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: " + displayType(enum.RawType)}}}, Definition: ownerDefinition})
 	}
 	sortSymbols(instance)
 	sortSymbols(namespace)
@@ -906,7 +902,7 @@ func enumMembers(enum *ir.Enum, owner, sourcePath string, ownerDefinition *Defin
 func methodSignature(method *ir.Method) string {
 	parameters := make([]string, 0, len(method.Parameters))
 	for _, parameter := range method.Parameters {
-		text := parameter.Name + ": " + parameter.Type.String()
+		text := parameter.Name + ": " + displayType(parameter.Type)
 		if parameter.Rest {
 			text = "*" + text
 		} else if parameter.KeywordRest {
@@ -920,18 +916,12 @@ func methodSignature(method *ir.Method) string {
 	}
 	valueType := methodValueType(method)
 	if valueType.Kind != types.Void {
-		result += ": " + valueType.String()
-	}
-	if method.Fails.Kind != "" && method.Fails.Kind != types.Never {
-		result += " fails " + method.Fails.String()
+		result += ": " + displayType(valueType)
 	}
 	return result
 }
 
 func methodValueType(method *ir.Method) types.Type {
-	if method.SuccessType.Kind != "" {
-		return method.SuccessType
-	}
 	return method.ReturnType
 }
 
@@ -955,7 +945,7 @@ func methodCallInfo(method *ir.Method) *CallInfo {
 }
 
 func callParameter(parameter ir.Parameter) CallParameter {
-	label := parameter.Name + ": " + parameter.Type.String()
+	label := parameter.Name + ": " + displayType(parameter.Type)
 	if parameter.Rest {
 		label = "*" + label
 	} else if parameter.KeywordRest {
@@ -980,7 +970,7 @@ func copyLiteralArrays(values [][]string) [][]string {
 func constructorSignature(method *ir.Method, owner string) string {
 	parameters := make([]string, 0, len(method.Parameters))
 	for _, parameter := range method.Parameters {
-		parameters = append(parameters, parameter.Name+": "+parameter.Type.String())
+		parameters = append(parameters, parameter.Name+": "+displayType(parameter.Type))
 	}
 	return "new(" + strings.Join(parameters, ", ") + "): " + owner
 }
@@ -988,16 +978,18 @@ func constructorSignature(method *ir.Method, owner string) string {
 func librarySignature(symbol stdlib.Symbol) string {
 	parameters := make([]string, 0, len(symbol.Parameters))
 	for _, parameter := range symbol.Parameters {
-		parameters = append(parameters, parameter.Name+": "+parameter.Type.String())
+		parameters = append(parameters, parameter.Name+": "+displayType(parameter.Type))
 	}
 	result := symbol.Name + "(" + strings.Join(parameters, ", ") + ")"
-	if symbol.Return.Kind != types.Void {
-		result += ": " + symbol.Return.String()
-	}
-	if symbol.Fails.Kind != "" && symbol.Fails.Kind != types.Never {
-		result += " fails " + symbol.Fails.String()
+	valueType := symbol.Return
+	if valueType.Kind != types.Void {
+		result += ": " + displayType(valueType)
 	}
 	return result
+}
+
+func displayType(input types.Type) string {
+	return input.String()
 }
 
 func sortSymbols(symbols []Symbol) {

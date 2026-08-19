@@ -30,7 +30,7 @@ func TestPortableORMCompilesRubyRuntimeAndTypedIntrinsics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	source := []byte(`import { Database, DbError, DbResult, Model, belongs_to, has_many } from trb/orm
+	source := []byte(`import { Database, DbResult, Model, belongs_to, has_many } from trb/orm
 
 class Category < Model
 	has_many(Product)
@@ -40,44 +40,44 @@ class Product < Model
 	belongs_to(Category)
 end
 
-def query_products(): Integer fails DbError
+def query_products(): DbResult<Integer>
 	base := Product.where(active: true).not(name: "hidden")
 	combined := base.or(Product.where(id: 10..20))
-	loaded := combined.order(name: :asc).limit(10).preload(:category).all()
-	return loaded.size()
+	loaded := try combined.order(name: :asc).limit(10).preload(:category).all()
+	return DbResult<Integer>::Ok(loaded.size())
 end
 
-def write_product(): Boolean fails DbError
+def write_product(): DbResult<Boolean>
 	draft := Product.build(name: "created", active: true)
-	created := draft.save()
-	updated := created.update(name: "updated")
+	created := try draft.save()
+	updated := try created.update(name: "updated")
 	return updated.delete()
 end
 
-def mutate_products(): Integer fails DbError
-	updated := Product.update_all(active: false)
-	deleted := Product.delete_all()
-	return updated + deleted
+def mutate_products(): DbResult<Integer>
+	updated := try Product.update_all(active: false)
+	deleted := try Product.delete_all()
+	return DbResult<Integer>::Ok(updated + deleted)
 end
 
 def transaction_count(): DbResult<Integer>
 	return Database.transaction() do |tx|
-		Product.using(tx).lock().count()
+		try Product.using(tx).lock().count()
 	end
 end
 
-def batch_count(): Integer fails DbError
+def batch_count(): DbResult<Integer>
 	return Product.find_each(batch_size: 10) do |product|
 		puts(product.name)
 	end
 end
 
 def main()
-	puts(attempt query_products())
-	puts(attempt write_product())
-	puts(attempt mutate_products())
+	puts(query_products())
+	puts(write_product())
+	puts(mutate_products())
 	puts(transaction_count())
-	puts(attempt batch_count())
+	puts(batch_count())
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{

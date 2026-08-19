@@ -139,8 +139,7 @@ end
 `,
 				"routes/products.trb": `import { WebConformanceProduct } from models/product
 import { Context, Response, json } from trb/web
-import { DbError } from trb/orm
-import { Result } from trb/std/result
+import { DbResult } from trb/orm
 
 record WebProductResponse
 	category: String
@@ -152,24 +151,25 @@ record WebDatabaseError
 	message: String
 end
 
-def web_product_response(product: WebConformanceProduct): WebProductResponse fails DbError
-	return WebProductResponse.new(id: product.id, name: product.name, category: product.category.name)
+def web_product_response(product: WebConformanceProduct): DbResult<WebProductResponse>
+	category := try product.category
+	return DbResult<WebProductResponse>::Ok(WebProductResponse.new(id: product.id, name: product.name, category: category.name))
 end
 
-def load_web_product_responses(): Array<WebProductResponse> fails DbError
-	products := WebConformanceProduct.preload(:category).order(id: :asc).all()
+def load_web_product_responses(): DbResult<Array<WebProductResponse>>
+	products := try WebConformanceProduct.preload(:category).order(id: :asc).all()
 	mut responses: Array<WebProductResponse> := []
 	products.each do |product|
-		responses.push(web_product_response(product))
+		responses.push(try web_product_response(product))
 	end
-	return responses
+	return DbResult<Array<WebProductResponse>>::Ok(responses)
 end
 
 def get(_context: Context): Response
-	case attempt load_web_product_responses()
-	when Result::Ok(products)
+	case load_web_product_responses()
+	when DbResult::Ok(products)
 		return json(products)
-	when Result::Err(error)
+	when DbResult::Err(error)
 		return json(WebDatabaseError.new(message: error.message), 500)
 	end
 end
@@ -245,8 +245,7 @@ func prepareORMApplicationConformanceSchema(t *testing.T, driver, databaseSource
 	}
 }
 
-const ormApplicationConformanceSource = `import { Database, DbError, DbErrorKind, Model, belongs_to, has_many, has_one } from trb/orm
-import { Result } from trb/std/result
+const ormApplicationConformanceSource = `import { Database, DbErrorKind, DbResult, Model, belongs_to, has_many, has_one } from trb/orm
 
 class TrbConformanceCategory < Model
 	has_many(TrbConformanceProduct, foreign_key: :category_id, dependent: :delete)
@@ -280,118 +279,135 @@ class TrbConformanceMembership < Model
 	belongs_to(TrbConformanceProject, foreign_key: :project_id)
 end
 
-def exercise(): Integer fails DbError
-	category := TrbConformanceCategory.create(name: "books")
+def exercise(): DbResult<Integer>
+	category := try TrbConformanceCategory.create(name: "books")
 	puts(category.id > 0)
-	puts(TrbConformanceProduct.insert_all([
+	puts(try TrbConformanceProduct.insert_all([
 		TrbConformanceProduct.build(category_id: category.id, name: "first", price: 1.0, active: true),
 		TrbConformanceProduct.build(category_id: category.id, name: "second", price: 3.0, active: false)
 	]))
 
-	loaded := TrbConformanceCategory.preload(:active_products).first()
-	puts(loaded.active_products.size())
-	puts(category.active_products.size())
-	puts(TrbConformanceCategory.join(:active_products).count())
-	puts(TrbConformanceCategory.where_exists(:active_products).count())
-	puts(TrbConformanceCategory.where_not_exists(:active_products).count())
-	product := TrbConformanceProduct.order(id: :asc).first()
+	loaded := try TrbConformanceCategory.preload(:active_products).first()
+	loaded_active_products := try loaded.active_products
+	puts(loaded_active_products.size())
+	category_active_products := try category.active_products
+	puts(category_active_products.size())
+	puts(try TrbConformanceCategory.join(:active_products).count())
+	puts(try TrbConformanceCategory.where_exists(:active_products).count())
+	puts(try TrbConformanceCategory.where_not_exists(:active_products).count())
+	product := try TrbConformanceProduct.order(id: :asc).first()
 	puts(product.category.loaded?())
-	puts(product.category.reload().name)
+	reloaded_category := try product.category.reload()
+	puts(reloaded_category.name)
 	puts(product.category.loaded?())
-	puts(TrbConformanceProduct.find(product.id).name)
-	puts(TrbConformanceProduct.find_by(name: "first").id == product.id)
-	puts(TrbConformanceProduct.exists?(name: "first"))
-	puts(TrbConformanceProduct.not(active: false).count())
-	puts(TrbConformanceProduct.where(active: true).or(TrbConformanceProduct.where(name: "second")).count())
-	puts(TrbConformanceProduct.distinct().count())
-	puts(TrbConformanceProduct.join(:category).left_join(:category).count())
-	puts(TrbConformanceProduct.where(id: 1..1000000).count())
-	puts(TrbConformanceProduct.order(id: :asc).limit(1).offset(1).all().size())
+	found_product := try TrbConformanceProduct.find(product.id)
+	puts(found_product.name)
+	found_by_product := try TrbConformanceProduct.find_by(name: "first")
+	puts(found_by_product.id == product.id)
+	puts(try TrbConformanceProduct.exists?(name: "first"))
+	puts(try TrbConformanceProduct.not(active: false).count())
+	puts(try TrbConformanceProduct.where(active: true).or(TrbConformanceProduct.where(name: "second")).count())
+	puts(try TrbConformanceProduct.distinct().count())
+	puts(try TrbConformanceProduct.join(:category).left_join(:category).count())
+	puts(try TrbConformanceProduct.where(id: 1..1000000).count())
+	paged_products := try TrbConformanceProduct.order(id: :asc).limit(1).offset(1).all()
+	puts(paged_products.size())
 
-	user := TrbConformanceUser.create(name: "Ada")
-	primary := TrbConformanceProject.create(name: "TypeRB")
-	secondary := TrbConformanceProject.create(name: "Other")
-	TrbConformanceMembership.create(user_id: user.id, project_id: primary.id)
-	TrbConformanceMembership.create(user_id: user.id, project_id: secondary.id)
-	puts(user.trb_conformance_projects.size())
-	puts(TrbConformanceUser.preload(:trb_conformance_projects).first().trb_conformance_projects.size())
-	puts(TrbConformanceUser.join(:trb_conformance_projects).count())
-	profile := TrbConformanceProfile.create(user_id: user.id, bio: "compiler")
-	puts(profile.user.reload().name)
-	puts(profile.user.profile.bio)
+	user := try TrbConformanceUser.create(name: "Ada")
+	primary := try TrbConformanceProject.create(name: "TypeRB")
+	secondary := try TrbConformanceProject.create(name: "Other")
+	_primary_membership := try TrbConformanceMembership.create(user_id: user.id, project_id: primary.id)
+	_secondary_membership := try TrbConformanceMembership.create(user_id: user.id, project_id: secondary.id)
+	user_projects := try user.trb_conformance_projects
+	puts(user_projects.size())
+	preloaded_user := try TrbConformanceUser.preload(:trb_conformance_projects).first()
+	preloaded_projects := try preloaded_user.trb_conformance_projects
+	puts(preloaded_projects.size())
+	puts(try TrbConformanceUser.join(:trb_conformance_projects).count())
+	profile := try TrbConformanceProfile.create(user_id: user.id, bio: "compiler")
+	profile_user := try profile.user.reload()
+	puts(profile_user.name)
+	profile_from_user := try profile_user.profile
+	puts(profile_from_user.bio)
 
-	puts(TrbConformanceProduct.order(id: :asc).pluck(:name).size())
-	puts(TrbConformanceProduct.order(id: :asc).pick(:name))
-	puts(TrbConformanceProduct.ids().size())
-	puts(TrbConformanceProduct.sum(:price))
-	puts(TrbConformanceProduct.average(:price))
-	puts(TrbConformanceProduct.minimum(:price))
-	puts(TrbConformanceProduct.maximum(:price))
-	puts(TrbConformanceProduct.group(:active).having(:count, ">=", 1).count().size())
+	names := try TrbConformanceProduct.order(id: :asc).pluck(:name)
+	puts(names.size())
+	puts(try TrbConformanceProduct.order(id: :asc).pick(:name))
+	ids := try TrbConformanceProduct.ids()
+	puts(ids.size())
+	puts(try TrbConformanceProduct.sum(:price))
+	puts(try TrbConformanceProduct.average(:price))
+	puts(try TrbConformanceProduct.minimum(:price))
+	puts(try TrbConformanceProduct.maximum(:price))
+	group_counts := try TrbConformanceProduct.group(:active).having(:count, ">=", 1).count()
+	puts(group_counts.size())
 	puts(TrbConformanceProduct.to_sql().size() > 0)
-	puts(TrbConformanceProduct.explain().size() > 0)
-	puts(TrbConformanceProduct.where(category_id: TrbConformanceCategory.select(:id)).count())
-	case attempt TrbConformanceProduct.lock().all()
-	when Result::Ok(_products)
+	explanation := try TrbConformanceProduct.explain()
+	puts(explanation.size() > 0)
+	puts(try TrbConformanceProduct.where(category_id: TrbConformanceCategory.select(:id)).count())
+	case TrbConformanceProduct.lock().all()
+	when DbResult::Ok(_products)
 		puts(false)
-	when Result::Err(error)
+	when DbResult::Err(error)
 		puts(error.kind == DbErrorKind::InvalidData)
 	end
 
 	processed := TrbConformanceProduct.find_each(batch_size: 1) do |_product|
 		_unused_id := _product.id
+	end catch |_error|
+		-1
 	end
 	puts(processed)
-	saved := TrbConformanceProduct.build(category_id: category.id, name: "saved", price: 2.0, active: true).save()
+	saved := try TrbConformanceProduct.build(category_id: category.id, name: "saved", price: 2.0, active: true).save()
 	puts(saved.id > 0)
-	changed := saved.with(price: 5.0).save()
+	changed := try saved.with(price: 5.0).save()
 	puts(changed.price)
-	updated := changed.update(name: "direct")
+	updated := try changed.update(name: "direct")
 	puts(updated.name)
-	puts(updated.delete())
-	puts(TrbConformanceProduct.upsert_all([
+	puts(try updated.delete())
+	puts(try TrbConformanceProduct.upsert_all([
 		TrbConformanceProduct.build(category_id: category.id, name: "first", price: 4.0, active: true),
 		TrbConformanceProduct.build(category_id: category.id, name: "second", price: 6.0, active: false)
 	], unique_by: [:name], update: [:price]))
-	puts(TrbConformanceProduct.insert_if_absent(TrbConformanceProduct.build(category_id: category.id, name: "first", price: 4.0, active: true), unique_by: [:name]))
-	upserted := TrbConformanceProduct.build(category_id: category.id, name: "first", price: 4.0, active: true).upsert(unique_by: [:name], update: [:price])
+	puts(try TrbConformanceProduct.insert_if_absent(TrbConformanceProduct.build(category_id: category.id, name: "first", price: 4.0, active: true), unique_by: [:name]))
+	upserted := try TrbConformanceProduct.build(category_id: category.id, name: "first", price: 4.0, active: true).upsert(unique_by: [:name], update: [:price])
 	puts(upserted.price)
-	puts(TrbConformanceProduct.update_all(price: 9.0))
-	puts(TrbConformanceProduct.where(active: false).update_all(active: true))
-	temporary := TrbConformanceProduct.create(category_id: category.id, name: "temporary", price: 2.0, active: false)
+	puts(try TrbConformanceProduct.update_all(price: 9.0))
+	puts(try TrbConformanceProduct.where(active: false).update_all(active: true))
+	temporary := try TrbConformanceProduct.create(category_id: category.id, name: "temporary", price: 2.0, active: false)
 	puts(temporary.id > 0)
-	puts(TrbConformanceProduct.where(name: "temporary").delete_all())
-	puts(TrbConformanceProduct.delete_all())
+	puts(try TrbConformanceProduct.where(name: "temporary").delete_all())
+	puts(try TrbConformanceProduct.delete_all())
 
-	TrbConformanceProduct.create(category_id: category.id, name: "dependent", price: 2.0, active: true)
-	puts(category.destroy())
-	puts(TrbConformanceProduct.count())
-	lifecycle := TrbConformanceCategory.create(name: "lifecycle")
-	TrbConformanceProduct.create(category_id: lifecycle.id, name: "destroy-all", price: 2.0, active: true)
-	puts(TrbConformanceCategory.where(name: "lifecycle").destroy_all())
-	puts(TrbConformanceProduct.count())
+	_dependent := try TrbConformanceProduct.create(category_id: category.id, name: "dependent", price: 2.0, active: true)
+	puts(try category.destroy())
+	puts(try TrbConformanceProduct.count())
+	lifecycle := try TrbConformanceCategory.create(name: "lifecycle")
+	_destroy_all_product := try TrbConformanceProduct.create(category_id: lifecycle.id, name: "destroy-all", price: 2.0, active: true)
+	puts(try TrbConformanceCategory.where(name: "lifecycle").destroy_all())
+	puts(try TrbConformanceProduct.count())
 	transaction_id := Database.transaction() do |outer|
 		nested_id := try outer.transaction() do |inner|
 			categories := TrbConformanceCategory.using(inner)
-			inside := categories.create(name: "transaction")
-			_locked := categories.lock().all()
+			inside := try categories.create(name: "transaction")
+			_locked := try categories.lock().all()
 			_locked_count := _locked.size()
 			inside.id
 		end
 		nested_id
 	end catch |_error|
-		return 0
+		0
 	end
 	puts(transaction_id > 0)
-	puts(TrbConformanceCategory.where(id: transaction_id).delete_all())
-	return 1
+	puts(try TrbConformanceCategory.where(id: transaction_id).delete_all())
+	return DbResult<Integer>::Ok(1)
 end
 
 def main()
-	case attempt exercise()
-	when Result::Ok(value)
+	case exercise()
+	when DbResult::Ok(value)
 		puts(value)
-	when Result::Err(error)
+	when DbResult::Err(error)
 		puts(error.kind)
 		puts(error.message)
 	end

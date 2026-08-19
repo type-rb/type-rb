@@ -300,7 +300,7 @@ func TestORMResultTransactionKeepsLambdaFailureOwnershipAcrossBackends(t *testin
 		want   string
 	}{
 		{
-			name: "pure lambda rejects captured ORM failure",
+			name: "non Result lambda rejects Result propagation",
 			source: `import { Database, DbResult, Model } from trb/orm
 
 class ResultTransactionItem < Model
@@ -309,27 +309,27 @@ end
 def invalid(): DbResult<Integer>
 	return Database.transaction() do |_tx|
 		callback := fn(): Integer
-			return ResultTransactionItem.count()
+			return try ResultTransactionItem.count()
 		end
 		callback()
 	end
 end
 `,
-			want: "operation may fail with DbError, but the enclosing function does not declare it",
+			want: "try requires the enclosing function to return Result<T, E>",
 		},
 		{
-			name: "fallible lambda owns and forwards ORM failure",
-			source: `import { Database, DbError, DbResult, Model } from trb/orm
+			name: "Result lambda owns and forwards ORM failure",
+			source: `import { Database, DbResult, Model } from trb/orm
 
 class ResultTransactionItem < Model
 end
 
 def valid(): DbResult<Integer>
 	return Database.transaction() do |_tx|
-		callback := fn(): Integer fails DbError
+		callback := fn(): DbResult<Integer>
 			return ResultTransactionItem.count()
 		end
-		callback()
+		try callback()
 	end
 end
 `,

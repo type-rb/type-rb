@@ -44,7 +44,7 @@ func TestReplORMResultTransactionControlFlowAcrossBackends(t *testing.T) {
 			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 				t.Fatalf("repl status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 			}
-			want := strings.TrimSuffix(ormResultTransactionApplicationOutput, "1\n") + "1 : Integer\n"
+			want := strings.TrimSuffix(ormResultTransactionApplicationOutput, "1\n") + "DbResult::Ok(value: 1) : DbResult<Integer>\n"
 			if got := stdout.String(); got != want || stderr.Len() != 0 {
 				t.Fatalf("unexpected %s transaction Result REPL output: want %q, got %q, stderr=%q", mode, want, got, stderr.String())
 			}
@@ -94,15 +94,14 @@ func prepareORMResultTransactionProject(t *testing.T, mode string) *project.Conf
 	return config
 }
 
-const ormResultTransactionApplicationSource = `import { Database, DbError, DbResult, Model } from trb/orm
-import { Result } from trb/std/result
+const ormResultTransactionApplicationSource = `import { Database, DbResult, Model } from trb/orm
 
 class ResultTransactionItem < Model
 end
 
 def commit_with_catch(): Integer
 	value := Database.transaction() do |tx|
-		_created := ResultTransactionItem.using(tx).create(name: "catch-committed")
+		_created := try ResultTransactionItem.using(tx).create(name: "catch-committed")
 		11
 	end catch |_error|
 		-1
@@ -112,7 +111,7 @@ end
 
 def commit_with_try(): DbResult<Integer>
 	value := try Database.transaction() do |tx|
-		_created := ResultTransactionItem.using(tx).create(name: "try-committed")
+		_created := try ResultTransactionItem.using(tx).create(name: "try-committed")
 		22
 	end
 	return DbResult<Integer>::Ok(value)
@@ -120,38 +119,39 @@ end
 
 def rollback_with_inner_try(): DbResult<Integer>
 	return Database.transaction() do |outer|
-		_outer_item := ResultTransactionItem.using(outer).create(name: "outer-rolled")
+		_outer_item := try ResultTransactionItem.using(outer).create(name: "outer-rolled")
 		nested_value := try outer.transaction() do |inner|
-			_inner_item := ResultTransactionItem.using(inner).create(name: "inner-rolled")
-			_duplicate := ResultTransactionItem.using(inner).create(name: "inner-rolled")
+			_inner_item := try ResultTransactionItem.using(inner).create(name: "inner-rolled")
+			_duplicate := try ResultTransactionItem.using(inner).create(name: "inner-rolled")
 			33
 		end
 		nested_value
 	end
 end
 
-def catch_observes_rollback(): Integer fails DbError
+def catch_observes_rollback(): DbResult<Integer>
 	observed := Database.transaction() do |tx|
-		_created := ResultTransactionItem.using(tx).create(name: "catch-rolled")
-		_duplicate := ResultTransactionItem.using(tx).create(name: "catch-rolled")
+		_created := try ResultTransactionItem.using(tx).create(name: "catch-rolled")
+		_duplicate := try ResultTransactionItem.using(tx).create(name: "catch-rolled")
 		44
 	end catch |_error|
-		return ResultTransactionItem.where(name: "catch-rolled").count()
+		try ResultTransactionItem.where(name: "catch-rolled").count()
 	end
-	return observed
+	return DbResult<Integer>::Ok(observed)
 end
 
-def return_catch_observes_rollback(): Integer fails DbError
-	return Database.transaction() do |tx|
-		_created := ResultTransactionItem.using(tx).create(name: "return-catch-rolled")
-		_duplicate := ResultTransactionItem.using(tx).create(name: "return-catch-rolled")
+def return_catch_observes_rollback(): DbResult<Integer>
+	observed := Database.transaction() do |tx|
+		_created := try ResultTransactionItem.using(tx).create(name: "return-catch-rolled")
+		_duplicate := try ResultTransactionItem.using(tx).create(name: "return-catch-rolled")
 		55
 	end catch |_error|
-		ResultTransactionItem.where(name: "return-catch-rolled").count()
+		try ResultTransactionItem.where(name: "return-catch-rolled").count()
 	end
+	return DbResult<Integer>::Ok(observed)
 end
 
-def exercise(): Integer fails DbError
+def exercise(): DbResult<Integer>
 	puts(commit_with_catch())
 	try_value := commit_with_try() catch |_error|
 		-1
@@ -161,20 +161,20 @@ def exercise(): Integer fails DbError
 		0
 	end
 	puts(rollback_value)
-	puts(ResultTransactionItem.where(name: "catch-committed").count())
-	puts(ResultTransactionItem.where(name: "try-committed").count())
-	puts(ResultTransactionItem.where(name: "outer-rolled").count())
-	puts(ResultTransactionItem.where(name: "inner-rolled").count())
-	puts(catch_observes_rollback())
-	puts(return_catch_observes_rollback())
-	return 1
+	puts(try ResultTransactionItem.where(name: "catch-committed").count())
+	puts(try ResultTransactionItem.where(name: "try-committed").count())
+	puts(try ResultTransactionItem.where(name: "outer-rolled").count())
+	puts(try ResultTransactionItem.where(name: "inner-rolled").count())
+	puts(try catch_observes_rollback())
+	puts(try return_catch_observes_rollback())
+	return DbResult<Integer>::Ok(1)
 end
 
 def main()
-	case attempt exercise()
-	when Result::Ok(value)
+	case exercise()
+	when DbResult::Ok(value)
 		puts(value)
-	when Result::Err(error)
+	when DbResult::Err(error)
 		puts(error.message)
 	end
 	return

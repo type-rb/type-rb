@@ -31,6 +31,7 @@ larger applications.
 - [Project configuration](configuration.md)
 - [Language specification](specification.md)
 - [Standard library](standard-library.md)
+- [Migrate to Result control flow in TypeRB 0.3](migrations/0.3-result-control.md)
 
 ## Project
 
@@ -47,6 +48,8 @@ larger applications.
 - `learning.md` orders existing material; it does not redefine syntax or APIs.
 - `standard-library.md`, `cli.md`, and `configuration.md` are the references for
   those public surfaces.
+- `migrations/` records release-specific source and package upgrade steps; it
+  does not redefine the current language contract.
 - `status.md` records current capability and limitations; `roadmap.md` contains
   future outcomes only.
 - Decision records preserve durable rationale. Scoped implementation work

@@ -59,3 +59,24 @@ func TestDocumentSymbolsRemainAvailableWithTypeErrors(t *testing.T) {
 		t.Fatalf("symbols=%#v", symbols)
 	}
 }
+
+func TestDocumentSymbolsShowResultReturnTypes(t *testing.T) {
+	symbols := DocumentSymbols("def load(): Result<String, LoadError>\n\treturn\nend\n")
+	if len(symbols) != 1 || symbols[0].Detail != "(): Result<String, LoadError>" {
+		t.Fatalf("symbols=%#v", symbols)
+	}
+}
+
+func TestDocumentSymbolsNormalizeLegacyEffectMetadataAsResult(t *testing.T) {
+	symbols := DocumentSymbols("def load(): String fails LoadError\n\treturn\nend\n")
+	if len(symbols) != 1 || symbols[0].Detail != "(): Result<String, LoadError>" {
+		t.Fatalf("symbols=%#v", symbols)
+	}
+}
+
+func TestDocumentSymbolsNormalizeLegacyFunctionTypeMetadataAsResult(t *testing.T) {
+	symbols := DocumentSymbols("def use_loader(loader: () -> String fails LoadError)\n\treturn\nend\n")
+	if len(symbols) != 1 || symbols[0].Detail != "(loader: () -> Result<String, LoadError>)" {
+		t.Fatalf("symbols=%#v", symbols)
+	}
+}

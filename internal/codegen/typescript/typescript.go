@@ -21,14 +21,16 @@ type generator struct {
 	indent           int
 	inClass          int
 	functionDepth    int
-	methods          map[string]bool
+	methods          map[string]*ir.Method
 	modulePath       string
 	moduleExtensions map[string]string
 	topFunctions     map[string]bool
+	topMethods       map[string]*ir.Method
 	topTargets       map[string]string
 	records          map[string]bool
 	typeAliases      map[string]string
 	typeMappings     map[string]string
+	standardResult   bool
 	browserRuntime   string
 	httpRuntime      bool
 	webRuntime       bool
@@ -130,10 +132,11 @@ func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error
 }
 
 func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string) sourcemap.Generated {
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
+			g.topMethods[method.Name] = method
 			if method.TargetName != "" {
 				g.topTargets[method.Name] = method.TargetName
 			}
@@ -1048,6 +1051,77 @@ func (g *generator) awaitCall(call *ir.Call, value string) string {
 	return value
 }
 
+func (g *generator) identifierName(identifier *ir.Identifier) string {
+	if identifier == nil {
+		return ""
+	}
+	if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] != nil {
+		return "this." + tsMethodName(identifier.Name)
+	}
+	if identifier.Owner != "" {
+		return strings.ReplaceAll(identifier.Owner, "::", ".") + "." + tsCallableName(identifier.Name)
+	}
+	if identifier.Reference != nil && identifier.Reference.ExportKind == "function" {
+		return tsCallableName(identifier.Name)
+	}
+	name := identifier.Name
+	if g.topFunctions[identifier.Name] {
+		if target := g.topTargets[identifier.Name]; target != "" {
+			name = target
+		}
+		name = tsCallableName(name)
+	}
+	return name
+}
+
+func (g *generator) identifierValue(identifier *ir.Identifier) string {
+	name := g.identifierName(identifier)
+	if identifier == nil || identifier.Lexical {
+		return name
+	}
+	scope := "undefined"
+	if g.executionActive {
+		scope = "__trbScope"
+	}
+	if g.inClass > 0 {
+		if method := g.methods[identifier.Name]; method != nil {
+			if g.methodUsesExecutionScope(method) {
+				return name + ".bind(this, " + scope + ")"
+			}
+			return name + ".bind(this)"
+		}
+	}
+	if method := g.topMethods[identifier.Name]; method != nil && g.methodUsesExecutionScope(method) {
+		return name + ".bind(undefined, " + scope + ")"
+	}
+	if identifier.Reference != nil && identifier.Reference.ExportKind == "function" && g.importedFunctionUsesExecutionScope(identifier.Reference) {
+		return name + ".bind(undefined, " + scope + ")"
+	}
+	return name
+}
+
+func (g *generator) importedFunctionUsesExecutionScope(reference *ir.Reference) bool {
+	if g.execution == nil || reference == nil || reference.Package == "" {
+		return false
+	}
+	name := reference.Symbol
+	if name == "" {
+		return false
+	}
+	modules := []string{reference.Package}
+	if strings.HasSuffix(reference.Package, "/index") {
+		modules = append(modules, strings.TrimSuffix(reference.Package, "/index"))
+	} else {
+		modules = append(modules, strings.TrimSuffix(reference.Package, "/")+"/index")
+	}
+	for _, module := range modules {
+		if g.execution.Method(module, "", name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *generator) expr(expression ir.Expression) string {
 	if expression == nil {
 		return ""
@@ -1057,8 +1131,6 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.ifExpression(n)
 	case *ir.Case:
 		return g.caseExpression(n)
-	case *ir.Attempt:
-		return g.attemptExpression(n)
 	case *ir.Lambda:
 		parts := make([]string, len(n.Parameters))
 		for index, parameter := range n.Parameters {
@@ -1076,8 +1148,6 @@ func (g *generator) expr(expression ir.Expression) string {
 			returnType = "Promise<" + returnType + ">"
 		}
 		return prefix + "(" + strings.Join(parts, ", ") + "): " + returnType + " => {\n" + child.b.String() + strings.Repeat("  ", g.indent) + "}"
-	case *ir.UnhandledEffect:
-		return g.expr(n.Value)
 	case *ir.Identifier:
 		if strings.HasPrefix(n.Name, "@") {
 			return "this.__trb_" + strings.TrimPrefix(strings.TrimPrefix(n.Name, "@"), "_")
@@ -1091,16 +1161,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return "this"
 		}
-		if !n.Lexical && g.inClass > 0 && g.methods[n.Name] {
-			return "this." + tsMethodName(n.Name) + ".bind(this)"
-		}
-		if n.Owner != "" {
-			return strings.ReplaceAll(n.Owner, "::", ".") + "." + tsCallableName(n.Name)
-		}
-		if n.Reference != nil && n.Reference.ExportKind == "function" {
-			return tsCallableName(n.Name)
-		}
-		return n.Name
+		return g.identifierValue(n)
 	case *ir.Literal:
 		if n.Kind == "nil" {
 			return "null"
@@ -1148,8 +1209,6 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.iterableExpr(n.Value)
 		case ir.ResultFunctionToPromiseRejectionConversion:
 			return g.resultFunctionToPromiseRejection(n)
-		case ir.PureFunctionToFallibleConversion:
-			return g.pureFunctionToFallible(n)
 		case ir.IntegerToFloatConversion:
 			return "Number(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
@@ -1218,7 +1277,7 @@ func (g *generator) expr(expression ir.Expression) string {
 				}
 			}
 			generated := g.intrinsic(reference.Intrinsic, n, parts)
-			if isSuspendingORM(reference.Intrinsic, n.Fails) {
+			if isSuspendingORM(reference.Intrinsic) {
 				return "(await " + generated + ")"
 			}
 			return g.awaitCall(n, generated)
@@ -1237,7 +1296,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.awaitCall(n, "new "+g.expr(member.Receiver)+"("+args+")")
 		}
 		if identifier, ok := n.Callee.(*ir.Identifier); ok {
-			if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] {
+			if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] != nil {
 				return g.awaitCall(n, "this."+tsMethodName(identifier.Name)+"("+args+")")
 			}
 			if g.topFunctions[identifier.Name] {
@@ -1247,6 +1306,7 @@ func (g *generator) expr(expression ir.Expression) string {
 				}
 				return g.awaitCall(n, tsCallableName(name)+"("+args+")")
 			}
+			return g.awaitCall(n, g.identifierName(identifier)+"("+args+")")
 		}
 		return g.awaitCall(n, g.expr(n.Callee)+"("+args+")")
 	case *ir.EnumCall:
@@ -1291,12 +1351,15 @@ func (g *generator) expr(expression ir.Expression) string {
 			arguments[index] = g.tsType(argument)
 		}
 		name := g.expr(n.Receiver)
-		if identifier, ok := n.Receiver.(*ir.Identifier); ok && g.topFunctions[identifier.Name] {
-			name = identifier.Name
-			if target := g.topTargets[identifier.Name]; target != "" {
-				name = target
+		if identifier, ok := n.Receiver.(*ir.Identifier); ok {
+			name = g.identifierName(identifier)
+			if g.topFunctions[identifier.Name] {
+				name = identifier.Name
+				if target := g.topTargets[identifier.Name]; target != "" {
+					name = target
+				}
+				name = tsCallableName(name)
 			}
-			name = tsCallableName(name)
 		}
 		return name + "<" + strings.Join(arguments, ", ") + ">"
 	case *ir.Index:
@@ -1314,46 +1377,6 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
-}
-
-func (g *generator) pureFunctionToFallible(conversion *ir.Conversion) string {
-	parameters, success, ok := types.FunctionSignature(conversion.ExprType())
-	if !ok {
-		return g.expr(conversion.Value)
-	}
-	failure := types.FunctionFailure(conversion.ExprType())
-	parts := make([]string, len(parameters))
-	arguments := make([]string, len(parameters))
-	for index, parameter := range parameters {
-		name := "__trbArg" + strconv.Itoa(index)
-		parts[index] = name + ": " + g.tsType(parameter)
-		arguments[index] = name
-	}
-	internalSuccess := success
-	call := "__trbValue(" + strings.Join(arguments, ", ") + ")"
-	value := call
-	prefix := ""
-	if success.Kind == types.Void {
-		internalSuccess = types.FromName("Unit")
-		prefix = call + "; "
-		value = "({} satisfies " + g.tsType(internalSuccess) + ")"
-	}
-	asyncPrefix := ""
-	returnType := g.tsType(types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{internalSuccess, failure}})
-	if lambda, literal := conversion.Value.(*ir.Lambda); literal && g.suspension != nil && g.suspension.Lambdas[lambda] {
-		asyncPrefix = "async "
-		returnType = "Promise<" + returnType + ">"
-		if success.Kind != types.Void {
-			value = "await " + value
-		} else {
-			prefix = "await " + call + "; "
-		}
-	}
-	result := g.runtimeName("Result")
-	wrapped := asyncPrefix + "(" + strings.Join(parts, ", ") + "): " + returnType + " => { " + prefix + "return " +
-		result + ".Ok<" + g.tsType(internalSuccess) + ", " + g.tsType(failure) + ">(" + value + "); }"
-	return "((__trbValue: " + g.tsType(conversion.Value.ExprType()) + "): " + g.tsType(conversion.ExprType()) +
-		" => " + wrapped + ")(" + g.expr(conversion.Value) + ")"
 }
 
 func (g *generator) resultFunctionToPromiseRejection(conversion *ir.Conversion) string {
@@ -1374,7 +1397,7 @@ func (g *generator) resultFunctionToPromiseRejection(conversion *ir.Conversion) 
 		returnValue = "return;"
 	}
 	callbackType := g.tsType(conversion.Value.ExprType())
-	if sourceParameters, sourceResult, sourceOK := types.FunctionSignature(conversion.Value.ExprType()); sourceOK && types.FunctionFailure(conversion.Value.ExprType()).Kind == types.Never {
+	if sourceParameters, sourceResult, sourceOK := types.FunctionSignature(conversion.Value.ExprType()); sourceOK {
 		sourceParts := make([]string, len(sourceParameters))
 		for index, parameter := range sourceParameters {
 			sourceParts[index] = "arg" + strconv.Itoa(index) + ": " + g.tsType(parameter)
@@ -1460,49 +1483,6 @@ func (g *generator) ifExpression(node *ir.If) string {
 		return "(await " + generated + ")"
 	}
 	return generated
-}
-
-func (g *generator) attemptExpression(node *ir.Attempt) string {
-	child := &generator{
-		inClass:         g.inClass,
-		functionDepth:   g.functionDepth,
-		methods:         g.methods,
-		modulePath:      g.modulePath,
-		topFunctions:    g.topFunctions,
-		topTargets:      g.topTargets,
-		records:         g.records,
-		typeAliases:     g.typeAliases,
-		temporary:       g.temporary,
-		suspension:      g.suspension,
-		execution:       g.execution,
-		executionActive: g.executionActive,
-		jobs:            g.jobs,
-		jobsSQL:         g.jobsSQL,
-		orm:             g.orm,
-		breakTarget:     g.breakTarget,
-		enumReceiver:    g.enumReceiver,
-	}
-	suspends := child.suspension != nil && child.suspension.Expressions[node]
-	if suspends {
-		child.line("(async (): Promise<" + child.tsType(node.ExprType()) + "> => {")
-	} else {
-		child.line("((): " + child.tsType(node.ExprType()) + " => {")
-	}
-	child.indent++
-	child.statements(node.Body)
-	result := node.Value
-	if result == nil {
-		result = node.BodyResult
-	}
-	child.line("return " + child.expr(result) + ";")
-	child.indent--
-	child.line("})()")
-	g.temporary = child.temporary
-	value := strings.TrimSpace(child.b.String())
-	if suspends {
-		return "(await " + value + ")"
-	}
-	return value
 }
 
 func (g *generator) caseExpression(node *ir.Case) string {
@@ -1617,9 +1597,6 @@ func (g *generator) transform(transform *ir.Transform) string {
 	if g.suspension != nil && g.suspension.Expressions[transform] {
 		return g.suspendingTransform(transform)
 	}
-	if transform.Fails.Kind != "" && transform.Fails.Kind != types.Never {
-		return g.imperativeTransform(transform, false)
-	}
 	source := g.iterableExpr(transform.Source)
 	result := g.transformResult(transform)
 	switch transform.Operation {
@@ -1695,17 +1672,8 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 	if item == "" {
 		item = "__trbItem" + suffix
 	}
-	success := transform.SuccessType
-	if success.Kind == "" {
-		success = transform.ExprType()
-	}
-	hasEffect := transform.Fails.Kind != "" && transform.Fails.Kind != types.Never
-	complete := func(value string) string {
-		if !hasEffect {
-			return value
-		}
-		return child.runtimeName("Result") + ".Ok<" + child.tsType(success) + ", " + child.tsType(transform.Fails) + ">(" + value + ")"
-	}
+	success := transform.ExprType()
+	complete := func(value string) string { return value }
 	if suspends {
 		child.line("(async (): Promise<" + child.tsType(transform.ExprType()) + "> => {")
 	} else {
@@ -2149,7 +2117,7 @@ func (g *generator) jsxElement(element *ir.JSXElement) string {
 	if element.Fragment {
 		name = ""
 	} else if element.Component != nil {
-		name = g.expr(element.Component)
+		name = g.jsxComponentName(element.Component, name)
 	}
 	var result strings.Builder
 	result.WriteByte('<')
@@ -2185,6 +2153,21 @@ func (g *generator) jsxElement(element *ir.JSXElement) string {
 	result.WriteString(name)
 	result.WriteByte('>')
 	return result.String()
+}
+
+func (g *generator) jsxComponentName(component ir.Expression, fallback string) string {
+	switch node := component.(type) {
+	case *ir.Identifier:
+		return g.identifierName(node)
+	case *ir.Member:
+		receiver := g.jsxComponentName(node.Receiver, "")
+		if receiver == "" {
+			return fallback
+		}
+		return receiver + "." + tsMethodName(node.Name)
+	default:
+		return fallback
+	}
 }
 
 func tsImportPath(modulePath, imported string, extensions ...string) string {
@@ -2233,12 +2216,12 @@ func filepathRel(base, target string) (string, error) {
 }
 
 func tsType(t types.Type) string {
-	return tsTypeWithMappings(t, nil, nil)
+	return tsTypeWithMappings(t, nil, nil, false)
 }
 
 func (g *generator) tsType(t types.Type) string {
 	if g.orm == nil || g.modulePath == "trb/orm/index" {
-		return tsTypeWithMappings(t, g.typeAliases, g.typeMappings)
+		return tsTypeWithMappings(t, g.typeAliases, g.typeMappings, g.standardResult)
 	}
 	aliases := make(map[string]string, len(g.typeAliases)+3)
 	for name, alias := range g.typeAliases {
@@ -2249,7 +2232,7 @@ func (g *generator) tsType(t types.Type) string {
 			aliases[name] = "__trbOrm"
 		}
 	}
-	return tsTypeWithMappings(t, aliases, g.typeMappings)
+	return tsTypeWithMappings(t, aliases, g.typeMappings, g.standardResult)
 }
 
 func (g *generator) tsSuspendingFunctionType(t types.Type) string {
@@ -2261,12 +2244,6 @@ func (g *generator) tsSuspendingFunctionType(t types.Type) string {
 	for index, parameter := range parameters {
 		parts[index] = "arg" + strconv.Itoa(index) + ": " + g.tsType(parameter)
 	}
-	if failure := types.FunctionFailure(t); failure.Kind != types.Never {
-		if returned.Kind == types.Void {
-			returned = types.FromName("Unit")
-		}
-		returned = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{returned, failure}}
-	}
 	return "(" + strings.Join(parts, ", ") + ") => Promise<" + g.tsType(returned) + ">"
 }
 
@@ -2277,7 +2254,7 @@ func (g *generator) runtimeName(name string) string {
 	return name
 }
 
-func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[string]string) string {
+func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[string]string, standardResult bool) string {
 	var result string
 	switch t.Kind {
 	case types.Void:
@@ -2287,7 +2264,7 @@ func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[st
 	case types.Union:
 		alternatives := make([]string, len(t.Args))
 		for index, alternative := range t.Args {
-			alternatives[index] = tsTypeWithMappings(alternative, aliases, mappings)
+			alternatives[index] = tsTypeWithMappings(alternative, aliases, mappings, standardResult)
 		}
 		result = strings.Join(alternatives, " | ")
 	case types.Bool:
@@ -2305,7 +2282,7 @@ func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[st
 	case types.Array, types.Iterable:
 		element := "unknown"
 		if len(t.Args) > 0 {
-			element = tsTypeWithMappings(t.Args[0], aliases, mappings)
+			element = tsTypeWithMappings(t.Args[0], aliases, mappings, standardResult)
 		}
 		result = "Array<" + element + ">"
 	case types.Range:
@@ -2314,11 +2291,11 @@ func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[st
 		key := "string"
 		value := "unknown"
 		if len(t.Args) == 2 {
-			key = tsTypeWithMappings(t.Args[0], aliases, mappings)
+			key = tsTypeWithMappings(t.Args[0], aliases, mappings, standardResult)
 			if t.Args[0].Kind == types.Bool {
 				key = "string"
 			}
-			value = tsTypeWithMappings(t.Args[1], aliases, mappings)
+			value = tsTypeWithMappings(t.Args[1], aliases, mappings, standardResult)
 		}
 		result = "Record<" + key + ", " + value + ">"
 	case types.Function:
@@ -2329,18 +2306,10 @@ func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[st
 		}
 		parts := make([]string, len(parameters))
 		for index, parameter := range parameters {
-			parts[index] = "arg" + strconv.Itoa(index) + ": " + tsTypeWithMappings(parameter, aliases, mappings)
+			parts[index] = "arg" + strconv.Itoa(index) + ": " + tsTypeWithMappings(parameter, aliases, mappings, standardResult)
 		}
-		fallible := false
-		if failure := types.FunctionFailure(t); failure.Kind != types.Never {
-			fallible = true
-			if returned.Kind == types.Void {
-				returned = types.FromName("Unit")
-			}
-			returned = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{returned, failure}}
-		}
-		resultType := tsTypeWithMappings(returned, aliases, mappings)
-		if fallible {
+		resultType := tsTypeWithMappings(returned, aliases, mappings, standardResult)
+		if standardResult && !returned.Nullable && returned.Name == "Result" && len(returned.Args) == 2 {
 			resultType += " | Promise<" + resultType + ">"
 		}
 		result = "(" + strings.Join(parts, ", ") + ") => " + resultType
@@ -2351,7 +2320,7 @@ func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[st
 		case "Callback":
 			argument := "unknown"
 			if len(t.Args) > 0 {
-				argument = tsTypeWithMappings(t.Args[0], aliases, mappings)
+				argument = tsTypeWithMappings(t.Args[0], aliases, mappings, standardResult)
 			}
 			result = "(value: " + argument + ") => void"
 		default:
@@ -2367,7 +2336,7 @@ func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[st
 	if t.Kind == types.Named && len(t.Args) > 0 {
 		arguments := make([]string, len(t.Args))
 		for index, argument := range t.Args {
-			arguments[index] = tsTypeWithMappings(argument, aliases, mappings)
+			arguments[index] = tsTypeWithMappings(argument, aliases, mappings, standardResult)
 		}
 		result += "<" + strings.Join(arguments, ", ") + ">"
 	}
@@ -2720,11 +2689,11 @@ func tsTrailingComment(value string) string {
 	return " //" + strings.TrimPrefix(value, "#")
 }
 
-func classMethods(statements []ir.Statement) map[string]bool {
-	methods := map[string]bool{}
+func classMethods(statements []ir.Statement) map[string]*ir.Method {
+	methods := map[string]*ir.Method{}
 	for _, statement := range statements {
 		if method, ok := statement.(*ir.Method); ok {
-			methods[method.Name] = true
+			methods[method.Name] = method
 		}
 	}
 	return methods

@@ -63,19 +63,20 @@ end
 
 Each `fn` parameter has a type. A function value with no result omits its
 return annotation, just like `def`. Its `return` exits the function value, not
-the enclosing method. Fallible function values retain their effect in both the
-declaration and type:
+the enclosing method. A function value that may return a recoverable error uses
+the same ordinary Result return in its declaration and type:
 
 ```trb
-loader: () -> String fails LoadError := fn(): String fails LoadError
+loader: () -> Result<String, LoadError> := fn(): Result<String, LoadError>
 	return read_name()
 end
 
-result := attempt loader()
+result := loader()
 ```
 
-A pure function can be used where the same callback is allowed to fail. The
-reverse assignment is rejected.
+TypeScript may lower a Result-returning callback to `async` when it reaches a
+Promise-based platform API. The TypeRB signature and Result control flow remain
+the same.
 
 Outside delimiters, `;` can separate complete statements:
 
@@ -661,7 +662,7 @@ respectively. `find` and `find_index` use the same predicate and stop at the
 first match. They return a nullable element or nullable `Integer`; an empty or
 unmatched Array returns `nil`.
 
-## Result and fallible effects
+## Result control flow
 
 `trb/std/result` provides `Result<T, E>` with `Ok` and `Err` variants:
 
@@ -679,33 +680,32 @@ end
 ```
 
 `Result` is an ordinary value: it can be stored, returned, and handled
-explicitly with exhaustive `case`. TypeRB also models operations that may fail
-before they have been captured as a value. Such a function declares a `fails`
-effect:
+explicitly with exhaustive `case`. Prefix `try` unwraps `Ok` and returns `Err`
+from the nearest compatible Result-returning function:
 
 ```trb
-def recent_posts(): Array<Post> fails DbError
-	return Post.order(created_at: :desc).limit(20).all()
+def recent_posts(): DbResult<Array<Post>>
+	posts := try Post.order(created_at: :desc).limit(20).all()
+	return DbResult<Array<Post>>::Ok(posts)
 end
 ```
 
-A compatible enclosing `fails` function propagates the effect automatically.
-A named function that neither declares nor captures it is rejected. `attempt`
-captures the effect as an ordinary `Result<T, E>`:
+Postfix `catch` handles `Err` locally while yielding the success value on the
+ordinary path:
 
 ```trb
-posts_result := attempt recent_posts()
-
-count_result := attempt do
-	posts := recent_posts()
-	posts.size()
+posts := recent_posts() catch |error|
+	puts(error.message)
+	return []
 end
 ```
 
-`main()` cannot declare `fails`; it must use `attempt`. At the REPL top level,
-a fallible expression prints its success or structured error and keeps the
-session alive. There is no postfix `Result` propagation operator in the current
-alpha; explicit `case`, `fails`, and `attempt` are the implemented choices.
+The catch handler must produce the same success type or transfer control with a
+valid `return`, `break`, or `next`. It handles only `Result::Err`, not native
+exceptions. Standard Result values must be used with `try`, `catch`, exhaustive
+`case`, `return`, passing, or storage. At the REPL top level, a Result is shown
+as `Ok` or `Err`; top-level `try` is rejected so the session remains a stable
+inspection boundary.
 
 ## Formatting
 

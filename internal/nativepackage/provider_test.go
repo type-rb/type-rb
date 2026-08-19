@@ -2,6 +2,7 @@ package nativepackage
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,10 +79,6 @@ func TestApplyProviderFilesAcceptsGenericNativeContracts(t *testing.T) {
 						Fields: []Field{
 							{Name: "queryFn", Type: Type{
 								Kind: "function", Name: "Function", Args: []Type{{Kind: "named", Name: "TData"}},
-								Fails: &Type{Kind: "named", Name: "TError"}, EffectBridge: "promise_rejection",
-							}},
-							{Name: "resultQueryFn", Type: Type{
-								Kind: "function", Name: "Function", Args: []Type{{Kind: "named", Name: "TData"}},
 								ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection", Error: Type{Kind: "named", Name: "TError"}},
 							}},
 						},
@@ -101,37 +98,8 @@ func TestApplyProviderFilesAcceptsGenericNativeContracts(t *testing.T) {
 		t.Fatalf("generic provider contracts were not retained: %#v", module)
 	}
 	queryFunction := module.Records["QueryOptions"].Fields[0].Type
-	if queryFunction.Fails == nil || queryFunction.Fails.Name != "TError" || queryFunction.EffectBridge != "promise_rejection" {
-		t.Fatalf("callback effect bridge was not retained: %#v", queryFunction)
-	}
-	resultQueryFunction := module.Records["QueryOptions"].Fields[1].Type
-	if resultQueryFunction.ResultBridge == nil || resultQueryFunction.ResultBridge.Kind != "result_to_promise_rejection" || resultQueryFunction.ResultBridge.Error.Name != "TError" {
-		t.Fatalf("callback result bridge was not retained: %#v", resultQueryFunction)
-	}
-}
-
-func TestApplyProviderFilesRejectsInvalidEffectBridges(t *testing.T) {
-	tests := []struct {
-		name string
-		typ  Type
-		want string
-	}{
-		{name: "without effect", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, EffectBridge: "promise_rejection"}, want: "requires a fallible function type"},
-		{name: "unknown bridge", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, Fails: &Type{Kind: "string", Name: "String"}, EffectBridge: "throw_value"}, want: "unsupported effectBridge"},
-		{name: "non-function failure", typ: Type{Kind: "string", Name: "String", Fails: &Type{Kind: "string", Name: "String"}}, want: "fails is only valid on function types"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			root := t.TempDir()
-			path := filepath.Join(root, "native-types.json")
-			writeProviderFixture(t, path, Provider{FormatVersion: FormatVersion, Modules: map[string]Module{
-				"query-library": {Records: map[string]Export{"Options": {Kind: "record", Type: Type{Kind: "named", Name: "Options"}, Fields: []Field{{Name: "queryFn", Type: test.typ}}}}},
-			}})
-			err := ApplyProviderFiles(Empty(map[string]string{"query-library": "1.0.0"}), []ProviderSource{{Package: "provider", Path: path, Dependencies: map[string]string{"query-library": "1.0.0"}}})
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("expected %q, got %v", test.want, err)
-			}
-		})
+	if queryFunction.ResultBridge == nil || queryFunction.ResultBridge.Kind != "result_to_promise_rejection" || queryFunction.ResultBridge.Error.Name != "TError" {
+		t.Fatalf("callback result bridge was not retained: %#v", queryFunction)
 	}
 }
 
@@ -145,7 +113,6 @@ func TestApplyProviderFilesRejectsInvalidResultBridges(t *testing.T) {
 		{name: "missing return", typ: Type{Kind: "function", Name: "Function", ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection", Error: Type{Kind: "string", Name: "String"}}}, want: "requires a function return type"},
 		{name: "missing error", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection"}}, want: "error is required"},
 		{name: "unknown kind", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, ResultBridge: &ResultBridge{Kind: "unwrap", Error: Type{Kind: "string", Name: "String"}}}, want: "unsupported resultBridge kind"},
-		{name: "effect and result", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, Fails: &Type{Kind: "string", Name: "String"}, EffectBridge: "promise_rejection", ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection", Error: Type{Kind: "string", Name: "String"}}}, want: "cannot be combined"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -159,6 +126,43 @@ func TestApplyProviderFilesRejectsInvalidResultBridges(t *testing.T) {
 				t.Fatalf("expected %q, got %v", test.want, err)
 			}
 		})
+	}
+}
+
+func TestReadProviderRejectsVersionOneBeforeLegacyFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "native-types.json")
+	data := `{"formatVersion":1,"modules":{"query-library":{"records":{"Options":{"kind":"record","type":{"kind":"named","name":"Options"},"fields":[{"name":"queryFn","type":{"kind":"function","name":"Function","args":[{"kind":"named","name":"TData"}],"fails":{"kind":"named","name":"TError"},"effectBridge":"promise_rejection"}}]}}}}}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ReadProvider(path)
+	if err == nil || !strings.Contains(err.Error(), "formatVersion 1") || !strings.Contains(err.Error(), "expected 2") || !strings.Contains(err.Error(), "resultBridge") || !strings.Contains(err.Error(), "run trb install") {
+		t.Fatalf("expected provider migration diagnostic, got %v", err)
+	}
+	if strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("legacy provider fields hid the version migration diagnostic: %v", err)
+	}
+}
+
+func TestReadProviderStrictlyRejectsLegacyFieldsInVersionTwo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "native-types.json")
+	data := fmt.Sprintf(`{"formatVersion":%d,"modules":{"query-library":{"records":{"Options":{"kind":"record","type":{"kind":"named","name":"Options"},"fields":[{"name":"queryFn","type":{"kind":"function","name":"Function","args":[{"kind":"named","name":"TData"}],"fails":{"kind":"named","name":"TError"}}}]}}}}}`, FormatVersion)
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadProvider(path); err == nil || !strings.Contains(err.Error(), `unknown field "fails"`) {
+		t.Fatalf("expected strict legacy field diagnostic, got %v", err)
+	}
+}
+
+func TestReadProviderRejectsTrailingContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "native-types.json")
+	data := fmt.Sprintf(`{"formatVersion":%d,"modules":{}} {}`, FormatVersion)
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadProvider(path); err == nil || !strings.Contains(err.Error(), "trailing JSON content") {
+		t.Fatalf("expected trailing content diagnostic, got %v", err)
 	}
 }
 

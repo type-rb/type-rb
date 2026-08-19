@@ -14,18 +14,84 @@ type SuspensionPlan = effectplan.Plan
 
 func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
 	plan := effectplan.Analyze(programs, effectplan.Options{Intrinsic: isSuspendingIntrinsic, WebNext: true, PassToFunctions: true})
+	standardResults := make(map[string]bool, len(programs))
+	for _, program := range programs {
+		standardResults[program.ModulePath] = standardResultAvailable(program)
+	}
 	for lambda, suspends := range plan.Lambdas {
-		if suspends && lambda.SuccessType.Kind != types.Void && lambda.Fails.Kind == types.Never && !plan.ResultPromiseBridges[lambda] {
+		resultBoundary := standardResults[plan.LambdaModules[lambda]] && functionReturnsStandardResult(lambda.ExprType())
+		if suspends && lambda.ReturnType.Kind != types.Void && !resultBoundary {
 			return nil, fmt.Errorf("TypeScript function values that may suspend must omit their return type")
 		}
 	}
 	return plan, nil
 }
 
-func isSuspendingORM(intrinsic string, fails types.Type) bool {
-	return effectplan.ORMOperation(intrinsic, fails)
+func functionReturnsStandardResult(function types.Type) bool {
+	_, returned, ok := types.FunctionSignature(function)
+	return ok && !returned.Nullable && returned.Name == "Result" && len(returned.Args) == 2
 }
 
-func isSuspendingIntrinsic(intrinsic string, fails types.Type) bool {
-	return intrinsic == "trb.std.test.describe" || intrinsic == "trb.std.test.test" || intrinsic == "trb.jobs.perform_later" || intrinsic == "trb.jobs.perform_in" || intrinsic == "trb.jobs.perform_at" || isSuspendingORM(intrinsic, fails) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || intrinsic == "trb.web.middleware.timeout.call" || intrinsic == "trb.platform.typescript.browser.request" || intrinsic == "trb.platform.typescript.browser.file_read" || intrinsic == "trb.platform.typescript.browser.file_read_text" || intrinsic == "trb.internal.auth.oidc.verify_bearer"
+func standardResultAvailable(program *ir.Program) bool {
+	if program == nil || standardResultModule(program.ModulePath) {
+		return true
+	}
+	return !statementsShadowStandardResult(program.Statements)
+}
+
+func statementsShadowStandardResult(statements []ir.Statement) bool {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Import:
+			if node.Namespace || standardResultModule(node.Path) {
+				continue
+			}
+			for _, symbol := range node.Symbols {
+				if symbol == "Result" {
+					return true
+				}
+			}
+		case *ir.Class:
+			if node.Name == "Result" || statementsShadowStandardResult(node.Body) {
+				return true
+			}
+		case *ir.Record:
+			if node.Name == "Result" || statementsShadowStandardResult(node.Body) {
+				return true
+			}
+		case *ir.Enum:
+			if node.Name == "Result" || statementsShadowStandardResult(node.Body) {
+				return true
+			}
+		case *ir.TypeAlias:
+			if node.Name == "Result" {
+				return true
+			}
+		case *ir.Interface:
+			if node.Name == "Result" {
+				return true
+			}
+		case *ir.Module:
+			if statementsShadowStandardResult(node.Body) {
+				return true
+			}
+		case *ir.NativeBlock:
+			if statementsShadowStandardResult(node.Body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func standardResultModule(module string) bool {
+	return module == "trb/std/result" || module == "trb/std/result/index"
+}
+
+func isSuspendingORM(intrinsic string) bool {
+	return effectplan.ORMOperation(intrinsic)
+}
+
+func isSuspendingIntrinsic(intrinsic string) bool {
+	return intrinsic == "trb.std.test.describe" || intrinsic == "trb.std.test.test" || intrinsic == "trb.jobs.perform_later" || intrinsic == "trb.jobs.perform_in" || intrinsic == "trb.jobs.perform_at" || isSuspendingORM(intrinsic) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || intrinsic == "trb.web.middleware.timeout.call" || intrinsic == "trb.platform.typescript.browser.request" || intrinsic == "trb.platform.typescript.browser.file_read" || intrinsic == "trb.platform.typescript.browser.file_read_text" || intrinsic == "trb.internal.auth.oidc.verify_bearer"
 }

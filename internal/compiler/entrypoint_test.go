@@ -26,16 +26,6 @@ end
 `,
 		},
 		{
-			name: "failure type",
-			source: `record AppError
-end
-
-def main() fails AppError
-	return
-end
-`,
-		},
-		{
 			name: "type parameter",
 			source: `def main<T>()
 	return

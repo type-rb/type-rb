@@ -84,7 +84,7 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 				declared.InstanceMembers[association.Name] = declaration.Member{
 					Name: association.Name, Kind: declaration.Property,
 					Intrinsic: "trb.orm.association.value." + string(association.Kind),
-					Return:    associationValueType(association), Fails: types.FromName("DbError"), Provider: PackageName,
+					Return:    dbResult(associationValueType(association)), Provider: PackageName,
 				}
 			}
 			declared.InstanceMembers[association.Name+"_query"] = declaration.Member{
@@ -314,7 +314,6 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		catalog.Types[model.ScopeType()] = scope
 	}
-	applyPortableEffects(catalog)
 	return catalog, nil
 }
 
@@ -327,42 +326,6 @@ func modelReferences(source Model, models []Model) []declaration.DeclarationRefe
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left].Name < result[right].Name })
 	return result
-}
-
-func applyPortableEffects(catalog *declaration.Catalog) {
-	for _, declared := range catalog.Types {
-		for name, member := range declared.InstanceMembers {
-			declared.InstanceMembers[name] = portableEffectMember(member)
-		}
-		for name, member := range declared.ClassMembers {
-			declared.ClassMembers[name] = portableEffectMember(member)
-		}
-	}
-}
-
-func portableEffectMember(member declaration.Member) declaration.Member {
-	if member.Block != nil && member.Block.ResultBoundary.Kind != "" && member.Block.ResultBoundary.Kind != types.Never {
-		return member
-	}
-	if success, ok := dbResultSuccess(member.Return); ok {
-		member.Return = success
-		member.Fails = types.FromName("DbError")
-	}
-	for index := range member.Alternatives {
-		if success, ok := dbResultSuccess(member.Alternatives[index].Return); ok {
-			member.Alternatives[index].Return = success
-			member.Alternatives[index].Fails = types.FromName("DbError")
-			member.Fails = types.FromName("DbError")
-		}
-	}
-	return member
-}
-
-func dbResultSuccess(result types.Type) (types.Type, bool) {
-	if result.Name != "DbResult" || len(result.Args) != 1 {
-		return types.Type{}, false
-	}
-	return result.Args[0], true
 }
 
 func groupDeclaration(model Model, intrinsic string, class bool) declaration.Member {
@@ -599,7 +562,11 @@ func batchDeclaration(model Model, name string, class, batches bool) declaration
 		Name: name, Kind: declaration.Method, Intrinsic: "trb.orm.query." + name,
 		Parameters: []declaration.Parameter{{Name: "batch_size", Type: types.FromName("Integer"), Keyword: true, Optional: true}},
 		Return:     dbResult(types.FromName("Integer")), Class: class, Provider: PackageName,
-		Block: &declaration.Block{Parameters: []types.Type{parameterType}, Structured: true},
+		Block: &declaration.Block{
+			Parameters:     []types.Type{parameterType},
+			ResultBoundary: types.FromName("DbError"),
+			Structured:     true,
+		},
 	}
 }
 

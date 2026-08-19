@@ -164,13 +164,6 @@ func (c *foldingCollector) expression(expression ast.Expression) {
 		c.ifExpression(node)
 	case *ast.CaseStatement:
 		c.caseExpression(node)
-	case *ast.AttemptExpression:
-		if len(node.Body) > 0 {
-			c.add(node)
-			c.statements(node.Body)
-		} else {
-			c.expression(node.Value)
-		}
 	case *ast.TryExpression:
 		c.expression(node.Value)
 	case *ast.CatchExpression:

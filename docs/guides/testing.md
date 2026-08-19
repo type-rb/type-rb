@@ -76,9 +76,12 @@ describe("Parser") do
 end
 ```
 
-Fallible operations retain the language's ordinary `fails` and `attempt`
-rules. Use `attempt` when the error value itself is the subject of the
-assertion.
+Recoverable operations return ordinary Result values. Use `try` only when a
+helper function itself returns a compatible Result, and use `catch` when a
+test can recover with a value. When a particular `Err` variant or payload is
+the subject of the assertion, keep the Result intact and inspect it with an
+exhaustive `case`. This makes the unexpected `Ok` path explicit without adding
+test-only control-flow semantics.
 
 There is no implicit setup inheritance, dedicated table-test syntax, fixture
 registry, or mock-generation magic. Tests use ordinary constructors,

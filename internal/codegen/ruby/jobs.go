@@ -230,9 +230,6 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 		case jobs.PerformJobResult:
 			g.line("execution = "+call, "")
 			g.line("raise execution.error.message if execution.is_a?(Result::Err)", "")
-		case jobs.PerformLegacyEffect:
-			g.line("execution = "+call, "")
-			g.line("raise execution.error.inspect if execution.is_a?(Result::Err)", "")
 		default:
 			g.line(call, "")
 		}

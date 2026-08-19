@@ -425,6 +425,9 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	model, ok := g.orm.QueryModel(iteration.Source.ExprType().Name)
 	source := g.expr(iteration.Source)
 	if !ok {
+		model, ok = g.orm.ScopeModel(iteration.Source.ExprType().Name)
+	}
+	if !ok {
 		model, ok = g.orm.Model(iteration.Source.ExprType().Name)
 		if !ok {
 			return

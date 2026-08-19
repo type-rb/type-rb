@@ -46,7 +46,7 @@ Read the [language guide](language.md) alongside the first program. Focus on:
 1. functions, canonical type names, and immutable or `mut` bindings;
 2. records, classes, enums, Arrays, and Hashes;
 3. `if`, exhaustive `case`, nullable narrowing, and iteration; and
-4. `Result`, `fails`, and `attempt` at fallible boundaries.
+4. `Result`, prefix `try`, and postfix `catch` at recoverable-error boundaries.
 
 Use the [language specification](specification.md) only when you need the exact
 rule or are evaluating an edge case.

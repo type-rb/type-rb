@@ -251,7 +251,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	jobsAlias := g.jobsRuntimeAlias()
 	resultAlias := ""
 	for _, job := range manifest.Jobs {
-		if job.PerformKind != jobs.PerformJobResult && job.PerformKind != jobs.PerformLegacyEffect {
+		if job.PerformKind != jobs.PerformJobResult {
 			continue
 		}
 		resultAlias = g.typeAliases["Result"]
@@ -305,9 +305,6 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 		case jobs.PerformJobResult:
 			g.line("execution := " + call)
 			g.line("if execution.Kind == " + resultAlias + ".ResultErrTag { return fmt.Errorf(\"%s\", execution.ErrError.Message) }")
-		case jobs.PerformLegacyEffect:
-			g.line("execution := " + call)
-			g.line("if execution.Kind == " + resultAlias + ".ResultErrTag { return fmt.Errorf(\"%v\", execution.ErrError) }")
 		default:
 			g.line(call)
 		}

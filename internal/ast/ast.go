@@ -180,9 +180,11 @@ type MethodStatement struct {
 	TypeParameters []TypeParameter
 	Parameters     []Parameter
 	ReturnType     TypeRef
-	Fails          TypeRef
-	Body           []Statement
-	Class          bool
+	// Fails is recovery-only for pre-0.3 source. The parser diagnoses every
+	// authored effect signature before later compiler phases can run it.
+	Fails TypeRef
+	Body  []Statement
+	Class bool
 }
 
 func (*MethodStatement) statementNode() {}
@@ -322,9 +324,10 @@ type TypeRef struct {
 	Union              []TypeRef
 	FunctionParameters []TypeRef
 	FunctionReturn     *TypeRef
-	FunctionFails      *TypeRef
-	Nullable           bool
-	Array              bool
+	// FunctionFails is recovery-only for pre-0.3 function types.
+	FunctionFails *TypeRef
+	Nullable      bool
+	Array         bool
 }
 
 func (t TypeRef) Empty() bool { return t.Name == "" && len(t.Union) == 0 && t.FunctionReturn == nil }
@@ -504,9 +507,9 @@ type RangeExpression struct {
 
 func (*RangeExpression) expressionNode() {}
 
-// AttemptExpression turns the fallible effects produced while evaluating a
-// single expression or a statement block into a Result value. Exactly one of
-// Value and Body is populated.
+// AttemptExpression is recovery-only for pre-0.3 source. The parser diagnoses
+// every authored attempt expression before later compiler phases can run it.
+// Exactly one of Value and Body is populated while recovery is still present.
 type AttemptExpression struct {
 	Base
 	Value Expression
@@ -543,8 +546,9 @@ type LambdaExpression struct {
 	Base
 	Parameters []Parameter
 	ReturnType TypeRef
-	Fails      TypeRef
-	Body       []Statement
+	// Fails is recovery-only for pre-0.3 lambda signatures.
+	Fails TypeRef
+	Body  []Statement
 }
 
 func (*LambdaExpression) expressionNode() {}

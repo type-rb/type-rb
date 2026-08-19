@@ -12,15 +12,18 @@ import (
 // Plan records the declarations and expressions that transitively reach one
 // of the backend effects selected by Options.
 type Plan struct {
-	Methods              map[*ir.Method]bool
-	Lambdas              map[*ir.Lambda]bool
-	Calls                map[*ir.Call]bool
-	EnumCalls            map[*ir.EnumCall]bool
-	Expressions          map[ir.Expression]bool
-	Iterations           map[*ir.Iterate]bool
-	StructuredBlocks     map[*ir.StructuredBlock]bool
-	ResultPromiseBridges map[*ir.Lambda]bool
-	methodKeys           map[methodKey]bool
+	Methods          map[*ir.Method]bool
+	Lambdas          map[*ir.Lambda]bool
+	Calls            map[*ir.Call]bool
+	EnumCalls        map[*ir.EnumCall]bool
+	Expressions      map[ir.Expression]bool
+	Iterations       map[*ir.Iterate]bool
+	StructuredBlocks map[*ir.StructuredBlock]bool
+	// LambdaModules retains the source module that owns each first-class
+	// function. Backend policy can use that identity without moving target-
+	// specific suspension rules into shared TypeRB semantics.
+	LambdaModules map[*ir.Lambda]string
+	methodKeys    map[methodKey]bool
 }
 
 type methodKey struct {
@@ -68,7 +71,7 @@ type functionBindingKey struct {
 
 // Options chooses effect roots while retaining one call-graph model.
 type Options struct {
-	Intrinsic       func(string, types.Type) bool
+	Intrinsic       func(string) bool
 	WebNext         bool
 	CaptureLambdas  bool
 	PassToFunctions bool
@@ -76,15 +79,15 @@ type Options struct {
 
 func Analyze(programs []*ir.Program, options Options) *Plan {
 	plan := &Plan{
-		Methods:              map[*ir.Method]bool{},
-		Lambdas:              map[*ir.Lambda]bool{},
-		Calls:                map[*ir.Call]bool{},
-		EnumCalls:            map[*ir.EnumCall]bool{},
-		Expressions:          map[ir.Expression]bool{},
-		Iterations:           map[*ir.Iterate]bool{},
-		StructuredBlocks:     map[*ir.StructuredBlock]bool{},
-		ResultPromiseBridges: map[*ir.Lambda]bool{},
-		methodKeys:           map[methodKey]bool{},
+		Methods:          map[*ir.Method]bool{},
+		Lambdas:          map[*ir.Lambda]bool{},
+		Calls:            map[*ir.Call]bool{},
+		EnumCalls:        map[*ir.EnumCall]bool{},
+		Expressions:      map[ir.Expression]bool{},
+		Iterations:       map[*ir.Iterate]bool{},
+		StructuredBlocks: map[*ir.StructuredBlock]bool{},
+		LambdaModules:    map[*ir.Lambda]string{},
+		methodKeys:       map[methodKey]bool{},
 	}
 	analyzer := &analyzer{
 		programs: programs, plan: plan, options: options, methodInfo: map[*ir.Method]methodContext{},
@@ -266,7 +269,7 @@ func (a *analyzer) statementsReach(statements []ir.Statement, context methodCont
 			suspends = a.expressionReaches(node.Condition, context, record) || suspends
 			suspends = a.statementsReach(node.Body, context, record) || suspends
 		case *ir.Iterate:
-			iterationSuspends := a.intrinsicReaches(node.Intrinsic, node.Fails)
+			iterationSuspends := a.intrinsicReaches(node.Intrinsic)
 			iterationSuspends = a.expressionReaches(node.Source, context, record) || iterationSuspends
 			iterationSuspends = a.expressionReaches(node.SliceSize, context, record) || iterationSuspends
 			iterationSuspends = a.statementsReach(node.Body, context, record) || iterationSuspends
@@ -275,7 +278,7 @@ func (a *analyzer) statementsReach(statements []ir.Statement, context methodCont
 			}
 			suspends = iterationSuspends || suspends
 		case *ir.StructuredBlock:
-			blockSuspends := a.intrinsicReaches(node.Intrinsic, node.Fails)
+			blockSuspends := a.intrinsicReaches(node.Intrinsic)
 			blockSuspends = a.expressionReaches(node.Call, context, record) || blockSuspends
 			blockSuspends = a.statementsReach(node.Body, context, record) || blockSuspends
 			blockSuspends = a.expressionReaches(node.Value, context, record) || blockSuspends
@@ -299,6 +302,7 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 	case *ir.Lambda:
 		// Creating a lambda never suspends the enclosing function. Its body owns
 		// a separate backend-only suspension boundary.
+		a.plan.LambdaModules[node] = context.module
 		lambdaSuspends := a.statementsReach(node.Body, context, record)
 		a.plan.Lambdas[node] = lambdaSuspends
 		return a.options.CaptureLambdas && lambdaSuspends
@@ -331,11 +335,6 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 	case *ir.Unary:
 		suspends = a.expressionReaches(node.Operand, context, record)
 	case *ir.Conversion:
-		if node.Kind == ir.ResultFunctionToPromiseRejectionConversion {
-			if lambda := a.boundLambda(node.Value, context); lambda != nil {
-				a.plan.ResultPromiseBridges[lambda] = true
-			}
-		}
 		suspends = a.expressionReaches(node.Value, context, record)
 	case *ir.Binary:
 		suspends = a.expressionReaches(node.Left, context, record)
@@ -356,17 +355,11 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		if node.Block != nil {
 			suspends = a.statementsReach(node.Block.Body, context, record) || suspends
 		}
-		callSuspends := a.intrinsicReaches(referenceIntrinsic(node.Callee), node.Fails) || a.options.WebNext && isWebNextCall(node.Callee) || a.callTargetReaches(node.Callee, context)
+		callSuspends := a.intrinsicReaches(referenceIntrinsic(node.Callee)) || a.options.WebNext && isWebNextCall(node.Callee) || a.callTargetReaches(node.Callee, context)
 		if record && callSuspends {
 			a.plan.Calls[node] = true
 		}
 		suspends = callSuspends || suspends
-	case *ir.Attempt:
-		suspends = a.expressionReaches(node.Value, context, record)
-		suspends = a.statementsReach(node.Body, context, record) || suspends
-		suspends = a.expressionReaches(node.BodyResult, context, record) || suspends
-	case *ir.UnhandledEffect:
-		suspends = a.expressionReaches(node.Value, context, record)
 	case *ir.EnumConstruct:
 		for _, argument := range node.Arguments {
 			suspends = a.expressionReaches(argument, context, record) || suspends
@@ -401,17 +394,6 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 	return suspends
 }
 
-func (a *analyzer) boundLambda(expression ir.Expression, context methodContext) *ir.Lambda {
-	if lambda, ok := expression.(*ir.Lambda); ok {
-		return lambda
-	}
-	identifier, ok := expression.(*ir.Identifier)
-	if !ok || !identifier.Lexical {
-		return nil
-	}
-	return a.lambdaBindings[functionBindingKey{module: context.module, method: context.method, name: identifier.Name}]
-}
-
 func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext) bool {
 	if a.options.PassToFunctions && callee != nil && callee.ExprType().Kind == types.Function {
 		if lambda, ok := callee.(*ir.Lambda); ok {
@@ -423,7 +405,9 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 			}
 			if context.method != nil {
 				for _, parameter := range context.method.Parameters {
-					if parameter.Name == identifier.Name && parameter.Type.Kind == types.Function {
+					if parameter.Name == identifier.Name {
+						// The checked callee type above is authoritative. A source
+						// parameter can retain a transparent function alias in IR.
 						// A higher-order function must accept both synchronous and
 						// backend-suspending callbacks.
 						return true
@@ -482,18 +466,15 @@ func referenceIntrinsic(expression ir.Expression) string {
 	return ""
 }
 
-func (a *analyzer) intrinsicReaches(intrinsic string, fails types.Type) bool {
-	return a.options.Intrinsic != nil && a.options.Intrinsic(intrinsic, fails)
+func (a *analyzer) intrinsicReaches(intrinsic string) bool {
+	return a.options.Intrinsic != nil && a.options.Intrinsic(intrinsic)
 }
 
 // ORMOperation identifies intrinsics that may execute database work. It is
 // shared by TypeScript suspension and portable execution-scope propagation.
-func ORMOperation(intrinsic string, fails types.Type) bool {
+func ORMOperation(intrinsic string) bool {
 	if !strings.HasPrefix(intrinsic, "trb.orm.") {
 		return false
-	}
-	if fails.Kind != "" && fails.Kind != types.Never {
-		return true
 	}
 	switch intrinsic {
 	case "trb.orm.all", "trb.orm.first", "trb.orm.count", "trb.orm.explain", "trb.orm.find_by", "trb.orm.exists",
@@ -503,7 +484,7 @@ func ORMOperation(intrinsic string, fails types.Type) bool {
 		"trb.orm.changes.save", "trb.orm.delete", "trb.orm.destroy", "trb.orm.destroy_all", "trb.orm.update_all", "trb.orm.delete_all",
 		"trb.orm.query.find_by", "trb.orm.query.exists", "trb.orm.query.update_all", "trb.orm.query.delete_all", "trb.orm.query.destroy_all",
 		"trb.orm.query.pluck", "trb.orm.query.pick", "trb.orm.query.ids", "trb.orm.query.sum", "trb.orm.query.average", "trb.orm.query.minimum", "trb.orm.query.maximum",
-		"trb.orm.query.all", "trb.orm.query.first", "trb.orm.query.count", "trb.orm.query.explain",
+		"trb.orm.query.all", "trb.orm.query.first", "trb.orm.query.count", "trb.orm.query.explain", "trb.orm.query.find_each", "trb.orm.query.find_in_batches",
 		"trb.orm.group.count", "trb.orm.group.sum", "trb.orm.group.average", "trb.orm.group.minimum", "trb.orm.group.maximum",
 		"trb.orm.association.value.belongs_to", "trb.orm.association.value.has_many", "trb.orm.association.value.has_one",
 		"trb.orm.association.load.belongs_to", "trb.orm.association.load.has_many", "trb.orm.association.load.has_one",
@@ -521,7 +502,7 @@ func ORMOperation(intrinsic string, fails types.Type) bool {
 func ExecutionScope(programs []*ir.Program) *Plan {
 	return Analyze(programs, Options{
 		WebNext: true, CaptureLambdas: true,
-		Intrinsic: func(intrinsic string, fails types.Type) bool {
+		Intrinsic: func(intrinsic string) bool {
 			return strings.HasPrefix(intrinsic, "trb.orm.") ||
 				strings.HasPrefix(intrinsic, "trb.jobs.") ||
 				intrinsic == "trb.platform.typescript.browser.request" ||

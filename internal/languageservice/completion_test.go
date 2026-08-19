@@ -128,6 +128,15 @@ func TestCompletionOffersResultControlFlowKeywords(t *testing.T) {
 	}
 }
 
+func TestCompletionOmitsLegacyEffectKeywords(t *testing.T) {
+	service := languageservice.New("go")
+	for _, keyword := range []string{"attempt", "fails"} {
+		if item, ok := findCompletion(service.Complete(keyword[:2], 2), keyword); ok {
+			t.Errorf("%s completion=%#v, want no legacy keyword", keyword, item)
+		}
+	}
+}
+
 func TestCompletionOffersOnlyTypesAtTypePositions(t *testing.T) {
 	service := languageservice.New("go")
 	for _, test := range []struct {
@@ -162,11 +171,14 @@ func TestCompletionDoesNotTreatValueArgumentsAsTypePositions(t *testing.T) {
 	}
 }
 
-func TestCompletionShowsSourceReturnAndEffectSignature(t *testing.T) {
-	artifact := compile(t, "go", `record LoadError
+func TestCompletionShowsSourceResultSignature(t *testing.T) {
+	artifact := compile(t, "go", `import { Result } from trb/std/result
+
+record LoadError
 end
-def load_name(): String fails LoadError
-	return "Ada"
+
+def load_name(): Result<String, LoadError>
+	return Result<String, LoadError>::Ok("Ada")
 end
 `)
 	service := languageservice.New("go")
@@ -175,8 +187,8 @@ end
 	if !ok {
 		t.Fatal("load_name completion is missing")
 	}
-	if item.Detail != "load_name(): String fails LoadError" {
-		t.Fatalf("effect completion detail=%q", item.Detail)
+	if item.Detail != "load_name(): Result<String, LoadError>" {
+		t.Fatalf("Result completion detail=%q", item.Detail)
 	}
 }
 

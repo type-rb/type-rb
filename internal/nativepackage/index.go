@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	FormatVersion     = 1
+	// FormatVersion versions both package-owned provider files and the generated
+	// native type cache because they share the Type wire representation below.
+	FormatVersion     = 2
 	indexRelativePath = ".trb/native-types.json"
 )
 
@@ -61,8 +63,6 @@ type Type struct {
 	Kind         string        `json:"kind"`
 	Name         string        `json:"name,omitempty"`
 	Args         []Type        `json:"args,omitempty"`
-	Fails        *Type         `json:"fails,omitempty"`
-	EffectBridge string        `json:"effectBridge,omitempty"`
 	ResultBridge *ResultBridge `json:"resultBridge,omitempty"`
 	Nullable     bool          `json:"nullable,omitempty"`
 	Readonly     bool          `json:"readonly,omitempty"`
@@ -70,8 +70,6 @@ type Type struct {
 
 // ResultBridge describes a native callback boundary that resolves its success
 // value through a Promise and rejects with the standard Result error payload.
-// It is additive to the formatVersion 1 effect bridge while the Result-only
-// package contract is evaluated.
 type ResultBridge struct {
 	Kind  string `json:"kind"`
 	Error Type   `json:"error"`
@@ -81,10 +79,6 @@ func (t Type) Semantic() types.Type {
 	result := types.Type{Kind: types.Kind(t.Kind), Name: t.Name, Nullable: t.Nullable, Readonly: t.Readonly}
 	for _, argument := range t.Args {
 		result.Args = append(result.Args, argument.Semantic())
-	}
-	if t.Fails != nil {
-		failure := t.Fails.Semantic()
-		result.Fails = &failure
 	}
 	if result.Name == "" {
 		result.Name = types.FromName(string(result.Kind)).Name
@@ -96,10 +90,6 @@ func FromSemantic(typ types.Type) Type {
 	result := Type{Kind: string(typ.Kind), Name: typ.Name, Nullable: typ.Nullable, Readonly: typ.Readonly}
 	for _, argument := range typ.Args {
 		result.Args = append(result.Args, FromSemantic(argument))
-	}
-	if typ.Fails != nil {
-		failure := FromSemantic(*typ.Fails)
-		result.Fails = &failure
 	}
 	return result
 }
@@ -138,6 +128,13 @@ func load(root string, dependencies, providers map[string]string, checkProviders
 	if err != nil {
 		return nil, fmt.Errorf("read native TypeScript package index: %w", err)
 	}
+	formatVersion, err := readFormatVersion(data)
+	if err != nil {
+		return nil, fmt.Errorf("decode %s: %w", IndexPath(root), err)
+	}
+	if formatVersion != FormatVersion {
+		return nil, fmt.Errorf("%s uses unsupported native type cache formatVersion %d; expected %d; run trb install to regenerate it", IndexPath(root), formatVersion, FormatVersion)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var catalog Catalog
@@ -146,9 +143,6 @@ func load(root string, dependencies, providers map[string]string, checkProviders
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("decode %s: trailing JSON content", IndexPath(root))
-	}
-	if catalog.FormatVersion != FormatVersion {
-		return nil, fmt.Errorf("%s uses unsupported formatVersion %d; run trb install", IndexPath(root), catalog.FormatVersion)
 	}
 	if catalog.Modules == nil {
 		catalog.Modules = map[string]Module{}

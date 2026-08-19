@@ -27,7 +27,6 @@ type Parameter struct {
 type Signature struct {
 	Parameters []Parameter
 	Return     types.Type
-	Fails      types.Type
 	Variadic   bool
 }
 
@@ -40,11 +39,12 @@ type Block struct {
 	// Return makes the block value-producing. The final expression must be
 	// assignable to this type.
 	Return types.Type
-	// ResultBoundary makes prefix try return Result<Return, ResultBoundary>
-	// from this block rather than from the enclosing callable. It is the error
-	// payload type, not an additional authored block parameter. Authored return
-	// is rejected until lexical transfer and resource cleanup share one portable
-	// contract; use try to abort this boundary with Err.
+	// ResultBoundary makes prefix try abort this structured operation with its
+	// declared Result error. A value-producing block uses Return as the success
+	// type; a structured iteration uses the enclosing member's Result success.
+	// It is not an authored block parameter. Authored return is rejected until
+	// lexical transfer and resource cleanup share one portable contract; use try
+	// to abort this boundary with Err.
 	ResultBoundary types.Type
 	// Structured keeps the block in typed IR instead of lowering it to a
 	// backend callback. Structured blocks may be assigned or returned while
@@ -60,7 +60,6 @@ type Member struct {
 	MinimumArguments int
 	MaximumArguments int
 	Return           types.Type
-	Fails            types.Type
 	Variadic         bool
 	Class            bool
 	TypeParameters   []string

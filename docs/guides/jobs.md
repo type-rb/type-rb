@@ -28,32 +28,28 @@ end
 The compiler derives typed enqueue methods from `perform`:
 
 ```trb
-import { EnqueueError } from trb/jobs
+import { EnqueueError, JobReference } from trb/jobs
 import { Result } from trb/std/result
 import { Duration, Instant } from trb/std/time
 
-def enqueue_receipt(order_id: Integer) fails EnqueueError
-	case attempt SendReceiptJob.perform_later(order_id, "ada@example.test")
-	when Result::Ok(reference)
-		puts(reference.id)
-	when Result::Err(error)
-		puts(error.message)
-	end
+def enqueue_receipt(order_id: Integer): Result<JobReference, EnqueueError>
+	reference := try SendReceiptJob.perform_later(order_id, "ada@example.test")
+	puts(reference.id)
 
-	SendReceiptJob.perform_in(Duration.minutes(5), order_id, "later@example.test")
-	SendReceiptJob.perform_at(
+	try SendReceiptJob.perform_in(Duration.minutes(5), order_id, "later@example.test")
+	return SendReceiptJob.perform_at(
 		Instant.now().add(Duration.hours(2)),
 		order_id,
 		"scheduled@example.test",
 	)
-	return
 end
 ```
 
-Enqueue operations declare `fails EnqueueError`, so they propagate inside a
-compatible `fails` function. `attempt` converts the operation to an explicit
-`Result`. `EnqueueErrorKind` distinguishes serialization, invalid arguments,
-cancellation, and adapter failures.
+Enqueue operations return `Result<JobReference, EnqueueError>`. Prefix `try`
+propagates an enqueue error from another Result-returning function, while
+`catch` handles it at a boundary that returns another type. `EnqueueErrorKind`
+distinguishes serialization, invalid arguments, cancellation, and adapter
+failures.
 
 `perform_in` schedules relative to now; `perform_at` accepts an absolute
 portable `Instant`. A past `Instant` is ready immediately. `queue`, `priority`,
@@ -61,6 +57,33 @@ and `maximum_attempts` are compile-time Job settings. The
 default queue is `default`, the default priority is `0`, and lower priority
 numbers run first. If a Job omits `maximum_attempts`, the adapter default is
 used.
+
+## Fallible Jobs
+
+An infallible `perform` method omits its return type. A Job that needs worker
+retry returns the exact `JobResult` contract instead:
+
+```trb
+import { Job, JobError, JobResult } from trb/jobs
+import { Unit } from trb/std/unit
+
+class ImportReceiptJob < Job
+	def perform(source: String): JobResult
+		if source.empty?()
+			return JobResult::Err(JobError.new(message: "receipt source is empty"))
+		end
+
+		import_receipt(source)
+		return JobResult::Ok(Unit.new())
+	end
+end
+```
+
+`JobResult` is `Result<Unit, JobError>`. `Ok(Unit.new())` acknowledges the Job
+after `perform` completes. `Err(error)` stores exactly `error.message` and uses
+the configured retry, backoff, and maximum-attempt policy. A Job maps database,
+HTTP, and domain errors to `JobError` at this boundary so every backend records
+the same operational message.
 
 ## Configure the SQL adapter
 

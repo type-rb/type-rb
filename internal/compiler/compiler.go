@@ -135,10 +135,9 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: filename, PackageAliases: options.PackageAliases, Declarations: declarations, NativePackages: options.NativePackages})
 	diagnostics = append(diagnostics, resolveDiagnostics...)
 	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{
-		AllowUnusedImports:    options.AllowUnusedImports,
-		AllowUnhandledEffects: options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
-		InteractiveTopLevel:   options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
-		RunnableMain:          topLevelMethod(program, MainFunction),
+		AllowUnusedImports:  options.AllowUnusedImports,
+		InteractiveTopLevel: options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
+		RunnableMain:        topLevelMethod(program, MainFunction),
 	})
 	diagnostics = append(diagnostics, checkDiagnostics...)
 	if hasErrors(diagnostics) {
@@ -314,10 +313,9 @@ func analyzeProject(sources []SourceUnit, options Options, validateBackend bool)
 	for _, source := range units {
 		program := programs[source.ModulePath]
 		checked, diagnostics := checker.CheckWithOptions(program, resolutions[source.ModulePath], checker.Options{
-			AllowUnusedImports:    options.AllowUnusedImports,
-			AllowUnhandledEffects: options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
-			InteractiveTopLevel:   options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
-			RunnableMain:          topLevelMethod(program, MainFunction),
+			AllowUnusedImports:  options.AllowUnusedImports,
+			InteractiveTopLevel: options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
+			RunnableMain:        topLevelMethod(program, MainFunction),
 		})
 		checkedPrograms[source.ModulePath] = checked
 		checkDiagnostics[source.ModulePath] = diagnostics

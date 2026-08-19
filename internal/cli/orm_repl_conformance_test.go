@@ -56,11 +56,14 @@ func TestReplORMConformanceAcrossModesAndDatabases(t *testing.T) {
 
 					input := strings.Join([]string{
 						"import { TrbReplConformanceProduct } from main",
+						"import { DbResult } from trb/orm",
 						"import { Date, DateTime, Instant, TimeOfDay } from trb/std/time",
-						`TrbReplConformanceProduct.create(name: "Portable", on_date: Date.parse("2025-03-08"), at_time: TimeOfDay.parse("12:34:56.123456"), local_at: DateTime.parse("2025-03-08T12:34:56.123456"), exact_at: Instant.parse("2025-03-08T03:34:56.123456Z")).id > 0`,
+						"def create_repl_product(): DbResult<Boolean>\n\tproduct := try TrbReplConformanceProduct.create(name: \"Portable\", on_date: Date.parse(\"2025-03-08\"), at_time: TimeOfDay.parse(\"12:34:56.123456\"), local_at: DateTime.parse(\"2025-03-08T12:34:56.123456\"), exact_at: Instant.parse(\"2025-03-08T03:34:56.123456Z\"))\n\treturn DbResult<Boolean>::Ok(product.id > 0)\nend",
+						"create_repl_product()",
 						"TrbReplConformanceProduct.count()",
 						`TrbReplConformanceProduct.where(on_date: Date.parse("2025-03-08")).count()`,
-						"TrbReplConformanceProduct.first().exact_at.to_s()",
+						"def first_exact_at(): DbResult<String>\n\tproduct := try TrbReplConformanceProduct.first()\n\treturn DbResult<String>::Ok(product.exact_at.to_s())\nend",
+						"first_exact_at()",
 						`TrbReplConformanceProduct.update_all(name: "Updated")`,
 						`TrbReplConformanceProduct.where(name: "Updated").count()`,
 						"TrbReplConformanceProduct.delete_all()",
@@ -72,7 +75,7 @@ func TestReplORMConformanceAcrossModesAndDatabases(t *testing.T) {
 					if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 						t.Fatalf("status=%d stderr=%s", status, stderr.String())
 					}
-					const want = "true : Boolean\n1 : Integer\n1 : Integer\n\"2025-03-08T03:34:56.123456Z\" : String\n1 : Integer\n1 : Integer\n1 : Integer\n0 : Integer\n"
+					const want = "DbResult::Ok(value: true) : DbResult<Boolean>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: \"2025-03-08T03:34:56.123456Z\") : DbResult<String>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: 0) : DbResult<Integer>\n"
 					if stdout.String() != want || stderr.Len() != 0 {
 						t.Fatalf("unexpected %s/%s ORM REPL output: stdout=%q stderr=%q", mode, adapter, stdout.String(), stderr.String())
 					}

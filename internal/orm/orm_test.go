@@ -49,7 +49,7 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 		t.Fatal("Database declaration was not generated")
 	}
 	transaction := database.ClassMembers["transaction"]
-	if transaction.Return.String() != "DbResult<T>" || transaction.Fails.Kind != "" || transaction.Block == nil || transaction.Block.Return.String() != "T" || transaction.Block.ResultBoundary.String() != "DbError" || !transaction.Block.Structured {
+	if transaction.Return.String() != "DbResult<T>" || transaction.Block == nil || transaction.Block.Return.String() != "T" || transaction.Block.ResultBoundary.String() != "DbError" || !transaction.Block.Structured {
 		t.Fatalf("unexpected transaction declaration: %#v", transaction)
 	}
 	transactionType, exists := catalog.Type("Transaction")
@@ -80,44 +80,44 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if where.Parameters[0].Type.String() != "Array<Integer> | Integer | Range<Integer> | Subquery<Integer>" || where.Parameters[1].Type.String() != "Array<String> | String | Subquery<String>" {
 		t.Fatalf("where predicate input types do not include collections and ranges: %#v", where.Parameters)
 	}
-	if product.ClassMembers["find_by"].Return.String() != "Product?" || product.ClassMembers["exists?"].Return.String() != "Boolean" || product.ClassMembers["find_by"].Fails.String() != "DbError" {
+	if product.ClassMembers["find_by"].Return.String() != "DbResult<Product?>" || product.ClassMembers["exists?"].Return.String() != "DbResult<Boolean>" {
 		t.Fatalf("unexpected predicate terminal declarations: %#v", product.ClassMembers)
 	}
 	if product.ClassMembers["order"].Return.String() != "ProductQuery" || product.ClassMembers["limit"].Return.String() != "ProductQuery" || product.ClassMembers["offset"].Return.String() != "ProductQuery" {
 		t.Fatalf("unexpected model query-root declarations: %#v", product.ClassMembers)
 	}
-	if product.ClassMembers["all"].Return.String() != "Array<Product>" || product.ClassMembers["first"].Return.String() != "Product?" || product.ClassMembers["count"].Return.String() != "Integer" {
+	if product.ClassMembers["all"].Return.String() != "DbResult<Array<Product>>" || product.ClassMembers["first"].Return.String() != "DbResult<Product?>" || product.ClassMembers["count"].Return.String() != "DbResult<Integer>" {
 		t.Fatalf("unexpected model terminal declarations: %#v", product.ClassMembers)
 	}
-	if product.ClassMembers["to_sql"].Return.String() != "String" || product.ClassMembers["explain"].Return.String() != "String" {
+	if product.ClassMembers["to_sql"].Return.String() != "String" || product.ClassMembers["explain"].Return.String() != "DbResult<String>" {
 		t.Fatalf("unexpected model diagnostic declarations: %#v", product.ClassMembers)
 	}
 	if product.ClassMembers["update_all"].Intrinsic != "trb.orm.update_all" || product.ClassMembers["delete_all"].Intrinsic != "trb.orm.delete_all" {
 		t.Fatalf("unexpected model bulk write declarations: %#v", product.ClassMembers)
 	}
-	if product.ClassMembers["pluck"].Alternatives[1].Return.String() != "Array<String>" || product.ClassMembers["pick"].Alternatives[2].Return.String() != "Float?" || product.ClassMembers["ids"].Return.String() != "Array<Integer>" {
+	if product.ClassMembers["pluck"].Alternatives[1].Return.String() != "DbResult<Array<String>>" || product.ClassMembers["pick"].Alternatives[2].Return.String() != "DbResult<Float?>" || product.ClassMembers["ids"].Return.String() != "DbResult<Array<Integer>>" {
 		t.Fatalf("unexpected projection declarations: %#v", product.ClassMembers)
 	}
 	if product.ClassMembers["select"].Alternatives[0].Return.String() != "Subquery<Integer>" || product.ClassMembers["select"].Alternatives[2].Return.String() != "Subquery<Float>" {
 		t.Fatalf("unexpected subquery declarations: %#v", product.ClassMembers["select"])
 	}
-	if product.ClassMembers["sum"].Alternatives[0].Return.String() != "Integer" || product.ClassMembers["sum"].Alternatives[1].Return.String() != "Float" {
+	if product.ClassMembers["sum"].Alternatives[0].Return.String() != "DbResult<Integer>" || product.ClassMembers["sum"].Alternatives[1].Return.String() != "DbResult<Float>" {
 		t.Fatalf("unexpected sum declaration: %#v", product.ClassMembers["sum"])
 	}
-	if product.ClassMembers["average"].Alternatives[1].Return.String() != "Float?" {
+	if product.ClassMembers["average"].Alternatives[1].Return.String() != "DbResult<Float?>" {
 		t.Fatalf("unexpected average declaration: %#v", product.ClassMembers["average"])
 	}
-	if product.ClassMembers["minimum"].Alternatives[0].Return.String() != "Integer?" || product.ClassMembers["minimum"].Alternatives[1].Return.String() != "String?" || product.ClassMembers["minimum"].Alternatives[2].Return.String() != "Float?" {
+	if product.ClassMembers["minimum"].Alternatives[0].Return.String() != "DbResult<Integer?>" || product.ClassMembers["minimum"].Alternatives[1].Return.String() != "DbResult<String?>" || product.ClassMembers["minimum"].Alternatives[2].Return.String() != "DbResult<Float?>" {
 		t.Fatalf("unexpected minimum declaration: %#v", product.ClassMembers["minimum"])
 	}
 	if !reflect.DeepEqual(product.ClassMembers["maximum"].Parameters[0].LiteralValues, []string{"id", "name", "price"}) {
 		t.Fatalf("unexpected maximum columns: %#v", product.ClassMembers["maximum"])
 	}
-	if product.ClassMembers["find"].Return.String() != "Product?" {
+	if product.ClassMembers["find"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected find declaration: %#v", product.ClassMembers["find"])
 	}
 	create := product.ClassMembers["create"]
-	if create.Return.String() != "Product" || create.Fails.String() != "DbError" || !create.Parameters[0].Optional || create.Parameters[1].Optional || !create.Parameters[2].Optional || !create.Parameters[3].Optional {
+	if create.Return.String() != "DbResult<Product>" || !create.Parameters[0].Optional || create.Parameters[1].Optional || !create.Parameters[2].Optional || !create.Parameters[3].Optional {
 		t.Fatalf("unexpected create declaration: %#v", create)
 	}
 	build := product.ClassMembers["build"]
@@ -125,30 +125,30 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 		t.Fatalf("unexpected build declaration: %#v", build)
 	}
 	draft, exists := catalog.Type("ProductDraft")
-	if !exists || draft.InstanceMembers["save"].Return.String() != "Product" || draft.InstanceMembers["save"].Fails.String() != "DbError" {
+	if !exists || draft.InstanceMembers["save"].Return.String() != "DbResult<Product>" {
 		t.Fatalf("unexpected draft declaration: %#v", draft)
 	}
 	insertAll := product.ClassMembers["insert_all"]
-	if insertAll.Return.String() != "Integer" || len(insertAll.Parameters) != 1 || insertAll.Parameters[0].Type.String() != "Array<ProductDraft>" {
+	if insertAll.Return.String() != "DbResult<Integer>" || len(insertAll.Parameters) != 1 || insertAll.Parameters[0].Type.String() != "Array<ProductDraft>" {
 		t.Fatalf("unexpected insert_all declaration: %#v", insertAll)
 	}
 	insertIfAbsent := product.ClassMembers["insert_if_absent"]
-	if insertIfAbsent.Return.String() != "Boolean" || len(insertIfAbsent.Parameters) != 2 || len(insertIfAbsent.Parameters[1].LiteralArrays) != 2 {
+	if insertIfAbsent.Return.String() != "DbResult<Boolean>" || len(insertIfAbsent.Parameters) != 2 || len(insertIfAbsent.Parameters[1].LiteralArrays) != 2 {
 		t.Fatalf("unexpected insert_if_absent declaration: %#v", insertIfAbsent)
 	}
 	upsertAll := product.ClassMembers["upsert_all"]
-	if upsertAll.Return.String() != "Integer" || len(upsertAll.Parameters) != 3 || upsertAll.Parameters[0].Type.String() != "Array<ProductDraft>" {
+	if upsertAll.Return.String() != "DbResult<Integer>" || len(upsertAll.Parameters) != 3 || upsertAll.Parameters[0].Type.String() != "Array<ProductDraft>" {
 		t.Fatalf("unexpected upsert_all declaration: %#v", upsertAll)
 	}
 	upsert := draft.InstanceMembers["upsert"]
-	if upsert.Return.String() != "Product" || len(upsert.Parameters) != 2 || len(upsert.Parameters[0].LiteralArrays) != 2 {
+	if upsert.Return.String() != "DbResult<Product>" || len(upsert.Parameters) != 2 || len(upsert.Parameters[0].LiteralArrays) != 2 {
 		t.Fatalf("unexpected upsert declaration: %#v", upsert)
 	}
 	if got := strings.Join(upsert.Parameters[1].LiteralArrayElements, ","); got != "name,price,active,payload" {
 		t.Fatalf("unexpected upsert update columns: %q", got)
 	}
 	update := product.InstanceMembers["update"]
-	if update.Return.String() != "Product" || len(update.Parameters) != 4 || !update.Parameters[0].Optional {
+	if update.Return.String() != "DbResult<Product>" || len(update.Parameters) != 4 || !update.Parameters[0].Optional {
 		t.Fatalf("unexpected update declaration: %#v", update)
 	}
 	with := product.InstanceMembers["with"]
@@ -156,25 +156,25 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 		t.Fatalf("unexpected with declaration: %#v", with)
 	}
 	changes, exists := catalog.Type("ProductChanges")
-	if !exists || changes.InstanceMembers["save"].Return.String() != "Product" {
+	if !exists || changes.InstanceMembers["save"].Return.String() != "DbResult<Product>" {
 		t.Fatalf("unexpected changes declaration: %#v", changes)
 	}
-	if product.InstanceMembers["delete"].Return.String() != "Boolean" {
+	if product.InstanceMembers["delete"].Return.String() != "DbResult<Boolean>" {
 		t.Fatalf("unexpected delete declaration: %#v", product.InstanceMembers["delete"])
 	}
-	if product.InstanceMembers["destroy"].Return.String() != "Boolean" || product.ClassMembers["destroy_all"].Return.String() != "Integer" {
+	if product.InstanceMembers["destroy"].Return.String() != "DbResult<Boolean>" || product.ClassMembers["destroy_all"].Return.String() != "DbResult<Integer>" {
 		t.Fatalf("unexpected destroy declarations: %#v", product)
 	}
 	findEach := product.ClassMembers["find_each"]
-	if findEach.Return.String() != "Integer" || findEach.Fails.String() != "DbError" || findEach.Block == nil || !findEach.Block.Structured || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
+	if findEach.Return.String() != "DbResult<Integer>" || findEach.Block == nil || !findEach.Block.Structured || findEach.Block.ResultBoundary.String() != "DbError" || len(findEach.Block.Parameters) != 1 || findEach.Block.Parameters[0].String() != "Product" {
 		t.Fatalf("unexpected find_each declaration: %#v", findEach)
 	}
 	query, exists := catalog.Type("ProductQuery")
-	if !exists || query.InstanceMembers["all"].Return.String() != "Array<Product>" {
+	if !exists || query.InstanceMembers["all"].Return.String() != "DbResult<Array<Product>>" {
 		t.Fatalf("unexpected query declaration: %#v", query)
 	}
 	findInBatches := query.InstanceMembers["find_in_batches"]
-	if findInBatches.Return.String() != "Integer" || findInBatches.Block == nil || !findInBatches.Block.Structured || findInBatches.Block.Parameters[0].String() != "Array<Product>" {
+	if findInBatches.Return.String() != "DbResult<Integer>" || findInBatches.Block == nil || !findInBatches.Block.Structured || findInBatches.Block.ResultBoundary.String() != "DbError" || findInBatches.Block.Parameters[0].String() != "Array<Product>" {
 		t.Fatalf("unexpected find_in_batches declaration: %#v", findInBatches)
 	}
 	if query.InstanceMembers["to_sql"].Return.String() != "String" {
@@ -186,13 +186,13 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	if distinct := query.InstanceMembers["distinct"]; distinct.Intrinsic != "trb.orm.query.distinct" || distinct.Return.String() != "ProductQuery" {
 		t.Fatalf("unexpected query distinct declaration: %#v", distinct)
 	}
-	if query.InstanceMembers["find_by"].Return.String() != "Product?" || query.InstanceMembers["exists?"].Return.String() != "Boolean" {
+	if query.InstanceMembers["find_by"].Return.String() != "DbResult<Product?>" || query.InstanceMembers["exists?"].Return.String() != "DbResult<Boolean>" {
 		t.Fatalf("unexpected query predicate terminals: %#v", query.InstanceMembers)
 	}
-	if query.InstanceMembers["update_all"].Return.String() != "Integer" || query.InstanceMembers["update_all"].MinimumArguments != 1 || query.InstanceMembers["delete_all"].Return.String() != "Integer" {
+	if query.InstanceMembers["update_all"].Return.String() != "DbResult<Integer>" || query.InstanceMembers["update_all"].MinimumArguments != 1 || query.InstanceMembers["delete_all"].Return.String() != "DbResult<Integer>" {
 		t.Fatalf("unexpected relation bulk write declarations: %#v", query.InstanceMembers)
 	}
-	if query.InstanceMembers["pluck"].Alternatives[1].Return.String() != "Array<String>" || query.InstanceMembers["pick"].Alternatives[2].Return.String() != "Float?" || query.InstanceMembers["ids"].Return.String() != "Array<Integer>" {
+	if query.InstanceMembers["pluck"].Alternatives[1].Return.String() != "DbResult<Array<String>>" || query.InstanceMembers["pick"].Alternatives[2].Return.String() != "DbResult<Float?>" || query.InstanceMembers["ids"].Return.String() != "DbResult<Array<Integer>>" {
 		t.Fatalf("unexpected query projection declarations: %#v", query.InstanceMembers)
 	}
 	for _, name := range []string{"sum", "average", "minimum", "maximum"} {
@@ -201,7 +201,7 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 		}
 	}
 	for name, expected := range map[string]string{
-		"first": "Product?", "count": "Integer", "explain": "String",
+		"first": "DbResult<Product?>", "count": "DbResult<Integer>", "explain": "DbResult<String>",
 	} {
 		if query.InstanceMembers[name].Return.String() != expected {
 			t.Fatalf("unexpected %s declaration: %#v", name, query.InstanceMembers[name])
@@ -427,7 +427,7 @@ func TestModelDeclarationsArePortableAcrossModes(t *testing.T) {
 				t.Fatal(err)
 			}
 			product, ok := catalog.Type("Product")
-			if !ok || product.ClassMembers["all"].Return.String() != "Array<Product>" || product.ClassMembers["all"].Fails.String() != "DbError" {
+			if !ok || product.ClassMembers["all"].Return.String() != "DbResult<Array<Product>>" {
 				t.Fatalf("unexpected Product declaration in mode %s: %#v", mode, product)
 			}
 		})
@@ -704,19 +704,19 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 			t.Fatalf("unexpected association reference rule: %#v", rule)
 		}
 	}
-	if product.InstanceMembers["category"].Return.String() != "Category?" {
+	if product.InstanceMembers["category"].Return.String() != "DbResult<Category?>" {
 		t.Fatalf("unexpected belongs_to declaration: %#v", product.InstanceMembers["category"])
 	}
 	if product.InstanceMembers["category_query"].Return.String() != "CategoryQuery" {
 		t.Fatalf("unexpected belongs_to query declaration: %#v", product.InstanceMembers["category_query"])
 	}
-	if category.InstanceMembers["products"].Return.String() != "Array<Product>" {
+	if category.InstanceMembers["products"].Return.String() != "DbResult<Array<Product>>" {
 		t.Fatalf("unexpected has_many declaration: %#v", category.InstanceMembers["products"])
 	}
 	if category.InstanceMembers["products_query"].Return.String() != "ProductQuery" {
 		t.Fatalf("unexpected has_many query declaration: %#v", category.InstanceMembers["products_query"])
 	}
-	if category.InstanceMembers["product"].Return.String() != "Product?" {
+	if category.InstanceMembers["product"].Return.String() != "DbResult<Product?>" {
 		t.Fatalf("unexpected has_one declaration: %#v", category.InstanceMembers["product"])
 	}
 	if category.InstanceMembers["product_query"].Return.String() != "ProductQuery" {

@@ -1120,8 +1120,6 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.ifExpression(n)
 	case *ir.Case:
 		return g.caseExpression(n)
-	case *ir.Attempt:
-		return g.attemptExpression(n)
 	case *ir.Lambda:
 		parts := make([]string, len(n.Parameters))
 		for index, parameter := range n.Parameters {
@@ -1137,8 +1135,6 @@ func (g *generator) expr(expression ir.Expression) string {
 		child.indent = g.indent + 1
 		child.statements(n.Body)
 		return header + " {\n" + child.b.String() + strings.Repeat("\t", g.indent) + "}"
-	case *ir.UnhandledEffect:
-		return g.expr(n.Value)
 	case *ir.Identifier:
 		if n.Generated {
 			return n.Name
@@ -1220,8 +1216,6 @@ func (g *generator) expr(expression ir.Expression) string {
 		switch n.Kind {
 		case ir.RangeToIterableConversion:
 			return g.iterableExpr(n.Value)
-		case ir.PureFunctionToFallibleConversion:
-			return g.pureFunctionToFallible(n)
 		case ir.IntegerToFloatConversion:
 			return "float64(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
@@ -1457,38 +1451,6 @@ func (g *generator) expr(expression ir.Expression) string {
 	}
 }
 
-func (g *generator) pureFunctionToFallible(conversion *ir.Conversion) string {
-	parameters, success, ok := types.FunctionSignature(conversion.ExprType())
-	if !ok {
-		return g.expr(conversion.Value)
-	}
-	failure := types.FunctionFailure(conversion.ExprType())
-	parts := make([]string, len(parameters))
-	arguments := make([]string, len(parameters))
-	for index, parameter := range parameters {
-		name := "__trbArg" + strconv.Itoa(index)
-		parts[index] = name + " " + g.goType(parameter)
-		arguments[index] = name
-	}
-	internalSuccess := success
-	value := "__trbValue(" + strings.Join(arguments, ", ") + ")"
-	prefix := ""
-	if success.Kind == types.Void {
-		internalSuccess = types.FromName("Unit")
-		prefix = value + "; "
-		value = g.goType(internalSuccess) + "{}"
-	}
-	resultAlias := g.typeAliases["Result"]
-	if resultAlias == "" {
-		resultAlias = "__trb_result"
-	}
-	resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{internalSuccess, failure}}
-	wrapped := "func(" + strings.Join(parts, ", ") + ") " + g.goType(resultType) + " { " + prefix + "return " +
-		resultAlias + ".NewResultOk[" + g.goType(internalSuccess) + ", " + g.goType(failure) + "](" + value + ") }"
-	return "func(__trbValue " + g.goType(conversion.Value.ExprType()) + ") " + g.goType(conversion.ExprType()) +
-		" { return " + wrapped + " }(" + g.expr(conversion.Value) + ")"
-}
-
 func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {
 	resultAlias := g.typeAliases["Result"]
 	if resultAlias == "" {
@@ -1691,50 +1653,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	return strings.TrimSpace(child.b.String())
 }
 
-func (g *generator) attemptExpression(node *ir.Attempt) string {
-	child := &generator{
-		functionDepth:   g.functionDepth,
-		receiver:        g.receiver,
-		inConstructor:   g.inConstructor,
-		methods:         g.methods,
-		topMethods:      g.topMethods,
-		staticMethods:   g.staticMethods,
-		records:         g.records,
-		classes:         g.classes,
-		typeAliases:     g.typeAliases,
-		typeKinds:       g.typeKinds,
-		imports:         g.imports,
-		bindingNames:    g.bindingNames,
-		bindingSources:  g.bindingSources,
-		modulePath:      g.modulePath,
-		goModule:        g.goModule,
-		temporary:       g.temporary,
-		breakTarget:     g.breakTarget,
-		jobs:            g.jobs,
-		jobsSQL:         g.jobsSQL,
-		orm:             g.orm,
-		projectNames:    g.projectNames,
-		execution:       g.execution,
-		executionActive: g.executionActive,
-	}
-	child.line("func() " + child.goType(node.ExprType()) + " {")
-	child.indent++
-	child.statements(node.Body)
-	result := node.Value
-	if result == nil {
-		result = node.BodyResult
-	}
-	child.line("return " + child.expr(result))
-	child.indent--
-	child.line("}()")
-	g.temporary = child.temporary
-	return strings.TrimSpace(child.b.String())
-}
-
 func (g *generator) transform(transform *ir.Transform) string {
-	if transform.Fails.Kind != "" && transform.Fails.Kind != types.Never {
-		return g.effectfulTransform(transform)
-	}
 	g.temporary++
 	suffix := strconv.Itoa(g.temporary)
 	items := "__trbItems" + suffix
@@ -1822,130 +1741,6 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
-}
-
-func (g *generator) effectfulTransform(transform *ir.Transform) string {
-	child := *g
-	child.b = strings.Builder{}
-	child.recordSources = false
-	child.indent = 0
-	child.temporary++
-	suffix := strconv.Itoa(child.temporary)
-	items := "__trbItems" + suffix
-	result := "__trbResult" + suffix
-	item := child.bindingIdentifier(transform.Item)
-	if item == "" || item == "_" {
-		item = "__trbItem" + suffix
-	}
-	index := "_"
-	if transform.WithIndex {
-		index = child.bindingIdentifier(transform.Index)
-		if index == "" || index == "_" {
-			index = "__trbIndex" + suffix
-		}
-	}
-	success := transform.SuccessType
-	resultAlias := child.typeAliases["Result"]
-	if resultAlias == "" {
-		resultAlias = "__trb_result"
-	}
-	ok := func(value string) string {
-		return resultAlias + ".NewResultOk[" + child.goType(success) + ", " + child.goType(transform.Fails) + "](" + value + ")"
-	}
-	emitBindings := func(includeIndex bool) {
-		if namedUnusedBinding(transform.Item) {
-			child.line("_ = " + item)
-		}
-		if includeIndex && namedUnusedBinding(transform.Index) {
-			child.line("_ = " + index)
-		}
-	}
-	emitValue := func() string {
-		child.statements(transform.Body)
-		return child.expr(transform.Result)
-	}
-
-	child.line("func() " + child.goType(transform.ExprType()) + " {")
-	child.indent++
-	child.line(items + " := " + child.iterableExpr(transform.Source))
-	switch transform.Operation {
-	case "map", "select":
-		child.line(result + " := make(" + child.goType(success) + ", 0, len(" + items + "))")
-		child.line("for " + index + ", " + item + " := range " + items + " {")
-		child.indent++
-		emitBindings(transform.WithIndex)
-		value := emitValue()
-		if transform.Operation == "map" {
-			child.line(result + " = append(" + result + ", " + value + ")")
-		} else {
-			child.line("if " + value + " { " + result + " = append(" + result + ", " + item + ") }")
-		}
-		child.indent--
-		child.line("}")
-		child.line("return " + ok(result))
-	case "any?", "all?", "none?", "find", "find_index":
-		loopIndex := "_"
-		if transform.Operation == "find_index" {
-			loopIndex = "__trbIndex" + suffix
-		}
-		child.line("for " + loopIndex + ", " + item + " := range " + items + " {")
-		child.indent++
-		emitBindings(false)
-		value := emitValue()
-		switch transform.Operation {
-		case "any?":
-			child.line("if " + value + " { return " + ok("true") + " }")
-		case "all?":
-			child.line("if !(" + value + ") { return " + ok("false") + " }")
-		case "none?":
-			child.line("if " + value + " { return " + ok("false") + " }")
-		case "find":
-			found := "&" + item
-			if len(transform.Source.ExprType().Args) > 0 {
-				elementType := transform.Source.ExprType().Args[0]
-				if child.goType(elementType) == child.goType(success) {
-					found = item
-				}
-			}
-			child.line("if " + value + " { return " + ok(found) + " }")
-		case "find_index":
-			child.line("if " + value + " { " + result + " := " + loopIndex + "; return " + ok("&"+result) + " }")
-		}
-		child.indent--
-		child.line("}")
-		switch transform.Operation {
-		case "any?":
-			child.line("return " + ok("false"))
-		case "all?", "none?":
-			child.line("return " + ok("true"))
-		default:
-			child.line("return " + ok("nil"))
-		}
-	case "reduce":
-		child.line(result + " := " + child.expr(transform.Initial))
-		child.line("for _, " + item + " := range " + items + " {")
-		child.indent++
-		emitBindings(false)
-		accumulator := child.bindingIdentifier(transform.Accumulator)
-		if accumulator == "" || accumulator == "_" {
-			accumulator = "__trbAccumulator" + suffix
-		}
-		child.line(accumulator + " := " + result)
-		if namedUnusedBinding(transform.Accumulator) {
-			child.line("_ = " + accumulator)
-		}
-		value := emitValue()
-		child.line(result + " = " + value)
-		child.indent--
-		child.line("}")
-		child.line("return " + ok(result))
-	default:
-		child.line("panic(\"unsupported effectful TypeRB collection transformation\")")
-	}
-	child.indent--
-	child.line("}()")
-	g.temporary = child.temporary
-	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) transformResult(transform *ir.Transform) string {
@@ -2645,12 +2440,6 @@ func (g *generator) goType(t types.Type) string {
 			parts[index] = g.goType(parameter)
 		}
 		result = "func(" + strings.Join(parts, ", ") + ")"
-		if failure := types.FunctionFailure(t); failure.Kind != types.Never {
-			if returned.Kind == types.Void {
-				returned = types.FromName("Unit")
-			}
-			returned = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{returned, failure}}
-		}
 		if returnType := g.goType(returned); returnType != "" {
 			result += " " + returnType
 		}

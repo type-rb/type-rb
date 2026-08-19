@@ -154,7 +154,7 @@ func (p *Parser) parseStatement() ast.Statement {
 	if p.opensNativeBlock(line) {
 		return p.parseNativeBlock()
 	}
-	if expression, ok := parseExpressionTokens(line); ok {
+	if expression, ok := p.parseExpression(line); ok {
 		p.pos = next
 		return &ast.ExpressionStatement{Base: base, Expression: expression}
 	}
@@ -170,7 +170,7 @@ func (p *Parser) tryCatchBlockStatement(line []token.Token, next int, base ast.B
 	}
 	prefix := line[:catchAt]
 	wrapper, valueTokens := expressionWrapper(prefix)
-	value, ok := parseExpressionTokens(valueTokens)
+	value, ok := p.parseExpression(valueTokens)
 	if !ok {
 		return nil
 	}
@@ -202,11 +202,10 @@ func (p *Parser) tryLambdaExpressionStatement(line []token.Token, next int, base
 		failsAt := topLevelIndex(tail, "fails")
 		returnTail := tail
 		if failsAt >= 0 {
+			p.migrationErrorAt(tail[failsAt].Span, failsRemovedMessage)
 			returnTail = tail[:failsAt]
-			if failsAt+1 >= len(tail) {
-				p.errorAt(tail[failsAt].Span, "fails requires an error type")
-			} else {
-				node.Fails = parseType(tail[failsAt+1:])
+			if failsAt+1 < len(tail) {
+				node.Fails = p.parseTypeRef(tail[failsAt+1:])
 			}
 		}
 		if len(returnTail) > 0 {
@@ -227,7 +226,7 @@ func (p *Parser) tryLambdaExpressionStatement(line []token.Token, next int, base
 	wrapper := append([]token.Token(nil), line[:fnAt+1]...)
 	embedded := map[int]ast.Expression{line[fnAt].Span.Start.Offset: node}
 	if len(wrapper) > 0 && wrapper[0].Lexeme == "return" {
-		if value, valid := parseExpressionTokensWithEmbedded(wrapper[1:], embedded); valid {
+		if value, valid := p.parseExpressionWithEmbedded(wrapper[1:], embedded); valid {
 			return &ast.ReturnStatement{Base: base, Value: value}
 		}
 	}
@@ -237,7 +236,7 @@ func (p *Parser) tryLambdaExpressionStatement(line []token.Token, next int, base
 	if statement := p.tryAssignmentWithEmbedded(wrapper, base, embedded); statement != nil {
 		return statement
 	}
-	if value, valid := parseExpressionTokensWithEmbedded(wrapper, embedded); valid {
+	if value, valid := p.parseExpressionWithEmbedded(wrapper, embedded); valid {
 		return &ast.ExpressionStatement{Base: base, Expression: value}
 	}
 	p.errorAt(base.SourceSpan, "fn is not valid in this expression context")
@@ -249,6 +248,10 @@ func (p *Parser) tryAttemptBlockStatement(line []token.Token, next int, base ast
 	if attemptAt < 0 || attemptAt+1 >= len(line) || line[attemptAt+1].Lexeme != "do" {
 		return nil
 	}
+	if attemptAt > 0 && (line[attemptAt-1].Lexeme == "." || line[attemptAt-1].Lexeme == "&." || line[attemptAt-1].Lexeme == "::") {
+		return nil
+	}
+	p.migrationErrorAt(line[attemptAt].Span, attemptRemovedMessage)
 	if attemptAt+2 != len(line) {
 		p.errorAt(spanOf(line[attemptAt+2:]), "attempt block does not take parameters or trailing expressions")
 	}
@@ -263,7 +266,7 @@ func (p *Parser) tryAttemptBlockStatement(line []token.Token, next int, base ast
 	wrapper := append([]token.Token(nil), line[:attemptAt+1]...)
 	embedded := map[int]ast.Expression{line[attemptAt].Span.Start.Offset: node}
 	if len(wrapper) > 0 && wrapper[0].Lexeme == "return" {
-		value, valid := parseExpressionTokensWithEmbedded(wrapper[1:], embedded)
+		value, valid := p.parseExpressionWithEmbedded(wrapper[1:], embedded)
 		if valid {
 			return &ast.ReturnStatement{Base: base, Value: value}
 		}
@@ -274,7 +277,7 @@ func (p *Parser) tryAttemptBlockStatement(line []token.Token, next int, base ast
 	if statement := p.tryAssignmentWithEmbedded(wrapper, base, embedded); statement != nil {
 		return statement
 	}
-	if value, valid := parseExpressionTokensWithEmbedded(wrapper, embedded); valid {
+	if value, valid := p.parseExpressionWithEmbedded(wrapper, embedded); valid {
 		return &ast.ExpressionStatement{Base: base, Expression: value}
 	}
 	p.errorAt(base.SourceSpan, "attempt block is not valid in this expression context")
@@ -293,7 +296,7 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 	}
 	prefix := line[:blockAt]
 	wrapper, header := expressionWrapper(prefix)
-	expression, ok := parseExpressionTokens(header)
+	expression, ok := p.parseExpression(header)
 	if !ok {
 		return nil
 	}
@@ -573,7 +576,7 @@ func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int,
 
 	var statement ast.Statement
 	if len(wrapped) > 0 && wrapped[0].Lexeme == "return" {
-		value, valid := parseExpressionTokensWithEmbedded(wrapped[1:], embedded)
+		value, valid := p.parseExpressionWithEmbedded(wrapped[1:], embedded)
 		if valid {
 			statement = &ast.ReturnStatement{Base: base, Value: value}
 		}
@@ -585,7 +588,7 @@ func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int,
 		statement = p.tryAssignmentWithEmbedded(wrapped, base, embedded)
 	}
 	if statement == nil {
-		if value, valid := parseExpressionTokensWithEmbedded(wrapped, embedded); valid {
+		if value, valid := p.parseExpressionWithEmbedded(wrapped, embedded); valid {
 			statement = &ast.ExpressionStatement{Base: base, Expression: value}
 		}
 	}
@@ -725,7 +728,7 @@ func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base
 func (p *Parser) inlineBlockStatement(line []token.Token) ast.Statement {
 	base := ast.Base{SourceSpan: spanOf(line)}
 	if line[0].Lexeme == "return" {
-		value, ok := parseExpressionTokens(line[1:])
+		value, ok := p.parseExpression(line[1:])
 		if len(line) > 1 && !ok {
 			return nil
 		}
@@ -746,7 +749,7 @@ func (p *Parser) inlineBlockStatement(line []token.Token) ast.Statement {
 	if assignment := p.tryAssignment(line, base); assignment != nil {
 		return assignment
 	}
-	if expression, ok := parseExpressionTokens(line); ok {
+	if expression, ok := p.parseExpression(line); ok {
 		return &ast.ExpressionStatement{Base: base, Expression: expression}
 	}
 	return nil
@@ -768,7 +771,7 @@ func (p *Parser) blockParameters(tokens []token.Token) ([]string, bool) {
 }
 
 func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression, bool) {
-	expression, ok := parseExpressionTokens(tokens)
+	expression, ok := p.parseExpression(tokens)
 	if !ok {
 		return nil, false
 	}
@@ -921,7 +924,7 @@ func (p *Parser) parseTypeAlias() ast.Statement {
 	if equal+1 >= len(line) {
 		p.errorAt(line[equal].Span, "type alias target is required after =")
 	} else {
-		node.Target = parseType(line[equal+1:])
+		node.Target = p.parseTypeRef(line[equal+1:])
 		if node.Target.Empty() {
 			p.errorAt(spanOf(line[equal+1:]), "type alias target must be a type")
 		}
@@ -977,7 +980,7 @@ func (p *Parser) parseEnumMember(parts []token.Token, trailing string) *ast.Enum
 		if len(parts) == 2 {
 			return nil
 		}
-		value, ok := parseExpressionTokens(parts[2:])
+		value, ok := p.parseExpression(parts[2:])
 		if !ok {
 			return nil
 		}
@@ -1021,7 +1024,7 @@ func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.Recor
 	field := &ast.RecordFieldStatement{
 		Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment},
 		Name: line[0].Lexeme,
-		Type: parseType(line[2:attributeAt]),
+		Type: p.parseTypeRef(line[2:attributeAt]),
 	}
 	for index := attributeAt; index < len(line); {
 		name := line[index]
@@ -1044,7 +1047,7 @@ func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.Recor
 					argument.Name = part[0].Lexeme
 					part = part[2:]
 				}
-				argument.Value, _ = parseExpressionTokens(part)
+				argument.Value, _ = p.parseExpression(part)
 				if argument.Value == nil {
 					return nil
 				}
@@ -1127,14 +1130,14 @@ func (p *Parser) parseClass() ast.Statement {
 		if implementsAt > extendsAt {
 			superEnd = implementsAt
 		}
-		if expr, ok := parseExpressionTokens(line[extendsAt+1 : superEnd]); ok {
+		if expr, ok := p.parseExpression(line[extendsAt+1 : superEnd]); ok {
 			c.Superclass = expr
 		}
 	}
 	if implementsAt >= 0 {
 		for _, part := range splitTopLevel(line[implementsAt+1:], ",") {
 			if len(part) > 0 {
-				implemented := parseType(part)
+				implemented := p.parseTypeRef(part)
 				if implemented.Empty() {
 					p.errorAt(spanOf(part), "implemented interface must be a type")
 					continue
@@ -1270,7 +1273,7 @@ func (p *Parser) parseMethod() ast.Statement {
 		i = len(line)
 	}
 	if !p.parseMethodResultAndEffects(m, line[i:]) {
-		p.errorAt(spanOf(line[i:]), "method signature must contain an optional return type followed by an optional fails type")
+		p.errorAt(spanOf(line[i:]), "method signature may only contain an optional return type written as : Type")
 	}
 	p.pos = next
 	m.Body = p.parseStatements(map[string]bool{"end": true})
@@ -1286,15 +1289,12 @@ func (p *Parser) parseMethodResultAndEffects(method *ast.MethodStatement, tokens
 	failsAt := topLevelIndex(tokens, "fails")
 	resultTokens := tokens
 	if failsAt >= 0 {
+		p.migrationErrorAt(tokens[failsAt].Span, failsRemovedMessage)
 		resultTokens = tokens[:failsAt]
 		if failsAt+1 >= len(tokens) {
-			p.errorAt(tokens[failsAt].Span, "fails requires an error type")
 			return true
 		}
-		method.Fails = parseType(tokens[failsAt+1:])
-		if method.Fails.Empty() {
-			p.errorAt(spanOf(tokens[failsAt+1:]), "fails must be followed by an error type")
-		}
+		method.Fails = p.parseTypeRef(tokens[failsAt+1:])
 	}
 	if len(resultTokens) == 0 {
 		return failsAt == 0
@@ -1307,7 +1307,7 @@ func (p *Parser) parseMethodResultAndEffects(method *ast.MethodStatement, tokens
 }
 
 func (p *Parser) parseReturnType(tokens []token.Token) ast.TypeRef {
-	result := parseType(tokens)
+	result := p.parseTypeRef(tokens)
 	if strings.EqualFold(result.Name, "Void") {
 		p.errorAt(result.Span(), "Void return type must be omitted")
 	}
@@ -1341,9 +1341,9 @@ func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 				equal += i
 				typeEnd = equal
 			}
-			param.Type = parseType(part[i:typeEnd])
+			param.Type = p.parseTypeRef(part[i:typeEnd])
 			if equal >= 0 {
-				param.Default, _ = parseExpressionTokens(part[equal+1:])
+				param.Default, _ = p.parseExpression(part[equal+1:])
 			}
 			params = append(params, param)
 			continue
@@ -1359,7 +1359,7 @@ func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 			}
 			if !looksLikeType(part[colon+1]) {
 				param.Keyword = true
-				param.Default, _ = parseExpressionTokens(part[colon+1:])
+				param.Default, _ = p.parseExpression(part[colon+1:])
 				params = append(params, param)
 				continue
 			}
@@ -1368,13 +1368,13 @@ func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 				equal += i
 				typeEnd = equal
 			}
-			param.Type = parseType(part[colon+1 : typeEnd])
+			param.Type = p.parseTypeRef(part[colon+1 : typeEnd])
 			if equal >= 0 {
-				param.Default, _ = parseExpressionTokens(part[equal+1:])
+				param.Default, _ = p.parseExpression(part[equal+1:])
 			}
 		} else if equal >= 0 {
 			equal += i
-			param.Default, _ = parseExpressionTokens(part[equal+1:])
+			param.Default, _ = p.parseExpression(part[equal+1:])
 		}
 		params = append(params, param)
 	}
@@ -1403,7 +1403,7 @@ func (p *Parser) parseIf() ast.Statement {
 	if len(conditionTokens) >= 2 && conditionTokens[0].Lexeme == "(" && conditionTokens[len(conditionTokens)-1].Lexeme == ")" {
 		conditionTokens = conditionTokens[1 : len(conditionTokens)-1]
 	}
-	n.Condition, _ = parseExpressionTokens(conditionTokens)
+	n.Condition, _ = p.parseExpression(conditionTokens)
 	if n.Condition == nil {
 		n.Condition = nativeExpression(conditionTokens, p)
 	}
@@ -1412,7 +1412,7 @@ func (p *Parser) parseIf() ast.Statement {
 	for !p.atEOF() && p.current().Lexeme == "elsif" {
 		s, e, nx, _ := p.logicalLine(p.pos)
 		parts := p.codeTokens(s, e)
-		cond, ok := parseExpressionTokens(parts[1:])
+		cond, ok := p.parseExpression(parts[1:])
 		if !ok {
 			cond = nativeExpression(parts[1:], p)
 		}
@@ -1435,7 +1435,7 @@ func (p *Parser) parseCase() ast.Statement {
 	start, end, next, comment := p.logicalLine(p.pos)
 	line := p.codeTokens(start, end)
 	node := &ast.CaseStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
-	node.Value, _ = parseExpressionTokens(line[1:])
+	node.Value, _ = p.parseExpression(line[1:])
 	if node.Value == nil {
 		p.errorAt(spanOf(line), "case requires a value")
 	}
@@ -1446,7 +1446,7 @@ func (p *Parser) parseCase() ast.Statement {
 		parts := p.codeTokens(s, e)
 		branch := ast.CaseBranch{Base: ast.Base{SourceSpan: spanOf(parts), TrailingComment: trailing}}
 		for _, alternativeTokens := range splitTopLevel(parts[1:], ",") {
-			alternative, ok := parseExpressionTokens(alternativeTokens)
+			alternative, ok := p.parseExpression(alternativeTokens)
 			if !ok || alternative == nil {
 				p.errorAt(spanOf(alternativeTokens), "when requires a valid value")
 				continue
@@ -1519,7 +1519,7 @@ func (p *Parser) parseWhile() ast.Statement {
 	if len(conditionTokens) >= 2 && conditionTokens[0].Lexeme == "(" && conditionTokens[len(conditionTokens)-1].Lexeme == ")" {
 		conditionTokens = conditionTokens[1 : len(conditionTokens)-1]
 	}
-	n.Condition, _ = parseExpressionTokens(conditionTokens)
+	n.Condition, _ = p.parseExpression(conditionTokens)
 	if n.Condition == nil {
 		n.Condition = nativeExpression(conditionTokens, p)
 	}
@@ -1535,7 +1535,7 @@ func (p *Parser) parseReturn() ast.Statement {
 	line := p.codeTokens(start, end)
 	r := &ast.ReturnStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
 	if len(line) > 1 {
-		r.Value, _ = parseExpressionTokens(line[1:])
+		r.Value, _ = p.parseExpression(line[1:])
 		if r.Value == nil {
 			r.Value = nativeExpression(line[1:], p)
 		}
@@ -1624,9 +1624,9 @@ func (p *Parser) tryField(line []token.Token, base ast.Base) ast.Statement {
 			assign += i + 1
 			typeEnd = assign
 		}
-		field.Type = parseType(line[i+1 : typeEnd])
+		field.Type = p.parseTypeRef(line[i+1 : typeEnd])
 		if assign >= 0 {
-			field.Value, _ = parseExpressionTokens(line[assign+1:])
+			field.Value, _ = p.parseExpression(line[assign+1:])
 		}
 		return field
 	}
@@ -1654,9 +1654,9 @@ func (p *Parser) tryVariableWithEmbedded(line []token.Token, base ast.Base, embe
 	n.Name = left[0].Lexeme
 	n.Constant = isConstantName(n.Name)
 	if len(left) > 1 && left[1].Lexeme == ":" {
-		n.Type = parseType(left[2:])
+		n.Type = p.parseTypeRef(left[2:])
 	}
-	n.Value, _ = parseExpressionTokensWithEmbedded(line[assign+1:], embedded)
+	n.Value, _ = p.parseExpressionWithEmbedded(line[assign+1:], embedded)
 	if n.Value == nil {
 		n.Value = nativeExpression(line[assign+1:], p)
 	}
@@ -1673,8 +1673,8 @@ func (p *Parser) tryAssignmentWithEmbedded(line []token.Token, base ast.Base, em
 		if at <= 0 {
 			continue
 		}
-		left, lok := parseExpressionTokens(line[:at])
-		right, rok := parseExpressionTokensWithEmbedded(line[at+1:], embedded)
+		left, lok := p.parseExpression(line[:at])
+		right, rok := p.parseExpressionWithEmbedded(line[at+1:], embedded)
 		if lok && rok {
 			return &ast.AssignmentStatement{Base: base, Target: left, Operator: op, Value: right}
 		}

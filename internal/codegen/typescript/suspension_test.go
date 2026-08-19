@@ -21,9 +21,8 @@ func TestSuspensionPropagatesOnlyThroughTypeScriptProjectGeneration(t *testing.T
 			Name:      "all",
 			Reference: &ir.Reference{Intrinsic: "trb.orm.query.all", Symbol: "all"},
 		},
-		Fails: dbError,
 	}
-	load := &ir.Method{Name: "load", SuccessType: products, ReturnType: result, Fails: dbError, Body: []ir.Statement{&ir.Return{Value: loadCall}}}
+	load := &ir.Method{Name: "load", ReturnType: result, Body: []ir.Statement{&ir.Return{Value: loadCall}}}
 	repository := &ir.Program{Mode: "typescript", ModulePath: "repository", Statements: []ir.Statement{load}}
 
 	forwardCall := &ir.Call{
@@ -33,15 +32,13 @@ func TestSuspensionPropagatesOnlyThroughTypeScriptProjectGeneration(t *testing.T
 			Name:      "load",
 			Reference: &ir.Reference{Package: "repository", Symbol: "load", ExportKind: "function"},
 		},
-		Fails: dbError,
 	}
-	forward := &ir.Method{Name: "forward", SuccessType: products, ReturnType: result, Fails: dbError, Body: []ir.Statement{&ir.Return{Value: forwardCall}}}
+	forward := &ir.Method{Name: "forward", ReturnType: result, Body: []ir.Statement{&ir.Return{Value: forwardCall}}}
 	mainCall := &ir.Call{
 		ExprBase: ir.NewExprBase(token.Span{}, result),
 		Callee:   &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, result), Name: "forward"},
-		Fails:    dbError,
 	}
-	main := &ir.Method{Name: "main", SuccessType: types.FromName("Void"), ReturnType: types.FromName("Void"), Body: []ir.Statement{&ir.ExpressionStatement{Expression: mainCall}}}
+	main := &ir.Method{Name: "main", ReturnType: types.FromName("Void"), Body: []ir.Statement{&ir.ExpressionStatement{Expression: mainCall}}}
 	application := &ir.Program{Mode: "typescript", ModulePath: "main", Statements: []ir.Statement{
 		&ir.Import{Path: "repository", Symbols: []string{"load"}, SymbolKinds: map[string]string{"load": "function"}, IntrinsicSymbols: map[string]bool{}, RuntimeIndependentSymbols: map[string]bool{}},
 		forward,
@@ -69,7 +66,7 @@ func TestSuspensionPropagatesOnlyThroughTypeScriptProjectGeneration(t *testing.T
 
 func TestPureTypeScriptFunctionsRemainSynchronous(t *testing.T) {
 	integer := types.FromName("Integer")
-	value := &ir.Method{Name: "value", SuccessType: integer, ReturnType: integer, Body: []ir.Statement{
+	value := &ir.Method{Name: "value", ReturnType: integer, Body: []ir.Statement{
 		&ir.Return{Value: &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, integer), Kind: "integer", Raw: "1"}},
 	}}
 	generated, err := GenerateProject([]*ir.Program{{Mode: "typescript", ModulePath: "values", Statements: []ir.Statement{value}}})
@@ -81,12 +78,31 @@ func TestPureTypeScriptFunctionsRemainSynchronous(t *testing.T) {
 	}
 }
 
-func TestSuspendingResultLambdaIsAllowedOnlyAtPromiseRejectionBridge(t *testing.T) {
+func TestORMResultStreamingIntrinsicsSuspendWithoutLegacyEffects(t *testing.T) {
+	for _, intrinsic := range []string{"trb.orm.query.find_each", "trb.orm.query.find_in_batches"} {
+		t.Run(intrinsic, func(t *testing.T) {
+			iteration := &ir.Iterate{Operation: "stream", Intrinsic: intrinsic}
+			method := &ir.Method{
+				Name:       "stream",
+				ReturnType: types.FromName("Void"),
+				Body:       []ir.Statement{iteration},
+			}
+			plan, err := AnalyzeSuspension([]*ir.Program{{Mode: "typescript", ModulePath: "main", Statements: []ir.Statement{method}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !plan.Methods[method] || !plan.Iterations[iteration] {
+				t.Fatalf("Result streaming intrinsic %s was not classified as suspending: %#v", intrinsic, plan)
+			}
+		})
+	}
+}
+
+func TestSuspendingResultLambdaUsesPortableBoundaryWithoutRequiringNativeBridge(t *testing.T) {
 	integer := types.FromName("Integer")
 	errorType := types.FromName("LoadError")
 	resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{integer, errorType}}
 	functionType := types.FunctionOf(nil, resultType)
-	nativeType := types.FunctionOf(nil, integer)
 	request := &ir.Call{
 		ExprBase: ir.NewExprBase(token.Span{}, resultType),
 		Callee: &ir.Identifier{
@@ -96,31 +112,34 @@ func TestSuspendingResultLambdaIsAllowedOnlyAtPromiseRejectionBridge(t *testing.
 		},
 	}
 	lambda := &ir.Lambda{
-		ExprBase:    ir.NewExprBase(token.Span{}, functionType),
-		SuccessType: resultType,
-		ReturnType:  resultType,
-		Fails:       types.Type{Kind: types.Never, Name: "Never"},
-		Body:        []ir.Statement{&ir.Return{Value: request}},
+		ExprBase:   ir.NewExprBase(token.Span{}, functionType),
+		ReturnType: resultType,
+		Body:       []ir.Statement{&ir.Return{Value: request}},
 	}
 	variable := &ir.Variable{Name: "loader", Type: functionType, Value: lambda}
-	identifier := &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, functionType), Name: "loader", Lexical: true}
-	bridge := &ir.Conversion{
-		ExprBase: ir.NewExprBase(token.Span{}, nativeType),
-		Kind:     ir.ResultFunctionToPromiseRejectionConversion,
-		Value:    identifier,
-	}
-	program := &ir.Program{Mode: "typescript", ModulePath: "main", Statements: []ir.Statement{variable, &ir.ExpressionStatement{Expression: bridge}}}
-	plan, err := AnalyzeSuspension([]*ir.Program{program})
+	ordinary := &ir.Program{Mode: "typescript", ModulePath: "main", Statements: []ir.Statement{variable}}
+	plan, err := AnalyzeSuspension([]*ir.Program{ordinary})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.Lambdas[lambda] || !plan.ResultPromiseBridges[lambda] {
-		t.Fatalf("suspending Result lambda was not associated with its native bridge: %#v", plan)
+	if !plan.Lambdas[lambda] || plan.LambdaModules[lambda] != "main" {
+		t.Fatalf("ordinary suspending Result lambda was not classified independently of native bridging: %#v", plan)
 	}
 
-	unbridged := &ir.Program{Mode: "typescript", ModulePath: "main", Statements: []ir.Statement{variable}}
-	if _, err := AnalyzeSuspension([]*ir.Program{unbridged}); err == nil || !strings.Contains(err.Error(), "may suspend must omit") {
-		t.Fatalf("expected an unbridged suspending Result lambda diagnostic, got %v", err)
+	shadowed := &ir.Program{Mode: "typescript", ModulePath: "shadowed", Statements: []ir.Statement{&ir.Enum{Name: "Result"}, variable}}
+	if _, err := AnalyzeSuspension([]*ir.Program{shadowed}); err == nil || !strings.Contains(err.Error(), "may suspend must omit") {
+		t.Fatalf("expected a user-defined Result to remain an ordinary non-Void boundary, got %v", err)
+	}
+
+	pureType := types.FunctionOf(nil, types.FromName("String"))
+	pure := &ir.Lambda{
+		ExprBase:   ir.NewExprBase(token.Span{}, pureType),
+		ReturnType: types.FromName("String"),
+		Body:       []ir.Statement{&ir.Return{Value: request}},
+	}
+	pureProgram := &ir.Program{Mode: "typescript", ModulePath: "pure", Statements: []ir.Statement{&ir.Variable{Name: "loader", Type: pureType, Value: pure}}}
+	if _, err := AnalyzeSuspension([]*ir.Program{pureProgram}); err == nil || !strings.Contains(err.Error(), "may suspend must omit") {
+		t.Fatalf("expected a pure non-Void suspending lambda diagnostic, got %v", err)
 	}
 }
 

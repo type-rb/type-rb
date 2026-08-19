@@ -163,9 +163,9 @@ class TransactionResultJob < Job
 
 	def perform(name: String): JobResult
 		completed := Database.transaction() do |tx|
-			_created := JobTransactionItem.using(tx).create(name: name)
+			_created := try JobTransactionItem.using(tx).create(name: name)
 			if name == "failed"
-				_duplicate := JobTransactionItem.using(tx).create(name: name)
+				_duplicate := try JobTransactionItem.using(tx).create(name: name)
 			end
 			Unit.new()
 		end catch |_error|

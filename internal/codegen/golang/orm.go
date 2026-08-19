@@ -841,6 +841,9 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	querySource := ""
 	if ok {
 		querySource = g.expr(iteration.Source)
+	} else if scopedModel, scope := g.orm.ScopeModel(iteration.Source.ExprType().Name); scope {
+		model = scopedModel
+		querySource = g.expr(iteration.Source)
 	} else {
 		model, ok = g.orm.Model(iteration.Source.ExprType().Name)
 		if !ok {

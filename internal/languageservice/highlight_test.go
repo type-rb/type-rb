@@ -38,12 +38,12 @@ func TestHighlightMarksLexicallyInvalidInputWithoutPanicking(t *testing.T) {
 	}
 }
 
-func TestHighlightClassifiesEffectKeywords(t *testing.T) {
-	source := "def load(): String fails LoadError\n\treturn attempt read()\nend"
+func TestHighlightDoesNotClassifyLegacyEffectWordsAsKeywords(t *testing.T) {
+	source := "attempt\nfails"
 	spans := languageservice.Highlight(languageservice.HighlightRequest{Source: source, Mode: "go"})
-	for _, keyword := range []string{"fails", "attempt"} {
-		if !hasHighlight(source, spans, keyword, languageservice.HighlightKeyword) {
-			t.Errorf("missing keyword highlight for %q in %#v", keyword, spans)
+	for _, word := range []string{"attempt", "fails"} {
+		if hasHighlight(source, spans, word, languageservice.HighlightKeyword) {
+			t.Errorf("legacy word %q retained keyword highlight in %#v", word, spans)
 		}
 	}
 }

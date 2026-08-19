@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-17
+Last updated: 2026-08-19
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -44,7 +44,7 @@ classes, records, and transparent type aliases while generated code continues
 to import the original npm package. The bridge preserves discriminated generic
 results and emits transitive native type-only imports without making their
 names source-visible. Provider-declared Promise callback boundaries can map a
-checked fallible TypeRB function to native resolution and rejection without
+Result-returning TypeRB function to native resolution and rejection without
 exposing Promise semantics in TypeRB source.
 
 The experimental TypeScript browser path accepts structured JSX in TypeRB
@@ -57,13 +57,13 @@ purpose-specific mouse, change, form, and keyboard event types. Its typed
 and `set(value)` members while generated TSX uses React `useState`.
 
 The implemented language includes functions, typed first-class function values
-with lexical capture and checked fallible effects, and classes, modules and
+with lexical capture and checked Result control flow, and classes, modules and
 generic interfaces, records, ordinary and raw-value enums, payload enums as sum
 types, enum instance methods, explicit generics for enums, aliases, records,
 classes, top-level functions and instance methods, normalized unions, immutable
 and mutable bindings, typed collections and iteration, exhaustive pattern
-matching, value-producing `if` and `case` expressions, and explicit fallible
-effects with `fails` and `attempt`. See the
+matching, value-producing `if` and `case` expressions, and explicit Result
+propagation and recovery with prefix `try` and postfix `catch`. See the
 [language guide](language.md) and [specification](specification.md) for the
 current semantics.
 
@@ -249,10 +249,12 @@ database schema and retain their portable types through predicates, writes,
 projections, and aggregates. Instant storage is normalized through UTC.
 The repository runs the same application contract across all nine backend and
 database combinations, plus an ORM-backed JSON route across all three backends.
-Database terminals and lazy association access use `fails DbError`; `attempt`
-captures them as ordinary `Result` values. The REPL uses the same schema-backed
-read and write API. A deterministic portable schema lock now removes the live
-database requirement from compiler checks and builds. Optional `trb db`
+Database terminals, lazy association access, transactions, and streaming
+return `DbResult<T>`. Applications propagate compatible errors with `try`,
+recover with `catch`, or inspect the Result with exhaustive `case`. The REPL
+uses the same schema-backed read and write API. A deterministic portable schema
+lock now removes the live database requirement from compiler checks and builds.
+Optional `trb db`
 commands provide plan, guarded apply, export, lock, and drift checks around a
 pinned external sqldef executable on SQLite, PostgreSQL, and MySQL. Production
 compatibility policy remains future work.
@@ -265,8 +267,8 @@ those shared methods and headers, repeated query parameters, text, bytes, form,
 JSON, and native browser `File` bodies, and timeouts. Indexed native component
 callbacks can pass a DOM `File` through the platform package's checked metadata
 boundary and into a request without losing the underlying browser object.
-`File#read()` and `File#read_text()` expose its buffered contents as fallible,
-generated-TypeScript-only browser operations.
+`File#read()` and `File#read_text()` expose their buffered contents as Result
+values from generated-TypeScript-only browser operations.
 Fetch responses retain status, headers, final URL, and buffered bytes; explicit
 JSON decoding produces `Response<T>` and preserves
 the raw response in a classified `RequestError` when the contract is invalid.
@@ -285,7 +287,9 @@ Workers support queues, priorities, retry and failed state, heartbeats, stale
 claim recovery, graceful stop, listing, manual retry, and discard. PostgreSQL
 and MySQL use short locking claims for multiple workers. SQLite is deliberately
 limited to one worker. Delivery is at least once, so Jobs remain responsible
-for idempotence. Recurring schedules, transactional outbox delivery, parallel
+for idempotence. A fallible job returns `JobResult`; `Err` enters the same retry
+and failure policy as a runtime execution failure. Recurring schedules,
+transactional outbox delivery, parallel
 workers within one process, and forced-shutdown timeouts remain future work.
 
 The compiler pipeline is:
@@ -393,7 +397,6 @@ The current alpha does not yet provide:
 - inferred type arguments, generic interfaces, or generic class methods;
 - complete superclass construction, override, and mutation-effect semantics;
 - general first-class call blocks;
-- concise `Result` propagation syntax;
 - complete target-standard source maps and runtime stack mapping across Ruby
   and TypeScript, incremental builds, or a persistent build cache;
 - semantic package version constraints, publishing or audit services, or a

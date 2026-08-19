@@ -33,18 +33,15 @@ type PerformKind string
 const (
 	// PerformVoid is the zero value so manifests assembled by package tests and
 	// third-party integrations keep the ordinary infallible Job contract.
-	PerformVoid         PerformKind = ""
-	PerformLegacyEffect PerformKind = "legacy_effect"
-	PerformJobResult    PerformKind = "job_result"
+	PerformVoid      PerformKind = ""
+	PerformJobResult PerformKind = "job_result"
 )
 
 type Job struct {
-	Name        string
-	ModulePath  string
-	Parameters  []Parameter
-	PerformKind PerformKind
-	// Fails is populated only for the temporary legacy effect contract.
-	Fails           types.Type
+	Name            string
+	ModulePath      string
+	Parameters      []Parameter
+	PerformKind     PerformKind
 	Queue           string
 	Priority        int
 	MaximumAttempts int
@@ -119,17 +116,17 @@ func (m *Manifest) Augment(program *ir.Program) {
 			enqueueResult := jobEnqueueResultType()
 			class.Body = append(class.Body, &ir.Method{
 				Name: "perform_later", External: true, Class: true,
-				Parameters: parameters, SuccessType: enqueueResult, ReturnType: enqueueResult,
+				Parameters: parameters, ReturnType: enqueueResult,
 			})
 			delayedParameters := append([]ir.Parameter{{Name: "delay", Type: types.FromName("Duration")}}, parameters...)
 			class.Body = append(class.Body, &ir.Method{
 				Name: "perform_in", External: true, Class: true,
-				Parameters: delayedParameters, SuccessType: enqueueResult, ReturnType: enqueueResult,
+				Parameters: delayedParameters, ReturnType: enqueueResult,
 			})
 			scheduledParameters := append([]ir.Parameter{{Name: "scheduled_at", Type: types.FromName("Instant")}}, parameters...)
 			class.Body = append(class.Body, &ir.Method{
 				Name: "perform_at", External: true, Class: true,
-				Parameters: scheduledParameters, SuccessType: enqueueResult, ReturnType: enqueueResult,
+				Parameters: scheduledParameters, ReturnType: enqueueResult,
 			})
 			ensureJobRuntimeImport(program, "trb/std/time/index", "Duration", "class")
 			ensureJobRuntimeImport(program, "trb/std/time/index", "Instant", "class")
@@ -304,22 +301,17 @@ func discoverJob(program *ast.Program, class *ast.ClassStatement, aliases aliasR
 	if len(perform.TypeParameters) != 0 {
 		return Job{}, fmt.Errorf("trb/jobs Job %s perform cannot declare type parameters", class.Name)
 	}
+	if !perform.Fails.Empty() {
+		return Job{}, fmt.Errorf("trb/jobs Job %s perform cannot declare fails; return JobResult to report failure", class.Name)
+	}
 	performKind := PerformVoid
 	if !perform.ReturnType.Empty() {
-		if !perform.Fails.Empty() {
-			return Job{}, fmt.Errorf("trb/jobs Job %s perform cannot combine a return type with fails", class.Name)
-		}
 		if !aliases.isCanonicalJobResult(program, perform.ReturnType, map[string]bool{}) {
 			return Job{}, fmt.Errorf("trb/jobs Job %s perform must omit its return type or return JobResult", class.Name)
 		}
 		performKind = PerformJobResult
-	} else if !perform.Fails.Empty() {
-		performKind = PerformLegacyEffect
 	}
 	job := Job{Name: class.Name, ModulePath: program.ModulePath, PerformKind: performKind, Queue: "default"}
-	if performKind == PerformLegacyEffect {
-		job.Fails = typeRef(perform.Fails)
-	}
 	if err := discoverJobDefaults(&job, class); err != nil {
 		return Job{}, err
 	}

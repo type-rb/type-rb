@@ -27,7 +27,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	}
 	if strings.HasPrefix(name, "trb.orm.") {
 		value := g.ormIntrinsic(name, call, arguments)
-		if effectplan.ORMOperation(name, call.Fails) {
+		if effectplan.ORMOperation(name) {
 			return "TrbOrmRuntime.with_scope(__trb_scope) { " + value + " }"
 		}
 		return value

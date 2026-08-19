@@ -1654,7 +1654,7 @@ func TestRenameIdentifierValidationRejectsKeywordsAndPunctuation(t *testing.T) {
 			t.Fatalf("validRenameIdentifier(%q)=true", name)
 		}
 	}
-	for _, name := range []string{"user", "User", "ready?", "save!", "利用者"} {
+	for _, name := range []string{"user", "User", "ready?", "save!", "attempt", "fails", "利用者"} {
 		if !validRenameIdentifier(name) {
 			t.Fatalf("validRenameIdentifier(%q)=false", name)
 		}

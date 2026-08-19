@@ -367,8 +367,7 @@ func (m *Manifest) augmentProgram(program *ir.Program, entrypoint bool) {
 					)
 					class.Body = append(class.Body, &ir.Method{
 						Name: association.Name, External: true,
-						ReturnType: associationValueType(association), SuccessType: associationValueType(association),
-						Fails: types.FromName("DbError"), Property: true, Loadable: true,
+						ReturnType: dbResult(associationValueType(association)), Property: true, Loadable: true,
 					})
 				}
 				if !existing[association.Name+"_query"] {
@@ -554,7 +553,6 @@ func (m *Manifest) augmentProgram(program *ir.Program, entrypoint bool) {
 			program.Statements = append(program.Statements, &ir.Class{Name: model.GroupType(column), External: true, Body: groupedIRMethods(model, column)})
 		}
 	}
-	applyPortableIREffects(program.Statements)
 }
 
 // Association targets are compiler-resolved declarations rather than runtime
@@ -593,22 +591,6 @@ func (m *Manifest) ensureModelRuntimeImports(program *ir.Program) {
 		})
 	}
 	program.Statements = append(imports, program.Statements...)
-}
-
-func applyPortableIREffects(statements []ir.Statement) {
-	for _, statement := range statements {
-		switch node := statement.(type) {
-		case *ir.Method:
-			if success, ok := dbResultSuccess(node.ReturnType); ok {
-				node.SuccessType = success
-				node.Fails = types.FromName("DbError")
-			}
-		case *ir.Class:
-			applyPortableIREffects(node.Body)
-		case *ir.Module:
-			applyPortableIREffects(node.Body)
-		}
-	}
 }
 
 func (m *Manifest) captureAssociationScopes(program *ir.Program) {

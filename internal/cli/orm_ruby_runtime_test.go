@@ -100,7 +100,7 @@ func TestRubyProjectREPLUsesPortableORMSchema(t *testing.T) {
 	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	const want = "Tools\nCompiler 2\n2\ntrue\nfalse\n3\n3\n3\n3\n1\n0\nPrimary\n2\n3\ntrue\n7\n4\n4\n1\n0 : Integer\n"
+	const want = "Tools\nCompiler 2\n2\ntrue\nfalse\n3\n3\n3\n3\n1\n0\nPrimary\n2\n3\ntrue\n7\n4\n4\n1\nDbResult::Ok(value: 0) : DbResult<Integer>\n"
 	if stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("unexpected Ruby project ORM REPL result: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
@@ -202,8 +202,7 @@ func requireRubyORMGems(t *testing.T, gems ...string) {
 	}
 }
 
-const rubyORMRuntimeSource = `import { Database, DbError, Model, belongs_to, has_many, has_one } from trb/orm
-import { Result } from trb/std/result
+const rubyORMRuntimeSource = `import { Database, DbResult, Model, belongs_to, has_many, has_one } from trb/orm
 
 class TrbRubyTestCategory < Model
 	has_many(TrbRubyTestProduct, dependent: :destroy) do |products|
@@ -238,12 +237,12 @@ class RubyMembership < Model
 	belongs_to(RubyProject)
 end
 
-def exercise(): Integer fails DbError
-	category := TrbRubyTestCategory.create(name: "Tools")
-	TrbRubyTestProfile.create(trb_ruby_test_category_id: category.id, label: "Primary", active: true)
-	first := TrbRubyTestProduct.create(trb_ruby_test_category_id: category.id, name: "Compiler", price: 10.0, active: true)
-	updated := first.with(name: "Compiler 2").save()
-	inserted := TrbRubyTestProduct.insert_all([
+def exercise(): DbResult<Integer>
+	category := try TrbRubyTestCategory.create(name: "Tools")
+	_profile := try TrbRubyTestProfile.create(trb_ruby_test_category_id: category.id, label: "Primary", active: true)
+	first := try TrbRubyTestProduct.create(trb_ruby_test_category_id: category.id, name: "Compiler", price: 10.0, active: true)
+	updated := try first.with(name: "Compiler 2").save()
+	inserted := try TrbRubyTestProduct.insert_all([
 		TrbRubyTestProduct.build(trb_ruby_test_category_id: category.id, name: "REPL", price: 20.0, active: true),
 		TrbRubyTestProduct.build(trb_ruby_test_category_id: category.id, name: "Formatter", price: 30.0, active: false)
 	])
@@ -251,36 +250,45 @@ def exercise(): Integer fails DbError
 	puts(category.name)
 	puts(updated.name)
 	puts(inserted)
-	puts(TrbRubyTestProduct.insert_if_absent(absent, unique_by: [:name]))
-	puts(TrbRubyTestProduct.insert_if_absent(absent, unique_by: [:name]))
-	puts(TrbRubyTestProduct.where(active: true).not(name: "Missing").count())
-	active_count := category.trb_ruby_test_products.size()
-	preloaded_active_count := TrbRubyTestCategory.preload(:trb_ruby_test_products).first().trb_ruby_test_products.size()
-	joined_active_count := TrbRubyTestCategory.join(:trb_ruby_test_products).count()
-	existing_active_count := TrbRubyTestCategory.where_exists(:trb_ruby_test_products).count()
+	puts(try TrbRubyTestProduct.insert_if_absent(absent, unique_by: [:name]))
+	puts(try TrbRubyTestProduct.insert_if_absent(absent, unique_by: [:name]))
+	puts(try TrbRubyTestProduct.where(active: true).not(name: "Missing").count())
+	active_products := try category.trb_ruby_test_products
+	active_count := active_products.size()
+	preloaded_category := try TrbRubyTestCategory.preload(:trb_ruby_test_products).first()
+	preloaded_products := try preloaded_category.trb_ruby_test_products
+	preloaded_active_count := preloaded_products.size()
+	joined_active_count := try TrbRubyTestCategory.join(:trb_ruby_test_products).count()
+	existing_active_count := try TrbRubyTestCategory.where_exists(:trb_ruby_test_products).count()
 	puts(active_count)
 	puts(preloaded_active_count)
 	puts(joined_active_count)
 	puts(existing_active_count)
-	missing_join := TrbRubyTestCategory.join(:trb_ruby_test_products, TrbRubyTestProduct.where(name: "Missing")).count()
-	missing_exists := TrbRubyTestCategory.where_exists(:trb_ruby_test_products, TrbRubyTestProduct.where(name: "Missing")).count()
+	missing_join := try TrbRubyTestCategory.join(:trb_ruby_test_products, TrbRubyTestProduct.where(name: "Missing")).count()
+	missing_exists := try TrbRubyTestCategory.where_exists(:trb_ruby_test_products, TrbRubyTestProduct.where(name: "Missing")).count()
 	puts(missing_join + missing_exists)
-	puts(category.trb_ruby_test_profile.label)
-	user := RubyUser.create(name: "Ada")
-	active_project := RubyProject.create(name: "TypeRB", active: true)
-	inactive_project := RubyProject.create(name: "Archived", active: false)
-	RubyMembership.create(ruby_user_id: user.id, ruby_project_id: active_project.id)
-	RubyMembership.create(ruby_user_id: user.id, ruby_project_id: inactive_project.id)
-	through_lazy := user.ruby_projects.size()
-	through_preload := RubyUser.preload(:ruby_projects).first().ruby_projects.size()
+	profile := try category.trb_ruby_test_profile
+	puts(profile.label)
+	user := try RubyUser.create(name: "Ada")
+	active_project := try RubyProject.create(name: "TypeRB", active: true)
+	inactive_project := try RubyProject.create(name: "Archived", active: false)
+	_active_membership := try RubyMembership.create(ruby_user_id: user.id, ruby_project_id: active_project.id)
+	_inactive_membership := try RubyMembership.create(ruby_user_id: user.id, ruby_project_id: inactive_project.id)
+	lazy_projects := try user.ruby_projects
+	through_lazy := lazy_projects.size()
+	preloaded_user := try RubyUser.preload(:ruby_projects).first()
+	preloaded_projects := try preloaded_user.ruby_projects
+	through_preload := preloaded_projects.size()
 	puts(through_lazy + through_preload)
-	puts(TrbRubyTestCategory.preload(:trb_ruby_test_products).first().trb_ruby_test_products.size())
+	second_preloaded_category := try TrbRubyTestCategory.preload(:trb_ruby_test_products).first()
+	second_preloaded_products := try second_preloaded_category.trb_ruby_test_products
+	puts(second_preloaded_products.size())
 	transaction_count := Database.transaction() do |tx|
-		inside := TrbRubyTestProduct.using(tx).count()
-		locked := TrbRubyTestProduct.using(tx).lock().first()
+		inside := try TrbRubyTestProduct.using(tx).count()
+		locked := try TrbRubyTestProduct.using(tx).lock().first()
 		puts(locked.id > 0)
 		nested_count := try tx.transaction() do |nested|
-			TrbRubyTestProduct.using(nested).where(active: true).count()
+			try TrbRubyTestProduct.using(nested).where(active: true).count()
 		end
 		inside + nested_count
 	end catch |_error|
@@ -288,24 +296,26 @@ def exercise(): Integer fails DbError
 	end
 	puts(transaction_count)
 	batch_count := TrbRubyTestProduct.find_each(batch_size: 2) do |_product|
+	end catch |_error|
+		-1
 	end
 	puts(batch_count)
-	puts(TrbRubyTestProduct.update_all(active: true))
-	destroyed := category.destroy()
+	puts(try TrbRubyTestProduct.update_all(active: true))
+	destroyed := try category.destroy()
 	if destroyed
-		later := TrbRubyTestCategory.create(name: "Later")
-		TrbRubyTestProduct.create(trb_ruby_test_category_id: later.id, name: "Later product", price: 50.0, active: true)
-		puts(TrbRubyTestProduct.delete_all())
+		later := try TrbRubyTestCategory.create(name: "Later")
+		_later_product := try TrbRubyTestProduct.create(trb_ruby_test_category_id: later.id, name: "Later product", price: 50.0, active: true)
+		puts(try TrbRubyTestProduct.delete_all())
 		return TrbRubyTestProduct.count()
 	end
-	return -1
+	return DbResult<Integer>::Ok(-1)
 end
 
 def main()
-	case attempt exercise()
-	when Result::Ok(value)
+	case exercise()
+	when DbResult::Ok(value)
 		puts(value)
-	when Result::Err(error)
+	when DbResult::Err(error)
 		puts(error.message)
 	end
 	return

@@ -16,14 +16,14 @@ import (
 )
 
 type lowerer struct {
-	checked          checker.Result
-	temporary        int
-	effectBoundaries []effectBoundary
-	generatedTypes   map[string]map[string]resolver.Export
-	usesJSX          bool
+	checked        checker.Result
+	temporary      int
+	generatedTypes map[string]map[string]resolver.Export
+	usesJSX        bool
 }
 
-type effectBoundary struct {
+// resultBoundary describes the explicit Result returned by a try expression.
+type resultBoundary struct {
 	success types.Type
 	fails   types.Type
 	result  types.Type
@@ -56,9 +56,6 @@ func Program(checked checker.Result) *ir.Program {
 func (l *lowerer) requireGeneratedType(typ types.Type) {
 	for _, argument := range typ.Args {
 		l.requireGeneratedType(argument)
-	}
-	if typ.Fails != nil {
-		l.requireGeneratedType(*typ.Fails)
 	}
 	if typ.Kind != types.Named || typ.Name == "" || l.checked.Resolution.Catalog == nil {
 		return
@@ -231,7 +228,6 @@ func typeContracts(imported *resolver.Import, generated []string) map[string]ir.
 			contract.Members[memberName] = ir.MemberContract{
 				Kind:           string(member.Kind),
 				Type:           member.Type,
-				Fails:          member.Fails,
 				TypeParameters: append([]string(nil), member.TypeParameters...),
 				Parameters:     append([]types.Type(nil), member.Parameters...),
 				Required:       member.Required,
@@ -358,9 +354,6 @@ func (l *lowerer) structuredResultStatement(node ast.Statement) ([]ir.Statement,
 			Owner:    l.checked.ConstantOwners[n],
 		}
 	case *ast.ReturnStatement:
-		if boundary, exists := l.currentEffectBoundary(); exists {
-			loweredValue = l.resultSuccess(n.Span(), boundary, loweredValue)
-		}
 		statement = &ir.Return{Base: base(n.Base), Value: loweredValue}
 	}
 	return append(prefix, statement), true
@@ -388,11 +381,6 @@ func (l *lowerer) structuredResultValue(expression ast.Expression) ([]ir.Stateme
 	if !ok || semantic.ResultBoundary.Kind == "" || semantic.ResultBoundary.Kind == types.Never || semantic.ResultType.Kind == "" {
 		return nil, nil, false
 	}
-	block, ok := l.structuredBlock(operand)
-	if !ok {
-		return nil, nil, false
-	}
-
 	l.temporary++
 	name := "__trbStructuredResult" + strconv.Itoa(l.temporary)
 	resultType := semantic.ResultType
@@ -403,7 +391,16 @@ func (l *lowerer) structuredResultValue(expression ast.Expression) ([]ir.Stateme
 		Lexical:   true,
 		Generated: true,
 	}
-	block.Result = &ir.StructuredBlockResult{Target: identifier, Type: resultType}
+	var structured ir.Statement
+	if block, blockOK := l.structuredBlock(operand); blockOK {
+		block.Result = &ir.StructuredBlockResult{Target: identifier, Type: resultType}
+		structured = block
+	} else if iteration, iterationOK := l.structuredIteration(operand); iterationOK {
+		iteration.Result = &ir.IterationResult{Target: identifier, Type: resultType}
+		structured = iteration
+	} else {
+		return nil, nil, false
+	}
 
 	var lowered ir.Expression
 	switch node := expression.(type) {
@@ -413,7 +410,7 @@ func (l *lowerer) structuredResultValue(expression ast.Expression) ([]ir.Stateme
 		lowered = l.resultCatchValue(node, identifier)
 	}
 	lowered = l.expressionConversions(expression, lowered)
-	return []ir.Statement{temporary, block}, lowered, true
+	return []ir.Statement{temporary, structured}, lowered, true
 }
 
 func (l *lowerer) statement(node ast.Statement) ir.Statement {
@@ -559,28 +556,15 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 	case *ast.FieldStatement:
 		return &ir.Field{Base: base(n.Base), Name: n.Name, Type: lowerType(n.Type), Value: l.expression(n.Value), ReadOnly: n.ReadOnly}
 	case *ast.MethodStatement:
-		successType := lowerType(n.ReturnType)
+		returnType := lowerType(n.ReturnType)
 		if n.ReturnType.Empty() {
-			successType = types.Type{Kind: types.Void, Name: "Void"}
+			returnType = types.Type{Kind: types.Void, Name: "Void"}
 		}
-		failsType := lowerFailureType(n.Fails)
-		method := &ir.Method{Base: base(n.Base), Name: n.Name, SuccessType: successType, ReturnType: successType, Fails: failsType, Class: n.Class}
+		method := &ir.Method{Base: base(n.Base), Name: n.Name, ReturnType: returnType, Class: n.Class}
 		for _, parameter := range n.TypeParameters {
 			method.TypeParameters = append(method.TypeParameters, parameter.Name)
 		}
-		if failsType.Kind != types.Never {
-			internalSuccess := effectSuccessType(successType)
-			boundary := effectBoundary{success: internalSuccess, fails: failsType, result: resultType(internalSuccess, failsType)}
-			method.ReturnType = boundary.result
-			l.effectBoundaries = append(l.effectBoundaries, boundary)
-			method.Body = l.statements(n.Body)
-			l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
-			if successType.Kind == types.Void {
-				method.Body = append(method.Body, &ir.Return{Value: l.resultSuccess(n.Span(), boundary, l.unitValue(n.Span()))})
-			}
-		} else {
-			method.Body = l.statements(n.Body)
-		}
+		method.Body = l.statements(n.Body)
 		for _, parameter := range n.Parameters {
 			typ := lowerType(parameter.Type)
 			if parameter.Type.Empty() {
@@ -626,12 +610,6 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			return iteration
 		}
 		value := l.expression(n.Value)
-		if boundary, ok := l.currentEffectBoundary(); ok {
-			if value == nil {
-				value = l.unitValue(n.Span())
-			}
-			value = l.resultSuccess(n.Span(), boundary, value)
-		}
 		return &ir.Return{Base: base(n.Base), Value: value}
 	case *ast.BreakStatement:
 		return &ir.Break{Base: base(n.Base)}
@@ -682,18 +660,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 }
 
 func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, bool) {
-	captureEffect := false
-	callExpression := expression
-	var captureBoundary *effectBoundary
-	if attempt, ok := expression.(*ast.AttemptExpression); ok {
-		callExpression = attempt.Value
-		captureEffect = true
-		if semantic, exists := l.checked.Attempts[attempt]; exists {
-			boundary := effectBoundary{success: semantic.SuccessType, fails: semantic.ErrorType, result: semantic.ResultType}
-			captureBoundary = &boundary
-		}
-	}
-	call, ok := callExpression.(*ast.CallExpression)
+	call, ok := expression.(*ast.CallExpression)
 	if !ok || call.Block == nil {
 		return nil, false
 	}
@@ -702,19 +669,20 @@ func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, b
 	if !external || !method || member.Block == nil || !member.Block.Structured || member.Block.Return.Name != "" {
 		return nil, false
 	}
-	result := &ir.Iterate{
-		Base:            ir.Base{Span: expression.Span()},
-		Source:          l.expression(callee.Receiver),
-		Operation:       callee.Name,
-		Intrinsic:       member.Intrinsic,
-		Fails:           l.checked.ExpressionEffects[call],
-		CaptureEffect:   captureEffect,
-		UnhandledEffect: l.checked.UnhandledEffects[call],
+	semantic, checked := l.checked.StructuredBlocks[call]
+	resultBoundary := checked && semantic.ResultBoundary.Kind != "" && semantic.ResultBoundary.Kind != types.Never && semantic.ResultType.Kind != ""
+	if !resultBoundary {
+		return nil, false
 	}
-	if captureBoundary != nil {
-		result.EffectSuccess = captureBoundary.success
-	} else if boundary, exists := l.currentEffectBoundary(); exists {
-		result.EffectSuccess = boundary.success
+	result := &ir.Iterate{
+		Base:           ir.Base{Span: expression.Span()},
+		Source:         l.expression(callee.Receiver),
+		Operation:      callee.Name,
+		Intrinsic:      member.Intrinsic,
+		Fails:          semantic.ResultBoundary,
+		EffectSuccess:  semantic.Return,
+		CaptureEffect:  true,
+		ResultBoundary: true,
 	}
 	for _, argument := range call.Arguments {
 		if argument.Name == "batch_size" || argument.Name == "" {
@@ -729,22 +697,11 @@ func (l *lowerer) structuredIteration(expression ast.Expression) (*ir.Iterate, b
 		}
 		result.Bindings = append(result.Bindings, ir.IterationBinding{Name: name, Type: typ})
 	}
-	if captureBoundary != nil {
-		l.effectBoundaries = append(l.effectBoundaries, *captureBoundary)
-	}
 	result.Body = l.statements(call.Block.Body)
-	if captureBoundary != nil {
-		l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
-	}
 	return result, true
 }
 
 func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBlock, bool) {
-	captureEffect := false
-	if attempt, ok := expression.(*ast.AttemptExpression); ok {
-		expression = attempt.Value
-		captureEffect = true
-	}
 	call, ok := expression.(*ast.CallExpression)
 	if !ok || call.Block == nil {
 		return nil, false
@@ -754,28 +711,13 @@ func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBloc
 	if !external || !checked || member.Block == nil || !member.Block.Structured || member.Block.Return.Name == "" {
 		return nil, false
 	}
-	fails := l.checked.ExpressionEffects[call]
-	success := l.checked.Expressions[call]
-	callType := success
-	boundaryType := callType
 	resultBoundary := semantic.ResultBoundary.Kind != "" && semantic.ResultBoundary.Kind != types.Never && semantic.ResultType.Kind != ""
-	if resultBoundary {
-		// Result-boundary blocks expose their raw Result as the call value while
-		// using the authored block return as the callback success type. Reusing
-		// the structured effect shape keeps rollback-aware backends portable,
-		// but CaptureEffect means the outer call remains an ordinary Result.
-		fails = semantic.ResultBoundary
-		success = semantic.Return
-		boundaryType = semantic.ResultType
-		captureEffect = true
-	} else if fails.Kind != "" && fails.Kind != types.Never {
-		callType = resultType(effectSuccessType(success), fails)
-		boundaryType = callType
+	if !resultBoundary {
+		return nil, false
 	}
 	loweredCall := &ir.Call{
-		ExprBase: ir.NewExprBase(call.Span(), callType),
+		ExprBase: ir.NewExprBase(call.Span(), semantic.ResultType),
 		Callee:   l.expression(call.Callee),
-		Fails:    fails,
 	}
 	if codec, ok := l.checked.CodecApplications[call]; ok {
 		loweredCall.Codec = lowerCodecSchema(codec.Schema)
@@ -790,31 +732,16 @@ func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBloc
 		return nil, false
 	}
 	result := &ir.StructuredBlock{
-		Base:            ir.Base{Span: call.Span()},
-		Call:            loweredCall,
-		Intrinsic:       member.Intrinsic,
-		Fails:           fails,
-		EffectSuccess:   success,
-		CaptureEffect:   captureEffect,
-		UnhandledEffect: !resultBoundary && l.checked.UnhandledEffects[call],
+		Base:          ir.Base{Span: call.Span()},
+		Call:          loweredCall,
+		Intrinsic:     member.Intrinsic,
+		Fails:         semantic.ResultBoundary,
+		EffectSuccess: semantic.Return,
+		CaptureEffect: true,
 	}
-	if fails.Kind != "" && fails.Kind != types.Never {
-		if !captureEffect {
-			if outer, ok := l.currentEffectBoundary(); ok {
-				result.PropagateSuccess = outer.success
-			}
-		}
-		boundary := effectBoundary{success: effectSuccessType(success), fails: fails, result: boundaryType}
-		l.effectBoundaries = append(l.effectBoundaries, boundary)
-		result.Body = l.statements(call.Block.Body[:resultIndex])
-		result.Value = l.expression(semantic.Result)
-		result.Body = append(result.Body, l.statements(call.Block.Body[resultIndex+1:])...)
-		l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
-	} else {
-		result.Body = l.statements(call.Block.Body[:resultIndex])
-		result.Value = l.expression(semantic.Result)
-		result.Body = append(result.Body, l.statements(call.Block.Body[resultIndex+1:])...)
-	}
+	result.Body = l.statements(call.Block.Body[:resultIndex])
+	result.Value = l.expression(semantic.Result)
+	result.Body = append(result.Body, l.statements(call.Block.Body[resultIndex+1:])...)
 	for index, name := range call.Block.Parameters {
 		typ := types.Type{Kind: types.Any, Name: "Any"}
 		if index < len(semantic.Parameters) {
@@ -846,9 +773,6 @@ func (l *lowerer) expressionConversions(node ast.Expression, result ir.Expressio
 		kind := ir.IntegerToFloatConversion
 		if target.Kind == types.Iterable && result.ExprType().Kind == types.Range {
 			kind = ir.RangeToIterableConversion
-		} else if target.Kind == types.Function && result.ExprType().Kind == types.Function &&
-			types.FunctionFailure(target).Kind != types.Never && types.FunctionFailure(result.ExprType()).Kind == types.Never {
-			kind = ir.PureFunctionToFallibleConversion
 		} else if target.Nullable && !result.ExprType().Nullable && result.ExprType().Kind != types.Nil {
 			kind = ir.NonNullableToNullableConversion
 		} else if result.ExprType().Kind == types.Union {
@@ -858,16 +782,6 @@ func (l *lowerer) expressionConversions(node ast.Expression, result ir.Expressio
 			ExprBase: ir.NewExprBase(node.Span(), target),
 			Kind:     kind,
 			Value:    result,
-		}
-	}
-	if bridge, ok := l.checked.NativeEffectBridges[node]; ok && result != nil {
-		parameters, success, valid := types.FunctionSignature(bridge.Type)
-		if valid {
-			result = &ir.Conversion{
-				ExprBase: ir.NewExprBase(node.Span(), types.FunctionOf(parameters, success)),
-				Kind:     ir.ResultFunctionToPromiseRejectionConversion,
-				Value:    result,
-			}
 		}
 	}
 	if bridge, ok := l.checked.NativeResultBridges[node]; ok && result != nil {
@@ -957,82 +871,28 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	case *ast.CatchExpression:
 		return l.resultCatch(n)
 	case *ast.AttemptExpression:
-		semantic, ok := l.checked.Attempts[n]
-		if !ok {
-			return nil
-		}
-		boundary := effectBoundary{success: semantic.SuccessType, fails: semantic.ErrorType, result: semantic.ResultType}
-		attempt := &ir.Attempt{
-			ExprBase: ir.NewExprBase(n.Span(), semantic.ResultType),
-			Success:  semantic.SuccessType,
-			Fails:    semantic.ErrorType,
-		}
-		l.effectBoundaries = append(l.effectBoundaries, boundary)
-		if n.Value != nil {
-			attempt.Value = l.resultSuccess(n.Span(), boundary, l.expression(n.Value))
-		}
-		if n.Value == nil {
-			resultIndex, resultExpression := lowerControlFlowBranchExpression(n.Body)
-			if resultExpression == nil {
-				attempt.Body = l.statements(n.Body)
-				attempt.BodyResult = l.resultSuccess(n.Span(), boundary, l.unitValue(n.Span()))
-			} else {
-				attempt.Body = l.statements(n.Body[:resultIndex])
-				attempt.BodyResult = l.resultSuccess(n.Span(), boundary, l.expression(semantic.Result))
-				attempt.Body = append(attempt.Body, l.statements(n.Body[resultIndex+1:])...)
-			}
-		}
-		l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
-		return attempt
+		// The parser retains this node only to recover and report pre-0.3 source.
+		return nil
 	case *ast.LambdaExpression:
-		result := &ir.Lambda{ExprBase: base, SuccessType: types.FromName("Void"), ReturnType: types.FromName("Void"), Fails: types.Type{Kind: types.Never, Name: "Never"}}
-		previousEffectBoundaries := l.effectBoundaries
-		l.effectBoundaries = nil
+		result := &ir.Lambda{ExprBase: base, ReturnType: types.FromName("Void")}
 		if !n.ReturnType.Empty() {
-			result.SuccessType = lowerType(n.ReturnType)
-			result.ReturnType = result.SuccessType
-		}
-		if !n.Fails.Empty() {
-			result.Fails = lowerType(n.Fails)
+			result.ReturnType = lowerType(n.ReturnType)
 		}
 		for _, parameter := range n.Parameters {
 			result.Parameters = append(result.Parameters, ir.Parameter{Name: parameter.Name, Type: lowerType(parameter.Type)})
 		}
-		if result.Fails.Kind != types.Never {
-			internalSuccess := effectSuccessType(result.SuccessType)
-			boundary := effectBoundary{success: internalSuccess, fails: result.Fails, result: resultType(internalSuccess, result.Fails)}
-			result.ReturnType = boundary.result
-			l.effectBoundaries = append(l.effectBoundaries, boundary)
-			result.Body = l.statements(n.Body)
-			l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
-			if result.SuccessType.Kind == types.Void {
-				result.Body = append(result.Body, &ir.Return{Value: l.resultSuccess(n.Span(), boundary, l.unitValue(n.Span()))})
-			}
-		} else {
-			result.Body = l.statements(n.Body)
-		}
-		l.effectBoundaries = previousEffectBoundaries
+		result.Body = l.statements(n.Body)
 		return result
 	case *ast.IterationExpression:
-		successType := typ
-		fails := l.checked.ExpressionEffects[n]
-		transformType := successType
 		source := l.expression(n.Source)
 		initial := l.expression(n.Initial)
-		if fails.Kind != "" && fails.Kind != types.Never {
-			transformType = resultType(effectSuccessType(successType), fails)
-			boundary := effectBoundary{success: effectSuccessType(successType), fails: fails, result: transformType}
-			l.effectBoundaries = append(l.effectBoundaries, boundary)
-		}
 		result := &ir.Transform{
-			ExprBase:    ir.NewExprBase(n.Span(), transformType),
-			Source:      source,
-			Operation:   n.Operation,
-			Initial:     initial,
-			WithIndex:   n.WithIndex,
-			ItemType:    l.checked.Iterations[n],
-			SuccessType: successType,
-			Fails:       fails,
+			ExprBase:  base,
+			Source:    source,
+			Operation: n.Operation,
+			Initial:   initial,
+			WithIndex: n.WithIndex,
+			ItemType:  l.checked.Iterations[n],
 		}
 		if n.Block != nil {
 			if n.Operation == "reduce" {
@@ -1063,24 +923,10 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				}
 			}
 		}
-		if fails.Kind != "" && fails.Kind != types.Never {
-			l.effectBoundaries = l.effectBoundaries[:len(l.effectBoundaries)-1]
-			if boundary, ok := l.currentEffectBoundary(); ok {
-				return l.effectPropagation(n.Span(), result, successType, fails, boundary)
-			}
-			if l.checked.UnhandledEffects[n] {
-				return &ir.UnhandledEffect{ExprBase: base, Value: result, Fails: fails}
-			}
-		}
 		return result
 	case *ast.CallExpression:
 		if semantic, ok := l.checked.EnumCalls[n]; ok {
-			fails := l.checked.ExpressionEffects[n]
-			callBase := base
-			if fails.Kind != "" && fails.Kind != types.Never {
-				callBase = ir.NewExprBase(n.Span(), resultType(effectSuccessType(typ), fails))
-			}
-			result := &ir.EnumCall{ExprBase: callBase, EnumName: semantic.EnumName, Method: semantic.Method, Reference: l.reference(n.Callee), Fails: fails}
+			result := &ir.EnumCall{ExprBase: base, EnumName: semantic.EnumName, Method: semantic.Method, Reference: l.reference(n.Callee)}
 			if semantic.Receiver != nil {
 				result.Receiver = l.expression(semantic.Receiver)
 			} else {
@@ -1100,14 +946,6 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 					result.RawValues = append(result.RawValues, ir.EnumRawValue{Member: name, Raw: semantic.Raw.Values[name].Raw})
 				}
 			}
-			if fails.Kind != "" && fails.Kind != types.Never {
-				if boundary, ok := l.currentEffectBoundary(); ok {
-					return l.effectPropagation(n.Span(), result, typ, fails, boundary)
-				}
-				if l.checked.UnhandledEffects[n] {
-					return &ir.UnhandledEffect{ExprBase: base, Value: result, Fails: fails}
-				}
-			}
 			return result
 		}
 		if variant, ok := l.checked.EnumConstructors[n]; ok {
@@ -1117,12 +955,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			}
 			return result
 		}
-		fails := l.checked.ExpressionEffects[n]
-		callBase := base
-		if fails.Kind != "" && fails.Kind != types.Never {
-			callBase = ir.NewExprBase(n.Span(), resultType(effectSuccessType(typ), fails))
-		}
-		result := &ir.Call{ExprBase: callBase, Callee: l.expression(n.Callee), Fails: fails}
+		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee)}
 		if codec, ok := l.checked.CodecApplications[n]; ok {
 			result.Codec = lowerCodecSchema(codec.Schema)
 		}
@@ -1131,14 +964,6 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		if n.Block != nil {
 			result.Block = l.expression(n.Block).(*ir.Block)
-		}
-		if fails.Kind != "" && fails.Kind != types.Never {
-			if boundary, ok := l.currentEffectBoundary(); ok {
-				return l.effectPropagation(n.Span(), result, typ, fails, boundary)
-			}
-			if l.checked.UnhandledEffects[n] {
-				return &ir.UnhandledEffect{ExprBase: base, Value: result, Fails: fails}
-			}
 		}
 		return result
 	case *ast.MemberExpression:
@@ -1155,20 +980,8 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		for _, alternative := range l.checked.UnionMemberAccesses[n] {
 			member.UnionAlternatives = append(member.UnionAlternatives, ir.UnionMemberAlternative{Type: alternative.Alternative, MemberType: alternative.Member})
 		}
-		fails := l.checked.ExpressionEffects[n]
-		if fails.Kind != "" && fails.Kind != types.Never {
-			raw := &ir.Call{
-				ExprBase: ir.NewExprBase(n.Span(), resultType(effectSuccessType(typ), fails)),
-				Callee:   member,
-				Fails:    fails,
-			}
-			if boundary, ok := l.currentEffectBoundary(); ok {
-				return l.effectPropagation(n.Span(), raw, typ, fails, boundary)
-			}
-			if l.checked.UnhandledEffects[n] {
-				return &ir.UnhandledEffect{ExprBase: base, Value: raw, Fails: fails}
-			}
-			return raw
+		if reference != nil && strings.HasPrefix(reference.Intrinsic, "trb.orm.association.value.") {
+			return &ir.Call{ExprBase: base, Callee: member}
 		}
 		return member
 	case *ast.GenericExpression:
@@ -1372,14 +1185,7 @@ func referenceFromBinding(binding *resolver.Binding) *ir.Reference {
 	return result
 }
 
-func (l *lowerer) currentEffectBoundary() (effectBoundary, bool) {
-	if len(l.effectBoundaries) == 0 {
-		return effectBoundary{}, false
-	}
-	return l.effectBoundaries[len(l.effectBoundaries)-1], true
-}
-
-func effectSuccessType(typ types.Type) types.Type {
+func resultSuccessType(typ types.Type) types.Type {
 	if typ.Kind == types.Void {
 		return types.FromName("Unit")
 	}
@@ -1400,18 +1206,7 @@ func (l *lowerer) resultPattern(span token.Span, result types.Type, member strin
 	return &ir.Member{ExprBase: ir.NewExprBase(span, result), Receiver: receiver, Name: member, Namespace: true, Reference: reference}
 }
 
-func (l *lowerer) resultSuccess(span token.Span, boundary effectBoundary, value ir.Expression) ir.Expression {
-	return &ir.EnumConstruct{
-		ExprBase:      ir.NewExprBase(span, boundary.result),
-		EnumName:      "Result",
-		Member:        "Ok",
-		TypeArguments: []types.Type{boundary.success, boundary.fails},
-		Arguments:     []ir.Expression{value},
-		Reference:     resultReference(),
-	}
-}
-
-func (l *lowerer) resultFailure(span token.Span, boundary effectBoundary, value ir.Expression) ir.Expression {
+func (l *lowerer) resultFailure(span token.Span, boundary resultBoundary, value ir.Expression) ir.Expression {
 	return &ir.EnumConstruct{
 		ExprBase:      ir.NewExprBase(span, boundary.result),
 		EnumName:      "Result",
@@ -1422,26 +1217,26 @@ func (l *lowerer) resultFailure(span token.Span, boundary effectBoundary, value 
 	}
 }
 
-func (l *lowerer) effectPropagation(span token.Span, value ir.Expression, success, failure types.Type, boundary effectBoundary) ir.Expression {
+func (l *lowerer) resultPropagation(span token.Span, value ir.Expression, success, failure types.Type, boundary resultBoundary) ir.Expression {
 	l.temporary++
 	suffix := strconv.Itoa(l.temporary)
 	valueName := "__trbEffectValue" + suffix
 	errorName := "__trbEffectError" + suffix
-	rawResult := resultType(effectSuccessType(success), failure)
+	rawResult := resultType(resultSuccessType(success), failure)
 
-	valueIdentifier := &ir.Identifier{ExprBase: ir.NewExprBase(span, effectSuccessType(success)), Name: valueName, Lexical: true, Generated: true}
+	valueIdentifier := &ir.Identifier{ExprBase: ir.NewExprBase(span, resultSuccessType(success)), Name: valueName, Lexical: true, Generated: true}
 	errorIdentifier := &ir.Identifier{ExprBase: ir.NewExprBase(span, failure), Name: errorName, Lexical: true, Generated: true}
 	returnFailure := l.resultFailure(span, boundary, assignableConversion(span, errorIdentifier, boundary.fails))
 
 	return &ir.Case{
-		ExprBase: ir.NewExprBase(span, effectSuccessType(success)),
+		ExprBase: ir.NewExprBase(span, resultSuccessType(success)),
 		Value:    value,
 		Branches: []ir.CaseBranch{
 			{
 				Value:       l.resultPattern(span, rawResult, "Ok"),
 				EnumName:    "Result",
 				Member:      "Ok",
-				Bindings:    []ir.CaseBinding{{Name: valueName, Field: "value", Type: effectSuccessType(success), Generated: true}},
+				Bindings:    []ir.CaseBinding{{Name: valueName, Field: "value", Type: resultSuccessType(success), Generated: true}},
 				PayloadEnum: true,
 				Result:      valueIdentifier,
 			},
@@ -1468,9 +1263,6 @@ func assignableConversion(span token.Span, value ir.Expression, target types.Typ
 	switch {
 	case target.Kind == types.Iterable && source.Kind == types.Range:
 		kind = ir.RangeToIterableConversion
-	case target.Kind == types.Function && source.Kind == types.Function &&
-		types.FunctionFailure(target).Kind != types.Never && types.FunctionFailure(source).Kind == types.Never:
-		kind = ir.PureFunctionToFallibleConversion
 	case target.Nullable && !source.Nullable && source.Kind != types.Nil:
 		kind = ir.NonNullableToNullableConversion
 	case target.Kind == types.Union && source.Kind == types.Union &&
@@ -1525,12 +1317,12 @@ func (l *lowerer) resultTryValue(node *ast.TryExpression, value ir.Expression) i
 	// not appear in a generated target-language type annotation.
 	l.requireGeneratedType(semantic.SuccessType)
 	l.requireGeneratedType(semantic.ReturnType)
-	boundary := effectBoundary{
+	boundary := resultBoundary{
 		success: semantic.ReturnSuccessType,
 		fails:   semantic.ReturnErrorType,
 		result:  semantic.ReturnType,
 	}
-	return l.effectPropagation(node.Span(), value, semantic.SuccessType, semantic.ErrorType, boundary)
+	return l.resultPropagation(node.Span(), value, semantic.SuccessType, semantic.ErrorType, boundary)
 }
 
 func (l *lowerer) resultCatch(node *ast.CatchExpression) ir.Expression {
@@ -1613,11 +1405,7 @@ func lowerType(ref ast.TypeRef) types.Type {
 		for index, parameter := range ref.FunctionParameters {
 			parameters[index] = lowerType(parameter)
 		}
-		failure := types.Type{Kind: types.Never, Name: "Never"}
-		if ref.FunctionFails != nil {
-			failure = lowerType(*ref.FunctionFails)
-		}
-		result := types.FunctionWithEffect(parameters, lowerType(*ref.FunctionReturn), failure)
+		result := types.FunctionOf(parameters, lowerType(*ref.FunctionReturn))
 		result.Nullable = ref.Nullable
 		return result
 	}
@@ -1630,11 +1418,4 @@ func lowerType(ref ast.TypeRef) types.Type {
 		t = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{t}, Nullable: ref.Nullable}
 	}
 	return t
-}
-
-func lowerFailureType(ref ast.TypeRef) types.Type {
-	if ref.Empty() {
-		return types.Type{Kind: types.Never, Name: "Never"}
-	}
-	return lowerType(ref)
 }

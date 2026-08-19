@@ -74,23 +74,21 @@ func TestFunctionTypesAreInvariant(t *testing.T) {
 	}
 }
 
-func TestFunctionEffectsAcceptPureImplementationsButNotTheReverse(t *testing.T) {
+func TestResultReturningFunctionsUseOrdinaryFunctionTypes(t *testing.T) {
 	integer := FromName("Integer")
 	appError := FromName("AppError")
 	pure := FunctionOf(nil, integer)
-	fallible := FunctionWithEffect(nil, integer, appError)
+	result := Type{Kind: Named, Name: "Result", Args: []Type{integer, appError}}
+	resultReturning := FunctionOf(nil, result)
 
-	if fallible.String() != "() -> Integer fails AppError" {
-		t.Fatalf("function effect string=%s", fallible)
+	if resultReturning.String() != "() -> Result<Integer, AppError>" {
+		t.Fatalf("Result function type string=%s", resultReturning)
 	}
-	if !Assignable(fallible, pure) {
-		t.Fatal("a pure function must satisfy a compatible fallible callback")
+	if Assignable(resultReturning, pure) || Assignable(pure, resultReturning) {
+		t.Fatal("Result and non-Result return types must remain distinct")
 	}
-	if Assignable(pure, fallible) {
-		t.Fatal("a fallible function must not satisfy a pure callback")
-	}
-	if Equivalent(fallible, pure) {
-		t.Fatal("function effects are part of semantic type identity")
+	if Equivalent(resultReturning, pure) {
+		t.Fatal("ordinary function return types are part of semantic identity")
 	}
 }
 
