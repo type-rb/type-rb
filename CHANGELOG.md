@@ -2,6 +2,18 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.3 - 2026-08-20
+
+### Tooling
+
+- Go to Definition treats the complete path in a project import as one link
+  to its resolved TypeRB source. Project auto-imports omit a redundant
+  terminal `/index` while retaining it when the shorter path would select a
+  different module. ([#358](https://github.com/type-rb/type-rb/pull/358))
+- Parenthesized integer Range literals such as `(1..10)` now offer `to_a()`
+  through member completion in editors and the REPL.
+  ([#357](https://github.com/type-rb/type-rb/pull/357))
+
 ## 0.3.2 - 2026-08-19
 
 ### Tooling

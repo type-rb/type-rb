@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-08-20
+
+- Require TypeRB 0.3.3 and navigate from a complete project-import path to its
+  resolved source file.
+- Insert unambiguous directory-index imports without a redundant terminal
+  `/index`, and offer `to_a()` completion for parenthesized integer Range
+  literals.
+
 ## 0.3.2 - 2026-08-19
 
 - Enable the breakpoint gutter for TypeRB source files and verify that
