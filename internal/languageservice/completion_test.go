@@ -497,6 +497,7 @@ func TestProjectImportCandidatesOmitAmbiguousAndSameModuleNames(t *testing.T) {
 		{ModulePath: "app/main"},
 		{ModulePath: "models/user", Statements: []ir.Statement{&ir.Record{Name: "User"}, &ir.Record{Name: "Unique"}}},
 		{ModulePath: "admin/user", Statements: []ir.Statement{&ir.Record{Name: "User"}}},
+		{ModulePath: "shared/ui/DataTable/index", Statements: []ir.Statement{&ir.Method{Name: "DataTable"}}},
 	}
 	project := languageservice.BuildProjectImportCandidates(programs)
 	candidates := project.ForModule("app/main")
@@ -509,6 +510,10 @@ func TestProjectImportCandidatesOmitAmbiguousAndSameModuleNames(t *testing.T) {
 	if !ok || item.AdditionalEdits[0].NewText != "import { Unique } from models/user\n" {
 		t.Fatalf("Unique completion=%#v, ok=%v", item, ok)
 	}
+	item, ok = findCompletion(service.Complete("DataT", 5), "DataTable")
+	if !ok || item.AdditionalEdits[0].NewText != "import { DataTable } from shared/ui/DataTable\n" {
+		t.Fatalf("index-module completion=%#v, ok=%v", item, ok)
+	}
 
 	service.SetCandidates(project.ForModule("models/user"))
 	if _, ok := findCompletion(service.Complete("Uni", 3), "Unique"); ok {
@@ -517,6 +522,30 @@ func TestProjectImportCandidatesOmitAmbiguousAndSameModuleNames(t *testing.T) {
 	item, ok = findCompletion(service.Complete("Us", 2), "User")
 	if !ok || len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0].NewText != "import { User } from admin/user\n" {
 		t.Fatalf("external User completion after excluding current module=%#v, ok=%v", item, ok)
+	}
+
+	service.SetCandidates(project.ForModule("shared/ui/DataTable/index"))
+	if _, ok := findCompletion(service.Complete("DataT", 5), "DataTable"); ok {
+		t.Fatal("shortened index-module import candidate included its own declaration")
+	}
+}
+
+func TestProjectImportCandidatesKeepIndexWhenShortPathNamesAnotherModule(t *testing.T) {
+	programs := []*ir.Program{
+		{ModulePath: "app/main"},
+		{ModulePath: "shared/ui/DataTable", Statements: []ir.Statement{&ir.Method{Name: "DirectDataTable"}}},
+		{ModulePath: "shared/ui/DataTable/index", Statements: []ir.Statement{&ir.Method{Name: "IndexedDataTable"}}},
+	}
+	service := languageservice.New("typescript")
+	service.SetCandidates(languageservice.BuildProjectImportCandidates(programs).ForModule("app/main"))
+
+	direct, ok := findCompletion(service.Complete("Direct", len("Direct")), "DirectDataTable")
+	if !ok || direct.AdditionalEdits[0].NewText != "import { DirectDataTable } from shared/ui/DataTable\n" {
+		t.Fatalf("direct-module completion=%#v, ok=%v", direct, ok)
+	}
+	indexed, ok := findCompletion(service.Complete("Indexed", len("Indexed")), "IndexedDataTable")
+	if !ok || indexed.AdditionalEdits[0].NewText != "import { IndexedDataTable } from shared/ui/DataTable/index\n" {
+		t.Fatalf("ambiguous index-module completion=%#v, ok=%v", indexed, ok)
 	}
 }
 

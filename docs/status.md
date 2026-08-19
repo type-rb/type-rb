@@ -343,7 +343,10 @@ at the adapter boundary; the compiler and formatter continue to use complete
 UTF-8 source snapshots and offsets. The preview Visual Studio Code extension is
 a published thin client over this boundary. Definition, reference, document
 highlight, and rename queries follow stable source declaration identities
-across project imports, receiver types, and common lexical bindings.
+across project imports, receiver types, and common lexical bindings. Go to
+Definition treats a complete project-import path as one module reference and
+opens its resolved TypeRB source; project auto-imports omit a redundant
+terminal `/index`.
 Association model references supplied by declarative package providers also
 participate in completion, hover, definition, references, and rename without
 adding ordinary source imports. Document

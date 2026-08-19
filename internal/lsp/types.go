@@ -144,6 +144,13 @@ type location struct {
 	Range rangeValue `json:"range"`
 }
 
+type locationLink struct {
+	OriginSelectionRange rangeValue `json:"originSelectionRange"`
+	TargetURI            string     `json:"targetUri"`
+	TargetRange          rangeValue `json:"targetRange"`
+	TargetSelectionRange rangeValue `json:"targetSelectionRange"`
+}
+
 type documentHighlight struct {
 	Range rangeValue `json:"range"`
 	Kind  int        `json:"kind,omitempty"`

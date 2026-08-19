@@ -14,8 +14,9 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Auto-imports for unambiguous project declarations and compiler-owned
   standard types such as `Result`
 - Hover information and signature help
-- Go to definition and implementation, references, symbol rename, and
-  project-wide symbol search
+- Go to definition from declarations, uses, and complete project-import paths;
+  implementation navigation, references, symbol rename, and project-wide
+  symbol search
 - Independent language servers for nested projects in monorepo workspaces
 - Checked symbol occurrence highlighting within the current document
 - Syntax-aware expanding and shrinking selections

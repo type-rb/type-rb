@@ -55,9 +55,10 @@ func (*BlankStatement) statementNode() {}
 
 type ImportStatement struct {
 	Base
-	Path    string
-	Symbols []string
-	Alias   string
+	Path     string
+	PathSpan token.Span
+	Symbols  []string
+	Alias    string
 }
 
 func (*ImportStatement) statementNode() {}

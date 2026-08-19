@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/token"
@@ -116,6 +117,9 @@ func Definition(request SemanticRequest) (DefinitionInfo, bool) {
 	if request.Cursor < 0 || request.Cursor > len(request.Source) {
 		return DefinitionInfo{}, false
 	}
+	if definition, found := importModuleDefinition(request); found {
+		return definition, true
+	}
 	tokens, _ := lexer.Lex([]byte(request.Source))
 	item, ok := semanticTokenAt(tokens, request.Cursor)
 	if ok && item.Kind == token.JSXLiteral {
@@ -153,6 +157,23 @@ func Definition(request SemanticRequest) (DefinitionInfo, bool) {
 	}
 	if definition, found := enclosingTypeMemberDefinition(request.Context, request.Path, item); found {
 		return definitionInfo(definition), true
+	}
+	return DefinitionInfo{}, false
+}
+
+func importModuleDefinition(request SemanticRequest) (DefinitionInfo, bool) {
+	program, _ := parser.Parse([]byte(request.Source))
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ast.ImportStatement)
+		if !ok || imported.PathSpan.Start.Offset > request.Cursor || request.Cursor > imported.PathSpan.End.Offset {
+			continue
+		}
+		targetPath := request.Context.ModulePaths[imported.Path]
+		if targetPath == "" {
+			return DefinitionInfo{}, false
+		}
+		origin := OffsetRange{Start: imported.PathSpan.Start.Offset, End: imported.PathSpan.End.Offset}
+		return DefinitionInfo{Path: targetPath, Range: OffsetRange{}, Origin: &origin}, true
 	}
 	return DefinitionInfo{}, false
 }
