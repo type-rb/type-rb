@@ -23,6 +23,7 @@ test("registers the canonical TypeRB language, grammar, and debugger", async () 
 	);
 	assert.equal(manifest.contributes.debuggers[0].type, "typerb");
 	assert.deepEqual(manifest.contributes.debuggers[0].languages, ["trb"]);
+	assert.deepEqual(manifest.contributes.breakpoints, [{ language: "trb" }]);
 	assert.equal(manifest.contributes.configuration.properties["typerb.standalone.mode"].default, "go");
 	assert.deepEqual(manifest.contributes.configuration.properties["typerb.standalone.mode"].enum, ["go", "ruby", "typescript"]);
 	assert.equal(manifest.contributes.configuration.properties["typerb.standalone.typescript.runtime"].default, "node");
