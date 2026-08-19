@@ -267,7 +267,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Array.from(" + arguments[0] + ").reverse().join(\"\")"
 	case "trb.std.strings.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbValue = Array.from(" + arguments[0] + "); const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValue.length) { return " + indexLookupError("__trbIndex", "__trbValue.length", "String index is out of bounds") + "; } return " + filesystemOK("__trbValue[__trbIndex]!") + "; })()"
+		return "((): " + resultType + " => { const __trbValue = Array.from(" + arguments[0] + "); const __trbRequested = " + arguments[1] + "; let __trbIndex = __trbRequested; if (__trbIndex < 0) __trbIndex += __trbValue.length; if (__trbIndex < 0 || __trbIndex >= __trbValue.length) { return " + indexLookupError("__trbRequested", "__trbValue.length", "String index is out of bounds") + "; } return " + filesystemOK("__trbValue[__trbIndex]!") + "; })()"
 	case "trb.std.strings.slice", "trb.std.strings.try_slice":
 		safe := name == "trb.std.strings.try_slice"
 		returnType := "string"
@@ -381,7 +381,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".length === 0"
 	case "trb.std.arrays.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbIndex = " + arguments[1] + "; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { return " + indexLookupError("__trbIndex", "__trbValues.length", "Array index is out of bounds") + "; } return " + filesystemOK("__trbValues[__trbIndex]!") + "; })()"
+		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbRequested = " + arguments[1] + "; let __trbIndex = __trbRequested; if (__trbIndex < 0) __trbIndex += __trbValues.length; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { return " + indexLookupError("__trbRequested", "__trbValues.length", "Array index is out of bounds") + "; } return " + filesystemOK("__trbValues[__trbIndex]!") + "; })()"
 	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
 		safe := name == "trb.std.arrays.try_slice"
 		returnType := g.tsType(call.ExprType())
@@ -401,6 +401,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "[..." + arguments[0] + "]"
 	case "trb.std.arrays.contains":
 		return "(" + arguments[0] + ".indexOf(" + arguments[1] + ") >= 0)"
+	case "trb.std.arrays.index":
+		return "((index: number): number | null => index < 0 ? null : index)(" + arguments[0] + ".indexOf(" + arguments[1] + "))"
 	case "trb.std.arrays.count":
 		return "((values: Array<unknown>, target: unknown): number => { let count = 0; for (const value of values) { if (value === target) { count++; } } return count; })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.uniq":
@@ -422,6 +424,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.sort", "trb.std.arrays.sort_descending":
 		comparison := tsPortableSortComparison("left.value", "right.value", call.ExprType().Args[0], name == "trb.std.arrays.sort_descending")
 		return arguments[0] + ".map((value, index) => ({ value, index })).sort((left, right) => { const compared = " + comparison + "; return compared === 0 ? left.index - right.index : compared; }).map((entry) => entry.value)"
+	case "trb.std.ranges.to_array":
+		return "((bounds: [number, number, boolean]): Array<number> => { const [start, end, exclusive] = bounds; return Array.from({ length: Math.max(0, end - start + (exclusive ? 0 : 1)) }, (_, index) => start + index); })(" + arguments[0] + ")"
 	case "trb.std.hashes.length":
 		return "Object.keys(" + arguments[0] + ").length"
 	case "trb.std.hashes.empty":

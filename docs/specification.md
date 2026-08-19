@@ -276,12 +276,15 @@ switches.
 
 #### Indexes, ranges, and subsequences
 
-- Array and String single-element access uses `value[index]`. The index is a
-  nonnegative, zero-based Integer and a missing element fails at runtime.
-  String indexing counts Unicode code points rather than encoded bytes.
+- Array and String single-element access uses `value[index]`. Nonnegative
+  indexes are zero-based from the start, while negative indexes count from the
+  end (`-1` is the last element). An index that remains outside the collection
+  after this normalization fails at runtime. String indexing counts Unicode
+  code points rather than encoded bytes.
 - The safe single-element form is `value.try_fetch(index)`, returning a
-  structured `IndexLookupError`. Array and String do not provide a second
-  strict `fetch` spelling.
+  structured `IndexLookupError` with the originally requested index. It uses
+  the same negative-index normalization. Array and String do not provide a
+  second strict `fetch` spelling.
 - Subsequence access uses `value.slice(range)`. `value[range]`,
   `slice(start, length)`, and a one-argument tail slice are not part of the
   initial language. `try_slice(range)` is the safe counterpart and returns a
@@ -293,6 +296,10 @@ switches.
 - Range values retain their bounds and inclusivity through variables and
   function boundaries. Converting `Range<Integer>` to `Iterable<Integer>`
   enumerates the represented values without changing slice semantics.
+  `range.to_a()` materializes those values as a new `Array<Integer>`; a
+  reversed Range materializes an empty Array.
+- Array `index(value)` returns the zero-based position of the first value that
+  is equal under portable `==`, or `nil` when no value matches.
 - String `index(substring)` and `rindex(substring)` search literal substrings
   and return a code-point position as `Integer?`. They return `nil` when the
   substring is absent. An empty substring is found at position zero for
@@ -533,6 +540,8 @@ equality is defined for the element type. `concat(other)` returns a new Array
 with the receiver's elements followed by `other`; neither input is mutated.
 Unlike Ruby's destructive `Array#concat`, TypeRB `concat()` follows the
 language's non-destructive collection default and does not require `mut`.
+`index(value)` uses the same equality contract and returns the first matching
+position as `Integer?` without a block.
 
 ### 3.12 Hashes
 

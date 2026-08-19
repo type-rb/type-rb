@@ -223,7 +223,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.strings.reverse":
 		return arguments[0] + ".each_char.to_a.reverse.join"
 	case "trb.std.strings.try_fetch":
-		return "->(value, index) { characters = value.each_char.to_a; index < 0 || index >= characters.length ? " + indexLookupError("index", "characters.length", "String index is out of bounds") + " : Result::Ok.new(characters.fetch(index)) }.call(" + arguments[0] + ", " + arguments[1] + ")"
+		return "->(value, requested) { characters = value.each_char.to_a; index = requested < 0 ? requested + characters.length : requested; index < 0 || index >= characters.length ? " + indexLookupError("requested", "characters.length", "String index is out of bounds") + " : Result::Ok.new(characters.fetch(index)) }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.strings.slice", "trb.std.strings.try_slice":
 		safe := name == "trb.std.strings.try_slice"
 		invalid := "raise IndexError, \"String slice range is out of bounds\""
@@ -331,7 +331,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.empty":
 		return arguments[0] + ".empty?"
 	case "trb.std.arrays.try_fetch":
-		return "->(values, index) { index < 0 || index >= values.length ? " + indexLookupError("index", "values.length", "Array index is out of bounds") + " : Result::Ok.new(values.fetch(index)) }.call(" + arguments[0] + ", " + arguments[1] + ")"
+		return "->(values, requested) { index = requested < 0 ? requested + values.length : requested; index < 0 || index >= values.length ? " + indexLookupError("requested", "values.length", "Array index is out of bounds") + " : Result::Ok.new(values.fetch(index)) }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
 		safe := name == "trb.std.arrays.try_slice"
 		invalid := "raise IndexError, \"Array slice range is out of bounds\""
@@ -349,6 +349,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return arguments[0] + ".dup"
 	case "trb.std.arrays.contains":
 		return arguments[0] + ".include?(" + arguments[1] + ")"
+	case "trb.std.arrays.index":
+		return arguments[0] + ".index(" + arguments[1] + ")"
 	case "trb.std.arrays.count":
 		return arguments[0] + ".count(" + arguments[1] + ")"
 	case "trb.std.arrays.uniq":
@@ -370,6 +372,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.sort", "trb.std.arrays.sort_descending":
 		comparison := rubyPortableSortComparison("left[0]", "right[0]", call.ExprType().Args[0], name == "trb.std.arrays.sort_descending")
 		return "->(values) { values.each_with_index.map { |value, index| [value, index] }.sort { |left, right| compared = " + comparison + "; compared.zero? ? left[1] <=> right[1] : compared }.map(&:first) }.call(" + arguments[0] + ")"
+	case "trb.std.ranges.to_array":
+		return "(" + arguments[0] + ").to_a"
 	case "trb.std.hashes.length":
 		return arguments[0] + ".length"
 	case "trb.std.hashes.empty":

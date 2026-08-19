@@ -906,6 +906,17 @@ end
 				},
 				Return: booleanType,
 			},
+			"index": {
+				Name:           "index",
+				Intrinsic:      "trb.std.arrays.index",
+				TypeParameters: []string{"T"},
+				EqualityTypes:  []types.Type{typeT},
+				Parameters: []Parameter{
+					{Name: "values", Type: arrayOf(typeT)},
+					{Name: "value", Type: typeT},
+				},
+				Return: nullable(integerType),
+			},
 			"count": {
 				Name:           "count",
 				Intrinsic:      "trb.std.arrays.count",
@@ -992,6 +1003,13 @@ end
 				Parameters:     []Parameter{{Name: "values", Type: arrayOf(typeT)}},
 				Return:         arrayOf(typeT),
 			},
+		},
+	},
+	"trb/std/ranges": {
+		Path: "trb/std/ranges",
+		Kind: Portable,
+		Symbols: map[string]Symbol{
+			"to_array": unary("to_array", "trb.std.ranges.to_array", rangeOf(integerType), arrayOf(integerType)),
 		},
 	},
 	"trb/std/hashes": {
@@ -1276,6 +1294,7 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"last":            {PackagePath: "trb/std/arrays", Symbol: "last"},
 		"dup":             {PackagePath: "trb/std/arrays", Symbol: "copy"},
 		"include?":        {PackagePath: "trb/std/arrays", Symbol: "contains"},
+		"index":           {PackagePath: "trb/std/arrays", Symbol: "index"},
 		"count":           {PackagePath: "trb/std/arrays", Symbol: "count"},
 		"uniq":            {PackagePath: "trb/std/arrays", Symbol: "uniq"},
 		"concat":          {PackagePath: "trb/std/arrays", Symbol: "concat"},
@@ -1287,6 +1306,9 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"reverse":         {PackagePath: "trb/std/arrays", Symbol: "reverse"},
 		"sort":            {PackagePath: "trb/std/arrays", Symbol: "sort"},
 		"sort_descending": {PackagePath: "trb/std/arrays", Symbol: "sort_descending"},
+	},
+	types.Range: {
+		"to_a": {PackagePath: "trb/std/ranges", Symbol: "to_array"},
 	},
 	types.Hash: {
 		"size":      {PackagePath: "trb/std/hashes", Symbol: "length"},

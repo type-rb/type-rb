@@ -2,6 +2,19 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.1 - 2026-08-19
+
+### Language and collections
+
+- Array and Unicode String element access now accepts negative indexes counted
+  from the end, including safe `try_fetch` lookup and mutable Array element
+  assignment. `-1` names the last element, and out-of-bounds errors retain the
+  originally requested index.
+- Arrays add `index(value)`, which returns the first matching position as
+  `Integer?` using portable equality. Integer Ranges add `to_a()`, preserving
+  inclusive and exclusive ends while producing an empty Array for reversed
+  ranges. ([#350](https://github.com/type-rb/type-rb/pull/350))
+
 ## 0.3.0 - 2026-08-19
 
 ### Language

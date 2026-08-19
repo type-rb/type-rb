@@ -6,6 +6,12 @@
   standalone Go debugging stops on the selected `.trb` line.
 - Navigate from JSX component uses directly to imported TypeRB declarations.
 
+## 0.3.1 - 2026-08-19
+
+- Require TypeRB 0.3.1 and expose its compiler-backed diagnostics,
+  completion, and hover support for negative Array and String indexes,
+  `Array#index(value)`, and `Range<Integer>#to_a()`.
+
 ## 0.3.0 - 2026-08-19
 
 - Require TypeRB 0.3.0 and support its Result-only control flow with prefix
