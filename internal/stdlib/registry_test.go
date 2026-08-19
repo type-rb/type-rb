@@ -308,7 +308,7 @@ func TestArrayMutationReceiversUsePackageMutabilityContracts(t *testing.T) {
 
 func TestArrayValueQueryReceiversPreserveEqualityRequirements(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
-	for _, name := range []string{"include?", "count", "uniq"} {
+	for _, name := range []string{"include?", "index", "count", "uniq"} {
 		_, method, ok := LookupReceiverMethod(arrayType, name)
 		if !ok {
 			t.Fatalf("Array#%s is missing", name)
@@ -319,6 +319,9 @@ func TestArrayValueQueryReceiversPreserveEqualityRequirements(t *testing.T) {
 		if name == "uniq" && (len(method.Parameters) != 0 || method.Return.String() != "Array<String>" || method.ReceiverMutable) {
 			t.Fatalf("Array#uniq has the wrong non-destructive contract: %#v", method)
 		}
+		if name == "index" && method.Return.String() != "Integer?" {
+			t.Fatalf("Array#index return=%s, want Integer?", method.Return)
+		}
 		if len(method.EqualityTypes) != 1 || method.EqualityTypes[0].String() != "String" {
 			t.Fatalf("Array#%s equality requirement was not specialized: %#v", name, method.EqualityTypes)
 		}
@@ -326,6 +329,17 @@ func TestArrayValueQueryReceiversPreserveEqualityRequirements(t *testing.T) {
 	_, concat, ok := LookupReceiverMethod(arrayType, "concat")
 	if !ok || concat.ReceiverMutable || concat.Return.String() != "Array<String>" || len(concat.Parameters) != 1 || concat.Parameters[0].Type.String() != "Array<String>" {
 		t.Fatalf("Array#concat has the wrong non-destructive contract: %#v", concat)
+	}
+}
+
+func TestIntegerRangeCanMaterializeAnArray(t *testing.T) {
+	rangeType := types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}
+	definition, method, ok := LookupReceiverMethod(rangeType, "to_a")
+	if !ok {
+		t.Fatal("Range<Integer>#to_a is missing")
+	}
+	if definition.Path != "trb/std/ranges" || len(method.Parameters) != 0 || method.Return.String() != "Array<Integer>" {
+		t.Fatalf("Range<Integer>#to_a contract=%#v from %#v", method, definition)
 	}
 }
 

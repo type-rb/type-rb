@@ -1368,10 +1368,10 @@ func (g *generator) expr(expression ir.Expression) string {
 			return "((values: " + g.tsType(hashType) + ", key: " + g.tsType(hashType.Args[0]) + "): " + g.tsType(hashType.Args[1]) + " => { if (!Object.prototype.hasOwnProperty.call(values, key)) { throw new Error(\"Hash key is missing\"); } return values[key]; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		if n.Receiver.ExprType().Kind == types.String {
-			return "((value: string, index: number): string => { const characters = Array.from(value); if (index < 0 || index >= characters.length) throw new RangeError(\"String index is out of bounds\"); return characters[index]!; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+			return "((value: string, index: number): string => { const characters = Array.from(value); if (index < 0) index += characters.length; if (index < 0 || index >= characters.length) throw new RangeError(\"String index is out of bounds\"); return characters[index]!; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		if n.Receiver.ExprType().Kind == types.Array {
-			return "((values: " + g.tsType(n.Receiver.ExprType()) + ", index: number): " + g.tsType(n.ExprType()) + " => { if (index < 0 || index >= values.length) throw new RangeError(\"Array index is out of bounds\"); return values[index]!; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+			return "((values: " + g.tsType(n.Receiver.ExprType()) + ", index: number): " + g.tsType(n.ExprType()) + " => { if (index < 0) index += values.length; if (index < 0 || index >= values.length) throw new RangeError(\"Array index is out of bounds\"); return values[index]!; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
@@ -1809,6 +1809,11 @@ func tsPortableSortComparison(left, right string, typ types.Type, descending boo
 
 func (g *generator) assignmentTarget(expression ir.Expression) string {
 	if index, ok := expression.(*ir.Index); ok {
+		if index.Receiver.ExprType().Kind == types.Array {
+			receiver := g.expr(index.Receiver)
+			position := "((index: number, size: number): number => { if (index < 0) index += size; if (index < 0 || index >= size) throw new RangeError(\"Array index is out of bounds\"); return index; })(" + g.expr(index.Index) + ", " + receiver + ".length)"
+			return receiver + "[" + position + "]"
+		}
 		return g.expr(index.Receiver) + "[" + g.expr(index.Index) + "]"
 	}
 	return g.expr(expression)

@@ -1769,6 +1769,71 @@ Result::Err(error: SliceRangeError(start: 1, finish: 3, exclusive: true, size: 2
 	}
 }
 
+func TestReplEvaluatesNegativeIndexesArrayIndexAndRangeToArrayAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/repl-index-range-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		input := `mut values := [10, 20, 30]
+values[-1]
+values[-2]
+values[-3]
+values[-1] = 40
+values
+values.try_fetch(-3)
+values.try_fetch(-4)
+values.index(20)
+values.index(99)
+"A😀"[-1]
+"A😀".try_fetch(-2)
+"A😀".try_fetch(-3)
+(1..3).to_a()
+(1...3).to_a()
+(3..1).to_a()
+(2..2).to_a()
+(2...2).to_a()
+:quit
+`
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := `[10, 20, 30] : Array<Integer>
+30 : Integer
+20 : Integer
+10 : Integer
+40 : Integer
+[10, 20, 40] : Array<Integer>
+Result::Ok(value: 10) : Result<Integer, IndexLookupError>
+Result::Err(error: IndexLookupError(index: -4, size: 3, message: "Array index is out of bounds")) : Result<Integer, IndexLookupError>
+1 : Integer?
+nil : Integer?
+"😀" : String
+Result::Ok(value: "A") : Result<String, IndexLookupError>
+Result::Err(error: IndexLookupError(index: -3, size: 2, message: "String index is out of bounds")) : Result<String, IndexLookupError>
+[1, 2, 3] : Array<Integer>
+[1, 2] : Array<Integer>
+[] : Array<Integer>
+[2] : Array<Integer>
+[] : Array<Integer>
+`
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s index/range REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplEvaluatesPortableArraySortingAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -4907,7 +4972,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "true\nok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:12.5\nok:5.0\nerr:invalid Float\nerr:Float is outside the portable range\nok:0.0\n😀\nok:A\nerr:2/2 String index is out of bounds\nerr:-1/2 String index is out of bounds\nA|😀\n😀A\nBRepyT\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
+		want := "true\nok:12\nerr:invalid Integer\nerr:Integer is outside the portable range\nok:12.5\nok:5.0\nerr:invalid Float\nerr:Float is outside the portable range\nok:0.0\n😀\nok:A\nerr:2/2 String index is out of bounds\nok:😀\nA|😀\n😀A\nBRepyT\nok:7\nerr:Array index is out of bounds\nok:Ada\nerr:Hash key is missing\ntrue\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s safe-operation output: want %q, got %q", mode, want, stdout.String())
 		}
@@ -5207,6 +5272,113 @@ end
 		want := "20,30\n20,30\n0\nerror:1:3:2\n😀\n😀B\n😀B\n0\nerror:String slice range is out of bounds\n1\n3\ntrue\n0\n4\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s slice output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
+func TestRunNegativeIndexesArrayIndexAndRangeToArrayAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby index/range run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript index/range run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-index-range-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := `import { Result } from trb/std/result
+import { IndexLookupError } from trb/std/errors
+
+def lookup_text(value: Result<Integer, IndexLookupError>): String
+	case value
+	when Result::Ok(number)
+		return "ok:" + number.to_s()
+	when Result::Err(error)
+		return "error:" + error.index.to_s() + "/" + error.size.to_s()
+	end
+end
+
+def string_lookup_text(value: Result<String, IndexLookupError>): String
+	case value
+	when Result::Ok(text)
+		return "ok:" + text
+	when Result::Err(error)
+		return "error:" + error.index.to_s() + "/" + error.size.to_s()
+	end
+end
+
+def numbers_text(values: Array<Integer>): String
+	texts := values.map do |value|
+		value.to_s()
+	end
+	return texts.join(",")
+end
+
+def main()
+	mut values := [10, 20, 30]
+	puts(values[-1])
+	puts(values[-2])
+	puts(values[-3])
+	values[-1] = 40
+	puts(values[2])
+	puts(lookup_text(values.try_fetch(-3)))
+	puts(lookup_text(values.try_fetch(-4)))
+	position := values.index(20)
+	if position != nil
+		puts(position)
+	end
+	puts(values.index(99) == nil)
+	puts("A😀"[-1])
+	puts(string_lookup_text("A😀".try_fetch(-2)))
+	puts(string_lookup_text("A😀".try_fetch(-3)))
+	puts(numbers_text((1..3).to_a()))
+	puts(numbers_text((1...3).to_a()))
+	puts(numbers_text((3..1).to_a()))
+	puts(numbers_text((2..2).to_a()))
+	puts(numbers_text((2...2).to_a()))
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "30\n20\n10\n40\nok:10\nerror:-4/3\n1\ntrue\n😀\nok:A\nerror:-3/2\n1,2,3\n1,2\n\n2\n\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s index/range output: want %q, got %q; stderr=%s", mode, want, stdout.String(), stderr.String())
+		}
+
+		invalid := "def main()\n\tputs([10, 20, 30][-4])\n\treturn\nend\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(invalid), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout.Reset()
+		stderr.Reset()
+		if status := command.Run([]string{"run", "--config", config.Path}); status == 0 {
+			t.Fatalf("%s accepted an out-of-bounds negative index; stdout=%s", mode, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "Array index is out of bounds") {
+			t.Fatalf("%s out-of-bounds negative index error=%s", mode, stderr.String())
 		}
 	}
 }

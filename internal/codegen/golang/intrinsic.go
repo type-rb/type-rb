@@ -496,7 +496,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "func(value string) string { characters := []rune(value); slices.Reverse(characters); return string(characters) }(" + arguments[0] + ")"
 	case "trb.std.strings.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { value := []rune(" + arguments[0] + "); index := " + arguments[1] + "; if index < 0 || index >= len(value) { return " + indexLookupError("index", "len(value)", "String index is out of bounds") + " }; return " + filesystemOK("string(value[index])") + " }()"
+		return "func() " + resultType + " { value := []rune(" + arguments[0] + "); requested := " + arguments[1] + "; index := requested; if index < 0 { index += len(value) }; if index < 0 || index >= len(value) { return " + indexLookupError("requested", "len(value)", "String index is out of bounds") + " }; return " + filesystemOK("string(value[index])") + " }()"
 	case "trb.std.strings.slice", "trb.std.strings.try_slice":
 		safe := name == "trb.std.strings.try_slice"
 		returnType := "string"
@@ -626,7 +626,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "len(" + arguments[0] + ") == 0"
 	case "trb.std.arrays.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { values := " + arguments[0] + "; index := " + arguments[1] + "; if index < 0 || index >= len(values) { return " + indexLookupError("index", "len(values)", "Array index is out of bounds") + " }; return " + filesystemOK("values[index]") + " }()"
+		return "func() " + resultType + " { values := " + arguments[0] + "; requested := " + arguments[1] + "; index := requested; if index < 0 { index += len(values) }; if index < 0 || index >= len(values) { return " + indexLookupError("requested", "len(values)", "Array index is out of bounds") + " }; return " + filesystemOK("values[index]") + " }()"
 	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
 		g.requireImport("slices", "")
 		safe := name == "trb.std.arrays.try_slice"
@@ -649,6 +649,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.contains":
 		g.requireImport("slices", "")
 		return "slices.Contains(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.arrays.index":
+		valuesType := call.Arguments[0].Value.ExprType()
+		if member, ok := call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Kind == types.Array {
+			valuesType = member.Receiver.ExprType()
+		}
+		valueType := valuesType.Args[0]
+		return "func(values " + g.goType(valuesType) + ", target " + g.goType(valueType) + ") *int { for index, value := range values { if value == target { result := index; return &result } }; return nil }(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.count":
 		return "func() int { values := " + arguments[0] + "; target := " + arguments[1] + "; count := 0; for _, value := range values { if value == target { count++ } }; return count }()"
 	case "trb.std.arrays.uniq":
@@ -680,6 +687,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		comparison := g.portableSortComparison("left", "right", elementType, name == "trb.std.arrays.sort_descending")
 		return "func() " + g.goType(valuesType) + " { values := slices.Clone(" + arguments[0] + "); slices.SortStableFunc(values, func(left, right " + g.goType(elementType) + ") int { return " + comparison + " }); return values }()"
+	case "trb.std.ranges.to_array":
+		return "func(bounds [3]int) []int { start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; values := []int{}; for current := start; current < end; current++ { values = append(values, current) }; if !exclusive && start <= end { values = append(values, end) }; return values }(" + arguments[0] + ")"
 	case "trb.std.hashes.length":
 		return "len(" + arguments[0] + ")"
 	case "trb.std.hashes.empty":

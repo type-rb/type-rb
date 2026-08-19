@@ -52,6 +52,7 @@ decimal := "12.5".to_f()
 safe_decimal := "+.5e1".try_to_f()
 length := "Hello".size()
 character := "A😀"[1]
+last_character := "A😀"[-1]
 safe_character := "A😀".try_fetch(2)
 middle := "A😀BC".slice(1...3)
 safe_middle := "A😀BC".try_slice(1..2)
@@ -105,9 +106,11 @@ infinity. Exponentiation remains the `**` operator.
 
 `String#size`, `[]`, `try_fetch`, `slice`, `try_slice`, `index`, and `rindex`
 operate on Unicode code points rather than encoded bytes. Indexes are
-zero-based and nonnegative. `value[index]` is the sole strict single-element
-form; it raises outside the string, while `try_fetch()` returns
-`Result<String, IndexLookupError>`. `slice(range)` accepts an inclusive `..` or
+zero-based from the start; a negative index counts from the end, with `-1`
+naming the final code point. `value[index]` is the sole strict single-element
+form; it raises when the normalized index is outside the string, while
+`try_fetch()` returns `Result<String, IndexLookupError>` and preserves the
+requested index in an error. `slice(range)` accepts an inclusive `..` or
 exclusive `...` `Range<Integer>` and raises for negative, reversed, or
 out-of-bounds limits. `try_slice()` returns
 `Result<String, SliceRangeError>` instead. An exclusive `size...size` range is
@@ -314,6 +317,7 @@ end
 deduplicated := [3, 1, 3, 2].uniq()
 combined_values := values.concat([4, 5])
 known := values.include?(2)
+position := values.index(2)
 occurrences := arrays.count(values, 2)
 has_even := values.any? do |value|
 	value % 2 == 0
@@ -330,6 +334,8 @@ end
 first_even_index := values.find_index do |value|
 	value % 2 == 0
 end
+inclusive_values := (1..3).to_a()
+exclusive_values := (1...3).to_a()
 
 mut labels: Hash<Integer, String> := {1 => "one"}
 known_label := labels.key?(1)
@@ -347,7 +353,13 @@ Arrays provide size, emptiness, strict `[]`, safe `try_fetch`, `slice`,
 `try_slice`, `first`,
 `last`, shallow `dup`, mutable `push`/`unshift`, mutable strict `pop`/`shift`,
 non-destructive shallow `reverse`, stable non-destructive sorting, value
-membership, and occurrence counting. `Array<String>` also provides `join`.
+membership, first-position lookup with `index(value)`, and occurrence counting.
+`Array<String>` also provides `join`.
+
+`Range<Integer>#to_a()` returns a new Array containing the same sequence that
+Range iteration would visit. Inclusive and exclusive ends are honored; an
+inclusive equal-bound Range contains one value, while exclusive equal-bound
+and reversed Ranges are empty. The package form is `ranges.to_array(range)`.
 
 `sort()` and `sort_descending()` order an Array of `Integer`, `Float`, or
 `String`. `sort_by` and `sort_by_descending` evaluate one non-fallible key
@@ -373,10 +385,11 @@ matches. A nullable element type remains nullable, so finding a stored `nil`
 and finding no element intentionally have the same result.
 
 Value membership is `include?` on a receiver and `arrays.contains` in package
-form. `count(value)` has the same name in both forms. Both use portable `==`
-semantics and are available when the element type is numeric, Boolean, String,
-or a payloadless enum. They do not inherit target-native structural equality
-for Arrays, Hashes, records, or payload-bearing enums.
+form. `index(value)` returns the first matching position as `Integer?`, and
+`count(value)` counts all matches. These operations use portable `==` semantics
+and are available when the element type is numeric, Boolean, String, or a
+payloadless enum. They do not inherit target-native structural equality for
+Arrays, Hashes, records, or payload-bearing enums.
 
 Hashes provide size, emptiness, strict `fetch`/`delete`, safe `try_fetch`, key
 checks, keys, values, shallow `dup`/`merge`, and mutable `update`. `merge`
@@ -390,7 +403,9 @@ unspecified.
 Strict operations fail at runtime for missing keys, invalid indexes, ranges,
 or empty edge removals. Array element access uses `value[index]`; safe fetch
 returns `Result<T, IndexLookupError>` with the requested index and collection
-size. Array subsequences use `slice(range)` and `try_slice(range)` with the same
+size. Nonnegative indexes count from the start and negative indexes count from
+the end, with `-1` naming the last element. Array subsequences use
+`slice(range)` and `try_slice(range)` with the same
 range rules as String. The safe form returns
 `Result<Array<T>, SliceRangeError>` and both forms return a new shallow Array.
 Hash safe fetch returns
@@ -624,6 +639,7 @@ The current portable standard library includes:
 - `trb/std/string_builder`
 - `trb/std/unicode`
 - `trb/std/arrays`
+- `trb/std/ranges`
 - `trb/std/hashes`
 - `trb/std/path`
 - `trb/std/url`

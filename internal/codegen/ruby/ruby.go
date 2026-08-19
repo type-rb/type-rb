@@ -786,10 +786,10 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.expr(n.Receiver) + ".fetch(" + g.expr(n.Index) + ")"
 		}
 		if n.Receiver.ExprType().Kind == types.String {
-			return "->(value, index) { characters = value.each_char.to_a; raise IndexError, \"String index is out of bounds\" if index < 0 || index >= characters.length; characters.fetch(index) }.call(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+			return "->(value, index) { characters = value.each_char.to_a; index += characters.length if index < 0; raise IndexError, \"String index is out of bounds\" if index < 0 || index >= characters.length; characters.fetch(index) }.call(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		if n.Receiver.ExprType().Kind == types.Array {
-			return "->(values, index) { raise IndexError, \"Array index is out of bounds\" if index < 0 || index >= values.length; values.fetch(index) }.call(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+			return "->(values, index) { index += values.length if index < 0; raise IndexError, \"Array index is out of bounds\" if index < 0 || index >= values.length; values.fetch(index) }.call(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	case *ir.NativeExpression:
@@ -999,6 +999,11 @@ func rubyPortableSortComparison(left, right string, typ types.Type, descending b
 
 func (g *generator) assignmentTarget(expression ir.Expression) string {
 	if index, ok := expression.(*ir.Index); ok {
+		if index.Receiver.ExprType().Kind == types.Array {
+			receiver := g.expr(index.Receiver)
+			position := "->(index, size) { index += size if index < 0; raise IndexError, \"Array index is out of bounds\" if index < 0 || index >= size; index }.call(" + g.expr(index.Index) + ", " + receiver + ".length)"
+			return receiver + "[" + position + "]"
+		}
 		return g.expr(index.Receiver) + "[" + g.expr(index.Index) + "]"
 	}
 	return g.expr(expression)

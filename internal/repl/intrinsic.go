@@ -546,8 +546,10 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return Value{}, errors.New("strings.try_fetch expects String and Integer")
 		}
 		characters := []rune(value)
-		if index < 0 || index >= int64(len(characters)) {
-			return e.indexLookupResultErr(typ, index, int64(len(characters)), "String index is out of bounds")
+		requested := index
+		index, valid := normalizedPosition(index, int64(len(characters)))
+		if !valid {
+			return e.indexLookupResultErr(typ, requested, int64(len(characters)), "String index is out of bounds")
 		}
 		result := Value{Type: types.FromName("String"), Data: string(characters[index])}
 		return e.filesystemOK(typ, result)
@@ -958,8 +960,10 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if !ok || !integer {
 			return Value{}, errors.New("arrays.try_fetch expects Array and Integer")
 		}
-		if index < 0 || index >= int64(len(array.Items)) {
-			return e.indexLookupResultErr(typ, index, int64(len(array.Items)), "Array index is out of bounds")
+		requested := index
+		index, valid := normalizedPosition(index, int64(len(array.Items)))
+		if !valid {
+			return e.indexLookupResultErr(typ, requested, int64(len(array.Items)), "Array index is out of bounds")
 		}
 		result := array.Items[index]
 		return e.filesystemOK(typ, result)
@@ -1017,19 +1021,25 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		}
 		items := append([]Value(nil), array.Items...)
 		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
-	case "trb.std.arrays.contains", "trb.std.arrays.count":
+	case "trb.std.arrays.contains", "trb.std.arrays.count", "trb.std.arrays.index":
 		if err := require(2); err != nil {
 			return Value{}, err
 		}
 		array, ok := values[0].Data.(*arrayValue)
 		if !ok {
-			return Value{}, errors.New("arrays.contains/count expects Array")
+			return Value{}, errors.New("arrays.contains/count/index expects Array")
 		}
 		count := int64(0)
-		for _, item := range array.Items {
+		for index, item := range array.Items {
 			if equal(item, values[1]) {
+				if name == "trb.std.arrays.index" {
+					return Value{Type: typ, Data: int64(index)}, nil
+				}
 				count++
 			}
+		}
+		if name == "trb.std.arrays.index" {
+			return Value{Type: typ, Data: nil}, nil
 		}
 		if name == "trb.std.arrays.contains" {
 			return Value{Type: typ, Data: count > 0}, nil
@@ -1180,6 +1190,15 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return Value{}, compareErr
 		}
 		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
+	case "trb.std.ranges.to_array":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		items, err := iterableValues(values[0])
+		if err != nil {
+			return Value{}, err
+		}
+		return Value{Type: typ, Data: &arrayValue{Items: append([]Value(nil), items...)}}, nil
 	case "trb.std.hashes.length", "trb.std.hashes.empty":
 		if err := require(1); err != nil {
 			return Value{}, err
