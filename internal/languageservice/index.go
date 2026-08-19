@@ -76,6 +76,22 @@ func BuildContexts(programs []*ir.Program) map[string]Context {
 			TypeMembers:     metadata.TypeMembers,
 			Types:           metadata.Types,
 			Implementations: metadata.Implementations,
+			ModulePaths:     map[string]string{},
+		}
+		for _, statement := range session.Statements {
+			imported, ok := statement.(*ir.Import)
+			if !ok || imported.Implicit {
+				continue
+			}
+			target := programsByPath[imported.Path]
+			if target == nil || target.SourcePath == "" {
+				continue
+			}
+			declaredPath := imported.DeclaredPath
+			if declaredPath == "" {
+				declaredPath = imported.Path
+			}
+			context.ModulePaths[declaredPath] = target.SourcePath
 		}
 		context.Symbols = make([]Symbol, 0, len(visible))
 		for _, symbol := range visible {
@@ -312,13 +328,20 @@ type ProjectImportCandidates struct {
 // completion and resolve the remaining names.
 func BuildProjectImportCandidates(programs []*ir.Program) ProjectImportCandidates {
 	byName := map[string][]Symbol{}
+	modulePaths := make(map[string]bool, len(programs))
+	for _, program := range programs {
+		if program != nil {
+			modulePaths[program.ModulePath] = true
+		}
+	}
 	for _, program := range programs {
 		if program == nil {
 			continue
 		}
+		importPath := projectImportPath(program.ModulePath, modulePaths)
 		metadata := emptyContext()
 		for _, symbol := range collectSymbols(program.Statements, "", program.SourcePath, &metadata) {
-			byName[symbol.Name] = append(byName[symbol.Name], withImport(symbol, program.ModulePath))
+			byName[symbol.Name] = append(byName[symbol.Name], withImportFromModule(symbol, importPath, program.ModulePath))
 		}
 	}
 	return ProjectImportCandidates{byName: byName}
@@ -332,7 +355,7 @@ func (c ProjectImportCandidates) ForModule(modulePath string) Context {
 		var candidate Symbol
 		count := 0
 		for _, symbol := range origins {
-			if symbol.Import != nil && symbol.Import.Path == modulePath {
+			if symbol.Import != nil && symbol.Import.ModulePath == modulePath {
 				continue
 			}
 			candidate = symbol
@@ -440,14 +463,29 @@ func sourceVisibleNames(source string) map[string]bool {
 }
 
 func withImport(symbol Symbol, path string) Symbol {
+	return withImportFromModule(symbol, path, path)
+}
+
+func withImportFromModule(symbol Symbol, path, modulePath string) Symbol {
 	result := symbol
-	result.Import = &Import{Path: path, Symbol: symbol.Name}
+	result.Import = &Import{Path: path, ModulePath: modulePath, Symbol: symbol.Name}
 	result.Members = append([]Symbol(nil), symbol.Members...)
 	for index := range result.Members {
-		result.Members[index] = withImport(result.Members[index], path)
+		result.Members[index] = withImportFromModule(result.Members[index], path, modulePath)
 		result.Members[index].Import.Symbol = symbol.Name
 	}
 	return result
+}
+
+func projectImportPath(modulePath string, modulePaths map[string]bool) string {
+	if !strings.HasSuffix(modulePath, "/index") {
+		return modulePath
+	}
+	short := strings.TrimSuffix(modulePath, "/index")
+	if short == "" || modulePaths[short] {
+		return modulePath
+	}
+	return short
 }
 
 func addDeclarationMembers(context *Context, catalog *declaration.Catalog) {

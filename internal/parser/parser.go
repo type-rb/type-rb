@@ -1571,7 +1571,9 @@ func (p *Parser) parseImport() ast.Statement {
 				}
 			}
 			if close+2 < len(line) && line[close+1].Lexeme == "from" {
-				n.Path = importPath(line[close+2:])
+				pathTokens := line[close+2:]
+				n.Path = importPath(pathTokens)
+				n.PathSpan = spanOf(pathTokens)
 			}
 		}
 	} else if len(line) > 1 {
@@ -1589,7 +1591,9 @@ func (p *Parser) parseImport() ast.Statement {
 				n.Alias = line[aliasAt+1].Lexeme
 			}
 		}
-		n.Path = importPath(line[1:pathEnd])
+		pathTokens := line[1:pathEnd]
+		n.Path = importPath(pathTokens)
+		n.PathSpan = spanOf(pathTokens)
 	}
 	if n.Path == "" {
 		p.errorAt(n.SourceSpan, "invalid import declaration")

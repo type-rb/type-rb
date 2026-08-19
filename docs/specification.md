@@ -367,6 +367,11 @@ switches.
   syntax or type provider package, count as semantic uses.
 - Project module identities come from paths below `sourceDir`; source files do
   not declare target packages.
+- A project import may omit a terminal `/index`. The omitted form is the
+  canonical authored spelling when it resolves uniquely to the directory's
+  `index.trb`; an explicit `/index` remains accepted. If both `name.trb` and
+  `name/index.trb` exist, `from name` resolves `name.trb`, so tooling retains
+  `/index` when it is needed to select the directory entry.
 - External TypeRB packages declare a canonical identity in
   `trbpackage.json`. A project lock may map an explicit short import to that
   identity. Alias mappings are scoped to the application or declaring package,

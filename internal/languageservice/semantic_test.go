@@ -169,7 +169,9 @@ def InsurerPage(): ReactNode
 	return <p>Ready</p>
 end
 `
-	entrySource := `import { InsurerPage } from features/insurers/components/InsurerPage/index
+	modulePath := "features/insurers/components/InsurerPage"
+	moduleSpecifier := "./" + modulePath + ".trb"
+	entrySource := `import { InsurerPage } from "./features/insurers/components/InsurerPage.trb"
 import { ReactNode } from trb/platform/typescript/react
 
 def InsurerListRoutePage(): ReactNode
@@ -189,6 +191,17 @@ end
 	}
 	service := languageservice.New("typescript")
 	service.Update(programs, "routes/insurers")
+
+	pathStart := strings.Index(entrySource, moduleSpecifier)
+	for cursor := pathStart; cursor < pathStart+len(moduleSpecifier); cursor++ {
+		definition, ok := service.Definition(entryPath, entrySource, cursor)
+		if !ok || definition.Path != pagePath || definition.Origin == nil {
+			t.Fatalf("module definition at offset %d=(%#v, %v), want %s", cursor-pathStart, definition, ok, pagePath)
+		}
+		if *definition.Origin != (languageservice.OffsetRange{Start: pathStart - 1, End: pathStart + len(moduleSpecifier) + 1}) {
+			t.Fatalf("module origin=%#v, want complete import path", definition.Origin)
+		}
+	}
 
 	cursor := strings.LastIndex(entrySource, "InsurerPage") + len("Insurer")
 	definition, ok := service.Definition(entryPath, entrySource, cursor)

@@ -1530,14 +1530,18 @@ func TestServerNavigatesFromJSXUseToImportedComponentDefinition(t *testing.T) {
 	pagePath := cleanPath(filepath.Join(root, "features", "insurers", "components", "InsurerPage", "index.trb"))
 	entryPath := cleanPath(filepath.Join(root, "routes", "insurers.trb"))
 	pageSource := "import { ReactNode } from trb/platform/typescript/react\n\ndef InsurerPage(): ReactNode\n\treturn <p>Ready</p>\nend\n"
-	entrySource := "import { InsurerPage } from features/insurers/components/InsurerPage/index\nimport { ReactNode } from trb/platform/typescript/react\n\ndef InsurerListRoutePage(): ReactNode\n\treturn <InsurerPage />\nend\n"
+	modulePath := "features/insurers/components/InsurerPage"
+	entrySource := "import { InsurerPage } from " + modulePath + "\nimport { ReactNode } from trb/platform/typescript/react\n\ndef InsurerListRoutePage(): ReactNode\n\treturn <InsurerPage />\nend\n"
 	uri := uriFromPath(entryPath)
+	pathStart := strings.Index(entrySource, modulePath)
+	pathOffset := pathStart + strings.Index(modulePath, "/components")
 	componentOffset := strings.LastIndex(entrySource, "InsurerPage") + len("Insurer")
 	input := framedMessages(t,
 		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
 		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: entrySource}})},
-		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/definition", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(entrySource), componentOffset)})},
-		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/definition", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(entrySource), pathOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "textDocument/definition", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(entrySource), componentOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("4"), Method: "shutdown", Params: json.RawMessage(`null`)},
 		message{JSONRPC: "2.0", Method: "exit"},
 	)
 	var output bytes.Buffer
@@ -1553,11 +1557,17 @@ func TestServerNavigatesFromJSXUseToImportedComponentDefinition(t *testing.T) {
 		t.Fatal(err)
 	}
 	frames := decodeFrames(t, output.Bytes())
-	if len(frames) != 4 {
-		t.Fatalf("response count=%d, want 4: %s", len(frames), output.String())
+	if len(frames) != 5 {
+		t.Fatalf("response count=%d, want 5: %s", len(frames), output.String())
+	}
+	var moduleLink locationLink
+	decodeResult(t, frames[2], &moduleLink)
+	wantOrigin := offsetRange([]byte(entrySource), pathStart, pathStart+len(modulePath))
+	if moduleLink.TargetURI != uriFromPath(pagePath) || moduleLink.OriginSelectionRange != wantOrigin || moduleLink.TargetSelectionRange.Start != (position{}) {
+		t.Fatalf("module definition link=%#v, want complete import path to %s", moduleLink, pagePath)
 	}
 	var componentLocation location
-	decodeResult(t, frames[2], &componentLocation)
+	decodeResult(t, frames[3], &componentLocation)
 	if componentLocation.URI != uriFromPath(pagePath) || componentLocation.Range.Start != (position{Line: 2, Character: 4}) {
 		t.Fatalf("JSX component definition=%#v", componentLocation)
 	}

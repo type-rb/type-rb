@@ -1013,6 +1013,14 @@ func (s *Server) definition(request message) error {
 		return s.stream.write(success(request.ID, nil))
 	}
 	range_ := refineDefinitionRange(targetSource, info)
+	if info.Origin != nil {
+		return s.stream.write(success(request.ID, locationLink{
+			OriginSelectionRange: offsetRange(document.source, info.Origin.Start, info.Origin.End),
+			TargetURI:            uriFromPath(targetPath),
+			TargetRange:          range_,
+			TargetSelectionRange: range_,
+		}))
+	}
 	return s.stream.write(success(request.ID, location{URI: uriFromPath(targetPath), Range: range_}))
 }
 

@@ -424,6 +424,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		result := &ir.Import{
 			Base:                      base(n.Base),
 			Path:                      n.Path,
+			DeclaredPath:              n.Path,
 			Symbols:                   append([]string(nil), n.Symbols...),
 			Alias:                     n.Alias,
 			SymbolKinds:               map[string]string{},

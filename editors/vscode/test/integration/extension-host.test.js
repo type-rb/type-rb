@@ -73,6 +73,18 @@ suite("TypeRB Extension Host", () => {
 			new vscode.Position(3, 7)
 		);
 		assert.ok(hovers?.length > 0, "the standalone LSP should provide checked hover information");
+		const importedPath = "./helper.trb";
+		const importedPathStart = originalSource.indexOf(importedPath);
+		for (let offset = 0; offset < importedPath.length; offset += 1) {
+			await waitFor(async () => {
+				const definitions = await vscode.commands.executeCommand(
+					"vscode.executeDefinitionProvider",
+					sourceURI,
+					document.positionAt(importedPathStart + offset)
+				);
+				return definitions?.some((item) => (item.uri ?? item.targetUri).toString() === helperURI.toString());
+			}, `complete import path definition at offset ${offset}`);
+		}
 		assert.deepEqual(vscode.languages.getDiagnostics(siblingURI), [], "a sibling file must not enter the standalone session");
 		const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", sourceURI, 10);
 		assert.ok(lenses?.some((lens) => lens.command?.command === "typerb.debugFile"), "a Go standalone entry should offer Debug File");

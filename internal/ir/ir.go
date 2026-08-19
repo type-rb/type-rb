@@ -55,16 +55,19 @@ func (*Comment) irStatement() {}
 
 type Import struct {
 	Base
-	Path      string
-	Symbols   []string
-	Alias     string
-	Namespace bool
-	Kind      string
-	Standard  bool
-	Official  bool
-	Platform  bool
-	Native    bool
-	Runtime   bool
+	Path string
+	// DeclaredPath retains the source spelling when Path is resolved to a
+	// canonical module identity. Language tooling uses it to link imports.
+	DeclaredPath string
+	Symbols      []string
+	Alias        string
+	Namespace    bool
+	Kind         string
+	Standard     bool
+	Official     bool
+	Platform     bool
+	Native       bool
+	Runtime      bool
 	// RuntimeRequired records that generated code must load the source module
 	// for compiler-owned runtime behavior. Fully lowered intrinsics can leave
 	// this false.

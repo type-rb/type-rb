@@ -42,8 +42,11 @@ type TextEdit struct {
 
 // Import identifies the explicit source import required by a completion.
 type Import struct {
-	Path   string
-	Symbol string
+	Path string
+	// ModulePath remains the canonical declaration owner when Path is shortened
+	// for insertion into source.
+	ModulePath string
+	Symbol     string
 }
 
 // CompletionItem separates the displayed label from the exact source text
@@ -128,6 +131,8 @@ type Context struct {
 	TypeMembers     map[string][]Symbol
 	Types           map[string]TypeInfo
 	Implementations map[SymbolID][]DefinitionLocation
+	// ModulePaths maps an authored import path to its resolved source filename.
+	ModulePaths map[string]string
 }
 
 type CompletionRequest struct {
@@ -158,10 +163,11 @@ type HoverInfo struct {
 }
 
 type DefinitionInfo struct {
-	ID    SymbolID
-	Name  string
-	Path  string
-	Range OffsetRange
+	ID     SymbolID
+	Name   string
+	Path   string
+	Range  OffsetRange
+	Origin *OffsetRange
 }
 
 // SemanticDocument supplies one checked project file to project-wide semantic
@@ -318,5 +324,6 @@ func emptyContext() Context {
 		TypeMembers:     map[string][]Symbol{},
 		Types:           map[string]TypeInfo{},
 		Implementations: map[SymbolID][]DefinitionLocation{},
+		ModulePaths:     map[string]string{},
 	}
 }
