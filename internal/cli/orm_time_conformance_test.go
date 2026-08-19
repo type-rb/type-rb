@@ -93,50 +93,50 @@ func prepareORMTimeSchema(t *testing.T, driver, databaseSource, adapter string) 
 	}
 }
 
-const ormTimeConformanceSource = `import { DbError, Model } from trb/orm
-import { Result } from trb/std/result
+const ormTimeConformanceSource = `import { DbResult, Model } from trb/orm
 import { Date, DateTime, Instant, TimeOfDay } from trb/std/time
 
 class TrbTimeEvent < Model
 end
 
-def exercise(): Integer fails DbError
+def exercise(): DbResult<Integer>
 	on_date := Date.parse("2025-03-08")
 	at_time := TimeOfDay.parse("12:34:56.123456")
 	local_at := DateTime.parse("2025-03-08T12:34:56.123456")
 	exact_at := Instant.parse("2025-03-08T03:34:56.123456Z")
-	event := TrbTimeEvent.create(on_date: on_date, at_time: at_time, local_at: local_at, exact_at: exact_at, optional_at: nil)
+	event := try TrbTimeEvent.create(on_date: on_date, at_time: at_time, local_at: local_at, exact_at: exact_at, optional_at: nil)
 	puts(event.id > 0)
 	puts(event.on_date.to_s())
 	puts(event.at_time.to_s())
 	puts(event.local_at.to_s())
 	puts(event.exact_at.to_s())
 
-	loaded := TrbTimeEvent.where(on_date: on_date, exact_at: exact_at).first()
+	loaded := try TrbTimeEvent.where(on_date: on_date, exact_at: exact_at).first()
 	puts(loaded.on_date.same?(on_date))
 	puts(loaded.at_time.same?(at_time))
 	puts(loaded.local_at.same?(local_at))
 	puts(loaded.exact_at.same?(exact_at))
-	puts(TrbTimeEvent.where("exact_at", ">=", exact_at).count())
-	puts(TrbTimeEvent.where(on_date: [on_date, on_date.add_days(1)]).count())
+	puts(try TrbTimeEvent.where("exact_at", ">=", exact_at).count())
+	puts(try TrbTimeEvent.where(on_date: [on_date, on_date.add_days(1)]).count())
 
-	changed := event.update(
+	changed := try event.update(
 		local_at: DateTime.parse("2025-03-09T01:02:03.654321"),
 		optional_at: DateTime.parse("2025-03-10T04:05:06.000007")
 	)
 	puts(changed.local_at.to_s())
 	puts(changed.optional_at != nil)
-	puts(TrbTimeEvent.pluck(:on_date).size())
-	puts(TrbTimeEvent.minimum(:on_date) != nil)
-	puts(TrbTimeEvent.maximum(:exact_at) != nil)
+	dates := try TrbTimeEvent.pluck(:on_date)
+	puts(dates.size())
+	puts(try TrbTimeEvent.minimum(:on_date) != nil)
+	puts(try TrbTimeEvent.maximum(:exact_at) != nil)
 	return TrbTimeEvent.count()
 end
 
 def main()
-	case attempt exercise()
-	when Result::Ok(value)
+	case exercise()
+	when DbResult::Ok(value)
 		puts(value)
-	when Result::Err(error)
+	when DbResult::Err(error)
 		puts(error.kind)
 		puts(error.message)
 	end

@@ -49,7 +49,7 @@ func Complete(source string) bool {
 			blocks++
 			lineOpenedBlock = true
 		}
-		if item.Kind == token.Identifier && item.Lexeme == "fn" && len(delimiters) == 0 {
+		if item.Kind == token.Identifier && (item.Lexeme == "fn" || item.Lexeme == "catch") && len(delimiters) == 0 {
 			blocks++
 			lineOpenedBlock = true
 		}

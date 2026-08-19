@@ -32,7 +32,6 @@ func TestRunnableDeclarationsRejectsInvalidMainSignatures(t *testing.T) {
 		"def main(value: String)\n\treturn\nend\n",
 		"def main<T>()\n\treturn\nend\n",
 		"def main(): String\n\treturn \"main\"\nend\n",
-		"def main() fails Error\n\treturn\nend\n",
 		"def self.main()\n\treturn\nend\n",
 	} {
 		if items := RunnableDeclarations(source); len(items) != 0 {

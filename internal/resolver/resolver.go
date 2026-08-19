@@ -46,26 +46,25 @@ const (
 )
 
 type Export struct {
-	Name              string
-	Kind              ExportKind
-	Type              types.Type
-	Fails             types.Type
-	Parameters        []types.Type
-	ParameterBridges  []string
-	Required          int
-	Variadic          bool
-	Members           map[string]Member
-	Fields            []RecordField
-	EnumMembers       []string
-	EnumVariants      []EnumVariant
-	EnumRawType       types.Type
-	TypeParameters    []string
-	AliasTarget       types.Type
-	AliasEnum         bool
-	Superclass        string
-	Interfaces        []types.Type
-	Span              token.Span
-	UnsupportedFields map[string]string
+	Name                   string
+	Kind                   ExportKind
+	Type                   types.Type
+	Parameters             []types.Type
+	ParameterResultBridges []NativeResultBridge
+	Required               int
+	Variadic               bool
+	Members                map[string]Member
+	Fields                 []RecordField
+	EnumMembers            []string
+	EnumVariants           []EnumVariant
+	EnumRawType            types.Type
+	TypeParameters         []string
+	AliasTarget            types.Type
+	AliasEnum              bool
+	Superclass             string
+	Interfaces             []types.Type
+	Span                   token.Span
+	UnsupportedFields      map[string]string
 	// NativeExported distinguishes a real target-package type export from a
 	// provider-only structural record used to describe another declaration.
 	NativeExported bool
@@ -76,7 +75,16 @@ type RecordField struct {
 	JSONName     string
 	Type         types.Type
 	Optional     bool
-	EffectBridge string
+	ResultBridge NativeResultBridge
+}
+
+// NativeResultBridge keeps both sides of a package-owned callback boundary.
+// Type is the native Promise success signature, while Error is the TypeRB
+// Result error payload accepted by the adapter.
+type NativeResultBridge struct {
+	Kind  string
+	Type  types.Type
+	Error types.Type
 }
 
 type EnumVariant struct {
@@ -89,7 +97,6 @@ type Member struct {
 	Name              string
 	Kind              ExportKind
 	Type              types.Type
-	Fails             types.Type
 	TypeParameters    []string
 	Parameters        []types.Type
 	Required          int
@@ -142,19 +149,6 @@ func (b Binding) Type() types.Type {
 		return b.Export.Type
 	}
 	return types.FromName("Any")
-}
-
-func (b Binding) FailureType() types.Type {
-	if b.Library != nil {
-		return b.Library.Fails
-	}
-	if b.Member != nil {
-		return b.Member.Fails
-	}
-	if b.Export != nil {
-		return b.Export.Fails
-	}
-	return types.Type{Kind: types.Never, Name: "Never"}
 }
 
 type Result struct {
@@ -381,6 +375,106 @@ func (r Result) CompilerOwnedType(name string) (Export, bool) {
 	}
 	exported, ok := r.Catalog.CompilerOwnedTypes[name]
 	return exported, ok
+}
+
+// CatalogTypeAlias resolves a transparent alias from the complete project
+// catalog for semantic expansion only. Imported value contracts retain their
+// declared alias names even when the alias is owned by another module, so the
+// checker needs this lookup to interpret the value without making the alias
+// name available to source annotations. NewCatalog rejects duplicate exported
+// type names, which keeps this lookup unambiguous.
+func (r Result) CatalogTypeAlias(name string) (Export, bool) {
+	if r.Catalog == nil {
+		return Export{}, false
+	}
+	for _, module := range r.Catalog.Modules {
+		exported, ok := module.Exports[name]
+		if ok && exported.Kind == TypeAliasExport {
+			return exported, true
+		}
+	}
+	return Export{}, false
+}
+
+// ContractTypeAlias resolves a catalog-owned transparent alias only when it
+// is reachable from a source-selected import contract. This is narrower than
+// source visibility: it lets the checker interpret a returned value while
+// preventing an unrelated project alias from changing an opaque native type
+// that happens to use the same name.
+func (r Result) ContractTypeAlias(name string) (Export, bool) {
+	alias, exists := r.CatalogTypeAlias(name)
+	if !exists {
+		return Export{}, false
+	}
+	seen := map[*Import]bool{}
+	for _, imported := range r.Imports {
+		if imported == nil || seen[imported] {
+			continue
+		}
+		seen[imported] = true
+		names := imported.Symbols
+		if len(names) == 0 {
+			names = make([]string, 0, len(imported.Exports))
+			for exportedName := range imported.Exports {
+				names = append(names, exportedName)
+			}
+		}
+		visiting := map[string]bool{}
+		for _, exportedName := range names {
+			exported, selected := imported.Exports[exportedName]
+			if selected && r.exportContractReferencesAlias(imported, exported, name, visiting) {
+				return alias, true
+			}
+		}
+	}
+	return Export{}, false
+}
+
+func (r Result) exportContractReferencesAlias(imported *Import, exported Export, name string, visiting map[string]bool) bool {
+	typesToVisit := []types.Type{exported.Type, exported.AliasTarget}
+	typesToVisit = append(typesToVisit, exported.Parameters...)
+	for _, field := range exported.Fields {
+		typesToVisit = append(typesToVisit, field.Type)
+	}
+	for _, member := range exported.Members {
+		typesToVisit = append(typesToVisit, member.Type)
+		typesToVisit = append(typesToVisit, member.Parameters...)
+	}
+	for _, typ := range typesToVisit {
+		if r.contractTypeReferencesAlias(imported, typ, name, visiting) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r Result) contractTypeReferencesAlias(imported *Import, typ types.Type, name string, visiting map[string]bool) bool {
+	for _, argument := range typ.Args {
+		if r.contractTypeReferencesAlias(imported, argument, name, visiting) {
+			return true
+		}
+	}
+	if typ.Kind != types.Named || typ.Name == "" || visiting[typ.Name] {
+		return false
+	}
+	exported, directlyOwned := imported.Exports[typ.Name]
+	if directlyOwned && exported.Kind != TypeAliasExport {
+		return false
+	}
+	if !directlyOwned {
+		var exists bool
+		exported, exists = r.CatalogTypeAlias(typ.Name)
+		if !exists {
+			return false
+		}
+	}
+	if typ.Name == name {
+		return true
+	}
+	visiting[typ.Name] = true
+	result := r.contractTypeReferencesAlias(imported, exported.AliasTarget, name, visiting)
+	delete(visiting, typ.Name)
+	return result
 }
 
 // addPrelude exposes the small set of Ruby-like, target-independent helpers
@@ -691,12 +785,14 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 		result.AliasTarget = exported.AliasTarget.Semantic()
 	}
 	for _, parameter := range exported.Parameters {
-		result.Parameters = append(result.Parameters, parameter.Semantic())
-		result.ParameterBridges = append(result.ParameterBridges, parameter.EffectBridge)
+		parameterType, resultBridge := nativeResultCallbackType(parameter)
+		result.Parameters = append(result.Parameters, parameterType)
+		result.ParameterResultBridges = append(result.ParameterResultBridges, resultBridge)
 	}
 	for _, field := range exported.Fields {
-		result.Fields = append(result.Fields, RecordField{Name: field.Name, JSONName: field.Name, Type: field.Type.Semantic(), Optional: field.Optional, EffectBridge: field.Type.EffectBridge})
-		result.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: field.Type.Semantic(), Readonly: true}
+		fieldType, resultBridge := nativeResultCallbackType(field.Type)
+		result.Fields = append(result.Fields, RecordField{Name: field.Name, JSONName: field.Name, Type: fieldType, Optional: field.Optional, ResultBridge: resultBridge})
+		result.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: fieldType, Readonly: true}
 	}
 	for name, exportedMember := range exported.Members {
 		memberExport := nativeExport(name, exportedMember, false)
@@ -704,7 +800,6 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 			Name:              name,
 			Kind:              memberExport.Kind,
 			Type:              memberExport.Type,
-			Fails:             memberExport.Fails,
 			TypeParameters:    append([]string(nil), memberExport.TypeParameters...),
 			Parameters:        append([]types.Type(nil), memberExport.Parameters...),
 			Required:          memberExport.Required,
@@ -714,6 +809,28 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 		}
 	}
 	return result
+}
+
+func nativeResultCallbackType(providerType nativepackage.Type) (types.Type, NativeResultBridge) {
+	nativeType := providerType.Semantic()
+	if providerType.ResultBridge == nil {
+		return nativeType, NativeResultBridge{}
+	}
+	parameters, success, ok := types.FunctionSignature(nativeType)
+	if !ok {
+		return nativeType, NativeResultBridge{}
+	}
+	errorType := providerType.ResultBridge.Error.Semantic()
+	resultSuccess := success
+	if resultSuccess.Kind == types.Void {
+		resultSuccess = types.FromName("Unit")
+	}
+	resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{resultSuccess, errorType}}
+	return types.FunctionOf(parameters, resultType), NativeResultBridge{
+		Kind:  providerType.ResultBridge.Kind,
+		Type:  nativeType,
+		Error: errorType,
+	}
 }
 
 func cloneStrings(input map[string]string) map[string]string {
@@ -963,7 +1080,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 							continue
 						}
 						if public(item.Name) {
-							method := Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Fails: failureTypeRef(item.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
+							method := Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
 							for _, parameter := range item.TypeParameters {
 								method.TypeParameters = append(method.TypeParameters, parameter.Name)
 							}
@@ -1036,7 +1153,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 					case *ast.MethodStatement:
 						if public(member.Name) {
 							parameterTypes, required, variadic := parameters(member.Parameters)
-							exported.Members[member.Name] = Member{Name: member.Name, Kind: FunctionExport, Type: returnTypeRef(member.ReturnType), Fails: failureTypeRef(member.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, EnumOwner: node.Name}
+							exported.Members[member.Name] = Member{Name: member.Name, Kind: FunctionExport, Type: returnTypeRef(member.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, EnumOwner: node.Name}
 						}
 					}
 				}
@@ -1073,14 +1190,14 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 				}
 				for _, method := range node.Methods {
 					parameterTypes, required, variadic := parameters(method.Parameters)
-					exported.Members[method.Name] = Member{Name: method.Name, Kind: FunctionExport, Type: returnTypeRef(method.ReturnType), Fails: failureTypeRef(method.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic}
+					exported.Members[method.Name] = Member{Name: method.Name, Kind: FunctionExport, Type: returnTypeRef(method.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic}
 				}
 				result[node.Name] = exported
 			}
 		case *ast.MethodStatement:
 			if public(node.Name) {
 				parameterTypes, required, variadic := parameters(node.Parameters)
-				exported := Export{Name: node.Name, Kind: FunctionExport, Type: returnTypeRef(node.ReturnType), Fails: failureTypeRef(node.Fails), Parameters: parameterTypes, Required: required, Variadic: variadic, Span: node.Span()}
+				exported := Export{Name: node.Name, Kind: FunctionExport, Type: returnTypeRef(node.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Span: node.Span()}
 				for _, parameter := range node.TypeParameters {
 					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
 				}
@@ -1226,11 +1343,7 @@ func typeRef(ref ast.TypeRef) types.Type {
 		for index, parameter := range ref.FunctionParameters {
 			parameters[index] = typeRef(parameter)
 		}
-		failure := types.Type{Kind: types.Never, Name: "Never"}
-		if ref.FunctionFails != nil {
-			failure = typeRef(*ref.FunctionFails)
-		}
-		result := types.FunctionWithEffect(parameters, typeRef(*ref.FunctionReturn), failure)
+		result := types.FunctionOf(parameters, typeRef(*ref.FunctionReturn))
 		result.Nullable = ref.Nullable
 		return result
 	}
@@ -1265,10 +1378,6 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 	result.Args = make([]types.Type, len(typ.Args))
 	for index, argument := range typ.Args {
 		result.Args[index] = substituteType(argument, substitutions)
-	}
-	if typ.Fails != nil {
-		failure := substituteType(*typ.Fails, substitutions)
-		result.Fails = &failure
 	}
 	return result
 }
@@ -1349,13 +1458,6 @@ func enumRawType(enum *ast.EnumStatement) types.Type {
 func returnTypeRef(ref ast.TypeRef) types.Type {
 	if ref.Empty() {
 		return types.FromName("Void")
-	}
-	return typeRef(ref)
-}
-
-func failureTypeRef(ref ast.TypeRef) types.Type {
-	if ref.Empty() {
-		return types.Type{Kind: types.Never, Name: "Never"}
 	}
 	return typeRef(ref)
 }

@@ -251,7 +251,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	jobsAlias := g.jobsRuntimeAlias()
 	resultAlias := ""
 	for _, job := range manifest.Jobs {
-		if job.Fails.Kind == "" || job.Fails.Kind == "Never" {
+		if job.PerformKind != jobs.PerformJobResult {
 			continue
 		}
 		resultAlias = g.typeAliases["Result"]
@@ -301,10 +301,11 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 			argumentNames = append([]string{"__trbScope"}, argumentNames...)
 		}
 		call := qualifier + "New" + goIdentifier(job.Name, true) + "()." + goMethodName("perform") + "(" + strings.Join(argumentNames, ", ") + ")"
-		if job.Fails.Kind != "" && job.Fails.Kind != "Never" {
+		switch job.PerformKind {
+		case jobs.PerformJobResult:
 			g.line("execution := " + call)
-			g.line("if execution.Kind == " + resultAlias + ".ResultErrTag { return fmt.Errorf(\"%v\", execution.ErrError) }")
-		} else {
+			g.line("if execution.Kind == " + resultAlias + ".ResultErrTag { return fmt.Errorf(\"%s\", execution.ErrError.Message) }")
+		default:
 			g.line(call)
 		}
 		g.line("return nil")

@@ -1,6 +1,6 @@
 {
   "name": "trb/platform/typescript/browser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "module": "trb/platform/typescript/browser/index",
   "source": "src/index.trb",
   "semanticProvider": "trb.typescript.browser",

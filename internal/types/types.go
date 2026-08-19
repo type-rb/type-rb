@@ -35,12 +35,9 @@ const (
 )
 
 type Type struct {
-	Kind Kind
-	Name string
-	Args []Type
-	// Fails is populated only for function values. A nil effect is the pure
-	// Never effect, keeping ordinary function types compact.
-	Fails    *Type
+	Kind     Kind
+	Name     string
+	Args     []Type
 	Nullable bool
 	Readonly bool
 }
@@ -52,9 +49,6 @@ func (t Type) String() string {
 			parts[index] = t.Args[index].String()
 		}
 		name := "(" + strings.Join(parts, ", ") + ") -> " + t.Args[len(t.Args)-1].String()
-		if failure := FunctionFailure(t); failure.Kind != Never {
-			name += " fails " + failure.String()
-		}
 		if t.Nullable {
 			return "(" + name + ")?"
 		}
@@ -89,18 +83,9 @@ func (t Type) String() string {
 }
 
 func FunctionOf(parameters []Type, result Type) Type {
-	return FunctionWithEffect(parameters, result, Type{Kind: Never, Name: "Never"})
-}
-
-func FunctionWithEffect(parameters []Type, result, failure Type) Type {
 	arguments := append([]Type(nil), parameters...)
 	arguments = append(arguments, result)
-	function := Type{Kind: Function, Name: "Function", Args: arguments}
-	if failure.Kind != "" && failure.Kind != Never {
-		copy := failure
-		function.Fails = &copy
-	}
-	return function
+	return Type{Kind: Function, Name: "Function", Args: arguments}
 }
 
 func FunctionSignature(function Type) ([]Type, Type, bool) {
@@ -108,13 +93,6 @@ func FunctionSignature(function Type) ([]Type, Type, bool) {
 		return nil, Type{}, false
 	}
 	return function.Args[:len(function.Args)-1], function.Args[len(function.Args)-1], true
-}
-
-func FunctionFailure(function Type) Type {
-	if function.Kind == Function && function.Fails != nil {
-		return *function.Fails
-	}
-	return Type{Kind: Never, Name: "Never"}
 }
 
 func FromName(name string) Type {
@@ -375,7 +353,7 @@ func Assignable(target, value Type) bool {
 				return false
 			}
 		}
-		return Equivalent(targetReturn, valueReturn) && Assignable(FunctionFailure(target), FunctionFailure(value))
+		return Equivalent(targetReturn, valueReturn)
 	}
 	if target.Kind == Iterable && (value.Kind == Iterable || value.Kind == Array || value.Kind == Range) {
 		if len(target.Args) == 0 || len(value.Args) == 0 {
@@ -420,9 +398,6 @@ func Assignable(target, value Type) bool {
 // state. Mutable generic containers use it to avoid unsound argument widening.
 func Equivalent(left, right Type) bool {
 	if left.Kind != right.Kind || left.Name != right.Name || left.Nullable != right.Nullable || len(left.Args) != len(right.Args) {
-		return false
-	}
-	if left.Kind == Function && !Equivalent(FunctionFailure(left), FunctionFailure(right)) {
 		return false
 	}
 	for index := range left.Args {

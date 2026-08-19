@@ -72,8 +72,8 @@ func TestORMEnumColumnsAcrossBackendsAndDatabases(t *testing.T) {
 					stderr.Reset()
 					input := "import { TrbEnumProduct } from main\n" +
 						"import { TrbOrderStatus } from domain/statuses\n" +
-						"TrbEnumProduct.where(status: TrbOrderStatus::Pending).count()\n" +
-						"attempt TrbEnumProduct.find(999)\n" +
+						"TrbEnumProduct.where(status: TrbOrderStatus::Pending).count() catch |_error|\n\t-1\nend\n" +
+						"TrbEnumProduct.find(999)\n" +
 						":quit\n"
 					command = &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 					if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -133,8 +133,7 @@ end
 `
 
 const ormEnumConformanceSource = `import { TrbOrderStatus, TrbPhase, TrbPriority } from domain/statuses
-import { Result } from trb/std/result
-import { DbError, DbErrorKind, Model, enum_column } from trb/orm
+import { DbErrorKind, DbResult, Model, enum_column } from trb/orm
 
 class TrbEnumProduct < Model
 	enum_column(:status, TrbOrderStatus)
@@ -142,39 +141,40 @@ class TrbEnumProduct < Model
 	enum_column(:phase, TrbPhase)
 end
 
-def exercise(): Boolean fails DbError
-	product := TrbEnumProduct.create(status: TrbOrderStatus::Pending, priority: TrbPriority::High, phase: TrbPhase::PendingReview)
+def exercise(): DbResult<Boolean>
+	product := try TrbEnumProduct.create(status: TrbOrderStatus::Pending, priority: TrbPriority::High, phase: TrbPhase::PendingReview)
 	puts(product.status == TrbOrderStatus::Pending)
 	puts(product.priority != nil)
-	puts(TrbEnumProduct.where(priority: TrbPriority::High).count() == 1)
+	puts(try TrbEnumProduct.where(priority: TrbPriority::High).count() == 1)
 	puts(product.phase == TrbPhase::PendingReview)
-	puts(TrbEnumProduct.where(status: [TrbOrderStatus::Pending, TrbOrderStatus::Completed]).count() == 1)
-	statuses := TrbEnumProduct.where(status: TrbOrderStatus::Pending).pluck(:status)
+	puts(try TrbEnumProduct.where(status: [TrbOrderStatus::Pending, TrbOrderStatus::Completed]).count() == 1)
+	statuses := try TrbEnumProduct.where(status: TrbOrderStatus::Pending).pluck(:status)
 	puts(statuses[0] == TrbOrderStatus::Pending)
-	counts := TrbEnumProduct.where(status: TrbOrderStatus::Pending).group(:status).count()
+	counts := try TrbEnumProduct.where(status: TrbOrderStatus::Pending).group(:status).count()
 	puts(counts[TrbOrderStatus::Pending] == 1)
-	updated := product.update(status: TrbOrderStatus::Completed, priority: TrbPriority::Low, phase: TrbPhase::ReadyToShip)
+	updated := try product.update(status: TrbOrderStatus::Completed, priority: TrbPriority::Low, phase: TrbPhase::ReadyToShip)
 	puts(updated.status == TrbOrderStatus::Completed)
 	puts(updated.priority != nil)
-	puts(TrbEnumProduct.where(priority: TrbPriority::Low).count() == 1)
+	puts(try TrbEnumProduct.where(priority: TrbPriority::Low).count() == 1)
 	puts(updated.phase == TrbPhase::ReadyToShip)
-	TrbEnumProduct.where(id: product.id).update_all(status: TrbOrderStatus::Pending)
-	puts(TrbEnumProduct.find(product.id).status == TrbOrderStatus::Pending)
-	case attempt TrbEnumProduct.find(999)
-	when Result::Ok(_value)
+	_updated_count := try TrbEnumProduct.where(id: product.id).update_all(status: TrbOrderStatus::Pending)
+	reloaded := try TrbEnumProduct.find(product.id)
+	puts(reloaded.status == TrbOrderStatus::Pending)
+	case TrbEnumProduct.find(999)
+	when DbResult::Ok(_value)
 		puts(false)
-	when Result::Err(error)
+	when DbResult::Err(error)
 		puts(error.kind == DbErrorKind::InvalidData)
 	end
-	return true
+	return DbResult<Boolean>::Ok(true)
 end
 
 
 def main()
-	case attempt exercise()
-	when Result::Ok(value)
+	case exercise()
+	when DbResult::Ok(value)
 		puts(value)
-	when Result::Err(error)
+	when DbResult::Err(error)
 		puts(error.kind)
 		puts(error.message)
 	end

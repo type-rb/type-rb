@@ -226,10 +226,11 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 		if g.execution.Method(job.ModulePath, job.Name, "perform") {
 			call = job.Name + ".new.perform(__trb_scope, *arguments)"
 		}
-		if job.Fails.Kind != "" && job.Fails.Kind != "Never" {
+		switch job.PerformKind {
+		case jobs.PerformJobResult:
 			g.line("execution = "+call, "")
-			g.line("raise execution.error.inspect if execution.is_a?(Result::Err)", "")
-		} else {
+			g.line("raise execution.error.message if execution.is_a?(Result::Err)", "")
+		default:
 			g.line(call, "")
 		}
 	}

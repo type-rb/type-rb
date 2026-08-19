@@ -98,7 +98,7 @@ func TestFormatUsesCommentPreservingFormatter(t *testing.T) {
 
 func TestRunRejectsHostAndPlatformPackages(t *testing.T) {
 	for _, source := range []string{
-		"import trb/std/filesystem\nfilesystem.exists(\".\")\n",
+		"import trb/std/filesystem\n_found := filesystem.exists(\".\") catch |_error|\n\tfalse\nend\n",
 		"import trb/std/process\nprocess.argv()\n",
 		"import trb/platform/go/http\nhttp.router()\n",
 	} {

@@ -17,7 +17,7 @@ func TestLocalNullableVariableInitializedWithTypedNil(t *testing.T) {
 	program := &ir.Program{
 		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/nullable",
 		Statements: []ir.Statement{&ir.Method{
-			Name: "main", SuccessType: types.FromName("Void"), ReturnType: types.FromName("Void"),
+			Name: "main", ReturnType: types.FromName("Void"),
 			Body: []ir.Statement{&ir.Variable{
 				Name: "value", Type: nullableString, Mutable: true,
 				Value: &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, types.FromName("Nil")), Kind: "nil", Raw: "nil"},
@@ -57,8 +57,8 @@ func TestNarrowedNullableReceiverPreservesMemberPrecedence(t *testing.T) {
 		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/nullable",
 		Statements: []ir.Statement{&ir.Method{
 			Name: "read", Parameters: []ir.Parameter{{Name: "format", Type: nullableFormat}},
-			SuccessType: types.FromName("String"), ReturnType: types.FromName("String"),
-			Body: []ir.Statement{&ir.Return{Value: name}},
+			ReturnType: types.FromName("String"),
+			Body:       []ir.Statement{&ir.Return{Value: name}},
 		}},
 	}
 

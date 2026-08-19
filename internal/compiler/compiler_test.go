@@ -859,7 +859,9 @@ end
 }
 
 func TestGenericInterfacesAreSpecializedAcrossBackends(t *testing.T) {
-	source := []byte(`enum LoadError
+	source := []byte(`import { Result } from trb/std/result
+
+enum LoadError
 	Unavailable
 end
 
@@ -869,7 +871,7 @@ interface Store<T>
 end
 
 interface Loader<T, E>
-	load(): T fails E
+	load(): Result<T, E>
 end
 
 class StringStore implements Store<String>, Loader<String, LoadError>
@@ -889,8 +891,8 @@ class StringStore implements Store<String>, Loader<String, LoadError>
 		return @value
 	end
 
-	def load(): String fails LoadError
-		return @value
+	def load(): Result<String, LoadError>
+		return Result<String, LoadError>::Ok(@value)
 	end
 end
 
@@ -902,7 +904,7 @@ def build(): Store<String>
 	return StringStore.new("initial")
 end
 
-def load(loader: Loader<String, LoadError>): String fails LoadError
+def load(loader: Loader<String, LoadError>): Result<String, LoadError>
 	return loader.load()
 end
 `)
@@ -1834,7 +1836,7 @@ func TestPortableArraySortingDiagnosticsAcrossModes(t *testing.T) {
 		{source: "def bad(values: Array<Integer?>): Array<Integer?>\n\treturn values.sort()\nend\n", want: "portable natural order is not defined for Integer?, required by sort()"},
 		{source: "record Item\n\tname: String\nend\ndef bad(values: Array<Item>): Array<Item>\n\treturn values.sort_by do |value|\n\t\tvalue\n\tend\nend\n", want: "sort_by block result must have portable natural order, got Item"},
 		{source: "def bad(values: Array<Integer>): Array<Integer>\n\treturn values.sort_by do |value, index|\n\t\tvalue + index\n\tend\nend\n", want: "sort_by block expects 1 parameter(s), got 2"},
-		{source: "record AppError\nend\ndef key(value: Integer): Integer fails AppError\n\treturn value\nend\ndef bad(values: Array<Integer>): Array<Integer> fails AppError\n\treturn values.sort_by do |value|\n\t\tkey(value)\n\tend\nend\n", want: "sort_by block must not use operations that may fail"},
+		{source: "import { Result } from trb/std/result\nrecord AppError\nend\ndef key(value: Integer): Result<Integer, AppError>\n\treturn Result<Integer, AppError>::Ok(value)\nend\ndef bad(values: Array<Integer>): Result<Array<Integer>, AppError>\n\tvalues := values.sort_by do |value|\n\t\ttry key(value)\n\tend\n\treturn Result<Array<Integer>, AppError>::Ok(values)\nend\n", want: "try is not supported inside value-producing collection transformations"},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for _, test := range tests {
@@ -3268,7 +3270,9 @@ func TestQualifiedGenericPackageFunctionsRemainFunctions(t *testing.T) {
 	source := []byte(`import trb/std/json
 
 def encode_message()
-	json.encode<String>("hello")
+	_encoded := json.encode<String>("hello") catch |_error|
+		return
+	end
 	return
 end
 `)

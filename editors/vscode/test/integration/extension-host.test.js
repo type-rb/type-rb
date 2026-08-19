@@ -355,7 +355,9 @@ end
 		const runSource = `import { write_text } from trb/std/filesystem
 
 def main()
-\twrite_text(${JSON.stringify(marker)}, "extension-host-ok")
+\twrite_text(${JSON.stringify(marker)}, "extension-host-ok") catch |_error|
+\t\treturn
+\tend
 \treturn
 end
 `;

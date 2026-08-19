@@ -123,19 +123,21 @@ def Counter(): ReactNode
 }
 
 func TestCompileTypeScriptReactComponentKeepsExecutionScopeInternal(t *testing.T) {
-	source := SourceUnit{
+	page := SourceUnit{
 		Filename:   "page.trb",
 		ModulePath: "app/page",
 		Source: []byte(`import { ReactNode } from trb/platform/typescript/react
 import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { Result } from trb/std/result
 
 API := HttpClient.new("https://api.example.test")
 
-type Loader = () -> Response<String> fails RequestError
+type Loader = () -> Result<Response<String>, RequestError>
 
 def make_loader(): Loader
-	return fn(): Response<String> fails RequestError
-		return API.request("/message").text()
+	return fn(): Result<Response<String>, RequestError>
+		raw := try API.request("/message")
+		return Result<Response<String>, RequestError>::Ok(raw.text())
 	end
 end
 
@@ -149,23 +151,52 @@ def Wrapper(): ReactNode
 end
 `),
 	}
-	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	root := SourceUnit{
+		Filename:   "root.trb",
+		ModulePath: "app/root",
+		Source: []byte(`import { Page } from app/page
+import { ReactNode } from trb/platform/typescript/react
+
+def Root(): ReactNode
+	return <Page />
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{page, root}, Options{Mode: "typescript", TypeScriptRuntime: "browser"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	output := string(artifacts[0].Output)
+	var pageOutput string
+	var rootOutput string
+	for _, artifact := range artifacts {
+		switch artifact.Filename {
+		case page.Filename:
+			pageOutput = string(artifact.Output)
+		case root.Filename:
+			rootOutput = string(artifact.Output)
+		}
+	}
+	if pageOutput == "" || rootOutput == "" {
+		t.Fatalf("expected page and root artifacts, got %#v", artifacts)
+	}
 	for _, expected := range []string{
 		"export function Page(): React.ReactNode {",
 		"const __trbScope: AbortSignal | undefined = undefined;",
 		"const _loader: () => Result<__trb_browser.Response<string>, __trb_browser.RequestError> | Promise<Result<__trb_browser.Response<string>, __trb_browser.RequestError>> = make_loader(__trbScope);",
 		"return Page();",
 	} {
-		if !strings.Contains(output, expected) {
-			t.Fatalf("generated component is missing %q:\n%s", expected, output)
+		if !strings.Contains(pageOutput, expected) {
+			t.Fatalf("generated component is missing %q:\n%s", expected, pageOutput)
 		}
 	}
-	if strings.Contains(output, "function Page(__trbScope") || strings.Contains(output, "Page(__trbScope)") {
-		t.Fatalf("generated component exposes its internal execution scope:\n%s", output)
+	if strings.Contains(pageOutput, "function Page(__trbScope") || strings.Contains(pageOutput, "Page(__trbScope)") {
+		t.Fatalf("generated component exposes its internal execution scope:\n%s", pageOutput)
+	}
+	if !strings.Contains(rootOutput, "return <Page />;") {
+		t.Fatalf("generated JSX does not retain the imported component name:\n%s", rootOutput)
+	}
+	if strings.Contains(rootOutput, "<Page.bind(") {
+		t.Fatalf("generated JSX binds the imported component as a function value:\n%s", rootOutput)
 	}
 }
 

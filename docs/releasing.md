@@ -75,6 +75,35 @@ Users can then install with:
 brew install type-rb/tap/trb
 ```
 
+## Visual Studio Code extension
+
+The compiler Release workflow does not publish the Visual Studio Code
+extension. When a language release requires a new extension version, publish
+the extension only after the matching compiler release and Homebrew Formula
+have been verified.
+
+From synchronized `main`, verify and package the extension:
+
+```sh
+npm ci --prefix editors/vscode
+npm test --prefix editors/vscode
+npm run package --prefix editors/vscode
+```
+
+Confirm that `editors/vscode/package.json`, its lockfile, changelog, and README
+declare the intended extension version and minimum TypeRB version. Inspect the
+generated `editors/vscode/dist/typerb.vsix`, then publish it with the
+Marketplace credentials owned by the maintainer:
+
+```sh
+npm exec --prefix editors/vscode -- vsce publish
+```
+
+Verify the Marketplace listing and install the published version against the
+new stable `trb` binary. The checked-in `vscode.yml` workflow tests and packages
+the extension but intentionally does not hold Marketplace credentials or
+publish it.
+
 To render a Formula without making a release:
 
 ```sh

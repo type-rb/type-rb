@@ -1,6 +1,9 @@
 package languageservice
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSelectionRangesBuildTokenLineAndStructuralParents(t *testing.T) {
 	source := "class User\n\tdef name(): String\n\t\tvalue := \"Ada\"\n\t\tputs(value)\n\tend\nend\n"
@@ -39,5 +42,33 @@ func TestSelectionRangesClampCursorsAndIncludeComments(t *testing.T) {
 	}
 	if ranges[1].Range != (OffsetRange{Start: 0, End: len(source)}) {
 		t.Fatalf("clamped range=%#v", ranges[1])
+	}
+}
+
+func TestSelectionRangesIncludeResultCatchExpression(t *testing.T) {
+	source := "value := load() catch |error|\n\tputs(error)\nend\n"
+	cursor := strings.LastIndex(source, "error") + 1
+	ranges := SelectionRanges(source, []int{cursor})
+	if len(ranges) != 1 {
+		t.Fatalf("ranges=%#v", ranges)
+	}
+	want := []string{
+		"error",
+		"\tputs(error)",
+		"load() catch |error|\n\tputs(error)\nend",
+		source,
+	}
+	current := &ranges[0]
+	for index, expected := range want {
+		if current == nil {
+			t.Fatalf("selection chain stopped at %d", index)
+		}
+		if selected := source[current.Range.Start:current.Range.End]; selected != expected {
+			t.Fatalf("selection %d=%q want=%q", index, selected, expected)
+		}
+		current = current.Parent
+	}
+	if current != nil {
+		t.Fatalf("unexpected extra parent=%#v", current)
 	}
 }

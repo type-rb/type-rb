@@ -13,6 +13,7 @@ const repositoryRoot = path.resolve(extensionRoot, "../..");
 
 test("registers the canonical TypeRB language, grammar, and debugger", async () => {
 	const manifest = JSON.parse(await readFile(path.join(extensionRoot, "package.json"), "utf8"));
+	assert.equal(manifest.version, "0.3.0");
 	assert.deepEqual(manifest.activationEvents, ["onLanguage:trb", "onDebug:typerb", "workspaceContains:trbconfig.jsonc"]);
 	assert.deepEqual(manifest.contributes.languages[0].extensions, [".trb"]);
 	assert.equal(manifest.contributes.grammars[0].scopeName, "source.trb");
@@ -33,6 +34,19 @@ test("registers the canonical TypeRB language, grammar, and debugger", async () 
 	const canonical = await readFile(path.join(repositoryRoot, "syntaxes/typerb.tmLanguage.json"));
 	const packaged = await readFile(path.join(extensionRoot, "syntaxes/typerb.tmLanguage.json"));
 	assert.deepEqual(packaged, canonical, "the packaged grammar must match the repository grammar");
+	const grammar = JSON.parse(canonical);
+	const controlPattern = grammar.repository.keywords.patterns.find((pattern) => pattern.name === "keyword.control.trb");
+	assert.ok(controlPattern, "the grammar must define control-flow keywords");
+	const controlKeywords = new RegExp(controlPattern.match);
+	for (const keyword of ["try", "catch"]) assert.equal(controlKeywords.test(keyword), true, `${keyword} must be highlighted`);
+	for (const legacy of ["attempt", "fails"]) assert.equal(controlKeywords.test(legacy), false, `${legacy} must not be highlighted`);
+
+	const snippets = JSON.parse(await readFile(path.join(extensionRoot, "snippets/typerb.json"), "utf8"));
+	const prefixes = Object.values(snippets).map((snippet) => snippet.prefix);
+	assert.ok(prefixes.includes("try"));
+	assert.ok(prefixes.includes("catch"));
+	assert.ok(!prefixes.includes("attempt"));
+	assert.ok(!prefixes.includes("fails"));
 
 	const repositoryLicense = await readFile(path.join(repositoryRoot, "LICENSE"));
 	const extensionLicense = await readFile(path.join(extensionRoot, "LICENSE"));

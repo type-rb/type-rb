@@ -45,6 +45,10 @@ sibling files are not compiled, and Go is the default target mode.
 
 Use Visual Studio Code 1.130 or newer.
 
+Use TypeRB 0.3.0 or newer. Earlier compilers use a different recoverable-error
+syntax and do not provide the language-server contract expected by this
+extension release.
+
 Install the TypeRB compiler and make `trb` available on `PATH`:
 
 ```sh

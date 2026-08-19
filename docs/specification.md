@@ -1,6 +1,6 @@
-# TypeRB Specification Draft v0.2
+# TypeRB Specification Draft v0.3
 
-Last updated: 2026-08-17
+Last updated: 2026-08-19
 
 ## 1. Language Goals
 
@@ -97,12 +97,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
 - Function types are written `(ParameterType, ...) -> ReturnType`. `Void` is
   permitted in a function type, for example `(String) -> Void`, but remains
   omitted from the corresponding `fn` declaration.
-- A function value may declare the same fallible effect as a named function:
-  `fn(): User fails LoadError ... end`. Its type is written
-  `() -> User fails LoadError`. Calling that value propagates or captures the
-  effect through the ordinary `fails` and `attempt` rules. A pure function is
-  assignable to a compatible fallible function type; a fallible function is
-  not assignable to a pure function type.
+- A function value that may return a recoverable error declares an ordinary
+  `Result` return, such as `fn(): Result<User, LoadError> ... end`. Its type is
+  written `() -> Result<User, LoadError>`. Prefix `try`, postfix `catch`, and
+  exhaustive `case` use the same Result rules as named functions.
 - A function value owns `return` statements in its body. It may capture outer
   lexical bindings, while ordinary immutability and `mut` assignment rules
   continue to apply to captured values.
@@ -114,9 +112,9 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   2; end`. `trb fmt` expands it to the canonical multiline form.
 - TypeScript alone may lower a function value to an `async` callback when its
   body reaches a Promise-based platform API. Suspension remains a backend
-  implementation detail rather than TypeRB syntax. A fallible function value
-  has an explicit `Result` runtime boundary and may suspend with a non-Void
-  success value. A pure suspending function value with a non-Void result
+  implementation detail rather than TypeRB syntax. A Result-returning function
+  value has an explicit portable boundary and may suspend with a non-Void
+  success value. A pure suspending function value with another non-Void result
   remains rejected until a higher-order suspension contract is available.
 
 #### JSX expressions
@@ -385,10 +383,10 @@ switches.
   type aliases. Calls continue to use TypeRB's explicit type arguments, and
   generated TypeScript imports any transitive target types required by the
   selected contracts without exposing those helper names to TypeRB source. A
-  provider may mark a fallible function field or parameter with the
-  `promise_rejection` effect bridge. The TypeScript backend then unwraps the
-  callback's `Result`, resolves `Ok(value)`, and rejects `Err(error)` only at
-  that native boundary.
+  provider may mark a Result-returning function field or parameter with the
+  `result_to_promise_rejection` bridge. The TypeScript backend then unwraps the
+  callback's `Result`, resolves `Ok(value)`, and rejects the exact `Err(error)`
+  payload only at that native boundary.
 - Official formatter command: `trb fmt`.
 - Canonical TypeRB indentation is one tab per nesting level. Formatter
   configuration is not part of the current language; a future configuration
@@ -417,12 +415,15 @@ switches.
 
 ### 3.8 Program Entry
 
-- A runnable project defines exactly one top-level `def main()`.
+- A runnable project defines exactly one top-level `def main()`. The runnable
+  declaration takes no parameters or type parameters and has no return
+  annotation. A class, enum, interface, or module member named `main` is an
+  ordinary non-entrypoint method and follows the usual method rules.
 - A standalone file-root program also starts from one top-level `def main()`
   in its selected entry file. The entry and the transitive closure of its
   explicit project imports form the program; unrelated sibling files are not
   discovered implicitly.
-- Project and standalone entrypoints have the same signature, effect, and
+- Project and standalone entrypoints have the same signature and
   startup rules. Selecting a file never turns top-level statements into a
   second script execution model or makes a function named `main` ordinary.
 - `main` is a language convention and is not configurable in
@@ -489,9 +490,16 @@ end
 ```
 
 The result must be assigned or returned; silently discarding it is an error.
-`return`, `break`, and `next` inside the block retain the same owners as an
-ordinary portable iteration. Ordinary call blocks are not value-producing
-unless their package declaration explicitly provides structured lowering.
+An ordinary structured iteration retains the same `return`, `break`, and
+`next` owners as a portable iteration. A Result-boundary structured block is a
+cleanup boundary: authored `return` cannot cross it, and `break` or `next`
+cannot cross it to an outer loop. A loop or function value nested inside the
+block still owns its local transfers. A Result-boundary structured iteration
+also rejects authored `return`, while `break` and `next` retain their local
+iteration meaning. Prefix `try` may return an Err to the structured boundary;
+the operation completes its rollback or cleanup before an outer `catch`
+handler runs. Ordinary call blocks are not value-producing unless their
+package declaration explicitly provides structured lowering.
 
 Portable Array transformations `map`, `select`, and `reduce` use the same
 typed-IR boundary. The short-circuit predicates `any?`, `all?`, and `none?`
@@ -842,32 +850,54 @@ end
   and case patterns—still require an explicit import such as
   `import { Result } from trb/std/result` or
   `import { IndexLookupError } from trb/std/errors`.
-- Postfix propagation with `?` or `!`, prefix `try`, implicit exceptions, and
-  `unwrap` are not part of the current language. Callable names may still end
-  in `?` or `!`; those suffixes are ordinary naming conventions. Fallible
-  operations use the effect rules below.
+- Postfix propagation with `?` or `!`, implicit exceptions, and unchecked
+  `unwrap` are not part of the language. Callable names may still end in `?`
+  or `!`; those suffixes are ordinary naming conventions. Recoverable failure
+  remains an ordinary `Result` value.
 
-### 4.2 Fallible effects
+### 4.2 Result control flow
 
-- A function declares one fallible effect after its success type:
-  `def find_user(id: Integer): User fails DbError`. A function without a return
-  value may write `def save() fails DbError`.
-- A call with an error effect propagates automatically through an enclosing
-  function that declares a compatible `fails` type. The compiler reports an
-  error when a named function neither declares nor captures the effect.
-- Function values retain their declared failure type. Invoking an effectful
-  function value follows the same propagation and capture rules as invoking a
-  named function.
-- `attempt expression` captures an effect as `Result<T, E>`. `attempt do ... end`
-  captures every compatible effect in the block and uses the block's final
-  expression as `T`. A block without a final value produces `Result<Unit, E>`.
-- `main()` cannot declare `fails`; it must capture fallible work explicitly.
-  The REPL top level is the deliberate exception: it executes a fallible call,
-  prints its success or error value, and keeps the session alive. Functions
-  defined in the REPL follow the ordinary declaration rule.
-- Typed IR represents propagation and capture explicitly. Backends may use a
-  native result representation internally, but TypeRB source has identical
-  control flow in Go, Ruby, and TypeScript modes.
+- The exact lowercase words `try` and `catch` are reserved for Result control
+  flow in authored declarations and bindings. Longer callable names such as
+  `try_fetch` and `catch?` remain ordinary names.
+- Prefix `try expression` requires the compiler-owned `Result<T, E>` or a
+  transparent alias. It evaluates the operand once. `Ok(value)` makes the
+  expression produce `value: T`; `Err(error)` returns a new Err from the
+  nearest compatible Result-returning function or compiler-declared structured
+  Result boundary.
+- The operand error type must be assignable to the enclosing Result error type
+  using the ordinary safe assignment conversions. TypeRB has no implicit
+  error-mapping protocol. Use `catch` and construct the outer error explicitly
+  when the types are incompatible.
+- Prefix `try` binds to its immediate postfix expression chain before binary
+  operators. It is not permitted at module or REPL top level, in a non-Result
+  function, or inside a value-producing collection transformation. Ordinary
+  `each` remains transparent to the enclosing function boundary.
+- `expression catch |error| ... end` also evaluates its Result operand once.
+  `Ok(value)` produces `value: T`. On `Err(error)`, the immutable binding has
+  type `E` and the handler must either produce a value assignable to `T` or
+  transfer control with `return`, `break`, or `next` to a valid lexical owner.
+  `catch` handles only `Result::Err`; it does not intercept a target-language
+  exception, Promise rejection, or panic.
+- In the initial grammar, `catch` wraps a complete statement value or the
+  complete result of a compiler-declared call block. A structured Result call,
+  and its optional direct `try` or `catch` wrapper, must be the direct value of
+  a variable declaration or return. Arbitrary argument, collection-element,
+  and member-chain composition is reserved until application evidence requires
+  it.
+- A discarded standard Result is a compile error. This required-use rule
+  covers bare Result expression statements and unread local Result bindings,
+  including names beginning with `_`. `try`, `catch`, exhaustive `case`,
+  `return`, passing, and storing the value are explicit handling or ownership
+  transfer. The rule is intentionally shallow: it does not recursively inspect
+  containers or perform whole-program liveness analysis. The REPL top level is
+  exempt because it displays the Result value.
+- An operation with no success value uses `Result<Unit, E>`. TypeRB does not
+  add an implicit Unit success, a one-argument Result shorthand, or a
+  zero-argument `Ok()` constructor.
+- Typed IR represents Result branching and structured boundaries explicitly.
+  Backends may choose a native representation internally, but source control
+  flow is identical in Go, Ruby, and TypeScript modes.
 
 ### 4.3 Test declarations
 
@@ -885,9 +915,13 @@ end
   nesting path is the stable full test name used by filters and tools.
   Duplicate full names in one file are an error.
 - Suite and test blocks take no parameters. Test bodies otherwise use ordinary
-  statements, helpers, effects, and imports. Effects retain the language's
-  normal `fails` and `attempt` rules. The test package does not change language
-  scoping or introduce implicit setup state.
+  statements, helpers, Results, and imports. Expected errors are inspected with
+  exhaustive `case`; the test package does not add an implicit Result boundary,
+  change language scoping, or introduce implicit setup state.
+- `return`, `break`, and `next` cannot transfer control across a `describe()` or
+  `test()` block boundary. A nested function still owns its own `return`, and
+  a `while` or iteration inside a test body still owns its local `break` and
+  `next` statements.
 - `expect<T>(actual)` preserves `T` in `Expectation<T>`. An assertion failure
   aborts the current case, records the assertion's `.trb` location, and does
   not abort subsequent cases.

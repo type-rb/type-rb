@@ -581,13 +581,13 @@ import { Result } from trb/std/result
 ```
 
 Construct `Result::Ok(value)` or `Result::Err(error)` and handle it with an
-exhaustive enum `case`. The current alpha has no postfix propagation operator
-for a `Result` value; fallible effects use the language-level `fails` and
-`attempt` constructs described in the
-[language guide](language.md#result-and-fallible-effects).
+exhaustive enum `case`. Prefix `try` unwraps `Ok` and returns `Err` from the
+nearest compatible Result-returning function. Postfix `catch` unwraps `Ok` and
+evaluates a local fallback or control transfer for `Err`. These constructs are
+described in the [language guide](language.md#result-control-flow).
 
 `trb/std/unit` provides `Unit` for successful generic operations with no
-application payload.
+application payload, including `Result<Unit, E>` operations.
 
 `trb/std/errors` provides `EnumValueError` for an unsuccessful raw-value enum
 conversion. `from_raw()` infers this error type and its runtime dependency; an

@@ -65,7 +65,7 @@ func collectDocumentSymbols(statements []ast.Statement, tokens []token.Token, me
 			}
 			symbol = structuralSymbol(node.Name, "interface", DocumentSymbolInterface, node.Span(), tokens, body)
 		case *ast.TypeAliasStatement:
-			symbol = leafDocumentSymbol(node.Name, "type "+node.Target.String(), DocumentSymbolType, node.Span(), tokens)
+			symbol = leafDocumentSymbol(node.Name, "type "+documentTypeDetail(node.Target), DocumentSymbolType, node.Span(), tokens)
 		case *ast.MethodStatement:
 			kind := DocumentSymbolFunction
 			if member {
@@ -73,9 +73,9 @@ func collectDocumentSymbols(statements []ast.Statement, tokens []token.Token, me
 			}
 			symbol = leafDocumentSymbol(node.Name, methodDocumentDetail(node), kind, node.Span(), tokens)
 		case *ast.FieldStatement:
-			symbol = leafDocumentSymbol(node.Name, node.Type.String(), DocumentSymbolField, node.Span(), tokens)
+			symbol = leafDocumentSymbol(node.Name, documentTypeDetail(node.Type), DocumentSymbolField, node.Span(), tokens)
 		case *ast.RecordFieldStatement:
-			symbol = leafDocumentSymbol(node.Name, node.Type.String(), DocumentSymbolField, node.Span(), tokens)
+			symbol = leafDocumentSymbol(node.Name, documentTypeDetail(node.Type), DocumentSymbolField, node.Span(), tokens)
 		case *ast.EnumMemberStatement:
 			symbol = leafDocumentSymbol(node.Name, "enum member", DocumentSymbolEnumMember, node.Span(), tokens)
 		case *ast.VariableStatement:
@@ -83,7 +83,7 @@ func collectDocumentSymbols(statements []ast.Statement, tokens []token.Token, me
 			if node.Constant {
 				kind = DocumentSymbolConstant
 			}
-			detail := node.Type.String()
+			detail := documentTypeDetail(node.Type)
 			if detail == "" {
 				detail = "inferred"
 			}
@@ -113,16 +113,56 @@ func leafDocumentSymbol(name, detail string, kind DocumentSymbolKind, span token
 func methodDocumentDetail(method *ast.MethodStatement) string {
 	parameters := make([]string, 0, len(method.Parameters))
 	for _, parameter := range method.Parameters {
-		parameters = append(parameters, parameter.Name+": "+parameter.Type.String())
+		parameters = append(parameters, parameter.Name+": "+documentTypeDetail(parameter.Type))
 	}
 	detail := "(" + strings.Join(parameters, ", ") + ")"
-	if !method.ReturnType.Empty() {
-		detail += ": " + method.ReturnType.String()
-	}
+	returnType := normalizeDocumentType(method.ReturnType)
 	if !method.Fails.Empty() {
-		detail += " fails " + method.Fails.String()
+		returnType = documentResultType(returnType, normalizeDocumentType(method.Fails))
+	}
+	if text := returnType.String(); text != "" {
+		detail += ": " + text
 	}
 	return detail
+}
+
+func documentTypeDetail(input ast.TypeRef) string {
+	return normalizeDocumentType(input).String()
+}
+
+func normalizeDocumentType(input ast.TypeRef) ast.TypeRef {
+	result := input
+	result.Arguments = make([]ast.TypeRef, len(input.Arguments))
+	for index, argument := range input.Arguments {
+		result.Arguments[index] = normalizeDocumentType(argument)
+	}
+	result.Union = make([]ast.TypeRef, len(input.Union))
+	for index, alternative := range input.Union {
+		result.Union[index] = normalizeDocumentType(alternative)
+	}
+	result.FunctionParameters = make([]ast.TypeRef, len(input.FunctionParameters))
+	for index, parameter := range input.FunctionParameters {
+		result.FunctionParameters[index] = normalizeDocumentType(parameter)
+	}
+	if input.FunctionReturn != nil {
+		valueType := normalizeDocumentType(*input.FunctionReturn)
+		if input.FunctionFails != nil {
+			valueType = documentResultType(valueType, normalizeDocumentType(*input.FunctionFails))
+		}
+		result.FunctionReturn = &valueType
+		result.FunctionFails = nil
+	}
+	return result
+}
+
+func documentResultType(success, failure ast.TypeRef) ast.TypeRef {
+	if success.Name == "Result" && len(success.Arguments) == 2 {
+		return success
+	}
+	if success.Empty() || success.Name == "Void" {
+		success = ast.TypeRef{Name: "Unit"}
+	}
+	return ast.TypeRef{Name: "Result", Arguments: []ast.TypeRef{success, failure}}
 }
 
 func tokenOffsetRange(span token.Span) OffsetRange {

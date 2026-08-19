@@ -108,7 +108,6 @@ type TypeContract struct {
 type MemberContract struct {
 	Kind           string
 	Type           types.Type
-	Fails          types.Type
 	TypeParameters []string
 	Parameters     []types.Type
 	Required       int
@@ -234,9 +233,7 @@ type Method struct {
 	TypeParameters []string
 	Parameters     []Parameter
 	Alternatives   []MethodSignature
-	SuccessType    types.Type
 	ReturnType     types.Type
-	Fails          types.Type
 	Body           []Statement
 	Class          bool
 	// Property exposes an external member without call syntax. Loadable
@@ -387,18 +384,20 @@ type IterationResult struct {
 
 type Iterate struct {
 	Base
-	Source          Expression
-	Operation       string
-	Intrinsic       string
-	SliceSize       Expression
-	WithIndex       bool
-	Bindings        []IterationBinding
-	Body            []Statement
-	Result          *IterationResult
-	Fails           types.Type
-	EffectSuccess   types.Type
-	CaptureEffect   bool
-	UnhandledEffect bool
+	Source    Expression
+	Operation string
+	Intrinsic string
+	SliceSize Expression
+	WithIndex bool
+	Bindings  []IterationBinding
+	Body      []Statement
+	Result    *IterationResult
+	// Fails, EffectSuccess, and CaptureEffect describe only a compiler-declared
+	// structured Result boundary. They do not represent function effects.
+	Fails          types.Type
+	EffectSuccess  types.Type
+	CaptureEffect  bool
+	ResultBoundary bool
 }
 
 func (*Iterate) irStatement() {}
@@ -416,17 +415,18 @@ type StructuredBlockResult struct {
 
 type StructuredBlock struct {
 	Base
-	Call             *Call
-	Intrinsic        string
-	Bindings         []IterationBinding
-	Body             []Statement
-	Value            Expression
-	Result           *StructuredBlockResult
+	Call      *Call
+	Intrinsic string
+	Bindings  []IterationBinding
+	Body      []Statement
+	Value     Expression
+	Result    *StructuredBlockResult
+	// Fails, EffectSuccess, and CaptureEffect describe only the structured
+	// Result boundary declared by the provider.
 	Fails            types.Type
 	EffectSuccess    types.Type
 	PropagateSuccess types.Type
 	CaptureEffect    bool
-	UnhandledEffect  bool
 }
 
 func (*StructuredBlock) irStatement() {}
@@ -444,8 +444,6 @@ type Transform struct {
 	Index       string
 	Accumulator string
 	ItemType    types.Type
-	SuccessType types.Type
-	Fails       types.Type
 	Body        []Statement
 	Result      Expression
 }
@@ -579,7 +577,6 @@ const IntegerToFloatConversion ConversionKind = "integer_to_float"
 const UnionIntegerToFloatConversion ConversionKind = "union_integer_to_float"
 const NonNullableToNullableConversion ConversionKind = "non_nullable_to_nullable"
 const NullableToNonNullableConversion ConversionKind = "nullable_to_non_nullable"
-const PureFunctionToFallibleConversion ConversionKind = "pure_function_to_fallible"
 const ResultFunctionToPromiseRejectionConversion ConversionKind = "result_function_to_promise_rejection"
 const RangeToIterableConversion ConversionKind = "range_to_iterable"
 
@@ -620,48 +617,20 @@ type Call struct {
 	Arguments []CallArgument
 	Block     *Block
 	Codec     *CodecSchema
-	Fails     types.Type
 }
 
 func (*Call) irExpression() {}
-
-// Attempt captures every fallible effect produced by Value or Body and
-// exposes it as Result<Success, Error>. BodyResult is the final value of a
-// block attempt and is nil for a Void block.
-type Attempt struct {
-	ExprBase
-	Value      Expression
-	Body       []Statement
-	BodyResult Expression
-	Success    types.Type
-	Fails      types.Type
-}
-
-func (*Attempt) irExpression() {}
 
 // Lambda is a first-class lexical function. Parameters and result remain
 // target-independent so every backend can emit its native closure form.
 type Lambda struct {
 	ExprBase
-	Parameters  []Parameter
-	SuccessType types.Type
-	ReturnType  types.Type
-	Fails       types.Type
-	Body        []Statement
+	Parameters []Parameter
+	ReturnType types.Type
+	Body       []Statement
 }
 
 func (*Lambda) irExpression() {}
-
-// UnhandledEffect marks a fallible expression evaluated by an interactive
-// host. The REPL unwraps success and reports failure without terminating the
-// session; project builds never produce this node.
-type UnhandledEffect struct {
-	ExprBase
-	Value Expression
-	Fails types.Type
-}
-
-func (*UnhandledEffect) irExpression() {}
 
 // CodecSchema is the checked, target-independent value shape used by typed
 // codecs and protocol bindings. Backends consume this schema instead of
@@ -709,7 +678,6 @@ type EnumCall struct {
 	Reference *Reference
 	RawType   types.Type
 	RawValues []EnumRawValue
-	Fails     types.Type
 }
 
 type EnumRawValue struct {

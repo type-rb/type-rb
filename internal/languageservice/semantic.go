@@ -442,7 +442,7 @@ func lexicalScopeRanges(tokens []token.Token) []lexicalScopeRange {
 
 func lexicalEndBlockOpener(name string) bool {
 	switch name {
-	case "case", "class", "def", "do", "enum", "fn", "if", "interface", "module", "record", "while":
+	case "case", "catch", "class", "def", "do", "enum", "fn", "if", "interface", "module", "record", "while":
 		return true
 	default:
 		return false

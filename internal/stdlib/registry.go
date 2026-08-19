@@ -31,7 +31,8 @@ type Parameter struct {
 // function. It deliberately models only ordinary callback blocks; structured
 // control-flow blocks remain declaration-provider functionality.
 type Block struct {
-	Parameters []types.Type
+	Parameters      []types.Type
+	ControlBoundary bool
 }
 
 type Symbol struct {
@@ -52,7 +53,6 @@ type Symbol struct {
 	ReceiverMutable     bool
 	Parameters          []Parameter
 	Return              types.Type
-	Fails               types.Type
 	Variadic            bool
 	Inference           string
 	RuntimeDependencies []types.Type
@@ -229,8 +229,8 @@ end
 `,
 		Kind: Portable,
 		Symbols: map[string]Symbol{
-			"describe": {Name: "describe", Intrinsic: "trb.std.test.describe", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{}},
-			"test":     {Name: "test", Intrinsic: "trb.std.test.test", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{}},
+			"describe": {Name: "describe", Intrinsic: "trb.std.test.describe", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{ControlBoundary: true}},
+			"test":     {Name: "test", Intrinsic: "trb.std.test.test", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{ControlBoundary: true}},
 			"expect": {
 				Name: "expect", Intrinsic: "trb.std.test.expect", RequiredSymbols: []string{"Expectation"}, TypeParameters: []string{"T"},
 				Parameters: []Parameter{{Name: "actual", Type: typeT}}, Return: expectationTType,
@@ -1622,9 +1622,6 @@ func bindType(pattern, actual types.Type, typeParameters map[string]bool, bindin
 	for index := range pattern.Args {
 		bindType(pattern.Args[index], actual.Args[index], typeParameters, bindings)
 	}
-	if pattern.Fails != nil && actual.Fails != nil {
-		bindType(*pattern.Fails, *actual.Fails, typeParameters, bindings)
-	}
 }
 
 func substituteType(input types.Type, bindings map[string]types.Type) types.Type {
@@ -1637,10 +1634,6 @@ func substituteType(input types.Type, bindings map[string]types.Type) types.Type
 	result.Args = make([]types.Type, len(input.Args))
 	for index, argument := range input.Args {
 		result.Args[index] = substituteType(argument, bindings)
-	}
-	if input.Fails != nil {
-		failure := substituteType(*input.Fails, bindings)
-		result.Fails = &failure
 	}
 	return result
 }

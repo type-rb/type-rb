@@ -11,10 +11,10 @@ than detailed syntax.
 
 ## 1. Complete the portable language core
 
-- Extend higher-order function effects across third-party package declarations,
-  native callback boundaries, and concurrent composition. Evaluate concise
-  `Result` propagation syntax only after application usage establishes a clear
-  ergonomic need.
+- Extend Result-returning higher-order functions across third-party package
+  declarations, native callback boundaries, and concurrent composition. Keep
+  prefix `try` and postfix `catch` as the sole propagation and recovery syntax
+  until application usage establishes another distinct need.
 - Extend union type-pattern narrowing to nullable, collection, enum, record,
   and class alternatives. Add position-typed Tuples and precise optional-value
   semantics.
@@ -76,7 +76,7 @@ than detailed syntax.
   framework integrations remain explicit platform packages.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
 - Expand automatic TypeScript `.d.ts` indexing beyond its initial simple
-  signatures and harden the declarative fallible/suspending callback bridge.
+  signatures and harden the declarative Result/suspending callback bridge.
   Then provide equivalent package-owned type discovery for Go modules and
   gems without application-authored signatures.
 - Evolve the initial distributed Git package system with semantic version

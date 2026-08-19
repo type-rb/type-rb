@@ -12,13 +12,10 @@ type exprParser struct {
 	tokens   []token.Token
 	pos      int
 	embedded map[int]ast.Expression
+	report   func(token.Span, string)
 }
 
-func parseExpressionTokens(tokens []token.Token) (ast.Expression, bool) {
-	return parseExpressionTokensWithEmbedded(tokens, nil)
-}
-
-func parseExpressionTokensWithEmbedded(tokens []token.Token, embedded map[int]ast.Expression) (ast.Expression, bool) {
+func parseExpressionTokensReporting(tokens []token.Token, embedded map[int]ast.Expression, report func(token.Span, string)) (ast.Expression, bool) {
 	filtered := make([]token.Token, 0, len(tokens))
 	for _, tok := range tokens {
 		if tok.Kind != token.Newline && tok.Kind != token.Comment {
@@ -28,10 +25,12 @@ func parseExpressionTokensWithEmbedded(tokens []token.Token, embedded map[int]as
 	if len(filtered) == 0 {
 		return nil, false
 	}
-	p := &exprParser{tokens: filtered, embedded: embedded}
+	p := &exprParser{tokens: filtered, embedded: embedded, report: report}
 	expr := p.parse(0)
 	return expr, expr != nil && p.pos == len(p.tokens)
 }
+
+const highestBinaryPrecedence = 12
 
 var precedences = map[string]int{
 	"or": 1, "||": 1,
@@ -43,7 +42,7 @@ var precedences = map[string]int{
 	"<<": 9, ">>": 9,
 	"+": 10, "-": 10,
 	"*": 11, "/": 11, "%": 11,
-	"**": 12,
+	"**": highestBinaryPrecedence,
 }
 
 func (p *exprParser) parse(min int) ast.Expression {
@@ -134,7 +133,7 @@ func (p *exprParser) parseGenericApplication(receiver ast.Expression) ast.Expres
 	parts := splitTopLevel(p.tokens[p.pos+1:close], ",")
 	arguments := make([]ast.TypeRef, 0, len(parts))
 	for _, part := range parts {
-		argument := parseType(part)
+		argument := parseTypeReporting(part, p.report)
 		if argument.Empty() {
 			p.tokens = original
 			return nil
@@ -170,11 +169,24 @@ func (p *exprParser) parsePrefix() ast.Expression {
 		}
 		return &ast.UnaryExpression{Base: ast.Base{SourceSpan: token.Span{Start: tok.Span.Start, End: operand.Span().End}}, Operator: tok.Lexeme, Operand: operand}
 	case "attempt":
+		if !p.startsRemovedAttemptOperand() {
+			return &ast.Identifier{Base: ast.Base{SourceSpan: tok.Span}, Name: tok.Lexeme}
+		}
+		p.reportRemovedSyntax(tok.Span, attemptRemovedMessage)
 		operand := p.parse(0)
 		if operand == nil {
 			return nil
 		}
 		return &ast.AttemptExpression{Base: ast.Base{SourceSpan: token.Span{Start: tok.Span.Start, End: operand.Span().End}}, Value: operand}
+	case "try":
+		// Propagation applies to the immediately following postfix chain. This
+		// makes `try result + 1` mean `(try result) + 1`, rather than requiring
+		// the complete arithmetic expression to produce a Result.
+		operand := p.parse(highestBinaryPrecedence)
+		if operand == nil {
+			return nil
+		}
+		return &ast.TryExpression{Base: ast.Base{SourceSpan: token.Span{Start: tok.Span.Start, End: operand.Span().End}}, Value: operand}
 	case "(":
 		expr := p.parse(0)
 		if expr == nil || !p.take(")") {
@@ -200,13 +212,13 @@ func (p *exprParser) parsePrefix() ast.Expression {
 		return &ast.SymbolLiteral{Base: ast.Base{SourceSpan: token.Span{Start: tok.Span.Start, End: name.Span.End}}, Name: value, Raw: raw}
 	}
 	if tok.Kind == token.String {
-		if interpolated, ok := parseInterpolatedString(tok); ok {
+		if interpolated, ok := parseInterpolatedString(tok, p.report); ok {
 			return interpolated
 		}
 		return &ast.Literal{Base: ast.Base{SourceSpan: tok.Span}, Kind: ast.StringLiteral, Raw: tok.Lexeme}
 	}
 	if tok.Kind == token.JSXLiteral {
-		element, ok := parseJSXExpression(tok)
+		element, ok := parseJSXExpression(tok, p.report)
 		if !ok {
 			return nil
 		}
@@ -234,7 +246,35 @@ func (p *exprParser) parsePrefix() ast.Expression {
 	return nil
 }
 
-func parseInterpolatedString(tok token.Token) (ast.Expression, bool) {
+func (p *exprParser) startsRemovedAttemptOperand() bool {
+	if p.pos >= len(p.tokens) {
+		return false
+	}
+	next := p.tokens[p.pos]
+	if _, binary := precedences[next.Lexeme]; binary {
+		return false
+	}
+	switch next.Lexeme {
+	case "(", "[", "{", ".", "&.", "::", ")", "]", "}", ",", ";", ":=", "=", "=>", "catch", "do":
+		return false
+	case "!", "not", "~", ":", "try":
+		return true
+	}
+	switch next.Kind {
+	case token.Identifier, token.Number, token.String, token.JSXLiteral, token.NativeLiteral:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *exprParser) reportRemovedSyntax(span token.Span, message string) {
+	if p.report != nil {
+		p.report(span, message)
+	}
+}
+
+func parseInterpolatedString(tok token.Token, report func(token.Span, string)) (ast.Expression, bool) {
 	raw := tok.Lexeme
 	if len(raw) < 2 || raw[0] != '"' || !strings.Contains(raw, "#{") {
 		return nil, false
@@ -290,7 +330,12 @@ func parseInterpolatedString(tok token.Token) (ast.Expression, bool) {
 		if len(innerTokens) > 0 && innerTokens[len(innerTokens)-1].Kind == token.EOF {
 			innerTokens = innerTokens[:len(innerTokens)-1]
 		}
-		expression, ok := parseExpressionTokens(innerTokens)
+		base := advancePosition(tok.Span.Start, raw[:1+expressionStart])
+		for index := range innerTokens {
+			innerTokens[index].Span.Start = shiftEmbeddedPosition(innerTokens[index].Span.Start, base)
+			innerTokens[index].Span.End = shiftEmbeddedPosition(innerTokens[index].Span.End, base)
+		}
+		expression, ok := parseExpressionTokensReporting(innerTokens, nil, report)
 		if !ok {
 			return nil, false
 		}
@@ -303,6 +348,29 @@ func parseInterpolatedString(tok token.Token) (ast.Expression, bool) {
 	}
 	result.Parts = append(result.Parts, ast.StringPart{Text: content[textStart:]})
 	return result, true
+}
+
+func advancePosition(position token.Position, source string) token.Position {
+	for index := 0; index < len(source); index++ {
+		position.Offset++
+		if source[index] == '\n' {
+			position.Line++
+			position.Column = 1
+		} else {
+			position.Column++
+		}
+	}
+	return position
+}
+
+func shiftEmbeddedPosition(position, base token.Position) token.Position {
+	result := position
+	result.Offset += base.Offset
+	result.Line += base.Line - 1
+	if position.Line == 1 {
+		result.Column += base.Column - 1
+	}
+	return result
 }
 
 func (p *exprParser) parseArray(open token.Token) ast.Expression {
@@ -405,7 +473,7 @@ func (p *exprParser) take(lexeme string) bool {
 	return false
 }
 
-func parseType(tokens []token.Token) ast.TypeRef {
+func parseTypeReporting(tokens []token.Token, report func(token.Span, string)) ast.TypeRef {
 	if len(tokens) == 0 {
 		return ast.TypeRef{}
 	}
@@ -418,7 +486,7 @@ func parseType(tokens []token.Token) ast.TypeRef {
 		}
 		for _, part := range splitTopLevel(tokens[1:arrow-1], ",") {
 			if len(part) > 0 {
-				result.FunctionParameters = append(result.FunctionParameters, parseType(part))
+				result.FunctionParameters = append(result.FunctionParameters, parseTypeReporting(part, report))
 			}
 		}
 		returnedTokens := tokens[arrow+1:]
@@ -427,18 +495,21 @@ func parseType(tokens []token.Token) ast.TypeRef {
 				result.Name = joinLexemes(tokens)
 				return result
 			}
-			failure := parseType(returnedTokens[failsAt+1:])
+			if report != nil {
+				report(returnedTokens[failsAt].Span, failsRemovedMessage)
+			}
+			failure := parseTypeReporting(returnedTokens[failsAt+1:], report)
 			result.FunctionFails = &failure
 			returnedTokens = returnedTokens[:failsAt]
 		}
-		returned := parseType(returnedTokens)
+		returned := parseTypeReporting(returnedTokens, report)
 		result.FunctionReturn = &returned
 		return result
 	}
 	if alternatives := splitTopLevel(tokens, "|"); len(alternatives) > 1 {
 		result := ast.TypeRef{Base: ast.Base{SourceSpan: spanOf(tokens)}}
 		for _, alternative := range alternatives {
-			result.Union = append(result.Union, parseType(alternative))
+			result.Union = append(result.Union, parseTypeReporting(alternative, report))
 		}
 		return result
 	}
@@ -462,7 +533,7 @@ func parseType(tokens []token.Token) ast.TypeRef {
 	if generic >= 0 && end > generic+1 && tokens[end-1].Lexeme == ">" {
 		t.Name = joinLexemes(tokens[:generic])
 		for _, part := range splitTopLevel(tokens[generic+1:end-1], ",") {
-			t.Arguments = append(t.Arguments, parseType(part))
+			t.Arguments = append(t.Arguments, parseTypeReporting(part, report))
 		}
 	} else {
 		t.Name = joinLexemes(tokens[:end])

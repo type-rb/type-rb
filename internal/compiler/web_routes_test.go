@@ -358,6 +358,58 @@ end
 			want: `Context#bind<TodoInput>() params field "slug" is not declared by route /todos/:id`,
 		},
 		{
+			name:       "endpoint input parameters mismatch inside catch",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, Response, text } from trb/web
+
+record TodoParams
+	slug: String
+end
+
+record TodoInput
+	params: TodoParams
+end
+
+def get(context: Context): Response
+	input := context.bind<TodoInput>() catch |_error|
+		return text("invalid", 400)
+	end
+	return text(input.params.slug)
+end
+`,
+			want: `Context#bind<TodoInput>() params field "slug" is not declared by route /todos/:id`,
+		},
+		{
+			name:       "endpoint input parameters mismatch inside try",
+			filename:   "/project/src/routes/todos/[id].trb",
+			modulePath: "routes/todos/[id]",
+			source: `import { Context, EndpointInputError, Response, text } from trb/web
+import { Result } from trb/std/result
+
+record TodoParams
+	slug: String
+end
+
+record TodoInput
+	params: TodoParams
+end
+
+def bind_input(context: Context): Result<TodoInput, EndpointInputError>
+	input := try context.bind<TodoInput>()
+	return Result<TodoInput, EndpointInputError>::Ok(input)
+end
+
+def get(context: Context): Response
+	input := bind_input(context) catch |_error|
+		return text("invalid", 400)
+	end
+	return text(input.params.slug)
+end
+`,
+			want: `Context#bind<TodoInput>() params field "slug" is not declared by route /todos/:id`,
+		},
+		{
 			name:       "catch-all parameter",
 			filename:   "/project/src/routes/files/[...path].trb",
 			modulePath: "routes/files/[...path]",

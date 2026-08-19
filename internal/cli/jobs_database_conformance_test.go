@@ -146,16 +146,14 @@ func jobsConformanceDatabase(t *testing.T, adapter string) (string, string, stri
 	}
 }
 
-const jobsServerMainSource = `import { Result } from trb/std/result
-import { ServerJob } from jobs/server_job
+const jobsServerMainSource = `import { ServerJob } from jobs/server_job
 
 def main()
-	case attempt ServerJob.perform_later(42)
-	when Result::Ok(_reference)
-		return
-	when Result::Err(error)
+	_reference := ServerJob.perform_later(42) catch |error|
 		puts(error.message)
+		return
 	end
+	return
 end
 `
 

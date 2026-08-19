@@ -27,16 +27,25 @@ type Parameter struct {
 type Signature struct {
 	Parameters []Parameter
 	Return     types.Type
-	Fails      types.Type
 	Variadic   bool
 }
 
 type Block struct {
 	Parameters []types.Type
-	// Return makes the block a value-producing control-flow boundary. The
-	// final expression must be assignable to this type, and return or Result
-	// propagation exits the block rather than the enclosing method.
+	// ControlBoundary prevents return, break, and next from crossing a
+	// backend callback whose target-language ownership would otherwise differ.
+	// Nested functions and loops still own their local control transfers.
+	ControlBoundary bool
+	// Return makes the block value-producing. The final expression must be
+	// assignable to this type.
 	Return types.Type
+	// ResultBoundary makes prefix try abort this structured operation with its
+	// declared Result error. A value-producing block uses Return as the success
+	// type; a structured iteration uses the enclosing member's Result success.
+	// It is not an authored block parameter. Authored return is rejected until
+	// lexical transfer and resource cleanup share one portable contract; use try
+	// to abort this boundary with Err.
+	ResultBoundary types.Type
 	// Structured keeps the block in typed IR instead of lowering it to a
 	// backend callback. Structured blocks may be assigned or returned while
 	// preserving return, break, and next in their lexical owner.
@@ -51,7 +60,6 @@ type Member struct {
 	MinimumArguments int
 	MaximumArguments int
 	Return           types.Type
-	Fails            types.Type
 	Variadic         bool
 	Class            bool
 	TypeParameters   []string

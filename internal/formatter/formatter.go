@@ -114,7 +114,7 @@ func writeStatement(out *strings.Builder, code []token.Token, indent, continuati
 
 	if dedent && isMidBlock(first) {
 		*indent++
-	} else if opensEndBlock(code) {
+	} else if opensEndBlock(code, *continuation) {
 		*indent++
 	}
 	*continuation += delimiterDelta(code)
@@ -202,7 +202,7 @@ func formatTokens(tokens []token.Token) string {
 			} else if current.Lexeme == ">>" && genericDepth >= 2 {
 				genericClosers = 2
 			}
-			openingPipe := current.Lexeme == "|" && (previous.Lexeme == "do" || previous.Lexeme == "{")
+			openingPipe := current.Lexeme == "|" && (previous.Lexeme == "do" || previous.Lexeme == "{" || previous.Lexeme == "catch")
 			closingPipe := current.Lexeme == "|" && inBlockParameters && !openingPipe
 			space := needsSpace(beforePrevious, *previous, current, next)
 			if (current.Lexeme == "|" || previous.Lexeme == "|") && !openingPipe && !closingPipe && !inBlockParameters {
@@ -470,7 +470,7 @@ func isMidBlock(first string) bool {
 	return false
 }
 
-func opensEndBlock(tokens []token.Token) bool {
+func opensEndBlock(tokens []token.Token, initialDepth int) bool {
 	first := firstCode(tokens)
 	switch first {
 	case "class", "record", "enum", "module", "interface", "def", "if", "unless", "case", "begin", "while", "until", "for":
@@ -481,8 +481,8 @@ func opensEndBlock(tokens []token.Token) bool {
 			return true
 		}
 	}
-	depth := 0
-	for _, item := range tokens {
+	depth := initialDepth
+	for index, item := range tokens {
 		switch item.Lexeme {
 		case "(", "[", "{":
 			depth++
@@ -495,6 +495,18 @@ func opensEndBlock(tokens []token.Token) bool {
 		case "fn":
 			if depth == 0 {
 				return true
+			}
+		case "catch":
+			if depth == 0 {
+				for next := index + 1; next < len(tokens); next++ {
+					if tokens[next].Kind == token.Comment {
+						continue
+					}
+					if tokens[next].Lexeme == "|" {
+						return true
+					}
+					break
+				}
 			}
 		}
 	}

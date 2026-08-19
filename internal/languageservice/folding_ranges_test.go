@@ -49,6 +49,17 @@ func TestFoldingRangesRemainAvailableForIncompleteDocuments(t *testing.T) {
 	}
 }
 
+func TestFoldingRangesIncludeResultCatchBodies(t *testing.T) {
+	source := "value := load() catch |error|\n\tputs(error)\nend\n"
+	ranges := FoldingRanges(source)
+	if len(ranges) != 1 {
+		t.Fatalf("ranges=%#v", ranges)
+	}
+	if start, end := lineAtOffset(source, ranges[0].Range.Start), lineAtOffset(source, ranges[0].Range.End); start != 0 || end != 2 {
+		t.Fatalf("catch range=(%d, %d), want (0, 2)", start, end)
+	}
+}
+
 func lineAtOffset(source string, offset int) int {
 	line := 0
 	for index := 0; index < offset && index < len(source); index++ {

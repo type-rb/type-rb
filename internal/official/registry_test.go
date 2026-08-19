@@ -93,9 +93,15 @@ func TestBundledJobsPackageDefaultsNativeDatabaseAdapterToSQLite(t *testing.T) {
 	if dependencies, err := contract.NativeDependenciesFor("go", nil); err != nil || len(dependencies) != 0 {
 		t.Fatalf("portable jobs contract has native dependencies: %#v, %v", dependencies, err)
 	}
+	if contract.Version != "0.2.0" {
+		t.Fatalf("jobs version = %q", contract.Version)
+	}
 	packageDefinition, ok := Lookup("trb/jobs/sql")
 	if !ok {
 		t.Fatal("SQL jobs adapter is not registered")
+	}
+	if packageDefinition.Version != "0.2.0" {
+		t.Fatalf("jobs SQL version = %q", packageDefinition.Version)
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		dependencies, err := packageDefinition.NativeDependenciesFor(mode, nil)
@@ -124,6 +130,22 @@ func TestBundledJobsPackageDefaultsNativeDatabaseAdapterToSQLite(t *testing.T) {
 		}
 		if dependencies["modernc.org/sqlite"] != "" || dependencies["sqlite3"] != "" {
 			t.Fatalf("%s PostgreSQL unexpectedly includes SQLite dependencies: %#v", mode, dependencies)
+		}
+	}
+}
+
+func TestResultOnlyBundledPackageVersions(t *testing.T) {
+	for name, version := range map[string]string{
+		"trb/orm":                         "0.2.0",
+		"trb/platform/typescript/browser": "0.2.0",
+		"trb/web":                         "0.1.0",
+	} {
+		packageDefinition, ok := Lookup(name)
+		if !ok {
+			t.Fatalf("%s is not registered", name)
+		}
+		if packageDefinition.Version != version {
+			t.Fatalf("%s version = %q, expected %q", name, packageDefinition.Version, version)
 		}
 	}
 }
@@ -335,26 +357,26 @@ func TestBundledTypeScriptBrowserPackage(t *testing.T) {
 		t.Fatalf("unexpected browser package boundary: %#v", definition)
 	}
 	request := definition.Symbols["request"]
-	if request.Intrinsic != "trb.platform.typescript.browser.request" || request.Receiver.String() != "HttpClient" || request.Return.String() != "Response<Body>" || request.Fails.String() != "RequestError" {
+	if request.Intrinsic != "trb.platform.typescript.browser.request" || request.Receiver.String() != "HttpClient" || request.Return.String() != "Result<Response<Body>, RequestError>" {
 		t.Fatalf("unexpected request contract: %#v", request)
 	}
 	if request.Parameters[3].Type.String() != "Headers" {
 		t.Fatalf("unexpected browser request headers contract: %#v", request.Parameters[3])
 	}
 	read := definition.Symbols["read"]
-	if read.Intrinsic != "trb.platform.typescript.browser.file_read" || read.Receiver.String() != "File" || read.Return.String() != "Bytes" || read.Fails.String() != "FileReadError" {
+	if read.Intrinsic != "trb.platform.typescript.browser.file_read" || read.Receiver.String() != "File" || read.Return.String() != "Result<Bytes, FileReadError>" {
 		t.Fatalf("unexpected browser file read contract: %#v", read)
 	}
 	readText := definition.Symbols["read_text"]
-	if readText.Intrinsic != "trb.platform.typescript.browser.file_read_text" || readText.Receiver.String() != "File" || readText.Return.String() != "String" || readText.Fails.String() != "FileReadError" {
+	if readText.Intrinsic != "trb.platform.typescript.browser.file_read_text" || readText.Receiver.String() != "File" || readText.Return.String() != "Result<String, FileReadError>" {
 		t.Fatalf("unexpected browser file text contract: %#v", readText)
 	}
 	json := definition.Symbols["json"]
-	if json.Receiver.String() != "Response<Body>" || json.Return.String() != "Response<T>" || len(json.TypeParameters) != 1 || json.Fails.String() != "RequestError" {
+	if json.Receiver.String() != "Response<Body>" || json.Return.String() != "Result<Response<T>, RequestError>" || len(json.TypeParameters) != 1 {
 		t.Fatalf("unexpected response JSON contract: %#v", json)
 	}
 	jsonBody := definition.Symbols["json_body"]
-	if jsonBody.Return.String() != "RequestBody" || jsonBody.Fails.String() != "RequestError" || len(jsonBody.TypeParameters) != 1 {
+	if jsonBody.Return.String() != "Result<RequestBody, RequestError>" || len(jsonBody.TypeParameters) != 1 {
 		t.Fatalf("unexpected JSON body contract: %#v", jsonBody)
 	}
 }

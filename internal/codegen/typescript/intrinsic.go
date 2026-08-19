@@ -23,7 +23,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return value
 	}
 	if generated, ok := g.ormIntrinsic(name, call, arguments); ok {
-		if effectplan.ORMOperation(name, call.Fails) {
+		if effectplan.ORMOperation(name) {
 			return "__trbOrm.withScope(__trbScope, async () => " + generated + ")"
 		}
 		return generated

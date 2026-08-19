@@ -16,6 +16,7 @@ import {
 	json_body,
 } from trb/platform/typescript/browser
 import { Header, Headers, HttpMethod } from trb/http
+import { Result } from trb/std/result
 import { QueryParameter } from trb/std/url
 
 record Todo
@@ -27,8 +28,8 @@ record CreateTodoInput
 	title: String
 end
 
-def fetch_todo(client: HttpClient, id: Integer): Response<Todo> fails RequestError
-	raw := client.request(
+def fetch_todo(client: HttpClient, id: Integer): Result<Response<Todo>, RequestError>
+	raw := try client.request(
 		"/todos",
 		query: [QueryParameter.new(name: "id", value: id.to_s())],
 		headers: Headers.new([Header.new(name: "accept", value: "application/json")]),
@@ -37,9 +38,9 @@ def fetch_todo(client: HttpClient, id: Integer): Response<Todo> fails RequestErr
 	return raw.json<Todo>()
 end
 
-def create_todo(client: HttpClient, input: CreateTodoInput): Response<Todo> fails RequestError
-	body := json_body(input)
-	raw := client.request("/todos", method: HttpMethod.post(), body: body)
+def create_todo(client: HttpClient, input: CreateTodoInput): Result<Response<Todo>, RequestError>
+	body := try json_body(input)
+	raw := try client.request("/todos", method: HttpMethod.post(), body: body)
 	return raw.json<Todo>()
 end
 ```
@@ -50,15 +51,18 @@ boundaries.
 
 ## Response model
 
-`request()` returns `Response<Body>`. It buffers the response body once and
-preserves the status, final URL, ordered headers, and bytes. Decode it
-explicitly when no endpoint contract is available:
+`request()` returns `Result<Response<Body>, RequestError>`. Prefix `try`
+propagates an error from a Result-returning function and yields the response on
+success. The response buffers its body once and preserves the status, final
+URL, ordered headers, and bytes. Decode it explicitly when no endpoint contract
+is available:
 
-- `response.json<T>()` validates JSON against `T` and returns `Response<T>`.
+- `response.json<T>()` validates JSON against `T` and returns
+  `Result<Response<T>, RequestError>`.
 - `response.text()` returns `Response<String>`.
 - `response.bytes()` returns `Response<Bytes>`.
 - `response.no_body()` validates an empty body and returns
-  `Response<NoBody>`.
+  `Result<Response<NoBody>, RequestError>`.
 
 `response.headers.first(name)` performs case-insensitive lookup,
 `response.headers.values(name)` preserves repeated values, and
@@ -74,7 +78,7 @@ narrowing can express a contract response such as
 
 ## Errors and bodies
 
-Fallible operations use one `RequestError` effect. Its `kind` is `Network`,
+Fallible operations return `Result` with one `RequestError` type. Its `kind` is `Network`,
 `Timeout`, `Abort`, or `Contract`. A JSON or empty-body contract failure keeps
 the original `Response<Body>` in `error.response`, so diagnostics and explicit
 fallback handling do not lose the status, headers, or body.

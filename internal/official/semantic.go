@@ -59,23 +59,25 @@ func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 	responseOf := func(body types.Type) types.Type {
 		return types.Type{Kind: types.Named, Name: "Response", Args: []types.Type{body}}
 	}
+	resultOf := func(success, failure types.Type) types.Type {
+		return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{success, failure}}
+	}
 	body := types.FromName("Body")
 	requestError := types.FromName("RequestError")
+	fileReadError := types.FromName("FileReadError")
 	jsonRuntime := []types.Type{types.FromName("JsonValue")}
 	return map[string]stdlib.Symbol{
 		"read": {
 			Name:      "read",
 			Intrinsic: "trb.platform.typescript.browser.file_read",
 			Receiver:  types.FromName("File"),
-			Return:    types.FromName("Bytes"),
-			Fails:     types.FromName("FileReadError"),
+			Return:    resultOf(types.FromName("Bytes"), fileReadError),
 		},
 		"read_text": {
 			Name:      "read_text",
 			Intrinsic: "trb.platform.typescript.browser.file_read_text",
 			Receiver:  types.FromName("File"),
-			Return:    types.FromName("String"),
-			Fails:     types.FromName("FileReadError"),
+			Return:    resultOf(types.FromName("String"), fileReadError),
 		},
 		"request": {
 			Name:      "request",
@@ -89,16 +91,14 @@ func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 				{Name: "body", Type: nullable(types.FromName("RequestBody")), Optional: true, Keyword: true},
 				{Name: "timeout_milliseconds", Type: nullable(types.FromName("Integer")), Optional: true, Keyword: true},
 			},
-			Return: responseOf(body),
-			Fails:  requestError,
+			Return: resultOf(responseOf(body), requestError),
 		},
 		"json": {
 			Name:                "json",
 			Intrinsic:           "trb.platform.typescript.browser.response_json",
 			Receiver:            responseOf(body),
 			TypeParameters:      []string{"T"},
-			Return:              responseOf(typeT),
-			Fails:               requestError,
+			Return:              resultOf(responseOf(typeT), requestError),
 			RuntimeDependencies: jsonRuntime,
 		},
 		"text": {
@@ -117,16 +117,14 @@ func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 			Name:      "no_body",
 			Intrinsic: "trb.platform.typescript.browser.response_no_body",
 			Receiver:  responseOf(body),
-			Return:    responseOf(types.FromName("NoBody")),
-			Fails:     requestError,
+			Return:    resultOf(responseOf(types.FromName("NoBody")), requestError),
 		},
 		"json_body": {
 			Name:                "json_body",
 			Intrinsic:           "trb.platform.typescript.browser.json_body",
 			TypeParameters:      []string{"T"},
 			Parameters:          []stdlib.Parameter{{Name: "value", Type: typeT}},
-			Return:              types.FromName("RequestBody"),
-			Fails:               requestError,
+			Return:              resultOf(types.FromName("RequestBody"), requestError),
 			RuntimeDependencies: jsonRuntime,
 		},
 	}

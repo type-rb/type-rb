@@ -29,6 +29,13 @@ func ReadProvider(path string) (*Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	formatVersion, err := readFormatVersion(data)
+	if err != nil {
+		return nil, err
+	}
+	if formatVersion != FormatVersion {
+		return nil, fmt.Errorf("unsupported native type provider formatVersion %d; expected %d; rewrite fallible callbacks with resultBridge and run trb install", formatVersion, FormatVersion)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var provider Provider
@@ -37,9 +44,6 @@ func ReadProvider(path string) (*Provider, error) {
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, errors.New("trailing JSON content")
-	}
-	if provider.FormatVersion != FormatVersion {
-		return nil, fmt.Errorf("unsupported formatVersion %d; expected %d", provider.FormatVersion, FormatVersion)
 	}
 	if provider.Modules == nil {
 		return nil, errors.New("modules is required")
@@ -241,20 +245,21 @@ func validateProviderType(typ Type) error {
 	if (typ.Kind == "named" || typ.Kind == "function") && strings.TrimSpace(typ.Name) == "" {
 		return fmt.Errorf("type kind %s requires a name", typ.Kind)
 	}
-	if typ.Fails != nil {
+	if typ.ResultBridge != nil {
 		if typ.Kind != "function" {
-			return errors.New("fails is only valid on function types")
+			return errors.New("resultBridge is only valid on function types")
 		}
-		if err := validateProviderType(*typ.Fails); err != nil {
-			return fmt.Errorf("invalid function failure type: %w", err)
+		if len(typ.Args) == 0 {
+			return errors.New("resultBridge requires a function return type")
 		}
-	}
-	if typ.EffectBridge != "" {
-		if typ.Kind != "function" || typ.Fails == nil {
-			return errors.New("effectBridge requires a fallible function type")
+		if typ.ResultBridge.Kind != "result_to_promise_rejection" {
+			return fmt.Errorf("unsupported resultBridge kind %q", typ.ResultBridge.Kind)
 		}
-		if typ.EffectBridge != "promise_rejection" {
-			return fmt.Errorf("unsupported effectBridge %q", typ.EffectBridge)
+		if typ.ResultBridge.Error.Kind == "" {
+			return errors.New("resultBridge error is required")
+		}
+		if err := validateProviderType(typ.ResultBridge.Error); err != nil {
+			return fmt.Errorf("invalid resultBridge error type: %w", err)
 		}
 	}
 	for _, argument := range typ.Args {
@@ -263,6 +268,16 @@ func validateProviderType(typ Type) error {
 		}
 	}
 	return nil
+}
+
+func readFormatVersion(data []byte) (int, error) {
+	var header struct {
+		FormatVersion int `json:"formatVersion"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&header); err != nil {
+		return 0, err
+	}
+	return header.FormatVersion, nil
 }
 
 func validateProviderTypeParameters(parameters []string) error {

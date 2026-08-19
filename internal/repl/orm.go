@@ -238,8 +238,14 @@ func (provider *ormRuntimeProvider) Iterate(evaluator *Evaluator, invocation run
 			for _, value := range values {
 				processed++
 				flow, evaluateErr := invocation.Evaluate(value)
-				if evaluateErr != nil || flow.Returned {
+				if evaluateErr != nil {
 					return Value{}, flow, evaluateErr
+				}
+				if flow.Returned {
+					if invocation.Iteration.ResultBoundary {
+						return flow.Value, flowResult{}, nil
+					}
+					return Value{}, flow, nil
 				}
 				switch flow.Loop {
 				case loopBreak:
@@ -253,8 +259,14 @@ func (provider *ormRuntimeProvider) Iterate(evaluator *Evaluator, invocation run
 			processed += int64(len(values))
 			valueType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName(query.model.Name)}}
 			flow, evaluateErr := invocation.Evaluate(Value{Type: valueType, Data: &arrayValue{Items: values}})
-			if evaluateErr != nil || flow.Returned {
+			if evaluateErr != nil {
 				return Value{}, flow, evaluateErr
+			}
+			if flow.Returned {
+				if invocation.Iteration.ResultBoundary {
+					return flow.Value, flowResult{}, nil
+				}
+				return Value{}, flow, nil
 			}
 			if flow.Loop == loopBreak {
 				result, resultErr := evaluator.ormResultOK(invocation.Type, Value{Type: types.FromName("Integer"), Data: processed})

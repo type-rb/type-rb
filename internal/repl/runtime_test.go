@@ -14,6 +14,7 @@ type testRuntimeProvider struct {
 	closed     bool
 	invocation runtimeInvocation
 	block      runtimeBlockInvocation
+	blockValue Value
 }
 
 func (*testRuntimeProvider) Name() string { return "test" }
@@ -35,7 +36,9 @@ func (provider *testRuntimeProvider) Call(_ *Evaluator, invocation runtimeInvoca
 
 func (provider *testRuntimeProvider) Block(_ *Evaluator, invocation runtimeBlockInvocation) (Value, error) {
 	provider.block = invocation
-	return invocation.Evaluate([]Value{{Type: types.FromName("String"), Data: "scoped"}})
+	value, err := invocation.Evaluate([]Value{{Type: types.FromName("String"), Data: "scoped"}})
+	provider.blockValue = value
+	return value, err
 }
 
 func (provider *testRuntimeProvider) Close() error {
@@ -92,5 +95,46 @@ func TestRuntimeProviderOwnsConfigurationInvocationAndLifecycle(t *testing.T) {
 	}
 	if !provider.closed {
 		t.Fatal("provider was not closed")
+	}
+}
+
+func TestStructuredResultBoundaryNormalizesCallbackAliasAndTemporary(t *testing.T) {
+	provider := &testRuntimeProvider{}
+	evaluator := NewEvaluator(nil, "go")
+	evaluator.runtimeProviders = []runtimeProvider{provider}
+	integerType := types.FromName("Integer")
+	errorType := types.FromName("DbError")
+	canonicalResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{integerType, errorType}}
+	aliasResult := types.Type{Kind: types.Named, Name: "DbResult", Args: []types.Type{integerType}}
+	temporaryName := "__trbStructuredResult1"
+	temporary := &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, aliasResult), Name: temporaryName, Lexical: true, Generated: true}
+
+	result, err := evaluator.Evaluate([]ir.Statement{
+		&ir.Temporary{Name: temporaryName, Type: aliasResult},
+		&ir.StructuredBlock{
+			Call: &ir.Call{
+				ExprBase: ir.NewExprBase(token.Span{}, aliasResult),
+				Callee: &ir.Identifier{
+					ExprBase: ir.NewExprBase(token.Span{}, aliasResult), Name: "resource",
+					Reference: &ir.Reference{Intrinsic: "test.echo"},
+				},
+			},
+			Intrinsic:     "test.echo",
+			Fails:         errorType,
+			EffectSuccess: integerType,
+			CaptureEffect: true,
+			Body: []ir.Statement{&ir.Return{Value: &ir.Literal{
+				ExprBase: ir.NewExprBase(token.Span{}, canonicalResult), Kind: "integer", Raw: "7",
+			}}},
+			Value:  &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, integerType), Kind: "integer", Raw: "0"},
+			Result: &ir.StructuredBlockResult{Target: temporary, Type: aliasResult},
+		},
+		&ir.Variable{Name: "result", Type: aliasResult, Value: temporary},
+	}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.blockValue.Type.Name != "DbResult" || result.Value.Type.Name != "DbResult" || result.Value.Data != int64(7) {
+		t.Fatalf("callback=%#v result=%#v", provider.blockValue, result.Value)
 	}
 }

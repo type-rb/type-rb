@@ -113,26 +113,77 @@ func TestFormatTransparentGenericTypeAlias(t *testing.T) {
 	}
 }
 
-func TestFormatEffectSignaturesAndAttemptBlocks(t *testing.T) {
-	source := []byte("def load():String fails LoadError # effect\nvalue:=attempt read() # direct\ngrouped:=attempt do # block\nread() # body\nend\nreturn value\nend\n")
-	want := "def load(): String fails LoadError # effect\n\tvalue := attempt read() # direct\n\tgrouped := attempt do # block\n\t\tread() # body\n\tend\n\treturn value\nend\n"
+func TestFormatResultSignaturesAndPropagation(t *testing.T) {
+	source := []byte("def load():Result<String,LoadError> # result\nvalue:=try read() # propagate\nreturn Result::Ok(value)\nend\n")
+	want := "def load(): Result<String, LoadError> # result\n\tvalue := try read() # propagate\n\treturn Result::Ok(value)\nend\n"
 
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %v", diagnostics)
 	}
 	if string(formatted) != want {
-		t.Fatalf("unexpected effect formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+		t.Fatalf("unexpected Result formatting\nwant:\n%s\ngot:\n%s", want, formatted)
 	}
 	formattedAgain, diagnostics := Format(formatted)
 	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
-		t.Fatalf("effect formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+		t.Fatalf("Result formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
 	}
 }
 
-func TestFormatFallibleFunctionValues(t *testing.T) {
-	source := []byte("loader:()->String fails LoadError:=fn():String fails LoadError; return read(); end\n")
-	want := "loader: () -> String fails LoadError := fn(): String fails LoadError\n\treturn read()\nend\n"
+func TestFormatTryAndCatchExpressions(t *testing.T) {
+	source := []byte("def load()\nvalue:=try read_value() # propagate\nrecovered:=read_value() catch | error | # recover\nreturn recover(error)\nend\nreturn recovered\nend\n")
+	want := "def load()\n\tvalue := try read_value() # propagate\n\trecovered := read_value() catch |error| # recover\n\t\treturn recover(error)\n\tend\n\treturn recovered\nend\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected try/catch formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("try/catch formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
+func TestFormatCatchAfterCallBlock(t *testing.T) {
+	source := []byte("def store()\nresult:=Database.transaction() do | tx | # transaction\ntry save(tx)\nend catch | error | # rollback complete\nreturn recover(error)\nend\nreturn result\nend\n")
+	want := "def store()\n\tresult := Database.transaction() do |tx| # transaction\n\t\ttry save(tx)\n\tend catch |error| # rollback complete\n\t\treturn recover(error)\n\tend\n\treturn result\nend\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected call-block catch formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("call-block catch formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
+func TestFormatCatchAfterMultilineCall(t *testing.T) {
+	source := []byte("def save()\nsaved:=row.with(\nvalue:1,\n).save() catch | error |\nreturn recover(error)\nend\nreturn saved\nend\n")
+	want := "def save()\n\tsaved := row.with(\n\t\tvalue: 1,\n\t).save() catch |error|\n\t\treturn recover(error)\n\tend\n\treturn saved\nend\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected multiline-call catch formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("multiline-call catch formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
+func TestFormatResultFunctionValues(t *testing.T) {
+	source := []byte("loader:()->Result<String,LoadError>:=fn():Result<String,LoadError>; return read(); end\n")
+	want := "loader: () -> Result<String, LoadError> := fn(): Result<String, LoadError>\n\treturn read()\nend\n"
 
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) != 0 {

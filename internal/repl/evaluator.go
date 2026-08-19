@@ -93,9 +93,6 @@ type typeValue struct {
 type callable struct {
 	Function  *functionDefinition
 	Lambda    *lambdaClosure
-	Adapted   *callable
-	Success   types.Type
-	Failure   types.Type
 	Method    *ir.Method
 	Receiver  Value
 	Module    string
@@ -332,15 +329,6 @@ func (*controlTransfer) Error() string {
 	return "control transfer from a value-producing branch"
 }
 
-type unhandledEffect struct {
-	typ   types.Type
-	value Value
-}
-
-func (e *unhandledEffect) Error() string {
-	return e.typ.String() + ": " + Inspect(e.value)
-}
-
 type loopFlow uint8
 
 const (
@@ -396,6 +384,12 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		sc.values[node.Name] = value
 		e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))] = value
 		return flowResult{Result: Result{Value: value, Display: true}}, nil
+	case *ir.Temporary:
+		// Compiler-owned temporaries are assigned by a following control-flow
+		// statement. A typed placeholder lets the REPL share the same expanded
+		// statement IR as generated backends without exposing an authored value.
+		sc.values[node.Name] = Value{Type: node.Type}
+		return flowResult{}, nil
 	case *ir.Assignment:
 		value, err := e.expression(node.Value, module, sc)
 		if err != nil {
@@ -516,7 +510,15 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 			return Value{}, errors.New("loop transfer escaped a structured block")
 		}
 		if flow.Returned {
-			return flow.Result.Value, nil
+			value := flow.Result.Value
+			if node.CaptureEffect {
+				// A Result-boundary block may expose an alias such as DbResult
+				// while its compiler-generated early return uses canonical Result.
+				// The runtime provider compares the callback value with the public
+				// call type to decide whether it must roll back.
+				value.Type = node.Call.ExprType()
+			}
+			return value, nil
 		}
 		return e.expression(node.Value, module, blockScope)
 	}
@@ -533,34 +535,6 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 	}
 	if node.Result == nil {
 		return flowResult{}, nil
-	}
-	fallible := node.Fails.Kind != "" && node.Fails.Kind != types.Never
-	if fallible && !node.CaptureEffect {
-		if node.Result.Return {
-			return flowResult{Result: Result{Value: value}, Returned: true}, nil
-		}
-		variant, ok := value.Data.(*enumValue)
-		if !ok {
-			return flowResult{}, errors.New("fallible structured block did not return Result")
-		}
-		if variant.Name == "Err" {
-			if node.UnhandledEffect {
-				errorValue, exists := variant.Payload["error"]
-				if !exists {
-					return flowResult{}, errors.New("fallible structured block returned Err without an error")
-				}
-				return flowResult{}, &unhandledEffect{typ: node.Fails, value: errorValue}
-			}
-			return flowResult{Result: Result{Value: value}, Returned: true}, nil
-		}
-		if variant.Name != "Ok" {
-			return flowResult{}, fmt.Errorf("fallible structured block returned unknown Result variant %s", variant.Name)
-		}
-		var exists bool
-		value, exists = variant.Payload["value"]
-		if !exists {
-			return flowResult{}, errors.New("fallible structured block returned Ok without a value")
-		}
 	}
 	value.Type = node.Result.Type
 	if node.Result.Variable != nil {
@@ -719,53 +693,6 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, fmt.Errorf("case expression branch has no result")
 		}
 		return e.expression(result, module, branchScope)
-	case *ir.Attempt:
-		attemptScope := &scope{parent: sc, values: map[string]Value{}}
-		flow, err := e.evaluate(node.Body, module, attemptScope)
-		if err != nil {
-			return Value{}, err
-		}
-		if flow.Returned {
-			return flow.Value, nil
-		}
-		result := node.Value
-		if result == nil {
-			result = node.BodyResult
-		}
-		value, err := e.expression(result, module, attemptScope)
-		if err != nil {
-			var transfer *controlTransfer
-			if errors.As(err, &transfer) && transfer.flow.Returned {
-				return transfer.flow.Value, nil
-			}
-		}
-		return value, err
-	case *ir.UnhandledEffect:
-		result, err := e.expression(node.Value, module, sc)
-		if err != nil {
-			return Value{}, err
-		}
-		variant, ok := result.Data.(*enumValue)
-		if !ok {
-			return Value{}, fmt.Errorf("fallible operation returned %s instead of Result", result.Type)
-		}
-		switch variant.Name {
-		case "Ok":
-			value, exists := variant.Payload["value"]
-			if !exists {
-				return Value{}, errors.New("fallible operation returned Ok without a value")
-			}
-			value.Type = node.ExprType()
-			return value, nil
-		case "Err":
-			value, exists := variant.Payload["error"]
-			if !exists {
-				return Value{}, errors.New("fallible operation returned Err without an error")
-			}
-			return Value{}, &unhandledEffect{typ: node.Fails, value: value}
-		default:
-			return Value{}, fmt.Errorf("fallible operation returned unknown Result variant %s", variant.Name)
-		}
 	case *ir.Literal:
 		return literal(node)
 	case *ir.InterpolatedString:
@@ -867,20 +794,6 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		case ir.RangeToIterableConversion:
 			value.Type = node.ExprType()
 			return value, nil
-		case ir.PureFunctionToFallibleConversion:
-			function, ok := value.Data.(*callable)
-			if !ok {
-				return Value{}, fmt.Errorf("cannot adapt %s as a fallible function", value.Type)
-			}
-			_, success, valid := types.FunctionSignature(node.ExprType())
-			if !valid {
-				return Value{}, fmt.Errorf("invalid fallible function type %s", node.ExprType())
-			}
-			return Value{Type: node.ExprType(), Data: &callable{
-				Adapted: function,
-				Success: success,
-				Failure: types.FunctionFailure(node.ExprType()),
-			}}, nil
 		case ir.IntegerToFloatConversion:
 			integer, ok := value.Data.(int64)
 			if !ok {
@@ -1360,33 +1273,7 @@ func (e *Evaluator) runtimeIterate(node *ir.Iterate, source Value, module string
 	if node.Result == nil {
 		return flowResult{}, nil
 	}
-	if node.CaptureEffect {
-		value.Type = node.Result.Type
-	} else {
-		variant, ok := value.Data.(*enumValue)
-		if !ok {
-			return flowResult{}, errors.New("fallible structured iteration did not return Result")
-		}
-		if variant.Name == "Err" {
-			if node.UnhandledEffect {
-				errorValue, exists := variant.Payload["error"]
-				if !exists {
-					return flowResult{}, errors.New("fallible structured iteration returned Err without an error")
-				}
-				return flowResult{}, &unhandledEffect{typ: node.Fails, value: errorValue}
-			}
-			return flowResult{Result: Result{Value: value}, Returned: true}, nil
-		}
-		if variant.Name != "Ok" {
-			return flowResult{}, fmt.Errorf("fallible structured iteration returned unknown Result variant %s", variant.Name)
-		}
-		var exists bool
-		value, exists = variant.Payload["value"]
-		if !exists {
-			return flowResult{}, errors.New("fallible structured iteration returned Ok without a value")
-		}
-		value.Type = node.Result.Type
-	}
+	value.Type = node.Result.Type
 	if node.Result.Variable != nil {
 		variable := node.Result.Variable
 		sc.values[variable.Name] = value
@@ -1530,22 +1417,6 @@ func (e *Evaluator) member(receiver Value, name, module string) (Value, error) {
 }
 
 func (e *Evaluator) call(function *callable, arguments []evaluatedArgument) (Value, error) {
-	if function.Adapted != nil {
-		value, err := e.call(function.Adapted, arguments)
-		if err != nil {
-			return Value{}, err
-		}
-		success := function.Success
-		if success.Kind == types.Void {
-			value, err = e.unitValue()
-			if err != nil {
-				return Value{}, err
-			}
-			success = value.Type
-		}
-		resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{success, function.Failure}}
-		return e.resultOK(resultType, value)
-	}
 	if function.Lambda != nil {
 		closure := function.Lambda
 		callScope := &scope{parent: closure.Scope, values: map[string]Value{}}

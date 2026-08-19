@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-19
+
+- Require TypeRB 0.3.0 and support its Result-only control flow with prefix
+  `try`, postfix `catch`, Result-aware hover and symbol details, and structured
+  catch folding.
+- Remove completion, highlighting, symbol, and rename treatment for the
+  removed `fails` and `attempt` syntax.
+
 ## 0.2.7 - 2026-08-18
 
 - Request TypeRB completions while identifiers are typed without requiring a

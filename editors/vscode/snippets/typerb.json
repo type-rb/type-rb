@@ -45,5 +45,19 @@
 			"${0}"
 		],
 		"description": "Define a TypeRB enum"
+	},
+	"Propagate Result": {
+		"prefix": "try",
+		"body": "try ${1:operation()}",
+		"description": "Propagate the Err value from a Result"
+	},
+	"Recover Result": {
+		"prefix": "catch",
+		"body": [
+			"${1:operation()} catch |${2:error}|",
+			"\t${0}",
+			"end"
+		],
+		"description": "Recover from the Err value of a Result"
 	}
 }

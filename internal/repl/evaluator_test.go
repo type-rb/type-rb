@@ -361,44 +361,6 @@ func TestEvaluateLiteralCaseAlternatives(t *testing.T) {
 	}
 }
 
-func TestEvaluateUnhandledEffectAtInteractiveTopLevel(t *testing.T) {
-	integerType := types.FromName("Integer")
-	errorType := types.FromName("String")
-	resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{integerType, errorType}}
-	definition := &ir.Enum{Name: "Result", TypeParameters: []string{"T", "E"}, Body: []ir.Statement{
-		&ir.EnumMember{Name: "Ok", Fields: []ir.Parameter{{Name: "value", Type: integerType}}},
-		&ir.EnumMember{Name: "Err", Fields: []ir.Parameter{{Name: "error", Type: errorType}}},
-	}}
-	construct := func(member string, value ir.Expression) *ir.EnumConstruct {
-		return &ir.EnumConstruct{
-			ExprBase: ir.NewExprBase(token.Span{}, resultType), EnumName: "Result", Member: member,
-			TypeArguments: []types.Type{integerType, errorType}, Arguments: []ir.Expression{value},
-		}
-	}
-	effect := func(result ir.Expression) *ir.UnhandledEffect {
-		return &ir.UnhandledEffect{ExprBase: ir.NewExprBase(token.Span{}, integerType), Value: result, Fails: errorType}
-	}
-
-	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
-	evaluator.LoadDefinitions(&ir.Program{ModulePath: "repl", Statements: []ir.Statement{definition}})
-	success, err := evaluator.Evaluate([]ir.Statement{&ir.ExpressionStatement{Expression: effect(construct("Ok", &ir.Literal{
-		ExprBase: ir.NewExprBase(token.Span{}, integerType), Kind: "integer", Raw: "7",
-	}))}}, "repl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !success.Display || Inspect(success.Value) != "7" || success.Value.Type.String() != "Integer" {
-		t.Fatalf("unexpected effect success: %#v", success)
-	}
-
-	_, err = evaluator.Evaluate([]ir.Statement{&ir.ExpressionStatement{Expression: effect(construct("Err", &ir.Literal{
-		ExprBase: ir.NewExprBase(token.Span{}, errorType), Kind: "string", Raw: `"stopped"`,
-	}))}}, "repl")
-	if err == nil || err.Error() != `String: "stopped"` {
-		t.Fatalf("unexpected effect failure: %v", err)
-	}
-}
-
 func TestEvaluateIfExpression(t *testing.T) {
 	booleanType := types.FromName("Boolean")
 	stringType := types.FromName("String")

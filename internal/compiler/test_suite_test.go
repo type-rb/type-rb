@@ -55,3 +55,120 @@ func TestTestRunnerProtocolIsNotAUserImport(t *testing.T) {
 		t.Fatalf("unexpected finish import result: %v", err)
 	}
 }
+
+func TestPortableTestBlocksRejectEscapingControlAcrossBackends(t *testing.T) {
+	tests := []struct {
+		keyword string
+		source  string
+	}{
+		{
+			keyword: "return",
+			source: `import { describe, test } from trb/std/test
+
+describe("suite") do
+	test("case") do
+		return
+	end
+end
+`,
+		},
+		{
+			keyword: "break",
+			source: `import { describe, test } from trb/std/test
+
+describe("suite") do
+	test("case") do
+		break
+	end
+end
+`,
+		},
+		{
+			keyword: "next",
+			source: `import { describe, test } from trb/std/test
+
+describe("suite") do
+	test("case") do
+		next
+	end
+end
+`,
+		},
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			t.Run(mode+"/"+test.keyword, func(t *testing.T) {
+				_, err := CompileProject([]SourceUnit{{
+					Filename: "/project/src/control_test.trb", Source: []byte(test.source), ModulePath: "control_test",
+				}}, Options{Mode: mode, GoModule: "example.com/test-control", SourceRoot: "/project/src", ProjectRoot: "/project", TypeScriptRuntime: "bun"})
+				want := test.keyword + " cannot cross the test() block boundary"
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("expected %q, got %v", want, err)
+				}
+				compileError, ok := err.(*CompileError)
+				if !ok {
+					t.Fatalf("error type=%T, want *CompileError", err)
+				}
+				found := false
+				for _, item := range compileError.Diagnostics {
+					if item.Message != want {
+						continue
+					}
+					if got := test.source[item.Span.Start.Offset:item.Span.End.Offset]; got != test.keyword {
+						t.Fatalf("diagnostic span=%q, want %q", got, test.keyword)
+					}
+					found = true
+				}
+				if !found {
+					t.Fatalf("missing structured diagnostic %q in %#v", want, compileError.Diagnostics)
+				}
+			})
+		}
+	}
+}
+
+func TestPortableTestBlocksAllowLocallyOwnedControlAcrossBackends(t *testing.T) {
+	const testSource = `import { describe, expect, test } from trb/std/test
+
+describe("Control") do
+	test("keeps local owners") do
+		while true
+			break
+		end
+		[1].each do |_value|
+			next
+		end
+		callback := fn()
+			return
+		end
+		callback()
+		expect(true).to_be_true()
+	end
+end
+`
+	const runnerSource = `import { finish } from trb/std/test
+import { trb_test_register_control } from control_test
+
+def main()
+	trb_test_register_control()
+	finish()
+	return
+end
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			rootPackage := ""
+			if mode == "go" {
+				rootPackage = "main"
+			}
+			_, err := CompileProject([]SourceUnit{
+				{Filename: "/project/src/control_test.trb", Source: []byte(testSource), ModulePath: "control_test", Package: rootPackage, TestRegistration: "trb_test_register_control"},
+				{Filename: "/project/src/__trb_test_main.trb", Source: []byte(runnerSource), ModulePath: "__trb_test_main", Package: rootPackage, CompilerOwned: true},
+			}, Options{Mode: mode, GoModule: "example.com/test-control", SourceRoot: "/project/src", ProjectRoot: "/project", TypeScriptRuntime: "bun"})
+			if err != nil {
+				t.Fatalf("%s rejected locally owned control: %v", mode, err)
+			}
+		})
+	}
+}

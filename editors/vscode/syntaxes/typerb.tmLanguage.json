@@ -324,7 +324,7 @@
         },
         {
           "name": "keyword.control.trb",
-          "match": "\\b(?:if|elsif|else|then|case|when|while|do|return|break|next|end)\\b"
+          "match": "\\b(?:if|elsif|else|then|case|when|while|do|try|catch|return|break|next|end)(?![?!_=])\\b"
         },
         {
           "name": "keyword.operator.logical.trb",

@@ -1,3 +1,6 @@
+import { Result } from trb/std/result
+import { Unit } from trb/std/unit
+
 enum EnqueueErrorKind
 	Serialization
 	InvalidArgument
@@ -14,6 +17,12 @@ record JobReference
 	id: String
 	job_name: String
 end
+
+record JobError
+	message: String
+end
+
+type JobResult = Result<Unit, JobError>
 
 interface JobAdapter
 end

@@ -32,6 +32,12 @@ Keep these application invariants:
   through `trb/platform/<mode>/*`.
 - Keep ordinary imports explicit. Do not rely on REPL-only hidden imports in
   project source.
+- Treat recoverable failure as `Result<T, E>`. Use prefix `try` only inside a
+  compatible Result-returning function, postfix `catch` for local recovery or
+  early control transfer, and exhaustive `case` when both variants are data to
+  inspect. Do not discard a standard Result value.
+- Keep `case`/`when` for the current value and enum-payload matching surface.
+  Do not invent `case`/`in`, `match`, or implicit payload accessors.
 - Edit `.trb` source and `trbconfig.jsonc`, not generated target files or a
   managed native manifest.
 

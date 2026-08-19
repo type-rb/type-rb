@@ -114,11 +114,11 @@ package directly. The provider is declarative data and cannot execute compiler
 code. Each declared module must belong to the package's TypeScript
 `nativeDependencies`; two providers cannot replace the same export or record.
 
-The initial provider file uses a versioned semantic type format:
+The provider file uses a versioned semantic type format:
 
 ```json
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "modules": {
     "@acme/ui": {
       "exports": {
@@ -157,9 +157,8 @@ union types for discriminated result contracts. TypeRB calls still provide
 explicit type arguments. Provider declarations cannot use `Any`;
 unrepresentable boundaries remain explicit diagnostics.
 
-A provider may expose a native Promise callback as a checked fallible TypeRB
-function. `fails` names the callback's error type and
-`effectBridge: "promise_rejection"` declares that an `Err` becomes a rejected
+A provider may expose a native Promise callback as a checked `Result`-returning
+TypeRB function. `resultBridge` declares that an `Err` becomes a rejected
 Promise while an `Ok` becomes its resolved value:
 
 ```json
@@ -169,15 +168,28 @@ Promise while an `Ok` becomes its resolved value:
     "kind": "function",
     "name": "Function",
     "args": [{ "kind": "named", "name": "TData" }],
-    "fails": { "kind": "named", "name": "TError" },
-    "effectBridge": "promise_rejection"
+    "resultBridge": {
+      "kind": "result_to_promise_rejection",
+      "error": { "kind": "named", "name": "TError" }
+    }
   }
 }
 ```
 
-Application code still uses ordinary `fn ... fails ...`, `attempt`, and
-`Result` semantics. The bridge is allowed only at the declared native
-boundary; it does not make Promise rejection part of portable TypeRB.
+The TypeRB callback must return the compiler-owned `Result<TData, TError>` or
+a transparent alias. The generated native callback accepts either that Result
+or a Promise of it, resolves `Ok(value)`, and rejects with the exact
+`Err(error)` payload. A native `Void` success uses `Result<Unit, E>` and emits
+`Promise<void>`; a generic success instantiated as `Unit` remains
+`Promise<Unit>`. The bridge is allowed only at the declared native boundary;
+it does not make Promise rejection part of portable TypeRB.
+
+Provider format version 2 is Result-only. Version 1 providers used the removed
+`fails` and `effectBridge` fields and are not accepted by TypeRB 0.3. Rewrite
+those callback contracts with `resultBridge`, update the provider's
+`formatVersion` to `2`, and run `trb install` to regenerate
+`.trb/native-types.json`. A version 1 generated cache can be regenerated with
+`trb install` after every referenced provider has been updated.
 
 Provider-only records may describe props or parameter objects without becoming
 application-importable names. When a selected contract refers to real native

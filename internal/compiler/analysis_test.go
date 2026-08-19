@@ -166,7 +166,7 @@ end
 
 def build_loader(client: HttpClient)
 	loader := fn(): String
-		response := attempt client.request("/todos")
+		response := client.request("/todos")
 		puts(response)
 		return "loaded"
 	end

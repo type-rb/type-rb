@@ -40,6 +40,5 @@ func runnableMain(method *ast.MethodStatement) bool {
 		!method.Class &&
 		len(method.TypeParameters) == 0 &&
 		len(method.Parameters) == 0 &&
-		method.ReturnType.Empty() &&
-		method.Fails.Empty()
+		method.ReturnType.Empty()
 }

@@ -67,7 +67,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	g.line("begin", "")
 	g.indent++
 	g.line(processed+" = 0", "")
-	g.line("catch("+strconv.Quote(breakTarget)+") do", "")
+	g.line("catch(:"+breakTarget+") do", "")
 	g.indent++
 	g.line(query+".each_batch("+batchSize+") do |"+batch+"|", "")
 	g.indent++

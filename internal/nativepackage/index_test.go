@@ -1,6 +1,7 @@
 package nativepackage
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,15 +11,11 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-func TestNativeTypePreservesFunctionEffects(t *testing.T) {
-	failure := types.FromName("RequestError")
-	semantic := types.FunctionWithEffect([]types.Type{types.FromName("String")}, types.FromName("Integer"), failure)
+func TestNativeTypeRoundTripsFunctionTypes(t *testing.T) {
+	semantic := types.FunctionOf([]types.Type{types.FromName("String")}, types.FromName("Integer"))
 	wire := FromSemantic(semantic)
-	if wire.Fails == nil || wire.Fails.Name != "RequestError" {
-		t.Fatalf("wire function lost its failure type: %#v", wire)
-	}
 	if restored := wire.Semantic(); !types.Equivalent(restored, semantic) {
-		t.Fatalf("function effect round trip changed %s to %s", semantic, restored)
+		t.Fatalf("function type round trip changed %s to %s", semantic, restored)
 	}
 }
 
@@ -28,21 +25,41 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 		TypeScriptVersion: "6.0.3",
 		Dependencies:      map[string]string{"@scope/ui": "1.2.3"},
 		Modules: map[string]Module{
-			"@scope/ui": {Exports: map[string]Export{"Button": {Kind: "component", Type: Type{Kind: "named", Name: "ReactNode"}}}},
+			"@scope/ui": {Exports: map[string]Export{
+				"Button": {Kind: "component", Type: Type{Kind: "named", Name: "ReactNode"}},
+				"runQuery": {
+					Kind: "function", Type: Type{Kind: "int", Name: "Integer"}, Required: 1,
+					Parameters: []Type{{
+						Kind: "function", Name: "Function", Args: []Type{{Kind: "int", Name: "Integer"}},
+						ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection", Error: Type{Kind: "string", Name: "String"}},
+					}},
+				},
+			}},
 		},
 	}
 	if err := Write(root, catalog); err != nil {
 		t.Fatal(err)
 	}
+	written, err := os.ReadFile(IndexPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), `"formatVersion": 2`) || strings.Contains(string(written), `"fails"`) || strings.Contains(string(written), `"effectBridge"`) {
+		t.Fatalf("native cache did not use the Result-only v2 schema:\n%s", written)
+	}
 	loaded, err := Load(root, map[string]string{"@scope/ui": "1.2.3"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.TypeScriptVersion != "6.0.3" || !loaded.Owns("@scope/ui/button") {
+	if loaded.FormatVersion != FormatVersion || loaded.TypeScriptVersion != "6.0.3" || !loaded.Owns("@scope/ui/button") {
 		t.Fatalf("unexpected loaded catalog: %#v", loaded)
 	}
 	if _, ok := loaded.Modules["@scope/ui"].Exports["Button"]; !ok {
 		t.Fatalf("native export was not preserved: %#v", loaded.Modules)
+	}
+	bridge := loaded.Modules["@scope/ui"].Exports["runQuery"].Parameters[0].ResultBridge
+	if bridge == nil || bridge.Kind != "result_to_promise_rejection" || bridge.Error.Name != "String" {
+		t.Fatalf("native Result bridge was not preserved: %#v", bridge)
 	}
 }
 
@@ -65,11 +82,44 @@ func TestLoadRejectsTrailingNativeIndexContent(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(IndexPath(root)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(IndexPath(root), []byte(`{"formatVersion":1,"dependencies":{"ui":"1"},"modules":{}} {}`), 0o644); err != nil {
+	data := fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"modules":{}} {}`, FormatVersion)
+	if err := os.WriteFile(IndexPath(root), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(root, map[string]string{"ui": "1"}); err == nil || !strings.Contains(err.Error(), "trailing JSON content") {
 		t.Fatalf("expected trailing content diagnostic, got %v", err)
+	}
+}
+
+func TestLoadRejectsVersionOneNativeIndexBeforeLegacyFields(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(IndexPath(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"formatVersion":1,"dependencies":{"ui":"1"},"modules":{"ui":{"exports":{"run":{"kind":"function","type":{"kind":"function","name":"Function","args":[{"kind":"int","name":"Integer"}],"fails":{"kind":"string","name":"String"},"effectBridge":"promise_rejection"}}}}}}`
+	if err := os.WriteFile(IndexPath(root), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(root, map[string]string{"ui": "1"})
+	if err == nil || !strings.Contains(err.Error(), "formatVersion 1") || !strings.Contains(err.Error(), "expected 2") || !strings.Contains(err.Error(), "run trb install") {
+		t.Fatalf("expected native cache migration diagnostic, got %v", err)
+	}
+	if strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("legacy cache fields hid the version migration diagnostic: %v", err)
+	}
+}
+
+func TestLoadStrictlyRejectsLegacyFieldsInVersionTwoIndex(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(IndexPath(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"modules":{"ui":{"exports":{"run":{"kind":"function","type":{"kind":"function","name":"Function","args":[{"kind":"int","name":"Integer"}],"fails":{"kind":"string","name":"String"}}}}}}}`, FormatVersion)
+	if err := os.WriteFile(IndexPath(root), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root, map[string]string{"ui": "1"}); err == nil || !strings.Contains(err.Error(), `unknown field "fails"`) {
+		t.Fatalf("expected strict legacy field diagnostic, got %v", err)
 	}
 }
 
