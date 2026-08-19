@@ -46,26 +46,27 @@ const (
 )
 
 type Export struct {
-	Name              string
-	Kind              ExportKind
-	Type              types.Type
-	Fails             types.Type
-	Parameters        []types.Type
-	ParameterBridges  []string
-	Required          int
-	Variadic          bool
-	Members           map[string]Member
-	Fields            []RecordField
-	EnumMembers       []string
-	EnumVariants      []EnumVariant
-	EnumRawType       types.Type
-	TypeParameters    []string
-	AliasTarget       types.Type
-	AliasEnum         bool
-	Superclass        string
-	Interfaces        []types.Type
-	Span              token.Span
-	UnsupportedFields map[string]string
+	Name                   string
+	Kind                   ExportKind
+	Type                   types.Type
+	Fails                  types.Type
+	Parameters             []types.Type
+	ParameterBridges       []string
+	ParameterResultBridges []NativeResultBridge
+	Required               int
+	Variadic               bool
+	Members                map[string]Member
+	Fields                 []RecordField
+	EnumMembers            []string
+	EnumVariants           []EnumVariant
+	EnumRawType            types.Type
+	TypeParameters         []string
+	AliasTarget            types.Type
+	AliasEnum              bool
+	Superclass             string
+	Interfaces             []types.Type
+	Span                   token.Span
+	UnsupportedFields      map[string]string
 	// NativeExported distinguishes a real target-package type export from a
 	// provider-only structural record used to describe another declaration.
 	NativeExported bool
@@ -77,6 +78,16 @@ type RecordField struct {
 	Type         types.Type
 	Optional     bool
 	EffectBridge string
+	ResultBridge NativeResultBridge
+}
+
+// NativeResultBridge keeps both sides of a package-owned callback boundary.
+// Type is the native Promise success signature, while Error is the TypeRB
+// Result error payload accepted by the adapter.
+type NativeResultBridge struct {
+	Kind  string
+	Type  types.Type
+	Error types.Type
 }
 
 type EnumVariant struct {
@@ -794,12 +805,15 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 		result.AliasTarget = exported.AliasTarget.Semantic()
 	}
 	for _, parameter := range exported.Parameters {
-		result.Parameters = append(result.Parameters, parameter.Semantic())
+		parameterType, resultBridge := nativeResultCallbackType(parameter)
+		result.Parameters = append(result.Parameters, parameterType)
 		result.ParameterBridges = append(result.ParameterBridges, parameter.EffectBridge)
+		result.ParameterResultBridges = append(result.ParameterResultBridges, resultBridge)
 	}
 	for _, field := range exported.Fields {
-		result.Fields = append(result.Fields, RecordField{Name: field.Name, JSONName: field.Name, Type: field.Type.Semantic(), Optional: field.Optional, EffectBridge: field.Type.EffectBridge})
-		result.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: field.Type.Semantic(), Readonly: true}
+		fieldType, resultBridge := nativeResultCallbackType(field.Type)
+		result.Fields = append(result.Fields, RecordField{Name: field.Name, JSONName: field.Name, Type: fieldType, Optional: field.Optional, EffectBridge: field.Type.EffectBridge, ResultBridge: resultBridge})
+		result.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: fieldType, Readonly: true}
 	}
 	for name, exportedMember := range exported.Members {
 		memberExport := nativeExport(name, exportedMember, false)
@@ -817,6 +831,28 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 		}
 	}
 	return result
+}
+
+func nativeResultCallbackType(providerType nativepackage.Type) (types.Type, NativeResultBridge) {
+	nativeType := providerType.Semantic()
+	if providerType.ResultBridge == nil {
+		return nativeType, NativeResultBridge{}
+	}
+	parameters, success, ok := types.FunctionSignature(nativeType)
+	if !ok {
+		return nativeType, NativeResultBridge{}
+	}
+	errorType := providerType.ResultBridge.Error.Semantic()
+	resultSuccess := success
+	if resultSuccess.Kind == types.Void {
+		resultSuccess = types.FromName("Unit")
+	}
+	resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{resultSuccess, errorType}}
+	return types.FunctionOf(parameters, resultType), NativeResultBridge{
+		Kind:  providerType.ResultBridge.Kind,
+		Type:  nativeType,
+		Error: errorType,
+	}
 }
 
 func cloneStrings(input map[string]string) map[string]string {

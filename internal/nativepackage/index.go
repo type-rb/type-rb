@@ -58,13 +58,23 @@ type Field struct {
 
 // Type is the stable on-disk form of a target-independent semantic type.
 type Type struct {
-	Kind         string `json:"kind"`
-	Name         string `json:"name,omitempty"`
-	Args         []Type `json:"args,omitempty"`
-	Fails        *Type  `json:"fails,omitempty"`
-	EffectBridge string `json:"effectBridge,omitempty"`
-	Nullable     bool   `json:"nullable,omitempty"`
-	Readonly     bool   `json:"readonly,omitempty"`
+	Kind         string        `json:"kind"`
+	Name         string        `json:"name,omitempty"`
+	Args         []Type        `json:"args,omitempty"`
+	Fails        *Type         `json:"fails,omitempty"`
+	EffectBridge string        `json:"effectBridge,omitempty"`
+	ResultBridge *ResultBridge `json:"resultBridge,omitempty"`
+	Nullable     bool          `json:"nullable,omitempty"`
+	Readonly     bool          `json:"readonly,omitempty"`
+}
+
+// ResultBridge describes a native callback boundary that resolves its success
+// value through a Promise and rejects with the standard Result error payload.
+// It is additive to the formatVersion 1 effect bridge while the Result-only
+// package contract is evaluated.
+type ResultBridge struct {
+	Kind  string `json:"kind"`
+	Error Type   `json:"error"`
 }
 
 func (t Type) Semantic() types.Type {

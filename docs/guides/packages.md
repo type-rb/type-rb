@@ -179,6 +179,32 @@ Application code still uses ordinary `fn ... fails ...`, `attempt`, and
 `Result` semantics. The bridge is allowed only at the declared native
 boundary; it does not make Promise rejection part of portable TypeRB.
 
+The additive Result-only bridge spells the same native contract without a
+fallible function effect:
+
+```json
+{
+  "name": "queryFn",
+  "type": {
+    "kind": "function",
+    "name": "Function",
+    "args": [{ "kind": "named", "name": "TData" }],
+    "resultBridge": {
+      "kind": "result_to_promise_rejection",
+      "error": { "kind": "named", "name": "TError" }
+    }
+  }
+}
+```
+
+The TypeRB callback must return the compiler-owned `Result<TData, TError>` or
+a transparent alias. The generated native callback accepts either that Result
+or a Promise of it, resolves `Ok(value)`, and rejects with the exact
+`Err(error)` payload. A native `Void` success uses `Result<Unit, E>` and emits
+`Promise<void>`; a generic success instantiated as `Unit` remains
+`Promise<Unit>`. `resultBridge` is mutually exclusive with `fails` and
+`effectBridge`.
+
 Provider-only records may describe props or parameter objects without becoming
 application-importable names. When a selected contract refers to real native
 package types, generated TypeScript adds the required type-only imports while

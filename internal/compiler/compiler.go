@@ -138,6 +138,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 		AllowUnusedImports:    options.AllowUnusedImports,
 		AllowUnhandledEffects: options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
 		InteractiveTopLevel:   options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
+		RunnableMain:          topLevelMethod(program, MainFunction),
 	})
 	diagnostics = append(diagnostics, checkDiagnostics...)
 	if hasErrors(diagnostics) {
@@ -316,6 +317,7 @@ func analyzeProject(sources []SourceUnit, options Options, validateBackend bool)
 			AllowUnusedImports:    options.AllowUnusedImports,
 			AllowUnhandledEffects: options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
 			InteractiveTopLevel:   options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
+			RunnableMain:          topLevelMethod(program, MainFunction),
 		})
 		checkedPrograms[source.ModulePath] = checked
 		checkDiagnostics[source.ModulePath] = diagnostics
@@ -539,12 +541,16 @@ func modeDiagnostics(program *ast.Program, mode string) []diagnostic.Diagnostic 
 }
 
 func hasTopLevelMethod(program *ast.Program, name string) bool {
+	return topLevelMethod(program, name) != nil
+}
+
+func topLevelMethod(program *ast.Program, name string) *ast.MethodStatement {
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ast.MethodStatement); ok && method.Name == name {
-			return true
+			return method
 		}
 	}
-	return false
+	return nil
 }
 
 func renameTopLevelMethod(program *ast.Program, name, replacement string) {

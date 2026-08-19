@@ -168,7 +168,7 @@ def main() fails AppError
 	return
 end
 `,
-			want: "main() cannot declare fails",
+			want: "runnable main must have signature def main()",
 		},
 	}
 

@@ -12,14 +12,15 @@ import (
 // Plan records the declarations and expressions that transitively reach one
 // of the backend effects selected by Options.
 type Plan struct {
-	Methods          map[*ir.Method]bool
-	Lambdas          map[*ir.Lambda]bool
-	Calls            map[*ir.Call]bool
-	EnumCalls        map[*ir.EnumCall]bool
-	Expressions      map[ir.Expression]bool
-	Iterations       map[*ir.Iterate]bool
-	StructuredBlocks map[*ir.StructuredBlock]bool
-	methodKeys       map[methodKey]bool
+	Methods              map[*ir.Method]bool
+	Lambdas              map[*ir.Lambda]bool
+	Calls                map[*ir.Call]bool
+	EnumCalls            map[*ir.EnumCall]bool
+	Expressions          map[ir.Expression]bool
+	Iterations           map[*ir.Iterate]bool
+	StructuredBlocks     map[*ir.StructuredBlock]bool
+	ResultPromiseBridges map[*ir.Lambda]bool
+	methodKeys           map[methodKey]bool
 }
 
 type methodKey struct {
@@ -75,14 +76,15 @@ type Options struct {
 
 func Analyze(programs []*ir.Program, options Options) *Plan {
 	plan := &Plan{
-		Methods:          map[*ir.Method]bool{},
-		Lambdas:          map[*ir.Lambda]bool{},
-		Calls:            map[*ir.Call]bool{},
-		EnumCalls:        map[*ir.EnumCall]bool{},
-		Expressions:      map[ir.Expression]bool{},
-		Iterations:       map[*ir.Iterate]bool{},
-		StructuredBlocks: map[*ir.StructuredBlock]bool{},
-		methodKeys:       map[methodKey]bool{},
+		Methods:              map[*ir.Method]bool{},
+		Lambdas:              map[*ir.Lambda]bool{},
+		Calls:                map[*ir.Call]bool{},
+		EnumCalls:            map[*ir.EnumCall]bool{},
+		Expressions:          map[ir.Expression]bool{},
+		Iterations:           map[*ir.Iterate]bool{},
+		StructuredBlocks:     map[*ir.StructuredBlock]bool{},
+		ResultPromiseBridges: map[*ir.Lambda]bool{},
+		methodKeys:           map[methodKey]bool{},
 	}
 	analyzer := &analyzer{
 		programs: programs, plan: plan, options: options, methodInfo: map[*ir.Method]methodContext{},
@@ -329,6 +331,11 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 	case *ir.Unary:
 		suspends = a.expressionReaches(node.Operand, context, record)
 	case *ir.Conversion:
+		if node.Kind == ir.ResultFunctionToPromiseRejectionConversion {
+			if lambda := a.boundLambda(node.Value, context); lambda != nil {
+				a.plan.ResultPromiseBridges[lambda] = true
+			}
+		}
 		suspends = a.expressionReaches(node.Value, context, record)
 	case *ir.Binary:
 		suspends = a.expressionReaches(node.Left, context, record)
@@ -392,6 +399,17 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		a.plan.Expressions[expression] = true
 	}
 	return suspends
+}
+
+func (a *analyzer) boundLambda(expression ir.Expression, context methodContext) *ir.Lambda {
+	if lambda, ok := expression.(*ir.Lambda); ok {
+		return lambda
+	}
+	identifier, ok := expression.(*ir.Identifier)
+	if !ok || !identifier.Lexical {
+		return nil
+	}
+	return a.lambdaBindings[functionBindingKey{module: context.module, method: context.method, name: identifier.Name}]
 }
 
 func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext) bool {

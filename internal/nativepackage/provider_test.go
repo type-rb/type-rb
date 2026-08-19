@@ -75,10 +75,16 @@ func TestApplyProviderFilesAcceptsGenericNativeContracts(t *testing.T) {
 				Records: map[string]Export{
 					"QueryOptions": {
 						Kind: "record", Type: Type{Kind: "named", Name: "QueryOptions"}, TypeParameters: []string{"TData", "TError"},
-						Fields: []Field{{Name: "queryFn", Type: Type{
-							Kind: "function", Name: "Function", Args: []Type{{Kind: "named", Name: "TData"}},
-							Fails: &Type{Kind: "named", Name: "TError"}, EffectBridge: "promise_rejection",
-						}}},
+						Fields: []Field{
+							{Name: "queryFn", Type: Type{
+								Kind: "function", Name: "Function", Args: []Type{{Kind: "named", Name: "TData"}},
+								Fails: &Type{Kind: "named", Name: "TError"}, EffectBridge: "promise_rejection",
+							}},
+							{Name: "resultQueryFn", Type: Type{
+								Kind: "function", Name: "Function", Args: []Type{{Kind: "named", Name: "TData"}},
+								ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection", Error: Type{Kind: "named", Name: "TError"}},
+							}},
+						},
 					},
 					"PendingResult": {Kind: "record", Type: Type{Kind: "named", Name: "PendingResult"}, TypeParameters: []string{"TData", "TError"}, Fields: []Field{{Name: "status", Type: Type{Kind: "string_literal", Name: `"pending"`}}}},
 					"SuccessResult": {Kind: "record", Type: Type{Kind: "named", Name: "SuccessResult"}, TypeParameters: []string{"TData", "TError"}, Fields: []Field{{Name: "status", Type: Type{Kind: "string_literal", Name: `"success"`}}, {Name: "data", Type: Type{Kind: "named", Name: "TData"}}}},
@@ -98,6 +104,10 @@ func TestApplyProviderFilesAcceptsGenericNativeContracts(t *testing.T) {
 	if queryFunction.Fails == nil || queryFunction.Fails.Name != "TError" || queryFunction.EffectBridge != "promise_rejection" {
 		t.Fatalf("callback effect bridge was not retained: %#v", queryFunction)
 	}
+	resultQueryFunction := module.Records["QueryOptions"].Fields[1].Type
+	if resultQueryFunction.ResultBridge == nil || resultQueryFunction.ResultBridge.Kind != "result_to_promise_rejection" || resultQueryFunction.ResultBridge.Error.Name != "TError" {
+		t.Fatalf("callback result bridge was not retained: %#v", resultQueryFunction)
+	}
 }
 
 func TestApplyProviderFilesRejectsInvalidEffectBridges(t *testing.T) {
@@ -109,6 +119,33 @@ func TestApplyProviderFilesRejectsInvalidEffectBridges(t *testing.T) {
 		{name: "without effect", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, EffectBridge: "promise_rejection"}, want: "requires a fallible function type"},
 		{name: "unknown bridge", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, Fails: &Type{Kind: "string", Name: "String"}, EffectBridge: "throw_value"}, want: "unsupported effectBridge"},
 		{name: "non-function failure", typ: Type{Kind: "string", Name: "String", Fails: &Type{Kind: "string", Name: "String"}}, want: "fails is only valid on function types"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "native-types.json")
+			writeProviderFixture(t, path, Provider{FormatVersion: FormatVersion, Modules: map[string]Module{
+				"query-library": {Records: map[string]Export{"Options": {Kind: "record", Type: Type{Kind: "named", Name: "Options"}, Fields: []Field{{Name: "queryFn", Type: test.typ}}}}},
+			}})
+			err := ApplyProviderFiles(Empty(map[string]string{"query-library": "1.0.0"}), []ProviderSource{{Package: "provider", Path: path, Dependencies: map[string]string{"query-library": "1.0.0"}}})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q, got %v", test.want, err)
+			}
+		})
+	}
+}
+
+func TestApplyProviderFilesRejectsInvalidResultBridges(t *testing.T) {
+	tests := []struct {
+		name string
+		typ  Type
+		want string
+	}{
+		{name: "non function", typ: Type{Kind: "string", Name: "String", ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection", Error: Type{Kind: "string", Name: "String"}}}, want: "only valid on function types"},
+		{name: "missing return", typ: Type{Kind: "function", Name: "Function", ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection", Error: Type{Kind: "string", Name: "String"}}}, want: "requires a function return type"},
+		{name: "missing error", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection"}}, want: "error is required"},
+		{name: "unknown kind", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, ResultBridge: &ResultBridge{Kind: "unwrap", Error: Type{Kind: "string", Name: "String"}}}, want: "unsupported resultBridge kind"},
+		{name: "effect and result", typ: Type{Kind: "function", Name: "Function", Args: []Type{{Kind: "string", Name: "String"}}, Fails: &Type{Kind: "string", Name: "String"}, EffectBridge: "promise_rejection", ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection", Error: Type{Kind: "string", Name: "String"}}}, want: "cannot be combined"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

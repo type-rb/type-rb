@@ -1,6 +1,9 @@
 package compiler
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -191,6 +194,37 @@ func nativeGenericQueryCatalog() *nativepackage.Catalog {
 			},
 		},
 	}
+}
+
+func nativeGenericResultQueryCatalog() *nativepackage.Catalog {
+	catalog := nativeGenericQueryCatalog()
+	module := catalog.Modules["@tanstack/react-query"]
+	tData := nativepackage.Type{Kind: "named", Name: "TData"}
+	tError := nativepackage.Type{Kind: "named", Name: "TError"}
+	callback := nativepackage.Type{
+		Kind: "function", Name: "Function", Args: []nativepackage.Type{tData},
+		ResultBridge: &nativepackage.ResultBridge{Kind: "result_to_promise_rejection", Error: tError},
+	}
+	options := module.Exports["UseQueryOptions"]
+	for index := range options.Fields {
+		if options.Fields[index].Name == "queryFn" {
+			options.Fields[index].Type = callback
+		}
+	}
+	module.Exports["UseQueryOptions"] = options
+	module.Exports["runQuery"] = nativepackage.Export{
+		Kind: "function", Type: tData, Parameters: []nativepackage.Type{callback}, Required: 1, TypeParameters: []string{"TData", "TError"},
+	}
+	module.Exports["runVoid"] = nativepackage.Export{
+		Kind: "function", Type: nativepackage.Type{Kind: "void", Name: "Void"},
+		Parameters: []nativepackage.Type{{
+			Kind: "function", Name: "Function", Args: []nativepackage.Type{{Kind: "void", Name: "Void"}},
+			ResultBridge: &nativepackage.ResultBridge{Kind: "result_to_promise_rejection", Error: tError},
+		}},
+		Required: 1, TypeParameters: []string{"TError"},
+	}
+	catalog.Modules["@tanstack/react-query"] = module
+	return catalog
 }
 
 func TestCompileTypeScriptImportsIndexedNativeReactComponent(t *testing.T) {
@@ -550,6 +584,278 @@ end
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated direct callback bridge is missing %q:\n%s", expected, output)
 		}
+	}
+}
+
+func TestCompileTypeScriptBridgesStandardResultCallbacksAtDirectAndRecordBoundaries(t *testing.T) {
+	source := []byte(`import { Result } from trb/std/result
+import { UseQueryOptions, runQuery } from "@tanstack/react-query"
+
+record LoadError
+	message: String
+end
+
+type LoadResult<T> = Result<T, LoadError>
+
+def main()
+	loader := fn(): LoadResult<Integer>
+		return LoadResult<Integer>::Ok(7)
+	end
+	_options := UseQueryOptions<Integer, LoadError>.new(
+		queryKey: ["value"],
+		queryFn: loader,
+	)
+	puts(runQuery<Integer, LoadError>(loader))
+	return
+end
+`)
+	artifact, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericResultQueryCatalog()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	for _, expected := range []string{
+		`(__trbCallback: () => Result<number, LoadError> | Promise<Result<number, LoadError>>)`,
+		`runQuery<number, LoadError>`,
+		`const __trbResult = await __trbCallback()`,
+		`if (__trbResult.kind === "Err") { throw __trbResult.error; }`,
+		`return __trbResult.value;`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated Result callback bridge is missing %q:\n%s", expected, output)
+		}
+	}
+	if count := strings.Count(output, `const __trbResult = await __trbCallback()`); count != 2 {
+		t.Fatalf("expected direct and record callback conversions, got %d:\n%s", count, output)
+	}
+}
+
+func TestCompileTypeScriptBridgesSuspendingStandardResultCallback(t *testing.T) {
+	source := []byte(`import { Result } from trb/std/result
+import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { UseQueryOptions } from "@tanstack/react-query"
+
+record Todo
+	id: Integer
+	title: String
+end
+
+def options(client: HttpClient): UseQueryOptions<Response<Todo>, RequestError>
+	query_fn := fn(): Result<Response<Todo>, RequestError>
+		return attempt client.request("/todos/1").json<Todo>()
+	end
+	return UseQueryOptions<Response<Todo>, RequestError>.new(
+		queryKey: ["todos"],
+		queryFn: query_fn,
+	)
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "query.trb", ModulePath: "app/query", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericResultQueryCatalog(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "query.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		`const query_fn: () => Promise<Result<__trb_browser.Response<Todo>, __trb_browser.RequestError>> = async ()`,
+		`() => Result<__trb_browser.Response<Todo>, __trb_browser.RequestError> | Promise<Result<__trb_browser.Response<Todo>, __trb_browser.RequestError>>`,
+		`globalThis.fetch`,
+		`const __trbResult = await __trbCallback()`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated suspending Result callback bridge is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
+func TestCompileTypeScriptNativeResultBridgeMapsVoidWithoutCollapsingGenericUnit(t *testing.T) {
+	source := []byte(`import { Result } from trb/std/result
+import { Unit } from trb/std/unit
+import { runQuery, runVoid } from "@tanstack/react-query"
+
+record LoadError
+	message: String
+end
+
+def main()
+	work := fn(): Result<Unit, LoadError>
+		return Result<Unit, LoadError>::Ok(Unit.new())
+	end
+	runVoid<LoadError>(work)
+	runQuery<Unit, LoadError>(work)
+	return
+end
+`)
+	artifact, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericResultQueryCatalog()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	for _, expected := range []string{`): Promise<void>`, `): Promise<Unit>`, `runVoid<LoadError>`, `runQuery<Unit, LoadError>`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated Unit/Void Result callback bridge is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
+func TestCompileTypeScriptNativeResultBridgeChecksStandardIdentityAndErrorAssignability(t *testing.T) {
+	t.Run("assignable error", func(t *testing.T) {
+		source := []byte(`import { Result } from trb/std/result
+import { runQuery } from "@tanstack/react-query"
+
+interface ErrorContract
+	message(): String
+end
+
+class ConcreteError implements ErrorContract
+	def message(): String
+		return "load failed"
+	end
+end
+
+def main()
+	loader := fn(): Result<Integer, ConcreteError>
+		return Result<Integer, ConcreteError>::Err(ConcreteError.new())
+	end
+	runQuery<Integer, ErrorContract>(loader)
+	return
+end
+`)
+		if _, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericResultQueryCatalog()}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "spoofed Result",
+			source: `import { runQuery } from "@tanstack/react-query"
+
+enum Result<T, E>
+	Ok(value: T)
+	Err(error: E)
+end
+
+record LoadError
+	message: String
+end
+
+def main()
+	loader := fn(): Result<Integer, LoadError>
+		return Result<Integer, LoadError>::Ok(7)
+	end
+	runQuery<Integer, LoadError>(loader)
+	return
+end
+`,
+			want: "requires a callback returning the standard Result<T, E>",
+		},
+		{
+			name: "mismatched error",
+			source: `import { Result } from trb/std/result
+import { runQuery } from "@tanstack/react-query"
+
+record ExpectedError
+	message: String
+end
+
+record ActualError
+	message: String
+end
+
+def main()
+	loader := fn(): Result<Integer, ActualError>
+		return Result<Integer, ActualError>::Err(ActualError.new(message: "failed"))
+	end
+	runQuery<Integer, ExpectedError>(loader)
+	return
+end
+`,
+			want: "callback error type ActualError is not assignable to ExpectedError",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := CompileWithOptions("query.trb", []byte(test.source), Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericResultQueryCatalog()})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q, got %v", test.want, err)
+			}
+		})
+	}
+}
+
+func TestGeneratedTypeScriptNativeResultBridgeResolvesOkAndRejectsExactErr(t *testing.T) {
+	if _, err := exec.LookPath("bun"); err != nil {
+		t.Skip("bun is not installed")
+	}
+	source := []byte(`import { Result } from trb/std/result
+import { runQuery } from "@tanstack/react-query"
+
+def main()
+	ok := fn(): Result<Integer, String>
+		return Result<Integer, String>::Ok(7)
+	end
+	err := fn(): Result<Integer, String>
+		return Result<Integer, String>::Err("boom")
+	end
+	runQuery<Integer, String>(ok)
+	runQuery<Integer, String>(err)
+	return
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "bun", NativePackages: nativeGenericResultQueryCatalog(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	for _, artifact := range artifacts {
+		path := filepath.Join(root, filepath.FromSlash(artifact.IR.ModulePath+".ts"))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, artifact.Output, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	moduleRoot := filepath.Join(root, "node_modules", "@tanstack", "react-query")
+	if err := os.MkdirAll(moduleRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stub := `export function runQuery<T, E>(callback: () => Promise<T>): T {
+  void callback().then(
+    (value) => console.log("resolved:" + String(value)),
+    (error) => console.log("rejected:" + String(error)),
+  );
+  return 0 as T;
+}
+`
+	if err := os.WriteFile(filepath.Join(moduleRoot, "index.ts"), []byte(stub), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleRoot, "package.json"), []byte(`{"name":"@tanstack/react-query","type":"module","exports":"./index.ts"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("bun", "run", "main.ts")
+	command.Dir = root
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated TypeScript failed: %v\n%s", err, output)
+	}
+	lines := strings.Fields(string(output))
+	if strings.Join(lines, "\n") != "resolved:7\nrejected:boom" {
+		t.Fatalf("unexpected native Result bridge output:\n%s", output)
 	}
 }
 

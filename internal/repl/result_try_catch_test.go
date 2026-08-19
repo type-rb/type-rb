@@ -46,6 +46,55 @@ def returned(success: Boolean): String
 	return value.to_s()
 end
 
+def lambda_propagated(success: Boolean): AppResult<String>
+	callback := fn(): AppResult<String>
+		value := try source(success)
+		return AppResult<String>::Ok("lambda=" + value.to_s())
+	end
+	return callback()
+end
+
+def void_lambda_catch_return(): String
+	callback := fn()
+		_value := source(false) catch |_error|
+			return
+		end
+		return
+	end
+	callback()
+	return "outer"
+end
+
+def each_propagated(success: Boolean): AppResult<String>
+	mut rendered := ""
+	[true, success, true].each do |current|
+		value := try source(current)
+		rendered += value.to_s()
+	end
+	return AppResult<String>::Ok(rendered)
+end
+
+def transform_fallbacks(): Integer
+	mapped := [true, false, true].map do |success|
+		source(success) catch |_error|
+			0
+		end
+	end
+	selected := [true, false, true].select do |success|
+		value := source(success) catch |_error|
+			0
+		end
+		value > 0
+	end
+	total := [true, false, true].reduce(0) do |sum, success|
+		value := source(success) catch |_error|
+			1
+		end
+		sum + value
+	end
+	return mapped[0] + mapped[1] + mapped[2] + selected.size() + total
+end
+
 def render(result: AppResult<String>): String
 	case result
 	when AppResult::Ok(value)
@@ -62,6 +111,12 @@ end
 	recovered(false).to_s(),
 	returned(true),
 	returned(false),
+	render(lambda_propagated(true)),
+	render(lambda_propagated(false)),
+	void_lambda_catch_return(),
+	render(each_propagated(true)),
+	render(each_propagated(false)),
+	transform_fallbacks().to_s(),
 ]
 `),
 	}
@@ -97,7 +152,7 @@ end
 			if err != nil {
 				t.Fatalf("%s Result try/catch evaluation failed: %v", mode, err)
 			}
-			if got, want := Inspect(result.Value), `["ok:value=7", "err", "7", "41", "7", "caught"]`; !result.Display || got != want {
+			if got, want := Inspect(result.Value), `["ok:value=7", "err", "7", "41", "7", "caught", "ok:lambda=7", "err", "outer", "ok:777", "err", "31"]`; !result.Display || got != want {
 				t.Fatalf("%s Result try/catch evaluation=%s display=%t, want %s", mode, got, result.Display, want)
 			}
 		})

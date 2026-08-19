@@ -1373,7 +1373,16 @@ func (g *generator) resultFunctionToPromiseRejection(conversion *ir.Conversion) 
 	if success.Kind == types.Void {
 		returnValue = "return;"
 	}
-	return "((__trbCallback: " + g.tsType(conversion.Value.ExprType()) + ") => async (" + strings.Join(parts, ", ") +
+	callbackType := g.tsType(conversion.Value.ExprType())
+	if sourceParameters, sourceResult, sourceOK := types.FunctionSignature(conversion.Value.ExprType()); sourceOK && types.FunctionFailure(conversion.Value.ExprType()).Kind == types.Never {
+		sourceParts := make([]string, len(sourceParameters))
+		for index, parameter := range sourceParameters {
+			sourceParts[index] = "arg" + strconv.Itoa(index) + ": " + g.tsType(parameter)
+		}
+		resultType := g.tsType(sourceResult)
+		callbackType = "(" + strings.Join(sourceParts, ", ") + ") => " + resultType + " | Promise<" + resultType + ">"
+	}
+	return "((__trbCallback: " + callbackType + ") => async (" + strings.Join(parts, ", ") +
 		"): Promise<" + returned + "> => { const __trbResult = await __trbCallback(" + strings.Join(arguments, ", ") +
 		"); if (__trbResult.kind === \"Err\") { throw __trbResult.error; } " + returnValue + " })(" + g.expr(conversion.Value) + ")"
 }

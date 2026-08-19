@@ -870,6 +870,15 @@ func (l *lowerer) expressionConversions(node ast.Expression, result ir.Expressio
 			}
 		}
 	}
+	if bridge, ok := l.checked.NativeResultBridges[node]; ok && result != nil {
+		if _, _, valid := types.FunctionSignature(bridge.Type); valid {
+			result = &ir.Conversion{
+				ExprBase: ir.NewExprBase(node.Span(), bridge.Type),
+				Kind:     ir.ResultFunctionToPromiseRejectionConversion,
+				Value:    result,
+			}
+		}
+	}
 	return result
 }
 

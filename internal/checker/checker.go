@@ -24,6 +24,7 @@ type Result struct {
 	Conversions         map[ast.Expression]types.Type
 	NullableUnwraps     map[ast.Expression]types.Type
 	NativeEffectBridges map[ast.Expression]NativeEffectBridge
+	NativeResultBridges map[ast.Expression]NativeResultBridge
 	Variables           map[*ast.VariableStatement]types.Type
 	Iterations          map[*ast.IterationExpression]types.Type
 	IterationBindings   map[*ast.IterationExpression][]types.Type
@@ -113,6 +114,11 @@ type NativeEffectBridge struct {
 	Type types.Type
 }
 
+type NativeResultBridge struct {
+	Kind string
+	Type types.Type
+}
+
 type StructuredBlock struct {
 	Parameters     []types.Type
 	Return         types.Type
@@ -157,18 +163,19 @@ type EnumVariant struct {
 }
 
 type GenericApplication struct {
-	Name             string
-	Kind             string
-	Owner            string
-	TypeParameters   []string
-	TypeArguments    []types.Type
-	OwnerArguments   []types.Type
-	Parameters       []types.Type
-	ParameterBridges []string
-	ReturnType       types.Type
-	FailureType      types.Type
-	Required         int
-	Variadic         bool
+	Name                   string
+	Kind                   string
+	Owner                  string
+	TypeParameters         []string
+	TypeArguments          []types.Type
+	OwnerArguments         []types.Type
+	Parameters             []types.Type
+	ParameterBridges       []string
+	ParameterResultBridges []resolver.NativeResultBridge
+	ReturnType             types.Type
+	FailureType            types.Type
+	Required               int
+	Variadic               bool
 }
 
 type CaseBinding struct {
@@ -364,8 +371,10 @@ type Checker struct {
 	loopDepth                   int
 	valueTransformDepth         int
 	resultBoundaryBlockDepth    int
+	controlBoundaries           []string
 	moduleDepth                 int
 	interfaceDepth              int
+	runnableMain                *ast.MethodStatement
 	returns                     []types.Type
 	resolution                  resolver.Result
 	external                    map[ast.Expression]declaration.Member
@@ -406,6 +415,7 @@ type Options struct {
 	AllowUnusedImports    bool
 	AllowUnhandledEffects bool
 	InteractiveTopLevel   bool
+	RunnableMain          *ast.MethodStatement
 }
 
 func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnostic.Diagnostic) {
@@ -422,6 +432,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 			Conversions:         map[ast.Expression]types.Type{},
 			NullableUnwraps:     map[ast.Expression]types.Type{},
 			NativeEffectBridges: map[ast.Expression]NativeEffectBridge{},
+			NativeResultBridges: map[ast.Expression]NativeResultBridge{},
 			Variables:           map[*ast.VariableStatement]types.Type{},
 			Iterations:          map[*ast.IterationExpression]types.Type{},
 			IterationBindings:   map[*ast.IterationExpression][]types.Type{},
@@ -463,6 +474,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		allowUnusedImports:    options.AllowUnusedImports,
 		allowUnhandledEffects: options.AllowUnhandledEffects,
 		interactiveTopLevel:   options.InteractiveTopLevel,
+		runnableMain:          options.RunnableMain,
 		aliasCycles:           map[string]bool{},
 		declarationCalls:      map[*ast.CallExpression]string{},
 	}
@@ -1224,6 +1236,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				}
 			}
 		case *ast.ReturnStatement:
+			if boundary := c.currentControlBoundary(); boundary != "" {
+				c.error(n.Span(), fmt.Sprintf("return cannot cross the %s() block boundary", boundary))
+			}
 			if c.resultBoundaryBlockDepth > 0 {
 				c.error(n.Span(), "return is not supported inside Result-boundary structured blocks; use try to abort with Err or return after the block")
 			}
@@ -1243,11 +1258,19 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 		case *ast.BreakStatement:
 			if c.loopDepth == 0 {
-				c.error(n.Span(), "break is only valid inside while or an iteration block")
+				if boundary := c.currentControlBoundary(); boundary != "" {
+					c.error(n.Span(), fmt.Sprintf("break cannot cross the %s() block boundary", boundary))
+				} else {
+					c.error(n.Span(), "break is only valid inside while or an iteration block")
+				}
 			}
 		case *ast.NextStatement:
 			if c.loopDepth == 0 {
-				c.error(n.Span(), "next is only valid inside while or an iteration block")
+				if boundary := c.currentControlBoundary(); boundary != "" {
+					c.error(n.Span(), fmt.Sprintf("next cannot cross the %s() block boundary", boundary))
+				} else {
+					c.error(n.Span(), "next is only valid inside while or an iteration block")
+				}
 			}
 		case *ast.ExpressionStatement:
 			typ := c.checkExpression(n.Expression, sc)
@@ -2318,6 +2341,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 				application.Kind = "function"
 				application.Parameters = append([]types.Type(nil), binding.Export.Parameters...)
 				application.ParameterBridges = append([]string(nil), binding.Export.ParameterBridges...)
+				application.ParameterResultBridges = append([]resolver.NativeResultBridge(nil), binding.Export.ParameterResultBridges...)
 				application.Required = binding.Export.Required
 				application.Variadic = binding.Export.Variadic
 				application.ReturnType = binding.Export.Type
@@ -2353,10 +2377,19 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 		for index := range application.Parameters {
 			application.Parameters[index] = substituteType(application.Parameters[index], substitutions)
 		}
+		for index := range application.ParameterResultBridges {
+			application.ParameterResultBridges[index] = substituteNativeResultBridge(application.ParameterResultBridges[index], substitutions)
+		}
 		application.ReturnType = substituteType(application.ReturnType, substitutions)
 		application.FailureType = substituteType(application.FailureType, substitutions)
 	}
 	return application, true
+}
+
+func substituteNativeResultBridge(bridge resolver.NativeResultBridge, substitutions map[string]types.Type) resolver.NativeResultBridge {
+	bridge.Type = substituteType(bridge.Type, substitutions)
+	bridge.Error = substituteType(bridge.Error, substitutions)
+	return bridge
 }
 
 func typeSubstitutions(parameters []string, arguments []types.Type) map[string]types.Type {
@@ -2928,6 +2961,35 @@ func (c *Checker) checkTypedArguments(span token.Span, name string, parameters [
 	}
 }
 
+func (c *Checker) checkTypedArgumentsWithNativeResultBridges(span token.Span, name string, parameters []types.Type, bridges []resolver.NativeResultBridge, required int, variadic bool, arguments []ast.CallArgument, actual []types.Type) {
+	if len(bridges) == 0 {
+		c.checkTypedArguments(span, name, parameters, required, variadic, arguments, actual)
+		return
+	}
+	if len(arguments) < required || !variadic && len(arguments) > len(parameters) {
+		c.error(span, fmt.Sprintf("%s() expects %d..%d arguments, got %d", name, required, len(parameters), len(arguments)))
+		return
+	}
+	for index, actualType := range actual {
+		parameterIndex := index
+		if parameterIndex >= len(parameters) {
+			parameterIndex = len(parameters) - 1
+		}
+		if parameterIndex < 0 {
+			continue
+		}
+		expected := parameters[parameterIndex]
+		actualType = c.contextualizeCollectionLiteral(arguments[index].Value, expected, actualType)
+		if parameterIndex < len(bridges) && bridges[parameterIndex].Kind != "" {
+			c.checkNativeResultBridge(arguments[index].Value, expected, actualType, bridges[parameterIndex])
+			continue
+		}
+		if !c.assignable(arguments[index].Value, expected, actualType) {
+			c.error(arguments[index].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", index+1, name, actualType, expected))
+		}
+	}
+}
+
 func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand types.Type) types.Type {
 	operand = scalarType(c.expandAlias(operand, map[string]bool{}))
 	if operand.Kind == types.Invalid {
@@ -3290,11 +3352,15 @@ func invalidType() types.Type {
 }
 
 func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
+	runnableMain := method == c.runnableMain
+	if runnableMain && (method.Class || len(method.TypeParameters) > 0 || len(method.Parameters) > 0 || !method.ReturnType.Empty() || !method.Fails.Empty()) {
+		c.error(method.Span(), "runnable main must have signature def main()")
+	}
 	c.checkTypeParameters(method.TypeParameters)
 	if len(method.TypeParameters) > 0 {
 		switch {
-		case method.Name == "main":
-			c.error(method.Span(), "main() cannot be generic")
+		case runnableMain:
+			// The exact runnable entrypoint signature is diagnosed above.
 		case c.current != nil && method.Class:
 			c.error(method.Span(), "generic class methods are not supported; use a top-level generic function")
 		case c.current == nil && (c.currentEnum != nil || c.moduleDepth > 0):
@@ -3349,9 +3415,6 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	}
 	failureType := c.methodFailureType(method)
 	if failureType.Kind != types.Never {
-		if method.Name == "main" {
-			c.error(method.Span(), "main() cannot declare fails; handle fallible operations with attempt")
-		}
 		c.requireEffectRuntime(returnType, failureType)
 	}
 	c.returns = append(c.returns, returnType)
@@ -4216,9 +4279,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		previousLoopDepth := c.loopDepth
 		previousValueTransformDepth := c.valueTransformDepth
 		previousResultBoundaryBlockDepth := c.resultBoundaryBlockDepth
+		previousControlBoundaries := c.controlBoundaries
 		c.loopDepth = 0
 		c.valueTransformDepth = 0
 		c.resultBoundaryBlockDepth = 0
+		c.controlBoundaries = nil
 		c.effectCaptures = nil
 		c.checkStatements(n.Body, lambdaScope)
 		if returnType.Kind != types.Void && c.statementsFallThrough(n.Body) {
@@ -4227,6 +4292,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.loopDepth = previousLoopDepth
 		c.valueTransformDepth = previousValueTransformDepth
 		c.resultBoundaryBlockDepth = previousResultBoundaryBlockDepth
+		c.controlBoundaries = previousControlBoundaries
 		c.effectCaptures = previousEffectCaptures
 		c.returns = c.returns[:len(c.returns)-1]
 		c.resultBoundaries = c.resultBoundaries[:len(c.resultBoundaries)-1]
@@ -4830,7 +4896,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Span(), fmt.Sprintf("generic %s %s is not callable", application.Kind, application.Name))
 				break
 			}
-			c.checkTypedArguments(n.Span(), application.Name, application.Parameters, application.Required, application.Variadic, n.Arguments, argumentTypes)
+			c.checkTypedArgumentsWithNativeResultBridges(n.Span(), application.Name, application.Parameters, application.ParameterResultBridges, application.Required, application.Variadic, n.Arguments, argumentTypes)
 			for index, argument := range n.Arguments {
 				parameterIndex := index
 				if parameterIndex >= len(application.Parameters) && application.Variadic {
@@ -4914,7 +4980,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 						Name:   binding.Name,
 						Return: typ,
 						Block: &declaration.Block{
-							Parameters: append([]types.Type(nil), library.Block.Parameters...),
+							Parameters:      append([]types.Type(nil), library.Block.Parameters...),
+							ControlBoundary: library.Block.ControlBoundary,
 						},
 					}
 					if blockType, checked := c.checkDeclarationBlock(n, member, sc, nil); checked {
@@ -4971,6 +5038,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 						fields := append([]resolver.RecordField(nil), exported.Fields...)
 						for index := range fields {
 							fields[index].Type = substituteType(fields[index].Type, substitutions)
+							fields[index].ResultBridge = substituteNativeResultBridge(fields[index].ResultBridge, substitutions)
 						}
 						c.checkRecordArguments(n, exported.Name, fields)
 					} else {
@@ -5782,7 +5850,9 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 		used[argument.Name] = true
 		actual := c.result.Expressions[argument.Value]
 		actual = c.contextualizeCollectionLiteral(argument.Value, field.Type, actual)
-		if !c.assignable(argument.Value, field.Type, actual) {
+		if field.ResultBridge.Kind != "" {
+			c.checkNativeResultBridge(argument.Value, field.Type, actual, field.ResultBridge)
+		} else if !c.assignable(argument.Value, field.Type, actual) {
 			c.error(argument.Value.Span(), fmt.Sprintf("record field %s has type %s, expected %s", field.Name, actual, field.Type))
 		} else {
 			c.recordNativeEffectBridge(argument.Value, field.Type, field.EffectBridge)
@@ -5890,7 +5960,17 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 		expected := parameters[parameterIndex]
 		actualType = c.contextualizeCollectionLiteral(arguments[i].Value, expected, actualType)
 		actual[i] = actualType
-		assignable := c.assignable(arguments[i].Value, expected, actualType)
+		resultBridge := resolver.NativeResultBridge{}
+		if binding.Export != nil && parameterIndex < len(binding.Export.ParameterResultBridges) {
+			resultBridge = binding.Export.ParameterResultBridges[parameterIndex]
+		}
+		assignable := false
+		bridgeChecked := resultBridge.Kind != ""
+		if bridgeChecked {
+			assignable = c.checkNativeResultBridge(arguments[i].Value, expected, actualType, resultBridge)
+		} else {
+			assignable = c.assignable(arguments[i].Value, expected, actualType)
+		}
 		if library != nil {
 			assignable = libraryAssignable(
 				c.expandAlias(expected, map[string]bool{}),
@@ -5903,7 +5983,7 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 				c.expandAlias(actualType, map[string]bool{}),
 			)
 		}
-		if !assignable {
+		if !assignable && !bridgeChecked {
 			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, name, actualType, expected))
 		} else if library != nil {
 			c.recordAssignableConversion(arguments[i].Value, expected, actualType)
@@ -5923,6 +6003,50 @@ func (c *Checker) recordNativeEffectBridge(expression ast.Expression, typ types.
 		return
 	}
 	c.result.NativeEffectBridges[expression] = NativeEffectBridge{Kind: bridge, Type: typ}
+}
+
+func (c *Checker) checkNativeResultBridge(expression ast.Expression, expected, actual types.Type, bridge resolver.NativeResultBridge) bool {
+	expectedParameters, _, expectedOK := types.FunctionSignature(expected)
+	actualParameters, actualResult, actualOK := types.FunctionSignature(actual)
+	if !expectedOK || !actualOK || len(expectedParameters) != len(actualParameters) {
+		c.error(expression.Span(), fmt.Sprintf("native result bridge requires callback type %s, got %s", expected, actual))
+		return false
+	}
+	for index := range expectedParameters {
+		if !c.typesEquivalent(expectedParameters[index], actualParameters[index]) {
+			c.error(expression.Span(), fmt.Sprintf("native result bridge callback parameter %d has type %s, expected %s", index+1, actualParameters[index], expectedParameters[index]))
+			return false
+		}
+	}
+	if failure := types.FunctionFailure(actual); failure.Kind != types.Never {
+		c.error(expression.Span(), fmt.Sprintf("native result bridge requires an explicit Result callback, got a callback that fails with %s", failure))
+		return false
+	}
+	actualSuccess, actualError, expandedResult, standard := c.standardResultParts(actualResult)
+	if !standard {
+		c.error(expression.Span(), fmt.Sprintf("native result bridge requires a callback returning the standard Result<T, E>, got %s", actualResult))
+		return false
+	}
+	_, nativeSuccess, nativeOK := types.FunctionSignature(bridge.Type)
+	if !nativeOK {
+		c.error(expression.Span(), "native result bridge has an invalid provider callback type")
+		return false
+	}
+	expectedSuccess := nativeSuccess
+	if expectedSuccess.Kind == types.Void {
+		expectedSuccess = types.FromName("Unit")
+	}
+	if !c.typesEquivalent(expectedSuccess, actualSuccess) {
+		c.error(expression.Span(), fmt.Sprintf("native result bridge callback success type is %s, expected %s", actualSuccess, expectedSuccess))
+		return false
+	}
+	if !c.typesAssignable(bridge.Error, actualError) {
+		c.error(expression.Span(), fmt.Sprintf("native result bridge callback error type %s is not assignable to %s", actualError, bridge.Error))
+		return false
+	}
+	c.requireRuntimeType(expandedResult)
+	c.result.NativeResultBridges[expression] = NativeResultBridge{Kind: bridge.Kind, Type: bridge.Type}
+	return true
 }
 
 func libraryAssignable(expected, actual types.Type) bool {
@@ -6245,9 +6369,18 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		blockScope.values[name] = declared
 	}
 	if member.Block.Return.Name == "" {
-		c.loopDepth++
+		previousLoopDepth := c.loopDepth
+		if member.Block.ControlBoundary {
+			c.loopDepth = 0
+			c.controlBoundaries = append(c.controlBoundaries, member.Name)
+		} else {
+			c.loopDepth++
+		}
 		c.checkStatements(call.Block.Body, blockScope)
-		c.loopDepth--
+		if member.Block.ControlBoundary {
+			c.controlBoundaries = c.controlBoundaries[:len(c.controlBoundaries)-1]
+		}
+		c.loopDepth = previousLoopDepth
 		c.result.Expressions[call.Block] = types.Type{Kind: types.Void, Name: "Void"}
 		return instantiateDeclarationType(member.Return, bindings), true
 	}
@@ -6336,6 +6469,13 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		ResultType:     resultBoundaryType,
 	}
 	return instantiateDeclarationType(member.Return, bindings), true
+}
+
+func (c *Checker) currentControlBoundary() string {
+	if len(c.controlBoundaries) == 0 {
+		return ""
+	}
+	return c.controlBoundaries[len(c.controlBoundaries)-1]
 }
 
 func (c *Checker) structuredBlockCall(expression ast.Expression) (*ast.CallExpression, declaration.Member, bool) {

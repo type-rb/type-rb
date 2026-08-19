@@ -31,7 +31,8 @@ type Parameter struct {
 // function. It deliberately models only ordinary callback blocks; structured
 // control-flow blocks remain declaration-provider functionality.
 type Block struct {
-	Parameters []types.Type
+	Parameters      []types.Type
+	ControlBoundary bool
 }
 
 type Symbol struct {
@@ -229,8 +230,8 @@ end
 `,
 		Kind: Portable,
 		Symbols: map[string]Symbol{
-			"describe": {Name: "describe", Intrinsic: "trb.std.test.describe", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{}},
-			"test":     {Name: "test", Intrinsic: "trb.std.test.test", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{}},
+			"describe": {Name: "describe", Intrinsic: "trb.std.test.describe", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{ControlBoundary: true}},
+			"test":     {Name: "test", Intrinsic: "trb.std.test.test", Parameters: []Parameter{{Name: "name", Type: stringType}}, Return: voidType, Block: &Block{ControlBoundary: true}},
 			"expect": {
 				Name: "expect", Intrinsic: "trb.std.test.expect", RequiredSymbols: []string{"Expectation"}, TypeParameters: []string{"T"},
 				Parameters: []Parameter{{Name: "actual", Type: typeT}}, Return: expectationTType,

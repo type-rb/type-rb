@@ -79,6 +79,55 @@ def returned(success: Boolean): String
 	return value.to_s()
 end
 
+def lambda_propagated(success: Boolean): AppResult<String>
+	callback := fn(): AppResult<String>
+		value := try source(success)
+		return AppResult<String>::Ok("lambda=" + value.to_s())
+	end
+	return callback()
+end
+
+def void_lambda_catch_return(): String
+	callback := fn()
+		_value := source(false) catch |_error|
+			return
+		end
+		return
+	end
+	callback()
+	return "outer"
+end
+
+def each_propagated(success: Boolean): AppResult<String>
+	mut rendered := ""
+	[true, success, true].each do |current|
+		value := try source(current)
+		rendered += value.to_s()
+	end
+	return AppResult<String>::Ok(rendered)
+end
+
+def transform_fallbacks(): Integer
+	mapped := [true, false, true].map do |success|
+		source(success) catch |_error|
+			0
+		end
+	end
+	selected := [true, false, true].select do |success|
+		value := source(success) catch |_error|
+			0
+		end
+		value > 0
+	end
+	total := [true, false, true].reduce(0) do |sum, success|
+		value := source(success) catch |_error|
+			1
+		end
+		sum + value
+	end
+	return mapped[0] + mapped[1] + mapped[2] + selected.size() + total
+end
+
 def catch_once(): Integer
 	mut probe := Probe.new()
 	value := probe.read(false) catch |_error|
@@ -137,6 +186,12 @@ def main()
 	puts(recovered(false))
 	puts(returned(true))
 	puts(returned(false))
+	puts(render(lambda_propagated(true)))
+	puts(render(lambda_propagated(false)))
+	puts(void_lambda_catch_return())
+	puts(render(each_propagated(true)))
+	puts(render(each_propagated(false)))
+	puts(transform_fallbacks())
 	puts(catch_once())
 	once := try_once() catch |_error|
 		-1
@@ -147,7 +202,7 @@ def main()
 	return
 end
 `
-	want := "ok:value=7\nerr\n7\n41\n7\ncaught\n1\n8\ntrue\n0\n"
+	want := "ok:value=7\nerr\n7\n41\n7\ncaught\nok:lambda=7\nerr\nouter\nok:777\nerr\n31\n1\n8\ntrue\n0\n"
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

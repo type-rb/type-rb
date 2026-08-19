@@ -417,7 +417,10 @@ switches.
 
 ### 3.8 Program Entry
 
-- A runnable project defines exactly one top-level `def main()`.
+- A runnable project defines exactly one top-level `def main()`. The runnable
+  declaration takes no parameters or type parameters and has no return or
+  `fails` annotation. A class, enum, interface, or module member named `main`
+  is an ordinary non-entrypoint method and follows the usual method rules.
 - A standalone file-root program also starts from one top-level `def main()`
   in its selected entry file. The entry and the transitive closure of its
   explicit project imports form the program; unrelated sibling files are not
@@ -888,6 +891,10 @@ end
   statements, helpers, effects, and imports. Effects retain the language's
   normal `fails` and `attempt` rules. The test package does not change language
   scoping or introduce implicit setup state.
+- `return`, `break`, and `next` cannot transfer control across a `describe()` or
+  `test()` block boundary. A nested function still owns its own `return`, and
+  a `while` or iteration inside a test body still owns its local `break` and
+  `next` statements.
 - `expect<T>(actual)` preserves `T` in `Expectation<T>`. An assertion failure
   aborts the current case, records the assertion's `.trb` location, and does
   not abort subsequent cases.

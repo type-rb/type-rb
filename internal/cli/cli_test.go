@@ -87,6 +87,22 @@ describe("Calculator") do
 		expect(true).to_be_true()
 		expect(false).to_be_false()
 		expect(nil).to_be_nil()
+		mut total := 0
+		while true
+			total = total + 1
+			break
+		end
+		[1, 2].each do |value|
+			if value == 1
+				next
+			end
+			total = total + value
+		end
+		callback := fn(): Integer
+			return 4
+		end
+		expect(total).to_equal(3)
+		expect(callback()).to_equal(4)
 	end
 end
 `
@@ -6059,7 +6075,6 @@ def main()
 end
 `
 			routeSource := `import { Context, EndpointInputError, Response, text } from trb/web
-import { Result } from trb/std/result
 
 record TodoParams
 	id: Integer
@@ -6091,12 +6106,10 @@ def get_error(error: EndpointInputError): Response
 end
 
 def post(context: Context): Response
-	case context.bind<TodoInput>()
-	when Result::Ok(input)
-		return text(input.params.id.to_s() + "|" + input.query.page.to_s() + "|" + input.body.title)
-	when Result::Err(error)
+	input := context.bind<TodoInput>() catch |error|
 		return get_error(error)
 	end
+	return text(input.params.id.to_s() + "|" + input.query.page.to_s() + "|" + input.body.title)
 end
 `
 			if err := os.MkdirAll(filepath.Join(root, "src", "routes", "todos"), 0o755); err != nil {

@@ -81,6 +81,49 @@ func TestPureTypeScriptFunctionsRemainSynchronous(t *testing.T) {
 	}
 }
 
+func TestSuspendingResultLambdaIsAllowedOnlyAtPromiseRejectionBridge(t *testing.T) {
+	integer := types.FromName("Integer")
+	errorType := types.FromName("LoadError")
+	resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{integer, errorType}}
+	functionType := types.FunctionOf(nil, resultType)
+	nativeType := types.FunctionOf(nil, integer)
+	request := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, resultType),
+		Callee: &ir.Identifier{
+			ExprBase:  ir.NewExprBase(token.Span{}, resultType),
+			Name:      "request",
+			Reference: &ir.Reference{Intrinsic: "trb.platform.typescript.browser.request"},
+		},
+	}
+	lambda := &ir.Lambda{
+		ExprBase:    ir.NewExprBase(token.Span{}, functionType),
+		SuccessType: resultType,
+		ReturnType:  resultType,
+		Fails:       types.Type{Kind: types.Never, Name: "Never"},
+		Body:        []ir.Statement{&ir.Return{Value: request}},
+	}
+	variable := &ir.Variable{Name: "loader", Type: functionType, Value: lambda}
+	identifier := &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, functionType), Name: "loader", Lexical: true}
+	bridge := &ir.Conversion{
+		ExprBase: ir.NewExprBase(token.Span{}, nativeType),
+		Kind:     ir.ResultFunctionToPromiseRejectionConversion,
+		Value:    identifier,
+	}
+	program := &ir.Program{Mode: "typescript", ModulePath: "main", Statements: []ir.Statement{variable, &ir.ExpressionStatement{Expression: bridge}}}
+	plan, err := AnalyzeSuspension([]*ir.Program{program})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Lambdas[lambda] || !plan.ResultPromiseBridges[lambda] {
+		t.Fatalf("suspending Result lambda was not associated with its native bridge: %#v", plan)
+	}
+
+	unbridged := &ir.Program{Mode: "typescript", ModulePath: "main", Statements: []ir.Statement{variable}}
+	if _, err := AnalyzeSuspension([]*ir.Program{unbridged}); err == nil || !strings.Contains(err.Error(), "may suspend must omit") {
+		t.Fatalf("expected an unbridged suspending Result lambda diagnostic, got %v", err)
+	}
+}
+
 func TestORMRejectsUnsupportedTypeScriptRuntimes(t *testing.T) {
 	for _, runtime := range []string{"", "browser", "node"} {
 		program := &ir.Program{

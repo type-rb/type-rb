@@ -257,6 +257,26 @@ func validateProviderType(typ Type) error {
 			return fmt.Errorf("unsupported effectBridge %q", typ.EffectBridge)
 		}
 	}
+	if typ.ResultBridge != nil {
+		if typ.Kind != "function" {
+			return errors.New("resultBridge is only valid on function types")
+		}
+		if len(typ.Args) == 0 {
+			return errors.New("resultBridge requires a function return type")
+		}
+		if typ.Fails != nil || typ.EffectBridge != "" {
+			return errors.New("resultBridge cannot be combined with fails or effectBridge")
+		}
+		if typ.ResultBridge.Kind != "result_to_promise_rejection" {
+			return fmt.Errorf("unsupported resultBridge kind %q", typ.ResultBridge.Kind)
+		}
+		if typ.ResultBridge.Error.Kind == "" {
+			return errors.New("resultBridge error is required")
+		}
+		if err := validateProviderType(typ.ResultBridge.Error); err != nil {
+			return fmt.Errorf("invalid resultBridge error type: %w", err)
+		}
+	}
 	for _, argument := range typ.Args {
 		if err := validateProviderType(argument); err != nil {
 			return err
