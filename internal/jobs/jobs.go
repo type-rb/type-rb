@@ -28,10 +28,22 @@ type Parameter struct {
 	WireType types.Type
 }
 
+type PerformKind string
+
+const (
+	// PerformVoid is the zero value so manifests assembled by package tests and
+	// third-party integrations keep the ordinary infallible Job contract.
+	PerformVoid         PerformKind = ""
+	PerformLegacyEffect PerformKind = "legacy_effect"
+	PerformJobResult    PerformKind = "job_result"
+)
+
 type Job struct {
-	Name            string
-	ModulePath      string
-	Parameters      []Parameter
+	Name        string
+	ModulePath  string
+	Parameters  []Parameter
+	PerformKind PerformKind
+	// Fails is populated only for the temporary legacy effect contract.
 	Fails           types.Type
 	Queue           string
 	Priority        int
@@ -104,22 +116,20 @@ func (m *Manifest) Augment(program *ir.Program) {
 			for index, parameter := range job.Parameters {
 				parameters[index] = ir.Parameter{Name: parameter.Name, Type: parameter.Type}
 			}
+			enqueueResult := jobEnqueueResultType()
 			class.Body = append(class.Body, &ir.Method{
 				Name: "perform_later", External: true, Class: true,
-				Parameters: parameters, SuccessType: types.FromName("JobReference"),
-				ReturnType: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+				Parameters: parameters, SuccessType: enqueueResult, ReturnType: enqueueResult,
 			})
 			delayedParameters := append([]ir.Parameter{{Name: "delay", Type: types.FromName("Duration")}}, parameters...)
 			class.Body = append(class.Body, &ir.Method{
 				Name: "perform_in", External: true, Class: true,
-				Parameters: delayedParameters, SuccessType: types.FromName("JobReference"),
-				ReturnType: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+				Parameters: delayedParameters, SuccessType: enqueueResult, ReturnType: enqueueResult,
 			})
 			scheduledParameters := append([]ir.Parameter{{Name: "scheduled_at", Type: types.FromName("Instant")}}, parameters...)
 			class.Body = append(class.Body, &ir.Method{
 				Name: "perform_at", External: true, Class: true,
-				Parameters: scheduledParameters, SuccessType: types.FromName("JobReference"),
-				ReturnType: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+				Parameters: scheduledParameters, SuccessType: enqueueResult, ReturnType: enqueueResult,
 			})
 			ensureJobRuntimeImport(program, "trb/std/time/index", "Duration", "class")
 			ensureJobRuntimeImport(program, "trb/std/time/index", "Instant", "class")
@@ -157,6 +167,14 @@ func contains(values []string, target string) bool {
 	return false
 }
 
+func jobEnqueueResultType() types.Type {
+	return types.Type{
+		Kind: types.Named,
+		Name: "Result",
+		Args: []types.Type{types.FromName("JobReference"), types.FromName("EnqueueError")},
+	}
+}
+
 func Declarations(programs []*ast.Program) (*declaration.Catalog, error) {
 	jobs, err := discoverJobs(programs, func(_ *ast.Program, typ types.Type, _ aliasResolver) bool {
 		return initialArgumentType(typ) || potentialAliasType(typ)
@@ -173,19 +191,19 @@ func Declarations(programs []*ast.Program) (*declaration.Catalog, error) {
 		}
 		declared.ClassMembers["perform_later"] = declaration.Member{
 			Name: "perform_later", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_later",
-			Parameters: parameters, Return: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+			Parameters: parameters, Return: jobEnqueueResultType(),
 			Class: true, Provider: PackageName,
 		}
 		delayedParameters := append([]declaration.Parameter{{Name: "delay", Type: types.FromName("Duration")}}, parameters...)
 		declared.ClassMembers["perform_in"] = declaration.Member{
 			Name: "perform_in", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_in",
-			Parameters: delayedParameters, Return: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+			Parameters: delayedParameters, Return: jobEnqueueResultType(),
 			Class: true, Provider: PackageName,
 		}
 		scheduledParameters := append([]declaration.Parameter{{Name: "scheduled_at", Type: types.FromName("Instant")}}, parameters...)
 		declared.ClassMembers["perform_at"] = declaration.Member{
 			Name: "perform_at", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_at",
-			Parameters: scheduledParameters, Return: types.FromName("JobReference"), Fails: types.FromName("EnqueueError"),
+			Parameters: scheduledParameters, Return: jobEnqueueResultType(),
 			Class: true, Provider: PackageName,
 		}
 		catalog.Types[job.Name] = declared
@@ -286,10 +304,22 @@ func discoverJob(program *ast.Program, class *ast.ClassStatement, aliases aliasR
 	if len(perform.TypeParameters) != 0 {
 		return Job{}, fmt.Errorf("trb/jobs Job %s perform cannot declare type parameters", class.Name)
 	}
+	performKind := PerformVoid
 	if !perform.ReturnType.Empty() {
-		return Job{}, fmt.Errorf("trb/jobs Job %s perform must not return a value", class.Name)
+		if !perform.Fails.Empty() {
+			return Job{}, fmt.Errorf("trb/jobs Job %s perform cannot combine a return type with fails", class.Name)
+		}
+		if !aliases.isCanonicalJobResult(program, perform.ReturnType, map[string]bool{}) {
+			return Job{}, fmt.Errorf("trb/jobs Job %s perform must omit its return type or return JobResult", class.Name)
+		}
+		performKind = PerformJobResult
+	} else if !perform.Fails.Empty() {
+		performKind = PerformLegacyEffect
 	}
-	job := Job{Name: class.Name, ModulePath: program.ModulePath, Fails: typeRef(perform.Fails), Queue: "default"}
+	job := Job{Name: class.Name, ModulePath: program.ModulePath, PerformKind: performKind, Queue: "default"}
+	if performKind == PerformLegacyEffect {
+		job.Fails = typeRef(perform.Fails)
+	}
 	if err := discoverJobDefaults(&job, class); err != nil {
 		return Job{}, err
 	}
@@ -364,6 +394,43 @@ func (r aliasResolver) expand(program *ast.Program, typ types.Type, visiting map
 		return typ
 	}
 	return r.expand(targetProgram, typeRef(alias.Target), visiting)
+}
+
+func (r aliasResolver) isCanonicalJobResult(program *ast.Program, ref ast.TypeRef, visiting map[string]bool) bool {
+	if program == nil || ref.Nullable || ref.Array || ref.FunctionReturn != nil || len(ref.Union) != 0 || len(ref.Arguments) != 0 {
+		return false
+	}
+	if ref.Name == "JobResult" && canonicalJobsPath(r.imports[program.ModulePath][ref.Name]) {
+		return true
+	}
+
+	modulePath := program.ModulePath
+	alias := r.aliases[modulePath][ref.Name]
+	if alias == nil {
+		importPath := r.imports[modulePath][ref.Name]
+		if importPath == "" || canonicalJobsPath(importPath) {
+			return false
+		}
+		modulePath = r.modulePath(importPath)
+		alias = r.aliases[modulePath][ref.Name]
+	}
+	if alias == nil || len(alias.TypeParameters) != 0 {
+		return false
+	}
+	key := modulePath + "\x00" + ref.Name
+	if visiting[key] {
+		return false
+	}
+	visiting[key] = true
+	targetProgram := r.programs[modulePath]
+	if targetProgram == nil {
+		return false
+	}
+	return r.isCanonicalJobResult(targetProgram, alias.Target, visiting)
+}
+
+func canonicalJobsPath(path string) bool {
+	return path == PackageName || path == PackageName+"/index"
 }
 
 func (r aliasResolver) modulePath(importPath string) string {

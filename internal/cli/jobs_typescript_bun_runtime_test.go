@@ -29,29 +29,25 @@ func TestRunTypeScriptBunJobApplicationPersistsAndPerforms(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(config.SourcePath(), "jobs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mainSource := `import { Result } from trb/std/result
-import { Duration, Instant } from trb/std/time
+	mainSource := `import { Duration, Instant } from trb/std/time
 import { SendReceiptJob } from jobs/send_receipt_job
 
 def main()
-	case attempt SendReceiptJob.perform_later(42, "ada@example.test")
-	when Result::Ok(reference)
-		puts(reference.job_name)
-	when Result::Err(error)
+	reference := SendReceiptJob.perform_later(42, "ada@example.test") catch |error|
 		puts(error.message)
+		return
 	end
-	case attempt SendReceiptJob.perform_in(Duration.seconds(60), 43, "later@example.test")
-	when Result::Ok(reference)
-		puts(reference.job_name)
-	when Result::Err(error)
+	puts(reference.job_name)
+	later_reference := SendReceiptJob.perform_in(Duration.seconds(60), 43, "later@example.test") catch |error|
 		puts(error.message)
+		return
 	end
-	case attempt SendReceiptJob.perform_at(Instant.now().add(Duration.seconds(120)), 44, "scheduled@example.test")
-	when Result::Ok(reference)
-		puts(reference.job_name)
-	when Result::Err(error)
+	puts(later_reference.job_name)
+	scheduled_reference := SendReceiptJob.perform_at(Instant.now().add(Duration.seconds(120)), 44, "scheduled@example.test") catch |error|
 		puts(error.message)
+		return
 	end
+	puts(scheduled_reference.job_name)
 	return
 end
 `

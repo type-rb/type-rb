@@ -196,15 +196,16 @@ type UnionMemberAccess struct {
 }
 
 type symbol struct {
-	typ      types.Type
-	declared types.Type
-	mutable  bool
-	constant bool
-	owner    string
-	span     token.Span
-	variable *ast.VariableStatement
-	used     *bool
-	useKind  string
+	typ           types.Type
+	declared      types.Type
+	mutable       bool
+	constant      bool
+	owner         string
+	span          token.Span
+	variable      *ast.VariableStatement
+	used          *bool
+	useKind       string
+	mustUseResult bool
 }
 
 func tracksUnusedBinding(name string) bool {
@@ -375,6 +376,7 @@ type Checker struct {
 	usedImports                 map[*ast.ImportStatement]map[string]bool
 	allowUnusedImports          bool
 	allowUnhandledEffects       bool
+	interactiveTopLevel         bool
 	aliasCycles                 map[string]bool
 	declaredEffects             []types.Type
 	effectCaptures              []*effectCapture
@@ -403,6 +405,7 @@ type resultBoundary struct {
 type Options struct {
 	AllowUnusedImports    bool
 	AllowUnhandledEffects bool
+	InteractiveTopLevel   bool
 }
 
 func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnostic.Diagnostic) {
@@ -459,6 +462,7 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		usedImports:           importUses,
 		allowUnusedImports:    options.AllowUnusedImports,
 		allowUnhandledEffects: options.AllowUnhandledEffects,
+		interactiveTopLevel:   options.InteractiveTopLevel,
 		aliasCycles:           map[string]bool{},
 		declarationCalls:      map[*ast.CallExpression]string{},
 	}
@@ -1147,10 +1151,12 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					variableType.Readonly = true
 				}
 				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n}
-				if len(c.returns) > 0 && !n.Constant && tracksUnusedBinding(n.Name) {
+				mustUseResult := len(c.returns) > 0 && !n.Constant && n.Name != "_" && c.isStandardResult(variableType)
+				if len(c.returns) > 0 && !n.Constant && (tracksUnusedBinding(n.Name) || mustUseResult) {
 					used := false
 					declared.used = &used
 					declared.useKind = "local variable"
+					declared.mustUseResult = mustUseResult
 				}
 				sc.values[n.Name] = declared
 			}
@@ -1244,7 +1250,10 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				c.error(n.Span(), "next is only valid inside while or an iteration block")
 			}
 		case *ast.ExpressionStatement:
-			c.checkExpression(n.Expression, sc)
+			typ := c.checkExpression(n.Expression, sc)
+			if c.isStandardResult(typ) && !(c.interactiveTopLevel && len(c.returns) == 0) {
+				c.error(n.Expression.Span(), "Result value must be used; handle it with try, catch, or case, or explicitly return, pass, or store it")
+			}
 			if call, member, ok := c.structuredBlockCall(n.Expression); ok && member.Block.Structured {
 				c.error(call.Span(), fmt.Sprintf("result of %s() must be assigned or returned", member.Name))
 			}
@@ -1295,6 +1304,10 @@ func (c *Checker) checkUnusedBindings(sc *scope) {
 		return left < right
 	})
 	for _, binding := range tracked {
+		if binding.value.mustUseResult {
+			c.errorCode(diagnostic.UnusedBinding, binding.value.span, fmt.Sprintf("Result binding %s must be used; handle it with try, catch, or case, or explicitly return, pass, or store it", binding.name))
+			continue
+		}
 		c.errorCode(diagnostic.UnusedBinding, binding.value.span, fmt.Sprintf("%s %s is not used", binding.value.useKind, binding.name))
 	}
 }
@@ -5344,6 +5357,11 @@ func (c *Checker) standardResultParts(typ types.Type) (types.Type, types.Type, t
 	return expanded.Args[0], expanded.Args[1], expanded, true
 }
 
+func (c *Checker) isStandardResult(typ types.Type) bool {
+	_, _, _, ok := c.standardResultParts(typ)
+	return ok
+}
+
 func (c *Checker) resultBoundaryFor(returnType types.Type) resultBoundary {
 	success, failure, result, ok := c.standardResultParts(returnType)
 	return resultBoundary{success: success, failure: failure, result: result, valid: ok}
@@ -5390,6 +5408,9 @@ func (c *Checker) standardResultAvailable() bool {
 	}
 	if binding, inferred := c.resolution.InferredType("Result"); inferred {
 		return binding.Import != nil && binding.Import.RuntimePath() == module
+	}
+	if dependency := c.result.RuntimeDependencies["trb/std/result"]; dependency != nil {
+		return dependency.ModulePath == module
 	}
 	_, ok := c.resolution.CompilerOwnedType("Result")
 	return ok

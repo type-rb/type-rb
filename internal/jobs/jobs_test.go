@@ -25,7 +25,7 @@ end
 		t.Fatal("SendReceiptJob declaration is missing")
 	}
 	performLater := job.ClassMembers["perform_later"]
-	if performLater.Intrinsic != "trb.jobs.perform_later" || performLater.Fails.String() != "EnqueueError" || performLater.Return.String() != "JobReference" {
+	if performLater.Intrinsic != "trb.jobs.perform_later" || performLater.Fails.Kind != "" || performLater.Return.String() != "Result<JobReference, EnqueueError>" {
 		t.Fatalf("unexpected perform_later declaration: %#v", performLater)
 	}
 	if len(performLater.Parameters) != 2 || performLater.Parameters[0].Name != "order_id" || performLater.Parameters[0].Type.String() != "Integer" || performLater.Parameters[1].Type.String() != "String" {
@@ -56,7 +56,7 @@ func TestManifestAugmentsJobRuntimeContract(t *testing.T) {
 		t.Fatalf("job runtime types were not attached: %#v", imported)
 	}
 	method, ok := class.Body[len(class.Body)-3].(*ir.Method)
-	if !ok || method.Name != "perform_later" || !method.External || !method.Class || method.Fails.String() != "EnqueueError" {
+	if !ok || method.Name != "perform_later" || !method.External || !method.Class || method.Fails.Kind != "" || method.ReturnType.String() != "Result<JobReference, EnqueueError>" {
 		t.Fatalf("job class was not augmented: %#v", class.Body)
 	}
 	delayed, ok := class.Body[len(class.Body)-2].(*ir.Method)
@@ -77,7 +77,10 @@ func TestDiscoverRejectsInvalidInitialJobContracts(t *testing.T) {
 	}{
 		{name: "missing perform", source: "class EmptyJob < Job\nend\n", message: "must declare perform"},
 		{name: "class perform", source: "class InvalidJob < Job\n\tdef self.perform()\n\t\treturn\n\tend\nend\n", message: "must be an instance method"},
-		{name: "return value", source: "class InvalidJob < Job\n\tdef perform(): String\n\t\treturn \"x\"\n\tend\nend\n", message: "must not return a value"},
+		{name: "return value", source: "class InvalidJob < Job\n\tdef perform(): String\n\t\treturn \"x\"\n\tend\nend\n", message: "must omit its return type or return JobResult"},
+		{name: "raw result", source: "import { Job, JobError } from trb/jobs\nimport { Result } from trb/std/result\nimport { Unit } from trb/std/unit\nclass InvalidJob < Job\n\tdef perform(): Result<Unit, JobError>\n\t\treturn Result<Unit, JobError>::Ok(Unit.new())\n\tend\nend\n", message: "must omit its return type or return JobResult"},
+		{name: "source-defined JobResult", source: "import { Job } from trb/jobs\nimport { Result } from trb/std/result\nimport { Unit } from trb/std/unit\nrecord LocalJobError\n\tmessage: String\nend\ntype JobResult = Result<Unit, LocalJobError>\nclass InvalidJob < Job\n\tdef perform(): JobResult\n\t\treturn JobResult::Ok(Unit.new())\n\tend\nend\n", message: "must omit its return type or return JobResult"},
+		{name: "mixed result and effect", source: "import { Job, JobResult } from trb/jobs\nrecord AppError\nend\nclass InvalidJob < Job\n\tdef perform(): JobResult fails AppError\n\t\treturn\n\tend\nend\n", message: "cannot combine a return type with fails"},
 		{name: "record argument", source: "record Payload\n\tid: Integer\nend\nclass InvalidJob < Job\n\tdef perform(payload: Payload)\n\t\treturn\n\tend\nend\n", message: "must initially be Boolean, Integer, Float, or String"},
 	}
 	for _, test := range tests {
@@ -85,6 +88,47 @@ func TestDiscoverRejectsInvalidInitialJobContracts(t *testing.T) {
 			_, err := Discover([]*ast.Program{parseJobsTest(t, test.source)})
 			if err == nil || !strings.Contains(err.Error(), test.message) {
 				t.Fatalf("expected %q, got %v", test.message, err)
+			}
+		})
+	}
+}
+
+func TestDiscoverClassifiesPerformContracts(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		kind    PerformKind
+		failure string
+	}{
+		{
+			name:   "infallible void",
+			source: "import { Job } from trb/jobs\nclass ExampleJob < Job\n\tdef perform()\n\t\treturn\n\tend\nend\n",
+			kind:   PerformVoid,
+		},
+		{
+			name:   "legacy effect",
+			source: "import { Job } from trb/jobs\nrecord AppError\nend\nclass ExampleJob < Job\n\tdef perform() fails AppError\n\t\treturn\n\tend\nend\n",
+			kind:   PerformLegacyEffect, failure: "AppError",
+		},
+		{
+			name:   "canonical result",
+			source: "import { Job, JobResult } from trb/jobs\nimport { Unit } from trb/std/unit\nclass ExampleJob < Job\n\tdef perform(): JobResult\n\t\treturn JobResult::Ok(Unit.new())\n\tend\nend\n",
+			kind:   PerformJobResult,
+		},
+		{
+			name:   "transparent alias of canonical result",
+			source: "import { Job, JobResult } from trb/jobs\nimport { Unit } from trb/std/unit\ntype ExampleJobResult = JobResult\nclass ExampleJob < Job\n\tdef perform(): ExampleJobResult\n\t\treturn ExampleJobResult::Ok(Unit.new())\n\tend\nend\n",
+			kind:   PerformJobResult,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			jobs, err := Discover([]*ast.Program{parseJobsTest(t, test.source)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(jobs) != 1 || jobs[0].PerformKind != test.kind || jobs[0].Fails.String() != test.failure {
+				t.Fatalf("unexpected Job contract: %#v", jobs)
 			}
 		})
 	}

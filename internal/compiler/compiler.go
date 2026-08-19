@@ -137,6 +137,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{
 		AllowUnusedImports:    options.AllowUnusedImports,
 		AllowUnhandledEffects: options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
+		InteractiveTopLevel:   options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
 	})
 	diagnostics = append(diagnostics, checkDiagnostics...)
 	if hasErrors(diagnostics) {
@@ -314,6 +315,7 @@ func analyzeProject(sources []SourceUnit, options Options, validateBackend bool)
 		checked, diagnostics := checker.CheckWithOptions(program, resolutions[source.ModulePath], checker.Options{
 			AllowUnusedImports:    options.AllowUnusedImports,
 			AllowUnhandledEffects: options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
+			InteractiveTopLevel:   options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
 		})
 		checkedPrograms[source.ModulePath] = checked
 		checkDiagnostics[source.ModulePath] = diagnostics

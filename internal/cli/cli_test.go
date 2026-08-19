@@ -4419,7 +4419,12 @@ def main()
 	a8 := "aaaaaaaa"
 	a56 := a8 + a8 + a8 + a8 + a8 + a8 + a8
 	a112 := a56 + a56
-	_decoded := decode("00")
+	decoded := decode("00") catch |_error|
+		return
+	end
+	if decoded.size() != 1
+		return
+	end
 	puts(encode(md5("".to_bytes())))
 	puts(encode(md5("abc".to_bytes())))
 	puts(encode(md5(a56.to_bytes())))
@@ -4499,7 +4504,12 @@ def main()
 	key := "Jefe".to_bytes()
 	message := "what do ya want for nothing?".to_bytes()
 	tag := sha256(key, message)
-	_decoded := decode("00")
+	decoded := decode("00") catch |_error|
+		return
+	end
+	if decoded.size() != 1
+		return
+	end
 	puts(encode(tag))
 	puts(encode(sha512(key, message)))
 	puts(encode(sha256(key80.to_bytes(), "message".to_bytes())))
@@ -5278,10 +5288,18 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 			"def names_or_error(value: Result<Array<String>, FileError>): Array<String>; case value; when Result::Ok(names); return names; when Result::Err(error); return [error.operation]; end; end\n" +
 			"def boolean_or_false(value: Result<Boolean, FileError>): Boolean; case value; when Result::Ok(found); return found; when Result::Err(error); return error.operation.empty?(); end; end\n\n" +
 			"def main()\n" +
-			"\tcreate_directory(" + strconv.Quote(directory) + ")\n" +
-			"\twrite_text(" + strconv.Quote(textPath) + ", \"A😀\")\n" +
-			"\twrite_text(" + strconv.Quote(astralPath) + ", \"\")\n" +
-			"\twrite_text(" + strconv.Quote(bmpPath) + ", \"\")\n" +
+			"\t_directory := create_directory(" + strconv.Quote(directory) + ") catch |_error|\n" +
+			"\t\treturn\n" +
+			"\tend\n" +
+			"\t_text := write_text(" + strconv.Quote(textPath) + ", \"A😀\") catch |_error|\n" +
+			"\t\treturn\n" +
+			"\tend\n" +
+			"\t_astral := write_text(" + strconv.Quote(astralPath) + ", \"\") catch |_error|\n" +
+			"\t\treturn\n" +
+			"\tend\n" +
+			"\t_bmp := write_text(" + strconv.Quote(bmpPath) + ", \"\") catch |_error|\n" +
+			"\t\treturn\n" +
+			"\tend\n" +
 			"\tputs(text_or_operation(read_text(" + strconv.Quote(textPath) + ")))\n" +
 			"\tputs(text_or_operation(read_text(" + strconv.Quote(missingPath) + ")))\n" +
 			"\tputs(names_or_error(list(" + strconv.Quote(directory) + ")).join(\",\"))\n" +

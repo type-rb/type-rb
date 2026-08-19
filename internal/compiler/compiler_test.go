@@ -3268,7 +3268,9 @@ func TestQualifiedGenericPackageFunctionsRemainFunctions(t *testing.T) {
 	source := []byte(`import trb/std/json
 
 def encode_message()
-	json.encode<String>("hello")
+	_encoded := json.encode<String>("hello") catch |_error|
+		return
+	end
 	return
 end
 `)

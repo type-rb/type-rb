@@ -216,9 +216,12 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 			argumentValues = append([]string{"__trbScope"}, argumentValues...)
 		}
 		call := "await new " + owner + "()." + tsMethodName("perform") + "(" + strings.Join(argumentValues, ", ") + ")"
-		if job.Fails.Kind != "" && job.Fails.Kind != "Never" {
+		switch job.PerformKind {
+		case jobs.PerformJobResult:
+			g.line("const execution = " + call + "; if (execution.kind === \"Err\") throw new Error(execution.error.message);")
+		case jobs.PerformLegacyEffect:
 			g.line("const execution = " + call + "; if (execution.kind === \"Err\") throw new Error(String(execution.error));")
-		} else {
+		default:
 			g.line(call + ";")
 		}
 		g.line("return;")

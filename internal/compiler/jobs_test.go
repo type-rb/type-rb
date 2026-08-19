@@ -20,17 +20,15 @@ func TestCompileProjectGeneratesTypedGoJobEnqueueRuntime(t *testing.T) {
 	sources := []SourceUnit{
 		{
 			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
-			Source: []byte(`import { Result } from trb/std/result
-import { puts } from trb/std/io
+			Source: []byte(`import { puts } from trb/std/io
 import { SendReceiptJob } from jobs/send_receipt_job
 
 def main()
-	case attempt SendReceiptJob.perform_later(42, "ada@example.test")
-	when Result::Ok(reference)
-		puts(reference.id)
-	when Result::Err(error)
+	reference := SendReceiptJob.perform_later(42, "ada@example.test") catch |error|
 		puts(error.message)
+		return
 	end
+	puts(reference.id)
 	return
 end
 `),
@@ -102,6 +100,82 @@ end
 	_, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project"})
 	if err == nil || !strings.Contains(err.Error(), "must initially be Boolean, Integer, Float, or String") {
 		t.Fatalf("expected job argument diagnostic, got %v", err)
+	}
+}
+
+func TestCompileProjectAcceptsCanonicalJobResultPerformAcrossModes(t *testing.T) {
+	sources := []SourceUnit{
+		{
+			Filename: "/project/src/jobs/example_job.trb", ModulePath: "jobs/example_job", Package: "jobs",
+			Source: []byte(`import { Job, JobError, JobResult } from trb/jobs
+import { Unit } from trb/std/unit
+
+class ExampleJob < Job
+	def perform(fail: Boolean): JobResult
+		if fail
+			return JobResult::Err(JobError.new(message: "stopped"))
+		end
+		return JobResult::Ok(Unit.new())
+	end
+end
+`),
+		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
+		{Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte("def main()\n\treturn\nend\n")},
+	}
+	for _, options := range []Options{
+		{Mode: "go", GoModule: "example.com/jobs"},
+		{Mode: "ruby", RubyLoader: "require_relative"},
+		{Mode: "typescript", TypeScriptRuntime: "bun"},
+	} {
+		options.SourceRoot = "/project/src"
+		options.ProjectRoot = "/project"
+		options.JobsConfiguration = "config/jobs"
+		artifacts, err := CompileProject(sources, options)
+		if err != nil {
+			t.Fatalf("%s: %v", options.Mode, err)
+		}
+		manifest := jobsintegration.ManifestFrom(artifactForModule(artifacts, "jobs/example_job").IR.Extensions)
+		if manifest == nil || len(manifest.Jobs) != 1 || manifest.Jobs[0].PerformKind != jobsintegration.PerformJobResult || manifest.Jobs[0].Fails.Kind != "" {
+			t.Fatalf("%s produced unexpected JobResult manifest: %#v", options.Mode, manifest)
+		}
+	}
+}
+
+func TestCompileProjectRejectsNonCanonicalJobResultPerform(t *testing.T) {
+	tests := []struct {
+		name    string
+		imports string
+		result  string
+		fails   string
+		message string
+	}{
+		{
+			name: "raw standard Result",
+			imports: "import { Job, JobError } from trb/jobs\n" +
+				"import { Result } from trb/std/result\n" +
+				"import { Unit } from trb/std/unit\n",
+			result:  "Result<Unit, JobError>",
+			message: "must omit its return type or return JobResult",
+		},
+		{
+			name:    "mixed result and effect",
+			imports: "import { Job, JobResult } from trb/jobs\nrecord AppError\nend\n",
+			result:  "JobResult",
+			fails:   " fails AppError",
+			message: "cannot combine a return type with fails",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := test.imports + "\nclass InvalidJob < Job\n\tdef perform(): " + test.result + test.fails + "\n\t\treturn\n\tend\nend\n"
+			_, err := CompileProject([]SourceUnit{{
+				Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte(source),
+			}}, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project"})
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("expected %q, got %v", test.message, err)
+			}
+		})
 	}
 }
 
@@ -203,7 +277,7 @@ func TestCompileProjectGeneratesRubyJobRuntime(t *testing.T) {
 import { SendReceiptJob } from jobs/send_receipt_job
 
 def main()
-	case attempt SendReceiptJob.perform_later(42, "ada@example.test")
+	case SendReceiptJob.perform_later(42, "ada@example.test")
 	when Result::Ok(_reference)
 		return
 	when Result::Err(_error)
@@ -252,7 +326,7 @@ func TestCompileProjectGeneratesTypeScriptBunJobRuntime(t *testing.T) {
 import { SendReceiptJob } from jobs/send_receipt_job
 
 def main()
-	case attempt SendReceiptJob.perform_later(42, "ada@example.test")
+	case SendReceiptJob.perform_later(42, "ada@example.test")
 	when Result::Ok(_reference)
 		return
 	when Result::Err(_error)
@@ -316,7 +390,8 @@ func TestCompileProjectPropagatesExecutionScopeThroughJobDispatch(t *testing.T) 
 	sources := []SourceUnit{
 		{
 			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
-			Source: []byte(`import { EnqueueError, Job } from trb/jobs
+			Source: []byte(`import { Job, JobError, JobResult } from trb/jobs
+import { Unit } from trb/std/unit
 
 class ChildJob < Job
 	def perform(value: Integer)
@@ -325,9 +400,11 @@ class ChildJob < Job
 end
 
 class ParentJob < Job
-	def perform(value: Integer) fails EnqueueError
-		ChildJob.perform_later(value)
-		return
+	def perform(value: Integer): JobResult
+		ChildJob.perform_later(value) catch |error|
+			return JobResult::Err(JobError.new(message: error.message))
+		end
+		return JobResult::Ok(Unit.new())
 	end
 end
 
