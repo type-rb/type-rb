@@ -1274,6 +1274,11 @@ func receiverStart(source string, end int, marker string) int {
 
 func literalReceiverType(receiver string) (types.Type, bool) {
 	trimmed := strings.TrimSpace(receiver)
+	if strings.Contains(trimmed, "..") {
+		if typ, ok := integerRangeLiteralType(trimmed); ok {
+			return typ, true
+		}
+	}
 	if trimmed == "true" || trimmed == "false" {
 		return types.FromName("Boolean"), true
 	}
@@ -1309,6 +1314,33 @@ func literalReceiverType(receiver string) (types.Type, bool) {
 		}
 	}
 	return types.Type{}, false
+}
+
+func integerRangeLiteralType(source string) (types.Type, bool) {
+	program, diagnostics := parser.Parse([]byte(source))
+	if len(diagnostics) > 0 || len(program.Statements) != 1 {
+		return types.Type{}, false
+	}
+	statement, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		return types.Type{}, false
+	}
+	rangeExpression, ok := statement.Expression.(*ast.RangeExpression)
+	if !ok || !integerLiteralExpression(rangeExpression.Start) || !integerLiteralExpression(rangeExpression.End) {
+		return types.Type{}, false
+	}
+	return types.Type{Kind: types.Range, Name: "Range", Args: []types.Type{types.FromName("Integer")}}, true
+}
+
+func integerLiteralExpression(expression ast.Expression) bool {
+	switch node := expression.(type) {
+	case *ast.Literal:
+		return node.Kind == ast.IntegerLiteral
+	case *ast.UnaryExpression:
+		return (node.Operator == "+" || node.Operator == "-") && integerLiteralExpression(node.Operand)
+	default:
+		return false
+	}
 }
 
 func lexicalSymbols(source string, cursor int, context Context) []Symbol {

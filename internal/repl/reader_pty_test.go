@@ -34,6 +34,13 @@ func TestZeroArgumentCompletionInsertsParentheses(t *testing.T) {
 	}
 }
 
+func TestRangeLiteralCompletionInsertsToArray(t *testing.T) {
+	output := runCompletionPTY(t, "(1..10).to\t\r")
+	if !bytes.Contains(output, []byte("[LINE:(1..10).to_a()]")) {
+		t.Fatalf("Range literal call was not completed: %q", output)
+	}
+}
+
 func runCompletionPTY(t *testing.T, input string) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
