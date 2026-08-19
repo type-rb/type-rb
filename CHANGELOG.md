@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.2 - 2026-08-19
+
+### Tooling
+
+- Language-server definition navigation now resolves JSX component uses such
+  as `<InsurerPage>` directly to their imported TypeRB declarations. The
+  matching Visual Studio Code extension 0.3.2 also enables breakpoint controls
+  for `.trb` files and stops Go debugging on selected TypeRB source lines.
+  ([#351](https://github.com/type-rb/type-rb/pull/351))
+
 ## 0.3.1 - 2026-08-19
 
 ### Language and collections

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.2 - 2026-08-19
+
 - Enable the breakpoint gutter for TypeRB source files and verify that
   standalone Go debugging stops on the selected `.trb` line.
 - Navigate from JSX component uses directly to imported TypeRB declarations.
