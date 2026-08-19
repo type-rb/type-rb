@@ -66,6 +66,11 @@
 		"serialize-javascript": "7.0.5"
 	},
 	"contributes": {
+		"breakpoints": [
+			{
+				"language": "trb"
+			}
+		],
 		"configurationDefaults": {
 			"[trb]": {
 				"editor.quickSuggestions": {

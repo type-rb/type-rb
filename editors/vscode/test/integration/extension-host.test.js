@@ -378,15 +378,25 @@ end
 		}
 	});
 
-	test("debugs the standalone file with a session-private executable", async function() {
+	test("stops at a standalone TypeRB source breakpoint with a session-private executable", async function() {
 		if (spawnSync("dlv", ["version"], { stdio: "ignore" }).status !== 0) {
 			this.skip();
 			return;
 		}
+		const breakpoint = new vscode.SourceBreakpoint(
+			new vscode.Location(sourceURI, new vscode.Position(3, 1))
+		);
+		vscode.debug.addBreakpoints([breakpoint]);
 		const started = eventPromise(
 			vscode.debug.onDidStartDebugSession,
 			(session) => session.type === "typerb" && session.configuration.standaloneDebugBuild === true,
 			"standalone source debug session start"
+		);
+		const stopped = eventPromise(
+			vscode.debug.onDidChangeActiveStackItem,
+			(item) => item?.session.type === "typerb" && typeof item.frameId === "number",
+			"standalone TypeRB source breakpoint",
+			30000
 		);
 		const terminated = eventPromise(
 			vscode.debug.onDidTerminateDebugSession,
@@ -394,33 +404,54 @@ end
 			"standalone source debug session termination",
 			30000
 		);
-		await vscode.commands.executeCommand("typerb.debugFile", sourceURI.toString());
-		const session = await started;
-		const program = session.configuration.program;
-		assert.equal(typeof program, "string");
-		await waitFor(
-			async () => {
-				try {
-					await access(program);
-					return true;
-				} catch {
-					return false;
-				}
-			},
-			"standalone debug executable",
-			30000
-		);
-		assert.notEqual(path.dirname(program), workspaceRoot);
-		assert.ok(path.basename(path.dirname(program)).startsWith("typerb-vscode-debug-"));
-		await terminated;
-		await waitFor(async () => {
-			try {
-				await access(path.dirname(program));
-				return false;
-			} catch (error) {
-				return error.code === "ENOENT";
+		let program;
+		try {
+			await waitFor(
+				() => vscode.debug.breakpoints.some((candidate) => candidate.id === breakpoint.id),
+				"standalone TypeRB source breakpoint registration"
+			);
+			await vscode.commands.executeCommand("typerb.debugFile", sourceURI.toString());
+			const session = await started;
+			program = session.configuration.program;
+			assert.equal(typeof program, "string");
+			await waitFor(
+				async () => {
+					try {
+						await access(program);
+						return true;
+					} catch {
+						return false;
+					}
+				},
+				"standalone debug executable",
+				30000
+			);
+			assert.notEqual(path.dirname(program), workspaceRoot);
+			assert.ok(path.basename(path.dirname(program)).startsWith("typerb-vscode-debug-"));
+
+			const frame = await stopped;
+			assert.equal(frame.session.id, session.id);
+			const stack = await session.customRequest("stackTrace", { threadId: frame.threadId });
+			assert.equal(path.resolve(stack.stackFrames[0].source.path), sourceURI.fsPath);
+			assert.equal(stack.stackFrames[0].line, 4);
+			await session.customRequest("continue", { threadId: frame.threadId });
+			await terminated;
+		} finally {
+			vscode.debug.removeBreakpoints([breakpoint]);
+			if (vscode.debug.activeDebugSession?.type === "typerb") {
+				await vscode.debug.stopDebugging(vscode.debug.activeDebugSession);
 			}
-		}, "standalone debug artifact cleanup");
+		}
+		if (program !== undefined) {
+			await waitFor(async () => {
+				try {
+					await access(path.dirname(program));
+					return false;
+				} catch (error) {
+					return error.code === "ENOENT";
+				}
+			}, "standalone debug artifact cleanup");
+		}
 	});
 
 });

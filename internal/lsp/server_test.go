@@ -1525,6 +1525,44 @@ func TestServerNavigatesToImportedTypeAndMemberDefinitions(t *testing.T) {
 	}
 }
 
+func TestServerNavigatesFromJSXUseToImportedComponentDefinition(t *testing.T) {
+	root := t.TempDir()
+	pagePath := cleanPath(filepath.Join(root, "features", "insurers", "components", "InsurerPage", "index.trb"))
+	entryPath := cleanPath(filepath.Join(root, "routes", "insurers.trb"))
+	pageSource := "import { ReactNode } from trb/platform/typescript/react\n\ndef InsurerPage(): ReactNode\n\treturn <p>Ready</p>\nend\n"
+	entrySource := "import { InsurerPage } from features/insurers/components/InsurerPage/index\nimport { ReactNode } from trb/platform/typescript/react\n\ndef InsurerListRoutePage(): ReactNode\n\treturn <InsurerPage />\nend\n"
+	uri := uriFromPath(entryPath)
+	componentOffset := strings.LastIndex(entrySource, "InsurerPage") + len("Insurer")
+	input := framedMessages(t,
+		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
+		message{JSONRPC: "2.0", Method: "textDocument/didOpen", Params: rawParams(t, didOpenParams{TextDocument: textDocumentItem{URI: uri, LanguageID: "trb", Version: 1, Text: entrySource}})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("2"), Method: "textDocument/definition", Params: rawParams(t, documentPositionParams{TextDocument: textDocumentIdentifier{URI: uri}, Position: positionAt([]byte(entrySource), componentOffset)})},
+		message{JSONRPC: "2.0", ID: json.RawMessage("3"), Method: "shutdown", Params: json.RawMessage(`null`)},
+		message{JSONRPC: "2.0", Method: "exit"},
+	)
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "typescript", Version: "test", Input: bytes.NewReader(input), Output: &output,
+		Units: []compiler.SourceUnit{
+			{Filename: pagePath, ModulePath: "features/insurers/components/InsurerPage/index", Source: []byte(pageSource)},
+			{Filename: entryPath, ModulePath: "routes/insurers", Source: []byte(entrySource)},
+		},
+		CompilerOptions: compiler.Options{Mode: "typescript", ModulePath: "routes/insurers", TypeScriptRuntime: "browser"},
+	})
+	if err := server.Run(); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 4 {
+		t.Fatalf("response count=%d, want 4: %s", len(frames), output.String())
+	}
+	var componentLocation location
+	decodeResult(t, frames[2], &componentLocation)
+	if componentLocation.URI != uriFromPath(pagePath) || componentLocation.Range.Start != (position{Line: 2, Character: 4}) {
+		t.Fatalf("JSX component definition=%#v", componentLocation)
+	}
+}
+
 func TestServerFindsInterfaceImplementations(t *testing.T) {
 	filename := cleanPath(filepath.Join(t.TempDir(), "renderers.trb"))
 	source := `interface Renderer

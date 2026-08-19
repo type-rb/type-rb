@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	"github.com/type-rb/type-rb/internal/lexer"
+	"github.com/type-rb/type-rb/internal/token"
 )
 
 func TestParseStructuredJSXExpression(t *testing.T) {
@@ -47,6 +49,43 @@ end
 	member, ok := row.Component.(*ast.MemberExpression)
 	if !ok || member.Name != "Row" || row.Name != "Table.Row" {
 		t.Fatalf("unexpected JSX member component: %#v", row)
+	}
+}
+
+func TestJSXComponentIdentifierAtFindsNestedAndClosingNames(t *testing.T) {
+	source := `<Table.Row><Card /><Table.Cell /></Table.Row>`
+	tokens, diagnostics := lexer.Lex([]byte(source))
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	var jsx token.Token
+	for _, item := range tokens {
+		if item.Kind == token.JSXLiteral {
+			jsx = item
+			break
+		}
+	}
+	if jsx.Kind != token.JSXLiteral {
+		t.Fatalf("missing JSX literal in %#v", tokens)
+	}
+
+	for _, test := range []struct {
+		name   string
+		cursor int
+		want   string
+	}{
+		{name: "opening receiver", cursor: strings.Index(source, "Table.Row") + len("Tab"), want: "Table"},
+		{name: "opening member", cursor: strings.Index(source, "Table.Row") + len("Table.R"), want: "Row"},
+		{name: "nested component", cursor: strings.Index(source, "Card") + len("Card"), want: "Card"},
+		{name: "nested member", cursor: strings.Index(source, "Table.Cell") + len("Table.C"), want: "Cell"},
+		{name: "closing member", cursor: strings.LastIndex(source, "Table.Row") + len("Table.R"), want: "Row"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			item, ok := JSXComponentIdentifierAt(jsx, test.cursor)
+			if !ok || item.Lexeme != test.want {
+				t.Fatalf("JSXComponentIdentifierAt(%d)=(%#v, %v), want %q", test.cursor, item, ok, test.want)
+			}
+		})
 	}
 }
 

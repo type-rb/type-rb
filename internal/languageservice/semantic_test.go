@@ -159,6 +159,47 @@ end
 	}
 }
 
+func TestDefinitionResolvesImportedJSXComponentUse(t *testing.T) {
+	root := t.TempDir()
+	pagePath := filepath.Join(root, "features", "insurers", "components", "InsurerPage", "index.trb")
+	entryPath := filepath.Join(root, "routes", "insurers.trb")
+	pageSource := `import { ReactNode } from trb/platform/typescript/react
+
+def InsurerPage(): ReactNode
+	return <p>Ready</p>
+end
+`
+	entrySource := `import { InsurerPage } from features/insurers/components/InsurerPage/index
+import { ReactNode } from trb/platform/typescript/react
+
+def InsurerListRoutePage(): ReactNode
+	return <InsurerPage />
+end
+`
+	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
+		{Filename: pagePath, ModulePath: "features/insurers/components/InsurerPage/index", Source: []byte(pageSource)},
+		{Filename: entryPath, ModulePath: "routes/insurers", Source: []byte(entrySource)},
+	}, compiler.Options{Mode: "typescript", TypeScriptRuntime: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	programs := make([]*ir.Program, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		programs = append(programs, artifact.IR)
+	}
+	service := languageservice.New("typescript")
+	service.Update(programs, "routes/insurers")
+
+	cursor := strings.LastIndex(entrySource, "InsurerPage") + len("Insurer")
+	definition, ok := service.Definition(entryPath, entrySource, cursor)
+	if !ok || definition.Path != pagePath || definition.Name != "InsurerPage" {
+		t.Fatalf("JSX definition=(%#v, %v), want %s:InsurerPage", definition, ok, pagePath)
+	}
+	if got := pageSource[definition.Range.Start:definition.Range.End]; !strings.Contains(got, "def InsurerPage") {
+		t.Fatalf("JSX definition range=%q, want InsurerPage declaration", got)
+	}
+}
+
 func TestImplementationsResolveInterfaceTypesAndMethods(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "renderers.trb")
