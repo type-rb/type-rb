@@ -10,10 +10,11 @@ import (
 )
 
 type jsxParser struct {
-	raw    string
-	root   token.Token
-	pos    int
-	report func(token.Span, string)
+	raw             string
+	root            token.Token
+	pos             int
+	report          func(token.Span, string)
+	componentTokens []token.Token
 }
 
 func parseJSXExpression(root token.Token, report func(token.Span, string)) (*ast.JSXElement, bool) {
@@ -23,16 +24,44 @@ func parseJSXExpression(root token.Token, report func(token.Span, string)) (*ast
 	return element, ok && parser.pos == len(parser.raw)
 }
 
+// JSXComponentIdentifierAt returns the component identifier under an editor
+// cursor. JSX is lexed as one literal token, so semantic tooling uses the JSX
+// parser's component-name boundaries instead of duplicating JSX syntax rules.
+func JSXComponentIdentifierAt(root token.Token, cursor int) (token.Token, bool) {
+	if root.Kind != token.JSXLiteral {
+		return token.Token{}, false
+	}
+	parser := &jsxParser{raw: root.Lexeme, root: root}
+	_, ok := parser.element()
+	parser.skipSpace()
+	if !ok || parser.pos != len(parser.raw) {
+		return token.Token{}, false
+	}
+	for _, item := range parser.componentTokens {
+		if item.Span.End.Offset == cursor {
+			return item, true
+		}
+	}
+	for _, item := range parser.componentTokens {
+		if item.Span.Start.Offset <= cursor && cursor < item.Span.End.Offset {
+			return item, true
+		}
+	}
+	return token.Token{}, false
+}
+
 func (p *jsxParser) element() (*ast.JSXElement, bool) {
 	start := p.pos
 	if !p.take("<") || p.starts("/") {
 		return nil, false
 	}
+	nameStart := p.pos
 	name := p.name()
 	fragment := name == ""
 	result := &ast.JSXElement{Base: ast.Base{SourceSpan: p.span(start, start+1)}, Name: name, Fragment: fragment}
 	if !fragment && startsComponentName(name) {
-		component, ok := p.expression(name, start+1)
+		p.recordComponentTokens(name, nameStart)
+		component, ok := p.expression(name, nameStart)
 		if !ok {
 			return nil, false
 		}
@@ -89,7 +118,11 @@ func (p *jsxParser) element() (*ast.JSXElement, bool) {
 		}
 		if p.starts("</") {
 			p.pos += 2
+			closingNameStart := p.pos
 			closingName := p.name()
+			if startsComponentName(closingName) {
+				p.recordComponentTokens(closingName, closingNameStart)
+			}
 			p.skipSpace()
 			if !p.take(">") || closingName != name {
 				return nil, false
@@ -131,6 +164,22 @@ func (p *jsxParser) element() (*ast.JSXElement, bool) {
 				result.Children = append(result.Children, &ast.JSXText{Base: ast.Base{SourceSpan: p.span(textStart, p.pos)}, Text: text})
 			}
 		}
+	}
+}
+
+func (p *jsxParser) recordComponentTokens(name string, relativeStart int) {
+	tokens, diagnostics := lexer.Lex([]byte(name))
+	if len(diagnostics) > 0 {
+		return
+	}
+	base := p.position(relativeStart)
+	for _, item := range tokens {
+		if item.Kind != token.Identifier {
+			continue
+		}
+		item.Span.Start = shiftJSXPosition(item.Span.Start, base)
+		item.Span.End = shiftJSXPosition(item.Span.End, base)
+		p.componentTokens = append(p.componentTokens, item)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/lexer"
+	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
@@ -117,6 +118,9 @@ func Definition(request SemanticRequest) (DefinitionInfo, bool) {
 	}
 	tokens, _ := lexer.Lex([]byte(request.Source))
 	item, ok := semanticTokenAt(tokens, request.Cursor)
+	if ok && item.Kind == token.JSXLiteral {
+		item, ok = parser.JSXComponentIdentifierAt(item, request.Cursor)
+	}
 	if !ok || item.Kind != token.Identifier {
 		return DefinitionInfo{}, false
 	}
