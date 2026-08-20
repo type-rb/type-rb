@@ -40,6 +40,36 @@ func TestMySQLConnectionKeepsPasswordOutOfArguments(t *testing.T) {
 	}
 }
 
+func TestMySQLURLKeepsPasswordOutOfArguments(t *testing.T) {
+	arguments, environment, err := connection("mysql", "mysql://app:secret@db.example:3307/catalog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArguments := []string{"--user", "app", "--host", "db.example", "--port", "3307", "catalog"}
+	if !reflect.DeepEqual(arguments, wantArguments) {
+		t.Fatalf("arguments=%#v, want %#v", arguments, wantArguments)
+	}
+	if !reflect.DeepEqual(environment, []string{"MYSQL_PWD=secret"}) {
+		t.Fatalf("environment=%#v", environment)
+	}
+	if strings.Contains(strings.Join(arguments, " "), "secret") {
+		t.Fatal("password leaked into process arguments")
+	}
+}
+
+func TestMySQLURLRequiresMySQLSchemeHostAndDatabase(t *testing.T) {
+	for _, source := range []string{
+		"postgres://app@db.example/catalog",
+		"mysql:///catalog",
+		"mysql://db.example",
+		"mysql://db.example/catalog/extra",
+	} {
+		if _, _, err := connection("mysql", source); err == nil {
+			t.Fatalf("connection accepted invalid MySQL source %q", source)
+		}
+	}
+}
+
 func TestVersionExtractsSqldefSemanticVersion(t *testing.T) {
 	for input, want := range map[string]string{
 		"v3.11.19\n":                  "3.11.19",

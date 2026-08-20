@@ -174,12 +174,12 @@ func postgresqlConnection(database string) ([]string, []string, error) {
 }
 
 func mysqlConnection(database string) ([]string, []string, error) {
-	configuration, err := mysqldriver.ParseDSN(database)
+	configuration, err := mysqlConfiguration(database)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid MySQL database DSN: %w", err)
+		return nil, nil, fmt.Errorf("invalid MySQL database source: %w", err)
 	}
 	if strings.TrimSpace(configuration.DBName) == "" {
-		return nil, nil, errors.New("MySQL database DSN must contain a database name")
+		return nil, nil, errors.New("MySQL database source must contain a database name")
 	}
 	arguments := []string{}
 	if configuration.User != "" {
@@ -204,4 +204,33 @@ func mysqlConnection(database string) ([]string, []string, error) {
 		environment = append(environment, "MYSQL_PWD="+configuration.Passwd)
 	}
 	return append(arguments, configuration.DBName), environment, nil
+}
+
+func mysqlConfiguration(database string) (*mysqldriver.Config, error) {
+	if !strings.Contains(database, "://") {
+		return mysqldriver.ParseDSN(database)
+	}
+	parsed, err := url.Parse(database)
+	if err != nil || parsed.Scheme != "mysql" {
+		return nil, errors.New("expected a mysql:// URL or Go driver DSN")
+	}
+	if parsed.Hostname() == "" {
+		return nil, errors.New("MySQL database URL must contain a host")
+	}
+	name := strings.TrimPrefix(parsed.EscapedPath(), "/")
+	name, err = url.PathUnescape(name)
+	if err != nil || name == "" || strings.Contains(name, "/") {
+		return nil, errors.New("MySQL database URL must contain one database name")
+	}
+	configuration := mysqldriver.NewConfig()
+	configuration.Net = "tcp"
+	configuration.Addr = parsed.Host
+	configuration.DBName = name
+	if parsed.User != nil {
+		configuration.User = parsed.User.Username()
+		if password, ok := parsed.User.Password(); ok {
+			configuration.Passwd = password
+		}
+	}
+	return configuration, nil
 }
