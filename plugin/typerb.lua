@@ -19,7 +19,7 @@ vim.api.nvim_create_autocmd("BufWritePre", {
 	desc = "Format TypeRB before saving",
 	callback = function(args)
 		local format_on_save = vim.g.typerb_format_on_save
-		if format_on_save ~= true and format_on_save ~= 1 then
+		if format_on_save == false or format_on_save == 0 then
 			return
 		end
 
@@ -34,11 +34,14 @@ vim.api.nvim_create_autocmd("BufWritePre", {
 			return
 		end
 
-		vim.lsp.buf.format({
+		local ok, err = pcall(vim.lsp.buf.format, {
 			bufnr = args.buf,
 			async = false,
 			timeout_ms = 2000,
 			filter = is_typerb,
 		})
+		if not ok then
+			pcall(vim.notify, "TypeRB format on save failed: " .. tostring(err), vim.log.levels.WARN)
+		end
 	end,
 })
