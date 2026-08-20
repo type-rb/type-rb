@@ -1,0 +1,9 @@
+**
+!LICENSE
+!dist/
+!dist/container/
+!dist/container/linux/
+!dist/container/linux/amd64/
+!dist/container/linux/amd64/trb
+!dist/container/linux/arm64/
+!dist/container/linux/arm64/trb

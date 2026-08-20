@@ -1,0 +1,86 @@
+name: Container
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".dockerignore"
+      - ".github/workflows/container.yml"
+      - ".github/workflows/release.yml"
+      - "packaging/container/**"
+      - "scripts/package-release.sh"
+      - "scripts/prepare-container-rootfs.sh"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".dockerignore"
+      - ".github/workflows/container.yml"
+      - ".github/workflows/release.yml"
+      - "packaging/container/**"
+      - "scripts/package-release.sh"
+      - "scripts/prepare-container-rootfs.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Package release binaries
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_version="$(sed -n 's/^var Version = "\([^"]*\)"$/\1/p' internal/cli/cli.go)"
+          version="${source_version%-dev}"
+          test "$version" != "$source_version"
+          ./scripts/package-release.sh "$version" dist
+          ./scripts/prepare-container-rootfs.sh "$version" dist dist/container
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-test the native runner image
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.package.outputs.version }}"
+          image="type-rb/trb-smoke:${version}"
+          docker build \
+            --file packaging/container/Dockerfile \
+            --platform linux/amd64 \
+            --build-arg "TYPERB_VERSION=${version}" \
+            --build-arg "SOURCE_REVISION=${GITHUB_SHA}" \
+            --tag "$image" .
+          test "$(docker run --rm "$image")" = "$version"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the multi-platform image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: packaging/container/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          outputs: type=oci,dest=/tmp/trb.oci
+          build-args: |
+            TYPERB_VERSION=${{ steps.package.outputs.version }}
+            SOURCE_REVISION=${{ github.sha }}
+          provenance: false
+          sbom: true
