@@ -2,6 +2,17 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.7 - 2026-08-20
+
+### Tooling
+
+- `trb install --config PATH` installs TypeRB packages and native dependencies
+  for an explicitly selected project configuration. This supports projects
+  that compile one source tree with separate Go, Ruby, or TypeScript configs.
+  The container guide now also shows how to check or transpile source with the
+  compiler image without installing TypeRB on the host.
+  ([#375](https://github.com/type-rb/type-rb/pull/375))
+
 ## 0.3.6 - 2026-08-20
 
 ### Tooling
