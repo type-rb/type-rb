@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/type-rb/type-rb/internal/project"
 )
@@ -65,6 +66,55 @@ func TestORMPortableTimeAcrossBackendsAndDatabases(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestTypeScriptMySQLDatabaseDefaultsUseUTCSession(t *testing.T) {
+	requireORMApplicationRuntime(t, "typescript", "mysql")
+	databaseSource, driver, available := replORMConformanceDatabase(t, "mysql")
+	if !available {
+		t.Skip("set TRB_TEST_MYSQL_DATABASE to run MySQL database-default time conformance")
+	}
+	database, err := sql.Open(driver, databaseSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	if _, err := database.Exec("CREATE TABLE trb_default_time_events (id BIGINT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6))"); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	config := project.New(root, "typescript")
+	config.SourceDir = "src"
+	config.OutDir = "build"
+	config.TypeScript.Runtime = project.TypeScriptRuntimeBun
+	config.TypeScript.PackageManager = "bun"
+	config.PackageOptions["trb/orm"] = json.RawMessage(fmt.Sprintf(`{"adapter":"mysql","database":%q}`, databaseSource))
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(ormMySQLDefaultTimeSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("TZ", "Asia/Tokyo")
+	startedAt := time.Now().UTC().Add(-2 * time.Second)
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+		t.Fatalf("run status=%d stderr=%s", status, stderr.String())
+	}
+	finishedAt := time.Now().UTC().Add(2 * time.Second)
+	createdAt, err := time.Parse("2006-01-02T15:04:05.999999", strings.TrimSpace(stdout.String()))
+	if err != nil {
+		t.Fatalf("generated application returned invalid DateTime %q: %v", stdout.String(), err)
+	}
+	if createdAt.Before(startedAt) || createdAt.After(finishedAt) {
+		t.Fatalf("MySQL database default was not evaluated in UTC: created_at=%s expected between %s and %s", createdAt, startedAt, finishedAt)
 	}
 }
 
@@ -140,6 +190,20 @@ def main()
 		puts(error.kind)
 		puts(error.message)
 	end
+end
+`
+
+const ormMySQLDefaultTimeSource = `import { Model } from trb/orm
+
+class TrbDefaultTimeEvent < Model
+end
+
+def main()
+	event := TrbDefaultTimeEvent.create(name: "default") catch |error|
+		puts(error.message)
+		return
+	end
+	puts(event.created_at.to_s())
 end
 `
 

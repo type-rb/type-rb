@@ -34,13 +34,23 @@ func TestORMRuntimeKeepsBunSQLBehindTypeRBOwnedQueryBoundary(t *testing.T) {
 			}
 			pool := generated[0]
 			for _, expected := range []string{
-				`import { SQL, type TransactionSQL } from "bun";`, "type TrbOrmQuery =",
+				`import { SQL, type ReservedSQL, type TransactionSQL } from "bun";`, "type TrbOrmQuery =",
 				"function predicateSQL", "function associationQuery", "async function destroyInTransaction",
 				"export async function transaction", `database().begin("immediate", run)`, "result.affectedRows ?? result.count",
 				`const __trbOrmAdapter: TrbOrmAdapter = "` + adapter + `";`,
 			} {
 				if !strings.Contains(pool, expected) {
 					t.Fatalf("generated %s TypeScript ORM pool is missing %q:\n%s", adapter, expected, pool)
+				}
+			}
+			if adapter == "mysql" {
+				for _, expected := range []string{
+					"reserved = await database().reserve", `await reserved.unsafe("SET SESSION time_zone = '+00:00'", [])`,
+					`parent === null) await client.unsafe("SET SESSION time_zone = '+00:00'", [])`, "reserved?.release()",
+				} {
+					if !strings.Contains(pool, expected) {
+						t.Fatalf("generated MySQL TypeScript ORM runtime is missing UTC session setup %q:\n%s", expected, pool)
+					}
 				}
 			}
 			assertTypeScriptSyntax(t, pool)

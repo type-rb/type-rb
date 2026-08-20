@@ -60,10 +60,11 @@ annotations:
 
 These values work in model fields, typed predicates, writes, projections, and
 `minimum()` / `maximum()`. `Instant` database traffic is normalized through
-UTC; `DateTime` never gains an implicit timezone. MySQL `TIME` is accepted only
-within the portable `TimeOfDay` range from `00:00:00` through `23:59:59.999999`.
-Database precision remains controlled by the column declaration, such as
-`timestamp(6)`.
+UTC, and generated runtimes use UTC database sessions so server-evaluated
+defaults behave consistently across targets. `DateTime` never gains an implicit
+timezone. MySQL `TIME` is accepted only within the portable `TimeOfDay` range
+from `00:00:00` through `23:59:59.999999`. Database precision remains controlled
+by the column declaration, such as `timestamp(6)`.
 
 ## Models and associations
 
