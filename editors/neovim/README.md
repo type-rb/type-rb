@@ -1,16 +1,15 @@
 # TypeRB for Neovim
 
-The TypeRB repository is a minimal Neovim plugin for configured projects. It
-registers `.trb` files, applies basic buffer options, and provides a native
-Neovim configuration for `trb lsp`. Parsing, semantic highlighting,
-diagnostics, completion, navigation, rename, and formatting remain owned by
-the TypeRB compiler.
+The TypeRB repository is a minimal Neovim plugin for configured projects and
+config-free files. It registers `.trb` files, applies basic buffer options,
+and connects Neovim's native LSP client to `trb lsp`. Parsing, semantic
+highlighting, diagnostics, completion, navigation, rename, and formatting
+remain owned by the TypeRB compiler.
 
 ## Requirements
 
 - Neovim 0.12 or newer
 - `trb` available on `PATH`
-- a project containing `trbconfig.jsonc`
 
 Install TypeRB first if necessary:
 
@@ -43,9 +42,11 @@ With `lazy.nvim`:
 }
 ```
 
-Open a `.trb` file below the project configuration. Neovim starts one client
-for the nearest `trbconfig.jsonc` root and reuses it for other files in that
-project.
+Open any `.trb` file. Below a `trbconfig.jsonc`, Neovim starts one `typerb`
+client for the nearest project root and reuses it for other files in that
+project. Without a project configuration, it starts an independent
+`typerb-standalone` client with the equivalent of `trb lsp FILE.trb`. The
+standalone session uses Go mode by default, matching the CLI.
 
 Check activation with:
 
@@ -54,10 +55,10 @@ Check activation with:
 :checkhealth vim.lsp
 ```
 
-The expected file type is `trb`, and the health report should list the
-`typerb` client as attached. Neovim's standard LSP mappings provide hover,
-navigation, references, and rename. Invoke completion with `<C-x><C-o>` and
-format the current buffer with:
+The expected file type is `trb`, and the health report should list either the
+`typerb` or `typerb-standalone` client as attached. Neovim's standard LSP
+mappings provide hover, navigation, references, and rename. Invoke completion
+with `<C-x><C-o>` and format the current buffer with:
 
 ```vim
 :lua vim.lsp.buf.format()
@@ -66,11 +67,14 @@ format the current buffer with:
 ## Scope
 
 The initial plugin intentionally does not include a Vim syntax file, a
-Tree-sitter parser, snippets, run or test commands, debugging, or support for
-config-free files. Semantic tokens and formatting come from `trb lsp`, so
-language changes do not require a parallel Neovim grammar.
+Tree-sitter parser, snippets, run or test commands, or debugging. Semantic
+tokens and formatting come from `trb lsp`, so language changes do not require
+a parallel Neovim grammar.
 
-Config-free sessions are deferred because each entry needs its own language
-server and imported helper buffers must be routed to the correct entry. The
-plugin avoids a partial implementation that would analyze saved imports but
-miss unsaved helper edits.
+Each config-free file is treated as an independent entry. Its own open-buffer
+edits receive diagnostics, semantic highlighting, completion, hover,
+navigation, rename, and formatting. The language server can read explicit
+local imports from disk, but the plugin does not route unsaved edits from a
+separately opened imported buffer back to every entry that imports it. It also
+does not arbitrate overlapping diagnostics when multiple standalone entries
+import the same helper.
