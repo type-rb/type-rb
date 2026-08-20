@@ -4262,6 +4262,7 @@ def main()
 	puts(math.log10(100) == 2.0)
 	puts(math.sqrt(-1).nan?())
 	puts(math.log(0).infinite?())
+	puts((1 + 2).to_s())
 	return
 end
 `
@@ -4273,7 +4274,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "3\n7\n10\n-3\n-2\n3\n-3\n2\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+		want := "3\n7\n10\n-3\n-2\n3\n-3\n2\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n3\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s portable math output: want %q, got %q", mode, want, stdout.String())
 		}

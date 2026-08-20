@@ -722,10 +722,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		} else if n.Safe {
 			op = "&."
 		}
+		receiver := g.receiverOperand(n.Receiver)
 		if n.ClassField {
-			return g.expr(n.Receiver) + op + "__trb_field_" + n.Name
+			return receiver + op + "__trb_field_" + n.Name
 		}
-		return g.expr(n.Receiver) + op + n.Name
+		return receiver + op + n.Name
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
 		for i, argument := range n.Arguments {
@@ -741,7 +742,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
 			if reference.ReceiverMethod {
 				if member, ok := receiverMember(n.Callee); ok {
-					parts = append([]string{g.expr(member.Receiver)}, parts...)
+					parts = append([]string{g.receiverOperand(member.Receiver)}, parts...)
 				}
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
@@ -1023,6 +1024,16 @@ func (g *generator) unaryOperand(expression ir.Expression) string {
 	value := g.expr(expression)
 	switch expression.(type) {
 	case *ir.Binary, *ir.Range:
+		return "(" + value + ")"
+	default:
+		return value
+	}
+}
+
+func (g *generator) receiverOperand(expression ir.Expression) string {
+	value := g.expr(expression)
+	switch expression.(type) {
+	case *ir.Binary, *ir.Range, *ir.Unary:
 		return "(" + value + ")"
 	default:
 		return value

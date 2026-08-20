@@ -43,6 +43,9 @@ func TestORMRuntimeKeepsSequelBehindTypeRBOwnedQueryBoundary(t *testing.T) {
 			if strings.Contains(pool, "Sequel::Model") || strings.Contains(pool, ".where(") && strings.Contains(pool, "database[") {
 				t.Fatalf("generated runtime exposes Sequel ORM semantics instead of the TypeRB query boundary:\n%s", pool)
 			}
+			if adapter == "mysql" && !strings.Contains(pool, `source.sub(/\Amysql:\/\//, "mysql2://")`) {
+				t.Fatalf("generated MySQL Ruby ORM pool does not normalize the portable mysql URL:\n%s", pool)
+			}
 			assertRubySyntax(t, pool)
 
 			modelProgram := &ir.Program{
