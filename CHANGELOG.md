@@ -2,6 +2,17 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.5 - 2026-08-20
+
+### Tooling
+
+- The Neovim plugin now enables its native TypeRB language-server
+  configuration when loaded, so installation no longer requires a separate
+  `vim.lsp.enable("typerb")` call. Set
+  `vim.g.typerb_format_on_save = true` to opt in to formatting before save, or
+  `vim.g.typerb_auto_start = false` when another configuration owns startup.
+  ([#367](https://github.com/type-rb/type-rb/pull/367))
+
 ## 0.3.4 - 2026-08-20
 
 ### Compiler and runtimes
