@@ -44,6 +44,42 @@ breakpoints, stepping, stack frames, and variables through Delve;
 Each standalone debug session builds a private temporary executable and removes
 it after the session ends.
 
+## Neovim
+
+The repository is also a minimal Neovim 0.12 plugin for configured TypeRB
+projects. Install it with Neovim's package manager and enable its native LSP
+configuration:
+
+```lua
+vim.pack.add({
+	{ src = "https://github.com/type-rb/type-rb" },
+}, { load = true })
+
+vim.lsp.enable("typerb")
+```
+
+The plugin registers `.trb`, uses the nearest `trbconfig.jsonc` as the project
+root, and starts `trb lsp` from `PATH`. It deliberately relies on compiler
+semantic tokens and formatting instead of carrying a separate Vim syntax,
+Tree-sitter, indentation, or formatting implementation. Config-free files,
+run and test commands, and debugging are outside its initial scope. See the
+[Neovim guide](../editors/neovim/README.md) for `lazy.nvim`, verification, and
+ordinary editor commands.
+
+## JetBrains IDEs
+
+JetBrains users can combine the canonical TextMate grammar with LSP4IJ without
+a TypeRB-specific IDE plugin. Import `editors/vscode` under **Settings | Editor
+| TextMate Bundles**, then register `trb lsp --config
+$PROJECT_DIR$/trbconfig.jsonc` as a user-defined language server mapped to
+`*.trb` with language ID `trb`.
+
+This initial setup supports one configured TypeRB project per JetBrains
+project. Config-free files, nested TypeRB projects in one IDE project, run and
+test CodeLens commands, Test Runner integration, and debugging are deferred.
+See the [JetBrains guide](../editors/jetbrains/README.md) for the complete setup
+and troubleshooting steps.
+
 ## Portable grammar
 
 TypeRB publishes a portable TextMate grammar for editors and documentation
@@ -78,8 +114,9 @@ target capabilities through explicit imports.
 
 When portable syntax changes, update the grammar together with representative
 fixtures and scope assertions in `tools/textmate/test`, then mirror it into the
-VS Code package. The extension test rejects a stale mirror. Verify both
-consumers with:
+VS Code package consumed by both VS Code and JetBrains IDEs. The extension test
+rejects a stale mirror. Neovim consumes compiler semantic tokens instead of a
+second lexical grammar. Verify the grammar and packaged consumer with:
 
 ```sh
 npm ci --prefix tools/textmate
