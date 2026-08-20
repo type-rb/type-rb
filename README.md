@@ -38,6 +38,20 @@ To build the compiler from source, use Go 1.26:
 go install github.com/type-rb/type-rb/cmd/trb@latest
 ```
 
+Container builds can copy the compiler from the matching release image without
+adding a Go, Ruby, Node, or Bun version to TypeRB's distribution contract:
+
+```dockerfile
+ARG TYPERB_VERSION=X.Y.Z
+FROM ghcr.io/type-rb/trb:${TYPERB_VERSION} AS typerb
+
+FROM golang:1.26-bookworm
+COPY --from=typerb /usr/local/bin/trb /usr/local/bin/trb
+```
+
+See [TypeRB in containers](docs/containers.md) for Go, Ruby, and TypeScript
+build and runtime layouts, supported platforms, and version pinning.
+
 ## REPL
 
 For a terminal workflow, start a typed REPL from any directory. It uses Go
