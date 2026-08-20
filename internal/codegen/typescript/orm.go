@@ -611,7 +611,6 @@ function database(): SQL {
   __trbOrmDatabase = __trbOrmAdapter === "sqlite" ? new SQL({ adapter: "sqlite", filename: value }) : new SQL(value);
   return __trbOrmDatabase;
 }
-function executor(query: TrbOrmQuery): SQL | TransactionSQL { return query.transaction?.sql ?? database(); }
 function model(name: string): TrbOrmModel {
   const value = __trbOrmModels.get(name);
   if (value === undefined) throw new Error("ORM model is not registered: " + name);
@@ -854,12 +853,23 @@ async function unsafe(source: TrbOrmQuery, sql: string, args: unknown[]): Promis
   if (source.lock && source.transaction === null) throw new TrbOrmExecutionError(DbErrorKind.InvalidData, "database lock requires an explicit transaction scope");
   const signal = __trbOrmExecutionScopes.getStore();
   if (signal?.aborted) throw new TrbOrmExecutionError(DbErrorKind.Timeout, "database operation was cancelled");
-  const operation = executor(source).unsafe(sql, args) as Promise<any[]> & { cancel?: () => void };
-  const cancel = () => operation.cancel?.();
-  signal?.addEventListener("abort", cancel, { once: true });
-  try { return await operation; }
+  let reserved: ReservedSQL | null = null;
+  let operation: (Promise<any[]> & { cancel?: () => void }) | null = null;
+  const cancel = () => operation?.cancel?.();
+  try {
+    let client: SQL | ReservedSQL | TransactionSQL = source.transaction?.sql ?? database();
+    if (__trbOrmAdapter === "mysql" && source.transaction === null) {
+      reserved = await database().reserve(signal === undefined ? undefined : { signal });
+      await reserved.unsafe("SET SESSION time_zone = '+00:00'", []);
+      if (signal?.aborted) throw new TrbOrmExecutionError(DbErrorKind.Timeout, "database operation was cancelled");
+      client = reserved;
+    }
+    operation = client.unsafe(sql, args) as Promise<any[]> & { cancel?: () => void };
+    signal?.addEventListener("abort", cancel, { once: true });
+    return await operation;
+  }
   catch (error) { if (signal?.aborted) throw new TrbOrmExecutionError(DbErrorKind.Timeout, "database operation was cancelled"); throw error; }
-  finally { signal?.removeEventListener("abort", cancel); }
+  finally { signal?.removeEventListener("abort", cancel); reserved?.release(); }
 }
 function affectedRows(result: any): number { return Number(result.affectedRows ?? result.count ?? result.changes ?? result.length ?? 0); }
 
@@ -1031,7 +1041,7 @@ export async function loadAssociation(value: any, name: string, reload: boolean,
 class TrbOrmRollback extends Error { constructor(readonly result: DbResult<any>) { super("TypeRB ORM rollback"); } }
 export async function transaction<T>(parent: Transaction | null, callback: (transaction: Transaction) => Promise<DbResult<T>>): Promise<DbResult<T>> {
   try {
-    const run = async (client: SQL | TransactionSQL): Promise<T> => { const result = await callback(new Transaction(client)); if (result.kind === "Err") throw new TrbOrmRollback(result); return result.value; };
+    const run = async (client: SQL | TransactionSQL): Promise<T> => { if (__trbOrmAdapter === "mysql" && parent === null) await client.unsafe("SET SESSION time_zone = '+00:00'", []); const result = await callback(new Transaction(client)); if (result.kind === "Err") throw new TrbOrmRollback(result); return result.value; };
     const value = parent === null
       ? await (__trbOrmAdapter === "sqlite" ? database().begin("immediate", run) : database().begin(run))
       : await (parent.sql as TransactionSQL).savepoint(run);

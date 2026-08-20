@@ -17,7 +17,7 @@ func (g *generator) integrationImports(extensions []ir.Extension) {
 	}
 	if manifest := ormintegration.ManifestFrom(extensions); manifest != nil {
 		if g.modulePath == "trb/orm/index" {
-			g.line(`import { SQL, type TransactionSQL } from "bun";`)
+			g.line(`import { SQL, type ReservedSQL, type TransactionSQL } from "bun";`)
 			g.line(`import { AsyncLocalStorage } from "node:async_hooks";`)
 		} else {
 			g.line("import * as __trbOrm from " + strconv.Quote(tsImportPath(g.modulePath, "trb/orm/index")) + ";")
