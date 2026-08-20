@@ -67,9 +67,13 @@ of `trb db plan`.
 
 `trb db lock` and `trb db check` do not invoke sqldef. The `--from-db` variants
 use TypeRB's database introspection. `plan`, `apply`, and `export` require the
-configured sqldef executable. Passwords parsed from PostgreSQL URLs and MySQL
-DSNs are passed through process environment variables rather than command-line
-arguments.
+configured sqldef executable. Passwords parsed from PostgreSQL URLs, MySQL
+URLs, and MySQL DSNs are passed through process environment variables rather
+than command-line arguments.
+
+MySQL database sources may use either the portable
+`mysql://user:password@host/database` URL accepted by the generated runtimes or
+a Go driver DSN such as `user:password@tcp(host:3306)/database`.
 
 ## Using another migration system
 
