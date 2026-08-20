@@ -1672,6 +1672,7 @@ func (c *CLI) runRemove(args []string) error {
 func (c *CLI) runInstall(args []string) error {
 	flags := flag.NewFlagSet("install", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
+	configPath := flags.String("config", "", "path to trbconfig.jsonc")
 	frozen := flags.Bool("frozen", false, "require trb.lock to match the project configuration")
 	offline := flags.Bool("offline", false, "use only the local TypeRB package cache")
 	if err := flags.Parse(args); err != nil {
@@ -1680,7 +1681,7 @@ func (c *CLI) runInstall(args []string) error {
 	if flags.NArg() != 0 {
 		return errors.New("install does not accept package arguments")
 	}
-	config, err := project.Find(".")
+	config, err := loadConfig(*configPath, ".")
 	if err != nil {
 		return err
 	}
@@ -2474,7 +2475,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb add [--source GIT | --path DIRECTORY] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb add --native [--dev] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb remove [--native] PACKAGE")
-	fmt.Fprintln(c.Stdout, "  trb install [--frozen] [--offline]")
+	fmt.Fprintln(c.Stdout, "  trb install [--frozen] [--offline] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb update")
 	fmt.Fprintln(c.Stdout, "  trb version")
 }

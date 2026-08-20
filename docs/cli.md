@@ -34,13 +34,16 @@ trb remove --native PACKAGE
 trb install
 trb install --frozen
 trb install --offline
+trb install --config trbconfig.ruby.jsonc
 ```
 
 TypeRB packages are ordinary typed source compiled through the same AST, typed
 IR, and backend as application code. `trb.lock` pins their canonical identity,
 transitive graph, Git revision, and content checksum. `--frozen` rejects config
 drift, while `--offline` uses only local packages and the existing project
-cache. See the [package guide](guides/packages.md).
+cache. `--config` selects an explicit project configuration, including when a
+single source tree has separate target configurations. See the
+[package guide](guides/packages.md).
 
 The `web` template uses `src` as the source root and creates `main.trb`, an
 index route, and an explicit root middleware stack with request IDs and JSONL

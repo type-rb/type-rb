@@ -10,6 +10,35 @@ The image supports Linux on `amd64` and `arm64`. It contains only the static
 `trb` binary and its license. It intentionally does not select or bundle a Go,
 Ruby, Node, or Bun toolchain.
 
+## Try the compiler without installing it
+
+For an existing TypeRB project, mount the project and run the compiler-only
+image directly:
+
+```sh
+docker run --rm \
+  --volume "$PWD:/workspace" \
+  --workdir /workspace \
+  ghcr.io/type-rb/trb:X.Y.Z check
+```
+
+The same pattern supports formatting and source generation. For example,
+`fmt --check` verifies formatting, and this command transpiles one standalone
+file to Go on standard output:
+
+```sh
+docker run --rm \
+  --volume "$PWD:/workspace" \
+  --workdir /workspace \
+  ghcr.io/type-rb/trb:X.Y.Z \
+  build --stdout --mode go hello.trb
+```
+
+These commands need no TypeRB installation on the host. Running generated
+programs or installing native dependencies still requires the selected target
+toolchain. Compose the compiler image with a Go, Ruby, Node, or Bun image as
+shown below when the container must build or run the application.
+
 ## Verify an image
 
 Run an exact release image to print its compiler version:
