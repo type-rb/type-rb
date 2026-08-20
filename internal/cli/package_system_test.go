@@ -125,6 +125,30 @@ func TestAddAndRemoveLocalTypeRBPackage(t *testing.T) {
 	}
 }
 
+func TestInstallLoadsExplicitConfig(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.Path = filepath.Join(root, "trbconfig.ruby.jsonc")
+	config.PackageManagement = project.ExternalPackages
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	workingDirectory := t.TempDir()
+	t.Chdir(workingDirectory)
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"install", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if stdout.String() != "native package management is external\n" {
+		t.Fatalf("unexpected install output: %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("install reported errors: %s", stderr.String())
+	}
+}
+
 func TestProjectWalkSkipsTypeRBPackageCache(t *testing.T) {
 	root := t.TempDir()
 	mainPath := filepath.Join(root, "main.trb")
