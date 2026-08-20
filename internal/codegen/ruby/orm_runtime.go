@@ -528,7 +528,7 @@ module TrbOrmRuntime
 		end
 
 		def mysql_options(source)
-			return source if source.start_with?("mysql://", "mysql2://")
+			return source.sub(/\Amysql:\/\//, "mysql2://") if source.start_with?("mysql://", "mysql2://")
 			match = source.match(/\A(?:(?<user>[^:@]+)(?::(?<password>[^@]*))?@)?tcp\((?<host>[^:)]+)(?::(?<port>[0-9]+))?\)\/(?<database>[^?]+)(?:\?.*)?\z/)
 			invalid!("MySQL database source must be a mysql2 URL or Go-style TCP DSN") if match.nil?
 			{
