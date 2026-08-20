@@ -26,8 +26,6 @@ With Neovim's built-in package manager, add the following to `init.lua`:
 vim.pack.add({
 	{ src = "https://github.com/type-rb/type-rb" },
 }, { load = true })
-
-vim.lsp.enable("typerb")
 ```
 
 With `lazy.nvim`:
@@ -36,11 +34,12 @@ With `lazy.nvim`:
 {
 	"type-rb/type-rb",
 	lazy = false,
-	config = function()
-		vim.lsp.enable("typerb")
-	end,
 }
 ```
+
+The plugin enables its native `typerb` LSP configuration when it loads. Set
+`vim.g.typerb_auto_start = false` before loading the plugin only when another
+configuration should own TypeRB language-server startup.
 
 Open any `.trb` file. Below a `trbconfig.jsonc`, Neovim starts one `typerb`
 client for the nearest project root and reuses it for other files in that
@@ -63,6 +62,16 @@ with `<C-x><C-o>` and format the current buffer with:
 ```vim
 :lua vim.lsp.buf.format()
 ```
+
+To format `.trb` buffers before each save, enable the opt-in setting before or
+after loading the plugin:
+
+```lua
+vim.g.typerb_format_on_save = true
+```
+
+Formatting is skipped when no TypeRB language server with formatting support
+is attached or when the current source cannot be formatted.
 
 ## Scope
 

@@ -47,15 +47,13 @@ it after the session ends.
 ## Neovim
 
 The repository is also a minimal Neovim 0.12 plugin for configured TypeRB
-projects and config-free files. Install it with Neovim's package manager and
-enable its native LSP configuration:
+projects and config-free files. Install it with Neovim's package manager; the
+plugin enables its native LSP configuration when loaded:
 
 ```lua
 vim.pack.add({
 	{ src = "https://github.com/type-rb/type-rb" },
 }, { load = true })
-
-vim.lsp.enable("typerb")
 ```
 
 The plugin registers `.trb`, uses the nearest `trbconfig.jsonc` as the project
@@ -63,8 +61,10 @@ root, and starts `trb lsp` from `PATH`. Without a project configuration it
 starts `trb lsp FILE.trb` for that file, using Go mode by default. It
 deliberately relies on compiler semantic tokens and formatting instead of
 carrying a separate Vim syntax, Tree-sitter, indentation, or formatting
-implementation. Unsaved imported-buffer routing, run and test commands, and
-debugging are outside its initial scope. See the
+implementation. Formatting on save is available as an explicit opt-in so the
+plugin does not modify files merely because it was installed. Unsaved
+imported-buffer routing, run and test commands, and debugging are outside its
+initial scope. See the
 [Neovim guide](../editors/neovim/README.md) for `lazy.nvim`, verification, and
 ordinary editor commands.
 
