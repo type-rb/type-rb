@@ -666,6 +666,10 @@ func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters m
 		}
 		return
 	}
+	if types.IsIntegerLiteralSource(ref.Name) {
+		c.error(ref.Span(), portableIntegerLiteralRangeMessage)
+		return
+	}
 	if ref.Name == "Never" {
 		c.error(ref.Span(), "Never is an internal compiler type and cannot be written in source")
 		return
@@ -4253,6 +4257,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		case ast.StringLiteral:
 			typ = types.FromName("String")
 		case ast.IntegerLiteral:
+			if _, ok := types.ParsePortableIntegerLiteral(n.Raw); !ok {
+				c.error(n.Span(), portableIntegerLiteralRangeMessage)
+			}
 			typ = types.FromName("Integer")
 		case ast.FloatLiteral:
 			typ = types.FromName("Float")
@@ -6531,6 +6538,8 @@ func integerLiteral(raw string) (int, bool) {
 	value, err := strconv.Atoi(strings.ReplaceAll(raw, "_", ""))
 	return value, err == nil
 }
+
+const portableIntegerLiteralRangeMessage = "Integer literal is outside the portable range -9007199254740991..9007199254740991"
 
 func (c *Checker) rawEnumLiteral(expression ast.Expression, sc *scope) (RawEnumValue, string, bool) {
 	typ := c.checkExpression(expression, sc)

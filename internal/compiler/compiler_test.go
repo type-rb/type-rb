@@ -2617,6 +2617,22 @@ end
 	}
 }
 
+func TestIntegerLiteralsAtPortableRangeBoundariesCompileAcrossModes(t *testing.T) {
+	source := []byte(`def maximum(): Integer
+	return 9007199254740991
+end
+
+def minimum(): Integer
+	return -9007199254740991
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("integer_boundaries.trb", source, mode); err != nil {
+			t.Fatalf("%s rejected portable Integer boundaries: %v", mode, err)
+		}
+	}
+}
+
 func TestLiteralAndDiscriminatedUnionDiagnosticsAreModeIndependent(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -2642,6 +2658,21 @@ func TestLiteralAndDiscriminatedUnionDiagnosticsAreModeIndependent(t *testing.T)
 			name:   "invalid literal modifier",
 			source: "def status(): 201?\n\treturn 201\nend\n",
 			want:   "literal type 201 cannot have type arguments, array, or nullable modifiers",
+		},
+		{
+			name:   "positive Integer literal outside portable range",
+			source: "def value(): Integer\n\treturn 9007199254740992\nend\n",
+			want:   "Integer literal is outside the portable range -9007199254740991..9007199254740991",
+		},
+		{
+			name:   "negative Integer literal outside portable range",
+			source: "def value(): Integer\n\treturn -9007199254740992\nend\n",
+			want:   "Integer literal is outside the portable range -9007199254740991..9007199254740991",
+		},
+		{
+			name:   "Integer literal type outside portable range",
+			source: "def value(): 9007199254740992\n\treturn 1\nend\n",
+			want:   "Integer literal is outside the portable range -9007199254740991..9007199254740991",
 		},
 	}
 	for _, test := range tests {
