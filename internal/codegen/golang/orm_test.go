@@ -125,6 +125,13 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 			if _, err := parser.ParseFile(token.NewFileSet(), "orm.go", pool, parser.AllErrors); err != nil {
 				t.Fatalf("generated invalid %s ORM pool Go: %v\n%s", test.adapter, err, pool)
 			}
+			if test.adapter == "mysql" {
+				for _, want := range []string{`"net/url"`, `strings.HasPrefix(trbOrmSource, "mysql://")`, `url.Parse(trbOrmSource)`} {
+					if !strings.Contains(pool, want) {
+						t.Fatalf("generated MySQL ORM pool is missing %q:\n%s", want, pool)
+					}
+				}
+			}
 		})
 	}
 }
