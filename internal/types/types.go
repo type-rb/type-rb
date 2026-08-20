@@ -10,6 +10,11 @@ import (
 type Kind string
 
 const (
+	MinPortableInteger int64 = -9007199254740991
+	MaxPortableInteger int64 = 9007199254740991
+)
+
+const (
 	Invalid Kind = "invalid"
 	// Never is the compiler-internal bottom type for expressions that cannot
 	// produce a value because control leaves the current flow.
@@ -142,11 +147,32 @@ func LiteralFromSource(source string) (Type, bool) {
 		}
 		return Type{Kind: StringLiteral, Name: strconv.Quote(value)}, true
 	}
-	value, err := strconv.ParseInt(strings.ReplaceAll(source, "_", ""), 10, 64)
-	if err != nil {
+	value, ok := ParsePortableIntegerLiteral(source)
+	if !ok {
 		return Type{}, false
 	}
 	return Type{Kind: IntLiteral, Name: strconv.FormatInt(value, 10)}, true
+}
+
+func ParsePortableIntegerLiteral(source string) (int64, bool) {
+	value, err := strconv.ParseInt(strings.ReplaceAll(source, "_", ""), 10, 64)
+	return value, err == nil && value >= MinPortableInteger && value <= MaxPortableInteger
+}
+
+func IsIntegerLiteralSource(source string) bool {
+	normalized := strings.ReplaceAll(source, "_", "")
+	if len(normalized) > 0 && (normalized[0] == '+' || normalized[0] == '-') {
+		normalized = normalized[1:]
+	}
+	if normalized == "" {
+		return false
+	}
+	for _, character := range normalized {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func IsLiteral(typ Type) bool {

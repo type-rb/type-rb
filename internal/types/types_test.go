@@ -163,6 +163,16 @@ func TestLiteralTypesRetainDiscriminantsAndWidenToScalars(t *testing.T) {
 	if !ok || invalid.String() != `"invalid"` {
 		t.Fatalf("String literal type was not retained: %s, %v", invalid, ok)
 	}
+	for _, source := range []string{"9007199254740991", "-9007199254740991"} {
+		if _, ok := LiteralFromSource(source); !ok {
+			t.Fatalf("portable boundary literal %s was rejected", source)
+		}
+	}
+	for _, source := range []string{"9007199254740992", "-9007199254740992", "9223372036854775808"} {
+		if literal, ok := LiteralFromSource(source); ok {
+			t.Fatalf("non-portable literal %s was accepted as %s", source, literal)
+		}
+	}
 	statuses := UnionOf(created, FromName("422"))
 	if statuses.String() != "201 | 422" {
 		t.Fatalf("literal union lost its alternatives: %s", statuses)

@@ -155,6 +155,9 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   spellings and shorthand aliases such as `bool`, `Int`, `int`, `number`, and
   `Map` are not TypeRB type names. Every other type reference must name a type
   parameter, a declaration in the project, or an explicitly imported type.
+- Integer literals use the portable exact range
+  `-9007199254740991..9007199254740991`. A literal outside that range is a
+  compile error in every mode rather than a target-dependent rounded value.
 
 #### Union types
 
