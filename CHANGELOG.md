@@ -2,6 +2,26 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.4 - 2026-08-20
+
+### Compiler and runtimes
+
+- Ruby code generation preserves receiver grouping for calls on compound
+  expressions. Generated Go and Ruby ORM runtimes accept portable `mysql://`
+  database URLs, so the same server configuration can run across Go, Ruby,
+  and TypeScript modes. ([#363](https://github.com/type-rb/type-rb/pull/363))
+
+### Tooling
+
+- TypeRB projects can use the repository as a minimal Neovim plugin with
+  filetype detection, canonical indentation, and native language-server
+  configuration. JetBrains IDE setup with TextMate and LSP4IJ is documented.
+  ([#361](https://github.com/type-rb/type-rb/pull/361))
+- Neovim starts an independent compiler-backed language-server client for a
+  config-free TypeRB file, providing diagnostics, semantic highlighting,
+  completion, hover, navigation, rename, and formatting without requiring a
+  `trbconfig.jsonc` project. ([#362](https://github.com/type-rb/type-rb/pull/362))
+
 ## 0.3.3 - 2026-08-20
 
 ### Tooling
