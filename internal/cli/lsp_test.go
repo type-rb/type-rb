@@ -113,6 +113,46 @@ func TestLSPCommandWaitsForMissingStandaloneEntryOverlay(t *testing.T) {
 	}
 }
 
+func TestLSPCommandRecoversFromUnclosedStandaloneMethodParameters(t *testing.T) {
+	root := t.TempDir()
+	filename := filepath.Join(root, "editing.trb")
+	if err := os.WriteFile(filename, []byte("def test()\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uri := (&url.URL{Scheme: "file", Path: filepath.ToSlash(filename)}).String()
+	input := lspFrames(t,
+		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{}},
+		map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}},
+		map[string]any{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": map[string]any{
+			"textDocument": map[string]any{"uri": uri, "languageId": "trb", "version": 1, "text": "def test()\nend\n"},
+		}},
+		map[string]any{"jsonrpc": "2.0", "method": "textDocument/didChange", "params": map[string]any{
+			"textDocument":   map[string]any{"uri": uri, "version": 2},
+			"contentChanges": []map[string]any{{"text": "def test("}},
+		}},
+		map[string]any{"jsonrpc": "2.0", "id": 2, "method": "textDocument/semanticTokens/full", "params": map[string]any{
+			"textDocument": map[string]any{"uri": uri},
+		}},
+		map[string]any{"jsonrpc": "2.0", "method": "textDocument/didChange", "params": map[string]any{
+			"textDocument":   map[string]any{"uri": uri, "version": 3},
+			"contentChanges": []map[string]any{{"text": "def test()\nend\n"}},
+		}},
+		map[string]any{"jsonrpc": "2.0", "id": 3, "method": "textDocument/semanticTokens/full", "params": map[string]any{
+			"textDocument": map[string]any{"uri": uri},
+		}},
+		map[string]any{"jsonrpc": "2.0", "id": 4, "method": "shutdown", "params": nil},
+		map[string]any{"jsonrpc": "2.0", "method": "exit"},
+	)
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: bytes.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"lsp", filename}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if stderr.Len() != 0 || !strings.Contains(stdout.String(), `"id":2`) || !strings.Contains(stdout.String(), `"id":3`) {
+		t.Fatalf("standalone LSP did not recover from incomplete method parameters: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestLSPCommandRequiresProjectOrStandaloneFile(t *testing.T) {
 	root := t.TempDir()
 	previous, err := os.Getwd()

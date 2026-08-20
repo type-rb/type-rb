@@ -1262,10 +1262,12 @@ func (p *Parser) parseMethod() ast.Statement {
 		close := matchingIndex(line, i, "(", ")")
 		if close < 0 {
 			p.errorAt(line[i].Span, "unclosed parameter list")
-			close = len(line) - 1
+			m.Parameters = p.parseParameters(line[i+1:])
+			i = len(line)
+		} else {
+			m.Parameters = p.parseParameters(line[i+1 : close])
+			i = close + 1
 		}
-		m.Parameters = p.parseParameters(line[i+1 : close])
-		i = close + 1
 	} else if i < len(line) && line[i].Lexeme != ":" && line[i].Lexeme != "fails" {
 		// Ruby-compatible unparenthesized definitions are represented, but the
 		// formatter will normalize them to parentheses.
