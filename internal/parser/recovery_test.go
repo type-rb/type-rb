@@ -34,3 +34,17 @@ func TestParseMethodRecoversFromUnclosedParameterList(t *testing.T) {
 		})
 	}
 }
+
+func TestParseMalformedCallExpressionFallsBackWithoutPanicking(t *testing.T) {
+	program, diagnostics := Parse([]byte("E(;+O"))
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics=%v", diagnostics)
+	}
+	if len(program.Statements) != 1 {
+		t.Fatalf("statements=%#v", program.Statements)
+	}
+	statement, ok := program.Statements[0].(*ast.NativeStatement)
+	if !ok || statement.Text != "E(;+O" {
+		t.Fatalf("statement=%#v", program.Statements[0])
+	}
+}

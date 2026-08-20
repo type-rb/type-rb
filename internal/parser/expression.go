@@ -59,7 +59,11 @@ func (p *exprParser) parse(min int) ast.Expression {
 			}
 		}
 		if tok.Lexeme == "(" {
-			left = p.parseCall(left)
+			call := p.parseCall(left)
+			if call == nil {
+				return nil
+			}
+			left = call
 			continue
 		}
 		if tok.Lexeme == "." || tok.Lexeme == "&." || tok.Lexeme == "::" {
