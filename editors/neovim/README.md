@@ -20,7 +20,22 @@ trb version
 
 ## Install
 
-With Neovim's built-in package manager, add the following to `init.lua`:
+Install this repository as an ordinary Neovim plugin. No `setup()` call or
+manual `vim.lsp.enable()` call is required. Load the plugin during startup so
+its `.trb` file detection is available.
+
+### Built-in package manager
+
+With Neovim 0.12's built-in `vim.pack`, use the example matching your
+configuration file.
+
+For `init.vim`:
+
+```vim
+lua vim.pack.add({ { src = 'https://github.com/type-rb/type-rb' } }, { load = true })
+```
+
+For `init.lua`:
 
 ```lua
 vim.pack.add({
@@ -28,7 +43,10 @@ vim.pack.add({
 }, { load = true })
 ```
 
-With `lazy.nvim`:
+### Other plugin managers
+
+Add `type-rb/type-rb` with an existing plugin manager and load it during
+startup. For example, with `lazy.nvim`:
 
 ```lua
 {
@@ -37,9 +55,24 @@ With `lazy.nvim`:
 }
 ```
 
-The plugin enables its native `typerb` LSP configuration when it loads. Set
-`vim.g.typerb_auto_start = false` before loading the plugin only when another
-configuration should own TypeRB language-server startup.
+Filetype-only lazy loading is not recommended because this plugin registers the
+`.trb` filetype itself.
+
+## Default behavior
+
+The plugin enables its native `typerb` LSP configuration when it loads and
+formats `.trb` buffers before saving by default. No additional configuration
+is required.
+
+The defaults can be disabled before loading the plugin:
+
+| Behavior | `init.vim` | `init.lua` |
+| --- | --- | --- |
+| Disable format on save | `let g:typerb_format_on_save = v:false` | `vim.g.typerb_format_on_save = false` |
+| Disable automatic LSP startup | `let g:typerb_auto_start = v:false` | `vim.g.typerb_auto_start = false` |
+
+Disable automatic LSP startup only when another configuration should own the
+TypeRB language-server lifecycle.
 
 Open any `.trb` file. Below a `trbconfig.jsonc`, Neovim starts one `typerb`
 client for the nearest project root and reuses it for other files in that
@@ -63,15 +96,28 @@ with `<C-x><C-o>` and format the current buffer with:
 :lua vim.lsp.buf.format()
 ```
 
-To format `.trb` buffers before each save, enable the opt-in setting before or
-after loading the plugin:
+Formatting is skipped when no TypeRB language server with formatting support
+is attached. If the formatter fails, Neovim reports a warning and continues
+the save.
 
-```lua
-vim.g.typerb_format_on_save = true
+## Update
+
+Update the TypeRB compiler installed by Homebrew with:
+
+```sh
+brew update
+brew upgrade type-rb/tap/trb
 ```
 
-Formatting is skipped when no TypeRB language server with formatting support
-is attached or when the current source cannot be formatted.
+For a plugin managed by `vim.pack`, run:
+
+```vim
+:lua vim.pack.update({ "type-rb" })
+```
+
+Review the proposed plugin update, write the confirmation buffer with
+`:write`, and restart Neovim. Use the corresponding update command when the
+plugin is owned by another manager.
 
 ## Scope
 

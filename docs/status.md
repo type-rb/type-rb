@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-19
+Last updated: 2026-08-20
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -107,9 +107,9 @@ highlighting. Its thin Visual Studio Code client packages that grammar and
 snippets, starts `trb lsp`, and exposes compiler-backed diagnostics, completion,
 formatting, and quick fixes without duplicating semantic logic. A minimal
 Neovim plugin automatically activates configured `.trb` projects, starts
-best-effort per-file sessions outside them, offers opt-in formatting on save,
-and delegates syntax-aware behavior to the same language server. JetBrains
-IDEs can import the packaged
+best-effort per-file sessions outside them, formats on save by default with an
+explicit opt-out, and delegates syntax-aware behavior to the same language
+server. JetBrains IDEs can import the packaged
 TextMate grammar and connect `trb lsp` through LSP4IJ without a TypeRB-specific
 IDE plugin. In the VS Code extension, open files outside configured projects
 receive isolated file-root language-server
