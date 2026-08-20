@@ -13,6 +13,7 @@ larger applications.
 
 ## Build applications
 
+- [TypeRB in containers](containers.md)
 - [Package system](guides/packages.md)
 - [Shared HTTP values](guides/http.md)
 - [Portable web applications](guides/web.md)

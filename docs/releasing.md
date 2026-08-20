@@ -2,7 +2,8 @@
 
 TypeRB publishes prebuilt `trb` binaries for macOS and Linux on Arm64 and
 x86-64. The Homebrew Formula selects the matching archive, so installing the
-compiler does not require Go.
+compiler does not require Go. Each stable release also publishes the Linux
+binary in a public multi-platform OCI image at `ghcr.io/type-rb/trb`.
 
 ## Version convention
 
@@ -27,6 +28,9 @@ only stable tagged releases and never consumes a `-dev` version.
    Store it as `RELEASE_SOURCE_TOKEN`. The workflow uses it only to create and
    merge the development-version pull request; the main branch ruleset remains
    unchanged.
+4. After the first workflow-created `type-rb/trb` container package exists,
+   set its visibility to Public. Keep it linked to `type-rb/type-rb`; public
+   images can then be pulled without registry authentication.
 
 The tap repository uses the standard layout:
 
@@ -66,7 +70,9 @@ The release workflow then:
 4. writes `checksums.txt` and renders `trb.rb`;
 5. creates or updates the GitHub release using the changelog entry;
 6. commits the Formula to `type-rb/homebrew-tap`; and
-7. opens and merges a pull request for the next patch `-dev` version, then
+7. publishes `ghcr.io/type-rb/trb` for Linux Arm64 and x86-64 with an SBOM and
+   build-provenance attestation; and
+8. opens and merges a pull request for the next patch `-dev` version, then
    dispatches Pages.
 
 Users can then install with:
@@ -74,6 +80,16 @@ Users can then install with:
 ```sh
 brew install type-rb/tap/trb
 ```
+
+Verify the published container and its exact release version:
+
+```sh
+docker run --rm "ghcr.io/type-rb/trb:${release_version}"
+```
+
+The package page must show the release tags and provenance for the image
+digest. Container publication must succeed before the workflow advances the
+source development version.
 
 ## Visual Studio Code extension
 
@@ -113,3 +129,18 @@ To render a Formula without making a release:
 That directory contains the four archives, their checksums, and the rendered
 Formula. TypeRB does not publish a Homebrew `HEAD` build; tagged releases keep
 the installed compiler and Formula in sync.
+
+Prepare and test the container root files locally from those artifacts:
+
+```sh
+./scripts/prepare-container-rootfs.sh \
+  X.Y.Z /tmp/type-rb-release /tmp/type-rb-release/container
+mkdir -p dist
+cp -R /tmp/type-rb-release/container dist/container
+docker build \
+  --file packaging/container/Dockerfile \
+  --build-arg TYPERB_VERSION=X.Y.Z \
+  --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" \
+  --tag type-rb/trb:X.Y.Z .
+docker run --rm type-rb/trb:X.Y.Z
+```
