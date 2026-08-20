@@ -34,11 +34,23 @@ func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 				coveredOffset = item.Span.End.Offset
 			}
 		}
-		if coveredLine > lineIndex && coveredLine < len(lines) {
-			for _, item := range withoutNewline(lines[coveredLine]) {
-				if item.Span.Start.Offset >= coveredOffset {
-					code = append(code, item)
+		// A token beginning after one multiline token may itself continue onto a
+		// later line, so follow the chain until its final physical line.
+		for coveredLine > lineIndex && coveredLine < len(lines) {
+			endingLine := coveredLine
+			endingOffset := coveredOffset
+			for _, item := range withoutNewline(lines[endingLine]) {
+				if item.Span.Start.Offset < endingOffset {
+					continue
 				}
+				code = append(code, item)
+				if endLine := item.Span.End.Line - 1; endLine > coveredLine || endLine == coveredLine && item.Span.End.Offset > coveredOffset {
+					coveredLine = endLine
+					coveredOffset = item.Span.End.Offset
+				}
+			}
+			if coveredLine == endingLine {
+				break
 			}
 		}
 		statements := splitStatements(code, continuation)
@@ -427,6 +439,9 @@ func isSymbolColon(before *token.Token, colon token.Token, next string) bool {
 		return false
 	}
 	if before == nil {
+		return true
+	}
+	if isOperator(before.Lexeme) {
 		return true
 	}
 	if colon.Span.Start.Offset > before.Span.End.Offset {

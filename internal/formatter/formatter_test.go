@@ -71,6 +71,38 @@ func TestFormatPreservesHeredocBody(t *testing.T) {
 	}
 }
 
+func TestFormatFollowsChainedMultilineTokensToTheirFinalLine(t *testing.T) {
+	source := []byte("'\n''\n'E")
+	want := "'\n' '\n' E\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected multiline token formatting\nwant:\n%q\ngot:\n%q", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("multiline token formatting is not idempotent:\nfirst:\n%q\nsecond:\n%q\ndiagnostics=%v", formatted, formattedAgain, diagnostics)
+	}
+}
+
+func TestFormatKeepsSymbolColonAfterOperatorIdempotent(t *testing.T) {
+	source := []byte("value|:active")
+	want := "value | :active\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected symbol formatting\nwant:\n%q\ngot:\n%q", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("symbol formatting is not idempotent:\nfirst:\n%q\nsecond:\n%q\ndiagnostics=%v", formatted, formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatDistinguishesNamespaceAndTypedKeyword(t *testing.T) {
 	source := []byte("class Admin::Post<ActiveRecord::Base\ndef configure(cache::Boolean=false)\nreturn cache\nend\nend\n")
 	formatted, diagnostics := Format(source)
