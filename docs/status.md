@@ -105,8 +105,12 @@ The same compiler and evaluator power the local and hosted playground and tour.
 The repository also publishes a reusable TextMate grammar for lexical editor
 highlighting. Its thin Visual Studio Code client packages that grammar and
 snippets, starts `trb lsp`, and exposes compiler-backed diagnostics, completion,
-formatting, and quick fixes without duplicating semantic logic. Open files
-outside configured projects receive isolated file-root language-server
+formatting, and quick fixes without duplicating semantic logic. A minimal
+Neovim plugin registers configured `.trb` projects and delegates syntax-aware
+behavior to the same language server. JetBrains IDEs can import the packaged
+TextMate grammar and connect `trb lsp` through LSP4IJ without a TypeRB-specific
+IDE plugin. In the VS Code extension, open files outside configured projects
+receive isolated file-root language-server
 sessions that follow explicit local imports and editor overlays without
 including unrelated siblings. Local Extension Development Host tests exercise
 standalone language services and execution against current Stable and Insiders
