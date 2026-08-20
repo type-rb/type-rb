@@ -2,6 +2,17 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.6 - 2026-08-20
+
+### Tooling
+
+- TypeRB releases now publish the Linux compiler as a public multi-platform
+  OCI image at `ghcr.io/type-rb/trb`. Projects can copy the compiler into
+  their own Go, Ruby, Node, or Bun toolchain images without taking on an
+  official combined runtime support matrix. The image is built for Arm64 and
+  x86-64 and includes an SBOM and provenance attestation.
+  ([#371](https://github.com/type-rb/type-rb/pull/371))
+
 ## 0.3.5 - 2026-08-20
 
 ### Tooling
