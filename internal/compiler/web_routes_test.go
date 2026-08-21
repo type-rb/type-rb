@@ -358,6 +358,29 @@ end
 			want: `Context#bind<TodoInput>() params field "slug" is not declared by route /todos/:id`,
 		},
 		{
+			name:       "endpoint input parameters omit route field",
+			filename:   "/project/src/routes/todos/[id]/[slug].trb",
+			modulePath: "routes/todos/[id]/[slug]",
+			source: `import { Context, Response, text } from trb/web
+
+record TodoParams
+	id: Integer
+end
+
+record TodoInput
+	params: TodoParams
+end
+
+def get(context: Context): Response
+	input := context.bind<TodoInput>() catch |_error|
+		return text("invalid", 400)
+	end
+	return text(input.params.id.to_s())
+end
+`,
+			want: `Context#bind<TodoInput>() params is missing route parameter "slug"`,
+		},
+		{
 			name:       "endpoint input parameters mismatch inside catch",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
