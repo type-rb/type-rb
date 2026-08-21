@@ -147,6 +147,43 @@ The integration suite builds the extension and compiler from the current
 checkout, then starts an isolated Extension Development Host. It does not
 install or update the Marketplace extension.
 
+For hands-on QA against an application workspace, use the managed local QA
+launcher from the repository root:
+
+```sh
+./scripts/vscode-local-qa.sh open ~/dev/whc-core-demo
+```
+
+The launcher builds `trb` and the VSIX from the current checkout, installs the
+VSIX into a dedicated extensions directory, writes an isolated VS Code profile
+that points `typerb.server.path` at the local binary, and opens the requested
+workspace. The window title starts with `[TypeRB Local QA]`. Format on save is
+enabled for TypeRB in this profile.
+
+The regular VS Code profile, Marketplace extension, and `trb` on `PATH` are
+never modified. Close the local QA window and either start VS Code normally or
+run the following command to return to the regular profile:
+
+```sh
+./scripts/vscode-local-qa.sh regular ~/dev/whc-core-demo
+```
+
+Use `reset` to remove only the managed isolated profile, its installed local
+extension, and its local compiler. The script refuses to remove a directory
+without its own marker file.
+
+```sh
+./scripts/vscode-local-qa.sh reset
+```
+
+Set `TYPERB_CODE=code-insiders` to use another VS Code CLI. The default QA
+state lives under the ignored `editors/vscode/.vscode-test/local-qa` directory.
+Run the same checks used for local extension QA with one command:
+
+```sh
+./scripts/vscode-local-qa.sh test
+```
+
 ```sh
 npm ci --prefix editors/vscode
 npm test --prefix editors/vscode

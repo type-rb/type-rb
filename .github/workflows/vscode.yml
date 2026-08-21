@@ -17,6 +17,7 @@ on:
       - "internal/compilerservice/**"
       - "internal/languageservice/**"
       - "internal/lsp/**"
+      - "scripts/vscode-local-qa*.sh"
   pull_request:
     branches:
       - main
@@ -33,6 +34,7 @@ on:
       - "internal/compilerservice/**"
       - "internal/languageservice/**"
       - "internal/lsp/**"
+      - "scripts/vscode-local-qa*.sh"
   workflow_dispatch:
 
 permissions:
@@ -62,6 +64,9 @@ jobs:
 
       - name: Install extension dependencies
         run: npm ci --prefix editors/vscode
+
+      - name: Verify local QA launcher
+        run: ./scripts/vscode-local-qa_test.sh
 
       - name: Verify extension unit and package checks
         run: |
