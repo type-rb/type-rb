@@ -1159,6 +1159,7 @@ func (c *CLI) runRepl(args []string) error {
 		Interactive: interactiveTerminal(c.Stdin, c.Stdout),
 		HistoryFile: historyFile,
 		Compile:     compile,
+		Initial:     initial,
 		Candidates:  candidates,
 	})
 }
