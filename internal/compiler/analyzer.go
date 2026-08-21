@@ -57,12 +57,12 @@ func NewAnalyzer() *Analyzer {
 }
 
 // AnalyzeProject returns checked semantic artifacts without backend output,
-// reusing prepared syntax trees and safe interactive analysis state.
+// reusing prepared syntax trees and dependency-aware semantic state.
 func (a *Analyzer) AnalyzeProject(sources []SourceUnit, options Options) ([]*Artifact, error) {
 	a.analysisMu.Lock()
 	defer a.analysisMu.Unlock()
 
-	if analysis, handled, err := analyzeInteractiveProject(a, a.state, sources, options, true); handled {
+	if analysis, handled, err := analyzeChangedProject(a, a.state, sources, options, true); handled {
 		if err == nil {
 			a.state = analysis
 			return analysis.artifacts, nil
