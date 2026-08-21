@@ -316,25 +316,84 @@ end
 	}
 }
 
+func TestOfficialWebEndpointInputBindingSupportsEverySourceCombinationAcrossBackends(t *testing.T) {
+	contracts := []struct {
+		name   string
+		fields string
+	}{
+		{name: "params", fields: "\tparams: Params\n"},
+		{name: "query", fields: "\tquery: Query\n"},
+		{name: "body", fields: "\tbody: Payload\n"},
+		{name: "scalar body", fields: "\tbody: String\n"},
+		{name: "params and query", fields: "\tparams: Params\n\tquery: Query\n"},
+		{name: "params and body", fields: "\tparams: Params\n\tbody: Payload\n"},
+		{name: "query and body", fields: "\tquery: Query\n\tbody: Payload\n"},
+		// Declaration order does not change the canonical params, query, body
+		// binding order.
+		{name: "all sources in reverse order", fields: "\tbody: Payload\n\tquery: Query\n\tparams: Params\n"},
+	}
+
+	for _, contract := range contracts {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			t.Run(contract.name+"/"+mode, func(t *testing.T) {
+				source := SourceUnit{
+					Filename:   "/project/main.trb",
+					ModulePath: "main",
+					Package:    "main",
+					Source: []byte(`import { Context, EndpointInputError } from trb/web
+import { Result } from trb/std/result
+
+record Params
+	id: Integer
+end
+
+record Query
+	page: Integer?
+end
+
+record Payload
+	title: String
+end
+
+record Input
+` + contract.fields + `end
+
+def bind(context: Context): Result<Input, EndpointInputError>
+	return context.bind<Input>()
+end
+`),
+				}
+				if _, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/endpoint-input", RubyLoader: "require_relative", ProjectRoot: "/project"}); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
 func TestOfficialWebEndpointInputBindingRejectsUnsupportedContracts(t *testing.T) {
 	tests := []struct {
-		name   string
-		record string
-		want   string
+		name         string
+		declarations string
+		target       string
+		want         string
 	}{
-		{name: "empty", record: "record Input\nend", want: "endpoint input record Input must declare at least one of params, query, or body"},
-		{name: "unknown field", record: "record Input\n\theaders: String\nend", want: `endpoint input record Input has unsupported field "headers"`},
-		{name: "non-record query", record: "record Input\n\tquery: String\nend", want: "web parameter binding type String must be a non-nullable record"},
+		{name: "non-record input", target: "String", want: "endpoint input type String must be a non-nullable record"},
+		{name: "nullable input", declarations: "record Input\n\tbody: String\nend", target: "Input?", want: "endpoint input type Input? must be a non-nullable record"},
+		{name: "empty", declarations: "record Input\nend", target: "Input", want: "endpoint input record Input must declare at least one of params, query, or body"},
+		{name: "unknown field", declarations: "record Input\n\theaders: String\nend", target: "Input", want: `endpoint input record Input has unsupported field "headers"`},
+		{name: "non-record query", declarations: "record Input\n\tquery: String\nend", target: "Input", want: "web parameter binding type String must be a non-nullable record"},
+		{name: "nullable params", declarations: "record Params\n\tid: Integer\nend\n\nrecord Input\n\tparams: Params?\nend", target: "Input", want: "web parameter binding type Params? must be a non-nullable record"},
 	}
 	for _, test := range tests {
 		for _, mode := range []string{"go", "ruby", "typescript"} {
 			t.Run(test.name+"/"+mode, func(t *testing.T) {
 				source := SourceUnit{Filename: "/project/main.trb", ModulePath: "main", Package: "main", Source: []byte(`import { Context } from trb/web
 
-` + test.record + `
+` + test.declarations + `
 
 def invalid(context: Context)
-	context.bind<Input>()
+	context.bind<` + test.target + `>()
 	return
 end
 `)}

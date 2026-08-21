@@ -6278,10 +6278,13 @@ def main()
 	show("/todos/bad", "page=2", "{\"title\":\"ship\"}")
 	show("/todos/7", "", "{\"title\":\"ship\"}")
 	show("/todos/7", "page=2", "{}")
+	show("/todos/bad", "", "{}")
+	show("/todos/7", "", "{}")
+	show("/todos/7", "page=2&unused=value", "{\"title\":\"\"}")
 	return
 end
 `
-			routeSource := `import { Context, EndpointInputError, Response, text } from trb/web
+			routeSource := `import { Context, EndpointInputError, ParameterError, RequestError, Response, text } from trb/web
 
 record TodoParams
 	id: Integer
@@ -6296,19 +6299,47 @@ record TodoBody
 end
 
 record TodoInput
-	params: TodoParams
-	query: TodoQuery
 	body: TodoBody
+	query: TodoQuery
+	params: TodoParams
+end
+
+def parameter_error_kind(error: ParameterError): String
+	case error
+	when ParameterError::MalformedQuery(_error)
+		return "malformed"
+	when ParameterError::Missing(_source, _name)
+		return "missing"
+	when ParameterError::Duplicate(_source, _name)
+		return "duplicate"
+	when ParameterError::Invalid(_source, _name, _value, _expected)
+		return "invalid"
+	end
+end
+
+def request_error_kind(error: RequestError): String
+	case error
+	when RequestError::MissingContentType
+		return "missing_content_type"
+	when RequestError::DuplicateContentType
+		return "duplicate_content_type"
+	when RequestError::UnsupportedContentType(_value)
+		return "unsupported_content_type"
+	when RequestError::InvalidUtf8
+		return "invalid_utf8"
+	when RequestError::InvalidJson(_error)
+		return "invalid_json"
+	end
 end
 
 def get_error(error: EndpointInputError): Response
 	case error
-	when EndpointInputError::Params(_error)
-		return text("params", 400)
-	when EndpointInputError::Query(_error)
-		return text("query", 400)
-	when EndpointInputError::Body(_error)
-		return text("body", 400)
+	when EndpointInputError::Params(source_error)
+		return text("params:" + parameter_error_kind(source_error), 400)
+	when EndpointInputError::Query(source_error)
+		return text("query:" + parameter_error_kind(source_error), 400)
+	when EndpointInputError::Body(source_error)
+		return text("body:" + request_error_kind(source_error), 400)
 	end
 end
 
@@ -6334,7 +6365,13 @@ end
 			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 				t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 			}
-			want := "200\n7|2|ship\n400\nparams\n400\nquery\n400\nbody\n"
+			want := "200\n7|2|ship\n" +
+				"400\nparams:invalid\n" +
+				"400\nquery:missing\n" +
+				"400\nbody:invalid_json\n" +
+				"400\nparams:invalid\n" +
+				"400\nquery:missing\n" +
+				"200\n7|2|\n"
 			if stdout.String() != want || stderr.Len() != 0 {
 				t.Fatalf("unexpected %s endpoint input output: want %q, got %q, stderr=%s", mode, want, stdout.String(), stderr.String())
 			}
