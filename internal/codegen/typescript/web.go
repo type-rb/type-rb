@@ -23,11 +23,13 @@ func (g *generator) integrationImports(extensions []ir.Extension) {
 			g.line("import * as __trbOrm from " + strconv.Quote(tsImportPath(g.modulePath, "trb/orm/index")) + ";")
 		}
 	}
-	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
+	if manifest := g.web; manifest != nil {
 		g.ensureHTTPRuntime()
 		g.ensureWebRuntime()
-		g.line(`import { createServer } from "node:http";`)
-		g.line(`import type { Socket } from "node:net";`)
+		if !g.webDispatchOnly {
+			g.line(`import { createServer } from "node:http";`)
+			g.line(`import type { Socket } from "node:net";`)
+		}
 		g.webRouteImports(manifest)
 	}
 }
@@ -39,9 +41,11 @@ func (g *generator) integrations(extensions []ir.Extension) {
 	if manifest := ormintegration.ManifestFrom(extensions); manifest != nil {
 		g.ormRuntime(manifest)
 	}
-	if manifest := webintegration.ManifestFrom(extensions); manifest != nil {
+	if manifest := g.web; manifest != nil {
 		g.webDispatcher(manifest)
-		g.webServer()
+		if !g.webDispatchOnly {
+			g.webServer()
+		}
 	}
 }
 

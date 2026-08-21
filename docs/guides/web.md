@@ -101,7 +101,6 @@ not use that input source. `params` and `query` name binding records, while
 
 ```trb
 import { Context, EndpointInputError, Response, text } from trb/web
-import { Result } from trb/std/result
 
 record TodoInput
 	params: TodoParams
@@ -109,27 +108,37 @@ record TodoInput
 	body: UpdateTodo
 end
 
-def invalid_input(_error: EndpointInputError): Response
-	return text("invalid request", 400)
+def invalid_input(error: EndpointInputError): Response
+	case error
+	when EndpointInputError::Params(_error)
+		return text("invalid path", 400)
+	when EndpointInputError::Query(_error)
+		return text("invalid query", 400)
+	when EndpointInputError::Body(_error)
+		return text("invalid body", 400)
+	end
 end
 
 def post(context: Context): Response
-	case context.bind<TodoInput>()
-	when Result::Ok(input)
-		return text(input.params.id.to_s() + ":" + input.body.title)
-	when Result::Err(error)
+	input := context.bind<TodoInput>() catch |error|
 		return invalid_input(error)
 	end
+	return text(input.params.id.to_s() + ":" + input.body.title)
 end
 ```
 
 `bind<T>()` checks path parameters, query parameters, then the JSON body and
 returns the first failure as `EndpointInputError::Params`, `Query`, or `Body`.
 Each variant preserves the original `ParameterError` or `RequestError`, so the
-application still chooses its validation response and logging policy. The
+application still chooses its validation response and logging policy through
+an ordinary mapper function; `trb/web` does not install a global error mapper
+or choose an application response body. The
 compiler validates a contract's `params` record against the file-based route
 in the same way as a direct `params<T>()` call. Contracts are optional;
-handlers may continue to use the individual request methods.
+handlers may continue to use the individual request methods. `bind<T>()` is
+most useful when one handler consumes more than one input source, or when the
+application wants a named endpoint contract. A handler that reads only path,
+query, or body input does not need a wrapper record merely for uniformity.
 
 Middleware can attach request-scoped values without a string-keyed cast at
 the handler boundary. Create one `ContextKey<T>` and share that key between
@@ -170,7 +179,11 @@ the value only for that key, and `with_request` retains attached values.
 Use `src/routes/_middleware.trb` for root middleware and nested
 `_middleware.trb` files for route-scoped middleware. `trb/web/testing` exposes
 the same dispatcher without opening a socket, so route and middleware tests can
-construct a `Request` from the shared [`trb/http`](http.md) values.
+construct a `Request` from the shared [`trb/http`](http.md) values. A request
+test that imports `dispatch` belongs in a `*_test.trb` file at the configured
+source root, which owns the complete file-route manifest. Tests inside a
+subpackage should call that package's ordinary functions instead of importing
+the project dispatcher.
 
 Response compression is opt-in middleware:
 
