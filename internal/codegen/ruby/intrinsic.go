@@ -153,8 +153,6 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return rubyWebParameterBinding(call, arguments[0], "query")
 	case "trb.web.context_params":
 		return rubyWebParameterBinding(call, arguments[0], "path")
-	case "trb.web.context_bind":
-		return rubyWebEndpointInput(call, arguments[0])
 	case "trb.web.context_with":
 		return rubyWebContextWith(arguments)
 	case "trb.web.context_with_request":
@@ -480,43 +478,6 @@ func rubyWebContextFetch(arguments []string) string {
 		return "nil"
 	}
 	return "-> { context_value = " + arguments[0] + "; context_key = " + arguments[1] + "; context_state = context_value.instance_variable_get(:@_trb_context_state); return Result::Ok.new(context_state[context_key]) if context_state.is_a?(Hash) && context_state.key?(context_key); Result::Err.new(ContextValueError.new(key: context_key.__trb_field_name)) }.call"
-}
-
-func rubyWebEndpointInput(call *ir.Call, receiver string) string {
-	if call.Codec == nil || call.Codec.Kind != "endpoint_input" {
-		return "nil"
-	}
-	var body strings.Builder
-	body.WriteString("context_value = " + receiver + "; ")
-	constructor := make([]string, 0, len(call.Codec.Fields))
-	for index, field := range call.Codec.Fields {
-		fieldResult := "input_result_" + strconv.Itoa(index)
-		fieldValue := "input_field_" + strconv.Itoa(index)
-		variant := "Params"
-		fieldReceiver := "context_value"
-		if field.Name == "query" {
-			variant = "Query"
-			fieldReceiver = "context_value.__trb_field_request"
-		} else if field.Name == "body" {
-			variant = "Body"
-			fieldReceiver = "context_value.__trb_field_request"
-		}
-		fieldCall := *call
-		fieldCall.Codec = field.Schema
-		errorName := "ParameterError"
-		if field.Name == "body" {
-			errorName = "RequestError"
-		}
-		fieldCall.ExprBase = ir.NewExprBase(call.Span, types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{field.Schema.Type, types.FromName(errorName)}})
-		fieldExpression := rubyWebParameterBinding(&fieldCall, fieldReceiver, field.Name)
-		if field.Name == "body" {
-			fieldExpression = rubyWebRequestJSON(&fieldCall, fieldReceiver)
-		}
-		body.WriteString(fieldResult + " = " + fieldExpression + "; return Result::Err.new(EndpointInputError::" + variant + ".new(" + fieldResult + ".error)) if " + fieldResult + ".is_a?(Result::Err); " + fieldValue + " = " + fieldResult + ".value; ")
-		constructor = append(constructor, field.Name+": "+fieldValue)
-	}
-	body.WriteString("Result::Ok.new(" + call.Codec.Type.Name + ".new(" + strings.Join(constructor, ", ") + "))")
-	return "-> { " + body.String() + " }.call"
 }
 
 func rubyWebLogger(arguments []string) string {

@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/packageextension"
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
@@ -19,40 +20,53 @@ import (
 )
 
 type Result struct {
-	Program             *ast.Program
-	Expressions         map[ast.Expression]types.Type
-	Conversions         map[ast.Expression]types.Type
-	NullableUnwraps     map[ast.Expression]types.Type
-	NativeResultBridges map[ast.Expression]NativeResultBridge
-	Variables           map[*ast.VariableStatement]types.Type
-	Iterations          map[*ast.IterationExpression]types.Type
-	IterationBindings   map[*ast.IterationExpression][]types.Type
-	LexicalBindings     map[*ast.Identifier]bool
-	Constants           map[ast.Expression]string
-	ConstantOwners      map[*ast.VariableStatement]string
-	Resolution          resolver.Result
-	References          map[ast.Expression]resolver.Binding
-	EnumConstructors    map[*ast.CallExpression]EnumVariant
-	CasePatterns        map[ast.Expression]CasePattern
-	CaseNarrowings      map[*ast.CaseStatement]CaseNarrowing
-	GenericApplications map[*ast.GenericExpression]GenericApplication
-	CodecApplications   map[*ast.CallExpression]CodecApplication
-	RawEnums            map[*ast.EnumStatement]RawEnum
-	EnumCalls           map[*ast.CallExpression]EnumCall
-	TypeAliases         map[*ast.TypeAliasStatement]TypeAlias
-	ResultTries         map[*ast.TryExpression]ResultTry
-	ResultCatches       map[*ast.CatchExpression]ResultCatch
-	StructuredBlocks    map[*ast.CallExpression]StructuredBlock
-	ExternalMembers     map[ast.Expression]declaration.Member
-	ClassFieldAccesses  map[*ast.MemberExpression]bool
-	UnionMemberAccesses map[*ast.MemberExpression][]UnionMemberAccess
-	RuntimeDependencies map[string]*stdlib.Package
-	ImportUses          map[*ast.ImportStatement]map[string]bool
+	Program                    *ast.Program
+	Expressions                map[ast.Expression]types.Type
+	Conversions                map[ast.Expression]types.Type
+	NullableUnwraps            map[ast.Expression]types.Type
+	NativeResultBridges        map[ast.Expression]NativeResultBridge
+	Variables                  map[*ast.VariableStatement]types.Type
+	Iterations                 map[*ast.IterationExpression]types.Type
+	IterationBindings          map[*ast.IterationExpression][]types.Type
+	LexicalBindings            map[*ast.Identifier]bool
+	Constants                  map[ast.Expression]string
+	ConstantOwners             map[*ast.VariableStatement]string
+	Resolution                 resolver.Result
+	References                 map[ast.Expression]resolver.Binding
+	EnumConstructors           map[*ast.CallExpression]EnumVariant
+	CasePatterns               map[ast.Expression]CasePattern
+	CaseNarrowings             map[*ast.CaseStatement]CaseNarrowing
+	GenericApplications        map[*ast.GenericExpression]GenericApplication
+	CodecApplications          map[*ast.CallExpression]CodecApplication
+	CallSpecializationRequests map[*ast.CallExpression]CallSpecializationRequest
+	CallSpecializations        map[*ast.CallExpression]CallSpecialization
+	RawEnums                   map[*ast.EnumStatement]RawEnum
+	EnumCalls                  map[*ast.CallExpression]EnumCall
+	TypeAliases                map[*ast.TypeAliasStatement]TypeAlias
+	ResultTries                map[*ast.TryExpression]ResultTry
+	ResultCatches              map[*ast.CatchExpression]ResultCatch
+	StructuredBlocks           map[*ast.CallExpression]StructuredBlock
+	ExternalMembers            map[ast.Expression]declaration.Member
+	ClassFieldAccesses         map[*ast.MemberExpression]bool
+	UnionMemberAccesses        map[*ast.MemberExpression][]UnionMemberAccess
+	RuntimeDependencies        map[string]*stdlib.Package
+	ImportUses                 map[*ast.ImportStatement]map[string]bool
+	CompilerGeneratedStart     int
 }
 
 type CodecApplication struct {
 	Operation string
 	Schema    CodecSchema
+}
+
+type CallSpecializationRequest struct {
+	Request  packageextension.SpecializeCallRequest
+	Receiver ast.Expression
+}
+
+type CallSpecialization struct {
+	Callee    string
+	Arguments []ast.Expression
 }
 
 type RawEnum struct {
@@ -158,6 +172,7 @@ type GenericApplication struct {
 	ReturnType             types.Type
 	Required               int
 	Variadic               bool
+	Specializer            string
 }
 
 type CaseBinding struct {
@@ -367,6 +382,7 @@ type Checker struct {
 	usedImports                 map[*ast.ImportStatement]map[string]bool
 	allowUnusedImports          bool
 	interactiveTopLevel         bool
+	compilerGeneratedStart      int
 	aliasCycles                 map[string]bool
 	resultBoundaries            []resultBoundary
 	directStructuredResultValue ast.Expression
@@ -387,9 +403,10 @@ type resultBoundary struct {
 }
 
 type Options struct {
-	AllowUnusedImports  bool
-	InteractiveTopLevel bool
-	RunnableMain        *ast.MethodStatement
+	AllowUnusedImports     bool
+	InteractiveTopLevel    bool
+	RunnableMain           *ast.MethodStatement
+	CompilerGeneratedStart int
 }
 
 func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnostic.Diagnostic) {
@@ -401,51 +418,55 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 	c := &Checker{
 		mode: program.Mode,
 		result: Result{
-			Program:             program,
-			Expressions:         map[ast.Expression]types.Type{},
-			Conversions:         map[ast.Expression]types.Type{},
-			NullableUnwraps:     map[ast.Expression]types.Type{},
-			NativeResultBridges: map[ast.Expression]NativeResultBridge{},
-			Variables:           map[*ast.VariableStatement]types.Type{},
-			Iterations:          map[*ast.IterationExpression]types.Type{},
-			IterationBindings:   map[*ast.IterationExpression][]types.Type{},
-			LexicalBindings:     map[*ast.Identifier]bool{},
-			Constants:           map[ast.Expression]string{},
-			ConstantOwners:      map[*ast.VariableStatement]string{},
-			Resolution:          resolution,
-			References:          map[ast.Expression]resolver.Binding{},
-			EnumConstructors:    map[*ast.CallExpression]EnumVariant{},
-			CasePatterns:        map[ast.Expression]CasePattern{},
-			CaseNarrowings:      map[*ast.CaseStatement]CaseNarrowing{},
-			GenericApplications: map[*ast.GenericExpression]GenericApplication{},
-			CodecApplications:   map[*ast.CallExpression]CodecApplication{},
-			RawEnums:            map[*ast.EnumStatement]RawEnum{},
-			EnumCalls:           map[*ast.CallExpression]EnumCall{},
-			TypeAliases:         map[*ast.TypeAliasStatement]TypeAlias{},
-			ResultTries:         map[*ast.TryExpression]ResultTry{},
-			ResultCatches:       map[*ast.CatchExpression]ResultCatch{},
-			StructuredBlocks:    map[*ast.CallExpression]StructuredBlock{},
-			ExternalMembers:     map[ast.Expression]declaration.Member{},
-			ClassFieldAccesses:  map[*ast.MemberExpression]bool{},
-			UnionMemberAccesses: map[*ast.MemberExpression][]UnionMemberAccess{},
-			RuntimeDependencies: map[string]*stdlib.Package{},
-			ImportUses:          importUses,
+			Program:                    program,
+			Expressions:                map[ast.Expression]types.Type{},
+			Conversions:                map[ast.Expression]types.Type{},
+			NullableUnwraps:            map[ast.Expression]types.Type{},
+			NativeResultBridges:        map[ast.Expression]NativeResultBridge{},
+			Variables:                  map[*ast.VariableStatement]types.Type{},
+			Iterations:                 map[*ast.IterationExpression]types.Type{},
+			IterationBindings:          map[*ast.IterationExpression][]types.Type{},
+			LexicalBindings:            map[*ast.Identifier]bool{},
+			Constants:                  map[ast.Expression]string{},
+			ConstantOwners:             map[*ast.VariableStatement]string{},
+			Resolution:                 resolution,
+			References:                 map[ast.Expression]resolver.Binding{},
+			EnumConstructors:           map[*ast.CallExpression]EnumVariant{},
+			CasePatterns:               map[ast.Expression]CasePattern{},
+			CaseNarrowings:             map[*ast.CaseStatement]CaseNarrowing{},
+			GenericApplications:        map[*ast.GenericExpression]GenericApplication{},
+			CodecApplications:          map[*ast.CallExpression]CodecApplication{},
+			CallSpecializationRequests: map[*ast.CallExpression]CallSpecializationRequest{},
+			CallSpecializations:        map[*ast.CallExpression]CallSpecialization{},
+			RawEnums:                   map[*ast.EnumStatement]RawEnum{},
+			EnumCalls:                  map[*ast.CallExpression]EnumCall{},
+			TypeAliases:                map[*ast.TypeAliasStatement]TypeAlias{},
+			ResultTries:                map[*ast.TryExpression]ResultTry{},
+			ResultCatches:              map[*ast.CatchExpression]ResultCatch{},
+			StructuredBlocks:           map[*ast.CallExpression]StructuredBlock{},
+			ExternalMembers:            map[ast.Expression]declaration.Member{},
+			ClassFieldAccesses:         map[*ast.MemberExpression]bool{},
+			UnionMemberAccesses:        map[*ast.MemberExpression][]UnionMemberAccess{},
+			RuntimeDependencies:        map[string]*stdlib.Package{},
+			ImportUses:                 importUses,
+			CompilerGeneratedStart:     options.CompilerGeneratedStart,
 		},
-		classes:             map[string]*classInfo{},
-		records:             map[string]*recordInfo{},
-		enums:               map[string]*enumInfo{},
-		aliases:             map[string]*aliasInfo{},
-		interfaces:          map[string]*ast.InterfaceStatement{},
-		functions:           map[string]*ast.MethodStatement{},
-		resolution:          resolution,
-		external:            map[ast.Expression]declaration.Member{},
-		declaredTypes:       map[string]typeDeclaration{},
-		usedImports:         importUses,
-		allowUnusedImports:  options.AllowUnusedImports,
-		interactiveTopLevel: options.InteractiveTopLevel,
-		runnableMain:        options.RunnableMain,
-		aliasCycles:         map[string]bool{},
-		declarationCalls:    map[*ast.CallExpression]string{},
+		classes:                map[string]*classInfo{},
+		records:                map[string]*recordInfo{},
+		enums:                  map[string]*enumInfo{},
+		aliases:                map[string]*aliasInfo{},
+		interfaces:             map[string]*ast.InterfaceStatement{},
+		functions:              map[string]*ast.MethodStatement{},
+		resolution:             resolution,
+		external:               map[ast.Expression]declaration.Member{},
+		declaredTypes:          map[string]typeDeclaration{},
+		usedImports:            importUses,
+		allowUnusedImports:     options.AllowUnusedImports,
+		interactiveTopLevel:    options.InteractiveTopLevel,
+		compilerGeneratedStart: options.CompilerGeneratedStart,
+		runnableMain:           options.RunnableMain,
+		aliasCycles:            map[string]bool{},
+		declarationCalls:       map[*ast.CallExpression]string{},
 	}
 	if resolution.Declarations != nil {
 		for _, runtimeType := range resolution.Declarations.RuntimeTypesByModule[program.ModulePath] {
@@ -693,21 +714,21 @@ func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters m
 		c.validateTypeReferenceInScope(argument, typeParameters)
 	}
 	_, declared := c.declaredTypes[ref.Name]
-	binding, imported := c.resolution.ImportedType(ref.Name)
+	binding, imported := c.importedTypeAt(ref.Name, ref.Span())
 	_, parameter := typeParameters[ref.Name]
-	if semantic.Kind == types.Named && !declared && !imported && !parameter {
+	if types.FromName(ref.Name).Kind == types.Named && !declared && !imported && !parameter {
 		c.error(ref.Span(), fmt.Sprintf("type %s is not declared or imported", ref.Name))
 	}
 	if imported {
 		c.markImportUsed(binding)
 	}
-	if expected, generic := c.genericTypeArity(ref.Name); generic {
+	if expected, generic := c.genericTypeArityAt(ref.Name, ref.Span()); generic {
 		if len(ref.Arguments) != expected {
 			c.error(ref.Span(), fmt.Sprintf("%s expects %d type argument(s), got %d", ref.Name, expected, len(ref.Arguments)))
 		}
 	} else if declaration, declared := c.declaredTypes[ref.Name]; declared && len(ref.Arguments) > 0 {
 		c.error(ref.Span(), fmt.Sprintf("%s is not generic", declaration.kind+" "+ref.Name))
-	} else if binding, imported := c.resolution.ImportedType(ref.Name); imported && len(binding.Export.TypeParameters) == 0 && len(ref.Arguments) > 0 {
+	} else if binding, imported := c.importedTypeAt(ref.Name, ref.Span()); imported && len(binding.Export.TypeParameters) == 0 && len(ref.Arguments) > 0 {
 		c.error(ref.Span(), fmt.Sprintf("%s is not generic", ref.Name))
 	}
 	if types.FromName(ref.Name).Kind != types.Hash {
@@ -748,6 +769,28 @@ func (c *Checker) genericTypeArity(name string) (int, bool) {
 		return len(binding.Export.TypeParameters), true
 	}
 	return 0, false
+}
+
+func (c *Checker) genericTypeArityAt(name string, span token.Span) (int, bool) {
+	if declaration, ok := c.declaredTypes[name]; ok && len(declaration.typeParameters) > 0 {
+		return len(declaration.typeParameters), true
+	}
+	if binding, ok := c.importedTypeAt(name, span); ok && len(binding.Export.TypeParameters) > 0 {
+		return len(binding.Export.TypeParameters), true
+	}
+	return 0, false
+}
+
+func (c *Checker) importedTypeAt(name string, span token.Span) (resolver.Binding, bool) {
+	binding, ok := c.resolution.ImportedType(name)
+	if !ok || c.importBindingVisible(binding, span) {
+		return binding, ok
+	}
+	return resolver.Binding{}, false
+}
+
+func (c *Checker) importBindingVisible(binding resolver.Binding, span token.Span) bool {
+	return binding.Import == nil || !binding.Import.CompilerGenerated || c.compilerGeneratedStart > 0 && span.Start.Offset >= c.compilerGeneratedStart
 }
 
 func (c *Checker) collect(statements []ast.Statement) {
@@ -2247,6 +2290,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 		} else if declared, found := c.external[node.Receiver]; found && len(declared.TypeParameters) > 0 {
 			declared = c.specializeDeclarationMember(receiver, declared)
 			application.Kind = "method"
+			application.Specializer = declared.Specializer
 			application.Owner = receiver.Name
 			application.OwnerArguments = append([]types.Type(nil), receiver.Args...)
 			application.TypeParameters = append([]string(nil), declared.TypeParameters...)
@@ -2384,8 +2428,6 @@ func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic stri
 		operation = "path_parameters"
 	case "trb.web.request_query":
 		operation = "query_parameters"
-	case "trb.web.context_bind":
-		operation = "endpoint_input"
 	case "trb.internal.json.encode", "trb.web.json", "trb.platform.typescript.browser.json_body":
 		operation = "encode"
 	default:
@@ -2393,9 +2435,7 @@ func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic stri
 	}
 	var schema CodecSchema
 	var ok bool
-	if operation == "endpoint_input" {
-		schema, ok = c.endpointInputSchema(call.Span(), typ)
-	} else if operation == "path_parameters" || operation == "query_parameters" {
+	if operation == "path_parameters" || operation == "query_parameters" {
 		schema, ok = c.parameterSchema(call.Span(), typ, operation)
 	} else {
 		schema, ok = c.codecSchema(call.Span(), typ, map[string]bool{})
@@ -2405,62 +2445,83 @@ func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic stri
 	}
 }
 
-func (c *Checker) endpointInputSchema(span token.Span, typ types.Type) (CodecSchema, bool) {
-	schema := CodecSchema{Type: typ}
-	base := typ
-	base.Nullable = false
-	if base.Kind != types.Named || typ.Nullable {
-		c.error(span, fmt.Sprintf("endpoint input type %s must be a non-nullable record", typ))
-		return schema, false
+func (c *Checker) recordCallSpecialization(call *ast.CallExpression, generic *ast.GenericExpression, application GenericApplication) {
+	member, ok := generic.Receiver.(*ast.MemberExpression)
+	if !ok || member.Namespace {
+		return
 	}
-	fields, module, reference, ok := c.codecRecord(base.Name)
+	typeArguments := make([]packageextension.Type, len(application.TypeArguments))
+	for index, argument := range application.TypeArguments {
+		typeArguments[index] = c.callSpecializationType(argument, true)
+	}
+	id := strconv.Itoa(call.Span().Start.Offset)
+	c.result.CallSpecializationRequests[call] = CallSpecializationRequest{
+		Request: packageextension.SpecializeCallRequest{
+			ProtocolVersion: packageextension.ProtocolVersion,
+			Provider:        application.Specializer,
+			CallSite: packageextension.CallSite{
+				ID:         id,
+				ModulePath: c.result.Program.ModulePath,
+			},
+			TypeArguments: typeArguments,
+		},
+		Receiver: member.Receiver,
+	}
+}
+
+func (c *Checker) callSpecializationType(typ types.Type, includeRecord bool) packageextension.Type {
+	result := packageextension.Type{
+		Kind:     string(typ.Kind),
+		Name:     typ.Name,
+		Nullable: typ.Nullable,
+	}
+	for _, argument := range typ.Args {
+		result.Arguments = append(result.Arguments, c.callSpecializationType(argument, false))
+	}
+	if typ.Kind != types.Named {
+		return result
+	}
+	result.Definition = c.callSpecializationDefinition(typ.Name)
+	if !includeRecord {
+		return result
+	}
+	fields, module, reference, ok := c.codecRecord(typ.Name)
 	if !ok {
-		c.error(span, fmt.Sprintf("endpoint input type %s must be a non-nullable record", typ))
-		return schema, false
+		return result
 	}
-	if len(fields) == 0 {
-		c.error(span, fmt.Sprintf("endpoint input record %s must declare at least one of params, query, or body", base.Name))
-		return schema, false
-	}
-	schema.Kind = "endpoint_input"
-	schema.Module = module
-	if reference != nil {
-		copy := *reference
-		schema.Reference = &copy
-	}
-	seen := map[string]bool{}
-	compiled := map[string]CodecSchema{}
+	result.Definition = callSpecializationDefinition(module, reference)
+	result.Record = &packageextension.Record{}
 	for _, field := range fields {
-		if seen[field.Name] {
-			c.error(span, fmt.Sprintf("endpoint input record %s declares %s more than once", base.Name, field.Name))
-			return schema, false
-		}
-		seen[field.Name] = true
-		var fieldSchema CodecSchema
-		var fieldOK bool
-		switch field.Name {
-		case "params":
-			fieldSchema, fieldOK = c.parameterSchema(span, field.Type, "path_parameters")
-		case "query":
-			fieldSchema, fieldOK = c.parameterSchema(span, field.Type, "query_parameters")
-		case "body":
-			fieldSchema, fieldOK = c.codecSchema(span, field.Type, map[string]bool{})
-		default:
-			c.error(span, fmt.Sprintf("endpoint input record %s has unsupported field %q; expected params, query, or body", base.Name, field.Name))
-			return schema, false
-		}
-		if !fieldOK {
-			return schema, false
-		}
-		compiled[field.Name] = fieldSchema
+		result.Record.Fields = append(result.Record.Fields, packageextension.Field{
+			Name: field.Name,
+			Type: c.callSpecializationType(field.Type, false),
+		})
 	}
-	for _, name := range []string{"params", "query", "body"} {
-		if fieldSchema, found := compiled[name]; found {
-			copy := fieldSchema
-			schema.Fields = append(schema.Fields, CodecField{Name: name, WireName: name, Schema: &copy})
+	return result
+}
+
+func (c *Checker) callSpecializationDefinition(name string) *packageextension.Definition {
+	if c.records[name] != nil || c.classes[name] != nil || c.enums[name] != nil || c.aliases[name] != nil || c.interfaces[name] != nil {
+		return &packageextension.Definition{ModulePath: c.result.Program.ModulePath}
+	}
+	if binding, ok := c.resolution.ImportedType(name); ok {
+		return callSpecializationDefinition(binding.Import.RuntimePath(), &binding)
+	}
+	if binding, ok := c.resolution.InferredType(name); ok {
+		return callSpecializationDefinition(binding.Import.RuntimePath(), &binding)
+	}
+	return nil
+}
+
+func callSpecializationDefinition(module string, reference *resolver.Binding) *packageextension.Definition {
+	result := &packageextension.Definition{ModulePath: module}
+	if reference != nil && reference.Import != nil {
+		result.ImportPath = reference.Import.Path
+		if result.ModulePath == "" {
+			result.ModulePath = reference.Import.RuntimePath()
 		}
 	}
-	return schema, true
+	return result
 }
 
 func (c *Checker) parameterSchema(span token.Span, typ types.Type, operation string) (CodecSchema, bool) {
@@ -3556,7 +3617,7 @@ func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
 	if name == "" || c.classes[name] != nil {
 		return
 	}
-	if imported, ok := c.resolution.ImportedType(name); ok && imported.Export.Kind == resolver.ClassExport {
+	if imported, ok := c.importedTypeAt(name, class.Superclass.Span()); ok && imported.Export.Kind == resolver.ClassExport {
 		c.markImportUsed(imported)
 		return
 	}
@@ -3982,8 +4043,8 @@ func (c *Checker) declarationTypeVisible(name string) bool {
 	if _, local := c.declaredTypes[name]; local {
 		return true
 	}
-	_, imported := c.resolution.ImportedType(name)
-	return imported
+	binding, imported := c.resolution.ImportedType(name)
+	return imported && (binding.Import == nil || !binding.Import.CompilerGenerated)
 }
 
 func (c *Checker) declarationFunctionArgumentReference(call *ast.CallExpression, argumentIndex int) bool {
@@ -4232,7 +4293,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if value.constant {
 				c.result.Constants[n] = value.owner
 			}
-		} else if binding, ok := c.resolution.Symbols[n.Name]; ok {
+		} else if binding, ok := c.resolution.Symbols[n.Name]; ok && c.importBindingVisible(binding, n.Span()) {
 			typ = binding.Type()
 			c.recordReference(n, binding)
 		} else if member, ok := c.currentDeclarationMember(n.Name); ok {
@@ -4813,6 +4874,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				} else if member, provided := c.external[generic.Receiver]; provided {
 					c.checkCodecApplication(n, member.Intrinsic, application.TypeArguments[0])
 				}
+			}
+			if application.Specializer != "" {
+				c.recordCallSpecialization(n, generic, application)
 			}
 			break
 		}

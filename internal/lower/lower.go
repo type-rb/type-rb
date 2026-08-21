@@ -433,6 +433,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			SymbolTypeParameters:      map[string][]string{},
 			IntrinsicSymbols:          map[string]bool{},
 			RuntimeIndependentSymbols: map[string]bool{},
+			Implicit:                  l.checked.CompilerGeneratedStart > 0 && n.Span().Start.Offset >= l.checked.CompilerGeneratedStart,
 		}
 		if resolved := l.checked.Resolution.Imports[n]; resolved != nil {
 			result.Path = resolved.RuntimePath()
@@ -955,6 +956,24 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				result.Arguments = append(result.Arguments, l.expression(argument.Value))
 			}
 			return result
+		}
+		if specialization, ok := l.checked.CallSpecializations[n]; ok {
+			arguments := make([]ir.CallArgument, 0, len(specialization.Arguments))
+			for _, argument := range specialization.Arguments {
+				value := l.expression(argument)
+				arguments = append(arguments, ir.CallArgument{Value: value})
+			}
+			return &ir.Call{
+				ExprBase: base,
+				Callee: &ir.Identifier{
+					// Source-level named calls carry the declared return type on
+					// their callee identifier. Keep the same representation so Ruby
+					// emits a method invocation rather than a first-class fn .call.
+					ExprBase: ir.NewExprBase(n.Callee.Span(), base.Type),
+					Name:     specialization.Callee,
+				},
+				Arguments: arguments,
+			}
 		}
 		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee)}
 		if codec, ok := l.checked.CodecApplications[n]; ok {

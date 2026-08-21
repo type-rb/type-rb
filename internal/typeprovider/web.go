@@ -44,7 +44,7 @@ func loadWeb(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {
 	context.InstanceMembers["bind"] = declaration.Member{
 		Name:           "bind",
 		Kind:           declaration.Method,
-		Intrinsic:      "trb.web.context_bind",
+		Specializer:    "trb.web.bind",
 		Return:         types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, types.FromName("EndpointInputError")}},
 		TypeParameters: []string{"T"},
 		Provider:       webTypeProvider,

@@ -109,15 +109,16 @@ type Member struct {
 }
 
 type Import struct {
-	Node       *ast.ImportStatement
-	Kind       ImportKind
-	Path       string
-	ModulePath string
-	Alias      string
-	Symbols    []string
-	Definition *stdlib.Package
-	Exports    map[string]Export
-	Filename   string
+	Node              *ast.ImportStatement
+	Kind              ImportKind
+	Path              string
+	ModulePath        string
+	Alias             string
+	Symbols           []string
+	Definition        *stdlib.Package
+	Exports           map[string]Export
+	Filename          string
+	CompilerGenerated bool
 }
 
 func (i *Import) RuntimePath() string {
@@ -161,15 +162,16 @@ type Result struct {
 }
 
 type Options struct {
-	Mode           string
-	SourceRoot     string
-	Filename       string
-	PackageAliases map[string]string
-	CompilerOwned  bool
-	Official       bool
-	Catalog        *Catalog
-	Declarations   *declaration.Catalog
-	NativePackages *nativepackage.Catalog
+	Mode                   string
+	SourceRoot             string
+	Filename               string
+	PackageAliases         map[string]string
+	CompilerOwned          bool
+	Official               bool
+	Catalog                *Catalog
+	Declarations           *declaration.Catalog
+	NativePackages         *nativepackage.Catalog
+	CompilerGeneratedStart int
 }
 
 type Module struct {
@@ -336,6 +338,7 @@ func Resolve(program *ast.Program, options Options) (Result, []diagnostic.Diagno
 		if resolved == nil {
 			continue
 		}
+		resolved.CompilerGenerated = options.CompilerGeneratedStart > 0 && node.Span().Start.Offset >= options.CompilerGeneratedStart
 		result.Imports[node] = resolved
 		if resolved.Definition != nil && resolved.Definition.NativeSyntax && resolved.Definition.Supports(options.Mode) {
 			result.NativeSyntax = true

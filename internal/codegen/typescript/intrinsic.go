@@ -196,8 +196,6 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.tsWebParameterBinding(call, arguments[0], "query")
 	case "trb.web.context_params":
 		return g.tsWebParameterBinding(call, arguments[0], "path")
-	case "trb.web.context_bind":
-		return g.tsWebEndpointInput(call, arguments[0])
 	case "trb.web.context_with":
 		return tsWebContextWith(call, arguments)
 	case "trb.web.context_with_request":
@@ -547,49 +545,6 @@ func tsWebContextFetch(call *ir.Call, arguments []string) string {
 	errorType := tsType(call.ExprType().Args[1])
 	resultType := tsType(call.ExprType())
 	return "((): " + resultType + " => { const contextValue = " + arguments[0] + "; const contextKey = " + arguments[1] + "; const contextState = (contextValue as any).__trb_trb_context_state; if (contextState instanceof Map && contextState.has(contextKey)) return Result.Ok<" + valueType + ", " + errorType + ">(contextState.get(contextKey) as " + valueType + "); return Result.Err<" + valueType + ", " + errorType + ">({ key: contextKey.__trb_name }); })()"
-}
-
-func (g *generator) tsWebEndpointInput(call *ir.Call, receiver string) string {
-	if call.Codec == nil || call.Codec.Kind != "endpoint_input" || len(call.ExprType().Args) != 2 {
-		return "undefined"
-	}
-	valueType := tsCodecType(call.Codec)
-	errorType := "__trb_web.EndpointInputError"
-	resultType := "Result<" + valueType + ", " + errorType + ">"
-	errResult := func(variant, value string) string {
-		return "Result.Err<" + valueType + ", " + errorType + ">(__trb_web.EndpointInputError." + variant + "(" + value + "))"
-	}
-	var body strings.Builder
-	body.WriteString("const contextValue = " + receiver + "; ")
-	constructor := make([]string, 0, len(call.Codec.Fields))
-	for index, field := range call.Codec.Fields {
-		fieldResult := "inputResult" + strconv.Itoa(index)
-		fieldValue := "inputField" + strconv.Itoa(index)
-		variant := "Params"
-		fieldReceiver := "contextValue"
-		if field.Name == "query" {
-			variant = "Query"
-			fieldReceiver = "contextValue.__trb_request"
-		} else if field.Name == "body" {
-			variant = "Body"
-			fieldReceiver = "contextValue.__trb_request"
-		}
-		fieldCall := *call
-		fieldCall.Codec = field.Schema
-		errorName := "ParameterError"
-		if field.Name == "body" {
-			errorName = "RequestError"
-		}
-		fieldCall.ExprBase = ir.NewExprBase(call.Span, types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{field.Schema.Type, types.FromName(errorName)}})
-		fieldExpression := g.tsWebParameterBinding(&fieldCall, fieldReceiver, field.Name)
-		if field.Name == "body" {
-			fieldExpression = g.tsWebRequestJSON(&fieldCall, fieldReceiver)
-		}
-		body.WriteString("const " + fieldResult + " = " + fieldExpression + "; if (" + fieldResult + ".kind === \"Err\") return " + errResult(variant, fieldResult+".error") + "; const " + fieldValue + " = " + fieldResult + ".value; ")
-		constructor = append(constructor, field.Name+": "+fieldValue)
-	}
-	body.WriteString("return Result.Ok<" + valueType + ", " + errorType + ">({ " + strings.Join(constructor, ", ") + " } satisfies " + valueType + ");")
-	return "((): " + resultType + " => { " + body.String() + " })()"
 }
 
 func portableArrayString(value string, typ types.Type) string {

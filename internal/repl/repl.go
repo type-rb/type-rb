@@ -112,7 +112,7 @@ func Run(options Options) error {
 					continue
 				}
 				nextEvaluator.LoadDefinitions(nextCompilation.Session.IR)
-				if _, err := evaluateInterruptibly(nextEvaluator, nextCompilation.Session.IR.Statements, nextCompilation.Session.IR.ModulePath); err != nil {
+				if _, err := evaluateInterruptibly(nextEvaluator, authoredStatements(nextCompilation.Session), nextCompilation.Session.IR.ModulePath); err != nil {
 					_ = nextEvaluator.Close()
 					if errors.Is(err, context.Canceled) {
 						printEvaluationInterrupted(options.Stdout, options.Interactive)
@@ -123,7 +123,7 @@ func Run(options Options) error {
 				}
 				source = replacement
 				compilation = nextCompilation
-				statementCount = len(compilation.Session.IR.Statements)
+				statementCount = len(authoredStatements(compilation.Session))
 				_ = evaluator.Close()
 				evaluator = nextEvaluator
 				options.language.Update(compilation.Programs, compilation.Session.IR.ModulePath)
@@ -137,7 +137,7 @@ func Run(options Options) error {
 			printCompileError(options.Stderr, compileErr, options.Interactive)
 			continue
 		}
-		if next.Session == nil || len(next.Session.IR.Statements) < statementCount {
+		if next.Session == nil || len(authoredStatements(next.Session)) < statementCount {
 			printReplError(options.Stderr, options.Interactive, "compiler returned an invalid session")
 			continue
 		}
@@ -152,7 +152,8 @@ func Run(options Options) error {
 			continue
 		}
 		evaluator.LoadDefinitions(next.Session.IR)
-		result, runtimeErr := evaluateInterruptibly(evaluator, next.Session.IR.Statements[statementCount:], next.Session.IR.ModulePath)
+		authored := authoredStatements(next.Session)
+		result, runtimeErr := evaluateInterruptibly(evaluator, authored[statementCount:], next.Session.IR.ModulePath)
 		if runtimeErr != nil {
 			if errors.Is(runtimeErr, context.Canceled) {
 				printEvaluationInterrupted(options.Stdout, options.Interactive)
@@ -162,7 +163,7 @@ func Run(options Options) error {
 			continue
 		}
 		source = candidate
-		statementCount = len(next.Session.IR.Statements)
+		statementCount = len(authored)
 		compilation = next
 		options.language.Update(compilation.Programs, compilation.Session.IR.ModulePath)
 		if result.Display && result.Value.Type.Kind != types.Void {
@@ -170,6 +171,22 @@ func Run(options Options) error {
 		}
 	}
 	return nil
+}
+
+func authoredStatements(artifact *compiler.Artifact) []ir.Statement {
+	if artifact == nil || artifact.IR == nil || artifact.CompilerGeneratedStart <= 0 {
+		if artifact == nil || artifact.IR == nil {
+			return nil
+		}
+		return artifact.IR.Statements
+	}
+	result := make([]ir.Statement, 0, len(artifact.IR.Statements))
+	for _, statement := range artifact.IR.Statements {
+		if statement.SourceSpan().Start.Offset < artifact.CompilerGeneratedStart {
+			result = append(result, statement)
+		}
+	}
+	return result
 }
 
 func evaluateInterruptibly(evaluator *Evaluator, statements []ir.Statement, module string) (Result, error) {
@@ -208,7 +225,7 @@ func handleCommand(command, source string, options Options) (bool, string, *Comp
 			printCompileError(options.Stderr, err, options.Interactive)
 			break
 		}
-		statements := compilation.Session.IR.Statements
+		statements := authoredStatements(compilation.Session)
 		if len(statements) == 0 {
 			printReplError(options.Stderr, options.Interactive, "expression has no type")
 			break
