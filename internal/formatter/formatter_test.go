@@ -24,6 +24,17 @@ func TestFormatPreservesCommentsAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestFormatRejectsInvalidUTF8WithoutProducingOutput(t *testing.T) {
+	source := append([]byte("value := 1\n"), 0xff)
+	formatted, diagnostics := Format(source)
+	if formatted != nil {
+		t.Fatalf("formatter produced invalid output: %q", formatted)
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Message != "source is not valid UTF-8" {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+}
+
 func TestFormatFunctionValuesAndSemicolonForm(t *testing.T) {
 	source := []byte("double:(Integer)->Integer:=fn(value:Integer):Integer; return value*2; end # closure\n")
 	want := "double: (Integer) -> Integer := fn(value: Integer): Integer\n\treturn value * 2\nend # closure\n"

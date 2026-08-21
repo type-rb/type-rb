@@ -22,9 +22,40 @@ type Lexer struct {
 }
 
 func Lex(source []byte) ([]token.Token, []diagnostic.Diagnostic) {
+	if !utf8.Valid(source) {
+		span := invalidUTF8Span(source)
+		position := span.Start
+		return []token.Token{{Kind: token.EOF, Span: token.Span{Start: position, End: position}}}, []diagnostic.Diagnostic{{
+			Code:     diagnostic.SyntaxError,
+			Severity: diagnostic.Error,
+			Message:  "source is not valid UTF-8",
+			Span:     span,
+		}}
+	}
 	l := &Lexer{source: source, line: 1, column: 1}
 	l.run()
 	return l.tokens, diagnostic.Normalize(l.diags, "", diagnostic.SyntaxError)
+}
+
+func invalidUTF8Span(source []byte) token.Span {
+	position := token.Position{Line: 1, Column: 1}
+	for position.Offset < len(source) {
+		r, width := utf8.DecodeRune(source[position.Offset:])
+		if r == utf8.RuneError && width == 1 {
+			end := position
+			end.Offset++
+			end.Column++
+			return token.Span{Start: position, End: end}
+		}
+		position.Offset += width
+		if r == '\n' {
+			position.Line++
+			position.Column = 1
+		} else {
+			position.Column++
+		}
+	}
+	return token.Span{}
 }
 
 func (l *Lexer) run() {
