@@ -18,7 +18,8 @@ than detailed syntax.
 - Extend union type-pattern narrowing to nullable, collection, enum, record,
   and class alternatives. Add position-typed Tuples and precise optional-value
   semantics.
-- Add type-argument inference, generic interfaces, and generic class methods.
+- Add type-argument inference, generic interface methods, and generic class
+  methods.
 - Define mutation effects for methods and parameters so immutable values remain
   safe across calls, not only assignments and known collection operations.
 - Complete the portable class model with explicit superclass construction and

@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -407,7 +407,7 @@ The current alpha does not yet provide:
 - a complete everyday receiver API;
 - position-typed tuples or type-pattern narrowing for nullable, collection,
   and non-discriminated structured union alternatives;
-- inferred type arguments, generic interfaces, or generic class methods;
+- inferred type arguments, generic interface methods, or generic class methods;
 - complete superclass construction, override, and mutation-effect semantics;
 - general first-class call blocks;
 - complete target-standard source maps and runtime stack mapping across Ruby
