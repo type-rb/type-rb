@@ -2,6 +2,23 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.10 - 2026-08-21
+
+### REPL
+
+- Project-aware REPL sessions reuse their initial semantic analysis and no
+  longer generate unused backend source for every project module. In a
+  274-file application, startup fell from 6.09 seconds to 1.05 seconds and
+  startup plus the first expression fell from 9.18 seconds to 2.02 seconds.
+  ([#397](https://github.com/type-rb/type-rb/pull/397),
+  [#398](https://github.com/type-rb/type-rb/pull/398))
+
+### Web
+
+- TypeScript projects can use `trb/web/testing.dispatch` from source-root
+  `*_test.trb` files without an undefined dispatcher at runtime.
+  ([#395](https://github.com/type-rb/type-rb/pull/395))
+
 ## 0.3.9 - 2026-08-21
 
 ### Compiler and CLI
