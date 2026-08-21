@@ -20,7 +20,6 @@ import (
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/stdlib"
-	"github.com/type-rb/type-rb/internal/testsuite"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/typeprovider"
 )
@@ -157,7 +156,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 // generated output should use AnalyzeProject so diagnostics and semantic
 // artifacts do not pay the backend generation cost.
 func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) {
-	artifacts, err := analyzeProject(sources, options, false)
+	artifacts, err := analyzeProject(NewAnalyzer(), sources, options, false)
 	if err != nil {
 		return nil, err
 	}
@@ -182,32 +181,17 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 // without generating backend source. Returned artifacts therefore have empty
 // Output and SourceMap fields.
 func AnalyzeProject(sources []SourceUnit, options Options) ([]*Artifact, error) {
-	return analyzeProject(sources, options, true)
+	return NewAnalyzer().AnalyzeProject(sources, options)
 }
 
-func analyzeProject(sources []SourceUnit, options Options, validateBackend bool) ([]*Artifact, error) {
+func analyzeProject(analyzer *Analyzer, sources []SourceUnit, options Options, validateBackend bool) ([]*Artifact, error) {
 	units := append([]SourceUnit(nil), sources...)
 	sort.Slice(units, func(i, j int) bool { return units[i].ModulePath < units[j].ModulePath })
 	programs := make(map[string]*ast.Program, len(units))
 	var parseDiagnostics []diagnostic.Diagnostic
 	for _, source := range units {
-		program, diagnostics := parser.Parse(source.Source)
-		configureProgram(program, options, source.ModulePath, source.Package)
-		if source.MainReplacement != "" {
-			renameTopLevelMethod(program, MainFunction, source.MainReplacement)
-		}
-		_, testDiagnostics := testsuite.Prepare(program, source.Filename, source.TestRegistration)
-		diagnostics = append(diagnostics, testDiagnostics...)
-		if official.OwnsModule(source.ModulePath) && !source.Official {
-			diagnostics = append(diagnostics, diagnostic.Diagnostic{
-				Code:     diagnostic.ProjectError,
-				Severity: diagnostic.Error,
-				Message:  fmt.Sprintf("module path %s is reserved for TypeRB packages", source.ModulePath),
-				Span:     program.Span(),
-			})
-		}
-		diagnostics = append(diagnostics, modeDiagnostics(program, options.Mode)...)
-		parseDiagnostics = append(parseDiagnostics, diagnostic.Normalize(diagnostics, source.Filename, diagnostic.SyntaxError)...)
+		program, diagnostics := analyzer.parseUnit(source, options, true)
+		parseDiagnostics = append(parseDiagnostics, diagnostics...)
 		programs[source.ModulePath] = program
 	}
 	if hasErrors(parseDiagnostics) {
@@ -220,10 +204,8 @@ func analyzeProject(sources []SourceUnit, options Options, validateBackend bool)
 		}
 		var dependencyDiagnostics []diagnostic.Diagnostic
 		for _, source := range dependencies {
-			program, diagnostics := parser.Parse(source.Source)
-			configureProgram(program, options, source.ModulePath, source.Package)
-			diagnostics = append(diagnostics, modeDiagnostics(program, options.Mode)...)
-			dependencyDiagnostics = append(dependencyDiagnostics, diagnostic.Normalize(diagnostics, source.Filename, diagnostic.SyntaxError)...)
+			program, diagnostics := analyzer.parseUnit(source, options, false)
+			dependencyDiagnostics = append(dependencyDiagnostics, diagnostics...)
 			units = append(units, source)
 			programs[source.ModulePath] = program
 		}
@@ -321,7 +303,7 @@ func analyzeProject(sources []SourceUnit, options Options, validateBackend bool)
 		checkDiagnostics[source.ModulePath] = diagnostics
 	}
 	if runtimeUnits := compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options); len(runtimeUnits) > 0 {
-		return analyzeProject(append(units, runtimeUnits...), options, validateBackend)
+		return analyzeProject(analyzer, append(units, runtimeUnits...), options, validateBackend)
 	}
 	var typeErrors []diagnostic.Diagnostic
 	for _, source := range units {
