@@ -2,10 +2,12 @@ package compiler
 
 import (
 	"bytes"
+	"reflect"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/codegen"
+	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
@@ -16,12 +18,12 @@ import (
 	"github.com/type-rb/type-rb/internal/typeprovider"
 )
 
-// analyzeInteractiveProject reuses resolution and checking results only when
-// the configured interactive module is the sole compiler input that changed.
-// Unsupported changes return handled=false so callers can run a full analysis.
-func analyzeInteractiveProject(analyzer *Analyzer, previous *projectAnalysis, sources []SourceUnit, options Options, validateBackend bool) (*projectAnalysis, bool, error) {
-	changed, ok := interactiveSourceChange(previous, sources, options, validateBackend)
-	if !ok || projectImportsModule(previous, options.InteractiveModule) {
+// analyzeChangedProject reuses resolution and checking results when exactly
+// one ordinary source unit changes. It invalidates importers whose visible
+// catalog changed and falls back when compiler-owned dependencies change.
+func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, sources []SourceUnit, options Options, validateBackend bool) (*projectAnalysis, bool, error) {
+	changed, ok := singleSourceChange(previous, sources, options, validateBackend)
+	if !ok {
 		return nil, false, nil
 	}
 
@@ -79,24 +81,31 @@ func analyzeInteractiveProject(analyzer *Analyzer, previous *projectAnalysis, so
 		return nil, true, compileProviderError(providerErr, units)
 	}
 
-	packageAliases := options.PackageAliases
-	if changed.PackageAliases != nil {
-		packageAliases = changed.PackageAliases
-	}
-	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{
-		Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: changed.Filename, PackageAliases: packageAliases,
-		CompilerOwned: changed.CompilerOwned, Official: changed.Official, Catalog: catalog, Declarations: declarations,
-		NativePackages: options.NativePackages,
-	})
-	resolveDiagnostics = diagnostic.Normalize(resolveDiagnostics, changed.Filename, diagnostic.ResolutionError)
-	if hasErrors(resolveDiagnostics) {
-		return nil, true, NewCompileError(changed.Filename, diagnostic.ResolutionError, resolveDiagnostics)
-	}
+	affected := affectedProjectModules(previous, catalog, declarations, changed.ModulePath)
 	resolutions := make(map[string]resolver.Result, len(previous.resolutions))
 	for modulePath, cached := range previous.resolutions {
 		resolutions[modulePath] = cached
 	}
-	resolutions[changed.ModulePath] = resolved
+	var resolveErrors []diagnostic.Diagnostic
+	for _, source := range units {
+		if !affected[source.ModulePath] {
+			continue
+		}
+		packageAliases := options.PackageAliases
+		if source.PackageAliases != nil {
+			packageAliases = source.PackageAliases
+		}
+		resolved, diagnostics := resolver.Resolve(programs[source.ModulePath], resolver.Options{
+			Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: source.Filename, PackageAliases: packageAliases,
+			CompilerOwned: source.CompilerOwned, Official: source.Official, Catalog: catalog, Declarations: declarations,
+			NativePackages: options.NativePackages,
+		})
+		resolveErrors = append(resolveErrors, diagnostic.Normalize(diagnostics, source.Filename, diagnostic.ResolutionError)...)
+		resolutions[source.ModulePath] = resolved
+	}
+	if hasErrors(resolveErrors) {
+		return nil, true, NewCompileError("", diagnostic.ResolutionError, resolveErrors)
+	}
 	graphDiagnostics := resolver.ValidateImportGraph(catalog, resolutions)
 	var graphErrors []diagnostic.Diagnostic
 	for _, source := range units {
@@ -110,22 +119,30 @@ func analyzeInteractiveProject(analyzer *Analyzer, previous *projectAnalysis, so
 	if ownerErr != nil {
 		return nil, true, ownerErr
 	}
-	checked, checkDiagnostics := analyzer.checkProgram(program, resolved, checker.Options{
-		AllowUnusedImports: options.AllowUnusedImports, InteractiveTopLevel: true,
-		RunnableMain: topLevelMethod(program, MainFunction),
-	})
-	checkDiagnostics = diagnostic.Normalize(checkDiagnostics, changed.Filename, diagnostic.TypeError)
-	if hasErrors(checkDiagnostics) {
-		return nil, true, NewCompileError(changed.Filename, diagnostic.TypeError, checkDiagnostics)
-	}
-	if !equalRuntimeDependencies(previous.checkedPrograms[changed.ModulePath], checked) {
-		return nil, false, nil
-	}
 	checkedPrograms := make(map[string]checker.Result, len(previous.checkedPrograms))
 	for modulePath, cached := range previous.checkedPrograms {
 		checkedPrograms[modulePath] = cached
 	}
-	checkedPrograms[changed.ModulePath] = checked
+	var typeErrors []diagnostic.Diagnostic
+	for _, source := range units {
+		if !affected[source.ModulePath] {
+			continue
+		}
+		program := programs[source.ModulePath]
+		checked, diagnostics := analyzer.checkProgram(program, resolutions[source.ModulePath], checker.Options{
+			AllowUnusedImports:  options.AllowUnusedImports,
+			InteractiveTopLevel: options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
+			RunnableMain:        topLevelMethod(program, MainFunction),
+		})
+		if !equalRuntimeDependencies(previous.checkedPrograms[source.ModulePath], checked) {
+			return nil, false, nil
+		}
+		checkedPrograms[source.ModulePath] = checked
+		typeErrors = append(typeErrors, diagnostic.Normalize(diagnostics, source.Filename, diagnostic.TypeError)...)
+	}
+	if hasErrors(typeErrors) {
+		return nil, true, NewCompileError("", diagnostic.TypeError, typeErrors)
+	}
 	if len(compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options)) > 0 {
 		return nil, false, nil
 	}
@@ -176,12 +193,13 @@ func analyzeInteractiveProject(analyzer *Analyzer, previous *projectAnalysis, so
 	}
 	return &projectAnalysis{
 		artifacts: artifacts, requestedUnits: cloneSourceUnits(sources), units: units, options: cloneOptions(options),
-		programs: programs, resolutions: resolutions, checkedPrograms: checkedPrograms, validateBackend: validateBackend,
+		programs: programs, catalog: catalog, declarations: declarations, resolutions: resolutions,
+		checkedPrograms: checkedPrograms, validateBackend: validateBackend,
 	}, true, nil
 }
 
-func interactiveSourceChange(previous *projectAnalysis, sources []SourceUnit, options Options, validateBackend bool) (SourceUnit, bool) {
-	if previous == nil || options.InteractiveModule == "" || previous.validateBackend != validateBackend || !equalOptions(previous.options, options) {
+func singleSourceChange(previous *projectAnalysis, sources []SourceUnit, options Options, validateBackend bool) (SourceUnit, bool) {
+	if previous == nil || previous.validateBackend != validateBackend || !equalOptions(previous.options, options) {
 		return SourceUnit{}, false
 	}
 	if len(previous.requestedUnits) != len(sources) {
@@ -211,24 +229,51 @@ func interactiveSourceChange(previous *projectAnalysis, sources []SourceUnit, op
 			changes++
 		}
 	}
-	if changes != 1 || changed.ModulePath != options.InteractiveModule || changed.CompilerOwned || changed.Official || changed.ExternalPackage {
+	if changes != 1 || changed.CompilerOwned || changed.Official || changed.ExternalPackage {
 		return SourceUnit{}, false
 	}
 	return changed, true
 }
 
-func projectImportsModule(previous *projectAnalysis, modulePath string) bool {
-	for owner, resolution := range previous.resolutions {
-		if owner == modulePath {
-			continue
-		}
-		for _, imported := range resolution.Imports {
-			if imported != nil && imported.ModulePath == modulePath {
-				return true
+func affectedProjectModules(previous *projectAnalysis, catalog *resolver.Catalog, declarations *declaration.Catalog, changedModule string) map[string]bool {
+	affected := map[string]bool{changedModule: true}
+	downstreamChanges := map[string]bool{}
+	previousChanged := previous.catalog.Modules[changedModule]
+	currentChanged := catalog.Modules[changedModule]
+	if previousChanged == nil || currentChanged == nil || !reflect.DeepEqual(previousChanged.Exports, currentChanged.Exports) {
+		for modulePath, module := range catalog.Modules {
+			previousModule := previous.catalog.Modules[modulePath]
+			if previousModule == nil || !reflect.DeepEqual(previousModule.Exports, module.Exports) {
+				affected[modulePath] = true
+				downstreamChanges[modulePath] = true
 			}
 		}
 	}
-	return false
+	if !reflect.DeepEqual(previous.declarations, declarations) {
+		for modulePath := range catalog.Modules {
+			affected[modulePath] = true
+		}
+		return affected
+	}
+	for {
+		changed := false
+		for owner, resolution := range previous.resolutions {
+			if downstreamChanges[owner] {
+				continue
+			}
+			for _, imported := range resolution.Imports {
+				if imported != nil && imported.Kind == resolver.ProjectImport && downstreamChanges[imported.Path] {
+					affected[owner] = true
+					downstreamChanges[owner] = true
+					changed = true
+					break
+				}
+			}
+		}
+		if !changed {
+			return affected
+		}
+	}
 }
 
 func equalCompilerOwnedImports(left, right *ast.Program) bool {
