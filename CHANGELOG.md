@@ -2,6 +2,29 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.11 - 2026-08-21
+
+### Compiler and tooling
+
+- Long-lived compiler clients reuse parsed source and checked semantic results
+  across single-module edits. Body-only changes recheck that module, while
+  public catalog changes invalidate its downstream importers and provider
+  declaration changes conservatively invalidate the whole project. In a
+  64-module benchmark, an independent edit fell from about 1.17 milliseconds
+  to 0.17 milliseconds and allocations fell from about 1.02 MB to 243 KB.
+  ([#402](https://github.com/type-rb/type-rb/pull/402),
+  [#404](https://github.com/type-rb/type-rb/pull/404))
+
+### REPL
+
+- Project-aware REPL submissions reuse resolution and type-checking results for
+  unchanged project modules while preserving the last successful state after
+  invalid input. Configuration and compiler-owned dependency changes still
+  fall back to complete analysis. In a 64-module benchmark, repeated input fell
+  from about 1.16 milliseconds to 0.16 milliseconds and allocations fell from
+  about 1.03 MB to 238 KB.
+  ([#403](https://github.com/type-rb/type-rb/pull/403))
+
 ## 0.3.10 - 2026-08-21
 
 ### REPL
