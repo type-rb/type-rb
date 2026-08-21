@@ -5,9 +5,11 @@ import (
 	"sync"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/official"
 	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/testsuite"
 )
 
@@ -16,9 +18,12 @@ import (
 // point; long-lived clients such as the compiler service and REPL should own
 // one Analyzer for the lifetime of their project snapshot.
 type Analyzer struct {
-	mu    sync.Mutex
-	cache map[parseCacheIdentity]parseCacheEntry
-	parse func([]byte) (*ast.Program, []diagnostic.Diagnostic)
+	analysisMu sync.Mutex
+	mu         sync.Mutex
+	cache      map[parseCacheIdentity]parseCacheEntry
+	state      *projectAnalysis
+	parse      func([]byte) (*ast.Program, []diagnostic.Diagnostic)
+	check      func(*ast.Program, resolver.Result, checker.Options) (checker.Result, []diagnostic.Diagnostic)
 }
 
 type parseCacheIdentity struct {
@@ -42,13 +47,42 @@ type parseOptions struct {
 }
 
 func NewAnalyzer() *Analyzer {
-	return &Analyzer{cache: map[parseCacheIdentity]parseCacheEntry{}, parse: parser.Parse}
+	return &Analyzer{
+		cache: map[parseCacheIdentity]parseCacheEntry{},
+		parse: parser.Parse,
+		check: checker.CheckWithOptions,
+	}
 }
 
 // AnalyzeProject returns checked semantic artifacts without backend output,
-// reusing prepared syntax trees for compiler-identical source units.
+// reusing prepared syntax trees and safe interactive analysis state.
 func (a *Analyzer) AnalyzeProject(sources []SourceUnit, options Options) ([]*Artifact, error) {
-	return analyzeProject(a, sources, options, true)
+	a.analysisMu.Lock()
+	defer a.analysisMu.Unlock()
+
+	if analysis, handled, err := analyzeInteractiveProject(a, a.state, sources, options, true); handled {
+		if err == nil {
+			a.state = analysis
+			return analysis.artifacts, nil
+		}
+		return nil, err
+	}
+	analysis, err := analyzeProjectFull(a, sources, options, true, sources)
+	if err != nil {
+		return nil, err
+	}
+	a.state = analysis
+	return analysis.artifacts, nil
+}
+
+func (a *Analyzer) checkProgram(program *ast.Program, resolution resolver.Result, options checker.Options) (checker.Result, []diagnostic.Diagnostic) {
+	a.mu.Lock()
+	if a.check == nil {
+		a.check = checker.CheckWithOptions
+	}
+	check := a.check
+	a.mu.Unlock()
+	return check(program, resolution, options)
 }
 
 func (a *Analyzer) parseUnit(unit SourceUnit, options Options, initial bool) (*ast.Program, []diagnostic.Diagnostic) {
