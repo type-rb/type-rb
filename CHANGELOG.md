@@ -48,6 +48,9 @@ This file records user-visible changes in stable TypeRB releases.
 
 ### Tooling
 
+- The Neovim plugin now formats `.trb` buffers before save by default. Set
+  `vim.g.typerb_format_on_save = false` to opt out.
+  ([#370](https://github.com/type-rb/type-rb/pull/370))
 - TypeRB releases now publish the Linux compiler as a public multi-platform
   OCI image at `ghcr.io/type-rb/trb`. Projects can copy the compiler into
   their own Go, Ruby, Node, or Bun toolchain images without taking on an
@@ -70,6 +73,9 @@ This file records user-visible changes in stable TypeRB releases.
 
 ### Compiler and runtimes
 
+- Incomplete method parameter lists now produce parser diagnostics instead of
+  aborting compilation, formatting, or language-service analysis.
+  ([#364](https://github.com/type-rb/type-rb/pull/364))
 - Ruby code generation preserves receiver grouping for calls on compound
   expressions. Generated Go and Ruby ORM runtimes accept portable `mysql://`
   database URLs, so the same server configuration can run across Go, Ruby,

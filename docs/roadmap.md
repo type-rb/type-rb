@@ -56,8 +56,9 @@ than detailed syntax.
 - Extend the reusable `trb lsp` diagnostics, formatting, completion, hover,
   signature help, checked navigation, rename, document symbols, and quick fixes
   with richer code actions and additional editor workflows.
-- Extend the published preview VS Code client beyond its initial Test Explorer
-  integration with additional editor workflows.
+- Add preview VS Code workflows for REPL evaluation, package and schema status,
+  and coordinated development servers after their shared compiler and CLI
+  contracts are stable.
 - Extend Go source debugging through Delve with Ruby and TypeScript adapters
   after their target-standard source maps and runtime stack mapping are
   reliable.
