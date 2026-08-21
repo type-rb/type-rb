@@ -402,8 +402,8 @@ box := Box<Integer>.new(1)
 label := box.echo<String>("one")
 ```
 
-Generic arguments are invariant. Type-argument inference, generic interfaces,
-and generic class methods are not part of the current language.
+Generic arguments are invariant. Type-argument inference, generic interface
+methods, and generic class methods are not part of the current language.
 
 ## Control-flow expressions
 
