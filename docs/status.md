@@ -341,8 +341,12 @@ edit fails, the service publishes current diagnostics while retaining the last
 successful context, so editor completion does not disappear during typing.
 Concurrent edits invalidate obsolete analysis before it can become current.
 Long-lived compiler-service and REPL sessions reuse prepared syntax trees for
-compiler-identical source units. `trb check` already consumes this service;
-dependency-aware resolver, checker, and lowering reuse remains future work.
+compiler-identical source units. When only the configured interactive leaf
+module changes, the analyzer also reuses resolution and checking results for
+the unchanged project. Compiler-owned dependency, configuration, and ordinary
+project changes conservatively fall back to complete analysis. `trb check`
+already consumes this service; general dependency-aware resolver, checker, and
+lowering reuse remains future work.
 
 `trb lsp` exposes that service over standard LSP framing. Its capabilities are
 project-wide live diagnostics, completion with explicit import insertion for

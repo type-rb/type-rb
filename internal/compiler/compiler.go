@@ -156,10 +156,11 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 // generated output should use AnalyzeProject so diagnostics and semantic
 // artifacts do not pay the backend generation cost.
 func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) {
-	artifacts, err := analyzeProject(NewAnalyzer(), sources, options, false)
+	analysis, err := analyzeProjectFull(NewAnalyzer(), sources, options, false, sources)
 	if err != nil {
 		return nil, err
 	}
+	artifacts := analysis.artifacts
 	programs := make([]*ir.Program, len(artifacts))
 	for index, artifact := range artifacts {
 		programs[index] = artifact.IR
@@ -184,7 +185,18 @@ func AnalyzeProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	return NewAnalyzer().AnalyzeProject(sources, options)
 }
 
-func analyzeProject(analyzer *Analyzer, sources []SourceUnit, options Options, validateBackend bool) ([]*Artifact, error) {
+type projectAnalysis struct {
+	artifacts       []*Artifact
+	requestedUnits  []SourceUnit
+	units           []SourceUnit
+	options         Options
+	programs        map[string]*ast.Program
+	resolutions     map[string]resolver.Result
+	checkedPrograms map[string]checker.Result
+	validateBackend bool
+}
+
+func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Options, validateBackend bool, requestedUnits []SourceUnit) (*projectAnalysis, error) {
 	units := append([]SourceUnit(nil), sources...)
 	sort.Slice(units, func(i, j int) bool { return units[i].ModulePath < units[j].ModulePath })
 	programs := make(map[string]*ast.Program, len(units))
@@ -294,7 +306,7 @@ func analyzeProject(analyzer *Analyzer, sources []SourceUnit, options Options, v
 	checkDiagnostics := make(map[string][]diagnostic.Diagnostic, len(units))
 	for _, source := range units {
 		program := programs[source.ModulePath]
-		checked, diagnostics := checker.CheckWithOptions(program, resolutions[source.ModulePath], checker.Options{
+		checked, diagnostics := analyzer.checkProgram(program, resolutions[source.ModulePath], checker.Options{
 			AllowUnusedImports:  options.AllowUnusedImports,
 			InteractiveTopLevel: options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
 			RunnableMain:        topLevelMethod(program, MainFunction),
@@ -303,7 +315,7 @@ func analyzeProject(analyzer *Analyzer, sources []SourceUnit, options Options, v
 		checkDiagnostics[source.ModulePath] = diagnostics
 	}
 	if runtimeUnits := compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options); len(runtimeUnits) > 0 {
-		return analyzeProject(analyzer, append(units, runtimeUnits...), options, validateBackend)
+		return analyzeProjectFull(analyzer, append(units, runtimeUnits...), options, validateBackend, requestedUnits)
 	}
 	var typeErrors []diagnostic.Diagnostic
 	for _, source := range units {
@@ -359,7 +371,10 @@ func analyzeProject(analyzer *Analyzer, sources []SourceUnit, options Options, v
 		program := programs[source.ModulePath]
 		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage})
 	}
-	return artifacts, nil
+	return &projectAnalysis{
+		artifacts: artifacts, requestedUnits: cloneSourceUnits(requestedUnits), units: cloneSourceUnits(units), options: cloneOptions(options),
+		programs: programs, resolutions: resolutions, checkedPrograms: checkedPrograms, validateBackend: validateBackend,
+	}, nil
 }
 
 type providerDiagnosticError interface {
