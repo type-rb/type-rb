@@ -46,6 +46,8 @@ and typed IR signatures, and must not create mode-dependent source semantics.
 
 ### 3.1 Declarations and Style
 
+- TypeRB source files use UTF-8. An invalid byte sequence is a syntax error
+  before tokenization, formatting, or semantic analysis.
 - Class-based language.
 - Method declaration keyword: `def`.
 - Block terminator: `end`.
