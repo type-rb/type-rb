@@ -67,6 +67,11 @@ func (g *generator) webRouteImports(manifest *webintegration.Manifest) {
 
 func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	routes := manifest.Routes
+	pathRoutes := webintegration.UniquePathRoutes(routes)
+	pathIndexes := map[string]int{}
+	for index, route := range pathRoutes {
+		pathIndexes[route.Path] = index
+	}
 	rootMiddlewares := webintegration.RootMiddlewares(manifest.Middlewares)
 	g.line("type TrbWebRequest = __trb_web.Request;")
 	g.line("type TrbWebContext = __trb_web.Context;")
@@ -132,17 +137,21 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("if (request.__trb_body.bytes().byteLength > max_body_bytes) return trb_web_payload_too_large();")
 	g.line("const method = request.__trb_method.to_s().toUpperCase();")
 	g.line(`const segments = request.__trb_path === "/" ? [] : request.__trb_path.slice(1).split("/");`)
+	g.line("let matched_path = -1;")
+	for pathIndex, route := range pathRoutes {
+		condition := typescriptWebRouteConditions(typescriptWebRouteSegments(route.Path))
+		g.line("if (matched_path === -1 && " + strings.Join(condition, " && ") + ") matched_path = " + strconv.Itoa(pathIndex) + ";")
+	}
 	g.line("let allowed_methods: string[] = [];")
 	g.line("let explicit_head = false;")
 	for _, route := range routes {
-		routeSegments := typescriptWebRouteSegments(route.Path)
-		condition := typescriptWebRouteConditions(routeSegments)
-		g.line("if (" + strings.Join(condition, " && ") + ") allowed_methods.push(" + strconv.Quote(route.Method) + ");")
+		condition := "matched_path === " + strconv.Itoa(pathIndexes[route.Path])
+		g.line("if (" + condition + ") allowed_methods.push(" + strconv.Quote(route.Method) + ");")
 		if route.Method == "GET" {
-			g.line("if (" + strings.Join(condition, " && ") + `) allowed_methods.push("HEAD");`)
+			g.line("if (" + condition + `) allowed_methods.push("HEAD");`)
 		}
 		if route.Method == "HEAD" {
-			g.line("if (" + strings.Join(condition, " && ") + ") explicit_head = true;")
+			g.line("if (" + condition + ") explicit_head = true;")
 		}
 	}
 	g.line(`if (allowed_methods.length > 0) allowed_methods.push("OPTIONS");`)
@@ -151,7 +160,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line(`if (method === "HEAD" && !explicit_head && allowed_methods.includes("GET")) dispatch_method = "GET";`)
 	for routeIndex, route := range routes {
 		segments := typescriptWebRouteSegments(route.Path)
-		condition := append([]string{"dispatch_method === " + strconv.Quote(route.Method)}, typescriptWebRouteConditions(segments)...)
+		condition := []string{"dispatch_method === " + strconv.Quote(route.Method), "matched_path === " + strconv.Itoa(pathIndexes[route.Path])}
 		g.line("if (" + strings.Join(condition, " && ") + ") {")
 		g.indent++
 		g.line("const path_parameters: Record<string, string> = {};")
@@ -171,9 +180,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		g.indent--
 		g.line("}")
 	}
-	for routeIndex, route := range webintegration.UniquePathRoutes(routes) {
+	for routeIndex, route := range pathRoutes {
 		segments := typescriptWebRouteSegments(route.Path)
-		condition := append([]string{`method === "OPTIONS"`}, typescriptWebRouteConditions(segments)...)
+		condition := []string{`method === "OPTIONS"`, "matched_path === " + strconv.Itoa(routeIndex)}
 		g.line("if (" + strings.Join(condition, " && ") + ") {")
 		g.indent++
 		g.line("const path_parameters: Record<string, string> = {};")

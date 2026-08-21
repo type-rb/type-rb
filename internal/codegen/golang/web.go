@@ -27,6 +27,11 @@ func (g *generator) integrations(extensions []ir.Extension) {
 
 func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	routes := manifest.Routes
+	pathRoutes := webintegration.UniquePathRoutes(routes)
+	pathIndexes := map[string]int{}
+	for index, route := range pathRoutes {
+		pathIndexes[route.Path] = index
+	}
 	rootMiddlewares := webintegration.RootMiddlewares(manifest.Middlewares)
 	webPath := pathpkg.Join(g.goModule, "trb/web")
 	g.requireImport(webPath, "web")
@@ -196,12 +201,20 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("segments = strings.Split(strings.TrimPrefix(request.TrbFieldPath, \"/\"), \"/\")")
 	g.indent--
 	g.line("}")
+	g.line("matchedPath := -1")
+	for pathIndex, route := range pathRoutes {
+		condition := goWebRouteConditions(webRouteSegments(route.Path))
+		g.line("if matchedPath == -1 && " + strings.Join(condition, " && ") + " {")
+		g.indent++
+		g.line("matchedPath = " + strconv.Itoa(pathIndex))
+		g.indent--
+		g.line("}")
+	}
 	g.line("allowedMethods := []string{}")
 	g.line("explicitHead := false")
 	for _, route := range routes {
-		routeSegments := webRouteSegments(route.Path)
-		condition := goWebRouteConditions(routeSegments)
-		g.line("if " + strings.Join(condition, " && ") + " {")
+		condition := "matchedPath == " + strconv.Itoa(pathIndexes[route.Path])
+		g.line("if " + condition + " {")
 		g.indent++
 		g.line("allowedMethods = append(allowedMethods, " + strconv.Quote(route.Method) + ")")
 		if route.Method == "GET" {
@@ -228,7 +241,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("}")
 	for routeIndex, route := range routes {
 		segments := webRouteSegments(route.Path)
-		condition := append([]string{"dispatchMethod == " + strconv.Quote(route.Method)}, goWebRouteConditions(segments)...)
+		condition := []string{"dispatchMethod == " + strconv.Quote(route.Method), "matchedPath == " + strconv.Itoa(pathIndexes[route.Path])}
 		g.line("if " + strings.Join(condition, " && ") + " {")
 		g.indent++
 		g.line("pathParameters := map[string]string{}")
@@ -252,9 +265,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		g.indent--
 		g.line("}")
 	}
-	for routeIndex, route := range webintegration.UniquePathRoutes(routes) {
+	for routeIndex, route := range pathRoutes {
 		segments := webRouteSegments(route.Path)
-		condition := append([]string{"method == \"OPTIONS\""}, goWebRouteConditions(segments)...)
+		condition := []string{"method == \"OPTIONS\"", "matchedPath == " + strconv.Itoa(routeIndex)}
 		g.line("if " + strings.Join(condition, " && ") + " {")
 		g.indent++
 		g.line("pathParameters := map[string]string{}")

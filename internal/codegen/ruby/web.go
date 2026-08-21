@@ -25,6 +25,11 @@ func (g *generator) integrations(extensions []ir.Extension) {
 
 func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	routes := manifest.Routes
+	pathRoutes := webintegration.UniquePathRoutes(routes)
+	pathIndexes := map[string]int{}
+	for index, route := range pathRoutes {
+		pathIndexes[route.Path] = index
+	}
 	rootMiddlewares := webintegration.RootMiddlewares(manifest.Middlewares)
 	modules := map[string]bool{}
 	for _, route := range routes {
@@ -111,17 +116,21 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("return trb_web_payload_too_large if request.__trb_field_body.bytes.bytesize > max_body_bytes", "")
 	g.line("method = request.__trb_field_method.to_s.upcase", "")
 	g.line(`segments = request.__trb_field_path == "/" ? [] : request.__trb_field_path.delete_prefix("/").split("/", -1)`, "")
+	g.line("matched_path = -1", "")
+	for pathIndex, route := range pathRoutes {
+		condition := rubyWebRouteConditions(rubyWebRouteSegments(route.Path))
+		g.line("matched_path = "+strconv.Itoa(pathIndex)+" if matched_path == -1 && "+strings.Join(condition, " && "), "")
+	}
 	g.line("allowed_methods = []", "")
 	g.line("explicit_head = false", "")
 	for _, route := range routes {
-		routeSegments := rubyWebRouteSegments(route.Path)
-		condition := rubyWebRouteConditions(routeSegments)
-		g.line("allowed_methods << "+strconv.Quote(route.Method)+" if "+strings.Join(condition, " && "), "")
+		condition := "matched_path == " + strconv.Itoa(pathIndexes[route.Path])
+		g.line("allowed_methods << "+strconv.Quote(route.Method)+" if "+condition, "")
 		if route.Method == "GET" {
-			g.line(`allowed_methods << "HEAD" if `+strings.Join(condition, " && "), "")
+			g.line(`allowed_methods << "HEAD" if `+condition, "")
 		}
 		if route.Method == "HEAD" {
-			g.line("explicit_head = true if "+strings.Join(condition, " && "), "")
+			g.line("explicit_head = true if "+condition, "")
 		}
 	}
 	g.line(`allowed_methods << "OPTIONS" unless allowed_methods.empty?`, "")
@@ -130,7 +139,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line(`dispatch_method = "GET" if method == "HEAD" && !explicit_head && allowed_methods.include?("GET")`, "")
 	for routeIndex, route := range routes {
 		segments := rubyWebRouteSegments(route.Path)
-		condition := append([]string{"dispatch_method == " + strconv.Quote(route.Method)}, rubyWebRouteConditions(segments)...)
+		condition := []string{"dispatch_method == " + strconv.Quote(route.Method), "matched_path == " + strconv.Itoa(pathIndexes[route.Path])}
 		g.line("if "+strings.Join(condition, " && "), "")
 		g.indent++
 		g.line("path_parameters = {}", "")
@@ -150,9 +159,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		g.indent--
 		g.line("end", "")
 	}
-	for routeIndex, route := range webintegration.UniquePathRoutes(routes) {
+	for routeIndex, route := range pathRoutes {
 		segments := rubyWebRouteSegments(route.Path)
-		condition := append([]string{`method == "OPTIONS"`}, rubyWebRouteConditions(segments)...)
+		condition := []string{`method == "OPTIONS"`, "matched_path == " + strconv.Itoa(routeIndex)}
 		g.line("if "+strings.Join(condition, " && "), "")
 		g.indent++
 		g.line("path_parameters = {}", "")

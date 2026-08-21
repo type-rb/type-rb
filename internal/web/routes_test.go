@@ -55,15 +55,44 @@ func TestUniquePathRoutesKeepsOneRepresentativeInManifestOrder(t *testing.T) {
 	}
 }
 
-func TestDiscoverRejectsAmbiguousRoutes(t *testing.T) {
+func TestDiscoverOrdersStaticRoutesBeforeParameterRoutes(t *testing.T) {
 	root := t.TempDir()
 	sources := []Source{
-		parsedSource(t, filepath.Join(root, "routes", "todos", "new.trb"), "routes/todos/new", "def get()\n\treturn\nend\n"),
 		parsedSource(t, filepath.Join(root, "routes", "todos", "[id].trb"), "routes/todos/[id]", "def get()\n\treturn\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "todos", "new.trb"), "routes/todos/new", "def get()\n\treturn\nend\n"),
+	}
+
+	routes, issues := Discover(sources, root)
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %#v", issues)
+	}
+	if len(routes) != 2 || routes[0].Path != "/todos/new" || routes[1].Path != "/todos/:id" {
+		t.Fatalf("unexpected route precedence: %#v", routes)
+	}
+}
+
+func TestDiscoverRejectsIrreduciblyAmbiguousParameterRoutes(t *testing.T) {
+	root := t.TempDir()
+	sources := []Source{
+		parsedSource(t, filepath.Join(root, "routes", "todos", "[id].trb"), "routes/todos/[id]", "def get()\n\treturn\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "todos", "[slug].trb"), "routes/todos/[slug]", "def get()\n\treturn\nend\n"),
 	}
 
 	_, issues := Discover(sources, root)
-	if len(issues) != 1 || !strings.Contains(issues[0].Message, "GET /todos/new conflicts with route /todos/:id") {
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, "conflicts with route") {
+		t.Fatalf("unexpected issues: %#v", issues)
+	}
+}
+
+func TestDiscoverRejectsPatternsWithReversedSpecificity(t *testing.T) {
+	root := t.TempDir()
+	sources := []Source{
+		parsedSource(t, filepath.Join(root, "routes", "todos", "new", "[id].trb"), "routes/todos/new/[id]", "def get()\n\treturn\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "todos", "[id]", "edit.trb"), "routes/todos/[id]/edit", "def get()\n\treturn\nend\n"),
+	}
+
+	_, issues := Discover(sources, root)
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, "conflicts with route") {
 		t.Fatalf("unexpected issues: %#v", issues)
 	}
 }

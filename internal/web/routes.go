@@ -296,7 +296,7 @@ func Discover(sources []Source, sourceRoot string) ([]Route, []Issue) {
 
 	sort.Slice(routes, func(i, j int) bool {
 		if routes[i].Path != routes[j].Path {
-			return routes[i].Path < routes[j].Path
+			return routePathLess(routes[i].Path, routes[j].Path)
 		}
 		if routes[i].Method != routes[j].Method {
 			return routes[i].Method < routes[j].Method
@@ -425,7 +425,7 @@ func conflictIssues(routes []Route) []Issue {
 	var issues []Issue
 	for current := 0; current < len(routes); current++ {
 		for previous := 0; previous < current; previous++ {
-			if routes[current].Method != routes[previous].Method || !pathsOverlap(routes[current].Path, routes[previous].Path) {
+			if routes[current].Method != routes[previous].Method || !pathsOverlap(routes[current].Path, routes[previous].Path) || staticPrecedenceResolves(routes[current].Path, routes[previous].Path) {
 				continue
 			}
 			issues = append(issues, Issue{
@@ -436,6 +436,63 @@ func conflictIssues(routes []Route) []Issue {
 		}
 	}
 	return issues
+}
+
+// routePathLess orders more specific static paths before parameter paths.
+// Irreducibly ambiguous paths are rejected separately by conflictIssues.
+func routePathLess(left, right string) bool {
+	leftSegments := routePatternSegments(left)
+	rightSegments := routePatternSegments(right)
+	shared := min(len(leftSegments), len(rightSegments))
+	for index := 0; index < shared; index++ {
+		leftRank := routeSegmentRank(leftSegments[index])
+		rightRank := routeSegmentRank(rightSegments[index])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		if leftRank == 0 && leftSegments[index] != rightSegments[index] {
+			return leftSegments[index] < rightSegments[index]
+		}
+	}
+	if len(leftSegments) != len(rightSegments) {
+		return len(leftSegments) < len(rightSegments)
+	}
+	return left < right
+}
+
+func routeSegmentRank(segment string) int {
+	if strings.HasPrefix(segment, ":") {
+		return 1
+	}
+	if strings.HasPrefix(segment, "*") {
+		return 2
+	}
+	return 0
+}
+
+// staticPrecedenceResolves reports whether one same-length parameter pattern
+// is strictly more specific than the other at every differing segment.
+func staticPrecedenceResolves(left, right string) bool {
+	leftSegments := routePatternSegments(left)
+	rightSegments := routePatternSegments(right)
+	if len(leftSegments) != len(rightSegments) || catchAllSegmentIndex(leftSegments) >= 0 || catchAllSegmentIndex(rightSegments) >= 0 {
+		return false
+	}
+	leftMoreSpecific := false
+	rightMoreSpecific := false
+	for index := range leftSegments {
+		leftDynamic := strings.HasPrefix(leftSegments[index], ":")
+		rightDynamic := strings.HasPrefix(rightSegments[index], ":")
+		if leftDynamic == rightDynamic {
+			continue
+		}
+		if leftDynamic {
+			rightMoreSpecific = true
+		} else {
+			leftMoreSpecific = true
+		}
+	}
+	return leftMoreSpecific != rightMoreSpecific
 }
 
 func pathsOverlap(left, right string) bool {
