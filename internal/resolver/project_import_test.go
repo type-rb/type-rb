@@ -32,6 +32,39 @@ func TestProjectImportModuleCandidatesUsePortablePaths(t *testing.T) {
 	}
 }
 
+func TestCanonicalProjectImportPathShortensOnlyEquivalentIndexModules(t *testing.T) {
+	modulePaths := map[string]bool{
+		"shared/ui/DataTable/index": true,
+		"models/user":               true,
+		"models/user/index":         true,
+		"github.com/acme/widgets/components/Button/index": true,
+	}
+	tests := []struct {
+		name    string
+		path    string
+		aliases map[string]string
+		want    string
+	}{
+		{name: "unique directory index", path: "shared/ui/DataTable/index", want: "shared/ui/DataTable"},
+		{name: "direct file wins", path: "models/user/index", want: "models/user/index"},
+		{name: "unresolved path", path: "missing/index", want: "missing/index"},
+		{name: "non index path", path: "models/user", want: "models/user"},
+		{
+			name:    "package alias",
+			path:    "widgets/components/Button/index",
+			aliases: map[string]string{"widgets": "github.com/acme/widgets"},
+			want:    "widgets/components/Button",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := CanonicalProjectImportPath(test.path, modulePaths, test.aliases); got != test.want {
+				t.Fatalf("CanonicalProjectImportPath(%q)=%q, want %q", test.path, got, test.want)
+			}
+		})
+	}
+}
+
 func TestCatalogBackedRubyImportFallsBackOnlyToOpaqueRuby(t *testing.T) {
 	root := t.TempDir()
 	rubyPath := filepath.Join(root, "helper.rb")

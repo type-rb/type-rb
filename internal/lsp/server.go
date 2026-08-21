@@ -23,6 +23,7 @@ import (
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/testsuite"
 	"github.com/type-rb/type-rb/internal/token"
 )
@@ -65,6 +66,7 @@ type Server struct {
 	resolveUnit          UnitResolver
 	resolveWorkspace     WorkspaceResolver
 	sourceRoot           string
+	packageAliases       map[string]string
 	excludedRoots        []string
 	includedFiles        map[string]bool
 	documents            map[string]document
@@ -118,8 +120,8 @@ func New(options Options) *Server {
 		mode: options.Mode, version: options.Version,
 		stream:   newRPCStream(options.Input, options.Output),
 		compiler: compilerservice.New(options.Units, options.CompilerOptions), resolveUnit: options.ResolveUnit,
-		resolveWorkspace: options.ResolveWorkspace,
-		sourceRoot:       sourceRoot, excludedRoots: excludedRoots, includedFiles: includedFiles,
+		resolveWorkspace: options.ResolveWorkspace, packageAliases: cloneStringMap(options.CompilerOptions.PackageAliases),
+		sourceRoot: sourceRoot, excludedRoots: excludedRoots, includedFiles: includedFiles,
 		documents: map[string]document{}, base: base, fileRootFiles: initialFileRootFiles(base, options.ResolveWorkspace != nil), published: map[string]bool{},
 		runSupported:       options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
 		standardCandidates: languageservice.StandardImportCandidates(options.Mode),
@@ -128,6 +130,14 @@ func New(options Options) *Server {
 		server.diagnostics = newDiagnosticCoordinator(diagnosticDebounce, server.compiler.AnalyzeOnce, server.compiler.Generation)
 	}
 	return server
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 
 func initialFileRootFiles(base map[string]compiler.SourceUnit, dynamic bool) map[string]bool {
@@ -1242,7 +1252,22 @@ func (s *Server) format(request message) error {
 	if !ok {
 		return s.stream.write(success(request.ID, []textEdit{}))
 	}
-	formatted, diagnostics := formatter.Format(document.source)
+	modulePaths := make(map[string]bool, len(s.base)+len(s.documents))
+	for _, unit := range s.base {
+		modulePaths[unit.ModulePath] = true
+	}
+	for _, openDocument := range s.documents {
+		modulePaths[openDocument.unit.ModulePath] = true
+	}
+	aliases := s.packageAliases
+	if document.unit.PackageAliases != nil {
+		aliases = document.unit.PackageAliases
+	}
+	formatted, diagnostics := formatter.FormatWithOptions(document.source, formatter.Options{
+		CanonicalImportPath: func(importPath string) string {
+			return resolver.CanonicalProjectImportPath(importPath, modulePaths, aliases)
+		},
+	})
 	if hasErrors(diagnostics) || string(formatted) == string(document.source) {
 		return s.stream.write(success(request.ID, []textEdit{}))
 	}

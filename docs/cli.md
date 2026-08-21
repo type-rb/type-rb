@@ -65,8 +65,12 @@ trb fmt -
 trb fmt src test.trb
 ```
 
-`trb fmt` is deterministic and idempotent. It emits one tab per nesting level
-and preserves comments and opaque literal contents.
+`trb fmt` is deterministic and idempotent. It emits one tab per nesting level,
+preserves comments and opaque literal contents, and removes a terminal
+`/index` from a project import when the shorter path resolves to the same
+module. It retains `/index` when a direct file would otherwise win or when the
+import cannot be resolved. Stdin formatting has no project snapshot and
+therefore does not remove `/index`.
 
 ## Build and run
 

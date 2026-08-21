@@ -1005,6 +1005,46 @@ func ProjectImportModuleCandidates(importPath string) ([]string, bool) {
 	return []string{clean, pathpkg.Join(clean, "index")}, true
 }
 
+// CanonicalProjectImportPath removes a terminal /index only when the shorter
+// authored path resolves to the same known module. Callers provide the module
+// identities available in their project snapshot so formatting and import
+// completion cannot change the selected module when both name.trb and
+// name/index.trb exist.
+func CanonicalProjectImportPath(importPath string, modulePaths map[string]bool, aliases map[string]string) string {
+	if stdlib.IsReservedPath(importPath) || !strings.HasSuffix(importPath, "/index") {
+		return importPath
+	}
+	short := strings.TrimSuffix(importPath, "/index")
+	if short == "" {
+		return importPath
+	}
+	resolved, ok := resolveKnownProjectModule(importPath, modulePaths, aliases)
+	if !ok {
+		return importPath
+	}
+	shortResolved, ok := resolveKnownProjectModule(short, modulePaths, aliases)
+	if !ok || shortResolved != resolved {
+		return importPath
+	}
+	return short
+}
+
+func resolveKnownProjectModule(importPath string, modulePaths map[string]bool, aliases map[string]string) (string, bool) {
+	candidates, valid := ProjectImportModuleCandidates(importPath)
+	if !valid {
+		return "", false
+	}
+	canonical := CanonicalPackageImport(candidates[0], aliases)
+	if modulePaths[canonical] {
+		return canonical, true
+	}
+	indexed := pathpkg.Join(canonical, "index")
+	if len(candidates) > 1 && modulePaths[indexed] {
+		return indexed, true
+	}
+	return "", false
+}
+
 // CanonicalPackageImport applies the longest matching TypeRB package alias to
 // a source import path. Compile-time providers use the same mapping before the
 // ordinary resolver has produced its import graph.

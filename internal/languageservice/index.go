@@ -478,14 +478,7 @@ func withImportFromModule(symbol Symbol, path, modulePath string) Symbol {
 }
 
 func projectImportPath(modulePath string, modulePaths map[string]bool) string {
-	if !strings.HasSuffix(modulePath, "/index") {
-		return modulePath
-	}
-	short := strings.TrimSuffix(modulePath, "/index")
-	if short == "" || modulePaths[short] {
-		return modulePath
-	}
-	return short
+	return resolver.CanonicalProjectImportPath(modulePath, modulePaths, nil)
 }
 
 func addDeclarationMembers(context *Context, catalog *declaration.Catalog) {

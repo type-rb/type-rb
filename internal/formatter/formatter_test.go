@@ -250,14 +250,35 @@ func TestFormatPreservesRailsRegexAndPercentLiterals(t *testing.T) {
 }
 
 func TestFormatKeepsExplicitImportPathsCompact(t *testing.T) {
-	source := []byte("import  trb / std / io # portable output\nimport {User} from app / models / user\nimport {\nFirst,\nSecond,\n} from domain / insurer\n")
+	source := []byte("import  trb / std / io # portable output\nimport {User} from app / models / user\nimport {Widget} from app / widgets / index\nimport {\nFirst,\nSecond,\n} from domain / insurer\n")
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
 	}
-	want := "import trb/std/io # portable output\nimport { User } from app/models/user\nimport {\n\tFirst,\n\tSecond,\n} from domain/insurer\n"
+	want := "import trb/std/io # portable output\nimport { User } from app/models/user\nimport { Widget } from app/widgets/index\nimport {\n\tFirst,\n\tSecond,\n} from domain/insurer\n"
 	if string(formatted) != want {
 		t.Fatalf("unexpected import formatting:\n%s", formatted)
+	}
+}
+
+func TestFormatCanonicalizesResolvedImportPathsAndPreservesComments(t *testing.T) {
+	source := []byte("import { DataTable } from shared / ui / DataTable / index # directory entry\nimport { User } from models / user / index # ambiguous\n")
+	formatted, diagnostics := FormatWithOptions(source, Options{CanonicalImportPath: func(path string) string {
+		if path == "shared/ui/DataTable/index" {
+			return "shared/ui/DataTable"
+		}
+		return path
+	}})
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "import { DataTable } from shared/ui/DataTable # directory entry\nimport { User } from models/user/index # ambiguous\n"
+	if string(formatted) != want {
+		t.Fatalf("unexpected canonical import formatting:\n%s", formatted)
+	}
+	formattedAgain, diagnostics := FormatWithOptions(formatted, Options{CanonicalImportPath: func(path string) string { return path }})
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("canonical import formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
 	}
 }
 

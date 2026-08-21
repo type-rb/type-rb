@@ -355,7 +355,9 @@ highlight, and rename queries follow stable source declaration identities
 across project imports, receiver types, and common lexical bindings. Go to
 Definition treats a complete project-import path as one module reference and
 opens its resolved TypeRB source; project auto-imports omit a redundant
-terminal `/index`.
+terminal `/index`. CLI and language-server formatting apply the same
+resolution-aware canonicalization to existing imports without changing an
+ambiguous or unresolved module selection.
 Association model references supplied by declarative package providers also
 participate in completion, hover, definition, references, and rename without
 adding ordinary source imports. Document

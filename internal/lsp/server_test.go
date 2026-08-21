@@ -87,6 +87,39 @@ func TestServerPublishesDiagnosticsAndServesCompletionAndFormatting(t *testing.T
 	}
 }
 
+func TestServerFormattingCanonicalizesOnlyEquivalentIndexImports(t *testing.T) {
+	root := t.TempDir()
+	entryPath := cleanPath(filepath.Join(root, "main.trb"))
+	entrySource := "import { DataTable } from shared / ui / DataTable / index\nimport { IndexedUser } from models / user / index\n"
+	var output bytes.Buffer
+	server := New(Options{
+		Mode: "typescript", Input: bytes.NewReader(nil), Output: &output,
+		Units: []compiler.SourceUnit{
+			{Filename: entryPath, ModulePath: "main", Source: []byte(entrySource)},
+			{Filename: cleanPath(filepath.Join(root, "shared", "ui", "DataTable", "index.trb")), ModulePath: "shared/ui/DataTable/index"},
+			{Filename: cleanPath(filepath.Join(root, "models", "user.trb")), ModulePath: "models/user"},
+			{Filename: cleanPath(filepath.Join(root, "models", "user", "index.trb")), ModulePath: "models/user/index"},
+		},
+		CompilerOptions: compiler.Options{Mode: "typescript"},
+	})
+	if err := server.format(message{
+		JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "textDocument/formatting",
+		Params: rawParams(t, formattingParams{TextDocument: textDocumentIdentifier{URI: uriFromPath(entryPath)}}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	frames := decodeFrames(t, output.Bytes())
+	if len(frames) != 1 {
+		t.Fatalf("response count=%d, want 1: %s", len(frames), output.String())
+	}
+	var edits []textEdit
+	decodeResult(t, frames[0], &edits)
+	want := "import { DataTable } from shared/ui/DataTable\nimport { IndexedUser } from models/user/index\n"
+	if len(edits) != 1 || edits[0].NewText != want {
+		t.Fatalf("formatting edits=%#v, want %q", edits, want)
+	}
+}
+
 func TestServerServesCompletionAndFormattingWhileDiagnosticsAreRunning(t *testing.T) {
 	filename := cleanPath("main.trb")
 	valid := "record Message\n\ttext: String\nend\n\ndef render(message: Message)\n\tputs(message.text)\n\treturn\nend\n"
