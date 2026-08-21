@@ -49,6 +49,51 @@ end
 	}
 }
 
+func TestTypeScriptWebTestModuleOwnsItsDispatcher(t *testing.T) {
+	const routeSource = `import { Context, Response, text } from trb/web
+
+def get(_context: Context): Response
+	return text("ok")
+end
+`
+	const testSource = `import { Body, Headers, HttpMethod } from trb/http
+import { Request } from trb/web
+import { dispatch } from trb/web/testing
+import { describe, expect, test } from trb/std/test
+
+describe("Web") do
+	test("dispatches a route") do
+		response := dispatch(Request.new(method: HttpMethod.get(), path: "/health", query_string: "", headers: Headers.new(), body: Body.empty()))
+		expect(response.status).to_equal(200)
+	end
+end
+`
+	const runnerSource = `import { finish } from trb/std/test
+import { trb_test_register_web } from web_test
+
+def main()
+	trb_test_register_web()
+	finish()
+	return
+end
+`
+	artifacts, err := CompileProject([]SourceUnit{
+		{Filename: "/project/src/routes/health.trb", Source: []byte(routeSource), ModulePath: "routes/health"},
+		{Filename: "/project/src/web_test.trb", Source: []byte(testSource), ModulePath: "web_test", TestRegistration: "trb_test_register_web"},
+		{Filename: "/project/src/__trb_test_main.trb", Source: []byte(runnerSource), ModulePath: "trb_test_main", CompilerOwned: true},
+	}, Options{Mode: "typescript", SourceRoot: "/project/src", ProjectRoot: "/project", TypeScriptRuntime: "bun"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifactForModule(artifacts, "web_test").Output)
+	if !strings.Contains(output, "async function trb_web_dispatch") {
+		t.Fatalf("TypeScript web test module does not own a dispatcher:\n%s", output)
+	}
+	if strings.Contains(output, `from "node:http"`) {
+		t.Fatalf("TypeScript web test module emitted the server host:\n%s", output)
+	}
+}
+
 func TestTestRunnerProtocolIsNotAUserImport(t *testing.T) {
 	_, err := Compile("example_test.trb", []byte("import { finish } from trb/std/test\n"), "go")
 	if err == nil || !strings.Contains(err.Error(), "finish is internal to the TypeRB compiler") {

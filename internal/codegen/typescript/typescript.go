@@ -14,6 +14,7 @@ import (
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/types"
+	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
 type generator struct {
@@ -44,6 +45,8 @@ type generator struct {
 	jobs             *jobsintegration.Manifest
 	jobsSQL          *jobssql.Manifest
 	orm              *ormintegration.Manifest
+	web              *webintegration.Manifest
+	webDispatchOnly  bool
 	breakTarget      string
 	enumReceiver     string
 	sourceRecorder   *sourcemap.Recorder
@@ -117,6 +120,13 @@ func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error
 		return nil, err
 	}
 	execution := effectplan.ExecutionScope(programs)
+	var projectWeb *webintegration.Manifest
+	for _, program := range programs {
+		if manifest := webintegration.ManifestFrom(program.Extensions); manifest != nil {
+			projectWeb = manifest
+			break
+		}
+	}
 	moduleExtensions := map[string]string{}
 	for _, program := range programs {
 		moduleExtensions[program.ModulePath] = ".ts"
@@ -126,13 +136,19 @@ func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error
 	}
 	generated := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
-		generated[index] = generate(program, plan, execution, moduleExtensions)
+		generated[index] = generate(program, plan, execution, moduleExtensions, projectWeb)
 	}
 	return generated, nil
 }
 
-func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string) sourcemap.Generated {
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string, projectWeb *webintegration.Manifest) sourcemap.Generated {
+	webManifest := webintegration.ManifestFrom(program.Extensions)
+	webDispatchOnly := false
+	if webManifest == nil && projectWeb != nil && importsWebTestingDispatch(program) {
+		webManifest = projectWeb
+		webDispatchOnly = true
+	}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -179,6 +195,19 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	}
 	output := strings.TrimRight(g.b.String(), "\n") + "\n"
 	return sourcemap.Generated{Output: output, Map: g.sourceRecorder.Build(output)}
+}
+
+func importsWebTestingDispatch(program *ir.Program) bool {
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ir.Import)
+		if !ok || strings.TrimSuffix(imported.Path, "/index") != "trb/web/testing" {
+			continue
+		}
+		if imported.IntrinsicSymbols["dispatch"] {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *generator) ensureHTTPRuntime() string {
