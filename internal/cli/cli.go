@@ -1095,6 +1095,7 @@ func (c *CLI) runRepl(args []string) error {
 	if config.Go != nil {
 		sessionPackage = config.Go.RootPackage
 	}
+	analyzer := compiler.NewAnalyzer()
 	compileSource := func(source string) (*repl.Compilation, error) {
 		units, options, err := projectCompilation(config, files)
 		if err != nil {
@@ -1109,7 +1110,7 @@ func (c *CLI) runRepl(args []string) error {
 		})
 		options.AllowUnusedImports = true
 		options.InteractiveModule = sessionModule
-		artifacts, err := analyzeReplProject(units, options)
+		artifacts, err := analyzer.AnalyzeProject(units, options)
 		if err != nil {
 			return nil, err
 		}

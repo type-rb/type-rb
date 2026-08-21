@@ -340,8 +340,9 @@ carry checked artifacts and per-module completion contexts. When an incomplete
 edit fails, the service publishes current diagnostics while retaining the last
 successful context, so editor completion does not disappear during typing.
 Concurrent edits invalidate obsolete analysis before it can become current.
-`trb check` already consumes this service; dependency-aware incremental phase
-reuse remains future work.
+Long-lived compiler-service and REPL sessions reuse prepared syntax trees for
+compiler-identical source units. `trb check` already consumes this service;
+dependency-aware resolver, checker, and lowering reuse remains future work.
 
 `trb lsp` exposes that service over standard LSP framing. Its capabilities are
 project-wide live diagnostics, completion with explicit import insertion for

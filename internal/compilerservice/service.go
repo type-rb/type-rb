@@ -70,9 +70,10 @@ type Service struct {
 }
 
 func New(units []compiler.SourceUnit, options compiler.Options) *Service {
+	analyzer := compiler.NewAnalyzer()
 	return &Service{
 		base: cloneUnits(units), options: options, overlays: map[string]compiler.SourceUnit{},
-		generation: 1, contexts: map[string]languageservice.Context{}, analyze: compiler.AnalyzeProject,
+		generation: 1, contexts: map[string]languageservice.Context{}, analyze: analyzer.AnalyzeProject,
 	}
 }
 
