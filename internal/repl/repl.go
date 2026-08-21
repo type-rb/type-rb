@@ -38,6 +38,7 @@ type Options struct {
 	Interactive bool
 	HistoryFile string
 	Compile     CompileFunc
+	Initial     *Compilation
 	Candidates  languageservice.Context
 	language    *languageservice.Service
 }
@@ -46,9 +47,13 @@ func Run(options Options) error {
 	if options.Compile == nil {
 		return errors.New("REPL compiler is not configured")
 	}
-	compilation, err := options.Compile("")
-	if err != nil {
-		return err
+	compilation := options.Initial
+	if compilation == nil {
+		var err error
+		compilation, err = options.Compile("")
+		if err != nil {
+			return err
+		}
 	}
 	evaluator := NewEvaluator(options.Stdout, options.Mode)
 	defer func() { _ = evaluator.Close() }()
