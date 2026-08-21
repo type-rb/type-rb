@@ -44,12 +44,13 @@
 	],
 	"scripts": {
 		"build": "esbuild extension.js --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
+		"build:production": "esbuild extension.js --bundle --minify --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
 		"test": "node --test test/*.test.js",
 		"test:integration:prepare": "npm run build && node test/integration/prepare.js",
 		"test:integration": "npm run test:integration:prepare && vscode-test --label stable",
 		"test:integration:insiders": "npm run test:integration:prepare && vscode-test --label insiders",
 		"test:integration:latest": "npm run test:integration:prepare && vscode-test --label stable && vscode-test --label insiders",
-		"package": "npm run build && vsce package --out dist/typerb.vsix"
+		"package": "npm run build:production && vsce package --out dist/typerb.vsix"
 	},
 	"dependencies": {
 		"@vscode/debugadapter": "^1.68.0",
