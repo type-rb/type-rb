@@ -2,6 +2,33 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.12 - 2026-08-22
+
+### Breaking changes
+
+- Go projects now require Go 1.27. Generated generic class instance methods use
+  native Go generic methods, compiler-owned Unicode behavior follows Unicode
+  17, and the reference Bun container uses Bun 1.4. Projects using Go 1.26 must
+  upgrade their Go toolchain and set `go.version` to 1.27 or later.
+  ([#409](https://github.com/type-rb/type-rb/pull/409))
+
+### Compiler performance
+
+- Project compilation now indexes transparent type aliases, substantially
+  reducing semantic analysis time in type-alias-heavy projects. In the measured
+  application, cold analysis fell from about 693 milliseconds to 246
+  milliseconds, while a 512-module lookup benchmark improved from about 7.66
+  microseconds to 18.8 nanoseconds with no lookup allocations.
+  ([#408](https://github.com/type-rb/type-rb/pull/408))
+
+### Packages and web
+
+- Bundled compiler-integrated packages can use an experimental, versioned,
+  data-only call-specialization protocol. `trb/web` now implements generic
+  endpoint input binding through target-independent TypeRB helper source for
+  consistent Go, Ruby, and TypeScript behavior.
+  ([#407](https://github.com/type-rb/type-rb/pull/407))
+
 ## 0.3.11 - 2026-08-21
 
 ### Compiler and tooling
