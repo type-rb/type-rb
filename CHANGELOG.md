@@ -2,6 +2,37 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.8 - 2026-08-21
+
+### Language and compiler
+
+- Integer literals outside TypeRB's portable exact range now produce a
+  compile-time diagnostic instead of rounding differently between targets.
+  ([#378](https://github.com/type-rb/type-rb/pull/378))
+- Malformed call expressions no longer cause a compiler, formatter, or
+  language-service panic. ([#379](https://github.com/type-rb/type-rb/pull/379))
+
+### Web
+
+- Static file routes take precedence over parameter routes, so paths such as
+  `/todos/new` can coexist with `/todos/[id]` consistently in Go, Ruby, and
+  TypeScript modes. ([#383](https://github.com/type-rb/type-rb/pull/383))
+
+### ORM and database tooling
+
+- Database commands accept the same portable `mysql://` URLs as generated
+  runtimes while retaining Go driver DSN support.
+  ([#381](https://github.com/type-rb/type-rb/pull/381))
+- Generated TypeScript applications initialize MySQL ORM sessions to UTC,
+  matching Go and Ruby and keeping database-evaluated time defaults portable.
+  ([#382](https://github.com/type-rb/type-rb/pull/382))
+
+### Tooling
+
+- The formatter now produces stable one-pass output for chained multiline
+  tokens and symbols following operators.
+  ([#380](https://github.com/type-rb/type-rb/pull/380))
+
 ## 0.3.7 - 2026-08-20
 
 ### Tooling
