@@ -787,6 +787,21 @@ func TestReplAutomaticallyImportsPortableStandardTypesAcrossModes(t *testing.T) 
 	}
 }
 
+func TestReplProjectAnalysisSkipsBackendOutput(t *testing.T) {
+	artifacts, err := analyzeReplProject([]compiler.SourceUnit{{
+		Filename: ".trb-repl.trb", ModulePath: "__trb_repl__", Package: "main", Source: []byte("1 + 2\n"),
+	}}, compiler.Options{Mode: "go", Package: "main", ModulePath: "__trb_repl__", InteractiveModule: "__trb_repl__"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) != 1 || artifacts[0].IR == nil {
+		t.Fatalf("unexpected semantic artifacts: %#v", artifacts)
+	}
+	if len(artifacts[0].Output) != 0 || artifacts[0].SourceMap.Version != 0 || len(artifacts[0].SourceMap.Mappings) != 0 {
+		t.Fatalf("REPL analysis generated backend output: %#v", artifacts[0])
+	}
+}
+
 func TestReplPreludeDoesNotDuplicateExplicitImports(t *testing.T) {
 	imports := []replImport{{path: "models/user", symbols: []string{"Profile", "User"}}}
 	if got, want := replPrelude(imports, "import { User } from models/user\n"), "import { Profile } from models/user\n"; got != want {

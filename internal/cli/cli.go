@@ -1109,7 +1109,7 @@ func (c *CLI) runRepl(args []string) error {
 		})
 		options.AllowUnusedImports = true
 		options.InteractiveModule = sessionModule
-		artifacts, err := compiler.CompileProject(units, options)
+		artifacts, err := analyzeReplProject(units, options)
 		if err != nil {
 			return nil, err
 		}
@@ -1162,6 +1162,10 @@ func (c *CLI) runRepl(args []string) error {
 		Initial:     initial,
 		Candidates:  candidates,
 	})
+}
+
+func analyzeReplProject(units []compiler.SourceUnit, options compiler.Options) ([]*compiler.Artifact, error) {
+	return compiler.AnalyzeProject(units, options)
 }
 
 type replImport struct {
@@ -1277,7 +1281,7 @@ func replStandardCandidates(config *project.Config, imports []replImport, sessio
 		return languageservice.Context{}, err
 	}
 	options.AllowUnusedImports = true
-	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{{
+	artifacts, err := analyzeReplProject([]compiler.SourceUnit{{
 		Filename:   filepath.Join(config.SourcePath(), ".trb-repl-standard-candidates.trb"),
 		Source:     []byte(source.String()),
 		ModulePath: modulePath,
