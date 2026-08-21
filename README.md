@@ -161,7 +161,7 @@ trb run
 
 - **Go** for native binaries and services
 - **Ruby** for server and application development
-- **TypeScript** for browser applications
+- **TypeScript** for browser and server applications
 
 Every target uses the same TypeRB grammar and portable semantics. A target mode
 selects the backend, toolchain, and package ecosystem. Target-specific APIs
