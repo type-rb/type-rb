@@ -6,6 +6,7 @@ package formatter
 import (
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/token"
@@ -13,12 +14,24 @@ import (
 
 const indentation = "\t"
 
+type Options struct {
+	// CanonicalImportPath returns the authored spelling that should be printed
+	// for one parsed import. Project-aware callers may use their shared module
+	// resolver; source-only callers leave it nil and preserve import paths.
+	CanonicalImportPath func(string) string
+}
+
 func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
+	return FormatWithOptions(source, Options{})
+}
+
+func FormatWithOptions(source []byte, options Options) ([]byte, []diagnostic.Diagnostic) {
 	program, diagnostics := parser.Parse(source)
 	if hasErrors(diagnostics) {
 		return nil, diagnostics
 	}
-	lines := tokensByLine(program.Tokens)
+	tokens := canonicalImportTokens(program, options.CanonicalImportPath)
+	lines := tokensByLine(tokens)
 	var out strings.Builder
 	indent := 0
 	continuation := 0
@@ -70,6 +83,60 @@ func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 		}
 	}
 	return []byte(strings.TrimRight(out.String(), "\n") + "\n"), nil
+}
+
+type importTokenReplacement struct {
+	end    int
+	lexeme string
+}
+
+func canonicalImportTokens(program *ast.Program, canonicalize func(string) string) []token.Token {
+	if canonicalize == nil {
+		return program.Tokens
+	}
+	replacements := map[int]importTokenReplacement{}
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ast.ImportStatement)
+		if !ok || imported.Path == "" {
+			continue
+		}
+		canonical := canonicalize(imported.Path)
+		if canonical == "" || canonical == imported.Path {
+			continue
+		}
+		replacements[imported.PathSpan.Start.Offset] = importTokenReplacement{
+			end: imported.PathSpan.End.Offset, lexeme: canonical,
+		}
+	}
+	if len(replacements) == 0 {
+		return program.Tokens
+	}
+	result := make([]token.Token, 0, len(program.Tokens))
+	skipUntil := -1
+	for _, item := range program.Tokens {
+		if replacement, ok := replacements[item.Span.Start.Offset]; ok {
+			item.Lexeme = canonicalImportLexeme(item, replacement.lexeme)
+			result = append(result, item)
+			skipUntil = replacement.end
+			continue
+		}
+		if item.Span.Start.Offset < skipUntil {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func canonicalImportLexeme(original token.Token, canonical string) string {
+	if original.Kind != token.String || len(original.Lexeme) < 2 {
+		return canonical
+	}
+	quote := original.Lexeme[0]
+	if (quote == '\'' || quote == '"') && original.Lexeme[len(original.Lexeme)-1] == quote {
+		return string(quote) + canonical + string(quote)
+	}
+	return original.Lexeme
 }
 
 // splitStatements treats a top-level semicolon as a physical newline for

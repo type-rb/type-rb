@@ -538,13 +538,16 @@ func (c *CLI) runFmt(args []string) error {
 	if err != nil {
 		return err
 	}
+	importContexts := newImportFormatContexts()
 	var changed []string
 	for _, name := range files {
 		source, err := os.ReadFile(name)
 		if err != nil {
 			return err
 		}
-		formatted, diagnostics := formatter.Format(source)
+		formatted, diagnostics := formatter.FormatWithOptions(source, formatter.Options{
+			CanonicalImportPath: importContexts.canonicalizer(name),
+		})
 		if len(diagnostics) > 0 {
 			return fmt.Errorf("%s:%s", name, diagnostics[0])
 		}

@@ -376,7 +376,10 @@ switches.
   canonical authored spelling when it resolves uniquely to the directory's
   `index.trb`; an explicit `/index` remains accepted. If both `name.trb` and
   `name/index.trb` exist, `from name` resolves `name.trb`, so tooling retains
-  `/index` when it is needed to select the directory entry.
+  `/index` when it is needed to select the directory entry. Project-aware
+  formatting removes an explicit `/index` only when resolving the shortened
+  path selects the same module. Unresolved paths and source-only formatting
+  without a project snapshot retain an explicit `/index`.
 - External TypeRB packages declare a canonical identity in
   `trbpackage.json`. A project lock may map an explicit short import to that
   identity. Alias mappings are scoped to the application or declaring package,
