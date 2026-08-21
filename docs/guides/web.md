@@ -135,7 +135,10 @@ an ordinary mapper function; `trb/web` does not install a global error mapper
 or choose an application response body. The
 compiler validates a contract's `params` record against the file-based route
 in the same way as a direct `params<T>()` call. Contracts are optional;
-handlers may continue to use the individual request methods.
+handlers may continue to use the individual request methods. `bind<T>()` is
+most useful when one handler consumes more than one input source, or when the
+application wants a named endpoint contract. A handler that reads only path,
+query, or body input does not need a wrapper record merely for uniformity.
 
 Middleware can attach request-scoped values without a string-keyed cast at
 the handler boundary. Create one `ContextKey<T>` and share that key between
