@@ -42,7 +42,7 @@ class Trb < Formula
         "packageManagement": "external",
         "go": {
           "module": "example.com/brew-smoke-test",
-          "version": "1.26",
+          "version": "1.27",
           "rootPackage": "main"
         }
       }

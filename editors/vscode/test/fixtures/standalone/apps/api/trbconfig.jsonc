@@ -6,7 +6,7 @@
   "outDir": "build",
   "go": {
     "module": "example.com/fixture/api",
-    "version": "1.26",
+    "version": "1.27",
     "rootPackage": "main"
   }
 }

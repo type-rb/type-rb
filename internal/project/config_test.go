@@ -194,9 +194,38 @@ func TestLoadJSONCRejectsTrailingCommas(t *testing.T) {
 	}
 }
 
+func TestGoVersionRequiresGo127OrLater(t *testing.T) {
+	for _, test := range []struct {
+		version string
+		valid   bool
+	}{
+		{version: "1.26"},
+		{version: "invalid"},
+		{version: "1.27", valid: true},
+		{version: "1.27.1", valid: true},
+		{version: "1.28", valid: true},
+	} {
+		t.Run(test.version, func(t *testing.T) {
+			config := New(t.TempDir(), "go")
+			config.Go.Module = "example.com/version-test"
+			config.Go.Version = test.version
+			err := config.Validate()
+			if test.valid && err != nil {
+				t.Fatalf("Go %s was rejected: %v", test.version, err)
+			}
+			if !test.valid && (err == nil || !strings.Contains(err.Error(), "go.version must be 1.27 or later")) {
+				t.Fatalf("Go %s produced unexpected validation: %v", test.version, err)
+			}
+		})
+	}
+}
+
 func TestSaveAndFindConfig(t *testing.T) {
 	root := t.TempDir()
 	config := New(root, "go")
+	if config.Go == nil || config.Go.Version != DefaultGoVersion {
+		t.Fatalf("unexpected Go defaults: %#v", config.Go)
+	}
 	config.Go.Module = "example.com/acme/app"
 	if err := config.Save(); err != nil {
 		t.Fatal(err)

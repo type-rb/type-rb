@@ -219,7 +219,7 @@ func TestRunKeepGeneratedRetainsExactTargetTree(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/keep-generated\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/keep-generated\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte("def main()\n\tputs(\"kept\")\n\treturn\nend\n"), 0o644); err != nil {
@@ -271,7 +271,7 @@ func TestRunCleansGeneratedWorkspaceAcrossBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == "go" {
-				module := "module example.com/type-rb/workspace-cleanup\n\ngo 1.26\n"
+				module := "module example.com/type-rb/workspace-cleanup\n\ngo 1.27\n"
 				if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0o644); err != nil {
 					t.Fatal(err)
 				}

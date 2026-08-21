@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-21
+Last updated: 2026-08-22
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -65,7 +65,9 @@ and mutable bindings, typed collections and iteration, exhaustive pattern
 matching, value-producing `if` and `case` expressions, and explicit Result
 propagation and recovery with prefix `try` and postfix `catch`. See the
 [language guide](language.md) and [specification](specification.md) for the
-current semantics.
+current semantics. Generated Go targets Go 1.27 and represents generic class
+instance methods directly with native generic methods instead of package-level
+helper functions.
 
 Array transformations such as `map`, `select`, `reduce`, predicate searches,
 and key-based sorting accept ordinary statements followed by one final result

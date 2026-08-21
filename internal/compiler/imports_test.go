@@ -2040,9 +2040,9 @@ end
 			}
 		}
 		runtimeWants := map[string][]string{
-			"go":         {`var UnicodeDataVersion string = "15.0.0"`, `func UnicodeLetter(value int) bool`, `func inRanges(value int, ranges [][]int) bool`},
-			"ruby":       {`class Unicode`, `UNICODE_DATA_VERSION = "15.0.0"`, `def self.letter(value)`, `def _in_ranges(value, ranges)`},
-			"typescript": {`export class Unicode`, `export const UNICODE_DATA_VERSION: string = "15.0.0";`, `static letter(value: number): boolean`, `export function _in_ranges(value: number, ranges: Array<Array<number>>): boolean`},
+			"go":         {`var UnicodeDataVersion string = "17.0.0"`, `func UnicodeLetter(value int) bool`, `func inRanges(value int, ranges [][]int) bool`},
+			"ruby":       {`class Unicode`, `UNICODE_DATA_VERSION = "17.0.0"`, `def self.letter(value)`, `def _in_ranges(value, ranges)`},
+			"typescript": {`export class Unicode`, `export const UNICODE_DATA_VERSION: string = "17.0.0";`, `static letter(value: number): boolean`, `export function _in_ranges(value: number, ranges: Array<Array<number>>): boolean`},
 		}[mode]
 		for _, want := range runtimeWants {
 			if output := string(runtime.Output); !strings.Contains(output, want) {
@@ -3740,6 +3740,18 @@ end
 		}
 		if len(artifacts) != 2 {
 			t.Fatalf("%s generated %d artifacts, want 2", mode, len(artifacts))
+		}
+		if mode == "go" {
+			outputs := map[string]string{}
+			for _, artifact := range artifacts {
+				outputs[artifact.Filename] = string(artifact.Output)
+			}
+			if !strings.Contains(outputs[models.Filename], "func (self *Box[T]) Pair[U any](other U) Pair[T, U]") {
+				t.Fatalf("generated Go model does not declare a native generic method:\n%s", outputs[models.Filename])
+			}
+			if !strings.Contains(outputs[main.Filename], `box.Pair[string]("Ada")`) {
+				t.Fatalf("generated Go consumer does not call the imported generic method directly:\n%s", outputs[main.Filename])
+			}
 		}
 	}
 }

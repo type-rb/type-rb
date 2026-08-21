@@ -57,4 +57,4 @@ For each coherent change:
    `trb` on `PATH` cannot validate current syntax with a stale formatter.
 5. Update `docs/specification.md`, `docs/status.md`, or `docs/roadmap.md` only
    where behavior or status changed.
-6. Commit the completed work unit. Use Go 1.26 and current target language features; legacy target versions are out of scope.
+6. Commit the completed work unit. Use Go 1.27 and current target language features; legacy target versions are out of scope.

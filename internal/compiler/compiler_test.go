@@ -3182,14 +3182,17 @@ end
 		"type Box[T any] struct",
 		"func NewBox[T any](value T) *Box[T]",
 		"func (self *Box[T]) Value() T",
-		"func BoxPair[T any, U any](self *Box[T], other U) Pair[T, U]",
+		"func (self *Box[T]) Pair[U any](other U) Pair[T, U]",
 		"type Pair[T any, U any] struct",
 		"NewBox[int](7)",
-		"BoxPair[int, string](box, \"Ada\")",
+		"box.Pair[string](\"Ada\")",
 	} {
 		if !strings.Contains(goOutput, want) {
 			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
 		}
+	}
+	if strings.Contains(goOutput, "BoxPair") {
+		t.Fatalf("generated Go retained the pre-1.27 generic method helper:\n%s", goOutput)
 	}
 	fileSet := token.NewFileSet()
 	parsed, err := parser.ParseFile(fileSet, "generic_objects.go", artifacts["go"].Output, parser.AllErrors)
@@ -3218,6 +3221,46 @@ end
 		if !strings.Contains(typescriptOutput, want) {
 			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
 		}
+	}
+}
+
+func TestGenericEnumMethodsRetainRepresentationHelper(t *testing.T) {
+	source := []byte(`enum Box<T>
+	Value(value: T)
+
+	def convert<U>(value: U): U
+		return value
+	end
+end
+
+def main()
+	box := Box<Integer>::Value(7)
+	puts(box.convert<String>("Ada"))
+	return
+end
+`)
+
+	artifact, err := Compile("generic_enum_method.trb", source, "go")
+	if err != nil {
+		t.Fatalf("Go rejected a generic enum method: %v", err)
+	}
+	output := string(artifact.Output)
+	for _, want := range []string{
+		"func BoxConvert[T any, U any](self Box[T], value U) U",
+		"BoxConvert[int, string](box, \"Ada\")",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, output)
+		}
+	}
+
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "generic_enum_method.go", artifact.Output, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("invalid generated generic enum method: %v\n%s", err, output)
+	}
+	if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+		t.Fatalf("generated generic enum method did not type-check: %v\n%s", err, output)
 	}
 }
 

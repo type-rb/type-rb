@@ -683,7 +683,8 @@ func (g *generator) enumMethods(enum *ir.Enum, enumName string) {
 		if parameters != "" {
 			parameters = ", " + parameters
 		}
-		g.line("func " + enumMethodName(enum.Name, method.Name) + goTypeParameterDeclarations(enum.TypeParameters) + "(self " + enumName + goTypeParameterArguments(enum.TypeParameters) + parameters + ")" + g.goReturn(method.ReturnType) + " {")
+		typeParameters := append(append([]string(nil), enum.TypeParameters...), method.TypeParameters...)
+		g.line("func " + enumMethodName(enum.Name, method.Name) + goTypeParameterDeclarations(typeParameters) + "(self " + enumName + goTypeParameterArguments(enum.TypeParameters) + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 		g.indent++
 		g.parameterDefaults(method.Parameters)
 		g.functionDepth++
@@ -965,15 +966,8 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 	name := goMethodName(method.Name)
 	if method.Class {
 		g.line("func " + className + name + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType) + " {")
-	} else if len(method.TypeParameters) > 0 {
-		parameters := g.methodParameters(method)
-		if parameters != "" {
-			parameters = ", " + parameters
-		}
-		allTypeParameters := append(append([]string(nil), classTypeParameters...), method.TypeParameters...)
-		g.line("func " + className + name + goTypeParameterDeclarations(allTypeParameters) + "(self *" + className + goTypeParameterArguments(classTypeParameters) + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 	} else {
-		g.line("func (self *" + className + goTypeParameterArguments(classTypeParameters) + ") " + name + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType) + " {")
+		g.line("func (self *" + className + goTypeParameterArguments(classTypeParameters) + ") " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType) + " {")
 	}
 	g.indent++
 	g.parameterDefaults(method.Parameters)
@@ -1307,7 +1301,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[i] = g.expr(argument.Value)
 		}
 		args := strings.Join(parts, ", ")
-		if application, ok := n.Callee.(*ir.TypeApply); ok && application.Kind == "method" && referenceIntrinsic(n.Callee) == "" {
+		if application, ok := n.Callee.(*ir.TypeApply); ok && application.Kind == "method" && g.typeKinds[application.Owner] == "enum" && referenceIntrinsic(n.Callee) == "" {
 			if member, method := application.Receiver.(*ir.Member); method {
 				name := goIdentifier(application.Owner, true) + goMethodName(member.Name)
 				if alias := g.referenceAlias(member.Reference); alias != "" {

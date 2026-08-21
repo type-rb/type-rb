@@ -25,7 +25,7 @@ accepts line and block comments. Trailing commas are not allowed.
   "devDependencies": {},
   "go": {
     "module": "example.com/my-app",
-    "version": "1.26",
+    "version": "1.27",
     "rootPackage": "main"
   }
 }
@@ -51,6 +51,9 @@ TypeScript mode owns `package.json`. These files are deterministic views of
 the native `dependencies` and `devDependencies` in `trbconfig.jsonc`. Edit
 native dependencies through the config or `trb add --native` and
 `trb remove --native`, then run `trb sync`.
+
+`go.version` must be Go 1.27 or later. Generated Go uses native generic
+methods introduced in Go 1.27, so projects targeting Go 1.26 are rejected.
 
 ## TypeScript toolchain
 

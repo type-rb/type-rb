@@ -36,7 +36,7 @@ brew install type-rb/tap/trb
 trb version
 ```
 
-To build the compiler from source, use Go 1.26:
+To build the compiler from source, use Go 1.27:
 
 ```sh
 go install github.com/type-rb/type-rb/cmd/trb@latest
@@ -49,7 +49,7 @@ adding a Go, Ruby, Node, or Bun version to TypeRB's distribution contract:
 ARG TYPERB_VERSION=X.Y.Z
 FROM ghcr.io/type-rb/trb:${TYPERB_VERSION} AS typerb
 
-FROM golang:1.26-bookworm
+FROM golang:1.27-bookworm
 COPY --from=typerb /usr/local/bin/trb /usr/local/bin/trb
 ```
 
