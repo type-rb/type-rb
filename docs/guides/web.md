@@ -37,6 +37,14 @@ def post(context: Context): Response
 end
 ```
 
+Static route segments take precedence over parameter segments. For example,
+`src/routes/todos/new.trb` and `src/routes/todos/[id].trb` can coexist:
+`/todos/new` selects the static route, while `/todos/42` binds `id` in the
+parameter route. Routing selects the most specific path before its HTTP
+handler, so an unsupported method on `/todos/new` returns 405 instead of
+falling through to `[id].trb`. Patterns that cannot be ordered consistently,
+such as sibling `[id].trb` and `[slug].trb` files, remain build errors.
+
 `Request`, `Response`, and `Context` are immutable classes. Request methods
 handle query parameters, headers, cookies, text, bytes, and typed JSON. Response
 methods change status, headers, `Vary`, and cookies by returning a new response:

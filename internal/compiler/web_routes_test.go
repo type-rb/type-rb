@@ -520,11 +520,11 @@ end
 	}
 }
 
-func TestCompileProjectRejectsAmbiguousWebRoutes(t *testing.T) {
+func TestCompileProjectAllowsStaticRoutesAlongsideParameterRoutesAcrossModes(t *testing.T) {
 	routeSource := []byte(`import { Body, Headers } from trb/http
-import { Response } from trb/web
+import { Context, Response } from trb/web
 
-def get(): Response
+def get(_context: Context): Response
 	return Response.new(status: 204, headers: Headers.new(), body: Body.empty())
 end
 `)
@@ -534,9 +534,15 @@ end
 		{Filename: "/project/src/routes/todos/[id].trb", ModulePath: "routes/todos/[id]", Package: "todos", Source: routeSource},
 	}
 
-	_, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/web-routes", SourceRoot: "/project/src", ProjectRoot: "/project"})
-	if err == nil || !strings.Contains(err.Error(), "GET /todos/new conflicts with route /todos/:id") {
-		t.Fatalf("unexpected error: %v", err)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject(sources, Options{Mode: mode, GoModule: "example.com/web-routes", RubyLoader: "require_relative", SourceRoot: "/project/src", ProjectRoot: "/project"})
+		if err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		manifest := webintegration.ManifestFrom(artifactForModule(artifacts, "main").IR.Extensions)
+		if manifest == nil || len(manifest.Routes) != 2 || manifest.Routes[0].Path != "/todos/new" || manifest.Routes[1].Path != "/todos/:id" {
+			t.Fatalf("unexpected %s route precedence: %#v", mode, manifest)
+		}
 	}
 }
 

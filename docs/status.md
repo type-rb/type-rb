@@ -138,9 +138,12 @@ dispatcher boundary. Malformed escapes, encoded separators, backslashes, and
 dot segments receive a portable JSON 400 response. Repeated and trailing
 slashes remain distinct paths instead of being silently collapsed. Terminal
 catch-all files such as `[...path].trb` match one or more decoded path
-segments and bind their slash-joined value. Route analysis rejects catch-alls
-outside the final position and any static, parameter, or catch-all pattern that
-could ambiguously match the same method and request path. Calls to
+segments and bind their slash-joined value. Static segments take precedence
+over parameter segments, and the dispatcher selects the most specific path
+before selecting its HTTP method. For the same method, route analysis rejects
+overlapping catch-all patterns, sibling parameter patterns, and patterns whose
+static specificity reverses between segments; catch-alls outside the final
+position are always invalid. Calls to
 `Context#path_value`
 inside route files require a string literal naming a parameter declared by that
 file's route pattern, so misspelled and dynamic names fail during the build.
