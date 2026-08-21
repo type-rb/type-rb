@@ -77,6 +77,11 @@ trb check
 # Emit stable, machine-readable diagnostics for editors and agents.
 trb check --diagnostic-format json
 
+# Check a config-free file and its explicit imports, using Go by default.
+trb check report.trb
+trb check --mode ruby report.trb
+trb check --mode typescript report.trb
+
 # Compile a project to its configured output directory.
 trb build
 
@@ -115,8 +120,15 @@ trb run --keep-generated
 ```
 
 `trb check` is the canonical validation command. It parses, resolves, type
-checks, and validates the complete project without writing generated files or
-starting a target toolchain. Human-readable diagnostics are the default.
+checks, and validates source without writing generated files or starting a
+target toolchain. Without a source path it validates the complete configured
+project. With one config-free `.trb` path it validates that file-root program
+and its transitive explicit local imports, ignores unrelated sibling files,
+uses Go by default, and accepts `--mode ruby|go|typescript`. A standalone
+library file does not need to define `main()` merely to be checked. When a
+configuration is discoverable from the selected file, `trb check` validates
+the complete project and the configured mode wins; passing `--mode` is an
+error. Human-readable diagnostics are the default.
 `--diagnostic-format json` writes a versioned report to standard output and
 returns a nonzero status when errors exist. Locations use one-based lines and
 columns plus zero-based UTF-8 byte offsets. Each diagnostic has a stable

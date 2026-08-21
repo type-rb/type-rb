@@ -147,28 +147,57 @@ func (c *CLI) runCheck(args []string) error {
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
 	format := flags.String("diagnostic-format", "human", "diagnostic output: human or json")
+	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 {
-		return errors.New("check does not accept source paths; it checks the configured project")
+	if flags.NArg() > 1 {
+		return errors.New("check accepts at most one standalone .trb file")
 	}
 	if *format != "human" && *format != "json" {
 		return fmt.Errorf("--diagnostic-format must be human or json; got %q", *format)
 	}
 
-	config, err := loadConfig(*configPath, ".")
+	filename := ""
+	configStart := "."
+	if flags.NArg() == 1 {
+		if filepath.Ext(flags.Arg(0)) != ".trb" {
+			return errors.New("standalone check source must be a .trb file")
+		}
+		var err error
+		filename, err = filepath.Abs(flags.Arg(0))
+		if err != nil {
+			return err
+		}
+		configStart = filename
+	}
+	config, standalone, err := loadCommandConfig("check", *configPath, configStart, filename, *mode, "")
 	if err != nil {
 		return c.reportCheckError(*format, diagnostic.ProjectError, err)
 	}
-	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
-	if err != nil {
-		return c.reportCheckError(*format, diagnostic.ProjectError, err)
+	var (
+		units   []compiler.SourceUnit
+		options compiler.Options
+		count   int
+	)
+	if standalone {
+		graph, graphErr := loadFileRootSourceGraph(filename, os.ReadFile)
+		if graphErr != nil {
+			return c.reportCheckError(*format, diagnostic.ProjectError, graphErr)
+		}
+		count = len(graph.Sources)
+		units, options, err = projectCompilationSources(config, graph.Sources)
+	} else {
+		files, collectErr := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+		if collectErr != nil {
+			return c.reportCheckError(*format, diagnostic.ProjectError, collectErr)
+		}
+		if len(files) == 0 {
+			return c.reportCheckError(*format, diagnostic.ProjectError, errors.New("no .trb files found"))
+		}
+		count = len(files)
+		units, options, err = projectCompilation(config, files)
 	}
-	if len(files) == 0 {
-		return c.reportCheckError(*format, diagnostic.ProjectError, errors.New("no .trb files found"))
-	}
-	units, options, err := projectCompilation(config, files)
 	if err != nil {
 		return c.reportCheckError(*format, diagnostic.ProjectError, err)
 	}
@@ -179,7 +208,7 @@ func (c *CLI) runCheck(args []string) error {
 	if *format == "json" {
 		return c.writeJSONDiagnostics(nil)
 	}
-	_, err = fmt.Fprintf(c.Stdout, "checked %d file(s) for mode %s\n", len(files), config.Mode)
+	_, err = fmt.Fprintf(c.Stdout, "checked %d file(s) for mode %s\n", count, config.Mode)
 	return err
 }
 
@@ -2456,6 +2485,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb init --mode ruby|go|typescript [--runtime browser|bun|node] [--template web] [directory]")
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb check [--diagnostic-format human|json] [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb check [--diagnostic-format human|json] [--mode MODE] FILE.trb")
 	fmt.Fprintln(c.Stdout, "  trb test [--filter TEXT] [--file FILE] [--reporter human|json] [--compile [--debug] [--outfile FILE]] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE]")
