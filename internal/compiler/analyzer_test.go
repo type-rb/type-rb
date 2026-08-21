@@ -138,8 +138,63 @@ func TestAnalyzerRechecksOnlyChangedInteractiveModule(t *testing.T) {
 	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
 		t.Fatal(err)
 	}
-	if checkCalls != 9 {
-		t.Fatalf("project edit check calls=%d, want 9", checkCalls)
+	if checkCalls != 7 {
+		t.Fatalf("independent project edit check calls=%d, want 7", checkCalls)
+	}
+}
+
+func TestAnalyzerRechecksChangedProjectDependencies(t *testing.T) {
+	analyzer := NewAnalyzer()
+	checkCalls := 0
+	analyzer.check = func(program *ast.Program, resolution resolver.Result, options checker.Options) (checker.Result, []diagnostic.Diagnostic) {
+		checkCalls++
+		return checker.CheckWithOptions(program, resolution, options)
+	}
+	sources := []SourceUnit{
+		{Filename: "/project/src/alpha.trb", ModulePath: "alpha", Package: "main", Source: []byte("def alpha(): Integer\n\treturn 1\nend\n")},
+		{Filename: "/project/src/middle.trb", ModulePath: "middle", Package: "main", Source: []byte("import { alpha } from alpha\ndef middle(): Integer\n\treturn alpha()\nend\n")},
+		{Filename: "/project/src/top.trb", ModulePath: "top", Package: "main", Source: []byte("import { middle } from middle\ndef top(): Integer\n\treturn middle()\nend\n")},
+		{Filename: "/project/src/unrelated.trb", ModulePath: "unrelated", Package: "main", Source: []byte("def unrelated(): Integer\n\treturn 4\nend\n")},
+	}
+	options := Options{Mode: "go", GoModule: "example.com/analyzer", SourceRoot: "/project/src", ProjectRoot: "/project"}
+
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatal(err)
+	}
+	if checkCalls != 4 {
+		t.Fatalf("initial check calls=%d, want 4", checkCalls)
+	}
+
+	sources[0].Source = []byte("def alpha(): Integer\n\treturn 2\nend\n")
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatal(err)
+	}
+	if checkCalls != 5 {
+		t.Fatalf("body-only edit check calls=%d, want 5", checkCalls)
+	}
+
+	sources[0].Source = []byte("def alpha(increment: Integer = 0): Integer\n\treturn 2 + increment\nend\n")
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatal(err)
+	}
+	if checkCalls != 8 {
+		t.Fatalf("signature edit check calls=%d, want 8", checkCalls)
+	}
+
+	sources[0].Source = []byte("def alpha(): String\n\treturn \"wrong\"\nend\n")
+	if _, err := analyzer.AnalyzeProject(sources, options); err == nil {
+		t.Fatal("expected incompatible dependency edit to fail")
+	}
+	if checkCalls != 11 {
+		t.Fatalf("invalid signature edit check calls=%d, want 11", checkCalls)
+	}
+
+	sources[0].Source = []byte("def alpha(increment: Integer = 0): Integer\n\treturn 3 + increment\nend\n")
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatal(err)
+	}
+	if checkCalls != 12 {
+		t.Fatalf("corrected body edit check calls=%d, want 12", checkCalls)
 	}
 }
 
@@ -207,27 +262,57 @@ func TestAnalyzerInteractiveArtifactsMatchFullCompilation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			full, err := CompileProject(sources, options)
-			if err != nil {
-				t.Fatal(err)
-			}
-			incrementalPrograms := make([]*ir.Program, len(incremental))
-			for index, artifact := range incremental {
-				incrementalPrograms[index] = artifact.IR
-			}
-			outputs, err := codegen.GenerateProject(incrementalPrograms)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(outputs) != len(full) {
-				t.Fatalf("incremental outputs=%d, full artifacts=%d", len(outputs), len(full))
-			}
-			for index := range outputs {
-				if got, want := string(outputs[index].Output), string(full[index].Output); got != want {
-					t.Fatalf("artifact %d output differs after incremental analysis:\ngot:\n%s\nwant:\n%s", index, got, want)
-				}
-			}
+			requireAnalysisMatchesFullCompilation(t, incremental, sources, options)
 		})
+	}
+}
+
+func TestAnalyzerProjectArtifactsMatchFullCompilation(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			sources := []SourceUnit{
+				{Filename: "/project/src/alpha.trb", ModulePath: "alpha", Package: "main", Source: []byte("def alpha(): Integer\n\treturn 1\nend\n")},
+				{Filename: "/project/src/consumer.trb", ModulePath: "consumer", Package: "main", Source: []byte("import { alpha } from alpha\ndef consumer(): Integer\n\treturn alpha()\nend\n")},
+			}
+			options := Options{
+				Mode: mode, GoModule: "example.com/analyzer", RubyLoader: "require_relative", TypeScriptRuntime: "node",
+				SourceRoot: "/project/src", ProjectRoot: "/project",
+			}
+			analyzer := NewAnalyzer()
+			if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+				t.Fatal(err)
+			}
+			sources[0].Source = []byte("def alpha(): Integer\n\treturn 2\nend\n")
+			incremental, err := analyzer.AnalyzeProject(sources, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireAnalysisMatchesFullCompilation(t, incremental, sources, options)
+		})
+	}
+}
+
+func requireAnalysisMatchesFullCompilation(t *testing.T, incremental []*Artifact, sources []SourceUnit, options Options) {
+	t.Helper()
+	full, err := CompileProject(sources, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	incrementalPrograms := make([]*ir.Program, len(incremental))
+	for index, artifact := range incremental {
+		incrementalPrograms[index] = artifact.IR
+	}
+	outputs, err := codegen.GenerateProject(incrementalPrograms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outputs) != len(full) {
+		t.Fatalf("incremental outputs=%d, full artifacts=%d", len(outputs), len(full))
+	}
+	for index := range outputs {
+		if got, want := string(outputs[index].Output), string(full[index].Output); got != want {
+			t.Fatalf("artifact %d output differs after incremental analysis:\ngot:\n%s\nwant:\n%s", index, got, want)
+		}
 	}
 }
 
@@ -255,7 +340,7 @@ func BenchmarkProjectAnalysisAfterOneFileEdit(b *testing.B) {
 			}
 		}
 	})
-	b.Run("reused-syntax", func(b *testing.B) {
+	b.Run("reused-dependencies", func(b *testing.B) {
 		sources := append([]SourceUnit(nil), base...)
 		analyzer := NewAnalyzer()
 		if _, err := analyzer.AnalyzeProject(sources, options); err != nil {

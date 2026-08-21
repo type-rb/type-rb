@@ -10,6 +10,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/codegen"
+	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
@@ -191,6 +192,8 @@ type projectAnalysis struct {
 	units           []SourceUnit
 	options         Options
 	programs        map[string]*ast.Program
+	catalog         *resolver.Catalog
+	declarations    *declaration.Catalog
 	resolutions     map[string]resolver.Result
 	checkedPrograms map[string]checker.Result
 	validateBackend bool
@@ -373,7 +376,8 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	}
 	return &projectAnalysis{
 		artifacts: artifacts, requestedUnits: cloneSourceUnits(requestedUnits), units: cloneSourceUnits(units), options: cloneOptions(options),
-		programs: programs, resolutions: resolutions, checkedPrograms: checkedPrograms, validateBackend: validateBackend,
+		programs: programs, catalog: catalog, declarations: declarations, resolutions: resolutions,
+		checkedPrograms: checkedPrograms, validateBackend: validateBackend,
 	}, nil
 }
 
