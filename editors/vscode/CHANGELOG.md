@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.4 - 2026-08-21
+
+- Require TypeRB 0.3.9 and format existing project imports without a redundant
+  terminal `/index` when the shorter path resolves to the same module.
+- Minify the production extension bundle, reducing the bundle by about 53%
+  and the packaged VSIX by about 26%.
 
 ## 0.3.3 - 2026-08-20
 
