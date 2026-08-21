@@ -186,10 +186,15 @@ type Module struct {
 type Catalog struct {
 	Modules            map[string]*Module
 	CompilerOwnedTypes map[string]Export
+	typeAliases        map[string]Export
 }
 
 func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic) {
-	catalog := &Catalog{Modules: map[string]*Module{}, CompilerOwnedTypes: map[string]Export{}}
+	catalog := &Catalog{
+		Modules:            map[string]*Module{},
+		CompilerOwnedTypes: map[string]Export{},
+		typeAliases:        map[string]Export{},
+	}
 	diagnostics := map[string][]diagnostic.Diagnostic{}
 	for i := range modules {
 		module := &modules[i]
@@ -309,6 +314,9 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		exported := typesByName[name]
 		owner := typeOwners[name]
 		owner.Exports[name] = *exported
+		if exported.Kind == TypeAliasExport {
+			catalog.typeAliases[name] = *exported
+		}
 		if owner.CompilerOwned || owner.Official {
 			catalog.CompilerOwnedTypes[name] = *exported
 		}
@@ -389,6 +397,10 @@ func (r Result) CompilerOwnedType(name string) (Export, bool) {
 func (r Result) CatalogTypeAlias(name string) (Export, bool) {
 	if r.Catalog == nil {
 		return Export{}, false
+	}
+	if r.Catalog.typeAliases != nil {
+		exported, ok := r.Catalog.typeAliases[name]
+		return exported, ok
 	}
 	for _, module := range r.Catalog.Modules {
 		exported, ok := module.Exports[name]

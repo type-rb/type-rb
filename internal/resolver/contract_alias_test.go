@@ -1,11 +1,29 @@
 package resolver
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/types"
 )
+
+func TestCatalogTypeAliasResolvesAliasesFromNewCatalog(t *testing.T) {
+	program := &ast.Program{Statements: []ast.Statement{
+		&ast.TypeAliasStatement{Name: "UserID", Target: ast.TypeRef{Name: "Integer"}},
+	}}
+	catalog, diagnostics := NewCatalog([]Module{{
+		Path: "domain/user", Filename: "domain/user.trb", Program: program,
+	}})
+	if len(diagnostics) != 0 {
+		t.Fatalf("NewCatalog diagnostics=%#v", diagnostics)
+	}
+
+	resolved, ok := (Result{Catalog: catalog}).CatalogTypeAlias("UserID")
+	if !ok || resolved.Name != "UserID" || resolved.AliasTarget.Name != "Integer" {
+		t.Fatalf("CatalogTypeAlias(UserID)=(%#v, %t), want the catalog alias", resolved, ok)
+	}
+}
 
 func TestContractTypeAliasFollowsSelectedImportedValueContract(t *testing.T) {
 	alias := Export{
@@ -67,5 +85,31 @@ func TestContractTypeAliasDoesNotReplaceDirectOpaqueType(t *testing.T) {
 
 	if resolved, ok := result.ContractTypeAlias("Response"); ok {
 		t.Fatalf("ContractTypeAlias replaced a directly owned opaque type with %#v", resolved)
+	}
+}
+
+func BenchmarkCatalogTypeAlias(b *testing.B) {
+	const modules = 512
+	units := make([]Module, 0, modules)
+	for index := 0; index < modules; index++ {
+		name := fmt.Sprintf("Alias%03d", index)
+		units = append(units, Module{
+			Path:     fmt.Sprintf("module_%03d", index),
+			Filename: fmt.Sprintf("module_%03d.trb", index),
+			Program: &ast.Program{Statements: []ast.Statement{
+				&ast.TypeAliasStatement{Name: name, Target: ast.TypeRef{Name: "Integer"}},
+			}},
+		})
+	}
+	catalog, diagnostics := NewCatalog(units)
+	if len(diagnostics) != 0 {
+		b.Fatalf("NewCatalog diagnostics=%#v", diagnostics)
+	}
+	result := Result{Catalog: catalog}
+	b.ResetTimer()
+	for b.Loop() {
+		if _, ok := result.CatalogTypeAlias("Alias511"); !ok {
+			b.Fatal("CatalogTypeAlias did not resolve Alias511")
+		}
 	}
 }
