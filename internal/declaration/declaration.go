@@ -53,9 +53,13 @@ type Block struct {
 }
 
 type Member struct {
-	Name             string
-	Kind             MemberKind
-	Intrinsic        string
+	Name      string
+	Kind      MemberKind
+	Intrinsic string
+	// Specializer identifies a package-extension call provider. The provider
+	// receives resolved, serializable semantic facts and returns ordinary
+	// TypeRB helper source plus a narrow call replacement.
+	Specializer      string
 	Parameters       []Parameter
 	MinimumArguments int
 	MaximumArguments int

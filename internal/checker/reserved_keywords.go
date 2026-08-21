@@ -21,6 +21,9 @@ func (c *Checker) validateReservedKeywords(statements []ast.Statement) {
 
 func (c *Checker) validateReservedKeywordName(name, kind string, span token.Span) {
 	if strings.HasPrefix(name, "__trb") {
+		if c.compilerGeneratedStart > 0 && span.Start.Offset >= c.compilerGeneratedStart {
+			return
+		}
 		c.error(span, fmt.Sprintf("%s uses the compiler-reserved __trb prefix and cannot be used as %s", name, kind))
 		return
 	}

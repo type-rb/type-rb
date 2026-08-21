@@ -84,9 +84,11 @@ than detailed syntax.
 - Evolve the initial distributed Git package system with semantic version
   constraints, selective updates, publishing conventions, shared caches,
   vulnerability/audit integration, and namespace-stable type identities.
-- Define a stable extension protocol before external packages can request
-  compiler integration; do not expose compiler internals as a public plugin
-  API.
+- Evolve the experimental bundled-package call-specialization data contract and
+  declarative native providers into a stable, sandboxed extension protocol
+  before external packages can request compiler integration. Validate the next
+  capability against ORM and Jobs rather than exposing compiler internals as a
+  public plugin API.
 
 ## 6. Application-level proof
 

@@ -34,6 +34,11 @@ type Artifact struct {
 	CompilerOwned   bool
 	Official        bool
 	ExternalPackage bool
+	// CompilerGeneratedStart is the byte offset at which virtual package
+	// extension source begins. Interactive consumers use it to distinguish
+	// authored submissions from helper declarations loaded as definitions.
+	CompilerGeneratedStart int
+	sourceUnit             SourceUnit
 }
 
 type SourceUnit struct {
@@ -51,6 +56,17 @@ type SourceUnit struct {
 	// MainReplacement disables automatic application startup while preserving
 	// the rest of a module for a test build.
 	MainReplacement string
+	// CompilerGeneratedSources are virtual TypeRB fragments returned by a
+	// package extension. They are parsed, resolved, checked, and lowered with
+	// the owning module but remain distinct from the authored source for
+	// diagnostics and incremental cache identity.
+	CompilerGeneratedSources []CompilerGeneratedSource
+}
+
+type CompilerGeneratedSource struct {
+	ID     string
+	Source []byte
+	Origin token.Span
 }
 
 type CompileError struct {
@@ -106,17 +122,24 @@ func Compile(filename string, source []byte, mode string) (*Artifact, error) {
 }
 
 func CompileWithOptions(filename string, source []byte, options Options) (*Artifact, error) {
-	program, diagnostics := parser.Parse(source)
+	return compileSourceUnit(SourceUnit{
+		Filename: filename, Source: source, ModulePath: options.ModulePath, Package: options.Package,
+		PackageAliases: options.PackageAliases,
+	}, options)
+}
+
+func compileSourceUnit(unit SourceUnit, options Options) (*Artifact, error) {
+	program, parseDiagnostics := parser.Parse(sourceUnitContents(unit))
 	configureProgram(program, options, options.ModulePath, options.Package)
 	if options.Mode == "" {
-		diagnostics = append(diagnostics, diagnostic.Diagnostic{
+		parseDiagnostics = append(parseDiagnostics, diagnostic.Diagnostic{
 			Code:     diagnostic.ProjectError,
 			Severity: diagnostic.Error,
 			Message:  "project mode is missing from trbconfig.jsonc",
 			Span:     token.Span{Start: token.Position{Line: 1, Column: 1}, End: token.Position{Line: 1, Column: 1}},
 		})
 	} else if options.Mode != "ruby" && options.Mode != "typescript" && options.Mode != "go" {
-		diagnostics = append(diagnostics, diagnostic.Diagnostic{
+		parseDiagnostics = append(parseDiagnostics, diagnostic.Diagnostic{
 			Code:     diagnostic.ProjectError,
 			Severity: diagnostic.Error,
 			Message:  fmt.Sprintf("unsupported mode %q", options.Mode),
@@ -129,26 +152,46 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 		PackageAliasesByModule: map[string]map[string]string{program.ModulePath: options.PackageAliases},
 	})
 	if providerErr != nil {
-		return nil, compileProviderError(providerErr, []SourceUnit{{Filename: filename, ModulePath: options.ModulePath}})
+		return nil, compileProviderError(providerErr, []SourceUnit{unit})
 	}
-	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: filename, PackageAliases: options.PackageAliases, Declarations: declarations, NativePackages: options.NativePackages})
-	diagnostics = append(diagnostics, resolveDiagnostics...)
-	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{
-		AllowUnusedImports:  options.AllowUnusedImports,
-		InteractiveTopLevel: options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
-		RunnableMain:        topLevelMethod(program, MainFunction),
+	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{
+		Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: unit.Filename, PackageAliases: options.PackageAliases,
+		Declarations: declarations, NativePackages: options.NativePackages, CompilerGeneratedStart: compilerGeneratedStart(unit),
 	})
-	diagnostics = append(diagnostics, checkDiagnostics...)
-	if hasErrors(diagnostics) {
-		return nil, NewCompileError(filename, diagnostic.TypeError, diagnostics)
+	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{
+		AllowUnusedImports:     options.AllowUnusedImports,
+		InteractiveTopLevel:    options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
+		RunnableMain:           topLevelMethod(program, MainFunction),
+		CompilerGeneratedStart: compilerGeneratedStart(unit),
+	})
+	checkedPrograms := map[string]checker.Result{program.ModulePath: checked}
+	programs := map[string]*ast.Program{program.ModulePath: program}
+	updated, specializationDiagnostics, specialized, err := applyCallSpecializations([]SourceUnit{unit}, programs, checkedPrograms)
+	if err != nil {
+		return nil, err
 	}
+	diagnostics := append([]diagnostic.Diagnostic(nil), specializationDiagnostics...)
+	diagnostics = append(diagnostics, normalizeSourceDiagnostics(parseDiagnostics, unit, diagnostic.SyntaxError)...)
+	diagnostics = append(diagnostics, normalizeSourceDiagnostics(resolveDiagnostics, unit, diagnostic.ResolutionError)...)
+	diagnostics = append(diagnostics, normalizeSourceDiagnostics(checkDiagnostics, unit, diagnostic.TypeError)...)
+	if specialized && len(specializationDiagnostics) == 0 {
+		return compileSourceUnit(updated[0], options)
+	}
+	if hasErrors(diagnostics) {
+		return nil, NewCompileError(unit.Filename, diagnostic.TypeError, diagnostics)
+	}
+	checked = checkedPrograms[program.ModulePath]
 	lowered := lower.Program(checked)
-	lowered.SourcePath = filename
+	lowered.SourcePath = unit.Filename
 	generated, err := codegen.Generate(lowered)
 	if err != nil {
 		return nil, err
 	}
-	return &Artifact{Filename: filename, Mode: options.Mode, AST: program, IR: lowered, Output: generated.Output, SourceMap: generated.SourceMap}, nil
+	return &Artifact{
+		Filename: unit.Filename, Mode: options.Mode, AST: program, IR: lowered, Output: generated.Output,
+		SourceMap: normalizeGeneratedSourceMap(generated.SourceMap, unit), CompilerGeneratedStart: compilerGeneratedStart(unit),
+		sourceUnit: cloneSourceUnit(unit),
+	}, nil
 }
 
 // CompileProject analyzes every source unit and then generates target-language
@@ -171,7 +214,7 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	}
 	for index, output := range outputs {
 		artifacts[index].Output = output.Output
-		artifacts[index].SourceMap = output.SourceMap
+		artifacts[index].SourceMap = normalizeGeneratedSourceMap(output.SourceMap, artifacts[index].sourceUnit)
 	}
 	return artifacts, nil
 }
@@ -261,17 +304,18 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 			packageAliases = source.PackageAliases
 		}
 		resolved, diagnostics := resolver.Resolve(programs[source.ModulePath], resolver.Options{
-			Mode:           options.Mode,
-			SourceRoot:     options.SourceRoot,
-			Filename:       source.Filename,
-			PackageAliases: packageAliases,
-			CompilerOwned:  source.CompilerOwned,
-			Official:       source.Official,
-			Catalog:        catalog,
-			Declarations:   declarations,
-			NativePackages: options.NativePackages,
+			Mode:                   options.Mode,
+			SourceRoot:             options.SourceRoot,
+			Filename:               source.Filename,
+			PackageAliases:         packageAliases,
+			CompilerOwned:          source.CompilerOwned,
+			Official:               source.Official,
+			Catalog:                catalog,
+			Declarations:           declarations,
+			NativePackages:         options.NativePackages,
+			CompilerGeneratedStart: compilerGeneratedStart(source),
 		})
-		resolveErrors = append(resolveErrors, diagnostic.Normalize(diagnostics, source.Filename, diagnostic.ResolutionError)...)
+		resolveErrors = append(resolveErrors, normalizeSourceDiagnostics(diagnostics, source, diagnostic.ResolutionError)...)
 		resolutions[source.ModulePath] = resolved
 	}
 	if hasErrors(resolveErrors) {
@@ -307,9 +351,10 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	for _, source := range units {
 		program := programs[source.ModulePath]
 		checked, diagnostics := analyzer.checkProgram(program, resolutions[source.ModulePath], checker.Options{
-			AllowUnusedImports:  options.AllowUnusedImports,
-			InteractiveTopLevel: options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
-			RunnableMain:        topLevelMethod(program, MainFunction),
+			AllowUnusedImports:     options.AllowUnusedImports,
+			InteractiveTopLevel:    options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
+			RunnableMain:           topLevelMethod(program, MainFunction),
+			CompilerGeneratedStart: compilerGeneratedStart(source),
 		})
 		checkedPrograms[source.ModulePath] = checked
 		checkDiagnostics[source.ModulePath] = diagnostics
@@ -317,9 +362,16 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	if runtimeUnits := compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options); len(runtimeUnits) > 0 {
 		return analyzeProjectFull(analyzer, append(units, runtimeUnits...), options, validateBackend, requestedUnits)
 	}
-	var typeErrors []diagnostic.Diagnostic
+	specializedUnits, specializationDiagnostics, specialized, err := applyCallSpecializations(units, programs, checkedPrograms)
+	if err != nil {
+		return nil, err
+	}
+	typeErrors := append([]diagnostic.Diagnostic(nil), specializationDiagnostics...)
 	for _, source := range units {
-		typeErrors = append(typeErrors, diagnostic.Normalize(checkDiagnostics[source.ModulePath], source.Filename, diagnostic.TypeError)...)
+		typeErrors = append(typeErrors, normalizeSourceDiagnostics(checkDiagnostics[source.ModulePath], source, diagnostic.TypeError)...)
+	}
+	if specialized && len(specializationDiagnostics) == 0 {
+		return analyzeProjectFull(analyzer, specializedUnits, options, validateBackend, requestedUnits)
 	}
 	if hasErrors(typeErrors) {
 		return nil, NewCompileError("", diagnostic.TypeError, typeErrors)
@@ -369,7 +421,11 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	artifacts := make([]*Artifact, 0, len(units))
 	for index, source := range units {
 		program := programs[source.ModulePath]
-		artifacts = append(artifacts, &Artifact{Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index], CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage})
+		artifacts = append(artifacts, &Artifact{
+			Filename: source.Filename, Mode: options.Mode, AST: program, IR: loweredPrograms[index],
+			CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage,
+			CompilerGeneratedStart: compilerGeneratedStart(source), sourceUnit: cloneSourceUnit(source),
+		})
 	}
 	return &projectAnalysis{
 		artifacts: artifacts, requestedUnits: cloneSourceUnits(requestedUnits), units: cloneSourceUnits(units), options: cloneOptions(options),

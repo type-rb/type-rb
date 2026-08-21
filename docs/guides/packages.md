@@ -202,6 +202,30 @@ wait for a versioned and sandboxed extension protocol rather than importing
 compiler internals. The declarative native type provider above is the safe
 non-executable subset.
 
+### Experimental bundled call specialization
+
+TypeRB 0.x also has an experimental call-specialization boundary for bundled,
+compiler-integrated packages. It is not a package-manifest capability or a
+supported external plugin API yet. The first consumer is
+`trb/web`'s `Context#bind<T>()`.
+
+A call specializer receives a versioned, serializable request containing the
+selected provider, call-site identity, resolved type arguments, and the record
+shape needed by that provider. It returns ordinary TypeRB helper source, named
+imports required by that source, and a narrow replacement of the original call.
+The compiler appends the helper to the call's owning module and runs it through
+the normal parser, resolver, checker, typed IR, and backend pipeline. Package
+code does not receive AST, checker, typed-IR, or backend objects, and it does not
+emit Go, Ruby, or TypeScript source.
+
+Generated diagnostics and source mappings point back to the original call, and
+generated names use the compiler-reserved `__trb` namespace. The current
+request shape deliberately supports only the facts needed by `Context#bind`;
+it is expected to change while ORM and Jobs characterization identifies the
+next reusable capability. In particular, generated source currently relies on
+ordinary named type imports, so namespace-stable type imports must be designed
+before this boundary is opened to independent packages.
+
 ## Lock and cache
 
 Commit `trb.lock`. It records direct import mappings, the complete dependency

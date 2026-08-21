@@ -86,9 +86,9 @@ func analyzeInteractiveProject(analyzer *Analyzer, previous *projectAnalysis, so
 	resolved, resolveDiagnostics := resolver.Resolve(program, resolver.Options{
 		Mode: options.Mode, SourceRoot: options.SourceRoot, Filename: changed.Filename, PackageAliases: packageAliases,
 		CompilerOwned: changed.CompilerOwned, Official: changed.Official, Catalog: catalog, Declarations: declarations,
-		NativePackages: options.NativePackages,
+		NativePackages: options.NativePackages, CompilerGeneratedStart: compilerGeneratedStart(changed),
 	})
-	resolveDiagnostics = diagnostic.Normalize(resolveDiagnostics, changed.Filename, diagnostic.ResolutionError)
+	resolveDiagnostics = normalizeSourceDiagnostics(resolveDiagnostics, changed, diagnostic.ResolutionError)
 	if hasErrors(resolveDiagnostics) {
 		return nil, true, NewCompileError(changed.Filename, diagnostic.ResolutionError, resolveDiagnostics)
 	}
@@ -112,13 +112,20 @@ func analyzeInteractiveProject(analyzer *Analyzer, previous *projectAnalysis, so
 	}
 	checked, checkDiagnostics := analyzer.checkProgram(program, resolved, checker.Options{
 		AllowUnusedImports: options.AllowUnusedImports, InteractiveTopLevel: true,
-		RunnableMain: topLevelMethod(program, MainFunction),
+		RunnableMain:           topLevelMethod(program, MainFunction),
+		CompilerGeneratedStart: compilerGeneratedStart(changed),
 	})
-	checkDiagnostics = diagnostic.Normalize(checkDiagnostics, changed.Filename, diagnostic.TypeError)
+	checkDiagnostics = normalizeSourceDiagnostics(checkDiagnostics, changed, diagnostic.TypeError)
 	if hasErrors(checkDiagnostics) {
 		return nil, true, NewCompileError(changed.Filename, diagnostic.TypeError, checkDiagnostics)
 	}
 	if !equalRuntimeDependencies(previous.checkedPrograms[changed.ModulePath], checked) {
+		return nil, false, nil
+	}
+	// Package call specialization may add same-module helper declarations and
+	// imports. Re-run the full project path until incremental analysis can diff
+	// and retain those virtual fragments explicitly.
+	if len(checked.CallSpecializationRequests) > 0 {
 		return nil, false, nil
 	}
 	checkedPrograms := make(map[string]checker.Result, len(previous.checkedPrograms))
@@ -172,6 +179,7 @@ func analyzeInteractiveProject(analyzer *Analyzer, previous *projectAnalysis, so
 		artifacts = append(artifacts, &Artifact{
 			Filename: source.Filename, Mode: options.Mode, AST: programs[source.ModulePath], IR: loweredPrograms[index],
 			CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage,
+			CompilerGeneratedStart: compilerGeneratedStart(source), sourceUnit: cloneSourceUnit(source),
 		})
 	}
 	return &projectAnalysis{
@@ -312,6 +320,7 @@ func cloneSourceUnits(units []SourceUnit) []SourceUnit {
 func cloneSourceUnit(unit SourceUnit) SourceUnit {
 	unit.Source = append([]byte(nil), unit.Source...)
 	unit.PackageAliases = cloneStringMap(unit.PackageAliases)
+	unit.CompilerGeneratedSources = cloneCompilerGeneratedSources(unit.CompilerGeneratedSources)
 	return unit
 }
 
@@ -319,7 +328,7 @@ func equalSourceUnitMetadata(left, right SourceUnit) bool {
 	return left.Filename == right.Filename && left.ModulePath == right.ModulePath && left.Package == right.Package &&
 		left.CompilerOwned == right.CompilerOwned && left.Official == right.Official && left.ExternalPackage == right.ExternalPackage &&
 		left.TestRegistration == right.TestRegistration && left.MainReplacement == right.MainReplacement &&
-		equalStringMap(left.PackageAliases, right.PackageAliases)
+		equalStringMap(left.PackageAliases, right.PackageAliases) && equalCompilerGeneratedSources(left.CompilerGeneratedSources, right.CompilerGeneratedSources)
 }
 
 func cloneOptions(options Options) Options {

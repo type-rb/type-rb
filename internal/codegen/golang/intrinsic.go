@@ -248,8 +248,6 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webParameterBinding(call, arguments[0], "query")
 	case "trb.web.context_params":
 		return g.webParameterBinding(call, arguments[0], "path")
-	case "trb.web.context_bind":
-		return g.webEndpointInput(call, arguments[0])
 	case "trb.web.context_with":
 		return g.webContextWith(call, arguments)
 	case "trb.web.context_with_request":
@@ -888,62 +886,6 @@ func (g *generator) webContextFetch(call *ir.Call, arguments []string) string {
 	okResult := resultAlias + ".NewResultOk[" + valueType + ", " + errorType + "]"
 	errResult := resultAlias + ".NewResultErr[" + valueType + ", " + errorType + "]"
 	return "func() " + resultType + " { contextValue := " + arguments[0] + "; contextKey := " + arguments[1] + "; if contextState, ok := contextValue.TrbInternalContextState.(map[any]any); ok { if raw, found := contextState[contextKey]; found { value, valid := raw.(" + valueType + "); if !valid { panic(\"ContextKey value has an incompatible runtime type\") }; return " + okResult + "(value) } }; return " + errResult + "(" + errorType + "{Key: contextKey.TrbFieldName}) }()"
-}
-
-func (g *generator) webEndpointInput(call *ir.Call, receiver string) string {
-	if call.Codec == nil || call.Codec.Kind != "endpoint_input" || len(call.ExprType().Args) != 2 {
-		return "nil"
-	}
-	resultAlias := g.typeAliases["Result"]
-	if resultAlias == "" {
-		resultAlias = "__trb_result"
-	}
-	webAlias := "web"
-	if reference := expressionReference(call.Callee); reference != nil {
-		if alias := g.referenceAlias(reference); alias != "" {
-			webAlias = alias
-		}
-	}
-	valueType := g.goCodecType(call.Codec)
-	errorType := webAlias + ".EndpointInputError"
-	resultType := resultAlias + ".Result[" + valueType + ", " + errorType + "]"
-	okResult := resultAlias + ".NewResultOk[" + valueType + ", " + errorType + "]"
-	errResult := func(value string) string {
-		return resultAlias + ".NewResultErr[" + valueType + ", " + errorType + "](" + value + ")"
-	}
-	wrapError := func(variant, value string) string {
-		return webAlias + ".New" + goIdentifier("EndpointInputError", true) + goIdentifier(variant, true) + "(" + value + ")"
-	}
-
-	var body strings.Builder
-	body.WriteString("contextValue := " + receiver + "; ")
-	constructor := make([]string, 0, len(call.Codec.Fields))
-	for index, field := range call.Codec.Fields {
-		fieldResult := "inputResult" + strconv.Itoa(index)
-		fieldValue := "inputField" + strconv.Itoa(index)
-		errorName := "ParameterError"
-		variant := "Params"
-		fieldReceiver := "contextValue"
-		if field.Name == "query" {
-			variant = "Query"
-			fieldReceiver = "contextValue.TrbFieldRequest"
-		} else if field.Name == "body" {
-			errorName = "RequestError"
-			variant = "Body"
-			fieldReceiver = "contextValue.TrbFieldRequest"
-		}
-		fieldCall := *call
-		fieldCall.Codec = field.Schema
-		fieldCall.ExprBase = ir.NewExprBase(call.Span, types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{field.Schema.Type, types.FromName(errorName)}})
-		fieldExpression := g.webParameterBinding(&fieldCall, fieldReceiver, field.Name)
-		if field.Name == "body" {
-			fieldExpression = g.webRequestJSON(&fieldCall, fieldReceiver)
-		}
-		body.WriteString(fieldResult + " := " + fieldExpression + "; if " + fieldResult + ".Kind == " + resultAlias + ".ResultErrTag { return " + errResult(wrapError(variant, fieldResult+".ErrError")) + " }; " + fieldValue + " := " + fieldResult + ".OkValue; ")
-		constructor = append(constructor, goIdentifier(field.Name, true)+": "+fieldValue)
-	}
-	body.WriteString("return " + okResult + "(" + valueType + "{" + strings.Join(constructor, ", ") + "})")
-	return "func() " + resultType + " { " + body.String() + " }()"
 }
 
 func (g *generator) portableArrayString(value string, typ types.Type) string {

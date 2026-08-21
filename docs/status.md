@@ -160,7 +160,11 @@ one ordinary endpoint input record. The reserved record fields `params`,
 `query`, and `body` reuse the individual checked codecs, and failures retain
 their original typed error inside `EndpointInputError`. Contracts remain
 optional, route parameter compatibility is still verified at build time, and
-applications keep control of the corresponding HTTP error response.
+applications keep control of the corresponding HTTP error response. The
+implementation is the first consumer of the experimental bundled-package call
+specialization boundary: `trb/web` returns target-independent TypeRB helper
+source, and the compiler re-parses, resolves, checks, and lowers that source
+instead of carrying a Web-specific bind intrinsic through each backend.
 Typed `ContextKey<T>` values let middleware pass authentication principals,
 request identifiers, and other request-scoped state to handlers without casts
 or string-key collisions. `Context#with` returns a new context and
@@ -323,8 +327,10 @@ the REPL.
 Compiler artifacts carry a versioned, backend-independent mapping from
 generated statement ranges to original `.trb` paths and spans. Go mappings are
 retained through target formatting; Ruby and TypeScript use the same internal
-model. Emitting target-standard map files and translating runtime stack traces
-remain follow-up work.
+model. Virtual TypeRB helpers returned by bundled package call specializers map
+back to their originating call rather than exposing synthetic source lines.
+Emitting target-standard map files and translating runtime stack traces remain
+follow-up work.
 
 `trb check` validates a configured project without writing generated source or
 starting a target toolchain. Its human diagnostics and versioned JSON report

@@ -384,6 +384,7 @@ func TestOfficialWebEndpointInputBindingRejectsUnsupportedContracts(t *testing.T
 		{name: "unknown field", declarations: "record Input\n\theaders: String\nend", target: "Input", want: `endpoint input record Input has unsupported field "headers"`},
 		{name: "non-record query", declarations: "record Input\n\tquery: String\nend", target: "Input", want: "web parameter binding type String must be a non-nullable record"},
 		{name: "nullable params", declarations: "record Params\n\tid: Integer\nend\n\nrecord Input\n\tparams: Params?\nend", target: "Input", want: "web parameter binding type Params? must be a non-nullable record"},
+		{name: "function body", declarations: "record Input\n\tbody: () -> String\nend", target: "Input", want: "JSON codec type () -> String is not supported"},
 	}
 	for _, test := range tests {
 		for _, mode := range []string{"go", "ruby", "typescript"} {
