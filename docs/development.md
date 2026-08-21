@@ -1,6 +1,6 @@
 # Development and compiler architecture
 
-TypeRB is implemented in Go 1.26. Clone the repository and run:
+TypeRB is implemented in Go 1.27. Clone the repository and run:
 
 ```sh
 go test ./...

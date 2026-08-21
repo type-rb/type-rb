@@ -23,5 +23,5 @@ The TypeRB and Go versions can be selected when rebuilding the image:
 ```sh
 docker compose build \
   --build-arg TYPERB_VERSION=X.Y.Z \
-  --build-arg GO_VERSION=1.26
+  --build-arg GO_VERSION=1.27
 ```

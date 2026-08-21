@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.3
 
-Last updated: 2026-08-19
+Last updated: 2026-08-22
 
 ## 1. Language Goals
 
@@ -811,10 +811,10 @@ inferred from Go, Ruby, or TypeScript:
 - Payloadless variants of generic enums are reserved until typed singleton
   construction has a portable representation. Generic class and interface
   methods, constraints, variance declarations, and type-argument inference are
-  staged work rather than implicit target-language behavior. A portable
-  generic instance method remains callable even when a target lacks native
-  generic methods; that backend lowers the checked operation through an
-  equivalent generated helper.
+  staged work rather than implicit target-language behavior. Go output requires
+  Go 1.27 and emits a generic class instance method as a native generic method.
+  A target or receiver representation without native generic methods lowers
+  the same checked operation through an equivalent representation.
 
 ```trb
 record Pair<T, U>

@@ -9,9 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 const ConfigName = "trbconfig.jsonc"
+
+// DefaultGoVersion is the current Go toolchain supported by TypeRB.
+const DefaultGoVersion = "1.27"
 
 // DefaultRubyVersion is the current Ruby toolchain supported by TypeRB.
 const DefaultRubyVersion = "4.0.6"
@@ -318,6 +323,12 @@ func (c *Config) Validate() error {
 	if c.Mode == "go" && (c.Go == nil || strings.TrimSpace(c.Go.Module) == "") {
 		return errors.New("go.module is required for mode go")
 	}
+	if c.Go != nil {
+		version := strings.TrimSpace(c.Go.Version)
+		if canonical := semver.Canonical("v" + version); canonical == "" || semver.Compare(canonical, "v"+DefaultGoVersion) < 0 {
+			return fmt.Errorf("go.version must be %s or later; got %q", DefaultGoVersion, c.Go.Version)
+		}
+	}
 	if c.Go != nil && c.Go.Sqldef != nil {
 		definition := c.Go.Sqldef
 		if strings.TrimSpace(definition.Command) == "" || strings.TrimSpace(definition.Database) == "" || strings.TrimSpace(definition.Schema) == "" {
@@ -465,7 +476,7 @@ func (c *Config) applyDefaults() {
 			c.Go = &GoConfig{}
 		}
 		if c.Go.Version == "" {
-			c.Go.Version = "1.26"
+			c.Go.Version = DefaultGoVersion
 		}
 		if c.Go.RootPackage == "" {
 			c.Go.RootPackage = "main"

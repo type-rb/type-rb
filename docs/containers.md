@@ -67,7 +67,7 @@ native toolchain selected by the project.
 
 ```dockerfile
 ARG TYPERB_VERSION=X.Y.Z
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.27
 
 FROM ghcr.io/type-rb/trb:${TYPERB_VERSION} AS typerb
 
@@ -111,7 +111,7 @@ Choose the JavaScript runtime separately from the TypeScript output mode:
 
 ```dockerfile
 ARG TYPERB_VERSION=X.Y.Z
-ARG BUN_VERSION=1.3
+ARG BUN_VERSION=1.4
 
 FROM ghcr.io/type-rb/trb:${TYPERB_VERSION} AS typerb
 

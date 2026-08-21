@@ -62,7 +62,7 @@ func TestTestRunsPortableSuiteAcrossBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == "go" {
-				if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-suite\n\ngo 1.26\n"), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-suite\n\ngo 1.27\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -142,7 +142,7 @@ func TestTestReturnsFailureAndJSONEvents(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-failure\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-failure\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	source := `import { describe, expect, test } from trb/std/test
@@ -184,7 +184,7 @@ func TestTestCompileCreatesDebuggableGoExecutable(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/debug-tests\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/debug-tests\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	testPath := filepath.Join(config.SourcePath(), "calculator_test.trb")
@@ -229,7 +229,7 @@ func TestTestFileFilterDisambiguatesDuplicateNames(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-file-filter\n\ngo 1.26\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-file-filter\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	source := "import { describe, expect, test } from trb/std/test\n\ndescribe(\"Duplicate\") do\n\ttest(\"same name\") do\n\t\texpect(1).to_equal(1)\n\tend\nend\n"
@@ -2766,7 +2766,7 @@ func TestReplEvaluatesCompilerOwnedUnicodeAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "\"15.0.0\" : String\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\nfalse : Boolean\n\"😀\" : String\n[65, 128512] : Array<Integer>\ntrue : Boolean\ntrue : Boolean\n"
+		want := "\"17.0.0\" : String\ntrue : Boolean\ntrue : Boolean\ntrue : Boolean\nfalse : Boolean\n\"😀\" : String\n[65, 128512] : Array<Integer>\ntrue : Boolean\ntrue : Boolean\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s Unicode REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -4909,7 +4909,7 @@ func TestRunCompilerOwnedUnicodeAcrossAvailableBackends(t *testing.T) {
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "15.0.0\ntrue\n😀\n"; stdout.String() != want {
+		if want := "17.0.0\ntrue\n😀\n"; stdout.String() != want {
 			t.Fatalf("unexpected %s Unicode program output: want %q, got %q", mode, want, stdout.String())
 		}
 	}

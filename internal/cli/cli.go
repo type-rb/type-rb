@@ -1041,7 +1041,7 @@ func loadCommandConfig(command, explicit, start, filename, mode, runtimeName str
 }
 
 func writeStandaloneGoModule(config *project.Config, root string) error {
-	version := "1.26"
+	version := project.DefaultGoVersion
 	if config.Go != nil && config.Go.Version != "" {
 		version = config.Go.Version
 	}
@@ -1434,7 +1434,7 @@ func replConfigForMode(base *project.Config, mode string) *project.Config {
 			config.Ruby = &clone
 		}
 	case "go":
-		config.Go = &project.GoConfig{Module: "trb.local/repl", Version: "1.26", RootPackage: "main", IndirectDependencies: map[string]string{}}
+		config.Go = &project.GoConfig{Module: "trb.local/repl", Version: project.DefaultGoVersion, RootPackage: "main", IndirectDependencies: map[string]string{}}
 		if base.Go != nil {
 			clone := *base.Go
 			config.Go = &clone

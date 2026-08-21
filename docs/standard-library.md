@@ -121,7 +121,7 @@ or at the string size, respectively. Additional receiver operations include
 `include?`, `start_with?`, `end_with?`, `split`, `replace_all`, `upcase`, and
 `downcase`.
 `chars()` returns one String per code point, and `reverse()` reverses that same
-sequence. String trimming uses the pinned Unicode 15.0 `White_Space` set,
+sequence. String trimming uses the pinned Unicode 17.0 `White_Space` set,
 preserves internal whitespace, and does not remove U+FEFF. `replace_all()`
 replaces every non-overlapping literal occurrence. The replacement is also
 literal, so strings such as `$&` and `$1` have no special meaning; an empty
