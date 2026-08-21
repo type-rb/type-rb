@@ -18,6 +18,10 @@ Learn the language through guided, executable lessons.
 Write, run, format, and transpile TypeRB while switching between Go, Ruby, and
 TypeScript output.
 
+[Docker quickstart](examples/docker/README.md)
+
+Run TypeRB locally without installing the compiler or a target toolchain.
+
 With the compiler installed, launch the same tools locally:
 
 ```sh

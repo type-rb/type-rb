@@ -1,0 +1,9 @@
+services:
+  typerb:
+    build: .
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    command: ["trb", "run", "hello.trb"]
+    stdin_open: true
+    tty: true
