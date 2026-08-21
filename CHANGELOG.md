@@ -2,6 +2,31 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.9 - 2026-08-21
+
+### Compiler and CLI
+
+- `trb check FILE.trb` validates a config-free file and its transitive explicit
+  local imports in Ruby, Go, or TypeScript mode without requiring `main()` or a
+  `trbconfig.jsonc` project. ([#387](https://github.com/type-rb/type-rb/pull/387))
+- Invalid UTF-8 source now produces a precise syntax diagnostic instead of
+  reaching the parser, formatter, or language service with malformed bytes.
+  ([#388](https://github.com/type-rb/type-rb/pull/388))
+
+### Tooling
+
+- Project-aware CLI and language-server formatting remove a redundant terminal
+  `/index` from imports while retaining it whenever shortening would select a
+  different or unresolved module.
+  ([#392](https://github.com/type-rb/type-rb/pull/392))
+- Contributors can launch the current compiler and Visual Studio Code
+  extension together in an isolated local QA profile without replacing their
+  regular extension or installed compiler.
+  ([#391](https://github.com/type-rb/type-rb/pull/391))
+- The packaged Visual Studio Code extension is minified, reducing its bundle
+  by about 53% and its compressed VSIX by about 26%.
+  ([#389](https://github.com/type-rb/type-rb/pull/389))
+
 ## 0.3.8 - 2026-08-21
 
 ### Language and compiler
