@@ -24,6 +24,13 @@ func parseJSXExpression(root token.Token, report func(token.Span, string)) (*ast
 	return element, ok && parser.pos == len(parser.raw)
 }
 
+// ParseJSXToken rebuilds the structured JSX node represented by one lossless
+// lexer token. Tooling that prints token-preserving source can use the shared
+// JSX grammar without duplicating it.
+func ParseJSXToken(root token.Token) (*ast.JSXElement, bool) {
+	return parseJSXExpression(root, nil)
+}
+
 // JSXComponentIdentifierAt returns the component identifier under an editor
 // cursor. JSX is lexed as one literal token, so semantic tooling uses the JSX
 // parser's component-name boundaries instead of duplicating JSX syntax rules.
@@ -94,7 +101,9 @@ func (p *jsxParser) element() (*ast.JSXElement, bool) {
 					return nil, false
 				}
 				attribute.Value = &ast.Literal{Base: ast.Base{SourceSpan: p.span(valueStart, p.pos)}, Kind: ast.StringLiteral, Raw: raw}
+				attribute.ValueSpan = p.span(valueStart, p.pos)
 			case p.starts("{"):
+				valueStart := p.pos
 				inner, innerStart, ok := p.braced()
 				if !ok {
 					return nil, false
@@ -104,6 +113,7 @@ func (p *jsxParser) element() (*ast.JSXElement, bool) {
 					return nil, false
 				}
 				attribute.Value = value
+				attribute.ValueSpan = p.span(valueStart, p.pos)
 			default:
 				return nil, false
 			}

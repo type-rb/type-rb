@@ -144,6 +144,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   Unknown, missing, duplicate, and incompatible component props are errors.
 - Text, numbers, Booleans, nullable values, provider nodes, and recursively
   renderable arrays and unions may be JSX children. Other values are rejected.
+- `trb fmt` prints returned JSX directly after `return` without adding
+  parentheses. It recursively indents structure-only element and embedded
+  expression children, while preserving text-bearing elements inline so
+  formatting does not change provider-visible text whitespace.
 
 ### 3.2 Typing
 

@@ -188,7 +188,7 @@ func writeStatement(out *strings.Builder, code []token.Token, indent, continuati
 		lineIndent = 0
 	}
 	out.WriteString(strings.Repeat(indentation, lineIndent))
-	out.WriteString(formatTokens(code))
+	out.WriteString(formatTokensAt(code, lineIndent, false))
 	out.WriteByte('\n')
 
 	if dedent && isMidBlock(first) {
@@ -239,7 +239,7 @@ func firstCode(tokens []token.Token) string {
 	return ""
 }
 
-func formatTokens(tokens []token.Token) string {
+func formatTokensAt(tokens []token.Token, baseIndent int, flatJSX bool) string {
 	var out strings.Builder
 	var previous *token.Token
 	var beforePrevious *token.Token
@@ -318,7 +318,11 @@ func formatTokens(tokens []token.Token) string {
 			}
 			genericDepth -= genericClosers
 		}
-		out.WriteString(current.Lexeme)
+		lexeme := current.Lexeme
+		if current.Kind == token.JSXLiteral {
+			lexeme = formatJSXToken(current, baseIndent, flatJSX)
+		}
+		out.WriteString(lexeme)
 		beforePrevious = previous
 		previous = &current
 	}
