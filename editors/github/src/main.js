@@ -1,4 +1,4 @@
-import { grammarJson, onigWasmBase64 } from "typerb:assets";
+import { grammarJson } from "typerb:assets";
 
 import {
   HIGHLIGHT_STYLES,
@@ -18,10 +18,7 @@ function addStyles() {
 
 async function start() {
   addStyles();
-  const highlighter = await createTextMateHighlighter({
-    grammarJson,
-    onigWasm: onigWasmBase64
-  });
+  const highlighter = await createTextMateHighlighter({ grammarJson });
   const cache = new Map();
   let timer;
   let scanning = false;

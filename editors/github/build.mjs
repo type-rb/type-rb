@@ -1,26 +1,23 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { build } from "esbuild";
 
-const require = createRequire(import.meta.url);
 const packageDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(packageDirectory, "../..");
 const outputPath = resolve(packageDirectory, "typerb-github.user.js");
 const checkOnly = process.argv.includes("--check");
 
+const packageJson = JSON.parse(await readFile(resolve(packageDirectory, "package.json"), "utf8"));
 const grammarPath = resolve(repositoryRoot, "syntaxes/typerb.tmLanguage.json");
 const grammarJson = await readFile(grammarPath, "utf8");
-const wasmPath = require.resolve("vscode-oniguruma/release/onig.wasm");
-const wasm = await readFile(wasmPath);
 
 const metadata = `// ==UserScript==
 // @name         TypeRB syntax highlighting for GitHub
 // @namespace    https://type-rb.github.io/
-// @version      0.1.0
+// @version      ${packageJson.version}
 // @description  Highlight TypeRB files, pull request diffs, and Markdown code blocks on GitHub.
 // @author       TypeRB contributors
 // @license      MIT
@@ -35,29 +32,43 @@ const metadata = `// ==UserScript==
 // @noframes
 // ==/UserScript==`;
 
-const notices = await Promise.all([
-  ["TypeRB", resolve(repositoryRoot, "LICENSE")],
-  ["vscode-textmate", require.resolve("vscode-textmate/LICENSE.md")],
-  ["vscode-oniguruma", require.resolve("vscode-oniguruma/LICENSE.txt")],
-  ["vscode-oniguruma third-party notices", require.resolve("vscode-oniguruma/NOTICES.txt")]
-].map(async ([name, path]) => `\n${name}\n${"=".repeat(name.length)}\n${await readFile(path, "utf8")}`));
+function packageRootFromInput(input) {
+  const normalized = input.replaceAll("\\", "/");
+  const marker = "node_modules/";
+  const markerIndex = normalized.lastIndexOf(marker);
+  if (markerIndex < 0) {
+    return null;
+  }
+  const parts = normalized.slice(markerIndex + marker.length).split("/");
+  const name = parts[0].startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+  return resolve(packageDirectory, normalized.slice(0, markerIndex + marker.length) + name);
+}
 
-const licenseBanner = `/*
-Bundled license notices
-${notices.join("\n").replaceAll("*/", "* /")}
-*/`;
+async function packageNotice(packageRoot) {
+  const manifest = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8"));
+  const candidates = ["LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "LICENCE.md"];
+  for (const candidate of candidates) {
+    const contents = await readFile(resolve(packageRoot, candidate), "utf8").catch(() => null);
+    if (contents) {
+      const heading = `${manifest.name} ${manifest.version}`;
+      return `\n${heading}\n${"=".repeat(heading.length)}\n${contents}`;
+    }
+  }
+  throw new Error(`No bundled license file found for ${manifest.name}`);
+}
 
 const result = await build({
+  absWorkingDir: packageDirectory,
   entryPoints: [resolve(packageDirectory, "src/main.js")],
   bundle: true,
   charset: "utf8",
   format: "iife",
   legalComments: "none",
+  metafile: true,
   minify: true,
   platform: "browser",
   target: ["chrome120", "firefox128"],
   write: false,
-  banner: { js: `${metadata}\n${licenseBanner}` },
   plugins: [{
     name: "typerb-assets",
     setup(builder) {
@@ -66,7 +77,7 @@ const result = await build({
         namespace: "typerb"
       }));
       builder.onLoad({ filter: /^assets$/, namespace: "typerb" }, () => ({
-        contents: `export const grammarJson = ${JSON.stringify(grammarJson)};\nexport const onigWasmBase64 = ${JSON.stringify(wasm.toString("base64"))};`,
+        contents: `export const grammarJson = ${JSON.stringify(grammarJson)};`,
         loader: "js"
       }));
     }
@@ -74,7 +85,18 @@ const result = await build({
 });
 
 assert.equal(result.outputFiles.length, 1, "expected one bundled userscript");
-const bundled = `${result.outputFiles[0].text.trimEnd()}\n`;
+const packageRoots = [...new Set(
+  Object.keys(result.metafile.inputs).map(packageRootFromInput).filter(Boolean)
+)].sort();
+const notices = [
+  `\nTypeRB\n======\n${await readFile(resolve(repositoryRoot, "LICENSE"), "utf8")}`,
+  ...await Promise.all(packageRoots.map(packageNotice))
+];
+const licenseBanner = `/*
+Bundled license notices
+${notices.join("\n").replaceAll("*/", "* /")}
+*/`;
+const bundled = `${metadata}\n${licenseBanner}\n${result.outputFiles[0].text.trimEnd()}\n`;
 
 if (checkOnly) {
   const committed = await readFile(outputPath, "utf8").catch(() => "");

@@ -11,7 +11,9 @@ GitHub pages before TypeRB is available through GitHub Linguist.
 3. Review the script and confirm the Tampermonkey installation prompt.
 
 Tampermonkey checks the same URL for version updates. The userscript is
-self-contained: it does not load code, the grammar, or WebAssembly from a CDN.
+self-contained: it does not load code or the grammar from a CDN. It uses a
+JavaScript regular expression engine so GitHub's Content Security Policy does
+not need to permit WebAssembly compilation.
 
 ## Supported GitHub surfaces
 
@@ -53,8 +55,10 @@ npm test --prefix editors/github
 Run `npm run fixture --prefix editors/github` to serve local blob, Markdown,
 and pull request fixtures for browser-level checks.
 
-The build embeds [`../../syntaxes/typerb.tmLanguage.json`](../../syntaxes/typerb.tmLanguage.json),
-`vscode-textmate`, and `vscode-oniguruma` into
-[`typerb-github.user.js`](typerb-github.user.js). Commit the rebuilt userscript
-whenever its source, dependency versions, metadata version, or canonical
-grammar changes. Bundled license notices are included in the generated file.
+The build embeds
+[`../../syntaxes/typerb.tmLanguage.json`](../../syntaxes/typerb.tmLanguage.json),
+`@shikijs/vscode-textmate`, and the Shiki JavaScript regular expression engine
+into [`typerb-github.user.js`](typerb-github.user.js). Commit the rebuilt
+userscript whenever its source, dependency versions, metadata version, or
+canonical grammar changes. Bundled license notices are included in the
+generated file.

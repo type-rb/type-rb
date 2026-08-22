@@ -1,20 +1,16 @@
-import oniguruma from "vscode-oniguruma";
-import textmate from "vscode-textmate";
+import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
+import * as textmate from "@shikijs/vscode-textmate";
 
-let onigurumaReady;
-
-function decodeBase64(value) {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-function wasmBuffer(value) {
-  const bytes = typeof value === "string" ? decodeBase64(value) : value;
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+function createOnigLib() {
+  const engine = createJavaScriptRegexEngine({ target: "ES2024" });
+  return {
+    createOnigScanner(patterns) {
+      return engine.createScanner(patterns);
+    },
+    createOnigString(source) {
+      return engine.createString(source);
+    }
+  };
 }
 
 function tokenClass(scopes) {
@@ -72,24 +68,15 @@ function segmentsForTokens(line, tokens) {
   return segments;
 }
 
-export async function createTextMateHighlighter({ grammarJson, onigWasm }) {
-  onigurumaReady ??= oniguruma.loadWASM(wasmBuffer(onigWasm));
-  await onigurumaReady;
-
+export async function createTextMateHighlighter({ grammarJson }) {
+  const rawGrammar = JSON.parse(grammarJson);
   const registry = new textmate.Registry({
-    onigLib: Promise.resolve({
-      createOnigScanner(sources) {
-        return new oniguruma.OnigScanner(sources);
-      },
-      createOnigString(source) {
-        return new oniguruma.OnigString(source);
-      }
-    }),
-    async loadGrammar(scopeName) {
+    onigLib: createOnigLib(),
+    loadGrammar(scopeName) {
       if (scopeName !== "source.trb") {
         return null;
       }
-      return textmate.parseRawGrammar(grammarJson, "typerb.tmLanguage.json");
+      return rawGrammar;
     }
   });
   const grammar = await registry.loadGrammar("source.trb");

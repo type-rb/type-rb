@@ -110,11 +110,17 @@ const server = createServer((request, response) => {
     return;
   }
   if (/\/pull\/\d+\/(?:files|changes)\/?$/.test(url.pathname)) {
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.writeHead(200, {
+      "content-security-policy": "script-src 'self'",
+      "content-type": "text/html; charset=utf-8"
+    });
     response.end(pullRequestPage(!url.pathname.includes("/pull/2/")));
     return;
   }
-  response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  response.writeHead(200, {
+    "content-security-policy": "script-src 'self'",
+    "content-type": "text/html; charset=utf-8"
+  });
   response.end(blobPage());
 });
 
