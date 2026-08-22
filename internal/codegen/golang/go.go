@@ -224,7 +224,7 @@ func (g *generator) importStatement(imported *ir.Import) {
 	if strings.TrimSuffix(imported.Path, "/index") == "trb/http" {
 		alias = "__trb_http"
 	}
-	g.requireImport(importPath, alias)
+	alias = g.requireSourceImport(importPath, alias)
 	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
 		g.typeAliases[symbol] = goImportAlias(alias)
 		g.typeKinds[symbol] = imported.SymbolKinds[symbol]
@@ -249,6 +249,31 @@ func (g *generator) requireImport(importPath, alias string) {
 	if importPath != "" {
 		g.imports[importPath] = alias
 	}
+}
+
+func (g *generator) requireSourceImport(importPath, alias string) string {
+	if imported, exists := g.imports[importPath]; exists {
+		return imported
+	}
+	candidate := goImportAlias(alias)
+	occupied := map[string]bool{}
+	for path, imported := range g.imports {
+		if path == importPath || imported == "_" {
+			continue
+		}
+		if imported == "" {
+			imported = pathpkg.Base(path)
+		}
+		occupied[goImportAlias(imported)] = true
+	}
+	if occupied[candidate] {
+		candidate = "__trb_import_" + hex.EncodeToString([]byte(importPath))
+		for occupied[candidate] {
+			candidate += "_"
+		}
+	}
+	g.imports[importPath] = candidate
+	return candidate
 }
 
 func (g *generator) statement(statement ir.Statement) {
@@ -2369,6 +2394,16 @@ func (g *generator) referenceAlias(reference *ir.Reference) string {
 	}
 	if directory == g.currentDirectory() {
 		return ""
+	}
+	importPath := directory
+	if g.goModule != "" {
+		importPath = pathpkg.Join(g.goModule, directory)
+	}
+	if alias, exists := g.imports[importPath]; exists {
+		if alias == "" {
+			alias = pathpkg.Base(importPath)
+		}
+		return goImportAlias(alias)
 	}
 	alias := reference.Alias
 	if alias == "" {

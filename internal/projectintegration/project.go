@@ -10,14 +10,19 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/official"
+	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/packageextensionhost"
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
 type Source struct {
-	Filename   string
-	ModulePath string
-	Program    *ast.Program
+	Filename        string
+	ModulePath      string
+	Program         *ast.Program
+	CompilerOwned   bool
+	Official        bool
+	ExternalPackage bool
 }
 
 type Context struct {
@@ -41,10 +46,16 @@ type Contribution struct {
 	Extension     ir.Extension
 	MethodTargets map[string]map[string]string
 	AllPrograms   bool
+	Generation    *packageextension.ProjectGenerationResponse
 }
 
 type Analysis struct {
 	contributions []Contribution
+}
+
+type GeneratedSource struct {
+	Provider string
+	Source   packageextension.ProjectGeneratedSource
 }
 
 type incrementalLoweringExtension interface {
@@ -76,6 +87,11 @@ func Analyze(context Context) (Analysis, []Issue, error) {
 	sort.Strings(packageNames)
 	analysis := Analysis{}
 	extensionOwners := map[string]string{}
+	generationOwners := map[string]string{}
+	sourcesByModule := map[string]Source{}
+	for _, source := range context.Sources {
+		sourcesByModule[source.ModulePath] = source
+	}
 	var issues []Issue
 	for _, packageName := range packageNames {
 		definition, _ := official.Lookup(packageName)
@@ -87,6 +103,29 @@ func Analyze(context Context) (Analysis, []Issue, error) {
 			return Analysis{}, nil, fmt.Errorf("official package %s declares unknown project provider %s", packageName, definition.ProjectProvider)
 		}
 		contribution, providerIssues := implementation(context)
+		if contribution.Generation != nil {
+			generation := *contribution.Generation
+			if err := packageextension.ValidateProjectGenerationResponse(generation); err != nil {
+				return Analysis{}, nil, fmt.Errorf("project provider %s returned invalid generated source response: %w", definition.ProjectProvider, err)
+			}
+			if generation.Provider != definition.ProjectProvider {
+				return Analysis{}, nil, fmt.Errorf("project provider %s returned generated source response for %s", definition.ProjectProvider, generation.Provider)
+			}
+			if owner := generationOwners[generation.Provider]; owner != "" {
+				return Analysis{}, nil, fmt.Errorf("official packages %s and %s returned generated sources for the same project provider %s", owner, packageName, generation.Provider)
+			}
+			generationOwners[generation.Provider] = packageName
+			for _, generatedIssue := range generation.Issues {
+				source, exists := sourcesByModule[generatedIssue.ModulePath]
+				if !exists {
+					return Analysis{}, nil, fmt.Errorf("project provider %s returned an issue for unknown module %s", generation.Provider, generatedIssue.ModulePath)
+				}
+				providerIssues = append(providerIssues, Issue{
+					Filename: source.Filename, Message: generatedIssue.Message,
+					Span: packageextensionhost.ImportSourceSpan(generatedIssue.Span),
+				})
+			}
+		}
 		if contribution.Extension != nil {
 			extensionName := contribution.Extension.ExtensionName()
 			if extensionName != definition.ProjectProvider {
@@ -110,6 +149,28 @@ func Analyze(context Context) (Analysis, []Issue, error) {
 		return issues[i].Message < issues[j].Message
 	})
 	return analysis, issues, nil
+}
+
+func (a Analysis) GeneratedSources() []GeneratedSource {
+	var result []GeneratedSource
+	for _, contribution := range a.contributions {
+		if contribution.Generation == nil {
+			continue
+		}
+		for _, source := range contribution.Generation.Sources {
+			result = append(result, GeneratedSource{Provider: contribution.Generation.Provider, Source: source})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Provider != result[j].Provider {
+			return result[i].Provider < result[j].Provider
+		}
+		if result[i].Source.ModulePath != result[j].Source.ModulePath {
+			return result[i].Source.ModulePath < result[j].Source.ModulePath
+		}
+		return result[i].Source.ID < result[j].Source.ID
+	})
+	return result
 }
 
 func (a Analysis) Apply(program *ir.Program, entrypoint bool) {

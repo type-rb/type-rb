@@ -240,7 +240,7 @@ The initial declaration catalog can describe:
 
 A declaration may name an opaque `runtimeOperation`, but only bundled compiler
 backends can implement those operation names today. ORM runtime manifests and
-Job payload manifests, retry policy, and worker dispatch use separate bundled
+Job persistence, retry policy, and worker lifecycle use separate bundled
 runtime paths rather than becoming declaration fields. These protocols
 therefore narrow the declaration boundary; they do not yet make ORM or Jobs an
 ordinary external package or define a public runtime adapter ABI.
@@ -255,6 +255,42 @@ declaration facts without introducing an arbitrary provider-data bag. The
 remaining ORM and Jobs runtime integrations can now guide a separate, minimal
 runtime adapter ABI. Capability negotiation and sandboxing remain deferred
 until an external provider boundary is justified.
+
+### Experimental bundled project source generation
+
+The Project Generated Source Protocol is a second versioned, data-only
+boundary for bundled project providers. A version 1 response contains the
+provider identity and deterministic TypeRB fragments. Each fragment has a
+stable ID, the path of an existing project module, ordinary TypeRB source,
+required named imports, and an authored origin span. A response may also
+contain located issues. It cannot create a standalone virtual module or return
+backend source, parser nodes, typed IR, opaque resources, filesystem handles,
+or runtime import mappings.
+
+The compiler host validates provider ownership and target modules, removes
+stale fragments by stable identity, and appends the current fragments to their
+owning source units. They then pass through the ordinary parser, resolver,
+checker, typed IR, effect analysis, source mapping, and all three backends.
+Diagnostics and generated source-map locations are mapped to the authored
+origin. Fragment source and identity participate in compiler cache identity;
+project edits currently re-enter full project analysis conservatively when a
+project-generated fragment is active.
+
+Jobs worker dispatch is the first consumer. The Jobs provider generates one
+portable dispatcher that validates payload versions, decodes scalar payload
+arguments, invokes the typed Job, and returns `JobResult`. Go, Ruby, and Bun
+workers call that compiled function from thin target-specific panic or
+exception wrappers. SQL persistence, claims, heartbeats, retry transitions,
+signals, and worker process lifecycle remain adapter/backend responsibilities.
+This split exercises a reusable generated-source capability without turning
+Jobs metadata into generic protocol fields or prematurely defining a public
+runtime adapter ABI.
+
+This protocol is still bundled and experimental, not a package-manifest
+capability or external plugin API. Like call specialization below, its required
+imports use ordinary named imports. Namespace-stable public type identities,
+capability negotiation, isolation, and compatibility policy remain necessary
+before independent packages can use it safely.
 
 ### Experimental bundled call specialization
 

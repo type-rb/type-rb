@@ -153,7 +153,10 @@ queue, and `discard` removes a non-running Job.
 Jobs may call other portable packages, including `trb/orm`. The compiler-owned
 execution scope crosses the worker dispatch boundary, so signal cancellation
 can reach nested database and HTTP operations without adding a public context
-parameter to `perform`.
+parameter to `perform`. Payload decoding and typed Job selection are generated
+once as portable TypeRB and compiled in every mode; the selected adapter and
+backend retain queue persistence, claims, retries, signals, and process
+lifecycle.
 
 In a configured project REPL, import a Job and call the same derived methods:
 

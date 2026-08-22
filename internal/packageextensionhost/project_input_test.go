@@ -8,7 +8,18 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/packageextension"
 	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/token"
 )
+
+func TestProjectSourceSpanBoundaryRoundTrips(t *testing.T) {
+	span := token.Span{
+		Start: token.Position{Offset: 4, Line: 2, Column: 3},
+		End:   token.Position{Offset: 11, Line: 2, Column: 10},
+	}
+	if roundTrip := ImportSourceSpan(ExportSourceSpan(span)); roundTrip != span {
+		t.Fatalf("source span round trip=%#v, want %#v", roundTrip, span)
+	}
+}
 
 func TestExportProjectDeclarationInputCopiesDeclarationFacts(t *testing.T) {
 	ids := parseProjectInputTest(t, "contracts/ids", `type ReceiptID = Integer

@@ -247,22 +247,14 @@ func (g *generator) jobsAdmin(config jobssql.Config) {
 	g.b.WriteByte('\n')
 }
 
-func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
+func (g *generator) jobsWorker(_ *jobs.Manifest, config jobssql.Config) {
 	jobsAlias := g.jobsRuntimeAlias()
-	resultAlias := ""
-	for _, job := range manifest.Jobs {
-		if job.PerformKind != jobs.PerformJobResult {
-			continue
-		}
-		resultAlias = g.typeAliases["Result"]
-		if resultAlias == "" {
-			resultAlias = "__trb_result"
-			g.requireImport(pathpkg.Join(g.goModule, "trb/std/result"), resultAlias)
-		}
-		break
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+		g.requireImport(pathpkg.Join(g.goModule, "trb/std/result"), resultAlias)
 	}
 	g.requireImport("context", "trbcontext")
-	g.requireImport("encoding/json", "")
 	g.requireImport("fmt", "")
 	g.requireImport("os", "")
 	g.requireImport("os/signal", "")
@@ -270,52 +262,16 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.requireImport("syscall", "")
 	g.requireImport("time", "stdtime")
 
-	aliases := g.jobsModuleAliases(manifest)
-	g.line("func trbJobsDispatch(__trbScope trbcontext.Context, jobName string, payload string, payloadVersion int) (result error) {")
+	dispatchArguments := "jobName, payload, payloadVersion"
+	if g.execution.Method(g.modulePath, "", "__trb_jobs_dispatch") {
+		dispatchArguments = "__trbScope, " + dispatchArguments
+	}
+	g.line("func trbJobsExecuteClaim(__trbScope trbcontext.Context, jobName string, payload string, payloadVersion int) (result error) {")
 	g.indent++
 	g.line("defer func() { if recovered := recover(); recovered != nil { result = fmt.Errorf(\"job panic: %v\", recovered) } }()")
-	g.line("if payloadVersion != 1 { return fmt.Errorf(\"unsupported job payload version %d\", payloadVersion) }")
-	g.line("var arguments []json.RawMessage")
-	g.line("if err := json.Unmarshal([]byte(payload), &arguments); err != nil { return fmt.Errorf(\"decode job payload: %w\", err) }")
-	g.line("switch jobName {")
-	for _, job := range manifest.Jobs {
-		g.line("case " + strconv.Quote(job.Name) + ":")
-		g.indent++
-		g.line("if len(arguments) != " + strconv.Itoa(len(job.Parameters)) + " { return fmt.Errorf(\"job " + job.Name + " expects " + strconv.Itoa(len(job.Parameters)) + " arguments, got %d\", len(arguments)) }")
-		argumentNames := make([]string, len(job.Parameters))
-		for index, parameter := range job.Parameters {
-			argumentName := "argument" + strconv.Itoa(index)
-			argumentNames[index] = argumentName
-			wireType := parameter.WireType
-			if wireType.Kind == "" {
-				wireType = parameter.Type
-			}
-			g.line("var " + argumentName + " " + g.goType(wireType))
-			g.line("if err := json.Unmarshal(arguments[" + strconv.Itoa(index) + "], &" + argumentName + "); err != nil { return fmt.Errorf(\"decode " + job.Name + "." + parameter.Name + ": %w\", err) }")
-		}
-		qualifier := aliases[job.ModulePath]
-		if qualifier != "" {
-			qualifier += "."
-		}
-		if g.execution.Method(job.ModulePath, job.Name, "perform") {
-			argumentNames = append([]string{"__trbScope"}, argumentNames...)
-		}
-		call := qualifier + "New" + goIdentifier(job.Name, true) + "()." + goMethodName("perform") + "(" + strings.Join(argumentNames, ", ") + ")"
-		switch job.PerformKind {
-		case jobs.PerformJobResult:
-			g.line("execution := " + call)
-			g.line("if execution.Kind == " + resultAlias + ".ResultErrTag { return fmt.Errorf(\"%s\", execution.ErrError.Message) }")
-		default:
-			g.line(call)
-		}
-		g.line("return nil")
-		g.indent--
-	}
-	g.line("default:")
-	g.indent++
-	g.line("return fmt.Errorf(\"unknown job %s\", jobName)")
-	g.indent--
-	g.line("}")
+	g.line("execution := trbJobsDispatch(" + dispatchArguments + ")")
+	g.line("if execution.Kind == " + resultAlias + ".ResultErrTag { return fmt.Errorf(\"%s\", execution.ErrError.Message) }")
+	g.line("return nil")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -362,7 +318,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.line("execution := make(chan error, 1)")
 	g.line("heartbeatDone := make(chan struct{})")
 	g.line("go func() { ticker := stdtime.NewTicker(heartbeatInterval); defer ticker.Stop(); for { select { case <-heartbeatDone: return; case <-ticker.C: if err := " + jobsAlias + ".TrbJobsHeartbeat(trbcontext.Background(), claim.Id, workerId); err != nil { fmt.Fprintln(os.Stderr, \"trb jobs heartbeat:\", err); return } } } }()")
-	g.line("go func() { execution <- trbJobsDispatch(signalContext, claim.JobName, claim.Payload, claim.PayloadVersion) }()")
+	g.line("go func() { execution <- trbJobsExecuteClaim(signalContext, claim.JobName, claim.Payload, claim.PayloadVersion) }()")
 	g.line("var executionError error")
 	g.line("select {")
 	g.line("case executionError = <-execution:")
@@ -379,29 +335,6 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-}
-
-func (g *generator) jobsModuleAliases(manifest *jobs.Manifest) map[string]string {
-	aliases := map[string]string{}
-	directories := map[string]string{}
-	for _, job := range manifest.Jobs {
-		directory := pathpkg.Dir(job.ModulePath)
-		if directory == "." || directory == g.currentDirectory() {
-			aliases[job.ModulePath] = ""
-			continue
-		}
-		alias := directories[directory]
-		if alias == "" {
-			alias = g.typeAliases[job.Name]
-		}
-		if alias == "" {
-			alias = goImportAlias("trb_job_" + strconv.Itoa(len(directories)))
-			g.requireImport(pathpkg.Join(g.goModule, directory), alias)
-		}
-		directories[directory] = alias
-		aliases[job.ModulePath] = alias
-	}
-	return aliases
 }
 
 func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
