@@ -449,6 +449,10 @@ end
 	if !strings.Contains(string(main.Output), "trb_jobs_run_worker_or_command") || !strings.Contains(string(job.Output), "return JOBS_ADAPTER.enqueue(__trb_scope, request)") || strings.Contains(string(job.Output), "TrbJobsRuntime.enqueue") || strings.Count(string(configuration.Output), "JOBS_ADAPTER = SQLAdapter.new(") != 1 || !strings.Contains(string(job.Output), "def self.perform_in") || !strings.Contains(string(job.Output), "def self.perform_at") || !strings.Contains(string(runtime.Output), "request_value.payload_version") || !strings.Contains(string(runtime.Output), "module TrbJobsRuntime") {
 		t.Fatalf("Ruby jobs runtime is incomplete:\nmain=%s\njob=%s\nconfiguration=%s\nruntime=%s", main.Output, job.Output, configuration.Output, runtime.Output)
 	}
+	rubyEnqueue := generatedSection(string(runtime.Output), "def enqueue(scope,", "def claim(")
+	if checks := strings.Count(rubyEnqueue, "scope.check!"); checks != 1 {
+		t.Fatalf("Ruby enqueue must check cancellation before persistence, not report cancellation after a known commit; checks=%d\nenqueue=%s", checks, rubyEnqueue)
+	}
 }
 
 func TestCompileProjectGeneratesTypeScriptBunJobRuntime(t *testing.T) {
@@ -499,6 +503,22 @@ end
 	if !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), "return (await JOBS_ADAPTER.enqueue(__trbScope, request))") || strings.Contains(string(job.Output), "trbJobsEnqueue(") || strings.Count(string(configuration.Output), "export const JOBS_ADAPTER:") != 1 || strings.Count(string(configuration.Output), "new SQLAdapter(") != 1 || !strings.Contains(string(job.Output), "function perform_in") || !strings.Contains(string(job.Output), "function perform_at") || !strings.Contains(string(runtime.Output), "requestValue.payload_version") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") || !strings.Contains(string(runtime.Output), "timestamp.slice(0, 23)") || !strings.Contains(string(runtime.Output), `strftime('%Y-%m-%d %H:%M:%f', 'now')`) {
 		t.Fatalf("TypeScript jobs runtime is incomplete:\nmain=%s\njob=%s\nconfiguration=%s\nruntime=%s", main.Output, job.Output, configuration.Output, runtime.Output)
 	}
+	typeScriptEnqueue := generatedSection(string(runtime.Output), "export async function trbJobsEnqueue(", "export async function trbJobsClaim(")
+	if checks := strings.Count(typeScriptEnqueue, "signal?.aborted"); checks != 1 {
+		t.Fatalf("TypeScript enqueue must check cancellation before persistence, not report cancellation after a known commit; checks=%d\nenqueue=%s", checks, typeScriptEnqueue)
+	}
+}
+
+func generatedSection(output, start, end string) string {
+	startIndex := strings.Index(output, start)
+	if startIndex < 0 {
+		return ""
+	}
+	endIndex := strings.Index(output[startIndex+len(start):], end)
+	if endIndex < 0 {
+		return output[startIndex:]
+	}
+	return output[startIndex : startIndex+len(start)+endIndex]
 }
 
 func TestCompileProjectRejectsTypeScriptJobsOutsideBun(t *testing.T) {

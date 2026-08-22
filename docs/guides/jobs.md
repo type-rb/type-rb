@@ -51,6 +51,15 @@ propagates an enqueue error from another Result-returning function, while
 distinguishes serialization, invalid arguments, cancellation, and adapter
 failures.
 
+Cancellation is checked before an adapter submits durable work. Once the
+native storage operation reports a successful commit, the adapter returns
+`Ok` even if the execution scope is cancelled immediately afterward; a known
+success must not be rewritten as `Cancelled`. A storage client can still
+report cancellation after a request has reached the server while its commit
+outcome is unknown. `Cancelled` therefore does not prove that no Job was
+enqueued, and callers must not assume that an unconditional retry cannot
+duplicate work.
+
 `perform_in` schedules relative to now; `perform_at` accepts an absolute
 portable `Instant`. A past `Instant` is ready immediately. `queue`, `priority`,
 and `maximum_attempts` are compile-time Job settings. The
