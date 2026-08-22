@@ -21,11 +21,20 @@ func loadJobs(programs []*ast.Program, _ Context) (*declaration.Catalog, error) 
 }
 
 func loadJobDeclarations(programs []*ast.Program) (packageextension.DeclarationCatalog, error) {
-	catalog, err := jobsintegration.Declarations(programs)
+	input, err := jobDeclarationInput(programs)
+	if err != nil {
+		return packageextension.DeclarationCatalog{}, err
+	}
+	catalog, err := jobsintegration.Declarations(input)
 	if err != nil {
 		return packageextension.DeclarationCatalog{}, err
 	}
 	return packageextensionhost.ExportDeclarationCatalog(jobsintegration.PackageName, catalog)
+}
+
+func jobDeclarationInput(programs []*ast.Program) (packageextension.ProjectDeclarationInput, error) {
+	relevant := providerPrograms(programs, jobsProviderProgram)
+	return packageextensionhost.ExportProjectDeclarationInput(jobsintegration.PackageName, relevant)
 }
 
 func jobsProviderInputs(programs []*ast.Program, _ Context) providerInputSnapshot {

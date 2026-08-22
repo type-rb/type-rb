@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
-	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/types"
@@ -170,42 +169,6 @@ func jobEnqueueResultType() types.Type {
 		Name: "Result",
 		Args: []types.Type{types.FromName("JobReference"), types.FromName("EnqueueError")},
 	}
-}
-
-func Declarations(programs []*ast.Program) (*declaration.Catalog, error) {
-	jobs, err := discoverJobs(programs, func(_ *ast.Program, typ types.Type, _ aliasResolver) bool {
-		return initialArgumentType(typ) || potentialAliasType(typ)
-	})
-	if err != nil {
-		return nil, err
-	}
-	catalog := declaration.NewCatalog()
-	for _, job := range jobs {
-		declared := declaration.NewType(job.Name, "Job")
-		parameters := make([]declaration.Parameter, len(job.Parameters))
-		for index, parameter := range job.Parameters {
-			parameters[index] = declaration.Parameter{Name: parameter.Name, Type: parameter.Type}
-		}
-		declared.ClassMembers["perform_later"] = declaration.Member{
-			Name: "perform_later", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_later",
-			Parameters: parameters, Return: jobEnqueueResultType(),
-			Class: true, Provider: PackageName,
-		}
-		delayedParameters := append([]declaration.Parameter{{Name: "delay", Type: types.FromName("Duration")}}, parameters...)
-		declared.ClassMembers["perform_in"] = declaration.Member{
-			Name: "perform_in", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_in",
-			Parameters: delayedParameters, Return: jobEnqueueResultType(),
-			Class: true, Provider: PackageName,
-		}
-		scheduledParameters := append([]declaration.Parameter{{Name: "scheduled_at", Type: types.FromName("Instant")}}, parameters...)
-		declared.ClassMembers["perform_at"] = declaration.Member{
-			Name: "perform_at", Kind: declaration.Method, Intrinsic: "trb.jobs.perform_at",
-			Parameters: scheduledParameters, Return: jobEnqueueResultType(),
-			Class: true, Provider: PackageName,
-		}
-		catalog.Types[job.Name] = declared
-	}
-	return catalog, nil
 }
 
 func Analyze(programs []*ast.Program, resolutions map[string]resolver.Result) (*Manifest, error) {
