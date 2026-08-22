@@ -16,6 +16,8 @@ import (
 
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/project"
 )
 
@@ -849,6 +851,76 @@ func TestReplStandardCandidatesIncludeDateAndClassMembers(t *testing.T) {
 	t.Fatal("Date completion candidate is missing")
 }
 
+func TestReplCompletionCandidatesIncludeProjectDeclarationsAtStartup(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if mode == "go" {
+				config.Go.Module = "example.com/type-rb/repl-project-candidates"
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			options, err := compilerOptions(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const sessionModule = "__trb_repl__"
+			sessionPackage := ""
+			if config.Go != nil {
+				sessionPackage = config.Go.RootPackage
+			}
+			options.AllowUnusedImports = true
+			options.InteractiveModule = sessionModule
+			artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
+				{
+					Filename:   filepath.Join(config.SourcePath(), "models", "insurer.trb"),
+					ModulePath: "models/insurer",
+					Package:    sessionPackage,
+					Source:     []byte("class Insurer\n\tdef self.first(): Insurer?\n\t\treturn nil\n\tend\nend\n"),
+				},
+				{
+					Filename:   filepath.Join(config.SourcePath(), ".trb-repl.trb"),
+					ModulePath: sessionModule,
+					Package:    sessionPackage,
+				},
+			}, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			imports := uniqueReplImports(artifacts, sessionModule, mode)
+			candidates, err := replCompletionCandidates(config, artifacts, imports, sessionModule, sessionPackage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			programs := make([]*ir.Program, 0, len(artifacts))
+			for _, artifact := range artifacts {
+				programs = append(programs, artifact.IR)
+			}
+			service := languageservice.New(mode)
+			service.SetCandidates(candidates)
+			service.Update(programs, sessionModule)
+			if !hasCompletionLabel(service.Complete("Insur", len("Insur")), "Insurer") {
+				t.Fatal("startup completion is missing Insurer")
+			}
+			if !hasCompletionLabel(service.Complete("Insurer.fi", len("Insurer.fi")), "first") {
+				t.Fatal("startup member completion is missing Insurer.first()")
+			}
+		})
+	}
+}
+
+func hasCompletionLabel(items []languageservice.CompletionItem, label string) bool {
+	for _, item := range items {
+		if item.Label == label {
+			return true
+		}
+	}
+	return false
+}
+
 func TestUniqueReplImportsOmitProjectAndStandardNameConflicts(t *testing.T) {
 	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
 		{Filename: "models/date.trb", ModulePath: "models/date", Package: "main", Source: []byte("record Date\nend\n")},
@@ -857,11 +929,18 @@ func TestUniqueReplImportsOmitProjectAndStandardNameConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, imported := range uniqueReplImports(artifacts, "__trb_repl__", "go") {
+	imports := uniqueReplImports(artifacts, "__trb_repl__", "go")
+	for _, imported := range imports {
 		for _, symbol := range imported.symbols {
 			if symbol == "Date" {
 				t.Fatalf("ambiguous Date was auto-imported from %s", imported.path)
 			}
+		}
+	}
+	candidates := replProjectCandidates(artifacts, imports, "__trb_repl__")
+	for _, candidate := range candidates.Symbols {
+		if candidate.Name == "Date" {
+			t.Fatal("ambiguous Date was offered as a completion candidate")
 		}
 	}
 }
