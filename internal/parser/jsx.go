@@ -101,7 +101,9 @@ func (p *jsxParser) element() (*ast.JSXElement, bool) {
 					return nil, false
 				}
 				attribute.Value = &ast.Literal{Base: ast.Base{SourceSpan: p.span(valueStart, p.pos)}, Kind: ast.StringLiteral, Raw: raw}
+				attribute.ValueSpan = p.span(valueStart, p.pos)
 			case p.starts("{"):
+				valueStart := p.pos
 				inner, innerStart, ok := p.braced()
 				if !ok {
 					return nil, false
@@ -111,6 +113,7 @@ func (p *jsxParser) element() (*ast.JSXElement, bool) {
 					return nil, false
 				}
 				attribute.Value = value
+				attribute.ValueSpan = p.span(valueStart, p.pos)
 			default:
 				return nil, false
 			}

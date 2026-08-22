@@ -458,9 +458,10 @@ func (*JSXElement) jsxChildNode()   {}
 
 type JSXAttribute struct {
 	Base
-	Name    string
-	Value   Expression
-	Boolean bool
+	Name      string
+	Value     Expression
+	ValueSpan token.Span
+	Boolean   bool
 }
 
 type JSXChild interface {

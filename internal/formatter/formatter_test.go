@@ -106,6 +106,18 @@ func TestFormatKeepsSignificantJSXTextInline(t *testing.T) {
 	}
 }
 
+func TestFormatPreservesParenthesizedJSXExpressions(t *testing.T) {
+	source := []byte("def Sum():ReactNode\nreturn <Text value={ (left + right).to_s() }>{ (left + right).to_s() }</Text>\nend\n")
+	want := "def Sum(): ReactNode\n\treturn <Text value={(left + right).to_s()}>{(left + right).to_s()}</Text>\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("parenthesized JSX expression changed\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
 func TestFormatPreservesHeredocBody(t *testing.T) {
 	source := []byte("class Query\ndef sql():String\nreturn <<~SQL\n  SELECT  *\n+    FROM posts # SQL comment, not TypeRB\nSQL\nend\nend\n")
 	formatted, diagnostics := Format(source)

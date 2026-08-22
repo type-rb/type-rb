@@ -35,7 +35,7 @@ func writeJSXElement(out *strings.Builder, root token.Token, element *ast.JSXEle
 			continue
 		}
 		out.WriteByte('{')
-		out.WriteString(formatJSXEmbeddedExpression(root, attribute.Value))
+		out.WriteString(formatJSXEmbeddedExpression(root, attribute.ValueSpan, attribute.Value))
 		out.WriteByte('}')
 	}
 
@@ -66,7 +66,7 @@ func writeJSXElement(out *strings.Builder, root token.Token, element *ast.JSXEle
 			writeJSXElement(out, root, child, baseIndent+1, false)
 		case *ast.JSXExpression:
 			out.WriteByte('{')
-			out.WriteString(formatJSXEmbeddedExpression(root, child.Value))
+			out.WriteString(formatJSXEmbeddedExpression(root, child.Span(), child.Value))
 			out.WriteByte('}')
 		case *ast.JSXText:
 			out.WriteString(child.Text)
@@ -83,7 +83,7 @@ func writeFlatJSXChild(out *strings.Builder, root token.Token, child ast.JSXChil
 		writeJSXElement(out, root, child, baseIndent, true)
 	case *ast.JSXExpression:
 		out.WriteByte('{')
-		out.WriteString(formatJSXEmbeddedExpression(root, child.Value))
+		out.WriteString(formatJSXEmbeddedExpression(root, child.Span(), child.Value))
 		out.WriteByte('}')
 	case *ast.JSXText:
 		out.WriteString(child.Text)
@@ -115,13 +115,16 @@ func jsxNeedsMultiline(element *ast.JSXElement) bool {
 	return false
 }
 
-func formatJSXEmbeddedExpression(root token.Token, expression ast.Expression) string {
+func formatJSXEmbeddedExpression(root token.Token, sourceSpan token.Span, expression ast.Expression) string {
 	if expression == nil {
 		return ""
 	}
-	source, ok := jsxSourceForSpan(root, expression.Span())
+	source, ok := jsxBracedSourceForSpan(root, sourceSpan)
 	if !ok {
-		return ""
+		source, ok = jsxSourceForSpan(root, expression.Span())
+		if !ok {
+			return ""
+		}
 	}
 	source = strings.TrimSpace(source)
 	if strings.ContainsAny(source, "\r\n") {
@@ -138,6 +141,14 @@ func formatJSXEmbeddedExpression(root token.Token, expression ast.Expression) st
 		}
 	}
 	return formatTokensAt(code, 0, true)
+}
+
+func jsxBracedSourceForSpan(root token.Token, span token.Span) (string, bool) {
+	source, ok := jsxSourceForSpan(root, span)
+	if !ok || len(source) < 2 || source[0] != '{' || source[len(source)-1] != '}' {
+		return "", false
+	}
+	return source[1 : len(source)-1], true
 }
 
 func jsxSourceForSpan(root token.Token, span token.Span) (string, bool) {
