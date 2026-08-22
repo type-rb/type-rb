@@ -65,16 +65,16 @@ end
 		"payload_values: Array<JsonValue> := [JsonValue::Integer(order_id), JsonValue::Float(ratio)]",
 		"stringify(JsonValue::Array(payload_values))",
 		"maximum_attempts: nil",
-		"return configure_jobs().enqueue(request)",
+		"return JOBS_ADAPTER.enqueue(request)",
 		"if delay.before?(Duration.seconds(0))",
-		"return configure_jobs().enqueue_at(request, Instant.now().add(delay))",
-		"return configure_jobs().enqueue_at(request, scheduled_at)",
+		"return JOBS_ADAPTER.enqueue_at(request, Instant.now().add(delay))",
+		"return JOBS_ADAPTER.enqueue_at(request, scheduled_at)",
 	} {
 		if !strings.Contains(enqueue.Source, expected) {
 			t.Fatalf("generated enqueue source is missing %q:\n%s", expected, enqueue.Source)
 		}
 	}
-	if !hasProjectGenerationImport(enqueue.RequiredImports, "config/jobs", "configure_jobs") {
+	if !hasProjectGenerationImport(enqueue.RequiredImports, "config/jobs", "JOBS_ADAPTER") {
 		t.Fatalf("generated enqueue source did not request the configuration import: %#v", enqueue.RequiredImports)
 	}
 }

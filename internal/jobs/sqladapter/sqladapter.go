@@ -15,7 +15,7 @@ const (
 	PackageName           = "trb/jobs/sql"
 	ModulePath            = "trb/jobs/sql/index"
 	ProjectProvider       = "trb.jobs.sql"
-	ConfigurationFunction = "configure_jobs"
+	ConfigurationConstant = "JOBS_ADAPTER"
 )
 
 type Config struct {
@@ -151,33 +151,26 @@ func ParseConfiguration(program *ast.Program) (Config, error) {
 	if program == nil {
 		return Config{}, fmt.Errorf("jobs configuration is missing")
 	}
-	var method *ast.MethodStatement
+	var binding *ast.VariableStatement
 	for _, statement := range program.Statements {
-		candidate, ok := statement.(*ast.MethodStatement)
-		if !ok || candidate.Name != ConfigurationFunction {
+		candidate, ok := statement.(*ast.VariableStatement)
+		if !ok || candidate.Name != ConfigurationConstant {
 			continue
 		}
-		if method != nil {
-			return Config{}, fmt.Errorf("jobs configuration declares %s more than once", ConfigurationFunction)
+		if binding != nil {
+			return Config{}, fmt.Errorf("jobs configuration declares %s more than once", ConfigurationConstant)
 		}
-		method = candidate
+		binding = candidate
 	}
-	if method == nil {
-		return Config{}, fmt.Errorf("jobs.configuration must define def %s(): JobAdapter", ConfigurationFunction)
+	if binding == nil {
+		return Config{}, fmt.Errorf("jobs.configuration must define %s: JobAdapter := SQLAdapter.new(...)", ConfigurationConstant)
 	}
-	if method.Class || len(method.Parameters) != 0 || method.ReturnType.String() != "JobAdapter" {
-		return Config{}, fmt.Errorf("%s must have signature def %s(): JobAdapter", ConfigurationFunction, ConfigurationFunction)
+	if !binding.Constant || binding.Mutable || binding.Type.String() != "JobAdapter" {
+		return Config{}, fmt.Errorf("%s must be declared as %s: JobAdapter := SQLAdapter.new(...)", ConfigurationConstant, ConfigurationConstant)
 	}
-	if len(method.Body) != 1 {
-		return Config{}, fmt.Errorf("%s must return one SQLAdapter.new(...) expression", ConfigurationFunction)
-	}
-	returned, ok := method.Body[0].(*ast.ReturnStatement)
-	if !ok || returned.Value == nil {
-		return Config{}, fmt.Errorf("%s must return SQLAdapter.new(...)", ConfigurationFunction)
-	}
-	call, ok := returned.Value.(*ast.CallExpression)
+	call, ok := binding.Value.(*ast.CallExpression)
 	if !ok || !sqlAdapterConstructor(call.Callee) {
-		return Config{}, fmt.Errorf("%s must return SQLAdapter.new(...)", ConfigurationFunction)
+		return Config{}, fmt.Errorf("%s must be initialized with SQLAdapter.new(...)", ConfigurationConstant)
 	}
 	config := DefaultConfig()
 	seen := map[string]bool{}

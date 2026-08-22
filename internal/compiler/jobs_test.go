@@ -12,9 +12,7 @@ import (
 const jobsSQLConfigurationSource = `import { JobAdapter } from trb/jobs
 import { SQLAdapter, SQLDialect } from trb/jobs/sql
 
-def configure_jobs(): JobAdapter
-	return SQLAdapter.new(dialect: SQLDialect::SQLite, source: "jobs.sqlite3")
-end
+JOBS_ADAPTER: JobAdapter := SQLAdapter.new(dialect: SQLDialect::SQLite, source: "jobs.sqlite3")
 `
 
 func TestCompileProjectGeneratesTypedGoJobEnqueueRuntime(t *testing.T) {
@@ -69,8 +67,15 @@ end
 		t.Fatalf("main does not call the typed job enqueue wrapper:\n%s", main.Output)
 	}
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
-	if job == nil || !strings.Contains(string(job.Output), "func trbJobsSendReceiptJobRequest(") || !strings.Contains(string(job.Output), "return config.ConfigureJobs().Enqueue(__trbScope, request)") || !strings.Contains(string(job.Output), "return trbJobsSendReceiptJobPerformLater(__trbScope") || strings.Contains(string(job.Output), ".TrbJobsEnqueue(") {
+	if job == nil || !strings.Contains(string(job.Output), "func trbJobsSendReceiptJobRequest(") || !strings.Contains(string(job.Output), "return config.JobsAdapter.Enqueue(__trbScope, request)") || !strings.Contains(string(job.Output), "return trbJobsSendReceiptJobPerformLater(__trbScope") || strings.Contains(string(job.Output), ".TrbJobsEnqueue(") {
 		t.Fatalf("job module does not enqueue through the portable generated helper:\n%s", job.Output)
+	}
+	configuration := artifactForModule(artifacts, "config/jobs")
+	if configuration == nil {
+		t.Fatal("jobs configuration artifact was not generated")
+	}
+	if strings.Count(string(configuration.Output), "var JobsAdapter ") != 1 || strings.Count(string(configuration.Output), "NewSQLAdapter(") != 1 {
+		t.Fatalf("Go jobs adapter is not initialized once at module scope:\n%s", configuration.Output)
 	}
 	runtime := artifactForModule(artifacts, jobssql.ModulePath)
 	if runtime == nil || !strings.Contains(string(runtime.Output), "func (self *SQLAdapter) Enqueue(") || !strings.Contains(string(runtime.Output), "requestValue.PayloadVersion") || !strings.Contains(string(runtime.Output), "func TrbJobsClaimNext") || !strings.Contains(string(runtime.Output), `runAtValue := runAt.Format("2006-01-02 15:04:05.000")`) || !strings.Contains(string(runtime.Output), `strftime('%Y-%m-%d %H:%M:%f', 'now')`) {
@@ -436,9 +441,13 @@ end
 	}
 	main := artifactForModule(artifacts, "main")
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
+	configuration := artifactForModule(artifacts, "config/jobs")
 	runtime := artifactForModule(artifacts, jobssql.ModulePath)
-	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "trb_jobs_run_worker_or_command") || !strings.Contains(string(job.Output), "return configure_jobs().enqueue(__trb_scope, request)") || strings.Contains(string(job.Output), "TrbJobsRuntime.enqueue") || !strings.Contains(string(job.Output), "def self.perform_in") || !strings.Contains(string(job.Output), "def self.perform_at") || !strings.Contains(string(runtime.Output), "request_value.payload_version") || !strings.Contains(string(runtime.Output), "module TrbJobsRuntime") {
-		t.Fatalf("Ruby jobs runtime is incomplete:\nmain=%s\njob=%s\nruntime=%s", main.Output, job.Output, runtime.Output)
+	if main == nil || job == nil || configuration == nil || runtime == nil {
+		t.Fatal("Ruby Jobs artifacts were not generated")
+	}
+	if !strings.Contains(string(main.Output), "trb_jobs_run_worker_or_command") || !strings.Contains(string(job.Output), "return JOBS_ADAPTER.enqueue(__trb_scope, request)") || strings.Contains(string(job.Output), "TrbJobsRuntime.enqueue") || strings.Count(string(configuration.Output), "JOBS_ADAPTER = SQLAdapter.new(") != 1 || !strings.Contains(string(job.Output), "def self.perform_in") || !strings.Contains(string(job.Output), "def self.perform_at") || !strings.Contains(string(runtime.Output), "request_value.payload_version") || !strings.Contains(string(runtime.Output), "module TrbJobsRuntime") {
+		t.Fatalf("Ruby jobs runtime is incomplete:\nmain=%s\njob=%s\nconfiguration=%s\nruntime=%s", main.Output, job.Output, configuration.Output, runtime.Output)
 	}
 }
 
@@ -482,9 +491,13 @@ end
 	}
 	main := artifactForModule(artifacts, "main")
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
+	configuration := artifactForModule(artifacts, "config/jobs")
 	runtime := artifactForModule(artifacts, jobssql.ModulePath)
-	if main == nil || job == nil || runtime == nil || !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), "return (await configure_jobs().enqueue(__trbScope, request))") || strings.Contains(string(job.Output), "trbJobsEnqueue(") || !strings.Contains(string(job.Output), "function perform_in") || !strings.Contains(string(job.Output), "function perform_at") || !strings.Contains(string(runtime.Output), "requestValue.payload_version") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") || !strings.Contains(string(runtime.Output), "timestamp.slice(0, 23)") || !strings.Contains(string(runtime.Output), `strftime('%Y-%m-%d %H:%M:%f', 'now')`) {
-		t.Fatalf("TypeScript jobs runtime is incomplete:\nmain=%s\njob=%s\nruntime=%s", main.Output, job.Output, runtime.Output)
+	if main == nil || job == nil || configuration == nil || runtime == nil {
+		t.Fatal("TypeScript Jobs artifacts were not generated")
+	}
+	if !strings.Contains(string(main.Output), "await trbJobsRunWorkerOrCommand()") || !strings.Contains(string(job.Output), "return (await JOBS_ADAPTER.enqueue(__trbScope, request))") || strings.Contains(string(job.Output), "trbJobsEnqueue(") || strings.Count(string(configuration.Output), "export const JOBS_ADAPTER:") != 1 || strings.Count(string(configuration.Output), "new SQLAdapter(") != 1 || !strings.Contains(string(job.Output), "function perform_in") || !strings.Contains(string(job.Output), "function perform_at") || !strings.Contains(string(runtime.Output), "requestValue.payload_version") || !strings.Contains(string(runtime.Output), "export async function trbJobsClaim") || !strings.Contains(string(runtime.Output), "timestamp.slice(0, 23)") || !strings.Contains(string(runtime.Output), `strftime('%Y-%m-%d %H:%M:%f', 'now')`) {
+		t.Fatalf("TypeScript jobs runtime is incomplete:\nmain=%s\njob=%s\nconfiguration=%s\nruntime=%s", main.Output, job.Output, configuration.Output, runtime.Output)
 	}
 }
 
