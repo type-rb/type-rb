@@ -305,6 +305,12 @@ MySQL and runs the same Job source in generated Go, Ruby, and Bun applications.
 Projects select the adapter through a typed TypeRB composition module rather
 than a string adapter name in `packageOptions`; Job definitions remain
 independent from storage.
+Jobs-derived `perform_later`, `perform_in`, and `perform_at` declarations now
+cross the same validated, mode-independent Declaration Protocol as ORM. Their
+typed arguments, scheduling parameters, enqueue Results, and runtime operation
+names required no Jobs-specific protocol fields. Payload manifests, retry
+policy, generated runtime imports, and worker dispatch remain a separate
+bundled runtime boundary.
 Workers support queues, priorities, retry and failed state, heartbeats, stale
 claim recovery, graceful stop, listing, manual retry, and discard. PostgreSQL
 and MySQL use short locking claims for multiple workers. SQLite is deliberately
