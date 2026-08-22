@@ -237,6 +237,7 @@ type projectAnalysis struct {
 	programs        map[string]*ast.Program
 	catalog         *resolver.Catalog
 	declarations    *declaration.Catalog
+	providerInputs  typeprovider.InputSnapshot
 	resolutions     map[string]resolver.Result
 	checkedPrograms map[string]checker.Result
 	validateBackend bool
@@ -290,6 +291,11 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 		providerPrograms = append(providerPrograms, programs[source.ModulePath])
 	}
 	packageAliasesByModule := sourcePackageAliases(units, options.PackageAliases)
+	providerInputs := typeprovider.CaptureInputs(providerPrograms, typeprovider.Context{
+		ProjectRoot:            projectRoot(options),
+		PackageOptions:         options.PackageOptions,
+		PackageAliasesByModule: packageAliasesByModule,
+	})
 	declarations, providerErr := typeprovider.Load(providerPrograms, typeprovider.Context{
 		ProjectRoot:            projectRoot(options),
 		PackageOptions:         options.PackageOptions,
@@ -432,7 +438,7 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	}
 	return &projectAnalysis{
 		artifacts: artifacts, requestedUnits: cloneSourceUnits(requestedUnits), units: cloneSourceUnits(units), options: cloneOptions(options),
-		programs: programs, catalog: catalog, declarations: declarations, resolutions: resolutions,
+		programs: programs, catalog: catalog, declarations: declarations, providerInputs: providerInputs, resolutions: resolutions,
 		checkedPrograms: checkedPrograms, validateBackend: validateBackend,
 	}, nil
 }

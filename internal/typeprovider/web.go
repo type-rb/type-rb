@@ -9,7 +9,7 @@ import (
 const webTypeProvider = "trb.web"
 
 func init() {
-	register(webTypeProvider, loadWeb)
+	register(webTypeProvider, loadWeb, staticProviderInputs)
 }
 
 func loadWeb(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {

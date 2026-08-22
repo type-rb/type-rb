@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -11,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/schemalock"
 )
 
 func TestAnalyzerReusesOnlyCompilerIdenticalParsedUnits(t *testing.T) {
@@ -140,6 +142,65 @@ func TestAnalyzerRechecksOnlyChangedInteractiveModule(t *testing.T) {
 	}
 	if checkCalls != 7 {
 		t.Fatalf("independent project edit check calls=%d, want 7", checkCalls)
+	}
+}
+
+func TestAnalyzerReusesORMDeclarationsUntilProviderInputsChange(t *testing.T) {
+	for _, mode := range []string{"ruby", "go", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			lockPath := filepath.Join(root, "schema.lock.json")
+			lock := schemalock.New("sqlite")
+			lock.Tables["products"] = schemalock.Table{Columns: map[string]schemalock.Column{
+				"id": {Type: "Integer", PrimaryKey: true},
+			}}
+			if err := lock.Write(lockPath); err != nil {
+				t.Fatal(err)
+			}
+			sources := []SourceUnit{
+				{
+					Filename: filepath.Join(root, "src", "models", "product.trb"), ModulePath: "models/product", Package: "models",
+					Source: []byte("import { Model } from trb/orm\n\nclass Product < Model\nend\n"),
+				},
+				{Filename: filepath.Join(root, "src", ".trb-repl.trb"), ModulePath: "__trb_repl__", Package: "main"},
+			}
+			options := Options{
+				Mode: mode, GoModule: "example.com/provider-reuse", RubyLoader: "require_relative", TypeScriptRuntime: "bun",
+				SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+				AllowUnusedImports: true, InteractiveModule: "__trb_repl__",
+				PackageOptions: map[string][]byte{
+					"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3","schemaLock":"schema.lock.json"}`),
+				},
+			}
+			analyzer := NewAnalyzer()
+			if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+				t.Fatal(err)
+			}
+			initialDeclarations := analyzer.state.declarations
+
+			sources[1].Source = []byte("1 + 2\n")
+			if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+				t.Fatal(err)
+			}
+			if analyzer.state.declarations != initialDeclarations {
+				t.Fatal("interactive expression edit reloaded unchanged ORM declarations")
+			}
+
+			lock.Tables["products"] = schemalock.Table{Columns: map[string]schemalock.Column{
+				"id":   {Type: "Integer", PrimaryKey: true},
+				"name": {Type: "String"},
+			}}
+			if err := lock.Write(lockPath); err != nil {
+				t.Fatal(err)
+			}
+			sources[1].Source = []byte("import { Product } from models/product\n\ndef product_name(product: Product): String\n\treturn product.name\nend\n")
+			if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+				t.Fatal(err)
+			}
+			if analyzer.state.declarations == initialDeclarations {
+				t.Fatal("ORM schema lock edit reused stale declarations")
+			}
+		})
 	}
 }
 

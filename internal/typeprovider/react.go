@@ -9,7 +9,7 @@ import (
 const reactTypeProvider = "trb.typescript.react"
 
 func init() {
-	register(reactTypeProvider, loadReact)
+	register(reactTypeProvider, loadReact, staticProviderInputs)
 }
 
 func loadReact(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {
