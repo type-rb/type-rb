@@ -26,6 +26,12 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 	if !ok {
 		return nil, false, nil
 	}
+	if hasProjectGeneratedSources(previous.units) {
+		// A changed declaration can invalidate portable project fragments before
+		// the old fragment itself type-checks. Re-enter the full path before
+		// resolving or checking stale generated source.
+		return nil, false, nil
+	}
 
 	program, parseDiagnostics := analyzer.parseUnit(changed, options, true)
 	if hasErrors(parseDiagnostics) {
@@ -164,6 +170,7 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 	for _, source := range units {
 		integrationSources = append(integrationSources, projectintegration.Source{
 			Filename: source.Filename, ModulePath: source.ModulePath, Program: programs[source.ModulePath],
+			CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage,
 		})
 	}
 	integrations, integrationIssues, err := projectintegration.Analyze(projectintegration.Context{
@@ -183,6 +190,17 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 			})
 		}
 		return nil, true, NewCompileError("", diagnostic.ProjectIntegration, items)
+	}
+	_, generated, err := applyProjectGeneratedSources(units, programs, integrations)
+	if err != nil {
+		return nil, true, err
+	}
+	if generated {
+		// Project-generated fragments participate in ordinary parsing and cache
+		// identity. Keep the alpha implementation conservative and re-enter the
+		// full path when a project provider is active; this preserves correctness
+		// until fragment-level incremental invalidation is characterized.
+		return nil, false, nil
 	}
 
 	reuseLoweredPrograms := ownerModule == previous.entrypointModule && integrations.CanReuseLoweredPrograms(previous.integrations, affected)

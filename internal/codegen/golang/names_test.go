@@ -36,3 +36,18 @@ func TestAnalyzeGoBindingNamesUsesExplicitImportAliases(t *testing.T) {
 		t.Fatalf("blank import renamed binding to %q", names["sqlite"])
 	}
 }
+
+func TestRequireSourceImportSeparatesEqualPackageBasenames(t *testing.T) {
+	g := &generator{imports: map[string]string{}}
+	first := g.requireSourceImport("example.com/application/jobs", "jobs")
+	second := g.requireSourceImport("example.com/application/trb/jobs", "jobs")
+	if first != "jobs" {
+		t.Fatalf("first import alias=%q, want jobs", first)
+	}
+	if !strings.HasPrefix(second, "__trb_import_") || second == first {
+		t.Fatalf("colliding import alias=%q", second)
+	}
+	if repeated := g.requireSourceImport("example.com/application/trb/jobs", "jobs"); repeated != second {
+		t.Fatalf("resolved import alias changed from %q to %q", second, repeated)
+	}
+}

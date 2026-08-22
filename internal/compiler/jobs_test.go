@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/ast"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 )
@@ -140,6 +141,129 @@ end
 			t.Fatalf("%s produced unexpected JobResult manifest: %#v", options.Mode, manifest)
 		}
 	}
+}
+
+func TestCompileProjectUsesPortableGeneratedJobsDispatchAcrossModes(t *testing.T) {
+	sources := []SourceUnit{
+		{
+			Filename: "/project/src/jobs/example_job.trb", ModulePath: "jobs/example_job", Package: "jobs",
+			Source: []byte(`import { Job } from trb/jobs
+
+class ExampleJob < Job
+	def perform(id: Integer)
+		puts(id)
+		return
+	end
+end
+`),
+		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
+		{Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte("def main()\n\treturn\nend\n")},
+	}
+	for _, options := range []Options{
+		{Mode: "go", GoModule: "example.com/jobs"},
+		{Mode: "ruby", RubyLoader: "require_relative"},
+		{Mode: "typescript", TypeScriptRuntime: "bun"},
+	} {
+		t.Run(options.Mode, func(t *testing.T) {
+			options.SourceRoot = "/project/src"
+			options.ProjectRoot = "/project"
+			options.JobsConfiguration = "config/jobs"
+			artifacts, err := CompileProject(sources, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			main := artifactForModule(artifacts, "main")
+			if main == nil || main.CompilerGeneratedStart <= 0 {
+				t.Fatalf("%s did not retain a generated source boundary", options.Mode)
+			}
+			foundDispatch := false
+			for _, statement := range main.AST.Statements {
+				method, ok := statement.(*ast.MethodStatement)
+				if ok && method.Name == "__trb_jobs_dispatch" {
+					foundDispatch = true
+					break
+				}
+			}
+			if !foundDispatch {
+				t.Fatalf("%s did not parse and check the generated Jobs dispatch", options.Mode)
+			}
+			output := string(main.Output)
+			for _, expected := range map[string][]string{
+				"go":         {"func trbJobsDispatch(", "func trbJobsExecuteClaim("},
+				"ruby":       {"def __trb_jobs_dispatch(", "def trb_jobs_execute_claim("},
+				"typescript": {"function __trb_jobs_dispatch(", "function trbJobsExecuteClaim("},
+			}[options.Mode] {
+				if !strings.Contains(output, expected) {
+					t.Fatalf("generated %s output is missing %q:\n%s", options.Mode, expected, output)
+				}
+			}
+			for _, legacy := range []string{"json.RawMessage", "switch (claim.job_name)", "def trb_jobs_dispatch("} {
+				if strings.Contains(output, legacy) {
+					t.Fatalf("generated %s output retains backend-owned dispatch %q:\n%s", options.Mode, legacy, output)
+				}
+			}
+			for _, mapping := range main.SourceMap.Mappings {
+				if mapping.Source.Path == main.Filename && mapping.Source.Span.Start.Offset >= main.CompilerGeneratedStart {
+					t.Fatalf("%s source map exposes generated Jobs source: %#v", options.Mode, mapping.Source)
+				}
+			}
+		})
+	}
+}
+
+func TestAnalyzerRefreshesProjectGeneratedJobsDispatchAfterJobContractChange(t *testing.T) {
+	jobSource := func(parameterType string) []byte {
+		return []byte("import { Job } from trb/jobs\n\nclass ExampleJob < Job\n\tdef perform(value: " + parameterType + ")\n\t\treturn\n\tend\nend\n")
+	}
+	sources := []SourceUnit{
+		{Filename: "/project/src/jobs/example_job.trb", ModulePath: "jobs/example_job", Package: "jobs", Source: jobSource("Integer")},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
+		{Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte("def main()\n\treturn\nend\n")},
+	}
+	options := Options{
+		Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs",
+	}
+	analyzer := NewAnalyzer()
+	initial, err := analyzer.AnalyzeProject(sources, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialSource := jobsDispatchFragment(t, artifactForModule(initial, "main"))
+	if !strings.Contains(initialSource, "as_integer(payload_values[0])") {
+		t.Fatalf("initial dispatch has unexpected source:\n%s", initialSource)
+	}
+
+	sources[0].Source = jobSource("String")
+	incremental, err := analyzer.AnalyzeProject(sources, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedSource := jobsDispatchFragment(t, artifactForModule(incremental, "main"))
+	if initialSource == updatedSource || !strings.Contains(updatedSource, "as_string(payload_values[0])") {
+		t.Fatalf("incremental dispatch retained stale source:\n%s", updatedSource)
+	}
+	requireAnalysisMatchesFullCompilation(t, incremental, sources, options)
+}
+
+func jobsDispatchFragment(t *testing.T, artifact *Artifact) string {
+	t.Helper()
+	if artifact == nil {
+		t.Fatal("entrypoint artifact is missing")
+	}
+	found := ""
+	for _, generated := range artifact.sourceUnit.CompilerGeneratedSources {
+		if strings.HasSuffix(generated.ID, ":worker-dispatch") {
+			if found != "" {
+				t.Fatal("Jobs dispatch was generated more than once")
+			}
+			found = string(generated.Source)
+		}
+	}
+	if found == "" {
+		t.Fatal("Jobs dispatch generated source is missing")
+	}
+	return found
 }
 
 func TestCompileProjectRejectsUnsupportedJobPerformContracts(t *testing.T) {
@@ -422,8 +546,8 @@ end
 		want    []string
 	}{
 		{mode: "go", options: Options{Mode: "go", GoModule: "example.com/jobs"}, want: []string{"func (self *ParentJob) Perform(__trbScope trbcontext.Context", "ChildJobPerformLater(__trbScope, value)", "NewParentJob().Perform(__trbScope, argument0)"}},
-		{mode: "ruby", options: Options{Mode: "ruby", RubyLoader: "require_relative"}, want: []string{"def perform(__trb_scope, value)", "ChildJob.perform_later(__trb_scope, value)", "ParentJob.new.perform(__trb_scope, *arguments)"}},
-		{mode: "typescript", options: Options{Mode: "typescript", TypeScriptRuntime: "bun"}, want: []string{"perform(__trbScope: AbortSignal | undefined, value: number)", "ChildJob.perform_later(__trbScope, value)", "new ParentJob().perform(__trbScope, parameters[0] as number)"}},
+		{mode: "ruby", options: Options{Mode: "ruby", RubyLoader: "require_relative"}, want: []string{"def perform(__trb_scope, value)", "ChildJob.perform_later(__trb_scope, value)", "return ParentJob.new().perform(__trb_scope, argument0)"}},
+		{mode: "typescript", options: Options{Mode: "typescript", TypeScriptRuntime: "bun"}, want: []string{"perform(__trbScope: AbortSignal | undefined, value: number)", "ChildJob.perform_later(__trbScope, value)", "return (await new ParentJob().perform(__trbScope, argument0))"}},
 	} {
 		t.Run(test.mode, func(t *testing.T) {
 			options := test.options

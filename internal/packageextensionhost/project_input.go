@@ -388,8 +388,23 @@ func cloneBoolMap(source map[string]bool) map[string]bool {
 }
 
 func exportSourceSpan(span token.Span) packageextension.SourceSpan {
+	return ExportSourceSpan(span)
+}
+
+// ExportSourceSpan copies a compiler source span into the data-only package
+// extension representation.
+func ExportSourceSpan(span token.Span) packageextension.SourceSpan {
 	return packageextension.SourceSpan{
 		Start: packageextension.SourcePosition{Offset: span.Start.Offset, Line: span.Start.Line, Column: span.Start.Column},
 		End:   packageextension.SourcePosition{Offset: span.End.Offset, Line: span.End.Line, Column: span.End.Column},
+	}
+}
+
+// ImportSourceSpan copies a package extension span back into compiler-owned
+// source coordinates.
+func ImportSourceSpan(span packageextension.SourceSpan) token.Span {
+	return token.Span{
+		Start: token.Position{Offset: span.Start.Offset, Line: span.Start.Line, Column: span.Start.Column},
+		End:   token.Position{Offset: span.End.Offset, Line: span.End.Line, Column: span.End.Column},
 	}
 }

@@ -312,11 +312,20 @@ independent from storage.
 Jobs-derived `perform_later`, `perform_in`, and `perform_at` declarations now
 cross the same validated, mode-independent Declaration Protocol as ORM. Their
 typed arguments, scheduling parameters, enqueue Results, and runtime operation
-names required no Jobs-specific protocol fields. Payload manifests, retry
-policy, generated runtime imports, and worker dispatch remain a separate
-bundled runtime boundary. Jobs and ORM declaration discovery now also consume
-versioned, JSON-serializable Project Declaration Input snapshots. Version 2
-contains only canonical module/import identity, aliases, enum and class
+names required no Jobs-specific protocol fields. Worker dispatch now crosses
+the versioned Project Generated Source Protocol as an ordinary TypeRB fragment:
+one portable dispatcher validates payload versions, decodes scalar arguments,
+calls the typed Job, and returns `JobResult` before all three backends lower it.
+Generated-source responses contain stable fragment and module identity,
+required named imports, authored origin spans, and located issues, but no AST,
+typed IR, backend source, filesystem handles, or arbitrary provider data.
+The compiler removes stale fragments, includes them in cache identity, and maps
+their diagnostics and source locations to authored source. Project edits
+currently use conservative full analysis while such fragments are active.
+Payload manifests, retry policy, SQL persistence, and worker lifecycle remain
+a separate bundled runtime boundary. Jobs and ORM declaration discovery also
+consume versioned, JSON-serializable Project Declaration Input snapshots.
+Version 2 contains only canonical module/import identity, aliases, enum and class
 declarations, method signatures, authored and resolved types, declarative call
 values, structural block summaries, and source spans. The ORM host combines
 that project snapshot with a separate versioned ORM schema snapshot containing

@@ -1,7 +1,6 @@
 package typescript
 
 import (
-	"sort"
 	"strconv"
 	"strings"
 
@@ -34,19 +33,6 @@ func (g *generator) jobsIntegrationImports(manifest *jobs.Manifest) {
 	}
 	if !jobModule {
 		g.line("import * as __trbJobsRuntime from " + strconv.Quote(tsImportPath(g.modulePath, jobssql.ModulePath)) + ";")
-	}
-	modulePaths := []string{}
-	seen := map[string]bool{}
-	for _, job := range manifest.Jobs {
-		if job.ModulePath == g.modulePath || seen[job.ModulePath] {
-			continue
-		}
-		seen[job.ModulePath] = true
-		modulePaths = append(modulePaths, job.ModulePath)
-	}
-	sort.Strings(modulePaths)
-	for index, modulePath := range modulePaths {
-		g.line("import * as __trbJob" + strconv.Itoa(index) + " from " + strconv.Quote(tsImportPath(g.modulePath, modulePath)) + ";")
 	}
 }
 
@@ -193,42 +179,15 @@ func (g *generator) jobsStorage(config jobssql.Config) {
 	g.line("export async function trbJobsDiscard(id: string): Promise<boolean> { return trbJobsAffected(await trbJobsDB().unsafe(" + strconv.Quote(discard) + ", [id])) === 1; }")
 }
 
-func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
-	aliases := g.jobsModuleAliases(manifest)
-	g.line("async function trbJobsDispatch(__trbScope: AbortSignal | undefined, claim: __trbJobsRuntime.TrbJobsClaim): Promise<void> {")
-	g.indent++
-	g.line("if (claim.payload_version !== 1) throw new Error(\"unsupported job payload version \" + claim.payload_version);")
-	g.line("const parameters = JSON.parse(claim.payload) as unknown[];")
-	g.line("switch (claim.job_name) {")
-	for _, job := range manifest.Jobs {
-		g.line("case " + strconv.Quote(job.Name) + ": {")
-		g.indent++
-		g.line("if (parameters.length !== " + strconv.Itoa(len(job.Parameters)) + ") throw new Error(\"job " + job.Name + " expects " + strconv.Itoa(len(job.Parameters)) + " arguments, got \" + parameters.length);")
-		argumentValues := make([]string, len(job.Parameters))
-		for index, parameter := range job.Parameters {
-			argumentValues[index] = "parameters[" + strconv.Itoa(index) + "] as " + g.tsType(parameter.Type)
-		}
-		owner := job.Name
-		if alias := aliases[job.ModulePath]; alias != "" {
-			owner = alias + "." + job.Name
-		}
-		if g.execution.Method(job.ModulePath, job.Name, "perform") {
-			argumentValues = append([]string{"__trbScope"}, argumentValues...)
-		}
-		call := "await new " + owner + "()." + tsMethodName("perform") + "(" + strings.Join(argumentValues, ", ") + ")"
-		switch job.PerformKind {
-		case jobs.PerformJobResult:
-			g.line("const execution = " + call + "; if (execution.kind === \"Err\") throw new Error(execution.error.message);")
-		default:
-			g.line(call + ";")
-		}
-		g.line("return;")
-		g.indent--
-		g.line("}")
+func (g *generator) jobsWorker(_ *jobs.Manifest, config jobssql.Config) {
+	dispatchArguments := "claim.job_name, claim.payload, claim.payload_version"
+	if g.execution.Method(g.modulePath, "", "__trb_jobs_dispatch") {
+		dispatchArguments = "__trbScope, " + dispatchArguments
 	}
-	g.line("default: throw new Error(\"unknown job \" + claim.job_name);")
-	g.indent--
-	g.line("}")
+	g.line("async function trbJobsExecuteClaim(__trbScope: AbortSignal | undefined, claim: __trbJobsRuntime.TrbJobsClaim): Promise<void> {")
+	g.indent++
+	g.line("const execution = await __trb_jobs_dispatch(" + dispatchArguments + ");")
+	g.line("if (execution.kind === \"Err\") throw new Error(execution.error.message);")
 	g.line("}")
 
 	g.line("async function trbJobsRunWorkerOrCommand(): Promise<boolean> {")
@@ -243,7 +202,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.indent++
 	g.line("await __trbJobsRuntime.trbJobsRecoverStale(); const claim = await __trbJobsRuntime.trbJobsClaim(workerId); if (claim === null) { if (process.env.TRB_JOBS_ONCE === \"1\") break; await Bun.sleep(" + strconv.Itoa(config.PollIntervalMilliseconds) + "); continue; }")
 	g.line("const heartbeat = setInterval(() => { void __trbJobsRuntime.trbJobsHeartbeat(claim.id, workerId).catch(error => console.error(\"trb jobs heartbeat:\", error)); }, " + strconv.Itoa(max(config.LeaseTimeoutMilliseconds/3, 100)) + ");")
-	g.line("try { await trbJobsDispatch(workerController.signal, claim); await __trbJobsRuntime.trbJobsAcknowledge(claim.id, workerId); } catch (error) { await __trbJobsRuntime.trbJobsFail(claim.id, workerId, error instanceof Error ? error.message : String(error)); } finally { clearInterval(heartbeat); }")
+	g.line("try { await trbJobsExecuteClaim(workerController.signal, claim); await __trbJobsRuntime.trbJobsAcknowledge(claim.id, workerId); } catch (error) { await __trbJobsRuntime.trbJobsFail(claim.id, workerId, error instanceof Error ? error.message : String(error)); } finally { clearInterval(heartbeat); }")
 	g.line("if (process.env.TRB_JOBS_ONCE === \"1\") break;")
 	g.indent--
 	g.line("}")
@@ -252,27 +211,6 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.line("return true;")
 	g.indent--
 	g.line("}")
-}
-
-func (g *generator) jobsModuleAliases(manifest *jobs.Manifest) map[string]string {
-	aliases := map[string]string{}
-	modulePaths := []string{}
-	seen := map[string]bool{}
-	for _, job := range manifest.Jobs {
-		if job.ModulePath == g.modulePath {
-			aliases[job.ModulePath] = ""
-			continue
-		}
-		if !seen[job.ModulePath] {
-			seen[job.ModulePath] = true
-			modulePaths = append(modulePaths, job.ModulePath)
-		}
-	}
-	sort.Strings(modulePaths)
-	for index, modulePath := range modulePaths {
-		aliases[modulePath] = "__trbJob" + strconv.Itoa(index)
-	}
-	return aliases
 }
 
 func tsJobsPlaceholder(adapter string, index int) string {

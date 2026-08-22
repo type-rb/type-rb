@@ -1,7 +1,6 @@
 package ruby
 
 import (
-	"sort"
 	"strconv"
 	"strings"
 
@@ -197,48 +196,15 @@ func (g *generator) jobsStorage(config jobssql.Config) {
 	g.line("end", "")
 }
 
-func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
-	modules := map[string]bool{}
-	for _, job := range manifest.Jobs {
-		if job.ModulePath == g.modulePath {
-			continue
-		}
-		modules[job.ModulePath] = true
+func (g *generator) jobsWorker(_ *jobs.Manifest, config jobssql.Config) {
+	dispatchArguments := "row[:job_name], row[:payload], row[:payload_version]"
+	if g.execution.Method(g.modulePath, "", "__trb_jobs_dispatch") {
+		dispatchArguments = "__trb_scope, " + dispatchArguments
 	}
-	modulePaths := make([]string, 0, len(modules))
-	for modulePath := range modules {
-		modulePaths = append(modulePaths, modulePath)
-	}
-	sort.Strings(modulePaths)
-	for _, modulePath := range modulePaths {
-		g.line("require_relative "+strconv.Quote(rubyImportPath(g.modulePath, modulePath)), "")
-	}
-	g.line("def trb_jobs_dispatch(__trb_scope, row)", "")
+	g.line("def trb_jobs_execute_claim(__trb_scope, row)", "")
 	g.indent++
-	g.line("raise \"unsupported job payload version #{row[:payload_version]}\" unless row[:payload_version] == 1", "")
-	g.line("arguments = JSON.parse(row[:payload])", "")
-	g.line("case row[:job_name]", "")
-	for _, job := range manifest.Jobs {
-		g.line("when "+strconv.Quote(job.Name), "")
-		g.indent++
-		g.line("raise \"job "+job.Name+" expects "+strconv.Itoa(len(job.Parameters))+" arguments, got #{arguments.length}\" unless arguments.length == "+strconv.Itoa(len(job.Parameters)), "")
-		call := job.Name + ".new.perform(*arguments)"
-		if g.execution.Method(job.ModulePath, job.Name, "perform") {
-			call = job.Name + ".new.perform(__trb_scope, *arguments)"
-		}
-		switch job.PerformKind {
-		case jobs.PerformJobResult:
-			g.line("execution = "+call, "")
-			g.line("raise execution.error.message if execution.is_a?(Result::Err)", "")
-		default:
-			g.line(call, "")
-		}
-	}
-	g.line("else", "")
-	g.indent++
-	g.line("raise \"unknown job #{row[:job_name]}\"", "")
-	g.indent--
-	g.line("end", "")
+	g.line("execution = __trb_jobs_dispatch("+dispatchArguments+")", "")
+	g.line("raise execution.error.message if execution.is_a?(Result::Err)", "")
 	g.indent--
 	g.line("end", "")
 	g.line("def trb_jobs_run_worker_or_command", "")
@@ -265,7 +231,7 @@ func (g *generator) jobsWorker(manifest *jobs.Manifest, config jobssql.Config) {
 	g.line("TrbJobsRuntime.recover_stale", "")
 	g.line("row = TrbJobsRuntime.claim(worker_id)", "")
 	g.line("if !row; break if ENV[\"TRB_JOBS_ONCE\"] == \"1\"; sleep("+strconv.FormatFloat(float64(config.PollIntervalMilliseconds)/1000.0, 'f', 3, 64)+"); next; end", "")
-	g.line("begin; trb_jobs_dispatch(worker_scope, row); TrbJobsRuntime.acknowledge(row[:id], worker_id); rescue StandardError => error; TrbJobsRuntime.fail(row[:id], worker_id, error.message); end", "")
+	g.line("begin; trb_jobs_execute_claim(worker_scope, row); TrbJobsRuntime.acknowledge(row[:id], worker_id); rescue StandardError => error; TrbJobsRuntime.fail(row[:id], worker_id, error.message); end", "")
 	g.line("break if ENV[\"TRB_JOBS_ONCE\"] == \"1\"", "")
 	g.indent--
 	g.line("end", "")

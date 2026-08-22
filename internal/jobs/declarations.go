@@ -121,7 +121,11 @@ func discoverDeclarationJob(modulePath string, class packageextension.ProjectCla
 		if !initialArgumentType(typ) && !potentialAliasType(typ) {
 			return Job{}, fmt.Errorf("trb/jobs Job %s parameter %s must initially be Boolean, Integer, Float, or String", class.Name, parameter.Name)
 		}
-		job.Parameters = append(job.Parameters, Parameter{Name: parameter.Name, Type: typ})
+		wireType := importProjectType(parameter.Type.Resolved)
+		if !initialArgumentType(wireType) {
+			wireType = typ
+		}
+		job.Parameters = append(job.Parameters, Parameter{Name: parameter.Name, Type: typ, WireType: wireType})
 	}
 	return job, nil
 }

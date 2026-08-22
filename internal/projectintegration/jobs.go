@@ -7,6 +7,8 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
+	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/packageextensionhost"
 )
 
 func init() {
@@ -51,7 +53,38 @@ func analyzeJobs(context Context) (Contribution, []Issue) {
 			return Contribution{}, []Issue{{Message: "jobs.configuration must import a trb/jobs adapter; trb/jobs/sql is currently available"}}
 		}
 	}
-	return Contribution{Extension: manifest, AllPrograms: true}, nil
+	projectInput, err := packageextensionhost.ExportProjectDeclarationInput(
+		jobsintegration.PackageName,
+		programs,
+		packageextensionhost.ProjectDeclarationInputOptions{PackageAliasesByModule: context.PackageAliasesByModule},
+	)
+	if err != nil {
+		return Contribution{}, []Issue{{Message: err.Error()}}
+	}
+	origin := packageextension.SourceSpan{}
+	generationEntrypoint := context.EntrypointModule
+	for _, source := range context.Sources {
+		if source.ModulePath != context.EntrypointModule {
+			continue
+		}
+		if source.CompilerOwned || source.Official || source.ExternalPackage {
+			generationEntrypoint = ""
+			break
+		}
+		for _, statement := range source.Program.Statements {
+			method, ok := statement.(*ast.MethodStatement)
+			if ok && method.Name == "main" {
+				origin = packageextensionhost.ExportSourceSpan(method.Span())
+				break
+			}
+		}
+		break
+	}
+	generation, err := jobsintegration.GenerateProject(projectInput, generationEntrypoint, origin)
+	if err != nil {
+		return Contribution{}, []Issue{{Message: err.Error()}}
+	}
+	return Contribution{Extension: manifest, AllPrograms: true, Generation: &generation}, nil
 }
 
 func analyzeSQLJobs(context Context) (Contribution, []Issue) {

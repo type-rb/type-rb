@@ -390,9 +390,8 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	integrationSources := make([]projectintegration.Source, 0, len(units))
 	for _, source := range units {
 		integrationSources = append(integrationSources, projectintegration.Source{
-			Filename:   source.Filename,
-			ModulePath: source.ModulePath,
-			Program:    programs[source.ModulePath],
+			Filename: source.Filename, ModulePath: source.ModulePath, Program: programs[source.ModulePath],
+			CompilerOwned: source.CompilerOwned, Official: source.Official, ExternalPackage: source.ExternalPackage,
 		})
 	}
 	integrations, integrationIssues, err := projectintegration.Analyze(projectintegration.Context{
@@ -414,6 +413,13 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 			items = append(items, diagnostic.Diagnostic{Code: diagnostic.ProjectIntegration, Severity: diagnostic.Error, Message: issue.Message, Path: issue.Filename, Span: issue.Span})
 		}
 		return nil, NewCompileError("", diagnostic.ProjectIntegration, items)
+	}
+	generatedUnits, generated, err := applyProjectGeneratedSources(units, programs, integrations)
+	if err != nil {
+		return nil, err
+	}
+	if generated {
+		return analyzeProjectFull(analyzer, generatedUnits, options, validateBackend, requestedUnits)
 	}
 
 	loweredPrograms := make([]*ir.Program, 0, len(units))
