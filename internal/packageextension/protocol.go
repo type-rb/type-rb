@@ -1,7 +1,6 @@
-// Package packageextension defines the versioned, data-only boundary used by
-// compiler-integrated packages. Providers receive resolved semantic facts and
-// return ordinary TypeRB source plus a narrow call replacement; they never
-// receive parser, checker, or typed-IR objects.
+// Package packageextension defines versioned, data-only boundaries used by
+// compiler-integrated packages. Providers never receive parser, checker, or
+// typed-IR objects.
 package packageextension
 
 import (

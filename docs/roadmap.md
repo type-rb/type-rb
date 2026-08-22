@@ -87,9 +87,10 @@ than detailed syntax.
   vulnerability/audit integration, and namespace-stable type identities.
 - Evolve the experimental bundled-package call-specialization data contract and
   declarative native providers into a stable, sandboxed extension protocol
-  before external packages can request compiler integration. Validate the next
-  capability against ORM and Jobs rather than exposing compiler internals as a
-  public plugin API.
+  before external packages can request compiler integration. Validate the
+  Declaration Protocol now exercised by ORM against Jobs before defining
+  external project-input discovery, capability negotiation, or a runtime
+  operation ABI. Do not expose compiler internals as a public plugin API.
 
 ## 6. Application-level proof
 

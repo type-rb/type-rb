@@ -270,6 +270,12 @@ return `DbResult<T>`. Applications propagate compatible errors with `try`,
 recover with `catch`, or inspect the Result with exhaustive `case`. The REPL
 uses the same schema-backed read and write API. A deterministic portable schema
 lock now removes the live database requirement from compiler checks and builds.
+ORM declaration output now dogfoods the experimental bundled Declaration
+Protocol. Schema-derived properties, literal-dependent terminals, and
+structured transaction and streaming contracts cross a validated,
+mode-independent data boundary before the compiler resolves them. Project model
+discovery and backend runtime operations remain bundled while the protocol is
+validated against another provider.
 Optional `trb db`
 commands provide plan, guarded apply, export, lock, and drift checks around a
 pinned external sqldef executable on SQLite, PostgreSQL, and MySQL. Production

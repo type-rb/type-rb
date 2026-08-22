@@ -1,12 +1,181 @@
 package typeprovider
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/packageextensionhost"
+	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/schemalock"
 )
+
+func TestORMDeclarationsCrossVersionedExtensionBoundary(t *testing.T) {
+	root := t.TempDir()
+	lock := schemalock.New("sqlite")
+	lock.Tables["categories"] = schemalock.Table{
+		Columns: map[string]schemalock.Column{
+			"id":   {Type: "Integer", PrimaryKey: true, Generated: true},
+			"name": {Type: "String"},
+		},
+		UniqueConstraints: map[string]schemalock.UniqueConstraint{
+			schemalock.ConstraintKey(true, []string{"id"}): {Columns: []string{"id"}, Primary: true},
+		},
+	}
+	foreignKey := schemalock.ForeignKey{Column: "category_id", ReferencedTable: "categories", ReferencedColumn: "id"}
+	lock.Tables["products"] = schemalock.Table{
+		Columns: map[string]schemalock.Column{
+			"id":          {Type: "Integer", PrimaryKey: true, Generated: true},
+			"category_id": {Type: "Integer"},
+			"name":        {Type: "String"},
+			"price":       {Type: "Float", Nullable: true},
+		},
+		ForeignKeys: map[string]schemalock.ForeignKey{
+			schemalock.ForeignKeyKey(foreignKey.Column, foreignKey.ReferencedTable, foreignKey.ReferencedColumn): foreignKey,
+		},
+		UniqueConstraints: map[string]schemalock.UniqueConstraint{
+			schemalock.ConstraintKey(true, []string{"id"}): {Columns: []string{"id"}, Primary: true},
+		},
+	}
+	lockPath := filepath.Join(root, "db", "schema.lock.json")
+	if err := lock.Write(lockPath); err != nil {
+		t.Fatal(err)
+	}
+	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many } from trb/orm
+
+class Category < Model
+	has_many(Product)
+end
+
+class Product < Model
+	belongs_to(Category)
+end
+`))
+	if len(diagnostics) > 0 {
+		t.Fatalf("parse diagnostics: %#v", diagnostics)
+	}
+	program.ModulePath = "models/catalog"
+	context := Context{
+		ProjectRoot: root,
+		PackageOptions: map[string][]byte{
+			"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3","schemaLock":"db/schema.lock.json"}`),
+		},
+	}
+	provided, err := loadORMDeclarations([]*ast.Program{program}, context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(provided)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded packageextension.DeclarationCatalog
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := packageextension.ValidateDeclarationCatalog(decoded); err != nil {
+		t.Fatal(err)
+	}
+
+	product := declaredProtocolType(t, decoded, "Product")
+	category := declaredProtocolMember(t, product.InstanceMembers, "category")
+	if category.Kind != "property" || category.RuntimeOperation != "trb.orm.association.value.belongs_to" || protocolTypeString(category.Return) != "DbResult<Category?>" {
+		t.Fatalf("association property did not cross the protocol: %#v", category)
+	}
+	pluck := declaredProtocolMember(t, product.ClassMembers, "pluck")
+	namePluck, found := declaredProtocolAlternative(pluck, "name")
+	if len(pluck.Alternatives) != 4 || !found || protocolTypeString(namePluck.Return) != "DbResult<Array<String>>" {
+		t.Fatalf("literal-dependent terminal did not cross the protocol: %#v", pluck)
+	}
+	transaction := declaredProtocolMember(t, declaredProtocolType(t, decoded, "Database").ClassMembers, "transaction")
+	if transaction.Block == nil || !transaction.Block.Structured || protocolTypeString(transaction.Block.Return) != "T" || protocolTypeString(transaction.Block.ResultBoundary) != "DbError" {
+		t.Fatalf("transaction Result boundary did not cross the protocol: %#v", transaction)
+	}
+	findEach := declaredProtocolMember(t, product.ClassMembers, "find_each")
+	if findEach.Block == nil || !findEach.Block.Structured || protocolTypeString(findEach.Block.Parameters[0]) != "Product" || protocolTypeString(findEach.Block.ResultBoundary) != "DbError" {
+		t.Fatalf("streaming Result boundary did not cross the protocol: %#v", findEach)
+	}
+
+	imported, err := packageextensionhost.ImportDeclarationCatalog(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := ormintegration.Declarations([]*ast.Program{program}, context.ProjectRoot, context.PackageOptions, context.PackageAliasesByModule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(imported, original) {
+		t.Fatal("declaration protocol changed the ORM catalog semantics")
+	}
+	loaded, err := loadORM([]*ast.Program{program}, context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(imported, loaded) {
+		t.Fatal("ORM provider did not load through the declaration protocol")
+	}
+}
+
+func declaredProtocolType(t *testing.T, catalog packageextension.DeclarationCatalog, name string) packageextension.DeclaredType {
+	t.Helper()
+	for _, declared := range catalog.Types {
+		if declared.Name == name {
+			return declared
+		}
+	}
+	t.Fatalf("missing declaration type %s", name)
+	return packageextension.DeclaredType{}
+}
+
+func declaredProtocolMember(t *testing.T, members []packageextension.DeclaredMember, name string) packageextension.DeclaredMember {
+	t.Helper()
+	for _, member := range members {
+		if member.Name == name {
+			return member
+		}
+	}
+	t.Fatalf("missing declaration member %s", name)
+	return packageextension.DeclaredMember{}
+}
+
+func declaredProtocolAlternative(member packageextension.DeclaredMember, literal string) (packageextension.DeclaredSignature, bool) {
+	for _, alternative := range member.Alternatives {
+		if len(alternative.Parameters) == 0 || len(alternative.Parameters[0].LiteralValues) == 0 {
+			continue
+		}
+		if alternative.Parameters[0].LiteralValues[0] == literal {
+			return alternative, true
+		}
+	}
+	return packageextension.DeclaredSignature{}, false
+}
+
+func protocolTypeString(typ packageextension.Type) string {
+	if typ.Kind == "" {
+		return ""
+	}
+	name := typ.Name
+	if name == "" {
+		name = typ.Kind
+	}
+	if len(typ.Arguments) > 0 {
+		values := make([]string, len(typ.Arguments))
+		for index, argument := range typ.Arguments {
+			values[index] = protocolTypeString(argument)
+		}
+		name += "<" + strings.Join(values, ", ") + ">"
+	}
+	if typ.Nullable {
+		name += "?"
+	}
+	return name
+}
 
 func TestInputSnapshotTracksORMProgramsAndSchemaLock(t *testing.T) {
 	root := t.TempDir()
