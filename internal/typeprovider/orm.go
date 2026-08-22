@@ -8,6 +8,8 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/packageextensionhost"
 )
 
 func init() {
@@ -15,7 +17,19 @@ func init() {
 }
 
 func loadORM(programs []*ast.Program, context Context) (*declaration.Catalog, error) {
-	return ormintegration.Declarations(programs, context.ProjectRoot, context.PackageOptions, context.PackageAliasesByModule)
+	provided, err := loadORMDeclarations(programs, context)
+	if err != nil {
+		return nil, err
+	}
+	return packageextensionhost.ImportDeclarationCatalog(provided)
+}
+
+func loadORMDeclarations(programs []*ast.Program, context Context) (packageextension.DeclarationCatalog, error) {
+	catalog, err := ormintegration.Declarations(programs, context.ProjectRoot, context.PackageOptions, context.PackageAliasesByModule)
+	if err != nil {
+		return packageextension.DeclarationCatalog{}, err
+	}
+	return packageextensionhost.ExportDeclarationCatalog(ormintegration.PackageName, catalog)
 }
 
 func ormProviderInputs(programs []*ast.Program, context Context) providerInputSnapshot {

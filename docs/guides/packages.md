@@ -202,6 +202,38 @@ wait for a versioned and sandboxed extension protocol rather than importing
 compiler internals. The declarative native type provider above is the safe
 non-executable subset.
 
+### Experimental bundled declaration providers
+
+TypeRB 0.x has a second experimental data boundary for declaration output from
+bundled, compiler-integrated packages. `trb/orm` is its first consumer. The ORM
+provider still discovers project models and schema metadata inside the compiler,
+but its resulting catalog crosses a versioned, JSON-serializable Declaration
+Protocol before resolution and checking. The compiler host validates and copies
+that data into its private semantic representation; the provider does not pass
+parser, checker, typed-IR, or backend objects across the boundary.
+
+The initial declaration catalog can describe:
+
+- package-owned types, modules, methods, and properties;
+- generic and literal-dependent call signatures such as typed ORM projections;
+- structured block contracts, including portable control and `Result`
+  boundaries; and
+- located project-declaration references and runtime value types needed by the
+  generated declarations.
+
+A declaration may name an opaque `runtimeOperation`, but only bundled compiler
+backends can implement those operation names today. Model and schema discovery
+also remains compiler-owned. The Declaration Protocol therefore characterizes
+and narrows the output side of dynamic providers; it does not yet make ORM an
+ordinary external package or define a public runtime adapter ABI.
+
+The declaration type format deliberately rejects call-site-only record
+inspection and source-definition metadata. Those facts remain scoped to call
+specialization until namespace-stable type identities are designed. A second
+provider, such as Jobs, should validate this catalog before TypeRB externalizes
+project-input discovery, capability negotiation, sandboxing, or runtime
+operations.
+
 ### Experimental bundled call specialization
 
 TypeRB 0.x also has an experimental call-specialization boundary for bundled,
