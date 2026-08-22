@@ -98,6 +98,22 @@ func TestORMResultStreamingIntrinsicsSuspendWithoutLegacyEffects(t *testing.T) {
 	}
 }
 
+func TestORMTransactionSuspendsEvenWhenItsBlockIsPure(t *testing.T) {
+	block := &ir.StructuredBlock{Intrinsic: "trb.orm.transaction", Call: &ir.Call{}}
+	method := &ir.Method{
+		Name:       "transaction",
+		ReturnType: types.FromName("Void"),
+		Body:       []ir.Statement{block},
+	}
+	plan, err := AnalyzeSuspension([]*ir.Program{{Mode: "typescript", ModulePath: "main", Statements: []ir.Statement{method}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Methods[method] || !plan.StructuredBlocks[block] {
+		t.Fatalf("transaction lifecycle was not classified as suspending: %#v", plan)
+	}
+}
+
 func TestSuspendingResultLambdaUsesPortableBoundaryWithoutRequiringNativeBridge(t *testing.T) {
 	integer := types.FromName("Integer")
 	errorType := types.FromName("LoadError")

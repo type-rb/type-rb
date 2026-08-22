@@ -291,6 +291,14 @@ adapter/backend responsibilities. This split exercises reusable generated
 source and per-fragment authored origins without turning Jobs metadata into
 generic protocol fields or prematurely defining a generic native-runtime ABI.
 
+The compiler currently keeps a small internal runtime-operation descriptor for
+the two call-graph effects that proved common across Jobs and ORM: an operation
+may suspend, and it may propagate the hidden execution scope used for
+cancellation. Typed parameters and return values remain in package
+declarations, while target lowering and native-error-to-`Result` conversion
+remain package-specific. The descriptor is compiler-owned metadata, not an
+external runtime ABI or permission for a package to add native operations.
+
 This protocol is still bundled and experimental, not a package-manifest
 capability or external plugin API. Like call specialization below, its required
 imports use ordinary named imports. Namespace-stable public type identities,

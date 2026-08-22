@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/runtimeoperation"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -473,26 +474,7 @@ func (a *analyzer) intrinsicReaches(intrinsic string) bool {
 // ORMOperation identifies intrinsics that may execute database work. It is
 // shared by TypeScript suspension and portable execution-scope propagation.
 func ORMOperation(intrinsic string) bool {
-	if !strings.HasPrefix(intrinsic, "trb.orm.") {
-		return false
-	}
-	switch intrinsic {
-	case "trb.orm.all", "trb.orm.first", "trb.orm.count", "trb.orm.explain", "trb.orm.find_by", "trb.orm.exists",
-		"trb.orm.pluck", "trb.orm.pick", "trb.orm.ids", "trb.orm.sum", "trb.orm.average", "trb.orm.minimum", "trb.orm.maximum",
-		"trb.orm.find", "trb.orm.create", "trb.orm.scope.find", "trb.orm.scope.create", "trb.orm.draft.save",
-		"trb.orm.insert_all", "trb.orm.insert_if_absent", "trb.orm.draft.upsert", "trb.orm.upsert_all", "trb.orm.update",
-		"trb.orm.changes.save", "trb.orm.delete", "trb.orm.destroy", "trb.orm.destroy_all", "trb.orm.update_all", "trb.orm.delete_all",
-		"trb.orm.query.find_by", "trb.orm.query.exists", "trb.orm.query.update_all", "trb.orm.query.delete_all", "trb.orm.query.destroy_all",
-		"trb.orm.query.pluck", "trb.orm.query.pick", "trb.orm.query.ids", "trb.orm.query.sum", "trb.orm.query.average", "trb.orm.query.minimum", "trb.orm.query.maximum",
-		"trb.orm.query.all", "trb.orm.query.first", "trb.orm.query.count", "trb.orm.query.explain", "trb.orm.query.find_each", "trb.orm.query.find_in_batches",
-		"trb.orm.group.count", "trb.orm.group.sum", "trb.orm.group.average", "trb.orm.group.minimum", "trb.orm.group.maximum",
-		"trb.orm.association.value.belongs_to", "trb.orm.association.value.has_many", "trb.orm.association.value.has_one",
-		"trb.orm.association.load.belongs_to", "trb.orm.association.load.has_many", "trb.orm.association.load.has_one",
-		"trb.orm.association.reload.belongs_to", "trb.orm.association.reload.has_many", "trb.orm.association.reload.has_one":
-		return true
-	default:
-		return false
-	}
+	return runtimeoperation.ORMExecution(intrinsic)
 }
 
 // ExecutionScope computes the functions that must receive the compiler-owned
@@ -503,14 +485,7 @@ func ExecutionScope(programs []*ir.Program) *Plan {
 	return Analyze(programs, Options{
 		WebNext: true, CaptureLambdas: true,
 		Intrinsic: func(intrinsic string) bool {
-			return strings.HasPrefix(intrinsic, "trb.orm.") ||
-				strings.HasPrefix(intrinsic, "trb.jobs.") ||
-				intrinsic == "trb.platform.typescript.browser.request" ||
-				intrinsic == "trb.platform.typescript.browser.file_read" ||
-				intrinsic == "trb.platform.typescript.browser.file_read_text" ||
-				intrinsic == "trb.web.middleware.logger.call" ||
-				intrinsic == "trb.web.middleware.timeout.call" ||
-				intrinsic == "trb.web.testing.dispatch"
+			return runtimeoperation.Describe(intrinsic).PropagatesExecutionScope
 		},
 	})
 }

@@ -1306,7 +1306,7 @@ func (g *generator) expr(expression ir.Expression) string {
 				}
 			}
 			generated := g.intrinsic(reference.Intrinsic, n, parts)
-			if isSuspendingORM(reference.Intrinsic) {
+			if effectplan.ORMOperation(reference.Intrinsic) {
 				return "(await " + generated + ")"
 			}
 			return g.awaitCall(n, generated)
