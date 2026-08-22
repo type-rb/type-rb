@@ -1,9 +1,33 @@
 # TypeRB syntax highlighting for GitHub
 
-This Tampermonkey userscript applies TypeRB's canonical TextMate grammar to
-GitHub pages before TypeRB is available through GitHub Linguist.
+This package applies TypeRB's canonical TextMate grammar to GitHub pages before
+TypeRB is available through GitHub Linguist. The Manifest V3 Chrome extension is
+the primary distribution. A Tampermonkey userscript remains available as a
+transition fallback until the Chrome Web Store release is live.
 
-## Install
+Both distributions bundle the same runtime, canonical grammar,
+`@shikijs/vscode-textmate`, and Shiki JavaScript regular expression engine.
+Neither distribution downloads executable code or a second grammar at runtime.
+
+## Chrome extension
+
+Build the unpacked extension and its Chrome Web Store ZIP:
+
+```sh
+npm ci --prefix editors/github
+npm run package:chrome --prefix editors/github
+```
+
+Load `editors/github/dist/chrome-extension` from `chrome://extensions` with
+Developer mode enabled. The Web Store upload is
+`editors/github/dist/typerb-github-chrome-extension.zip`; its `manifest.json`
+is at the ZIP root.
+
+The extension requests no optional Chrome API permissions. Its only site access
+is the `https://github.com/*` content-script match. See the
+[privacy policy](PRIVACY.md) for the exact data behavior.
+
+## Tampermonkey fallback
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) in a desktop browser.
 2. Open the
@@ -23,7 +47,7 @@ not need to permit WebAssembly compilation.
   issues, discussions, and comments; and
 - `suggestion` blocks attached to a `.trb` pull request diff.
 
-For a pull request diff, the userscript reads the base and head commit IDs from
+For a pull request diff, the highlighter reads the base and head commit IDs from
 GitHub's page data and fetches the exact file revisions from the repository
 currently being viewed. Deleted lines use the base revision and added lines use
 the head revision. If a complete revision is unavailable, contiguous displayed
@@ -31,20 +55,32 @@ lines are highlighted with a fresh lexical state at each gap.
 
 Code search, commit and compare diffs, blame, raw files, Gists, `github.dev`,
 GitHub Enterprise Server, and the GitHub mobile application are not supported
-by the initial release. A diff that GitHub does not render cannot be augmented
-by the userscript.
+by the initial release. A diff that GitHub does not render cannot be augmented.
 
-## Privacy and permissions
+## Chrome Web Store release
 
-The userscript runs only on `https://github.com/*`. It does not collect
-telemetry, store repository contents, or send data to TypeRB services. For
-accurate pull request highlighting it may fetch `.trb` source from the same
-GitHub repository and commit already visible to the signed-in user. Source
-tokens are cached only in memory for the current page session.
+The `Chrome extension release` GitHub Actions workflow always creates a
+downloadable ZIP. With the `chrome-web-store` environment configured, it can
+also upload through Chrome Web Store API v2, submit for review as a staged
+release, and publish the approved staged revision in a separate manual run.
+
+Configure these environment variables:
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`: GitHub Actions Workload Identity provider;
+- `CWS_SERVICE_ACCOUNT`: service account linked in the Chrome Web Store
+  Developer Dashboard;
+- `CWS_PUBLISHER_ID`: Chrome Web Store publisher ID; and
+- `CWS_EXTENSION_ID`: Chrome Web Store item ID.
+
+The workflow uses short-lived GitHub OIDC credentials. Do not add a service
+account key to the repository. Before the first API submission, create the item
+and complete its Store listing, Privacy, and distribution settings in the
+Developer Dashboard. A visibility change made later in the Dashboard must be
+published manually once before the API can publish with that visibility.
 
 ## Development
 
-Install dependencies, rebuild the distributable userscript, and run the tests:
+Install dependencies, rebuild both distributions, and run the tests:
 
 ```sh
 npm ci --prefix editors/github
@@ -55,10 +91,7 @@ npm test --prefix editors/github
 Run `npm run fixture --prefix editors/github` to serve local blob, Markdown,
 and pull request fixtures for browser-level checks.
 
-The build embeds
-[`../../syntaxes/typerb.tmLanguage.json`](../../syntaxes/typerb.tmLanguage.json),
-`@shikijs/vscode-textmate`, and the Shiki JavaScript regular expression engine
-into [`typerb-github.user.js`](typerb-github.user.js). Commit the rebuilt
-userscript whenever its source, dependency versions, metadata version, or
-canonical grammar changes. Bundled license notices are included in the
-generated file.
+The generated Tampermonkey file is committed so its raw GitHub URL remains
+installable. Chrome extension files and the upload ZIP are generated under the
+ignored `editors/github/dist` directory. Bundled license notices are generated
+from the dependencies included by esbuild.

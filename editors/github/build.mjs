@@ -1,14 +1,23 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { copyFile, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { build } from "esbuild";
 
+import { chromeManifest } from "./src/chrome-manifest.js";
+import { HIGHLIGHT_STYLES } from "./src/styles.js";
+
+const execFileAsync = promisify(execFile);
 const packageDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(packageDirectory, "../..");
-const outputPath = resolve(packageDirectory, "typerb-github.user.js");
+const userscriptOutputPath = resolve(packageDirectory, "typerb-github.user.js");
+const extensionOutputDirectory = resolve(packageDirectory, "dist/chrome-extension");
+const extensionArchivePath = resolve(packageDirectory, "dist/typerb-github-chrome-extension.zip");
 const checkOnly = process.argv.includes("--check");
+const packageChrome = process.argv.includes("--package-chrome");
 
 const packageJson = JSON.parse(await readFile(resolve(packageDirectory, "package.json"), "utf8"));
 const grammarPath = resolve(repositoryRoot, "syntaxes/typerb.tmLanguage.json");
@@ -57,36 +66,47 @@ async function packageNotice(packageRoot) {
   throw new Error(`No bundled license file found for ${manifest.name}`);
 }
 
-const result = await build({
-  absWorkingDir: packageDirectory,
-  entryPoints: [resolve(packageDirectory, "src/main.js")],
-  bundle: true,
-  charset: "utf8",
-  format: "iife",
-  legalComments: "none",
-  metafile: true,
-  minify: true,
-  platform: "browser",
-  target: ["chrome120", "firefox128"],
-  write: false,
-  plugins: [{
-    name: "typerb-assets",
-    setup(builder) {
-      builder.onResolve({ filter: /^typerb:assets$/ }, () => ({
-        path: "assets",
-        namespace: "typerb"
-      }));
-      builder.onLoad({ filter: /^assets$/, namespace: "typerb" }, () => ({
-        contents: `export const grammarJson = ${JSON.stringify(grammarJson)};`,
-        loader: "js"
-      }));
-    }
-  }]
-});
+async function bundle(entryPoint) {
+  return build({
+    absWorkingDir: packageDirectory,
+    entryPoints: [resolve(packageDirectory, entryPoint)],
+    bundle: true,
+    charset: "utf8",
+    format: "iife",
+    legalComments: "none",
+    metafile: true,
+    minify: true,
+    platform: "browser",
+    target: ["chrome120", "firefox128"],
+    write: false,
+    plugins: [{
+      name: "typerb-assets",
+      setup(builder) {
+        builder.onResolve({ filter: /^typerb:assets$/ }, () => ({
+          path: "assets",
+          namespace: "typerb"
+        }));
+        builder.onLoad({ filter: /^assets$/, namespace: "typerb" }, () => ({
+          contents: `export const grammarJson = ${JSON.stringify(grammarJson)};`,
+          loader: "js"
+        }));
+      }
+    }]
+  });
+}
 
-assert.equal(result.outputFiles.length, 1, "expected one bundled userscript");
+const [userscriptResult, chromeResult] = await Promise.all([
+  bundle("src/main.js"),
+  bundle("src/chrome.js")
+]);
+assert.equal(userscriptResult.outputFiles.length, 1, "expected one bundled userscript");
+assert.equal(chromeResult.outputFiles.length, 1, "expected one bundled Chrome content script");
+
 const packageRoots = [...new Set(
-  Object.keys(result.metafile.inputs).map(packageRootFromInput).filter(Boolean)
+  [userscriptResult, chromeResult]
+    .flatMap((result) => Object.keys(result.metafile.inputs))
+    .map(packageRootFromInput)
+    .filter(Boolean)
 )].sort();
 const notices = [
   `\nTypeRB\n======\n${await readFile(resolve(repositoryRoot, "LICENSE"), "utf8")}`,
@@ -96,15 +116,47 @@ const licenseBanner = `/*
 Bundled license notices
 ${notices.join("\n").replaceAll("*/", "* /")}
 */`;
-const bundled = `${metadata}\n${licenseBanner}\n${result.outputFiles[0].text.trimEnd()}\n`;
+const userscript = `${metadata}\n${licenseBanner}\n${userscriptResult.outputFiles[0].text.trimEnd()}\n`;
+const chromeContentScript = `${licenseBanner}\n${chromeResult.outputFiles[0].text.trimEnd()}\n`;
+const manifest = chromeManifest(packageJson.version);
+const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
+
+assert.equal(manifest.permissions, undefined, "Chrome extension must not request optional APIs");
+assert.equal(manifest.host_permissions, undefined, "GitHub access belongs only in content script matches");
+assert.doesNotMatch(chromeContentScript, /WebAssembly\.instantiate|onig\.wasm|vscode-oniguruma/);
+assert.doesNotMatch(chromeContentScript, /cdn\.jsdelivr\.net|unpkg\.com/);
 
 if (checkOnly) {
-  const committed = await readFile(outputPath, "utf8").catch(() => "");
+  const committed = await readFile(userscriptOutputPath, "utf8").catch(() => "");
   assert.equal(
     committed,
-    bundled,
+    userscript,
     "typerb-github.user.js is stale; run npm run build --prefix editors/github"
   );
 } else {
-  await writeFile(outputPath, bundled);
+  await writeFile(userscriptOutputPath, userscript);
+  await rm(extensionOutputDirectory, { recursive: true, force: true });
+  await mkdir(resolve(extensionOutputDirectory, "images"), { recursive: true });
+  await Promise.all([
+    writeFile(resolve(extensionOutputDirectory, "manifest.json"), manifestJson),
+    writeFile(resolve(extensionOutputDirectory, "content.js"), chromeContentScript),
+    writeFile(resolve(extensionOutputDirectory, "content.css"), HIGHLIGHT_STYLES.trimStart()),
+    ...[16, 32, 48, 128].map((size) => copyFile(
+      resolve(packageDirectory, `assets/icon-${size}.png`),
+      resolve(extensionOutputDirectory, `images/icon-${size}.png`)
+    ))
+  ]);
+}
+
+if (packageChrome) {
+  await mkdir(dirname(extensionArchivePath), { recursive: true });
+  await unlink(extensionArchivePath).catch((error) => {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  });
+  await execFileAsync("zip", ["-X", "-q", "-r", extensionArchivePath, "."], {
+    cwd: extensionOutputDirectory
+  });
+  console.log(extensionArchivePath);
 }
