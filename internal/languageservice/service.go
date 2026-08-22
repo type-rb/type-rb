@@ -234,6 +234,7 @@ type Service struct {
 	mode       string
 	context    Context
 	candidates Context
+	project    *projectContextCache
 }
 
 func New(mode string) *Service {
@@ -241,9 +242,11 @@ func New(mode string) *Service {
 }
 
 func (s *Service) Update(programs []*ir.Program, modulePath string) {
-	context := BuildContext(programs, modulePath)
 	s.mu.Lock()
-	s.context = context
+	if !s.project.reusable(programs, modulePath) {
+		s.project = newProjectContextCache(programs, modulePath)
+	}
+	s.context = s.project.build(programs)
 	s.mu.Unlock()
 }
 

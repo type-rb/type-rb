@@ -18,8 +18,9 @@ import (
 // BuildContext indexes only declarations visible from modulePath. Other
 // project modules contribute names through explicit imports.
 func BuildContext(programs []*ir.Program, modulePath string) Context {
-	if context, ok := BuildContexts(programs)[modulePath]; ok {
-		return context
+	index := buildProjectIndex(programs)
+	if session := index.programsByPath[modulePath]; session != nil {
+		return index.buildContext(session)
 	}
 	return emptyContext()
 }
@@ -27,6 +28,77 @@ func BuildContext(programs []*ir.Program, modulePath string) Context {
 // BuildContexts indexes project-wide type metadata once, then derives the
 // declarations visible from each module through its explicit imports.
 func BuildContexts(programs []*ir.Program) map[string]Context {
+	index := buildProjectIndex(programs)
+	result := make(map[string]Context, len(index.programsByPath))
+	for _, session := range index.programsByPath {
+		result[session.ModulePath] = index.buildContext(session)
+	}
+	return result
+}
+
+type projectIndex struct {
+	metadata       Context
+	programsByPath map[string]*ir.Program
+	exportsByPath  map[string][]Symbol
+}
+
+type projectContextCache struct {
+	modulePath string
+	index      projectIndex
+}
+
+func newProjectContextCache(programs []*ir.Program, modulePath string) *projectContextCache {
+	projectPrograms := make([]*ir.Program, 0, len(programs))
+	for _, program := range programs {
+		if program != nil && program.ModulePath != modulePath {
+			projectPrograms = append(projectPrograms, program)
+		}
+	}
+	return &projectContextCache{modulePath: modulePath, index: buildProjectMetadata(projectPrograms)}
+}
+
+func (cache *projectContextCache) reusable(programs []*ir.Program, modulePath string) bool {
+	if cache == nil || cache.modulePath != modulePath {
+		return false
+	}
+	current := make(map[string]*ir.Program, len(programs))
+	for _, program := range programs {
+		if program != nil && program.ModulePath != modulePath {
+			current[program.ModulePath] = program
+		}
+	}
+	if len(current) != len(cache.index.programsByPath) {
+		return false
+	}
+	for path, program := range current {
+		if cache.index.programsByPath[path] != program {
+			return false
+		}
+	}
+	return true
+}
+
+func (cache *projectContextCache) build(programs []*ir.Program) Context {
+	var session *ir.Program
+	for _, program := range programs {
+		if program != nil && program.ModulePath == cache.modulePath {
+			session = program
+		}
+	}
+	if session == nil {
+		return emptyContext()
+	}
+	index := cache.index.withSession(session, programs)
+	return index.buildContext(session)
+}
+
+func buildProjectIndex(programs []*ir.Program) projectIndex {
+	index := buildProjectMetadata(programs)
+	indexImplementations(programs, &index.metadata)
+	return index
+}
+
+func buildProjectMetadata(programs []*ir.Program) projectIndex {
 	metadata := emptyContext()
 	programsByPath := make(map[string]*ir.Program, len(programs))
 	exportsByPath := make(map[string][]Symbol, len(programs))
@@ -48,59 +120,90 @@ func BuildContexts(programs []*ir.Program) map[string]Context {
 			}
 		}
 	}
+	return projectIndex{metadata: metadata, programsByPath: programsByPath, exportsByPath: exportsByPath}
+}
+
+func (index projectIndex) withSession(session *ir.Program, programs []*ir.Program) projectIndex {
+	metadata := cloneProjectMetadata(index.metadata)
+	programsByPath := make(map[string]*ir.Program, len(index.programsByPath)+1)
+	for path, program := range index.programsByPath {
+		programsByPath[path] = program
+	}
+	programsByPath[session.ModulePath] = session
+	exportsByPath := make(map[string][]Symbol, len(index.exportsByPath)+1)
+	for path, exports := range index.exportsByPath {
+		exportsByPath[path] = exports
+	}
+	exportsByPath[session.ModulePath] = collectSymbols(session.Statements, "", session.SourcePath, &metadata)
+	addDeclarationMembers(&metadata, session.Declarations)
+	for _, statement := range session.Statements {
+		if imported, ok := statement.(*ir.Import); ok && !imported.Implicit {
+			addImportContracts(&metadata, imported)
+		}
+	}
 	indexImplementations(programs, &metadata)
+	return projectIndex{metadata: metadata, programsByPath: programsByPath, exportsByPath: exportsByPath}
+}
 
-	result := make(map[string]Context, len(programsByPath))
-	for _, session := range programsByPath {
-		visible := map[string]Symbol{}
-		for _, symbol := range exportsByPath[session.ModulePath] {
-			visible[symbol.Name] = symbol
-		}
-		for _, statement := range session.Statements {
-			imported, ok := statement.(*ir.Import)
-			if !ok || imported.Implicit {
-				continue
-			}
-			addImportSymbols(visible, imported, programsByPath, exportsByPath)
-		}
-		addFunctionArgumentReferences(visible, session, programsByPath, exportsByPath)
-		visible["puts"] = Symbol{
-			Name:   "puts",
-			Kind:   CompletionFunction,
-			Detail: "puts(value: Any)",
-			Type:   types.FromName("Void"),
-			Call:   &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: Any"}}},
-		}
-
-		context := Context{
-			TypeMembers:     metadata.TypeMembers,
-			Types:           metadata.Types,
-			Implementations: metadata.Implementations,
-			ModulePaths:     map[string]string{},
-		}
-		for _, statement := range session.Statements {
-			imported, ok := statement.(*ir.Import)
-			if !ok || imported.Implicit {
-				continue
-			}
-			target := programsByPath[imported.Path]
-			if target == nil || target.SourcePath == "" {
-				continue
-			}
-			declaredPath := imported.DeclaredPath
-			if declaredPath == "" {
-				declaredPath = imported.Path
-			}
-			context.ModulePaths[declaredPath] = target.SourcePath
-		}
-		context.Symbols = make([]Symbol, 0, len(visible))
-		for _, symbol := range visible {
-			context.Symbols = append(context.Symbols, symbol)
-		}
-		sortSymbols(context.Symbols)
-		result[session.ModulePath] = context
+func cloneProjectMetadata(metadata Context) Context {
+	result := emptyContext()
+	for name, members := range metadata.TypeMembers {
+		result.TypeMembers[name] = append([]Symbol(nil), members...)
+	}
+	for name, info := range metadata.Types {
+		result.Types[name] = info
 	}
 	return result
+}
+
+func (index projectIndex) buildContext(session *ir.Program) Context {
+	visible := map[string]Symbol{}
+	for _, symbol := range index.exportsByPath[session.ModulePath] {
+		visible[symbol.Name] = symbol
+	}
+	for _, statement := range session.Statements {
+		imported, ok := statement.(*ir.Import)
+		if !ok || imported.Implicit {
+			continue
+		}
+		addImportSymbols(visible, imported, index.programsByPath, index.exportsByPath)
+	}
+	addFunctionArgumentReferences(visible, session, index.programsByPath, index.exportsByPath)
+	visible["puts"] = Symbol{
+		Name:   "puts",
+		Kind:   CompletionFunction,
+		Detail: "puts(value: Any)",
+		Type:   types.FromName("Void"),
+		Call:   &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: Any"}}},
+	}
+
+	context := Context{
+		TypeMembers:     index.metadata.TypeMembers,
+		Types:           index.metadata.Types,
+		Implementations: index.metadata.Implementations,
+		ModulePaths:     map[string]string{},
+	}
+	for _, statement := range session.Statements {
+		imported, ok := statement.(*ir.Import)
+		if !ok || imported.Implicit {
+			continue
+		}
+		target := index.programsByPath[imported.Path]
+		if target == nil || target.SourcePath == "" {
+			continue
+		}
+		declaredPath := imported.DeclaredPath
+		if declaredPath == "" {
+			declaredPath = imported.Path
+		}
+		context.ModulePaths[declaredPath] = target.SourcePath
+	}
+	context.Symbols = make([]Symbol, 0, len(visible))
+	for _, symbol := range visible {
+		context.Symbols = append(context.Symbols, symbol)
+	}
+	sortSymbols(context.Symbols)
+	return context
 }
 
 func addFunctionArgumentReferences(visible map[string]Symbol, session *ir.Program, programsByPath map[string]*ir.Program, exportsByPath map[string][]Symbol) {
@@ -602,6 +705,7 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 
 	byName := map[string]Symbol{}
 	for _, symbol := range exports {
+		symbol.Members = append([]Symbol(nil), symbol.Members...)
 		byName[symbol.Name] = symbol
 	}
 	for _, name := range imported.Symbols {
