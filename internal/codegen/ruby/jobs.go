@@ -25,6 +25,24 @@ func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 	return g.rubyClassName(jobName, nil) + "." + method + "(" + strings.Join(arguments, ", ") + ")"
 }
 
+func (g *generator) jobsAdapterEnqueue(name string, call *ir.Call, arguments []string) string {
+	if len(arguments) < 2 {
+		return "nil"
+	}
+	waitMilliseconds := "0"
+	parameters := []string{"_adapter", "request_value"}
+	values := []string{arguments[0], arguments[1]}
+	if name == "trb.jobs.sql.enqueue_at" {
+		if len(arguments) < 3 {
+			return "nil"
+		}
+		parameters = append(parameters, "scheduled_at")
+		values = append(values, arguments[2])
+		waitMilliseconds = "[scheduled_at.epoch_seconds * 1000 + (scheduled_at.nanosecond + 999999) / 1000000 - (Time.now.utc.to_r * 1000).ceil, 0].max"
+	}
+	return "->(" + strings.Join(parameters, ", ") + ") { begin; maximum_attempts = request_value.maximum_attempts || 0; reference = TrbJobsRuntime.enqueue(__trb_scope, request_value.job_name, request_value.payload, request_value.payload_version, request_value.queue_name, request_value.priority, " + waitMilliseconds + ", maximum_attempts); Result::Ok.new(reference); rescue TrbExecutionCancelled => error; Result::Err.new(EnqueueError.new(kind: EnqueueErrorKind::Cancelled, message: error.message)); rescue StandardError => error; Result::Err.new(EnqueueError.new(kind: EnqueueErrorKind::Adapter, message: error.message)); end }.call(" + strings.Join(values, ", ") + ")"
+}
+
 func (g *generator) jobsDeclaration(call *ir.Call) bool {
 	if g.jobs == nil || call == nil {
 		return false
@@ -60,47 +78,17 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		}
 		g.line("class "+g.rubyClassName(job.Name, nil), "")
 		g.indent++
-		emit := func(method string, methodParameters []string, waitLines ...string) {
+		emit := func(method string, methodParameters, methodArguments []string) {
 			g.line("def self."+method+"(__trb_scope"+rubyJobsParameters(methodParameters)+")", "")
 			g.indent++
-			for _, line := range waitLines {
-				g.line(line, "")
-			}
-			g.line("begin", "")
-			g.indent++
-			g.line("payload = JSON.generate(["+strings.Join(parameters, ", ")+"])", "")
-			g.indent--
-			g.line("rescue StandardError => error", "")
-			g.indent++
-			g.line("return Result::Err.new(EnqueueError.new(kind: EnqueueErrorKind::Serialization, message: error.message))", "")
-			g.indent--
-			g.line("end", "")
-			g.line("begin", "")
-			g.indent++
-			g.line("reference = TrbJobsRuntime.enqueue(__trb_scope, "+strconv.Quote(job.Name)+", payload, "+strconv.Quote(job.Queue)+", "+strconv.Itoa(job.Priority)+", wait_milliseconds, "+strconv.Itoa(job.MaximumAttempts)+")", "")
-			g.line("Result::Ok.new(reference)", "")
-			g.indent--
-			g.line("rescue TrbExecutionCancelled => error", "")
-			g.indent++
-			g.line("Result::Err.new(EnqueueError.new(kind: EnqueueErrorKind::Cancelled, message: error.message))", "")
-			g.indent--
-			g.line("rescue StandardError => error", "")
-			g.indent++
-			g.line("Result::Err.new(EnqueueError.new(kind: EnqueueErrorKind::Adapter, message: error.message))", "")
-			g.indent--
-			g.line("end", "")
+			methodArguments = append([]string{"__trb_scope"}, methodArguments...)
+			g.line(jobs.EnqueueHelperName(job.Name, method)+"("+strings.Join(methodArguments, ", ")+")", "")
 			g.indent--
 			g.line("end", "")
 		}
-		emit("perform_later", parameters, "wait_milliseconds = 0")
-		emit("perform_in", append([]string{"delay"}, parameters...),
-			"wait_milliseconds = delay.whole_seconds * 1000 + (delay.nanosecond + 999999) / 1000000",
-			"return Result::Err.new(EnqueueError.new(kind: EnqueueErrorKind::InvalidArgument, message: \"job delay must not be negative\")) if wait_milliseconds < 0",
-		)
-		emit("perform_at", append([]string{"scheduled_at"}, parameters...),
-			"target_milliseconds = scheduled_at.epoch_seconds * 1000 + (scheduled_at.nanosecond + 999999) / 1000000",
-			"wait_milliseconds = [target_milliseconds - (Time.now.utc.to_r * 1000).ceil, 0].max",
-		)
+		emit("perform_later", parameters, parameters)
+		emit("perform_in", append([]string{"delay"}, parameters...), append([]string{"delay"}, parameters...))
+		emit("perform_at", append([]string{"scheduled_at"}, parameters...), append([]string{"scheduled_at"}, parameters...))
 		g.indent--
 		g.line("end", "")
 	}
@@ -142,14 +130,14 @@ func (g *generator) jobsStorage(config jobssql.Config) {
 	g.indent--
 	g.line("end", "")
 	g.line("def close; @database.disconnect if @database; @database = nil; end", "")
-	g.line("def enqueue(scope, job_name, payload, queue_name, priority, wait_milliseconds, maximum_attempts)", "")
+	g.line("def enqueue(scope, job_name, payload, payload_version, queue_name, priority, wait_milliseconds, maximum_attempts)", "")
 	g.indent++
 	g.line("scope.check!", "")
 	g.line("id = SecureRandom.hex(16)", "")
 	g.line("now = Time.now.utc", "")
 	g.line("raise \"job delay must not be negative\" if wait_milliseconds < 0", "")
 	g.line("maximum_attempts = "+strconv.Itoa(config.DefaultMaximumAttempts)+" if maximum_attempts <= 0", "")
-	g.line("database[:trb_jobs].insert(id: id, queue_name: queue_name, job_name: job_name, payload: payload, payload_version: 1, priority: priority, run_at: now + wait_milliseconds / 1000.0, state: \"ready\", attempts: 0, maximum_attempts: maximum_attempts, created_at: now, updated_at: now)", "")
+	g.line("database[:trb_jobs].insert(id: id, queue_name: queue_name, job_name: job_name, payload: payload, payload_version: payload_version, priority: priority, run_at: now + wait_milliseconds / 1000.0, state: \"ready\", attempts: 0, maximum_attempts: maximum_attempts, created_at: now, updated_at: now)", "")
 	g.line("scope.check!", "")
 	g.line("JobReference.new(id: id, job_name: job_name)", "")
 	g.indent--

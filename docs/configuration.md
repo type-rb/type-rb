@@ -220,6 +220,12 @@ compile-time values.
 This keeps native dependency and generated SQL selection deterministic while
 the external adapter protocol is still under development.
 
+Derived Job enqueue methods call the returned `JobAdapter` through its
+portable `enqueue` and `enqueue_at` methods. Portable generated TypeRB owns
+payload serialization and relative scheduling validation; the adapter owns ID
+generation, persistence, and native error mapping. Worker lifecycle remains a
+separate bundled integration in this alpha contract.
+
 ## Project entrypoint
 
 A runnable project defines exactly one top-level `def main()`. `main` is a

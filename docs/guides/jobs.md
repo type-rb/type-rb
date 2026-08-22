@@ -58,6 +58,12 @@ default queue is `default`, the default priority is `0`, and lower priority
 numbers run first. If a Job omits `maximum_attempts`, the adapter default is
 used.
 
+The derived methods are portable TypeRB wrappers rather than backend-specific
+enqueue implementations. They encode the typed arguments as JSON, build an
+`EnqueueRequest`, reject a negative relative delay, and normalize `perform_in`
+to an absolute `Instant`. Applications normally call the derived methods and
+do not construct an `EnqueueRequest` directly.
+
 ## Fallible Jobs
 
 An infallible `perform` method omits its return type. A Job that needs worker
@@ -124,6 +130,31 @@ The configuration module is also the native dependency boundary: application
 Job source imports only `trb/jobs`, while an adapter package owns its target
 drivers and worker implementation.
 
+## Adapter contract
+
+`JobAdapter` deliberately has only two enqueue operations:
+
+```trb
+interface JobAdapter
+	enqueue(request: EnqueueRequest): Result<JobReference, EnqueueError>
+	enqueue_at(request: EnqueueRequest, scheduled_at: Instant): Result<JobReference, EnqueueError>
+end
+```
+
+`EnqueueRequest` carries the stable Job name, serialized payload and payload
+version, queue, priority, and an optional maximum-attempt override. `nil`
+leaves maximum attempts to the adapter default. An adapter owns ID generation,
+durable persistence, and conversion of native cancellation or storage failures
+to `EnqueueError`. Worker claims, acknowledgements, retries, administration,
+and process lifecycle are intentionally outside this small enqueue contract.
+
+The official SQL adapter implements these methods in ordinary TypeRB source
+and delegates only the final persistence operation to an internal native
+primitive. That primitive remains a bundled implementation detail rather than
+a generic external runtime ABI. The alpha compiler still recognizes a direct
+`SQLAdapter.new(...)` composition so native dependencies and worker generation
+remain deterministic.
+
 ## Run and inspect workers
 
 ```sh
@@ -153,10 +184,10 @@ queue, and `discard` removes a non-running Job.
 Jobs may call other portable packages, including `trb/orm`. The compiler-owned
 execution scope crosses the worker dispatch boundary, so signal cancellation
 can reach nested database and HTTP operations without adding a public context
-parameter to `perform`. Payload decoding and typed Job selection are generated
-once as portable TypeRB and compiled in every mode; the selected adapter and
-backend retain queue persistence, claims, retries, signals, and process
-lifecycle.
+parameter to `perform`. Payload encoding, relative-delay validation, adapter
+dispatch, payload decoding, and typed Job selection are generated once as
+portable TypeRB and compiled in every mode. The selected adapter and backend
+retain queue persistence, claims, retries, signals, and process lifecycle.
 
 In a configured project REPL, import a Job and call the same derived methods:
 

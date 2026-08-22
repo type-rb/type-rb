@@ -91,10 +91,12 @@ than detailed syntax.
   Declaration Protocol and read-only Project Declaration Input Protocol now
   exercised by both ORM and Jobs to shape reusable declaration capabilities.
   Evolve Project Generated Source Protocol v1, first exercised by portable Jobs
-  worker dispatch, only when another package identifies a shared capability.
+  worker dispatch and typed enqueue wrappers, only when another package
+  identifies a shared capability.
   Characterize fragment-level incremental invalidation and namespace-stable
-  imports before external use. Design the remaining ORM and Jobs runtime
-  integration as a separate minimal runtime operation ABI. Do not expose
+  imports before external use. Use the two normalized native persistence calls
+  below the Jobs adapter, together with remaining ORM runtime integration, to
+  design a separate minimal runtime-operation descriptor. Do not expose
   compiler internals as a public plugin API.
 
 ## 6. Application-level proof

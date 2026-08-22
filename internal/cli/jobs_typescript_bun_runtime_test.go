@@ -83,15 +83,15 @@ end
 		t.Fatal(err)
 	}
 	var jobName, payload, queueName, state string
-	var priority int
-	if err := database.QueryRow(`SELECT job_name, payload, queue_name, priority, state FROM trb_jobs ORDER BY run_at LIMIT 1`).Scan(&jobName, &payload, &queueName, &priority, &state); err != nil {
+	var priority, maximumAttempts int
+	if err := database.QueryRow(`SELECT job_name, payload, queue_name, priority, maximum_attempts, state FROM trb_jobs ORDER BY run_at LIMIT 1`).Scan(&jobName, &payload, &queueName, &priority, &maximumAttempts, &state); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if jobName != "SendReceiptJob" || payload != `[42,"ada@example.test"]` || queueName != "mail" || priority != 10 || state != "ready" {
-		t.Fatalf("unexpected Bun persisted job name=%q payload=%q queue=%q priority=%d state=%q", jobName, payload, queueName, priority, state)
+	if jobName != "SendReceiptJob" || payload != `[42,"ada@example.test"]` || queueName != "mail" || priority != 10 || maximumAttempts != 5 || state != "ready" {
+		t.Fatalf("unexpected Bun persisted job name=%q payload=%q queue=%q priority=%d maximum_attempts=%d state=%q", jobName, payload, queueName, priority, maximumAttempts, state)
 	}
 
 	stdout.Reset()
