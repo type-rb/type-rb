@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TypeRB syntax highlighting for GitHub
 // @namespace    https://type-rb.github.io/
-// @version      0.2.0
+// @version      0.2.1
 // @description  Highlight TypeRB files, pull request diffs, and Markdown code blocks on GitHub.
 // @author       TypeRB contributors
 // @license      MIT

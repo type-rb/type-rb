@@ -5,9 +5,10 @@ Last updated: August 22, 2026
 TypeRB Syntax Highlighting for GitHub highlights TypeRB source code on
 `github.com` in the user's browser.
 
-The extension does not collect analytics, identifiers, browsing history, or
-repository contents. It does not send page or source data to TypeRB or to any
-service outside `github.com`.
+The extension processes TypeRB source displayed on the current GitHub page
+locally in the browser solely to apply syntax highlighting. It does not collect
+analytics, identifiers, or browsing history, and it does not transmit GitHub
+page or source content to TypeRB or to services outside `github.com`.
 
 To preserve multiline syntax state in pull request diffs, the extension may
 request the exact `.trb` file revisions referenced by the GitHub page currently

@@ -66,12 +66,12 @@ async function packageNotice(packageRoot) {
   throw new Error(`No bundled license file found for ${manifest.name}`);
 }
 
-async function bundle(entryPoint) {
+async function bundle(entryPoint, charset = "utf8") {
   return build({
     absWorkingDir: packageDirectory,
     entryPoints: [resolve(packageDirectory, entryPoint)],
     bundle: true,
-    charset: "utf8",
+    charset,
     format: "iife",
     legalComments: "none",
     metafile: true,
@@ -97,7 +97,7 @@ async function bundle(entryPoint) {
 
 const [userscriptResult, chromeResult] = await Promise.all([
   bundle("src/main.js"),
-  bundle("src/chrome.js")
+  bundle("src/chrome.js", "ascii")
 ]);
 assert.equal(userscriptResult.outputFiles.length, 1, "expected one bundled userscript");
 assert.equal(chromeResult.outputFiles.length, 1, "expected one bundled Chrome content script");
@@ -123,6 +123,11 @@ const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
 
 assert.equal(manifest.permissions, undefined, "Chrome extension must not request optional APIs");
 assert.equal(manifest.host_permissions, undefined, "GitHub access belongs only in content script matches");
+assert.doesNotMatch(
+  chromeContentScript,
+  /[^\x00-\x7F]/,
+  "Chrome content script must contain only ASCII-compatible UTF-8"
+);
 assert.doesNotMatch(chromeContentScript, /WebAssembly\.instantiate|onig\.wasm|vscode-oniguruma/);
 assert.doesNotMatch(chromeContentScript, /cdn\.jsdelivr\.net|unpkg\.com/);
 
