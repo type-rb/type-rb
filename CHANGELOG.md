@@ -2,6 +2,22 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.14 - 2026-08-22
+
+### Language and collections
+
+- Fresh unannotated mutable Arrays and Hashes now infer their types from all
+  statically checked writes in the first constraining statement, including
+  branches and literal callback bodies. Later statements are checked against
+  the fixed type, and Hash keys remain homogeneous.
+  ([#424](https://github.com/type-rb/type-rb/pull/424))
+
+### REPL
+
+- Configured REPL sessions now complete unique project declarations and their
+  class members immediately after startup, before the first expression is
+  evaluated. ([#421](https://github.com/type-rb/type-rb/pull/421))
+
 ## 0.3.13 - 2026-08-22
 
 ### Compiler and REPL performance
