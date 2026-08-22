@@ -25,6 +25,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	if name == "trb.jobs.perform_later" || name == "trb.jobs.perform_in" || name == "trb.jobs.perform_at" {
 		return g.jobsPerformLater(call, arguments)
 	}
+	if name == "trb.jobs.sql.enqueue" || name == "trb.jobs.sql.enqueue_at" {
+		return g.jobsAdapterEnqueue(name, call, arguments)
+	}
 	if strings.HasPrefix(name, "trb.orm.") {
 		value := g.ormIntrinsic(name, call, arguments)
 		if effectplan.ORMOperation(name) {

@@ -316,6 +316,12 @@ end
 			},
 		},
 	},
+	"trb/internal/jobs/sql": {
+		Path:     "trb/internal/jobs/sql",
+		Kind:     Portable,
+		Internal: true,
+		Symbols:  jobsSQLIntrinsicSymbols(),
+	},
 	"trb/internal/auth/oidc": {
 		Path:     "trb/internal/auth/oidc",
 		Kind:     Portable,

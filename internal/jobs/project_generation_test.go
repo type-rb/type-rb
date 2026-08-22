@@ -11,7 +11,7 @@ import (
 	"github.com/type-rb/type-rb/internal/parser"
 )
 
-func TestGenerateProjectReturnsDeterministicPortableDispatch(t *testing.T) {
+func TestGenerateProjectReturnsDeterministicPortableSources(t *testing.T) {
 	contracts := parseProjectGenerationProgram(t, "contracts/index", "type OrderId = Integer\n")
 	job := parseProjectGenerationProgram(t, "jobs/send_receipt_job", `import { OrderId } from contracts
 import { Job, JobError, JobResult } from trb/jobs
@@ -29,11 +29,11 @@ end
 		t.Fatal(err)
 	}
 	origin := packageextension.SourceSpan{Start: packageextension.SourcePosition{Offset: 0, Line: 1, Column: 1}, End: packageextension.SourcePosition{Offset: 23, Line: 3, Column: 4}}
-	first, err := GenerateProject(input, "main", origin)
+	first, err := GenerateProject(input, "main", "config/jobs", origin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := GenerateProject(input, "main", origin)
+	second, err := GenerateProject(input, "main", "config/jobs", origin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,10 +42,10 @@ end
 	if string(firstJSON) != string(secondJSON) {
 		t.Fatalf("project generation is not deterministic:\n%s\n%s", firstJSON, secondJSON)
 	}
-	if len(first.Sources) != 1 {
+	if len(first.Sources) != 2 {
 		t.Fatalf("unexpected generated sources: %#v", first.Sources)
 	}
-	source := first.Sources[0]
+	source := projectGenerationSource(t, first, projectDispatchSourceID)
 	for _, expected := range []string{
 		"def __trb_jobs_dispatch(job_name: String, payload: String, payload_version: Integer): JobResult",
 		"argument0 := as_integer(payload_values[0]) catch |error|",
@@ -59,6 +59,60 @@ end
 	if !hasProjectGenerationImport(source.RequiredImports, "jobs/send_receipt_job", "SendReceiptJob") {
 		t.Fatalf("generated dispatch did not request the Job import: %#v", source.RequiredImports)
 	}
+	enqueue := projectGenerationSource(t, first, projectEnqueueSourceID+"jobs/send_receipt_job:SendReceiptJob")
+	for _, expected := range []string{
+		"def __trb_jobs_SendReceiptJob_request(order_id: OrderId, ratio: Float): Result<EnqueueRequest, EnqueueError>",
+		"payload_values: Array<JsonValue> := [JsonValue::Integer(order_id), JsonValue::Float(ratio)]",
+		"stringify(JsonValue::Array(payload_values))",
+		"maximum_attempts: nil",
+		"return configure_jobs().enqueue(request)",
+		"if delay.before?(Duration.seconds(0))",
+		"return configure_jobs().enqueue_at(request, Instant.now().add(delay))",
+		"return configure_jobs().enqueue_at(request, scheduled_at)",
+	} {
+		if !strings.Contains(enqueue.Source, expected) {
+			t.Fatalf("generated enqueue source is missing %q:\n%s", expected, enqueue.Source)
+		}
+	}
+	if !hasProjectGenerationImport(enqueue.RequiredImports, "config/jobs", "configure_jobs") {
+		t.Fatalf("generated enqueue source did not request the configuration import: %#v", enqueue.RequiredImports)
+	}
+}
+
+func TestGenerateProjectKeepsEachJobEnqueueFragmentAtItsAuthoredOrigin(t *testing.T) {
+	jobs := parseProjectGenerationProgram(t, "jobs/examples", `import { Job } from trb/jobs
+
+class FirstJob < Job
+	def perform(value: Integer)
+		return
+	end
+end
+
+class SecondJob < Job
+	def perform(value: String)
+		return
+	end
+end
+`)
+	input, err := packageextensionhost.ExportProjectDeclarationInput(PackageName, []*ast.Program{jobs}, packageextensionhost.ProjectDeclarationInputOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := GenerateProject(input, "", "config/jobs", packageextension.SourceSpan{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Sources) != 2 {
+		t.Fatalf("unexpected generated sources: %#v", response.Sources)
+	}
+	first := projectGenerationSource(t, response, projectEnqueueSourceID+"jobs/examples:FirstJob")
+	second := projectGenerationSource(t, response, projectEnqueueSourceID+"jobs/examples:SecondJob")
+	if first.Origin == second.Origin {
+		t.Fatalf("Job enqueue fragments share an authored origin: %#v", first.Origin)
+	}
+	if !strings.Contains(first.Source, "__trb_jobs_FirstJob_perform_later") || !strings.Contains(second.Source, "__trb_jobs_SecondJob_perform_later") {
+		t.Fatalf("unexpected generated enqueue fragments:\nfirst=%s\nsecond=%s", first.Source, second.Source)
+	}
 }
 
 func TestGenerateProjectSkipsDispatchWithoutJobsOrEntrypoint(t *testing.T) {
@@ -68,13 +122,24 @@ func TestGenerateProjectSkipsDispatchWithoutJobsOrEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := GenerateProject(input, "main", packageextension.SourceSpan{})
+	response, err := GenerateProject(input, "main", "config/jobs", packageextension.SourceSpan{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(response.Sources) != 0 {
 		t.Fatalf("unexpected generated source: %#v", response.Sources)
 	}
+}
+
+func projectGenerationSource(t *testing.T, response packageextension.ProjectGenerationResponse, id string) packageextension.ProjectGeneratedSource {
+	t.Helper()
+	for _, source := range response.Sources {
+		if source.ID == id {
+			return source
+		}
+	}
+	t.Fatalf("generated source %s is missing: %#v", id, response.Sources)
+	return packageextension.ProjectGeneratedSource{}
 }
 
 func parseProjectGenerationProgram(t *testing.T, modulePath, source string) *ast.Program {

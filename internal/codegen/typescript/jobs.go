@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	"github.com/type-rb/type-rb/internal/jobs/sqlstore"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 func (g *generator) jobsIntegrationImports(manifest *jobs.Manifest) {
@@ -17,23 +18,10 @@ func (g *generator) jobsIntegrationImports(manifest *jobs.Manifest) {
 	if g.modulePath == jobssql.ModulePath {
 		g.line("import { SQL, type TransactionSQL } from \"bun\";")
 	}
-	jobModule := false
-	for _, job := range manifest.Jobs {
-		if job.ModulePath == g.modulePath {
-			jobModule = true
-			break
-		}
-	}
-	if jobModule {
-		g.line("import * as __trbJobResult from " + strconv.Quote(tsImportPath(g.modulePath, "trb/std/result/index")) + ";")
-		g.line("import * as __trbJobsRuntime from " + strconv.Quote(tsImportPath(g.modulePath, jobssql.ModulePath)) + ";")
-	}
 	if !g.topFunctions["main"] || g.modulePath == "trb_test_main" {
 		return
 	}
-	if !jobModule {
-		g.line("import * as __trbJobsRuntime from " + strconv.Quote(tsImportPath(g.modulePath, jobssql.ModulePath)) + ";")
-	}
+	g.line("import * as __trbJobsRuntime from " + strconv.Quote(tsImportPath(g.modulePath, jobssql.ModulePath)) + ";")
 }
 
 func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
@@ -49,6 +37,29 @@ func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 		arguments = append([]string{"__trbScope"}, arguments...)
 	}
 	return jobName + "." + tsMethodName(method) + "(" + strings.Join(arguments, ", ") + ")"
+}
+
+func (g *generator) jobsAdapterEnqueue(name string, call *ir.Call, arguments []string) string {
+	if len(arguments) < 2 || len(call.ExprType().Args) != 2 {
+		return "undefined"
+	}
+	parameters := []string{"_adapter: " + g.tsType(call.Arguments[0].Value.ExprType()), "requestValue: " + g.tsType(call.Arguments[1].Value.ExprType())}
+	values := []string{arguments[0], arguments[1]}
+	waitMilliseconds := "0"
+	if name == "trb.jobs.sql.enqueue_at" {
+		if len(arguments) < 3 {
+			return "undefined"
+		}
+		parameters = append(parameters, "scheduledAt: "+g.tsType(call.Arguments[2].Value.ExprType()))
+		values = append(values, arguments[2])
+		waitMilliseconds = "Math.max(scheduledAt.epoch_seconds() * 1000 + Math.ceil(scheduledAt.nanosecond() / 1000000) - globalThis.Date.now(), 0)"
+	}
+	resultType := g.tsType(call.ExprType())
+	successType := g.tsType(call.ExprType().Args[0])
+	errorType := g.tsType(call.ExprType().Args[1])
+	result := g.runtimeName("Result")
+	errorKind := g.runtimeName("EnqueueErrorKind")
+	return "(async (" + strings.Join(parameters, ", ") + "): Promise<" + resultType + "> => { const maximumAttempts = requestValue.maximum_attempts ?? 0; try { const reference = await trbJobsEnqueue(__trbScope, requestValue.job_name, requestValue.payload, requestValue.payload_version, requestValue.queue_name, requestValue.priority, " + waitMilliseconds + ", maximumAttempts); return " + result + ".Ok<" + successType + ", " + errorType + ">(reference); } catch (error) { return " + result + ".Err<" + successType + ", " + errorType + ">({ kind: __trbScope?.aborted ? " + errorKind + ".Cancelled : " + errorKind + ".Adapter, message: error instanceof Error ? error.message : String(error) }); } })(" + strings.Join(values, ", ") + ")"
 }
 
 func (g *generator) jobsDeclaration(call *ir.Call) bool {
@@ -88,36 +99,18 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		}
 		g.line("export namespace " + job.Name + " {")
 		g.indent++
-		emit := func(method string, methodParameters []string, waitLines ...string) {
-			g.line("export async function " + tsMethodName(method) + "(__trbScope: AbortSignal | undefined" + tsJobsParameters(methodParameters) + "): Promise<__trbJobResult.Result<JobReference, EnqueueError>> {")
+		enqueueResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("JobReference"), types.FromName("EnqueueError")}}
+		emit := func(method string, methodParameters, methodArguments []string) {
+			g.line("export async function " + tsMethodName(method) + "(__trbScope: AbortSignal | undefined" + tsJobsParameters(methodParameters) + "): Promise<" + g.tsType(enqueueResult) + "> {")
 			g.indent++
-			for _, line := range waitLines {
-				g.line(line)
-			}
-			g.line("let payload: string;")
-			g.line("try { payload = JSON.stringify([" + strings.Join(arguments, ", ") + "]); } catch (error) { return __trbJobResult.Result.Err<JobReference, EnqueueError>({ kind: EnqueueErrorKind.Serialization, message: error instanceof Error ? error.message : String(error) }); }")
-			g.line("try {")
-			g.indent++
-			g.line("const reference = await __trbJobsRuntime.trbJobsEnqueue(__trbScope, " + strconv.Quote(job.Name) + ", payload, " + strconv.Quote(job.Queue) + ", " + strconv.Itoa(job.Priority) + ", waitMilliseconds, " + strconv.Itoa(job.MaximumAttempts) + ");")
-			g.line("return __trbJobResult.Result.Ok<JobReference, EnqueueError>(reference);")
-			g.indent--
-			g.line("} catch (error) {")
-			g.indent++
-			g.line("return __trbJobResult.Result.Err<JobReference, EnqueueError>({ kind: __trbScope?.aborted ? EnqueueErrorKind.Cancelled : EnqueueErrorKind.Adapter, message: error instanceof Error ? error.message : String(error) });")
-			g.indent--
-			g.line("}")
+			methodArguments = append([]string{"__trbScope"}, methodArguments...)
+			g.line("return await " + jobs.EnqueueHelperName(job.Name, method) + "(" + strings.Join(methodArguments, ", ") + ");")
 			g.indent--
 			g.line("}")
 		}
-		emit("perform_later", parameters, "const waitMilliseconds = 0;")
-		emit("perform_in", append([]string{"delay: Duration"}, parameters...),
-			"const waitMilliseconds = delay.whole_seconds() * 1000 + Math.ceil(delay.nanosecond() / 1000000);",
-			"if (waitMilliseconds < 0) return __trbJobResult.Result.Err<JobReference, EnqueueError>({ kind: EnqueueErrorKind.InvalidArgument, message: \"job delay must not be negative\" });",
-		)
-		emit("perform_at", append([]string{"scheduled_at: Instant"}, parameters...),
-			"const targetMilliseconds = scheduled_at.epoch_seconds() * 1000 + Math.ceil(scheduled_at.nanosecond() / 1000000);",
-			"const waitMilliseconds = Math.max(targetMilliseconds - globalThis.Date.now(), 0);",
-		)
+		emit("perform_later", parameters, arguments)
+		emit("perform_in", append([]string{"delay: Duration"}, parameters...), append([]string{"delay"}, arguments...))
+		emit("perform_at", append([]string{"scheduled_at: Instant"}, parameters...), append([]string{"scheduled_at"}, arguments...))
 		g.indent--
 		g.line("}")
 	}
@@ -156,7 +149,7 @@ func (g *generator) jobsStorage(config jobssql.Config) {
 	g.line("export async function trbJobsClose(): Promise<void> { if (trbJobsDatabase !== null) await trbJobsDatabase.close(); trbJobsDatabase = null; trbJobsSchema = null; }")
 
 	insert := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + tsJobsPlaceholders(config.Dialect, 7, 0) + ", 'ready', 0, " + tsJobsPlaceholder(config.Dialect, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-	g.line("export async function trbJobsEnqueue(signal: AbortSignal | undefined, jobName: string, payload: string, queueName: string, priority: number, waitMilliseconds: number, maximumAttempts: number): Promise<JobReference> { if (signal?.aborted) throw signal.reason ?? new DOMException(\"TypeRB execution was cancelled\", \"AbortError\"); if (waitMilliseconds < 0) throw new Error(\"job delay must not be negative\"); if (maximumAttempts <= 0) maximumAttempts = " + strconv.Itoa(config.DefaultMaximumAttempts) + "; await trbJobsEnsureSchema(); const id = crypto.randomUUID().replaceAll(\"-\", \"\"); const timestamp = new Date(Date.now() + waitMilliseconds).toISOString(); const runAt = timestamp.slice(0, 23).replace(\"T\", \" \" ); await trbJobsDB().unsafe(" + strconv.Quote(insert) + ", [id, queueName, jobName, payload, 1, priority, runAt, maximumAttempts]); if (signal?.aborted) throw signal.reason ?? new DOMException(\"TypeRB execution was cancelled\", \"AbortError\"); return { id, job_name: jobName }; }")
+	g.line("export async function trbJobsEnqueue(signal: AbortSignal | undefined, jobName: string, payload: string, payloadVersion: number, queueName: string, priority: number, waitMilliseconds: number, maximumAttempts: number): Promise<JobReference> { if (signal?.aborted) throw signal.reason ?? new DOMException(\"TypeRB execution was cancelled\", \"AbortError\"); if (waitMilliseconds < 0) throw new Error(\"job delay must not be negative\"); if (maximumAttempts <= 0) maximumAttempts = " + strconv.Itoa(config.DefaultMaximumAttempts) + "; await trbJobsEnsureSchema(); const id = crypto.randomUUID().replaceAll(\"-\", \"\"); const timestamp = new Date(Date.now() + waitMilliseconds).toISOString(); const runAt = timestamp.slice(0, 23).replace(\"T\", \" \" ); await trbJobsDB().unsafe(" + strconv.Quote(insert) + ", [id, queueName, jobName, payload, payloadVersion, priority, runAt, maximumAttempts]); if (signal?.aborted) throw signal.reason ?? new DOMException(\"TypeRB execution was cancelled\", \"AbortError\"); return { id, job_name: jobName }; }")
 
 	update := "UPDATE trb_jobs SET state = 'running', attempts = attempts + 1, claimed_by = " + tsJobsPlaceholder(config.Dialect, 1) + ", claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = " + tsJobsPlaceholder(config.Dialect, 2) + " AND state = 'ready'"
 	read := "SELECT job_name, payload, payload_version, attempts, maximum_attempts FROM trb_jobs WHERE id = " + tsJobsPlaceholder(config.Dialect, 1)

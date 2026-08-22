@@ -316,14 +316,20 @@ names required no Jobs-specific protocol fields. Worker dispatch now crosses
 the versioned Project Generated Source Protocol as an ordinary TypeRB fragment:
 one portable dispatcher validates payload versions, decodes scalar arguments,
 calls the typed Job, and returns `JobResult` before all three backends lower it.
+The same protocol emits a stable fragment per Job for payload serialization,
+negative-delay validation, relative-to-absolute schedule normalization, and
+dispatch through the ordinary TypeRB `JobAdapter#enqueue`/`enqueue_at`
+contract. `EnqueueRequest` carries serialized payload and queue policy; the SQL
+adapter owns ID generation, persistence, and native error mapping.
 Generated-source responses contain stable fragment and module identity,
 required named imports, authored origin spans, and located issues, but no AST,
 typed IR, backend source, filesystem handles, or arbitrary provider data.
 The compiler removes stale fragments, includes them in cache identity, and maps
 their diagnostics and source locations to authored source. Project edits
 currently use conservative full analysis while such fragments are active.
-Payload manifests, retry policy, SQL persistence, and worker lifecycle remain
-a separate bundled runtime boundary. Jobs and ORM declaration discovery also
+Retry policy, SQL worker lifecycle, and the SQL adapter's final native
+persistence primitives remain a separate bundled runtime boundary. Jobs and
+ORM declaration discovery also
 consume versioned, JSON-serializable Project Declaration Input snapshots.
 Version 2 contains only canonical module/import identity, aliases, enum and class
 declarations, method signatures, authored and resolved types, declarative call

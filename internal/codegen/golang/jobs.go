@@ -54,6 +54,42 @@ func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 	return qualifier + goIdentifier(jobName, true) + goMethodName(method) + "(" + strings.Join(arguments, ", ") + ")"
 }
 
+func (g *generator) jobsAdapterEnqueue(name string, call *ir.Call, arguments []string) string {
+	if len(arguments) < 2 || len(call.ExprType().Args) != 2 {
+		return "nil"
+	}
+	resultAlias := g.typeAliases["Result"]
+	if resultAlias == "" {
+		resultAlias = "__trb_result"
+		g.requireImport(pathpkg.Join(g.goModule, "trb/std/result"), resultAlias)
+	}
+	contractAlias := g.jobsContractAlias()
+	successType := g.goType(call.ExprType().Args[0])
+	errorType := g.goType(call.ExprType().Args[1])
+	resultType := g.goType(call.ExprType())
+	parameters := []string{"_ " + g.goType(call.Arguments[0].Value.ExprType()), "requestValue " + g.goType(call.Arguments[1].Value.ExprType())}
+	values := []string{arguments[0], arguments[1]}
+	waitMilliseconds := "0"
+	if name == "trb.jobs.sql.enqueue_at" {
+		if len(arguments) < 3 {
+			return "nil"
+		}
+		g.requireImport("time", "stdtime")
+		parameters = append(parameters, "scheduledAt "+g.goType(call.Arguments[2].Value.ExprType()))
+		values = append(values, arguments[2])
+		waitMilliseconds = "int(max(int64(scheduledAt.EpochSeconds())*1000+(int64(scheduledAt.Nanosecond())+999999)/1000000-stdtime.Now().UTC().UnixMilli(), 0))"
+	}
+	enqueue := "TrbJobsEnqueue"
+	if alias := g.jobsRuntimeAlias(); alias != "" {
+		enqueue = alias + "." + enqueue
+	}
+	return "func(" + strings.Join(parameters, ", ") + ") " + resultType + " { " +
+		"maximumAttempts := 0; if requestValue.MaximumAttempts != nil { maximumAttempts = *requestValue.MaximumAttempts }; " +
+		"reference, err := " + enqueue + "(__trbScope, requestValue.JobName, requestValue.Payload, requestValue.PayloadVersion, requestValue.QueueName, requestValue.Priority, " + waitMilliseconds + ", maximumAttempts); " +
+		"if err != nil { kind := " + contractAlias + "." + goConstantIdentifier("EnqueueErrorKind", "Adapter") + "; if __trbScope.Err() != nil { kind = " + contractAlias + "." + goConstantIdentifier("EnqueueErrorKind", "Cancelled") + " }; return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorType + "{Kind: kind, Message: err.Error()}) }; " +
+		"return " + resultAlias + ".NewResultOk[" + successType + ", " + errorType + "](reference) }(" + strings.Join(values, ", ") + ")"
+}
+
 func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	if manifest == nil || g.jobsSQL == nil {
 		return
@@ -342,19 +378,14 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		if job.ModulePath != g.modulePath {
 			continue
 		}
-		g.requireImport("encoding/json", "")
 		resultAlias := g.typeAliases["Result"]
 		if resultAlias == "" {
 			resultAlias = "__trb_result"
 			g.requireImport(pathpkg.Join(g.goModule, "trb/std/result"), resultAlias)
 		}
-		jobsAlias := g.jobsRuntimeAlias()
 		contractAlias := g.jobsContractAlias()
 		successType := contractAlias + ".JobReference"
 		errorType := contractAlias + ".EnqueueError"
-		errorValue := func(kind, message string) string {
-			return errorType + "{Kind: " + contractAlias + "." + goConstantIdentifier("EnqueueErrorKind", kind) + ", Message: " + message + "}"
-		}
 		parameters := make([]string, len(job.Parameters))
 		arguments := make([]string, len(job.Parameters))
 		for index, parameter := range job.Parameters {
@@ -364,36 +395,32 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		}
 		resultType := resultAlias + ".Result[" + successType + ", " + errorType + "]"
 		g.requireImport("context", "trbcontext")
-		emit := func(method string, methodParameters []string, waitMilliseconds string) {
+		emit := func(method string, methodParameters, methodArguments []string) {
 			functionName := goIdentifier(job.Name, true) + goMethodName(method)
 			methodParameters = append([]string{"__trbScope trbcontext.Context"}, methodParameters...)
 			g.line("func " + functionName + "(" + strings.Join(methodParameters, ", ") + ") " + resultType + " {")
 			g.indent++
-			g.line("payload, err := json.Marshal([]any{" + strings.Join(arguments, ", ") + "})")
-			g.line("if err != nil { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorValue("Serialization", "err.Error()") + ") }")
-			g.line("waitMilliseconds := " + waitMilliseconds)
-			g.line("if waitMilliseconds < 0 { return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorValue("InvalidArgument", strconv.Quote("job delay must not be negative")) + ") }")
-			g.line("reference, err := " + jobsAlias + ".TrbJobsEnqueue(__trbScope, " + strconv.Quote(job.Name) + ", string(payload), " + strconv.Quote(job.Queue) + ", " + strconv.Itoa(job.Priority) + ", waitMilliseconds, " + strconv.Itoa(job.MaximumAttempts) + ")")
-			g.line("if err != nil { kind := " + contractAlias + "." + goConstantIdentifier("EnqueueErrorKind", "Adapter") + "; if __trbScope.Err() != nil { kind = " + contractAlias + "." + goConstantIdentifier("EnqueueErrorKind", "Cancelled") + " }; return " + resultAlias + ".NewResultErr[" + successType + ", " + errorType + "](" + errorType + "{Kind: kind, Message: err.Error()}) }")
-			g.line("return " + resultAlias + ".NewResultOk[" + successType + ", " + errorType + "](reference)")
+			methodArguments = append([]string{"__trbScope"}, methodArguments...)
+			g.line("return " + goMethodName(jobs.EnqueueHelperName(job.Name, method)) + "(" + strings.Join(methodArguments, ", ") + ")")
 			g.indent--
 			g.line("}")
 			g.b.WriteByte('\n')
 		}
-		emit("perform_later", parameters, "0")
+		emit("perform_later", parameters, arguments)
 		durationType := g.goType(types.FromName("Duration"))
 		delayedParameters := append([]string{"delay " + durationType}, parameters...)
-		emit("perform_in", delayedParameters, "delay.WholeSeconds()*1000+(delay.Nanosecond()+999999)/1000000")
-		g.requireImport("time", "stdtime")
+		delayedArguments := append([]string{"delay"}, arguments...)
+		emit("perform_in", delayedParameters, delayedArguments)
 		instantType := g.goType(types.FromName("Instant"))
 		scheduledParameters := append([]string{"scheduledAt " + instantType}, parameters...)
-		emit("perform_at", scheduledParameters, "int(max(int64(scheduledAt.EpochSeconds())*1000+(int64(scheduledAt.Nanosecond())+999999)/1000000-stdtime.Now().UTC().UnixMilli(), 0))")
+		scheduledArguments := append([]string{"scheduledAt"}, arguments...)
+		emit("perform_at", scheduledParameters, scheduledArguments)
 	}
 }
 
 func (g *generator) jobsEnqueue(config jobssql.Config) {
 	referenceType := g.jobsContractAlias() + ".JobReference"
-	g.line("func TrbJobsEnqueue(ctx trbcontext.Context, jobName string, payload string, queueName string, priority int, waitMilliseconds int, maximumAttempts int) (" + referenceType + ", error) {")
+	g.line("func TrbJobsEnqueue(ctx trbcontext.Context, jobName string, payload string, payloadVersion int, queueName string, priority int, waitMilliseconds int, maximumAttempts int) (" + referenceType + ", error) {")
 	g.indent++
 	g.line("database, err := trbJobsOpenDatabase()")
 	g.line("if err != nil { return " + referenceType + "{}, err }")
@@ -408,7 +435,7 @@ func (g *generator) jobsEnqueue(config jobssql.Config) {
 		runAtArgument = "runAtValue"
 	}
 	query := "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (" + goJobsPlaceholders(config.Dialect, 7, 0) + ", 'ready', 0, " + goJobsPlaceholder(config.Dialect, 8) + ", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-	g.line("_, err = database.ExecContext(ctx, " + strconv.Quote(query) + ", id, queueName, jobName, payload, 1, priority, " + runAtArgument + ", maximumAttempts)")
+	g.line("_, err = database.ExecContext(ctx, " + strconv.Quote(query) + ", id, queueName, jobName, payload, payloadVersion, priority, " + runAtArgument + ", maximumAttempts)")
 	g.line("if err != nil { return " + referenceType + "{}, err }")
 	g.line("return " + referenceType + "{Id: id, JobName: jobName}, nil")
 	g.indent--

@@ -80,12 +80,12 @@ end
 		t.Fatal(err)
 	}
 	var jobName, payload, queueName, state string
-	var payloadVersion, priority int
-	if err := database.QueryRow(`SELECT job_name, payload, payload_version, queue_name, priority, state FROM trb_jobs ORDER BY run_at LIMIT 1`).Scan(&jobName, &payload, &payloadVersion, &queueName, &priority, &state); err != nil {
+	var payloadVersion, priority, maximumAttempts int
+	if err := database.QueryRow(`SELECT job_name, payload, payload_version, queue_name, priority, maximum_attempts, state FROM trb_jobs ORDER BY run_at LIMIT 1`).Scan(&jobName, &payload, &payloadVersion, &queueName, &priority, &maximumAttempts, &state); err != nil {
 		t.Fatal(err)
 	}
-	if jobName != "SendReceiptJob" || payload != `[42,"ada@example.test"]` || payloadVersion != 1 || queueName != "mail" || priority != 10 || state != "ready" {
-		t.Fatalf("unexpected persisted job: name=%q payload=%q version=%d queue=%q priority=%d state=%q", jobName, payload, payloadVersion, queueName, priority, state)
+	if jobName != "SendReceiptJob" || payload != `[42,"ada@example.test"]` || payloadVersion != 1 || queueName != "mail" || priority != 10 || maximumAttempts != 5 || state != "ready" {
+		t.Fatalf("unexpected persisted job: name=%q payload=%q version=%d queue=%q priority=%d maximum_attempts=%d state=%q", jobName, payload, payloadVersion, queueName, priority, maximumAttempts, state)
 	}
 	if _, err := database.Exec(`INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES ('other-queue', 'default', 'RemovedJob', '[]', 1, 0, CURRENT_TIMESTAMP, 'ready', 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`); err != nil {
 		t.Fatal(err)

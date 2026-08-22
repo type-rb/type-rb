@@ -80,7 +80,7 @@ func analyzeJobs(context Context) (Contribution, []Issue) {
 		}
 		break
 	}
-	generation, err := jobsintegration.GenerateProject(projectInput, generationEntrypoint, origin)
+	generation, err := jobsintegration.GenerateProject(projectInput, generationEntrypoint, context.JobsConfiguration, origin)
 	if err != nil {
 		return Contribution{}, []Issue{{Message: err.Error()}}
 	}

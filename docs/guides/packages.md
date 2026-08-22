@@ -240,10 +240,12 @@ The initial declaration catalog can describe:
 
 A declaration may name an opaque `runtimeOperation`, but only bundled compiler
 backends can implement those operation names today. ORM runtime manifests and
-Job persistence, retry policy, and worker lifecycle use separate bundled
-runtime paths rather than becoming declaration fields. These protocols
-therefore narrow the declaration boundary; they do not yet make ORM or Jobs an
-ordinary external package or define a public runtime adapter ABI.
+Job worker lifecycle use separate bundled runtime paths rather than becoming
+declaration fields. Jobs now exposes a small package-level `JobAdapter`
+interface in ordinary TypeRB source, but its SQL implementation still reaches
+bundled native primitives. These protocols therefore narrow the declaration
+boundary; they do not yet make ORM or Jobs an ordinary external package or
+define a generic external native-runtime ABI.
 
 The declaration type format deliberately rejects call-site-only record
 inspection and source-definition metadata. Those facts remain scoped to call
@@ -252,9 +254,10 @@ read-only project input may carry source-definition identity because providers
 need to distinguish an imported canonical type from a same-shaped local type.
 Applying the same capability to Jobs and ORM established the reusable
 declaration facts without introducing an arbitrary provider-data bag. The
-remaining ORM and Jobs runtime integrations can now guide a separate, minimal
-runtime adapter ABI. Capability negotiation and sandboxing remain deferred
-until an external provider boundary is justified.
+remaining ORM integration and the normalized native operations below the Jobs
+adapter can now guide a separate, minimal runtime-operation descriptor.
+Capability negotiation and sandboxing remain deferred until an external
+provider boundary is justified.
 
 ### Experimental bundled project source generation
 
@@ -276,15 +279,17 @@ origin. Fragment source and identity participate in compiler cache identity;
 project edits currently re-enter full project analysis conservatively when a
 project-generated fragment is active.
 
-Jobs worker dispatch is the first consumer. The Jobs provider generates one
-portable dispatcher that validates payload versions, decodes scalar payload
-arguments, invokes the typed Job, and returns `JobResult`. Go, Ruby, and Bun
-workers call that compiled function from thin target-specific panic or
-exception wrappers. SQL persistence, claims, heartbeats, retry transitions,
-signals, and worker process lifecycle remain adapter/backend responsibilities.
-This split exercises a reusable generated-source capability without turning
-Jobs metadata into generic protocol fields or prematurely defining a public
-runtime adapter ABI.
+Jobs is the first consumer. The Jobs provider generates one portable worker
+dispatcher plus one stable fragment for each Job's typed enqueue wrappers. The
+enqueue fragments encode scalar payloads, normalize relative scheduling, and
+call the ordinary TypeRB `JobAdapter` contract. The dispatcher validates
+payload versions, decodes arguments, invokes the typed Job, and returns
+`JobResult`. Go, Ruby, and Bun workers call that compiled function from thin
+target-specific panic or exception wrappers. SQL persistence, claims,
+heartbeats, retry transitions, signals, and worker process lifecycle remain
+adapter/backend responsibilities. This split exercises reusable generated
+source and per-fragment authored origins without turning Jobs metadata into
+generic protocol fields or prematurely defining a generic native-runtime ABI.
 
 This protocol is still bundled and experimental, not a package-manifest
 capability or external plugin API. Like call specialization below, its required

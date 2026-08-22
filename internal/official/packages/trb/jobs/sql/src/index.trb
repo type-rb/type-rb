@@ -1,5 +1,7 @@
-import { JobAdapter } from trb/jobs
-import { Duration } from trb/std/time
+import { EnqueueError, EnqueueRequest, JobAdapter, JobReference } from trb/jobs
+import trb/internal/jobs/sql as native_jobs
+import { Result } from trb/std/result
+import { Duration, Instant } from trb/std/time
 
 enum SQLDialect
 	SQLite
@@ -33,5 +35,13 @@ class SQLAdapter implements JobAdapter
 		@default_maximum_attempts = default_maximum_attempts
 		@retry_base_delay = retry_base_delay
 		return
+	end
+
+	def enqueue(request: EnqueueRequest): Result<JobReference, EnqueueError>
+		return native_jobs.enqueue(self, request)
+	end
+
+	def enqueue_at(request: EnqueueRequest, scheduled_at: Instant): Result<JobReference, EnqueueError>
+		return native_jobs.enqueue_at(self, request, scheduled_at)
 	end
 end

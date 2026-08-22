@@ -1,4 +1,5 @@
 import { Result } from trb/std/result
+import { Instant } from trb/std/time
 import { Unit } from trb/std/unit
 
 enum EnqueueErrorKind
@@ -18,6 +19,15 @@ record JobReference
 	job_name: String
 end
 
+record EnqueueRequest
+	job_name: String
+	payload: String
+	payload_version: Integer
+	queue_name: String
+	priority: Integer
+	maximum_attempts: Integer?
+end
+
 record JobError
 	message: String
 end
@@ -25,6 +35,8 @@ end
 type JobResult = Result<Unit, JobError>
 
 interface JobAdapter
+	enqueue(request: EnqueueRequest): Result<JobReference, EnqueueError>
+	enqueue_at(request: EnqueueRequest, scheduled_at: Instant): Result<JobReference, EnqueueError>
 end
 
 class Job
