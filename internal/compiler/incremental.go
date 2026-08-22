@@ -74,11 +74,17 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		providerPrograms = append(providerPrograms, programs[source.ModulePath])
 	}
 	packageAliasesByModule := sourcePackageAliases(units, options.PackageAliases)
-	declarations, providerErr := typeprovider.Load(providerPrograms, typeprovider.Context{
+	providerContext := typeprovider.Context{
 		ProjectRoot: projectRoot(options), PackageOptions: options.PackageOptions, PackageAliasesByModule: packageAliasesByModule,
-	})
-	if providerErr != nil {
-		return nil, true, compileProviderError(providerErr, units)
+	}
+	providerInputs := typeprovider.CaptureInputs(providerPrograms, providerContext)
+	declarations := previous.declarations
+	if !providerInputs.CanReuse(previous.providerInputs) {
+		var providerErr error
+		declarations, providerErr = typeprovider.Load(providerPrograms, providerContext)
+		if providerErr != nil {
+			return nil, true, compileProviderError(providerErr, units)
+		}
 	}
 
 	affected := affectedProjectModules(previous, catalog, declarations, changed.ModulePath)
@@ -201,7 +207,7 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 	}
 	return &projectAnalysis{
 		artifacts: artifacts, requestedUnits: cloneSourceUnits(sources), units: units, options: cloneOptions(options),
-		programs: programs, catalog: catalog, declarations: declarations, resolutions: resolutions,
+		programs: programs, catalog: catalog, declarations: declarations, providerInputs: providerInputs, resolutions: resolutions,
 		checkedPrograms: checkedPrograms, validateBackend: validateBackend,
 	}, true, nil
 }

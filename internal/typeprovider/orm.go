@@ -1,15 +1,67 @@
 package typeprovider
 
 import (
+	"encoding/json"
+	"path/filepath"
+	"strings"
+
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 )
 
 func init() {
-	register(ormintegration.TypeProvider, loadORM)
+	register(ormintegration.TypeProvider, loadORM, ormProviderInputs)
 }
 
 func loadORM(programs []*ast.Program, context Context) (*declaration.Catalog, error) {
 	return ormintegration.Declarations(programs, context.ProjectRoot, context.PackageOptions, context.PackageAliasesByModule)
+}
+
+func ormProviderInputs(programs []*ast.Program, context Context) providerInputSnapshot {
+	result := providerInputSnapshot{programs: providerPrograms(programs, ormProviderProgram), reusable: true}
+	var configured struct {
+		SchemaLock string `json:"schemaLock"`
+	}
+	if err := json.Unmarshal(context.PackageOptions[ormintegration.PackageName], &configured); err != nil {
+		result.reusable = false
+		return result
+	}
+	configured.SchemaLock = strings.TrimSpace(configured.SchemaLock)
+	path := ""
+	if configured.SchemaLock == "" {
+		path = filepath.Join(context.ProjectRoot, "db", "schema.lock.json")
+	} else {
+		if filepath.IsAbs(configured.SchemaLock) {
+			result.reusable = false
+			return result
+		}
+		clean := filepath.Clean(configured.SchemaLock)
+		if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			result.reusable = false
+			return result
+		}
+		path = filepath.Join(context.ProjectRoot, clean)
+	}
+	file, ok := captureProviderFile(path, false)
+	if !ok {
+		result.reusable = false
+		return result
+	}
+	result.files = []providerFileSnapshot{file}
+	return result
+}
+
+func ormProviderProgram(program *ast.Program) bool {
+	for _, statement := range program.Statements {
+		switch node := statement.(type) {
+		case *ast.EnumStatement:
+			return true
+		case *ast.ClassStatement:
+			if identifier, ok := node.Superclass.(*ast.Identifier); ok && identifier.Name == "Model" {
+				return true
+			}
+		}
+	}
+	return false
 }
