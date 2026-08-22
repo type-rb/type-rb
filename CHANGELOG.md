@@ -2,6 +2,27 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.15 - 2026-08-22
+
+### Jobs
+
+- Jobs now exposes a small portable enqueue adapter contract. Derived Job
+  methods share serialization, scheduling validation, and error behavior
+  across generated Go, Ruby, and Bun applications.
+  ([#430](https://github.com/type-rb/type-rb/pull/430))
+
+### Tooling
+
+- `trb fmt` now recursively indents structured JSX while preserving
+  text-bearing JSX whitespace and grouping parentheses in embedded
+  expressions. ([#431](https://github.com/type-rb/type-rb/pull/431))
+- TypeRB source files, pull request diffs, and explicit TypeRB Markdown blocks
+  can now be syntax-highlighted on github.com with the Chrome extension or the
+  packaged Tampermonkey fallback.
+  ([#422](https://github.com/type-rb/type-rb/pull/422))
+- TypeRB syntax highlighting on GitHub now preserves blank lines in repository
+  file views. ([#428](https://github.com/type-rb/type-rb/pull/428))
+
 ## 0.3.14 - 2026-08-22
 
 ### Language and collections
