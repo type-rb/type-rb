@@ -2,6 +2,25 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.13 - 2026-08-22
+
+### Compiler and REPL performance
+
+- Incremental project analysis reuses unchanged type-provider declarations and
+  lowered IR, including semantically unchanged TypeScript native package
+  catalogs loaded into new instances. This substantially reduces repeated
+  compiler work in larger, schema-backed projects.
+  ([#412](https://github.com/type-rb/type-rb/pull/412),
+  [#413](https://github.com/type-rb/type-rb/pull/413),
+  [#415](https://github.com/type-rb/type-rb/pull/415))
+- The REPL batches project definition loading, refreshes only changed modules,
+  and reuses unchanged project language metadata between submissions. In the
+  measured 274-file application, repeated input fell from about 305 to 28
+  milliseconds in Ruby mode, 303 to 28 milliseconds in Go mode, and 313 to 35
+  milliseconds in TypeScript mode.
+  ([#414](https://github.com/type-rb/type-rb/pull/414),
+  [#416](https://github.com/type-rb/type-rb/pull/416))
+
 ## 0.3.12 - 2026-08-22
 
 ### Breaking changes
