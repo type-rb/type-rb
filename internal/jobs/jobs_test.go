@@ -6,6 +6,8 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/packageextensionhost"
 	"github.com/type-rb/type-rb/internal/parser"
 )
 
@@ -16,7 +18,7 @@ func TestDeclarationsMirrorPerformParameters(t *testing.T) {
 	end
 end
 `)
-	catalog, err := Declarations([]*ast.Program{program})
+	catalog, err := Declarations(projectDeclarationInput(t, []*ast.Program{program}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +40,45 @@ end
 	performAt := job.ClassMembers["perform_at"]
 	if performAt.Intrinsic != "trb.jobs.perform_at" || len(performAt.Parameters) != 3 || performAt.Parameters[0].Type.String() != "Instant" {
 		t.Fatalf("unexpected perform_at declaration: %#v", performAt)
+	}
+}
+
+func TestDeclarationsAcceptCanonicalJobResultThroughTransparentAlias(t *testing.T) {
+	program := parseJobsTest(t, `import { Job, JobResult } from trb/jobs
+
+type DeliveryResult = JobResult
+
+class SendReceiptJob < Job
+	def perform(order_id: Integer): DeliveryResult
+		return DeliveryResult::Ok(Unit.new())
+	end
+end
+`)
+	if _, err := Declarations(projectDeclarationInput(t, []*ast.Program{program})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeclarationsPreserveJobContractDiagnostics(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		message string
+	}{
+		{name: "missing perform", source: "class EmptyJob < Job\nend\n", message: "must declare perform"},
+		{name: "class perform", source: "class InvalidJob < Job\n\tdef self.perform()\n\t\treturn\n\tend\nend\n", message: "must be an instance method"},
+		{name: "source-defined JobResult", source: "type JobResult = String\nclass InvalidJob < Job\n\tdef perform(): JobResult\n\t\treturn \"invalid\"\n\tend\nend\n", message: "must omit its return type or return JobResult"},
+		{name: "optional argument", source: "class InvalidJob < Job\n\tdef perform(value: Integer = 1)\n\t\treturn\n\tend\nend\n", message: "required positional parameters only"},
+		{name: "dynamic queue", source: "class InvalidJob < Job\n\tqueue(QUEUE)\n\tdef perform()\n\t\treturn\n\tend\nend\n", message: "expects a literal"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			program := parseJobsTest(t, test.source)
+			_, err := Declarations(projectDeclarationInput(t, []*ast.Program{program}))
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("expected %q, got %v", test.message, err)
+			}
+		})
 	}
 }
 
@@ -207,4 +248,13 @@ func parseJobsTest(t *testing.T, source string) *ast.Program {
 	}
 	program.ModulePath = "jobs/send_receipt_job"
 	return program
+}
+
+func projectDeclarationInput(t *testing.T, programs []*ast.Program) packageextension.ProjectDeclarationInput {
+	t.Helper()
+	input, err := packageextensionhost.ExportProjectDeclarationInput(PackageName, programs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return input
 }

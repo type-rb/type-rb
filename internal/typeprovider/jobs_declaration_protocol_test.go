@@ -27,7 +27,33 @@ end
 		t.Fatalf("parse diagnostics: %#v", diagnostics)
 	}
 	program.ModulePath = "jobs/send_receipt_job"
-	programs := []*ast.Program{program}
+	unrelated, diagnostics := parser.Parse([]byte(`class InternalService
+	secret("not-for-jobs")
+end
+`))
+	if len(diagnostics) > 0 {
+		t.Fatalf("parse diagnostics: %#v", diagnostics)
+	}
+	unrelated.ModulePath = "services/internal"
+	programs := []*ast.Program{unrelated, program}
+	input, err := jobDeclarationInput(programs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input.Modules) != 1 || input.Modules[0].ModulePath != program.ModulePath {
+		t.Fatalf("Jobs input included unrelated project declarations: %#v", input.Modules)
+	}
+	encodedInput, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decodedInput packageextension.ProjectDeclarationInput
+	if err := json.Unmarshal(encodedInput, &decodedInput); err != nil {
+		t.Fatal(err)
+	}
+	if err := packageextension.ValidateProjectDeclarationInput(decodedInput); err != nil {
+		t.Fatal(err)
+	}
 
 	provided, err := loadJobDeclarations(programs)
 	if err != nil {
@@ -73,7 +99,7 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := jobsintegration.Declarations(programs)
+	original, err := jobsintegration.Declarations(decodedInput)
 	if err != nil {
 		t.Fatal(err)
 	}

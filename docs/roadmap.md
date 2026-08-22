@@ -88,10 +88,11 @@ than detailed syntax.
 - Evolve the experimental bundled-package call-specialization data contract and
   declarative native providers into a stable, sandboxed extension protocol
   before external packages can request compiler integration. Use the
-  Declaration Protocol now exercised by ORM and Jobs, plus the remaining Jobs
-  project manifest and worker runtime boundary, to choose between externalizing
-  project-input discovery or a runtime operation ABI next. Do not expose
-  compiler internals as a public plugin API.
+  Declaration Protocol now exercised by ORM and Jobs and the read-only Project
+  Declaration Input Protocol exercised by Jobs to test the same capability
+  against ORM. Design the remaining Jobs project manifest and worker runtime as
+  a separate minimal runtime operation ABI. Do not expose compiler internals as
+  a public plugin API.
 
 ## 6. Application-level proof
 
