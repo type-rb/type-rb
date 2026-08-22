@@ -1,0 +1,19 @@
+{
+  "name": "@type-rb/github-syntax-highlighting",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "package:chrome": "node build.mjs --package-chrome",
+    "fixture": "node test/browser-fixture.mjs",
+    "test": "node build.mjs --check && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@shikijs/engine-javascript": "4.4.3",
+    "@shikijs/vscode-textmate": "10.0.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

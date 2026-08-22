@@ -1,0 +1,49 @@
+name: GitHub syntax highlighting
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/github-userscript.yml"
+      - ".github/workflows/chrome-extension-release.yml"
+      - "editors/github/**"
+      - "syntaxes/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/github-userscript.yml"
+      - ".github/workflows/chrome-extension-release.yml"
+      - "editors/github/**"
+      - "syntaxes/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-syntax-highlighting-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: editors/github/package-lock.json
+
+      - name: Install GitHub highlighter dependencies
+        run: npm ci --prefix editors/github
+
+      - name: Verify userscript and Chrome extension
+        run: npm test --prefix editors/github
+
+      - name: Package Chrome extension
+        run: npm run package:chrome --prefix editors/github

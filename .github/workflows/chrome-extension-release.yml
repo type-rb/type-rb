@@ -1,0 +1,95 @@
+name: Chrome extension release
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Chrome Web Store operation
+        required: true
+        default: package-only
+        type: choice
+        options:
+          - package-only
+          - submit
+          - release-staged
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-extension-release
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: editors/github/package-lock.json
+
+      - run: npm ci --prefix editors/github
+
+      - run: npm test --prefix editors/github
+
+      - run: npm run package:chrome --prefix editors/github
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: typerb-github-chrome-extension
+          path: editors/github/dist/typerb-github-chrome-extension.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy:
+    if: inputs.operation != 'package-only'
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: chrome-web-store
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: editors/github/package-lock.json
+
+      - run: npm ci --prefix editors/github
+
+      - run: npm run package:chrome --prefix editors/github
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+
+      - name: Upload and submit for staged publishing
+        if: inputs.operation == 'submit'
+        env:
+          CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
+          CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+        run: >-
+          node editors/github/webstore.mjs submit
+          editors/github/dist/typerb-github-chrome-extension.zip
+
+      - name: Publish approved staged revision
+        if: inputs.operation == 'release-staged'
+        env:
+          CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
+          CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+        run: node editors/github/webstore.mjs release-staged
