@@ -6,6 +6,7 @@
 - Summary: `Highlight TypeRB files, pull request diffs, and Markdown code blocks on GitHub.`
 - Category: `Developer Tools`
 - Primary language: `English`
+- Chrome Web Store: `https://chromewebstore.google.com/detail/typerb-syntax-highlightin/icogpeecnhfgfdbdjihfhmngpengkcni`
 - Homepage: `https://github.com/type-rb/type-rb/tree/main/editors/github`
 - Support: `https://github.com/type-rb/type-rb/issues`
 - Privacy policy: `https://github.com/type-rb/type-rb/blob/main/editors/github/PRIVACY.md`

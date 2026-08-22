@@ -29,6 +29,17 @@ trb tour
 trb play
 ```
 
+## GitHub syntax highlighting
+
+GitHub's built-in syntax highlighting depends on
+[GitHub Linguist](https://github.com/github-linguist/linguist/blob/main/CONTRIBUTING.md#language-extension-and-filename-usage-requirements),
+which requires widespread real-world usage before accepting a new language or
+file extension. Until TypeRB becomes eligible for native highlighting, install
+[TypeRB Syntax Highlighting for GitHub](https://chromewebstore.google.com/detail/typerb-syntax-highlightin/icogpeecnhfgfdbdjihfhmngpengkcni).
+
+The extension highlights `.trb` file views, pull request diffs, and explicit
+`trb` and `typerb` Markdown code blocks on github.com.
+
 ## Install
 
 ```sh

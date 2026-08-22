@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -114,9 +114,9 @@ best-effort per-file sessions outside them, formats on save by default with an
 explicit opt-out, and delegates syntax-aware behavior to the same language
 server. JetBrains IDEs can import the packaged
 TextMate grammar and connect `trb lsp` through LSP4IJ without a TypeRB-specific
-IDE plugin. A self-contained Tampermonkey userscript applies the same TextMate
-grammar to GitHub `.trb` files, pull request diffs, and explicit TypeRB Markdown
-code blocks while native GitHub Linguist support is unavailable. In the VS
+IDE plugin. A Chrome extension applies the same TextMate grammar to GitHub
+`.trb` files, pull request diffs, and explicit TypeRB Markdown code blocks while
+native GitHub Linguist support is unavailable. In the VS
 Code extension, open files outside configured projects
 receive isolated file-root language-server
 sessions that follow explicit local imports and editor overlays without

@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - ".github/workflows/github-userscript.yml"
+      - ".github/workflows/github-syntax-highlighting.yml"
       - ".github/workflows/chrome-extension-release.yml"
       - "editors/github/**"
       - "syntaxes/**"
@@ -13,7 +13,7 @@ on:
     branches:
       - main
     paths:
-      - ".github/workflows/github-userscript.yml"
+      - ".github/workflows/github-syntax-highlighting.yml"
       - ".github/workflows/chrome-extension-release.yml"
       - "editors/github/**"
       - "syntaxes/**"
@@ -42,7 +42,7 @@ jobs:
       - name: Install GitHub highlighter dependencies
         run: npm ci --prefix editors/github
 
-      - name: Verify userscript and Chrome extension
+      - name: Verify Chrome extension
         run: npm test --prefix editors/github
 
       - name: Package Chrome extension

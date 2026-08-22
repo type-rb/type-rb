@@ -1,15 +1,20 @@
 # TypeRB syntax highlighting for GitHub
 
 This package applies TypeRB's canonical TextMate grammar to GitHub pages before
-TypeRB is available through GitHub Linguist. The Manifest V3 Chrome extension is
-the primary distribution. A Tampermonkey userscript remains available as a
-transition fallback until the Chrome Web Store release is live.
+TypeRB is available through GitHub Linguist. It is distributed as a Manifest V3
+Chrome extension.
 
-Both distributions bundle the same runtime, canonical grammar,
-`@shikijs/vscode-textmate`, and Shiki JavaScript regular expression engine.
-Neither distribution downloads executable code or a second grammar at runtime.
+The extension bundles its runtime, canonical grammar,
+`@shikijs/vscode-textmate`, and Shiki JavaScript regular expression engine. It
+does not download executable code or a second grammar at runtime.
 
-## Chrome extension
+## Install
+
+Install
+[TypeRB Syntax Highlighting for GitHub](https://chromewebstore.google.com/detail/typerb-syntax-highlightin/icogpeecnhfgfdbdjihfhmngpengkcni)
+from the Chrome Web Store. No configuration is required.
+
+## Local build
 
 Build the unpacked extension and its Chrome Web Store ZIP:
 
@@ -26,18 +31,6 @@ is at the ZIP root.
 The extension requests no optional Chrome API permissions. Its only site access
 is the `https://github.com/*` content-script match. See the
 [privacy policy](PRIVACY.md) for the exact data behavior.
-
-## Tampermonkey fallback
-
-1. Install [Tampermonkey](https://www.tampermonkey.net/) in a desktop browser.
-2. Open the
-   [TypeRB GitHub userscript](https://raw.githubusercontent.com/type-rb/type-rb/main/editors/github/typerb-github.user.js).
-3. Review the script and confirm the Tampermonkey installation prompt.
-
-Tampermonkey checks the same URL for version updates. The userscript is
-self-contained: it does not load code or the grammar from a CDN. It uses a
-JavaScript regular expression engine so GitHub's Content Security Policy does
-not need to permit WebAssembly compilation.
 
 ## Supported GitHub surfaces
 
@@ -80,7 +73,7 @@ published manually once before the API can publish with that visibility.
 
 ## Development
 
-Install dependencies, rebuild both distributions, and run the tests:
+Install dependencies, rebuild the extension, and run the tests:
 
 ```sh
 npm ci --prefix editors/github
@@ -91,7 +84,6 @@ npm test --prefix editors/github
 Run `npm run fixture --prefix editors/github` to serve local blob, Markdown,
 and pull request fixtures for browser-level checks.
 
-The generated Tampermonkey file is committed so its raw GitHub URL remains
-installable. Chrome extension files and the upload ZIP are generated under the
-ignored `editors/github/dist` directory. Bundled license notices are generated
-from the dependencies included by esbuild.
+Chrome extension files and the upload ZIP are generated under the ignored
+`editors/github/dist` directory. Bundled license notices are generated from the
+dependencies included by esbuild.

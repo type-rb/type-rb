@@ -13,7 +13,6 @@ import { HIGHLIGHT_STYLES } from "./src/styles.js";
 const execFileAsync = promisify(execFile);
 const packageDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(packageDirectory, "../..");
-const userscriptOutputPath = resolve(packageDirectory, "typerb-github.user.js");
 const extensionOutputDirectory = resolve(packageDirectory, "dist/chrome-extension");
 const extensionArchivePath = resolve(packageDirectory, "dist/typerb-github-chrome-extension.zip");
 const checkOnly = process.argv.includes("--check");
@@ -22,24 +21,6 @@ const packageChrome = process.argv.includes("--package-chrome");
 const packageJson = JSON.parse(await readFile(resolve(packageDirectory, "package.json"), "utf8"));
 const grammarPath = resolve(repositoryRoot, "syntaxes/typerb.tmLanguage.json");
 const grammarJson = await readFile(grammarPath, "utf8");
-
-const metadata = `// ==UserScript==
-// @name         TypeRB syntax highlighting for GitHub
-// @namespace    https://type-rb.github.io/
-// @version      ${packageJson.version}
-// @description  Highlight TypeRB files, pull request diffs, and Markdown code blocks on GitHub.
-// @author       TypeRB contributors
-// @license      MIT
-// @homepageURL  https://github.com/type-rb/type-rb/tree/main/editors/github
-// @supportURL   https://github.com/type-rb/type-rb/issues
-// @updateURL    https://raw.githubusercontent.com/type-rb/type-rb/main/editors/github/typerb-github.user.js
-// @downloadURL  https://raw.githubusercontent.com/type-rb/type-rb/main/editors/github/typerb-github.user.js
-// @match        https://github.com/*
-// @run-at       document-idle
-// @sandbox      DOM
-// @grant        GM_addStyle
-// @noframes
-// ==/UserScript==`;
 
 function packageRootFromInput(input) {
   const normalized = input.replaceAll("\\", "/");
@@ -66,12 +47,12 @@ async function packageNotice(packageRoot) {
   throw new Error(`No bundled license file found for ${manifest.name}`);
 }
 
-async function bundle(entryPoint, charset = "utf8") {
+async function bundle(entryPoint) {
   return build({
     absWorkingDir: packageDirectory,
     entryPoints: [resolve(packageDirectory, entryPoint)],
     bundle: true,
-    charset,
+    charset: "ascii",
     format: "iife",
     legalComments: "none",
     metafile: true,
@@ -95,16 +76,11 @@ async function bundle(entryPoint, charset = "utf8") {
   });
 }
 
-const [userscriptResult, chromeResult] = await Promise.all([
-  bundle("src/main.js"),
-  bundle("src/chrome.js", "ascii")
-]);
-assert.equal(userscriptResult.outputFiles.length, 1, "expected one bundled userscript");
+const chromeResult = await bundle("src/chrome.js");
 assert.equal(chromeResult.outputFiles.length, 1, "expected one bundled Chrome content script");
 
 const packageRoots = [...new Set(
-  [userscriptResult, chromeResult]
-    .flatMap((result) => Object.keys(result.metafile.inputs))
+  Object.keys(chromeResult.metafile.inputs)
     .map(packageRootFromInput)
     .filter(Boolean)
 )].sort();
@@ -116,7 +92,6 @@ const licenseBanner = `/*
 Bundled license notices
 ${notices.join("\n").replaceAll("*/", "* /")}
 */`;
-const userscript = `${metadata}\n${licenseBanner}\n${userscriptResult.outputFiles[0].text.trimEnd()}\n`;
 const chromeContentScript = `${licenseBanner}\n${chromeResult.outputFiles[0].text.trimEnd()}\n`;
 const manifest = chromeManifest(packageJson.version);
 const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
@@ -131,15 +106,7 @@ assert.doesNotMatch(
 assert.doesNotMatch(chromeContentScript, /WebAssembly\.instantiate|onig\.wasm|vscode-oniguruma/);
 assert.doesNotMatch(chromeContentScript, /cdn\.jsdelivr\.net|unpkg\.com/);
 
-if (checkOnly) {
-  const committed = await readFile(userscriptOutputPath, "utf8").catch(() => "");
-  assert.equal(
-    committed,
-    userscript,
-    "typerb-github.user.js is stale; run npm run build --prefix editors/github"
-  );
-} else {
-  await writeFile(userscriptOutputPath, userscript);
+if (!checkOnly) {
   await rm(extensionOutputDirectory, { recursive: true, force: true });
   await mkdir(resolve(extensionOutputDirectory, "images"), { recursive: true });
   await Promise.all([
