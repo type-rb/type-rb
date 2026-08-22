@@ -10,6 +10,7 @@ import (
 	"github.com/type-rb/type-rb/internal/codegen"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/schemalock"
@@ -56,6 +57,47 @@ func TestAnalyzerReusesOnlyCompilerIdenticalParsedUnits(t *testing.T) {
 	}
 	if parseCalls != 5 {
 		t.Fatalf("changed compiler options parse calls=%d, want 5", parseCalls)
+	}
+}
+
+func TestAnalyzerReusesEquivalentNativePackageCatalog(t *testing.T) {
+	analyzer := NewAnalyzer()
+	checkCalls := 0
+	analyzer.check = func(program *ast.Program, resolution resolver.Result, options checker.Options) (checker.Result, []diagnostic.Diagnostic) {
+		checkCalls++
+		return checker.CheckWithOptions(program, resolution, options)
+	}
+	sources := []SourceUnit{
+		{Filename: "/project/src/main.trb", ModulePath: "main", Source: []byte("def value(): Integer\n\treturn 1\nend\n")},
+		{Filename: "/project/src/.trb-repl.trb", ModulePath: "__trb_repl__", Source: []byte("1\n")},
+	}
+	options := Options{
+		Mode: "typescript", TypeScriptRuntime: "bun", SourceRoot: "/project/src", ProjectRoot: "/project",
+		AllowUnusedImports: true, InteractiveModule: "__trb_repl__", NativePackages: nativepackage.Empty(map[string]string{"example": "1.0.0"}),
+	}
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatal(err)
+	}
+	if checkCalls != 2 {
+		t.Fatalf("initial check calls=%d, want 2", checkCalls)
+	}
+
+	sources[1].Source = []byte("2\n")
+	options.NativePackages = nativepackage.Empty(map[string]string{"example": "1.0.0"})
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatal(err)
+	}
+	if checkCalls != 3 {
+		t.Fatalf("equivalent catalog check calls=%d, want 3", checkCalls)
+	}
+
+	sources[1].Source = []byte("3\n")
+	options.NativePackages = nativepackage.Empty(map[string]string{"example": "2.0.0"})
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatal(err)
+	}
+	if checkCalls != 5 {
+		t.Fatalf("changed catalog check calls=%d, want 5", checkCalls)
 	}
 }
 

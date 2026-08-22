@@ -411,7 +411,8 @@ func equalOptions(left, right Options) bool {
 		left.GoModule == right.GoModule && left.RubyLoader == right.RubyLoader && left.TypeScriptRuntime == right.TypeScriptRuntime &&
 		left.SourceRoot == right.SourceRoot && left.ProjectRoot == right.ProjectRoot && left.JobsConfiguration == right.JobsConfiguration &&
 		left.AllowUnusedImports == right.AllowUnusedImports && left.InteractiveModule == right.InteractiveModule &&
-		left.NativePackages == right.NativePackages && equalBytesMap(left.PackageOptions, right.PackageOptions) &&
+		(left.NativePackages == right.NativePackages || reflect.DeepEqual(left.NativePackages, right.NativePackages)) &&
+		equalBytesMap(left.PackageOptions, right.PackageOptions) &&
 		equalStringMap(left.PackageAliases, right.PackageAliases)
 }
 
