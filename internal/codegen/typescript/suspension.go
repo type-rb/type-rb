@@ -5,6 +5,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/runtimeoperation"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -88,10 +89,6 @@ func standardResultModule(module string) bool {
 	return module == "trb/std/result" || module == "trb/std/result/index"
 }
 
-func isSuspendingORM(intrinsic string) bool {
-	return effectplan.ORMOperation(intrinsic)
-}
-
 func isSuspendingIntrinsic(intrinsic string) bool {
-	return intrinsic == "trb.std.test.describe" || intrinsic == "trb.std.test.test" || intrinsic == "trb.jobs.perform_later" || intrinsic == "trb.jobs.perform_in" || intrinsic == "trb.jobs.perform_at" || intrinsic == "trb.jobs.sql.enqueue" || intrinsic == "trb.jobs.sql.enqueue_at" || isSuspendingORM(intrinsic) || intrinsic == "trb.web.testing.dispatch" || intrinsic == "trb.web.middleware.logger.call" || intrinsic == "trb.web.middleware.timeout.call" || intrinsic == "trb.platform.typescript.browser.request" || intrinsic == "trb.platform.typescript.browser.file_read" || intrinsic == "trb.platform.typescript.browser.file_read_text" || intrinsic == "trb.internal.auth.oidc.verify_bearer"
+	return runtimeoperation.Describe(intrinsic).MaySuspend
 }
