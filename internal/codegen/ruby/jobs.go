@@ -138,7 +138,6 @@ func (g *generator) jobsStorage(config jobssql.Config) {
 	g.line("raise \"job delay must not be negative\" if wait_milliseconds < 0", "")
 	g.line("maximum_attempts = "+strconv.Itoa(config.DefaultMaximumAttempts)+" if maximum_attempts <= 0", "")
 	g.line("database[:trb_jobs].insert(id: id, queue_name: queue_name, job_name: job_name, payload: payload, payload_version: payload_version, priority: priority, run_at: now + wait_milliseconds / 1000.0, state: \"ready\", attempts: 0, maximum_attempts: maximum_attempts, created_at: now, updated_at: now)", "")
-	g.line("scope.check!", "")
 	g.line("JobReference.new(id: id, job_name: job_name)", "")
 	g.indent--
 	g.line("end", "")
