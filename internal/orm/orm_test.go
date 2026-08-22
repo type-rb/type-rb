@@ -11,6 +11,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/packageextensionhost"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/schemalock"
 	"github.com/type-rb/type-rb/internal/types"
@@ -40,7 +41,7 @@ func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	assertUniqueConstraints(t, products.UniqueConstraints, []string{"id"}, []string{"name", "active"})
 
 	program := parseModel(t)
-	catalog, err := Declarations([]*ast.Program{program}, root, options, nil)
+	catalog, err := declarationsForTest([]*ast.Program{program}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +281,7 @@ end
 	if phase.Type.String() != "FulfillmentPhase" || phase.Enum == nil || phase.Enum.Values[0].StringValue != "pending_review" || phase.Enum.Values[1].StringValue != "ready_to_ship" {
 		t.Fatalf("unexpected conventional enum column: %#v", phase)
 	}
-	catalog, err := Declarations([]*ast.Program{program}, root, options, nil)
+	catalog, err := declarationsForTest([]*ast.Program{program}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,6 +342,14 @@ end
 	if !ok || status.Type.String() != "OrderStatus" || status.Enum == nil || status.Enum.ModulePath != "domain/status" || status.Enum.Values[1].StringValue != "COMPLETED" {
 		t.Fatalf("unexpected imported enum column: %#v", status)
 	}
+	catalog, err := declarationsForTest([]*ast.Program{enums, model}, root, options, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared, ok := catalog.Type("EnumProduct")
+	if !ok || declared.InstanceMembers["status"].Return.String() != "OrderStatus" {
+		t.Fatalf("imported enum did not cross the ORM declaration input: %#v", declared)
+	}
 }
 
 func TestEnumColumnsRejectInvalidMappings(t *testing.T) {
@@ -372,9 +381,14 @@ func TestEnumColumnsRejectInvalidMappings(t *testing.T) {
 				t.Fatalf("parse diagnostics: %#v", diagnostics)
 			}
 			program.ModulePath = "models/product"
-			_, err = Analyze([]*ast.Program{program}, root, map[string][]byte{PackageName: encoded}, nil)
+			options := map[string][]byte{PackageName: encoded}
+			_, declarationErr := declarationsForTest([]*ast.Program{program}, root, options, nil)
+			if declarationErr == nil || !strings.Contains(declarationErr.Error(), test.want) {
+				t.Fatalf("declaration input: expected %q, got %v", test.want, declarationErr)
+			}
+			_, err = Analyze([]*ast.Program{program}, root, options, nil)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("expected %q, got %v", test.want, err)
+				t.Fatalf("runtime manifest: expected %q, got %v", test.want, err)
 			}
 		})
 	}
@@ -422,7 +436,7 @@ func TestModelDeclarationsArePortableAcrossModes(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			program := parseModel(t)
 			program.Mode = mode
-			catalog, err := Declarations([]*ast.Program{program}, root, options, nil)
+			catalog, err := declarationsForTest([]*ast.Program{program}, root, options, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -431,6 +445,49 @@ func TestModelDeclarationsArePortableAcrossModes(t *testing.T) {
 				t.Fatalf("unexpected Product declaration in mode %s: %#v", mode, product)
 			}
 		})
+	}
+}
+
+func TestORMDeclarationInputPreservesASTDiscoverySemantics(t *testing.T) {
+	root, options := sqliteAssociationFixture(t, true)
+	program, diagnostics := parser.Parse([]byte(`import { Model, belongs_to, has_many } from trb/orm
+
+class Category < Model
+	has_many(Product, name: :active_products, foreign_key: :category_id) do |products|
+		products.where(name: "active")
+	end
+end
+
+class Product < Model
+	belongs_to(Category, foreign_key: :category_id)
+end
+`))
+	if len(diagnostics) != 0 {
+		t.Fatalf("parse diagnostics: %#v", diagnostics)
+	}
+	program.ModulePath = "src/models"
+	schema, err := LoadSchema(root, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := discoverModels([]*ast.Program{program}, schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := packageextensionhost.ExportProjectDeclarationInput(PackageName, []*ast.Program{program}, packageextensionhost.ProjectDeclarationInputOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := ExportDeclarationInput(project, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := discoverDeclarationModels(input.Project, importDeclarationSchema(input.Schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(declarationsForModels(got, schema.Adapter), declarationsForModels(want, schema.Adapter)) {
+		t.Fatal("data-only ORM discovery changed declaration catalog semantics")
 	}
 }
 
@@ -687,7 +744,7 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 	if !ok || len(products.ForeignKeys) != 1 || products.ForeignKeys[0].Column != "category_id" || products.ForeignKeys[0].ReferencedTable != "categories" {
 		t.Fatalf("unexpected product foreign keys: %#v", products.ForeignKeys)
 	}
-	catalog, err := Declarations([]*ast.Program{program}, root, options, nil)
+	catalog, err := declarationsForTest([]*ast.Program{program}, root, options, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -826,7 +883,12 @@ func productQueryMember(t *testing.T, catalog *declaration.Catalog, typeName, na
 
 func TestSQLiteAssociationRejectsMissingForeignKey(t *testing.T) {
 	root, options := sqliteAssociationFixture(t, false)
-	_, err := Analyze([]*ast.Program{parseAssociationModels(t)}, root, options, nil)
+	program := parseAssociationModels(t)
+	_, declarationErr := declarationsForTest([]*ast.Program{program}, root, options, nil)
+	if declarationErr == nil || !strings.Contains(declarationErr.Error(), "requires foreign key products.category_id -> categories.id") {
+		t.Fatalf("expected declaration missing foreign key diagnostic, got %v", declarationErr)
+	}
+	_, err := Analyze([]*ast.Program{program}, root, options, nil)
 	if err == nil || !strings.Contains(err.Error(), "requires foreign key products.category_id -> categories.id") {
 		t.Fatalf("expected missing foreign key diagnostic, got %v", err)
 	}
@@ -975,6 +1037,24 @@ func assertUniqueConstraints(t *testing.T, constraints []UniqueConstraint, expec
 	if len(constraints) > 0 && !constraints[0].Primary {
 		t.Fatalf("first unique constraint is not primary: %#v", constraints)
 	}
+}
+
+func declarationsForTest(programs []*ast.Program, projectRoot string, options map[string][]byte, packageAliasesByModule map[string]map[string]string) (*declaration.Catalog, error) {
+	project, err := packageextensionhost.ExportProjectDeclarationInput(PackageName, programs, packageextensionhost.ProjectDeclarationInputOptions{
+		PackageAliasesByModule: packageAliasesByModule,
+	})
+	if err != nil {
+		return nil, err
+	}
+	schema, err := LoadSchema(projectRoot, options)
+	if err != nil {
+		return nil, err
+	}
+	input, err := ExportDeclarationInput(project, schema)
+	if err != nil {
+		return nil, err
+	}
+	return Declarations(input)
 }
 
 func TestCaptureAssociationScopesUsesScopedManifestEntry(t *testing.T) {

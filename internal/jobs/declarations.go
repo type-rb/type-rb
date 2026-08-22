@@ -141,7 +141,7 @@ func canonicalProjectJobResult(use packageextension.ProjectTypeUse) bool {
 func discoverDeclarationJobDefaults(job *Job, directives []packageextension.ProjectDirective) error {
 	seen := map[string]bool{}
 	for _, directive := range directives {
-		if directive.Name != "queue" && directive.Name != "priority" && directive.Name != "maximum_attempts" {
+		if directive.Block != nil || directive.Name != "queue" && directive.Name != "priority" && directive.Name != "maximum_attempts" {
 			continue
 		}
 		if seen[directive.Name] {
@@ -151,8 +151,10 @@ func discoverDeclarationJobDefaults(job *Job, directives []packageextension.Proj
 		if len(directive.Arguments) != 1 || directive.Arguments[0].Name != "" {
 			return fmt.Errorf("trb/jobs Job %s.%s expects one positional literal", job.Name, directive.Name)
 		}
-		literal := directive.Arguments[0].Literal
-		if literal.Kind == "unsupported" {
+		literal := directive.Arguments[0].Value
+		switch literal.Kind {
+		case "string", "integer", "float", "boolean", "nil":
+		default:
 			return fmt.Errorf("trb/jobs Job %s.%s expects a literal", job.Name, directive.Name)
 		}
 		switch directive.Name {

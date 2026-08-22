@@ -25,11 +25,30 @@ func loadORM(programs []*ast.Program, context Context) (*declaration.Catalog, er
 }
 
 func loadORMDeclarations(programs []*ast.Program, context Context) (packageextension.DeclarationCatalog, error) {
-	catalog, err := ormintegration.Declarations(programs, context.ProjectRoot, context.PackageOptions, context.PackageAliasesByModule)
+	input, err := ormDeclarationInput(programs, context)
+	if err != nil {
+		return packageextension.DeclarationCatalog{}, err
+	}
+	catalog, err := ormintegration.Declarations(input)
 	if err != nil {
 		return packageextension.DeclarationCatalog{}, err
 	}
 	return packageextensionhost.ExportDeclarationCatalog(ormintegration.PackageName, catalog)
+}
+
+func ormDeclarationInput(programs []*ast.Program, context Context) (ormintegration.DeclarationInput, error) {
+	relevant := providerPrograms(programs, ormProviderProgram)
+	project, err := packageextensionhost.ExportProjectDeclarationInput(ormintegration.PackageName, relevant, packageextensionhost.ProjectDeclarationInputOptions{
+		PackageAliasesByModule: context.PackageAliasesByModule,
+	})
+	if err != nil {
+		return ormintegration.DeclarationInput{}, err
+	}
+	schema, err := ormintegration.LoadSchema(context.ProjectRoot, context.PackageOptions)
+	if err != nil {
+		return ormintegration.DeclarationInput{}, err
+	}
+	return ormintegration.ExportDeclarationInput(project, schema)
 }
 
 func ormProviderInputs(programs []*ast.Program, context Context) providerInputSnapshot {

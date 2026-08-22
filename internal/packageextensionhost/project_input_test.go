@@ -12,15 +12,22 @@ import (
 
 func TestExportProjectDeclarationInputCopiesDeclarationFacts(t *testing.T) {
 	ids := parseProjectInputTest(t, "contracts/ids", `type ReceiptID = Integer
+
+enum DeliveryState
+	Pending = "pending"
+end
 `)
 	job := parseProjectInputTest(t, "jobs/send_receipt", `import { Job, JobResult } from trb/jobs
-import { ReceiptID } from contracts/ids
+import { DeliveryState, ReceiptID } from app/contracts/ids
 
 type DeliveryResult = JobResult
 
 class SendReceiptJob < Job
 	queue("mail")
 	priority(PRIORITY)
+	configure(:mail, DeliveryState) do |scope|
+		scope
+	end
 
 	def helper(value: String): String
 		return value
@@ -31,7 +38,9 @@ class SendReceiptJob < Job
 	end
 end
 `)
-	input, err := ExportProjectDeclarationInput("trb/jobs", []*ast.Program{job, ids})
+	input, err := ExportProjectDeclarationInput("trb/jobs", []*ast.Program{job, ids}, ProjectDeclarationInputOptions{
+		PackageAliasesByModule: map[string]map[string]string{"jobs/send_receipt": {"app/contracts": "contracts"}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,21 +48,31 @@ end
 		t.Fatalf("modules are not deterministic: %#v", input.Modules)
 	}
 	module := input.Modules[1]
-	if len(module.Imports) != 2 || len(module.TypeAliases) != 1 || len(module.Classes) != 1 {
+	if len(input.Modules[0].Enums) != 1 || input.Modules[0].Enums[0].Members[0].RawValue == nil || input.Modules[0].Enums[0].Members[0].RawValue.Raw != `"pending"` {
+		t.Fatalf("enum declaration facts are incomplete: %#v", input.Modules[0].Enums)
+	}
+	if len(module.Imports) != 2 || module.Imports[1].ModulePath != "contracts/ids" || len(module.TypeAliases) != 1 || len(module.Classes) != 1 {
 		t.Fatalf("declaration facts are incomplete: %#v", module)
 	}
 	class := module.Classes[0]
 	if class.Superclass == nil || class.Superclass.Authored.Name != "Job" || class.Superclass.Authored.Definition == nil || class.Superclass.Authored.Definition.ImportPath != "trb/jobs" {
 		t.Fatalf("superclass identity is missing: %#v", class.Superclass)
 	}
-	if len(class.Methods) != 2 || len(class.Directives) != 2 {
+	if len(class.Methods) != 2 || len(class.Directives) != 3 {
 		t.Fatalf("class signature facts are incomplete: %#v", class)
 	}
-	if class.Directives[0].Arguments[0].Literal.Kind != "string" || class.Directives[0].Arguments[0].Literal.Raw != `"mail"` {
+	if class.Directives[0].Arguments[0].Value.Kind != "string" || class.Directives[0].Arguments[0].Value.Raw != `"mail"` {
 		t.Fatalf("literal directive was not copied: %#v", class.Directives[0])
 	}
-	if class.Directives[1].Arguments[0].Literal.Kind != "unsupported" {
-		t.Fatalf("non-literal directive was not isolated: %#v", class.Directives[1])
+	if class.Directives[1].Arguments[0].Value.Kind != "reference" {
+		t.Fatalf("reference directive argument was not copied: %#v", class.Directives[1])
+	}
+	configured := class.Directives[2]
+	if configured.Arguments[0].Value.Kind != "symbol" || configured.Arguments[0].Value.Name != "mail" || configured.Arguments[1].Value.Reference == nil || configured.Arguments[1].Value.Reference.ModulePath != "contracts/ids" {
+		t.Fatalf("declarative directive values are incomplete: %#v", configured)
+	}
+	if configured.Block == nil || len(configured.Block.Parameters) != 1 || configured.Block.StatementCount != 1 || !configured.Block.ResultExpression {
+		t.Fatalf("directive block summary is incomplete: %#v", configured.Block)
 	}
 	perform := class.Methods[1]
 	parameter := perform.Parameters[0].Type

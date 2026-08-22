@@ -311,12 +311,17 @@ cross the same validated, mode-independent Declaration Protocol as ORM. Their
 typed arguments, scheduling parameters, enqueue Results, and runtime operation
 names required no Jobs-specific protocol fields. Payload manifests, retry
 policy, generated runtime imports, and worker dispatch remain a separate
-bundled runtime boundary. Jobs declaration discovery now also consumes a
-versioned, JSON-serializable Project Declaration Input snapshot containing only
-module/import identity, aliases, class and method signatures, authored and
-resolved types, literal directives, and source spans. Parser nodes, method
-bodies, resolver/checker state, filesystem access, and backend objects do not
-cross that input boundary.
+bundled runtime boundary. Jobs and ORM declaration discovery now also consume
+versioned, JSON-serializable Project Declaration Input snapshots. Version 2
+contains only canonical module/import identity, aliases, enum and class
+declarations, method signatures, authored and resolved types, declarative call
+values, structural block summaries, and source spans. The ORM host combines
+that project snapshot with a separate versioned ORM schema snapshot containing
+only the adapter and table, column, foreign-key, and unique-constraint facts
+needed to derive its catalog. Database credentials, parser nodes, method and
+block bodies, resolver/checker state, filesystem access, and backend objects do
+not cross the declaration-provider input boundary. The ORM runtime manifest
+remains a separate bundled integration boundary.
 Workers support queues, priorities, retry and failed state, heartbeats, stale
 claim recovery, graceful stop, listing, manual retry, and discard. PostgreSQL
 and MySQL use short locking claims for multiple workers. SQLite is deliberately
