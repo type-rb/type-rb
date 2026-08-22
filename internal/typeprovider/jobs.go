@@ -4,6 +4,8 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
+	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/packageextensionhost"
 )
 
 func init() {
@@ -11,7 +13,19 @@ func init() {
 }
 
 func loadJobs(programs []*ast.Program, _ Context) (*declaration.Catalog, error) {
-	return jobsintegration.Declarations(programs)
+	provided, err := loadJobDeclarations(programs)
+	if err != nil {
+		return nil, err
+	}
+	return packageextensionhost.ImportDeclarationCatalog(provided)
+}
+
+func loadJobDeclarations(programs []*ast.Program) (packageextension.DeclarationCatalog, error) {
+	catalog, err := jobsintegration.Declarations(programs)
+	if err != nil {
+		return packageextension.DeclarationCatalog{}, err
+	}
+	return packageextensionhost.ExportDeclarationCatalog(jobsintegration.PackageName, catalog)
 }
 
 func jobsProviderInputs(programs []*ast.Program, _ Context) providerInputSnapshot {

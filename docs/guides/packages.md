@@ -205,12 +205,13 @@ non-executable subset.
 ### Experimental bundled declaration providers
 
 TypeRB 0.x has a second experimental data boundary for declaration output from
-bundled, compiler-integrated packages. `trb/orm` is its first consumer. The ORM
-provider still discovers project models and schema metadata inside the compiler,
-but its resulting catalog crosses a versioned, JSON-serializable Declaration
-Protocol before resolution and checking. The compiler host validates and copies
-that data into its private semantic representation; the provider does not pass
-parser, checker, typed-IR, or backend objects across the boundary.
+bundled, compiler-integrated packages. `trb/orm` and `trb/jobs` are its first
+consumers. The ORM provider discovers project models and schema metadata, while
+the Jobs provider derives typed enqueue methods from Job classes. Their
+resulting catalogs cross a versioned, JSON-serializable Declaration Protocol
+before resolution and checking. The compiler host validates and copies that
+data into its private semantic representation; providers do not pass parser,
+checker, typed-IR, or backend objects across the boundary.
 
 The initial declaration catalog can describe:
 
@@ -222,17 +223,20 @@ The initial declaration catalog can describe:
   generated declarations.
 
 A declaration may name an opaque `runtimeOperation`, but only bundled compiler
-backends can implement those operation names today. Model and schema discovery
-also remains compiler-owned. The Declaration Protocol therefore characterizes
-and narrows the output side of dynamic providers; it does not yet make ORM an
-ordinary external package or define a public runtime adapter ABI.
+backends can implement those operation names today. Model, schema, and Job
+discovery also remain compiler-owned. Job payload manifests, retry policy, and
+worker dispatch use a separate bundled runtime path rather than becoming
+declaration fields. The Declaration Protocol therefore characterizes and
+narrows the output side of dynamic providers; it does not yet make ORM or Jobs
+an ordinary external package or define a public runtime adapter ABI.
 
 The declaration type format deliberately rejects call-site-only record
 inspection and source-definition metadata. Those facts remain scoped to call
-specialization until namespace-stable type identities are designed. A second
-provider, such as Jobs, should validate this catalog before TypeRB externalizes
-project-input discovery, capability negotiation, sandboxing, or runtime
-operations.
+specialization until namespace-stable type identities are designed. Jobs did
+not require additional catalog fields, so its remaining project manifest and
+runtime integration should guide the next decision between project-input
+discovery and a runtime adapter ABI. Capability negotiation and sandboxing
+remain deferred until an external provider boundary is justified.
 
 ### Experimental bundled call specialization
 
@@ -253,10 +257,10 @@ emit Go, Ruby, or TypeScript source.
 Generated diagnostics and source mappings point back to the original call, and
 generated names use the compiler-reserved `__trb` namespace. The current
 request shape deliberately supports only the facts needed by `Context#bind`;
-it is expected to change while ORM and Jobs characterization identifies the
-next reusable capability. In particular, generated source currently relies on
-ordinary named type imports, so namespace-stable type imports must be designed
-before this boundary is opened to independent packages.
+it is expected to change as additional package cases identify reusable
+capabilities. In particular, generated source currently relies on ordinary
+named type imports, so namespace-stable type imports must be designed before
+this boundary is opened to independent packages.
 
 ## Lock and cache
 
