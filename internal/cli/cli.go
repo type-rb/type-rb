@@ -1131,7 +1131,7 @@ func (c *CLI) runRepl(args []string) error {
 		return err
 	}
 	availableImports := uniqueReplImports(initial.Artifacts, sessionModule, config.Mode)
-	candidates, err := replStandardCandidates(config, availableImports, sessionPackage)
+	candidates, err := replCompletionCandidates(config, initial.Artifacts, availableImports, sessionModule, sessionPackage)
 	if err != nil {
 		return err
 	}
@@ -1264,6 +1264,45 @@ func replPrelude(imports []replImport, sessionSource string) string {
 		fmt.Fprintf(&source, "import { %s } from %s\n", strings.Join(symbols, ", "), imported.path)
 	}
 	return source.String()
+}
+
+func replCompletionCandidates(config *project.Config, artifacts []*compiler.Artifact, imports []replImport, sessionModule, sessionPackage string) (languageservice.Context, error) {
+	standard, err := replStandardCandidates(config, imports, sessionPackage)
+	if err != nil {
+		return languageservice.Context{}, err
+	}
+	project := replProjectCandidates(artifacts, imports, sessionModule)
+	return languageservice.MergeImportCandidateSets(standard, project), nil
+}
+
+func replProjectCandidates(artifacts []*compiler.Artifact, imports []replImport, sessionModule string) languageservice.Context {
+	allowed := map[string]bool{}
+	for _, imported := range imports {
+		if imported.standard {
+			continue
+		}
+		for _, name := range imported.symbols {
+			allowed[name] = true
+		}
+	}
+	if len(allowed) == 0 {
+		return languageservice.Context{}
+	}
+	programs := make([]*ir.Program, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if artifact == nil || artifact.IR == nil || artifact.CompilerOwned || artifact.Official {
+			continue
+		}
+		programs = append(programs, artifact.IR)
+	}
+	projectCandidates := languageservice.BuildImportCandidates(programs, sessionModule)
+	filtered := languageservice.Context{Symbols: make([]languageservice.Symbol, 0, len(projectCandidates.Symbols))}
+	for _, symbol := range projectCandidates.Symbols {
+		if allowed[symbol.Name] {
+			filtered.Symbols = append(filtered.Symbols, symbol)
+		}
+	}
+	return filtered
 }
 
 func replStandardCandidates(config *project.Config, imports []replImport, sessionPackage string) (languageservice.Context, error) {
