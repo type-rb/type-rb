@@ -61,7 +61,8 @@ with lexical capture and checked Result control flow, and classes, modules and
 generic interfaces, records, ordinary and raw-value enums, payload enums as sum
 types, enum instance methods, explicit generics for enums, aliases, records,
 classes, top-level functions and instance methods, normalized unions, immutable
-and mutable bindings, typed collections and iteration, exhaustive pattern
+and mutable bindings, first-constraint inference for fresh empty mutable Arrays
+and Hashes, typed collections and iteration, exhaustive pattern
 matching, value-producing `if` and `case` expressions, and explicit Result
 propagation and recovery with prefix `try` and postfix `catch`. See the
 [language guide](language.md) and [specification](specification.md) for the

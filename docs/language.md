@@ -521,6 +521,34 @@ when String(text)
 end
 ```
 
+An unannotated fresh mutable collection is refined by its first constraining
+statement. Every write nested in that statement participates before the type
+is fixed; later statements are checked against the fixed type:
+
+```trb
+mut numbers := []
+[1, 2.5].each do |number|
+	numbers.push(number)
+end
+# numbers is Array<Float>
+
+include_name := true
+mut fields := {}
+if include_name
+	fields["value"] = 1
+else
+	fields["value"] = "unknown"
+end
+# fields is Hash<String, Integer | String>
+```
+
+A fully typed assignment, parameter, or return context can provide the type
+instead. Hash keys remain one homogeneous `String` or `Integer` type and never
+form a key union. A named function's implementation is not inspected to refine
+its caller, and a pending collection that reaches an untyped boundary or the
+end of its scope requires an explicit annotation. At the interactive REPL,
+top-level pending bindings can instead be refined by a later submission.
+
 Ordinary homogeneous collection operations remain unchanged:
 
 ```trb

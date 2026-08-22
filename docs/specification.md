@@ -161,6 +161,35 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   `-9007199254740991..9007199254740991`. A literal outside that range is a
   compile error in every mode rather than a target-dependent rounded value.
 
+#### Fresh empty mutable collections
+
+- An unannotated `mut values := []` or `mut values := {}` starts with a
+  pending collection type. The first later statement in the binding's lexical
+  statement sequence that constrains the collection is its inference region.
+  A statement that only observes the collection, such as `values.empty?()`,
+  does not end the pending state.
+- All statically checked writes in that one statement contribute, including
+  writes nested in its `if` or `case` branches, iteration blocks, call blocks,
+  and literal `fn` bodies. Array elements and Hash values use the same common
+  type and union normalization as non-empty literals. A fully typed assignment,
+  argument, or return context instead supplies the exact collection type.
+- The type is fixed after that statement. A later statement must conform and
+  never widens the collection. Branches join into one collection type; they do
+  not retain separate flow-sensitive Array or Hash types.
+- A syntactically present callback body participates even when the callback may
+  execute later. The implementation body of a separately named function or
+  method never constrains a caller's pending collection; only its declared
+  parameter or return signature can do so.
+- A pending collection that reaches an untyped boundary, is aliased without a
+  concrete collection context, or remains unresolved at the end of its lexical
+  scope is an error and requires an explicit annotation. Interactive top-level
+  REPL bindings may remain pending across submissions and are refined when a
+  later submission supplies their first constraint.
+- Hash keys do not use value-union inference. The first write fixes one
+  homogeneous, non-nullable `String` or `Integer` key type for the entire Hash;
+  another key type in the same inference region is an error. Hash values still
+  use common-type and union inference.
+
 #### Union types
 
 - `A | B` is a portable union type. Unions are flattened, duplicate
@@ -571,7 +600,8 @@ position as `Integer?` without a block.
   values infer Float. Values without a safe common type retain their
   alternatives in a normalized union such as `Integer | String`. An empty `{}`
   receives its type from a declared variable, field, parameter, record field,
-  assignment target, or return type.
+  assignment target, or return type, or from the first constraining statement
+  of a fresh unannotated mutable binding as defined in section 3.2.
 - A fresh literal may be contextually widened when every entry is assignable,
   for example `Hash<String, Any> := {"count" => 1}`. Existing mutable Hash
   values are invariant in both arguments, preventing an alias from inserting

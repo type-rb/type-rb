@@ -24,6 +24,16 @@ type Value struct {
 	Data any
 }
 
+func collectionValueAtType(value Value, typ types.Type) Value {
+	// Interactive declarations may have been evaluated while their fresh empty
+	// collection type was still pending. Later submissions reuse the same data
+	// object but expose the collection type resolved by the latest checked IR.
+	if value.Type.Kind == typ.Kind && (typ.Kind == types.Array || typ.Kind == types.Hash) {
+		value.Type = typ
+	}
+	return value
+}
+
 type bytesValue []byte
 
 type stringBuilderValue struct{ value strings.Builder }
@@ -807,11 +817,11 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return e.selfValue(node.Name, sc)
 		}
 		if value, ok := sc.get(node.Name); ok {
-			return value, nil
+			return collectionValueAtType(value, node.ExprType()), nil
 		}
 		if node.Owner != "" {
 			if value, ok := e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))]; ok {
-				return value, nil
+				return collectionValueAtType(value, node.ExprType()), nil
 			}
 		}
 		if node.Reference != nil {
@@ -819,14 +829,14 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 				return Value{Type: node.ExprType(), Data: &callable{Intrinsic: node.Reference.Intrinsic, Module: module}}, nil
 			}
 			if value, ok := e.symbol(node.Reference.Package, node.Reference.Symbol); ok {
-				return value, nil
+				return collectionValueAtType(value, node.ExprType()), nil
 			}
 		}
 		if value, ok := e.moduleValue[symbolKey(module, node.Name)]; ok {
-			return value, nil
+			return collectionValueAtType(value, node.ExprType()), nil
 		}
 		if value, ok := e.symbol(module, node.Name); ok {
-			return value, nil
+			return collectionValueAtType(value, node.ExprType()), nil
 		}
 		return Value{}, fmt.Errorf("%s is not available in the REPL environment", node.Name)
 	case *ir.Unary:
