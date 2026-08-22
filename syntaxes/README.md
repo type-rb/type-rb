@@ -32,9 +32,10 @@ When portable syntax changes, update the grammar together with representative
 fixtures and scope assertions in [`tools/textmate/test`](../tools/textmate/test).
 Then mirror the grammar into the
 [Visual Studio Code package](../editors/vscode/syntaxes/typerb.tmLanguage.json),
-which is also the bundle imported by JetBrains IDEs. The extension test rejects
-a stale mirror. Neovim consumes compiler semantic tokens instead of carrying a
-second lexical grammar.
+which is also the bundle imported by JetBrains IDEs, and rebuild the
+[GitHub userscript](../editors/github/README.md). The corresponding tests reject
+stale generated copies. Neovim consumes compiler semantic tokens instead of
+carrying a second lexical grammar.
 
 Run these checks from the repository root:
 
@@ -43,4 +44,7 @@ npm ci --prefix tools/textmate
 npm test --prefix tools/textmate
 npm ci --prefix editors/vscode
 npm test --prefix editors/vscode
+npm ci --prefix editors/github
+npm run build --prefix editors/github
+npm test --prefix editors/github
 ```
