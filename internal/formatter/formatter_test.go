@@ -51,26 +51,61 @@ func TestFormatFunctionValuesAndSemicolonForm(t *testing.T) {
 	}
 }
 
-func TestFormatPreservesStructuredJSXAndIsIdempotent(t *testing.T) {
-	source := []byte("import { ReactNode } from trb/platform/typescript/react\ndef Card(props:CardProps):ReactNode\nreturn <article className=\"card\">\n\t<h2>{props.title}</h2>\n</article> # card\nend\n")
+func TestFormatCanonicalizesStructuredJSXAndIsIdempotent(t *testing.T) {
+	source := []byte(`import { ReactNode } from trb/platform/typescript/react
+def AnnouncementDetail():ReactNode
+return <VStack className="w-full p-6"><MainContent title={ query.data.title }><HStack className="w-full justify-between"><Button ghost onClick={back_click}>Back to announcements</Button><HStack>{transition}{deletion}</HStack></HStack>{feedback}<Card><CardContent><CardTitle title="Announcement detail" /><Text>Status: <AnnouncementStatusBadge status={query.data.status} /></Text><Text>Category: {query.data.category}</Text><Text>{query.data.content}</Text></CardContent></Card></MainContent></VStack> # detail
+end
+`)
+	want := `import { ReactNode } from trb/platform/typescript/react
+def AnnouncementDetail(): ReactNode
+	return <VStack className="w-full p-6">
+		<MainContent title={query.data.title}>
+			<HStack className="w-full justify-between">
+				<Button ghost onClick={back_click}>Back to announcements</Button>
+				<HStack>
+					{transition}
+					{deletion}
+				</HStack>
+			</HStack>
+			{feedback}
+			<Card>
+				<CardContent>
+					<CardTitle title="Announcement detail" />
+					<Text>Status: <AnnouncementStatusBadge status={query.data.status} /></Text>
+					<Text>Category: {query.data.category}</Text>
+					<Text>{query.data.content}</Text>
+				</CardContent>
+			</Card>
+		</MainContent>
+	</VStack> # detail
+end
+`
 	formatted, diagnostics := Format(source)
-	if len(diagnostics) > 0 {
-		t.Fatal(diagnostics)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
 	}
-	text := string(formatted)
-	for _, expected := range []string{
-		"def Card(props: CardProps): ReactNode",
-		"\treturn <article className=\"card\">\n\t<h2>{props.title}</h2>\n</article> # card",
-	} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("formatted JSX is missing %q:\n%s", expected, text)
-		}
+	if string(formatted) != want {
+		t.Fatalf("unexpected JSX formatting\nwant:\n%s\ngot:\n%s", want, formatted)
 	}
 	formattedAgain, diagnostics := Format(formatted)
 	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
 		t.Fatalf("JSX formatting is not idempotent:\nfirst:\n%s\nsecond:\n%s\ndiags=%v", formatted, formattedAgain, diagnostics)
 	}
 }
+
+func TestFormatKeepsSignificantJSXTextInline(t *testing.T) {
+	source := []byte("def Label():ReactNode\nreturn <Text>Hello <Strong>{ name }</Strong>!</Text>\nend\n")
+	want := "def Label(): ReactNode\n\treturn <Text>Hello <Strong>{name}</Strong>!</Text>\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("significant JSX text changed\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
 func TestFormatPreservesHeredocBody(t *testing.T) {
 	source := []byte("class Query\ndef sql():String\nreturn <<~SQL\n  SELECT  *\n+    FROM posts # SQL comment, not TypeRB\nSQL\nend\nend\n")
 	formatted, diagnostics := Format(source)
