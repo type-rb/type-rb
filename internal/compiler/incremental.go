@@ -185,11 +185,29 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		return nil, true, NewCompileError("", diagnostic.ProjectIntegration, items)
 	}
 
+	reuseLoweredPrograms := ownerModule == previous.entrypointModule && integrations.CanReuseLoweredPrograms(previous.integrations, affected)
+	loweringIntegrations := integrations
+	previousPrograms := map[string]*ir.Program{}
+	if reuseLoweredPrograms {
+		loweringIntegrations = previous.integrations
+		previousPrograms = make(map[string]*ir.Program, len(previous.artifacts))
+		for _, artifact := range previous.artifacts {
+			if artifact != nil && artifact.IR != nil {
+				previousPrograms[artifact.IR.ModulePath] = artifact.IR
+			}
+		}
+	}
 	loweredPrograms := make([]*ir.Program, 0, len(units))
 	for _, source := range units {
+		if !affected[source.ModulePath] {
+			if cached := previousPrograms[source.ModulePath]; cached != nil {
+				loweredPrograms = append(loweredPrograms, cached)
+				continue
+			}
+		}
 		lowered := lower.Program(checkedPrograms[source.ModulePath])
 		lowered.SourcePath = source.Filename
-		integrations.Apply(lowered, source.ModulePath == ownerModule)
+		loweringIntegrations.Apply(lowered, source.ModulePath == ownerModule)
 		loweredPrograms = append(loweredPrograms, lowered)
 	}
 	if validateBackend {
@@ -208,7 +226,7 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 	return &projectAnalysis{
 		artifacts: artifacts, requestedUnits: cloneSourceUnits(sources), units: units, options: cloneOptions(options),
 		programs: programs, catalog: catalog, declarations: declarations, providerInputs: providerInputs, resolutions: resolutions,
-		checkedPrograms: checkedPrograms, validateBackend: validateBackend,
+		checkedPrograms: checkedPrograms, integrations: loweringIntegrations, entrypointModule: ownerModule, validateBackend: validateBackend,
 	}, true, nil
 }
 

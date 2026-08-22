@@ -1017,3 +1017,28 @@ func TestCaptureAssociationScopesUsesScopedManifestEntry(t *testing.T) {
 		t.Fatal("scope was attached to the unscoped conventional association")
 	}
 }
+
+func TestManifestIncrementalLoweringComparisonSeparatesCapturedScopes(t *testing.T) {
+	manifest := func(scope *ir.Block) *Manifest {
+		return &Manifest{Adapter: "sqlite", Models: []Model{{
+			Name: "Category", ModulePath: "models/category",
+			Associations: []Association{{Name: "products", Kind: HasMany, TargetModel: "Product", Scoped: true, Scope: scope}},
+		}}}
+	}
+	previous := manifest(&ir.Block{Parameters: []string{"previous"}})
+	current := manifest(nil)
+	if !current.EquivalentForIncrementalLowering(previous) {
+		t.Fatal("captured association scope changed the immutable integration comparison")
+	}
+	if !current.RequiresIncrementalRelowering("models/category") {
+		t.Fatal("scoped association model was not marked as a lowering input")
+	}
+	if current.RequiresIncrementalRelowering("models/product") {
+		t.Fatal("unrelated model was marked as a lowering input")
+	}
+	changed := manifest(nil)
+	changed.Models[0].Associations[0].TargetModel = "ArchivedProduct"
+	if changed.EquivalentForIncrementalLowering(previous) {
+		t.Fatal("changed immutable association contribution was considered equivalent")
+	}
+}

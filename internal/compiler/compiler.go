@@ -230,17 +230,19 @@ func AnalyzeProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 }
 
 type projectAnalysis struct {
-	artifacts       []*Artifact
-	requestedUnits  []SourceUnit
-	units           []SourceUnit
-	options         Options
-	programs        map[string]*ast.Program
-	catalog         *resolver.Catalog
-	declarations    *declaration.Catalog
-	providerInputs  typeprovider.InputSnapshot
-	resolutions     map[string]resolver.Result
-	checkedPrograms map[string]checker.Result
-	validateBackend bool
+	artifacts        []*Artifact
+	requestedUnits   []SourceUnit
+	units            []SourceUnit
+	options          Options
+	programs         map[string]*ast.Program
+	catalog          *resolver.Catalog
+	declarations     *declaration.Catalog
+	providerInputs   typeprovider.InputSnapshot
+	resolutions      map[string]resolver.Result
+	checkedPrograms  map[string]checker.Result
+	integrations     projectintegration.Analysis
+	entrypointModule string
+	validateBackend  bool
 }
 
 func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Options, validateBackend bool, requestedUnits []SourceUnit) (*projectAnalysis, error) {
@@ -439,7 +441,7 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	return &projectAnalysis{
 		artifacts: artifacts, requestedUnits: cloneSourceUnits(requestedUnits), units: cloneSourceUnits(units), options: cloneOptions(options),
 		programs: programs, catalog: catalog, declarations: declarations, providerInputs: providerInputs, resolutions: resolutions,
-		checkedPrograms: checkedPrograms, validateBackend: validateBackend,
+		checkedPrograms: checkedPrograms, integrations: integrations, entrypointModule: ownerModule, validateBackend: validateBackend,
 	}, nil
 }
 

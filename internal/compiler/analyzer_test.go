@@ -173,18 +173,29 @@ func TestAnalyzerReusesORMDeclarationsUntilProviderInputsChange(t *testing.T) {
 				},
 			}
 			analyzer := NewAnalyzer()
-			if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+			initial, err := analyzer.AnalyzeProject(sources, options)
+			if err != nil {
 				t.Fatal(err)
 			}
 			initialDeclarations := analyzer.state.declarations
+			initialModel := artifactForModule(initial, "models/product").IR
+			initialREPL := artifactForModule(initial, "__trb_repl__").IR
 
 			sources[1].Source = []byte("1 + 2\n")
-			if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+			interactive, err := analyzer.AnalyzeProject(sources, options)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if analyzer.state.declarations != initialDeclarations {
 				t.Fatal("interactive expression edit reloaded unchanged ORM declarations")
 			}
+			if artifactForModule(interactive, "models/product").IR != initialModel {
+				t.Fatal("interactive expression edit lowered the unchanged ORM model again")
+			}
+			if artifactForModule(interactive, "__trb_repl__").IR == initialREPL {
+				t.Fatal("interactive expression edit reused stale lowered IR")
+			}
+			requireAnalysisMatchesFullCompilation(t, interactive, sources, options)
 
 			lock.Tables["products"] = schemalock.Table{Columns: map[string]schemalock.Column{
 				"id":   {Type: "Integer", PrimaryKey: true},
@@ -194,12 +205,72 @@ func TestAnalyzerReusesORMDeclarationsUntilProviderInputsChange(t *testing.T) {
 				t.Fatal(err)
 			}
 			sources[1].Source = []byte("import { Product } from models/product\n\ndef product_name(product: Product): String\n\treturn product.name\nend\n")
-			if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+			withSchemaChange, err := analyzer.AnalyzeProject(sources, options)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if analyzer.state.declarations == initialDeclarations {
 				t.Fatal("ORM schema lock edit reused stale declarations")
 			}
+			if artifactForModule(withSchemaChange, "models/product").IR == initialModel {
+				t.Fatal("ORM schema lock edit reused stale lowered IR")
+			}
+		})
+	}
+}
+
+func TestAnalyzerRelowersProjectWhenScopedORMInputChanges(t *testing.T) {
+	for _, mode := range []string{"ruby", "go", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			lock := schemalock.New("sqlite")
+			lock.Tables["categories"] = schemalock.Table{Columns: map[string]schemalock.Column{
+				"id": {Type: "Integer", PrimaryKey: true},
+			}}
+			foreignKey := schemalock.ForeignKey{Column: "category_id", ReferencedTable: "categories", ReferencedColumn: "id"}
+			lock.Tables["products"] = schemalock.Table{
+				Columns: map[string]schemalock.Column{
+					"id":          {Type: "Integer", PrimaryKey: true},
+					"category_id": {Type: "Integer"},
+					"active":      {Type: "Boolean"},
+				},
+				ForeignKeys: map[string]schemalock.ForeignKey{
+					schemalock.ForeignKeyKey(foreignKey.Column, foreignKey.ReferencedTable, foreignKey.ReferencedColumn): foreignKey,
+				},
+			}
+			if err := lock.Write(filepath.Join(root, "schema.lock.json")); err != nil {
+				t.Fatal(err)
+			}
+			modelSource := func(active string) []byte {
+				return []byte("import { Model, has_many } from trb/orm\n\nclass Category < Model\n\thas_many(Product, name: :active_products) do |products|\n\t\tproducts.where(active: " + active + ")\n\tend\nend\n\nclass Product < Model\nend\n")
+			}
+			sources := []SourceUnit{
+				{Filename: filepath.Join(root, "src", "models.trb"), ModulePath: "models", Package: "models", Source: modelSource("true")},
+				{Filename: filepath.Join(root, "src", "helper.trb"), ModulePath: "helper", Package: "main", Source: []byte("def helper(): Integer\n\treturn 1\nend\n")},
+			}
+			options := Options{
+				Mode: mode, GoModule: "example.com/scoped-orm", RubyLoader: "require_relative", TypeScriptRuntime: "bun",
+				SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+				PackageOptions: map[string][]byte{
+					"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3","schemaLock":"schema.lock.json"}`),
+				},
+			}
+			analyzer := NewAnalyzer()
+			initial, err := analyzer.AnalyzeProject(sources, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			initialHelper := artifactForModule(initial, "helper").IR
+
+			sources[0].Source = modelSource("false")
+			incremental, err := analyzer.AnalyzeProject(sources, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if artifactForModule(incremental, "helper").IR == initialHelper {
+				t.Fatal("scoped ORM edit reused project IR with stale integration state")
+			}
+			requireAnalysisMatchesFullCompilation(t, incremental, sources, options)
 		})
 	}
 }
@@ -315,13 +386,22 @@ func TestAnalyzerInteractiveArtifactsMatchFullCompilation(t *testing.T) {
 				SourceRoot: "/project/src", ProjectRoot: "/project", AllowUnusedImports: true, InteractiveModule: "__trb_repl__",
 			}
 			analyzer := NewAnalyzer()
-			if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+			initial, err := analyzer.AnalyzeProject(sources, options)
+			if err != nil {
 				t.Fatal(err)
 			}
+			initialAlpha := artifactForModule(initial, "alpha").IR
+			initialREPL := artifactForModule(initial, "__trb_repl__").IR
 			sources[1].Source = []byte("import { alpha } from alpha\nalpha(2)\n")
 			incremental, err := analyzer.AnalyzeProject(sources, options)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if artifactForModule(incremental, "alpha").IR != initialAlpha {
+				t.Fatal("unchanged module was lowered again")
+			}
+			if artifactForModule(incremental, "__trb_repl__").IR == initialREPL {
+				t.Fatal("changed interactive module reused stale lowered IR")
 			}
 			requireAnalysisMatchesFullCompilation(t, incremental, sources, options)
 		})

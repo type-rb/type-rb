@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -288,6 +289,51 @@ func Analyze(programs []*ast.Program, projectRoot string, options map[string][]b
 }
 
 func (*Manifest) ExtensionName() string { return ProjectProvider }
+
+// EquivalentForIncrementalLowering compares the immutable contribution made
+// by two manifests. Association scopes are captured from typed IR after this
+// manifest is created and are guarded separately by module invalidation.
+func (m *Manifest) EquivalentForIncrementalLowering(extension ir.Extension) bool {
+	other, ok := extension.(*Manifest)
+	if !ok || m == nil || other == nil {
+		return m == nil && other == nil
+	}
+	left := *m
+	right := *other
+	left.Models = modelsWithoutAssociationScopes(m.Models)
+	right.Models = modelsWithoutAssociationScopes(other.Models)
+	return reflect.DeepEqual(left, right)
+}
+
+// RequiresIncrementalRelowering reports whether a changed module can alter an
+// association scope captured from its typed IR.
+func (m *Manifest) RequiresIncrementalRelowering(modulePath string) bool {
+	if m == nil {
+		return false
+	}
+	for _, model := range m.Models {
+		if model.ModulePath != modulePath {
+			continue
+		}
+		for _, association := range model.Associations {
+			if association.Scoped {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func modelsWithoutAssociationScopes(models []Model) []Model {
+	result := append([]Model(nil), models...)
+	for modelIndex := range result {
+		result[modelIndex].Associations = append([]Association(nil), result[modelIndex].Associations...)
+		for associationIndex := range result[modelIndex].Associations {
+			result[modelIndex].Associations[associationIndex].Scope = nil
+		}
+	}
+	return result
+}
 
 func (m *Manifest) Augment(program *ir.Program) {
 	m.augmentProgram(program, false)
