@@ -4,6 +4,7 @@ package projectintegration
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -44,6 +45,11 @@ type Contribution struct {
 
 type Analysis struct {
 	contributions []Contribution
+}
+
+type incrementalLoweringExtension interface {
+	EquivalentForIncrementalLowering(ir.Extension) bool
+	RequiresIncrementalRelowering(string) bool
 }
 
 type provider func(Context) (Contribution, []Issue)
@@ -129,4 +135,39 @@ func (a Analysis) Apply(program *ir.Program, entrypoint bool) {
 			program.Extensions = append(program.Extensions, contribution.Extension)
 		}
 	}
+}
+
+// CanReuseLoweredPrograms reports whether unchanged IR augmented by previous
+// has the same project-integration behavior under the receiver.
+func (a Analysis) CanReuseLoweredPrograms(previous Analysis, affected map[string]bool) bool {
+	if len(a.contributions) != len(previous.contributions) {
+		return false
+	}
+	for index, current := range a.contributions {
+		cached := previous.contributions[index]
+		if current.AllPrograms != cached.AllPrograms || !reflect.DeepEqual(current.MethodTargets, cached.MethodTargets) {
+			return false
+		}
+		if current.Extension == nil || cached.Extension == nil {
+			if current.Extension != nil || cached.Extension != nil {
+				return false
+			}
+			continue
+		}
+		if comparable, ok := current.Extension.(incrementalLoweringExtension); ok {
+			if !comparable.EquivalentForIncrementalLowering(cached.Extension) {
+				return false
+			}
+			for modulePath := range affected {
+				if comparable.RequiresIncrementalRelowering(modulePath) {
+					return false
+				}
+			}
+			continue
+		}
+		if !reflect.DeepEqual(current.Extension, cached.Extension) {
+			return false
+		}
+	}
+	return true
 }
