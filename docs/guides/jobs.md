@@ -110,17 +110,15 @@ import { JobAdapter } from trb/jobs
 import { SQLAdapter, SQLDialect } from trb/jobs/sql
 import { Duration } from trb/std/time
 
-def configure_jobs(): JobAdapter
-	return SQLAdapter.new(
-		dialect: SQLDialect::PostgreSQL,
-		source: "postgres://localhost/jobs",
-		source_environment: "JOBS_DATABASE_URL",
-		poll_interval: Duration.seconds(1),
-		lease_timeout: Duration.seconds(60),
-		default_maximum_attempts: 5,
-		retry_base_delay: Duration.seconds(1),
-	)
-end
+JOBS_ADAPTER: JobAdapter := SQLAdapter.new(
+	dialect: SQLDialect::PostgreSQL,
+	source: "postgres://localhost/jobs",
+	source_environment: "JOBS_DATABASE_URL",
+	poll_interval: Duration.seconds(1),
+	lease_timeout: Duration.seconds(60),
+	default_maximum_attempts: 5,
+	retry_base_delay: Duration.seconds(1),
+)
 ```
 
 When `source_environment` is present, its environment variable is required at
@@ -129,6 +127,11 @@ of silently connecting to another database.
 The configuration module is also the native dependency boundary: application
 Job source imports only `trb/jobs`, while an adapter package owns its target
 drivers and worker implementation.
+`JOBS_ADAPTER` is an ordinary immutable TypeRB constant. Its initializer runs
+once when the configuration module loads, and every generated enqueue wrapper
+reuses that application-scoped adapter instance. This explicit lifetime also
+allows a future stateful adapter to own a connection pool or metrics state;
+the configuration is not called as a per-enqueue factory.
 
 ## Adapter contract
 

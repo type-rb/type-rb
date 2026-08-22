@@ -308,7 +308,9 @@ separate `trb/jobs/sql` adapter persists queue state in SQLite, PostgreSQL, or
 MySQL and runs the same Job source in generated Go, Ruby, and Bun applications.
 Projects select the adapter through a typed TypeRB composition module rather
 than a string adapter name in `packageOptions`; Job definitions remain
-independent from storage.
+independent from storage. The module exposes one explicitly typed
+`JOBS_ADAPTER` constant, initialized once and reused by every enqueue wrapper,
+so adapter lifetime is application-scoped rather than per-enqueue.
 Jobs-derived `perform_later`, `perform_in`, and `perform_at` declarations now
 cross the same validated, mode-independent Declaration Protocol as ORM. Their
 typed arguments, scheduling parameters, enqueue Results, and runtime operation

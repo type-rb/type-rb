@@ -31,12 +31,10 @@ func configureSQLJobsSource(t *testing.T, config *project.Config, adapter, sourc
 	source := `import { JobAdapter } from trb/jobs
 import { SQLAdapter, SQLDialect } from trb/jobs/sql
 
-def configure_jobs(): JobAdapter
-	return SQLAdapter.new(
-		dialect: SQLDialect::` + member + `,
-		` + sourceArgument + `,
-	)
-end
+JOBS_ADAPTER: JobAdapter := SQLAdapter.new(
+	dialect: SQLDialect::` + member + `,
+	` + sourceArgument + `,
+)
 `
 	if err := os.WriteFile(filepath.Join(directory, "jobs.trb"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)

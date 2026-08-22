@@ -202,25 +202,25 @@ import { JobAdapter } from trb/jobs
 import { SQLAdapter, SQLDialect } from trb/jobs/sql
 import { Duration } from trb/std/time
 
-def configure_jobs(): JobAdapter
-	return SQLAdapter.new(
-		dialect: SQLDialect::PostgreSQL,
-		source_environment: "JOBS_DATABASE_URL",
-		poll_interval: Duration.seconds(1),
-	)
-end
+JOBS_ADAPTER: JobAdapter := SQLAdapter.new(
+	dialect: SQLDialect::PostgreSQL,
+	source_environment: "JOBS_DATABASE_URL",
+	poll_interval: Duration.seconds(1),
+)
 ```
 
 `configuration` is relative to `sourceDir`; a trailing `.trb` is optional.
 Normal Job modules import only `trb/jobs`. Importing `trb/jobs/sql` in the
 composition module also selects the target-native database dependency. The
-initial compiler integration accepts one `configure_jobs` function whose body
-directly returns `SQLAdapter.new(...)`; duration and scalar options are
-compile-time values.
+initial compiler integration accepts one explicitly typed `JOBS_ADAPTER`
+constant initialized directly with `SQLAdapter.new(...)`; duration and scalar
+options are compile-time values. The configuration module initializes this
+application-scoped adapter once, and all generated enqueue wrappers reuse the
+same instance. It is not a factory evaluated for each enqueue.
 This keeps native dependency and generated SQL selection deterministic while
 the external adapter protocol is still under development.
 
-Derived Job enqueue methods call the returned `JobAdapter` through its
+Derived Job enqueue methods call the configured `JobAdapter` through its
 portable `enqueue` and `enqueue_at` methods. Portable generated TypeRB owns
 payload serialization and relative scheduling validation; the adapter owns ID
 generation, persistence, and native error mapping. Worker lifecycle remains a

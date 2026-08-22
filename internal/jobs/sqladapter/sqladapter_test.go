@@ -12,13 +12,11 @@ func TestParseConfigurationUsesTypedSQLAdapter(t *testing.T) {
 import { SQLAdapter, SQLDialect } from trb/jobs/sql
 import { Duration } from trb/std/time
 
-def configure_jobs(): JobAdapter
-	return SQLAdapter.new(
-		dialect: SQLDialect::PostgreSQL,
-		source: "jobs",
-		poll_interval: Duration.milliseconds(250),
-	)
-end
+JOBS_ADAPTER: JobAdapter := SQLAdapter.new(
+	dialect: SQLDialect::PostgreSQL,
+	source: "jobs",
+	poll_interval: Duration.milliseconds(250),
+)
 `))
 	if len(diagnostics) != 0 {
 		t.Fatalf("parse diagnostics: %v", diagnostics)
@@ -32,10 +30,22 @@ end
 	}
 }
 
-func TestParseConfigurationRejectsUnimplementedRuntimeTuning(t *testing.T) {
+func TestParseConfigurationRejectsPerEnqueueFactory(t *testing.T) {
 	program, diagnostics := parser.Parse([]byte(`def configure_jobs(): JobAdapter
-	return SQLAdapter.new(worker_concurrency: 2)
+	return SQLAdapter.new()
 end
+`))
+	if len(diagnostics) != 0 {
+		t.Fatalf("parse diagnostics: %v", diagnostics)
+	}
+	_, err := ParseConfiguration(program)
+	if err == nil || !strings.Contains(err.Error(), "must define JOBS_ADAPTER: JobAdapter") {
+		t.Fatalf("expected application-scoped adapter diagnostic, got %v", err)
+	}
+}
+
+func TestParseConfigurationRejectsUnimplementedRuntimeTuning(t *testing.T) {
+	program, diagnostics := parser.Parse([]byte(`JOBS_ADAPTER: JobAdapter := SQLAdapter.new(worker_concurrency: 2)
 `))
 	if len(diagnostics) != 0 {
 		t.Fatalf("parse diagnostics: %v", diagnostics)
@@ -47,9 +57,7 @@ end
 }
 
 func TestParseConfigurationTreatsSourceEnvironmentAsRequired(t *testing.T) {
-	program, diagnostics := parser.Parse([]byte(`def configure_jobs(): JobAdapter
-	return SQLAdapter.new(source_environment: "JOBS_DATABASE_URL")
-end
+	program, diagnostics := parser.Parse([]byte(`JOBS_ADAPTER: JobAdapter := SQLAdapter.new(source_environment: "JOBS_DATABASE_URL")
 `))
 	if len(diagnostics) != 0 {
 		t.Fatalf("parse diagnostics: %v", diagnostics)

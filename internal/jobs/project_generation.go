@@ -86,7 +86,7 @@ func jobsEnqueueSources(input packageextension.ProjectDeclarationInput, jobs []J
 			"trb/std/time":   {"Duration": true, "Instant": true},
 		}
 		if configurationModule != job.ModulePath {
-			required[configurationModule] = map[string]bool{"configure_jobs": true}
+			required[configurationModule] = map[string]bool{"JOBS_ADAPTER": true}
 		}
 		result = append(result, packageextension.ProjectGeneratedSource{
 			ID:              projectEnqueueSourceID + job.ModulePath + ":" + job.Name,
@@ -145,7 +145,7 @@ func jobsEnqueueSource(job Job) (string, error) {
 
 	source.WriteString("def " + laterHelper + "(" + strings.Join(parameters, ", ") + "): " + enqueueResult + "\n")
 	source.WriteString("\trequest := try " + requestHelper + "(" + strings.Join(arguments, ", ") + ")\n")
-	source.WriteString("\treturn configure_jobs().enqueue(request)\n")
+	source.WriteString("\treturn JOBS_ADAPTER.enqueue(request)\n")
 	source.WriteString("end\n\n")
 
 	delayedParameters := append([]string{"delay: Duration"}, parameters...)
@@ -154,13 +154,13 @@ func jobsEnqueueSource(job Job) (string, error) {
 	source.WriteString("\t\treturn " + enqueueResult + "::Err(EnqueueError.new(kind: EnqueueErrorKind::InvalidArgument, message: \"job delay must not be negative\"))\n")
 	source.WriteString("\tend\n")
 	source.WriteString("\trequest := try " + requestHelper + "(" + strings.Join(arguments, ", ") + ")\n")
-	source.WriteString("\treturn configure_jobs().enqueue_at(request, Instant.now().add(delay))\n")
+	source.WriteString("\treturn JOBS_ADAPTER.enqueue_at(request, Instant.now().add(delay))\n")
 	source.WriteString("end\n\n")
 
 	scheduledParameters := append([]string{"scheduled_at: Instant"}, parameters...)
 	source.WriteString("def " + atHelper + "(" + strings.Join(scheduledParameters, ", ") + "): " + enqueueResult + "\n")
 	source.WriteString("\trequest := try " + requestHelper + "(" + strings.Join(arguments, ", ") + ")\n")
-	source.WriteString("\treturn configure_jobs().enqueue_at(request, scheduled_at)\n")
+	source.WriteString("\treturn JOBS_ADAPTER.enqueue_at(request, scheduled_at)\n")
 	source.WriteString("end\n")
 	return source.String(), nil
 }
