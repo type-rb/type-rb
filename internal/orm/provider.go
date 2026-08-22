@@ -13,15 +13,22 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-func Declarations(programs []*ast.Program, projectRoot string, options map[string][]byte, packageAliasesByModule map[string]map[string]string) (*declaration.Catalog, error) {
-	schema, err := LoadSchema(projectRoot, options)
+// Declarations derives the ORM type-provider catalog from validated, data-only
+// project and schema snapshots. It never receives compiler AST nodes or owns
+// filesystem and database access.
+func Declarations(input DeclarationInput) (*declaration.Catalog, error) {
+	if err := ValidateDeclarationInput(input); err != nil {
+		return nil, err
+	}
+	schema := importDeclarationSchema(input.Schema)
+	models, err := discoverDeclarationModels(input.Project, schema)
 	if err != nil {
 		return nil, err
 	}
-	models, err := discoverModels(programs, schema, packageAliasesByModule)
-	if err != nil {
-		return nil, err
-	}
+	return declarationsForModels(models, schema.Adapter), nil
+}
+
+func declarationsForModels(models []Model, adapter string) *declaration.Catalog {
 	catalog := declaration.NewCatalog()
 	runtimeTypes := map[string]map[string]bool{}
 	for _, model := range models {
@@ -150,8 +157,8 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			declared.ClassMembers["find"] = findDeclaration(model, primaryKey)
 			declared.ClassMembers["ids"] = idsDeclaration(model, "trb.orm.ids", true, primaryKey)
-			declared.ClassMembers["build"] = buildDeclaration(model, schema.Adapter)
-			declared.ClassMembers["create"] = createDeclaration(model, schema.Adapter)
+			declared.ClassMembers["build"] = buildDeclaration(model, adapter)
+			declared.ClassMembers["create"] = createDeclaration(model, adapter)
 			declared.ClassMembers["insert_all"] = declaration.Member{
 				Name: "insert_all", Kind: declaration.Method, Intrinsic: "trb.orm.insert_all",
 				Parameters: []declaration.Parameter{{Name: "drafts", Type: arrayOf(model.DraftType())}},
@@ -309,12 +316,12 @@ func Declarations(programs []*ast.Program, projectRoot string, options map[strin
 		}
 		if primaryKey, ok := model.PrimaryKey(); ok {
 			scope.InstanceMembers["find"] = scopeFindDeclaration(model, primaryKey)
-			scope.InstanceMembers["build"] = scopeWriteDeclaration(model, "build", "trb.orm.scope.build", types.FromName(model.DraftType()), schema.Adapter)
-			scope.InstanceMembers["create"] = scopeWriteDeclaration(model, "create", "trb.orm.scope.create", dbResult(types.FromName(model.Name)), schema.Adapter)
+			scope.InstanceMembers["build"] = scopeWriteDeclaration(model, "build", "trb.orm.scope.build", types.FromName(model.DraftType()), adapter)
+			scope.InstanceMembers["create"] = scopeWriteDeclaration(model, "create", "trb.orm.scope.create", dbResult(types.FromName(model.Name)), adapter)
 		}
 		catalog.Types[model.ScopeType()] = scope
 	}
-	return catalog, nil
+	return catalog
 }
 
 func modelReferences(source Model, models []Model) []declaration.DeclarationReference {
@@ -1108,7 +1115,12 @@ func discoverAssociationSpecs(source Model, class *ast.ClassStatement, models ma
 			return nil, fmt.Errorf("trb/orm %s.%s references unknown model %s", source.Name, callee.Name, targetName)
 		}
 		if !sameModelGroup(source, *target) {
-			return nil, associationModelGroupError(source, *target, classes[targetName], callee.Name, call.Arguments[0].Value.Span())
+			targetClass := classes[targetName]
+			if targetClass == nil {
+				return nil, associationModelGroupError(source, *target, nil, callee.Name, call.Arguments[0].Value.Span())
+			}
+			targetSpan := targetClass.Span()
+			return nil, associationModelGroupError(source, *target, &targetSpan, callee.Name, call.Arguments[0].Value.Span())
 		}
 		spec := associationSpec{Kind: AssociationKind(callee.Name), TargetModel: targetName}
 		if call.Block != nil {

@@ -252,7 +252,7 @@ func parseJobsTest(t *testing.T, source string) *ast.Program {
 
 func projectDeclarationInput(t *testing.T, programs []*ast.Program) packageextension.ProjectDeclarationInput {
 	t.Helper()
-	input, err := packageextensionhost.ExportProjectDeclarationInput(PackageName, programs)
+	input, err := packageextensionhost.ExportProjectDeclarationInput(PackageName, programs, packageextensionhost.ProjectDeclarationInputOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

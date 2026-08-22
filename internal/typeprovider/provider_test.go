@@ -61,13 +61,43 @@ end
 		t.Fatalf("parse diagnostics: %#v", diagnostics)
 	}
 	program.ModulePath = "models/catalog"
+	unrelated, diagnostics := parser.Parse([]byte("class InternalService\n\tsecret(\"not-for-orm\")\nend\n"))
+	if len(diagnostics) > 0 {
+		t.Fatalf("unrelated parse diagnostics: %#v", diagnostics)
+	}
+	unrelated.ModulePath = "services/internal"
+	programs := []*ast.Program{unrelated, program}
 	context := Context{
 		ProjectRoot: root,
 		PackageOptions: map[string][]byte{
 			"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3","schemaLock":"db/schema.lock.json"}`),
 		},
 	}
-	provided, err := loadORMDeclarations([]*ast.Program{program}, context)
+	input, err := ormDeclarationInput(programs, context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedInput, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encodedInput), "application.sqlite3") {
+		t.Fatalf("ORM declaration input exposed its database location: %s", encodedInput)
+	}
+	var decodedInput ormintegration.DeclarationInput
+	if err := json.Unmarshal(encodedInput, &decodedInput); err != nil {
+		t.Fatal(err)
+	}
+	if err := ormintegration.ValidateDeclarationInput(decodedInput); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decodedInput, input) {
+		t.Fatal("ORM declaration input changed across its JSON boundary")
+	}
+	if len(decodedInput.Project.Modules) != 1 || decodedInput.Project.Modules[0].ModulePath != program.ModulePath {
+		t.Fatalf("ORM input included unrelated project declarations: %#v", decodedInput.Project.Modules)
+	}
+	provided, err := loadORMDeclarations(programs, context)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,14 +136,14 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := ormintegration.Declarations([]*ast.Program{program}, context.ProjectRoot, context.PackageOptions, context.PackageAliasesByModule)
+	original, err := ormintegration.Declarations(decodedInput)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(imported, original) {
 		t.Fatal("declaration protocol changed the ORM catalog semantics")
 	}
-	loaded, err := loadORM([]*ast.Program{program}, context)
+	loaded, err := loadORM(programs, context)
 	if err != nil {
 		t.Fatal(err)
 	}

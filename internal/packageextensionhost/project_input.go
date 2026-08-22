@@ -6,9 +6,14 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
+
+type ProjectDeclarationInputOptions struct {
+	PackageAliasesByModule map[string]map[string]string
+}
 
 type projectImportBinding struct {
 	importPath string
@@ -16,21 +21,22 @@ type projectImportBinding struct {
 }
 
 type projectInputResolver struct {
-	programs    map[string]*ast.Program
-	aliases     map[string]map[string]*ast.TypeAliasStatement
-	definitions map[string]map[string]bool
-	imports     map[string]map[string]projectImportBinding
+	programs               map[string]*ast.Program
+	aliases                map[string]map[string]*ast.TypeAliasStatement
+	definitions            map[string]map[string]bool
+	imports                map[string]map[string]projectImportBinding
+	packageAliasesByModule map[string]map[string]string
 }
 
 // ExportProjectDeclarationInput copies the declaration-only portion of parsed
 // project source into the versioned package-extension boundary. The returned
 // value owns its data and does not retain compiler AST nodes.
-func ExportProjectDeclarationInput(provider string, programs []*ast.Program) (packageextension.ProjectDeclarationInput, error) {
+func ExportProjectDeclarationInput(provider string, programs []*ast.Program, options ProjectDeclarationInputOptions) (packageextension.ProjectDeclarationInput, error) {
 	result := packageextension.ProjectDeclarationInput{
 		ProtocolVersion: packageextension.ProjectDeclarationInputProtocolVersion,
 		Provider:        provider,
 	}
-	resolver, err := newProjectInputResolver(programs)
+	resolver, err := newProjectInputResolver(programs, options)
 	if err != nil {
 		return result, err
 	}
@@ -42,7 +48,8 @@ func ExportProjectDeclarationInput(provider string, programs []*ast.Program) (pa
 			switch node := statement.(type) {
 			case *ast.ImportStatement:
 				module.Imports = append(module.Imports, packageextension.ProjectImport{
-					Path: node.Path, Symbols: append([]string(nil), node.Symbols...), Alias: node.Alias, Span: exportSourceSpan(node.Span()),
+					Path: node.Path, ModulePath: resolver.importModulePath(program.ModulePath, node.Path),
+					Symbols: append([]string(nil), node.Symbols...), Alias: node.Alias, Span: exportSourceSpan(node.Span()),
 				})
 			case *ast.TypeAliasStatement:
 				module.TypeAliases = append(module.TypeAliases, packageextension.ProjectTypeAlias{
@@ -52,6 +59,8 @@ func ExportProjectDeclarationInput(provider string, programs []*ast.Program) (pa
 				})
 			case *ast.ClassStatement:
 				module.Classes = append(module.Classes, resolver.exportClass(program.ModulePath, node))
+			case *ast.EnumStatement:
+				module.Enums = append(module.Enums, resolver.exportEnum(program.ModulePath, node))
 			}
 		}
 		result.Modules = append(result.Modules, module)
@@ -62,12 +71,13 @@ func ExportProjectDeclarationInput(provider string, programs []*ast.Program) (pa
 	return result, nil
 }
 
-func newProjectInputResolver(programs []*ast.Program) (projectInputResolver, error) {
+func newProjectInputResolver(programs []*ast.Program, options ProjectDeclarationInputOptions) (projectInputResolver, error) {
 	result := projectInputResolver{
-		programs:    map[string]*ast.Program{},
-		aliases:     map[string]map[string]*ast.TypeAliasStatement{},
-		definitions: map[string]map[string]bool{},
-		imports:     map[string]map[string]projectImportBinding{},
+		programs:               map[string]*ast.Program{},
+		aliases:                map[string]map[string]*ast.TypeAliasStatement{},
+		definitions:            map[string]map[string]bool{},
+		imports:                map[string]map[string]projectImportBinding{},
+		packageAliasesByModule: options.PackageAliasesByModule,
 	}
 	for _, program := range programs {
 		if program == nil {
@@ -87,7 +97,7 @@ func newProjectInputResolver(programs []*ast.Program) (projectInputResolver, err
 			case *ast.ImportStatement:
 				for _, symbol := range node.Symbols {
 					result.imports[program.ModulePath][symbol] = projectImportBinding{
-						importPath: node.Path, modulePath: result.modulePath(node.Path),
+						importPath: node.Path, modulePath: result.importModulePath(program.ModulePath, node.Path),
 					}
 				}
 			case *ast.TypeAliasStatement:
@@ -105,6 +115,33 @@ func newProjectInputResolver(programs []*ast.Program) (projectInputResolver, err
 		}
 	}
 	return result, nil
+}
+
+func (r projectInputResolver) exportEnum(modulePath string, enum *ast.EnumStatement) packageextension.ProjectEnum {
+	result := packageextension.ProjectEnum{
+		Name: enum.Name, TypeParameters: projectTypeParameterNames(enum.TypeParameters), Span: exportSourceSpan(enum.Span()),
+	}
+	typeParameters := projectTypeParameterSet(enum.TypeParameters)
+	for _, statement := range enum.Body {
+		member, ok := statement.(*ast.EnumMemberStatement)
+		if !ok {
+			continue
+		}
+		converted := packageextension.ProjectEnumMember{Name: member.Name, Span: exportSourceSpan(member.Span())}
+		for _, parameter := range member.Parameters {
+			converted.Parameters = append(converted.Parameters, packageextension.ProjectParameter{
+				Name: parameter.Name, Type: r.typeUse(modulePath, parameter.Type, typeParameters),
+				Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
+				Optional: parameter.Default != nil, Span: exportSourceSpan(parameter.Span()),
+			})
+		}
+		if member.RawValue != nil {
+			value := r.exportProjectValue(modulePath, member.RawValue, true)
+			converted.RawValue = &value
+		}
+		result.Members = append(result.Members, converted)
+	}
+	return result
 }
 
 func (r projectInputResolver) exportClass(modulePath string, class *ast.ClassStatement) packageextension.ProjectClass {
@@ -140,7 +177,7 @@ func (r projectInputResolver) exportClass(modulePath string, class *ast.ClassSta
 			}
 			result.Methods = append(result.Methods, method)
 		case *ast.ExpressionStatement:
-			if directive, ok := exportProjectDirective(node); ok {
+			if directive, ok := r.exportProjectDirective(modulePath, node); ok {
 				result.Directives = append(result.Directives, directive)
 			}
 		}
@@ -148,9 +185,9 @@ func (r projectInputResolver) exportClass(modulePath string, class *ast.ClassSta
 	return result
 }
 
-func exportProjectDirective(statement *ast.ExpressionStatement) (packageextension.ProjectDirective, bool) {
+func (r projectInputResolver) exportProjectDirective(modulePath string, statement *ast.ExpressionStatement) (packageextension.ProjectDirective, bool) {
 	call, ok := statement.Expression.(*ast.CallExpression)
-	if !ok || call.Block != nil {
+	if !ok {
 		return packageextension.ProjectDirective{}, false
 	}
 	callee, ok := call.Callee.(*ast.Identifier)
@@ -159,15 +196,51 @@ func exportProjectDirective(statement *ast.ExpressionStatement) (packageextensio
 	}
 	result := packageextension.ProjectDirective{Name: callee.Name, Span: exportSourceSpan(call.Span())}
 	for _, argument := range call.Arguments {
-		converted := packageextension.ProjectDirectiveArgument{Name: argument.Name, Splat: argument.Splat}
-		if literal, ok := argument.Value.(*ast.Literal); ok {
-			converted.Literal = packageextension.ProjectLiteral{Kind: string(literal.Kind), Raw: literal.Raw}
-		} else {
-			converted.Literal = packageextension.ProjectLiteral{Kind: "unsupported"}
+		converted := packageextension.ProjectDirectiveArgument{
+			Name: argument.Name, Splat: argument.Splat,
+			Value: r.exportProjectValue(modulePath, argument.Value, false), Span: exportSourceSpan(argument.Value.Span()),
 		}
 		result.Arguments = append(result.Arguments, converted)
 	}
+	if call.Block != nil {
+		result.Block = &packageextension.ProjectDirectiveBlock{
+			Parameters: append([]string(nil), call.Block.Parameters...), StatementCount: len(call.Block.Body),
+			Span: exportSourceSpan(call.Block.Span()),
+		}
+		if len(call.Block.Body) == 1 {
+			_, result.Block.ResultExpression = call.Block.Body[0].(*ast.ExpressionStatement)
+		}
+	}
 	return result, true
+}
+
+func (r projectInputResolver) exportProjectValue(modulePath string, expression ast.Expression, negativeInteger bool) packageextension.ProjectValue {
+	result := exportStandaloneProjectValue(expression, negativeInteger)
+	if result.Kind != "reference" {
+		return result
+	}
+	if reference, ok := r.reference(modulePath, result.Name); ok {
+		copy := reference
+		result.Reference = &copy
+	}
+	return result
+}
+
+func exportStandaloneProjectValue(expression ast.Expression, negativeInteger bool) packageextension.ProjectValue {
+	switch value := expression.(type) {
+	case *ast.Literal:
+		return packageextension.ProjectValue{Kind: string(value.Kind), Raw: value.Raw}
+	case *ast.SymbolLiteral:
+		return packageextension.ProjectValue{Kind: "symbol", Raw: value.Raw, Name: value.Name}
+	case *ast.Identifier:
+		return packageextension.ProjectValue{Kind: "reference", Name: value.Name}
+	case *ast.UnaryExpression:
+		literal, ok := value.Operand.(*ast.Literal)
+		if negativeInteger && value.Operator == "-" && ok && literal.Kind == ast.IntegerLiteral {
+			return packageextension.ProjectValue{Kind: "integer", Raw: "-" + literal.Raw}
+		}
+	}
+	return packageextension.ProjectValue{Kind: "unsupported"}
 }
 
 func (r projectInputResolver) typeUse(modulePath string, ref ast.TypeRef, typeParameters map[string]bool) packageextension.ProjectTypeUse {
@@ -273,6 +346,10 @@ func (r projectInputResolver) modulePath(importPath string) string {
 		return importPath + "/index"
 	}
 	return importPath
+}
+
+func (r projectInputResolver) importModulePath(modulePath, importPath string) string {
+	return r.modulePath(resolver.CanonicalPackageImport(importPath, r.packageAliasesByModule[modulePath]))
 }
 
 func projectTypeParameterNames(parameters []ast.TypeParameter) []string {

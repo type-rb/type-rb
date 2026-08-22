@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const ProjectDeclarationInputProtocolVersion = 1
+const ProjectDeclarationInputProtocolVersion = 2
 
 // ProjectDeclarationInput is a versioned, read-only snapshot of source
 // declarations that a declaration provider may inspect. It intentionally
@@ -20,14 +20,16 @@ type ProjectModule struct {
 	ModulePath  string             `json:"modulePath"`
 	Imports     []ProjectImport    `json:"imports,omitempty"`
 	TypeAliases []ProjectTypeAlias `json:"typeAliases,omitempty"`
+	Enums       []ProjectEnum      `json:"enums,omitempty"`
 	Classes     []ProjectClass     `json:"classes,omitempty"`
 }
 
 type ProjectImport struct {
-	Path    string     `json:"path"`
-	Symbols []string   `json:"symbols,omitempty"`
-	Alias   string     `json:"alias,omitempty"`
-	Span    SourceSpan `json:"span"`
+	Path       string     `json:"path"`
+	ModulePath string     `json:"modulePath"`
+	Symbols    []string   `json:"symbols,omitempty"`
+	Alias      string     `json:"alias,omitempty"`
+	Span       SourceSpan `json:"span"`
 }
 
 type ProjectTypeAlias struct {
@@ -44,6 +46,20 @@ type ProjectClass struct {
 	Methods        []ProjectMethod    `json:"methods,omitempty"`
 	Directives     []ProjectDirective `json:"directives,omitempty"`
 	Span           SourceSpan         `json:"span"`
+}
+
+type ProjectEnum struct {
+	Name           string              `json:"name"`
+	TypeParameters []string            `json:"typeParameters,omitempty"`
+	Members        []ProjectEnumMember `json:"members,omitempty"`
+	Span           SourceSpan          `json:"span"`
+}
+
+type ProjectEnumMember struct {
+	Name       string             `json:"name"`
+	Parameters []ProjectParameter `json:"parameters,omitempty"`
+	RawValue   *ProjectValue      `json:"rawValue,omitempty"`
+	Span       SourceSpan         `json:"span"`
 }
 
 type ProjectMethod struct {
@@ -65,23 +81,35 @@ type ProjectParameter struct {
 	Span        SourceSpan     `json:"span"`
 }
 
-// ProjectDirective is a direct class-body call with no block. Arguments retain
-// only literal values; non-literal expressions are marked unsupported.
+// ProjectDirective is a direct class-body call. It retains only declarative
+// argument values and a structural block summary, never executable block
+// statements.
 type ProjectDirective struct {
 	Name      string                     `json:"name"`
 	Arguments []ProjectDirectiveArgument `json:"arguments,omitempty"`
+	Block     *ProjectDirectiveBlock     `json:"block,omitempty"`
 	Span      SourceSpan                 `json:"span"`
 }
 
 type ProjectDirectiveArgument struct {
-	Name    string         `json:"name,omitempty"`
-	Splat   string         `json:"splat,omitempty"`
-	Literal ProjectLiteral `json:"literal"`
+	Name  string       `json:"name,omitempty"`
+	Splat string       `json:"splat,omitempty"`
+	Value ProjectValue `json:"value"`
+	Span  SourceSpan   `json:"span"`
 }
 
-type ProjectLiteral struct {
-	Kind string `json:"kind"`
-	Raw  string `json:"raw,omitempty"`
+type ProjectValue struct {
+	Kind      string                `json:"kind"`
+	Raw       string                `json:"raw,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Reference *ProjectTypeReference `json:"reference,omitempty"`
+}
+
+type ProjectDirectiveBlock struct {
+	Parameters       []string   `json:"parameters,omitempty"`
+	StatementCount   int        `json:"statementCount"`
+	ResultExpression bool       `json:"resultExpression,omitempty"`
+	Span             SourceSpan `json:"span"`
 }
 
 // ProjectTypeUse separates the source spelling from the best resolved type
@@ -130,6 +158,9 @@ func ValidateProjectDeclarationInput(input ProjectDeclarationInput) error {
 			if strings.TrimSpace(imported.Path) == "" {
 				return fmt.Errorf("project declaration input module %s contains an import without a path", module.ModulePath)
 			}
+			if strings.TrimSpace(imported.ModulePath) == "" {
+				return fmt.Errorf("project declaration input module %s import %s has no resolved module path", module.ModulePath, imported.Path)
+			}
 			for _, symbol := range imported.Symbols {
 				if strings.TrimSpace(symbol) == "" {
 					return fmt.Errorf("project declaration input module %s import %s contains an empty symbol", module.ModulePath, imported.Path)
@@ -153,10 +184,52 @@ func ValidateProjectDeclarationInput(input ProjectDeclarationInput) error {
 				return fmt.Errorf("project declaration input type alias %s.%s: %w", module.ModulePath, alias.Name, err)
 			}
 		}
+		for _, enum := range module.Enums {
+			if err := validateProjectEnum(module.ModulePath, enum); err != nil {
+				return err
+			}
+		}
 		for _, class := range module.Classes {
 			if err := validateProjectClass(module.ModulePath, class); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func validateProjectEnum(modulePath string, enum ProjectEnum) error {
+	if strings.TrimSpace(enum.Name) == "" {
+		return fmt.Errorf("project declaration input module %s contains an unnamed enum", modulePath)
+	}
+	if err := validateProjectTypeParameters(enum.TypeParameters); err != nil {
+		return fmt.Errorf("project declaration input enum %s.%s: %w", modulePath, enum.Name, err)
+	}
+	if err := validateSourceSpan(enum.Span); err != nil {
+		return fmt.Errorf("project declaration input enum %s.%s: %w", modulePath, enum.Name, err)
+	}
+	for _, member := range enum.Members {
+		if strings.TrimSpace(member.Name) == "" {
+			return fmt.Errorf("project declaration input enum %s.%s contains an unnamed member", modulePath, enum.Name)
+		}
+		for _, parameter := range member.Parameters {
+			if strings.TrimSpace(parameter.Name) == "" {
+				return fmt.Errorf("project declaration input enum %s.%s member %s contains an unnamed parameter", modulePath, enum.Name, member.Name)
+			}
+			if err := validateProjectTypeUse(parameter.Type); err != nil {
+				return fmt.Errorf("project declaration input enum %s.%s member %s parameter %s: %w", modulePath, enum.Name, member.Name, parameter.Name, err)
+			}
+			if err := validateSourceSpan(parameter.Span); err != nil {
+				return fmt.Errorf("project declaration input enum %s.%s member %s parameter %s: %w", modulePath, enum.Name, member.Name, parameter.Name, err)
+			}
+		}
+		if member.RawValue != nil {
+			if err := validateProjectValue(*member.RawValue); err != nil {
+				return fmt.Errorf("project declaration input enum %s.%s member %s raw value: %w", modulePath, enum.Name, member.Name, err)
+			}
+		}
+		if err := validateSourceSpan(member.Span); err != nil {
+			return fmt.Errorf("project declaration input enum %s.%s member %s: %w", modulePath, enum.Name, member.Name, err)
 		}
 	}
 	return nil
@@ -209,19 +282,58 @@ func validateProjectClass(modulePath string, class ProjectClass) error {
 			return fmt.Errorf("project declaration input class %s.%s contains an unnamed directive", modulePath, class.Name)
 		}
 		for _, argument := range directive.Arguments {
-			switch argument.Literal.Kind {
-			case "string", "integer", "float", "boolean", "nil":
-				if argument.Literal.Raw == "" {
-					return fmt.Errorf("project declaration input directive %s.%s.%s contains an empty literal", modulePath, class.Name, directive.Name)
+			if err := validateProjectValue(argument.Value); err != nil {
+				return fmt.Errorf("project declaration input directive %s.%s.%s argument: %w", modulePath, class.Name, directive.Name, err)
+			}
+			if err := validateSourceSpan(argument.Span); err != nil {
+				return fmt.Errorf("project declaration input directive %s.%s.%s argument: %w", modulePath, class.Name, directive.Name, err)
+			}
+		}
+		if directive.Block != nil {
+			if directive.Block.StatementCount < 0 {
+				return fmt.Errorf("project declaration input directive %s.%s.%s block has a negative statement count", modulePath, class.Name, directive.Name)
+			}
+			if directive.Block.ResultExpression && directive.Block.StatementCount != 1 {
+				return fmt.Errorf("project declaration input directive %s.%s.%s block result expression requires one statement", modulePath, class.Name, directive.Name)
+			}
+			for _, parameter := range directive.Block.Parameters {
+				if strings.TrimSpace(parameter) == "" {
+					return fmt.Errorf("project declaration input directive %s.%s.%s block contains an unnamed parameter", modulePath, class.Name, directive.Name)
 				}
-			case "unsupported":
-			default:
-				return fmt.Errorf("project declaration input directive %s.%s.%s contains unsupported literal kind %q", modulePath, class.Name, directive.Name, argument.Literal.Kind)
+			}
+			if err := validateSourceSpan(directive.Block.Span); err != nil {
+				return fmt.Errorf("project declaration input directive %s.%s.%s block: %w", modulePath, class.Name, directive.Name, err)
 			}
 		}
 		if err := validateSourceSpan(directive.Span); err != nil {
 			return fmt.Errorf("project declaration input directive %s.%s.%s: %w", modulePath, class.Name, directive.Name, err)
 		}
+	}
+	return nil
+}
+
+func validateProjectValue(value ProjectValue) error {
+	switch value.Kind {
+	case "string", "integer", "float", "boolean", "nil":
+		if value.Raw == "" {
+			return fmt.Errorf("contains an empty literal")
+		}
+	case "symbol":
+		if strings.TrimSpace(value.Name) == "" {
+			return fmt.Errorf("contains an empty symbol")
+		}
+	case "reference":
+		if strings.TrimSpace(value.Name) == "" {
+			return fmt.Errorf("contains an empty reference")
+		}
+		if value.Reference != nil {
+			if value.Reference.Name != value.Name || strings.TrimSpace(value.Reference.ModulePath) == "" {
+				return fmt.Errorf("contains an invalid resolved reference")
+			}
+		}
+	case "unsupported":
+	default:
+		return fmt.Errorf("contains unsupported value kind %q", value.Kind)
 	}
 	return nil
 }

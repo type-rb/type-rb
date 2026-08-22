@@ -3,7 +3,6 @@ package orm
 import (
 	"fmt"
 
-	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/token"
 )
@@ -28,7 +27,7 @@ func (e *providerDiagnosticError) Diagnostics() []diagnostic.Diagnostic {
 	return append([]diagnostic.Diagnostic(nil), e.diagnostics...)
 }
 
-func associationModelGroupError(source, target Model, targetClass *ast.ClassStatement, association string, span token.Span) error {
+func associationModelGroupError(source, target Model, targetSpan *token.Span, association string, span token.Span) error {
 	sourceGroup := displayModelGroup(modelGroup(source.ModulePath))
 	targetGroup := displayModelGroup(modelGroup(target.ModulePath))
 	item := diagnostic.Diagnostic{
@@ -41,10 +40,10 @@ func associationModelGroupError(source, target Model, targetClass *ast.ClassStat
 			source.Name, association, target.Name, targetGroup, source.Name, sourceGroup,
 		),
 	}
-	if targetClass != nil {
+	if targetSpan != nil {
 		item.Related = []diagnostic.RelatedInformation{{
 			Message:  "target model " + target.Name + " is declared here",
-			Location: diagnostic.Location{Path: target.ModulePath, Span: targetClass.Span()},
+			Location: diagnostic.Location{Path: target.ModulePath, Span: *targetSpan},
 		}}
 	}
 	return &providerDiagnosticError{diagnostics: []diagnostic.Diagnostic{item}}

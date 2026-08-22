@@ -61,6 +61,22 @@ func TestProjectDeclarationInputRejectsInvalidBoundaryData(t *testing.T) {
 		{name: "version", mutate: func(input *ProjectDeclarationInput) { input.ProtocolVersion++ }, message: "unsupported project declaration input protocol version"},
 		{name: "provider", mutate: func(input *ProjectDeclarationInput) { input.Provider = "" }, message: "provider is missing"},
 		{name: "duplicate module", mutate: func(input *ProjectDeclarationInput) { input.Modules = append(input.Modules, input.Modules[0]) }, message: "empty or duplicate module"},
+		{name: "resolved import", mutate: func(input *ProjectDeclarationInput) {
+			input.Modules[0].Imports = []ProjectImport{{Path: "contracts/ids"}}
+		}, message: "has no resolved module path"},
+		{name: "enum raw value", mutate: func(input *ProjectDeclarationInput) {
+			input.Modules[0].Enums = []ProjectEnum{{Name: "State", Members: []ProjectEnumMember{{Name: "Ready", RawValue: &ProjectValue{Kind: "array"}}}}}
+		}, message: "unsupported value kind"},
+		{name: "directive reference", mutate: func(input *ProjectDeclarationInput) {
+			input.Modules[0].Classes = []ProjectClass{{Name: "Model", Directives: []ProjectDirective{{
+				Name: "belongs_to", Arguments: []ProjectDirectiveArgument{{Value: ProjectValue{Kind: "reference"}}},
+			}}}}
+		}, message: "empty reference"},
+		{name: "directive block shape", mutate: func(input *ProjectDeclarationInput) {
+			input.Modules[0].Classes = []ProjectClass{{Name: "Model", Directives: []ProjectDirective{{
+				Name: "has_many", Block: &ProjectDirectiveBlock{StatementCount: 2, ResultExpression: true},
+			}}}}
+		}, message: "result expression requires one statement"},
 		{name: "definition module", mutate: func(input *ProjectDeclarationInput) {
 			input.Modules[0].TypeAliases = []ProjectTypeAlias{{
 				Name: "ID",

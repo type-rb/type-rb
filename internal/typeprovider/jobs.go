@@ -34,7 +34,7 @@ func loadJobDeclarations(programs []*ast.Program) (packageextension.DeclarationC
 
 func jobDeclarationInput(programs []*ast.Program) (packageextension.ProjectDeclarationInput, error) {
 	relevant := providerPrograms(programs, jobsProviderProgram)
-	return packageextensionhost.ExportProjectDeclarationInput(jobsintegration.PackageName, relevant)
+	return packageextensionhost.ExportProjectDeclarationInput(jobsintegration.PackageName, relevant, packageextensionhost.ProjectDeclarationInputOptions{})
 }
 
 func jobsProviderInputs(programs []*ast.Program, _ Context) providerInputSnapshot {
