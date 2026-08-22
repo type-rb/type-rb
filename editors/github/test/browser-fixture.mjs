@@ -90,12 +90,14 @@ function page(body, distribution) {
 function blobPage(distribution) {
   return page(`
     <textarea data-testid="read-only-cursor-text-area">def greet(name: String): String
+
   return "Hello, #{name}"
 end</textarea>
     <div class="react-code-lines">
       <div class="react-file-line" id="LC1">def greet(name: String): String</div>
-      <div class="react-file-line" id="LC2">  return "Hello, #{name}"</div>
-      <div class="react-file-line" id="LC3">end</div>
+      <div class="react-file-line" id="LC2"><br></div>
+      <div class="react-file-line" id="LC3">  return "Hello, #{name}"</div>
+      <div class="react-file-line" id="LC4">end</div>
     </div>
     <pre lang="trb"><code># Markdown comment
 puts("Markdown string")</code></pre>

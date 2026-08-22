@@ -2,11 +2,46 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  highlightBlob,
   isTypeRBPath,
   pullRequestMetadataFromPayload,
   rawFileURL,
   repositoryFromPathname
 } from "../src/github.js";
+
+test("preserves GitHub's blank-line placeholder in blob views", () => {
+  let replacementCalls = 0;
+  const blankLine = {
+    id: "LC2",
+    textContent: "",
+    dataset: {},
+    ownerDocument: {},
+    replaceChildren() {
+      replacementCalls += 1;
+    }
+  };
+  const document = {
+    querySelector() {
+      return { value: "record Entry\n\nend" };
+    },
+    querySelectorAll() {
+      return [blankLine];
+    }
+  };
+  const highlighter = {
+    tokenizeSource() {
+      return [[], [], []];
+    }
+  };
+
+  highlightBlob(
+    document,
+    { pathname: "/type-rb/example/blob/main/src/audit.trb" },
+    highlighter
+  );
+
+  assert.equal(replacementCalls, 0);
+});
 
 test("recognizes TypeRB paths and GitHub repository routes", () => {
   assert.equal(isTypeRBPath("src/main.trb"), true);

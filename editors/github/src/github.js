@@ -103,7 +103,7 @@ function regionPath(region) {
 }
 
 function replaceWithSegments(element, segments, source) {
-  if (!element || element.dataset.typerbSource === source) {
+  if (!element || segments.length === 0 || element.dataset.typerbSource === source) {
     return;
   }
   const document = element.ownerDocument;
