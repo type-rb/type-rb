@@ -1,6 +1,7 @@
 package languageservice_test
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -11,6 +12,30 @@ import (
 	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/types"
 )
+
+func TestBuildContextMatchesBuildContexts(t *testing.T) {
+	programs := []*ir.Program{
+		{ModulePath: "models/user", SourcePath: "models/user.trb", Statements: []ir.Statement{
+			&ir.Record{Name: "User", Body: []ir.Statement{&ir.RecordField{Name: "name", Type: types.FromName("String")}}},
+		}},
+		{ModulePath: "models/state", SourcePath: "models/state.trb", Statements: []ir.Statement{
+			&ir.Enum{Name: "State", Body: []ir.Statement{&ir.EnumMember{Name: "Open"}, &ir.EnumMember{Name: "Closed"}}},
+		}},
+		{ModulePath: "repl", SourcePath: ".trb-repl.trb", Statements: []ir.Statement{
+			&ir.Import{Path: "models/user", Symbols: []string{"User"}},
+			&ir.Import{Path: "models/state", Symbols: []string{"State"}},
+		}},
+	}
+	contexts := languageservice.BuildContexts(programs)
+	for modulePath, expected := range contexts {
+		t.Run(modulePath, func(t *testing.T) {
+			actual := languageservice.BuildContext(programs, modulePath)
+			if !reflect.DeepEqual(actual, expected) {
+				t.Fatalf("BuildContext(%q) did not match BuildContexts", modulePath)
+			}
+		})
+	}
+}
 
 const completionProgram = `class User
 	@_name: String
