@@ -210,6 +210,46 @@ type symbol struct {
 	used          *bool
 	useKind       string
 	mustUseResult bool
+	pending       *pendingEmptyCollection
+}
+
+// pendingEmptyCollection is shared by every lexical reference found during the
+// constraint pass. It resolves once, at the end of the first constraining
+// statement owned by its declaration scope.
+type pendingEmptyCollection struct {
+	variable *ast.VariableStatement
+	owner    *scope
+	kind     types.Kind
+	resolved types.Type
+	blocked  bool
+}
+
+type emptyCollectionOutcome struct {
+	typ         types.Type
+	keySpan     token.Span
+	blocked     bool
+	blockedSpan token.Span
+}
+
+type emptyCollectionConstraint struct {
+	typ  types.Type
+	span token.Span
+}
+
+type emptyCollectionRegionConstraints struct {
+	exact       *types.Type
+	elements    []emptyCollectionConstraint
+	keys        []emptyCollectionConstraint
+	values      []emptyCollectionConstraint
+	captured    bool
+	captureSpan token.Span
+	escaped     bool
+	escapeSpan  token.Span
+}
+
+type emptyCollectionInferenceRegion struct {
+	scope       *scope
+	constraints map[*pendingEmptyCollection]*emptyCollectionRegionConstraints
 }
 
 func tracksUnusedBinding(name string) bool {
@@ -239,6 +279,9 @@ type nullableMemberFact struct {
 func (s *scope) lookup(name string) (symbol, bool) {
 	for current := s; current != nil; current = current.parent {
 		if value, ok := current.values[name]; ok {
+			if value.pending != nil && value.pending.resolved.Kind != "" {
+				value.typ = value.pending.resolved
+			}
 			return value, true
 		}
 	}
@@ -389,6 +432,12 @@ type Checker struct {
 	directStructuredResultKind  string
 	declarationReferences       int
 	declarationCalls            map[*ast.CallExpression]string
+	inferenceOnly               bool
+	emptyCollectionOutcomes     map[*ast.VariableStatement]emptyCollectionOutcome
+	emptyCollectionRegions      []*emptyCollectionInferenceRegion
+	pendingExpressions          map[ast.Expression]*pendingEmptyCollection
+	callbackScopes              []*scope
+	pendingEmptyCollections     int
 }
 
 // resultBoundary is the lexical destination for prefix try. A boundary entry
@@ -414,8 +463,235 @@ func Check(program *ast.Program, resolution resolver.Result) (Result, []diagnost
 }
 
 func CheckWithOptions(program *ast.Program, resolution resolver.Result, options Options) (Result, []diagnostic.Diagnostic) {
+	// Only programs that contain the opt-in mutable-empty form pay for the
+	// constraint pass. The ordinary pass remains authoritative for diagnostics,
+	// conversions, and typed IR consumed by every backend.
+	var outcomes map[*ast.VariableStatement]emptyCollectionOutcome
+	if statementsHaveFreshEmptyMutableCollection(program.Statements) {
+		inference := newChecker(program, resolution, options)
+		inference.inferenceOnly = true
+		inference.allowUnusedImports = true
+		inference.emptyCollectionOutcomes = map[*ast.VariableStatement]emptyCollectionOutcome{}
+		inference.pendingExpressions = map[ast.Expression]*pendingEmptyCollection{}
+		inference.checkProgram(program, false)
+		outcomes = inference.emptyCollectionOutcomes
+	}
+	c := newChecker(program, resolution, options)
+	c.emptyCollectionOutcomes = outcomes
+	c.checkProgram(program, true)
+	return c.result, diagnostic.Normalize(c.diags, "", diagnostic.TypeError)
+}
+
+// statementsHaveFreshEmptyMutableCollection is a lightweight fast-path scan.
+// Keep its expression descent exhaustive when adding syntax nodes that
+// can contain authored statement bodies.
+func statementsHaveFreshEmptyMutableCollection(statements []ast.Statement) bool {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ast.ClassStatement:
+			if expressionHasFreshEmptyMutableCollection(node.Superclass) || statementsHaveFreshEmptyMutableCollection(node.Body) {
+				return true
+			}
+		case *ast.RecordStatement:
+			if statementsHaveFreshEmptyMutableCollection(node.Body) {
+				return true
+			}
+		case *ast.EnumStatement:
+			if statementsHaveFreshEmptyMutableCollection(node.Body) {
+				return true
+			}
+		case *ast.EnumMemberStatement:
+			if expressionHasFreshEmptyMutableCollection(node.RawValue) {
+				return true
+			}
+		case *ast.ModuleStatement:
+			if statementsHaveFreshEmptyMutableCollection(node.Body) {
+				return true
+			}
+		case *ast.InterfaceStatement:
+			for _, method := range node.Methods {
+				if methodHasFreshEmptyMutableCollection(method) {
+					return true
+				}
+			}
+		case *ast.FieldStatement:
+			if expressionHasFreshEmptyMutableCollection(node.Value) {
+				return true
+			}
+		case *ast.MethodStatement:
+			if methodHasFreshEmptyMutableCollection(node) {
+				return true
+			}
+		case *ast.VariableStatement:
+			if (node.Mutable && node.Type.Empty() && freshEmptyCollectionKind(node.Value) != "") ||
+				expressionHasFreshEmptyMutableCollection(node.Value) {
+				return true
+			}
+		case *ast.AssignmentStatement:
+			if expressionHasFreshEmptyMutableCollection(node.Target) || expressionHasFreshEmptyMutableCollection(node.Value) {
+				return true
+			}
+		case *ast.ReturnStatement:
+			if expressionHasFreshEmptyMutableCollection(node.Value) {
+				return true
+			}
+		case *ast.IfStatement:
+			if expressionHasFreshEmptyMutableCollection(node) {
+				return true
+			}
+		case *ast.CaseStatement:
+			if expressionHasFreshEmptyMutableCollection(node) {
+				return true
+			}
+		case *ast.WhileStatement:
+			if expressionHasFreshEmptyMutableCollection(node.Condition) || statementsHaveFreshEmptyMutableCollection(node.Body) {
+				return true
+			}
+		case *ast.ExpressionStatement:
+			if expressionHasFreshEmptyMutableCollection(node.Expression) {
+				return true
+			}
+		case *ast.NativeBlock:
+			if statementsHaveFreshEmptyMutableCollection(node.Body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func methodHasFreshEmptyMutableCollection(method *ast.MethodStatement) bool {
+	if method == nil {
+		return false
+	}
+	for _, parameter := range method.Parameters {
+		if expressionHasFreshEmptyMutableCollection(parameter.Default) {
+			return true
+		}
+	}
+	return statementsHaveFreshEmptyMutableCollection(method.Body)
+}
+
+func expressionHasFreshEmptyMutableCollection(expression ast.Expression) bool {
+	if expression == nil {
+		return false
+	}
+	switch node := expression.(type) {
+	case *ast.IfStatement:
+		if expressionHasFreshEmptyMutableCollection(node.Condition) ||
+			statementsHaveFreshEmptyMutableCollection(node.Then) ||
+			statementsHaveFreshEmptyMutableCollection(node.Else) {
+			return true
+		}
+		for _, branch := range node.ElseIf {
+			if expressionHasFreshEmptyMutableCollection(branch.Condition) || statementsHaveFreshEmptyMutableCollection(branch.Body) {
+				return true
+			}
+		}
+	case *ast.CaseStatement:
+		if expressionHasFreshEmptyMutableCollection(node.Value) ||
+			statementsHaveFreshEmptyMutableCollection(node.Leading) ||
+			statementsHaveFreshEmptyMutableCollection(node.Else) {
+			return true
+		}
+		for _, branch := range node.Branches {
+			if expressionHasFreshEmptyMutableCollection(branch.Value) || statementsHaveFreshEmptyMutableCollection(branch.Body) {
+				return true
+			}
+			for _, alternative := range branch.Alternatives {
+				if expressionHasFreshEmptyMutableCollection(alternative) {
+					return true
+				}
+			}
+		}
+	case *ast.IterationExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Source) ||
+			expressionHasFreshEmptyMutableCollection(node.SliceSize) ||
+			expressionHasFreshEmptyMutableCollection(node.Initial) ||
+			node.Block != nil && statementsHaveFreshEmptyMutableCollection(node.Block.Body)
+	case *ast.InterpolatedString:
+		for _, part := range node.Parts {
+			if expressionHasFreshEmptyMutableCollection(part.Expression) {
+				return true
+			}
+		}
+	case *ast.ArrayLiteral:
+		for _, element := range node.Elements {
+			if expressionHasFreshEmptyMutableCollection(element) {
+				return true
+			}
+		}
+	case *ast.HashLiteral:
+		for _, entry := range node.Entries {
+			if expressionHasFreshEmptyMutableCollection(entry.Key) || expressionHasFreshEmptyMutableCollection(entry.Value) {
+				return true
+			}
+		}
+	case *ast.JSXElement:
+		if expressionHasFreshEmptyMutableCollection(node.Component) {
+			return true
+		}
+		for _, attribute := range node.Attributes {
+			if expressionHasFreshEmptyMutableCollection(attribute.Value) {
+				return true
+			}
+		}
+		for _, child := range node.Children {
+			switch item := child.(type) {
+			case *ast.JSXElement:
+				if expressionHasFreshEmptyMutableCollection(item) {
+					return true
+				}
+			case *ast.JSXExpression:
+				if expressionHasFreshEmptyMutableCollection(item.Value) {
+					return true
+				}
+			}
+		}
+	case *ast.UnaryExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Operand)
+	case *ast.BinaryExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Left) || expressionHasFreshEmptyMutableCollection(node.Right)
+	case *ast.RangeExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Start) || expressionHasFreshEmptyMutableCollection(node.End)
+	case *ast.AttemptExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Value) || statementsHaveFreshEmptyMutableCollection(node.Body)
+	case *ast.TryExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Value)
+	case *ast.CatchExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Value) || statementsHaveFreshEmptyMutableCollection(node.Body)
+	case *ast.LambdaExpression:
+		for _, parameter := range node.Parameters {
+			if expressionHasFreshEmptyMutableCollection(parameter.Default) {
+				return true
+			}
+		}
+		return statementsHaveFreshEmptyMutableCollection(node.Body)
+	case *ast.CallExpression:
+		if expressionHasFreshEmptyMutableCollection(node.Callee) {
+			return true
+		}
+		for _, argument := range node.Arguments {
+			if expressionHasFreshEmptyMutableCollection(argument.Value) {
+				return true
+			}
+		}
+		return node.Block != nil && statementsHaveFreshEmptyMutableCollection(node.Block.Body)
+	case *ast.GenericExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Receiver)
+	case *ast.MemberExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Receiver)
+	case *ast.IndexExpression:
+		return expressionHasFreshEmptyMutableCollection(node.Receiver) || expressionHasFreshEmptyMutableCollection(node.Index)
+	case *ast.BlockExpression:
+		return statementsHaveFreshEmptyMutableCollection(node.Body)
+	}
+	return false
+}
+
+func newChecker(program *ast.Program, resolution resolver.Result, options Options) Checker {
 	importUses := map[*ast.ImportStatement]map[string]bool{}
-	c := &Checker{
+	return Checker{
 		mode: program.Mode,
 		result: Result{
 			Program:                    program,
@@ -468,24 +744,30 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 		aliasCycles:            map[string]bool{},
 		declarationCalls:       map[*ast.CallExpression]string{},
 	}
-	if resolution.Declarations != nil {
-		for _, runtimeType := range resolution.Declarations.RuntimeTypesByModule[program.ModulePath] {
+}
+
+func (c *Checker) checkProgram(program *ast.Program, checkUnusedImports bool) {
+	if !c.inferenceOnly && c.resolution.Declarations != nil {
+		for _, runtimeType := range c.resolution.Declarations.RuntimeTypesByModule[program.ModulePath] {
 			c.requireRuntimeType(runtimeType)
 		}
 	}
-	c.validateReservedKeywords(program.Statements)
+	if !c.inferenceOnly {
+		c.validateReservedKeywords(program.Statements)
+	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ast.MethodStatement); ok {
 			c.functions[method.Name] = method
 		}
 	}
 	c.collect(program.Statements)
-	c.validateTypeReferences(program.Statements, nil)
+	if !c.inferenceOnly {
+		c.validateTypeReferences(program.Statements, nil)
+	}
 	c.checkStatements(program.Statements, &scope{values: map[string]symbol{}, constantsAllowed: true, enumsAllowed: true})
-	if !c.allowUnusedImports {
+	if checkUnusedImports && !c.allowUnusedImports {
 		c.checkUnusedImports(program.Statements)
 	}
-	return c.result, diagnostic.Normalize(c.diags, "", diagnostic.TypeError)
 }
 
 func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParameters map[string]bool) {
@@ -944,11 +1226,20 @@ func (c *Checker) declareType(name, kind string, span token.Span) bool {
 
 func (c *Checker) checkStatements(statements []ast.Statement, sc *scope) {
 	c.checkStatementSequence(statements, sc)
-	c.checkUnusedBindings(sc)
+	if !c.inferenceOnly {
+		c.checkUnusedBindings(sc)
+	}
 }
 
 func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) {
 	for _, statement := range statements {
+		var inferenceRegion *emptyCollectionInferenceRegion
+		if c.inferenceOnly && c.pendingEmptyCollections > 0 {
+			inferenceRegion = &emptyCollectionInferenceRegion{
+				scope: sc,
+			}
+			c.emptyCollectionRegions = append(c.emptyCollectionRegions, inferenceRegion)
+		}
 		switch n := statement.(type) {
 		case *ast.ClassStatement:
 			previous := c.current
@@ -1143,6 +1434,8 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			valueType := c.checkDirectStructuredResultValue(n.Value, sc, "variable declaration")
 			c.checkStructuredBlockValue(n.Value)
 			variableType := valueType
+			emptyKind := freshEmptyCollectionKind(n.Value)
+			var pending *pendingEmptyCollection
 			if n.Name == "_" {
 				c.error(n.Span(), "blank binding _ is only valid as a parameter or pattern binding")
 			}
@@ -1161,6 +1454,38 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", valueType, variableType))
 				}
 			}
+			if n.Mutable && n.Type.Empty() && emptyKind != "" {
+				outcome, inferred := c.emptyCollectionOutcomes[n]
+				if !c.inferenceOnly && inferred && outcome.typ.Kind != "" {
+					variableType = outcome.typ
+					valueType = c.contextualizeCollectionLiteral(n.Value, variableType, valueType)
+					if variableType.Kind == types.Hash && len(variableType.Args) == 2 && !portableHashKey(variableType.Args[0]) && !c.rubyNativeSyntax() {
+						span := outcome.keySpan
+						if span == (token.Span{}) {
+							span = n.Value.Span()
+						}
+						c.error(span, fmt.Sprintf("Hash key must be String or Integer, got %s", variableType.Args[0]))
+					}
+				} else {
+					if c.inferenceOnly {
+						variableType = provisionalEmptyCollectionType(emptyKind)
+						valueType = c.contextualizeCollectionLiteral(n.Value, variableType, valueType)
+					}
+					pending = &pendingEmptyCollection{variable: n, owner: sc, kind: emptyKind}
+					if c.inferenceOnly {
+						c.pendingEmptyCollections++
+					}
+					if !c.inferenceOnly && inferred && outcome.blocked {
+						pending.blocked = true
+						c.error(outcome.blockedSpan, emptyCollectionInferenceMessage(emptyKind, true))
+					}
+				}
+			}
+			if c.inferenceOnly && n.Type.Empty() && emptyKind == "" {
+				if escaped := c.pendingEmptyCollection(n.Value); escaped != nil {
+					c.markEmptyCollectionEscape(escaped, n.Value.Span())
+				}
+			}
 			if n.Mutable && valueType.Readonly && isReferenceType(variableType) {
 				c.error(n.Value.Span(), fmt.Sprintf("cannot initialize mutable %s from an immutable value", n.Name))
 			}
@@ -1173,7 +1498,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				if n.Constant {
 					variableType.Readonly = true
 				}
-				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n}
+				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n, pending: pending}
 				mustUseResult := len(c.returns) > 0 && !n.Constant && n.Name != "_" && c.isStandardResult(variableType)
 				if len(c.returns) > 0 && !n.Constant && (tracksUnusedBinding(n.Name) || mustUseResult) {
 					used := false
@@ -1198,6 +1523,22 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			rightType := c.checkDirectStructuredResultValue(n.Value, sc, "assignment")
 			c.checkStructuredBlockValue(n.Value)
+			if c.inferenceOnly && n.Operator == "=" {
+				if pending := c.pendingEmptyCollection(n.Target); pending != nil && freshEmptyCollectionKind(n.Value) == "" {
+					if source := c.pendingEmptyCollection(n.Value); source != nil {
+						c.markEmptyCollectionEscape(pending, n.Target.Span())
+						c.markEmptyCollectionEscape(source, n.Value.Span())
+					} else {
+						c.constrainEmptyCollectionExactly(pending, rightType)
+					}
+				}
+				if index, ok := n.Target.(*ast.IndexExpression); ok {
+					if pending := c.pendingEmptyCollection(index.Receiver); pending != nil {
+						keyType := c.result.Expressions[index.Index]
+						c.constrainEmptyHash(pending, keyType, rightType, index.Index.Span(), n.Value.Span())
+					}
+				}
+			}
 			if _, member, ok := c.structuredBlockCall(n.Value); ok && member.Block != nil && member.Block.Structured {
 				if _, identifier := n.Target.(*ast.Identifier); !identifier {
 					c.error(n.Target.Span(), "a structured block assignment target must be a variable name")
@@ -1315,13 +1656,290 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}})
 		}
+		if inferenceRegion != nil {
+			c.finishEmptyCollectionInferenceRegion(inferenceRegion)
+			c.emptyCollectionRegions = c.emptyCollectionRegions[:len(c.emptyCollectionRegions)-1]
+		}
 	}
 }
 
+func freshEmptyCollectionKind(expression ast.Expression) types.Kind {
+	switch literal := expression.(type) {
+	case *ast.ArrayLiteral:
+		if len(literal.Elements) == 0 {
+			return types.Array
+		}
+	case *ast.HashLiteral:
+		if len(literal.Entries) == 0 {
+			return types.Hash
+		}
+	}
+	return ""
+}
+
+func provisionalEmptyCollectionType(kind types.Kind) types.Type {
+	anyType := types.FromName("Any")
+	switch kind {
+	case types.Array:
+		return types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{anyType}}
+	case types.Hash:
+		return types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{anyType, anyType}}
+	default:
+		return invalidType()
+	}
+}
+
+func (c *Checker) emptyCollectionRegion(pending *pendingEmptyCollection) *emptyCollectionInferenceRegion {
+	if pending == nil || pending.resolved.Kind != "" || pending.blocked {
+		return nil
+	}
+	for index := len(c.emptyCollectionRegions) - 1; index >= 0; index-- {
+		region := c.emptyCollectionRegions[index]
+		if region.scope == pending.owner {
+			return region
+		}
+	}
+	return nil
+}
+
+func (c *Checker) emptyCollectionConstraints(pending *pendingEmptyCollection) *emptyCollectionRegionConstraints {
+	region := c.emptyCollectionRegion(pending)
+	if region == nil {
+		return nil
+	}
+	constraints := region.constraints[pending]
+	if constraints == nil {
+		if region.constraints == nil {
+			region.constraints = map[*pendingEmptyCollection]*emptyCollectionRegionConstraints{}
+		}
+		constraints = &emptyCollectionRegionConstraints{}
+		region.constraints[pending] = constraints
+	}
+	return constraints
+}
+
+func (c *Checker) constrainEmptyCollectionExactly(pending *pendingEmptyCollection, typ types.Type) {
+	constraints := c.emptyCollectionConstraints(pending)
+	if constraints == nil {
+		return
+	}
+	typ = c.expandAlias(typ, map[string]bool{})
+	valid := typ.Kind == types.Array && len(typ.Args) == 1 || typ.Kind == types.Hash && len(typ.Args) == 2
+	if typ.Kind != pending.kind || !valid {
+		return
+	}
+	typ.Readonly = false
+	if constraints.exact == nil {
+		constraints.exact = &typ
+	}
+}
+
+func (c *Checker) constrainEmptyArray(pending *pendingEmptyCollection, typ types.Type, span token.Span) {
+	if pending == nil || pending.kind != types.Array || typ.Kind == types.Invalid || typ.Kind == types.Never {
+		return
+	}
+	constraints := c.emptyCollectionConstraints(pending)
+	if constraints != nil {
+		constraints.elements = append(constraints.elements, emptyCollectionConstraint{typ: typ, span: span})
+	}
+}
+
+func (c *Checker) constrainEmptyHash(pending *pendingEmptyCollection, key, value types.Type, keySpan, valueSpan token.Span) {
+	if pending == nil || pending.kind != types.Hash || key.Kind == types.Invalid || value.Kind == types.Invalid || key.Kind == types.Never || value.Kind == types.Never {
+		return
+	}
+	constraints := c.emptyCollectionConstraints(pending)
+	if constraints == nil {
+		return
+	}
+	constraints.keys = append(constraints.keys, emptyCollectionConstraint{typ: key, span: keySpan})
+	constraints.values = append(constraints.values, emptyCollectionConstraint{typ: value, span: valueSpan})
+}
+
+func (c *Checker) markEmptyCollectionEscape(pending *pendingEmptyCollection, span token.Span) {
+	constraints := c.emptyCollectionConstraints(pending)
+	if constraints == nil || constraints.escaped {
+		return
+	}
+	constraints.escaped = true
+	constraints.escapeSpan = span
+}
+
+func (c *Checker) markEmptyCollectionCapture(pending *pendingEmptyCollection, span token.Span) {
+	constraints := c.emptyCollectionConstraints(pending)
+	if constraints == nil || constraints.captured {
+		return
+	}
+	constraints.captured = true
+	constraints.captureSpan = span
+}
+
+func commonEmptyCollectionConstraint(constraints []emptyCollectionConstraint) types.Type {
+	if len(constraints) == 0 {
+		return types.Type{}
+	}
+	result := constraints[0].typ
+	for _, constraint := range constraints[1:] {
+		result, _ = types.CommonType(result, constraint.typ)
+	}
+	return result
+}
+
+func (c *Checker) finishEmptyCollectionInferenceRegion(region *emptyCollectionInferenceRegion) {
+	// Exact typed contexts take precedence over write candidates. The ordinary
+	// checker pass reports any incompatible write within the same statement.
+	for pending, constraints := range region.constraints {
+		if pending.resolved.Kind != "" || pending.blocked {
+			continue
+		}
+		if constraints.escaped {
+			pending.blocked = true
+			c.pendingEmptyCollections--
+			c.emptyCollectionOutcomes[pending.variable] = emptyCollectionOutcome{
+				blocked:     true,
+				blockedSpan: constraints.escapeSpan,
+			}
+			continue
+		}
+		inferred := types.Type{}
+		if constraints.exact != nil {
+			inferred = *constraints.exact
+		} else {
+			switch pending.kind {
+			case types.Array:
+				if element := commonEmptyCollectionConstraint(constraints.elements); element.Kind != "" {
+					inferred = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{element}}
+				}
+			case types.Hash:
+				if len(constraints.keys) > 0 {
+					inferred = types.Type{
+						Kind: types.Hash,
+						Name: "Hash",
+						Args: []types.Type{constraints.keys[0].typ, commonEmptyCollectionConstraint(constraints.values)},
+					}
+				}
+			}
+		}
+		if inferred.Kind != "" {
+			pending.resolved = inferred
+			c.pendingEmptyCollections--
+			outcome := emptyCollectionOutcome{typ: inferred}
+			if len(constraints.keys) > 0 {
+				outcome.keySpan = constraints.keys[0].span
+			}
+			c.emptyCollectionOutcomes[pending.variable] = outcome
+			continue
+		}
+		if constraints.captured {
+			pending.blocked = true
+			c.pendingEmptyCollections--
+			c.emptyCollectionOutcomes[pending.variable] = emptyCollectionOutcome{
+				blocked:     true,
+				blockedSpan: constraints.captureSpan,
+			}
+		}
+	}
+}
+
+func (c *Checker) pendingEmptyCollection(expression ast.Expression) *pendingEmptyCollection {
+	if !c.inferenceOnly {
+		return nil
+	}
+	return c.pendingExpressions[expression]
+}
+
+func (c *Checker) constrainEmptyCollectionCall(call *ast.CallExpression, arguments []types.Type) {
+	if !c.inferenceOnly || call == nil {
+		return
+	}
+	binding, referenced := c.result.References[call.Callee]
+	if !referenced || binding.Library == nil {
+		return
+	}
+	library := binding.Library
+	receiverMethod := library.HasReceiver()
+	var receiver ast.Expression
+	argumentOffset := 1
+	if receiverMethod {
+		member, ok := call.Callee.(*ast.MemberExpression)
+		if !ok {
+			return
+		}
+		receiver = member.Receiver
+		argumentOffset = 0
+	} else if len(call.Arguments) > 0 {
+		receiver = call.Arguments[0].Value
+	}
+	pending := c.pendingEmptyCollection(receiver)
+	if pending == nil {
+		return
+	}
+
+	switch library.Intrinsic {
+	case "trb.std.arrays.push", "trb.std.arrays.unshift":
+		if argumentOffset < len(arguments) && argumentOffset < len(call.Arguments) {
+			c.constrainEmptyArray(pending, arguments[argumentOffset], call.Arguments[argumentOffset].Value.Span())
+		}
+	case "trb.std.hashes.update":
+		if argumentOffset >= len(arguments) || argumentOffset >= len(call.Arguments) {
+			return
+		}
+		other := c.expandAlias(arguments[argumentOffset], map[string]bool{})
+		if other.Kind == types.Hash && len(other.Args) == 2 {
+			span := call.Arguments[argumentOffset].Value.Span()
+			c.constrainEmptyHash(pending, other.Args[0], other.Args[1], span, span)
+		}
+	}
+}
+
+func scopeDescendsFrom(candidate, root *scope) bool {
+	for current := candidate; current != nil; current = current.parent {
+		if current == root {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Checker) pendingCollectionIsCaptured(pending *pendingEmptyCollection) bool {
+	if pending == nil || len(c.callbackScopes) == 0 {
+		return false
+	}
+	return !scopeDescendsFrom(pending.owner, c.callbackScopes[len(c.callbackScopes)-1])
+}
+
+func emptyCollectionInferenceMessage(kind types.Kind, escaped bool) string {
+	suffix := "; add an explicit collection type annotation"
+	if escaped {
+		suffix = " before the value escapes" + suffix
+	}
+	if kind == types.Hash {
+		return "cannot infer key and value types of empty Hash" + suffix
+	}
+	return "cannot infer element type of empty Array" + suffix
+}
+
 func (c *Checker) checkUnusedBindings(sc *scope) {
+	if c.inferenceOnly {
+		return
+	}
 	type trackedBinding struct {
 		name  string
 		value symbol
+	}
+	if !(c.interactiveTopLevel && sc.parent == nil) {
+		unresolved := make([]trackedBinding, 0)
+		for name, value := range sc.values {
+			if value.pending != nil && !value.pending.blocked && value.pending.resolved.Kind == "" {
+				unresolved = append(unresolved, trackedBinding{name: name, value: value})
+			}
+		}
+		sort.Slice(unresolved, func(i, j int) bool {
+			return unresolved[i].value.span.Start.Offset < unresolved[j].value.span.Start.Offset
+		})
+		for _, binding := range unresolved {
+			c.error(binding.value.pending.variable.Value.Span(), emptyCollectionInferenceMessage(binding.value.pending.kind, false))
+		}
 	}
 	tracked := make([]trackedBinding, 0, len(sc.values))
 	for name, value := range sc.values {
@@ -3155,6 +3773,18 @@ func commonNumberType(left, right types.Type) types.Type {
 }
 
 func (c *Checker) assignable(expression ast.Expression, target, actual types.Type) bool {
+	if c.inferenceOnly {
+		if pending := c.pendingEmptyCollection(expression); pending != nil {
+			expanded := c.expandAlias(target, map[string]bool{})
+			validCollection := expanded.Kind == types.Array && len(expanded.Args) == 1 ||
+				expanded.Kind == types.Hash && len(expanded.Args) == 2
+			if expanded.Kind == pending.kind && validCollection {
+				c.constrainEmptyCollectionExactly(pending, expanded)
+				return true
+			}
+			c.markEmptyCollectionEscape(pending, expression.Span())
+		}
+	}
 	if !c.typesAssignable(target, actual) && !c.literalTargetAcceptsExpression(target, expression) {
 		return false
 	}
@@ -3358,6 +3988,21 @@ func invalidType() types.Type {
 }
 
 func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
+	if c.inferenceOnly {
+		// A named body is not part of the caller's inference region. Its declared
+		// signature still constrains arguments at each call site.
+		previousRegions := c.emptyCollectionRegions
+		previousCallbacks := c.callbackScopes
+		previousPending := c.pendingEmptyCollections
+		c.emptyCollectionRegions = nil
+		c.callbackScopes = nil
+		c.pendingEmptyCollections = 0
+		defer func() {
+			c.emptyCollectionRegions = previousRegions
+			c.callbackScopes = previousCallbacks
+			c.pendingEmptyCollections = previousPending
+		}()
+	}
 	runnableMain := method == c.runnableMain
 	if runnableMain && (method.Class || len(method.TypeParameters) > 0 || len(method.Parameters) > 0 || !method.ReturnType.Empty()) {
 		c.error(method.Span(), "runnable main must have signature def main()")
@@ -4264,7 +4909,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.valueTransformDepth = 0
 		c.resultBoundaryBlockDepth = 0
 		c.controlBoundaries = nil
+		if c.inferenceOnly {
+			c.callbackScopes = append(c.callbackScopes, lambdaScope)
+		}
 		c.checkStatements(n.Body, lambdaScope)
+		if c.inferenceOnly {
+			c.callbackScopes = c.callbackScopes[:len(c.callbackScopes)-1]
+		}
 		if returnType.Kind != types.Void && c.statementsFallThrough(n.Body) {
 			c.error(n.Span(), fmt.Sprintf("fn must return %s on every path", returnType))
 		}
@@ -4283,6 +4934,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if value, ok := sc.lookup(n.Name); ok {
 			typ = value.typ
+			if c.inferenceOnly && value.pending != nil && value.pending.resolved.Kind == "" && !value.pending.blocked {
+				c.pendingExpressions[n] = value.pending
+				if c.pendingCollectionIsCaptured(value.pending) {
+					c.markEmptyCollectionCapture(value.pending, n.Span())
+				}
+			}
 			if value.declared.Nullable && !value.typ.Nullable {
 				c.result.NullableUnwraps[n] = value.declared
 			}
@@ -4340,6 +4997,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = types.FromName("String")
 	case *ast.ArrayLiteral:
 		element := c.inferCollectionType(n.Elements, sc)
+		if c.inferenceOnly {
+			for _, value := range n.Elements {
+				if pending := c.pendingEmptyCollection(value); pending != nil {
+					c.markEmptyCollectionCapture(pending, value.Span())
+				}
+			}
+		}
 		typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{element}}
 	case *ast.HashLiteral:
 		if len(n.Entries) == 0 {
@@ -4362,6 +5026,16 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			values = append(values, entry.Value)
 		}
 		valueType := c.inferCollectionType(values, sc)
+		if c.inferenceOnly {
+			for _, entry := range n.Entries {
+				if pending := c.pendingEmptyCollection(entry.Key); pending != nil {
+					c.markEmptyCollectionCapture(pending, entry.Key.Span())
+				}
+				if pending := c.pendingEmptyCollection(entry.Value); pending != nil {
+					c.markEmptyCollectionCapture(pending, entry.Value.Span())
+				}
+			}
+		}
 		typ = types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{keyType, valueType}}
 	case *ast.JSXElement:
 		provider := c.jsxProvider(n.Span())
@@ -4846,6 +5520,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.declarationReferences--
 			}
 		}
+		c.constrainEmptyCollectionCall(n, argumentTypes)
 		typ = calleeType
 		if parameters, returned, callable := types.FunctionSignature(calleeType); callable {
 			for _, argument := range n.Arguments {
@@ -6173,6 +6848,12 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		c.error(call.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", member.Name, len(member.Block.Parameters), len(call.Block.Parameters)))
 	}
 	blockScope := &scope{parent: sc, values: map[string]symbol{}}
+	if c.inferenceOnly && !member.Block.Structured {
+		c.callbackScopes = append(c.callbackScopes, blockScope)
+		defer func() {
+			c.callbackScopes = c.callbackScopes[:len(c.callbackScopes)-1]
+		}()
+	}
 	for index, name := range call.Block.Parameters {
 		parameterType := types.Type{Kind: types.Any, Name: "Any"}
 		if index < len(member.Block.Parameters) {
@@ -6368,6 +7049,12 @@ func (c *Checker) checkStructuredBlockValue(expression ast.Expression) {
 
 func (c *Checker) checkNativeCallBlock(block *ast.BlockExpression, sc *scope) {
 	blockScope := &scope{parent: sc, values: map[string]symbol{}}
+	if c.inferenceOnly {
+		c.callbackScopes = append(c.callbackScopes, blockScope)
+		defer func() {
+			c.callbackScopes = c.callbackScopes[:len(c.callbackScopes)-1]
+		}()
+	}
 	for _, name := range block.Parameters {
 		if _, duplicate := blockScope.values[name]; duplicate {
 			c.error(block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
@@ -6719,6 +7406,11 @@ func (c *Checker) checkArguments(span token.Span, method *ast.MethodStatement, a
 		}
 		expected := c.typeFromRef(method.Parameters[i].Type)
 		if method.Parameters[i].Type.Empty() || method.Parameters[i].Rest || method.Parameters[i].KeywordRest {
+			if c.inferenceOnly {
+				if pending := c.pendingEmptyCollection(arguments[i].Value); pending != nil {
+					c.markEmptyCollectionEscape(pending, arguments[i].Value.Span())
+				}
+			}
 			continue
 		}
 		argumentType = c.contextualizeCollectionLiteral(arguments[i].Value, expected, argumentType)
@@ -6830,10 +7522,16 @@ func (c *Checker) error(span token.Span, message string) {
 }
 
 func (c *Checker) errorCode(code diagnostic.Code, span token.Span, message string) {
+	if c.inferenceOnly {
+		return
+	}
 	c.diags = append(c.diags, diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message, Span: span})
 }
 
 func (c *Checker) errorRelated(code diagnostic.Code, span token.Span, message, relatedMessage string, relatedSpan token.Span) {
+	if c.inferenceOnly {
+		return
+	}
 	c.diags = append(c.diags, diagnostic.Diagnostic{
 		Code: code, Severity: diagnostic.Error, Message: message, Span: span,
 		Related: []diagnostic.RelatedInformation{{Message: relatedMessage, Location: diagnostic.Location{Span: relatedSpan}}},

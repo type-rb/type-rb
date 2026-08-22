@@ -1483,6 +1483,300 @@ end
 	}
 }
 
+func TestFreshEmptyMutableCollectionsInferFromFirstConstrainingStatementAcrossBackends(t *testing.T) {
+	source := []byte(`def direct_values(): Array<Integer>
+	mut values := []
+	values.push(1)
+	return values
+end
+
+def iterated_values(): Array<Float>
+	mut values := []
+	[1, 2.5].each do |value|
+		values.push(value)
+	end
+	return values
+end
+
+def iterated_union_values(): Array<Integer | String>
+	mut values := []
+	[1, "two"].each do |value|
+		values.push(value)
+	end
+	return values
+end
+
+def branched_values(condition: Boolean): Array<Integer | String>
+	mut values := []
+	if condition
+		values.push(1)
+	else
+		values.push("one")
+	end
+	return values
+end
+
+def callback_values(): Array<Float>
+	mut values := []
+	callback := fn()
+		values.push(1)
+		values.push(2.5)
+		return
+	end
+	callback()
+	return values
+end
+
+def hash_values(condition: Boolean): Hash<String, Integer | String>
+	mut values := {}
+	if condition
+		values["value"] = 1
+	else
+		values["value"] = "one"
+	end
+	return values
+end
+
+def accept_integers(values: Array<Integer>): Array<Integer>
+	return values
+end
+
+def contextual_values(): Array<Integer>
+	mut values := []
+	return accept_integers(values)
+end
+
+def reassigned_values(): Array<Float>
+	mut values := []
+	values = [1, 2.5]
+	return values
+end
+
+def observed_then_constrained_values(): Array<Integer>
+	mut values := []
+	values.empty?()
+	values.push(1)
+	return values
+end
+
+def updated_hash_values(): Hash<String, Float>
+	mut values := {}
+	values.update({ integer: 1, float: 2.5 })
+	return values
+end
+
+def nested_context_values(): Array<Integer>
+	mut values := []
+	_nested: Array<Array<Integer>> := [values]
+	return values
+end
+
+def returned_context_values(): Array<String>
+	mut values := []
+	return values
+end
+`)
+
+	expected := map[string]types.Type{
+		"direct_values":                    {Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}},
+		"iterated_values":                  {Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Float")}},
+		"iterated_union_values":            {Kind: types.Array, Name: "Array", Args: []types.Type{types.UnionOf(types.FromName("Integer"), types.FromName("String"))}},
+		"branched_values":                  {Kind: types.Array, Name: "Array", Args: []types.Type{types.UnionOf(types.FromName("Integer"), types.FromName("String"))}},
+		"callback_values":                  {Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Float")}},
+		"hash_values":                      {Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("String"), types.UnionOf(types.FromName("Integer"), types.FromName("String"))}},
+		"contextual_values":                {Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}},
+		"reassigned_values":                {Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Float")}},
+		"observed_then_constrained_values": {Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}},
+		"updated_hash_values":              {Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("String"), types.FromName("Float")}},
+		"nested_context_values":            {Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}},
+		"returned_context_values":          {Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}},
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("empty_collection_inference.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected fresh empty collection inference: %v", mode, err)
+		}
+		seen := map[string]bool{}
+		for _, statement := range artifact.IR.Statements {
+			method, ok := statement.(*ir.Method)
+			if !ok || len(method.Body) == 0 {
+				continue
+			}
+			want, checked := expected[method.Name]
+			if !checked {
+				continue
+			}
+			variable, ok := method.Body[0].(*ir.Variable)
+			if !ok {
+				t.Fatalf("%s %s first statement is %T, expected inferred variable", mode, method.Name, method.Body[0])
+			}
+			if !types.Equivalent(variable.Type, want) {
+				t.Fatalf("%s %s inferred %s, expected %s", mode, method.Name, variable.Type, want)
+			}
+			seen[method.Name] = true
+		}
+		if len(seen) != len(expected) {
+			t.Fatalf("%s checked inferred methods %v, expected %v", mode, seen, expected)
+		}
+	}
+}
+
+func TestFreshEmptyMutableCollectionInferenceFindsNestedLambdaDeclarationsAcrossBackends(t *testing.T) {
+	source := []byte(`def nested_values(): Array<Integer>
+	factory := fn(): Array<Integer>
+		mut values := []
+		values.push(1)
+		return values
+	end
+	return factory()
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("nested_empty_collection_inference.trb", source, mode); err != nil {
+			t.Fatalf("%s rejected nested fresh empty collection inference: %v", mode, err)
+		}
+	}
+}
+
+func TestFreshEmptyMutableCollectionInferenceDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "later statement does not widen Array",
+			source: `def invalid()
+	mut values := []
+	values.push(1)
+	values.push(2.5)
+	return
+end
+`,
+			want: "argument 1 to push() has type Float, expected Integer",
+		},
+		{
+			name: "Hash keys remain homogeneous",
+			source: `def invalid(condition: Boolean)
+	mut values := {}
+	if condition
+		values["one"] = 1
+	else
+		values[2] = 2
+	end
+	return
+end
+`,
+			want: "Hash index has type Integer, expected String",
+		},
+		{
+			name: "Hash key remains portable",
+			source: `def invalid()
+	mut values := {}
+	values[1.5] = 1
+	return
+end
+`,
+			want: "Hash key must be String or Integer, got Float",
+		},
+		{
+			name: "unresolved Array",
+			source: `def invalid()
+	mut values := []
+	values.empty?()
+	return
+end
+`,
+			want: "cannot infer element type of empty Array",
+		},
+		{
+			name: "unresolved Hash",
+			source: `def invalid()
+	mut values := {}
+	values.empty?()
+	return
+end
+`,
+			want: "cannot infer key and value types of empty Hash",
+		},
+		{
+			name: "untyped call escapes before later constraint",
+			source: `def consume(_value)
+	return
+end
+
+def invalid()
+	mut values := []
+	consume(values)
+	values.push(1)
+	return
+end
+`,
+			want: "before the value escapes; add an explicit collection type annotation",
+		},
+		{
+			name: "named function body does not constrain caller state",
+			source: `mut values := []
+
+def fill()
+	values.push(1)
+	return
+end
+
+fill()
+`,
+			want: "cannot infer element type of empty Array",
+		},
+		{
+			name: "pending collections cannot determine each other",
+			source: `def invalid()
+	mut left := []
+	mut right := []
+	left = right
+	return
+end
+`,
+			want: "before the value escapes; add an explicit collection type annotation",
+		},
+		{
+			name: "callback capture without a constraint escapes",
+			source: `def invalid()
+	mut values := []
+	callback := fn()
+		values.empty?()
+		return
+	end
+	callback()
+	return
+end
+`,
+			want: "before the value escapes; add an explicit collection type annotation",
+		},
+		{
+			name: "untyped aggregate alias escapes",
+			source: `def invalid()
+	mut values := []
+	_snapshot := [values]
+	values.push(1)
+	return
+end
+`,
+			want: "before the value escapes; add an explicit collection type annotation",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("invalid_empty_collection_inference.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestUnionTypesInferAndNarrowAcrossBackends(t *testing.T) {
 	source := []byte(`def describe(value: Integer | String): String
 	case value

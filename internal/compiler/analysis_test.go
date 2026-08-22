@@ -244,6 +244,25 @@ func BenchmarkProjectAnalysisWithoutBackendGeneration(b *testing.B) {
 	})
 }
 
+func BenchmarkProjectAnalysisWithFreshEmptyMutableCollections(b *testing.B) {
+	const modules = 64
+	sources := make([]SourceUnit, 0, modules)
+	for index := 0; index < modules; index++ {
+		sources = append(sources, SourceUnit{
+			Filename:   fmt.Sprintf("/project/src/module_%03d.trb", index),
+			ModulePath: fmt.Sprintf("module_%03d", index),
+			Package:    "main",
+			Source:     []byte(fmt.Sprintf("def value_%03d()\n\tmut values := []\n\tvalues.push(%d)\n\treturn\nend\n", index, index)),
+		})
+	}
+	options := Options{Mode: "go", GoModule: "example.com/analysis", SourceRoot: "/project/src", ProjectRoot: "/project"}
+	for b.Loop() {
+		if _, err := AnalyzeProject(sources, options); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func compileErrorDiagnostics(t *testing.T, operation func() error) []diagnostic.Diagnostic {
 	t.Helper()
 	err := operation()
