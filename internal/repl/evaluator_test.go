@@ -381,6 +381,52 @@ func TestEvaluateCaseExpression(t *testing.T) {
 	}
 }
 
+func TestUpdateProjectDefinitionsRetainsUnchangedModulesAndRelinksSuperclasses(t *testing.T) {
+	parent := &ir.Program{ModulePath: "models/parent", Statements: []ir.Statement{
+		&ir.Class{Name: "Parent"},
+	}}
+	child := &ir.Program{ModulePath: "models/child", Statements: []ir.Statement{
+		&ir.Class{Name: "Child", Superclass: &ir.Identifier{Name: "Parent"}},
+	}}
+	unchanged := &ir.Program{ModulePath: "models/profile", Statements: []ir.Statement{
+		&ir.Record{Name: "Profile"},
+	}}
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	initial := []*ir.Program{parent, child, unchanged}
+	if err := evaluator.LoadProject(initial, "__trb_repl__"); err != nil {
+		t.Fatal(err)
+	}
+	initialParent := evaluator.definitions[symbolKey(parent.ModulePath, "Parent")].(*classDefinition)
+	initialChild := evaluator.definitions[symbolKey(child.ModulePath, "Child")].(*classDefinition)
+	initialProfile := evaluator.definitions[symbolKey(unchanged.ModulePath, "Profile")]
+	if initialChild.Superclass != initialParent {
+		t.Fatal("initial project definitions did not link the superclass")
+	}
+
+	updatedParent := &ir.Program{ModulePath: parent.ModulePath, Statements: []ir.Statement{
+		&ir.Class{Name: "Parent", Body: []ir.Statement{&ir.Method{Name: "updated"}}},
+	}}
+	updated := []*ir.Program{updatedParent, child, unchanged}
+	evaluator.updateProjectDefinitions(initial, updated, "__trb_repl__")
+	currentParent := evaluator.definitions[symbolKey(parent.ModulePath, "Parent")].(*classDefinition)
+	currentChild := evaluator.definitions[symbolKey(child.ModulePath, "Child")].(*classDefinition)
+	if currentParent == initialParent || currentChild != initialChild || currentChild.Superclass != currentParent {
+		t.Fatalf("definitions were not updated incrementally: parent=%p child=%p superclass=%p", currentParent, currentChild, currentChild.Superclass)
+	}
+	if evaluator.definitions[symbolKey(unchanged.ModulePath, "Profile")] != initialProfile {
+		t.Fatal("unchanged module definitions were rebuilt")
+	}
+
+	withoutParent := []*ir.Program{child, unchanged}
+	evaluator.updateProjectDefinitions(updated, withoutParent, "__trb_repl__")
+	if _, exists := evaluator.definitions[symbolKey(parent.ModulePath, "Parent")]; exists {
+		t.Fatal("removed module definition remained available")
+	}
+	if currentChild.Superclass != nil {
+		t.Fatal("class retained a removed superclass definition")
+	}
+}
+
 func TestEvaluateLiteralCaseAlternatives(t *testing.T) {
 	stringType := types.FromName("String")
 	literal := func(value string) *ir.Literal {

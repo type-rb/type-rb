@@ -157,11 +157,13 @@ func (e *Evaluator) LoadProject(programs []*ir.Program, sessionModule string) er
 	if err := e.configureRuntimeProviders(programs); err != nil {
 		return err
 	}
+	projectPrograms := make([]*ir.Program, 0, len(programs))
 	for _, program := range programs {
 		if program.ModulePath != sessionModule {
-			e.LoadDefinitions(program)
+			projectPrograms = append(projectPrograms, program)
 		}
 	}
+	e.loadProgramDefinitions(projectPrograms)
 	for _, program := range programs {
 		if program.ModulePath == sessionModule {
 			continue
@@ -217,14 +219,69 @@ func (e *Evaluator) evaluateOwnedConstants(statements []ir.Statement, module str
 }
 
 func (e *Evaluator) LoadDefinitions(program *ir.Program) {
-	e.loadDefinitions(program.Statements, program.ModulePath)
-	e.linkSuperclasses()
+	if program != nil && e.loadDefinitions(program.Statements, program.ModulePath) {
+		e.linkSuperclasses()
+	}
 }
 
-func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
+func (e *Evaluator) loadProgramDefinitions(programs []*ir.Program) {
+	changed := false
+	for _, program := range programs {
+		if program != nil && e.loadDefinitions(program.Statements, program.ModulePath) {
+			changed = true
+		}
+	}
+	if changed {
+		e.linkSuperclasses()
+	}
+}
+
+func (e *Evaluator) updateProjectDefinitions(previous, current []*ir.Program, sessionModule string) {
+	previousByModule := make(map[string]*ir.Program, len(previous))
+	for _, program := range previous {
+		if program != nil && program.ModulePath != sessionModule {
+			previousByModule[program.ModulePath] = program
+		}
+	}
+	changed := false
+	for _, program := range current {
+		if program == nil || program.ModulePath == sessionModule {
+			continue
+		}
+		cached := previousByModule[program.ModulePath]
+		delete(previousByModule, program.ModulePath)
+		if cached == program {
+			continue
+		}
+		changed = e.removeModuleDefinitions(program.ModulePath) || changed
+		changed = e.loadDefinitions(program.Statements, program.ModulePath) || changed
+	}
+	for modulePath := range previousByModule {
+		changed = e.removeModuleDefinitions(modulePath) || changed
+	}
+	if changed {
+		e.linkSuperclasses()
+	}
+}
+
+func (e *Evaluator) removeModuleDefinitions(module string) bool {
+	prefix := module + "\x00"
+	changed := false
+	for key := range e.definitions {
+		if strings.HasPrefix(key, prefix) {
+			delete(e.definitions, key)
+			changed = true
+		}
+	}
+	return changed
+}
+
+func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) bool {
+	changed := false
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Record:
+			changed = true
 			definition := &recordDefinition{Module: module, Node: node}
 			for _, member := range node.Body {
 				if field, ok := member.(*ir.RecordField); ok {
@@ -233,6 +290,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
 			}
 			e.definitions[symbolKey(module, node.Name)] = definition
 		case *ir.Enum:
+			changed = true
 			definition := &enumDefinition{Module: module, Node: node, Members: map[string]*ir.EnumMember{}, Methods: map[string]*ir.Method{}}
 			for _, statement := range node.Body {
 				switch member := statement.(type) {
@@ -247,6 +305,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
 			if len(node.Variants) == 0 {
 				continue
 			}
+			changed = true
 			enumNode := &ir.Enum{Name: node.Name, TypeParameters: append([]string(nil), node.TypeParameters...)}
 			definition := &enumDefinition{Module: module, Node: enumNode, Members: map[string]*ir.EnumMember{}, Methods: map[string]*ir.Method{}}
 			for index := range node.Variants {
@@ -256,6 +315,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
 			}
 			e.definitions[symbolKey(module, node.Name)] = definition
 		case *ir.Class:
+			changed = true
 			definition := &classDefinition{Module: module, Node: node, Methods: map[string]*ir.Method{}}
 			for _, member := range node.Body {
 				switch item := member.(type) {
@@ -267,11 +327,13 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) {
 			}
 			e.definitions[symbolKey(module, node.Name)] = definition
 		case *ir.Method:
+			changed = true
 			e.definitions[symbolKey(module, node.Name)] = &functionDefinition{Module: module, Method: node}
 		case *ir.Module:
-			e.loadDefinitions(node.Body, module)
+			changed = e.loadDefinitions(node.Body, module) || changed
 		}
 	}
+	return changed
 }
 
 func (e *Evaluator) linkSuperclasses() {
@@ -280,6 +342,7 @@ func (e *Evaluator) linkSuperclasses() {
 		if !ok || definition.Node.Superclass == nil {
 			continue
 		}
+		definition.Superclass = nil
 		name := expressionName(definition.Node.Superclass)
 		if parent, ok := e.definitions[symbolKey(definition.Module, name)].(*classDefinition); ok {
 			definition.Superclass = parent

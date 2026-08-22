@@ -142,11 +142,7 @@ func Run(options Options) error {
 			continue
 		}
 
-		for _, program := range next.Programs {
-			if program.ModulePath != next.Session.IR.ModulePath {
-				evaluator.LoadDefinitions(program)
-			}
-		}
+		evaluator.updateProjectDefinitions(compilation.Programs, next.Programs, next.Session.IR.ModulePath)
 		if err := evaluator.configureRuntimeProviders(next.Programs); err != nil {
 			printReplError(options.Stderr, options.Interactive, err.Error())
 			continue
