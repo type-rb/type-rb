@@ -446,7 +446,8 @@ switches.
 - Every ordinary import must be used. A package import is used by referencing
   one of its members; every symbol in a named import list must be referenced.
   Imports that explicitly activate a compiler integration, such as a native
-  syntax or type provider package, count as semantic uses.
+  syntax or type provider package, and imports that activate an external fixed
+  declaration provider count as semantic uses.
 - Project module identities come from paths below `sourceDir`; source files do
   not declare target packages.
 - A project import may omit a terminal `/index`. The omitted form is the
@@ -501,6 +502,22 @@ switches.
   from an installed native declaration system is currently available only for
   TypeScript. A declaration adapter cannot execute compiler code, access
   compiler AST or typed IR, or emit target source.
+- A Ruby TypeRB package may select a fixed Declaration Protocol version 2
+  catalog with `declarationProviders.ruby`. The package must declare at least
+  one Ruby native dependency and provide a root `index.trb`; importing that
+  root activates the catalog and retains the root module's ordinary runtime
+  loading. The catalog provider identity must equal the package's canonical
+  name. It may declare fixed external types, modules, properties, methods,
+  generics, overloads, and literal-dependent signatures. It cannot execute
+  compiler code, emit source, claim project source declarations, supply
+  project rules or runtime types, select runtime operations or call
+  specializers, declare compiler-controlled block behavior, or weaken nominal
+  representation boundaries. Strict decoding rejects unknown fields, trailing
+  data, empty catalogs, symlinked catalogs, unsafe `Any` or invalid signature
+  types, and compiler-derived representation metadata. A declaration name that
+  conflicts with another active provider or a project declaration is an error.
+  Other modes and project-aware external providers are not supported by this
+  capability.
 - A package may pair `declarationAdapters.<mode>` with
   `runtimeAdapters.<mode>` in Go, Ruby, or TypeScript mode. Native Runtime
   Adapter Protocol version 1 maps a canonical `module#export` identity to a

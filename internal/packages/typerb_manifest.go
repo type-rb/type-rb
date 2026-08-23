@@ -29,6 +29,7 @@ type TypeRBManifest struct {
 	Modes                     []string                              `json:"modes,omitempty"`
 	Packages                  map[string]project.PackageRequirement `json:"packages,omitempty"`
 	NativeDependencies        map[string]map[string]string          `json:"nativeDependencies,omitempty"`
+	DeclarationProviders      map[string]string                     `json:"declarationProviders,omitempty"`
 	DeclarationAdapters       map[string]string                     `json:"declarationAdapters,omitempty"`
 	RuntimeAdapters           map[string]string                     `json:"runtimeAdapters,omitempty"`
 	AdapterTests              map[string]AdapterTest                `json:"adapterTests,omitempty"`
@@ -81,6 +82,9 @@ func (m *TypeRBManifest) applyDefaults() {
 	}
 	if m.DeclarationAdapters == nil {
 		m.DeclarationAdapters = map[string]string{}
+	}
+	if m.DeclarationProviders == nil {
+		m.DeclarationProviders = map[string]string{}
 	}
 	if m.RuntimeAdapters == nil {
 		m.RuntimeAdapters = map[string]string{}
@@ -141,6 +145,48 @@ func (m *TypeRBManifest) Validate(root string) error {
 	}
 	if len(m.LegacyNativeTypeProviders) != 0 {
 		return errors.New("nativeTypeProviders has been replaced by declarationAdapters")
+	}
+	for mode, provider := range m.DeclarationProviders {
+		if mode != "ruby" {
+			return fmt.Errorf("declarationProviders currently supports only ruby mode; got %q", mode)
+		}
+		if !m.Supports(mode) {
+			return fmt.Errorf("declarationProviders.%s requires %s in modes", mode, mode)
+		}
+		if filepath.IsAbs(provider) || escapesDirectory(provider) || strings.TrimSpace(provider) == "" {
+			return fmt.Errorf("declarationProviders.%s must stay below the package root", mode)
+		}
+		providerPath := filepath.Join(root, provider)
+		info, err := os.Lstat(providerPath)
+		if err != nil {
+			return fmt.Errorf("declarationProviders.%s: %w", mode, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("declarationProviders.%s must name a regular file", mode)
+		}
+		resolvedRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			return fmt.Errorf("declarationProviders.%s package root: %w", mode, err)
+		}
+		resolvedProvider, err := filepath.EvalSymlinks(providerPath)
+		if err != nil {
+			return fmt.Errorf("declarationProviders.%s: %w", mode, err)
+		}
+		resolvedRelative, err := filepath.Rel(resolvedRoot, resolvedProvider)
+		if err != nil || escapesDirectory(resolvedRelative) {
+			return fmt.Errorf("declarationProviders.%s must resolve below the package root", mode)
+		}
+		if len(m.NativeDependenciesFor(mode)) == 0 {
+			return fmt.Errorf("declarationProviders.%s requires at least one nativeDependencies.%s entry", mode, mode)
+		}
+		entry := filepath.Join(root, m.SourceDir, "index.trb")
+		entryInfo, err := os.Stat(entry)
+		if err != nil {
+			return fmt.Errorf("declarationProviders.%s requires package root module %s: %w", mode, entry, err)
+		}
+		if !entryInfo.Mode().IsRegular() {
+			return fmt.Errorf("declarationProviders.%s package root module must be a regular file", mode)
+		}
 	}
 	for mode, adapter := range m.DeclarationAdapters {
 		if mode != "go" && mode != "ruby" && mode != "typescript" {
@@ -240,6 +286,10 @@ func (m *TypeRBManifest) NativeDependenciesFor(mode string) map[string]string {
 
 func (m *TypeRBManifest) DeclarationAdapterFor(mode string) string {
 	return m.DeclarationAdapters[mode]
+}
+
+func (m *TypeRBManifest) DeclarationProviderFor(mode string) string {
+	return m.DeclarationProviders[mode]
 }
 
 func (m *TypeRBManifest) RuntimeAdapterFor(mode string) string {

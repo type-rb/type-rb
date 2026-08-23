@@ -34,6 +34,13 @@ type DeclarationAdapter struct {
 	Dependencies map[string]string
 }
 
+type DeclarationProvider struct {
+	Package string
+	Mode    string
+	Module  string
+	Path    string
+}
+
 type RuntimeAdapter struct {
 	Package      string
 	Mode         string
@@ -42,12 +49,13 @@ type RuntimeAdapter struct {
 }
 
 type TypeRBPackages struct {
-	Lock                *TypeRBLock
-	Aliases             map[string]string
-	Packages            []TypeRBResolvedPackage
-	NativeDependencies  map[string]string
-	DeclarationAdapters []DeclarationAdapter
-	RuntimeAdapters     []RuntimeAdapter
+	Lock                 *TypeRBLock
+	Aliases              map[string]string
+	Packages             []TypeRBResolvedPackage
+	NativeDependencies   map[string]string
+	DeclarationProviders []DeclarationProvider
+	DeclarationAdapters  []DeclarationAdapter
+	RuntimeAdapters      []RuntimeAdapter
 }
 
 var errLocalTypeRBManifestChanged = errors.New("local TypeRB package manifest changed")
@@ -304,6 +312,11 @@ func loadResolvedTypeRBPackages(config *project.Config, lock *TypeRBLock) (*Type
 		if adapter := manifest.DeclarationAdapterFor(config.Mode); adapter != "" {
 			result.DeclarationAdapters = append(result.DeclarationAdapters, DeclarationAdapter{
 				Package: name, Mode: config.Mode, Path: filepath.Join(root, adapter), Dependencies: manifest.NativeDependenciesFor(config.Mode),
+			})
+		}
+		if provider := manifest.DeclarationProviderFor(config.Mode); provider != "" {
+			result.DeclarationProviders = append(result.DeclarationProviders, DeclarationProvider{
+				Package: name, Mode: config.Mode, Module: name, Path: filepath.Join(root, provider),
 			})
 		}
 		if adapter := manifest.RuntimeAdapterFor(config.Mode); adapter != "" {

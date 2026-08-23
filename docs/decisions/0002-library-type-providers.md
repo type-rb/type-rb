@@ -14,13 +14,22 @@ Platform packages may name a compiler type provider. Importing such a package
 loads its declarations automatically into a target-independent Declaration IR.
 Application source does not contain or reference shadow signature files.
 
+An independent Ruby TypeRB package may instead publish a fixed, data-only
+Declaration Protocol catalog selected by `declarationProviders.ruby` in its
+manifest. Importing the package root activates the catalog, while ordinary
+TypeRB source in that root owns `require` and any runtime wrappers. The host
+strictly decodes a non-executable subset and rejects project-aware rules,
+compiler execution hooks, source-module claims, controlled block behavior, and
+nominal representation-boundary privileges. This gives static gem APIs a
+package-owned path without opening the compiler-integrated provider API.
+
 The built-in Rails provider attached to `trb/platform/ruby/rails` supplies
 controller and ActiveRecord contracts and parses `db/schema.rb` into a Schema
 AST. It derives model column properties, finder keyword types, generic
 relations, and other schema-owned declarations from that AST. It does not
 synthesize application controller classes, application helpers, or third-party
-gem APIs. Those declarations belong to their own package adapter or project
-provider. Future providers may
+gem APIs. Those declarations belong to their own fixed package catalog or
+project provider. Future providers may
 compile library-owned RBS, RBI, `.d.ts`, or Go export data into the same IR.
 
 Unknown members on a provider-owned type are errors instead of silently
@@ -34,6 +43,8 @@ migrated to TypeRB.
   declarations for them.
 - Providers are versionable compiler packages analogous to `@types`, and may
   contain both static declarations and framework-specific inference.
+- Independent Ruby packages may ship fixed static declarations, but cannot run
+  provider logic or inspect the consuming project merely by being imported.
 - Rails schema parsing and library declaration parsing remain separate from the
   TypeRB source parser but converge on Declaration IR.
 - Project-specific controller concerns and value objects are not part of the

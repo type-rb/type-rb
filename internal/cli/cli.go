@@ -22,6 +22,7 @@ import (
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/compilerservice"
 	"github.com/type-rb/type-rb/internal/declarationadapterhost"
+	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/ir"
@@ -1894,6 +1895,19 @@ func declarationAdapterSources(resolved *packageManager.TypeRBPackages) []declar
 	return adapters
 }
 
+func declarationProviderSources(resolved *packageManager.TypeRBPackages) []declarationproviderhost.Source {
+	if resolved == nil {
+		return nil
+	}
+	providers := make([]declarationproviderhost.Source, 0, len(resolved.DeclarationProviders))
+	for _, provider := range resolved.DeclarationProviders {
+		providers = append(providers, declarationproviderhost.Source{
+			Package: provider.Package, Mode: provider.Mode, Module: provider.Module, Path: provider.Path,
+		})
+	}
+	return providers
+}
+
 func runtimeAdapterSources(resolved *packageManager.TypeRBPackages) []runtimeadapterhost.Source {
 	if resolved == nil {
 		return nil
@@ -2147,6 +2161,7 @@ func projectSourceUnitsFromSources(config *project.Config, sources []fileRootSou
 				return nil, err
 			}
 			unit.PackageAliases = packageAliases
+			unit.DeclarationProvider = resolved.Manifest.DeclarationProviderFor(config.Mode) != "" && unit.ModulePath == resolved.Name+"/index"
 			units = append(units, unit)
 		}
 	}
@@ -2293,7 +2308,11 @@ func compilerOptionsWithPackages(config *project.Config, resolvedPackages *packa
 	for name, value := range config.PackageOptions {
 		packageOptions[name] = append([]byte(nil), value...)
 	}
-	options := compiler.Options{Mode: config.Mode, SourceRoot: config.SourcePath(), ProjectRoot: config.Root, PackageOptions: packageOptions, PackageAliases: resolvedPackages.Aliases}
+	options := compiler.Options{
+		Mode: config.Mode, SourceRoot: config.SourcePath(), ProjectRoot: config.Root,
+		PackageOptions: packageOptions, PackageAliases: resolvedPackages.Aliases,
+		DeclarationProviders: declarationProviderSources(resolvedPackages),
+	}
 	if config.Jobs != nil {
 		options.JobsConfiguration = config.Jobs.Configuration
 	}

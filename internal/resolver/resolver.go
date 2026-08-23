@@ -132,16 +132,17 @@ type Member struct {
 }
 
 type Import struct {
-	Node              *ast.ImportStatement
-	Kind              ImportKind
-	Path              string
-	ModulePath        string
-	Alias             string
-	Symbols           []string
-	Definition        *stdlib.Package
-	Exports           map[string]Export
-	Filename          string
-	CompilerGenerated bool
+	Node                *ast.ImportStatement
+	Kind                ImportKind
+	Path                string
+	ModulePath          string
+	Alias               string
+	Symbols             []string
+	Definition          *stdlib.Package
+	Exports             map[string]Export
+	Filename            string
+	CompilerGenerated   bool
+	DeclarationProvider bool
 }
 
 func (i *Import) RuntimePath() string {
@@ -198,12 +199,13 @@ type Options struct {
 }
 
 type Module struct {
-	Path          string
-	Filename      string
-	Program       *ast.Program
-	Exports       map[string]Export
-	CompilerOwned bool
-	Official      bool
+	Path                string
+	Filename            string
+	Program             *ast.Program
+	Exports             map[string]Export
+	CompilerOwned       bool
+	Official            bool
+	DeclarationProvider bool
 }
 
 type Catalog struct {
@@ -989,6 +991,7 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 			resolved.Path = module.Path
 			resolved.Filename = module.Filename
 			resolved.Exports = module.Exports
+			resolved.DeclarationProvider = module.DeclarationProvider
 			return finalizeProjectImport(resolved)
 		}
 		// Ruby projects may explicitly import an opaque .rb file which is not a
