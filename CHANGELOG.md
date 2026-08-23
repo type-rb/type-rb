@@ -2,6 +2,22 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.22 - 2026-08-24
+
+### Packages and TypeScript interop
+
+- Declaration adapters can expose readonly native properties on
+  non-constructible interfaces. This supports checked projections of opaque
+  objects such as authentication context values without making them
+  constructible in TypeRB.
+  ([#473](https://github.com/type-rb/type-rb/pull/473))
+- Native Promise-returning functions and instance members can expose checked
+  `Result<T, String>` values. Promise resolution produces `Ok`, synchronous
+  throws and rejections produce `Err`, and `Promise<void>` maps to
+  `Result<Unit, String>` while preserving TypeScript suspension propagation
+  and strict native Promise conformance.
+  ([#474](https://github.com/type-rb/type-rb/pull/474))
+
 ## 0.3.21 - 2026-08-23
 
 ### Go backend
