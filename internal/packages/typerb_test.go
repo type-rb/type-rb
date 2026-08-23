@@ -129,8 +129,40 @@ func TestTypeRBPackageDeclarationAdapterDiagnosesLegacyAndUnavailableModes(t *te
 	}
 	config := project.New(filepath.Join(workspace, "app"), "ruby")
 	config.Packages["acme/ruby-adapter"] = project.PackageRequirement{Path: "../ruby-adapter"}
-	if _, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{}); err == nil || !strings.Contains(err.Error(), "provides only the TypeScript declaration adapter") {
+	if _, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{}); err == nil || !strings.Contains(err.Error(), "requires runtimeAdapters.ruby") {
 		t.Fatalf("expected unavailable Ruby adapter diagnostic, got %v", err)
+	}
+}
+
+func TestResolveTypeRBPackageExposesNativeRuntimeAdapter(t *testing.T) {
+	workspace := t.TempDir()
+	packageRoot := filepath.Join(workspace, "aws-s3")
+	writeTestPackage(t, packageRoot, TypeRBManifest{
+		Name: "github.com/acme/aws-s3", Version: "0.1.0", Modes: []string{"ruby"},
+		NativeDependencies:  map[string]map[string]string{"ruby": {"acme-aws-s3-wire": "0.1.0"}},
+		DeclarationAdapters: map[string]string{"ruby": "declarations.json"},
+		RuntimeAdapters:     map[string]string{"ruby": "runtime.json"},
+	}, "")
+	declarations := filepath.Join(packageRoot, "declarations.json")
+	runtime := filepath.Join(packageRoot, "runtime.json")
+	if err := os.WriteFile(declarations, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runtime, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(filepath.Join(workspace, "app"), "ruby")
+	config.Packages["acme/aws-s3"] = project.PackageRequirement{Path: "../aws-s3"}
+	resolved, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.DeclarationAdapters) != 1 || len(resolved.RuntimeAdapters) != 1 {
+		t.Fatalf("unexpected adapter sources: declarations=%#v runtime=%#v", resolved.DeclarationAdapters, resolved.RuntimeAdapters)
+	}
+	adapter := resolved.RuntimeAdapters[0]
+	if adapter.Package != "github.com/acme/aws-s3" || adapter.Mode != "ruby" || adapter.Path != runtime || adapter.Dependencies["acme-aws-s3-wire"] != "0.1.0" {
+		t.Fatalf("unexpected runtime adapter: %#v", adapter)
 	}
 }
 

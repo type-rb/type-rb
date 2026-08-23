@@ -9,7 +9,90 @@ import (
 
 	"github.com/type-rb/type-rb/internal/declarationadapterhost"
 	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/runtimeadapterhost"
 )
+
+func TestApplyDeclarationAdapterFilesAttachesPortableRuntimeFunction(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			declarations := filepath.Join(root, "declarations.json")
+			moduleName := "github.com/acme/aws-s3/native"
+			writeDeclarationAdapterFixture(t, declarations, packageextension.DeclarationAdapterCatalog{
+				ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
+				Modules: map[string]packageextension.DeclarationAdapterModule{
+					moduleName: {Exports: map[string]packageextension.DeclarationAdapterExport{
+						"head_object": {
+							Kind: "function", Type: adapterType("string", "String"),
+							Parameters: []packageextension.DeclarationAdapterType{adapterType("string", "String")}, Required: 1,
+						},
+					}},
+				},
+			})
+			dependency, targetModule, targetSymbol := runtimeTargetFixture(mode)
+			runtimePath := filepath.Join(root, "runtime.json")
+			writeNativeRuntimeAdapterFixture(t, runtimePath, packageextension.NativeRuntimeAdapterCatalog{
+				ProtocolVersion: packageextension.NativeRuntimeAdapterProtocolVersion,
+				Bindings: map[string]packageextension.NativeRuntimeAdapterBinding{
+					moduleName + "#head_object": {
+						Dependency: dependency, Module: targetModule, Symbol: targetSymbol, CallConvention: "function",
+						MaySuspend: true, PropagatesExecutionScope: true,
+					},
+				},
+			})
+			dependencies := map[string]string{dependency: "1.0.0"}
+			runtime, err := runtimeadapterhost.Load([]runtimeadapterhost.Source{{
+				Package: "github.com/acme/aws-s3", Mode: mode, Path: runtimePath, Dependencies: dependencies,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog := Empty(dependencies)
+			sources := []declarationadapterhost.Source{{Package: "github.com/acme/aws-s3", Mode: mode, Path: declarations, Dependencies: dependencies}}
+			if err := ApplyDeclarationAdapterFilesWithRuntime(catalog, sources, runtime); err != nil {
+				t.Fatal(err)
+			}
+			if !catalog.Owns(moduleName) {
+				t.Fatalf("runtime-backed semantic module %s is not importable", moduleName)
+			}
+			exported := catalog.Modules[moduleName].Exports["head_object"]
+			if exported.Runtime == nil || exported.Runtime.Identity != moduleName+"#head_object" || exported.Runtime.Module != targetModule || !exported.Runtime.MaySuspend || !exported.Runtime.PropagatesExecutionScope {
+				t.Fatalf("runtime binding was not attached: %#v", exported.Runtime)
+			}
+		})
+	}
+}
+
+func TestApplyDeclarationAdapterFilesRejectsUnsafeRuntimeBoundary(t *testing.T) {
+	root := t.TempDir()
+	declarations := filepath.Join(root, "declarations.json")
+	moduleName := "github.com/acme/aws-s3/native"
+	writeDeclarationAdapterFixture(t, declarations, packageextension.DeclarationAdapterCatalog{
+		ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
+		Modules: map[string]packageextension.DeclarationAdapterModule{
+			moduleName: {Exports: map[string]packageextension.DeclarationAdapterExport{
+				"head_object": {Kind: "function", Type: adapterType("string", "String")},
+			}},
+		},
+	})
+	runtimePath := filepath.Join(root, "runtime.json")
+	writeNativeRuntimeAdapterFixture(t, runtimePath, packageextension.NativeRuntimeAdapterCatalog{
+		ProtocolVersion: packageextension.NativeRuntimeAdapterProtocolVersion,
+		Bindings: map[string]packageextension.NativeRuntimeAdapterBinding{
+			moduleName + "#head_object": {Dependency: "wire", Module: "wire", Symbol: "Invoke", CallConvention: "function"},
+		},
+	})
+	runtime, err := runtimeadapterhost.Load([]runtimeadapterhost.Source{{Package: "github.com/acme/aws-s3", Mode: "go", Path: runtimePath, Dependencies: map[string]string{"wire": "1.0.0"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ApplyDeclarationAdapterFilesWithRuntime(Empty(map[string]string{"wire": "1.0.0"}), []declarationadapterhost.Source{{
+		Package: "github.com/acme/aws-s3", Mode: "go", Path: declarations, Dependencies: map[string]string{"wire": "1.0.0"},
+	}}, runtime)
+	if err == nil || !strings.Contains(err.Error(), "signature (String) -> String") {
+		t.Fatalf("expected narrow runtime signature diagnostic, got %v", err)
+	}
+}
 
 func TestApplyDeclarationAdapterFilesCorrectsIndexedExport(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "declarations.json")
@@ -286,5 +369,27 @@ func writeDeclarationAdapterFixture(t *testing.T, path string, catalog packageex
 	}
 	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func writeNativeRuntimeAdapterFixture(t *testing.T, path string, catalog packageextension.NativeRuntimeAdapterCatalog) {
+	t.Helper()
+	data, err := json.MarshalIndent(catalog, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runtimeTargetFixture(mode string) (dependency, module, symbol string) {
+	switch mode {
+	case "go":
+		return "github.com/acme/aws-s3-wire", "github.com/acme/aws-s3-wire/s3", "HeadObject"
+	case "ruby":
+		return "acme-aws-s3-wire", "acme/aws_s3_wire", "Acme::AwsS3Wire.head_object"
+	default:
+		return "@acme/aws-s3-wire", "@acme/aws-s3-wire/s3", "headObject"
 	}
 }

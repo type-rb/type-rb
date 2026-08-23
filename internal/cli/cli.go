@@ -36,6 +36,7 @@ import (
 	"github.com/type-rb/type-rb/internal/project"
 	"github.com/type-rb/type-rb/internal/repl"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/runtimeadapterhost"
 	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/testsuite"
@@ -1809,7 +1810,11 @@ func (c *CLI) indexNativeTypeScriptPackages(config *project.Config, resolved *pa
 		return err
 	}
 	adapters := declarationAdapterSources(resolved)
-	if err := nativepackage.ApplyDeclarationAdapterFiles(catalog, adapters); err != nil {
+	runtimeAdapters, err := runtimeadapterhost.Load(runtimeAdapterSources(resolved))
+	if err != nil {
+		return err
+	}
+	if err := nativepackage.ApplyDeclarationAdapterFilesWithRuntime(catalog, adapters, runtimeAdapters); err != nil {
 		return err
 	}
 	if err := nativepackage.Write(config.Root, catalog); err != nil {
@@ -1883,6 +1888,19 @@ func declarationAdapterSources(resolved *packageManager.TypeRBPackages) []declar
 	adapters := make([]declarationadapterhost.Source, 0, len(resolved.DeclarationAdapters))
 	for _, adapter := range resolved.DeclarationAdapters {
 		adapters = append(adapters, declarationadapterhost.Source{
+			Package: adapter.Package, Mode: adapter.Mode, Path: adapter.Path, Dependencies: adapter.Dependencies,
+		})
+	}
+	return adapters
+}
+
+func runtimeAdapterSources(resolved *packageManager.TypeRBPackages) []runtimeadapterhost.Source {
+	if resolved == nil {
+		return nil
+	}
+	adapters := make([]runtimeadapterhost.Source, 0, len(resolved.RuntimeAdapters))
+	for _, adapter := range resolved.RuntimeAdapters {
+		adapters = append(adapters, runtimeadapterhost.Source{
 			Package: adapter.Package, Mode: adapter.Mode, Path: adapter.Path, Dependencies: adapter.Dependencies,
 		})
 	}
@@ -2285,14 +2303,27 @@ func compilerOptionsWithPackages(config *project.Config, resolvedPackages *packa
 	if config.Go != nil {
 		options.GoModule = config.Go.Module
 	}
+	declarationAdapters := declarationAdapterSources(resolvedPackages)
+	runtimeAdapters, err := runtimeadapterhost.Load(runtimeAdapterSources(resolvedPackages))
+	if err != nil {
+		return compiler.Options{}, err
+	}
 	if config.TypeScript != nil {
 		options.TypeScriptRuntime = config.TypeScript.Runtime
 		dependencies, err := nativeTypeScriptDependencies(config, resolvedPackages)
 		if err != nil {
 			return compiler.Options{}, err
 		}
-		options.NativePackages, err = nativepackage.LoadWithDeclarationAdapters(config.Root, dependencies, declarationAdapterSources(resolvedPackages))
+		options.NativePackages, err = nativepackage.LoadWithDeclarationAdapters(config.Root, dependencies, declarationAdapters)
 		if err != nil {
+			return compiler.Options{}, err
+		}
+		if err := nativepackage.AttachRuntimeBindings(options.NativePackages, declarationAdapters, runtimeAdapters); err != nil {
+			return compiler.Options{}, err
+		}
+	} else if len(declarationAdapters) > 0 {
+		options.NativePackages = nativepackage.Empty(resolvedPackages.NativeDependencies)
+		if err := nativepackage.ApplyDeclarationAdapterFilesWithRuntime(options.NativePackages, declarationAdapters, runtimeAdapters); err != nil {
 			return compiler.Options{}, err
 		}
 	}

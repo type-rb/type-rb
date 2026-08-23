@@ -2,6 +2,7 @@ package ruby
 
 import (
 	pathpkg "path"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -145,6 +146,21 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(n.Text, "")
 	case *ir.Import:
+		if n.Native && len(n.RuntimeSymbols) > 0 {
+			modules := map[string]bool{}
+			for _, binding := range n.RuntimeSymbols {
+				modules[binding.Module] = true
+			}
+			paths := make([]string, 0, len(modules))
+			for path := range modules {
+				paths = append(paths, path)
+			}
+			sort.Strings(paths)
+			for _, path := range paths {
+				g.line("require "+strconv.Quote(path), "")
+			}
+			return
+		}
 		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) || g.loader == "zeitwerk" && !n.Runtime {
 			return
 		}
@@ -741,6 +757,10 @@ func (g *generator) expr(expression ir.Expression) string {
 				value = argument.Name + ": " + value
 			}
 			parts[i] = value
+		}
+		if reference := expressionReference(n.Callee); reference != nil && reference.Runtime != nil {
+			parts = g.executionArguments(n, parts)
+			return reference.Runtime.Symbol + "(" + strings.Join(parts, ", ") + ")"
 		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
 			if reference.ReceiverMethod {

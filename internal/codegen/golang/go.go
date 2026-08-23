@@ -238,6 +238,9 @@ func pruneUnusedImports(body string, imports map[string]string) map[string]strin
 }
 
 func (g *generator) importStatement(imported *ir.Import) {
+	if imported.Native && len(imported.RuntimeSymbols) > 0 {
+		return
+	}
 	if (imported.Standard || imported.Official) && (!imported.Runtime || !imported.RuntimeRequired) {
 		return
 	}
@@ -1109,6 +1112,11 @@ func (g *generator) executionArguments(call *ir.Call, arguments []string) []stri
 	return append([]string{"__trbScope"}, arguments...)
 }
 
+func (g *generator) nativeRuntimeCall(binding *ir.RuntimeBinding, arguments []string) string {
+	alias := g.requireSourceImport(binding.Module, pathpkg.Base(binding.Dependency))
+	return goImportAlias(alias) + "." + binding.Symbol + "(" + strings.Join(arguments, ", ") + ")"
+}
+
 func (g *generator) parameters(parameters []ir.Parameter) string {
 	optionalStart := optionalParameterStart(parameters)
 	if optionalStart < 0 {
@@ -1387,6 +1395,10 @@ func (g *generator) expr(expression ir.Expression) string {
 				values := append([]string{g.expr(member.Receiver)}, g.executionArguments(n, parts)...)
 				return name + "(" + strings.Join(values, ", ") + ")"
 			}
+		}
+		if reference := expressionReference(n.Callee); reference != nil && reference.Runtime != nil {
+			parts = g.executionArguments(n, parts)
+			return g.nativeRuntimeCall(reference.Runtime, parts)
 		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
 			if reference.ReceiverMethod {

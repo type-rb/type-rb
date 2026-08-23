@@ -54,6 +54,21 @@ type Export struct {
 	ClassMembers      map[string]Export `json:"classMembers,omitempty"`
 	ResultBridge      *ResultBridge     `json:"resultBridge,omitempty"`
 	UnsupportedFields map[string]string `json:"unsupportedFields,omitempty"`
+	Runtime           *RuntimeBinding   `json:"-"`
+}
+
+// RuntimeBinding is validated target-native lowering metadata attached to a
+// semantic declaration at compile time. It is not persisted in the generated
+// TypeScript declaration cache because runtime adapter files are loaded and
+// validated independently.
+type RuntimeBinding struct {
+	Identity                 string
+	Dependency               string
+	Module                   string
+	Symbol                   string
+	CallConvention           string
+	MaySuspend               bool
+	PropagatesExecutionScope bool
 }
 
 type Field struct {
@@ -218,6 +233,13 @@ func (c *Catalog) Owns(importPath string) bool {
 	for dependency := range c.Dependencies {
 		if importPath == dependency || len(importPath) > len(dependency) && importPath[:len(dependency)+1] == dependency+"/" {
 			return true
+		}
+	}
+	if module, exists := c.Modules[importPath]; exists {
+		for _, exported := range module.Exports {
+			if exported.Runtime != nil {
+				return true
+			}
 		}
 	}
 	return false

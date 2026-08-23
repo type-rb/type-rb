@@ -3,11 +3,13 @@ package nativepackage
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/declarationadapterhost"
 	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/runtimeadapterhost"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -16,6 +18,14 @@ import (
 // The extension host validates the shared data protocol; this adapter validates
 // the remaining TypeScript-specific bridge kinds and dependency ownership.
 func ApplyDeclarationAdapterFiles(catalog *Catalog, sources []declarationadapterhost.Source) error {
+	return ApplyDeclarationAdapterFilesWithRuntime(catalog, sources, nil)
+}
+
+// ApplyDeclarationAdapterFilesWithRuntime overlays package-owned semantic
+// declarations and attaches separately validated target-native runtime
+// bindings. Go and Ruby currently accept only runtime-backed declarations;
+// TypeScript additionally retains direct .d.ts-backed declarations.
+func ApplyDeclarationAdapterFilesWithRuntime(catalog *Catalog, sources []declarationadapterhost.Source, runtime *runtimeadapterhost.Catalog) error {
 	if catalog == nil {
 		return errors.New("native type catalog is nil")
 	}
@@ -38,15 +48,13 @@ func ApplyDeclarationAdapterFiles(catalog *Catalog, sources []declarationadapter
 		packageName string
 	}
 	owners := map[declarationName]declarationOwner{}
+	usedRuntimeBindings := map[string]bool{}
 	checksums, err := declarationadapterhost.Checksums(sorted)
 	if err != nil {
 		return err
 	}
 	catalog.DeclarationAdapterChecksums = checksums
 	for _, source := range sorted {
-		if source.Mode != "typescript" {
-			return fmt.Errorf("declaration adapter %s selects unsupported mode %q; this TypeRB version provides only the TypeScript declaration adapter", source.Package, source.Mode)
-		}
 		provided, err := declarationadapterhost.Read(source.Path)
 		if err != nil {
 			return fmt.Errorf("declaration adapter %s (%s): %w", source.Package, source.Path, err)
@@ -57,12 +65,37 @@ func ApplyDeclarationAdapterFiles(catalog *Catalog, sources []declarationadapter
 		}
 		sort.Strings(moduleNames)
 		for _, moduleName := range moduleNames {
-			if !catalog.Owns(moduleName) || !nativeDependencyOwns(source.Dependencies, moduleName) {
-				return fmt.Errorf("declaration adapter %s declares %s without a matching TypeScript native dependency", source.Package, moduleName)
+			providedModule := provided.Modules[moduleName]
+			runtimeExports := map[string]runtimeadapterhost.Binding{}
+			for name := range providedModule.Exports {
+				identity := runtimeBindingIdentity(moduleName, name)
+				if binding, ok := runtime.Lookup(source.Package, source.Mode, identity); ok {
+					runtimeExports[name] = binding
+					usedRuntimeBindings[source.Package+"#"+source.Mode+"#"+identity] = true
+				}
 			}
-			patch, err := importDeclarationAdapterModule(provided.Modules[moduleName])
+			if len(runtimeExports) > 0 && len(runtimeExports) != len(providedModule.Exports) {
+				return fmt.Errorf("declaration adapter %s module %s mixes direct and native runtime exports; protocol version 1 requires one boundary per module", source.Package, moduleName)
+			}
+			if len(runtimeExports) == 0 {
+				if source.Mode != "typescript" {
+					return fmt.Errorf("declaration adapter %s module %s has no native runtime bindings; direct %s declaration import is not implemented", source.Package, moduleName, source.Mode)
+				}
+				if !catalog.Owns(moduleName) || !nativeDependencyOwns(source.Dependencies, moduleName) {
+					return fmt.Errorf("declaration adapter %s declares %s without a matching TypeScript native dependency", source.Package, moduleName)
+				}
+			}
+			patch, err := importDeclarationAdapterModule(providedModule)
 			if err != nil {
 				return fmt.Errorf("declaration adapter %s module %s: %w", source.Package, moduleName, err)
+			}
+			for name, binding := range runtimeExports {
+				exported := patch.Exports[name]
+				if err := validateNativeRuntimeExport(source.Mode, exported, binding); err != nil {
+					return fmt.Errorf("declaration adapter %s runtime export %s from %s: %w", source.Package, name, moduleName, err)
+				}
+				exported.Runtime = nativeRuntimeBinding(binding)
+				patch.Exports[name] = exported
 			}
 			current := catalog.Modules[moduleName]
 			if current.Exports == nil {
@@ -93,6 +126,110 @@ func ApplyDeclarationAdapterFiles(catalog *Catalog, sources []declarationadapter
 			}
 			catalog.Modules[moduleName] = current
 		}
+	}
+	if runtime != nil {
+		for _, source := range sorted {
+			for _, binding := range runtime.Bindings(source.Package, source.Mode) {
+				key := source.Package + "#" + source.Mode + "#" + binding.Identity
+				if !usedRuntimeBindings[key] {
+					return fmt.Errorf("native runtime adapter %s binding %s has no matching declaration export", source.Package, binding.Identity)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// AttachRuntimeBindings restores independently loaded runtime metadata on a
+// declaration catalog read from the TypeScript native type cache.
+func AttachRuntimeBindings(catalog *Catalog, sources []declarationadapterhost.Source, runtime *runtimeadapterhost.Catalog) error {
+	if catalog == nil {
+		return errors.New("native type catalog is nil")
+	}
+	if runtime == nil || catalog.UnavailableReason != "" {
+		return nil
+	}
+	for _, source := range sources {
+		for _, binding := range runtime.Bindings(source.Package, source.Mode) {
+			moduleName, name, ok := strings.Cut(binding.Identity, "#")
+			if !ok {
+				return fmt.Errorf("native runtime adapter %s binding %s has an invalid identity", source.Package, binding.Identity)
+			}
+			module, exists := catalog.Modules[moduleName]
+			if !exists {
+				return fmt.Errorf("native runtime adapter %s binding %s has no matching declaration module; run trb install", source.Package, binding.Identity)
+			}
+			exported, exists := module.Exports[name]
+			if !exists {
+				return fmt.Errorf("native runtime adapter %s binding %s has no matching declaration export; run trb install", source.Package, binding.Identity)
+			}
+			if err := validateNativeRuntimeExport(source.Mode, exported, binding); err != nil {
+				return fmt.Errorf("declaration adapter %s runtime export %s from %s: %w", source.Package, name, moduleName, err)
+			}
+			exported.Runtime = nativeRuntimeBinding(binding)
+			module.Exports[name] = exported
+			catalog.Modules[moduleName] = module
+		}
+	}
+	return nil
+}
+
+func runtimeBindingIdentity(moduleName, exportName string) string {
+	return moduleName + "#" + exportName
+}
+
+func nativeRuntimeBinding(binding runtimeadapterhost.Binding) *RuntimeBinding {
+	return &RuntimeBinding{
+		Identity: binding.Identity, Dependency: binding.Dependency, Module: binding.Module, Symbol: binding.Symbol,
+		CallConvention: binding.CallConvention, MaySuspend: binding.MaySuspend,
+		PropagatesExecutionScope: binding.PropagatesExecutionScope,
+	}
+}
+
+var (
+	goRuntimeSymbol         = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
+	typeScriptRuntimeSymbol = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
+	rubyRuntimeModule       = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
+	rubyRuntimeSymbol       = regexp.MustCompile(`^(?:[A-Z][A-Za-z0-9_]*::)*[A-Z][A-Za-z0-9_]*\.[a-z_][A-Za-z0-9_]*[!?]?$`)
+)
+
+func validateNativeRuntimeExport(mode string, exported Export, binding runtimeadapterhost.Binding) error {
+	stringType := func(value Type) bool {
+		return !value.Nullable && value.Kind == "string" && value.Name == "String" && len(value.Args) == 0
+	}
+	if exported.Kind != "function" || len(exported.Parameters) != 1 || exported.Required != 1 || exported.Variadic || len(exported.TypeParameters) != 0 || !stringType(exported.Parameters[0]) || !stringType(exported.Type) {
+		return fmt.Errorf("native runtime adapter protocol version 1 requires a non-generic top-level function with signature (String) -> String")
+	}
+	if exported.ResultBridge != nil {
+		return fmt.Errorf("native runtime exports cannot also declare a Result bridge")
+	}
+	if binding.CallConvention != "function" {
+		return fmt.Errorf("unsupported call convention %q", binding.CallConvention)
+	}
+	switch mode {
+	case "go":
+		if !nativeDependencyOwns(map[string]string{binding.Dependency: ""}, binding.Module) {
+			return fmt.Errorf("Go module %s is outside declared dependency %s", binding.Module, binding.Dependency)
+		}
+		if !goRuntimeSymbol.MatchString(binding.Symbol) {
+			return fmt.Errorf("Go function symbol %q must be an exported identifier", binding.Symbol)
+		}
+	case "ruby":
+		if !rubyRuntimeModule.MatchString(binding.Module) || strings.Contains(binding.Module, "..") || strings.HasPrefix(binding.Module, "/") {
+			return fmt.Errorf("Ruby require path %q is unsafe", binding.Module)
+		}
+		if !rubyRuntimeSymbol.MatchString(binding.Symbol) {
+			return fmt.Errorf("Ruby function symbol %q must be a constant-qualified module method", binding.Symbol)
+		}
+	case "typescript":
+		if !nativeDependencyOwns(map[string]string{binding.Dependency: ""}, binding.Module) {
+			return fmt.Errorf("TypeScript module %s is outside declared dependency %s", binding.Module, binding.Dependency)
+		}
+		if !typeScriptRuntimeSymbol.MatchString(binding.Symbol) {
+			return fmt.Errorf("TypeScript function symbol %q must be an identifier", binding.Symbol)
+		}
+	default:
+		return fmt.Errorf("unsupported runtime adapter mode %q", mode)
 	}
 	return nil
 }

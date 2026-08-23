@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -48,10 +48,19 @@ discriminated generic results and emits transitive native type-only imports
 without making their names source-visible. Adapter-declared Promise callback
 boundaries can map a Result-returning TypeRB function to native resolution and
 rejection without exposing Promise semantics in TypeRB source.
+An installed package can instead pair its semantic declaration catalog with a
+mode-specific Native Runtime Adapter Protocol file in Go, Ruby, or TypeScript
+mode. The initial protocol maps package-owned wire exports to top-level native
+shim functions and accepts only `(String) -> String`; package source and the
+shim own JSON envelopes, SDK error normalization, and domain `Result`
+conversion. Two declarative effect flags propagate TypeScript suspension and
+the hidden Go, Ruby, or TypeScript execution scope through the ordinary call
+graph. Direct Go module and Ruby gem declaration import, structural native
+values, lifecycle hooks, and arbitrary native error mappers are not included.
 Package authors can run `trb adapter check` to validate the manifest and every
-catalog through the selected ecosystem consumer before publishing. Its optional
-versioned JSON report exposes deterministic adapter counts and diagnostics for
-CI and AI agents.
+catalog and runtime mapping through the selected ecosystem consumer before
+publishing. Its optional versioned JSON report exposes deterministic adapter
+and runtime-binding counts and diagnostics for CI and AI agents.
 Packages can also declare a mode-specific conformance project for explicit
 `trb adapter test` execution. The command validates the adapter, builds the
 installed self-referencing fixture, and invokes its structured native check;

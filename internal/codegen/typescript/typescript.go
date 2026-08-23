@@ -3,6 +3,7 @@ package typescript
 import (
 	"fmt"
 	pathpkg "path"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,7 @@ type generator struct {
 	records          map[string]bool
 	typeAliases      map[string]string
 	typeMappings     map[string]string
+	runtimeImports   map[string]bool
 	standardResult   bool
 	browserRuntime   string
 	httpRuntime      bool
@@ -148,7 +150,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		webManifest = projectWeb
 		webDispatchOnly = true
 	}
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, runtimeImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -269,6 +271,23 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(comment(n.Text))
 	case *ir.Import:
+		if n.Native && len(n.RuntimeSymbols) > 0 {
+			names := make([]string, 0, len(n.RuntimeSymbols))
+			for name := range n.RuntimeSymbols {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				binding := n.RuntimeSymbols[name]
+				if g.runtimeImports[binding.Identity] {
+					continue
+				}
+				g.runtimeImports[binding.Identity] = true
+				local := naming.RuntimeBindingIdentifier(binding.Identity)
+				g.line("import { " + binding.Symbol + " as " + local + " } from " + strconv.Quote(binding.Module) + ";")
+			}
+			return
+		}
 		if n.Path == "trb/platform/typescript/react" || n.Path == "trb/platform/typescript/react/index" {
 			g.line(`import * as React from "react";`)
 			for _, symbol := range n.Symbols {
@@ -1303,6 +1322,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[i] = value
 		}
 		args := strings.Join(parts, ", ")
+		if reference := expressionReference(n.Callee); reference != nil && reference.Runtime != nil {
+			parts = g.executionArguments(n, parts)
+			local := naming.RuntimeBindingIdentifier(reference.Runtime.Identity)
+			return g.awaitCall(n, local+"("+strings.Join(parts, ", ")+")")
+		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
 			if reference.ReceiverMethod {
 				if member, ok := receiverMember(n.Callee); ok {

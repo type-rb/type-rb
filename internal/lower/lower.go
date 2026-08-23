@@ -106,6 +106,7 @@ func (l *lowerer) generatedTypeImports(statements []ir.Statement) []ir.Statement
 				Implicit:                  true,
 				IntrinsicSymbols:          map[string]bool{},
 				RuntimeIndependentSymbols: map[string]bool{},
+				RuntimeSymbols:            map[string]ir.RuntimeBinding{},
 				SymbolKinds:               map[string]string{},
 				SymbolTypes:               map[string]types.Type{},
 				SymbolParameters:          map[string][]types.Type{},
@@ -283,6 +284,7 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 			Implicit:                  true,
 			IntrinsicSymbols:          map[string]bool{},
 			RuntimeIndependentSymbols: map[string]bool{},
+			RuntimeSymbols:            map[string]ir.RuntimeBinding{},
 			SymbolKinds:               map[string]string{},
 			SymbolTypes:               map[string]types.Type{},
 			SymbolParameters:          map[string][]types.Type{},
@@ -434,6 +436,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			SymbolTypeParameters:      map[string][]string{},
 			IntrinsicSymbols:          map[string]bool{},
 			RuntimeIndependentSymbols: map[string]bool{},
+			RuntimeSymbols:            map[string]ir.RuntimeBinding{},
 			Implicit:                  l.checked.CompilerGeneratedStart > 0 && n.Span().Start.Offset >= l.checked.CompilerGeneratedStart,
 		}
 		if resolved := l.checked.Resolution.Imports[n]; resolved != nil {
@@ -447,6 +450,16 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			result.Native = resolved.Kind == resolver.NativeImport
 			result.Platform = resolved.Definition != nil && resolved.Definition.Kind == "platform"
 			result.Runtime = resolved.Definition != nil && resolved.Definition.Source != ""
+			selectedRuntimeSymbols := map[string]bool{}
+			if result.Namespace {
+				for name := range resolved.Exports {
+					selectedRuntimeSymbols[name] = true
+				}
+			} else {
+				for _, name := range resolved.Symbols {
+					selectedRuntimeSymbols[name] = true
+				}
+			}
 			for name, exported := range resolved.Exports {
 				kind := string(exported.Kind)
 				if exported.Kind == resolver.TypeAliasExport && exported.AliasEnum {
@@ -456,6 +469,9 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 				result.SymbolTypes[name] = exported.Type
 				result.SymbolParameters[name] = append([]types.Type(nil), exported.Parameters...)
 				result.SymbolTypeParameters[name] = append([]string(nil), exported.TypeParameters...)
+				if exported.Runtime != nil && selectedRuntimeSymbols[name] {
+					result.RuntimeSymbols[name] = *lowerRuntimeBinding(exported.Runtime)
+				}
 			}
 			result.GeneratedTypeSymbols = contractTypeSymbols(resolved, resolved.Kind == resolver.NativeImport)
 			result.TypeContracts = typeContracts(resolved, result.GeneratedTypeSymbols)
@@ -1218,6 +1234,7 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 	}
 	if binding.Export != nil {
 		result.ExportKind = string(binding.Export.Kind)
+		result.Runtime = lowerRuntimeBinding(binding.Export.Runtime)
 	}
 	if binding.Member != nil {
 		result.ExportKind = string(binding.Member.Kind)
@@ -1232,11 +1249,23 @@ func referenceFromBinding(binding *resolver.Binding) *ir.Reference {
 	result := &ir.Reference{Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name}
 	if binding.Export != nil {
 		result.ExportKind = string(binding.Export.Kind)
+		result.Runtime = lowerRuntimeBinding(binding.Export.Runtime)
 	}
 	if binding.Member != nil {
 		result.ExportKind = string(binding.Member.Kind)
 	}
 	return result
+}
+
+func lowerRuntimeBinding(binding *resolver.RuntimeBinding) *ir.RuntimeBinding {
+	if binding == nil {
+		return nil
+	}
+	return &ir.RuntimeBinding{
+		Identity: binding.Identity, Dependency: binding.Dependency, Module: binding.Module,
+		Symbol: binding.Symbol, CallConvention: binding.CallConvention, MaySuspend: binding.MaySuspend,
+		PropagatesExecutionScope: binding.PropagatesExecutionScope,
+	}
 }
 
 func resultSuccessType(typ types.Type) types.Type {

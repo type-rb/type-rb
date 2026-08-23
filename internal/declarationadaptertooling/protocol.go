@@ -6,7 +6,7 @@ package declarationadaptertooling
 
 import "github.com/type-rb/type-rb/internal/diagnostic"
 
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 const (
 	TestPhaseAdapterCheck = "adapter_check"
@@ -41,6 +41,9 @@ type Adapter struct {
 	Modules                    int    `json:"modules"`
 	Exports                    int    `json:"exports"`
 	SupportingRecords          int    `json:"supportingRecords"`
+	RuntimePath                string `json:"runtimePath,omitempty"`
+	RuntimeProtocolVersion     int    `json:"runtimeProtocolVersion,omitempty"`
+	RuntimeBindings            int    `json:"runtimeBindings"`
 }
 
 type Summary struct {
@@ -49,6 +52,7 @@ type Summary struct {
 	Modules           int `json:"modules"`
 	Exports           int `json:"exports"`
 	SupportingRecords int `json:"supportingRecords"`
+	RuntimeBindings   int `json:"runtimeBindings"`
 	Errors            int `json:"errors"`
 	Warnings          int `json:"warnings"`
 }
@@ -122,6 +126,7 @@ func Build(options BuildOptions) Report {
 		report.Summary.Modules += adapter.Modules
 		report.Summary.Exports += adapter.Exports
 		report.Summary.SupportingRecords += adapter.SupportingRecords
+		report.Summary.RuntimeBindings += adapter.RuntimeBindings
 	}
 	return report
 }

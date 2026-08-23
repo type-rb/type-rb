@@ -66,6 +66,51 @@ func TestAdapterCheckDogfoodsTanStackQueryExample(t *testing.T) {
 	}
 }
 
+func TestAdapterCheckReportsNativeRuntimeBindings(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := packageManager.TypeRBManifest{
+		FormatVersion: 1, Name: "github.com/acme/runtime", Version: "0.1.0", Modes: []string{"go"},
+		NativeDependencies:  map[string]map[string]string{"go": {"example.com/runtime-wire": "v0.1.0"}},
+		DeclarationAdapters: map[string]string{"go": "declarations.json"},
+		RuntimeAdapters:     map[string]string{"go": "runtime.json"},
+	}
+	writeCLIPackageManifest(t, root, manifest)
+	writeCLIJSONFile(t, filepath.Join(root, "declarations.json"), packageextension.DeclarationAdapterCatalog{
+		ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
+		Modules: map[string]packageextension.DeclarationAdapterModule{
+			"github.com/acme/runtime/native": {Exports: map[string]packageextension.DeclarationAdapterExport{
+				"invoke": {
+					Kind: "function", Type: packageextension.DeclarationAdapterType{Kind: "string", Name: "String"},
+					Parameters: []packageextension.DeclarationAdapterType{{Kind: "string", Name: "String"}}, Required: 1,
+				},
+			}},
+		},
+	})
+	writeCLIJSONFile(t, filepath.Join(root, "runtime.json"), packageextension.NativeRuntimeAdapterCatalog{
+		ProtocolVersion: packageextension.NativeRuntimeAdapterProtocolVersion,
+		Bindings: map[string]packageextension.NativeRuntimeAdapterBinding{
+			"github.com/acme/runtime/native#invoke": {
+				Dependency: "example.com/runtime-wire", Module: "example.com/runtime-wire", Symbol: "Invoke",
+				CallConvention: "function", MaySuspend: true, PropagatesExecutionScope: true,
+			},
+		},
+	})
+	report, _ := runAdapterCheckReport(t, []string{"adapter", "check", "--format", "json", root}, 0)
+	if len(report.Adapters) != 1 {
+		t.Fatalf("unexpected adapters: %#v", report.Adapters)
+	}
+	adapter := report.Adapters[0]
+	if !adapter.Valid || adapter.RuntimePath != filepath.Join(root, "runtime.json") || adapter.RuntimeProtocolVersion != packageextension.NativeRuntimeAdapterProtocolVersion || adapter.RuntimeBindings != 1 {
+		t.Fatalf("unexpected runtime adapter report: %#v", adapter)
+	}
+	if report.Summary.RuntimeBindings != 1 || report.Summary.Errors != 0 {
+		t.Fatalf("unexpected runtime adapter summary: %#v", report.Summary)
+	}
+}
+
 func TestAdapterCheckReportsManifestAndConsumerDiagnosticsAsJSON(t *testing.T) {
 	t.Run("missing manifest", func(t *testing.T) {
 		report, _ := runAdapterCheckReport(t, []string{"adapter", "check", "--format", "json", t.TempDir()}, 1)
@@ -120,7 +165,7 @@ func TestAdapterCheckReportsManifestAndConsumerDiagnosticsAsJSON(t *testing.T) {
 			},
 		})
 		report, _ := runAdapterCheckReport(t, []string{"adapter", "check", "--format", "json", root}, 1)
-		assertAdapterCheckDiagnostic(t, report, diagnostic.ProjectIntegration, "provides only the TypeScript declaration adapter")
+		assertAdapterCheckDiagnostic(t, report, diagnostic.ProjectError, "requires runtimeAdapters.ruby")
 	})
 }
 

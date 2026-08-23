@@ -497,10 +497,22 @@ switches.
   `declarationAdapters.<mode>` in the package manifest. The common host
   strictly decodes the catalog and validates its protocol shape and checksum.
   The selected ecosystem adapter validates native-dependency ownership, name
-  conflicts, and adapter-specific bridge kinds before import. The initial
-  implementation provides the TypeScript adapter only. An
-  adapter cannot execute compiler code, access compiler AST or typed IR, or
-  emit target source.
+  conflicts, and adapter-specific bridge kinds before import. Direct import
+  from an installed native declaration system is currently available only for
+  TypeScript. A declaration adapter cannot execute compiler code, access
+  compiler AST or typed IR, or emit target source.
+- A package may pair `declarationAdapters.<mode>` with
+  `runtimeAdapters.<mode>` in Go, Ruby, or TypeScript mode. Native Runtime
+  Adapter Protocol version 1 maps a canonical `module#export` identity to a
+  declared native dependency, target module, and top-level function symbol.
+  Every export in a runtime-backed declaration module must have the exact
+  non-generic `(String) -> String` signature; direct and runtime-backed exports
+  cannot share a module. The runtime binding may declare that the call suspends
+  and that the generated backend passes its hidden execution scope before the
+  string argument. Runtime adapter data is strictly decoded and validated but
+  never executed by package resolution or checking. Target shims and ordinary
+  TypeRB package source own JSON envelopes, SDK error normalization, and
+  conversion to domain `Result` values.
 - A package may declare one explicit declaration-adapter conformance project
   per mode with `adapterTests.<mode>`. Its config path stays below the package
   root and its native check is a structured argument vector rather than a

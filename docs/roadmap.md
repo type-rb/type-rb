@@ -85,8 +85,9 @@ than detailed syntax.
 - Keep target-only functionality in explicit `trb/platform/<mode>/*` packages.
 - Expand automatic TypeScript `.d.ts` indexing beyond its initial simple
   signatures and harden the declarative Result/suspending callback bridge.
-  Then provide equivalent package-owned type discovery for Go modules and
-  gems without application-authored signatures.
+  Evaluate equivalent package-owned type discovery for Go modules and gems
+  only where the initial package-owned string-wire runtime adapter is
+  insufficient; do not make application authors duplicate native signatures.
 - Evolve the initial distributed Git package system with semantic version
   constraints, selective updates, publishing conventions, shared caches,
   vulnerability/audit integration, and namespace-stable type identities.
@@ -100,10 +101,12 @@ than detailed syntax.
   worker dispatch and typed enqueue wrappers, only when another package
   identifies a shared capability.
   Characterize fragment-level incremental invalidation and namespace-stable
-  imports before external use. Use the two normalized native persistence calls
-  below the Jobs adapter, together with remaining ORM runtime integration, to
-  design a separate minimal runtime-operation descriptor. Do not expose
-  compiler internals as a public plugin API.
+  imports before external use. Dogfood Native Runtime Adapter Protocol v1 with
+  independent SDK packages across all three backends before adding structural
+  wire values, native handles, lifecycle hooks, direct FFI, or configurable
+  error mappers. Use ORM and Jobs runtime evidence to add only capabilities
+  that the fixed function wire cannot express. Do not expose compiler internals
+  as a public plugin API.
 
 ## 6. Application-level proof
 

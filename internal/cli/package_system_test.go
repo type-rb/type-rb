@@ -10,9 +10,154 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/codegen"
+	"github.com/type-rb/type-rb/internal/nativepackage"
+	"github.com/type-rb/type-rb/internal/packageextension"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
 	"github.com/type-rb/type-rb/internal/project"
+	"github.com/type-rb/type-rb/internal/runtimeadapterhost"
 )
+
+func TestBuildLoadsAWSS3PackageRuntimeAdapterAcrossBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			workspace := t.TempDir()
+			packageRoot := filepath.Join(workspace, "aws-s3")
+			if err := os.MkdirAll(filepath.Join(packageRoot, "src"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			dependency, targetModule, targetSymbol := cliRuntimeTarget(mode)
+			dependencyVersion := "1.0.0"
+			if mode == "go" {
+				dependencyVersion = "v1.0.0"
+			}
+			manifest := packageManager.TypeRBManifest{
+				FormatVersion: 1, Name: "github.com/acme/aws-s3", Version: "0.1.0", SourceDir: "src", Modes: []string{mode},
+				NativeDependencies:  map[string]map[string]string{mode: {dependency: dependencyVersion}},
+				DeclarationAdapters: map[string]string{mode: "declarations.json"},
+				RuntimeAdapters:     map[string]string{mode: "runtime.json"},
+			}
+			writeCLIPackageManifest(t, packageRoot, manifest)
+			packageSource := `import { head_object } from github.com/acme/aws-s3/native
+
+def head_object_wire(input: String): String
+	return head_object(input)
+end
+`
+			if err := os.WriteFile(filepath.Join(packageRoot, "src", "index.trb"), []byte(packageSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			declarations := packageextension.DeclarationAdapterCatalog{
+				ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
+				Modules: map[string]packageextension.DeclarationAdapterModule{
+					"github.com/acme/aws-s3/native": {Exports: map[string]packageextension.DeclarationAdapterExport{
+						"head_object": {
+							Kind: "function", Type: packageextension.DeclarationAdapterType{Kind: "string", Name: "String"},
+							Parameters: []packageextension.DeclarationAdapterType{{Kind: "string", Name: "String"}}, Required: 1,
+						},
+					}},
+				},
+			}
+			writeCLIJSONFile(t, filepath.Join(packageRoot, "declarations.json"), declarations)
+			runtimeProtocol := packageextension.NativeRuntimeAdapterCatalog{
+				ProtocolVersion: packageextension.NativeRuntimeAdapterProtocolVersion,
+				Bindings: map[string]packageextension.NativeRuntimeAdapterBinding{
+					"github.com/acme/aws-s3/native#head_object": {
+						Dependency: dependency, Module: targetModule, Symbol: targetSymbol, CallConvention: "function",
+						MaySuspend: true, PropagatesExecutionScope: true,
+					},
+				},
+			}
+			writeCLIJSONFile(t, filepath.Join(packageRoot, "runtime.json"), runtimeProtocol)
+
+			appRoot := filepath.Join(workspace, "app")
+			if err := os.MkdirAll(filepath.Join(appRoot, "src"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			config := project.New(appRoot, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/aws-s3-app"
+			}
+			if config.TypeScript != nil {
+				config.TypeScript.Runtime = project.TypeScriptRuntimeBun
+			}
+			config.Packages["acme/aws-s3"] = project.PackageRequirement{Path: "../aws-s3"}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(appRoot, "src", "main.trb"), []byte("import { head_object_wire } from acme/aws-s3\n\ndef main()\n\tputs(head_object_wire(\"{\\\"bucket\\\":\\\"demo\\\",\\\"key\\\":\\\"object\\\"}\"))\n\treturn\nend\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "typescript" {
+				declarationSources := declarationAdapterSources(resolved)
+				runtimeAdapters, err := runtimeadapterhost.Load(runtimeAdapterSources(resolved))
+				if err != nil {
+					t.Fatal(err)
+				}
+				catalog := nativepackage.Empty(resolved.NativeDependencies)
+				if err := nativepackage.ApplyDeclarationAdapterFilesWithRuntime(catalog, declarationSources, runtimeAdapters); err != nil {
+					t.Fatal(err)
+				}
+				if err := nativepackage.Write(config.Root, catalog); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			packageOutput := filepath.Join(appRoot, "build", "github.com", "acme", "aws-s3", "index"+codegen.Extension(mode))
+			generated, err := os.ReadFile(packageOutput)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, expected := range cliRuntimeGeneratedMarkers(mode, targetModule, targetSymbol) {
+				if !strings.Contains(string(generated), expected) {
+					t.Fatalf("generated %s package runtime is missing %q:\n%s", mode, expected, generated)
+				}
+			}
+		})
+	}
+}
+
+func cliRuntimeTarget(mode string) (dependency, module, symbol string) {
+	switch mode {
+	case "go":
+		return "github.com/acme/aws-s3-wire", "github.com/acme/aws-s3-wire/s3", "HeadObject"
+	case "ruby":
+		return "acme-aws-s3-wire", "acme/aws_s3_wire", "Acme::AwsS3Wire.head_object"
+	default:
+		return "@acme/aws-s3-wire", "@acme/aws-s3-wire/s3", "headObject"
+	}
+}
+
+func cliRuntimeGeneratedMarkers(mode, module, symbol string) []string {
+	switch mode {
+	case "go":
+		return []string{`"` + module + `"`, symbol + "(__trbScope, input)"}
+	case "ruby":
+		return []string{`require "` + module + `"`, symbol + "(__trb_scope, input)"}
+	default:
+		return []string{`from "` + module + `"`, "await __trb_runtime_"}
+	}
+}
+
+func writeCLIJSONFile(t *testing.T, path string, value any) {
+	t.Helper()
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestBuildCompilesLockedTypeRBPackageAcrossBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {

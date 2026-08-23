@@ -30,6 +30,7 @@ type TypeRBManifest struct {
 	Packages                  map[string]project.PackageRequirement `json:"packages,omitempty"`
 	NativeDependencies        map[string]map[string]string          `json:"nativeDependencies,omitempty"`
 	DeclarationAdapters       map[string]string                     `json:"declarationAdapters,omitempty"`
+	RuntimeAdapters           map[string]string                     `json:"runtimeAdapters,omitempty"`
 	AdapterTests              map[string]AdapterTest                `json:"adapterTests,omitempty"`
 	LegacyNativeTypeProviders map[string]string                     `json:"nativeTypeProviders,omitempty"`
 	CompilerExtension         json.RawMessage                       `json:"compilerExtension,omitempty"`
@@ -80,6 +81,9 @@ func (m *TypeRBManifest) applyDefaults() {
 	}
 	if m.DeclarationAdapters == nil {
 		m.DeclarationAdapters = map[string]string{}
+	}
+	if m.RuntimeAdapters == nil {
+		m.RuntimeAdapters = map[string]string{}
 	}
 	if m.AdapterTests == nil {
 		m.AdapterTests = map[string]AdapterTest{}
@@ -153,6 +157,29 @@ func (m *TypeRBManifest) Validate(root string) error {
 			return fmt.Errorf("declarationAdapters.%s must name a regular file", mode)
 		}
 	}
+	for mode, adapter := range m.RuntimeAdapters {
+		if mode != "go" && mode != "ruby" && mode != "typescript" {
+			return fmt.Errorf("runtimeAdapters has unsupported mode %q", mode)
+		}
+		if m.DeclarationAdapterFor(mode) == "" {
+			return fmt.Errorf("runtimeAdapters.%s requires declarationAdapters.%s", mode, mode)
+		}
+		if filepath.IsAbs(adapter) || escapesDirectory(adapter) || strings.TrimSpace(adapter) == "" {
+			return fmt.Errorf("runtimeAdapters.%s must stay below the package root", mode)
+		}
+		info, err := os.Stat(filepath.Join(root, adapter))
+		if err != nil {
+			return fmt.Errorf("runtimeAdapters.%s: %w", mode, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("runtimeAdapters.%s must name a regular file", mode)
+		}
+	}
+	for mode := range m.DeclarationAdapters {
+		if mode != "typescript" && m.RuntimeAdapterFor(mode) == "" {
+			return fmt.Errorf("declarationAdapters.%s requires runtimeAdapters.%s until direct %s declaration import is implemented", mode, mode, mode)
+		}
+	}
 	testModes := make([]string, 0, len(m.AdapterTests))
 	for mode := range m.AdapterTests {
 		testModes = append(testModes, mode)
@@ -213,6 +240,10 @@ func (m *TypeRBManifest) NativeDependenciesFor(mode string) map[string]string {
 
 func (m *TypeRBManifest) DeclarationAdapterFor(mode string) string {
 	return m.DeclarationAdapters[mode]
+}
+
+func (m *TypeRBManifest) RuntimeAdapterFor(mode string) string {
+	return m.RuntimeAdapters[mode]
 }
 
 func validateManifestRequirement(name string, requirement project.PackageRequirement) error {

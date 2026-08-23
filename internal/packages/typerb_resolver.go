@@ -34,12 +34,20 @@ type DeclarationAdapter struct {
 	Dependencies map[string]string
 }
 
+type RuntimeAdapter struct {
+	Package      string
+	Mode         string
+	Path         string
+	Dependencies map[string]string
+}
+
 type TypeRBPackages struct {
 	Lock                *TypeRBLock
 	Aliases             map[string]string
 	Packages            []TypeRBResolvedPackage
 	NativeDependencies  map[string]string
 	DeclarationAdapters []DeclarationAdapter
+	RuntimeAdapters     []RuntimeAdapter
 }
 
 var errLocalTypeRBManifestChanged = errors.New("local TypeRB package manifest changed")
@@ -294,10 +302,12 @@ func loadResolvedTypeRBPackages(config *project.Config, lock *TypeRBLock) (*Type
 			result.NativeDependencies[dependency] = version
 		}
 		if adapter := manifest.DeclarationAdapterFor(config.Mode); adapter != "" {
-			if config.Mode != "typescript" {
-				return nil, fmt.Errorf("TypeRB package %s declares a %s declaration adapter, but this TypeRB version provides only the TypeScript declaration adapter", name, config.Mode)
-			}
 			result.DeclarationAdapters = append(result.DeclarationAdapters, DeclarationAdapter{
+				Package: name, Mode: config.Mode, Path: filepath.Join(root, adapter), Dependencies: manifest.NativeDependenciesFor(config.Mode),
+			})
+		}
+		if adapter := manifest.RuntimeAdapterFor(config.Mode); adapter != "" {
+			result.RuntimeAdapters = append(result.RuntimeAdapters, RuntimeAdapter{
 				Package: name, Mode: config.Mode, Path: filepath.Join(root, adapter), Dependencies: manifest.NativeDependenciesFor(config.Mode),
 			})
 		}
