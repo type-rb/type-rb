@@ -380,11 +380,26 @@ REPL commands are:
 Interactive terminals provide multiline input, colors, and a Tab completion
 menu with checked signatures and return types. A single candidate completes
 directly; multiple candidates are shown before Tab or Shift-Tab cycles through
-them. Terminals also provide cursor editing, Up/Down history, and Ctrl-R reverse
-search. Ctrl-B/F moves by
+them. Enter automatically corrects the complete input buffer to canonical
+tab-based indentation and indents the next line while a block or delimiter is
+open. Terminals also provide cursor editing, Up/Down history, and Ctrl-R
+reverse search. Ctrl-B/F moves by
 character, Ctrl-A/E by line, Alt-B/F by word, and Ctrl-P/N moves vertically or
 through history. Ctrl-C cancels current input or evaluation without exiting;
 Ctrl-D exits.
+
+Ordinary results retain the `value : Type` form. A result directly associated
+with a mutable REPL binding includes a trailing `[mut]`; arbitrary expressions
+do not inherit the marker:
+
+```console
+trb:go> mut count := 123
+123 : Integer [mut]
+trb:go> count
+123 : Integer [mut]
+trb:go> count + 1
+124 : Integer
+```
 
 Project history is stored in `.trb/repl_history`. Scratch history is stored in
 the user cache and separated by mode.

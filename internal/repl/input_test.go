@@ -150,6 +150,32 @@ func TestTerminalReaderUsesMultilineAwareHistoryNavigation(t *testing.T) {
 			t.Errorf("binding %q=%q, want %q", test.sequence, binding.Action, test.action)
 		}
 	}
+	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert", "vi-command"} {
+		for _, sequence := range []string{`\C-j`, `\C-m`} {
+			binding := terminal.Config.Binds[keymap][inputrc.Unescape(sequence)]
+			if binding.Action != "trb-accept-line" {
+				t.Errorf("%s binding %q=%q, want trb-accept-line", keymap, sequence, binding.Action)
+			}
+		}
+	}
+}
+
+func TestReindentOpenInputCorrectsExistingLinesAndIndentsTheCursorLine(t *testing.T) {
+	terminal, err := newTerminalReader(Options{Mode: "go", language: languageservice.New("go")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := []rune("class User\n      def name(): String\n return \"Ada\"\n")
+	terminal.Line().Set(input...)
+	terminal.Cursor().Set(len(input))
+	reindentOpenInput(terminal)
+	want := "class User\n\tdef name(): String\n\t\treturn \"Ada\"\n\t\t"
+	if got := string(*terminal.Line()); got != want {
+		t.Fatalf("open input\nwant:\n%q\ngot:\n%q", want, got)
+	}
+	if got := terminal.Cursor().Pos(); got != len([]rune(want)) {
+		t.Fatalf("cursor=%d, want %d", got, len([]rune(want)))
+	}
 }
 
 func TestCompleteTracksValueProducingControlFlow(t *testing.T) {

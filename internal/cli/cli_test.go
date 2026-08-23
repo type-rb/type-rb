@@ -674,6 +674,36 @@ func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 	}
 }
 
+func TestReplMarksDirectMutableBindingResultsAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/repl-mutable-result"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			input := "mut count := 123\ncount = 456\ncount\ncount + 1\n:quit\n"
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stderr=%s", status, stderr.String())
+			}
+			want := "123 : Integer [mut]\n456 : Integer [mut]\n456 : Integer [mut]\n457 : Integer\n"
+			if got := stdout.String(); got != want {
+				t.Fatalf("stdout=%q, want %q; stderr=%s", got, want, stderr.String())
+			}
+		})
+	}
+}
+
 func TestReplAutomaticallyImportsUniqueProjectExportsAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
@@ -1903,12 +1933,12 @@ values.index(99)
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := `[10, 20, 30] : Array<Integer>
+		want := `[10, 20, 30] : Array<Integer> [mut]
 30 : Integer
 20 : Integer
 10 : Integer
 40 : Integer
-[10, 20, 40] : Array<Integer>
+[10, 20, 40] : Array<Integer> [mut]
 Result::Ok(value: 10) : Result<Integer, IndexLookupError>
 Result::Err(error: IndexLookupError(index: -4, size: 3, message: "Array index is out of bounds")) : Result<Integer, IndexLookupError>
 1 : Integer?
@@ -2352,7 +2382,7 @@ func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "StringBuilder(\"A\") : StringBuilder\nfalse : Boolean\nStringBuilder(\"A😀!\") : StringBuilder\n3 : Integer\n\"A😀!\" : String\ntrue : Boolean\n\"\" : String\n\"A😀!\" : String\n"
+		want := "StringBuilder(\"A\") : StringBuilder [mut]\nfalse : Boolean\nStringBuilder(\"A😀!\") : StringBuilder [mut]\n3 : Integer\n\"A😀!\" : String\ntrue : Boolean\n\"\" : String\n\"A😀!\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s StringBuilder REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -2380,7 +2410,7 @@ func TestReplEvaluatesPortableArrayAndHashOperationsAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "[1, 2] : Array<Integer>\n1 : Integer\n2 : Integer\n2 : Integer\nResult::Ok(value: 2) : Result<Integer, IndexLookupError>\nResult::Err(error: IndexLookupError(index: 9, size: 2, message: \"Array index is out of bounds\")) : Result<Integer, IndexLookupError>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[1, 2, 3] : Array<Integer>\n1 : Integer\n[3, 2, 0] : Array<Integer>\n[0, 2, 3] : Array<Integer>\n0 : Integer\n[3, 2, 1] : Array<Integer>\n[1, 2, 3] : Array<Integer>\ntrue : Boolean\n1 : Integer\nfalse : Boolean\n1 : Integer\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"two\" : String\nResult::Ok(value: \"two\") : Result<String, KeyLookupError>\nResult::Err(error: KeyLookupError(key: 9, message: \"Hash key is missing\")) : Result<String, KeyLookupError>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[\"one\", \"two\"] : Array<String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n{1: \"one\", 2: \"TWO\", 3: \"three\"} : Hash<Integer, String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"one\" : String\n\"TWO\" : String\n{3: \"three\", 4: \"four\"} : Hash<Integer, String>\n[\"a\", \"b\", \"\"] : Array<String>\ntrue : Boolean\ntrue : Boolean\n[\"root\", \"leaf\"] : Array<String>\n\"leaf\" : String\n\"root\" : String\n"
+		want := "[1, 2] : Array<Integer> [mut]\n1 : Integer\n2 : Integer\n2 : Integer\nResult::Ok(value: 2) : Result<Integer, IndexLookupError>\nResult::Err(error: IndexLookupError(index: 9, size: 2, message: \"Array index is out of bounds\")) : Result<Integer, IndexLookupError>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[1, 2, 3] : Array<Integer> [mut]\n1 : Integer\n[3, 2, 0] : Array<Integer>\n[0, 2, 3] : Array<Integer> [mut]\n0 : Integer\n[3, 2, 1] : Array<Integer>\n[1, 2, 3] : Array<Integer> [mut]\ntrue : Boolean\n1 : Integer\nfalse : Boolean\n1 : Integer\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n\"two\" : String\nResult::Ok(value: \"two\") : Result<String, KeyLookupError>\nResult::Err(error: KeyLookupError(key: 9, message: \"Hash key is missing\")) : Result<String, KeyLookupError>\nfalse : Boolean\n[1, 2] : Array<Integer>\n[\"one\", \"two\"] : Array<String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n{1: \"one\", 2: \"TWO\", 3: \"three\"} : Hash<Integer, String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String>\n{1: \"one\", 2: \"two\"} : Hash<Integer, String> [mut]\n\"one\" : String\n\"TWO\" : String\n{3: \"three\", 4: \"four\"} : Hash<Integer, String> [mut]\n[\"a\", \"b\", \"\"] : Array<String>\ntrue : Boolean\ntrue : Boolean\n[\"root\", \"leaf\"] : Array<String> [mut]\n\"leaf\" : String\n\"root\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s Array/Hash REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -2906,7 +2936,7 @@ total
 	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	want := "0 : Integer\n4 : Integer\n"
+	want := "0 : Integer [mut]\n4 : Integer [mut]\n"
 	if stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("unexpected REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
 	}
@@ -2937,7 +2967,7 @@ scores["one"]
 	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	want := "{\"one\": 1} : Hash<String, Integer>\n1 : Integer\n2 : Integer\n2 : Integer\n1 : Integer\n"
+	want := "{\"one\": 1} : Hash<String, Integer> [mut]\n1 : Integer\n2 : Integer\n2 : Integer\n1 : Integer\n"
 	if stdout.String() != want {
 		t.Fatalf("unexpected REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", want, stdout.String(), stderr.String())
 	}
@@ -2995,7 +3025,7 @@ func TestReplRefinesFreshEmptyMutableCollectionsAcrossSubmissions(t *testing.T) 
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "[] : Array<Any>\n[1, 2.5] : Array<Float>\n{} : Hash\n1 : Integer\n{\"count\": 1} : Hash<String, Integer>\n"
+		want := "[] : Array<Any> [mut]\n[1, 2.5] : Array<Float> [mut]\n{} : Hash [mut]\n1 : Integer\n{\"count\": 1} : Hash<String, Integer> [mut]\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s empty collection REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}

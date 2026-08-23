@@ -15,6 +15,7 @@ import (
 
 	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
+	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/languageservice"
 )
 
@@ -59,6 +60,9 @@ func newTerminalReader(options Options, history []string) (*readline.Shell, erro
 		return colorTitle + "trb:" + options.Mode + "*  " + colorReset
 	})
 	terminal.AcceptMultiline = func(line []rune) bool { return Complete(string(line)) }
+	if err := configureInteractiveFormatting(terminal); err != nil {
+		return nil, err
+	}
 	terminal.SyntaxHighlighter = func(line []rune) string {
 		source := string(line)
 		if options.language == nil {
@@ -93,6 +97,67 @@ func newTerminalReader(options Options, history []string) (*readline.Shell, erro
 		}
 	}
 	return terminal, nil
+}
+
+func configureInteractiveFormatting(terminal *readline.Shell) error {
+	acceptLine := terminal.Keymap.Commands()["accept-line"]
+	if acceptLine == nil {
+		return errors.New("readline accept-line command is unavailable")
+	}
+	terminal.Keymap.Register(map[string]func(){
+		"trb-accept-line": func() {
+			if Complete(string(*terminal.Line())) {
+				formatCompleteInput(terminal)
+				acceptLine()
+				return
+			}
+			acceptLine()
+			reindentOpenInput(terminal)
+		},
+	})
+	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert", "vi-command"} {
+		for _, sequence := range []string{`\C-j`, `\C-m`} {
+			if err := terminal.Config.Bind(keymap, inputrc.Unescape(sequence), "trb-accept-line", false); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func formatCompleteInput(terminal *readline.Shell) {
+	formatted, diagnostics := formatter.Format([]byte(string(*terminal.Line())))
+	if len(diagnostics) > 0 {
+		return
+	}
+	line := []rune(strings.TrimSuffix(string(formatted), "\n"))
+	terminal.Line().Set(line...)
+	terminal.Cursor().Set(len(line))
+}
+
+func reindentOpenInput(terminal *readline.Shell) {
+	source := []rune(string(*terminal.Line()))
+	cursor := terminal.Cursor().Pos()
+	if cursor < 0 || cursor > len(source) {
+		return
+	}
+	cursorLine := strings.Count(string(source[:cursor]), "\n")
+	indent := formatter.NextLineIndent([]byte(string(source[:cursor])))
+	formattedLines := strings.Split(string(formatter.ReindentPartial([]byte(string(source)))), "\n")
+	if cursorLine >= len(formattedLines) {
+		return
+	}
+	if strings.TrimSpace(formattedLines[cursorLine]) == "" {
+		formattedLines[cursorLine] = indent
+	}
+	formatted := strings.Join(formattedLines, "\n")
+	cursor = 0
+	for lineIndex := 0; lineIndex < cursorLine; lineIndex++ {
+		cursor += utf8.RuneCountInString(formattedLines[lineIndex]) + 1
+	}
+	cursor += utf8.RuneCountInString(formattedLines[cursorLine]) - utf8.RuneCountInString(strings.TrimLeft(formattedLines[cursorLine], " \t"))
+	terminal.Line().Set([]rune(formatted)...)
+	terminal.Cursor().Set(cursor)
 }
 
 func isQuitCommand(input string) bool {

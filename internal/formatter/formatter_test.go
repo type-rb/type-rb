@@ -129,6 +129,25 @@ func TestFormatPreservesHeredocBody(t *testing.T) {
 	}
 }
 
+func TestReindentPartialFormatsOpenInteractiveBlocks(t *testing.T) {
+	source := []byte("class User\n      def name(): String\n return \"Ada\"\n        end")
+	want := "class User\n\tdef name(): String\n\t\treturn \"Ada\"\n\tend"
+	if got := string(ReindentPartial(source)); got != want {
+		t.Fatalf("partial indentation\nwant:\n%q\ngot:\n%q", want, got)
+	}
+	if got, wantIndent := NextLineIndent(source), "\t"; got != wantIndent {
+		t.Fatalf("next-line indentation=%q, want %q", got, wantIndent)
+	}
+}
+
+func TestReindentPartialTracksDelimitersAndPreservesHeredocs(t *testing.T) {
+	source := []byte("class Query\n def sql(): String\n  value := call(\n1,\n[2],\n)\nreturn <<~SQL\n  SELECT  *\n+    FROM posts\nSQL\nend")
+	want := "class Query\n\tdef sql(): String\n\t\tvalue := call(\n\t\t\t1,\n\t\t\t[2],\n\t\t)\n\t\treturn <<~SQL\n  SELECT  *\n+    FROM posts\nSQL\n\tend"
+	if got := string(ReindentPartial(source)); got != want {
+		t.Fatalf("partial delimiter indentation\nwant:\n%q\ngot:\n%q", want, got)
+	}
+}
+
 func TestFormatFollowsChainedMultilineTokensToTheirFinalLine(t *testing.T) {
 	source := []byte("'\n''\n'E")
 	want := "'\n' '\n' E\n"

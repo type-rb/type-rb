@@ -70,6 +70,41 @@ func TestEvaluateFirstClassFunctionClosure(t *testing.T) {
 	}
 }
 
+func TestEvaluateMarksOnlyDirectMutableBindingResults(t *testing.T) {
+	integer := types.FromName("Integer")
+	span := token.Span{}
+	literal := func(raw string) *ir.Literal {
+		return &ir.Literal{ExprBase: ir.NewExprBase(span, integer), Kind: "integer", Raw: raw}
+	}
+	identifier := func(name string) *ir.Identifier {
+		return &ir.Identifier{ExprBase: ir.NewExprBase(span, integer), Name: name, Lexical: true}
+	}
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+
+	result, err := evaluator.Evaluate([]ir.Statement{&ir.Variable{Name: "count", Type: integer, Value: literal("123"), Mutable: true}}, "repl")
+	if err != nil || !result.MutableBinding {
+		t.Fatalf("mutable declaration result=%#v, error=%v", result, err)
+	}
+	result, err = evaluator.Evaluate([]ir.Statement{&ir.Assignment{Target: identifier("count"), Operator: "=", Value: literal("456")}}, "repl")
+	if err != nil || !result.MutableBinding {
+		t.Fatalf("mutable assignment result=%#v, error=%v", result, err)
+	}
+	result, err = evaluator.Evaluate([]ir.Statement{&ir.ExpressionStatement{Expression: identifier("count")}}, "repl")
+	if err != nil || !result.MutableBinding {
+		t.Fatalf("mutable identifier result=%#v, error=%v", result, err)
+	}
+	result, err = evaluator.Evaluate([]ir.Statement{&ir.ExpressionStatement{Expression: &ir.Binary{
+		ExprBase: ir.NewExprBase(span, integer), Left: identifier("count"), Operator: "+", Right: literal("1"),
+	}}}, "repl")
+	if err != nil || result.MutableBinding {
+		t.Fatalf("derived expression result=%#v, error=%v", result, err)
+	}
+	result, err = evaluator.Evaluate([]ir.Statement{&ir.Variable{Name: "snapshot", Type: integer, Value: identifier("count")}}, "repl")
+	if err != nil || result.MutableBinding {
+		t.Fatalf("immutable declaration result=%#v, error=%v", result, err)
+	}
+}
+
 func TestEvaluateInternalRuntimeFailure(t *testing.T) {
 	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
 	_, err := evaluator.intrinsic(

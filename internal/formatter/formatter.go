@@ -8,6 +8,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/token"
 )
@@ -31,6 +32,10 @@ func FormatWithOptions(source []byte, options Options) ([]byte, []diagnostic.Dia
 		return nil, diagnostics
 	}
 	tokens := canonicalImportTokens(program, options.CanonicalImportPath)
+	return formatTokens(tokens), nil
+}
+
+func formatTokens(tokens []token.Token) []byte {
 	lines := tokensByLine(tokens)
 	var out strings.Builder
 	indent := 0
@@ -82,7 +87,91 @@ func FormatWithOptions(source []byte, options Options) ([]byte, []diagnostic.Dia
 			lineIndex = coveredLine
 		}
 	}
-	return []byte(strings.TrimRight(out.String(), "\n") + "\n"), nil
+	return []byte(strings.TrimRight(out.String(), "\n") + "\n")
+}
+
+// ReindentPartial applies canonical leading indentation to a tokenizable source
+// fragment without requiring the fragment to parse as a complete program. It
+// preserves all non-leading text and the contents of multiline tokens so an
+// interactive editor can safely call it while a submission is still open.
+func ReindentPartial(source []byte) []byte {
+	tokens, diagnostics := lexer.Lex(source)
+	if hasErrors(diagnostics) {
+		return append([]byte(nil), source...)
+	}
+	levels, _ := partialIndentation(tokens)
+	lines := strings.Split(string(source), "\n")
+	for lineIndex, level := range levels {
+		if lineIndex >= len(lines) || level < 0 || strings.TrimSpace(lines[lineIndex]) == "" {
+			continue
+		}
+		lines[lineIndex] = strings.Repeat(indentation, level) + strings.TrimLeft(lines[lineIndex], " \t")
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// NextLineIndent returns the indentation for a new line following a
+// tokenizable, possibly incomplete source fragment.
+func NextLineIndent(source []byte) string {
+	tokens, diagnostics := lexer.Lex(source)
+	if hasErrors(diagnostics) {
+		return ""
+	}
+	_, level := partialIndentation(tokens)
+	return strings.Repeat(indentation, level)
+}
+
+func partialIndentation(tokens []token.Token) ([]int, int) {
+	lines := tokensByLine(tokens)
+	levels := make([]int, len(lines))
+	for index := range levels {
+		levels[index] = -1
+	}
+	indent := 0
+	continuation := 0
+	for lineIndex := 0; lineIndex < len(lines); lineIndex++ {
+		code := withoutNewline(lines[lineIndex])
+		coveredLine := lineIndex
+		coveredOffset := -1
+		for _, item := range code {
+			if endLine := item.Span.End.Line - 1; endLine > coveredLine || endLine == coveredLine && item.Span.End.Offset > coveredOffset {
+				coveredLine = endLine
+				coveredOffset = item.Span.End.Offset
+			}
+		}
+		for coveredLine > lineIndex && coveredLine < len(lines) {
+			endingLine := coveredLine
+			endingOffset := coveredOffset
+			for _, item := range withoutNewline(lines[endingLine]) {
+				if item.Span.Start.Offset < endingOffset {
+					continue
+				}
+				code = append(code, item)
+				if endLine := item.Span.End.Line - 1; endLine > coveredLine || endLine == coveredLine && item.Span.End.Offset > coveredOffset {
+					coveredLine = endLine
+					coveredOffset = item.Span.End.Offset
+				}
+			}
+			if coveredLine == endingLine {
+				break
+			}
+		}
+		statements := splitStatements(code, continuation)
+		for statementIndex, statement := range statements {
+			level := advanceIndentation(statement, &indent, &continuation)
+			if statementIndex == 0 {
+				levels[lineIndex] = level
+			}
+		}
+		if coveredLine > lineIndex {
+			lineIndex = coveredLine
+		}
+	}
+	level := indent + continuation
+	if level < 0 {
+		level = 0
+	}
+	return levels, level
 }
 
 type importTokenReplacement struct {
@@ -174,6 +263,13 @@ func splitStatements(tokens []token.Token, initialDepth int) [][]token.Token {
 }
 
 func writeStatement(out *strings.Builder, code []token.Token, indent, continuation *int) {
+	lineIndent := advanceIndentation(code, indent, continuation)
+	out.WriteString(strings.Repeat(indentation, lineIndent))
+	out.WriteString(formatTokensAt(code, lineIndent, false))
+	out.WriteByte('\n')
+}
+
+func advanceIndentation(code []token.Token, indent, continuation *int) int {
 	first := firstCode(code)
 	dedent := isDedent(first)
 	if dedent && *indent > 0 {
@@ -187,10 +283,6 @@ func writeStatement(out *strings.Builder, code []token.Token, indent, continuati
 	if lineIndent < 0 {
 		lineIndent = 0
 	}
-	out.WriteString(strings.Repeat(indentation, lineIndent))
-	out.WriteString(formatTokensAt(code, lineIndent, false))
-	out.WriteByte('\n')
-
 	if dedent && isMidBlock(first) {
 		*indent++
 	} else if opensEndBlock(code, *continuation) {
@@ -200,6 +292,7 @@ func writeStatement(out *strings.Builder, code []token.Token, indent, continuati
 	if *continuation < 0 {
 		*continuation = 0
 	}
+	return lineIndent
 }
 
 func tokensByLine(tokens []token.Token) [][]token.Token {
