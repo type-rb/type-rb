@@ -96,7 +96,7 @@ func validateDeclarationAdapterExport(moduleName, category, name string, exporte
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("declaration adapter module %s contains an empty %s name", moduleName, category)
 	}
-	if exported.Kind != "component" && exported.Kind != "function" && exported.Kind != "class" && exported.Kind != "record" && exported.Kind != "type_alias" {
+	if exported.Kind != "component" && exported.Kind != "function" && exported.Kind != "class" && exported.Kind != "interface" && exported.Kind != "record" && exported.Kind != "type_alias" {
 		return fmt.Errorf("declaration adapter %s %s from %s has unsupported kind %q", category, name, moduleName, exported.Kind)
 	}
 	if category == "record" && exported.Kind != "record" {
@@ -105,7 +105,7 @@ func validateDeclarationAdapterExport(moduleName, category, name string, exporte
 	if err := validateDeclarationAdapterExportShape(exported); err != nil {
 		return fmt.Errorf("declaration adapter %s %s from %s: %w", category, name, moduleName, err)
 	}
-	if (exported.Kind == "class" || exported.Kind == "record" || exported.Kind == "type_alias") &&
+	if (exported.Kind == "class" || exported.Kind == "interface" || exported.Kind == "record" || exported.Kind == "type_alias") &&
 		(exported.Type.Kind != "named" || exported.Type.Name != name) {
 		return fmt.Errorf("declaration adapter %s %s from %s: kind %s requires a named self type", category, name, moduleName, exported.Kind)
 	}
@@ -233,8 +233,14 @@ func validateDeclarationAdapterExportShape(exported DeclarationAdapterExport) er
 	if exported.Kind == "class" && len(exported.Members) != 0 {
 		return fmt.Errorf("kind class uses instanceMembers or classMembers instead of members")
 	}
-	if exported.Kind != "class" && (len(exported.InstanceMembers) != 0 || len(exported.ClassMembers) != 0) {
-		return fmt.Errorf("instanceMembers and classMembers are only valid for classes")
+	if exported.Kind == "interface" && len(exported.Members) != 0 {
+		return fmt.Errorf("kind interface uses instanceMembers instead of members")
+	}
+	if exported.Kind != "class" && exported.Kind != "interface" && len(exported.InstanceMembers) != 0 {
+		return fmt.Errorf("instanceMembers are only valid for classes and interfaces")
+	}
+	if exported.Kind != "class" && len(exported.ClassMembers) != 0 {
+		return fmt.Errorf("classMembers are only valid for classes")
 	}
 	if (exported.Kind == "record" || exported.Kind == "type_alias") && len(exported.Members) != 0 {
 		return fmt.Errorf("kind %s cannot declare members", exported.Kind)

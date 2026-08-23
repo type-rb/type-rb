@@ -27,6 +27,12 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 		Modules: map[string]Module{
 			"@scope/ui": {Exports: map[string]Export{
 				"Button": {Kind: "component", Type: Type{Kind: "named", Name: "ReactNode"}},
+				"ClientView": {
+					Kind: "interface", Type: Type{Kind: "named", Name: "ClientView"},
+					InstanceMembers: map[string]Export{
+						"run": {Kind: "function", Type: Type{Kind: "string", Name: "String"}},
+					},
+				},
 				"Client": {
 					Kind: "class", Type: Type{Kind: "named", Name: "Client"},
 					InstanceMembers: map[string]Export{
@@ -69,6 +75,10 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 	client := loaded.Modules["@scope/ui"].Exports["Client"]
 	if client.InstanceMembers["run"].Type.Name != "String" || client.ClassMembers["create"].Type.Name != "Client" {
 		t.Fatalf("native class member identity was not preserved: %#v", client)
+	}
+	clientView := loaded.Modules["@scope/ui"].Exports["ClientView"]
+	if clientView.Kind != "interface" || clientView.InstanceMembers["run"].Type.Name != "String" {
+		t.Fatalf("native interface member identity was not preserved: %#v", clientView)
 	}
 	bridge := loaded.Modules["@scope/ui"].Exports["runQuery"].Parameters[0].ResultBridge
 	if bridge == nil || bridge.Kind != "result_to_promise_rejection" || bridge.Error.Name != "String" {

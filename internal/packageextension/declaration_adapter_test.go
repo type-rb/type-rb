@@ -12,6 +12,12 @@ func TestDeclarationAdapterCatalogRoundTripsAsModeIndependentData(t *testing.T) 
 		Modules: map[string]DeclarationAdapterModule{
 			"query-library": {
 				Exports: map[string]DeclarationAdapterExport{
+					"ClientView": {
+						Kind: "interface", Type: DeclarationAdapterType{Kind: "named", Name: "ClientView"},
+						InstanceMembers: map[string]DeclarationAdapterExport{
+							"run": {Kind: "function", Type: DeclarationAdapterType{Kind: "string", Name: "String"}},
+						},
+					},
 					"Client": {
 						Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Client"},
 						InstanceMembers: map[string]DeclarationAdapterExport{
@@ -157,7 +163,9 @@ func TestDeclarationAdapterCatalogRejectsKindSpecificExportShapes(t *testing.T) 
 		{name: "function fields", exported: DeclarationAdapterExport{Kind: "function", Type: stringType, Fields: []DeclarationAdapterField{{Name: "value", Type: stringType}}}, message: "fields are only valid for records and classes"},
 		{name: "record members", exported: DeclarationAdapterExport{Kind: "record", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Members: map[string]DeclarationAdapterExport{"build": functionMember}}, message: "kind record cannot declare members"},
 		{name: "legacy class members", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Members: map[string]DeclarationAdapterExport{"build": functionMember}}, message: "kind class uses instanceMembers or classMembers"},
-		{name: "instance members on function", exported: DeclarationAdapterExport{Kind: "function", Type: stringType, InstanceMembers: map[string]DeclarationAdapterExport{"run": functionMember}}, message: "instanceMembers and classMembers are only valid for classes"},
+		{name: "legacy interface members", exported: DeclarationAdapterExport{Kind: "interface", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Members: map[string]DeclarationAdapterExport{"run": functionMember}}, message: "kind interface uses instanceMembers"},
+		{name: "instance members on function", exported: DeclarationAdapterExport{Kind: "function", Type: stringType, InstanceMembers: map[string]DeclarationAdapterExport{"run": functionMember}}, message: "instanceMembers are only valid for classes and interfaces"},
+		{name: "class members on interface", exported: DeclarationAdapterExport{Kind: "interface", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, ClassMembers: map[string]DeclarationAdapterExport{"build": functionMember}}, message: "classMembers are only valid for classes"},
 		{name: "nested instance members", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, InstanceMembers: map[string]DeclarationAdapterExport{"run": {Kind: "function", Type: stringType, InstanceMembers: map[string]DeclarationAdapterExport{"nested": functionMember}}}}, message: "cannot declare nested members"},
 		{name: "overlapping instance and class members", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, InstanceMembers: map[string]DeclarationAdapterExport{"run": functionMember}, ClassMembers: map[string]DeclarationAdapterExport{"run": functionMember}}, message: "both instance member and class member"},
 		{name: "overlapping field and member", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Fields: []DeclarationAdapterField{{Name: "run", Type: stringType}}, InstanceMembers: map[string]DeclarationAdapterExport{"run": functionMember}}, message: "both field and instance member"},
