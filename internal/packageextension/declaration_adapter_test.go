@@ -14,6 +14,7 @@ func TestDeclarationAdapterCatalogRoundTripsAsModeIndependentData(t *testing.T) 
 				Exports: map[string]DeclarationAdapterExport{
 					"ClientView": {
 						Kind: "interface", Type: DeclarationAdapterType{Kind: "named", Name: "ClientView"},
+						Fields: []DeclarationAdapterField{{Name: "ready", Type: DeclarationAdapterType{Kind: "bool", Name: "Boolean"}}},
 						InstanceMembers: map[string]DeclarationAdapterExport{
 							"run": {Kind: "function", Type: DeclarationAdapterType{Kind: "string", Name: "String"}},
 						},
@@ -160,7 +161,7 @@ func TestDeclarationAdapterCatalogRejectsKindSpecificExportShapes(t *testing.T) 
 		message  string
 	}{
 		{name: "record parameters", exported: DeclarationAdapterExport{Kind: "record", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Parameters: []DeclarationAdapterType{stringType}}, message: "kind record cannot declare call parameters"},
-		{name: "function fields", exported: DeclarationAdapterExport{Kind: "function", Type: stringType, Fields: []DeclarationAdapterField{{Name: "value", Type: stringType}}}, message: "fields are only valid for records and classes"},
+		{name: "function fields", exported: DeclarationAdapterExport{Kind: "function", Type: stringType, Fields: []DeclarationAdapterField{{Name: "value", Type: stringType}}}, message: "fields are only valid for records, classes, and interfaces"},
 		{name: "record members", exported: DeclarationAdapterExport{Kind: "record", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Members: map[string]DeclarationAdapterExport{"build": functionMember}}, message: "kind record cannot declare members"},
 		{name: "legacy class members", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Members: map[string]DeclarationAdapterExport{"build": functionMember}}, message: "kind class uses instanceMembers or classMembers"},
 		{name: "legacy interface members", exported: DeclarationAdapterExport{Kind: "interface", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Members: map[string]DeclarationAdapterExport{"run": functionMember}}, message: "kind interface uses instanceMembers"},

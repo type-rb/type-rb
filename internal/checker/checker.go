@@ -4678,6 +4678,9 @@ func (c *Checker) readonlyClassField(member *ast.MemberExpression, sc *scope) bo
 	if binding, ok := c.importedAncestorMember(receiverType.Name, member.Name, false, map[string]bool{}); ok && binding.Member != nil {
 		return binding.Member.Readonly
 	}
+	if binding, ok := c.resolution.InferredTypeMember(receiverType.Name, member.Name); ok && binding.Member != nil {
+		return binding.Member.Readonly
+	}
 	return false
 }
 
@@ -5573,7 +5576,18 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Span(), fmt.Sprintf("class %s has no %s member %s", receiverType.Name, kind, n.Name))
 			} else if imported, exists := c.resolution.ImportedType(receiverType.Name); exists {
 				c.markImportUsed(imported)
-				c.error(n.Span(), fmt.Sprintf("type %s imported from %s has no member %s", receiverType.Name, imported.Import.Path, n.Name))
+				if imported.Export != nil && imported.Export.UnsupportedFields[n.Name] != "" {
+					c.error(n.Span(), fmt.Sprintf("member %s from native type %s cannot be represented safely: %s; use a TypeRB provider for this package", n.Name, receiverType.Name, imported.Export.UnsupportedFields[n.Name]))
+				} else {
+					c.error(n.Span(), fmt.Sprintf("type %s imported from %s has no member %s", receiverType.Name, imported.Import.Path, n.Name))
+				}
+			} else if inferred, exists := c.resolution.InferredType(receiverType.Name); exists {
+				c.markImportUsed(inferred)
+				if inferred.Export != nil && inferred.Export.UnsupportedFields[n.Name] != "" {
+					c.error(n.Span(), fmt.Sprintf("member %s from native type %s cannot be represented safely: %s; use a TypeRB provider for this package", n.Name, receiverType.Name, inferred.Export.UnsupportedFields[n.Name]))
+				} else {
+					c.error(n.Span(), fmt.Sprintf("type %s imported from %s has no member %s", receiverType.Name, inferred.Import.Path, n.Name))
+				}
 			} else if declared, exists := c.declarations().Type(receiverType.Name); exists {
 				c.error(n.Span(), fmt.Sprintf("externally provided type %s has no member %s", declared.Name, n.Name))
 			} else if portableReceiverKind(receiverType.Kind) {

@@ -1,0 +1,14 @@
+{
+  "formatVersion": 1,
+  "configChecksum": "sha256:9c7aaef56046a2841962303bcda371aedf4ba266b3cd4f9f67a991a9ee745d08",
+  "imports": {
+    "type-rb/auth0-react": "github.com/type-rb/auth0-react-adapter-example"
+  },
+  "packages": {
+    "github.com/type-rb/auth0-react-adapter-example": {
+      "version": "0.1.0",
+      "path": "..",
+      "manifestChecksum": "sha256:79bc0ad05760d0f0a88fee0fb0d4e2deb134c0a7a43b13deb7cc36754cd85878"
+    }
+  }
+}
