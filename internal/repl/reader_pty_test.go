@@ -22,7 +22,6 @@ import (
 
 const replCompletionPTYChild = "TRB_REPL_COMPLETION_PTY_CHILD"
 const replScreenPTYChild = "TRB_REPL_SCREEN_PTY_CHILD"
-const replScreenPTYReady = "TRB_REPL_SCREEN_READY"
 
 func TestCompletionRemainsCommittedBeforeTrailingInput(t *testing.T) {
 	output := runCompletionPTY(t, "pu\t(1)\r")
@@ -72,6 +71,26 @@ func TestCompletedMultilineInputRemainsVisibleAfterFormatting(t *testing.T) {
 	t.Fatalf("accepted end was erased from the terminal:\n%s\nraw=%q", terminal.String(), output)
 }
 
+func TestCompletedNestedMultilineInputRetainsInteractiveIndentation(t *testing.T) {
+	output := runPTY(t, "class A\rdef abc()\rend\rend\r", true)
+	terminal := vt10x.New(vt10x.WithSize(80, 24))
+	if _, err := terminal.Write(output); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(terminal.String(), "\n")
+	want := []string{
+		"trb:go> class A",
+		"          def abc()",
+		"          end",
+		"        end",
+	}
+	for index, expected := range want {
+		if actual := strings.TrimRight(lines[index], " "); actual != expected {
+			t.Fatalf("rendered line %d=%q, want %q:\n%s\nraw=%q", index+1, actual, expected, terminal.String(), output)
+		}
+	}
+}
+
 func runCompletionPTY(t *testing.T, input string) []byte {
 	return runPTY(t, input, false)
 }
@@ -94,7 +113,7 @@ func runPTY(t *testing.T, input string, screenOnly bool) []byte {
 
 	var output []byte
 	if screenOnly {
-		output = readPTYUntil(t, terminal, []byte(replScreenPTYReady))
+		output = readPTYUntil(t, terminal, []byte("trb:go> "))
 	}
 	if _, err := terminal.Write([]byte(input)); err != nil {
 		t.Fatal(err)
@@ -144,13 +163,8 @@ func TestCompletionPTYChild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if os.Getenv(replScreenPTYChild) == "1" {
-		terminal.Prompt.Primary(func() string {
-			return "\x1b]0;" + replScreenPTYReady + "\x07" + colorTitle + "trb:go> " + colorReset
-		})
-	}
-
-	line, err := terminal.Readline()
+	reader := &terminalSubmissionReader{terminal: terminal}
+	line, err := reader.Read()
 	if err != nil {
 		t.Fatal(err)
 	}

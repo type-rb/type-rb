@@ -94,7 +94,7 @@ func newTerminalReader(options Options, history []string) (*readline.Shell, erro
 		}
 	}
 	for _, entry := range history {
-		if _, err := terminal.History.Current().Write(entry); err != nil {
+		if _, err := terminal.History.Current().Write(interactiveDisplayInput(entry)); err != nil {
 			return nil, err
 		}
 	}
@@ -134,14 +134,26 @@ func configureInteractiveFormatting(terminal *readline.Shell) error {
 
 func formatCompleteInput(terminal *readline.Shell) bool {
 	source := string(*terminal.Line())
-	formatted, diagnostics := formatter.Format([]byte(source))
-	if len(diagnostics) > 0 {
+	canonical, ok := canonicalInput(source)
+	if !ok {
 		return false
 	}
-	line := []rune(strings.TrimSuffix(string(formatted), "\n"))
+	line := []rune(interactiveDisplayInput(canonical))
 	terminal.Line().Set(line...)
 	terminal.Cursor().Set(len(line))
 	return string(line) != source
+}
+
+func canonicalInput(source string) (string, bool) {
+	formatted, diagnostics := formatter.Format([]byte(source))
+	if len(diagnostics) > 0 {
+		return source, false
+	}
+	return strings.TrimSuffix(string(formatted), "\n"), true
+}
+
+func interactiveDisplayInput(source string) string {
+	return string(formatter.ReindentPartialWithIndentation([]byte(source), interactiveIndentation))
 }
 
 func reindentOpenInput(terminal *readline.Shell) {
@@ -217,6 +229,11 @@ func (r *terminalSubmissionReader) Read() (string, error) {
 	case errors.Is(err, readline.ErrInterrupt):
 		return "", errInputInterrupted
 	default:
+		if err == nil {
+			if canonical, ok := canonicalInput(input); ok {
+				input = canonical
+			}
+		}
 		return input, err
 	}
 }
@@ -227,6 +244,9 @@ func (r *terminalSubmissionReader) Close() error {
 		entry, err := r.terminal.History.Current().GetLine(index)
 		if err != nil {
 			return err
+		}
+		if canonical, ok := canonicalInput(entry); ok {
+			entry = canonical
 		}
 		history = append(history, entry)
 	}
