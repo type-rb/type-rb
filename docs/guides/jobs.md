@@ -133,6 +133,8 @@ JOBS_ADAPTER: JobAdapter := SQLAdapter.new(
 When `source_environment` is present, its environment variable is required at
 runtime and replaces `source`. A missing or empty value fails startup instead
 of silently connecting to another database.
+MySQL source URLs use the same authentication and TLS options documented in
+the [database schema guide](database.md).
 The configuration module is also the native dependency boundary: application
 Job source imports only `trb/jobs`, while an adapter package owns its target
 drivers and worker implementation.

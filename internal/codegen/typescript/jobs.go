@@ -133,10 +133,13 @@ func (g *generator) jobsStorage(config jobssql.Config) {
 	g.line("const trbJobsConfiguredDatabase = " + strconv.Quote(config.Source) + ";")
 	g.line("let trbJobsDatabase: SQL | null = null;")
 	g.line("let trbJobsSchema: Promise<void> | null = null;")
+	for _, line := range strings.Split(strings.TrimSpace(typeScriptSQLConnectionRuntime), "\n") {
+		g.line(line)
+	}
 	if config.SourceEnvironment == "" {
-		g.line("function trbJobsDB(): SQL { if (trbJobsDatabase !== null) return trbJobsDatabase; const source = trbJobsConfiguredDatabase; trbJobsDatabase = trbJobsAdapter === \"sqlite\" ? new SQL({ adapter: \"sqlite\", filename: source }) : new SQL(source); return trbJobsDatabase; }")
+		g.line("function trbJobsDB(): SQL { if (trbJobsDatabase !== null) return trbJobsDatabase; const source = trbJobsConfiguredDatabase; trbJobsDatabase = __trbOpenSQL(trbJobsAdapter, source); return trbJobsDatabase; }")
 	} else {
-		g.line("function trbJobsDB(): SQL { if (trbJobsDatabase !== null) return trbJobsDatabase; const source = process.env[" + strconv.Quote(config.SourceEnvironment) + "]; if (source === undefined || source.trim() === \"\") throw new Error(" + strconv.Quote("jobs database environment "+config.SourceEnvironment+" is not set or empty") + "); trbJobsDatabase = trbJobsAdapter === \"sqlite\" ? new SQL({ adapter: \"sqlite\", filename: source }) : new SQL(source); return trbJobsDatabase; }")
+		g.line("function trbJobsDB(): SQL { if (trbJobsDatabase !== null) return trbJobsDatabase; const source = process.env[" + strconv.Quote(config.SourceEnvironment) + "]; if (source === undefined || source.trim() === \"\") throw new Error(" + strconv.Quote("jobs database environment "+config.SourceEnvironment+" is not set or empty") + "); trbJobsDatabase = __trbOpenSQL(trbJobsAdapter, source); return trbJobsDatabase; }")
 	}
 	g.line("async function trbJobsEnsureSchema(): Promise<void> { if (trbJobsSchema !== null) return trbJobsSchema; trbJobsSchema = (async () => {")
 	g.indent++

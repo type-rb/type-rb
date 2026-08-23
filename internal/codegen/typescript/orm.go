@@ -30,6 +30,9 @@ func (g *generator) ormCoreRuntime(manifest *ormintegration.Manifest) {
 	g.line("const __trbOrmAdapter: TrbOrmAdapter = " + adapter + ";")
 	g.line("const __trbOrmConfiguredDatabase: string = " + database + ";")
 	g.line("const __trbOrmDatabaseEnvironment: string = " + environment + ";")
+	for _, line := range strings.Split(strings.TrimSpace(typeScriptSQLConnectionRuntime), "\n") {
+		g.line(line)
+	}
 	for _, line := range strings.Split(strings.TrimSpace(typescriptORMRuntime), "\n") {
 		g.line(line)
 	}
@@ -599,16 +602,16 @@ function configuredDatabase(): string {
   const value = __trbOrmDatabaseEnvironment === "" ? "" : (environment?.[__trbOrmDatabaseEnvironment] ?? "");
   const configured = value === "" ? __trbOrmConfiguredDatabase : value;
   if (__trbOrmAdapter !== "mysql" || configured.startsWith("mysql://")) return configured;
-  const match = configured.match(/^([^:@]+)(?::([^@]*))?@tcp\(([^)]+)\)\/([^?]+)(?:\?.*)?$/);
+  const match = configured.match(/^([^:@]+)(?::([^@]*))?@tcp\(([^)]+)\)\/([^?]+)(\?.*)?$/);
   if (match === null) return configured;
   const credentials = encodeURIComponent(match[1]!) + (match[2] === undefined ? "" : ":" + encodeURIComponent(match[2]));
-  return "mysql://" + credentials + "@" + match[3] + "/" + match[4];
+  return "mysql://" + credentials + "@" + match[3] + "/" + match[4] + (match[5] ?? "");
 }
 function database(): SQL {
   if (__trbOrmDatabase !== null) return __trbOrmDatabase;
   const value = configuredDatabase();
   if (value === "") throw new Error("database configuration is empty");
-  __trbOrmDatabase = __trbOrmAdapter === "sqlite" ? new SQL({ adapter: "sqlite", filename: value }) : new SQL(value);
+  __trbOrmDatabase = __trbOpenSQL(__trbOrmAdapter, value);
   return __trbOrmDatabase;
 }
 function model(name: string): TrbOrmModel {
