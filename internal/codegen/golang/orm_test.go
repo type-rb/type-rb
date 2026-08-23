@@ -28,7 +28,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 		},
 		{
 			adapter: "mysql",
-			driver:  `_ "github.com/go-sql-driver/mysql"`,
+			driver:  `trbmysql "github.com/go-sql-driver/mysql"`,
 			want: []string{
 				`return "?"`, `mark := "` + "`" + `"`,
 				`column := trbOrmQuoteIdentifier(condition.column)`,
@@ -126,7 +126,12 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				t.Fatalf("generated invalid %s ORM pool Go: %v\n%s", test.adapter, err, pool)
 			}
 			if test.adapter == "mysql" {
-				for _, want := range []string{`"net/url"`, `strings.HasPrefix(trbOrmSource, "mysql://")`, `url.Parse(trbOrmSource)`} {
+				for _, want := range []string{
+					`"net/url"`, `strings.HasPrefix(trbOrmSource, "mysql://")`, `url.Parse(trbOrmSource)`,
+					`trbmysql.ParseDSN(trbOrmSource)`, `trbMySQLConfig.Params["allowPublicKeyRetrieval"]`,
+					`delete(trbMySQLConfig.Params, "allowPublicKeyRetrieval")`, `trbOrmSource = trbMySQLConfig.FormatDSN()`,
+					`errors.New("MySQL allowPublicKeyRetrieval must be true or false")`,
+				} {
 					if !strings.Contains(pool, want) {
 						t.Fatalf("generated MySQL ORM pool is missing %q:\n%s", want, pool)
 					}

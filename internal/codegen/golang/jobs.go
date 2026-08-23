@@ -119,8 +119,6 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 		g.requireImport("modernc.org/sqlite", "_")
 	case "postgresql":
 		g.requireImport("github.com/jackc/pgx/v5/stdlib", "_")
-	case "mysql":
-		g.requireImport("github.com/go-sql-driver/mysql", "_")
 	}
 
 	g.line("type TrbJobsClaim struct {")
@@ -164,7 +162,7 @@ func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 		g.line("if !sourceExists || strings.TrimSpace(source) == \"\" { trbJobsDatabaseError = errors.New(" + strconv.Quote("jobs database environment "+config.SourceEnvironment+" is not set or empty") + "); return }")
 	}
 	if config.Dialect == "mysql" {
-		g.line("if strings.HasPrefix(source, \"mysql://\") { parsed, err := url.Parse(source); if err != nil { trbJobsDatabaseError = err; return }; credentials := parsed.User.Username(); if password, exists := parsed.User.Password(); exists { credentials += \":\" + password }; source = credentials + \"@tcp(\" + parsed.Host + \")\" + parsed.Path; if parsed.RawQuery != \"\" { source += \"?\" + parsed.RawQuery } }")
+		g.normalizeMySQLSource("source", "trbJobsDatabaseError")
 	}
 	g.line("trbJobsDatabase, trbJobsDatabaseError = sql.Open(" + strconv.Quote(goJobsDriver(config.Dialect)) + ", source)")
 	g.line("if trbJobsDatabaseError != nil { return }")

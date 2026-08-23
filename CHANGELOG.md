@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.21 - 2026-08-23
+
+### Go backend
+
+- Go ORM and SQL Jobs runtimes validate and remove Bun's
+  `allowPublicKeyRetrieval` URL parameter before opening a MySQL DSN. Projects
+  can now share the same explicit local-development MySQL URL across Go, Ruby,
+  and TypeScript modes without the Go driver forwarding the unknown parameter
+  as a server system variable.
+
 ## 0.3.20 - 2026-08-23
 
 ### TypeScript backend
