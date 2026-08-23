@@ -179,7 +179,11 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   `Array<ProductId>`, but the representation must not itself be nullable.
   Generic newtype declarations such as `newtype Id<T> = T` are not supported.
 - Construction is explicit with `Name.new(value)`, and `value()` returns the
-  representation. No other representation members are forwarded. Ordinary
+  representation. After ordinary argument type checking, `new()` is
+  infallible and performs no user-defined domain validation. Newtype
+  declarations cannot currently define custom members or replace these
+  generated methods; fallible invariant checks use ordinary Result-returning
+  functions. No other representation members are forwarded. Ordinary
   parameters, returns, assignments, collection elements, and record fields do
   not implicitly convert between a newtype, its representation, or a different
   newtype with the same representation.
