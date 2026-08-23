@@ -14,7 +14,14 @@ import (
 type SuspensionPlan = effectplan.Plan
 
 func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
-	plan := effectplan.Analyze(programs, effectplan.Options{Intrinsic: isSuspendingIntrinsic, WebNext: true, PassToFunctions: true})
+	plan := effectplan.Analyze(programs, effectplan.Options{
+		Intrinsic: isSuspendingIntrinsic,
+		Conversion: func(kind ir.ConversionKind) bool {
+			return kind == ir.PromiseRejectionToResultConversion
+		},
+		WebNext:         true,
+		PassToFunctions: true,
+	})
 	standardResults := make(map[string]bool, len(programs))
 	for _, program := range programs {
 		standardResults[program.ModulePath] = standardResultAvailable(program)

@@ -592,8 +592,16 @@ func TestCompileTypeScriptAuth0ReactAdapterExample(t *testing.T) {
 		}
 	}
 	for _, expected := range []string{
+		`import { Result } from "./trb/std/result/index.ts";`,
+		`import type { Unit } from "./trb/std/unit/index.ts";`,
 		`import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";`,
-		`import type { AuthorizationParams, Auth0ContextInterface } from "@auth0/auth0-react";`,
+		`import type { Auth0ContextInterface, AuthorizationParams } from "@auth0/auth0-react";`,
+		`export async function access_token(auth: Auth0ContextInterface): Promise<Result<string, string>>`,
+		`const __trbPromise: Promise<string> = auth.getAccessTokenSilently(); const __trbValue: string = await __trbPromise`,
+		`export async function login(auth: Auth0ContextInterface): Promise<Result<Unit, string>>`,
+		`const __trbPromise: Promise<void> = auth.loginWithRedirect(); await __trbPromise; const __trbValue: Unit = ({} satisfies Unit)`,
+		`const __trbPromise: Promise<void> = auth.logout(); await __trbPromise; const __trbValue: Unit = ({} satisfies Unit)`,
+		`__trbError instanceof Error ? __trbError.message : String(__trbError)`,
 		`const auth: Auth0ContextInterface = useAuth0();`,
 		`auth.isLoading`,
 		`auth.isAuthenticated`,
@@ -604,10 +612,10 @@ func TestCompileTypeScriptAuth0ReactAdapterExample(t *testing.T) {
 		}
 	}
 
-	invalid := []byte("import { useAuth0 } from \"@auth0/auth0-react\"\nauth := useAuth0()\nauth.getAccessTokenSilently()\n")
+	invalid := []byte("import { useAuth0 } from \"@auth0/auth0-react\"\nauth := useAuth0()\nputs(auth.user)\n")
 	_, err = CompileWithOptions("invalid.trb", invalid, Options{Mode: "typescript", NativePackages: auth0ReactAdapterCatalog(t)})
-	if err == nil || !strings.Contains(err.Error(), "native Promise rejection cannot yet be converted into a checked TypeRB Result") {
-		t.Fatalf("expected unsupported native Promise diagnostic, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "the complete Auth0 User shape is outside this adapter's state-only projection") {
+		t.Fatalf("expected unsupported Auth0 user diagnostic, got %v", err)
 	}
 }
 
@@ -1077,6 +1085,135 @@ end
 	lines := strings.Fields(string(output))
 	if strings.Join(lines, "\n") != "resolved:7\nrejected:boom" {
 		t.Fatalf("unexpected native Result bridge output:\n%s", output)
+	}
+}
+
+func TestGeneratedTypeScriptPromiseRejectionBridgeReturnsCheckedResults(t *testing.T) {
+	if _, err := exec.LookPath("bun"); err != nil {
+		t.Skip("bun is not installed")
+	}
+	integerType := nativepackage.Type{Kind: "int", Name: "Integer"}
+	stringType := nativepackage.Type{Kind: "string", Name: "String"}
+	unitType := nativepackage.Type{Kind: "named", Name: "Unit"}
+	tValue := nativepackage.Type{Kind: "named", Name: "TValue"}
+	bridge := &nativepackage.ResultBridge{Kind: "promise_rejection_to_result", Error: stringType}
+	result := func(success nativepackage.Type) nativepackage.Type {
+		return nativepackage.Type{Kind: "named", Name: "Result", Args: []nativepackage.Type{success, stringType}}
+	}
+	catalog := &nativepackage.Catalog{
+		FormatVersion: nativepackage.FormatVersion,
+		Dependencies:  map[string]string{"promise-library": "1.0.0"},
+		Modules: map[string]nativepackage.Module{
+			"promise-library": {Exports: map[string]nativepackage.Export{
+				"resolveValue": {Kind: "function", Type: result(integerType), ResultBridge: bridge},
+				"rejectError":  {Kind: "function", Type: result(integerType), ResultBridge: bridge},
+				"rejectText":   {Kind: "function", Type: result(integerType), ResultBridge: bridge},
+				"rejectOpaque": {Kind: "function", Type: result(integerType), ResultBridge: bridge},
+				"throwSync":    {Kind: "function", Type: result(integerType), ResultBridge: bridge},
+				"resolveVoid":  {Kind: "function", Type: result(unitType), ResultBridge: bridge},
+				"resolveIdentity": {
+					Kind: "function", Type: result(tValue), Parameters: []nativepackage.Type{tValue}, Required: 1,
+					TypeParameters: []string{"TValue"}, ResultBridge: bridge,
+				},
+			}},
+		},
+	}
+	source := []byte(`import { Result } from trb/std/result
+import { Unit } from trb/std/unit
+import { rejectError, rejectOpaque, rejectText, resolveIdentity, resolveValue, resolveVoid, throwSync } from promise-library
+
+def print_integer(result: Result<Integer, String>)
+	case result
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error)
+	end
+end
+
+def print_unit(result: Result<Unit, String>)
+	case result
+	when Result::Ok(_value)
+		puts("unit")
+	when Result::Err(error)
+		puts(error)
+	end
+end
+
+def incremented(): Result<Integer, String>
+	value := try resolveIdentity<Integer>(9)
+	return Result<Integer, String>::Ok(value + 1)
+end
+
+def recovered(): Integer
+	value := rejectError() catch |_error|
+		11
+	end
+	return value
+end
+
+def main()
+	print_integer(resolveValue())
+	print_integer(incremented())
+	puts(recovered())
+	print_integer(rejectError())
+	print_integer(rejectText())
+	print_integer(rejectOpaque())
+	print_integer(throwSync())
+	print_unit(resolveVoid())
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "bun", NativePackages: catalog,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	var generated string
+	for _, artifact := range artifacts {
+		if artifact.IR.ModulePath == "main" {
+			generated = string(artifact.Output)
+		}
+		path := filepath.Join(root, filepath.FromSlash(artifact.IR.ModulePath+".ts"))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, artifact.Output, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, expected := range []string{"const __trbPromise: Promise<number>", "const __trbPromise: Promise<void>", "export async function incremented", "export async function recovered"} {
+		if !strings.Contains(generated, expected) {
+			t.Fatalf("generated Promise rejection bridge output is missing %q:\n%s", expected, generated)
+		}
+	}
+	moduleRoot := filepath.Join(root, "node_modules", "promise-library")
+	if err := os.MkdirAll(moduleRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stub := `export async function resolveValue(): Promise<number> { return 7; }
+export async function resolveIdentity<T>(value: T): Promise<T> { return value; }
+export async function rejectError(): Promise<number> { throw new Error("boom"); }
+export async function rejectText(): Promise<number> { throw "plain"; }
+export async function rejectOpaque(): Promise<number> { throw Object.create(null); }
+export function throwSync(): Promise<number> { throw new Error("sync"); }
+export async function resolveVoid(): Promise<void> {}
+`
+	if err := os.WriteFile(filepath.Join(moduleRoot, "index.ts"), []byte(stub), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleRoot, "package.json"), []byte(`{"name":"promise-library","type":"module","exports":"./index.ts"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("bun", "run", "main.ts")
+	command.Dir = root
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated TypeScript failed: %v\n%s", err, output)
+	}
+	if lines := strings.TrimSpace(string(output)); lines != "7\n10\n11\nboom\nplain\nUnknown native rejection\nsync\nunit" {
+		t.Fatalf("unexpected Promise rejection bridge output:\n%s", output)
 	}
 }
 

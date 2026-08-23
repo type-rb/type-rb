@@ -73,6 +73,7 @@ type functionBindingKey struct {
 // Options chooses effect roots while retaining one call-graph model.
 type Options struct {
 	Intrinsic       func(string) bool
+	Conversion      func(ir.ConversionKind) bool
 	WebNext         bool
 	CaptureLambdas  bool
 	PassToFunctions bool
@@ -337,6 +338,9 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		suspends = a.expressionReaches(node.Operand, context, record)
 	case *ir.Conversion:
 		suspends = a.expressionReaches(node.Value, context, record)
+		if a.options.Conversion != nil && a.options.Conversion(node.Kind) {
+			suspends = true
+		}
 	case *ir.Binary:
 		suspends = a.expressionReaches(node.Left, context, record)
 		suspends = a.expressionReaches(node.Right, context, record) || suspends

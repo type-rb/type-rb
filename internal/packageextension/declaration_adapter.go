@@ -35,6 +35,7 @@ type DeclarationAdapterExport struct {
 	Members           map[string]DeclarationAdapterExport `json:"members,omitempty"`
 	InstanceMembers   map[string]DeclarationAdapterExport `json:"instanceMembers,omitempty"`
 	ClassMembers      map[string]DeclarationAdapterExport `json:"classMembers,omitempty"`
+	ResultBridge      *DeclarationAdapterResultBridge     `json:"resultBridge,omitempty"`
 	UnsupportedFields map[string]string                   `json:"unsupportedFields,omitempty"`
 }
 
@@ -45,8 +46,9 @@ type DeclarationAdapterField struct {
 }
 
 // DeclarationAdapterType is a backend-independent semantic TypeRB type. A
-// result bridge is adapter metadata on a function boundary rather than a
-// second TypeRB failure model.
+// nested result bridge applies to a callback function; a bridge on
+// DeclarationAdapterExport applies to the native call itself. Both remain
+// boundary metadata rather than a second TypeRB failure model.
 type DeclarationAdapterType struct {
 	Kind         string                          `json:"kind"`
 	Name         string                          `json:"name,omitempty"`
@@ -114,6 +116,14 @@ func validateDeclarationAdapterExport(moduleName, category, name string, exporte
 	}
 	if err := validateDeclarationAdapterType(exported.Type); err != nil {
 		return fmt.Errorf("declaration adapter %s %s from %s: %w", category, name, moduleName, err)
+	}
+	if exported.ResultBridge != nil {
+		if exported.Kind != "function" {
+			return fmt.Errorf("declaration adapter %s %s from %s: resultBridge is only valid on functions", category, name, moduleName)
+		}
+		if err := validateDeclarationAdapterResultBridge(*exported.ResultBridge); err != nil {
+			return fmt.Errorf("declaration adapter %s %s from %s: %w", category, name, moduleName, err)
+		}
 	}
 	if exported.Kind == "type_alias" {
 		if exported.AliasTarget == nil || exported.AliasTarget.Kind == "" {
@@ -316,20 +326,27 @@ func validateDeclarationAdapterType(typ DeclarationAdapterType) error {
 		if len(typ.Arguments) == 0 {
 			return fmt.Errorf("resultBridge requires a function return type")
 		}
-		if strings.TrimSpace(typ.ResultBridge.Kind) == "" {
-			return fmt.Errorf("resultBridge kind is required")
-		}
-		if typ.ResultBridge.Error.Kind == "" {
-			return fmt.Errorf("resultBridge error is required")
-		}
-		if err := validateDeclarationAdapterType(typ.ResultBridge.Error); err != nil {
-			return fmt.Errorf("invalid resultBridge error type: %w", err)
+		if err := validateDeclarationAdapterResultBridge(*typ.ResultBridge); err != nil {
+			return err
 		}
 	}
 	for _, argument := range typ.Arguments {
 		if err := validateDeclarationAdapterType(argument); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateDeclarationAdapterResultBridge(bridge DeclarationAdapterResultBridge) error {
+	if strings.TrimSpace(bridge.Kind) == "" {
+		return fmt.Errorf("resultBridge kind is required")
+	}
+	if bridge.Error.Kind == "" {
+		return fmt.Errorf("resultBridge error is required")
+	}
+	if err := validateDeclarationAdapterType(bridge.Error); err != nil {
+		return fmt.Errorf("invalid resultBridge error type: %w", err)
 	}
 	return nil
 }

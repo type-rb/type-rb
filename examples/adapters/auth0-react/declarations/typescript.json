@@ -25,11 +25,82 @@
               }
             }
           ],
+          "instanceMembers": {
+            "getAccessTokenSilently": {
+              "kind": "function",
+              "type": {
+                "kind": "named",
+                "name": "Result",
+                "arguments": [
+                  {
+                    "kind": "string",
+                    "name": "String"
+                  },
+                  {
+                    "kind": "string",
+                    "name": "String"
+                  }
+                ]
+              },
+              "resultBridge": {
+                "kind": "promise_rejection_to_result",
+                "error": {
+                  "kind": "string",
+                  "name": "String"
+                }
+              }
+            },
+            "loginWithRedirect": {
+              "kind": "function",
+              "type": {
+                "kind": "named",
+                "name": "Result",
+                "arguments": [
+                  {
+                    "kind": "named",
+                    "name": "Unit"
+                  },
+                  {
+                    "kind": "string",
+                    "name": "String"
+                  }
+                ]
+              },
+              "resultBridge": {
+                "kind": "promise_rejection_to_result",
+                "error": {
+                  "kind": "string",
+                  "name": "String"
+                }
+              }
+            },
+            "logout": {
+              "kind": "function",
+              "type": {
+                "kind": "named",
+                "name": "Result",
+                "arguments": [
+                  {
+                    "kind": "named",
+                    "name": "Unit"
+                  },
+                  {
+                    "kind": "string",
+                    "name": "String"
+                  }
+                ]
+              },
+              "resultBridge": {
+                "kind": "promise_rejection_to_result",
+                "error": {
+                  "kind": "string",
+                  "name": "String"
+                }
+              }
+            }
+          },
           "unsupportedFields": {
             "error": "the native Error value requires an explicit portable error projection",
-            "getAccessTokenSilently": "native Promise rejection cannot yet be converted into a checked TypeRB Result",
-            "loginWithRedirect": "native Promise rejection cannot yet be converted into a checked TypeRB Result",
-            "logout": "native Promise rejection cannot yet be converted into a checked TypeRB Result",
             "user": "the complete Auth0 User shape is outside this adapter's state-only projection"
           }
         },

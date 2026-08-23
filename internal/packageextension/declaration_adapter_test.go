@@ -12,6 +12,13 @@ func TestDeclarationAdapterCatalogRoundTripsAsModeIndependentData(t *testing.T) 
 		Modules: map[string]DeclarationAdapterModule{
 			"query-library": {
 				Exports: map[string]DeclarationAdapterExport{
+					"loadToken": {
+						Kind: "function",
+						Type: DeclarationAdapterType{Kind: "named", Name: "Result", Arguments: []DeclarationAdapterType{
+							{Kind: "string", Name: "String"}, {Kind: "string", Name: "String"},
+						}},
+						ResultBridge: &DeclarationAdapterResultBridge{Kind: "promise_rejection_to_result", Error: DeclarationAdapterType{Kind: "string", Name: "String"}},
+					},
 					"ClientView": {
 						Kind: "interface", Type: DeclarationAdapterType{Kind: "named", Name: "ClientView"},
 						Fields: []DeclarationAdapterField{{Name: "ready", Type: DeclarationAdapterType{Kind: "bool", Name: "Boolean"}}},
@@ -94,6 +101,11 @@ func TestDeclarationAdapterCatalogRejectsInvalidBoundaryData(t *testing.T) {
 			exported.Type.ResultBridge = &DeclarationAdapterResultBridge{Kind: "native_failure", Error: DeclarationAdapterType{Kind: "string", Name: "String"}}
 			catalog.Modules["library"].Exports["run"] = exported
 		}, message: "only valid on function types"},
+		{name: "call bridge shape", mutate: func(catalog *DeclarationAdapterCatalog) {
+			exported := catalog.Modules["library"].Exports["run"]
+			exported.ResultBridge = &DeclarationAdapterResultBridge{Kind: "", Error: DeclarationAdapterType{Kind: "string", Name: "String"}}
+			catalog.Modules["library"].Exports["run"] = exported
+		}, message: "resultBridge kind is required"},
 		{name: "export record overlap", mutate: func(catalog *DeclarationAdapterCatalog) {
 			module := catalog.Modules["library"]
 			module.Records = map[string]DeclarationAdapterExport{"run": {Kind: "record", Type: DeclarationAdapterType{Kind: "named", Name: "Run"}}}
@@ -175,6 +187,7 @@ func TestDeclarationAdapterCatalogRejectsKindSpecificExportShapes(t *testing.T) 
 		{name: "component type parameters", exported: DeclarationAdapterExport{Kind: "component", Type: DeclarationAdapterType{Kind: "named", Name: "ReactNode"}, TypeParameters: []string{"T"}}, message: "component cannot declare type parameters"},
 		{name: "required variadic", exported: DeclarationAdapterExport{Kind: "function", Type: stringType, Parameters: []DeclarationAdapterType{stringType}, Required: 1, Variadic: true}, message: "variadic parameter cannot be required"},
 		{name: "class self type", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Other"}}, message: "kind class requires a named self type"},
+		{name: "call bridge on interface", exported: DeclarationAdapterExport{Kind: "interface", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, ResultBridge: &DeclarationAdapterResultBridge{Kind: "promise_rejection_to_result", Error: stringType}}, message: "resultBridge is only valid on functions"},
 		{name: "type alias self type", exported: DeclarationAdapterExport{Kind: "type_alias", Type: DeclarationAdapterType{Kind: "named", Name: "Other"}, AliasTarget: &stringType}, message: "kind type_alias requires a named self type"},
 	}
 	for _, test := range tests {

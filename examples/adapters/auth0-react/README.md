@@ -2,7 +2,8 @@
 
 This adapter-only package is a dogfood fixture, not a published compatibility
 package. It projects the small `@auth0/auth0-react` surface needed to configure
-`Auth0Provider` and read loading and authentication state from `useAuth0()`.
+`Auth0Provider`, read loading and authentication state from `useAuth0()`, and
+invoke the no-argument token, login, and logout operations.
 
 The native dependency is pinned to `@auth0/auth0-react` 2.21.0. Revalidate the
 adapter and its generated TypeScript before changing that version.
@@ -13,12 +14,12 @@ native properties without becoming constructible. The state projection uses
 are deliberately absent rather than becoming `Any`.
 
 Auth0's token, login, and logout methods return Promises that may reject. The
-current `result_to_promise_rejection` bridge covers the opposite direction: a
-TypeRB Result-returning callback supplied to a native package. This adapter
-therefore reports those methods as unsupported instead of declaring them as
-infallible or discarding their Promises. A later runtime-bridge slice must
-define Promise rejection mapping, checked Result construction, and suspension
-metadata together.
+`promise_rejection_to_result` call bridge exposes their no-argument forms as
+checked `Result` values and marks their callers as backend-suspending. A
+resolved Promise becomes `Ok`; an `Error` rejection becomes its message and
+any other rejection is converted with `String(...)` before becoming
+`Err<String>`. A failed String conversion uses `"Unknown native rejection"`.
+Rich native error projections remain outside this first bridge.
 
 Install the conformance project's locked dependencies once from the TypeRB
 checkout:

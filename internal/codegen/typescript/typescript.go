@@ -1240,6 +1240,8 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.iterableExpr(n.Value)
 		case ir.ResultFunctionToPromiseRejectionConversion:
 			return g.resultFunctionToPromiseRejection(n)
+		case ir.PromiseRejectionToResultConversion:
+			return g.promiseRejectionToResult(n)
 		case ir.IntegerToFloatConversion:
 			return "Number(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
@@ -1439,6 +1441,32 @@ func (g *generator) resultFunctionToPromiseRejection(conversion *ir.Conversion) 
 	return "((__trbCallback: " + callbackType + ") => async (" + strings.Join(parts, ", ") +
 		"): Promise<" + returned + "> => { const __trbResult = await __trbCallback(" + strings.Join(arguments, ", ") +
 		"); if (__trbResult.kind === \"Err\") { throw __trbResult.error; } " + returnValue + " })(" + g.expr(conversion.Value) + ")"
+}
+
+func (g *generator) promiseRejectionToResult(conversion *ir.Conversion) string {
+	resultType := conversion.ExprType()
+	if resultType.Name != "Result" || len(resultType.Args) != 2 {
+		return g.expr(conversion.Value)
+	}
+	success := resultType.Args[0]
+	failure := resultType.Args[1]
+	successType := g.tsType(success)
+	failureType := g.tsType(failure)
+	nativeCall := g.expr(conversion.Value)
+	nativeSuccessType := successType
+	if success.Name == "Unit" && !success.Nullable {
+		nativeSuccessType = "void"
+	}
+	value := "const __trbPromise: Promise<" + nativeSuccessType + "> = " + nativeCall + "; const __trbValue: " + successType + " = await __trbPromise;"
+	if success.Name == "Unit" && !success.Nullable {
+		value = "const __trbPromise: Promise<void> = " + nativeCall + "; await __trbPromise; const __trbValue: " + successType + " = ({} satisfies " + successType + ");"
+	}
+	result := g.runtimeName("Result")
+	return "(await (async (): Promise<" + g.tsType(resultType) + "> => { try { " + value +
+		" return " + result + ".Ok<" + successType + ", " + failureType + ">(__trbValue); } catch (__trbError) { " +
+		"let __trbFailure: " + failureType + "; try { __trbFailure = __trbError instanceof Error ? __trbError.message : String(__trbError); } " +
+		"catch { __trbFailure = \"Unknown native rejection\"; } " +
+		"return " + result + ".Err<" + successType + ", " + failureType + ">(__trbFailure); } })())"
 }
 
 func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {

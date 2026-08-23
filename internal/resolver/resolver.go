@@ -52,6 +52,7 @@ type Export struct {
 	Type                   types.Type
 	Parameters             []types.Type
 	ParameterResultBridges []NativeResultBridge
+	CallResultBridge       NativeCallResultBridge
 	Required               int
 	Variadic               bool
 	Members                map[string]Member
@@ -89,6 +90,14 @@ type NativeResultBridge struct {
 	Error types.Type
 }
 
+// NativeCallResultBridge converts one native call's Promise settlement into a
+// checked TypeRB Result. Unlike NativeResultBridge, it applies to the callee's
+// return boundary rather than to a callback parameter.
+type NativeCallResultBridge struct {
+	Kind  string
+	Error types.Type
+}
+
 type EnumVariant struct {
 	Name     string
 	Fields   []RecordField
@@ -107,6 +116,7 @@ type Member struct {
 	Readonly          bool
 	EnumOwner         string
 	Generated         string
+	CallResultBridge  NativeCallResultBridge
 	UnsupportedFields map[string]string
 }
 
@@ -798,6 +808,9 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 		UnsupportedFields: cloneStrings(exported.UnsupportedFields),
 		NativeExported:    nativeExported,
 	}
+	if exported.ResultBridge != nil {
+		result.CallResultBridge = NativeCallResultBridge{Kind: exported.ResultBridge.Kind, Error: exported.ResultBridge.Error.Semantic()}
+	}
 	if exported.AliasTarget != nil {
 		result.AliasTarget = exported.AliasTarget.Semantic()
 	}
@@ -823,6 +836,7 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 				Required:          memberExport.Required,
 				Variadic:          memberExport.Variadic,
 				Class:             class,
+				CallResultBridge:  memberExport.CallResultBridge,
 				UnsupportedFields: cloneStrings(memberExport.UnsupportedFields),
 			}
 		}

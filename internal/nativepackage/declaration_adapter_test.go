@@ -123,6 +123,70 @@ func TestApplyDeclarationAdapterFilesPreservesGenericResultBridge(t *testing.T) 
 	}
 }
 
+func TestApplyDeclarationAdapterFilesPreservesPromiseRejectionResultBridge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "declarations.json")
+	stringType := adapterType("string", "String")
+	resultType := packageextension.DeclarationAdapterType{Kind: "named", Name: "Result", Arguments: []packageextension.DeclarationAdapterType{stringType, stringType}}
+	writeDeclarationAdapterFixture(t, path, packageextension.DeclarationAdapterCatalog{
+		ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
+		Modules: map[string]packageextension.DeclarationAdapterModule{
+			"auth-library": {Exports: map[string]packageextension.DeclarationAdapterExport{
+				"loadToken": {
+					Kind: "function", Type: resultType,
+					ResultBridge: &packageextension.DeclarationAdapterResultBridge{Kind: "promise_rejection_to_result", Error: stringType},
+				},
+			}},
+		},
+	})
+	catalog := Empty(map[string]string{"auth-library": "1.0.0"})
+	if err := ApplyDeclarationAdapterFiles(catalog, []declarationadapterhost.Source{{
+		Package: "auth-types", Mode: "typescript", Path: path, Dependencies: map[string]string{"auth-library": "1.0.0"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	bridge := catalog.Modules["auth-library"].Exports["loadToken"].ResultBridge
+	if bridge == nil || bridge.Kind != "promise_rejection_to_result" || bridge.Error.Name != "String" {
+		t.Fatalf("Promise rejection Result bridge was not retained: %#v", bridge)
+	}
+}
+
+func TestApplyDeclarationAdapterFilesRejectsUnsafePromiseRejectionResultBridge(t *testing.T) {
+	stringType := adapterType("string", "String")
+	integerType := adapterType("int", "Integer")
+	tests := []struct {
+		name    string
+		kind    string
+		result  packageextension.DeclarationAdapterType
+		error   packageextension.DeclarationAdapterType
+		message string
+	}{
+		{name: "unknown kind", kind: "promise_to_exception", result: packageextension.DeclarationAdapterType{Kind: "named", Name: "Result", Arguments: []packageextension.DeclarationAdapterType{stringType, stringType}}, error: stringType, message: "unsupported TypeScript call resultBridge kind"},
+		{name: "non Result return", kind: "promise_rejection_to_result", result: stringType, error: stringType, message: "requires a Result<T, E> return type"},
+		{name: "Void success", kind: "promise_rejection_to_result", result: packageextension.DeclarationAdapterType{Kind: "named", Name: "Result", Arguments: []packageextension.DeclarationAdapterType{{Kind: "void", Name: "Void"}, stringType}}, error: stringType, message: "represents Promise<void> as Result<Unit, E>"},
+		{name: "mismatched error", kind: "promise_rejection_to_result", result: packageextension.DeclarationAdapterType{Kind: "named", Name: "Result", Arguments: []packageextension.DeclarationAdapterType{stringType, stringType}}, error: integerType, message: "does not match Result error"},
+		{name: "non String error", kind: "promise_rejection_to_result", result: packageextension.DeclarationAdapterType{Kind: "named", Name: "Result", Arguments: []packageextension.DeclarationAdapterType{stringType, integerType}}, error: integerType, message: "currently requires String"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "declarations.json")
+			writeDeclarationAdapterFixture(t, path, packageextension.DeclarationAdapterCatalog{
+				ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
+				Modules: map[string]packageextension.DeclarationAdapterModule{
+					"auth-library": {Exports: map[string]packageextension.DeclarationAdapterExport{
+						"loadToken": {Kind: "function", Type: test.result, ResultBridge: &packageextension.DeclarationAdapterResultBridge{Kind: test.kind, Error: test.error}},
+					}},
+				},
+			})
+			err := ApplyDeclarationAdapterFiles(Empty(map[string]string{"auth-library": "1.0.0"}), []declarationadapterhost.Source{{
+				Package: "auth-types", Mode: "typescript", Path: path, Dependencies: map[string]string{"auth-library": "1.0.0"},
+			}})
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("expected %q, got %v", test.message, err)
+			}
+		})
+	}
+}
+
 func TestApplyDeclarationAdapterFilesRejectsAdapterSpecificBridgeKind(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "declarations.json")
 	writeDeclarationAdapterFixture(t, path, packageextension.DeclarationAdapterCatalog{

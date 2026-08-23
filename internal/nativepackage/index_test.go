@@ -49,6 +49,11 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 						ResultBridge: &ResultBridge{Kind: "result_to_promise_rejection", Error: Type{Kind: "string", Name: "String"}},
 					}},
 				},
+				"loadToken": {
+					Kind:         "function",
+					Type:         Type{Kind: "named", Name: "Result", Args: []Type{{Kind: "string", Name: "String"}, {Kind: "string", Name: "String"}}},
+					ResultBridge: &ResultBridge{Kind: "promise_rejection_to_result", Error: Type{Kind: "string", Name: "String"}},
+				},
 			}},
 		},
 	}
@@ -59,7 +64,7 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), `"formatVersion": 4`) || strings.Contains(string(written), `"fails"`) || strings.Contains(string(written), `"effectBridge"`) {
+	if !strings.Contains(string(written), `"formatVersion": 5`) || strings.Contains(string(written), `"fails"`) || strings.Contains(string(written), `"effectBridge"`) {
 		t.Fatalf("native cache did not use the current schema:\n%s", written)
 	}
 	loaded, err := Load(root, map[string]string{"@scope/ui": "1.2.3"})
@@ -83,6 +88,10 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 	bridge := loaded.Modules["@scope/ui"].Exports["runQuery"].Parameters[0].ResultBridge
 	if bridge == nil || bridge.Kind != "result_to_promise_rejection" || bridge.Error.Name != "String" {
 		t.Fatalf("native Result bridge was not preserved: %#v", bridge)
+	}
+	callBridge := loaded.Modules["@scope/ui"].Exports["loadToken"].ResultBridge
+	if callBridge == nil || callBridge.Kind != "promise_rejection_to_result" || callBridge.Error.Name != "String" {
+		t.Fatalf("native call Result bridge was not preserved: %#v", callBridge)
 	}
 }
 
@@ -124,7 +133,7 @@ func TestLoadRejectsOlderNativeIndexBeforeLegacyFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Load(root, map[string]string{"ui": "1"})
-	if err == nil || !strings.Contains(err.Error(), "formatVersion 3") || !strings.Contains(err.Error(), "expected 4") || !strings.Contains(err.Error(), "run trb install") {
+	if err == nil || !strings.Contains(err.Error(), "formatVersion 3") || !strings.Contains(err.Error(), "expected 5") || !strings.Contains(err.Error(), "run trb install") {
 		t.Fatalf("expected native cache migration diagnostic, got %v", err)
 	}
 	if strings.Contains(err.Error(), "unknown field") {
