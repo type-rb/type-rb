@@ -2,6 +2,42 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.18 - 2026-08-23
+
+### Breaking changes
+
+- Transparent type aliases now use `alias Name = Target`. The former
+  `type Name = Target` spelling reports a migration diagnostic so each
+  declaration can be classified as a transparent `alias` or a nominal
+  `newtype`. The migration guide documents the semantic conversion.
+  ([#460](https://github.com/type-rb/type-rb/pull/460))
+- The bundled Declaration Protocol advances to version 2, call-specialization
+  protocol to version 2, and Project Declaration Input Protocol to version 3
+  to carry nominal representation boundaries. The read-only
+  `trb compiler inspect` protocol advances to version 2 and reports authored
+  newtype declarations. ([#460](https://github.com/type-rb/type-rb/pull/460))
+
+### Language and compiler
+
+- `newtype Name = Representation` declares a strict nominal type over any
+  concrete, fully instantiated, non-nullable representation, including
+  collections such as `Array<ProductId>`. Newtypes use `.new(value)` and
+  `.value()`, preserve nominal checking in ordinary source, and expose their
+  concrete shape only through typed JSON, Web, Jobs, ORM, and explicitly
+  declared package boundaries. Go, Ruby, TypeScript, and the REPL share the
+  same behavior. ([#460](https://github.com/type-rb/type-rb/pull/460))
+
+### REPL and tooling
+
+- Multiline editing displays two-space indentation consistently, preserves the
+  accepted formatted source on screen, and keeps accepted indentation stable
+  after submission. ([#456](https://github.com/type-rb/type-rb/pull/456),
+  [#458](https://github.com/type-rb/type-rb/pull/458),
+  [#459](https://github.com/type-rb/type-rb/pull/459))
+- The TextMate grammar, Playground highlighter, completion, document symbols,
+  compiler inspection, and Visual Studio Code snippets recognize `alias` and
+  `newtype`. ([#460](https://github.com/type-rb/type-rb/pull/460))
+
 ## 0.3.17 - 2026-08-23
 
 ### Breaking changes
