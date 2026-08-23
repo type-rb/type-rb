@@ -47,6 +47,8 @@ func TestORMRuntimeKeepsBunSQLBehindTypeRBOwnedQueryBoundary(t *testing.T) {
 				for _, expected := range []string{
 					"reserved = await database().reserve", `await reserved.unsafe("SET SESSION time_zone = '+00:00'", [])`,
 					`parent === null) await client.unsafe("SET SESSION time_zone = '+00:00'", [])`, "reserved?.release()",
+					`parsed.searchParams.get("allowPublicKeyRetrieval")`, `allowPublicKeyRetrieval: setting === "true"`,
+					`+ (match[5] ?? "")`,
 				} {
 					if !strings.Contains(pool, expected) {
 						t.Fatalf("generated MySQL TypeScript ORM runtime is missing UTC session setup %q:\n%s", expected, pool)

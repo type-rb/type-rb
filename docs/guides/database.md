@@ -75,6 +75,14 @@ MySQL database sources may use either the portable
 `mysql://user:password@host/database` URL accepted by the generated runtimes or
 a Go driver DSN such as `user:password@tcp(host:3306)/database`.
 
+For a trusted local MySQL 8 connection without TLS, an application may opt in
+to RSA public-key retrieval with
+`mysql://user:password@host/database?allowPublicKeyRetrieval=true`. The
+TypeScript/Bun runtimes convert this explicit URL parameter to Bun SQL's
+connection option. It permits a network peer to substitute the authentication
+key, so do not enable it on an untrusted network; configure TLS instead for
+deployed databases.
+
 ## Using another migration system
 
 The `db` section and every `trb db` command are optional. A project can manage
