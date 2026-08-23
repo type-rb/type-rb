@@ -1,0 +1,15 @@
+{
+  "formatVersion": 1,
+  "name": "github.com/type-rb/tanstack-query-adapter-example",
+  "version": "0.1.0",
+  "sourceDir": "src",
+  "modes": ["typescript"],
+  "nativeDependencies": {
+    "typescript": {
+      "@tanstack/react-query": "5.101.4"
+    }
+  },
+  "declarationAdapters": {
+    "typescript": "declarations/typescript.json"
+  }
+}

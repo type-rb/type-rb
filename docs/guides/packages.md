@@ -225,6 +225,13 @@ checks the common catalog shape as well as native-dependency ownership, name
 conflicts within the catalog, and ecosystem-specific bridge kinds. An explicit
 package root may be passed as the only positional argument.
 
+`adapter check` does not install the native package or prove that a projected
+contract remains assignable to that package's declarations. Keep the native
+dependency at an explicit version and run a native type-checking conformance
+project when changing it. The repository's
+`examples/adapters/tanstack-query` fixture demonstrates this split with a
+checked catalog plus a strict TypeScript project pinned to TanStack Query.
+
 JSON output is deterministic and versioned independently from the declaration
 catalog. It contains package identity, one result per adapter in mode order,
 semantic declaration counts, diagnostics, and a summary. Invalid input still
