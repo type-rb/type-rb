@@ -1,0 +1,422 @@
+{
+  "protocolVersion": 1,
+  "modules": {
+    "@tanstack/react-query": {
+      "exports": {
+        "QueryClient": {
+          "kind": "class",
+          "type": {
+            "kind": "named",
+            "name": "QueryClient"
+          }
+        },
+        "QueryClientProvider": {
+          "kind": "component",
+          "type": {
+            "kind": "named",
+            "name": "ReactNode"
+          },
+          "parameters": [
+            {
+              "kind": "named",
+              "name": "QueryClientProviderProps"
+            }
+          ],
+          "required": 1
+        },
+        "UseQueryOptions": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "UseQueryOptions"
+          },
+          "typeParameters": ["TData", "TError"],
+          "fields": [
+            {
+              "name": "queryKey",
+              "type": {
+                "kind": "array",
+                "name": "Array",
+                "arguments": [
+                  {
+                    "kind": "string",
+                    "name": "String"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "queryFn",
+              "type": {
+                "kind": "function",
+                "name": "Function",
+                "arguments": [
+                  {
+                    "kind": "named",
+                    "name": "TData"
+                  }
+                ],
+                "resultBridge": {
+                  "kind": "result_to_promise_rejection",
+                  "error": {
+                    "kind": "named",
+                    "name": "TError"
+                  }
+                }
+              }
+            },
+            {
+              "name": "enabled",
+              "type": {
+                "kind": "bool",
+                "name": "Boolean"
+              },
+              "optional": true
+            }
+          ]
+        },
+        "UseQueryResult": {
+          "kind": "type_alias",
+          "type": {
+            "kind": "named",
+            "name": "UseQueryResult",
+            "arguments": [
+              {
+                "kind": "named",
+                "name": "TData"
+              },
+              {
+                "kind": "named",
+                "name": "TError"
+              }
+            ]
+          },
+          "typeParameters": ["TData", "TError"],
+          "aliasTarget": {
+            "kind": "union",
+            "name": "Union",
+            "arguments": [
+              {
+                "kind": "named",
+                "name": "QueryObserverPendingResult",
+                "arguments": [
+                  {
+                    "kind": "named",
+                    "name": "TData"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "TError"
+                  }
+                ]
+              },
+              {
+                "kind": "named",
+                "name": "QueryObserverLoadingResult",
+                "arguments": [
+                  {
+                    "kind": "named",
+                    "name": "TData"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "TError"
+                  }
+                ]
+              },
+              {
+                "kind": "named",
+                "name": "QueryObserverLoadingErrorResult",
+                "arguments": [
+                  {
+                    "kind": "named",
+                    "name": "TData"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "TError"
+                  }
+                ]
+              },
+              {
+                "kind": "named",
+                "name": "QueryObserverRefetchErrorResult",
+                "arguments": [
+                  {
+                    "kind": "named",
+                    "name": "TData"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "TError"
+                  }
+                ]
+              },
+              {
+                "kind": "named",
+                "name": "QueryObserverSuccessResult",
+                "arguments": [
+                  {
+                    "kind": "named",
+                    "name": "TData"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "TError"
+                  }
+                ]
+              },
+              {
+                "kind": "named",
+                "name": "QueryObserverPlaceholderResult",
+                "arguments": [
+                  {
+                    "kind": "named",
+                    "name": "TData"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "TError"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "QueryObserverPendingResult": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "QueryObserverPendingResult"
+          },
+          "typeParameters": ["TData", "TError"],
+          "fields": [
+            {
+              "name": "status",
+              "type": {
+                "kind": "string_literal",
+                "name": "\"pending\""
+              }
+            }
+          ]
+        },
+        "QueryObserverLoadingResult": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "QueryObserverLoadingResult"
+          },
+          "typeParameters": ["TData", "TError"],
+          "fields": [
+            {
+              "name": "status",
+              "type": {
+                "kind": "string_literal",
+                "name": "\"pending\""
+              }
+            }
+          ]
+        },
+        "QueryObserverLoadingErrorResult": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "QueryObserverLoadingErrorResult"
+          },
+          "typeParameters": ["TData", "TError"],
+          "fields": [
+            {
+              "name": "status",
+              "type": {
+                "kind": "string_literal",
+                "name": "\"error\""
+              }
+            },
+            {
+              "name": "error",
+              "type": {
+                "kind": "named",
+                "name": "TError"
+              }
+            }
+          ]
+        },
+        "QueryObserverRefetchErrorResult": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "QueryObserverRefetchErrorResult"
+          },
+          "typeParameters": ["TData", "TError"],
+          "fields": [
+            {
+              "name": "status",
+              "type": {
+                "kind": "string_literal",
+                "name": "\"error\""
+              }
+            },
+            {
+              "name": "data",
+              "type": {
+                "kind": "named",
+                "name": "TData"
+              }
+            },
+            {
+              "name": "error",
+              "type": {
+                "kind": "named",
+                "name": "TError"
+              }
+            }
+          ]
+        },
+        "QueryObserverSuccessResult": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "QueryObserverSuccessResult"
+          },
+          "typeParameters": ["TData", "TError"],
+          "fields": [
+            {
+              "name": "status",
+              "type": {
+                "kind": "string_literal",
+                "name": "\"success\""
+              }
+            },
+            {
+              "name": "data",
+              "type": {
+                "kind": "named",
+                "name": "TData"
+              }
+            }
+          ]
+        },
+        "QueryObserverPlaceholderResult": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "QueryObserverPlaceholderResult"
+          },
+          "typeParameters": ["TData", "TError"],
+          "fields": [
+            {
+              "name": "status",
+              "type": {
+                "kind": "string_literal",
+                "name": "\"success\""
+              }
+            },
+            {
+              "name": "data",
+              "type": {
+                "kind": "named",
+                "name": "TData"
+              }
+            }
+          ]
+        },
+        "queryOptions": {
+          "kind": "function",
+          "type": {
+            "kind": "named",
+            "name": "UseQueryOptions",
+            "arguments": [
+              {
+                "kind": "named",
+                "name": "TData"
+              },
+              {
+                "kind": "named",
+                "name": "TError"
+              }
+            ]
+          },
+          "parameters": [
+            {
+              "kind": "named",
+              "name": "UseQueryOptions",
+              "arguments": [
+                {
+                  "kind": "named",
+                  "name": "TData"
+                },
+                {
+                  "kind": "named",
+                  "name": "TError"
+                }
+              ]
+            }
+          ],
+          "required": 1,
+          "typeParameters": ["TData", "TError"]
+        },
+        "useQuery": {
+          "kind": "function",
+          "type": {
+            "kind": "named",
+            "name": "UseQueryResult",
+            "arguments": [
+              {
+                "kind": "named",
+                "name": "TData"
+              },
+              {
+                "kind": "named",
+                "name": "TError"
+              }
+            ]
+          },
+          "parameters": [
+            {
+              "kind": "named",
+              "name": "UseQueryOptions",
+              "arguments": [
+                {
+                  "kind": "named",
+                  "name": "TData"
+                },
+                {
+                  "kind": "named",
+                  "name": "TError"
+                }
+              ]
+            }
+          ],
+          "required": 1,
+          "typeParameters": ["TData", "TError"]
+        }
+      },
+      "records": {
+        "QueryClientProviderProps": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "QueryClientProviderProps"
+          },
+          "fields": [
+            {
+              "name": "client",
+              "type": {
+                "kind": "named",
+                "name": "QueryClient"
+              }
+            },
+            {
+              "name": "children",
+              "type": {
+                "kind": "named",
+                "name": "ReactNode"
+              },
+              "optional": true
+            }
+          ]
+        }
+      }
+    }
+  }
+}

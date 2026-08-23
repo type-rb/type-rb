@@ -59,6 +59,10 @@ default. `--format json` writes a versioned report to standard output on both
 success and failure and returns a nonzero status when diagnostics contain
 errors.
 
+The command does not install native dependencies or compare the projected
+contract with their declarations. Run the adapter package's native
+type-checking conformance project after changing a pinned native version.
+
 The `web` template uses `src` as the source root and creates `main.trb`, an
 index route, and an explicit root middleware stack with request IDs and JSONL
 access logging. It never replaces an existing source file.

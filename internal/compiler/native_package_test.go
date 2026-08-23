@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/declarationadapterhost"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/nativepackage"
+	packageManager "github.com/type-rb/type-rb/internal/packages"
 )
 
 func nativeComponentCatalog() *nativepackage.Catalog {
@@ -125,86 +127,57 @@ end
 	}
 }
 
-func nativeGenericQueryCatalog() *nativepackage.Catalog {
-	typeParameter := func(name string) nativepackage.Type {
-		return nativepackage.Type{Kind: "named", Name: name}
+func tanStackQueryAdapterExampleRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "examples", "adapters", "tanstack-query"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	named := func(name string, arguments ...nativepackage.Type) nativepackage.Type {
-		return nativepackage.Type{Kind: "named", Name: name, Args: arguments}
+	return root
+}
+
+func tanStackQueryAdapterCatalog(t *testing.T) *nativepackage.Catalog {
+	t.Helper()
+	root := tanStackQueryAdapterExampleRoot(t)
+	manifest, err := packageManager.ReadTypeRBManifest(root)
+	if err != nil {
+		t.Fatal(err)
 	}
-	tData := typeParameter("TData")
-	tError := typeParameter("TError")
-	parameters := []string{"TData", "TError"}
+	dependencies := manifest.NativeDependenciesFor("typescript")
+	catalog := nativepackage.Empty(dependencies)
+	if err := nativepackage.ApplyDeclarationAdapterFiles(catalog, []declarationadapterhost.Source{{
+		Package: manifest.Name, Mode: "typescript",
+		Path: filepath.Join(root, manifest.DeclarationAdapterFor("typescript")), Dependencies: dependencies,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}
+
+func nativeGenericQueryCatalog(t *testing.T) *nativepackage.Catalog {
+	t.Helper()
+	catalog := tanStackQueryAdapterCatalog(t)
+	tData := nativepackage.Type{Kind: "named", Name: "TData"}
+	tError := nativepackage.Type{Kind: "named", Name: "TError"}
 	queryCallback := nativepackage.Type{
 		Kind: "function", Name: "Function", Args: []nativepackage.Type{tData},
 		ResultBridge: &nativepackage.ResultBridge{Kind: "result_to_promise_rejection", Error: tError},
 	}
-	queryResultTarget := nativepackage.Type{Kind: "union", Name: "Union", Args: []nativepackage.Type{
-		named("QueryObserverPendingResult", tData, tError),
-		named("QueryObserverLoadingErrorResult", tData, tError),
-		named("QueryObserverRefetchErrorResult", tData, tError),
-		named("QueryObserverSuccessResult", tData, tError),
-		named("QueryObserverPlaceholderResult", tData, tError),
-	}}
-	resultRecord := func(name, status string, fields ...nativepackage.Field) nativepackage.Export {
-		fields = append([]nativepackage.Field{{Name: "status", Type: nativepackage.Type{Kind: "string_literal", Name: `"` + status + `"`}}}, fields...)
-		return nativepackage.Export{Kind: "record", Type: named(name), TypeParameters: parameters, Fields: fields}
+	module := catalog.Modules["@tanstack/react-query"]
+	module.Exports["runQuery"] = nativepackage.Export{
+		Kind: "function", Type: tData, Parameters: []nativepackage.Type{queryCallback}, Required: 1,
+		TypeParameters: []string{"TData", "TError"},
 	}
-	queryOptions := nativepackage.Export{
-		Kind: "record", Type: named("UseQueryOptions"), TypeParameters: parameters, Fields: []nativepackage.Field{
-			{Name: "queryKey", Type: nativepackage.Type{Kind: "array", Name: "Array", Args: []nativepackage.Type{{Kind: "string", Name: "String"}}}},
-			{Name: "queryFn", Type: queryCallback},
-			{Name: "enabled", Type: nativepackage.Type{Kind: "bool", Name: "Boolean"}, Optional: true},
-		},
+	module.Exports["runVoid"] = nativepackage.Export{
+		Kind: "function", Type: nativepackage.Type{Kind: "void", Name: "Void"},
+		Parameters: []nativepackage.Type{{
+			Kind: "function", Name: "Function", Args: []nativepackage.Type{{Kind: "void", Name: "Void"}},
+			ResultBridge: &nativepackage.ResultBridge{Kind: "result_to_promise_rejection", Error: tError},
+		}},
+		Required: 1, TypeParameters: []string{"TError"},
 	}
-	return &nativepackage.Catalog{
-		FormatVersion: nativepackage.FormatVersion,
-		Dependencies:  map[string]string{"@tanstack/react-query": "5.101.2"},
-		Modules: map[string]nativepackage.Module{
-			"@tanstack/react-query": {
-				Exports: map[string]nativepackage.Export{
-					"QueryClient": {Kind: "class", Type: named("QueryClient")},
-					"QueryClientProvider": {
-						Kind: "component", Type: named("ReactNode"), Parameters: []nativepackage.Type{named("QueryClientProviderProps")}, Required: 1,
-					},
-					"UseQueryResult": {
-						Kind: "type_alias", Type: named("UseQueryResult", tData, tError), TypeParameters: parameters, AliasTarget: &queryResultTarget,
-					},
-					"UseQueryOptions":                 queryOptions,
-					"QueryObserverPendingResult":      resultRecord("QueryObserverPendingResult", "pending"),
-					"QueryObserverLoadingErrorResult": resultRecord("QueryObserverLoadingErrorResult", "error", nativepackage.Field{Name: "error", Type: tError}),
-					"QueryObserverRefetchErrorResult": resultRecord("QueryObserverRefetchErrorResult", "error", nativepackage.Field{Name: "error", Type: tError}),
-					"QueryObserverSuccessResult":      resultRecord("QueryObserverSuccessResult", "success", nativepackage.Field{Name: "data", Type: tData}),
-					"QueryObserverPlaceholderResult":  resultRecord("QueryObserverPlaceholderResult", "success", nativepackage.Field{Name: "data", Type: tData}),
-					"queryOptions": {
-						Kind: "function", Type: named("UseQueryOptions", tData, tError), Parameters: []nativepackage.Type{named("UseQueryOptions", tData, tError)}, Required: 1, TypeParameters: parameters,
-					},
-					"useQuery": {
-						Kind: "function", Type: named("UseQueryResult", tData, tError), Parameters: []nativepackage.Type{named("UseQueryOptions", tData, tError)}, Required: 1, TypeParameters: parameters,
-					},
-					"runQuery": {
-						Kind: "function", Type: tData, Parameters: []nativepackage.Type{queryCallback}, Required: 1, TypeParameters: parameters,
-					},
-					"runVoid": {
-						Kind: "function", Type: nativepackage.Type{Kind: "void", Name: "Void"},
-						Parameters: []nativepackage.Type{{
-							Kind: "function", Name: "Function", Args: []nativepackage.Type{{Kind: "void", Name: "Void"}},
-							ResultBridge: &nativepackage.ResultBridge{Kind: "result_to_promise_rejection", Error: tError},
-						}},
-						Required: 1, TypeParameters: []string{"TError"},
-					},
-				},
-				Records: map[string]nativepackage.Export{
-					"QueryClientProviderProps": {
-						Kind: "record", Type: named("QueryClientProviderProps"), Fields: []nativepackage.Field{
-							{Name: "client", Type: named("QueryClient")},
-							{Name: "children", Type: named("ReactNode"), Optional: true},
-						},
-					},
-				},
-			},
-		},
-	}
+	catalog.Modules["@tanstack/react-query"] = module
+	return catalog
 }
 
 func TestCompileTypeScriptImportsIndexedNativeReactComponent(t *testing.T) {
@@ -456,7 +429,7 @@ def App(): ReactNode
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{Filename: "app.trb", ModulePath: "app", Source: source}}, Options{
-		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(),
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: tanStackQueryAdapterCatalog(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -493,6 +466,42 @@ end
 	}
 }
 
+func TestCompileTypeScriptTanStackQueryAdapterExample(t *testing.T) {
+	root := tanStackQueryAdapterExampleRoot(t)
+	source, err := os.ReadFile(filepath.Join(root, "conformance", "src", "app.trb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "app.trb", ModulePath: "app", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: tanStackQueryAdapterCatalog(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "app.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		`import { QueryClient, QueryClientProvider, queryOptions, useQuery } from "@tanstack/react-query";`,
+		`QueryObserverLoadingResult`,
+		`const QUERY_CLIENT: QueryClient = new QueryClient();`,
+		`globalThis.fetch`,
+		`queryOptions<Todo, __trb_browser.RequestError>`,
+		`useQuery<Todo, __trb_browser.RequestError>`,
+		`const __trbResult = await __trbCallback()`,
+		`throw __trbResult.error`,
+		`return query.error.__trb_message;`,
+		`return query.data.title;`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated TanStack Query example is missing %q:\n%s", expected, output)
+		}
+	}
+}
+
 func TestCompileTypeScriptBridgesSuspendingHTTPResultToNativePromiseRejection(t *testing.T) {
 	source := []byte(`import { HttpClient, RequestError } from trb/platform/typescript/browser
 import { Result } from trb/std/result
@@ -516,7 +525,7 @@ def options(client: HttpClient): UseQueryOptions<Todo, RequestError>
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{Filename: "query.trb", ModulePath: "app/query", Source: source}}, Options{
-		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(),
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: tanStackQueryAdapterCatalog(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -560,7 +569,7 @@ def main()
 	return
 end
 `)
-	artifact, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog()})
+	artifact, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +603,7 @@ def main()
 	return
 end
 `)
-	artifact, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog()})
+	artifact, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,7 +646,7 @@ def options(client: HttpClient): UseQueryOptions<Response<Todo>, RequestError>
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{Filename: "query.trb", ModulePath: "app/query", Source: source}}, Options{
-		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(),
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: tanStackQueryAdapterCatalog(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -678,7 +687,7 @@ def main()
 	return
 end
 `)
-	artifact, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog()})
+	artifact, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,7 +722,7 @@ def main()
 	return
 end
 `)
-		if _, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog()}); err != nil {
+		if _, err := CompileWithOptions("query.trb", source, Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(t)}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -772,7 +781,7 @@ end
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := CompileWithOptions("query.trb", []byte(test.source), Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog()})
+			_, err := CompileWithOptions("query.trb", []byte(test.source), Options{Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: nativeGenericQueryCatalog(t)})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("expected %q, got %v", test.want, err)
 			}
@@ -800,7 +809,7 @@ def main()
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Source: source}}, Options{
-		Mode: "typescript", TypeScriptRuntime: "bun", NativePackages: nativeGenericQueryCatalog(),
+		Mode: "typescript", TypeScriptRuntime: "bun", NativePackages: nativeGenericQueryCatalog(t),
 	})
 	if err != nil {
 		t.Fatal(err)

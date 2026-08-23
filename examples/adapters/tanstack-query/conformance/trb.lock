@@ -1,0 +1,14 @@
+{
+  "formatVersion": 1,
+  "configChecksum": "sha256:53efbb77fec074f61bfb5e1df77f1a9660047c3374d0fa6cb577f997a395561e",
+  "imports": {
+    "type-rb/tanstack-query": "github.com/type-rb/tanstack-query-adapter-example"
+  },
+  "packages": {
+    "github.com/type-rb/tanstack-query-adapter-example": {
+      "version": "0.1.0",
+      "path": "..",
+      "manifestChecksum": "sha256:e22b7561b94bd145ed2b93277e722aeca6b5166b2cc05a5c93e2fd3e0dfbe3a8"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+import { HttpClient, RequestError } from trb/platform/typescript/browser
+import { ReactNode } from trb/platform/typescript/react
+import { Result } from trb/std/result
+import {
+	QueryClient,
+	QueryClientProvider,
+	UseQueryOptions,
+	queryOptions,
+	useQuery,
+} from "@tanstack/react-query"
+
+record Todo
+	id: Integer
+	title: String
+end
+
+API := HttpClient.new("https://api.example.test")
+QUERY_CLIENT := QueryClient.new()
+
+def todo_options(): UseQueryOptions<Todo, RequestError>
+	query_fn := fn(): Result<Todo, RequestError>
+		raw := try API.request("/todos/1")
+		response := try raw.json<Todo>()
+		return Result<Todo, RequestError>::Ok(response.body)
+	end
+	return queryOptions<Todo, RequestError>(
+		UseQueryOptions<Todo, RequestError>.new(
+			queryKey: ["todos"],
+			queryFn: query_fn,
+		),
+	)
+end
+
+def Todos(): ReactNode
+	query := useQuery<Todo, RequestError>(todo_options())
+	label := case query.status
+	when "pending"
+		"Loading"
+	when "error"
+		query.error.message
+	when "success"
+		query.data.title
+	end
+	return <p>{label}</p>
+end
+
+def App(): ReactNode
+	return <QueryClientProvider client={QUERY_CLIENT}><Todos /></QueryClientProvider>
+end

@@ -42,6 +42,30 @@ func TestAdapterCheckEmitsDeterministicMachineReadableReport(t *testing.T) {
 	}
 }
 
+func TestAdapterCheckDogfoodsTanStackQueryExample(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "examples", "adapters", "tanstack-query"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, _ := runAdapterCheckReport(t, []string{"adapter", "check", "--format", "json", root}, 0)
+	if report.Package == nil || report.Package.Name != "github.com/type-rb/tanstack-query-adapter-example" || report.Package.Version != "0.1.0" {
+		t.Fatalf("unexpected TanStack Query package identity: %#v", report.Package)
+	}
+	if len(report.Adapters) != 1 {
+		t.Fatalf("unexpected TanStack Query adapter report: %#v", report.Adapters)
+	}
+	adapter := report.Adapters[0]
+	if adapter.Mode != "typescript" || !adapter.Valid || adapter.DeclarationProtocolVersion != packageextension.DeclarationAdapterProtocolVersion {
+		t.Fatalf("unexpected TanStack Query adapter result: %#v", adapter)
+	}
+	if adapter.Modules != 1 || adapter.Exports != 12 || adapter.SupportingRecords != 1 {
+		t.Fatalf("unexpected TanStack Query declaration counts: %#v", adapter)
+	}
+	if report.Summary.ValidAdapters != 1 || report.Summary.Errors != 0 || len(report.Diagnostics) != 0 {
+		t.Fatalf("TanStack Query adapter did not pass validation: %#v", report)
+	}
+}
+
 func TestAdapterCheckReportsManifestAndConsumerDiagnosticsAsJSON(t *testing.T) {
 	t.Run("missing manifest", func(t *testing.T) {
 		report, _ := runAdapterCheckReport(t, []string{"adapter", "check", "--format", "json", t.TempDir()}, 1)
