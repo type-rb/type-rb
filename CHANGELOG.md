@@ -2,6 +2,26 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.23 - 2026-08-24
+
+### Breaking changes
+
+- The machine-readable `trb adapter check` and `trb adapter test` report
+  protocol advances to version 2 and includes native runtime adapter paths,
+  protocol versions, and binding counts. Strict report consumers must accept
+  protocol version 2 and the new runtime fields.
+  ([#477](https://github.com/type-rb/type-rb/pull/477))
+
+### Packages
+
+- TypeRB packages can pair semantic declaration adapters with validated,
+  mode-specific native runtime mappings for package-owned Go, Ruby, and
+  TypeScript shims. Protocol version 1 deliberately accepts only top-level
+  `(String) -> String` wire functions, while explicit effect flags propagate
+  TypeScript suspension and the hidden backend execution scope. Package source
+  continues to own JSON validation and conversion to domain `Result` values.
+  ([#477](https://github.com/type-rb/type-rb/pull/477))
+
 ## 0.3.22 - 2026-08-24
 
 ### Packages and TypeScript interop
