@@ -2085,7 +2085,7 @@ func (c *Checker) checkUnusedImports(statements []ast.Statement) {
 			continue
 		}
 		imported := c.resolution.Imports[node]
-		if imported == nil || imported.Definition != nil && (imported.Definition.NativeSyntax || imported.Definition.TypeProvider != "") {
+		if imported == nil || imported.DeclarationProvider || imported.Definition != nil && (imported.Definition.NativeSyntax || imported.Definition.TypeProvider != "") {
 			continue
 		}
 		used := c.usedImports[node]

@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/codegen"
 	"github.com/type-rb/type-rb/internal/declaration"
+	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
@@ -63,7 +64,7 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 	for _, source := range units {
 		modules = append(modules, resolver.Module{
 			Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath],
-			CompilerOwned: source.CompilerOwned, Official: source.Official,
+			CompilerOwned: source.CompilerOwned, Official: source.Official, DeclarationProvider: source.DeclarationProvider,
 		})
 	}
 	catalog, catalogDiagnostics := resolver.NewCatalog(modules)
@@ -82,6 +83,7 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 	packageAliasesByModule := sourcePackageAliases(units, options.PackageAliases)
 	providerContext := typeprovider.Context{
 		ProjectRoot: projectRoot(options), PackageOptions: options.PackageOptions, PackageAliasesByModule: packageAliasesByModule,
+		DeclarationProviders: options.DeclarationProviders,
 	}
 	providerInputs := typeprovider.CaptureInputs(providerPrograms, providerContext)
 	declarations := previous.declarations
@@ -414,6 +416,7 @@ func cloneSourceUnit(unit SourceUnit) SourceUnit {
 func equalSourceUnitMetadata(left, right SourceUnit) bool {
 	return left.Filename == right.Filename && left.ModulePath == right.ModulePath && left.Package == right.Package &&
 		left.CompilerOwned == right.CompilerOwned && left.Official == right.Official && left.ExternalPackage == right.ExternalPackage &&
+		left.DeclarationProvider == right.DeclarationProvider &&
 		left.TestRegistration == right.TestRegistration && left.MainReplacement == right.MainReplacement &&
 		equalStringMap(left.PackageAliases, right.PackageAliases) && equalCompilerGeneratedSources(left.CompilerGeneratedSources, right.CompilerGeneratedSources)
 }
@@ -421,6 +424,7 @@ func equalSourceUnitMetadata(left, right SourceUnit) bool {
 func cloneOptions(options Options) Options {
 	options.PackageOptions = cloneBytesMap(options.PackageOptions)
 	options.PackageAliases = cloneStringMap(options.PackageAliases)
+	options.DeclarationProviders = append([]declarationproviderhost.Source(nil), options.DeclarationProviders...)
 	return options
 }
 
@@ -430,6 +434,7 @@ func equalOptions(left, right Options) bool {
 		left.SourceRoot == right.SourceRoot && left.ProjectRoot == right.ProjectRoot && left.JobsConfiguration == right.JobsConfiguration &&
 		left.AllowUnusedImports == right.AllowUnusedImports && left.InteractiveModule == right.InteractiveModule &&
 		(left.NativePackages == right.NativePackages || reflect.DeepEqual(left.NativePackages, right.NativePackages)) &&
+		reflect.DeepEqual(left.DeclarationProviders, right.DeclarationProviders) &&
 		equalBytesMap(left.PackageOptions, right.PackageOptions) &&
 		equalStringMap(left.PackageAliases, right.PackageAliases)
 }

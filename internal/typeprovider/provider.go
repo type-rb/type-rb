@@ -8,11 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	pathpkg "path"
 	"sort"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
+	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/official"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stdlib"
 )
 
@@ -20,6 +24,7 @@ type Context struct {
 	ProjectRoot            string
 	PackageOptions         map[string][]byte
 	PackageAliasesByModule map[string]map[string]string
+	DeclarationProviders   []declarationproviderhost.Source
 }
 
 type loader func([]*ast.Program, Context) (*declaration.Catalog, error)
@@ -76,6 +81,16 @@ func Load(programs []*ast.Program, context Context) (*declaration.Catalog, error
 		}
 		result.Merge(catalog)
 	}
+	projectDeclarations := sourceDeclarationNames(programs)
+	for _, source := range activeDeclarationProviderSources(programs, context) {
+		catalog, err := declarationproviderhost.Read(source)
+		if err != nil {
+			return nil, fmt.Errorf("declaration provider %s (%s): %w", source.Package, source.Path, err)
+		}
+		if err := mergeExternalDeclarations(result, catalog, source.Package, projectDeclarations); err != nil {
+			return nil, err
+		}
+	}
 	return result, nil
 }
 
@@ -93,6 +108,14 @@ func CaptureInputs(programs []*ast.Program, context Context) InputSnapshot {
 		inputs := definition.inputs(programs, context)
 		inputs.name = name
 		if !inputs.reusable {
+			result.reusable = false
+		}
+		result.providers = append(result.providers, inputs)
+	}
+	for _, source := range activeDeclarationProviderSources(programs, context) {
+		file, ok := captureProviderFile(source.Path, false)
+		inputs := providerInputSnapshot{name: "external:" + source.Package, files: []providerFileSnapshot{file}, reusable: ok}
+		if !ok {
 			result.reusable = false
 		}
 		result.providers = append(result.providers, inputs)
@@ -144,6 +167,90 @@ func activeProviderNames(programs []*ast.Program) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func activeDeclarationProviderSources(programs []*ast.Program, context Context) []declarationproviderhost.Source {
+	active := map[string]bool{}
+	for _, program := range programs {
+		aliases := context.PackageAliasesByModule[program.ModulePath]
+		for _, statement := range program.Statements {
+			imported, ok := statement.(*ast.ImportStatement)
+			if !ok {
+				continue
+			}
+			clean := pathpkg.Clean(strings.TrimSuffix(imported.Path, "/index"))
+			canonical := resolver.CanonicalPackageImport(clean, aliases)
+			active[canonical] = true
+		}
+	}
+	result := make([]declarationproviderhost.Source, 0, len(context.DeclarationProviders))
+	for _, source := range context.DeclarationProviders {
+		if active[source.Module] {
+			result = append(result, source)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Package != result[j].Package {
+			return result[i].Package < result[j].Package
+		}
+		return result[i].Path < result[j].Path
+	})
+	return result
+}
+
+func mergeExternalDeclarations(target, provided *declaration.Catalog, provider string, projectDeclarations map[string]bool) error {
+	if target == nil || provided == nil {
+		return fmt.Errorf("declaration provider %s returned an empty catalog", provider)
+	}
+	for name := range provided.Types {
+		if projectDeclarations[name] {
+			return fmt.Errorf("declaration provider %s type %s conflicts with a project declaration", provider, name)
+		}
+		if _, exists := target.Types[name]; exists {
+			return fmt.Errorf("declaration provider %s conflicts with existing type %s", provider, name)
+		}
+		if _, exists := target.Modules[name]; exists {
+			return fmt.Errorf("declaration provider %s type %s conflicts with an existing module", provider, name)
+		}
+	}
+	for name := range provided.Modules {
+		if projectDeclarations[name] {
+			return fmt.Errorf("declaration provider %s module %s conflicts with a project declaration", provider, name)
+		}
+		if _, exists := target.Modules[name]; exists {
+			return fmt.Errorf("declaration provider %s conflicts with existing module %s", provider, name)
+		}
+		if _, exists := target.Types[name]; exists {
+			return fmt.Errorf("declaration provider %s module %s conflicts with an existing type", provider, name)
+		}
+	}
+	target.Merge(provided)
+	return nil
+}
+
+func sourceDeclarationNames(programs []*ast.Program) map[string]bool {
+	result := map[string]bool{}
+	for _, program := range programs {
+		for _, statement := range program.Statements {
+			switch declared := statement.(type) {
+			case *ast.ClassStatement:
+				result[declared.Name] = true
+			case *ast.RecordStatement:
+				result[declared.Name] = true
+			case *ast.EnumStatement:
+				result[declared.Name] = true
+			case *ast.TypeAliasStatement:
+				result[declared.Name] = true
+			case *ast.NewtypeStatement:
+				result[declared.Name] = true
+			case *ast.ModuleStatement:
+				result[declared.Name] = true
+			case *ast.InterfaceStatement:
+				result[declared.Name] = true
+			}
+		}
+	}
+	return result
 }
 
 func staticProviderInputs(_ []*ast.Program, _ Context) providerInputSnapshot {

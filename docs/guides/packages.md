@@ -108,6 +108,135 @@ aliases are local to the declaring package. Native dependencies are selected
 only for the application's active mode and merge into its generated target
 manifest.
 
+### Fixed declaration providers
+
+A Ruby platform package may attach fixed type declarations for classes and
+modules supplied by one of its native gems. This is useful for APIs such as a
+gem-owned mixin: application code imports the TypeRB package, the declaration
+catalog makes the mixin methods type-check, and the package root loads the gem
+at runtime.
+
+The package manifest selects one Declaration Protocol catalog for Ruby mode:
+
+```json
+{
+  "formatVersion": 1,
+  "name": "github.com/acme/pagy",
+  "version": "0.1.0",
+  "sourceDir": "src",
+  "modes": ["ruby"],
+  "nativeDependencies": {
+    "ruby": { "pagy": "43.6.1" }
+  },
+  "declarationProviders": {
+    "ruby": "declarations/ruby.json"
+  }
+}
+```
+
+`src/index.trb` is required and owns ordinary runtime loading:
+
+```trb
+import trb/platform/ruby/native
+
+require "pagy"
+```
+
+The application explicitly imports that package root. The import is a semantic
+use even when it does not import a TypeRB symbol, because it activates the
+fixed declarations and keeps the package root in generated Ruby:
+
+```trb
+import github.com/acme/pagy
+import trb/platform/ruby/native
+
+class ProductsController
+	include Pagy::Method
+end
+```
+
+The JSON file uses Declaration Protocol version 2, including its generic,
+literal-dependent, instance-member, and class-member type shapes. Its
+`provider` must exactly equal the canonical package name. For example, a
+catalog may declare `Pagy::Offset#page` and the `Pagy::Method#pagy` mixin
+method:
+
+```json
+{
+  "protocolVersion": 2,
+  "provider": "github.com/acme/pagy",
+  "types": [
+    {
+      "name": "Pagy::Offset",
+      "instanceMembers": [
+        {
+          "name": "page",
+          "kind": "property",
+          "return": { "kind": "int", "name": "Integer" }
+        }
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "Pagy::Method",
+      "instanceMembers": [
+        {
+          "name": "pagy",
+          "kind": "method",
+          "typeParameters": ["T"],
+          "parameters": [
+            {
+              "name": "paginator",
+              "type": { "kind": "string", "name": "String" },
+              "literalValues": ["offset"]
+            },
+            {
+              "name": "collection",
+              "type": {
+                "kind": "array",
+                "name": "Array",
+                "arguments": [{ "kind": "named", "name": "T" }]
+              }
+            }
+          ],
+          "return": {
+            "kind": "named",
+            "name": "Tuple",
+            "arguments": [
+              { "kind": "named", "name": "Pagy::Offset" },
+              {
+                "kind": "array",
+                "name": "Array",
+                "arguments": [{ "kind": "named", "name": "T" }]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+This capability reads fixed data; importing a package never executes a
+provider program. The external subset cannot select compiler runtime
+operations or call specializers, claim project source modules, inject project
+rules or runtime types, declare compiler-controlled block contracts, or weaken
+nominal representation boundaries. The catalog must be a regular package file,
+not a symlink, and contain at least one declaration. Unknown JSON fields,
+trailing data, unsafe `Any` or invalid signature types, compiler-derived
+representation metadata, and conflicts with active built-in or project
+declarations are errors. These restrictions keep ordinary signatures useful
+without turning a dependency into compiler code.
+
+Fixed declaration providers initially support Ruby only. They describe
+gem-owned global classes, modules, and mixins whose runtime loading remains in
+ordinary TypeRB package source. A declaration adapter instead projects
+target-native module exports and may require the separate runtime mapping
+below. Project-aware discovery remains limited to bundled compiler-integrated
+providers.
+
 ### Declaration adapters
 
 An optional declaration adapter supplies semantic TypeRB declarations for a
@@ -115,9 +244,9 @@ target-native dependency. The semantic catalog format is mode-independent; a
 mode key selects the native-ecosystem adapter that consumes it and validates
 any adapter-specific bridge kinds. TypeScript can overlay declarations inferred
 from installed `.d.ts` files while application source continues to import the
-npm package directly. Go and Ruby do not yet import declarations directly from
-modules or gems; they require the separate native runtime mapping described
-below.
+npm package directly. Within the declaration-adapter path, Go and Ruby require
+the separate native runtime mapping described below. Ruby fixed declarations
+for gem-owned global types and mixins use the narrower capability above.
 
 An adapter file is declarative data and cannot execute compiler code. The
 common host strictly decodes the catalog, validates its protocol shape, and
@@ -699,11 +828,13 @@ trb add --path ../contracts local/contracts
 Local paths are recorded relative to the project and source content is not
 locked, so code edits are visible immediately. The normalized manifest is
 checksummed; run `trb install` after changing its identity, dependencies,
-supported modes, native dependencies, declaration adapter, or runtime adapter.
-Declaration adapter file changes also require `trb install`; a build diagnoses
-a stale cached declaration adapter. Runtime adapter data is strictly reloaded
-and validated by each build. Run `trb adapter check` before publishing either
-file.
+supported modes, native dependencies, fixed declaration provider, declaration
+adapter, or runtime adapter. Edits to a local fixed declaration catalog are
+strictly reloaded by the next build and participate in incremental compiler
+invalidation. Declaration adapter file changes require `trb install`; a build
+diagnoses a stale cached declaration adapter. Runtime adapter data is strictly
+reloaded and validated by each build. Run `trb adapter check` before publishing
+either adapter file.
 A local package's manifest name
 remains its canonical identity; `local/contracts` is only the importing
 project's alias.

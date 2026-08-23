@@ -107,6 +107,112 @@ func TestResolveTypeRBPackageExposesDeclarationAdapter(t *testing.T) {
 	}
 }
 
+func TestResolveTypeRBPackageExposesFixedRubyDeclarationProvider(t *testing.T) {
+	workspace := t.TempDir()
+	packageRoot := filepath.Join(workspace, "pagy")
+	writeTestPackage(t, packageRoot, TypeRBManifest{
+		Name: "github.com/acme/pagy", Version: "0.1.0", Modes: []string{"ruby"},
+		NativeDependencies:   map[string]map[string]string{"ruby": {"pagy": "43.6.1"}},
+		DeclarationProviders: map[string]string{"ruby": "declarations.json"},
+	}, "import trb/platform/ruby/native\n\nrequire \"pagy\"\n")
+	providerPath := filepath.Join(packageRoot, "declarations.json")
+	if err := os.WriteFile(providerPath, []byte(`{"protocolVersion":2,"provider":"github.com/acme/pagy"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(filepath.Join(workspace, "app"), "ruby")
+	config.Packages["acme/pagy"] = project.PackageRequirement{Path: "../pagy"}
+	resolved, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.DeclarationProviders) != 1 {
+		t.Fatalf("unexpected declaration providers: %#v", resolved.DeclarationProviders)
+	}
+	provider := resolved.DeclarationProviders[0]
+	if provider.Package != "github.com/acme/pagy" || provider.Mode != "ruby" || provider.Module != "github.com/acme/pagy" || provider.Path != providerPath {
+		t.Fatalf("unexpected declaration provider: %#v", provider)
+	}
+}
+
+func TestTypeRBManifestRejectsUnsafeFixedDeclarationProviderConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		mode         string
+		dependencies map[string]map[string]string
+		want         string
+	}{
+		{name: "unsupported mode", mode: "go", dependencies: map[string]map[string]string{"go": {"pagy": "43.6.1"}}, want: "only ruby"},
+		{name: "missing dependency", mode: "ruby", dependencies: map[string]map[string]string{}, want: "requires at least one"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTestPackage(t, root, TypeRBManifest{
+				Name: "github.com/acme/pagy", Version: "0.1.0", Modes: []string{test.mode},
+				NativeDependencies: test.dependencies, DeclarationProviders: map[string]string{test.mode: "declarations.json"},
+			}, "")
+			if err := os.WriteFile(filepath.Join(root, "declarations.json"), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ReadTypeRBManifest(root); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error=%v, want %q", err, test.want)
+			}
+		})
+	}
+
+	t.Run("mode not declared by package", func(t *testing.T) {
+		root := t.TempDir()
+		writeTestPackage(t, root, TypeRBManifest{
+			Name: "github.com/acme/pagy", Version: "0.1.0", Modes: []string{"typescript"},
+			NativeDependencies:   map[string]map[string]string{"ruby": {"pagy": "43.6.1"}},
+			DeclarationProviders: map[string]string{"ruby": "declarations.json"},
+		}, "")
+		if err := os.WriteFile(filepath.Join(root, "declarations.json"), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadTypeRBManifest(root); err == nil || !strings.Contains(err.Error(), "requires ruby in modes") {
+			t.Fatalf("unexpected mode diagnostic: %v", err)
+		}
+	})
+
+	t.Run("provider symlink", func(t *testing.T) {
+		root := t.TempDir()
+		writeTestPackage(t, root, TypeRBManifest{
+			Name: "github.com/acme/pagy", Version: "0.1.0", Modes: []string{"ruby"},
+			NativeDependencies:   map[string]map[string]string{"ruby": {"pagy": "43.6.1"}},
+			DeclarationProviders: map[string]string{"ruby": "declarations.json"},
+		}, "")
+		target := filepath.Join(root, "catalog.json")
+		if err := os.WriteFile(target, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(root, "declarations.json")); err != nil {
+			t.Skipf("symlinks are unavailable: %v", err)
+		}
+		if _, err := ReadTypeRBManifest(root); err == nil || !strings.Contains(err.Error(), "must name a regular file") {
+			t.Fatalf("unexpected symlink diagnostic: %v", err)
+		}
+	})
+
+	t.Run("provider parent symlink escape", func(t *testing.T) {
+		root := t.TempDir()
+		writeTestPackage(t, root, TypeRBManifest{
+			Name: "github.com/acme/pagy", Version: "0.1.0", Modes: []string{"ruby"},
+			NativeDependencies:   map[string]map[string]string{"ruby": {"pagy": "43.6.1"}},
+			DeclarationProviders: map[string]string{"ruby": "linked/declarations.json"},
+		}, "")
+		outside := t.TempDir()
+		if err := os.WriteFile(filepath.Join(outside, "declarations.json"), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
+			t.Skipf("symlinks are unavailable: %v", err)
+		}
+		if _, err := ReadTypeRBManifest(root); err == nil || !strings.Contains(err.Error(), "must resolve below") {
+			t.Fatalf("unexpected symlink escape diagnostic: %v", err)
+		}
+	})
+}
+
 func TestTypeRBPackageDeclarationAdapterDiagnosesLegacyAndUnavailableModes(t *testing.T) {
 	workspace := t.TempDir()
 	legacyRoot := filepath.Join(workspace, "legacy")

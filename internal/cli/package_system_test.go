@@ -159,6 +159,161 @@ func writeCLIJSONFile(t *testing.T, path string, value any) {
 	}
 }
 
+func TestBuildRunsRubyPackageWithFixedDeclarationProvider(t *testing.T) {
+	if _, err := exec.LookPath("ruby"); err != nil {
+		t.Skip("ruby is not installed")
+	}
+	workspace := t.TempDir()
+	packageRoot := filepath.Join(workspace, "pagy")
+	if err := os.MkdirAll(filepath.Join(packageRoot, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCLIPackageManifest(t, packageRoot, packageManager.TypeRBManifest{
+		FormatVersion: 1,
+		Name:          "github.com/acme/pagy",
+		Version:       "0.1.0",
+		SourceDir:     "src",
+		Modes:         []string{"ruby"},
+		NativeDependencies: map[string]map[string]string{
+			"ruby": {"pagy": "43.6.1"},
+		},
+		DeclarationProviders: map[string]string{"ruby": "declarations.json"},
+	})
+	if err := os.WriteFile(filepath.Join(packageRoot, "src", "index.trb"), []byte("import trb/platform/ruby/native\n\nrequire \"pagy\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCLIJSONFile(t, filepath.Join(packageRoot, "declarations.json"), pagyDeclarationCatalog())
+
+	appRoot := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(filepath.Join(appRoot, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(appRoot, "ruby")
+	config.SourceDir = "src"
+	config.Packages["acme/pagy"] = project.PackageRequirement{Path: "../pagy"}
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	application := `import acme/pagy
+import trb/platform/ruby/native
+
+class PageExample
+	include Pagy::Method
+
+	def first_page(): String
+		page_result := pagy(:offset, ["first", "second"], limit: 1)
+		pagination := page_result[0]
+		records := page_result[1]
+		puts(pagination.page)
+		return records[0]
+	end
+end
+
+def main()
+	puts(PageExample.new().first_page())
+	return
+end
+`
+	if err := os.WriteFile(filepath.Join(appRoot, "src", "main.trb"), []byte(application), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
+		t.Fatalf("build status=%d stderr=%s", status, stderr.String())
+	}
+	packageOutput, err := os.ReadFile(filepath.Join(appRoot, "build", "github.com", "acme", "pagy", "index.rb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(packageOutput), `require "pagy"`) {
+		t.Fatalf("package root did not load its native dependency:\n%s", packageOutput)
+	}
+	mainOutput, err := os.ReadFile(filepath.Join(appRoot, "build", "main.rb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainOutput), `require_relative "./github.com/acme/pagy/index"`) {
+		t.Fatalf("application did not load the declaration provider package:\n%s", mainOutput)
+	}
+	gemfile, err := os.ReadFile(filepath.Join(appRoot, "Gemfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gemfile), `gem "pagy", "43.6.1"`) {
+		t.Fatalf("package native dependency is missing from Gemfile:\n%s", gemfile)
+	}
+
+	fakeLibrary := filepath.Join(workspace, "fake-ruby-library")
+	if err := os.MkdirAll(fakeLibrary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakePagy := `class Pagy
+  class Offset
+    attr_reader :page
+
+    def initialize(page)
+      @page = page
+    end
+  end
+
+  module Method
+    def pagy(_kind, collection, limit:)
+      [Pagy::Offset.new(1), collection.first(limit)]
+    end
+  end
+end
+`
+	if err := os.WriteFile(filepath.Join(fakeLibrary, "pagy.rb"), []byte(fakePagy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := exec.Command("ruby", "-I", fakeLibrary, filepath.Join(appRoot, "build", "main.rb"))
+	run.Dir = appRoot
+	generatedOutput, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated Ruby failed: %v\n%s", err, generatedOutput)
+	}
+	if string(generatedOutput) != "1\nfirst\n" {
+		t.Fatalf("unexpected generated Ruby output: %q", generatedOutput)
+	}
+}
+
+func pagyDeclarationCatalog() packageextension.DeclarationCatalog {
+	typeT := packageextension.Type{Kind: "named", Name: "T"}
+	stringType := packageextension.Type{Kind: "string", Name: "String"}
+	integerType := packageextension.Type{Kind: "int", Name: "Integer"}
+	arrayT := packageextension.Type{Kind: "array", Name: "Array", Arguments: []packageextension.Type{typeT}}
+	returnType := packageextension.Type{
+		Kind: "named", Name: "Tuple",
+		Arguments: []packageextension.Type{{Kind: "named", Name: "Pagy::Offset"}, arrayT},
+	}
+	return packageextension.DeclarationCatalog{
+		ProtocolVersion: packageextension.DeclarationProtocolVersion,
+		Provider:        "github.com/acme/pagy",
+		Types: []packageextension.DeclaredType{{
+			Name: "Pagy::Offset",
+			InstanceMembers: []packageextension.DeclaredMember{{
+				Name: "page", Kind: "property", Return: integerType,
+			}},
+		}},
+		Modules: []packageextension.DeclaredModule{{
+			Name: "Pagy::Method",
+			InstanceMembers: []packageextension.DeclaredMember{{
+				Name: "pagy", Kind: "method", TypeParameters: []string{"T"}, Return: returnType,
+				Parameters: []packageextension.DeclaredParameter{
+					{Name: "paginator", Type: stringType, LiteralValues: []string{"offset"}},
+					{Name: "collection", Type: arrayT},
+					{Name: "limit", Type: integerType, Keyword: true, Optional: true},
+				},
+			}},
+		}},
+	}
+}
+
 func TestBuildCompilesLockedTypeRBPackageAcrossBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {

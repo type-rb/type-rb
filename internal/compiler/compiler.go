@@ -11,6 +11,7 @@ import (
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/codegen"
 	"github.com/type-rb/type-rb/internal/declaration"
+	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
@@ -51,6 +52,10 @@ type SourceUnit struct {
 	CompilerOwned   bool
 	Official        bool
 	ExternalPackage bool
+	// DeclarationProvider marks a package root module whose import activates a
+	// fixed external declaration catalog. The module still owns ordinary target
+	// runtime loading through its authored TypeRB source.
+	DeclarationProvider bool
 	// TestRegistration moves top-level test suites into this generated
 	// function. An empty value keeps ordinary source behavior.
 	TestRegistration string
@@ -84,20 +89,21 @@ func NewCompileError(filename string, fallback diagnostic.Code, items []diagnost
 }
 
 type Options struct {
-	Mode               string
-	Package            string
-	ModulePath         string
-	GoModule           string
-	RubyLoader         string
-	TypeScriptRuntime  string
-	SourceRoot         string
-	ProjectRoot        string
-	PackageOptions     map[string][]byte
-	PackageAliases     map[string]string
-	JobsConfiguration  string
-	AllowUnusedImports bool
-	InteractiveModule  string
-	NativePackages     *nativepackage.Catalog
+	Mode                 string
+	Package              string
+	ModulePath           string
+	GoModule             string
+	RubyLoader           string
+	TypeScriptRuntime    string
+	SourceRoot           string
+	ProjectRoot          string
+	PackageOptions       map[string][]byte
+	PackageAliases       map[string]string
+	JobsConfiguration    string
+	AllowUnusedImports   bool
+	InteractiveModule    string
+	NativePackages       *nativepackage.Catalog
+	DeclarationProviders []declarationproviderhost.Source
 }
 
 const MainFunction = "main"
@@ -151,6 +157,7 @@ func compileSourceUnit(unit SourceUnit, options Options) (*Artifact, error) {
 		ProjectRoot:            projectRoot(options),
 		PackageOptions:         options.PackageOptions,
 		PackageAliasesByModule: map[string]map[string]string{program.ModulePath: options.PackageAliases},
+		DeclarationProviders:   options.DeclarationProviders,
 	})
 	if providerErr != nil {
 		return nil, compileProviderError(providerErr, []SourceUnit{unit})
@@ -278,7 +285,10 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 
 	modules := make([]resolver.Module, 0, len(units))
 	for _, source := range units {
-		modules = append(modules, resolver.Module{Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath], CompilerOwned: source.CompilerOwned, Official: source.Official})
+		modules = append(modules, resolver.Module{
+			Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath],
+			CompilerOwned: source.CompilerOwned, Official: source.Official, DeclarationProvider: source.DeclarationProvider,
+		})
 	}
 	catalog, catalogDiagnostics := resolver.NewCatalog(modules)
 	var catalogErrors []diagnostic.Diagnostic
@@ -297,11 +307,13 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 		ProjectRoot:            projectRoot(options),
 		PackageOptions:         options.PackageOptions,
 		PackageAliasesByModule: packageAliasesByModule,
+		DeclarationProviders:   options.DeclarationProviders,
 	})
 	declarations, providerErr := typeprovider.Load(providerPrograms, typeprovider.Context{
 		ProjectRoot:            projectRoot(options),
 		PackageOptions:         options.PackageOptions,
 		PackageAliasesByModule: packageAliasesByModule,
+		DeclarationProviders:   options.DeclarationProviders,
 	})
 	if providerErr != nil {
 		return nil, compileProviderError(providerErr, units)
