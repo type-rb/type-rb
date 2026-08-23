@@ -216,12 +216,23 @@ jobs:
           git commit -m "Advance development version to ${next_version}-dev"
           git push origin "HEAD:refs/heads/$branch"
 
+          pr_body="$(printf '%s\n' \
+            "Created automatically after the ${release_version} release." \
+            "" \
+            "## Release note" \
+            "" \
+            "Area: Tooling" \
+            "Kind: None" \
+            "Breaking: No" \
+            "" \
+            "Release bookkeeping only; this advances the source development version after publishing v${release_version}.")"
           pr_url="$(gh pr create \
             --base main \
             --head "$branch" \
             --title "Advance development version to ${next_version}-dev" \
+            --assignee "@me" \
             --label chore \
-            --body "Created automatically after the ${release_version} release.")"
+            --body "$pr_body")"
           gh pr merge "$pr_url" --merge --delete-branch
           printf 'changed=true\n' >> "$GITHUB_OUTPUT"
 
