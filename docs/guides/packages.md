@@ -383,11 +383,20 @@ application-importable names. When a selected contract refers to real native
 package types, generated TypeScript adds the required type-only imports while
 keeping those transitive names invisible to TypeRB source and completion.
 
-External executable compiler extensions are intentionally unavailable.
-Packages that need syntax, code generation, or dynamic type discovery must
-wait for a versioned and sandboxed extension protocol rather than importing
-compiler internals. The declaration adapter above is the safe
-non-executable subset.
+Compiler-triggered executable extensions are intentionally unavailable.
+Package imports that need to inspect the TypeRB project during compilation or
+change syntax, checking, or code generation must wait for a versioned and
+sandboxed extension protocol rather than importing compiler internals. The
+declaration adapter above is the safe non-executable subset.
+
+An explicitly invoked external generator is a different boundary. A tool may
+read an OpenAPI document or another external schema and emit ordinary `.trb`
+source or a declarative adapter catalog. TypeRB then parses, checks, formats,
+maps, and compiles those artifacts through the normal pipeline. Such a tool is
+not executed by importing a package, receives no compiler privileges, and
+remains under the application's dependency and command policy. Prefer this
+model when generation does not require TypeRB project declarations; reserve a
+future compiler provider for cases that genuinely need project-aware discovery.
 
 ### Experimental bundled declaration providers
 
