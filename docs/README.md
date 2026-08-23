@@ -29,6 +29,7 @@ larger applications.
 ## Reference
 
 - [Command-line reference](cli.md)
+- [Compiler tooling protocol](guides/compiler-tooling.md)
 - [Project configuration](configuration.md)
 - [Language specification](specification.md)
 - [Standard library](standard-library.md)

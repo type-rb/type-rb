@@ -126,6 +126,14 @@ builds without a Marketplace install. Focused unit tests cover private Go debug
 artifact creation and cleanup. Command details belong in the
 [CLI reference](cli.md).
 
+Explicit tooling can consume the same compiler service through
+`trb compiler inspect`. Its experimental version 1 JSON snapshot contains exact
+source inputs, modules and authored imports, flattened checked declarations and
+semantic types, and diagnostics without generating target source. The command
+is read-only and one-shot; mutable AST or typed IR access, backend hooks, and a
+long-lived protocol server are not exposed. See the
+[compiler tooling protocol guide](guides/compiler-tooling.md).
+
 The early official `trb/web` package discovers file-based routes at compile
 time and runs typed request, path-parameter, JSON decode, and JSON response
 handlers through the same dispatcher in all three backends. Applications can
