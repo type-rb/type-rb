@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5 - 2026-08-23
+
+- Require TypeRB 0.3.18 and support its explicit `alias` declarations and
+  nominal `newtype` declarations in highlighting, completion, document
+  outlines, and snippets.
+
 ## 0.3.4 - 2026-08-21
 
 - Require TypeRB 0.3.9 and format existing project imports without a redundant
