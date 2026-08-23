@@ -2,7 +2,10 @@
 // source names that are not valid identifiers in every backend.
 package naming
 
-import "encoding/hex"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
 
 // CallableSuffix returns the source suffix kind and a reversible encoding of
 // the complete TypeRB name. Encoding the complete name keeps distinct source
@@ -20,4 +23,11 @@ func CallableSuffix(name string) (kind, encoded string, ok bool) {
 		return "", "", false
 	}
 	return kind, hex.EncodeToString([]byte(name)), true
+}
+
+// RuntimeBindingIdentifier returns a deterministic private identifier for a
+// canonical native runtime binding identity.
+func RuntimeBindingIdentifier(identity string) string {
+	sum := sha256.Sum256([]byte(identity))
+	return "__trb_runtime_" + hex.EncodeToString(sum[:])
 }

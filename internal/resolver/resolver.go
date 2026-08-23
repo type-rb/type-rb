@@ -71,6 +71,17 @@ type Export struct {
 	// NativeExported distinguishes a real target-package type export from a
 	// provider-only structural record used to describe another declaration.
 	NativeExported bool
+	Runtime        *RuntimeBinding
+}
+
+type RuntimeBinding struct {
+	Identity                 string
+	Dependency               string
+	Module                   string
+	Symbol                   string
+	CallConvention           string
+	MaySuspend               bool
+	PropagatesExecutionScope bool
 }
 
 type RecordField struct {
@@ -741,11 +752,8 @@ func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagn
 		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("unknown TypeRB package %s", node.Path))}
 	}
 	if options.NativePackages != nil && options.NativePackages.Owns(node.Path) {
-		if options.Mode != "typescript" {
-			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("native package %s is only available in mode typescript", node.Path))}
-		}
 		if options.Catalog != nil && (options.Catalog.Modules[node.Path] != nil || options.Catalog.Modules[pathpkg.Join(node.Path, "index")] != nil) {
-			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("import %s is provided by both a TypeRB package and a native TypeScript dependency", node.Path))}
+			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("import %s is provided by both a TypeRB source module and a native declaration adapter", node.Path))}
 		}
 		return resolveNativeImport(node, options.NativePackages)
 	}
@@ -807,6 +815,13 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 		Members:           map[string]Member{},
 		UnsupportedFields: cloneStrings(exported.UnsupportedFields),
 		NativeExported:    nativeExported,
+	}
+	if exported.Runtime != nil {
+		result.Runtime = &RuntimeBinding{
+			Identity: exported.Runtime.Identity, Dependency: exported.Runtime.Dependency,
+			Module: exported.Runtime.Module, Symbol: exported.Runtime.Symbol, CallConvention: exported.Runtime.CallConvention,
+			MaySuspend: exported.Runtime.MaySuspend, PropagatesExecutionScope: exported.Runtime.PropagatesExecutionScope,
+		}
 	}
 	if exported.ResultBridge != nil {
 		result.CallResultBridge = NativeCallResultBridge{Kind: exported.ResultBridge.Kind, Error: exported.ResultBridge.Error.Semantic()}

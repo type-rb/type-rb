@@ -56,12 +56,13 @@ single source tree has separate target configurations. See the
 
 `trb adapter check` runs from a TypeRB package root by default, or accepts one
 explicit package-root directory. It validates `trbpackage.json`, every
-configured `declarationAdapters.<mode>` catalog, native-dependency ownership,
-catalog-internal export/supporting-record conflicts, and bridge kinds through
-the same selected ecosystem adapter used by installation. Human output is the
-default. `--format json` writes a versioned report to standard output on both
-success and failure and returns a nonzero status when diagnostics contain
-errors.
+configured `declarationAdapters.<mode>` catalog and paired
+`runtimeAdapters.<mode>` mapping, native-dependency ownership,
+catalog-internal export/supporting-record conflicts, bridge kinds, runtime
+coverage, and target symbol rules through the same selected ecosystem adapter
+used by installation and compilation. Human output is the default. `--format
+json` writes a versioned report to standard output on both success and failure
+and returns a nonzero status when diagnostics contain errors.
 
 The check command does not install native dependencies or compare the
 projected contract with their declarations. An adapter package may declare one

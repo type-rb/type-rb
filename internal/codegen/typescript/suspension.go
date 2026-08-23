@@ -16,6 +16,9 @@ type SuspensionPlan = effectplan.Plan
 func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
 	plan := effectplan.Analyze(programs, effectplan.Options{
 		Intrinsic: isSuspendingIntrinsic,
+		Runtime: func(binding *ir.RuntimeBinding) bool {
+			return binding.MaySuspend
+		},
 		Conversion: func(kind ir.ConversionKind) bool {
 			return kind == ir.PromiseRejectionToResultConversion
 		},

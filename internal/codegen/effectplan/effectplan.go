@@ -73,6 +73,7 @@ type functionBindingKey struct {
 // Options chooses effect roots while retaining one call-graph model.
 type Options struct {
 	Intrinsic       func(string) bool
+	Runtime         func(*ir.RuntimeBinding) bool
 	Conversion      func(ir.ConversionKind) bool
 	WebNext         bool
 	CaptureLambdas  bool
@@ -360,7 +361,7 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		if node.Block != nil {
 			suspends = a.statementsReach(node.Block.Body, context, record) || suspends
 		}
-		callSuspends := a.intrinsicReaches(referenceIntrinsic(node.Callee)) || a.options.WebNext && isWebNextCall(node.Callee) || a.callTargetReaches(node.Callee, context)
+		callSuspends := a.intrinsicReaches(referenceIntrinsic(node.Callee)) || a.runtimeReaches(referenceRuntime(node.Callee)) || a.options.WebNext && isWebNextCall(node.Callee) || a.callTargetReaches(node.Callee, context)
 		if record && callSuspends {
 			a.plan.Calls[node] = true
 		}
@@ -471,8 +472,28 @@ func referenceIntrinsic(expression ir.Expression) string {
 	return ""
 }
 
+func referenceRuntime(expression ir.Expression) *ir.RuntimeBinding {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		if node.Reference != nil {
+			return node.Reference.Runtime
+		}
+	case *ir.Member:
+		if node.Reference != nil {
+			return node.Reference.Runtime
+		}
+	case *ir.TypeApply:
+		return referenceRuntime(node.Receiver)
+	}
+	return nil
+}
+
 func (a *analyzer) intrinsicReaches(intrinsic string) bool {
 	return a.options.Intrinsic != nil && a.options.Intrinsic(intrinsic)
+}
+
+func (a *analyzer) runtimeReaches(binding *ir.RuntimeBinding) bool {
+	return binding != nil && a.options.Runtime != nil && a.options.Runtime(binding)
 }
 
 // ORMOperation identifies intrinsics that may execute database work. It is
@@ -490,6 +511,9 @@ func ExecutionScope(programs []*ir.Program) *Plan {
 		WebNext: true, CaptureLambdas: true,
 		Intrinsic: func(intrinsic string) bool {
 			return runtimeoperation.Describe(intrinsic).PropagatesExecutionScope
+		},
+		Runtime: func(binding *ir.RuntimeBinding) bool {
+			return binding.PropagatesExecutionScope
 		},
 	})
 }

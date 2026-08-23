@@ -108,21 +108,24 @@ aliases are local to the declaring package. Native dependencies are selected
 only for the application's active mode and merge into its generated target
 manifest.
 
+### Declaration adapters
+
 An optional declaration adapter supplies semantic TypeRB declarations for a
 target-native dependency. The semantic catalog format is mode-independent; a
 mode key selects the native-ecosystem adapter that consumes it and validates
-any adapter-specific bridge kinds. TypeScript is the first
-implemented adapter. It overlays declarations inferred from installed `.d.ts`
-files while application source continues to import the npm package directly.
+any adapter-specific bridge kinds. TypeScript can overlay declarations inferred
+from installed `.d.ts` files while application source continues to import the
+npm package directly. Go and Ruby do not yet import declarations directly from
+modules or gems; they require the separate native runtime mapping described
+below.
 
 An adapter file is declarative data and cannot execute compiler code. The
 common host strictly decodes the catalog, validates its protocol shape, and
 verifies its checksum. The selected ecosystem adapter checks that every
 declared module belongs to the package's native dependencies for that mode,
 rejects name conflicts across exports and supporting records, and validates
-adapter-specific bridge kinds. Ruby and Go declaration importers are not
-implemented yet; configuring either mode produces an explicit
-unsupported-adapter error.
+adapter-specific bridge kinds. A declaration catalog never grants permission to
+call native code by itself.
 
 The adapter file uses Declaration/Adapter Protocol version 2:
 
@@ -280,6 +283,85 @@ fields to `arguments`, and split class members by access kind. Existing
 `.trb/native-types.json`; its cache format is independent from the
 package-owned protocol.
 
+### Native runtime adapters
+
+A package may pair a declaration adapter with a Native Runtime Adapter Protocol
+file for the same mode. The declaration file remains the portable semantic
+contract; the runtime file maps its canonical export identities to
+package-owned target shims. This is the initial supported path for calling
+native Go and Ruby dependencies from an independent TypeRB package, and it is
+also available in TypeScript mode when a fixed `.d.ts` projection is not an
+appropriate boundary.
+
+```json
+{
+  "nativeDependencies": {
+    "go": { "github.com/acme/aws-s3-wire": "v0.1.0" },
+    "ruby": { "acme-aws-s3-wire": "0.1.0" },
+    "typescript": { "@acme/aws-s3-wire": "0.1.0" }
+  },
+  "declarationAdapters": {
+    "go": "declarations/go.json",
+    "ruby": "declarations/ruby.json",
+    "typescript": "declarations/typescript.json"
+  },
+  "runtimeAdapters": {
+    "go": "runtime/go.json",
+    "ruby": "runtime/ruby.json",
+    "typescript": "runtime/typescript.json"
+  }
+}
+```
+
+Each `runtimeAdapters.<mode>` entry requires
+`declarationAdapters.<mode>`. Runtime Protocol version 1 maps a stable
+`canonical-module#export` identity to one top-level target function:
+
+```json
+{
+  "protocolVersion": 1,
+  "bindings": {
+    "github.com/acme/aws-s3/native#head_object": {
+      "dependency": "github.com/acme/aws-s3-wire",
+      "module": "github.com/acme/aws-s3-wire/s3",
+      "symbol": "HeadObject",
+      "callConvention": "function",
+      "maySuspend": true,
+      "propagatesExecutionScope": true
+    }
+  }
+}
+```
+
+The initial wire contract is deliberately narrow. Every export in a
+runtime-backed declaration module must be a non-generic top-level function with
+exactly one required `String` parameter and a `String` return. A module cannot
+mix direct native declarations and runtime-backed exports, and a runtime export
+cannot also declare a `resultBridge`. Package TypeRB source should expose the
+domain API: it serializes a request to JSON, calls the private wire function,
+validates and decodes the response envelope, and converts its success or error
+variant to the package's ordinary records, enums, and `Result` values. The
+compiler treats the wire payload as an opaque string and does not invent an SDK
+error mapping.
+
+The target shim owns SDK construction, target exceptions or errors, and the
+stable JSON envelope. `dependency` must name a native dependency declared for
+the selected mode. A Go or TypeScript `module` must be that dependency or one
+of its submodules; a Ruby `module` is a safe relative `require` path. Go symbols
+are exported function identifiers, Ruby symbols are constant-qualified module
+methods, and TypeScript symbols are named function exports. Package import,
+resolution, adapter checking, and compilation validate this data but never
+execute the shim.
+
+`maySuspend` makes the mapped TypeScript call and all portable callers that
+reach it suspend; TypeRB source still adds no `async` or `await` syntax.
+`propagatesExecutionScope` passes one compiler-owned argument before the
+declared string parameter: `context.Context` in Go, the TypeRB execution-scope
+object in Ruby, and `AbortSignal | undefined` in TypeScript. Set either flag
+only when the shim implements that contract. Direct FFI, native object handles,
+structural wire types, lifecycle hooks, and arbitrary error-mapper callbacks
+remain outside Protocol version 1.
+
 Validate an adapter package from its repository root before publishing it:
 
 ```sh
@@ -288,9 +370,10 @@ trb adapter check --format json
 ```
 
 The command validates the package manifest and every configured adapter through
-the same selected ecosystem consumer used by `trb install`. It therefore
-checks the common catalog shape as well as native-dependency ownership, name
-conflicts within the catalog, and ecosystem-specific bridge kinds. An explicit
+the same selected ecosystem consumer used by `trb install` or compilation. It
+therefore checks the common catalog shape, native-dependency ownership, name
+conflicts within the catalog, ecosystem-specific bridge kinds, runtime export
+coverage, and the narrow runtime signature and target rules. An explicit
 package root may be passed as the only positional argument.
 
 `adapter check` does not install the native package or prove that a projected
@@ -349,8 +432,8 @@ phase states without embedding native-tool logs:
 
 ```json
 {
-  "protocolVersion": 1,
-  "compilerVersion": "0.3.16",
+  "protocolVersion": 2,
+  "compilerVersion": "0.3.23",
   "package": {
     "name": "github.com/acme/ui-types",
     "version": "0.1.0",
@@ -389,8 +472,8 @@ CI and AI agents to use one contract for success and failure:
 
 ```json
 {
-  "protocolVersion": 1,
-  "compilerVersion": "0.3.16",
+  "protocolVersion": 2,
+  "compilerVersion": "0.3.23",
   "package": {
     "name": "github.com/acme/ui-types",
     "version": "0.1.0",
@@ -404,7 +487,10 @@ CI and AI agents to use one contract for success and failure:
       "declarationProtocolVersion": 2,
       "modules": 1,
       "exports": 1,
-      "supportingRecords": 1
+      "supportingRecords": 1,
+      "runtimePath": "/workspace/ui-types/runtime/typescript.json",
+      "runtimeProtocolVersion": 1,
+      "runtimeBindings": 1
     }
   ],
   "diagnostics": [],
@@ -414,6 +500,7 @@ CI and AI agents to use one contract for success and failure:
     "modules": 1,
     "exports": 1,
     "supportingRecords": 1,
+    "runtimeBindings": 1,
     "errors": 0,
     "warnings": 0
   }
@@ -425,11 +512,13 @@ application-importable names. When a selected contract refers to real native
 package types, generated TypeScript adds the required type-only imports while
 keeping those transitive names invisible to TypeRB source and completion.
 
-Compiler-triggered executable extensions are intentionally unavailable.
-Package imports that need to inspect the TypeRB project during compilation or
-change syntax, checking, or code generation must wait for a versioned and
-sandboxed extension protocol rather than importing compiler internals. The
-declaration adapter above is the safe non-executable subset.
+Arbitrary compiler-triggered executable extensions are intentionally
+unavailable. Package imports that need to inspect the TypeRB project during
+compilation or change syntax, checking, or code generation must wait for a
+versioned and sandboxed extension protocol rather than importing compiler
+internals. Declaration adapters and the fixed native runtime mapping above are
+strictly decoded, non-executable subsets; neither permits package-supplied
+compiler logic.
 
 An explicitly invoked external generator is a different boundary. A tool may
 read an OpenAPI document or another external schema and emit ordinary `.trb`
@@ -488,7 +577,9 @@ declaration fields. Jobs now exposes a small package-level `JobAdapter`
 interface in ordinary TypeRB source, but its SQL implementation still reaches
 bundled native primitives. These protocols therefore narrow the declaration
 boundary; they do not yet make ORM or Jobs an ordinary external package or
-define a generic external native-runtime ABI.
+define a rich external native-runtime ABI. Independent packages can use the
+fixed string-wire function ABI described earlier, but it does not expose these
+bundled operation names or lifecycle paths.
 
 The declaration type format deliberately rejects call-site-only record
 inspection and source-definition metadata. Those facts remain scoped to call
@@ -498,9 +589,9 @@ need to distinguish an imported canonical type from a same-shaped local type.
 Applying the same capability to Jobs and ORM established the reusable
 declaration facts without introducing an arbitrary provider-data bag. The
 remaining ORM integration and the normalized native operations below the Jobs
-adapter can now guide a separate, minimal runtime-operation descriptor.
-Capability negotiation and sandboxing remain deferred until an external
-provider boundary is justified.
+adapter can continue to test whether the initial string-wire runtime protocol
+needs another general capability. Capability negotiation and sandboxing remain
+deferred until an external project-aware provider boundary is justified.
 
 ### Experimental bundled project source generation
 
@@ -539,14 +630,19 @@ the two call-graph effects that proved common across Jobs and ORM: an operation
 may suspend, and it may propagate the hidden execution scope used for
 cancellation. Typed parameters and return values remain in package
 declarations, while target lowering and native-error-to-`Result` conversion
-remain package-specific. The descriptor is compiler-owned metadata, not an
-external runtime ABI or permission for a package to add native operations.
+remain package-specific. Those findings also produced the independent Native
+Runtime Adapter Protocol's two explicit effect flags. The external protocol
+remains limited to the fixed `String -> String` function wire and does not
+expose compiler-owned operation names or package-specific ORM and Jobs
+lowering.
 
-This protocol is still bundled and experimental, not a package-manifest
-capability or external plugin API. Like call specialization below, its required
-imports use ordinary named imports. Namespace-stable public type identities,
-capability negotiation, isolation, and compatibility policy remain necessary
-before independent packages can use it safely.
+The project-source protocol in this section is still bundled and experimental,
+not a package-manifest capability or external plugin API. Like call
+specialization below, its required imports use ordinary named imports.
+Namespace-stable public type identities, capability negotiation, isolation, and
+compatibility policy remain necessary before independent packages can generate
+project-aware source safely. Independent packages may use only the declaration
+and fixed runtime adapter files described earlier.
 
 ### Experimental bundled call specialization
 
@@ -603,8 +699,11 @@ trb add --path ../contracts local/contracts
 Local paths are recorded relative to the project and source content is not
 locked, so code edits are visible immediately. The normalized manifest is
 checksummed; run `trb install` after changing its identity, dependencies,
-supported modes, native dependencies, or declaration adapter. Adapter file
-changes also require `trb install`; a build diagnoses a stale cached adapter.
+supported modes, native dependencies, declaration adapter, or runtime adapter.
+Declaration adapter file changes also require `trb install`; a build diagnoses
+a stale cached declaration adapter. Runtime adapter data is strictly reloaded
+and validated by each build. Run `trb adapter check` before publishing either
+file.
 A local package's manifest name
 remains its canonical identity; `local/contracts` is only the importing
 project's alias.

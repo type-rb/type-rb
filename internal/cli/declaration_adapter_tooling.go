@@ -14,6 +14,7 @@ import (
 	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/packageextension"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
+	"github.com/type-rb/type-rb/internal/runtimeadapterhost"
 )
 
 func (c *CLI) runAdapter(args []string) error {
@@ -107,10 +108,31 @@ func checkAdapterPackage(root string) adapterPackageCheck {
 		}
 
 		dependencies := manifest.NativeDependenciesFor(mode)
+		var runtimeSources []runtimeadapterhost.Source
+		if runtimePath := manifest.RuntimeAdapterFor(mode); runtimePath != "" {
+			checked.RuntimePath = filepath.Join(root, runtimePath)
+			providedRuntime, readRuntimeErr := runtimeadapterhost.Read(checked.RuntimePath)
+			if readRuntimeErr != nil {
+				result.Diagnostics = append(result.Diagnostics, adapterCheckDiagnostic(checked.RuntimePath, readRuntimeErr))
+				result.Adapters = append(result.Adapters, checked)
+				continue
+			}
+			checked.RuntimeProtocolVersion = providedRuntime.ProtocolVersion
+			checked.RuntimeBindings = len(providedRuntime.Bindings)
+			runtimeSources = append(runtimeSources, runtimeadapterhost.Source{
+				Package: manifest.Name, Mode: mode, Path: checked.RuntimePath, Dependencies: dependencies,
+			})
+		}
+		runtimeAdapters, runtimeErr := runtimeadapterhost.Load(runtimeSources)
+		if runtimeErr != nil {
+			result.Diagnostics = append(result.Diagnostics, adapterCheckDiagnostic(filepath.Join(root, manifest.RuntimeAdapterFor(mode)), runtimeErr))
+			result.Adapters = append(result.Adapters, checked)
+			continue
+		}
 		catalog := nativepackage.Empty(dependencies)
-		applyErr := nativepackage.ApplyDeclarationAdapterFiles(catalog, []declarationadapterhost.Source{{
+		applyErr := nativepackage.ApplyDeclarationAdapterFilesWithRuntime(catalog, []declarationadapterhost.Source{{
 			Package: manifest.Name, Mode: mode, Path: adapterPath, Dependencies: dependencies,
-		}})
+		}}, runtimeAdapters)
 		if applyErr != nil {
 			result.Diagnostics = append(result.Diagnostics, adapterCheckDiagnostic(adapterPath, applyErr))
 		} else {

@@ -19,6 +19,24 @@ func TestNativeTypeRoundTripsFunctionTypes(t *testing.T) {
 	}
 }
 
+func TestCatalogOwnsOnlyDependenciesAndRuntimeBackedSemanticModules(t *testing.T) {
+	catalog := &Catalog{
+		Dependencies: map[string]string{"native": "1.0.0"},
+		Modules: map[string]Module{
+			"semantic/direct": {Exports: map[string]Export{"invoke": {Kind: "function"}}},
+			"semantic/runtime": {Exports: map[string]Export{
+				"invoke": {Kind: "function", Runtime: &RuntimeBinding{Identity: "semantic/runtime#invoke"}},
+			}},
+		},
+	}
+	if !catalog.Owns("native/submodule") || !catalog.Owns("semantic/runtime") {
+		t.Fatalf("expected dependency and runtime-backed module ownership")
+	}
+	if catalog.Owns("semantic/direct") {
+		t.Fatalf("an unrelated catalog module must not grant native import ownership")
+	}
+}
+
 func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 	root := t.TempDir()
 	catalog := &Catalog{

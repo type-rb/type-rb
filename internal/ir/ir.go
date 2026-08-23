@@ -98,6 +98,10 @@ type Import struct {
 	// imported declaration contracts. They are emitted as type-only imports but
 	// stay invisible to source name resolution and editor completion.
 	GeneratedTypeSymbols []string
+	// RuntimeSymbols map semantic declaration exports to separately validated
+	// target-native runtime functions. Their signatures remain in SymbolTypes
+	// and SymbolParameters.
+	RuntimeSymbols map[string]RuntimeBinding
 }
 
 func (*Import) irStatement() {}
@@ -117,6 +121,16 @@ type MemberContract struct {
 	Variadic       bool
 	Class          bool
 	Readonly       bool
+}
+
+type RuntimeBinding struct {
+	Identity                 string
+	Dependency               string
+	Module                   string
+	Symbol                   string
+	CallConvention           string
+	MaySuspend               bool
+	PropagatesExecutionScope bool
 }
 
 type Class struct {
@@ -773,4 +787,5 @@ type Reference struct {
 	ExportKind     string
 	Intrinsic      string
 	ReceiverMethod bool
+	Runtime        *RuntimeBinding
 }

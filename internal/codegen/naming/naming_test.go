@@ -2,6 +2,7 @@ package naming
 
 import (
 	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -35,5 +36,16 @@ func TestCallableSuffixEncodesTheCompleteSourceName(t *testing.T) {
 func TestCallableSuffixRejectsOrdinaryNames(t *testing.T) {
 	if _, _, ok := CallableSuffix("ready"); ok {
 		t.Fatal("ordinary name was treated as suffixed")
+	}
+}
+
+func TestRuntimeBindingIdentifierUsesTheCompleteDigest(t *testing.T) {
+	first := RuntimeBindingIdentifier("github.com/acme/runtime/native#invoke")
+	second := RuntimeBindingIdentifier("github.com/acme/runtime/native#other")
+	if !strings.HasPrefix(first, "__trb_runtime_") || len(strings.TrimPrefix(first, "__trb_runtime_")) != 64 {
+		t.Fatalf("runtime identifier does not contain a complete SHA-256 digest: %q", first)
+	}
+	if first == second || first != RuntimeBindingIdentifier("github.com/acme/runtime/native#invoke") {
+		t.Fatalf("runtime identifiers must be deterministic and distinct: %q, %q", first, second)
 	}
 }
