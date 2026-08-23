@@ -385,6 +385,49 @@ func TestCompileTypeScriptCallsIndexedNativeFunction(t *testing.T) {
 	}
 }
 
+func TestCompileTypeScriptDistinguishesNativeClassAndInstanceMembers(t *testing.T) {
+	stringType := nativepackage.Type{Kind: "string", Name: "String"}
+	clientType := nativepackage.Type{Kind: "named", Name: "Client"}
+	catalog := &nativepackage.Catalog{
+		FormatVersion: nativepackage.FormatVersion,
+		Dependencies:  map[string]string{"client-library": "1.0.0"},
+		Modules: map[string]nativepackage.Module{
+			"client-library": {Exports: map[string]nativepackage.Export{
+				"Client": {
+					Kind: "class", Type: clientType,
+					InstanceMembers: map[string]nativepackage.Export{
+						"run": {Kind: "function", Type: stringType},
+					},
+					ClassMembers: map[string]nativepackage.Export{
+						"create": {Kind: "function", Type: clientType},
+					},
+				},
+			}},
+		},
+	}
+	source := []byte(`import { Client } from client-library
+
+client := Client.new()
+puts(client.run())
+other := Client.create()
+puts(other.run())
+`)
+	artifact, err := CompileWithOptions("main.trb", source, Options{Mode: "typescript", NativePackages: catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`new Client()`, `client.run()`, `Client.create()`, `other.run()`} {
+		if !strings.Contains(string(artifact.Output), expected) {
+			t.Fatalf("generated native class access is missing %q:\n%s", expected, artifact.Output)
+		}
+	}
+
+	_, err = CompileWithOptions("invalid.trb", []byte("import { Client } from client-library\nclient := Client.new()\nclient.create()\n"), Options{Mode: "typescript", NativePackages: catalog})
+	if err == nil || !strings.Contains(err.Error(), "class Client has no instance member create; create is a class member") {
+		t.Fatalf("expected class/instance member diagnostic, got %v", err)
+	}
+}
+
 func TestCompileTypeScriptUsesGenericNativeQueryContracts(t *testing.T) {
 	source := []byte(`import { ReactNode } from trb/platform/typescript/react
 import { Result } from trb/std/result

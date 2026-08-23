@@ -432,11 +432,12 @@ switches.
   shapes that cannot be represented safely are errors and never fall back to
   `Any`. A declarative adapter from an installed TypeRB package may replace
   indexed exports and records without changing the application import. An
-  adapter may describe generic functions, classes, records, and transparent
-  type aliases. Calls continue to use TypeRB's explicit type arguments, and
-  generated TypeScript imports any transitive target types required by the
-  selected contracts without exposing those helper names to TypeRB source. An
-  adapter may mark a Result-returning function field or parameter with the
+  adapter may describe generic functions, classes with distinct instance and
+  class members, records, and transparent type aliases. Calls continue to use
+  TypeRB's explicit type arguments, and generated TypeScript imports any
+  transitive target types required by the selected contracts without exposing
+  those helper names to TypeRB source. An adapter may mark a Result-returning
+  function field or parameter with the
   `result_to_promise_rejection` bridge. The TypeScript backend then unwraps the
   callback's `Result`, resolves `Ok(value)`, and rejects the exact `Err(error)`
   payload only at that native boundary.

@@ -1,15 +1,18 @@
 package declarationadapterhost
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/type-rb/type-rb/internal/packageextension"
 )
 
 func TestReadUsesStrictVersionedJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "declarations.json")
-	data := `{"protocolVersion":1,"modules":{"ui":{"exports":{"Button":{"kind":"component","type":{"kind":"named","name":"ReactNode"}}}}}}`
+	data := fmt.Sprintf(`{"protocolVersion":%d,"modules":{"ui":{"exports":{"Button":{"kind":"component","type":{"kind":"named","name":"ReactNode"}}}}}}`, packageextension.DeclarationAdapterProtocolVersion)
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +31,7 @@ func TestReadUsesStrictVersionedJSON(t *testing.T) {
 		t.Fatalf("expected trailing content diagnostic, got %v", err)
 	}
 
-	unknown := `{"protocolVersion":1,"modules":{},"compilerExtension":{}}`
+	unknown := fmt.Sprintf(`{"protocolVersion":%d,"modules":{},"compilerExtension":{}}`, packageextension.DeclarationAdapterProtocolVersion)
 	if err := os.WriteFile(path, []byte(unknown), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +47,19 @@ func TestReadDiagnosesLegacyNativeTypeProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Read(path)
-	if err == nil || !strings.Contains(err.Error(), "formatVersion 2") || !strings.Contains(err.Error(), "declarationAdapters") || !strings.Contains(err.Error(), "protocolVersion 1") || !strings.Contains(err.Error(), "run trb install") {
+	if err == nil || !strings.Contains(err.Error(), "formatVersion 2") || !strings.Contains(err.Error(), "declarationAdapters") || !strings.Contains(err.Error(), "protocolVersion 2") || !strings.Contains(err.Error(), "run trb install") {
 		t.Fatalf("expected declaration adapter migration diagnostic, got %v", err)
+	}
+}
+
+func TestReadDiagnosesProtocolVersionOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "declarations.json")
+	if err := os.WriteFile(path, []byte(`{"protocolVersion":1,"modules":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Read(path)
+	if err == nil || !strings.Contains(err.Error(), "protocolVersion 1") || !strings.Contains(err.Error(), "protocolVersion to 2") || !strings.Contains(err.Error(), "instanceMembers or classMembers") || !strings.Contains(err.Error(), "run trb install") {
+		t.Fatalf("expected protocol version migration diagnostic, got %v", err)
 	}
 }
 

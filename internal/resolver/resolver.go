@@ -809,20 +809,25 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 		result.Fields = append(result.Fields, RecordField{Name: field.Name, JSONName: field.Name, Type: fieldType, Optional: field.Optional, ResultBridge: resultBridge})
 		result.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: fieldType, Readonly: true}
 	}
-	for name, exportedMember := range exported.Members {
-		memberExport := nativeExport(name, exportedMember, false)
-		result.Members[name] = Member{
-			Name:              name,
-			Kind:              memberExport.Kind,
-			Type:              memberExport.Type,
-			TypeParameters:    append([]string(nil), memberExport.TypeParameters...),
-			Parameters:        append([]types.Type(nil), memberExport.Parameters...),
-			Required:          memberExport.Required,
-			Variadic:          memberExport.Variadic,
-			Class:             true,
-			UnsupportedFields: cloneStrings(memberExport.UnsupportedFields),
+	importMembers := func(members map[string]nativepackage.Export, class bool) {
+		for name, exportedMember := range members {
+			memberExport := nativeExport(name, exportedMember, false)
+			result.Members[name] = Member{
+				Name:              name,
+				Kind:              memberExport.Kind,
+				Type:              memberExport.Type,
+				TypeParameters:    append([]string(nil), memberExport.TypeParameters...),
+				Parameters:        append([]types.Type(nil), memberExport.Parameters...),
+				Required:          memberExport.Required,
+				Variadic:          memberExport.Variadic,
+				Class:             class,
+				UnsupportedFields: cloneStrings(memberExport.UnsupportedFields),
+			}
 		}
 	}
+	importMembers(exported.Members, true)
+	importMembers(exported.InstanceMembers, false)
+	importMembers(exported.ClassMembers, true)
 	return result
 }
 

@@ -37,6 +37,9 @@ func Read(path string) (packageextension.DeclarationAdapterCatalog, error) {
 	if header.ProtocolVersion == 0 && header.FormatVersion != 0 {
 		return packageextension.DeclarationAdapterCatalog{}, fmt.Errorf("legacy native type provider formatVersion %d is not supported; rename nativeTypeProviders to declarationAdapters, replace formatVersion with protocolVersion %d, use arguments instead of args in semantic types, and run trb install", header.FormatVersion, packageextension.DeclarationAdapterProtocolVersion)
 	}
+	if header.ProtocolVersion == 1 && packageextension.DeclarationAdapterProtocolVersion == 2 {
+		return packageextension.DeclarationAdapterCatalog{}, fmt.Errorf("declaration adapter protocolVersion 1 is no longer supported; set protocolVersion to 2, replace class members with instanceMembers or classMembers, and run trb install")
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var catalog packageextension.DeclarationAdapterCatalog

@@ -140,7 +140,8 @@ func importDeclarationAdapterExport(source packageextension.DeclarationAdapterEx
 	result := Export{
 		Kind: source.Kind, Type: importDeclarationAdapterType(source.Type), Required: source.Required,
 		Variadic: source.Variadic, TypeParameters: append([]string(nil), source.TypeParameters...),
-		Members: map[string]Export{}, UnsupportedFields: cloneStringMap(source.UnsupportedFields),
+		Members: map[string]Export{}, InstanceMembers: map[string]Export{}, ClassMembers: map[string]Export{},
+		UnsupportedFields: cloneStringMap(source.UnsupportedFields),
 	}
 	if source.AliasTarget != nil {
 		converted := importDeclarationAdapterType(*source.AliasTarget)
@@ -170,6 +171,22 @@ func importDeclarationAdapterExport(source packageextension.DeclarationAdapterEx
 			return Export{}, fmt.Errorf("member %s: %w", name, err)
 		}
 		result.Members[name] = converted
+	}
+	for _, name := range sortedDeclarationAdapterKeys(source.InstanceMembers) {
+		member := source.InstanceMembers[name]
+		converted, err := importDeclarationAdapterExport(member)
+		if err != nil {
+			return Export{}, fmt.Errorf("instance member %s: %w", name, err)
+		}
+		result.InstanceMembers[name] = converted
+	}
+	for _, name := range sortedDeclarationAdapterKeys(source.ClassMembers) {
+		member := source.ClassMembers[name]
+		converted, err := importDeclarationAdapterExport(member)
+		if err != nil {
+			return Export{}, fmt.Errorf("class member %s: %w", name, err)
+		}
+		result.ClassMembers[name] = converted
 	}
 	return result, nil
 }

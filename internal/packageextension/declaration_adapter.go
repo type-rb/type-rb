@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const DeclarationAdapterProtocolVersion = 1
+const DeclarationAdapterProtocolVersion = 2
 
 // DeclarationAdapterCatalog is the versioned, mode-independent declaration
 // input consumed by a native-ecosystem adapter. It contains semantic data
@@ -33,6 +33,8 @@ type DeclarationAdapterExport struct {
 	TypeParameters    []string                            `json:"typeParameters,omitempty"`
 	Fields            []DeclarationAdapterField           `json:"fields,omitempty"`
 	Members           map[string]DeclarationAdapterExport `json:"members,omitempty"`
+	InstanceMembers   map[string]DeclarationAdapterExport `json:"instanceMembers,omitempty"`
+	ClassMembers      map[string]DeclarationAdapterExport `json:"classMembers,omitempty"`
 	UnsupportedFields map[string]string                   `json:"unsupportedFields,omitempty"`
 }
 
@@ -149,21 +151,54 @@ func validateDeclarationAdapterExport(moduleName, category, name string, exporte
 			return fmt.Errorf("declaration adapter %s %s from %s contains an empty unsupported field or reason", category, name, moduleName)
 		}
 	}
-	if !allowMembers && len(exported.Members) != 0 {
+	if !allowMembers && (len(exported.Members) != 0 || len(exported.InstanceMembers) != 0 || len(exported.ClassMembers) != 0) {
 		return fmt.Errorf("declaration adapter record %s from %s cannot declare members", name, moduleName)
 	}
-	for _, memberName := range sortedDeclarationAdapterKeys(exported.Members) {
-		member := exported.Members[memberName]
+	memberKinds := []struct {
+		name    string
+		members map[string]DeclarationAdapterExport
+	}{
+		{name: "member", members: exported.Members},
+		{name: "instance member", members: exported.InstanceMembers},
+		{name: "class member", members: exported.ClassMembers},
+	}
+	seenMemberNames := map[string]string{}
+	for _, memberKind := range memberKinds {
+		for memberName := range memberKind.members {
+			if seenFields[memberName] {
+				return fmt.Errorf("declaration adapter export %s from %s declares %s as both field and %s", name, moduleName, memberName, memberKind.name)
+			}
+			if previous, exists := seenMemberNames[memberName]; exists {
+				return fmt.Errorf("declaration adapter export %s from %s declares %s as both %s and %s", name, moduleName, memberName, previous, memberKind.name)
+			}
+			seenMemberNames[memberName] = memberKind.name
+		}
+	}
+	if err := validateDeclarationAdapterMembers(moduleName, name, exported.Members); err != nil {
+		return err
+	}
+	if err := validateDeclarationAdapterMembers(moduleName, name, exported.InstanceMembers); err != nil {
+		return err
+	}
+	if err := validateDeclarationAdapterMembers(moduleName, name, exported.ClassMembers); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateDeclarationAdapterMembers(moduleName, ownerName string, members map[string]DeclarationAdapterExport) error {
+	for _, memberName := range sortedDeclarationAdapterKeys(members) {
+		member := members[memberName]
 		if strings.TrimSpace(memberName) == "" {
-			return fmt.Errorf("declaration adapter export %s from %s contains an empty member name", name, moduleName)
+			return fmt.Errorf("declaration adapter export %s from %s contains an empty member name", ownerName, moduleName)
 		}
 		if member.Kind != "component" && member.Kind != "function" {
-			return fmt.Errorf("declaration adapter member %s.%s from %s has unsupported kind %q", name, memberName, moduleName, member.Kind)
+			return fmt.Errorf("declaration adapter member %s.%s from %s has unsupported kind %q", ownerName, memberName, moduleName, member.Kind)
 		}
-		if len(member.Members) != 0 {
-			return fmt.Errorf("declaration adapter member %s.%s from %s cannot declare nested members", name, memberName, moduleName)
+		if len(member.Members) != 0 || len(member.InstanceMembers) != 0 || len(member.ClassMembers) != 0 {
+			return fmt.Errorf("declaration adapter member %s.%s from %s cannot declare nested members", ownerName, memberName, moduleName)
 		}
-		if err := validateDeclarationAdapterExport(moduleName, "member "+name+".", memberName, member, false); err != nil {
+		if err := validateDeclarationAdapterExport(moduleName, "member "+ownerName+".", memberName, member, false); err != nil {
 			return err
 		}
 	}
@@ -194,6 +229,12 @@ func validateDeclarationAdapterExportShape(exported DeclarationAdapterExport) er
 	}
 	if exported.Kind != "record" && exported.Kind != "class" && len(exported.Fields) != 0 {
 		return fmt.Errorf("fields are only valid for records and classes")
+	}
+	if exported.Kind == "class" && len(exported.Members) != 0 {
+		return fmt.Errorf("kind class uses instanceMembers or classMembers instead of members")
+	}
+	if exported.Kind != "class" && (len(exported.InstanceMembers) != 0 || len(exported.ClassMembers) != 0) {
+		return fmt.Errorf("instanceMembers and classMembers are only valid for classes")
 	}
 	if (exported.Kind == "record" || exported.Kind == "type_alias") && len(exported.Members) != 0 {
 		return fmt.Errorf("kind %s cannot declare members", exported.Kind)
