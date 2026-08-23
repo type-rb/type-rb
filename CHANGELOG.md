@@ -2,6 +2,62 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.16 - 2026-08-23
+
+### Breaking changes
+
+- Package-owned native declarations now use the mode-independent
+  Declaration/Adapter Protocol v1. Rename `nativeTypeProviders` to
+  `declarationAdapters`, replace provider `formatVersion: 2` with
+  `protocolVersion: 1`, rename nested semantic type `args` fields to
+  `arguments`, and run `trb install` to regenerate the native-type cache.
+  ([#439](https://github.com/type-rb/type-rb/pull/439))
+- Jobs configuration now defines one application-scoped
+  `JOBS_ADAPTER: JobAdapter := SQLAdapter.new(...)` constant instead of a
+  `configure_jobs()` factory. Job definitions and enqueue call sites are
+  unchanged. ([#435](https://github.com/type-rb/type-rb/pull/435))
+
+### Packages and tooling
+
+- `trb adapter check` validates declaration adapter manifests, semantic
+  catalogs, and ecosystem-specific constraints with human or versioned JSON
+  output. `trb adapter test` additionally builds an explicitly installed
+  conformance project and invokes its structured native check without adding
+  implicit installation or network access.
+  ([#441](https://github.com/type-rb/type-rb/pull/441),
+  [#444](https://github.com/type-rb/type-rb/pull/444))
+- The declaration adapter host rejects malformed semantic shapes and name
+  conflicts before native package resolution. Compiler-generated TypeRB
+  helpers also reuse matching imports written through package aliases.
+  ([#440](https://github.com/type-rb/type-rb/pull/440),
+  [#445](https://github.com/type-rb/type-rb/pull/445))
+- A pinned TanStack Query example demonstrates generic declarations,
+  discriminated query results, Result-to-Promise bridging, and strict native
+  TypeScript conformance.
+  ([#443](https://github.com/type-rb/type-rb/pull/443))
+- `trb compiler inspect` emits a versioned, read-only JSON snapshot of project
+  sources, modules, authored imports, checked declarations and types, and
+  diagnostics without exposing mutable compiler internals.
+  ([#438](https://github.com/type-rb/type-rb/pull/438))
+
+### Compiler and runtimes
+
+- Generated TypeScript browser requests and React components pass strict
+  native checking when optional request inputs and the internal execution
+  scope are absent. ORM transactions are treated as asynchronous even when
+  their block contains no other database terminal operation.
+  ([#434](https://github.com/type-rb/type-rb/pull/434),
+  [#442](https://github.com/type-rb/type-rb/pull/442))
+- Ruby and TypeScript Jobs adapters return a successful Job reference after
+  storage confirms enqueue instead of changing that known success to a
+  cancellation error. ([#436](https://github.com/type-rb/type-rb/pull/436))
+
+### Tooling distribution
+
+- GitHub syntax highlighting is now distributed exclusively through the
+  published Chrome Web Store extension; the temporary Tampermonkey fallback
+  is no longer shipped. ([#437](https://github.com/type-rb/type-rb/pull/437))
+
 ## 0.3.15 - 2026-08-22
 
 ### Jobs
