@@ -181,7 +181,7 @@ end
 	}
 	for _, expected := range []string{
 		"export function Page(): React.ReactNode {",
-		"const __trbScope: AbortSignal | undefined = undefined;",
+		"let __trbScope: AbortSignal | undefined;",
 		"const _loader: () => Result<__trb_browser.Response<string>, __trb_browser.RequestError> | Promise<Result<__trb_browser.Response<string>, __trb_browser.RequestError>> = make_loader(__trbScope);",
 		"return Page();",
 	} {

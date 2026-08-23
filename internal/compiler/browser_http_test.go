@@ -183,6 +183,30 @@ end
 	}
 }
 
+func TestTypeScriptBrowserHTTPDefaultsAvoidInvalidStrictTemporaries(t *testing.T) {
+	source := []byte(`import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { Result } from trb/std/result
+
+def load(client: HttpClient): Result<Response<String>, RequestError>
+	response := try client.request("/message")
+	return Result<Response<String>, RequestError>::Ok(response.text())
+end
+`)
+	artifact, err := Compile("browser_http_defaults.trb", source, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	for _, invalid := range []string{"const __trbQuery = [];", "const __trbRequestHeaders = null;"} {
+		if strings.Contains(output, invalid) {
+			t.Fatalf("generated browser defaults expose a temporary rejected by strict TypeScript %q:\n%s", invalid, output)
+		}
+	}
+	if !strings.Contains(output, "globalThis.fetch") {
+		t.Fatalf("generated browser request is missing fetch:\n%s", output)
+	}
+}
+
 func TestOfficialReceiverMethodsRequireTheirImport(t *testing.T) {
 	source := []byte(`class HttpClient
 end
