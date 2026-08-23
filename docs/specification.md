@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.3
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 ## 1. Language Goals
 
@@ -131,7 +131,7 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   name is a component reference. This rule does not change ordinary TypeRB
   function or constant naming.
 - A component may be a checked member of another imported component, such as
-  `Table.Row` or `Sidebar.Item`. Package-owned native type providers declare
+  `Table.Row` or `Sidebar.Item`. Package-owned declaration adapters declare
   these compound component members and their props; generated TSX retains the
   member expression unchanged.
 - JSX attribute names retain their source spelling. The compiler does not
@@ -430,16 +430,24 @@ switches.
   dependency resolves through the declaration index produced by `trb install`.
   Its generated import keeps the original package specifier. Declaration
   shapes that cannot be represented safely are errors and never fall back to
-  `Any`. A declarative provider from an installed TypeRB package may replace
-  indexed exports and records without changing the application import. A
-  provider may describe generic functions, classes, records, and transparent
+  `Any`. A declarative adapter from an installed TypeRB package may replace
+  indexed exports and records without changing the application import. An
+  adapter may describe generic functions, classes, records, and transparent
   type aliases. Calls continue to use TypeRB's explicit type arguments, and
   generated TypeScript imports any transitive target types required by the
-  selected contracts without exposing those helper names to TypeRB source. A
-  provider may mark a Result-returning function field or parameter with the
+  selected contracts without exposing those helper names to TypeRB source. An
+  adapter may mark a Result-returning function field or parameter with the
   `result_to_promise_rejection` bridge. The TypeScript backend then unwraps the
   callback's `Result`, resolves `Ok(value)`, and rejects the exact `Err(error)`
   payload only at that native boundary.
+- A package-owned declaration adapter uses a versioned, mode-independent
+  semantic catalog selected for one native ecosystem by
+  `declarationAdapters.<mode>` in the package manifest. The common host
+  validates the catalog, native-dependency ownership, conflicts, and checksum;
+  the selected ecosystem adapter additionally validates bridge kinds before
+  import. The initial implementation provides the TypeScript adapter only. An
+  adapter cannot execute compiler code, access compiler AST or typed IR, or
+  emit target source.
 - Official formatter command: `trb fmt`.
 - Canonical TypeRB indentation is one tab per nesting level. Formatter
   configuration is not part of the current language; a future configuration

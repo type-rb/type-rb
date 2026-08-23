@@ -64,7 +64,7 @@ func TestResolveLocalTypeRBPackageWritesDeterministicLock(t *testing.T) {
 	}
 }
 
-func TestResolveTypeRBPackageExposesDeclarativeNativeTypeProvider(t *testing.T) {
+func TestResolveTypeRBPackageExposesDeclarationAdapter(t *testing.T) {
 	workspace := t.TempDir()
 	packageRoot := filepath.Join(workspace, "ui-types")
 	writeTestPackage(t, packageRoot, TypeRBManifest{
@@ -74,10 +74,10 @@ func TestResolveTypeRBPackageExposesDeclarativeNativeTypeProvider(t *testing.T) 
 		NativeDependencies: map[string]map[string]string{
 			"typescript": {"@acme/ui": "1.0.0"},
 		},
-		NativeTypeProviders: map[string]string{"typescript": "native-types.json"},
+		DeclarationAdapters: map[string]string{"typescript": "declarations.json"},
 	}, "")
-	providerPath := filepath.Join(packageRoot, "native-types.json")
-	if err := os.WriteFile(providerPath, []byte("{}\n"), 0o644); err != nil {
+	adapterPath := filepath.Join(packageRoot, "declarations.json")
+	if err := os.WriteFile(adapterPath, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	config := project.New(filepath.Join(workspace, "app"), "typescript")
@@ -86,15 +86,42 @@ func TestResolveTypeRBPackageExposesDeclarativeNativeTypeProvider(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resolved.NativeTypeProviders) != 1 {
-		t.Fatalf("unexpected native type providers: %#v", resolved.NativeTypeProviders)
+	if len(resolved.DeclarationAdapters) != 1 {
+		t.Fatalf("unexpected declaration adapters: %#v", resolved.DeclarationAdapters)
 	}
-	provider := resolved.NativeTypeProviders[0]
-	if provider.Package != "github.com/acme/ui-types" || provider.Path != providerPath {
-		t.Fatalf("unexpected native type provider: %#v", provider)
+	adapter := resolved.DeclarationAdapters[0]
+	if adapter.Package != "github.com/acme/ui-types" || adapter.Mode != "typescript" || adapter.Path != adapterPath {
+		t.Fatalf("unexpected declaration adapter: %#v", adapter)
 	}
-	if provider.Dependencies["@acme/ui"] != "1.0.0" {
-		t.Fatalf("native type provider lost package-owned dependencies: %#v", provider.Dependencies)
+	if adapter.Dependencies["@acme/ui"] != "1.0.0" {
+		t.Fatalf("declaration adapter lost package-owned dependencies: %#v", adapter.Dependencies)
+	}
+}
+
+func TestTypeRBPackageDeclarationAdapterDiagnosesLegacyAndUnavailableModes(t *testing.T) {
+	workspace := t.TempDir()
+	legacyRoot := filepath.Join(workspace, "legacy")
+	writeTestPackage(t, legacyRoot, TypeRBManifest{
+		Name: "github.com/acme/legacy", Version: "0.1.0", Modes: []string{"typescript"},
+		LegacyNativeTypeProviders: map[string]string{"typescript": "native-types.json"},
+	}, "")
+	if _, err := ReadTypeRBManifest(legacyRoot); err == nil || !strings.Contains(err.Error(), "nativeTypeProviders has been replaced by declarationAdapters") {
+		t.Fatalf("expected native type provider migration diagnostic, got %v", err)
+	}
+
+	rubyRoot := filepath.Join(workspace, "ruby-adapter")
+	writeTestPackage(t, rubyRoot, TypeRBManifest{
+		Name: "github.com/acme/ruby-adapter", Version: "0.1.0", Modes: []string{"ruby"},
+		NativeDependencies:  map[string]map[string]string{"ruby": {"pagy": "9.4.0"}},
+		DeclarationAdapters: map[string]string{"ruby": "declarations.json"},
+	}, "")
+	if err := os.WriteFile(filepath.Join(rubyRoot, "declarations.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := project.New(filepath.Join(workspace, "app"), "ruby")
+	config.Packages["acme/ruby-adapter"] = project.PackageRequirement{Path: "../ruby-adapter"}
+	if _, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{}); err == nil || !strings.Contains(err.Error(), "provides only the TypeScript declaration adapter") {
+		t.Fatalf("expected unavailable Ruby adapter diagnostic, got %v", err)
 	}
 }
 

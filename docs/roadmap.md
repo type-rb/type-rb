@@ -86,7 +86,8 @@ than detailed syntax.
   constraints, selective updates, publishing conventions, shared caches,
   vulnerability/audit integration, and namespace-stable type identities.
 - Evolve the experimental bundled-package call-specialization data contract and
-  declarative native providers into a stable, sandboxed extension protocol
+  the initial mode-independent Declaration/Adapter Protocol into a stable,
+  sandboxed extension protocol
   before external packages can request compiler integration. Use the
   Declaration Protocol and read-only Project Declaration Input Protocol now
   exercised by both ORM and Jobs to shape reusable declaration capabilities.
