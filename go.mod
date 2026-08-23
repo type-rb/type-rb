@@ -5,6 +5,7 @@ go 1.27
 require (
 	github.com/creack/pty v1.1.24
 	github.com/go-sql-driver/mysql v1.10.0
+	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/reeflective/readline v1.3.1-0.20260802023205-4d8e27a037bd
 	golang.org/x/mod v0.36.0

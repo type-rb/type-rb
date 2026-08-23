@@ -10,15 +10,19 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/hinshun/vt10x"
 	"github.com/type-rb/type-rb/internal/languageservice"
 )
 
 const replCompletionPTYChild = "TRB_REPL_COMPLETION_PTY_CHILD"
+const replScreenPTYChild = "TRB_REPL_SCREEN_PTY_CHILD"
+const replScreenPTYReady = "TRB_REPL_SCREEN_READY"
 
 func TestCompletionRemainsCommittedBeforeTrailingInput(t *testing.T) {
 	output := runCompletionPTY(t, "pu\t(1)\r")
@@ -54,23 +58,49 @@ func TestMultilineInputIsAutomaticallyFormatted(t *testing.T) {
 	}
 }
 
+func TestCompletedMultilineInputRemainsVisibleAfterFormatting(t *testing.T) {
+	output := runPTY(t, "class A\rend\r", true)
+	terminal := vt10x.New(vt10x.WithSize(80, 24))
+	if _, err := terminal.Write(output); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(terminal.String(), "\n") {
+		if strings.TrimSpace(line) == "end" {
+			return
+		}
+	}
+	t.Fatalf("accepted end was erased from the terminal:\n%s\nraw=%q", terminal.String(), output)
+}
+
 func runCompletionPTY(t *testing.T, input string) []byte {
+	return runPTY(t, input, false)
+}
+
+func runPTY(t *testing.T, input string, screenOnly bool) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCompletionPTYChild$")
 	command.Env = append(os.Environ(), replCompletionPTYChild+"=1")
+	if screenOnly {
+		command.Env = append(command.Env, replScreenPTYChild+"=1")
+	}
 	terminal, err := pty.Start(command)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer terminal.Close()
 
+	var output []byte
+	if screenOnly {
+		output = readPTYUntil(t, terminal, []byte(replScreenPTYReady))
+	}
 	if _, err := terminal.Write([]byte(input)); err != nil {
 		t.Fatal(err)
 	}
-	output, err := io.ReadAll(terminal)
+	rest, err := io.ReadAll(terminal)
+	output = append(output, rest...)
 	if err != nil && ctx.Err() == nil && !errors.Is(err, syscall.EIO) {
 		t.Fatal(err)
 	}
@@ -79,6 +109,20 @@ func runCompletionPTY(t *testing.T, input string) []byte {
 	}
 	if err := command.Wait(); err != nil {
 		t.Fatalf("REPL helper failed: %v: %q", err, output)
+	}
+	return output
+}
+
+func readPTYUntil(t *testing.T, terminal io.Reader, marker []byte) []byte {
+	t.Helper()
+	var output []byte
+	buffer := make([]byte, 256)
+	for !bytes.Contains(output, marker) {
+		count, err := terminal.Read(buffer)
+		output = append(output, buffer[:count]...)
+		if err != nil {
+			t.Fatalf("PTY closed before marker %q: %v: %q", marker, err, output)
+		}
 	}
 	return output
 }
@@ -100,10 +144,18 @@ func TestCompletionPTYChild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if os.Getenv(replScreenPTYChild) == "1" {
+		terminal.Prompt.Primary(func() string {
+			return "\x1b]0;" + replScreenPTYReady + "\x07" + colorTitle + "trb:go> " + colorReset
+		})
+	}
 
 	line, err := terminal.Readline()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if os.Getenv(replScreenPTYChild) == "1" {
+		return
 	}
 	fmt.Fprintf(os.Stdout, "\r\n[LINE:%s]\r\n", line)
 }

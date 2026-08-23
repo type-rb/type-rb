@@ -109,7 +109,12 @@ func configureInteractiveFormatting(terminal *readline.Shell) error {
 	terminal.Keymap.Register(map[string]func(){
 		"trb-accept-line": func() {
 			if Complete(string(*terminal.Line())) {
-				formatCompleteInput(terminal)
+				if formatCompleteInput(terminal) {
+					// The formatter can move text between terminal columns, such as
+					// dedenting a closing end. Redraw before readline clears below
+					// the accepted line so its display geometry matches the buffer.
+					terminal.Display.Refresh()
+				}
 				acceptLine()
 				return
 			}
@@ -127,14 +132,16 @@ func configureInteractiveFormatting(terminal *readline.Shell) error {
 	return nil
 }
 
-func formatCompleteInput(terminal *readline.Shell) {
-	formatted, diagnostics := formatter.Format([]byte(string(*terminal.Line())))
+func formatCompleteInput(terminal *readline.Shell) bool {
+	source := string(*terminal.Line())
+	formatted, diagnostics := formatter.Format([]byte(source))
 	if len(diagnostics) > 0 {
-		return
+		return false
 	}
 	line := []rune(strings.TrimSuffix(string(formatted), "\n"))
 	terminal.Line().Set(line...)
 	terminal.Cursor().Set(len(line))
+	return string(line) != source
 }
 
 func reindentOpenInput(terminal *readline.Shell) {
