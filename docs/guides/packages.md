@@ -159,25 +159,28 @@ The adapter file uses Declaration/Adapter Protocol version 2:
 ```
 
 This protocol is an alpha Tier 1 extension for package authors. It supports
-`function`, `component`, `class`, `record`, and transparent `type_alias`
-declarations. `typeParameters` names explicit generic parameters on functions,
-classes, records, and aliases; `aliasTarget` describes an alias's semantic
-target. Semantic types may refer to those parameters and may use literal and
-union types for discriminated result contracts. Nested semantic type arguments
-use the `arguments` field. Every semantic type includes its canonical TypeRB
-`name`; collection and union kinds use their required argument counts, while a
-function's final argument is its return type. TypeRB calls still provide
-explicit type arguments. Adapter declarations cannot use `Any`;
-unrepresentable boundaries remain explicit diagnostics.
+`function`, `component`, `class`, `interface`, `record`, and transparent
+`type_alias` declarations. `typeParameters` names explicit generic parameters
+on functions, classes, interfaces, records, and aliases; `aliasTarget`
+describes an alias's semantic target. Semantic types may refer to those
+parameters and may use literal and union types for discriminated result
+contracts. Nested semantic type arguments use the `arguments` field. Every
+semantic type includes its canonical TypeRB `name`; collection and union kinds
+use their required argument counts, while a function's final argument is its
+return type. TypeRB calls still provide explicit type arguments. Adapter
+declarations cannot use `Any`; unrepresentable boundaries remain explicit
+diagnostics.
 
 Call parameters are valid on functions, components, and classes. Fields are
 valid on records and classes. A function or component uses `members` for
 compound function or component exports such as `Table.Row`. A class instead
 uses `instanceMembers` and `classMembers`, so a method such as
 `router.navigate()` cannot accidentally become a class call such as
-`Router.navigate()`. Members cannot themselves contain nested members. A
-component accepts at most one non-variadic props parameter and does not declare
-explicit type parameters. Class, record, and alias declarations use their
+`Router.navigate()`. An interface uses `instanceMembers` and cannot be
+constructed, which is appropriate for opaque native objects returned by a
+function. Members cannot themselves contain nested members. A component
+accepts at most one non-variadic props parameter and does not declare explicit
+type parameters. Class, interface, record, and alias declarations use their
 exported name as their named self type.
 
 For example, a native class method stays distinct from an instance method:

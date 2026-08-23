@@ -52,7 +52,7 @@ func TestApplyDeclarationAdapterFilesCorrectsIndexedExport(t *testing.T) {
 	}
 }
 
-func TestApplyDeclarationAdapterFilesPreservesClassMemberIdentity(t *testing.T) {
+func TestApplyDeclarationAdapterFilesPreservesObjectMemberIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "declarations.json")
 	function := func(result packageextension.DeclarationAdapterType) packageextension.DeclarationAdapterExport {
 		return packageextension.DeclarationAdapterExport{Kind: "function", Type: result}
@@ -61,6 +61,10 @@ func TestApplyDeclarationAdapterFilesPreservesClassMemberIdentity(t *testing.T) 
 		ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
 		Modules: map[string]packageextension.DeclarationAdapterModule{
 			"client-library": {Exports: map[string]packageextension.DeclarationAdapterExport{
+				"ClientView": {
+					Kind: "interface", Type: adapterType("named", "ClientView"),
+					InstanceMembers: map[string]packageextension.DeclarationAdapterExport{"run": function(adapterType("string", "String"))},
+				},
 				"Client": {
 					Kind: "class", Type: adapterType("named", "Client"),
 					InstanceMembers: map[string]packageextension.DeclarationAdapterExport{"run": function(adapterType("string", "String"))},
@@ -78,6 +82,10 @@ func TestApplyDeclarationAdapterFilesPreservesClassMemberIdentity(t *testing.T) 
 	client := catalog.Modules["client-library"].Exports["Client"]
 	if client.InstanceMembers["run"].Type.Name != "String" || client.ClassMembers["create"].Type.Name != "Client" {
 		t.Fatalf("class member identity was not preserved: %#v", client)
+	}
+	clientView := catalog.Modules["client-library"].Exports["ClientView"]
+	if clientView.Kind != "interface" || clientView.InstanceMembers["run"].Type.Name != "String" {
+		t.Fatalf("interface member identity was not preserved: %#v", clientView)
 	}
 }
 

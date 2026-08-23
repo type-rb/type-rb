@@ -428,6 +428,47 @@ puts(other.run())
 	}
 }
 
+func TestCompileTypeScriptUsesNativeInterfaceInstanceMembers(t *testing.T) {
+	catalog := &nativepackage.Catalog{
+		FormatVersion: nativepackage.FormatVersion,
+		Dependencies:  map[string]string{"router-library": "1.0.0"},
+		Modules: map[string]nativepackage.Module{
+			"router-library": {Exports: map[string]nativepackage.Export{
+				"AnyRouter": {
+					Kind: "interface", Type: nativepackage.Type{Kind: "named", Name: "AnyRouter"},
+					InstanceMembers: map[string]nativepackage.Export{
+						"navigate": {
+							Kind: "function", Type: nativepackage.Type{Kind: "void", Name: "Void"},
+							Parameters: []nativepackage.Type{{Kind: "string", Name: "String"}}, Required: 1,
+						},
+					},
+				},
+				"useRouter": {Kind: "function", Type: nativepackage.Type{Kind: "named", Name: "AnyRouter"}},
+			}},
+		},
+	}
+	source := []byte("import { useRouter } from router-library\nrouter := useRouter()\nrouter.navigate(\"/todos/42\")\n")
+	artifact, err := CompileWithOptions("main.trb", source, Options{Mode: "typescript", NativePackages: catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`import { useRouter } from "router-library";`,
+		`import type { AnyRouter } from "router-library";`,
+		`const router: AnyRouter = useRouter();`,
+		`router.navigate("/todos/42");`,
+	} {
+		if !strings.Contains(string(artifact.Output), expected) {
+			t.Fatalf("generated native interface access is missing %q:\n%s", expected, artifact.Output)
+		}
+	}
+
+	_, err = CompileWithOptions("invalid.trb", []byte("import { AnyRouter } from router-library\nrouter := AnyRouter.new()\n"), Options{Mode: "typescript", NativePackages: catalog})
+	if err == nil || !strings.Contains(err.Error(), "type AnyRouter imported from router-library has no member new") {
+		t.Fatalf("expected non-constructible interface diagnostic, got %v", err)
+	}
+}
+
 func TestCompileTypeScriptUsesGenericNativeQueryContracts(t *testing.T) {
 	source := []byte(`import { ReactNode } from trb/platform/typescript/react
 import { Result } from trb/std/result
