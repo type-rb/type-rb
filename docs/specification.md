@@ -468,10 +468,11 @@ switches.
   surface may select a different indentation style without changing language
   semantics.
 - Interactive multiline REPL input displays each indentation level as two
-  spaces while it is open. Enter reindents the open submission and inserts the
-  indentation for the next line; accepting a complete submission converts the
-  complete buffer to canonical tab indentation before it is compiled and
-  stored in history.
+  spaces while it is open and after the accepted input remains on screen.
+  Enter reindents the open submission and inserts the indentation for the next
+  line; accepting a complete submission converts the value passed to the
+  compiler and stored in history to canonical tab indentation without changing
+  the displayed width.
 
 #### Unused bindings
 

@@ -68,6 +68,45 @@ func TestHistoryRoundTripsMultilineSubmissions(t *testing.T) {
 	}
 }
 
+func TestTerminalReaderDisplaysCanonicalHistoryWithInteractiveIndentation(t *testing.T) {
+	canonical := "class A\n\tdef abc()\n\tend\nend"
+	terminal, err := newTerminalReader(Options{Mode: "go", language: languageservice.New("go")}, []string{canonical})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := terminal.History.Current().GetLine(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "class A\n  def abc()\n  end\nend"
+	if got != want {
+		t.Fatalf("display history=%q, want %q", got, want)
+	}
+}
+
+func TestTerminalReaderStoresCanonicalHistory(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "repl_history")
+	terminal, err := newTerminalReader(Options{Mode: "go", language: languageservice.New("go")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := terminal.History.Current().Write("class A\n  def abc()\n  end\nend"); err != nil {
+		t.Fatal(err)
+	}
+	reader := &terminalSubmissionReader{terminal: terminal, options: Options{HistoryFile: filename}}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadHistory(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"class A\n\tdef abc()\n\tend\nend"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("history=%q, want %q", got, want)
+	}
+}
+
 func TestCompleteInputSuggestsCommandsAndLanguageKeywords(t *testing.T) {
 	service := languageservice.New("go")
 	tests := []struct {
