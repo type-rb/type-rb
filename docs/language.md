@@ -253,6 +253,10 @@ such as `newtype MaybeUserId = Integer?` is rejected.
 Newtypes are nominal in ordinary TypeRB code. A base value, another newtype
 with the same representation, and the newtype itself are not interchangeable.
 Construct one with `UserId.new(value)` and unwrap it with `id.value()`.
+The generated `new()` is an infallible nominal wrap after its argument passes
+ordinary type checking; it does not validate domain invariants. Keep fallible
+validation in an ordinary Result-returning function and call `new()` only
+after that validation succeeds.
 Underlying members are not forwarded. Two values of the same newtype support
 `==` only when their representation has portable equality.
 
