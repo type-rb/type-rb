@@ -208,6 +208,31 @@ Output names follow the project mode:
 - `main.go.trb` becomes `main.go`, without duplicating an existing target
   suffix.
 
+## Compiler tooling
+
+```sh
+# Emit a read-only, versioned JSON snapshot of the configured project.
+trb compiler inspect
+
+# Select an explicit project configuration.
+trb compiler inspect --config trbconfig.typescript.jsonc
+
+# Inspect a config-free file and its explicit import closure.
+trb compiler inspect --mode ruby report.trb
+```
+
+The snapshot contains the exact analyzed sources, module and authored-import
+identities, flattened checked declarations and types, and diagnostics. It does
+not generate target source or run a target toolchain. Compiler-generated
+helpers and implicit runtime imports are excluded from the authored surface.
+
+The command always writes the JSON snapshot to standard output after project
+inputs have been loaded. A snapshot containing errors still includes source,
+module, and diagnostic data and returns a nonzero status; checked declarations
+are empty when semantic artifacts are unavailable. See the
+[compiler tooling protocol guide](guides/compiler-tooling.md) for the version 1
+schema, compatibility policy, and security considerations.
+
 ## Clean
 
 ```sh
