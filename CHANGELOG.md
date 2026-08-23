@@ -2,6 +2,30 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.24 - 2026-08-24
+
+### Breaking changes
+
+- The built-in Rails provider now exposes only framework-owned
+  `ActionController::API`, `ActionController::Base`,
+  `ActionController::Parameters`, and generic `ActiveRecord::Relation<T>`
+  contracts. Projects that referenced the prototype-only
+  `ApplicationController`, `Api::ApplicationController`, `PaginationHelper`,
+  or `Pagination` declarations must move those application or gem contracts
+  into their own source or package declarations.
+  ([#480](https://github.com/type-rb/type-rb/pull/480))
+
+### Packages and Ruby interop
+
+- Ruby TypeRB packages can publish fixed, data-only declarations for
+  gem-owned classes, modules, mixins, generic methods, overloads, and
+  literal-dependent signatures through `declarationProviders.ruby`. An
+  explicit package-root import activates the catalog and preserves the
+  package-owned native `require`. The strict host rejects compiler hooks,
+  project-aware metadata, unsafe types, representation privileges, declaration
+  conflicts, and package-path escapes.
+  ([#481](https://github.com/type-rb/type-rb/pull/481))
+
 ## 0.3.23 - 2026-08-24
 
 ### Breaking changes
