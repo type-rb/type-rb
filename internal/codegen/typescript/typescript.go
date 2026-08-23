@@ -1000,7 +1000,7 @@ func (g *generator) function(method *ir.Method) {
 	previousExecution := g.executionActive
 	g.executionActive = g.methodUsesExecutionScope(method)
 	if component && g.executionActive {
-		g.line("const __trbScope: AbortSignal | undefined = undefined;")
+		g.line("let __trbScope: AbortSignal | undefined;")
 	}
 	g.statements(method.Body)
 	g.executionActive = previousExecution

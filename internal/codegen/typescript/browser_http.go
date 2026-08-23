@@ -117,11 +117,18 @@ func (g *generator) browserRequest(call *ir.Call, arguments []string) string {
 	if values["body"] != "null" {
 		bodySetup += "const __trbRequestBody: " + g.runtimeName("RequestBody") + " | null = " + values["body"] + "; if (__trbRequestBody !== null) { switch (__trbRequestBody.kind) { case \"Text\": __trbNativeBody = __trbRequestBody.value; if (!__trbHeaders.has(\"content-type\")) __trbHeaders.set(\"content-type\", \"text/plain; charset=utf-8\"); break; case \"Bytes\": __trbNativeBody = new Uint8Array(__trbRequestBody.value); break; case \"File\": __trbNativeBody = __trbRequestBody.value as unknown as globalThis.File; if (!__trbHeaders.has(\"content-type\") && __trbRequestBody.value.type.length > 0) __trbHeaders.set(\"content-type\", __trbRequestBody.value.type); break; case \"Form\": __trbNativeBody = __trbRequestBody.value.map((item) => encodeURIComponent(item.name) + \"=\" + encodeURIComponent(item.value)).join(\"&\"); if (!__trbHeaders.has(\"content-type\")) __trbHeaders.set(\"content-type\", \"application/x-www-form-urlencoded;charset=UTF-8\"); break; case \"Json\": __trbNativeBody = __trbRequestBody.value; if (!__trbHeaders.has(\"content-type\")) __trbHeaders.set(\"content-type\", \"application/json\"); break; } } "
 	}
+	querySetup := ""
+	if values["query"] != "[]" {
+		querySetup = "const __trbQuery = " + values["query"] + "; if (__trbQuery.length > 0) { const __trbEncodedQuery = __trbQuery.map((item) => encodeURIComponent(item.name) + \"=\" + encodeURIComponent(item.value)).join(\"&\"); __trbUrl += (__trbUrl.includes(\"?\") ? \"&\" : \"?\") + __trbEncodedQuery; } "
+	}
+	headersSetup := "const __trbHeaders = new globalThis.Headers(); "
+	if values["headers"] != "null" {
+		headersSetup += "const __trbRequestHeaders = " + values["headers"] + "; if (__trbRequestHeaders !== null) { for (const __trbHeader of __trbRequestHeaders.entries()) __trbHeaders.append(__trbHeader.name, __trbHeader.value); } "
+	}
 	return "(async (): Promise<" + resultType + "> => { " +
 		"const __trbClient = " + arguments[0] + "; const __trbPath = " + values["path"] + "; const __trbBase = __trbClient.__trb_base_url; " +
 		"let __trbUrl = __trbBase.length === 0 ? __trbPath : new URL(__trbPath, __trbBase.endsWith(\"/\") ? __trbBase : __trbBase + \"/\").toString(); " +
-		"const __trbQuery = " + values["query"] + "; if (__trbQuery.length > 0) { const __trbEncodedQuery = __trbQuery.map((item) => encodeURIComponent(item.name) + \"=\" + encodeURIComponent(item.value)).join(\"&\"); __trbUrl += (__trbUrl.includes(\"?\") ? \"&\" : \"?\") + __trbEncodedQuery; } " +
-		"const __trbHeaders = new globalThis.Headers(); const __trbRequestHeaders = " + values["headers"] + "; if (__trbRequestHeaders !== null) { for (const __trbHeader of __trbRequestHeaders.entries()) __trbHeaders.append(__trbHeader.name, __trbHeader.value); } " +
+		querySetup + headersSetup +
 		bodySetup +
 		"const __trbTimeout: number | null = " + values["timeout_milliseconds"] + "; const __trbController = new globalThis.AbortController(); const __trbAbort = () => __trbController.abort(); if (__trbScope?.aborted) __trbAbort(); else __trbScope?.addEventListener(\"abort\", __trbAbort, { once: true }); let __trbTimedOut = false; const __trbTimer = __trbTimeout === null ? null : globalThis.setTimeout(() => { __trbTimedOut = true; __trbController.abort(); }, __trbTimeout); try { " +
 		"const __trbNativeResponse = await globalThis.fetch(__trbUrl, { method: " + values["method"] + ", headers: __trbHeaders, body: __trbNativeBody, signal: __trbController.signal }); const __trbResponseHeaders: Array<{ name: string; value: string }> = []; __trbNativeResponse.headers.forEach((value, name) => __trbResponseHeaders.push({ name, value })); const __trbBytes = new Uint8Array(await __trbNativeResponse.arrayBuffer()); const __trbResponse: " + successType + " = " + g.browserRuntimeName("_transport_response") + "(__trbNativeResponse.status, __trbResponseHeaders, __trbNativeResponse.url, __trbBytes); return " + g.browserOK(call, "__trbResponse") + "; " +
