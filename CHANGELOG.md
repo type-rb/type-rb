@@ -2,6 +2,28 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.17 - 2026-08-23
+
+### Breaking changes
+
+- Declaration/Adapter Protocol v2 distinguishes class `instanceMembers`
+  from `classMembers`. Set `protocolVersion` to `2`, replace each class's v1
+  `members` according to how it is accessed, and run `trb install` to
+  regenerate the native-type cache. Compound function and component exports
+  continue to use `members`.
+  ([#448](https://github.com/type-rb/type-rb/pull/448))
+
+### Packages and tooling
+
+- Declaration adapters can describe non-constructible native objects as
+  interfaces. TypeRB checks their instance members, rejects `.new()`, and
+  emits type-only TypeScript imports.
+  ([#449](https://github.com/type-rb/type-rb/pull/449))
+- A pinned TanStack Router fixture verifies native navigation and documents
+  the boundary between stable fixed declarations and route-tree-derived
+  project declarations.
+  ([#450](https://github.com/type-rb/type-rb/pull/450))
+
 ## 0.3.16 - 2026-08-23
 
 ### Breaking changes
