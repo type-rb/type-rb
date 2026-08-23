@@ -17,7 +17,10 @@ Application source does not contain or reference shadow signature files.
 The built-in Rails provider attached to `trb/platform/ruby/rails` supplies
 controller and ActiveRecord contracts and parses `db/schema.rb` into a Schema
 AST. It derives model column properties, finder keyword types, generic
-relations, and pagination result types from that AST. Future providers may
+relations, and other schema-owned declarations from that AST. It does not
+synthesize application controller classes, application helpers, or third-party
+gem APIs. Those declarations belong to their own package adapter or project
+provider. Future providers may
 compile library-owned RBS, RBI, `.d.ts`, or Go export data into the same IR.
 
 Unknown members on a provider-owned type are errors instead of silently
@@ -33,6 +36,8 @@ migrated to TypeRB.
   contain both static declarations and framework-specific inference.
 - Rails schema parsing and library declaration parsing remain separate from the
   TypeRB source parser but converge on Declaration IR.
+- Project-specific controller concerns and value objects are not part of the
+  Rails provider merely because a Rails application uses them.
 - Provider coverage is incremental. Known APIs are strict; uncovered Ruby APIs
   retain the explicit Ruby interoperability escape hatch.
 

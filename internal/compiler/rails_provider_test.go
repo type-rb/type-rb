@@ -14,12 +14,9 @@ const railsInsurersController = `import trb/platform/ruby/rails
 module Api
   module V1
     module Internal
-      class InsurersController < Api::ApplicationController
-        include PaginationHelper
-
+      class InsurersController < ActionController::API
         def index()
-          page := paginate_with_headers(Insurer.all())
-          insurers := page[0]
+          insurers := Insurer.all()
           render(json: insurers)
           return
         end
@@ -44,8 +41,7 @@ func TestRailsProviderTypesControllerWithoutApplicationSignatures(t *testing.T) 
 	variables := map[string]string{}
 	collectIRVariables(artifact.IR.Statements, variables)
 	for name, want := range map[string]string{
-		"page":     "Tuple<Array<Insurer>, Pagination>",
-		"insurers": "Array<Insurer>",
+		"insurers": "ActiveRecord::Relation<Insurer>",
 		"insurer":  "Insurer",
 	} {
 		if got := variables[name]; got != want {

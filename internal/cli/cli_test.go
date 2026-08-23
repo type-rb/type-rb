@@ -8126,7 +8126,7 @@ func TestBuildCanEmbedInExistingRailsProjectWithoutManagingGemfile(t *testing.T)
 	if err := os.MkdirAll(filepath.Dir(controller), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := "import trb/platform/ruby/rails\n\nmodule Api\n  module V1\n    module Internal\n      class InsurersController < Api::ApplicationController\n        include PaginationHelper\n\n        def index()\n          page := paginate_with_headers(Insurer.all())\n          insurers := page[0]\n          render(json: insurers)\n          return\n        end\n\n        def show()\n          insurer := Insurer.find_by!(code: params[:code])\n          render(json: insurer.as_json())\n          return\n        end\n      end\n    end\n  end\nend\n"
+	source := "import trb/platform/ruby/rails\n\nmodule Api\n  module V1\n    module Internal\n      class InsurersController < Api::ApplicationController\n        def index()\n          insurers := Insurer.all()\n          render(json: insurers)\n          return\n        end\n\n        def show()\n          insurer := Insurer.find_by!(code: params[:code])\n          render(json: insurer.as_json())\n          return\n        end\n      end\n    end\n  end\nend\n"
 	if err := os.WriteFile(controller, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -8148,8 +8148,8 @@ func TestBuildCanEmbedInExistingRailsProjectWithoutManagingGemfile(t *testing.T)
 	if !strings.Contains(string(output), "Insurer.find_by!(code: params[:code])") {
 		t.Fatalf("unexpected generated controller:\n%s", output)
 	}
-	if !strings.Contains(string(output), "page = paginate_with_headers(Insurer.all())") {
-		t.Fatalf("generated controller omitted index pagination:\n%s", output)
+	if !strings.Contains(string(output), "insurers = Insurer.all()") {
+		t.Fatalf("generated controller omitted index query:\n%s", output)
 	}
 	if strings.Contains(stdout.String(), "packages ->") {
 		t.Fatalf("external build reported a managed manifest:\n%s", stdout.String())
