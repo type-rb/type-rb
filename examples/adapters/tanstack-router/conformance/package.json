@@ -1,0 +1,20 @@
+{
+  "name": "tanstack-router-adapter-conformance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun",
+  "scripts": {
+    "check": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "1.170.29",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "^6.0.0"
+  }
+}

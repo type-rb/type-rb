@@ -1,0 +1,14 @@
+import { MouseEvent, ReactNode } from trb/platform/typescript/react
+import { NavigateOptions, Outlet, useRouter } from "@tanstack/react-router"
+
+def RouterPage(): ReactNode
+	router := useRouter()
+	open_todo := fn(_event: MouseEvent)
+		router.navigate(NavigateOptions.new(to: "/todos/42"))
+		return
+	end
+	return <main>
+		<button type="button" onClick={open_todo}>Open todo</button>
+		<Outlet />
+	</main>
+end

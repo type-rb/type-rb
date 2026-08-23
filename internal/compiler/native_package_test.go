@@ -154,6 +154,33 @@ func tanStackQueryAdapterCatalog(t *testing.T) *nativepackage.Catalog {
 	return catalog
 }
 
+func tanStackRouterAdapterExampleRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "examples", "adapters", "tanstack-router"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func tanStackRouterAdapterCatalog(t *testing.T) *nativepackage.Catalog {
+	t.Helper()
+	root := tanStackRouterAdapterExampleRoot(t)
+	manifest, err := packageManager.ReadTypeRBManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependencies := manifest.NativeDependenciesFor("typescript")
+	catalog := nativepackage.Empty(dependencies)
+	if err := nativepackage.ApplyDeclarationAdapterFiles(catalog, []declarationadapterhost.Source{{
+		Package: manifest.Name, Mode: "typescript",
+		Path: filepath.Join(root, manifest.DeclarationAdapterFor("typescript")), Dependencies: dependencies,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}
+
 func nativeGenericQueryCatalog(t *testing.T) *nativepackage.Catalog {
 	t.Helper()
 	catalog := tanStackQueryAdapterCatalog(t)
@@ -466,6 +493,36 @@ func TestCompileTypeScriptUsesNativeInterfaceInstanceMembers(t *testing.T) {
 	_, err = CompileWithOptions("invalid.trb", []byte("import { AnyRouter } from router-library\nrouter := AnyRouter.new()\n"), Options{Mode: "typescript", NativePackages: catalog})
 	if err == nil || !strings.Contains(err.Error(), "type AnyRouter imported from router-library has no member new") {
 		t.Fatalf("expected non-constructible interface diagnostic, got %v", err)
+	}
+}
+
+func TestCompileTypeScriptTanStackRouterAdapterExample(t *testing.T) {
+	root := tanStackRouterAdapterExampleRoot(t)
+	source, err := os.ReadFile(filepath.Join(root, "conformance", "src", "app.trb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "app.trb", ModulePath: "app", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: tanStackRouterAdapterCatalog(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "app.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		`import { Outlet, useRouter } from "@tanstack/react-router";`,
+		`import type { NavigateOptions, AnyRouter } from "@tanstack/react-router";`,
+		`const router: AnyRouter = useRouter();`,
+		`router.navigate(({to: "/todos/42"} satisfies NavigateOptions));`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated TanStack Router adapter output is missing %q:\n%s", expected, output)
+		}
 	}
 }
 

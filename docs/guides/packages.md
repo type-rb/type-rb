@@ -261,6 +261,11 @@ dependency at an explicit version and run a native type-checking conformance
 project when changing it. The repository's
 `examples/adapters/tanstack-query` fixture demonstrates this split with a
 checked catalog plus a strict TypeScript project pinned to TanStack Query.
+The `examples/adapters/tanstack-router` fixture also verifies a
+non-constructible interface and its instance member against the native package.
+It intentionally omits route-tree-derived generics, exact parameters, and
+destinations: those values require a future project provider rather than a
+fixed declaration catalog.
 
 An adapter package may connect one conformance project to each adapter mode:
 
