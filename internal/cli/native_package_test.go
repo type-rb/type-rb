@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/nativepackage"
+	"github.com/type-rb/type-rb/internal/packageextension"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
 	"github.com/type-rb/type-rb/internal/project"
 )
@@ -167,28 +168,28 @@ func TestBuildRejectsStaleNativeTypeScriptPackageIndex(t *testing.T) {
 	}
 }
 
-func TestInstallAppliesTypeRBPackageNativeTypeProvider(t *testing.T) {
+func TestInstallAppliesTypeRBPackageDeclarationAdapter(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "typescript")
 	config.TypeScript.PackageManager = "npm"
 	config.Dependencies["ui"] = "1.0.0"
-	providerPath := filepath.Join(root, "provider.json")
-	provider := nativepackage.Provider{
-		FormatVersion: nativepackage.FormatVersion,
-		Modules: map[string]nativepackage.Module{
-			"ui": {Exports: map[string]nativepackage.Export{
-				"Button": {Kind: "component", Type: nativepackage.Type{Kind: "named", Name: "ReactNode"}},
+	adapterPath := filepath.Join(root, "declarations.json")
+	adapter := packageextension.DeclarationAdapterCatalog{
+		ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
+		Modules: map[string]packageextension.DeclarationAdapterModule{
+			"ui": {Exports: map[string]packageextension.DeclarationAdapterExport{
+				"Button": {Kind: "component", Type: packageextension.DeclarationAdapterType{Kind: "named", Name: "ReactNode"}},
 				"identity": {
-					Kind: "function", Type: nativepackage.Type{Kind: "named", Name: "T"}, Parameters: []nativepackage.Type{{Kind: "named", Name: "T"}}, Required: 1, TypeParameters: []string{"T"},
+					Kind: "function", Type: packageextension.DeclarationAdapterType{Kind: "named", Name: "T"}, Parameters: []packageextension.DeclarationAdapterType{{Kind: "named", Name: "T"}}, Required: 1, TypeParameters: []string{"T"},
 				},
 			}},
 		},
 	}
-	providerData, err := json.Marshal(provider)
+	adapterData, err := json.Marshal(adapter)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(providerPath, append(providerData, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(adapterPath, append(adapterData, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(root, "bin")
@@ -201,8 +202,8 @@ func TestInstallAppliesTypeRBPackageNativeTypeProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	resolved := &packageManager.TypeRBPackages{NativeTypeProviders: []packageManager.NativeTypeProvider{{
-		Package: "github.com/acme/ui-types", Path: providerPath, Dependencies: map[string]string{"ui": "1.0.0"},
+	resolved := &packageManager.TypeRBPackages{DeclarationAdapters: []packageManager.DeclarationAdapter{{
+		Package: "github.com/acme/ui-types", Mode: "typescript", Path: adapterPath, Dependencies: map[string]string{"ui": "1.0.0"},
 	}}}
 	var stdout bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &bytes.Buffer{}}
@@ -214,10 +215,10 @@ func TestInstallAppliesTypeRBPackageNativeTypeProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	if loaded.Modules["ui"].Exports["Button"].Kind != "component" {
-		t.Fatalf("provider correction is missing: %#v", loaded.Modules["ui"])
+		t.Fatalf("declaration adapter correction is missing: %#v", loaded.Modules["ui"])
 	}
 	if parameters := loaded.Modules["ui"].Exports["identity"].TypeParameters; len(parameters) != 1 || parameters[0] != "T" {
-		t.Fatalf("generic provider correction is missing: %#v", loaded.Modules["ui"])
+		t.Fatalf("generic declaration adapter correction is missing: %#v", loaded.Modules["ui"])
 	}
 	if !strings.Contains(stdout.String(), "indexed 1 native TypeScript module(s) from 1 package(s)") {
 		t.Fatalf("unexpected install output: %s", stdout.String())

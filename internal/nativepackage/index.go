@@ -14,23 +14,24 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/type-rb/type-rb/internal/declarationadapterhost"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
 const (
-	// FormatVersion versions both package-owned provider files and the generated
-	// native type cache because they share the Type wire representation below.
-	FormatVersion     = 2
+	// FormatVersion belongs only to the generated TypeScript native type cache.
+	// Package-owned declaration adapters use their independent protocol version.
+	FormatVersion     = 3
 	indexRelativePath = ".trb/native-types.json"
 )
 
 type Catalog struct {
-	FormatVersion     int               `json:"formatVersion"`
-	TypeScriptVersion string            `json:"typescriptVersion,omitempty"`
-	Dependencies      map[string]string `json:"dependencies"`
-	ProviderChecksums map[string]string `json:"providerChecksums,omitempty"`
-	Modules           map[string]Module `json:"modules"`
-	UnavailableReason string            `json:"-"`
+	FormatVersion               int               `json:"formatVersion"`
+	TypeScriptVersion           string            `json:"typescriptVersion,omitempty"`
+	Dependencies                map[string]string `json:"dependencies"`
+	DeclarationAdapterChecksums map[string]string `json:"declarationAdapterChecksums,omitempty"`
+	Modules                     map[string]Module `json:"modules"`
+	UnavailableReason           string            `json:"-"`
 }
 
 type Module struct {
@@ -106,15 +107,15 @@ func Load(root string, dependencies map[string]string) (*Catalog, error) {
 	return load(root, dependencies, nil, false)
 }
 
-func LoadWithProviders(root string, dependencies map[string]string, providers []ProviderSource) (*Catalog, error) {
-	expectedProviders, err := providerChecksums(providers)
+func LoadWithDeclarationAdapters(root string, dependencies map[string]string, adapters []declarationadapterhost.Source) (*Catalog, error) {
+	expectedAdapters, err := declarationadapterhost.Checksums(adapters)
 	if err != nil {
 		return nil, err
 	}
-	return load(root, dependencies, expectedProviders, true)
+	return load(root, dependencies, expectedAdapters, true)
 }
 
-func load(root string, dependencies, providers map[string]string, checkProviders bool) (*Catalog, error) {
+func load(root string, dependencies, adapters map[string]string, checkAdapters bool) (*Catalog, error) {
 	expected := cloneDependencies(dependencies)
 	if len(expected) == 0 {
 		return Empty(nil), nil
@@ -152,10 +153,10 @@ func load(root string, dependencies, providers map[string]string, checkProviders
 		catalog.Modules = map[string]Module{}
 		catalog.UnavailableReason = "native TypeScript package types are stale; run trb install"
 	}
-	if checkProviders && !equalDependencies(catalog.ProviderChecksums, providers) {
-		catalog.ProviderChecksums = cloneDependencies(providers)
+	if checkAdapters && !equalDependencies(catalog.DeclarationAdapterChecksums, adapters) {
+		catalog.DeclarationAdapterChecksums = cloneDependencies(adapters)
 		catalog.Modules = map[string]Module{}
-		catalog.UnavailableReason = "native TypeScript package provider types are stale; run trb install"
+		catalog.UnavailableReason = "native TypeScript package declaration adapters are stale; run trb install"
 	}
 	return &catalog, nil
 }
@@ -168,8 +169,8 @@ func Write(root string, catalog *Catalog) error {
 	if catalog.Dependencies == nil {
 		catalog.Dependencies = map[string]string{}
 	}
-	if catalog.ProviderChecksums == nil {
-		catalog.ProviderChecksums = map[string]string{}
+	if catalog.DeclarationAdapterChecksums == nil {
+		catalog.DeclarationAdapterChecksums = map[string]string{}
 	}
 	if catalog.Modules == nil {
 		catalog.Modules = map[string]Module{}
@@ -249,4 +250,14 @@ func equalDependencies(left, right map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func readFormatVersion(data []byte) (int, error) {
+	var header struct {
+		FormatVersion int `json:"formatVersion"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&header); err != nil {
+		return 0, err
+	}
+	return header.FormatVersion, nil
 }

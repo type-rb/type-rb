@@ -22,15 +22,16 @@ const TypeRBManifestName = "trbpackage.json"
 // TypeRB package. Compiler extensions are recorded at this boundary but are
 // deliberately rejected until the sandboxed extension protocol is available.
 type TypeRBManifest struct {
-	FormatVersion       int                                   `json:"formatVersion"`
-	Name                string                                `json:"name"`
-	Version             string                                `json:"version"`
-	SourceDir           string                                `json:"sourceDir,omitempty"`
-	Modes               []string                              `json:"modes,omitempty"`
-	Packages            map[string]project.PackageRequirement `json:"packages,omitempty"`
-	NativeDependencies  map[string]map[string]string          `json:"nativeDependencies,omitempty"`
-	NativeTypeProviders map[string]string                     `json:"nativeTypeProviders,omitempty"`
-	CompilerExtension   json.RawMessage                       `json:"compilerExtension,omitempty"`
+	FormatVersion             int                                   `json:"formatVersion"`
+	Name                      string                                `json:"name"`
+	Version                   string                                `json:"version"`
+	SourceDir                 string                                `json:"sourceDir,omitempty"`
+	Modes                     []string                              `json:"modes,omitempty"`
+	Packages                  map[string]project.PackageRequirement `json:"packages,omitempty"`
+	NativeDependencies        map[string]map[string]string          `json:"nativeDependencies,omitempty"`
+	DeclarationAdapters       map[string]string                     `json:"declarationAdapters,omitempty"`
+	LegacyNativeTypeProviders map[string]string                     `json:"nativeTypeProviders,omitempty"`
+	CompilerExtension         json.RawMessage                       `json:"compilerExtension,omitempty"`
 }
 
 func ReadTypeRBManifest(root string) (*TypeRBManifest, error) {
@@ -68,8 +69,8 @@ func (m *TypeRBManifest) applyDefaults() {
 	if m.NativeDependencies == nil {
 		m.NativeDependencies = map[string]map[string]string{}
 	}
-	if m.NativeTypeProviders == nil {
-		m.NativeTypeProviders = map[string]string{}
+	if m.DeclarationAdapters == nil {
+		m.DeclarationAdapters = map[string]string{}
 	}
 }
 
@@ -122,19 +123,22 @@ func (m *TypeRBManifest) Validate(root string) error {
 			}
 		}
 	}
-	for mode, provider := range m.NativeTypeProviders {
-		if mode != "typescript" {
-			return fmt.Errorf("nativeTypeProviders has unsupported mode %q", mode)
+	if len(m.LegacyNativeTypeProviders) != 0 {
+		return errors.New("nativeTypeProviders has been replaced by declarationAdapters")
+	}
+	for mode, adapter := range m.DeclarationAdapters {
+		if mode != "go" && mode != "ruby" && mode != "typescript" {
+			return fmt.Errorf("declarationAdapters has unsupported mode %q", mode)
 		}
-		if filepath.IsAbs(provider) || escapesDirectory(provider) || strings.TrimSpace(provider) == "" {
-			return fmt.Errorf("nativeTypeProviders.%s must stay below the package root", mode)
+		if filepath.IsAbs(adapter) || escapesDirectory(adapter) || strings.TrimSpace(adapter) == "" {
+			return fmt.Errorf("declarationAdapters.%s must stay below the package root", mode)
 		}
-		info, err := os.Stat(filepath.Join(root, provider))
+		info, err := os.Stat(filepath.Join(root, adapter))
 		if err != nil {
-			return fmt.Errorf("nativeTypeProviders.%s: %w", mode, err)
+			return fmt.Errorf("declarationAdapters.%s: %w", mode, err)
 		}
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("nativeTypeProviders.%s must name a regular file", mode)
+			return fmt.Errorf("declarationAdapters.%s must name a regular file", mode)
 		}
 	}
 	if len(bytes.TrimSpace(m.CompilerExtension)) > 0 && string(bytes.TrimSpace(m.CompilerExtension)) != "null" {
@@ -160,8 +164,8 @@ func (m *TypeRBManifest) NativeDependenciesFor(mode string) map[string]string {
 	return result
 }
 
-func (m *TypeRBManifest) NativeTypeProviderFor(mode string) string {
-	return m.NativeTypeProviders[mode]
+func (m *TypeRBManifest) DeclarationAdapterFor(mode string) string {
+	return m.DeclarationAdapters[mode]
 }
 
 func validateManifestRequirement(name string, requirement project.PackageRequirement) error {

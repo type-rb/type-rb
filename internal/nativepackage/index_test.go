@@ -44,7 +44,7 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), `"formatVersion": 2`) || strings.Contains(string(written), `"fails"`) || strings.Contains(string(written), `"effectBridge"`) {
+	if !strings.Contains(string(written), `"formatVersion": 3`) || strings.Contains(string(written), `"fails"`) || strings.Contains(string(written), `"effectBridge"`) {
 		t.Fatalf("native cache did not use the Result-only v2 schema:\n%s", written)
 	}
 	loaded, err := Load(root, map[string]string{"@scope/ui": "1.2.3"})
@@ -91,17 +91,17 @@ func TestLoadRejectsTrailingNativeIndexContent(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsVersionOneNativeIndexBeforeLegacyFields(t *testing.T) {
+func TestLoadRejectsVersionTwoNativeIndexBeforeLegacyFields(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Dir(IndexPath(root)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := `{"formatVersion":1,"dependencies":{"ui":"1"},"modules":{"ui":{"exports":{"run":{"kind":"function","type":{"kind":"function","name":"Function","args":[{"kind":"int","name":"Integer"}],"fails":{"kind":"string","name":"String"},"effectBridge":"promise_rejection"}}}}}}`
+	data := `{"formatVersion":2,"dependencies":{"ui":"1"},"modules":{"ui":{"exports":{"run":{"kind":"function","type":{"kind":"function","name":"Function","args":[{"kind":"int","name":"Integer"}],"fails":{"kind":"string","name":"String"},"effectBridge":"promise_rejection"}}}}}}`
 	if err := os.WriteFile(IndexPath(root), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(root, map[string]string{"ui": "1"})
-	if err == nil || !strings.Contains(err.Error(), "formatVersion 1") || !strings.Contains(err.Error(), "expected 2") || !strings.Contains(err.Error(), "run trb install") {
+	if err == nil || !strings.Contains(err.Error(), "formatVersion 2") || !strings.Contains(err.Error(), "expected 3") || !strings.Contains(err.Error(), "run trb install") {
 		t.Fatalf("expected native cache migration diagnostic, got %v", err)
 	}
 	if strings.Contains(err.Error(), "unknown field") {
@@ -109,7 +109,7 @@ func TestLoadRejectsVersionOneNativeIndexBeforeLegacyFields(t *testing.T) {
 	}
 }
 
-func TestLoadStrictlyRejectsLegacyFieldsInVersionTwoIndex(t *testing.T) {
+func TestLoadStrictlyRejectsLegacyFieldsInVersionThreeIndex(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Dir(IndexPath(root)), 0o755); err != nil {
 		t.Fatal(err)

@@ -96,8 +96,8 @@ A repository publishes `trbpackage.json` at its root:
       "uuid": "11.1.0"
     }
   },
-  "nativeTypeProviders": {
-    "typescript": "native-types/typescript.json"
+  "declarationAdapters": {
+    "typescript": "declarations/typescript.json"
   }
 }
 ```
@@ -108,17 +108,25 @@ aliases are local to the declaring package. Native dependencies are selected
 only for the application's active mode and merge into its generated target
 manifest.
 
-An optional TypeScript native type provider corrects declarations inferred from
-installed `.d.ts` files while application source continues to import the npm
-package directly. The provider is declarative data and cannot execute compiler
-code. Each declared module must belong to the package's TypeScript
-`nativeDependencies`; two providers cannot replace the same export or record.
+An optional declaration adapter supplies semantic TypeRB declarations for a
+target-native dependency. The semantic catalog format is mode-independent; a
+mode key selects the native-ecosystem adapter that consumes it and validates
+any adapter-specific bridge kinds. TypeScript is the first
+implemented adapter. It overlays declarations inferred from installed `.d.ts`
+files while application source continues to import the npm package directly.
 
-The provider file uses a versioned semantic type format:
+An adapter file is declarative data and cannot execute compiler code. The host
+strictly decodes and validates it, verifies a checksum, and checks that every
+declared module belongs to the package's native dependencies for the selected
+mode. Two adapters cannot replace the same export or supporting record. Ruby
+and Go declaration importers are not implemented yet; configuring either mode
+produces an explicit unsupported-adapter error.
+
+The adapter file uses Declaration/Adapter Protocol version 1:
 
 ```json
 {
-  "formatVersion": 2,
+  "protocolVersion": 1,
   "modules": {
     "@acme/ui": {
       "exports": {
@@ -148,16 +156,17 @@ The provider file uses a versioned semantic type format:
 }
 ```
 
-This format is an alpha Tier 1 extension for package authors. It supports
+This protocol is an alpha Tier 1 extension for package authors. It supports
 `function`, `component`, `class`, `record`, and transparent `type_alias`
 declarations. `typeParameters` names explicit generic parameters on functions,
 classes, records, and aliases; `aliasTarget` describes an alias's semantic
 target. Semantic types may refer to those parameters and may use literal and
-union types for discriminated result contracts. TypeRB calls still provide
-explicit type arguments. Provider declarations cannot use `Any`;
+union types for discriminated result contracts. Nested semantic type arguments
+use the `arguments` field. TypeRB calls still provide
+explicit type arguments. Adapter declarations cannot use `Any`;
 unrepresentable boundaries remain explicit diagnostics.
 
-A provider may expose a native Promise callback as a checked `Result`-returning
+An adapter may expose a native Promise callback as a checked `Result`-returning
 TypeRB function. `resultBridge` declares that an `Err` becomes a rejected
 Promise while an `Ok` becomes its resolved value:
 
@@ -167,7 +176,7 @@ Promise while an `Ok` becomes its resolved value:
   "type": {
     "kind": "function",
     "name": "Function",
-    "args": [{ "kind": "named", "name": "TData" }],
+    "arguments": [{ "kind": "named", "name": "TData" }],
     "resultBridge": {
       "kind": "result_to_promise_rejection",
       "error": { "kind": "named", "name": "TError" }
@@ -184,14 +193,15 @@ or a Promise of it, resolves `Ok(value)`, and rejects with the exact
 `Promise<Unit>`. The bridge is allowed only at the declared native boundary;
 it does not make Promise rejection part of portable TypeRB.
 
-Provider format version 2 is Result-only. Version 1 providers used the removed
-`fails` and `effectBridge` fields and are not accepted by TypeRB 0.3. Rewrite
-those callback contracts with `resultBridge`, update the provider's
-`formatVersion` to `2`, and run `trb install` to regenerate
-`.trb/native-types.json`. A version 1 generated cache can be regenerated with
-`trb install` after every referenced provider has been updated.
+Declaration/Adapter Protocol version 1 is Result-only. It replaces the former
+TypeScript-only `nativeTypeProviders` format version 2. Rename the manifest
+field to `declarationAdapters`, replace the file's `formatVersion` with
+`protocolVersion: 1`, and rename nested semantic type `args` fields to
+`arguments`. Existing `resultBridge` contracts remain valid. Then run
+`trb install` to regenerate `.trb/native-types.json`; its cache format is
+independent from the package-owned protocol.
 
-Provider-only records may describe props or parameter objects without becoming
+Adapter-only supporting records may describe props or parameter objects without becoming
 application-importable names. When a selected contract refers to real native
 package types, generated TypeScript adds the required type-only imports while
 keeping those transitive names invisible to TypeRB source and completion.
@@ -199,7 +209,7 @@ keeping those transitive names invisible to TypeRB source and completion.
 External executable compiler extensions are intentionally unavailable.
 Packages that need syntax, code generation, or dynamic type discovery must
 wait for a versioned and sandboxed extension protocol rather than importing
-compiler internals. The declarative native type provider above is the safe
+compiler internals. The declaration adapter above is the safe
 non-executable subset.
 
 ### Experimental bundled declaration providers
@@ -358,8 +368,8 @@ trb add --path ../contracts local/contracts
 Local paths are recorded relative to the project and source content is not
 locked, so code edits are visible immediately. The normalized manifest is
 checksummed; run `trb install` after changing its identity, dependencies,
-supported modes, native dependencies, or native type provider. Provider file
-changes also require `trb install`; a build diagnoses a stale cached provider.
+supported modes, native dependencies, or declaration adapter. Adapter file
+changes also require `trb install`; a build diagnoses a stale cached adapter.
 A local package's manifest name
 remains its canonical identity; `local/contracts` is only the importing
 project's alias.

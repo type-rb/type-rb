@@ -39,13 +39,14 @@ project compiler, and completion consume the cache without invoking TypeScript.
 The indexer currently uses the TypeScript 6 compiler API; TypeScript 7 support
 is deferred until its replacement programmatic API is stable.
 Unsupported declaration shapes are diagnosed instead of becoming `Any`.
-Installed TypeRB packages can supply versioned declarative generic functions,
-classes, records, and transparent type aliases while generated code continues
-to import the original npm package. The bridge preserves discriminated generic
-results and emits transitive native type-only imports without making their
-names source-visible. Provider-declared Promise callback boundaries can map a
-Result-returning TypeRB function to native resolution and rejection without
-exposing Promise semantics in TypeRB source.
+Installed TypeRB packages can supply a versioned, mode-independent declaration
+adapter catalog with generic functions, classes, records, and transparent type
+aliases. The TypeScript adapter is the first consumer and generated code
+continues to import the original npm package. The bridge preserves
+discriminated generic results and emits transitive native type-only imports
+without making their names source-visible. Adapter-declared Promise callback
+boundaries can map a Result-returning TypeRB function to native resolution and
+rejection without exposing Promise semantics in TypeRB source.
 
 The experimental TypeScript browser path accepts structured JSX in TypeRB
 source and emits ordinary TSX for React tooling. Function components use typed

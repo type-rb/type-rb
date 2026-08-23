@@ -27,8 +27,9 @@ type TypeRBResolvedPackage struct {
 	Manifest *TypeRBManifest
 }
 
-type NativeTypeProvider struct {
+type DeclarationAdapter struct {
 	Package      string
+	Mode         string
 	Path         string
 	Dependencies map[string]string
 }
@@ -38,7 +39,7 @@ type TypeRBPackages struct {
 	Aliases             map[string]string
 	Packages            []TypeRBResolvedPackage
 	NativeDependencies  map[string]string
-	NativeTypeProviders []NativeTypeProvider
+	DeclarationAdapters []DeclarationAdapter
 }
 
 // ResolveTypeRBPackages creates or reuses the deterministic project lock and
@@ -284,9 +285,12 @@ func loadResolvedTypeRBPackages(config *project.Config, lock *TypeRBLock) (*Type
 			}
 			result.NativeDependencies[dependency] = version
 		}
-		if provider := manifest.NativeTypeProviderFor(config.Mode); provider != "" {
-			result.NativeTypeProviders = append(result.NativeTypeProviders, NativeTypeProvider{
-				Package: name, Path: filepath.Join(root, provider), Dependencies: manifest.NativeDependenciesFor(config.Mode),
+		if adapter := manifest.DeclarationAdapterFor(config.Mode); adapter != "" {
+			if config.Mode != "typescript" {
+				return nil, fmt.Errorf("TypeRB package %s declares a %s declaration adapter, but this TypeRB version provides only the TypeScript declaration adapter", name, config.Mode)
+			}
+			result.DeclarationAdapters = append(result.DeclarationAdapters, DeclarationAdapter{
+				Package: name, Mode: config.Mode, Path: filepath.Join(root, adapter), Dependencies: manifest.NativeDependenciesFor(config.Mode),
 			})
 		}
 		result.Packages = append(result.Packages, TypeRBResolvedPackage{Name: name, Root: root, Manifest: manifest})

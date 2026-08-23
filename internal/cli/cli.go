@@ -21,6 +21,7 @@ import (
 	"github.com/type-rb/type-rb/internal/codegen"
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/compilerservice"
+	"github.com/type-rb/type-rb/internal/declarationadapterhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/formatter"
 	"github.com/type-rb/type-rb/internal/ir"
@@ -1805,8 +1806,8 @@ func (c *CLI) indexNativeTypeScriptPackages(config *project.Config, resolved *pa
 	if err != nil {
 		return err
 	}
-	providers := nativeTypeProviderSources(resolved)
-	if err := nativepackage.ApplyProviderFiles(catalog, providers); err != nil {
+	adapters := declarationAdapterSources(resolved)
+	if err := nativepackage.ApplyDeclarationAdapterFiles(catalog, adapters); err != nil {
 		return err
 	}
 	if err := nativepackage.Write(config.Root, catalog); err != nil {
@@ -1873,15 +1874,17 @@ func nativeTypeScriptDependencies(config *project.Config, resolved *packageManag
 	return dependencies, nil
 }
 
-func nativeTypeProviderSources(resolved *packageManager.TypeRBPackages) []nativepackage.ProviderSource {
+func declarationAdapterSources(resolved *packageManager.TypeRBPackages) []declarationadapterhost.Source {
 	if resolved == nil {
 		return nil
 	}
-	providers := make([]nativepackage.ProviderSource, 0, len(resolved.NativeTypeProviders))
-	for _, provider := range resolved.NativeTypeProviders {
-		providers = append(providers, nativepackage.ProviderSource{Package: provider.Package, Path: provider.Path, Dependencies: provider.Dependencies})
+	adapters := make([]declarationadapterhost.Source, 0, len(resolved.DeclarationAdapters))
+	for _, adapter := range resolved.DeclarationAdapters {
+		adapters = append(adapters, declarationadapterhost.Source{
+			Package: adapter.Package, Mode: adapter.Mode, Path: adapter.Path, Dependencies: adapter.Dependencies,
+		})
 	}
-	return providers
+	return adapters
 }
 
 func (c *CLI) runUpdate(args []string) error {
@@ -2286,7 +2289,7 @@ func compilerOptionsWithPackages(config *project.Config, resolvedPackages *packa
 		if err != nil {
 			return compiler.Options{}, err
 		}
-		options.NativePackages, err = nativepackage.LoadWithProviders(config.Root, dependencies, nativeTypeProviderSources(resolvedPackages))
+		options.NativePackages, err = nativepackage.LoadWithDeclarationAdapters(config.Root, dependencies, declarationAdapterSources(resolvedPackages))
 		if err != nil {
 			return compiler.Options{}, err
 		}
