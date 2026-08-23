@@ -191,7 +191,7 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		}
 		return nil, true, NewCompileError("", diagnostic.ProjectIntegration, items)
 	}
-	_, generated, err := applyProjectGeneratedSources(units, programs, integrations)
+	_, generated, err := applyProjectGeneratedSources(units, programs, resolutions, integrations)
 	if err != nil {
 		return nil, true, err
 	}

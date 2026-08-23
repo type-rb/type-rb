@@ -86,6 +86,47 @@ end
 	}
 }
 
+func TestWebBindCallSpecializationReusesImportsThroughPackageAliases(t *testing.T) {
+	sources := []SourceUnit{
+		{
+			Filename: "/project/packages/contracts/src/input.trb", ModulePath: "github.com/acme/contracts/input",
+			Source: []byte(`record Payload
+	title: String
+end
+`),
+		},
+		{
+			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
+			PackageAliases: map[string]string{"contracts": "github.com/acme/contracts"},
+			Source: []byte(`import { Payload } from contracts/input
+import { Context } from trb/web
+
+record Input
+	body: Payload
+end
+
+def bind(context: Context)
+	_input := context.bind<Input>() catch |_error|
+		return
+	end
+	return
+end
+`),
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject(sources, Options{
+				Mode: mode, SourceRoot: "/project/src", ProjectRoot: "/project",
+				GoModule: "example.com/package-extension", RubyLoader: "require_relative",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestPackageCallSpecializationImportsDoNotBecomeAuthoredSourceVisible(t *testing.T) {
 	sources := []SourceUnit{
 		{

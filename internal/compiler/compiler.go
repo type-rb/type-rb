@@ -414,7 +414,7 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 		}
 		return nil, NewCompileError("", diagnostic.ProjectIntegration, items)
 	}
-	generatedUnits, generated, err := applyProjectGeneratedSources(units, programs, integrations)
+	generatedUnits, generated, err := applyProjectGeneratedSources(units, programs, resolutions, integrations)
 	if err != nil {
 		return nil, err
 	}
