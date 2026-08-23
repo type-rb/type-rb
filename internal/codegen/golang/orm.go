@@ -1278,14 +1278,12 @@ func (g *generator) ormEnumColumnRuntime(enum *ormintegration.EnumColumn) {
 
 func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter ormintegration.Adapter) {
 	g.requireImport("database/sql", "sql")
-	g.requireImport(adapter.GoDriverImport, "_")
+	if adapter.Name != "mysql" {
+		g.requireImport(adapter.GoDriverImport, "_")
+	}
 	g.requireImport("context", "trbcontext")
 	g.requireImport("strconv", "")
 	g.requireImport("sync", "")
-	if adapter.Name == "mysql" {
-		g.requireImport("net/url", "url")
-		g.requireImport("strings", "")
-	}
 	if manifest.DatabaseEnvironment != "" {
 		g.requireImport("errors", "")
 		g.requireImport("os", "")
@@ -1306,7 +1304,7 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	}
 	g.line("trbOrmSource := " + database)
 	if adapter.Name == "mysql" {
-		g.line("if strings.HasPrefix(trbOrmSource, \"mysql://\") { parsed, err := url.Parse(trbOrmSource); if err != nil { trbOrmDatabaseError = err; return }; credentials := parsed.User.Username(); if password, exists := parsed.User.Password(); exists { credentials += \":\" + password }; trbOrmSource = credentials + \"@tcp(\" + parsed.Host + \")\" + parsed.Path; if parsed.RawQuery != \"\" { trbOrmSource += \"?\" + parsed.RawQuery } }")
+		g.normalizeMySQLSource("trbOrmSource", "trbOrmDatabaseError")
 		g.line("separator := \"?\"; if strings.Contains(trbOrmSource, \"?\") { separator = \"&\" }; if !strings.Contains(trbOrmSource, \"parseTime=\") { trbOrmSource += separator + \"parseTime=true\"; separator = \"&\" }; if !strings.Contains(trbOrmSource, \"loc=\") { trbOrmSource += separator + \"loc=UTC\"; separator = \"&\" }; if !strings.Contains(trbOrmSource, \"time_zone=\") { trbOrmSource += separator + \"time_zone=%27%2B00%3A00%27\" }")
 	}
 	g.line("trbOrmDatabase, trbOrmDatabaseError = sql.Open(" + strconv.Quote(adapter.DriverName) + ", trbOrmSource)")

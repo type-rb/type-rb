@@ -79,9 +79,11 @@ For a trusted local MySQL 8 connection without TLS, an application may opt in
 to RSA public-key retrieval with
 `mysql://user:password@host/database?allowPublicKeyRetrieval=true`. The
 TypeScript/Bun runtimes convert this explicit URL parameter to Bun SQL's
-connection option. It permits a network peer to substitute the authentication
-key, so do not enable it on an untrusted network; configure TLS instead for
-deployed databases.
+connection option. Go runtimes validate and remove the Bun-specific parameter
+before passing the DSN to go-sql-driver/mysql, so the same URL can be shared
+across backend modes. The option permits a network peer to substitute the
+authentication key, so do not enable it on an untrusted network; configure TLS
+instead for deployed databases.
 
 ## Using another migration system
 
