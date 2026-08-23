@@ -35,6 +35,11 @@ trb install
 trb install --frozen
 trb install --offline
 trb install --config trbconfig.ruby.jsonc
+
+# Validate a package-owned declaration adapter before publishing it.
+trb adapter check
+trb adapter check --format json
+trb adapter check ../ui-types
 ```
 
 TypeRB packages are ordinary typed source compiled through the same AST, typed
@@ -44,6 +49,15 @@ drift, while `--offline` uses only local packages and the existing project
 cache. `--config` selects an explicit project configuration, including when a
 single source tree has separate target configurations. See the
 [package guide](guides/packages.md).
+
+`trb adapter check` runs from a TypeRB package root by default, or accepts one
+explicit package-root directory. It validates `trbpackage.json`, every
+configured `declarationAdapters.<mode>` catalog, native-dependency ownership,
+catalog-internal export/supporting-record conflicts, and bridge kinds through
+the same selected ecosystem adapter used by installation. Human output is the
+default. `--format json` writes a versioned report to standard output on both
+success and failure and returns a nonzero status when diagnostics contain
+errors.
 
 The `web` template uses `src` as the source root and creates `main.trb`, an
 index route, and an explicit root middleware stack with request IDs and JSONL

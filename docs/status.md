@@ -47,6 +47,10 @@ discriminated generic results and emits transitive native type-only imports
 without making their names source-visible. Adapter-declared Promise callback
 boundaries can map a Result-returning TypeRB function to native resolution and
 rejection without exposing Promise semantics in TypeRB source.
+Package authors can run `trb adapter check` to validate the manifest and every
+catalog through the selected ecosystem consumer before publishing. Its optional
+versioned JSON report exposes deterministic adapter counts and diagnostics for
+CI and AI agents.
 
 The experimental TypeScript browser path accepts structured JSX in TypeRB
 source and emits ordinary TSX for React tooling. Function components use typed
