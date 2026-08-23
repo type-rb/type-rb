@@ -2,6 +2,17 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.20 - 2026-08-23
+
+### TypeScript backend
+
+- TypeScript/Bun ORM and SQL Jobs runtimes honor an explicit
+  `allowPublicKeyRetrieval=true` MySQL URL parameter for trusted local MySQL 8
+  connections without TLS. The option remains disabled unless the application
+  opts in, and the database guide documents the security tradeoff and recommends
+  TLS for deployed databases.
+  ([#466](https://github.com/type-rb/type-rb/pull/466))
+
 ## 0.3.19 - 2026-08-23
 
 ### Go backend
