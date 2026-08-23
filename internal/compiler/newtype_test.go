@@ -172,6 +172,40 @@ end
 	}
 }
 
+func TestImportedNewtypeConversionsDoNotLeaveUnusedGoImports(t *testing.T) {
+	contracts := SourceUnit{
+		Filename: "/project/contracts/index.trb", ModulePath: "contracts/index", Package: "contracts",
+		Source: []byte("newtype UserId = Integer\n"),
+	}
+	main := SourceUnit{
+		Filename: "/project/main.trb", ModulePath: "main", Package: "main",
+		Source: []byte(`import { UserId } from contracts
+
+def build_id(): Integer
+	id := UserId.new(7)
+	return id.value()
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{contracts, main}, Options{
+		Mode: "go", GoModule: "example.com/newtypes", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatalf("compile imported newtype: %v", err)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Filename != main.Filename {
+			continue
+		}
+		output := string(artifact.Output)
+		if strings.Contains(output, `"example.com/newtypes/contracts"`) {
+			t.Fatalf("generated Go retained an import erased with the newtype conversion:\n%s", output)
+		}
+		return
+	}
+	t.Fatalf("missing artifact for %s", main.Filename)
+}
+
 func TestAliasCanNameANewtypeWithoutLosingNominality(t *testing.T) {
 	source := []byte(`newtype UserId = Integer
 alias CurrentUserId = UserId

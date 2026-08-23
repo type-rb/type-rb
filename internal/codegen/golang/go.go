@@ -2,7 +2,10 @@ package golang
 
 import (
 	"encoding/hex"
+	goast "go/ast"
 	"go/format"
+	goparser "go/parser"
+	gotoken "go/token"
 	pathpkg "path"
 	"sort"
 	"strconv"
@@ -166,6 +169,7 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	if g.arrayIndexRuntime {
 		g.arrayIndexRuntimeSupport()
 	}
+	g.imports = pruneUnusedImports(g.b.String(), g.imports)
 	packageName := program.Package
 	if packageName == "" {
 		packageName = "main"
@@ -196,6 +200,41 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	}
 	generated, mapping := sourcemap.ExtractMarkers(generated, g.sourceLocations)
 	return sourcemap.Generated{Output: generated, Map: mapping}, g.imports, g.bindingSources
+}
+
+func pruneUnusedImports(body string, imports map[string]string) map[string]string {
+	if len(imports) == 0 {
+		return imports
+	}
+	file, err := goparser.ParseFile(gotoken.NewFileSet(), "generated.go", "package generated\n\n"+body, 0)
+	if err != nil {
+		// Preserve the original imports so a code-generation syntax error keeps
+		// its most useful diagnostics instead of being obscured by this cleanup.
+		return imports
+	}
+	referenced := map[string]bool{}
+	goast.Inspect(file, func(node goast.Node) bool {
+		selector, ok := node.(*goast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if qualifier, ok := selector.X.(*goast.Ident); ok {
+			referenced[qualifier.Name] = true
+		}
+		return true
+	})
+	used := make(map[string]string, len(imports))
+	for importPath, alias := range imports {
+		name := alias
+		if name == "" {
+			name = pathpkg.Base(importPath)
+		}
+		name = goImportAlias(name)
+		if name == "_" || name == "." || referenced[name] {
+			used[importPath] = alias
+		}
+	}
+	return used
 }
 
 func (g *generator) importStatement(imported *ir.Import) {
