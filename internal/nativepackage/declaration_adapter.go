@@ -8,6 +8,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/declarationadapterhost"
 	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 // ApplyDeclarationAdapterFiles overlays package-owned semantic declarations
@@ -143,6 +144,12 @@ func importDeclarationAdapterExport(source packageextension.DeclarationAdapterEx
 		Members: map[string]Export{}, InstanceMembers: map[string]Export{}, ClassMembers: map[string]Export{},
 		UnsupportedFields: cloneStringMap(source.UnsupportedFields),
 	}
+	if source.ResultBridge != nil {
+		result.ResultBridge = &ResultBridge{Kind: source.ResultBridge.Kind, Error: importDeclarationAdapterType(source.ResultBridge.Error)}
+		if err := validateTypeScriptCallResultBridge(result); err != nil {
+			return Export{}, err
+		}
+	}
 	if source.AliasTarget != nil {
 		converted := importDeclarationAdapterType(*source.AliasTarget)
 		if err := validateTypeScriptResultBridges(converted); err != nil {
@@ -221,6 +228,32 @@ func validateTypeScriptResultBridges(typ Type) error {
 		if err := validateTypeScriptResultBridges(argument); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateTypeScriptCallResultBridge(exported Export) error {
+	if exported.ResultBridge == nil {
+		return nil
+	}
+	if exported.ResultBridge.Kind != "promise_rejection_to_result" {
+		return fmt.Errorf("unsupported TypeScript call resultBridge kind %q", exported.ResultBridge.Kind)
+	}
+	if exported.Kind != "function" {
+		return fmt.Errorf("TypeScript call resultBridge is only valid on functions")
+	}
+	if exported.Type.Nullable || exported.Type.Kind != "named" || exported.Type.Name != "Result" || len(exported.Type.Args) != 2 {
+		return fmt.Errorf("TypeScript promise_rejection_to_result bridge requires a Result<T, E> return type")
+	}
+	if exported.Type.Args[0].Kind == "void" {
+		return fmt.Errorf("TypeScript promise_rejection_to_result bridge represents Promise<void> as Result<Unit, E>, not Result<Void, E>")
+	}
+	if !types.Equivalent(exported.Type.Args[1].Semantic(), exported.ResultBridge.Error.Semantic()) {
+		return fmt.Errorf("TypeScript promise_rejection_to_result bridge error %s does not match Result error %s", exported.ResultBridge.Error.Semantic(), exported.Type.Args[1].Semantic())
+	}
+	errorType := exported.ResultBridge.Error
+	if errorType.Nullable || errorType.Kind != "string" || errorType.Name != "String" || len(errorType.Args) != 0 {
+		return fmt.Errorf("TypeScript promise_rejection_to_result currently requires String as its error type")
 	}
 	return nil
 }

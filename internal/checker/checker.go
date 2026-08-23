@@ -25,6 +25,7 @@ type Result struct {
 	Conversions                map[ast.Expression]types.Type
 	NullableUnwraps            map[ast.Expression]types.Type
 	NativeResultBridges        map[ast.Expression]NativeResultBridge
+	NativeCallResultBridges    map[*ast.CallExpression]NativeCallResultBridge
 	Variables                  map[*ast.VariableStatement]types.Type
 	Iterations                 map[*ast.IterationExpression]types.Type
 	IterationBindings          map[*ast.IterationExpression][]types.Type
@@ -129,6 +130,13 @@ type NativeResultBridge struct {
 	Type types.Type
 }
 
+type NativeCallResultBridge struct {
+	Kind       string
+	Success    types.Type
+	Error      types.Type
+	ResultType types.Type
+}
+
 type StructuredBlock struct {
 	Parameters     []types.Type
 	Return         types.Type
@@ -181,6 +189,7 @@ type GenericApplication struct {
 	OwnerArguments         []types.Type
 	Parameters             []types.Type
 	ParameterResultBridges []resolver.NativeResultBridge
+	CallResultBridge       resolver.NativeCallResultBridge
 	ReturnType             types.Type
 	Required               int
 	Variadic               bool
@@ -717,6 +726,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			Conversions:                map[ast.Expression]types.Type{},
 			NullableUnwraps:            map[ast.Expression]types.Type{},
 			NativeResultBridges:        map[ast.Expression]NativeResultBridge{},
+			NativeCallResultBridges:    map[*ast.CallExpression]NativeCallResultBridge{},
 			Variables:                  map[*ast.VariableStatement]types.Type{},
 			Iterations:                 map[*ast.IterationExpression]types.Type{},
 			IterationBindings:          map[*ast.IterationExpression][]types.Type{},
@@ -2958,6 +2968,18 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.Required = binding.Member.Required
 			application.Variadic = binding.Member.Variadic
 			application.ReturnType = binding.Member.Type
+			application.CallResultBridge = binding.Member.CallResultBridge
+		} else if binding, found := c.resolution.InferredTypeMember(receiver.Name, member.Name); found && binding.Member != nil && len(binding.Member.TypeParameters) > 0 {
+			binding = specializeResolvedClassMember(receiver, binding)
+			application.Kind = "method"
+			application.Owner = receiver.Name
+			application.OwnerArguments = append([]types.Type(nil), receiver.Args...)
+			application.TypeParameters = append([]string(nil), binding.Member.TypeParameters...)
+			application.Parameters = append([]types.Type(nil), binding.Member.Parameters...)
+			application.Required = binding.Member.Required
+			application.Variadic = binding.Member.Variadic
+			application.ReturnType = binding.Member.Type
+			application.CallResultBridge = binding.Member.CallResultBridge
 		} else if declared, found := c.external[node.Receiver]; found && len(declared.TypeParameters) > 0 {
 			declared = c.specializeDeclarationMember(receiver, declared)
 			application.Kind = "method"
@@ -3019,6 +3041,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 				application.Kind = "function"
 				application.Parameters = append([]types.Type(nil), binding.Export.Parameters...)
 				application.ParameterResultBridges = append([]resolver.NativeResultBridge(nil), binding.Export.ParameterResultBridges...)
+				application.CallResultBridge = binding.Export.CallResultBridge
 				application.Required = binding.Export.Required
 				application.Variadic = binding.Export.Variadic
 				application.ReturnType = binding.Export.Type
@@ -3055,6 +3078,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 		for index := range application.ParameterResultBridges {
 			application.ParameterResultBridges[index] = substituteNativeResultBridge(application.ParameterResultBridges[index], substitutions)
 		}
+		application.CallResultBridge = substituteNativeCallResultBridge(application.CallResultBridge, substitutions)
 		application.ReturnType = substituteType(application.ReturnType, substitutions)
 	}
 	return application, true
@@ -3062,6 +3086,11 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 
 func substituteNativeResultBridge(bridge resolver.NativeResultBridge, substitutions map[string]types.Type) resolver.NativeResultBridge {
 	bridge.Type = substituteType(bridge.Type, substitutions)
+	bridge.Error = substituteType(bridge.Error, substitutions)
+	return bridge
+}
+
+func substituteNativeCallResultBridge(bridge resolver.NativeCallResultBridge, substitutions map[string]types.Type) resolver.NativeCallResultBridge {
 	bridge.Error = substituteType(bridge.Error, substitutions)
 	return bridge
 }
@@ -4634,12 +4663,13 @@ func specializeResolvedEnumMember(receiver types.Type, binding resolver.Binding)
 	for index := range copy.Parameters {
 		copy.Parameters[index] = substituteType(copy.Parameters[index], substitutions)
 	}
+	copy.CallResultBridge = substituteNativeCallResultBridge(copy.CallResultBridge, substitutions)
 	binding.Member = &copy
 	return binding
 }
 
 func specializeResolvedClassMember(receiver types.Type, binding resolver.Binding) resolver.Binding {
-	if binding.Export == nil || binding.Member == nil || (binding.Export.Kind != resolver.ClassExport && binding.Export.Kind != resolver.RecordExport) || len(binding.Export.TypeParameters) == 0 {
+	if binding.Export == nil || binding.Member == nil || (binding.Export.Kind != resolver.ClassExport && binding.Export.Kind != resolver.RecordExport && binding.Export.Kind != resolver.InterfaceExport) || len(binding.Export.TypeParameters) == 0 {
 		return binding
 	}
 	substitutions := typeSubstitutions(binding.Export.TypeParameters, receiver.Args)
@@ -4649,6 +4679,7 @@ func specializeResolvedClassMember(receiver types.Type, binding resolver.Binding
 	for index := range copy.Parameters {
 		copy.Parameters[index] = substituteType(copy.Parameters[index], substitutions)
 	}
+	copy.CallResultBridge = substituteNativeCallResultBridge(copy.CallResultBridge, substitutions)
 	binding.Member = &copy
 	return binding
 }
@@ -5659,6 +5690,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			c.checkTypedArgumentsWithNativeResultBridges(n.Span(), application.Name, application.Parameters, application.ParameterResultBridges, application.Required, application.Variadic, n.Arguments, argumentTypes)
 			typ = application.ReturnType
+			c.checkNativeCallResultBridge(n, typ, application.CallResultBridge)
 			if len(application.TypeArguments) == 1 {
 				if binding, imported := c.result.References[generic.Receiver]; imported && binding.Library != nil {
 					c.checkCodecApplication(n, binding.Library.Intrinsic, application.TypeArguments[0])
@@ -5696,6 +5728,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			typ = binding.Type()
 			library := c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
+			if binding.Member != nil {
+				c.checkNativeCallResultBridge(n, typ, binding.Member.CallResultBridge)
+			} else if binding.Export != nil {
+				c.checkNativeCallResultBridge(n, typ, binding.Export.CallResultBridge)
+			}
 			if binding.Member != nil && binding.Member.EnumOwner != "" {
 				copy := binding
 				call := EnumCall{EnumName: binding.Member.EnumOwner, Method: binding.Name, Reference: &copy}
@@ -6656,6 +6693,35 @@ func (c *Checker) checkNativeResultBridge(expression ast.Expression, expected, a
 	c.requireRuntimeType(expandedResult)
 	c.result.NativeResultBridges[expression] = NativeResultBridge{Kind: bridge.Kind, Type: bridge.Type}
 	return true
+}
+
+func (c *Checker) checkNativeCallResultBridge(call *ast.CallExpression, returned types.Type, bridge resolver.NativeCallResultBridge) {
+	if bridge.Kind == "" {
+		return
+	}
+	if bridge.Kind != "promise_rejection_to_result" {
+		c.error(call.Span(), fmt.Sprintf("unsupported native call result bridge %s", bridge.Kind))
+		return
+	}
+	success, failure, expanded, standard := c.standardResultParts(returned)
+	if !standard {
+		c.error(call.Span(), fmt.Sprintf("native call result bridge requires the standard Result<T, E>, got %s", returned))
+		return
+	}
+	if success.Kind == types.Void {
+		c.error(call.Span(), "native Promise rejection bridge represents Promise<void> with Result<Unit, E>, not Result<Void, E>")
+		return
+	}
+	if !c.typesEquivalent(failure, bridge.Error) {
+		c.error(call.Span(), fmt.Sprintf("native call result bridge error type %s does not match Result error %s", bridge.Error, failure))
+		return
+	}
+	if failure.Nullable || failure.Kind != types.String {
+		c.error(call.Span(), fmt.Sprintf("native Promise rejection bridge currently requires String as its Result error type, got %s", failure))
+		return
+	}
+	c.requireRuntimeType(expanded)
+	c.result.NativeCallResultBridges[call] = NativeCallResultBridge{Kind: bridge.Kind, Success: success, Error: failure, ResultType: expanded}
 }
 
 func libraryAssignable(expected, actual types.Type) bool {

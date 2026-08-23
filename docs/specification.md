@@ -485,7 +485,13 @@ switches.
   adapter may mark a Result-returning function field or parameter with the
   `result_to_promise_rejection` bridge. The TypeScript backend then unwraps the
   callback's `Result`, resolves `Ok(value)`, and rejects the exact `Err(error)`
-  payload only at that native boundary.
+  payload only at that native boundary. A native function or instance member
+  may instead use the call-level `promise_rejection_to_result` bridge and
+  declare `Result<T, String>`. The call becomes a TypeScript suspension root;
+  resolution produces `Ok`, and a synchronous throw or Promise rejection
+  produces `Err` from `Error.message` or `String(value)`. `Promise<void>` maps
+  to `Result<Unit, String>`. If String conversion throws, the error is
+  `"Unknown native rejection"`. Other error projections are not yet accepted.
 - A package-owned declaration adapter uses a versioned, mode-independent
   semantic catalog selected for one native ecosystem by
   `declarationAdapters.<mode>` in the package manifest. The common host

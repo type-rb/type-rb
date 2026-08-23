@@ -21,7 +21,7 @@ import (
 const (
 	// FormatVersion belongs only to the generated TypeScript native type cache.
 	// Package-owned declaration adapters use their independent protocol version.
-	FormatVersion     = 4
+	FormatVersion     = 5
 	indexRelativePath = ".trb/native-types.json"
 )
 
@@ -52,6 +52,7 @@ type Export struct {
 	Members           map[string]Export `json:"members,omitempty"`
 	InstanceMembers   map[string]Export `json:"instanceMembers,omitempty"`
 	ClassMembers      map[string]Export `json:"classMembers,omitempty"`
+	ResultBridge      *ResultBridge     `json:"resultBridge,omitempty"`
 	UnsupportedFields map[string]string `json:"unsupportedFields,omitempty"`
 }
 
@@ -71,8 +72,9 @@ type Type struct {
 	Readonly     bool          `json:"readonly,omitempty"`
 }
 
-// ResultBridge describes a native callback boundary that resolves its success
-// value through a Promise and rejects with the standard Result error payload.
+// ResultBridge describes a package-owned conversion between a native Promise
+// boundary and the standard TypeRB Result. Its placement determines whether
+// it applies to a callback type or to the declared call itself.
 type ResultBridge struct {
 	Kind  string `json:"kind"`
 	Error Type   `json:"error"`

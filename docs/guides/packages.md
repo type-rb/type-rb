@@ -231,6 +231,42 @@ or a Promise of it, resolves `Ok(value)`, and rejects with the exact
 `Promise<Unit>`. The bridge is allowed only at the declared native boundary;
 it does not make Promise rejection part of portable TypeRB.
 
+The opposite direction is a call-level bridge on a native function or
+instance member. The native Promise success type must match the `Result`
+success type. The initial bridge intentionally accepts only `String` errors:
+an `Error` rejection contributes its message, while any other rejection uses
+`String(...)`. If that conversion itself throws, the stable fallback is
+`"Unknown native rejection"`.
+
+```json
+{
+  "kind": "function",
+  "type": {
+    "kind": "named",
+    "name": "Result",
+    "arguments": [
+      { "kind": "string", "name": "String" },
+      { "kind": "string", "name": "String" }
+    ]
+  },
+  "resultBridge": {
+    "kind": "promise_rejection_to_result",
+    "error": { "kind": "string", "name": "String" }
+  }
+}
+```
+
+The call is a backend suspension root even though TypeRB adds no `async` or
+`await` syntax. A resolved native `Promise<T>` becomes `Result<T, String>::Ok`;
+`Promise<void>` is represented by `Result<Unit, String>::Ok(Unit.new())`.
+Generated TypeScript first checks the native expression against that exact
+Promise type, so conformance testing rejects a bridge attached to a synchronous
+return. Synchronous throws from the call use the same checked error path. Rich
+record or enum errors require a future package-owned rejection mapper and are
+rejected by this first bridge rather than filled with partial values. The
+bridge does not invent cancellation: a package must declare an explicit native
+cancellation parameter when its API provides one.
+
 Declaration/Adapter Protocol version 2 distinguishes class instance members
 from class members. To migrate a version 1 catalog, set `protocolVersion` to
 `2` and replace each class's `members` with `instanceMembers` or
@@ -269,9 +305,9 @@ It intentionally omits route-tree-derived generics, exact parameters, and
 destinations: those values require a future project provider rather than a
 fixed declaration catalog.
 The `examples/adapters/auth0-react` fixture verifies readonly properties on a
-non-constructible interface and a React provider projection. Native token,
-login, and logout methods remain explicit unsupported fields until a later
-bridge defines Promise rejection-to-Result mapping and suspension together.
+non-constructible interface, a React provider projection, and native Promise
+calls exposed as checked Results. Its token, login, and logout methods use the
+`promise_rejection_to_result` call bridge described above.
 
 An adapter package may connect one conformance project to each adapter mode:
 

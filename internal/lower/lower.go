@@ -799,6 +799,17 @@ func (l *lowerer) expressionConversions(node ast.Expression, result ir.Expressio
 			}
 		}
 	}
+	if call, ok := node.(*ast.CallExpression); ok && result != nil {
+		if bridge, bridged := l.checked.NativeCallResultBridges[call]; bridged {
+			if nativeCall := expressionWithType(result, bridge.Success); nativeCall != nil {
+				result = &ir.Conversion{
+					ExprBase: ir.NewExprBase(node.Span(), bridge.ResultType),
+					Kind:     ir.PromiseRejectionToResultConversion,
+					Value:    nativeCall,
+				}
+			}
+		}
+	}
 	return result
 }
 
@@ -809,6 +820,10 @@ func expressionWithType(expression ir.Expression, typ types.Type) ir.Expression 
 		copy.ExprBase.Type = typ
 		return &copy
 	case *ir.Member:
+		copy := *node
+		copy.ExprBase.Type = typ
+		return &copy
+	case *ir.Call:
 		copy := *node
 		copy.ExprBase.Type = typ
 		return &copy
