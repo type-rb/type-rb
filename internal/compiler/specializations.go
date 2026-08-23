@@ -11,6 +11,7 @@ import (
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/packageextension"
 	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/resolver"
 )
 
 func applyCallSpecializations(units []SourceUnit, programs map[string]*ast.Program, checkedPrograms map[string]checker.Result) ([]SourceUnit, []diagnostic.Diagnostic, bool, error) {
@@ -100,7 +101,7 @@ func applyCallSpecializations(units []SourceUnit, programs map[string]*ast.Progr
 		if unit == nil {
 			continue
 		}
-		source := generatedImportsSource(programs[modulePath], *unit, imports, func(id string) bool {
+		source := generatedImportsSource(programs[modulePath], checkedPrograms[modulePath].Resolution, *unit, imports, func(id string) bool {
 			return id == "packageextension.imports"
 		})
 		if source == "" {
@@ -130,7 +131,7 @@ func applyCallSpecializations(units []SourceUnit, programs map[string]*ast.Progr
 	return updated, diagnostics, changed, nil
 }
 
-func generatedImportsSource(program *ast.Program, unit SourceUnit, required map[string]map[string]bool, excluded func(string) bool) string {
+func generatedImportsSource(program *ast.Program, resolution resolver.Result, unit SourceUnit, required map[string]map[string]bool, excluded func(string) bool) string {
 	visible := map[string]map[string]bool{}
 	if program != nil {
 		for _, statement := range program.Statements {
@@ -138,7 +139,11 @@ func generatedImportsSource(program *ast.Program, unit SourceUnit, required map[
 			if !ok || imported.Alias != "" || compilerGeneratedStart(unit) > 0 && imported.Span().Start.Offset >= compilerGeneratedStart(unit) {
 				continue
 			}
-			addVisibleImport(visible, imported)
+			path := imported.Path
+			if resolved := resolution.Imports[imported]; resolved != nil {
+				path = resolved.Path
+			}
+			addVisibleImport(visible, path, imported.Symbols)
 		}
 	}
 	for _, generated := range unit.CompilerGeneratedSources {
@@ -152,7 +157,7 @@ func generatedImportsSource(program *ast.Program, unit SourceUnit, required map[
 		for _, statement := range fragment.Statements {
 			imported, ok := statement.(*ast.ImportStatement)
 			if ok && imported.Alias == "" {
-				addVisibleImport(visible, imported)
+				addVisibleImport(visible, imported.Path, imported.Symbols)
 			}
 		}
 	}
@@ -181,11 +186,11 @@ func generatedImportsSource(program *ast.Program, unit SourceUnit, required map[
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func addVisibleImport(visible map[string]map[string]bool, imported *ast.ImportStatement) {
-	if visible[imported.Path] == nil {
-		visible[imported.Path] = map[string]bool{}
+func addVisibleImport(visible map[string]map[string]bool, path string, symbols []string) {
+	if visible[path] == nil {
+		visible[path] = map[string]bool{}
 	}
-	for _, symbol := range imported.Symbols {
-		visible[imported.Path][symbol] = true
+	for _, symbol := range symbols {
+		visible[path][symbol] = true
 	}
 }

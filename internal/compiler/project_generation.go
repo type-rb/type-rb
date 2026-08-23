@@ -8,11 +8,12 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/packageextensionhost"
 	"github.com/type-rb/type-rb/internal/projectintegration"
+	"github.com/type-rb/type-rb/internal/resolver"
 )
 
 const projectGeneratedSourcePrefix = "packageextension.project:"
 
-func applyProjectGeneratedSources(units []SourceUnit, programs map[string]*ast.Program, analysis projectintegration.Analysis) ([]SourceUnit, bool, error) {
+func applyProjectGeneratedSources(units []SourceUnit, programs map[string]*ast.Program, resolutions map[string]resolver.Result, analysis projectintegration.Analysis) ([]SourceUnit, bool, error) {
 	updated := cloneSourceUnits(units)
 	byModule := make(map[string]*SourceUnit, len(updated))
 	originalByModule := make(map[string]SourceUnit, len(units))
@@ -50,7 +51,7 @@ func applyProjectGeneratedSources(units []SourceUnit, programs map[string]*ast.P
 
 	for modulePath := range required {
 		original := originalByModule[modulePath]
-		imports := generatedImportsSource(programs[modulePath], original, required[modulePath], func(id string) bool {
+		imports := generatedImportsSource(programs[modulePath], resolutions[modulePath], original, required[modulePath], func(id string) bool {
 			return strings.HasPrefix(id, projectGeneratedSourcePrefix)
 		})
 		if imports == "" {
