@@ -1,0 +1,23 @@
+import { ReactNode } from trb/platform/typescript/react
+import { Auth0Provider, AuthorizationParams, useAuth0 } from "@auth0/auth0-react"
+
+def AuthStatus(): ReactNode
+	auth := useAuth0()
+	label := if auth.isLoading
+		"Loading"
+	elsif auth.isAuthenticated
+		"Authenticated"
+	else
+		"Signed out"
+	end
+	return <p>{label}</p>
+end
+
+def App(): ReactNode
+	authorization := AuthorizationParams.new(
+		redirect_uri: "https://app.example.test",
+		audience: "https://api.example.test",
+		scope: "openid profile email",
+	)
+	return <Auth0Provider domain="tenant.example.test" clientId="client-id" authorizationParams={authorization}><AuthStatus /></Auth0Provider>
+end

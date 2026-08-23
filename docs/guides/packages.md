@@ -172,12 +172,14 @@ declarations cannot use `Any`; unrepresentable boundaries remain explicit
 diagnostics.
 
 Call parameters are valid on functions, components, and classes. Fields are
-valid on records and classes. A function or component uses `members` for
-compound function or component exports such as `Table.Row`. A class instead
+valid on records, classes, and interfaces. Interface fields are readonly and
+describe properties of a native object without making it constructible. A
+function or component uses `members` for compound function or component
+exports such as `Table.Row`. A class instead
 uses `instanceMembers` and `classMembers`, so a method such as
 `router.navigate()` cannot accidentally become a class call such as
-`Router.navigate()`. An interface uses `instanceMembers` and cannot be
-constructed, which is appropriate for opaque native objects returned by a
+`Router.navigate()`. An interface uses fields and `instanceMembers` and cannot
+be constructed, which is appropriate for opaque native objects returned by a
 function. Members cannot themselves contain nested members. A component
 accepts at most one non-variadic props parameter and does not declare explicit
 type parameters. Class, interface, record, and alias declarations use their
@@ -266,6 +268,10 @@ non-constructible interface and its instance member against the native package.
 It intentionally omits route-tree-derived generics, exact parameters, and
 destinations: those values require a future project provider rather than a
 fixed declaration catalog.
+The `examples/adapters/auth0-react` fixture verifies readonly properties on a
+non-constructible interface and a React provider projection. Native token,
+login, and logout methods remain explicit unsupported fields until a later
+bridge defines Promise rejection-to-Result mapping and suspension together.
 
 An adapter package may connect one conformance project to each adapter mode:
 

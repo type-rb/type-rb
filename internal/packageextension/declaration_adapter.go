@@ -227,8 +227,8 @@ func validateDeclarationAdapterExportShape(exported DeclarationAdapterExport) er
 			return fmt.Errorf("a component cannot declare type parameters")
 		}
 	}
-	if exported.Kind != "record" && exported.Kind != "class" && len(exported.Fields) != 0 {
-		return fmt.Errorf("fields are only valid for records and classes")
+	if exported.Kind != "record" && exported.Kind != "class" && exported.Kind != "interface" && len(exported.Fields) != 0 {
+		return fmt.Errorf("fields are only valid for records, classes, and interfaces")
 	}
 	if exported.Kind == "class" && len(exported.Members) != 0 {
 		return fmt.Errorf("kind class uses instanceMembers or classMembers instead of members")

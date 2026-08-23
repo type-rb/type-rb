@@ -181,6 +181,33 @@ func tanStackRouterAdapterCatalog(t *testing.T) *nativepackage.Catalog {
 	return catalog
 }
 
+func auth0ReactAdapterExampleRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "examples", "adapters", "auth0-react"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func auth0ReactAdapterCatalog(t *testing.T) *nativepackage.Catalog {
+	t.Helper()
+	root := auth0ReactAdapterExampleRoot(t)
+	manifest, err := packageManager.ReadTypeRBManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependencies := manifest.NativeDependenciesFor("typescript")
+	catalog := nativepackage.Empty(dependencies)
+	if err := nativepackage.ApplyDeclarationAdapterFiles(catalog, []declarationadapterhost.Source{{
+		Package: manifest.Name, Mode: "typescript",
+		Path: filepath.Join(root, manifest.DeclarationAdapterFor("typescript")), Dependencies: dependencies,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}
+
 func nativeGenericQueryCatalog(t *testing.T) *nativepackage.Catalog {
 	t.Helper()
 	catalog := tanStackQueryAdapterCatalog(t)
@@ -463,6 +490,10 @@ func TestCompileTypeScriptUsesNativeInterfaceInstanceMembers(t *testing.T) {
 			"router-library": {Exports: map[string]nativepackage.Export{
 				"AnyRouter": {
 					Kind: "interface", Type: nativepackage.Type{Kind: "named", Name: "AnyRouter"},
+					Fields: []nativepackage.Field{{Name: "ready", Type: nativepackage.Type{Kind: "bool", Name: "Boolean"}}},
+					UnsupportedFields: map[string]string{
+						"history": "uses a target-specific history object",
+					},
 					InstanceMembers: map[string]nativepackage.Export{
 						"navigate": {
 							Kind: "function", Type: nativepackage.Type{Kind: "void", Name: "Void"},
@@ -474,7 +505,7 @@ func TestCompileTypeScriptUsesNativeInterfaceInstanceMembers(t *testing.T) {
 			}},
 		},
 	}
-	source := []byte("import { useRouter } from router-library\nrouter := useRouter()\nrouter.navigate(\"/todos/42\")\n")
+	source := []byte("import { useRouter } from router-library\nrouter := useRouter()\nputs(router.ready.to_s())\nrouter.navigate(\"/todos/42\")\n")
 	artifact, err := CompileWithOptions("main.trb", source, Options{Mode: "typescript", NativePackages: catalog})
 	if err != nil {
 		t.Fatal(err)
@@ -483,6 +514,7 @@ func TestCompileTypeScriptUsesNativeInterfaceInstanceMembers(t *testing.T) {
 		`import { useRouter } from "router-library";`,
 		`import type { AnyRouter } from "router-library";`,
 		`const router: AnyRouter = useRouter();`,
+		`console.log(String(router.ready));`,
 		`router.navigate("/todos/42");`,
 	} {
 		if !strings.Contains(string(artifact.Output), expected) {
@@ -493,6 +525,21 @@ func TestCompileTypeScriptUsesNativeInterfaceInstanceMembers(t *testing.T) {
 	_, err = CompileWithOptions("invalid.trb", []byte("import { AnyRouter } from router-library\nrouter := AnyRouter.new()\n"), Options{Mode: "typescript", NativePackages: catalog})
 	if err == nil || !strings.Contains(err.Error(), "type AnyRouter imported from router-library has no member new") {
 		t.Fatalf("expected non-constructible interface diagnostic, got %v", err)
+	}
+
+	_, err = CompileWithOptions("invalid.trb", []byte("import { useRouter } from router-library\nrouter := useRouter()\nputs(router.history)\n"), Options{Mode: "typescript", NativePackages: catalog})
+	if err == nil || !strings.Contains(err.Error(), "member history from native type AnyRouter cannot be represented safely: uses a target-specific history object") {
+		t.Fatalf("expected unsupported native interface field diagnostic, got %v", err)
+	}
+
+	_, err = CompileWithOptions("invalid.trb", []byte("import { useRouter } from router-library\nrouter := useRouter()\nputs(router.missing)\n"), Options{Mode: "typescript", NativePackages: catalog})
+	if err == nil || !strings.Contains(err.Error(), "type AnyRouter imported from router-library has no member missing") {
+		t.Fatalf("expected unknown inferred native interface member diagnostic, got %v", err)
+	}
+
+	_, err = CompileWithOptions("invalid.trb", []byte("import { useRouter } from router-library\nmut router := useRouter()\nrouter.ready = false\n"), Options{Mode: "typescript", NativePackages: catalog})
+	if err == nil || !strings.Contains(err.Error(), "field ready is readonly") {
+		t.Fatalf("expected readonly native interface field diagnostic, got %v", err)
 	}
 }
 
@@ -523,6 +570,44 @@ func TestCompileTypeScriptTanStackRouterAdapterExample(t *testing.T) {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated TanStack Router adapter output is missing %q:\n%s", expected, output)
 		}
+	}
+}
+
+func TestCompileTypeScriptAuth0ReactAdapterExample(t *testing.T) {
+	root := auth0ReactAdapterExampleRoot(t)
+	source, err := os.ReadFile(filepath.Join(root, "conformance", "src", "app.trb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "app.trb", ModulePath: "app", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: auth0ReactAdapterCatalog(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "app.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		`import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";`,
+		`import type { AuthorizationParams, Auth0ContextInterface } from "@auth0/auth0-react";`,
+		`const auth: Auth0ContextInterface = useAuth0();`,
+		`auth.isLoading`,
+		`auth.isAuthenticated`,
+		`<Auth0Provider domain={"tenant.example.test"} clientId={"client-id"}`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated Auth0 adapter output is missing %q:\n%s", expected, output)
+		}
+	}
+
+	invalid := []byte("import { useAuth0 } from \"@auth0/auth0-react\"\nauth := useAuth0()\nauth.getAccessTokenSilently()\n")
+	_, err = CompileWithOptions("invalid.trb", invalid, Options{Mode: "typescript", NativePackages: auth0ReactAdapterCatalog(t)})
+	if err == nil || !strings.Contains(err.Error(), "native Promise rejection cannot yet be converted into a checked TypeRB Result") {
+		t.Fatalf("expected unsupported native Promise diagnostic, got %v", err)
 	}
 }
 

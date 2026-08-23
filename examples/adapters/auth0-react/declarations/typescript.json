@@ -1,0 +1,134 @@
+{
+  "protocolVersion": 2,
+  "modules": {
+    "@auth0/auth0-react": {
+      "exports": {
+        "Auth0ContextInterface": {
+          "kind": "interface",
+          "type": {
+            "kind": "named",
+            "name": "Auth0ContextInterface"
+          },
+          "fields": [
+            {
+              "name": "isAuthenticated",
+              "type": {
+                "kind": "bool",
+                "name": "Boolean"
+              }
+            },
+            {
+              "name": "isLoading",
+              "type": {
+                "kind": "bool",
+                "name": "Boolean"
+              }
+            }
+          ],
+          "unsupportedFields": {
+            "error": "the native Error value requires an explicit portable error projection",
+            "getAccessTokenSilently": "native Promise rejection cannot yet be converted into a checked TypeRB Result",
+            "loginWithRedirect": "native Promise rejection cannot yet be converted into a checked TypeRB Result",
+            "logout": "native Promise rejection cannot yet be converted into a checked TypeRB Result",
+            "user": "the complete Auth0 User shape is outside this adapter's state-only projection"
+          }
+        },
+        "Auth0Provider": {
+          "kind": "component",
+          "type": {
+            "kind": "named",
+            "name": "ReactNode"
+          },
+          "parameters": [
+            {
+              "kind": "named",
+              "name": "Auth0ProviderOptions"
+            }
+          ],
+          "required": 1
+        },
+        "AuthorizationParams": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "AuthorizationParams"
+          },
+          "fields": [
+            {
+              "name": "redirect_uri",
+              "type": {
+                "kind": "string",
+                "name": "String"
+              },
+              "optional": true
+            },
+            {
+              "name": "audience",
+              "type": {
+                "kind": "string",
+                "name": "String"
+              },
+              "optional": true
+            },
+            {
+              "name": "scope",
+              "type": {
+                "kind": "string",
+                "name": "String"
+              },
+              "optional": true
+            }
+          ]
+        },
+        "useAuth0": {
+          "kind": "function",
+          "type": {
+            "kind": "named",
+            "name": "Auth0ContextInterface"
+          }
+        }
+      },
+      "records": {
+        "Auth0ProviderOptions": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "Auth0ProviderOptions"
+          },
+          "fields": [
+            {
+              "name": "domain",
+              "type": {
+                "kind": "string",
+                "name": "String"
+              }
+            },
+            {
+              "name": "clientId",
+              "type": {
+                "kind": "string",
+                "name": "String"
+              }
+            },
+            {
+              "name": "authorizationParams",
+              "type": {
+                "kind": "named",
+                "name": "AuthorizationParams"
+              },
+              "optional": true
+            },
+            {
+              "name": "children",
+              "type": {
+                "kind": "named",
+                "name": "ReactNode"
+              },
+              "optional": true
+            }
+          ]
+        }
+      }
+    }
+  }
+}

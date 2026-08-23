@@ -63,6 +63,7 @@ func TestApplyDeclarationAdapterFilesPreservesObjectMemberIdentity(t *testing.T)
 			"client-library": {Exports: map[string]packageextension.DeclarationAdapterExport{
 				"ClientView": {
 					Kind: "interface", Type: adapterType("named", "ClientView"),
+					Fields:          []packageextension.DeclarationAdapterField{{Name: "ready", Type: adapterType("bool", "Boolean")}},
 					InstanceMembers: map[string]packageextension.DeclarationAdapterExport{"run": function(adapterType("string", "String"))},
 				},
 				"Client": {
@@ -84,7 +85,7 @@ func TestApplyDeclarationAdapterFilesPreservesObjectMemberIdentity(t *testing.T)
 		t.Fatalf("class member identity was not preserved: %#v", client)
 	}
 	clientView := catalog.Modules["client-library"].Exports["ClientView"]
-	if clientView.Kind != "interface" || clientView.InstanceMembers["run"].Type.Name != "String" {
+	if clientView.Kind != "interface" || len(clientView.Fields) != 1 || clientView.Fields[0].Name != "ready" || clientView.Fields[0].Type.Name != "Boolean" || clientView.InstanceMembers["run"].Type.Name != "String" {
 		t.Fatalf("interface member identity was not preserved: %#v", clientView)
 	}
 }
