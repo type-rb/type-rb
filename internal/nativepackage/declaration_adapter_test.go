@@ -52,6 +52,35 @@ func TestApplyDeclarationAdapterFilesCorrectsIndexedExport(t *testing.T) {
 	}
 }
 
+func TestApplyDeclarationAdapterFilesPreservesClassMemberIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "declarations.json")
+	function := func(result packageextension.DeclarationAdapterType) packageextension.DeclarationAdapterExport {
+		return packageextension.DeclarationAdapterExport{Kind: "function", Type: result}
+	}
+	writeDeclarationAdapterFixture(t, path, packageextension.DeclarationAdapterCatalog{
+		ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
+		Modules: map[string]packageextension.DeclarationAdapterModule{
+			"client-library": {Exports: map[string]packageextension.DeclarationAdapterExport{
+				"Client": {
+					Kind: "class", Type: adapterType("named", "Client"),
+					InstanceMembers: map[string]packageextension.DeclarationAdapterExport{"run": function(adapterType("string", "String"))},
+					ClassMembers:    map[string]packageextension.DeclarationAdapterExport{"create": function(adapterType("named", "Client"))},
+				},
+			}},
+		},
+	})
+	catalog := Empty(map[string]string{"client-library": "1.0.0"})
+	if err := ApplyDeclarationAdapterFiles(catalog, []declarationadapterhost.Source{{
+		Package: "client-types", Mode: "typescript", Path: path, Dependencies: map[string]string{"client-library": "1.0.0"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	client := catalog.Modules["client-library"].Exports["Client"]
+	if client.InstanceMembers["run"].Type.Name != "String" || client.ClassMembers["create"].Type.Name != "Client" {
+		t.Fatalf("class member identity was not preserved: %#v", client)
+	}
+}
+
 func TestApplyDeclarationAdapterFilesPreservesGenericResultBridge(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "declarations.json")
 	tData := adapterType("named", "TData")

@@ -21,7 +21,7 @@ import (
 const (
 	// FormatVersion belongs only to the generated TypeScript native type cache.
 	// Package-owned declaration adapters use their independent protocol version.
-	FormatVersion     = 3
+	FormatVersion     = 4
 	indexRelativePath = ".trb/native-types.json"
 )
 
@@ -50,6 +50,8 @@ type Export struct {
 	TypeParameters    []string          `json:"typeParameters,omitempty"`
 	Fields            []Field           `json:"fields,omitempty"`
 	Members           map[string]Export `json:"members,omitempty"`
+	InstanceMembers   map[string]Export `json:"instanceMembers,omitempty"`
+	ClassMembers      map[string]Export `json:"classMembers,omitempty"`
 	UnsupportedFields map[string]string `json:"unsupportedFields,omitempty"`
 }
 

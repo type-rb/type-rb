@@ -89,10 +89,11 @@ Automatic `.d.ts` indexing supports ordinary functions and React components
 whose signatures can be represented safely by TypeRB types. Unsupported
 overloads, conditional types, `any`, and individual complex props produce a
 diagnostic instead of becoming `Any`. A TypeRB package may provide declarative
-generic functions, classes, records, and discriminated result aliases for a
-complex native package. Application code still imports the original npm
-package and writes explicit TypeRB type arguments; it does not maintain a local
-signature file. See the [package guide](packages.md).
+generic functions, classes with explicit instance and class members, records,
+and discriminated result aliases for a complex native package. Application
+code still imports the original npm package and writes explicit TypeRB type
+arguments; it does not maintain a local signature file. See the
+[package guide](packages.md).
 
 Event attributes use purpose-specific React types instead of one untyped event:
 

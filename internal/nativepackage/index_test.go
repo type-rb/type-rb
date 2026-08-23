@@ -27,6 +27,15 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 		Modules: map[string]Module{
 			"@scope/ui": {Exports: map[string]Export{
 				"Button": {Kind: "component", Type: Type{Kind: "named", Name: "ReactNode"}},
+				"Client": {
+					Kind: "class", Type: Type{Kind: "named", Name: "Client"},
+					InstanceMembers: map[string]Export{
+						"run": {Kind: "function", Type: Type{Kind: "string", Name: "String"}},
+					},
+					ClassMembers: map[string]Export{
+						"create": {Kind: "function", Type: Type{Kind: "named", Name: "Client"}},
+					},
+				},
 				"runQuery": {
 					Kind: "function", Type: Type{Kind: "int", Name: "Integer"}, Required: 1,
 					Parameters: []Type{{
@@ -44,8 +53,8 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), `"formatVersion": 3`) || strings.Contains(string(written), `"fails"`) || strings.Contains(string(written), `"effectBridge"`) {
-		t.Fatalf("native cache did not use the Result-only v2 schema:\n%s", written)
+	if !strings.Contains(string(written), `"formatVersion": 4`) || strings.Contains(string(written), `"fails"`) || strings.Contains(string(written), `"effectBridge"`) {
+		t.Fatalf("native cache did not use the current schema:\n%s", written)
 	}
 	loaded, err := Load(root, map[string]string{"@scope/ui": "1.2.3"})
 	if err != nil {
@@ -56,6 +65,10 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 	}
 	if _, ok := loaded.Modules["@scope/ui"].Exports["Button"]; !ok {
 		t.Fatalf("native export was not preserved: %#v", loaded.Modules)
+	}
+	client := loaded.Modules["@scope/ui"].Exports["Client"]
+	if client.InstanceMembers["run"].Type.Name != "String" || client.ClassMembers["create"].Type.Name != "Client" {
+		t.Fatalf("native class member identity was not preserved: %#v", client)
 	}
 	bridge := loaded.Modules["@scope/ui"].Exports["runQuery"].Parameters[0].ResultBridge
 	if bridge == nil || bridge.Kind != "result_to_promise_rejection" || bridge.Error.Name != "String" {
@@ -91,17 +104,17 @@ func TestLoadRejectsTrailingNativeIndexContent(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsVersionTwoNativeIndexBeforeLegacyFields(t *testing.T) {
+func TestLoadRejectsOlderNativeIndexBeforeLegacyFields(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Dir(IndexPath(root)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := `{"formatVersion":2,"dependencies":{"ui":"1"},"modules":{"ui":{"exports":{"run":{"kind":"function","type":{"kind":"function","name":"Function","args":[{"kind":"int","name":"Integer"}],"fails":{"kind":"string","name":"String"},"effectBridge":"promise_rejection"}}}}}}`
+	data := `{"formatVersion":3,"dependencies":{"ui":"1"},"modules":{"ui":{"exports":{"run":{"kind":"function","type":{"kind":"function","name":"Function","args":[{"kind":"int","name":"Integer"}],"fails":{"kind":"string","name":"String"},"effectBridge":"promise_rejection"}}}}}}`
 	if err := os.WriteFile(IndexPath(root), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(root, map[string]string{"ui": "1"})
-	if err == nil || !strings.Contains(err.Error(), "formatVersion 2") || !strings.Contains(err.Error(), "expected 3") || !strings.Contains(err.Error(), "run trb install") {
+	if err == nil || !strings.Contains(err.Error(), "formatVersion 3") || !strings.Contains(err.Error(), "expected 4") || !strings.Contains(err.Error(), "run trb install") {
 		t.Fatalf("expected native cache migration diagnostic, got %v", err)
 	}
 	if strings.Contains(err.Error(), "unknown field") {
@@ -109,7 +122,7 @@ func TestLoadRejectsVersionTwoNativeIndexBeforeLegacyFields(t *testing.T) {
 	}
 }
 
-func TestLoadStrictlyRejectsLegacyFieldsInVersionThreeIndex(t *testing.T) {
+func TestLoadStrictlyRejectsLegacyFieldsInCurrentIndex(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Dir(IndexPath(root)), 0o755); err != nil {
 		t.Fatal(err)

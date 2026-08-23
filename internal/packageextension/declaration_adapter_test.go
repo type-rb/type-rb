@@ -12,6 +12,15 @@ func TestDeclarationAdapterCatalogRoundTripsAsModeIndependentData(t *testing.T) 
 		Modules: map[string]DeclarationAdapterModule{
 			"query-library": {
 				Exports: map[string]DeclarationAdapterExport{
+					"Client": {
+						Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Client"},
+						InstanceMembers: map[string]DeclarationAdapterExport{
+							"run": {Kind: "function", Type: DeclarationAdapterType{Kind: "string", Name: "String"}},
+						},
+						ClassMembers: map[string]DeclarationAdapterExport{
+							"create": {Kind: "function", Type: DeclarationAdapterType{Kind: "named", Name: "Client"}},
+						},
+					},
 					"useQuery": {
 						Kind: "function", TypeParameters: []string{"TData", "TError"},
 						Type:       DeclarationAdapterType{Kind: "named", Name: "QueryResult", Arguments: []DeclarationAdapterType{{Kind: "named", Name: "TData"}, {Kind: "named", Name: "TError"}}},
@@ -36,6 +45,9 @@ func TestDeclarationAdapterCatalogRoundTripsAsModeIndependentData(t *testing.T) 
 	}
 	if strings.Contains(string(data), "typescript") {
 		t.Fatalf("mode leaked into the declaration protocol: %s", data)
+	}
+	if !strings.Contains(string(data), `"instanceMembers"`) || !strings.Contains(string(data), `"classMembers"`) {
+		t.Fatalf("class member identity was not encoded: %s", data)
 	}
 	var decoded DeclarationAdapterCatalog
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -144,6 +156,11 @@ func TestDeclarationAdapterCatalogRejectsKindSpecificExportShapes(t *testing.T) 
 		{name: "record parameters", exported: DeclarationAdapterExport{Kind: "record", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Parameters: []DeclarationAdapterType{stringType}}, message: "kind record cannot declare call parameters"},
 		{name: "function fields", exported: DeclarationAdapterExport{Kind: "function", Type: stringType, Fields: []DeclarationAdapterField{{Name: "value", Type: stringType}}}, message: "fields are only valid for records and classes"},
 		{name: "record members", exported: DeclarationAdapterExport{Kind: "record", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Members: map[string]DeclarationAdapterExport{"build": functionMember}}, message: "kind record cannot declare members"},
+		{name: "legacy class members", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Members: map[string]DeclarationAdapterExport{"build": functionMember}}, message: "kind class uses instanceMembers or classMembers"},
+		{name: "instance members on function", exported: DeclarationAdapterExport{Kind: "function", Type: stringType, InstanceMembers: map[string]DeclarationAdapterExport{"run": functionMember}}, message: "instanceMembers and classMembers are only valid for classes"},
+		{name: "nested instance members", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, InstanceMembers: map[string]DeclarationAdapterExport{"run": {Kind: "function", Type: stringType, InstanceMembers: map[string]DeclarationAdapterExport{"nested": functionMember}}}}, message: "cannot declare nested members"},
+		{name: "overlapping instance and class members", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, InstanceMembers: map[string]DeclarationAdapterExport{"run": functionMember}, ClassMembers: map[string]DeclarationAdapterExport{"run": functionMember}}, message: "both instance member and class member"},
+		{name: "overlapping field and member", exported: DeclarationAdapterExport{Kind: "class", Type: DeclarationAdapterType{Kind: "named", Name: "Value"}, Fields: []DeclarationAdapterField{{Name: "run", Type: stringType}}, InstanceMembers: map[string]DeclarationAdapterExport{"run": functionMember}}, message: "both field and instance member"},
 		{name: "component arity", exported: DeclarationAdapterExport{Kind: "component", Type: DeclarationAdapterType{Kind: "named", Name: "ReactNode"}, Parameters: []DeclarationAdapterType{stringType, stringType}}, message: "at most one props parameter"},
 		{name: "component variadic", exported: DeclarationAdapterExport{Kind: "component", Type: DeclarationAdapterType{Kind: "named", Name: "ReactNode"}, Parameters: []DeclarationAdapterType{stringType}, Variadic: true}, message: "component cannot be variadic"},
 		{name: "component type parameters", exported: DeclarationAdapterExport{Kind: "component", Type: DeclarationAdapterType{Kind: "named", Name: "ReactNode"}, TypeParameters: []string{"T"}}, message: "component cannot declare type parameters"},

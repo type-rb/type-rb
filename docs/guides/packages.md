@@ -124,11 +124,11 @@ adapter-specific bridge kinds. Ruby and Go declaration importers are not
 implemented yet; configuring either mode produces an explicit
 unsupported-adapter error.
 
-The adapter file uses Declaration/Adapter Protocol version 1:
+The adapter file uses Declaration/Adapter Protocol version 2:
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "modules": {
     "@acme/ui": {
       "exports": {
@@ -171,11 +171,33 @@ explicit type arguments. Adapter declarations cannot use `Any`;
 unrepresentable boundaries remain explicit diagnostics.
 
 Call parameters are valid on functions, components, and classes. Fields are
-valid on records and classes, while compound function or component members are
-valid on functions, components, and classes. A component accepts at most one
-non-variadic props parameter and does not declare explicit type parameters.
-Class, record, and alias declarations use their exported name as their named
-self type.
+valid on records and classes. A function or component uses `members` for
+compound function or component exports such as `Table.Row`. A class instead
+uses `instanceMembers` and `classMembers`, so a method such as
+`router.navigate()` cannot accidentally become a class call such as
+`Router.navigate()`. Members cannot themselves contain nested members. A
+component accepts at most one non-variadic props parameter and does not declare
+explicit type parameters. Class, record, and alias declarations use their
+exported name as their named self type.
+
+For example, a native class method stays distinct from an instance method:
+
+```json
+{
+  "kind": "class",
+  "type": { "kind": "named", "name": "Router" },
+  "instanceMembers": {
+    "navigate": {
+      "kind": "function",
+      "type": { "kind": "void", "name": "Void" },
+      "parameters": [
+        { "kind": "string", "name": "String" }
+      ],
+      "required": 1
+    }
+  }
+}
+```
 
 An adapter may expose a native Promise callback as a checked `Result`-returning
 TypeRB function. `resultBridge` declares that an `Err` becomes a rejected
@@ -204,13 +226,18 @@ or a Promise of it, resolves `Ok(value)`, and rejects with the exact
 `Promise<Unit>`. The bridge is allowed only at the declared native boundary;
 it does not make Promise rejection part of portable TypeRB.
 
-Declaration/Adapter Protocol version 1 is Result-only. It replaces the former
-TypeScript-only `nativeTypeProviders` format version 2. Rename the manifest
-field to `declarationAdapters`, replace the file's `formatVersion` with
-`protocolVersion: 1`, and rename nested semantic type `args` fields to
-`arguments`. Existing `resultBridge` contracts remain valid. Then run
-`trb install` to regenerate `.trb/native-types.json`; its cache format is
-independent from the package-owned protocol.
+Declaration/Adapter Protocol version 2 distinguishes class instance members
+from class members. To migrate a version 1 catalog, set `protocolVersion` to
+`2` and replace each class's `members` with `instanceMembers` or
+`classMembers` according to how callers access it.
+
+For the older TypeScript-only `nativeTypeProviders` format version 2, rename
+the manifest field to `declarationAdapters`, replace the file's
+`formatVersion` with `protocolVersion: 2`, rename nested semantic type `args`
+fields to `arguments`, and split class members by access kind. Existing
+`resultBridge` contracts remain valid. Then run `trb install` to regenerate
+`.trb/native-types.json`; its cache format is independent from the
+package-owned protocol.
 
 Validate an adapter package from its repository root before publishing it:
 
