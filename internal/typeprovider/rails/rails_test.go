@@ -46,4 +46,12 @@ end
 	if got := find.Return.String(); got != "Insurer" {
 		t.Fatalf("find_by!() return = %s", got)
 	}
+	for _, name := range []string{"ApplicationController", "Api::ApplicationController", "Pagination"} {
+		if _, exists := catalog.Types[name]; exists {
+			t.Fatalf("Rails provider declared application-owned %s", name)
+		}
+	}
+	if _, exists := catalog.Modules["PaginationHelper"]; exists {
+		t.Fatal("Rails provider declared application-owned PaginationHelper")
+	}
 }

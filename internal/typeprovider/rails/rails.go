@@ -52,14 +52,13 @@ func builtins() *declaration.Catalog {
 	void := types.FromName("Void")
 	stringType := types.FromName("String")
 
-	controller := declaration.NewType("ActionController::API", "")
-	controller.InstanceMembers["params"] = property("params", types.FromName("ActionController::Parameters"))
-	controller.InstanceMembers["render"] = declaration.Member{
-		Name: "render", Kind: declaration.Method, Parameters: []declaration.Parameter{{Name: "value", Type: any, Optional: true}}, Return: void, Variadic: true, Provider: "rails",
-	}
-	catalog.Types[controller.Name] = controller
-	for _, name := range []string{"ApplicationController", "Api::ApplicationController"} {
-		catalog.Types[name] = declaration.NewType(name, controller.Name)
+	for _, name := range []string{"ActionController::API", "ActionController::Base"} {
+		controller := declaration.NewType(name, "")
+		controller.InstanceMembers["params"] = property("params", types.FromName("ActionController::Parameters"))
+		controller.InstanceMembers["render"] = declaration.Member{
+			Name: "render", Kind: declaration.Method, Parameters: []declaration.Parameter{{Name: "value", Type: any, Optional: true}}, Return: void, Variadic: true, Provider: "rails",
+		}
+		catalog.Types[controller.Name] = controller
 	}
 
 	parameters := declaration.NewType("ActionController::Parameters", "")
@@ -69,21 +68,10 @@ func builtins() *declaration.Catalog {
 	activeRecord := declaration.NewType("ActiveRecord::Base", "")
 	activeRecord.InstanceMembers["as_json"] = declaration.Member{Name: "as_json", Kind: declaration.Method, Return: types.FromName("JSON::Value"), Provider: "rails"}
 	catalog.Types[activeRecord.Name] = activeRecord
-	catalog.Types["ActiveRecord::Relation"] = declaration.NewType("ActiveRecord::Relation", "")
-	catalog.Types["Pagination"] = declaration.NewType("Pagination", "")
+	relation := declaration.NewType("ActiveRecord::Relation", "")
+	relation.TypeParameters = []string{"T"}
+	catalog.Types[relation.Name] = relation
 	catalog.Types["JSON::Value"] = declaration.NewType("JSON::Value", "")
-
-	pagination := declaration.NewModule("PaginationHelper")
-	typeVariable := types.FromName("T")
-	relation := types.FromName("ActiveRecord::Relation")
-	relation.Args = []types.Type{typeVariable}
-	array := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{typeVariable}}
-	tuple := types.FromName("Tuple")
-	tuple.Args = []types.Type{array, types.FromName("Pagination")}
-	pagination.InstanceMembers["paginate_with_headers"] = declaration.Member{
-		Name: "paginate_with_headers", Kind: declaration.Method, Parameters: []declaration.Parameter{{Name: "relation", Type: relation}}, Return: tuple, TypeParameters: []string{"T"}, Provider: "rails",
-	}
-	catalog.Modules[pagination.Name] = pagination
 	return catalog
 }
 
