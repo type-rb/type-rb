@@ -41,6 +41,19 @@ func TestRangeLiteralCompletionInsertsToArray(t *testing.T) {
 	}
 }
 
+func TestMultilineInputIsAutomaticallyFormatted(t *testing.T) {
+	input := "class User\r" +
+		"    def value(): Integer\r" +
+		"      return 1\r" +
+		"       end\r" +
+		"      end\r"
+	output := bytes.ReplaceAll(runCompletionPTY(t, input), []byte("\r"), nil)
+	want := []byte("[LINE:class User\n\tdef value(): Integer\n\t\treturn 1\n\tend\nend]")
+	if !bytes.Contains(output, want) {
+		t.Fatalf("multiline input was not formatted: %q", output)
+	}
+}
+
 func runCompletionPTY(t *testing.T, input string) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

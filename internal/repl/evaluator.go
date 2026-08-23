@@ -39,8 +39,9 @@ type bytesValue []byte
 type stringBuilderValue struct{ value strings.Builder }
 
 type Result struct {
-	Value   Value
-	Display bool
+	Value          Value
+	Display        bool
+	MutableBinding bool
 }
 
 type arrayValue struct{ Items []Value }
@@ -117,8 +118,9 @@ type lambdaClosure struct {
 }
 
 type scope struct {
-	parent *scope
-	values map[string]Value
+	parent  *scope
+	values  map[string]Value
+	mutable map[string]bool
 }
 
 func (s *scope) get(name string) (Value, bool) {
@@ -136,6 +138,23 @@ func (s *scope) assign(name string, value Value) bool {
 		if _, ok := current.values[name]; ok {
 			current.values[name] = value
 			return true
+		}
+	}
+	return false
+}
+
+func (s *scope) declare(name string, value Value, mutable bool) {
+	s.values[name] = value
+	if s.mutable == nil {
+		s.mutable = map[string]bool{}
+	}
+	s.mutable[name] = mutable
+}
+
+func (s *scope) mutableBinding(name string) bool {
+	for current := s; current != nil; current = current.parent {
+		if _, ok := current.values[name]; ok {
+			return current.mutable[name]
 		}
 	}
 	return false
@@ -454,9 +473,9 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 			return flowResult{}, err
 		}
 		value.Type = node.Type
-		sc.values[node.Name] = value
+		sc.declare(node.Name, value, node.Mutable)
 		e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))] = value
-		return flowResult{Result: Result{Value: value, Display: true}}, nil
+		return flowResult{Result: Result{Value: value, Display: true, MutableBinding: node.Mutable}}, nil
 	case *ir.Temporary:
 		// Compiler-owned temporaries are assigned by a following control-flow
 		// statement. A typed placeholder lets the REPL share the same expanded
@@ -481,10 +500,18 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		if err := e.assign(node.Target, value, module, sc); err != nil {
 			return flowResult{}, err
 		}
-		return flowResult{Result: Result{Value: value, Display: true}}, nil
+		mutableBinding := false
+		if target, ok := node.Target.(*ir.Identifier); ok && !strings.HasPrefix(target.Name, "@") {
+			mutableBinding = sc.mutableBinding(target.Name)
+		}
+		return flowResult{Result: Result{Value: value, Display: true, MutableBinding: mutableBinding}}, nil
 	case *ir.ExpressionStatement:
 		value, err := e.expression(node.Expression, module, sc)
-		return flowResult{Result: Result{Value: value, Display: err == nil}}, err
+		mutableBinding := false
+		if identifier, ok := node.Expression.(*ir.Identifier); ok && !strings.HasPrefix(identifier.Name, "@") {
+			mutableBinding = sc.mutableBinding(identifier.Name)
+		}
+		return flowResult{Result: Result{Value: value, Display: err == nil, MutableBinding: mutableBinding}}, err
 	case *ir.Return:
 		value := Value{Type: types.FromName("Void")}
 		var err error

@@ -376,6 +376,10 @@ switches.
   current language. Class fields use their existing `readonly` modifier
   instead of `mut`.
 - `@ivar := expr` is disallowed; instance variables use declared fields and `=` updates.
+- The REPL appends ` [mut]` to the displayed value and type when a submission
+  directly declares, assigns, or evaluates a mutable binding. The marker is
+  REPL metadata about the binding rather than part of its value or type, and
+  it does not propagate through a derived expression.
 
 ### 3.6 Constants
 
@@ -463,6 +467,10 @@ switches.
   configuration is not part of the current language; a future configuration
   surface may select a different indentation style without changing language
   semantics.
+- Interactive multiline REPL input uses the same canonical indentation. Enter
+  reindents the open submission and inserts the indentation for the next line;
+  accepting a complete submission formats the complete buffer before it is
+  compiled and stored in history.
 
 #### Unused bindings
 

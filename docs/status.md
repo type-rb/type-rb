@@ -112,9 +112,10 @@ conversion, JSON codecs, generated applications, and the REPL. Its
 public contracts are listed in the
 [standard-library reference](standard-library.md).
 
-The typed-IR REPL supports persistent state, multiline editing, history,
-completion menus, project declaration auto-import, suggestions, syntax
-highlighting, interrupts, and type inspection.
+The typed-IR REPL supports persistent state, auto-formatted multiline editing,
+history, completion menus, project declaration auto-import, suggestions,
+syntax highlighting, interrupts, type inspection, and mutable-binding result
+markers.
 The same compiler and evaluator power the local and hosted playground and tour.
 The repository also publishes a reusable TextMate grammar for lexical editor
 highlighting. Its thin Visual Studio Code client packages that grammar and

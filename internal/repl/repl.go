@@ -163,7 +163,11 @@ func Run(options Options) error {
 		compilation = next
 		options.language.Update(compilation.Programs, compilation.Session.IR.ModulePath)
 		if result.Display && result.Value.Type.Kind != types.Void {
-			fmt.Fprintf(options.Stdout, "%s %s %s\n", colorize(options.Interactive, colorValue, Inspect(result.Value)), colorize(options.Interactive, colorMuted, ":"), colorize(options.Interactive, colorType, result.Value.Type.String()))
+			mutable := ""
+			if result.MutableBinding {
+				mutable = " " + colorize(options.Interactive, colorKeyword, "[mut]")
+			}
+			fmt.Fprintf(options.Stdout, "%s %s %s%s\n", colorize(options.Interactive, colorValue, Inspect(result.Value)), colorize(options.Interactive, colorMuted, ":"), colorize(options.Interactive, colorType, result.Value.Type.String()), mutable)
 		}
 	}
 	return nil
@@ -206,7 +210,8 @@ func handleCommand(command, source string, options Options) (bool, string, *Comp
 		fmt.Fprintln(options.Stdout, ":reload           reload the project and replay the session")
 		fmt.Fprintln(options.Stdout, ":quit             leave the REPL")
 		if options.Interactive {
-			fmt.Fprintln(options.Stdout, "keys: Left/Right or Ctrl-B/F move; Ctrl-A/E line; Alt-B/F word")
+			fmt.Fprintln(options.Stdout, "keys: Enter submit/indent; Left/Right or Ctrl-B/F move; Ctrl-A/E line")
+			fmt.Fprintln(options.Stdout, "      Alt-B/F word")
 			fmt.Fprintln(options.Stdout, "      Up/Down or Ctrl-P/N line/history; Ctrl-R search; Tab complete")
 			fmt.Fprintln(options.Stdout, "      Ctrl-K/U/W edit; Ctrl-L clear; Ctrl-C interrupt; Ctrl-D exit")
 		}
