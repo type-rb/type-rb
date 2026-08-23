@@ -46,6 +46,8 @@ func jobsProviderProgram(program *ast.Program) bool {
 		switch node := statement.(type) {
 		case *ast.TypeAliasStatement:
 			return true
+		case *ast.NewtypeStatement:
+			return true
 		case *ast.ClassStatement:
 			if identifier, ok := node.Superclass.(*ast.Identifier); ok && identifier.Name == "Job" {
 				return true

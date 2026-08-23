@@ -265,7 +265,7 @@ The command always writes the JSON snapshot to standard output after project
 inputs have been loaded. A snapshot containing errors still includes source,
 module, and diagnostic data and returns a nonzero status; checked declarations
 are empty when semantic artifacts are unavailable. See the
-[compiler tooling protocol guide](guides/compiler-tooling.md) for the version 1
+[compiler tooling protocol guide](guides/compiler-tooling.md) for the version 2
 schema, compatibility policy, and security considerations.
 
 ## Clean

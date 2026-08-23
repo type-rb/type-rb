@@ -208,16 +208,20 @@ end
 	}
 }
 
-func TestOfficialWebTypedParameterBindingAcceptsTransparentScalarAliases(t *testing.T) {
+func TestOfficialWebTypedParameterBindingAcceptsAliasesAndNewtypes(t *testing.T) {
 	source := SourceUnit{
 		Filename: "/project/main.trb", ModulePath: "main", Package: "main",
 		Source: []byte(`import { ParameterError, Request } from trb/web
 import { Result } from trb/std/result
 
-type InsurerId = Integer
+alias InsurerId = Integer
+newtype MemberId = Integer
+newtype MemberIds = Array<MemberId>
 
 record Query
 	insurer_id: InsurerId
+	member_id: MemberId
+	member_ids: MemberIds
 end
 
 def read(request: Request): Result<Query, ParameterError>

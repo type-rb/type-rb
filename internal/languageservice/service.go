@@ -118,7 +118,8 @@ type Symbol struct {
 }
 
 // TypeInfo retains generic parameters and transparent alias targets needed to
-// instantiate checked member types for editor queries.
+// instantiate checked member types for editor queries. Nominal newtypes keep
+// their explicit new/value members instead of forwarding representation APIs.
 type TypeInfo struct {
 	TypeParameters []string
 	AliasTarget    *types.Type

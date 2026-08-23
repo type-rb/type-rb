@@ -65,7 +65,9 @@ func collectDocumentSymbols(statements []ast.Statement, tokens []token.Token, me
 			}
 			symbol = structuralSymbol(node.Name, "interface", DocumentSymbolInterface, node.Span(), tokens, body)
 		case *ast.TypeAliasStatement:
-			symbol = leafDocumentSymbol(node.Name, "type "+documentTypeDetail(node.Target), DocumentSymbolType, node.Span(), tokens)
+			symbol = leafDocumentSymbol(node.Name, "alias "+documentTypeDetail(node.Target), DocumentSymbolType, node.Span(), tokens)
+		case *ast.NewtypeStatement:
+			symbol = leafDocumentSymbol(node.Name, "newtype "+documentTypeDetail(node.Target), DocumentSymbolType, node.Span(), tokens)
 		case *ast.MethodStatement:
 			kind := DocumentSymbolFunction
 			if member {

@@ -60,6 +60,13 @@ func TestDocumentSymbolsRemainAvailableWithTypeErrors(t *testing.T) {
 	}
 }
 
+func TestDocumentSymbolsDescribeAliasesAndNewtypes(t *testing.T) {
+	symbols := DocumentSymbols("alias Users = Array<User>\nnewtype UserId = Integer\n")
+	if len(symbols) != 2 || symbols[0].Detail != "alias Array<User>" || symbols[1].Detail != "newtype Integer" {
+		t.Fatalf("symbols=%#v", symbols)
+	}
+}
+
 func TestDocumentSymbolsShowResultReturnTypes(t *testing.T) {
 	symbols := DocumentSymbols("def load(): Result<String, LoadError>\n\treturn\nend\n")
 	if len(symbols) != 1 || symbols[0].Detail != "(): Result<String, LoadError>" {

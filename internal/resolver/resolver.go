@@ -39,6 +39,7 @@ const (
 	RecordExport    ExportKind = "record"
 	EnumExport      ExportKind = "enum"
 	TypeAliasExport ExportKind = "type_alias"
+	NewtypeExport   ExportKind = "newtype"
 	ModuleExport    ExportKind = "module"
 	InterfaceExport ExportKind = "interface"
 	FunctionExport  ExportKind = "function"
@@ -61,6 +62,7 @@ type Export struct {
 	TypeParameters         []string
 	AliasTarget            types.Type
 	AliasEnum              bool
+	NewtypeTarget          types.Type
 	Superclass             string
 	Interfaces             []types.Type
 	Span                   token.Span
@@ -222,7 +224,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		module := catalog.Modules[modulePath]
 		for name := range module.Exports {
 			exported := module.Exports[name]
-			if exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != InterfaceExport {
+			if exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != NewtypeExport && exported.Kind != InterfaceExport {
 				continue
 			}
 			if previous := typeOwners[name]; previous != nil {
@@ -592,13 +594,13 @@ func (r Result) TypeMember(typeName, name string) (Binding, bool) {
 
 func (r Result) ImportedType(typeName string) (Binding, bool) {
 	for _, binding := range r.Symbols {
-		if binding.Export != nil && binding.Export.Name == typeName && (binding.Export.Kind == ClassExport || binding.Export.Kind == RecordExport || binding.Export.Kind == EnumExport || binding.Export.Kind == TypeAliasExport || binding.Export.Kind == InterfaceExport) {
+		if binding.Export != nil && binding.Export.Name == typeName && (binding.Export.Kind == ClassExport || binding.Export.Kind == RecordExport || binding.Export.Kind == EnumExport || binding.Export.Kind == TypeAliasExport || binding.Export.Kind == NewtypeExport || binding.Export.Kind == InterfaceExport) {
 			return binding, true
 		}
 	}
 	for _, imported := range r.Packages {
 		exported, exists := imported.Exports[typeName]
-		if exists && (exported.Kind == ClassExport || exported.Kind == RecordExport || exported.Kind == EnumExport || exported.Kind == TypeAliasExport || exported.Kind == InterfaceExport) {
+		if exists && (exported.Kind == ClassExport || exported.Kind == RecordExport || exported.Kind == EnumExport || exported.Kind == TypeAliasExport || exported.Kind == NewtypeExport || exported.Kind == InterfaceExport) {
 			copy := exported
 			return Binding{Import: imported, Name: typeName, Export: &copy}, true
 		}
@@ -623,7 +625,7 @@ func (r Result) InferredType(typeName string) (Binding, bool) {
 	sort.Slice(imports, func(i, j int) bool { return imports[i].Path < imports[j].Path })
 	for _, imported := range imports {
 		exported, exists := imported.Exports[typeName]
-		if !exists || exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != InterfaceExport {
+		if !exists || exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != NewtypeExport && exported.Kind != InterfaceExport {
 			continue
 		}
 		copy := exported
@@ -1231,6 +1233,19 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
 				}
 				result[node.Name] = exported
+			}
+		case *ast.NewtypeStatement:
+			if public(node.Name) {
+				typ := types.FromName(node.Name)
+				target := typeRef(node.Target)
+				result[node.Name] = Export{
+					Name: node.Name, Kind: NewtypeExport, Type: typ, NewtypeTarget: target,
+					Members: map[string]Member{
+						"new":   {Name: "new", Kind: FunctionExport, Type: typ, Parameters: []types.Type{target}, Required: 1, Class: true, Generated: "newtype_new"},
+						"value": {Name: "value", Kind: FunctionExport, Type: target, Generated: "newtype_value"},
+					},
+					Span: node.Span(),
+				}
 			}
 		case *ast.ModuleStatement:
 			if public(node.Name) {

@@ -222,6 +222,47 @@ from a private `_value()` method.
 Method parameters, fields, constants, and top-level bindings are not rejected
 solely for being unused.
 
+### Aliases and newtypes
+
+Use `alias` for a transparent shorthand. It does not create a distinct type:
+
+```trb
+alias UserList = Array<User>
+alias LoadResult<T> = Result<T, LoadError>
+```
+
+Use `newtype` when a domain value must remain distinct even if it has the same
+representation as another value:
+
+```trb
+newtype UserId = Integer
+newtype ProductId = Integer
+newtype ProductIds = Array<ProductId>
+
+def load(id: UserId): UserId
+	return UserId.new(id.value())
+end
+```
+
+A newtype target may be any concrete, fully instantiated, non-nullable type.
+The declaration itself is not generic in the initial design, so
+`newtype Id<T> = T` is rejected while `newtype ProductIds = Array<ProductId>`
+is valid. Express absence outside the newtype as `UserId?`; a nullable target
+such as `newtype MaybeUserId = Integer?` is rejected.
+
+Newtypes are nominal in ordinary TypeRB code. A base value, another newtype
+with the same representation, and the newtype itself are not interchangeable.
+Construct one with `UserId.new(value)` and unwrap it with `id.value()`.
+Underlying members are not forwarded. Two values of the same newtype support
+`==` only when their representation has portable equality.
+
+Typed serialization and persistence boundaries may explicitly use a
+newtype's representation. The built-in JSON codecs, `trb/web` binding, Jobs
+payloads, and ORM value parameters use this rule. Other functions and package
+APIs remain nominal unless their declaration marks the same boundary. Backend
+output may erase the physical wrapper while the TypeRB checker and typed IR
+retain the nominal distinction.
+
 ## Conditions and operators
 
 Conditions must have the non-nullable `Boolean` type. TypeRB does not inherit
@@ -468,7 +509,7 @@ record Invalid
 	body: Array<String>
 end
 
-type Response = Created | Invalid
+alias Response = Created | Invalid
 
 def message(response: Response): String
 	case response.status

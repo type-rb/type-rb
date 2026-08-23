@@ -15,7 +15,7 @@ import (
 func TestJobDeclarationsCrossVersionedExtensionBoundary(t *testing.T) {
 	program, diagnostics := parser.Parse([]byte(`import { Job } from trb/jobs
 
-type ReceiptID = Integer
+alias ReceiptID = Integer
 
 class SendReceiptJob < Job
 	def perform(receipt_id: ReceiptID, email: String)

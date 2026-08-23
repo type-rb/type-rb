@@ -20,6 +20,9 @@ than detailed syntax.
   semantics.
 - Add type-argument inference, generic interface methods, and generic class
   methods.
+- Dogfood nominal newtypes before deciding whether generic newtype declarations
+  or language-defined validated constructors justify additional syntax. Keep
+  fallible validation in ordinary Result-returning functions meanwhile.
 - Define mutation effects for methods and parameters so immutable values remain
   safe across calls, not only assignments and known collection operations.
 - Complete the portable class model with explicit superclass construction and

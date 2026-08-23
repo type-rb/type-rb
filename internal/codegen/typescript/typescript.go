@@ -322,7 +322,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.ensureHTTPRuntime()
 			for symbol, kind := range n.SymbolKinds {
 				switch kind {
-				case "class", "record", "enum", "interface", "type_alias", "enum_alias":
+				case "class", "record", "enum", "interface", "type_alias", "newtype", "enum_alias":
 					g.typeAliases[symbol] = browserAlias
 				}
 			}
@@ -340,7 +340,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.Namespace && n.Alias != "" {
 			for symbol, kind := range n.SymbolKinds {
 				switch kind {
-				case "class", "record", "enum", "interface", "type_alias", "enum_alias":
+				case "class", "record", "enum", "interface", "type_alias", "newtype", "enum_alias":
 					g.typeAliases[symbol] = n.Alias
 				}
 			}
@@ -357,7 +357,7 @@ func (g *generator) statement(statement ir.Statement) {
 					continue
 				}
 				switch n.SymbolKinds[symbol] {
-				case "record", "interface", "type_alias":
+				case "record", "interface", "type_alias", "newtype":
 					types = append(types, symbol)
 				case "function":
 					values = append(values, tsCallableName(symbol))
@@ -476,6 +476,8 @@ func (g *generator) statement(statement ir.Statement) {
 		if len(n.Variants) > 0 {
 			g.line("export const " + n.Name + " = " + g.runtimeName(n.Target.Name) + ";")
 		}
+	case *ir.Newtype:
+		g.line("export type " + n.Name + " = " + g.tsType(n.Target) + ";" + tsTrailingComment(n.TrailingComment))
 	case *ir.Module:
 		g.line("export namespace " + n.Name + " {")
 		g.indent++

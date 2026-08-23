@@ -308,9 +308,9 @@ func TestCompileProjectRejectsUnsupportedJobPerformContracts(t *testing.T) {
 	}
 }
 
-func TestCompileProjectAcceptsImportedTransparentScalarAliasJobArgument(t *testing.T) {
+func TestCompileProjectAcceptsImportedScalarNewtypeJobArgument(t *testing.T) {
 	sources := []SourceUnit{
-		{Filename: "/project/src/contracts/index.trb", ModulePath: "contracts/index", Package: "contracts", Source: []byte("type OrderId = Integer\n")},
+		{Filename: "/project/src/contracts/index.trb", ModulePath: "contracts/index", Package: "contracts", Source: []byte("newtype OrderId = Integer\n")},
 		{
 			Filename: "/project/src/jobs/send_receipt_job.trb", ModulePath: "jobs/send_receipt_job", Package: "jobs",
 			Source: []byte(`import { OrderId } from contracts

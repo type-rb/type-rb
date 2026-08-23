@@ -208,8 +208,9 @@ func importMember(provider string, source packageextension.DeclaredMember, class
 func exportParameter(source declaration.Parameter) packageextension.DeclaredParameter {
 	result := packageextension.DeclaredParameter{
 		Name: source.Name, Type: exportType(source.Type), Keyword: source.Keyword, Optional: source.Optional,
-		LiteralValues:        append([]string(nil), source.LiteralValues...),
-		LiteralArrayElements: append([]string(nil), source.LiteralArrayElements...),
+		RepresentationBoundary: source.RepresentationBoundary,
+		LiteralValues:          append([]string(nil), source.LiteralValues...),
+		LiteralArrayElements:   append([]string(nil), source.LiteralArrayElements...),
 	}
 	for _, values := range source.LiteralArrays {
 		result.LiteralArrays = append(result.LiteralArrays, append([]string(nil), values...))
@@ -220,8 +221,9 @@ func exportParameter(source declaration.Parameter) packageextension.DeclaredPara
 func importParameter(source packageextension.DeclaredParameter) declaration.Parameter {
 	result := declaration.Parameter{
 		Name: source.Name, Type: importType(source.Type), Keyword: source.Keyword, Optional: source.Optional,
-		LiteralValues:        append([]string(nil), source.LiteralValues...),
-		LiteralArrayElements: append([]string(nil), source.LiteralArrayElements...),
+		RepresentationBoundary: source.RepresentationBoundary,
+		LiteralValues:          append([]string(nil), source.LiteralValues...),
+		LiteralArrayElements:   append([]string(nil), source.LiteralArrayElements...),
 	}
 	for _, values := range source.LiteralArrays {
 		result.LiteralArrays = append(result.LiteralArrays, append([]string(nil), values...))

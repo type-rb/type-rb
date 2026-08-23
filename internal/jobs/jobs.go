@@ -22,9 +22,11 @@ const (
 )
 
 type Parameter struct {
-	Name     string
-	Type     types.Type
-	WireType types.Type
+	Name          string
+	Type          types.Type
+	WireType      types.Type
+	Newtype       bool
+	NewtypeModule string
 }
 
 type PerformKind string
@@ -180,7 +182,13 @@ func Analyze(programs []*ast.Program, resolutions map[string]resolver.Result) (*
 		}
 		resolution := resolutions[program.ModulePath]
 		binding, exists := resolution.ImportedType(typ.Name)
-		return exists && binding.Export != nil && binding.Export.Kind == resolver.TypeAliasExport && initialArgumentType(binding.Export.AliasTarget)
+		if !exists || binding.Export == nil {
+			return false
+		}
+		if binding.Export.Kind == resolver.TypeAliasExport {
+			return initialArgumentType(binding.Export.AliasTarget)
+		}
+		return binding.Export.Kind == resolver.NewtypeExport && initialArgumentType(binding.Export.NewtypeTarget)
 	})
 	if err != nil {
 		return nil, err
@@ -199,8 +207,16 @@ func Analyze(programs []*ast.Program, resolutions map[string]resolver.Result) (*
 				continue
 			}
 			binding, exists := resolution.ImportedType(parameter.Type.Name)
-			if exists && binding.Export != nil && binding.Export.Kind == resolver.TypeAliasExport {
-				parameter.WireType = binding.Export.AliasTarget
+			if exists && binding.Export != nil {
+				if binding.Export.Kind == resolver.TypeAliasExport {
+					parameter.WireType = binding.Export.AliasTarget
+				} else if binding.Export.Kind == resolver.NewtypeExport {
+					parameter.WireType = binding.Export.NewtypeTarget
+					parameter.Newtype = true
+					if binding.Import != nil {
+						parameter.NewtypeModule = binding.Import.RuntimePath()
+					}
+				}
 			}
 		}
 	}
@@ -298,6 +314,7 @@ func potentialAliasType(typ types.Type) bool {
 type aliasResolver struct {
 	programs map[string]*ast.Program
 	aliases  map[string]map[string]*ast.TypeAliasStatement
+	newtypes map[string]map[string]*ast.NewtypeStatement
 	imports  map[string]map[string]string
 }
 
@@ -305,16 +322,20 @@ func newAliasResolver(programs []*ast.Program) aliasResolver {
 	result := aliasResolver{
 		programs: map[string]*ast.Program{},
 		aliases:  map[string]map[string]*ast.TypeAliasStatement{},
+		newtypes: map[string]map[string]*ast.NewtypeStatement{},
 		imports:  map[string]map[string]string{},
 	}
 	for _, program := range programs {
 		result.programs[program.ModulePath] = program
 		result.aliases[program.ModulePath] = map[string]*ast.TypeAliasStatement{}
+		result.newtypes[program.ModulePath] = map[string]*ast.NewtypeStatement{}
 		result.imports[program.ModulePath] = map[string]string{}
 		for _, statement := range program.Statements {
 			switch node := statement.(type) {
 			case *ast.TypeAliasStatement:
 				result.aliases[program.ModulePath][node.Name] = node
+			case *ast.NewtypeStatement:
+				result.newtypes[program.ModulePath][node.Name] = node
 			case *ast.ImportStatement:
 				for _, symbol := range node.Symbols {
 					result.imports[program.ModulePath][symbol] = node.Path
@@ -331,12 +352,14 @@ func (r aliasResolver) expand(program *ast.Program, typ types.Type, visiting map
 	}
 	modulePath := program.ModulePath
 	alias := r.aliases[modulePath][typ.Name]
-	if alias == nil {
+	newtype := r.newtypes[modulePath][typ.Name]
+	if alias == nil && newtype == nil {
 		importPath := r.imports[modulePath][typ.Name]
 		modulePath = r.modulePath(importPath)
 		alias = r.aliases[modulePath][typ.Name]
+		newtype = r.newtypes[modulePath][typ.Name]
 	}
-	if alias == nil || len(alias.TypeParameters) != 0 {
+	if alias == nil && newtype == nil || alias != nil && len(alias.TypeParameters) != 0 {
 		return typ
 	}
 	key := modulePath + "\x00" + typ.Name
@@ -348,7 +371,13 @@ func (r aliasResolver) expand(program *ast.Program, typ types.Type, visiting map
 	if targetProgram == nil {
 		return typ
 	}
-	return r.expand(targetProgram, typeRef(alias.Target), visiting)
+	target := ast.TypeRef{}
+	if alias != nil {
+		target = alias.Target
+	} else {
+		target = newtype.Target
+	}
+	return r.expand(targetProgram, typeRef(target), visiting)
 }
 
 func (r aliasResolver) isCanonicalJobResult(program *ast.Program, ref ast.TypeRef, visiting map[string]bool) bool {

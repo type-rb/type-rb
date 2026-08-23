@@ -31,7 +31,7 @@ enum AppError
 	NotFound
 end
 
-type AppResult<T> = Result<T, AppError>
+alias AppResult<T> = Result<T, AppError>
 
 class Probe
 	@calls: Integer

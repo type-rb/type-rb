@@ -15,8 +15,8 @@ import { Result } from trb/std/result
 
 API := HttpClient.new("https://example.test")
 
-type LoadResult<T> = Result<T, RequestError>
-type Loader = () -> LoadResult<Response<String>>
+alias LoadResult<T> = Result<T, RequestError>
+alias Loader = () -> LoadResult<Response<String>>
 
 def named_loader(): LoadResult<Response<String>>
 	raw := try API.request("/named")
@@ -86,8 +86,8 @@ func TestCompileTypeScriptResultFunctionValuesMaySuspendAcrossOrdinaryBoundaries
 func TestCompileTypeScriptSuspendingResultFunctionUsesImportedTransparentAlias(t *testing.T) {
 	contracts := SourceUnit{Filename: "contracts.trb", ModulePath: "app/contracts", Source: []byte(`import { Result } from trb/std/result
 
-type ExternalResult<T, E> = Result<T, E>
-type ExternalLoader<T, E> = () -> ExternalResult<T, E>
+alias ExternalResult<T, E> = Result<T, E>
+alias ExternalLoader<T, E> = () -> ExternalResult<T, E>
 `)}
 	consumer := SourceUnit{Filename: "consumer.trb", ModulePath: "app/consumer", Source: []byte(`import { ExternalLoader, ExternalResult } from app/contracts
 import { HttpClient, RequestError, Response } from trb/platform/typescript/browser

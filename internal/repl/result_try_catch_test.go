@@ -19,7 +19,7 @@ enum AppError
 	NotFound
 end
 
-type AppResult<T> = Result<T, AppError>
+alias AppResult<T> = Result<T, AppError>
 
 def source(success: Boolean): AppResult<Integer>
 	if success

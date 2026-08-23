@@ -359,7 +359,7 @@ CI and AI agents to use one contract for success and failure:
       "mode": "typescript",
       "path": "/workspace/ui-types/declarations/typescript.json",
       "valid": true,
-      "declarationProtocolVersion": 1,
+      "declarationProtocolVersion": 2,
       "modules": 1,
       "exports": 1,
       "supportingRecords": 1
@@ -405,16 +405,19 @@ output from bundled, compiler-integrated packages. `trb/orm` and `trb/jobs` are
 the first consumers. The ORM provider discovers project models and schema
 metadata, while the Jobs provider derives typed enqueue methods from Job
 classes. Their resulting catalogs cross a versioned, JSON-serializable
-Declaration Protocol before resolution and checking. The compiler host
+Declaration Protocol before resolution and checking. The current Declaration
+Protocol is version 2; parameters may explicitly identify a representation
+boundary for nominal source newtypes. The compiler host
 validates and copies that data into its private semantic representation.
 
 The Jobs and ORM declaration providers also receive versioned, validated
-Project Declaration Input snapshots. Version 2 contains canonical module and
-import identity, transparent type aliases, enum and class declarations, method
-signatures, authored and resolved types, declarative class-body call values,
-structural block summaries, and source spans. It does not contain parser nodes,
-method or block bodies, resolver or checker state, filesystem handles, or
-backend objects. These two consumers characterize a small reusable read-only
+Project Declaration Input snapshots. Version 3 contains canonical module and
+import identity, transparent type aliases, nominal newtypes with concrete
+representations, enum and class declarations, method signatures, authored,
+resolved, and boundary representation types, declarative class-body call
+values, structural block summaries, and source spans. It does not contain
+parser nodes, method or block bodies, resolver or checker state, filesystem
+handles, or backend objects. These two consumers characterize a small reusable read-only
 project view; it is not yet a general external provider API.
 
 ORM declaration discovery composes that generic project snapshot with a
@@ -429,6 +432,8 @@ The initial declaration catalog can describe:
 
 - package-owned types, modules, methods, and properties;
 - generic and literal-dependent call signatures such as typed ORM projections;
+- parameters that explicitly accept a nominal source type through its concrete
+  serialization or persistence representation;
 - structured block contracts, including portable control and `Result`
   boundaries; and
 - located project-declaration references and runtime value types needed by the
@@ -509,9 +514,11 @@ supported external plugin API yet. The first consumer is
 `trb/web`'s `Context#bind<T>()`.
 
 A call specializer receives a versioned, serializable request containing the
-selected provider, call-site identity, resolved type arguments, and the record
-shape needed by that provider. It returns ordinary TypeRB helper source, named
-imports required by that source, and a narrow replacement of the original call.
+selected provider, call-site identity, resolved type arguments, nominal
+newtype representation metadata, and the record shape needed by that provider.
+The current request protocol is version 2. It returns ordinary TypeRB helper
+source, named imports required by that source, and a narrow replacement of the
+original call.
 The compiler appends the helper to the call's owning module and runs it through
 the normal parser, resolver, checker, typed IR, and backend pipeline. Package
 code does not receive AST, checker, typed-IR, or backend objects, and it does not

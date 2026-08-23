@@ -159,6 +159,7 @@ func contractTypeSymbols(imported *resolver.Import, native bool) []string {
 		}
 		visitType(exported.Type)
 		visitType(exported.AliasTarget)
+		visitType(exported.NewtypeTarget)
 		for _, parameter := range exported.Parameters {
 			visitType(parameter)
 		}
@@ -193,7 +194,7 @@ func contractTypeSymbols(imported *resolver.Import, native bool) []string {
 
 func contractTypeExport(kind resolver.ExportKind) bool {
 	switch kind {
-	case resolver.ClassExport, resolver.RecordExport, resolver.EnumExport, resolver.TypeAliasExport, resolver.InterfaceExport:
+	case resolver.ClassExport, resolver.RecordExport, resolver.EnumExport, resolver.TypeAliasExport, resolver.NewtypeExport, resolver.InterfaceExport:
 		return true
 	default:
 		return false
@@ -542,6 +543,9 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			result.Variants = append(result.Variants, member)
 		}
 		return result
+	case *ast.NewtypeStatement:
+		semantic := l.checked.Newtypes[n]
+		return &ir.Newtype{Base: base(n.Base), Name: n.Name, Target: semantic.Target}
 	case *ast.ModuleStatement:
 		return &ir.Module{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
 	case *ast.InterfaceStatement:
@@ -927,6 +931,21 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		return result
 	case *ast.CallExpression:
+		if semantic, ok := l.checked.NewtypeCalls[n]; ok {
+			kind := ir.NewtypeConstructionConversion
+			var value ir.Expression
+			if semantic.Operation == "new" {
+				if len(n.Arguments) > 0 {
+					value = l.expression(n.Arguments[0].Value)
+				}
+			} else {
+				kind = ir.NewtypeValueConversion
+				if member, memberCall := n.Callee.(*ast.MemberExpression); memberCall {
+					value = l.expression(member.Receiver)
+				}
+			}
+			return &ir.Conversion{ExprBase: base, Kind: kind, Value: value}
+		}
 		if semantic, ok := l.checked.EnumCalls[n]; ok {
 			result := &ir.EnumCall{ExprBase: base, EnumName: semantic.EnumName, Method: semantic.Method, Reference: l.reference(n.Callee)}
 			if semantic.Receiver != nil {

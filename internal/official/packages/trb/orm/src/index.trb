@@ -14,7 +14,7 @@ record DbError
 	message: String
 end
 
-type DbResult<T> = Result<T, DbError>
+alias DbResult<T> = Result<T, DbError>
 
 class Database
 end

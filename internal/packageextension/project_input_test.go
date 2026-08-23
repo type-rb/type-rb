@@ -16,6 +16,11 @@ func TestProjectDeclarationInputIsVersionedAndSerializable(t *testing.T) {
 		Provider:        "trb/jobs",
 		Modules: []ProjectModule{{
 			ModulePath: "jobs/example",
+			Newtypes: []ProjectNewtype{{
+				Name:   "JobID",
+				Target: ProjectTypeUse{Authored: Type{Kind: "int", Name: "Integer"}, Resolved: Type{Kind: "int", Name: "Integer"}, Span: span},
+				Span:   span,
+			}},
 			Classes: []ProjectClass{{
 				Name: "ExampleJob",
 				Superclass: &ProjectTypeUse{

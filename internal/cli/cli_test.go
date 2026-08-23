@@ -3205,7 +3205,7 @@ record InvalidResponse
 	body: Array<String>
 end
 
-type CreateResponse = CreatedResponse | InvalidResponse
+alias CreateResponse = CreatedResponse | InvalidResponse
 
 def render(response: CreateResponse): String
 	case response.status

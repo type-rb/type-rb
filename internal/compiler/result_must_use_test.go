@@ -41,8 +41,8 @@ end
 			name: "bare transitive alias",
 			source: `import { Result } from trb/std/result
 
-type InnerResult<T> = Result<T, String>
-type AppResult<T> = InnerResult<T>
+alias InnerResult<T> = Result<T, String>
+alias AppResult<T> = InnerResult<T>
 
 def operation(): AppResult<Integer>
 	return AppResult<Integer>::Ok(1)
@@ -106,7 +106,7 @@ func TestStandardResultMustUseRecognizesImportedTransparentAlias(t *testing.T) {
 		Package:    "services",
 		Source: []byte(`import { Result } from trb/std/result
 
-type AppResult<T> = Result<T, String>
+alias AppResult<T> = Result<T, String>
 
 def operation(): AppResult<Integer>
 	return AppResult<Integer>::Ok(1)
@@ -137,7 +137,7 @@ end
 func TestStandardResultMustUseAcceptsExplicitHandlingAndTransferAcrossModes(t *testing.T) {
 	source := []byte(`import { Result } from trb/std/result
 
-type AppResult<T> = Result<T, String>
+alias AppResult<T> = Result<T, String>
 
 def operation(): AppResult<Integer>
 	return AppResult<Integer>::Ok(1)

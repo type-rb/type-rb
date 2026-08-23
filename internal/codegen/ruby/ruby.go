@@ -128,7 +128,7 @@ func wantsSeparation(previous, current ir.Statement) bool {
 		return false
 	}
 	switch current.(type) {
-	case *ir.Class, *ir.Record, *ir.Enum, *ir.TypeAlias, *ir.Module, *ir.Interface, *ir.Method:
+	case *ir.Class, *ir.Record, *ir.Enum, *ir.TypeAlias, *ir.Newtype, *ir.Module, *ir.Interface, *ir.Method:
 		return true
 	}
 	return false
@@ -237,6 +237,9 @@ func (g *generator) statement(statement ir.Statement) {
 		if len(n.Variants) > 0 {
 			g.line(n.Name+" = "+n.Target.Name, n.TrailingComment)
 		}
+	case *ir.Newtype:
+		// Newtypes are source-level nominal types. Ruby uses the representation
+		// value directly, so no runtime declaration is required.
 	case *ir.Module:
 		g.line("module "+n.Name, n.TrailingComment)
 		g.indent++

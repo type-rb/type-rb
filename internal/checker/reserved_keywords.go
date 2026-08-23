@@ -27,7 +27,7 @@ func (c *Checker) validateReservedKeywordName(name, kind string, span token.Span
 		c.error(span, fmt.Sprintf("%s uses the compiler-reserved __trb prefix and cannot be used as %s", name, kind))
 		return
 	}
-	if name == "try" || name == "catch" {
+	if name == "try" || name == "catch" || name == "alias" || name == "newtype" {
 		c.error(span, fmt.Sprintf("%s is a reserved keyword and cannot be used as %s", name, kind))
 	}
 }
@@ -85,6 +85,9 @@ func (c *Checker) validateReservedKeywordStatement(statement ast.Statement) {
 	case *ast.TypeAliasStatement:
 		c.validateReservedKeywordName(node.Name, "a type alias", node.Span())
 		c.validateReservedKeywordTypeParameters(node.TypeParameters)
+		c.validateReservedKeywordType(node.Target)
+	case *ast.NewtypeStatement:
+		c.validateReservedKeywordName(node.Name, "a newtype", node.Span())
 		c.validateReservedKeywordType(node.Target)
 	case *ast.ModuleStatement:
 		c.validateReservedKeywordName(node.Name, "a module name", node.Span())

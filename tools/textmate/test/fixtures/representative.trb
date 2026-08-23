@@ -2,13 +2,15 @@ import { Result } from trb/std/result
 
 module Demo
 	API_VERSION := "v1"
+	alias Names = Array<String>
+	newtype UserId = Integer
 
 	interface Renderable
 		render(): String
 	end
 
 	record User
-		id: Integer
+		id: UserId
 		name: String
 	end
 

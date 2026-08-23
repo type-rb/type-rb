@@ -110,7 +110,11 @@ func jobsEnqueueSource(job Job) (string, error) {
 		if wireType.Kind == "" {
 			wireType = parameter.Type
 		}
-		value, err := jobsJSONValue(wireType, parameter.Name)
+		valueExpression := parameter.Name
+		if parameter.Newtype {
+			valueExpression += ".value()"
+		}
+		value, err := jobsJSONValue(wireType, valueExpression)
 		if err != nil {
 			return "", fmt.Errorf("trb/jobs Job %s parameter %s: %w", job.Name, parameter.Name, err)
 		}
@@ -233,6 +237,12 @@ func jobsDispatchSource(jobs []Job, entrypointModule string) (string, []packagee
 			case types.String:
 				required["trb/std/json"]["as_string"] = true
 			}
+			if parameter.Newtype && parameter.NewtypeModule != "" && parameter.NewtypeModule != entrypointModule {
+				if required[parameter.NewtypeModule] == nil {
+					required[parameter.NewtypeModule] = map[string]bool{}
+				}
+				required[parameter.NewtypeModule][parameter.Type.Name] = true
+			}
 		}
 	}
 
@@ -278,6 +288,11 @@ func jobsDispatchSource(jobs []Job, entrypointModule string) (string, []packagee
 			source.WriteString("\t\t" + name + " := " + converter + "(payload_values[" + strconv.Itoa(index) + "]) catch |error|\n")
 			source.WriteString("\t\t\treturn JobResult::Err(JobError.new(message: \"decode " + job.Name + "." + parameter.Name + ": \" + error.message))\n")
 			source.WriteString("\t\tend\n")
+			if parameter.Newtype {
+				typedName := name + "_newtype"
+				source.WriteString("\t\t" + typedName + " := " + parameter.Type.Name + ".new(" + name + ")\n")
+				argumentNames[index] = typedName
+			}
 		}
 		call := job.Name + ".new().perform(" + strings.Join(argumentNames, ", ") + ")"
 		if job.PerformKind == PerformJobResult {

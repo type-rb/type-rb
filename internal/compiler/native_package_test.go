@@ -730,7 +730,7 @@ record LoadError
 	message: String
 end
 
-type LoadResult<T> = Result<T, LoadError>
+alias LoadResult<T> = Result<T, LoadError>
 
 def main()
 	loader := fn(): LoadResult<Integer>

@@ -122,10 +122,18 @@ func discoverDeclarationJob(modulePath string, class packageextension.ProjectCla
 			return Job{}, fmt.Errorf("trb/jobs Job %s parameter %s must initially be Boolean, Integer, Float, or String", class.Name, parameter.Name)
 		}
 		wireType := importProjectType(parameter.Type.Resolved)
+		newtype := parameter.Type.Representation != nil
+		if parameter.Type.Representation != nil {
+			wireType = importProjectType(*parameter.Type.Representation)
+		}
 		if !initialArgumentType(wireType) {
 			wireType = typ
 		}
-		job.Parameters = append(job.Parameters, Parameter{Name: parameter.Name, Type: typ, WireType: wireType})
+		newtypeModule := ""
+		if newtype && parameter.Type.Authored.Definition != nil {
+			newtypeModule = parameter.Type.Authored.Definition.ModulePath
+		}
+		job.Parameters = append(job.Parameters, Parameter{Name: parameter.Name, Type: typ, WireType: wireType, Newtype: newtype, NewtypeModule: newtypeModule})
 	}
 	return job, nil
 }

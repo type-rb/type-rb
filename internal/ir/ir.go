@@ -183,6 +183,14 @@ type TypeAlias struct {
 
 func (*TypeAlias) irStatement() {}
 
+type Newtype struct {
+	Base
+	Name   string
+	Target types.Type
+}
+
+func (*Newtype) irStatement() {}
+
 type Module struct {
 	Base
 	Name string
@@ -582,6 +590,8 @@ const NonNullableToNullableConversion ConversionKind = "non_nullable_to_nullable
 const NullableToNonNullableConversion ConversionKind = "nullable_to_non_nullable"
 const ResultFunctionToPromiseRejectionConversion ConversionKind = "result_function_to_promise_rejection"
 const RangeToIterableConversion ConversionKind = "range_to_iterable"
+const NewtypeConstructionConversion ConversionKind = "newtype_construction"
+const NewtypeValueConversion ConversionKind = "newtype_value"
 
 type Conversion struct {
 	ExprBase

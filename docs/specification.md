@@ -165,6 +165,42 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   `-9007199254740991..9007199254740991`. A literal outside that range is a
   compile error in every mode rather than a target-dependent rounded value.
 
+#### Aliases and nominal newtypes
+
+- `alias Name = Target` declares a transparent type shorthand. A generic alias
+  uses `alias Name<T> = Target<T>`. Assignment and member checking expand the
+  alias while diagnostics, completion, imports, and generated signatures may
+  retain its authored name.
+- The former `type Name = Target` spelling is not accepted as current syntax.
+  It produces a migration diagnostic because an existing declaration must be
+  classified as either a transparent `alias` or a nominal `newtype`.
+- `newtype Name = Representation` declares a nominal type. Its representation
+  may be any concrete, fully instantiated type, including
+  `Array<ProductId>`, but the representation must not itself be nullable.
+  Generic newtype declarations such as `newtype Id<T> = T` are not supported.
+- Construction is explicit with `Name.new(value)`, and `value()` returns the
+  representation. No other representation members are forwarded. Ordinary
+  parameters, returns, assignments, collection elements, and record fields do
+  not implicitly convert between a newtype, its representation, or a different
+  newtype with the same representation.
+- Optionality is applied outside the nominal type as `Name?`. Rejecting a
+  nullable representation keeps an erased backend representation from
+  conflating a wrapped `nil` with absence of the newtype value.
+- `==` and `!=` accept two values of the same newtype only when the recursively
+  expanded representation supports portable equality. Ordering, arithmetic,
+  indexing, iteration, and other representation operations require explicit
+  `value()` unless a future newtype API specifies them.
+- A package declaration may mark a typed serialization or persistence
+  parameter as a representation boundary. At that boundary only, a newtype is
+  checked through its recursively expanded representation. JSON codecs,
+  `trb/web` binding, Jobs payload generation, and ORM column-value parameters
+  use representation metadata rather than checker logic tied to those package
+  names.
+- Typed IR retains construction, unwrapping, nominal identity, and
+  representation metadata. Go, Ruby, and TypeScript backends may erase the
+  physical wrapper; target-native code is not a source-level nominality
+  guarantee.
+
 #### Fresh empty mutable collections
 
 - An unannotated `mut values := []` or `mut values := {}` starts with a
@@ -294,7 +330,7 @@ record InvalidResponse
 	body: Array<String>
 end
 
-type CreateResponse = CreatedResponse | InvalidResponse
+alias CreateResponse = CreatedResponse | InvalidResponse
 
 def body_text(response: CreateResponse): String
 	case response.status
@@ -844,10 +880,10 @@ inferred from Go, Ruby, or TypeScript:
 - Generic declarations include payload enums, transparent type aliases,
   records, classes, interfaces, top-level functions, and instance methods:
   `enum Result<T,
-  E>`, `type DbResult<T> = Result<T, DbError>`, `record Pair<T, U>`, `class
+  E>`, `alias DbResult<T> = Result<T, DbError>`, `record Pair<T, U>`, `class
   Response<T>`, `interface Repository<T>`, `def identity<T>(value: T): T`, and
   `response.json<T>()`.
-- `type Alias<T> = Target<T, ...>` creates a transparent alias rather than a
+- `alias Alias<T> = Target<T, ...>` creates a transparent alias rather than a
   nominal type. Assignment and member checking use the expanded target, while
   diagnostics, completion, imports, and generated signatures retain the alias.
   An alias of an enum also qualifies its variants, such as

@@ -32,7 +32,7 @@ record JobError
 	message: String
 end
 
-type JobResult = Result<Unit, JobError>
+alias JobResult = Result<Unit, JobError>
 
 interface JobAdapter
 	enqueue(request: EnqueueRequest): Result<JobReference, EnqueueError>

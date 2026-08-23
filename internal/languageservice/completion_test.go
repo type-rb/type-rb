@@ -154,6 +154,19 @@ func TestCompletionOffersResultControlFlowKeywords(t *testing.T) {
 	}
 }
 
+func TestCompletionOffersAliasAndNewtypeKeywords(t *testing.T) {
+	service := languageservice.New("go")
+	for _, keyword := range []string{"alias", "newtype"} {
+		item, ok := findCompletion(service.Complete(keyword[:2], 2), keyword)
+		if !ok || item.Kind != languageservice.CompletionKeyword {
+			t.Errorf("%s completion=(%#v, %v), want keyword", keyword, item, ok)
+		}
+	}
+	if item, ok := findCompletion(service.Complete("ty", 2), "type"); ok {
+		t.Errorf("legacy type completion=%#v, want no keyword", item)
+	}
+}
+
 func TestCompletionOmitsLegacyEffectKeywords(t *testing.T) {
 	service := languageservice.New("go")
 	for _, keyword := range []string{"attempt", "fails"} {
@@ -171,7 +184,8 @@ func TestCompletionOffersOnlyTypesAtTypePositions(t *testing.T) {
 	}{
 		{source: "record User\n\tid: Int", want: "Integer"},
 		{source: "def render(value: Str", want: "String"},
-		{source: "type Names = Array<Str", want: "String"},
+		{source: "alias Names = Array<Str", want: "String"},
+		{source: "newtype UserName = Str", want: "String"},
 		{source: "record Box<T>\n\tvalue: T", want: "T"},
 		{source: "def identity<T>(value: T", want: "T"},
 	} {

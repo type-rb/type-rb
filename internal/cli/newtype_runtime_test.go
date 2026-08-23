@@ -11,45 +11,32 @@ import (
 	"github.com/type-rb/type-rb/internal/project"
 )
 
-func TestRunCatchWithTransitiveResultAliasAcrossBackends(t *testing.T) {
+func TestRunImportedNewtypeJSONRoundTripAcrossBackends(t *testing.T) {
 	files := map[string]string{
-		"domain/insurer_member.trb": `record InsurerMemberEntity
-	id: Integer
-end
-`,
-		"domain/insurer_member_error.trb": `enum InsurerMemberError
-	NotFound
-end
-`,
-		"domain/insurer_member_result.trb": `import { InsurerMemberEntity } from domain/insurer_member
-import { InsurerMemberError } from domain/insurer_member_error
-import { Result } from trb/std/result
+		"contracts/index.trb": `newtype UserId = Integer
+newtype UserIds = Array<UserId>
 
-alias InsurerMemberResult = Result<InsurerMemberEntity, InsurerMemberError>
-`,
-		"application/load_member.trb": `import { InsurerMemberEntity } from domain/insurer_member
-import { InsurerMemberError } from domain/insurer_member_error
-import { InsurerMemberResult } from domain/insurer_member_result
-
-def load_member(found: Boolean): InsurerMemberResult
-	if found
-		return InsurerMemberResult::Ok(InsurerMemberEntity.new(id: 7))
-	end
-	return InsurerMemberResult::Err(InsurerMemberError::NotFound)
+record Payload
+	id: UserId
+	ids: UserIds
+	parent_id: UserId?
 end
 `,
-		"main.trb": `import { load_member } from application/load_member
-
-def member_id(found: Boolean): Integer
-	member := load_member(found) catch |_error|
-		return 41
-	end
-	return member.id
-end
+		"main.trb": `import { Payload, UserId, UserIds } from contracts
+import { decode, encode } from trb/std/json
 
 def main()
-	puts(member_id(true))
-	puts(member_id(false))
+	id := UserId.new(7)
+	payload := Payload.new(id: id, ids: UserIds.new([id]), parent_id: nil)
+	encoded := encode(payload) catch |_error|
+		return
+	end
+	decoded := decode<Payload>(encoded) catch |_error|
+		return
+	end
+	puts(decoded.id.value())
+	puts(decoded.ids.value()[0].value())
+	puts(decoded.id == id)
 	return
 end
 `,
@@ -65,7 +52,7 @@ end
 			config := project.New(root, mode)
 			config.SourceDir = "src"
 			if config.Go != nil {
-				config.Go.Module = "example.com/type-rb/transitive-result-alias-test"
+				config.Go.Module = "example.com/type-rb/newtype-runtime-test"
 			}
 			if err := config.Save(); err != nil {
 				t.Fatal(err)
@@ -85,7 +72,7 @@ end
 			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 				t.Fatalf("%s status=%d stdout=%s stderr=%s", mode, status, stdout.String(), stderr.String())
 			}
-			if got, want := stdout.String(), "7\n41\n"; got != want || stderr.Len() != 0 {
+			if got, want := stdout.String(), "7\n7\ntrue\n"; got != want || stderr.Len() != 0 {
 				t.Fatalf("%s output=%q, want %q; stderr=%q", mode, got, want, stderr.String())
 			}
 		})
