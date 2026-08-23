@@ -3,6 +3,7 @@ package packageextension
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -99,6 +100,13 @@ func validateDeclarationAdapterExport(moduleName, category, name string, exporte
 	if category == "record" && exported.Kind != "record" {
 		return fmt.Errorf("declaration adapter record %s from %s must use kind record", name, moduleName)
 	}
+	if err := validateDeclarationAdapterExportShape(exported); err != nil {
+		return fmt.Errorf("declaration adapter %s %s from %s: %w", category, name, moduleName, err)
+	}
+	if (exported.Kind == "class" || exported.Kind == "record" || exported.Kind == "type_alias") &&
+		(exported.Type.Kind != "named" || exported.Type.Name != name) {
+		return fmt.Errorf("declaration adapter %s %s from %s: kind %s requires a named self type", category, name, moduleName, exported.Kind)
+	}
 	if err := validateDeclarationAdapterTypeParameters(exported.TypeParameters); err != nil {
 		return fmt.Errorf("declaration adapter %s %s from %s: %w", category, name, moduleName, err)
 	}
@@ -162,14 +170,97 @@ func validateDeclarationAdapterExport(moduleName, category, name string, exporte
 	return nil
 }
 
+func validateDeclarationAdapterExportShape(exported DeclarationAdapterExport) error {
+	callable := exported.Kind == "component" || exported.Kind == "function" || exported.Kind == "class"
+	if !callable && (len(exported.Parameters) != 0 || exported.Required != 0 || exported.Variadic) {
+		return fmt.Errorf("kind %s cannot declare call parameters", exported.Kind)
+	}
+	if exported.Variadic && len(exported.Parameters) == 0 {
+		return fmt.Errorf("a variadic declaration requires a parameter")
+	}
+	if exported.Variadic && exported.Required >= len(exported.Parameters) {
+		return fmt.Errorf("a variadic parameter cannot be required")
+	}
+	if exported.Kind == "component" {
+		if len(exported.Parameters) > 1 {
+			return fmt.Errorf("a component accepts at most one props parameter")
+		}
+		if exported.Variadic {
+			return fmt.Errorf("a component cannot be variadic")
+		}
+		if len(exported.TypeParameters) != 0 {
+			return fmt.Errorf("a component cannot declare type parameters")
+		}
+	}
+	if exported.Kind != "record" && exported.Kind != "class" && len(exported.Fields) != 0 {
+		return fmt.Errorf("fields are only valid for records and classes")
+	}
+	if (exported.Kind == "record" || exported.Kind == "type_alias") && len(exported.Members) != 0 {
+		return fmt.Errorf("kind %s cannot declare members", exported.Kind)
+	}
+	return nil
+}
+
 func validateDeclarationAdapterType(typ DeclarationAdapterType) error {
 	switch typ.Kind {
 	case "array", "bool", "bytes", "float", "function", "hash", "int", "int_literal", "named", "never", "nil", "range", "string", "string_literal", "union", "void":
 	default:
 		return fmt.Errorf("unsupported type kind %q", typ.Kind)
 	}
-	if (typ.Kind == "named" || typ.Kind == "function") && strings.TrimSpace(typ.Name) == "" {
+	if strings.TrimSpace(typ.Name) == "" {
 		return fmt.Errorf("type kind %s requires a name", typ.Kind)
+	}
+	if canonical, exists := declarationAdapterCanonicalTypeNames[typ.Kind]; exists && typ.Name != canonical {
+		return fmt.Errorf("type kind %s requires name %s", typ.Kind, canonical)
+	}
+	switch typ.Kind {
+	case "array", "range":
+		if len(typ.Arguments) != 1 {
+			return fmt.Errorf("type kind %s requires exactly one argument", typ.Kind)
+		}
+	case "hash":
+		if len(typ.Arguments) != 2 {
+			return fmt.Errorf("type kind hash requires exactly two arguments")
+		}
+	case "function":
+		if len(typ.Arguments) == 0 {
+			return fmt.Errorf("type kind function requires a return type")
+		}
+	case "union":
+		if len(typ.Arguments) < 2 {
+			return fmt.Errorf("type kind union requires at least two alternatives")
+		}
+	case "named":
+		// Named declarations may carry any number of explicit generic arguments.
+	case "int_literal":
+		value, err := strconv.ParseInt(strings.ReplaceAll(typ.Name, "_", ""), 10, 64)
+		if err != nil || value < -9007199254740991 || value > 9007199254740991 {
+			return fmt.Errorf("type kind int_literal requires a portable Integer literal name")
+		}
+		if typ.Name != strconv.FormatInt(value, 10) {
+			return fmt.Errorf("type kind int_literal requires a canonical Integer literal name")
+		}
+		if len(typ.Arguments) != 0 || typ.Nullable {
+			return fmt.Errorf("type kind int_literal cannot have arguments or be nullable")
+		}
+	case "string_literal":
+		value, err := strconv.Unquote(typ.Name)
+		if err != nil || len(typ.Name) < 2 || typ.Name[0] != '"' || typ.Name[len(typ.Name)-1] != '"' {
+			return fmt.Errorf("type kind string_literal requires a quoted String literal name")
+		}
+		if typ.Name != strconv.Quote(value) {
+			return fmt.Errorf("type kind string_literal requires a canonical String literal name")
+		}
+		if len(typ.Arguments) != 0 || typ.Nullable {
+			return fmt.Errorf("type kind string_literal cannot have arguments or be nullable")
+		}
+	default:
+		if len(typ.Arguments) != 0 {
+			return fmt.Errorf("type kind %s cannot have arguments", typ.Kind)
+		}
+		if typ.Nullable && (typ.Kind == "never" || typ.Kind == "nil" || typ.Kind == "void") {
+			return fmt.Errorf("type kind %s cannot be nullable", typ.Kind)
+		}
 	}
 	if typ.ResultBridge != nil {
 		if typ.Kind != "function" {
@@ -194,6 +285,22 @@ func validateDeclarationAdapterType(typ DeclarationAdapterType) error {
 		}
 	}
 	return nil
+}
+
+var declarationAdapterCanonicalTypeNames = map[string]string{
+	"array":    "Array",
+	"bool":     "Boolean",
+	"bytes":    "Bytes",
+	"float":    "Float",
+	"function": "Function",
+	"hash":     "Hash",
+	"int":      "Integer",
+	"never":    "Never",
+	"nil":      "Nil",
+	"range":    "Range",
+	"string":   "String",
+	"union":    "Union",
+	"void":     "Void",
 }
 
 func validateDeclarationAdapterTypeParameters(parameters []string) error {

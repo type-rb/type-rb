@@ -115,12 +115,14 @@ any adapter-specific bridge kinds. TypeScript is the first
 implemented adapter. It overlays declarations inferred from installed `.d.ts`
 files while application source continues to import the npm package directly.
 
-An adapter file is declarative data and cannot execute compiler code. The host
-strictly decodes and validates it, verifies a checksum, and checks that every
-declared module belongs to the package's native dependencies for the selected
-mode. Two adapters cannot replace the same export or supporting record. Ruby
-and Go declaration importers are not implemented yet; configuring either mode
-produces an explicit unsupported-adapter error.
+An adapter file is declarative data and cannot execute compiler code. The
+common host strictly decodes the catalog, validates its protocol shape, and
+verifies its checksum. The selected ecosystem adapter checks that every
+declared module belongs to the package's native dependencies for that mode,
+rejects name conflicts across exports and supporting records, and validates
+adapter-specific bridge kinds. Ruby and Go declaration importers are not
+implemented yet; configuring either mode produces an explicit
+unsupported-adapter error.
 
 The adapter file uses Declaration/Adapter Protocol version 1:
 
@@ -162,9 +164,18 @@ declarations. `typeParameters` names explicit generic parameters on functions,
 classes, records, and aliases; `aliasTarget` describes an alias's semantic
 target. Semantic types may refer to those parameters and may use literal and
 union types for discriminated result contracts. Nested semantic type arguments
-use the `arguments` field. TypeRB calls still provide
+use the `arguments` field. Every semantic type includes its canonical TypeRB
+`name`; collection and union kinds use their required argument counts, while a
+function's final argument is its return type. TypeRB calls still provide
 explicit type arguments. Adapter declarations cannot use `Any`;
 unrepresentable boundaries remain explicit diagnostics.
+
+Call parameters are valid on functions, components, and classes. Fields are
+valid on records and classes, while compound function or component members are
+valid on functions, components, and classes. A component accepts at most one
+non-variadic props parameter and does not declare explicit type parameters.
+Class, record, and alias declarations use their exported name as their named
+self type.
 
 An adapter may expose a native Promise callback as a checked `Result`-returning
 TypeRB function. `resultBridge` declares that an `Err` becomes a rejected

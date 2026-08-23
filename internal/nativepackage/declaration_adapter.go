@@ -28,7 +28,15 @@ func ApplyDeclarationAdapterFiles(catalog *Catalog, sources []declarationadapter
 		}
 		return sorted[i].Path < sorted[j].Path
 	})
-	owners := map[string]string{}
+	type declarationName struct {
+		module string
+		name   string
+	}
+	type declarationOwner struct {
+		category    string
+		packageName string
+	}
+	owners := map[declarationName]declarationOwner{}
 	checksums, err := declarationadapterhost.Checksums(sorted)
 	if err != nil {
 		return err
@@ -64,21 +72,21 @@ func ApplyDeclarationAdapterFiles(catalog *Catalog, sources []declarationadapter
 			}
 			for _, name := range sortedDeclarationAdapterKeys(patch.Exports) {
 				exported := patch.Exports[name]
-				key := moduleName + "#export#" + name
-				if previous := owners[key]; previous != "" {
-					return fmt.Errorf("declaration adapters %s and %s both declare export %s from %s", previous, source.Package, name, moduleName)
+				key := declarationName{module: moduleName, name: name}
+				if previous, exists := owners[key]; exists {
+					return declarationAdapterConflict(previous.packageName, previous.category, source.Package, "export", moduleName, name)
 				}
-				owners[key] = source.Package
+				owners[key] = declarationOwner{category: "export", packageName: source.Package}
 				current.Exports[name] = exported
 				delete(current.Unsupported, name)
 			}
 			for _, name := range sortedDeclarationAdapterKeys(patch.Records) {
 				record := patch.Records[name]
-				key := moduleName + "#record#" + name
-				if previous := owners[key]; previous != "" {
-					return fmt.Errorf("declaration adapters %s and %s both declare record %s for %s", previous, source.Package, name, moduleName)
+				key := declarationName{module: moduleName, name: name}
+				if previous, exists := owners[key]; exists {
+					return declarationAdapterConflict(previous.packageName, previous.category, source.Package, "supporting record", moduleName, name)
 				}
-				owners[key] = source.Package
+				owners[key] = declarationOwner{category: "supporting record", packageName: source.Package}
 				current.Records[name] = record
 				delete(current.Unsupported, name)
 			}
@@ -86,6 +94,13 @@ func ApplyDeclarationAdapterFiles(catalog *Catalog, sources []declarationadapter
 		}
 	}
 	return nil
+}
+
+func declarationAdapterConflict(firstPackage, firstCategory, secondPackage, secondCategory, moduleName, name string) error {
+	if firstCategory == secondCategory {
+		return fmt.Errorf("declaration adapters %s and %s both declare %s %s from %s", firstPackage, secondPackage, firstCategory, name, moduleName)
+	}
+	return fmt.Errorf("declaration adapters %s and %s declare %s from %s once as an export and once as a supporting record", firstPackage, secondPackage, name, moduleName)
 }
 
 func nativeDependencyOwns(dependencies map[string]string, moduleName string) bool {

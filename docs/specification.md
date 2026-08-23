@@ -443,9 +443,10 @@ switches.
 - A package-owned declaration adapter uses a versioned, mode-independent
   semantic catalog selected for one native ecosystem by
   `declarationAdapters.<mode>` in the package manifest. The common host
-  validates the catalog, native-dependency ownership, conflicts, and checksum;
-  the selected ecosystem adapter additionally validates bridge kinds before
-  import. The initial implementation provides the TypeScript adapter only. An
+  strictly decodes the catalog and validates its protocol shape and checksum.
+  The selected ecosystem adapter validates native-dependency ownership, name
+  conflicts, and adapter-specific bridge kinds before import. The initial
+  implementation provides the TypeScript adapter only. An
   adapter cannot execute compiler code, access compiler AST or typed IR, or
   emit target source.
 - Official formatter command: `trb fmt`.
