@@ -2,6 +2,32 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.17 - 2026-08-23
+
+### Breaking changes
+
+- Declaration/Adapter Protocol v2 distinguishes class instance members from
+  class members. Adapter authors must set `protocolVersion` to `2`, replace
+  each class's `members` with `instanceMembers` or `classMembers` according to
+  how callers access it, and run `trb install` to regenerate the native-type
+  cache. ([#448](https://github.com/type-rb/type-rb/pull/448))
+
+### REPL
+
+- Interactive multiline input is automatically indented while it is open and
+  formatted before evaluation and history storage. Results directly associated
+  with mutable bindings are marked with `[mut]`.
+  ([#451](https://github.com/type-rb/type-rb/pull/451))
+
+### Packages and tooling
+
+- Declaration adapters can model non-constructible interfaces for opaque
+  native objects with checked instance members. A pinned TanStack Router
+  example verifies this boundary and documents why route-tree-derived types
+  require a future project provider.
+  ([#449](https://github.com/type-rb/type-rb/pull/449),
+  [#450](https://github.com/type-rb/type-rb/pull/450))
+
 ## 0.3.16 - 2026-08-23
 
 ### Breaking changes
