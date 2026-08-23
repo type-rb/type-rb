@@ -33,9 +33,10 @@ fixtures and scope assertions in [`tools/textmate/test`](../tools/textmate/test)
 Then mirror the grammar into the
 [Visual Studio Code package](../editors/vscode/syntaxes/typerb.tmLanguage.json),
 which is also the bundle imported by JetBrains IDEs, and rebuild the
-[GitHub userscript](../editors/github/README.md). The corresponding tests reject
-stale generated copies. Neovim consumes compiler semantic tokens instead of
-carrying a second lexical grammar.
+[GitHub Chrome extension](../editors/github/README.md). The editor tests reject
+stale generated copies, while the GitHub extension bundles the canonical
+grammar directly at build time. Neovim consumes compiler semantic tokens
+instead of carrying a second lexical grammar.
 
 Run these checks from the repository root:
 

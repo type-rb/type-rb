@@ -17,8 +17,7 @@ This file records user-visible changes in stable TypeRB releases.
   text-bearing JSX whitespace and grouping parentheses in embedded
   expressions. ([#431](https://github.com/type-rb/type-rb/pull/431))
 - TypeRB source files, pull request diffs, and explicit TypeRB Markdown blocks
-  can now be syntax-highlighted on github.com with the Chrome extension or the
-  packaged Tampermonkey fallback.
+  can now be syntax-highlighted on github.com with the Chrome extension.
   ([#422](https://github.com/type-rb/type-rb/pull/422))
 - TypeRB syntax highlighting on GitHub now preserves blank lines in repository
   file views. ([#428](https://github.com/type-rb/type-rb/pull/428))

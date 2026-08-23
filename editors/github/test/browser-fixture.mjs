@@ -4,7 +4,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
-const userscript = await readFile(resolve(testDirectory, "../typerb-github.user.js"), "utf8");
 const chromeContentScript = await readFile(
   resolve(testDirectory, "../dist/chrome-extension/content.js"),
   "utf8"
@@ -57,10 +56,8 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;");
 }
 
-function page(body, distribution) {
-  const assets = distribution === "chrome"
-    ? '<link rel="stylesheet" href="/content.css"><script src="/content.js"></script>'
-    : '<script src="/typerb-github.user.js"></script>';
+function page(body) {
+  const assets = '<link rel="stylesheet" href="/content.css"><script src="/content.js"></script>';
   return `<!doctype html>
 <html>
   <head>
@@ -87,7 +84,7 @@ function page(body, distribution) {
 </html>`;
 }
 
-function blobPage(distribution) {
+function blobPage() {
   return page(`
     <textarea data-testid="read-only-cursor-text-area">def greet(name: String): String
 
@@ -101,10 +98,10 @@ end</textarea>
     </div>
     <pre lang="trb"><code># Markdown comment
 puts("Markdown string")</code></pre>
-  `, distribution);
+  `);
 }
 
-function pullRequestPage(includePayload = true, distribution) {
+function pullRequestPage(includePayload = true) {
   const payload = JSON.stringify({
     payload: {
       pullRequestsChangesRoute: {
@@ -134,7 +131,7 @@ function pullRequestPage(includePayload = true, distribution) {
       <div class="diff-text-cell" data-line-number="2" data-diff-side="left"><span>-</span><span class="diff-text-inner">${leftLine}</span></div>
       <div class="diff-text-cell" data-line-number="2" data-diff-side="right"><span>+</span><span class="diff-text-inner">${rightLine}</span></div>
     </div>
-  `, distribution);
+  `);
 }
 
 function storePreviewPage() {
@@ -256,11 +253,6 @@ const server = createServer((request, response) => {
     response.end(storePreviewPage());
     return;
   }
-  if (url.pathname === "/typerb-github.user.js") {
-    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
-    response.end(userscript);
-    return;
-  }
   if (url.pathname === "/content.js" && chromeContentScript) {
     response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
     response.end(chromeContentScript);
@@ -281,17 +273,14 @@ const server = createServer((request, response) => {
       "content-security-policy": "script-src 'self'",
       "content-type": "text/html; charset=utf-8"
     });
-    response.end(pullRequestPage(
-      !url.pathname.includes("/pull/2/"),
-      url.searchParams.get("distribution")
-    ));
+    response.end(pullRequestPage(!url.pathname.includes("/pull/2/")));
     return;
   }
   response.writeHead(200, {
     "content-security-policy": "script-src 'self'",
     "content-type": "text/html; charset=utf-8"
   });
-  response.end(blobPage(url.searchParams.get("distribution")));
+  response.end(blobPage());
 });
 
 server.listen(port, "127.0.0.1", () => {
