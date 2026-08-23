@@ -30,8 +30,17 @@ type TypeRBManifest struct {
 	Packages                  map[string]project.PackageRequirement `json:"packages,omitempty"`
 	NativeDependencies        map[string]map[string]string          `json:"nativeDependencies,omitempty"`
 	DeclarationAdapters       map[string]string                     `json:"declarationAdapters,omitempty"`
+	AdapterTests              map[string]AdapterTest                `json:"adapterTests,omitempty"`
 	LegacyNativeTypeProviders map[string]string                     `json:"nativeTypeProviders,omitempty"`
 	CompilerExtension         json.RawMessage                       `json:"compilerExtension,omitempty"`
+}
+
+// AdapterTest declares one explicitly invoked conformance project for a
+// package-owned declaration adapter. Command is an argv vector and is never
+// interpreted by a shell.
+type AdapterTest struct {
+	Config  string   `json:"config"`
+	Command []string `json:"command"`
 }
 
 func ReadTypeRBManifest(root string) (*TypeRBManifest, error) {
@@ -71,6 +80,9 @@ func (m *TypeRBManifest) applyDefaults() {
 	}
 	if m.DeclarationAdapters == nil {
 		m.DeclarationAdapters = map[string]string{}
+	}
+	if m.AdapterTests == nil {
+		m.AdapterTests = map[string]AdapterTest{}
 	}
 }
 
@@ -139,6 +151,41 @@ func (m *TypeRBManifest) Validate(root string) error {
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("declarationAdapters.%s must name a regular file", mode)
+		}
+	}
+	testModes := make([]string, 0, len(m.AdapterTests))
+	for mode := range m.AdapterTests {
+		testModes = append(testModes, mode)
+	}
+	sort.Strings(testModes)
+	for _, mode := range testModes {
+		test := m.AdapterTests[mode]
+		if !m.Supports(mode) {
+			return fmt.Errorf("adapterTests has unsupported package mode %q", mode)
+		}
+		if m.DeclarationAdapterFor(mode) == "" {
+			return fmt.Errorf("adapterTests.%s requires declarationAdapters.%s", mode, mode)
+		}
+		if filepath.IsAbs(test.Config) || escapesDirectory(test.Config) || strings.TrimSpace(test.Config) == "" {
+			return fmt.Errorf("adapterTests.%s.config must stay below the package root", mode)
+		}
+		info, err := os.Stat(filepath.Join(root, test.Config))
+		if err != nil {
+			return fmt.Errorf("adapterTests.%s.config: %w", mode, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("adapterTests.%s.config must name a regular file", mode)
+		}
+		if len(test.Command) == 0 || strings.TrimSpace(test.Command[0]) == "" {
+			return fmt.Errorf("adapterTests.%s.command must contain an executable", mode)
+		}
+		if filepath.IsAbs(test.Command[0]) || escapesDirectory(test.Command[0]) {
+			return fmt.Errorf("adapterTests.%s.command executable must not be absolute or escape the conformance project", mode)
+		}
+		for _, argument := range test.Command {
+			if strings.ContainsAny(argument, "\x00\r\n") {
+				return fmt.Errorf("adapterTests.%s.command arguments must not contain NUL or newlines", mode)
+			}
 		}
 	}
 	if len(bytes.TrimSpace(m.CompilerExtension)) > 0 && string(bytes.TrimSpace(m.CompilerExtension)) != "null" {

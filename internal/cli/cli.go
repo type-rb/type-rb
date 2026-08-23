@@ -2553,6 +2553,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb compiler inspect [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb compiler inspect [--mode MODE] FILE.trb")
 	fmt.Fprintln(c.Stdout, "  trb adapter check [--format human|json] [PACKAGE_ROOT]")
+	fmt.Fprintln(c.Stdout, "  trb adapter test [--format human|json] [PACKAGE_ROOT]")
 	fmt.Fprintln(c.Stdout, "  trb play [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb tour [--mode ruby|go|typescript] [--port PORT] [--no-open]")
 	fmt.Fprintln(c.Stdout, "  trb db plan|apply|export|lock|check [options]")

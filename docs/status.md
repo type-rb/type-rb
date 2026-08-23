@@ -51,6 +51,11 @@ Package authors can run `trb adapter check` to validate the manifest and every
 catalog through the selected ecosystem consumer before publishing. Its optional
 versioned JSON report exposes deterministic adapter counts and diagnostics for
 CI and AI agents.
+Packages can also declare a mode-specific conformance project for explicit
+`trb adapter test` execution. The command validates the adapter, builds the
+installed self-referencing fixture, and invokes its structured native check;
+its versioned JSON report exposes stable phase states without implicitly
+installing dependencies or running package code during ordinary builds.
 
 The experimental TypeScript browser path accepts structured JSX in TypeRB
 source and emits ordinary TSX for React tooling. Function components use typed

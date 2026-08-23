@@ -11,5 +11,11 @@
   },
   "declarationAdapters": {
     "typescript": "declarations/typescript.json"
+  },
+  "adapterTests": {
+    "typescript": {
+      "config": "conformance/trbconfig.jsonc",
+      "command": ["bun", "run", "check"]
+    }
   }
 }

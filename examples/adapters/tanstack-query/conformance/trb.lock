@@ -8,7 +8,7 @@
     "github.com/type-rb/tanstack-query-adapter-example": {
       "version": "0.1.0",
       "path": "..",
-      "manifestChecksum": "sha256:e22b7561b94bd145ed2b93277e722aeca6b5166b2cc05a5c93e2fd3e0dfbe3a8"
+      "manifestChecksum": "sha256:2255267740ba332f4d75c1c62213795cc359b6f7b52a88218030393649cfb77e"
     }
   }
 }

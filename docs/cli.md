@@ -40,6 +40,10 @@ trb install --config trbconfig.ruby.jsonc
 trb adapter check
 trb adapter check --format json
 trb adapter check ../ui-types
+
+# Build and run its explicitly declared native conformance project.
+trb adapter test
+trb adapter test --format json ../ui-types
 ```
 
 TypeRB packages are ordinary typed source compiled through the same AST, typed
@@ -59,9 +63,22 @@ default. `--format json` writes a versioned report to standard output on both
 success and failure and returns a nonzero status when diagnostics contain
 errors.
 
-The command does not install native dependencies or compare the projected
-contract with their declarations. Run the adapter package's native
-type-checking conformance project after changing a pinned native version.
+The check command does not install native dependencies or compare the
+projected contract with their declarations. An adapter package may declare one
+`adapterTests.<mode>` conformance project with a project config and a structured
+command argument vector. After installing that project's dependencies with a
+frozen lock, `trb adapter test` runs catalog validation, a TypeRB project build,
+and the declared native check in order. It verifies that the conformance
+project installs the package under test from the current package root.
+
+`adapter test` never runs during ordinary package installation, compilation,
+or import. Invoking it explicitly authorizes the declared command. TypeRB
+passes its argument vector directly to the executable instead of interpreting
+a shell command string; the invoked tool may retain its own script, process,
+and network behavior. TypeRB performs no implicit dependency installation or
+network access before that command. Human output is concise; `--format json`
+emits stable phase states and diagnostics while failed native-tool output
+remains on standard error.
 
 The `web` template uses `src` as the source root and creates `main.trb`, an
 index route, and an explicit root middleware stack with request IDs and JSONL

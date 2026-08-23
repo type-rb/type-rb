@@ -449,6 +449,14 @@ switches.
   implementation provides the TypeScript adapter only. An
   adapter cannot execute compiler code, access compiler AST or typed IR, or
   emit target source.
+- A package may declare one explicit declaration-adapter conformance project
+  per mode with `adapterTests.<mode>`. Its config path stays below the package
+  root and its native check is a structured argument vector rather than a
+  shell string. Only `trb adapter test` executes that command, after validating
+  the adapter, verifying that the project installs the current package, and
+  building the project. Package resolution, installation, compilation, and
+  import never execute adapter tests, and the test command does not install
+  dependencies implicitly.
 - Official formatter command: `trb fmt`.
 - Canonical TypeRB indentation is one tab per nesting level. Formatter
   configuration is not part of the current language; a future configuration

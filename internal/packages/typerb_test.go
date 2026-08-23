@@ -62,6 +62,15 @@ func TestResolveLocalTypeRBPackageWritesDeterministicLock(t *testing.T) {
 	if _, err := LoadTypeRBPackages(config); err == nil || !strings.Contains(err.Error(), "manifest changed") {
 		t.Fatalf("local manifest drift was accepted: %v", err)
 	}
+	if _, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{Frozen: true}); err == nil || !strings.Contains(err.Error(), "manifest changed") {
+		t.Fatalf("frozen install accepted local manifest drift: %v", err)
+	}
+	if _, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{}); err != nil {
+		t.Fatalf("ordinary install did not refresh local manifest drift: %v", err)
+	}
+	if _, err := LoadTypeRBPackages(config); err != nil {
+		t.Fatalf("refreshed local manifest lock did not load: %v", err)
+	}
 }
 
 func TestResolveTypeRBPackageExposesDeclarationAdapter(t *testing.T) {
@@ -122,6 +131,79 @@ func TestTypeRBPackageDeclarationAdapterDiagnosesLegacyAndUnavailableModes(t *te
 	config.Packages["acme/ruby-adapter"] = project.PackageRequirement{Path: "../ruby-adapter"}
 	if _, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{}); err == nil || !strings.Contains(err.Error(), "provides only the TypeScript declaration adapter") {
 		t.Fatalf("expected unavailable Ruby adapter diagnostic, got %v", err)
+	}
+}
+
+func TestTypeRBManifestAcceptsExplicitContainedAdapterTest(t *testing.T) {
+	root := t.TempDir()
+	for _, directory := range []string{"src", "conformance"} {
+		if err := os.MkdirAll(filepath.Join(root, directory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "declarations.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "conformance", project.ConfigName), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"formatVersion": 1,
+		"name": "github.com/acme/ui-types",
+		"version": "0.1.0",
+		"modes": ["typescript"],
+		"nativeDependencies": {"typescript": {"ui": "1.0.0"}},
+		"declarationAdapters": {"typescript": "declarations.json"},
+		"adapterTests": {
+			"typescript": {
+				"config": "conformance/trbconfig.jsonc",
+				"command": ["bun", "run", "check"]
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, TypeRBManifestName), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadTypeRBManifest(root); err != nil {
+		t.Fatalf("explicit adapter test was rejected: %v", err)
+	}
+}
+
+func TestTypeRBManifestRejectsUnsafeAdapterTestDeclarations(t *testing.T) {
+	tests := []struct {
+		name       string
+		definition AdapterTest
+		adapters   map[string]string
+		want       string
+	}{
+		{name: "escaping config", definition: AdapterTest{Config: "../trbconfig.jsonc", Command: []string{"bun", "run", "check"}}, adapters: map[string]string{"typescript": "declarations.json"}, want: "config must stay below"},
+		{name: "missing executable", definition: AdapterTest{Config: "conformance/trbconfig.jsonc"}, adapters: map[string]string{"typescript": "declarations.json"}, want: "command must contain an executable"},
+		{name: "absolute executable", definition: AdapterTest{Config: "conformance/trbconfig.jsonc", Command: []string{"/usr/bin/env"}}, adapters: map[string]string{"typescript": "declarations.json"}, want: "must not be absolute"},
+		{name: "newline argument", definition: AdapterTest{Config: "conformance/trbconfig.jsonc", Command: []string{"bun", "bad\nargument"}}, adapters: map[string]string{"typescript": "declarations.json"}, want: "must not contain NUL or newlines"},
+		{name: "missing adapter", definition: AdapterTest{Config: "conformance/trbconfig.jsonc", Command: []string{"bun", "run", "check"}}, adapters: map[string]string{}, want: "requires declarationAdapters.typescript"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTestPackage(t, root, TypeRBManifest{
+				Name: "github.com/acme/ui-types", Version: "0.1.0", Modes: []string{"typescript"},
+				NativeDependencies:  map[string]map[string]string{"typescript": {"ui": "1.0.0"}},
+				DeclarationAdapters: test.adapters,
+				AdapterTests:        map[string]AdapterTest{"typescript": test.definition},
+			}, "")
+			if err := os.WriteFile(filepath.Join(root, "declarations.json"), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(root, "conformance"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "conformance", project.ConfigName), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ReadTypeRBManifest(root); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q, got %v", test.want, err)
+			}
+		})
 	}
 }
 

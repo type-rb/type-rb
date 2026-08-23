@@ -26,11 +26,19 @@ The catalog is a checked projection, not a copy of every TanStack Query option
 or result member. Unsupported APIs remain absent rather than becoming `Any`.
 
 The `conformance` project installs the adapter as a local TypeRB package and
-compiles `src/app.trb` against the pinned native package. From that directory,
-run:
+compiles `src/app.trb` against the pinned native package. Install its locked
+dependencies once from the TypeRB checkout:
 
 ```sh
-../../../../trb install --config trbconfig.jsonc
-../../../../trb build --config trbconfig.jsonc
-bun run check
+./trb install --frozen --config examples/adapters/tanstack-query/conformance/trbconfig.jsonc
 ```
+
+Then run all declared conformance phases from the adapter package root:
+
+```sh
+./trb adapter test --format json examples/adapters/tanstack-query
+```
+
+`adapter test` validates the catalog, builds the TypeRB project, and invokes
+the declared `bun run check` argv directly. TypeRB does not install dependencies
+implicitly; Bun retains its ordinary script and process behavior.
