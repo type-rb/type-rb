@@ -125,6 +125,22 @@ func TestApplyDeclarationAdapterFilesRejectsUnownedAndConflictingDeclarations(t 
 	if err == nil || !strings.Contains(err.Error(), "both declare export Button") {
 		t.Fatalf("expected conflict diagnostic, got %v", err)
 	}
+	recordPath := filepath.Join(root, "record.json")
+	writeDeclarationAdapterFixture(t, recordPath, packageextension.DeclarationAdapterCatalog{
+		ProtocolVersion: packageextension.DeclarationAdapterProtocolVersion,
+		Modules: map[string]packageextension.DeclarationAdapterModule{
+			"ui": {Records: map[string]packageextension.DeclarationAdapterExport{
+				"Button": {Kind: "record", Type: adapterType("named", "Button")},
+			}},
+		},
+	})
+	err = ApplyDeclarationAdapterFiles(Empty(map[string]string{"ui": "1.0.0"}), []declarationadapterhost.Source{
+		write("first", "ui"),
+		{Package: "record", Mode: "typescript", Path: recordPath, Dependencies: map[string]string{"ui": "1.0.0"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "once as an export and once as a supporting record") {
+		t.Fatalf("expected cross-category conflict diagnostic, got %v", err)
+	}
 }
 
 func TestLoadWithDeclarationAdaptersMarksChangedAdapterStale(t *testing.T) {
