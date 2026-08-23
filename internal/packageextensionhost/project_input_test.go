@@ -22,7 +22,7 @@ func TestProjectSourceSpanBoundaryRoundTrips(t *testing.T) {
 }
 
 func TestExportProjectDeclarationInputCopiesDeclarationFacts(t *testing.T) {
-	ids := parseProjectInputTest(t, "contracts/ids", `type ReceiptID = Integer
+	ids := parseProjectInputTest(t, "contracts/ids", `newtype ReceiptID = Integer
 
 enum DeliveryState
 	Pending = "pending"
@@ -31,7 +31,7 @@ end
 	job := parseProjectInputTest(t, "jobs/send_receipt", `import { Job, JobResult } from trb/jobs
 import { DeliveryState, ReceiptID } from app/contracts/ids
 
-type DeliveryResult = JobResult
+alias DeliveryResult = JobResult
 
 class SendReceiptJob < Job
 	queue("mail")
@@ -40,7 +40,7 @@ class SendReceiptJob < Job
 		scope
 	end
 
-	def helper(value: String): String
+	def helper(value: ReceiptID?): ReceiptID?
 		return value
 	end
 
@@ -59,6 +59,9 @@ end
 		t.Fatalf("modules are not deterministic: %#v", input.Modules)
 	}
 	module := input.Modules[1]
+	if len(input.Modules[0].Newtypes) != 1 || input.Modules[0].Newtypes[0].Name != "ReceiptID" || input.Modules[0].Newtypes[0].Target.Resolved.Kind != "int" {
+		t.Fatalf("newtype declaration facts are incomplete: %#v", input.Modules[0].Newtypes)
+	}
 	if len(input.Modules[0].Enums) != 1 || input.Modules[0].Enums[0].Members[0].RawValue == nil || input.Modules[0].Enums[0].Members[0].RawValue.Raw != `"pending"` {
 		t.Fatalf("enum declaration facts are incomplete: %#v", input.Modules[0].Enums)
 	}
@@ -71,6 +74,10 @@ end
 	}
 	if len(class.Methods) != 2 || len(class.Directives) != 3 {
 		t.Fatalf("class signature facts are incomplete: %#v", class)
+	}
+	helperParameter := class.Methods[0].Parameters[0].Type
+	if helperParameter.Representation == nil || helperParameter.Representation.Kind != "int" || !helperParameter.Representation.Nullable {
+		t.Fatalf("nullable newtype representation is missing: %#v", helperParameter)
 	}
 	if class.Directives[0].Arguments[0].Value.Kind != "string" || class.Directives[0].Arguments[0].Value.Raw != `"mail"` {
 		t.Fatalf("literal directive was not copied: %#v", class.Directives[0])
@@ -87,7 +94,7 @@ end
 	}
 	perform := class.Methods[1]
 	parameter := perform.Parameters[0].Type
-	if parameter.Authored.Name != "ReceiptID" || parameter.Authored.Definition == nil || parameter.Authored.Definition.ModulePath != "contracts/ids" || parameter.Resolved.Kind != "int" {
+	if parameter.Authored.Name != "ReceiptID" || parameter.Authored.Definition == nil || parameter.Authored.Definition.ModulePath != "contracts/ids" || parameter.Resolved.Name != "ReceiptID" || parameter.Representation == nil || parameter.Representation.Kind != "int" {
 		t.Fatalf("parameter authored and resolved types differ from the source contract: %#v", parameter)
 	}
 	if perform.Return == nil || perform.Return.Authored.Name != "DeliveryResult" || !containsProjectTypeReference(perform.Return.ResolutionPath, "JobResult", "trb/jobs") {

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 type Definition struct {
 	ModulePath string `json:"modulePath,omitempty"`
@@ -22,6 +22,9 @@ type Type struct {
 	Arguments  []Type      `json:"arguments,omitempty"`
 	Definition *Definition `json:"definition,omitempty"`
 	Record     *Record     `json:"record,omitempty"`
+	// Representation is present for a nominal newtype and describes the
+	// concrete boundary shape without weakening its authored TypeRB identity.
+	Representation *Type `json:"representation,omitempty"`
 }
 
 type Record struct {

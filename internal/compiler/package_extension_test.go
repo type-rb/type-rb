@@ -135,7 +135,7 @@ func TestPackageCallSpecializationImportsDoNotBecomeAuthoredSourceVisible(t *tes
 	page: Integer?
 end
 
-type HiddenAlias = String
+alias HiddenAlias = String
 
 record Input
 	query: HiddenPayload

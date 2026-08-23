@@ -18,7 +18,7 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 type Report struct {
 	ProtocolVersion int                         `json:"protocolVersion"`
@@ -65,6 +65,7 @@ const (
 	DeclarationEnumMember  DeclarationKind = "enum_member"
 	DeclarationInterface   DeclarationKind = "interface"
 	DeclarationTypeAlias   DeclarationKind = "type_alias"
+	DeclarationNewtype     DeclarationKind = "newtype"
 	DeclarationModule      DeclarationKind = "module"
 	DeclarationConstant    DeclarationKind = "constant"
 	DeclarationField       DeclarationKind = "field"
@@ -297,6 +298,10 @@ func (w *declarationWalker) statements(statements []ir.Statement, owner *Declara
 				child.Parameters = parameters(variant.Fields)
 				w.add(child)
 			}
+		case *ir.Newtype:
+			declared := w.base(owner, ownerName, DeclarationNewtype, node.Name, node.SourceSpan())
+			declared.Type = typePointer(node.Target)
+			w.add(declared)
 		case *ir.Module:
 			declared := w.base(owner, ownerName, DeclarationModule, node.Name, node.SourceSpan())
 			w.add(declared)

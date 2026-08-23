@@ -261,7 +261,7 @@
     "declarations": {
       "patterns": [
         {
-          "match": "\\b(class|record|enum|module|interface)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
+          "match": "\\b(class|record|enum|module|interface|alias|newtype)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
           "captures": {
             "1": {
               "name": "storage.type.trb"
@@ -316,7 +316,7 @@
         },
         {
           "name": "storage.type.trb",
-          "match": "\\b(?:class|record|enum|module|interface|def|fn)\\b"
+          "match": "\\b(?:class|record|enum|module|interface|alias|newtype|def|fn)\\b"
         },
         {
           "name": "keyword.control.import.trb",

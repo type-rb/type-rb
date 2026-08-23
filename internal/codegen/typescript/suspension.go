@@ -68,6 +68,10 @@ func statementsShadowStandardResult(statements []ir.Statement) bool {
 			if node.Name == "Result" {
 				return true
 			}
+		case *ir.Newtype:
+			if node.Name == "Result" {
+				return true
+			}
 		case *ir.Interface:
 			if node.Name == "Result" {
 				return true

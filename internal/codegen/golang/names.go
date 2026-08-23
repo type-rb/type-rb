@@ -92,6 +92,8 @@ func collectGoProjectDeclarations(modulePath string, statements []ir.Statement, 
 			occupied[goIdentifier(node.Name, true)] = true
 		case *ir.TypeAlias:
 			occupied[goIdentifier(node.Name, true)] = true
+		case *ir.Newtype:
+			occupied[goIdentifier(node.Name, true)] = true
 		case *ir.Interface:
 			occupied[goIdentifier(node.Name, true)] = true
 		case *ir.Variable:

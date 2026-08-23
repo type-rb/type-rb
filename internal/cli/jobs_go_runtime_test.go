@@ -202,7 +202,7 @@ func TestGoJobWorkerBuildsWithWebAndImportedAliasPayload(t *testing.T) {
 		}
 	}
 	sources := map[string]string{
-		"domain/item_id.trb": "type ItemId = Integer\n",
+		"domain/item_id.trb": "alias ItemId = Integer\n",
 		"jobs/sync_item_job.trb": `import { ItemId } from domain/item_id
 import { Job } from trb/jobs
 

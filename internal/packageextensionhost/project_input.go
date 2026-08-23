@@ -23,6 +23,7 @@ type projectImportBinding struct {
 type projectInputResolver struct {
 	programs               map[string]*ast.Program
 	aliases                map[string]map[string]*ast.TypeAliasStatement
+	newtypes               map[string]map[string]*ast.NewtypeStatement
 	definitions            map[string]map[string]bool
 	imports                map[string]map[string]projectImportBinding
 	packageAliasesByModule map[string]map[string]string
@@ -57,6 +58,10 @@ func ExportProjectDeclarationInput(provider string, programs []*ast.Program, opt
 					Target: resolver.typeUse(program.ModulePath, node.Target, projectTypeParameterSet(node.TypeParameters)),
 					Span:   exportSourceSpan(node.Span()),
 				})
+			case *ast.NewtypeStatement:
+				module.Newtypes = append(module.Newtypes, packageextension.ProjectNewtype{
+					Name: node.Name, Target: resolver.typeUse(program.ModulePath, node.Target, nil), Span: exportSourceSpan(node.Span()),
+				})
 			case *ast.ClassStatement:
 				module.Classes = append(module.Classes, resolver.exportClass(program.ModulePath, node))
 			case *ast.EnumStatement:
@@ -75,6 +80,7 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 	result := projectInputResolver{
 		programs:               map[string]*ast.Program{},
 		aliases:                map[string]map[string]*ast.TypeAliasStatement{},
+		newtypes:               map[string]map[string]*ast.NewtypeStatement{},
 		definitions:            map[string]map[string]bool{},
 		imports:                map[string]map[string]projectImportBinding{},
 		packageAliasesByModule: options.PackageAliasesByModule,
@@ -88,6 +94,7 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 		}
 		result.programs[program.ModulePath] = program
 		result.aliases[program.ModulePath] = map[string]*ast.TypeAliasStatement{}
+		result.newtypes[program.ModulePath] = map[string]*ast.NewtypeStatement{}
 		result.definitions[program.ModulePath] = map[string]bool{}
 		result.imports[program.ModulePath] = map[string]projectImportBinding{}
 	}
@@ -102,6 +109,9 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 				}
 			case *ast.TypeAliasStatement:
 				result.aliases[program.ModulePath][node.Name] = node
+				result.definitions[program.ModulePath][node.Name] = true
+			case *ast.NewtypeStatement:
+				result.newtypes[program.ModulePath][node.Name] = node
 				result.definitions[program.ModulePath][node.Name] = true
 			case *ast.ClassStatement:
 				result.definitions[program.ModulePath][node.Name] = true
@@ -247,9 +257,49 @@ func (r projectInputResolver) typeUse(modulePath string, ref ast.TypeRef, typePa
 	authored := exportType(projectInputTypeRef(ref))
 	r.attachDefinitions(modulePath, &authored, typeParameters)
 	resolved, path := r.resolveType(modulePath, authored, map[string]bool{})
-	return packageextension.ProjectTypeUse{
+	result := packageextension.ProjectTypeUse{
 		Authored: authored, Resolved: resolved, ResolutionPath: path, Span: exportSourceSpan(ref.Span()),
 	}
+	if representation, newtype := r.resolveRepresentation(modulePath, authored, map[string]bool{}); newtype {
+		result.Representation = &representation
+	}
+	return result
+}
+
+func (r projectInputResolver) resolveRepresentation(modulePath string, typ packageextension.Type, visiting map[string]bool) (packageextension.Type, bool) {
+	foundNewtype := false
+	for index := range typ.Arguments {
+		resolved, found := r.resolveRepresentation(modulePath, typ.Arguments[index], cloneBoolMap(visiting))
+		typ.Arguments[index] = resolved
+		foundNewtype = foundNewtype || found
+	}
+	if typ.Kind != "named" || len(typ.Arguments) != 0 {
+		return typ, foundNewtype
+	}
+	reference, ok := projectTypeReference(typ)
+	if !ok {
+		return typ, foundNewtype
+	}
+	key := reference.ModulePath + "\x00" + typ.Name
+	if visiting[key] {
+		return typ, foundNewtype
+	}
+	visiting[key] = true
+	if alias := r.aliases[reference.ModulePath][typ.Name]; alias != nil && len(alias.TypeParameters) == 0 {
+		target := exportType(projectInputTypeRef(alias.Target))
+		target.Nullable = target.Nullable || typ.Nullable
+		r.attachDefinitions(reference.ModulePath, &target, nil)
+		resolved, found := r.resolveRepresentation(reference.ModulePath, target, visiting)
+		return resolved, foundNewtype || found
+	}
+	if newtype := r.newtypes[reference.ModulePath][typ.Name]; newtype != nil {
+		target := exportType(projectInputTypeRef(newtype.Target))
+		target.Nullable = target.Nullable || typ.Nullable
+		r.attachDefinitions(reference.ModulePath, &target, nil)
+		resolved, _ := r.resolveRepresentation(reference.ModulePath, target, visiting)
+		return resolved, true
+	}
+	return typ, foundNewtype
 }
 
 func projectInputTypeRef(ref ast.TypeRef) types.Type {

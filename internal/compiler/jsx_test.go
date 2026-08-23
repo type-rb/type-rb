@@ -132,7 +132,7 @@ import { Result } from trb/std/result
 
 API := HttpClient.new("https://api.example.test")
 
-type Loader = () -> Result<Response<String>, RequestError>
+alias Loader = () -> Result<Response<String>, RequestError>
 
 def make_loader(): Loader
 	return fn(): Result<Response<String>, RequestError>
@@ -325,7 +325,7 @@ func TestCompileTypeScriptJSXRendersImportedTransparentAliases(t *testing.T) {
 	contracts := SourceUnit{
 		Filename:   "contracts.trb",
 		ModulePath: "contracts",
-		Source: []byte(`type EmailAddress = String
+		Source: []byte(`alias EmailAddress = String
 
 record Contact
 	email_address: EmailAddress

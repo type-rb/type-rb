@@ -43,6 +43,8 @@ type Result struct {
 	RawEnums                   map[*ast.EnumStatement]RawEnum
 	EnumCalls                  map[*ast.CallExpression]EnumCall
 	TypeAliases                map[*ast.TypeAliasStatement]TypeAlias
+	Newtypes                   map[*ast.NewtypeStatement]Newtype
+	NewtypeCalls               map[*ast.CallExpression]NewtypeCall
 	ResultTries                map[*ast.TryExpression]ResultTry
 	ResultCatches              map[*ast.CatchExpression]ResultCatch
 	StructuredBlocks           map[*ast.CallExpression]StructuredBlock
@@ -90,6 +92,16 @@ type EnumCall struct {
 type TypeAlias struct {
 	Target   types.Type
 	Variants []EnumVariant
+}
+
+type Newtype struct {
+	Target types.Type
+}
+
+type NewtypeCall struct {
+	Operation      string
+	Type           types.Type
+	Representation types.Type
 }
 
 // ResultTry describes the two Result variants used by a prefix try expression
@@ -388,6 +400,11 @@ type aliasInfo struct {
 	target         types.Type
 }
 
+type newtypeInfo struct {
+	statement *ast.NewtypeStatement
+	target    types.Type
+}
+
 type typeDeclaration struct {
 	kind           string
 	span           token.Span
@@ -402,6 +419,7 @@ type Checker struct {
 	records                     map[string]*recordInfo
 	enums                       map[string]*enumInfo
 	aliases                     map[string]*aliasInfo
+	newtypes                    map[string]*newtypeInfo
 	interfaces                  map[string]*ast.InterfaceStatement
 	functions                   map[string]*ast.MethodStatement
 	current                     *classInfo
@@ -717,6 +735,8 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			RawEnums:                   map[*ast.EnumStatement]RawEnum{},
 			EnumCalls:                  map[*ast.CallExpression]EnumCall{},
 			TypeAliases:                map[*ast.TypeAliasStatement]TypeAlias{},
+			Newtypes:                   map[*ast.NewtypeStatement]Newtype{},
+			NewtypeCalls:               map[*ast.CallExpression]NewtypeCall{},
 			ResultTries:                map[*ast.TryExpression]ResultTry{},
 			ResultCatches:              map[*ast.CatchExpression]ResultCatch{},
 			StructuredBlocks:           map[*ast.CallExpression]StructuredBlock{},
@@ -731,6 +751,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		records:                map[string]*recordInfo{},
 		enums:                  map[string]*enumInfo{},
 		aliases:                map[string]*aliasInfo{},
+		newtypes:               map[string]*newtypeInfo{},
 		interfaces:             map[string]*ast.InterfaceStatement{},
 		functions:              map[string]*ast.MethodStatement{},
 		resolution:             resolution,
@@ -785,6 +806,8 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParamet
 			c.validateTypeReferences(node.Body, extendTypeParameters(typeParameters, node.TypeParameters))
 		case *ast.TypeAliasStatement:
 			c.validateTypeReferenceInScope(node.Target, extendTypeParameters(typeParameters, node.TypeParameters))
+		case *ast.NewtypeStatement:
+			c.validateTypeReferenceInScope(node.Target, typeParameters)
 		case *ast.EnumMemberStatement:
 			for _, parameter := range node.Parameters {
 				c.validateTypeReferenceInScope(parameter.Type, typeParameters)
@@ -1198,6 +1221,11 @@ func (c *Checker) collect(statements []ast.Statement) {
 			declaration.typeParameters = append([]string(nil), info.typeParameters...)
 			c.declaredTypes[n.Name] = declaration
 			c.aliases[n.Name] = info
+		case *ast.NewtypeStatement:
+			if !c.declareType(n.Name, "newtype", n.Span()) {
+				continue
+			}
+			c.newtypes[n.Name] = &newtypeInfo{statement: n, target: fromTypeRef(n.Target)}
 		case *ast.InterfaceStatement:
 			if c.declareType(n.Name, "interface", n.Span()) {
 				declaration := c.declaredTypes[n.Name]
@@ -1402,6 +1430,31 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				alias.Variants = variants
 			}
 			c.result.TypeAliases[n] = alias
+		case *ast.NewtypeStatement:
+			if !sc.enumsAllowed {
+				c.error(n.Span(), fmt.Sprintf("newtype %s may only be declared at top level or directly inside a module", n.Name))
+			}
+			if !isConstant(n.Name) {
+				c.error(n.Span(), "newtype name must begin with an uppercase letter")
+			}
+			if n.Target.Empty() {
+				c.error(n.Span(), fmt.Sprintf("newtype %s requires a target type", n.Name))
+				break
+			}
+			target := c.expandAlias(c.typeFromRef(n.Target), map[string]bool{})
+			if target.Nullable {
+				c.error(n.Target.Span(), fmt.Sprintf("newtype %s representation must be non-nullable; make %s nullable at use sites instead", n.Name, n.Name))
+			}
+			if target.Kind == types.Invalid || target.Kind == types.Never || target.Kind == types.Nil || target.Kind == types.Any || target.Kind == types.Void {
+				c.error(n.Target.Span(), fmt.Sprintf("newtype %s requires a concrete value representation", n.Name))
+			}
+			if !newtypeRepresentationFullyInstantiated(target) {
+				c.error(n.Target.Span(), fmt.Sprintf("newtype %s representation must be fully instantiated", n.Name))
+			}
+			if c.newtypeRepresentationCycle(n.Name, map[string]bool{}) {
+				c.error(n.Target.Span(), "newtype representation cycle involving "+n.Name)
+			}
+			c.result.Newtypes[n] = Newtype{Target: target}
 		case *ast.RecordFieldStatement:
 			// Checked as part of its enclosing record.
 		case *ast.ModuleStatement:
@@ -3096,6 +3149,11 @@ func (c *Checker) callSpecializationType(typ types.Type, includeRecord bool) pac
 	for _, argument := range typ.Args {
 		result.Arguments = append(result.Arguments, c.callSpecializationType(argument, false))
 	}
+	expanded := c.expandAlias(typ, map[string]bool{})
+	if _, _, newtype := c.newtypeDefinition(expanded.Name); newtype {
+		representation := c.callSpecializationType(c.expandRepresentation(expanded, map[string]bool{}), false)
+		result.Representation = &representation
+	}
 	if typ.Kind != types.Named {
 		return result
 	}
@@ -3143,8 +3201,8 @@ func callSpecializationDefinition(module string, reference *resolver.Binding) *p
 }
 
 func (c *Checker) parameterSchema(span token.Span, typ types.Type, operation string) (CodecSchema, bool) {
-	schema := CodecSchema{Type: typ}
-	base := typ
+	base := c.expandRepresentation(typ, map[string]bool{})
+	schema := CodecSchema{Type: base}
 	base.Nullable = false
 	if base.Kind != types.Named || typ.Nullable {
 		c.error(span, fmt.Sprintf("web parameter binding type %s must be a non-nullable record", typ))
@@ -3182,7 +3240,7 @@ func (c *Checker) parameterSchema(span token.Span, typ types.Type, operation str
 }
 
 func (c *Checker) parameterValueSchema(typ types.Type, allowArray bool) (CodecSchema, bool) {
-	expanded := c.expandAlias(typ, map[string]bool{})
+	expanded := c.expandRepresentation(typ, map[string]bool{})
 	schema := CodecSchema{Type: expanded}
 	base := expanded
 	base.Nullable = false
@@ -3239,10 +3297,10 @@ func (c *Checker) parameterValueSchema(typ types.Type, allowArray bool) (CodecSc
 }
 
 func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[string]bool) (CodecSchema, bool) {
-	// Codecs use the expanded representation of transparent aliases. Generated
-	// helpers can then cross a package boundary without importing an alias that
-	// appeared only inside an imported record definition.
-	base := c.expandAlias(typ, map[string]bool{})
+	// Codecs use the expanded representation of transparent aliases and nominal
+	// newtypes. Generated helpers can then cross package boundaries without
+	// exposing a source-only representation wrapper.
+	base := c.expandRepresentation(typ, map[string]bool{})
 	schema := CodecSchema{Type: base}
 	base.Nullable = false
 	switch base.Kind {
@@ -3967,6 +4025,12 @@ func (c *Checker) portableEqualityOperands(left, right types.Type) bool {
 	if left.Nullable || right.Nullable {
 		return false
 	}
+	if types.Equivalent(left, right) {
+		if _, _, newtype := c.newtypeDefinition(left.Name); newtype {
+			representation := c.expandRepresentation(left, map[string]bool{})
+			return representation.Kind != types.Invalid && c.portableEqualityOperands(representation, representation)
+		}
+	}
 	if isNonNullableNumber(left) && isNonNullableNumber(right) {
 		return true
 	}
@@ -4629,14 +4693,14 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 			return false
 		}
 		if declared, exists := c.declaredTypes[node.Name]; exists {
-			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum"
+			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum" || declared.kind == "newtype"
 		}
 		if c.declarationTypeVisible(node.Name) {
 			return true
 		}
 		if binding, exists := c.result.References[node]; exists && binding.Export != nil {
 			switch binding.Export.Kind {
-			case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport:
+			case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport, resolver.NewtypeExport:
 				return true
 			}
 		}
@@ -4648,16 +4712,16 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 
 func (c *Checker) constructorType(name string) bool {
 	if declaration, exists := c.declaredTypes[name]; exists {
-		return declaration.kind == "class" || declaration.kind == "record"
+		return declaration.kind == "class" || declaration.kind == "record" || declaration.kind == "newtype"
 	}
 	if c.declarationTypeVisible(name) {
 		return true
 	}
 	if binding, exists := c.resolution.ImportedType(name); exists && binding.Export != nil {
-		return binding.Export.Kind == resolver.ClassExport || binding.Export.Kind == resolver.RecordExport
+		return binding.Export.Kind == resolver.ClassExport || binding.Export.Kind == resolver.RecordExport || binding.Export.Kind == resolver.NewtypeExport
 	}
 	if exported, exists := c.resolution.CompilerOwnedType(name); exists {
-		return exported.Kind == resolver.ClassExport || exported.Kind == resolver.RecordExport
+		return exported.Kind == resolver.ClassExport || exported.Kind == resolver.RecordExport || exported.Kind == resolver.NewtypeExport
 	}
 	return false
 }
@@ -5368,6 +5432,22 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
+		if target, _, newtype := c.newtypeDefinition(receiverType.Name); newtype {
+			switch {
+			case classAccess && n.Name == "new":
+				typ = receiverType
+			case !classAccess && n.Name == "value":
+				typ = target
+			default:
+				kind := "instance"
+				if classAccess {
+					kind = "class"
+				}
+				c.error(n.Span(), fmt.Sprintf("newtype %s has no %s member %s", receiverType.Name, kind, n.Name))
+				typ = invalidType()
+			}
+			break
+		}
 		if identifier, ok := n.Receiver.(*ast.Identifier); ok && !n.Namespace {
 			if owner, imported := c.result.References[identifier]; imported && owner.Export != nil && owner.Export.NativeExported && owner.Export.Kind == resolver.FunctionExport {
 				if member, found := owner.Export.Members[n.Name]; found {
@@ -5522,6 +5602,28 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		c.constrainEmptyCollectionCall(n, argumentTypes)
 		typ = calleeType
+		if member, ok := n.Callee.(*ast.MemberExpression); ok {
+			receiverType := c.result.Expressions[member.Receiver]
+			if target, _, newtype := c.newtypeDefinition(receiverType.Name); newtype {
+				switch member.Name {
+				case "new":
+					c.checkTypedArguments(n.Span(), receiverType.Name+".new", []types.Type{target}, 1, false, n.Arguments, argumentTypes)
+					if n.Block != nil {
+						c.error(n.Block.Span(), receiverType.Name+".new() does not accept a block")
+					}
+					typ = receiverType
+					c.result.NewtypeCalls[n] = NewtypeCall{Operation: "new", Type: receiverType, Representation: target}
+				case "value":
+					c.checkTypedArguments(n.Span(), receiverType.Name+".value", nil, 0, false, n.Arguments, argumentTypes)
+					if n.Block != nil {
+						c.error(n.Block.Span(), receiverType.Name+".value() does not accept a block")
+					}
+					typ = target
+					c.result.NewtypeCalls[n] = NewtypeCall{Operation: "value", Type: receiverType, Representation: target}
+				}
+				break
+			}
+		}
 		if parameters, returned, callable := types.FunctionSignature(calleeType); callable {
 			for _, argument := range n.Arguments {
 				if argument.Name != "" || argument.Splat != "" {
@@ -6795,11 +6897,17 @@ func (c *Checker) checkDeclarationArgumentsWithBindings(span token.Span, member 
 			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() must be a non-empty literal array containing only %s", index+1, member.Name, quotedDeclarationValues(parameter.LiteralArrayElements)))
 			continue
 		}
-		bindDeclarationType(parameter.Type, actual[index], typeParameters, bindings)
+		authoredActual := actual[index]
+		actualForBoundary := authoredActual
+		if parameter.RepresentationBoundary {
+			actualForBoundary = c.expandRepresentation(actualForBoundary, map[string]bool{})
+		}
+		bindDeclarationType(parameter.Type, actualForBoundary, typeParameters, bindings)
 		expected := instantiateDeclarationType(parameter.Type, bindings)
-		actual[index] = c.contextualizeCollectionLiteral(argument.Value, expected, actual[index])
-		if !c.assignable(argument.Value, expected, actual[index]) {
-			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", index+1, member.Name, actual[index], expected))
+		actualForBoundary = c.contextualizeCollectionLiteral(argument.Value, expected, actualForBoundary)
+		actual[index] = actualForBoundary
+		if !c.assignable(argument.Value, expected, actualForBoundary) {
+			c.error(argument.Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", index+1, member.Name, authoredActual, expected))
 		}
 	}
 	for _, parameter := range member.Parameters {
@@ -7470,6 +7578,96 @@ func (c *Checker) aliasDefinition(name string) ([]string, types.Type, bool) {
 		return exported.TypeParameters, exported.AliasTarget, true
 	}
 	return nil, types.Type{}, false
+}
+
+func (c *Checker) newtypeDefinition(name string) (types.Type, *resolver.Binding, bool) {
+	if defined := c.newtypes[name]; defined != nil {
+		return defined.target, nil, true
+	}
+	if binding, imported := c.resolution.ImportedType(name); imported && binding.Export != nil && binding.Export.Kind == resolver.NewtypeExport {
+		copy := binding
+		return binding.Export.NewtypeTarget, &copy, true
+	}
+	if binding, inferred := c.resolution.InferredType(name); inferred && binding.Export != nil && binding.Export.Kind == resolver.NewtypeExport {
+		copy := binding
+		return binding.Export.NewtypeTarget, &copy, true
+	}
+	if exported, exists := c.resolution.CompilerOwnedType(name); exists && exported.Kind == resolver.NewtypeExport {
+		return exported.NewtypeTarget, nil, true
+	}
+	return types.Type{}, nil, false
+}
+
+func (c *Checker) expandRepresentation(typ types.Type, visiting map[string]bool) types.Type {
+	typ = c.expandAlias(typ, map[string]bool{})
+	arguments := make([]types.Type, len(typ.Args))
+	for index, argument := range typ.Args {
+		arguments[index] = c.expandRepresentation(argument, visiting)
+	}
+	typ.Args = arguments
+	target, _, newtype := c.newtypeDefinition(typ.Name)
+	if !newtype {
+		return typ
+	}
+	if visiting[typ.Name] {
+		return invalidType()
+	}
+	visiting[typ.Name] = true
+	representation := c.expandRepresentation(target, visiting)
+	delete(visiting, typ.Name)
+	representation.Nullable = representation.Nullable || typ.Nullable
+	representation.Readonly = representation.Readonly || typ.Readonly
+	return representation
+}
+
+func (c *Checker) newtypeRepresentationCycle(name string, visiting map[string]bool) bool {
+	if visiting[name] {
+		return true
+	}
+	target, _, ok := c.newtypeDefinition(name)
+	if !ok {
+		return false
+	}
+	visiting[name] = true
+	target = c.expandAlias(target, map[string]bool{})
+	var cycle func(types.Type) bool
+	cycle = func(typ types.Type) bool {
+		if _, _, defined := c.newtypeDefinition(typ.Name); defined && c.newtypeRepresentationCycle(typ.Name, visiting) {
+			return true
+		}
+		for _, argument := range typ.Args {
+			if cycle(argument) {
+				return true
+			}
+		}
+		return false
+	}
+	result := cycle(target)
+	delete(visiting, name)
+	return result
+}
+
+func newtypeRepresentationFullyInstantiated(typ types.Type) bool {
+	switch typ.Kind {
+	case types.Array, types.Range, types.Iterable:
+		if len(typ.Args) != 1 {
+			return false
+		}
+	case types.Hash:
+		if len(typ.Args) != 2 {
+			return false
+		}
+	case types.Function, types.Union:
+		if len(typ.Args) == 0 {
+			return false
+		}
+	}
+	for _, argument := range typ.Args {
+		if !newtypeRepresentationFullyInstantiated(argument) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Checker) expandAlias(typ types.Type, visiting map[string]bool) types.Type {

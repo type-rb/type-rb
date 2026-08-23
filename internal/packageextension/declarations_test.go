@@ -18,7 +18,8 @@ func TestDeclarationCatalogRoundTripsAsVersionedData(t *testing.T) {
 			}},
 			ClassMembers: []DeclaredMember{{
 				Name: "pluck", Kind: "method", RuntimeOperation: "test.pluck",
-				Return: Type{Kind: "named", Name: "Result", Arguments: []Type{{Kind: "array", Name: "Array", Arguments: []Type{{Kind: "string", Name: "String"}}}, {Kind: "named", Name: "Error"}}},
+				Parameters: []DeclaredParameter{{Name: "id", Type: Type{Kind: "int", Name: "Integer"}, RepresentationBoundary: true}},
+				Return:     Type{Kind: "named", Name: "Result", Arguments: []Type{{Kind: "array", Name: "Array", Arguments: []Type{{Kind: "string", Name: "String"}}}, {Kind: "named", Name: "Error"}}},
 				Alternatives: []DeclaredSignature{{
 					Parameters: []DeclaredParameter{{Name: "column", Type: Type{Kind: "string", Name: "String"}, LiteralValues: []string{"name"}}},
 					Return:     Type{Kind: "named", Name: "Result", Arguments: []Type{{Kind: "array", Name: "Array", Arguments: []Type{{Kind: "string", Name: "String"}}}, {Kind: "named", Name: "Error"}}},
@@ -39,6 +40,9 @@ func TestDeclarationCatalogRoundTripsAsVersionedData(t *testing.T) {
 	}
 	if decoded.Types[0].ClassMembers[0].Alternatives[0].Parameters[0].LiteralValues[0] != "name" {
 		t.Fatalf("declaration data changed during JSON round trip: %#v", decoded)
+	}
+	if !decoded.Types[0].ClassMembers[0].Parameters[0].RepresentationBoundary {
+		t.Fatalf("representation boundary changed during JSON round trip: %#v", decoded)
 	}
 }
 

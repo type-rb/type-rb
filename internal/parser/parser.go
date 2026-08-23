@@ -85,8 +85,14 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseRecord()
 	case "enum":
 		return p.parseEnum()
-	case "type":
+	case "alias":
 		return p.parseTypeAlias()
+	case "newtype":
+		return p.parseNewtype()
+	case "type":
+		statement := p.parseTypeAlias()
+		p.migrationErrorAt(statement.Span(), typeAliasMovedMessage)
+		return statement
 	case "module":
 		return p.parseModule()
 	case "interface":
@@ -916,7 +922,7 @@ func (p *Parser) parseTypeAlias() ast.Statement {
 	node := &ast.TypeAliasStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
 	equal := topLevelIndex(line, "=")
 	if equal < 0 {
-		p.errorAt(spanOf(line), "type alias must be: type Name<T> = Target")
+		p.errorAt(spanOf(line), "type alias must be: alias Name<T> = Target")
 		p.pos = next
 		return node
 	}
@@ -927,6 +933,33 @@ func (p *Parser) parseTypeAlias() ast.Statement {
 		node.Target = p.parseTypeRef(line[equal+1:])
 		if node.Target.Empty() {
 			p.errorAt(spanOf(line[equal+1:]), "type alias target must be a type")
+		}
+	}
+	p.pos = next
+	return node
+}
+
+func (p *Parser) parseNewtype() ast.Statement {
+	start, end, next, comment := p.logicalLine(p.pos)
+	line := p.codeTokens(start, end)
+	node := &ast.NewtypeStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
+	equal := topLevelIndex(line, "=")
+	if equal < 0 {
+		p.errorAt(spanOf(line), "newtype must be: newtype Name = Target")
+		p.pos = next
+		return node
+	}
+	name, parameters := p.parseGenericDeclaration(line[:equal], "newtype")
+	node.Name = name
+	if len(parameters) > 0 {
+		p.errorAt(spanOf(line[2:equal]), "generic newtype declarations are not supported yet")
+	}
+	if equal+1 >= len(line) {
+		p.errorAt(line[equal].Span, "newtype target is required after =")
+	} else {
+		node.Target = p.parseTypeRef(line[equal+1:])
+		if node.Target.Empty() {
+			p.errorAt(spanOf(line[equal+1:]), "newtype target must be a type")
 		}
 	}
 	p.pos = next

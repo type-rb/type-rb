@@ -19,8 +19,8 @@ enum AppError
 	Invalid
 end
 
-type AppResult<T> = Result<T, AppError>
-type NestedAppResult<T> = AppResult<T>
+alias AppResult<T> = Result<T, AppError>
+alias NestedAppResult<T> = AppResult<T>
 
 def source(success: Boolean): NestedAppResult<Integer>
 	if success
@@ -131,8 +131,8 @@ record AppError
 	message: String
 end
 
-type AppResult<T> = Result<T, AppError>
-type NestedAppResult<T> = AppResult<T>
+alias AppResult<T> = Result<T, AppError>
+alias NestedAppResult<T> = AppResult<T>
 
 def source(): NestedAppResult<Integer>
 	return AppResult<Integer>::Ok(7)
@@ -145,7 +145,7 @@ end
 		Package:    "main",
 		Source: []byte(`import { AppResult, NestedAppResult, source } from contracts/result
 
-type ConsumerResult<T> = NestedAppResult<T>
+alias ConsumerResult<T> = NestedAppResult<T>
 
 def propagated(): ConsumerResult<String>
 	value := try source()
@@ -176,7 +176,7 @@ enum AppError
 	Unavailable
 end
 
-type AppResult<T> = Result<T, AppError>
+alias AppResult<T> = Result<T, AppError>
 `),
 	}
 	service := SourceUnit{
@@ -226,7 +226,7 @@ enum AppError
 	Unavailable
 end
 
-type AppResult<T> = Result<T, AppError>
+alias AppResult<T> = Result<T, AppError>
 `),
 	}
 	service := SourceUnit{

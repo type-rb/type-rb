@@ -81,7 +81,7 @@ func TestBuildNarrowsNullableAliasThroughNativeDiscriminatedUnion(t *testing.T) 
 	}
 	source := `import { QueryResult } from "query"
 
-type MemberId = Integer
+alias MemberId = Integer
 
 record UserView
 	member_id: MemberId?

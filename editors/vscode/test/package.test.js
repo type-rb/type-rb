@@ -41,11 +41,16 @@ test("registers the canonical TypeRB language, grammar, and debugger", async () 
 	const controlKeywords = new RegExp(controlPattern.match);
 	for (const keyword of ["try", "catch"]) assert.equal(controlKeywords.test(keyword), true, `${keyword} must be highlighted`);
 	for (const legacy of ["attempt", "fails"]) assert.equal(controlKeywords.test(legacy), false, `${legacy} must not be highlighted`);
+	const declarationPattern = grammar.repository.declarations.patterns[0];
+	const declarations = new RegExp(declarationPattern.match, "u");
+	for (const keyword of ["alias", "newtype"]) assert.equal(declarations.test(`${keyword} UserId`), true, `${keyword} declarations must be highlighted`);
 
 	const snippets = JSON.parse(await readFile(path.join(extensionRoot, "snippets/typerb.json"), "utf8"));
 	const prefixes = Object.values(snippets).map((snippet) => snippet.prefix);
 	assert.ok(prefixes.includes("try"));
 	assert.ok(prefixes.includes("catch"));
+	assert.ok(prefixes.includes("alias"));
+	assert.ok(prefixes.includes("newtype"));
 	assert.ok(!prefixes.includes("attempt"));
 	assert.ok(!prefixes.includes("fails"));
 

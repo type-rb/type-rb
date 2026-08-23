@@ -17,6 +17,7 @@ import (
 )
 
 var keywordDetails = map[string]string{
+	"alias":      "declare a transparent type alias",
 	"and":        "Boolean conjunction",
 	"break":      "exit the current loop",
 	"case":       "dispatch on an enum",
@@ -36,6 +37,7 @@ var keywordDetails = map[string]string{
 	"interface":  "declare required methods",
 	"module":     "group declarations",
 	"mut":        "declare a mutable binding",
+	"newtype":    "declare a nominal representation type",
 	"next":       "continue the current loop",
 	"nil":        "empty value",
 	"not":        "Boolean negation",
@@ -45,7 +47,6 @@ var keywordDetails = map[string]string{
 	"return":     "return from a function",
 	"self":       "current class or instance",
 	"then":       "separate a condition from its branch",
-	"type":       "declare a transparent type alias",
 	"true":       "Boolean literal",
 	"try":        "propagate a Result error",
 	"when":       "handle an enum member",
@@ -209,7 +210,7 @@ func typeCompletionPosition(source string, wordStart int) bool {
 	case "implements", "|", "->":
 		return true
 	case "=":
-		return currentLineStartsWith(significant, "type")
+		return currentLineStartsWith(significant, "alias") || currentLineStartsWith(significant, "newtype")
 	case ":":
 		if unclosedDelimiter(significant, "{", "}") >= 0 {
 			return false
@@ -1367,7 +1368,7 @@ func lexicalSymbolsWithLocals(source string, cursor int, context Context) ([]Sym
 			continue
 		}
 		switch item.Lexeme {
-		case "class", "record", "enum", "interface", "type":
+		case "class", "record", "enum", "interface", "alias", "newtype":
 			if name, ok := tokenAt(significant, index+1); ok && name.Kind == token.Identifier {
 				known[name.Lexeme] = Symbol{Name: name.Lexeme, Kind: CompletionType, Detail: item.Lexeme, Type: types.FromName(name.Lexeme)}
 				collectTypeParameters(significant, index+2, known)

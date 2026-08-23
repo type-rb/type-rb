@@ -46,7 +46,7 @@ end
 func TestDeclarationsAcceptCanonicalJobResultThroughTransparentAlias(t *testing.T) {
 	program := parseJobsTest(t, `import { Job, JobResult } from trb/jobs
 
-type DeliveryResult = JobResult
+alias DeliveryResult = JobResult
 
 class SendReceiptJob < Job
 	def perform(order_id: Integer): DeliveryResult
@@ -67,7 +67,7 @@ func TestDeclarationsPreserveJobContractDiagnostics(t *testing.T) {
 	}{
 		{name: "missing perform", source: "class EmptyJob < Job\nend\n", message: "must declare perform"},
 		{name: "class perform", source: "class InvalidJob < Job\n\tdef self.perform()\n\t\treturn\n\tend\nend\n", message: "must be an instance method"},
-		{name: "source-defined JobResult", source: "type JobResult = String\nclass InvalidJob < Job\n\tdef perform(): JobResult\n\t\treturn \"invalid\"\n\tend\nend\n", message: "must omit its return type or return JobResult"},
+		{name: "source-defined JobResult", source: "alias JobResult = String\nclass InvalidJob < Job\n\tdef perform(): JobResult\n\t\treturn \"invalid\"\n\tend\nend\n", message: "must omit its return type or return JobResult"},
 		{name: "optional argument", source: "class InvalidJob < Job\n\tdef perform(value: Integer = 1)\n\t\treturn\n\tend\nend\n", message: "required positional parameters only"},
 		{name: "dynamic queue", source: "class InvalidJob < Job\n\tqueue(QUEUE)\n\tdef perform()\n\t\treturn\n\tend\nend\n", message: "expects a literal"},
 	}
@@ -120,7 +120,7 @@ func TestDiscoverRejectsInvalidInitialJobContracts(t *testing.T) {
 		{name: "class perform", source: "class InvalidJob < Job\n\tdef self.perform()\n\t\treturn\n\tend\nend\n", message: "must be an instance method"},
 		{name: "return value", source: "class InvalidJob < Job\n\tdef perform(): String\n\t\treturn \"x\"\n\tend\nend\n", message: "must omit its return type or return JobResult"},
 		{name: "raw result", source: "import { Job, JobError } from trb/jobs\nimport { Result } from trb/std/result\nimport { Unit } from trb/std/unit\nclass InvalidJob < Job\n\tdef perform(): Result<Unit, JobError>\n\t\treturn Result<Unit, JobError>::Ok(Unit.new())\n\tend\nend\n", message: "must omit its return type or return JobResult"},
-		{name: "source-defined JobResult", source: "import { Job } from trb/jobs\nimport { Result } from trb/std/result\nimport { Unit } from trb/std/unit\nrecord LocalJobError\n\tmessage: String\nend\ntype JobResult = Result<Unit, LocalJobError>\nclass InvalidJob < Job\n\tdef perform(): JobResult\n\t\treturn JobResult::Ok(Unit.new())\n\tend\nend\n", message: "must omit its return type or return JobResult"},
+		{name: "source-defined JobResult", source: "import { Job } from trb/jobs\nimport { Result } from trb/std/result\nimport { Unit } from trb/std/unit\nrecord LocalJobError\n\tmessage: String\nend\nalias JobResult = Result<Unit, LocalJobError>\nclass InvalidJob < Job\n\tdef perform(): JobResult\n\t\treturn JobResult::Ok(Unit.new())\n\tend\nend\n", message: "must omit its return type or return JobResult"},
 		{name: "record argument", source: "record Payload\n\tid: Integer\nend\nclass InvalidJob < Job\n\tdef perform(payload: Payload)\n\t\treturn\n\tend\nend\n", message: "must initially be Boolean, Integer, Float, or String"},
 	}
 	for _, test := range tests {
@@ -163,7 +163,7 @@ func TestDiscoverClassifiesPerformContracts(t *testing.T) {
 		},
 		{
 			name:   "transparent alias of canonical result",
-			source: "import { Job, JobResult } from trb/jobs\nimport { Unit } from trb/std/unit\ntype ExampleJobResult = JobResult\nclass ExampleJob < Job\n\tdef perform(): ExampleJobResult\n\t\treturn ExampleJobResult::Ok(Unit.new())\n\tend\nend\n",
+			source: "import { Job, JobResult } from trb/jobs\nimport { Unit } from trb/std/unit\nalias ExampleJobResult = JobResult\nclass ExampleJob < Job\n\tdef perform(): ExampleJobResult\n\t\treturn ExampleJobResult::Ok(Unit.new())\n\tend\nend\n",
 			kind:   PerformJobResult,
 		},
 	}
@@ -200,8 +200,8 @@ end
 	}
 }
 
-func TestDiscoverAcceptsTransparentScalarAliasPayload(t *testing.T) {
-	program := parseJobsTest(t, `type OrderId = Integer
+func TestDiscoverAcceptsScalarNewtypePayload(t *testing.T) {
+	program := parseJobsTest(t, `newtype OrderId = Integer
 class SendReceiptJob < Job
 	def perform(order_id: OrderId)
 		return
@@ -213,7 +213,7 @@ end
 		t.Fatal(err)
 	}
 	if len(jobs) != 1 || len(jobs[0].Parameters) != 1 || jobs[0].Parameters[0].Type.String() != "OrderId" {
-		t.Fatalf("unexpected aliased Job payload: %#v", jobs)
+		t.Fatalf("unexpected newtype Job payload: %#v", jobs)
 	}
 }
 

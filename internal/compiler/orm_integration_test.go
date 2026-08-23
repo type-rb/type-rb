@@ -35,7 +35,7 @@ func TestPortableORMCompilesLiveSQLiteQuery(t *testing.T) {
 class Product < Model
 end
 
-type ProductList = Array<Product>
+alias ProductList = Array<Product>
 
 def create_product(): DbResult<Product>
 	return Product.create(name: "Created", active: true)
@@ -164,6 +164,43 @@ end
 	context := languageservice.BuildContext(programs, "src/main")
 	assertORMCompletionContext(t, context)
 	assertORMLiteralCompletions(t, context)
+}
+
+func TestPortableORMAcceptsNewtypeRepresentationsAtPersistenceBoundaries(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "application.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`import { DbResult, Model } from trb/orm
+
+newtype ProductId = Integer
+newtype ProductIds = Array<ProductId>
+
+class Product < Model
+end
+
+def load(id: ProductId, ids: ProductIds): DbResult<Product?>
+	Product.where(id: ids).where("id", "=", id)
+	return Product.find(id)
+end
+`)
+	if _, err := CompileProject([]SourceUnit{{
+		Filename: filepath.Join(root, "src", "main.trb"), Source: source, ModulePath: "src/main", Package: "main",
+	}}, Options{
+		Mode: "go", GoModule: "example.com/orm-newtype", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
+		PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},
+	}); err != nil {
+		t.Fatalf("ORM representation boundary rejected newtypes: %v", err)
+	}
 }
 
 func TestPortableORMEnumColumnResolvesPackageAlias(t *testing.T) {

@@ -2922,7 +2922,7 @@ func TestTypedJSONRecordCodecsLowerAcrossBackends(t *testing.T) {
 		Filename:   "/project/contracts/user.trb",
 		ModulePath: "contracts/user",
 		Package:    "user",
-		Source: []byte(`type UserId = Integer
+		Source: []byte(`alias UserId = Integer
 
 record Address
 	city: String
@@ -2994,15 +2994,15 @@ func TestImportedTransparentAliasesUseUnderlyingReceiverMethods(t *testing.T) {
 		Package:    "ids",
 		Source: []byte(`import { Result } from trb/std/result
 
-type UserId = Integer
-type MemberId = Integer
-type EmailAddress = String
+alias UserId = Integer
+alias MemberId = Integer
+alias EmailAddress = String
 
 record MemberRef
 	member_id: MemberId?
 end
 
-type MemberResult = Result<MemberRef, String>
+alias MemberResult = Result<MemberRef, String>
 `),
 	}
 	consumer := SourceUnit{
@@ -3540,7 +3540,7 @@ record InvalidResponse
 	body: Array<String>
 end
 
-type CreateResponse = CreatedResponse | InvalidResponse
+alias CreateResponse = CreatedResponse | InvalidResponse
 `),
 	}
 	consumer := SourceUnit{
@@ -3864,7 +3864,7 @@ enum RepositoryError
 	NotFound
 end
 
-type EntityResult = Result<Entity, RepositoryError>
+alias EntityResult = Result<Entity, RepositoryError>
 
 interface Repository
 	find(id: Integer): EntityResult

@@ -15,13 +15,18 @@ const (
 )
 
 type Parameter struct {
-	Name                 string
-	Type                 types.Type
-	Keyword              bool
-	Optional             bool
-	LiteralValues        []string
-	LiteralArrays        [][]string
-	LiteralArrayElements []string
+	Name     string
+	Type     types.Type
+	Keyword  bool
+	Optional bool
+	// RepresentationBoundary accepts a source type when its runtime
+	// representation is assignable to Type. Package providers use this only at
+	// typed serialization or persistence boundaries; ordinary TypeRB calls keep
+	// nominal newtypes distinct.
+	RepresentationBoundary bool
+	LiteralValues          []string
+	LiteralArrays          [][]string
+	LiteralArrayElements   []string
 }
 
 type Signature struct {

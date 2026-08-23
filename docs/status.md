@@ -70,7 +70,9 @@ and `set(value)` members while generated TSX uses React `useState`.
 The implemented language includes functions, typed first-class function values
 with lexical capture and checked Result control flow, and classes, modules and
 generic interfaces, records, ordinary and raw-value enums, payload enums as sum
-types, enum instance methods, explicit generics for enums, aliases, records,
+types, enum instance methods, transparent `alias` declarations, nominal
+`newtype` declarations over concrete non-nullable representations, explicit
+generics for enums, aliases, records,
 classes, top-level functions and instance methods, normalized unions, immutable
 and mutable bindings, first-constraint inference for fresh empty mutable Arrays
 and Hashes, typed collections and iteration, exhaustive pattern
@@ -139,9 +141,10 @@ artifact creation and cleanup. Command details belong in the
 [CLI reference](cli.md).
 
 Explicit tooling can consume the same compiler service through
-`trb compiler inspect`. Its experimental version 1 JSON snapshot contains exact
+`trb compiler inspect`. Its experimental version 2 JSON snapshot contains exact
 source inputs, modules and authored imports, flattened checked declarations and
-semantic types, and diagnostics without generating target source. The command
+semantic types including nominal newtypes, and diagnostics without generating
+target source. The command
 is read-only and one-shot; mutable AST or typed IR access, backend hooks, and a
 long-lived protocol server are not exposed. See the
 [compiler tooling protocol guide](guides/compiler-tooling.md).
@@ -353,9 +356,10 @@ Retry policy, SQL worker lifecycle, and the SQL adapter's final native
 persistence primitives remain a separate bundled runtime boundary. Jobs and
 ORM declaration discovery also
 consume versioned, JSON-serializable Project Declaration Input snapshots.
-Version 2 contains only canonical module/import identity, aliases, enum and class
-declarations, method signatures, authored and resolved types, declarative call
-values, structural block summaries, and source spans. The ORM host combines
+Version 3 contains only canonical module/import identity, aliases, newtypes and
+their concrete boundary representations, enum and class declarations, method
+signatures, authored and resolved types, declarative call values, structural
+block summaries, and source spans. The ORM host combines
 that project snapshot with a separate versioned ORM schema snapshot containing
 only the adapter and table, column, foreign-key, and unique-constraint facts
 needed to derive its catalog. Database credentials, parser nodes, method and

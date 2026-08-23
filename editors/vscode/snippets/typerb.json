@@ -46,6 +46,16 @@
 		],
 		"description": "Define a TypeRB enum"
 	},
+	"Alias": {
+		"prefix": "alias",
+		"body": "alias ${1:Name} = ${2:Target}",
+		"description": "Define a transparent TypeRB type alias"
+	},
+	"Newtype": {
+		"prefix": "newtype",
+		"body": "newtype ${1:Name} = ${2:Representation}",
+		"description": "Define a nominal TypeRB newtype"
+	},
 	"Propagate Result": {
 		"prefix": "try",
 		"body": "try ${1:operation()}",

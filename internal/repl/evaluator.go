@@ -458,7 +458,7 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		return flowResult{}, err
 	}
 	switch node := statement.(type) {
-	case *ir.Comment, *ir.Import, *ir.Record, *ir.Enum, *ir.EnumMember, *ir.TypeAlias, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
+	case *ir.Comment, *ir.Import, *ir.Record, *ir.Enum, *ir.EnumMember, *ir.TypeAlias, *ir.Newtype, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
 		return flowResult{}, nil
 	case *ir.Class:
 		if err := e.evaluateOwnedConstants(node.Body, module, sc); err != nil {
@@ -891,7 +891,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		switch node.Kind {
-		case ir.RangeToIterableConversion:
+		case ir.RangeToIterableConversion, ir.NewtypeConstructionConversion, ir.NewtypeValueConversion:
 			value.Type = node.ExprType()
 			return value, nil
 		case ir.IntegerToFloatConversion:

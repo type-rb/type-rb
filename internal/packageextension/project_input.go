@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const ProjectDeclarationInputProtocolVersion = 2
+const ProjectDeclarationInputProtocolVersion = 3
 
 // ProjectDeclarationInput is a versioned, read-only snapshot of source
 // declarations that a declaration provider may inspect. It intentionally
@@ -20,6 +20,7 @@ type ProjectModule struct {
 	ModulePath  string             `json:"modulePath"`
 	Imports     []ProjectImport    `json:"imports,omitempty"`
 	TypeAliases []ProjectTypeAlias `json:"typeAliases,omitempty"`
+	Newtypes    []ProjectNewtype   `json:"newtypes,omitempty"`
 	Enums       []ProjectEnum      `json:"enums,omitempty"`
 	Classes     []ProjectClass     `json:"classes,omitempty"`
 }
@@ -37,6 +38,12 @@ type ProjectTypeAlias struct {
 	TypeParameters []string       `json:"typeParameters,omitempty"`
 	Target         ProjectTypeUse `json:"target"`
 	Span           SourceSpan     `json:"span"`
+}
+
+type ProjectNewtype struct {
+	Name   string         `json:"name"`
+	Target ProjectTypeUse `json:"target"`
+	Span   SourceSpan     `json:"span"`
 }
 
 type ProjectClass struct {
@@ -118,6 +125,7 @@ type ProjectDirectiveBlock struct {
 type ProjectTypeUse struct {
 	Authored       Type                   `json:"authored"`
 	Resolved       Type                   `json:"resolved"`
+	Representation *Type                  `json:"representation,omitempty"`
 	ResolutionPath []ProjectTypeReference `json:"resolutionPath,omitempty"`
 	Span           SourceSpan             `json:"span"`
 }
@@ -182,6 +190,17 @@ func ValidateProjectDeclarationInput(input ProjectDeclarationInput) error {
 			}
 			if err := validateSourceSpan(alias.Span); err != nil {
 				return fmt.Errorf("project declaration input type alias %s.%s: %w", module.ModulePath, alias.Name, err)
+			}
+		}
+		for _, newtype := range module.Newtypes {
+			if strings.TrimSpace(newtype.Name) == "" {
+				return fmt.Errorf("project declaration input module %s contains an unnamed newtype", module.ModulePath)
+			}
+			if err := validateProjectTypeUse(newtype.Target); err != nil {
+				return fmt.Errorf("project declaration input newtype %s.%s target: %w", module.ModulePath, newtype.Name, err)
+			}
+			if err := validateSourceSpan(newtype.Span); err != nil {
+				return fmt.Errorf("project declaration input newtype %s.%s: %w", module.ModulePath, newtype.Name, err)
 			}
 		}
 		for _, enum := range module.Enums {
@@ -355,6 +374,11 @@ func validateProjectTypeUse(use ProjectTypeUse) error {
 	}
 	if err := validateProjectInputType(use.Resolved); err != nil {
 		return fmt.Errorf("resolved type: %w", err)
+	}
+	if use.Representation != nil {
+		if err := validateProjectInputType(*use.Representation); err != nil {
+			return fmt.Errorf("representation type: %w", err)
+		}
 	}
 	for _, reference := range use.ResolutionPath {
 		if strings.TrimSpace(reference.Name) == "" || strings.TrimSpace(reference.ModulePath) == "" {

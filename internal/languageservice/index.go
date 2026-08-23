@@ -717,7 +717,7 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 			continue
 		}
 		switch imported.SymbolKinds[name] {
-		case "class", "record", "enum", "type_alias", "enum_alias", "interface":
+		case "class", "record", "enum", "type_alias", "newtype", "enum_alias", "interface":
 			kind = CompletionType
 		}
 		typ := imported.SymbolTypes[name]
@@ -869,7 +869,22 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, context
 			for _, variant := range node.Variants {
 				members = append(members, Symbol{Name: variant.Name, Kind: CompletionConstant, Detail: displayType(node.Target), Definition: sourceDefinition(sourcePath, variant.Name, variant.SourceSpan())})
 			}
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "type " + qualified + " = " + displayType(node.Target), Type: types.FromName(qualified), Members: members, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "alias " + qualified + " = " + displayType(node.Target), Type: types.FromName(qualified), Members: members, Definition: sourceDefinition(sourcePath, node.Name, node.SourceSpan())})
+		case *ir.Newtype:
+			qualified := qualify(owner, node.Name)
+			definition := sourceDefinition(sourcePath, node.Name, node.SourceSpan())
+			rememberType(context, qualified, node.Name, nil, nil)
+			value := Symbol{
+				Name: "value", Kind: CompletionMethod, Detail: "value(): " + displayType(node.Target), Type: node.Target,
+				Call: &CallInfo{}, Definition: definition,
+			}
+			context.TypeMembers[qualified] = []Symbol{value}
+			context.TypeMembers[node.Name] = []Symbol{value}
+			constructor := Symbol{
+				Name: "new", Kind: CompletionMethod, Detail: "new(value: " + displayType(node.Target) + "): " + qualified,
+				Type: types.FromName(qualified), Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: " + displayType(node.Target)}}}, Definition: definition,
+			}
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "newtype " + qualified + " = " + displayType(node.Target), Type: types.FromName(qualified), Members: []Symbol{constructor}, Definition: definition})
 		case *ir.Interface:
 			qualified := qualify(owner, node.Name)
 			rememberType(context, qualified, node.Name, node.TypeParameters, nil)

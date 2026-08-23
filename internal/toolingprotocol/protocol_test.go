@@ -12,7 +12,7 @@ import (
 
 func TestBuildExposesAuthoredSourcesModulesAndTypedDeclarations(t *testing.T) {
 	root := t.TempDir()
-	modelsSource := "record User\n\tname: String\nend\n\nenum Status\n\tReady = \"ready\"\n\tFailed = \"failed\"\nend\n\ninterface Loader<T>\n\tload(id: Integer): T\nend\n\nclass Service\n\t@_name: String\n\n\tdef initialize(name: String)\n\t\t@_name = name\n\t\treturn\n\tend\n\n\tdef name(): String\n\t\treturn @_name\n\tend\n\n\tdef self.kind(): String\n\t\treturn \"service\"\n\tend\nend\n\ntype UserID = Integer\n\nDEFAULT_NAME := \"guest\"\n\ndef make_user(name: String = DEFAULT_NAME): User\n\treturn User.new(name: name)\nend\n"
+	modelsSource := "record User\n\tname: String\nend\n\nenum Status\n\tReady = \"ready\"\n\tFailed = \"failed\"\nend\n\ninterface Loader<T>\n\tload(id: Integer): T\nend\n\nclass Service\n\t@_name: String\n\n\tdef initialize(name: String)\n\t\t@_name = name\n\t\treturn\n\tend\n\n\tdef name(): String\n\t\treturn @_name\n\tend\n\n\tdef self.kind(): String\n\t\treturn \"service\"\n\tend\nend\n\nalias UserList = Array<User>\nnewtype UserID = Integer\n\nDEFAULT_NAME := \"guest\"\n\ndef make_user(name: String = DEFAULT_NAME): User\n\treturn User.new(name: name)\nend\n"
 	units := []compiler.SourceUnit{
 		{
 			Filename: filepath.Join(root, "main.trb"), ModulePath: "main", Package: "main",
@@ -64,6 +64,10 @@ func TestBuildExposesAuthoredSourcesModulesAndTypedDeclarations(t *testing.T) {
 	status := requireDeclaration(t, report, DeclarationEnum, "Status")
 	if status.RawType == nil || status.RawType.Name != "String" {
 		t.Fatalf("unexpected raw enum declaration: %#v", status)
+	}
+	userID := requireDeclaration(t, report, DeclarationNewtype, "UserID")
+	if userID.Type == nil || userID.Type.Name != "Integer" {
+		t.Fatalf("unexpected newtype declaration: %#v", userID)
 	}
 	if report.Summary.Errors != 0 || len(report.Diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostic report: %#v", report)

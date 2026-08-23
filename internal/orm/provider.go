@@ -463,6 +463,7 @@ func updateParameters(model Model) []declaration.Parameter {
 		}
 		parameters = append(parameters, declaration.Parameter{
 			Name: column.Name, Type: column.Type, Keyword: true, Optional: true,
+			RepresentationBoundary: true,
 		})
 	}
 	return parameters
@@ -476,6 +477,7 @@ func relationUpdateAllDeclaration(model Model) declaration.Member {
 		}
 		parameters = append(parameters, declaration.Parameter{
 			Name: column.Name, Type: column.Type, Keyword: true, Optional: true,
+			RepresentationBoundary: true,
 		})
 	}
 	return declaration.Member{
@@ -510,7 +512,7 @@ func writeParameters(model Model, adapter string) []declaration.Parameter {
 		}
 		parameters = append(parameters, declaration.Parameter{
 			Name: column.Name, Type: column.Type, Keyword: true,
-			Optional: optional,
+			Optional: optional, RepresentationBoundary: true,
 		})
 	}
 	return parameters
@@ -555,7 +557,7 @@ func findDeclaration(model Model, primaryKey Column) declaration.Member {
 	keyType.Nullable = false
 	return declaration.Member{
 		Name: "find", Kind: declaration.Method, Intrinsic: "trb.orm.find",
-		Parameters: []declaration.Parameter{{Name: primaryKey.Name, Type: keyType}},
+		Parameters: []declaration.Parameter{{Name: primaryKey.Name, Type: keyType, RepresentationBoundary: true}},
 		Return:     dbResult(result), Class: true, Provider: PackageName,
 	}
 }
@@ -581,7 +583,7 @@ func whereDeclaration(model Model, intrinsic string, class bool) declaration.Mem
 	parameters := make([]declaration.Parameter, 0, len(model.Columns))
 	var alternatives []declaration.Signature
 	for _, column := range model.Columns {
-		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true, Optional: true})
+		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true, Optional: true, RepresentationBoundary: true})
 		alternatives = append(alternatives, comparisonSignatures(column, model.QueryType)...)
 	}
 	return declaration.Member{
@@ -597,7 +599,7 @@ func notDeclaration(model Model, intrinsic string, class bool) declaration.Membe
 func predicateDeclaration(model Model, name, intrinsic string, class bool, minimum, maximum int) declaration.Member {
 	parameters := make([]declaration.Parameter, 0, len(model.Columns))
 	for _, column := range model.Columns {
-		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true, Optional: true})
+		parameters = append(parameters, declaration.Parameter{Name: column.Name, Type: predicateValueType(column), Keyword: true, Optional: true, RepresentationBoundary: true})
 	}
 	return declaration.Member{
 		Name: name, Kind: declaration.Method, Intrinsic: intrinsic, Parameters: parameters,
@@ -754,7 +756,7 @@ func comparisonSignatures(column Column, queryType string) []declaration.Signatu
 			Parameters: []declaration.Parameter{
 				{Name: "column", Type: types.FromName("String"), LiteralValues: []string{column.Name}},
 				{Name: "operator", Type: types.FromName("String"), LiteralValues: operators},
-				{Name: "value", Type: valueType},
+				{Name: "value", Type: valueType, RepresentationBoundary: true},
 			},
 			Return: types.FromName(queryType),
 		}

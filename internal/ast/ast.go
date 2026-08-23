@@ -133,6 +133,17 @@ type TypeAliasStatement struct {
 
 func (*TypeAliasStatement) statementNode() {}
 
+// NewtypeStatement declares a nominal source-level type with one concrete,
+// non-nullable representation. Unlike a transparent alias, ordinary source
+// assignments and calls do not implicitly cross the representation boundary.
+type NewtypeStatement struct {
+	Base
+	Name   string
+	Target TypeRef
+}
+
+func (*NewtypeStatement) statementNode() {}
+
 type ModuleStatement struct {
 	Base
 	Name string

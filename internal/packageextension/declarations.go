@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const DeclarationProtocolVersion = 1
+const DeclarationProtocolVersion = 2
 
 // DeclarationCatalog is the versioned, mode-independent output of a package
 // declaration provider. It contains semantic data only: the compiler host
@@ -50,13 +50,14 @@ type DeclaredMember struct {
 }
 
 type DeclaredParameter struct {
-	Name                 string     `json:"name"`
-	Type                 Type       `json:"type"`
-	Keyword              bool       `json:"keyword,omitempty"`
-	Optional             bool       `json:"optional,omitempty"`
-	LiteralValues        []string   `json:"literalValues,omitempty"`
-	LiteralArrays        [][]string `json:"literalArrays,omitempty"`
-	LiteralArrayElements []string   `json:"literalArrayElements,omitempty"`
+	Name                   string     `json:"name"`
+	Type                   Type       `json:"type"`
+	Keyword                bool       `json:"keyword,omitempty"`
+	Optional               bool       `json:"optional,omitempty"`
+	RepresentationBoundary bool       `json:"representationBoundary,omitempty"`
+	LiteralValues          []string   `json:"literalValues,omitempty"`
+	LiteralArrays          [][]string `json:"literalArrays,omitempty"`
+	LiteralArrayElements   []string   `json:"literalArrayElements,omitempty"`
 }
 
 type DeclaredSignature struct {

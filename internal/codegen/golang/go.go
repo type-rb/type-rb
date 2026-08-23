@@ -138,6 +138,8 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 			g.typeKinds[n.Name] = "enum"
 		case *ir.TypeAlias:
 			g.typeKinds[n.Name] = "type_alias"
+		case *ir.Newtype:
+			g.typeKinds[n.Name] = "newtype"
 		}
 	}
 	for _, statement := range program.Statements {
@@ -303,6 +305,9 @@ func (g *generator) statement(statement ir.Statement) {
 		g.enum(n)
 	case *ir.TypeAlias:
 		g.typeAlias(n)
+	case *ir.Newtype:
+		g.line("type " + goIdentifier(n.Name, true) + " = " + g.goType(n.Target) + goTrailingComment(n.TrailingComment))
+		g.b.WriteByte('\n')
 	case *ir.Module:
 		g.line("// module " + n.Name)
 		for _, member := range n.Body {

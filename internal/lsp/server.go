@@ -1760,6 +1760,7 @@ var renameReservedWords = map[string]bool{
 	"interface": true, "module": true, "mut": true, "next": true, "nil": true,
 	"not": true, "or": true, "readonly": true, "record": true, "return": true,
 	"self": true, "then": true, "true": true, "try": true, "type": true,
+	"alias": true, "newtype": true,
 	"unless": true, "until": true, "when": true, "while": true,
 }
 

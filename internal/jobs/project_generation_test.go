@@ -12,7 +12,7 @@ import (
 )
 
 func TestGenerateProjectReturnsDeterministicPortableSources(t *testing.T) {
-	contracts := parseProjectGenerationProgram(t, "contracts/index", "type OrderId = Integer\n")
+	contracts := parseProjectGenerationProgram(t, "contracts/index", "alias OrderId = Integer\n")
 	job := parseProjectGenerationProgram(t, "jobs/send_receipt_job", `import { OrderId } from contracts
 import { Job, JobError, JobResult } from trb/jobs
 import { Unit } from trb/std/unit

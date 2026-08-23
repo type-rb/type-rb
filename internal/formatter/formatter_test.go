@@ -221,8 +221,8 @@ func TestFormatKeepsNullableTypeMarkersAttached(t *testing.T) {
 }
 
 func TestFormatTransparentGenericTypeAlias(t *testing.T) {
-	source := []byte("type  DbResult < T > =Result<T,DbError> # database result\n")
-	want := "type DbResult<T> = Result<T, DbError> # database result\n"
+	source := []byte("alias  DbResult < T > =Result<T,DbError> # database result\n")
+	want := "alias DbResult<T> = Result<T, DbError> # database result\n"
 
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) != 0 {
@@ -230,6 +230,19 @@ func TestFormatTransparentGenericTypeAlias(t *testing.T) {
 	}
 	if string(formatted) != want {
 		t.Fatalf("unexpected type alias formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
+func TestFormatConcreteNewtype(t *testing.T) {
+	source := []byte("newtype  ProductIds =Array<ProductId> # product identities\n")
+	want := "newtype ProductIds = Array<ProductId> # product identities\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected newtype formatting\nwant:\n%s\ngot:\n%s", want, formatted)
 	}
 }
 

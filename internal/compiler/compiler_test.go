@@ -2767,7 +2767,7 @@ record InvalidResponse
 	body: Array<String>
 end
 
-type CreateResponse = CreatedResponse | InvalidResponse
+alias CreateResponse = CreatedResponse | InvalidResponse
 
 def render(response: CreateResponse): String
 	case response.status
@@ -2862,7 +2862,7 @@ class Missing
 	end
 end
 
-type LoadResult = Loaded | Missing
+alias LoadResult = Loaded | Missing
 
 def read(result: LoadResult): String
 	case result.kind
@@ -2895,7 +2895,7 @@ end
 record Ratio
 	value: Float
 end
-type NumberValue = Count | Ratio
+alias NumberValue = Count | Ratio
 def number(value: NumberValue): Float
 	return value.value
 end
@@ -2940,7 +2940,7 @@ func TestLiteralAndDiscriminatedUnionDiagnosticsAreModeIndependent(t *testing.T)
 		},
 		{
 			name:   "non exhaustive literal union",
-			source: "record Found\n\tstatus: 200\nend\nrecord Missing\n\tstatus: 404\nend\ntype Response = Found | Missing\ndef show(response: Response)\n\tcase response.status\n\twhen 200\n\t\treturn\n\tend\nend\n",
+			source: "record Found\n\tstatus: 200\nend\nrecord Missing\n\tstatus: 404\nend\nalias Response = Found | Missing\ndef show(response: Response)\n\tcase response.status\n\twhen 200\n\t\treturn\n\tend\nend\n",
 			want:   "case for 200 | 404 is not exhaustive; missing 404",
 		},
 		{
@@ -3568,7 +3568,7 @@ record DbError
 	message: String
 end
 
-type DbResult<T> = Result<T, DbError>
+alias DbResult<T> = Result<T, DbError>
 
 def successful(): DbResult<Integer>
 	return DbResult<Integer>::Ok(7)
@@ -4061,9 +4061,9 @@ func TestImmutableBindingsRequireMutForReassignmentAndArrayUpdates(t *testing.T)
 			want:   "values is immutable; declare it with mut to use push()",
 		},
 		{
-			name:   "readonly alias",
-			source: "def example()\n  values := [1]\n  mut alias := values\n  return\nend\n",
-			want:   "cannot initialize mutable alias from an immutable value",
+			name:   "readonly mutable copy",
+			source: "def example()\n  values := [1]\n  mut mutable_values := values\n  return\nend\n",
+			want:   "cannot initialize mutable mutable_values from an immutable value",
 		},
 	}
 	for _, test := range invalid {
