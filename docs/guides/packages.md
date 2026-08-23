@@ -212,6 +212,58 @@ field to `declarationAdapters`, replace the file's `formatVersion` with
 `trb install` to regenerate `.trb/native-types.json`; its cache format is
 independent from the package-owned protocol.
 
+Validate an adapter package from its repository root before publishing it:
+
+```sh
+trb adapter check
+trb adapter check --format json
+```
+
+The command validates the package manifest and every configured adapter through
+the same selected ecosystem consumer used by `trb install`. It therefore
+checks the common catalog shape as well as native-dependency ownership, name
+conflicts within the catalog, and ecosystem-specific bridge kinds. An explicit
+package root may be passed as the only positional argument.
+
+JSON output is deterministic and versioned independently from the declaration
+catalog. It contains package identity, one result per adapter in mode order,
+semantic declaration counts, diagnostics, and a summary. Invalid input still
+produces the report on standard output and returns a nonzero status, allowing
+CI and AI agents to use one contract for success and failure:
+
+```json
+{
+  "protocolVersion": 1,
+  "compilerVersion": "0.3.16",
+  "package": {
+    "name": "github.com/acme/ui-types",
+    "version": "0.1.0",
+    "manifestPath": "/workspace/ui-types/trbpackage.json"
+  },
+  "adapters": [
+    {
+      "mode": "typescript",
+      "path": "/workspace/ui-types/declarations/typescript.json",
+      "valid": true,
+      "declarationProtocolVersion": 1,
+      "modules": 1,
+      "exports": 1,
+      "supportingRecords": 1
+    }
+  ],
+  "diagnostics": [],
+  "summary": {
+    "adapters": 1,
+    "validAdapters": 1,
+    "modules": 1,
+    "exports": 1,
+    "supportingRecords": 1,
+    "errors": 0,
+    "warnings": 0
+  }
+}
+```
+
 Adapter-only supporting records may describe props or parameter objects without becoming
 application-importable names. When a selected contract refers to real native
 package types, generated TypeScript adds the required type-only imports while
