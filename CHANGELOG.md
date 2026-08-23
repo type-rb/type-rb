@@ -11,6 +11,7 @@ This file records user-visible changes in stable TypeRB releases.
   can now share the same explicit local-development MySQL URL across Go, Ruby,
   and TypeScript modes without the Go driver forwarding the unknown parameter
   as a server system variable.
+  ([#469](https://github.com/type-rb/type-rb/pull/469))
 
 ## 0.3.20 - 2026-08-23
 
