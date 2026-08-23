@@ -42,6 +42,8 @@ type TypeRBPackages struct {
 	DeclarationAdapters []DeclarationAdapter
 }
 
+var errLocalTypeRBManifestChanged = errors.New("local TypeRB package manifest changed")
+
 // ResolveTypeRBPackages creates or reuses the deterministic project lock and
 // ensures every remote package is present in the content-addressed cache.
 func ResolveTypeRBPackages(config *project.Config, options TypeRBResolveOptions) (*TypeRBPackages, error) {
@@ -65,7 +67,13 @@ func ResolveTypeRBPackages(config *project.Config, options TypeRBResolveOptions)
 		if err := ensureTypeRBPackageCache(config, locked, options.Offline); err != nil {
 			return nil, err
 		}
-		return loadResolvedTypeRBPackages(config, locked)
+		resolved, loadErr := loadResolvedTypeRBPackages(config, locked)
+		if loadErr == nil {
+			return resolved, nil
+		}
+		if options.Frozen || !errors.Is(loadErr, errLocalTypeRBManifestChanged) {
+			return nil, loadErr
+		}
 	}
 	if options.Offline && hasRemoteTypeRBRequirement(config.Packages) {
 		return nil, errors.New("cannot resolve an unlocked TypeRB package while offline")
@@ -270,7 +278,7 @@ func loadResolvedTypeRBPackages(config *project.Config, lock *TypeRBLock) (*Type
 				return nil, err
 			}
 			if manifestChecksum != locked.ManifestChecksum {
-				return nil, fmt.Errorf("local TypeRB package %s manifest changed; run trb install", name)
+				return nil, fmt.Errorf("%w: %s; run trb install", errLocalTypeRBManifestChanged, name)
 			}
 		}
 		if manifest.Name != name || manifest.Version != locked.Version {

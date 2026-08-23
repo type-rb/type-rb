@@ -18,11 +18,13 @@ import (
 
 func (c *CLI) runAdapter(args []string) error {
 	if len(args) == 0 {
-		return errors.New("adapter requires a subcommand: check")
+		return errors.New("adapter requires a subcommand: check or test")
 	}
 	switch args[0] {
 	case "check":
 		return c.runAdapterCheck(args[1:])
+	case "test":
+		return c.runAdapterTest(args[1:])
 	default:
 		return fmt.Errorf("unknown adapter command %q", args[0])
 	}
@@ -51,20 +53,36 @@ func (c *CLI) runAdapterCheck(args []string) error {
 		return err
 	}
 	root = filepath.Clean(root)
-	manifestPath := filepath.Join(root, packageManager.TypeRBManifestName)
+	checked := checkAdapterPackage(root)
+	return c.finishAdapterCheck(*format, checked.Package, checked.Adapters, checked.Diagnostics)
+}
+
+type adapterPackageCheck struct {
+	Root         string
+	ManifestPath string
+	Manifest     *packageManager.TypeRBManifest
+	Package      *declarationadaptertooling.Package
+	Adapters     []declarationadaptertooling.Adapter
+	Diagnostics  []diagnostic.Diagnostic
+}
+
+func checkAdapterPackage(root string) adapterPackageCheck {
+	result := adapterPackageCheck{Root: root, ManifestPath: filepath.Join(root, packageManager.TypeRBManifestName)}
 	manifest, err := packageManager.ReadTypeRBManifest(root)
 	if err != nil {
-		return c.finishAdapterCheck(*format, nil, nil, []diagnostic.Diagnostic{{
-			Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: err.Error(), Path: manifestPath,
-		}})
+		result.Diagnostics = []diagnostic.Diagnostic{{
+			Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: err.Error(), Path: result.ManifestPath,
+		}}
+		return result
 	}
-
-	packageInfo := &declarationadaptertooling.Package{Name: manifest.Name, Version: manifest.Version, ManifestPath: manifestPath}
+	result.Manifest = manifest
+	result.Package = &declarationadaptertooling.Package{Name: manifest.Name, Version: manifest.Version, ManifestPath: result.ManifestPath}
 	if len(manifest.DeclarationAdapters) == 0 {
-		return c.finishAdapterCheck(*format, packageInfo, nil, []diagnostic.Diagnostic{{
+		result.Diagnostics = []diagnostic.Diagnostic{{
 			Code: diagnostic.ProjectIntegration, Severity: diagnostic.Error,
-			Message: fmt.Sprintf("package %s declares no declaration adapters", manifest.Name), Path: manifestPath,
-		}})
+			Message: fmt.Sprintf("package %s declares no declaration adapters", manifest.Name), Path: result.ManifestPath,
+		}}
+		return result
 	}
 
 	modes := make([]string, 0, len(manifest.DeclarationAdapters))
@@ -72,8 +90,7 @@ func (c *CLI) runAdapterCheck(args []string) error {
 		modes = append(modes, mode)
 	}
 	sort.Strings(modes)
-	adapters := make([]declarationadaptertooling.Adapter, 0, len(modes))
-	issues := []diagnostic.Diagnostic{}
+	result.Adapters = make([]declarationadaptertooling.Adapter, 0, len(modes))
 	for _, mode := range modes {
 		adapterPath := filepath.Join(root, manifest.DeclarationAdapterFor(mode))
 		adapterPath = filepath.Clean(adapterPath)
@@ -84,8 +101,8 @@ func (c *CLI) runAdapterCheck(args []string) error {
 			checked.Modules, checked.Exports, checked.SupportingRecords = declarationAdapterCounts(provided)
 		}
 		if readErr != nil {
-			issues = append(issues, adapterCheckDiagnostic(adapterPath, readErr))
-			adapters = append(adapters, checked)
+			result.Diagnostics = append(result.Diagnostics, adapterCheckDiagnostic(adapterPath, readErr))
+			result.Adapters = append(result.Adapters, checked)
 			continue
 		}
 
@@ -95,13 +112,13 @@ func (c *CLI) runAdapterCheck(args []string) error {
 			Package: manifest.Name, Mode: mode, Path: adapterPath, Dependencies: dependencies,
 		}})
 		if applyErr != nil {
-			issues = append(issues, adapterCheckDiagnostic(adapterPath, applyErr))
+			result.Diagnostics = append(result.Diagnostics, adapterCheckDiagnostic(adapterPath, applyErr))
 		} else {
 			checked.Valid = true
 		}
-		adapters = append(adapters, checked)
+		result.Adapters = append(result.Adapters, checked)
 	}
-	return c.finishAdapterCheck(*format, packageInfo, adapters, issues)
+	return result
 }
 
 func declarationAdapterCounts(catalog packageextension.DeclarationAdapterCatalog) (modules, exports, records int) {

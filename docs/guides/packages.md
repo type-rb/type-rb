@@ -232,9 +232,81 @@ project when changing it. The repository's
 `examples/adapters/tanstack-query` fixture demonstrates this split with a
 checked catalog plus a strict TypeScript project pinned to TanStack Query.
 
-JSON output is deterministic and versioned independently from the declaration
-catalog. It contains package identity, one result per adapter in mode order,
-semantic declaration counts, diagnostics, and a summary. Invalid input still
+An adapter package may connect one conformance project to each adapter mode:
+
+```json
+{
+  "adapterTests": {
+    "typescript": {
+      "config": "conformance/trbconfig.jsonc",
+      "command": ["bun", "run", "check"]
+    }
+  }
+}
+```
+
+The config and any relative command executable stay below the package root.
+TypeRB passes the command as an argument vector instead of interpreting a shell
+string; the invoked tool may retain its own script behavior. Its project must
+install the package under test from the current package root so the checked
+catalog and source cannot silently come from another copy.
+
+Install the conformance project's dependencies explicitly, then test it from
+the adapter root:
+
+```sh
+trb install --frozen --config conformance/trbconfig.jsonc
+trb adapter test
+trb adapter test --format json
+```
+
+`adapter test` runs three ordered phases: `adapter_check`, `build`, and
+`native_check`. It does not install dependencies or contact the network on
+TypeRB's behalf. The native command runs only when the author invokes
+`adapter test`; ordinary package resolution, installation, build, and import
+never execute it. Failed native output is written to standard error so JSON
+reports remain parseable.
+
+The JSON report uses the adapter-tooling protocol version and records stable
+phase states without embedding native-tool logs:
+
+```json
+{
+  "protocolVersion": 1,
+  "compilerVersion": "0.3.16",
+  "package": {
+    "name": "github.com/acme/ui-types",
+    "version": "0.1.0",
+    "manifestPath": "/workspace/ui-types/trbpackage.json"
+  },
+  "tests": [
+    {
+      "mode": "typescript",
+      "configPath": "/workspace/ui-types/conformance/trbconfig.jsonc",
+      "command": ["bun", "run", "check"],
+      "passed": true,
+      "phases": [
+        {"name": "adapter_check", "status": "passed"},
+        {"name": "build", "status": "passed"},
+        {"name": "native_check", "status": "passed"}
+      ]
+    }
+  ],
+  "diagnostics": [],
+  "summary": {
+    "tests": 1,
+    "passedTests": 1,
+    "failedTests": 0,
+    "errors": 0,
+    "warnings": 0
+  }
+}
+```
+
+`adapter check --format json` output is deterministic and versioned
+independently from the declaration catalog. It contains package identity, one
+result per adapter in mode order, semantic declaration counts, diagnostics,
+and a summary. Invalid input still
 produces the report on standard output and returns a nonzero status, allowing
 CI and AI agents to use one contract for success and failure:
 
