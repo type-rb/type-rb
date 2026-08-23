@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.19 - 2026-08-23
+
+### Go backend
+
+- Generated Go prunes package imports that become unused when imported
+  newtype construction and unwrapping are lowered to the representation type.
+  This prevents otherwise valid newtype-based applications from failing the
+  Go build with an unused-import error.
+  ([#463](https://github.com/type-rb/type-rb/pull/463))
+
 ## 0.3.18 - 2026-08-23
 
 ### Breaking changes
