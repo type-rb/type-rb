@@ -95,6 +95,13 @@ func formatTokens(tokens []token.Token) []byte {
 // preserves all non-leading text and the contents of multiline tokens so an
 // interactive editor can safely call it while a submission is still open.
 func ReindentPartial(source []byte) []byte {
+	return ReindentPartialWithIndentation(source, indentation)
+}
+
+// ReindentPartialWithIndentation applies leading indentation using the given
+// display unit. It is intended for interactive editors that keep canonical
+// formatting at submission boundaries but need a different on-screen width.
+func ReindentPartialWithIndentation(source []byte, indentation string) []byte {
 	tokens, diagnostics := lexer.Lex(source)
 	if hasErrors(diagnostics) {
 		return append([]byte(nil), source...)
@@ -113,6 +120,12 @@ func ReindentPartial(source []byte) []byte {
 // NextLineIndent returns the indentation for a new line following a
 // tokenizable, possibly incomplete source fragment.
 func NextLineIndent(source []byte) string {
+	return NextLineIndentWithIndentation(source, indentation)
+}
+
+// NextLineIndentWithIndentation returns the next-line indentation using the
+// given display unit.
+func NextLineIndentWithIndentation(source []byte, indentation string) string {
 	tokens, diagnostics := lexer.Lex(source)
 	if hasErrors(diagnostics) {
 		return ""

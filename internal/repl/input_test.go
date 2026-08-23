@@ -169,7 +169,7 @@ func TestReindentOpenInputCorrectsExistingLinesAndIndentsTheCursorLine(t *testin
 	terminal.Line().Set(input...)
 	terminal.Cursor().Set(len(input))
 	reindentOpenInput(terminal)
-	want := "class User\n\tdef name(): String\n\t\treturn \"Ada\"\n\t\t"
+	want := "class User\n  def name(): String\n    return \"Ada\"\n    "
 	if got := string(*terminal.Line()); got != want {
 		t.Fatalf("open input\nwant:\n%q\ngot:\n%q", want, got)
 	}

@@ -380,9 +380,11 @@ REPL commands are:
 Interactive terminals provide multiline input, colors, and a Tab completion
 menu with checked signatures and return types. A single candidate completes
 directly; multiple candidates are shown before Tab or Shift-Tab cycles through
-them. Enter automatically corrects the complete input buffer to canonical
-tab-based indentation and indents the next line while a block or delimiter is
-open. Terminals also provide cursor editing, Up/Down history, and Ctrl-R
+them. While a multiline submission is open, Enter reindents it with a visual
+width of two spaces per level and indents the next line while a block or
+delimiter is open. A complete submission is converted to canonical tab-based
+indentation before evaluation and history storage. Terminals also provide
+cursor editing, Up/Down history, and Ctrl-R
 reverse search. Ctrl-B/F moves by
 character, Ctrl-A/E by line, Alt-B/F by word, and Ctrl-P/N moves vertically or
 through history. Ctrl-C cancels current input or evaluation without exiting;

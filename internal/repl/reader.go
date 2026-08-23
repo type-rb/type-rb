@@ -24,6 +24,8 @@ var (
 	errIncompleteInput  = errors.New("incomplete REPL input")
 )
 
+const interactiveIndentation = "  "
+
 type submissionReader interface {
 	Read() (string, error)
 	Close() error
@@ -142,8 +144,8 @@ func reindentOpenInput(terminal *readline.Shell) {
 		return
 	}
 	cursorLine := strings.Count(string(source[:cursor]), "\n")
-	indent := formatter.NextLineIndent([]byte(string(source[:cursor])))
-	formattedLines := strings.Split(string(formatter.ReindentPartial([]byte(string(source)))), "\n")
+	indent := formatter.NextLineIndentWithIndentation([]byte(string(source[:cursor])), interactiveIndentation)
+	formattedLines := strings.Split(string(formatter.ReindentPartialWithIndentation([]byte(string(source)), interactiveIndentation)), "\n")
 	if cursorLine >= len(formattedLines) {
 		return
 	}
