@@ -467,10 +467,11 @@ switches.
   configuration is not part of the current language; a future configuration
   surface may select a different indentation style without changing language
   semantics.
-- Interactive multiline REPL input uses the same canonical indentation. Enter
-  reindents the open submission and inserts the indentation for the next line;
-  accepting a complete submission formats the complete buffer before it is
-  compiled and stored in history.
+- Interactive multiline REPL input displays each indentation level as two
+  spaces while it is open. Enter reindents the open submission and inserts the
+  indentation for the next line; accepting a complete submission converts the
+  complete buffer to canonical tab indentation before it is compiled and
+  stored in history.
 
 #### Unused bindings
 

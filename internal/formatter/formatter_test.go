@@ -148,6 +148,17 @@ func TestReindentPartialTracksDelimitersAndPreservesHeredocs(t *testing.T) {
 	}
 }
 
+func TestReindentPartialSupportsDisplayIndentationWithoutChangingHeredocs(t *testing.T) {
+	source := []byte("class Query\n def sql(): String\nreturn <<~SQL\n\tSELECT  *\nSQL\nend")
+	want := "class Query\n  def sql(): String\n    return <<~SQL\n\tSELECT  *\nSQL\n  end"
+	if got := string(ReindentPartialWithIndentation(source, "  ")); got != want {
+		t.Fatalf("partial display indentation\nwant:\n%q\ngot:\n%q", want, got)
+	}
+	if got, wantIndent := NextLineIndentWithIndentation([]byte("class Query"), "  "), "  "; got != wantIndent {
+		t.Fatalf("next-line display indentation=%q, want %q", got, wantIndent)
+	}
+}
+
 func TestFormatFollowsChainedMultilineTokensToTheirFinalLine(t *testing.T) {
 	source := []byte("'\n''\n'E")
 	want := "'\n' '\n' E\n"
