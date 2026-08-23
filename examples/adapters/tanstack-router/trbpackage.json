@@ -1,0 +1,21 @@
+{
+  "formatVersion": 1,
+  "name": "github.com/type-rb/tanstack-router-adapter-example",
+  "version": "0.1.0",
+  "sourceDir": "src",
+  "modes": ["typescript"],
+  "nativeDependencies": {
+    "typescript": {
+      "@tanstack/react-router": "1.170.29"
+    }
+  },
+  "declarationAdapters": {
+    "typescript": "declarations/typescript.json"
+  },
+  "adapterTests": {
+    "typescript": {
+      "config": "conformance/trbconfig.jsonc",
+      "command": ["bun", "run", "check"]
+    }
+  }
+}

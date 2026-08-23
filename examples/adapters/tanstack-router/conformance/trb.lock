@@ -1,0 +1,14 @@
+{
+  "formatVersion": 1,
+  "configChecksum": "sha256:0d711e07972d80cfaef9cf654a63a8a2e450ce84e052ae5beb64ea030b918a4a",
+  "imports": {
+    "type-rb/tanstack-router": "github.com/type-rb/tanstack-router-adapter-example"
+  },
+  "packages": {
+    "github.com/type-rb/tanstack-router-adapter-example": {
+      "version": "0.1.0",
+      "path": "..",
+      "manifestChecksum": "sha256:d719449b535b80223a582277975513753e48a09f3c8200fa14efb968b47b9e84"
+    }
+  }
+}

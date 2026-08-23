@@ -1,0 +1,27 @@
+{
+  "name": "tanstack-router-adapter-conformance",
+  "version": "0.1.0",
+  "mode": "typescript",
+  "sourceDir": "src",
+  "outDir": "build",
+  "copyFiles": true,
+  "packageManagement": "managed",
+  "packages": {
+    "type-rb/tanstack-router": {
+      "path": ".."
+    }
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "^6.0.0"
+  },
+  "typescript": {
+    "packageManager": "bun",
+    "moduleType": "module",
+    "runtime": "browser",
+    "scripts": {
+      "check": "tsc -p tsconfig.json"
+    }
+  }
+}

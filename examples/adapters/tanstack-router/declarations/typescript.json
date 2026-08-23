@@ -1,0 +1,43 @@
+{
+  "protocolVersion": 2,
+  "modules": {
+    "@tanstack/react-router": {
+      "exports": {
+        "AnyRouter": {
+          "kind": "interface",
+          "type": { "kind": "named", "name": "AnyRouter" },
+          "instanceMembers": {
+            "navigate": {
+              "kind": "function",
+              "type": { "kind": "void", "name": "Void" },
+              "parameters": [
+                { "kind": "named", "name": "NavigateOptions" }
+              ],
+              "required": 1
+            }
+          }
+        },
+        "NavigateOptions": {
+          "kind": "record",
+          "type": { "kind": "named", "name": "NavigateOptions" },
+          "fields": [
+            { "name": "to", "type": { "kind": "string", "name": "String" } },
+            {
+              "name": "replace",
+              "type": { "kind": "bool", "name": "Boolean" },
+              "optional": true
+            }
+          ]
+        },
+        "useRouter": {
+          "kind": "function",
+          "type": { "kind": "named", "name": "AnyRouter" }
+        },
+        "Outlet": {
+          "kind": "component",
+          "type": { "kind": "named", "name": "ReactNode" }
+        }
+      }
+    }
+  }
+}
