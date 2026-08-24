@@ -571,6 +571,12 @@ switches.
   line; accepting a complete submission converts the value passed to the
   compiler and stored in history to canonical tab indentation without changing
   the displayed width.
+- REPL diagnostics identify the accumulated interactive source as `(trb)` and
+  retain one-based line and column positions. Locations inside the active
+  project use paths relative to the project root, while locations outside it
+  retain absolute paths. Runtime evaluation failures use the innermost typed-IR
+  source location when one is available; REPL operation errors without a source
+  location retain the `trb: repl:` prefix.
 
 #### Unused bindings
 

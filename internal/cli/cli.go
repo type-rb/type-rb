@@ -1149,6 +1149,7 @@ func (c *CLI) runRepl(args []string) error {
 		if err != nil {
 			return nil, hideReplPreludeDiagnostics(err, sessionFilename, hiddenPreludeLines, len(hiddenPrelude))
 		}
+		compilation.HiddenPreludeLines = hiddenPreludeLines
 		return compilation, nil
 	}
 	historyFile := ""
@@ -1166,6 +1167,7 @@ func (c *CLI) runRepl(args []string) error {
 		Stderr:      c.Stderr,
 		Interactive: interactiveTerminal(c.Stdin, c.Stdout),
 		HistoryFile: historyFile,
+		ProjectRoot: config.Root,
 		Compile:     compile,
 		Initial:     initial,
 		Candidates:  candidates,

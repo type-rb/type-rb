@@ -996,8 +996,43 @@ func TestReplAutoImportsDoNotShiftUserDiagnostics(t *testing.T) {
 	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), ".trb-repl.trb:1:1: error[TRB3000]:") {
+	if !strings.Contains(stderr.String(), "(trb):1:1: error[TRB3000]:") {
 		t.Fatalf("hidden imports shifted the user diagnostic: %s", stderr.String())
+	}
+}
+
+func TestReplReportsRuntimeSourceLocations(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/repl-runtime-locations"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(root, "src", "math.trb")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectPath, []byte("def divide_by_zero(): Integer\n\treturn 1 / 0\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{
+		Stdin:  strings.NewReader("1 / 0\ndivide_by_zero()\n:quit\n"),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout=%q, want no evaluated values", stdout.String())
+	}
+	want := "(trb):1:1: error: division by zero\n" +
+		filepath.Join("src", "math.trb") + ":2:9: error: division by zero\n"
+	if stderr.String() != want {
+		t.Fatalf("unexpected REPL diagnostics\nwant:\n%s\ngot:\n%s", want, stderr.String())
 	}
 }
 
