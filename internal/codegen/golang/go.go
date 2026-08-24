@@ -27,6 +27,7 @@ type generator struct {
 	indent            int
 	functionDepth     int
 	receiver          string
+	returnType        types.Type
 	inConstructor     bool
 	methods           map[string]bool
 	topMethods        map[string]bool
@@ -407,7 +408,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.Value == nil {
 			g.line("return")
 		} else {
-			g.line("return " + g.expr(n.Value))
+			g.line("return " + g.returnExpr(n.Value))
 		}
 	case *ir.Break:
 		if g.breakTarget != "" {
@@ -678,6 +679,40 @@ func (g *generator) exprExpected(expression ir.Expression, expected types.Type) 
 		return "(" + g.goType(expected) + ")(nil)"
 	}
 	return g.expr(expression)
+}
+
+func (g *generator) returnExpr(expression ir.Expression) string {
+	conversion, ok := expression.(*ir.Conversion)
+	if !ok || conversion.Kind != ir.NonNullableToNullableConversion || !g.returnType.Nullable {
+		return g.expr(expression)
+	}
+	if kind := g.typeKinds[g.returnType.Name]; kind != "type_alias" && kind != "enum_alias" {
+		return g.expr(expression)
+	}
+	return g.nonNullableToNullableExpr(conversion, g.returnType)
+}
+
+func (g *generator) nonNullableToNullableExpr(conversion *ir.Conversion, target types.Type) string {
+	value := g.expr(conversion.Value)
+	base := target
+	base.Nullable = false
+	nullable := target
+	valueBase := conversion.Value.ExprType()
+	valueBase.Nullable = false
+	if kind := g.typeKinds[valueBase.Name]; kind == "type_alias" || kind == "enum_alias" {
+		base = valueBase
+		nullable = valueBase
+		nullable.Nullable = true
+	}
+	if conversion.Value.ExprType().Kind == types.Int && base.Kind == types.Float {
+		value = "float64(" + value + ")"
+	}
+	baseType := g.goType(base)
+	nullableType := g.goType(nullable)
+	if baseType == nullableType {
+		return value
+	}
+	return "func(value " + baseType + ") " + nullableType + " { return &value }(" + value + ")"
 }
 
 func (g *generator) record(record *ir.Record) {
@@ -1053,12 +1088,15 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 	g.parameterDefaults(method.Parameters)
 	previous := g.receiver
 	g.receiver = "self"
+	previousReturnType := g.returnType
+	g.returnType = method.ReturnType
 	g.functionDepth++
 	previousExecution := g.executionActive
 	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
+	g.returnType = previousReturnType
 	g.receiver = previous
 	g.indent--
 	g.line("}")
@@ -1078,6 +1116,8 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 		g.line("__trbScope := trbcontext.Background()")
 	}
 	g.parameterDefaults(method.Parameters)
+	previousReturnType := g.returnType
+	g.returnType = method.ReturnType
 	if method.Name == "main" && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
 		g.line("if trbJobsRunWorkerIfRequested() { return }")
 	}
@@ -1090,6 +1130,7 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
+	g.returnType = previousReturnType
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1216,6 +1257,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		child.b = strings.Builder{}
 		child.recordSources = false
 		child.indent = g.indent + 1
+		child.returnType = n.ReturnType
 		child.statements(n.Body)
 		return header + " {\n" + child.b.String() + strings.Repeat("\t", g.indent) + "}"
 	case *ir.Identifier:
@@ -1311,26 +1353,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		case ir.UnionIntegerToFloatConversion:
 			return "func(value any) any { if integer, ok := value.(int); ok { return float64(integer) }; return value }(" + g.expr(n.Value) + ")"
 		case ir.NonNullableToNullableConversion:
-			value := g.expr(n.Value)
-			base := n.ExprType()
-			base.Nullable = false
-			nullable := n.ExprType()
-			valueBase := n.Value.ExprType()
-			valueBase.Nullable = false
-			if kind := g.typeKinds[valueBase.Name]; kind == "type_alias" || kind == "enum_alias" {
-				base = valueBase
-				nullable = valueBase
-				nullable.Nullable = true
-			}
-			if n.Value.ExprType().Kind == types.Int && base.Kind == types.Float {
-				value = "float64(" + value + ")"
-			}
-			baseType := g.goType(base)
-			nullableType := g.goType(nullable)
-			if baseType == nullableType {
-				return value
-			}
-			return "func(value " + baseType + ") " + nullableType + " { return &value }(" + value + ")"
+			return g.nonNullableToNullableExpr(n, n.ExprType())
 		case ir.NullableToNonNullableConversion:
 			value := g.expr(n.Value)
 			if g.goType(n.Value.ExprType()) == g.goType(n.ExprType()) {
@@ -1622,6 +1645,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 	child := &generator{
 		functionDepth:   g.functionDepth,
 		receiver:        g.receiver,
+		returnType:      node.ExprType(),
 		inConstructor:   g.inConstructor,
 		methods:         g.methods,
 		topMethods:      g.topMethods,
@@ -1680,6 +1704,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	child := &generator{
 		functionDepth:   g.functionDepth,
 		receiver:        g.receiver,
+		returnType:      node.ExprType(),
 		inConstructor:   g.inConstructor,
 		methods:         g.methods,
 		topMethods:      g.topMethods,
