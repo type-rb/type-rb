@@ -23,7 +23,9 @@ The initial distributed package system resolves TypeRB source directly from
 Git repositories or explicit local paths. Short imports default to GitHub but
 lock to canonical manifest identities. A deterministic `trb.lock` pins the
 transitive graph, commit IDs, and SHA-256 content checksums; frozen and offline
-installation are available for CI and disconnected builds. Package source uses
+installation are available for CI and disconnected builds. `trb update` can
+re-resolve the complete graph or selected direct aliases and their transitive
+dependencies while leaving other direct graphs pinned. Package source uses
 the same parser, project-wide checker, typed IR, and Go, Ruby, or TypeScript
 backend as application source. Target-native modules requested by a TypeRB
 package are merged into the generated `go.mod`, `Gemfile`, or `package.json`.

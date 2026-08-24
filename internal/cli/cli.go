@@ -1924,14 +1924,12 @@ func runtimeAdapterSources(resolved *packageManager.TypeRBPackages) []runtimeada
 }
 
 func (c *CLI) runUpdate(args []string) error {
-	if len(args) != 0 {
-		return errors.New("update does not accept package arguments yet")
-	}
 	config, err := project.Find(".")
 	if err != nil {
 		return err
 	}
-	resolved, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{Update: true})
+	options := packageManager.TypeRBResolveOptions{Update: len(args) == 0, UpdatePackages: args}
+	resolved, err := packageManager.ResolveTypeRBPackages(config, options)
 	if err != nil {
 		return err
 	}
@@ -1944,7 +1942,14 @@ func (c *CLI) runUpdate(args []string) error {
 			return err
 		}
 	}
-	fmt.Fprintf(c.Stdout, "updated %d TypeRB package(s) -> %s\n", len(resolved.Packages), packageManager.TypeRBLockPath(config))
+	if len(args) == 0 {
+		fmt.Fprintf(c.Stdout, "updated %d TypeRB package(s) -> %s\n", len(resolved.Packages), packageManager.TypeRBLockPath(config))
+	} else {
+		selected := append([]string(nil), args...)
+		sort.Strings(selected)
+		selected = unique(selected)
+		fmt.Fprintf(c.Stdout, "updated selected package graph(s): %s -> %s\n", strings.Join(selected, ", "), packageManager.TypeRBLockPath(config))
+	}
 	return nil
 }
 
@@ -2617,6 +2622,6 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb add --native [--dev] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb remove [--native] PACKAGE")
 	fmt.Fprintln(c.Stdout, "  trb install [--frozen] [--offline] [--config trbconfig.jsonc]")
-	fmt.Fprintln(c.Stdout, "  trb update")
+	fmt.Fprintln(c.Stdout, "  trb update [PACKAGE...]")
 	fmt.Fprintln(c.Stdout, "  trb version")
 }

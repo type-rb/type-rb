@@ -821,7 +821,17 @@ trb install --offline
 
 # Re-resolve entries such as latest.
 trb update
+
+# Re-resolve one direct alias and the dependencies selected by its new manifest.
+trb update acme/contracts
 ```
+
+Without package arguments, `trb update` re-resolves the complete graph. With
+one or more direct application aliases, it keeps every unselected direct graph
+pinned and re-resolves each selected package and its transitive dependencies.
+Selective update requires a current lock. If a selected graph and an
+unselected graph require incompatible revisions of the same canonical package,
+the command reports a conflict; the initial resolver does not choose a winner.
 
 ## Local development
 
@@ -848,9 +858,41 @@ project's alias.
 `localPackages` remains available for older source-only workspaces, but new
 reusable packages should use `trbpackage.json` and a path requirement.
 
-The initial compiler still requires public user-defined type names to be
-unique across one complete project graph. Namespace-stable type identities are
-planned before the package system is considered production-compatible.
+## Production-readiness boundaries
+
+The distributed resolver is usable without a central registry, but the
+following capabilities remain intentionally staged:
+
+- Requirements accept exact semantic-version tags, `latest`, or Git revisions.
+  Semantic-version ranges and a policy for selecting one version from multiple
+  requirements are not defined. Different requirements for one canonical
+  package therefore remain a conflict.
+- Publishing currently means committing a root `trbpackage.json` and tagging a
+  matching semantic version in Git. There is no `trb publish`, registry,
+  compatibility checker, signing policy, provenance verification, or
+  vulnerability service.
+- Remote content is cached below each project's `.trb/packages`. A shared
+  user-level cache, concurrent-install policy, garbage collection, and cache
+  permission model are not defined.
+- Multiple local path packages may live in one repository, but TypeRB does not
+  provide first-class workspace orchestration or select a package from a
+  subdirectory of one remote Git source.
+- Public user-defined type names must still be unique across the complete
+  project graph. Namespace-stable type identity is required before independent
+  packages may safely export the same authored type name.
+
+Remote package checksum traversal rejects symbolic links, and every cache read
+revalidates its checksum. Local path packages are editable developer inputs and
+are not content locked as untrusted artifacts. Git fetches use shallow history,
+but explicit transfer-size, file-count, and execution-time limits are not yet
+part of the resolver. Checksums establish content integrity and reproducibility;
+they do not establish author trust or absence of vulnerabilities.
+
+`trb install` delegates native dependency installation to Go modules, Bundler,
+or npm/Bun. Native ecosystem code, build steps, and install scripts remain
+outside the TypeRB compiler-extension boundary. Package import itself does not
+execute package-supplied compiler code; external project-aware executable
+providers remain unavailable until a sandbox and resource limits are defined.
 
 ## Native dependencies
 
