@@ -9,6 +9,8 @@
   "typeProvider": "trb.typescript.react",
   "nativeDependencies": {
     "typescript": {
+      "@types/react": "latest",
+      "@types/react-dom": "latest",
       "react": "latest",
       "react-dom": "latest"
     }
