@@ -9,6 +9,11 @@ and TypeScript.
 
 ## Try TypeRB
 
+[TypeRB documentation](https://type-rb.github.io/docs/)
+
+Install the compiler, follow the learning path, and browse application guides,
+lint rules, and language references.
+
 [A Tour of TypeRB](https://type-rb.github.io/tour/)
 
 Learn the language through guided, executable lessons.
@@ -185,9 +190,9 @@ require explicit imports.
 
 ## Documentation
 
-Follow the [learning path](docs/learning.md), or browse the
-[documentation](docs/README.md) for application guides, references, current
-status, and the roadmap.
+Follow the [learning path](https://type-rb.github.io/docs/learning/), or browse
+the [documentation](https://type-rb.github.io/docs/) for application guides,
+lint rules, references, current status, and the roadmap.
 
 ## License
 

@@ -1,0 +1,57 @@
+{
+  "sections": [
+    {
+      "title": "Get started",
+      "pages": [
+        { "source": "README.md", "label": "Documentation" },
+        { "source": "getting-started.md", "label": "Getting started" },
+        { "source": "learning.md", "label": "Learning path" },
+        { "source": "language.md", "label": "Language guide" }
+      ]
+    },
+    {
+      "title": "Build applications",
+      "pages": [
+        { "source": "containers.md", "label": "Containers" },
+        { "source": "guides/packages.md", "label": "Packages" },
+        { "source": "guides/web.md", "label": "Web" },
+        { "source": "guides/http.md", "label": "HTTP values" },
+        { "source": "guides/authentication.md", "label": "Authentication" },
+        { "source": "guides/browser-http.md", "label": "Browser HTTP" },
+        { "source": "guides/database.md", "label": "Database workflow" },
+        { "source": "guides/orm.md", "label": "ORM" },
+        { "source": "guides/jobs.md", "label": "Jobs" },
+        { "source": "guides/react.md", "label": "React and JSX" },
+        { "source": "guides/testing.md", "label": "Testing" }
+      ]
+    },
+    {
+      "title": "Tooling",
+      "pages": [
+        { "source": "cli.md", "label": "Command line" },
+        { "source": "configuration.md", "label": "Configuration" },
+        { "source": "editor-support.md", "label": "Editor support" },
+        { "source": "guides/linting.md", "label": "Linting" },
+        { "source": "lint-rules/index.md", "label": "Lint rules" },
+        { "source": "guides/compiler-tooling.md", "label": "Compiler tooling" },
+        { "source": "ai-assisted-development.md", "label": "AI-assisted development" }
+      ]
+    },
+    {
+      "title": "Reference",
+      "pages": [
+        { "source": "specification.md", "label": "Language specification" },
+        { "source": "standard-library.md", "label": "Standard library" },
+        { "source": "migrations/0.3-result-control.md", "label": "Result migration" },
+        { "source": "migrations/0.3-alias-newtype.md", "label": "Alias and newtype migration" },
+        { "source": "status.md", "label": "Current status" },
+        { "source": "roadmap.md", "label": "Roadmap" }
+      ]
+    }
+  ],
+  "exclude": [
+    "decisions",
+    "development.md",
+    "releasing.md"
+  ]
+}

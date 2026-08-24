@@ -5,8 +5,6 @@ on:
     branches:
       - main
     paths-ignore:
-      - "docs/**"
-      - "**/*.md"
       - ".agents/**"
       - ".claude/**"
       - "LICENSE"
@@ -14,8 +12,6 @@ on:
     branches:
       - main
     paths-ignore:
-      - "docs/**"
-      - "**/*.md"
       - ".agents/**"
       - ".claude/**"
       - "LICENSE"
@@ -49,6 +45,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             tools/textmate/package-lock.json
+            tools/site/package-lock.json
 
       - name: Verify compiler and tour
         run: go test ./...
@@ -61,24 +58,43 @@ jobs:
           npm ci --prefix tools/textmate
           npm test --prefix tools/textmate
 
-      - name: Build browser playground
+      - name: Verify website build tools
+        run: |
+          npm ci --prefix tools/site
+          npm test --prefix tools/site
+
+      - name: Build TypeRB website
         shell: bash
         run: |
           set -euo pipefail
           version="$(go run ./cmd/trb version)"
-          ./scripts/build-playground-site.sh dist/playground "$version"
-          test -s dist/playground/play/index.html
-          test -s dist/playground/tour/index.html
-          test -s dist/playground/llms.txt
-          test -s dist/playground/assets/trb.wasm
-          test -s dist/playground/assets/wasm_exec.js
-          grep -F 'url=/' dist/playground/type-rb/index.html
-          grep -F 'url=/tour/' dist/playground/type-rb/tour/index.html
-          grep -F 'url=/play/' dist/playground/type-rb/play/index.html
-          grep -F '"transport": "wasm"' dist/playground/runtime.json
-          grep -F '"version": "'"$version"'"' dist/playground/runtime.json
-          grep -F '# TypeRB' dist/playground/llms.txt
-          grep -F 'docs/specification.md' dist/playground/llms.txt
+          ./scripts/build-site.sh dist/site "$version"
+          test -s dist/site/index.html
+          test -s dist/site/docs/index.html
+          test -s dist/site/docs/getting-started/index.html
+          test -s dist/site/docs/guides/linting/index.html
+          test -s dist/site/docs/lint-rules/index.html
+          test -s dist/site/docs/lint-rules/prefer-conditional-transfer/index.html
+          test -s dist/site/play/index.html
+          test -s dist/site/tour/index.html
+          test -s dist/site/llms.txt
+          test -s dist/site/assets/trb.wasm
+          test -s dist/site/assets/wasm_exec.js
+          grep -F 'href="/docs/"' dist/site/index.html
+          grep -F 'href="/tour/"' dist/site/index.html
+          grep -F 'href="/play/"' dist/site/index.html
+          grep -F 'class="shiki github-dark-default"' dist/site/docs/getting-started/index.html
+          if grep -R -F 'class="language-trb"' dist/site/docs; then
+            echo "TypeRB documentation fences were not statically highlighted" >&2
+            exit 1
+          fi
+          grep -F 'url=/' dist/site/type-rb/index.html
+          grep -F 'url=/tour/' dist/site/type-rb/tour/index.html
+          grep -F 'url=/play/' dist/site/type-rb/play/index.html
+          grep -F '"transport": "wasm"' dist/site/runtime.json
+          grep -F '"version": "'"$version"'"' dist/site/runtime.json
+          grep -F '# TypeRB' dist/site/llms.txt
+          grep -F 'https://type-rb.github.io/docs/specification/' dist/site/llms.txt
 
       - name: Prepare legacy Pages redirects
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -86,9 +102,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/legacy-pages/play dist/legacy-pages/tour
-          cp dist/playground/type-rb/index.html dist/legacy-pages/index.html
-          cp dist/playground/type-rb/play/index.html dist/legacy-pages/play/index.html
-          cp dist/playground/type-rb/tour/index.html dist/legacy-pages/tour/index.html
+          cp dist/site/type-rb/index.html dist/legacy-pages/index.html
+          cp dist/site/type-rb/play/index.html dist/legacy-pages/play/index.html
+          cp dist/site/type-rb/tour/index.html dist/legacy-pages/tour/index.html
 
       - name: Publish organization Pages branch
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -120,7 +136,7 @@ jobs:
             git -C "$site_dir" remote add origin "$site_repository"
           fi
 
-          rsync --archive --delete --exclude .git/ dist/playground/ "$site_dir/"
+          rsync --archive --delete --exclude .git/ dist/site/ "$site_dir/"
           touch "$site_dir/.nojekyll"
           git -C "$site_dir" config user.name "github-actions[bot]"
           git -C "$site_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"

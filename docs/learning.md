@@ -28,7 +28,7 @@ The scratch REPL uses Go mode. Select another target with
 
 ## 2. Build one local program
 
-Follow [Create a project](../README.md#create-a-project), then keep this loop
+Follow [Create a project](getting-started.md#create-a-project), then keep this loop
 short:
 
 ```sh

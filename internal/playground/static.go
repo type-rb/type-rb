@@ -67,13 +67,6 @@ func ExportStatic(options StaticOptions) error {
 	if err := writeStaticJSON(options.OutputDir, "tour.json", Tour()); err != nil {
 		return err
 	}
-	landing, err := webAssets.ReadFile("assets/landing.html")
-	if err != nil {
-		return err
-	}
-	if err := writeStaticFile(options.OutputDir, "index.html", landing); err != nil {
-		return err
-	}
 	for path, destination := range map[string]string{
 		"type-rb/index.html":      "/",
 		"type-rb/play/index.html": "/play/",

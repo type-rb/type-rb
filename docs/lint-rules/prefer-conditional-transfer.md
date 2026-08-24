@@ -11,8 +11,8 @@ contains exactly one `return`, `break`, or `next`.
 ## Why
 
 Guard clauses keep the main path at the surrounding indentation level. The
-conditional-transfer syntax expresses that shape directly without adding a
-general Ruby-style modifier `if` to calls or assignments.
+conditional-transfer syntax expresses that shape directly without making
+trailing `if` a general modifier for calls or assignments.
 
 ## Examples
 

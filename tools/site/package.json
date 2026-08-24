@@ -1,0 +1,12 @@
+{
+  "name": "@type-rb/site-build-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "shiki": "4.4.3"
+  }
+}
