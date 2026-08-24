@@ -127,6 +127,13 @@ conversion, JSON codecs, generated applications, and the REPL. Its
 public contracts are listed in the
 [standard-library reference](standard-library.md).
 
+Runtime Integer arithmetic is checked against the shared exact range
+`-9007199254740991..9007199254740991` in generated Go, Ruby, TypeScript, and the
+REPL; String, JSON, and ORM ingress use the same boundary. Float remains
+binary64 and consistently exposes arithmetic Infinity and NaN while source
+literals remain finite. Formatting preserves opaque native syntax and prevents
+whitespace removal from fusing separate tokens into another operator.
+
 The typed-IR REPL supports persistent state, auto-formatted multiline editing,
 history, completion menus, project declaration auto-import, suggestions,
 syntax highlighting, interrupts, type inspection, and mutable-binding result

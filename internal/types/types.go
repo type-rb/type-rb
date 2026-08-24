@@ -2,6 +2,8 @@
 package types
 
 import (
+	"errors"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -157,6 +159,17 @@ func LiteralFromSource(source string) (Type, bool) {
 func ParsePortableIntegerLiteral(source string) (int64, bool) {
 	value, err := strconv.ParseInt(strings.ReplaceAll(source, "_", ""), 10, 64)
 	return value, err == nil && value >= MinPortableInteger && value <= MaxPortableInteger
+}
+
+// ParsePortableFloatLiteral accepts finite binary64 literals. Runtime Float
+// arithmetic may produce infinities and NaN, but source literals never spell
+// non-finite values directly. Underflow follows binary64 and rounds to zero.
+func ParsePortableFloatLiteral(source string) (float64, bool) {
+	value, err := strconv.ParseFloat(strings.ReplaceAll(source, "_", ""), 64)
+	if math.IsInf(value, 0) || math.IsNaN(value) {
+		return value, false
+	}
+	return value, err == nil || value == 0 && errors.Is(err, strconv.ErrRange)
 }
 
 func IsIntegerLiteralSource(source string) bool {

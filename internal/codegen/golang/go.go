@@ -56,6 +56,7 @@ type generator struct {
 	sourceMarker      int
 	sourceLocations   map[int]sourcemap.Location
 	sourcePath        string
+	checkedInteger    bool
 }
 
 func Generate(program *ir.Program) string {
@@ -168,6 +169,9 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	}
 	if g.arrayIndexRuntime {
 		g.arrayIndexRuntimeSupport()
+	}
+	if g.checkedInteger || strings.Contains(g.b.String(), "trbInteger") {
+		g.checkedIntegerRuntimeSupport()
 	}
 	g.imports = pruneUnusedImports(g.b.String(), g.imports)
 	packageName := program.Package
@@ -390,7 +394,11 @@ func (g *generator) statement(statement ir.Statement) {
 		case "||=":
 			g.line(target + " = " + target + " || " + g.expr(n.Value))
 		default:
-			g.line(target + " " + n.Operator + " " + g.expr(n.Value))
+			if n.Target.ExprType().Kind == types.Int && isCheckedIntegerAssignment(n.Operator) {
+				g.line(target + " = " + g.checkedIntegerBinary(strings.TrimSuffix(n.Operator, "="), target, g.expr(n.Value)))
+			} else {
+				g.line(target + " " + n.Operator + " " + g.expr(n.Value))
+			}
 		}
 	case *ir.Return:
 		if g.inConstructor && n.Value == nil {
@@ -1286,6 +1294,13 @@ func (g *generator) expr(expression ir.Expression) string {
 		if op == "not" || op == "!" {
 			return "!(" + g.expr(n.Operand) + ")"
 		}
+		if op == "-" && n.ExprType().Kind == types.Int {
+			if literal, ok := n.Operand.(*ir.Literal); ok && literal.Kind == "integer" {
+				return "-" + literal.Raw
+			}
+			g.checkedInteger = true
+			return g.checkedIntegerRuntimeName("Negate") + "(" + g.expr(n.Operand) + ")"
+		}
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
@@ -1334,12 +1349,15 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		left := g.binaryOperand(n.Left)
 		right := g.binaryOperand(n.Right)
-		if op == "**" {
-			if n.ExprType().Kind == types.Int {
-				return "func(base int, exponent int) int { if exponent < 0 { panic(\"negative Integer exponent\") }; result := 1; for exponent > 0 { if exponent%2 == 1 { result *= base }; base *= base; exponent /= 2 }; return result }(" + left + ", " + right + ")"
-			}
+		if op == "**" && n.ExprType().Kind != types.Int {
 			g.requireImport("math", "math")
 			return "math.Pow(" + left + ", " + right + ")"
+		}
+		if n.ExprType().Kind == types.Int && isCheckedIntegerOperator(op) {
+			return g.checkedIntegerBinary(op, left, right)
+		}
+		if n.ExprType().Kind == types.Float && (op == "+" || op == "-" || op == "*" || op == "/") {
+			return "func(left float64, right float64) float64 { return left " + op + " right }(" + left + ", " + right + ")"
 		}
 		return left + " " + op + " " + right
 	case *ir.Range:
@@ -1529,6 +1547,53 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) checkedIntegerBinary(operator, left, right string) string {
+	g.checkedInteger = true
+	name := map[string]string{
+		"+": "Add", "-": "Subtract", "*": "Multiply", "/": "Divide", "%": "Remainder", "**": "Power",
+	}[operator]
+	return g.checkedIntegerRuntimeName(name) + "(" + left + ", " + right + ")"
+}
+
+func (g *generator) checkedIntegerRuntimeSupport() {
+	check := g.checkedIntegerRuntimeName("Check")
+	add := g.checkedIntegerRuntimeName("Add")
+	subtract := g.checkedIntegerRuntimeName("Subtract")
+	multiply := g.checkedIntegerRuntimeName("Multiply")
+	divide := g.checkedIntegerRuntimeName("Divide")
+	remainder := g.checkedIntegerRuntimeName("Remainder")
+	power := g.checkedIntegerRuntimeName("Power")
+	negate := g.checkedIntegerRuntimeName("Negate")
+	g.line("func " + check + `(value int) int { if value < -9007199254740991 || value > 9007199254740991 { panic("Integer is outside the portable range") }; return value }`)
+	g.line("func " + add + "(left int, right int) int { return " + check + "(left + right) }")
+	g.line("func " + subtract + "(left int, right int) int { return " + check + "(left - right) }")
+	g.line("func " + multiply + `(left int, right int) int { if left > 0 { if right > 0 && left > 9007199254740991/right { panic("Integer is outside the portable range") }; if right < 0 && right < -9007199254740991/left { panic("Integer is outside the portable range") } } else if left < 0 { if right > 0 && left < -9007199254740991/right { panic("Integer is outside the portable range") }; if right < 0 && left < 9007199254740991/right { panic("Integer is outside the portable range") } }; return ` + check + `(left * right) }`)
+	g.line("func " + divide + `(left int, right int) int { if right == 0 { panic("division by zero") }; return ` + check + `(left / right) }`)
+	g.line("func " + remainder + `(left int, right int) int { if right == 0 { panic("division by zero") }; return ` + check + `(left % right) }`)
+	g.line("func " + power + `(base int, exponent int) int { if exponent < 0 { panic("negative Integer exponent") }; result, factor := 1, base; for exponent > 0 { if exponent%2 == 1 { result = ` + multiply + `(result, factor) }; exponent /= 2; if exponent > 0 { factor = ` + multiply + `(factor, factor) } }; return result }`)
+	g.line("func " + negate + "(value int) int { return " + check + "(-value) }")
+}
+
+func (g *generator) checkedIntegerRuntimeName(operation string) string {
+	return "trbInteger" + operation + "_" + naming.PrivateSuffix("integer:"+g.modulePath)
+}
+
+func isCheckedIntegerAssignment(operator string) bool {
+	switch operator {
+	case "+=", "-=", "*=", "/=":
+		return true
+	}
+	return false
+}
+
+func isCheckedIntegerOperator(operator string) bool {
+	switch operator {
+	case "+", "-", "*", "/", "%", "**":
+		return true
+	}
+	return false
 }
 
 func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {

@@ -4,7 +4,59 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/type-rb/type-rb/internal/lexer"
 )
+
+func TestFormatDoesNotFuseSeparateTokensIntoAnotherOperator(t *testing.T) {
+	tokens, diagnostics := lexer.Lex([]byte("value & .member\n"))
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if got, want := string(formatTokens(tokens)), "value & .member\n"; got != want {
+		t.Fatalf("token boundary changed\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
+func TestFormatPreservesNativeStatementContents(t *testing.T) {
+	source := []byte("class  User\n  scope   :active, -> { where(  enabled: true ) } # keep exactly\nend\n")
+	want := "class User\n\tscope   :active, -> { where(  enabled: true ) } # keep exactly\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("native statement changed\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
+func TestFormatPreservesNativeExpressionContents(t *testing.T) {
+	source := []byte("value:=native_call(  one & .two ) # expression\n")
+	want := "value := native_call(  one & .two ) # expression\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("native expression changed\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
+func TestFormatReindentsNativeBlockWithoutRewritingIt(t *testing.T) {
+	source := []byte("class  User\n  begin # native\n      value  =  one & .two\n    end # native close\nend\n")
+	want := "class User\n\tbegin # native\n\t    value  =  one & .two\n\t  end # native close\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("native block changed\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("native block formatting is not idempotent:\nfirst:\n%s\nsecond:\n%s\ndiagnostics=%v", formatted, formattedAgain, diagnostics)
+	}
+}
 
 func TestFormatPreservesCommentsAndIsIdempotent(t *testing.T) {
 	source := []byte("# target\nclass  Post<ApplicationRecord\n# association\nbelongs_to :user # owner\ndef summary( limit:Integer=80 ):String\nvalue:=body.to_s() # keep me\nreturn value\nend\nend\n")
@@ -162,10 +214,11 @@ func TestReindentPartialSupportsDisplayIndentationWithoutChangingHeredocs(t *tes
 func TestFormatFollowsChainedMultilineTokensToTheirFinalLine(t *testing.T) {
 	source := []byte("'\n''\n'E")
 	want := "'\n' '\n' E\n"
-	formatted, diagnostics := Format(source)
+	tokens, diagnostics := lexer.Lex(source)
 	if len(diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %v", diagnostics)
 	}
+	formatted := formatTokens(tokens)
 	if string(formatted) != want {
 		t.Fatalf("unexpected multiline token formatting\nwant:\n%q\ngot:\n%q", want, formatted)
 	}

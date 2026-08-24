@@ -153,9 +153,32 @@ func (g *generator) ormGroupedAggregateRuntime(adapter ormintegration.Adapter, m
 	g.line("rows, err := database.Query(statement, arguments...); if err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database grouped "+label+" query failed\")") + " }; defer rows.Close()")
 	g.line("values := make(" + g.goType(resultType) + ")")
 	if ormintegration.IsPortableTimeType(valueType) {
-		g.line("for rows.Next() { var key " + g.goType(groupColumn.Type) + "; var raw any; if err := rows.Scan(&key, &raw); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }; value, conversionError := " + goORMTemporalScan(valueType.Name) + "(raw); if conversionError != nil { return " + g.ormResultErr(resultType, "trbOrmError(conversionError, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }; values[key] = value }")
+		g.line("for rows.Next() {")
+		g.indent++
+		g.line("var key " + g.goType(groupColumn.Type) + "; var raw any")
+		g.line("if err := rows.Scan(&key, &raw); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }")
+		if groupColumn.Type.Kind == types.Int {
+			g.line("if " + goORMIntegerOutside("key", groupColumn.Type.Nullable) + " { return " + g.ormResultErr(resultType, g.ormErrorValue("InvalidData", "database Integer is outside the portable range")) + " }")
+		}
+		g.line("value, conversionError := " + goORMTemporalScan(valueType.Name) + "(raw)")
+		g.line("if conversionError != nil { return " + g.ormResultErr(resultType, "trbOrmError(conversionError, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }")
+		g.line("values[key] = value")
+		g.indent--
+		g.line("}")
 	} else {
-		g.line("for rows.Next() { var key " + g.goType(groupColumn.Type) + "; var value " + g.goType(valueType) + "; if err := rows.Scan(&key, &value); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }; values[key] = value }")
+		g.line("for rows.Next() {")
+		g.indent++
+		g.line("var key " + g.goType(groupColumn.Type) + "; var value " + g.goType(valueType))
+		g.line("if err := rows.Scan(&key, &value); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database grouped "+label+" row was invalid\")") + " }")
+		if groupColumn.Type.Kind == types.Int {
+			g.line("if " + goORMIntegerOutside("key", groupColumn.Type.Nullable) + " { return " + g.ormResultErr(resultType, g.ormErrorValue("InvalidData", "database Integer is outside the portable range")) + " }")
+		}
+		if valueType.Kind == types.Int {
+			g.line("if " + goORMIntegerOutside("value", valueType.Nullable) + " { return " + g.ormResultErr(resultType, g.ormErrorValue("InvalidData", "database Integer is outside the portable range")) + " }")
+		}
+		g.line("values[key] = value")
+		g.indent--
+		g.line("}")
 	}
 	g.line("if err := rows.Err(); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database grouped "+label+" query failed\")") + " }; return " + g.ormResultOK(resultType, "values"))
 	g.indent--

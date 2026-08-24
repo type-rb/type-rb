@@ -32,7 +32,7 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		t.Fatal(err)
 	}
 	goOutput := string(goArtifact.Output)
-	for _, want := range []string{`import "fmt"`, `import "strings"`, `strings.ToUpper("Hello, TypeRB")`, `fmt.Println(1 + 2)`, `fmt.Println(message)`} {
+	for _, want := range []string{`import "fmt"`, `import "strings"`, `strings.ToUpper("Hello, TypeRB")`, `fmt.Println(trbIntegerAdd_`, `fmt.Println(message)`} {
 		if !strings.Contains(goOutput, want) {
 			t.Fatalf("generated Go does not contain %q:\n%s", want, goOutput)
 		}
@@ -51,7 +51,7 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		t.Fatal(err)
 	}
 	tsOutput := string(tsArtifact.Output)
-	for _, want := range []string{`"Hello, TypeRB".toUpperCase()`, `console.log(1 + 2);`, `console.log(message);`, `main();`} {
+	for _, want := range []string{`"Hello, TypeRB".toUpperCase()`, `console.log(__trbIntegerAdd(1, 2));`, `console.log(message);`, `main();`} {
 		if !strings.Contains(tsOutput, want) {
 			t.Fatalf("generated TypeScript does not contain %q:\n%s", want, tsOutput)
 		}
@@ -62,7 +62,7 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		t.Fatal(err)
 	}
 	rubyOutput := string(rubyArtifact.Output)
-	for _, want := range []string{`"Hello, TypeRB".upcase`, `$stdout.puts(1 + 2)`, `$stdout.puts(message)`, `main()`} {
+	for _, want := range []string{`"Hello, TypeRB".upcase`, `$stdout.puts(__trb_integer_add(1, 2))`, `$stdout.puts(message)`, `main()`} {
 		if !strings.Contains(rubyOutput, want) {
 			t.Fatalf("generated Ruby does not contain %q:\n%s", want, rubyOutput)
 		}
@@ -3141,9 +3141,9 @@ func TestPutsPreludeLowersWithoutImportAcrossBackends(t *testing.T) {
 		mode string
 		want string
 	}{
-		{mode: "go", want: "fmt.Println(1 + 2)"},
-		{mode: "typescript", want: "console.log(1 + 2);"},
-		{mode: "ruby", want: "$stdout.puts(1 + 2)"},
+		{mode: "go", want: "fmt.Println(trbIntegerAdd_"},
+		{mode: "typescript", want: "console.log(__trbIntegerAdd(1, 2));"},
+		{mode: "ruby", want: "$stdout.puts(__trb_integer_add(1, 2))"},
 	}
 	for _, test := range tests {
 		artifact, err := CompileWithOptions("main.trb", source, Options{Mode: test.mode, Package: "main", RubyLoader: "require_relative"})

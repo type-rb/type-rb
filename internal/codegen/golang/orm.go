@@ -1200,6 +1200,13 @@ func (g *generator) ormModelScanner(model ormintegration.Model) {
 	}
 	g.line("if err := scanner.Scan(" + strings.Join(targets, ", ") + "); err != nil { return err }")
 	for _, column := range model.Columns {
+		if column.Type.Kind != types.Int || column.Enum != nil {
+			continue
+		}
+		value := "value." + goFieldName(column.Name)
+		g.line("if " + goORMIntegerOutside(value, column.Nullable) + " { return errors.New(\"database Integer is outside the portable range\") }")
+	}
+	for _, column := range model.Columns {
 		if !ormintegration.IsPortableTimeType(column.Type) {
 			continue
 		}
@@ -1211,6 +1218,13 @@ func (g *generator) ormModelScanner(model ormintegration.Model) {
 		g.line("value." + goFieldName(column.Name) + " = converted" + name)
 	}
 	g.line("return nil")
+}
+
+func goORMIntegerOutside(value string, nullable bool) string {
+	if nullable {
+		return value + " != nil && (*" + value + " < -9007199254740991 || *" + value + " > 9007199254740991)"
+	}
+	return value + " < -9007199254740991 || " + value + " > 9007199254740991"
 }
 
 func (g *generator) ormEnumColumnRuntime(enum *ormintegration.EnumColumn) {
@@ -2133,6 +2147,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("row := database.QueryRow(\"SELECT COUNT(*) FROM (\"+statement+\") AS trb_count\", arguments...)")
 	g.line("var count int")
 	g.line("if err := row.Scan(&count); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database count failed\")") + " }")
+	g.line("if " + goORMIntegerOutside("count", false) + " { return " + g.ormResultErr(integerType, g.ormErrorValue("InvalidData", "database Integer is outside the portable range")) + " }")
 	g.line("return " + g.ormResultOK(integerType, "count"))
 	g.indent--
 	g.line("}")

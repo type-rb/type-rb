@@ -97,6 +97,9 @@ func (g *generator) ormProjectionRuntime(adapter ormintegration.Adapter, model o
 	} else {
 		g.line("var value " + g.goType(elementType))
 		g.line("if err := rows.Scan(&value); err != nil { return " + g.ormResultErr(arrayType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database projection row was invalid\")") + " }")
+		if elementType.Kind == types.Int {
+			g.line("if " + goORMIntegerOutside("value", elementType.Nullable) + " { return " + g.ormResultErr(arrayType, g.ormErrorValue("InvalidData", "database Integer is outside the portable range")) + " }")
+		}
 	}
 	g.line("result = append(result, value)")
 	g.indent--
@@ -128,6 +131,9 @@ func (g *generator) ormProjectionRuntime(adapter ormintegration.Adapter, model o
 	g.line("return " + g.ormResultErr(pickType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database projection query failed\")"))
 	g.indent--
 	g.line("}")
+	if !ormintegration.IsPortableTimeType(elementType) && elementType.Kind == types.Int {
+		g.line("if " + goORMIntegerOutside("value", elementType.Nullable) + " { return " + g.ormResultErr(pickType, g.ormErrorValue("InvalidData", "database Integer is outside the portable range")) + " }")
+	}
 	value := "&value"
 	if ormintegration.IsPortableTimeType(elementType) {
 		g.line("value, conversionError := " + goORMTemporalScan(elementType.Name) + "(raw); if conversionError != nil { return " + g.ormResultErr(pickType, "trbOrmError(conversionError, "+g.ormErrorKind("InvalidData")+", \"database projection value was invalid\")") + " }")

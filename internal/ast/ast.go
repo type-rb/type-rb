@@ -30,6 +30,15 @@ type Program struct {
 	TypeScriptRuntime string
 	Statements        []Statement
 	Tokens            []token.Token
+	NativeIslands     []NativeIsland
+}
+
+// NativeIsland identifies source text owned by a target-language interop node.
+// Formatters may reindent the island as a whole, but must not rewrite its
+// internal tokens because their meaning is defined by the native language.
+type NativeIsland struct {
+	Span           token.Span
+	WholeStatement bool
 }
 
 type Statement interface {

@@ -37,6 +37,67 @@ func TestEvaluateFloatClassificationIntrinsics(t *testing.T) {
 	}
 }
 
+func TestEvaluateCheckedPortableIntegerArithmetic(t *testing.T) {
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	integer := types.FromName("Integer")
+	boolean := types.FromName("Boolean")
+	value := func(number int64) Value { return Value{Type: integer, Data: number} }
+
+	result, err := evaluator.binary(value(types.MaxPortableInteger), "-", value(1), integer)
+	if err != nil || result.Data != types.MaxPortableInteger-1 {
+		t.Fatalf("portable subtraction result=%#v, error=%v", result, err)
+	}
+	comparison, err := evaluator.binary(value(types.MaxPortableInteger), ">", value(types.MaxPortableInteger-1), boolean)
+	if err != nil || comparison.Data != true {
+		t.Fatalf("exact Integer comparison result=%#v, error=%v", comparison, err)
+	}
+
+	for _, test := range []struct {
+		name     string
+		left     int64
+		operator string
+		right    int64
+		message  string
+	}{
+		{name: "addition", left: types.MaxPortableInteger, operator: "+", right: 1, message: "Integer is outside the portable range"},
+		{name: "subtraction", left: types.MinPortableInteger, operator: "-", right: 1, message: "Integer is outside the portable range"},
+		{name: "multiplication", left: types.MaxPortableInteger, operator: "*", right: 2, message: "Integer is outside the portable range"},
+		{name: "power", left: 2, operator: "**", right: 53, message: "Integer is outside the portable range"},
+		{name: "negative exponent", left: 2, operator: "**", right: -1, message: "negative Integer exponent"},
+		{name: "division by zero", left: 1, operator: "/", right: 0, message: "division by zero"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := evaluator.binary(value(test.left), test.operator, value(test.right), integer)
+			if err == nil || err.Error() != test.message {
+				t.Fatalf("error=%v, want %q", err, test.message)
+			}
+		})
+	}
+}
+
+func TestEvaluateIEEEFloatArithmetic(t *testing.T) {
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	floating := types.FromName("Float")
+	value := func(number float64) Value { return Value{Type: floating, Data: number} }
+
+	positiveInfinity, err := evaluator.binary(value(1), "/", value(0), floating)
+	if err != nil || !math.IsInf(positiveInfinity.Data.(float64), 1) {
+		t.Fatalf("1.0 / 0.0 result=%#v, error=%v", positiveInfinity, err)
+	}
+	notANumber, err := evaluator.binary(value(0), "/", value(0), floating)
+	if err != nil || !math.IsNaN(notANumber.Data.(float64)) {
+		t.Fatalf("0.0 / 0.0 result=%#v, error=%v", notANumber, err)
+	}
+	overflow, err := evaluator.binary(value(math.MaxFloat64), "*", value(2), floating)
+	if err != nil || !math.IsInf(overflow.Data.(float64), 1) {
+		t.Fatalf("Float overflow result=%#v, error=%v", overflow, err)
+	}
+	domain, err := evaluator.binary(value(-1), "**", value(0.5), floating)
+	if err != nil || !math.IsNaN(domain.Data.(float64)) {
+		t.Fatalf("negative fractional power result=%#v, error=%v", domain, err)
+	}
+}
+
 func TestEvaluateFirstClassFunctionClosure(t *testing.T) {
 	integer := types.FromName("Integer")
 	functionType := types.FunctionOf([]types.Type{integer}, integer)

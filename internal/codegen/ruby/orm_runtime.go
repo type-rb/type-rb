@@ -338,7 +338,7 @@ module TrbOrmRuntime
 		end
 
 		def count_result
-			TrbOrmRuntime.result { TrbOrmRuntime.scalar(self, "COUNT(*)").to_i }
+			TrbOrmRuntime.result { TrbOrmRuntime.portable_integer(TrbOrmRuntime.scalar(self, "COUNT(*)")) }
 		end
 
 		def exists_result
@@ -394,7 +394,7 @@ module TrbOrmRuntime
 				elsif operation == "minimum" || operation == "maximum"
 					TrbOrmRuntime.application_value(TrbOrmRuntime.column!(@metadata, column), value)
 				else
-					value
+					TrbOrmRuntime.application_value(TrbOrmRuntime.column!(@metadata, column), value)
 				end
 			end
 		end
@@ -405,9 +405,10 @@ module TrbOrmRuntime
 				function = operation == "count" ? "COUNT(*)" : { "sum" => "SUM", "average" => "AVG", "minimum" => "MIN", "maximum" => "MAX" }.fetch(operation) + "(" + TrbOrmRuntime.qualified(@metadata.table, column) + ")"
 				rows = TrbOrmRuntime.select_rows(select_columns([@group_column, TrbOrmRuntime::RawSelection.new(function, "__trb_value")]))
 				group = TrbOrmRuntime.column!(@metadata, @group_column)
-				aggregate_column = operation == "minimum" || operation == "maximum" ? TrbOrmRuntime.column!(@metadata, column) : nil
+				aggregate_column = operation == "count" || operation == "average" ? nil : TrbOrmRuntime.column!(@metadata, column)
 				rows.to_h do |row|
 					value = TrbOrmRuntime.row_value(row, "__trb_value")
+					value = TrbOrmRuntime.portable_integer(value) if operation == "count"
 					value = TrbOrmRuntime.application_value(aggregate_column, value) unless aggregate_column.nil?
 					[TrbOrmRuntime.application_value(group, TrbOrmRuntime.row_value(row, @group_column)), value]
 				end
@@ -667,6 +668,7 @@ module TrbOrmRuntime
 				invalid!("database enum column " + column.name + " contains an unknown value") if entry.nil?
 				return entry.fetch(0)
 			end
+			return portable_integer(value) if column.kind == "integer"
 			klass, text = case column.kind
 			when "date"
 				[TrbTimeDate, value.respond_to?(:strftime) ? value.strftime("%Y-%m-%d") : value.to_s]
@@ -693,6 +695,14 @@ module TrbOrmRuntime
 			parsed = klass.try_parse(text)
 			invalid!("database " + column.kind + " column " + column.name + " contains an invalid value") if parsed.is_a?(Result::Err)
 			parsed.value
+		end
+
+		def portable_integer(value)
+			integer = Integer(value)
+			invalid!("database Integer is outside the portable range") if integer < -9007199254740991 || integer > 9007199254740991
+			integer
+		rescue ArgumentError, TypeError
+			invalid!("database Integer is outside the portable range")
 		end
 
 		def and_predicates(left, right)

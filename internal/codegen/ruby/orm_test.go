@@ -31,6 +31,7 @@ func TestORMRuntimeKeepsSequelBehindTypeRBOwnedQueryBoundary(t *testing.T) {
 			for _, expected := range []string{
 				`require "sequel"`, "class Query", "def select_sql", "def render_predicate",
 				"def association_query", "def destroy_model_result", "def transaction_result",
+				"def portable_integer(value)", `database Integer is outside the portable range`,
 				`options[:mode] = :immediate if @adapter == "sqlite" && parent.nil?`,
 				`sql += " FOR UPDATE" unless @adapter == "sqlite"`,
 				`table_alias = "__trb_join_" + index.to_s`,

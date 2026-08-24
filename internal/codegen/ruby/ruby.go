@@ -34,6 +34,7 @@ type generator struct {
 	oidcRuntime     bool
 	sourceRecorder  *sourcemap.Recorder
 	sourcePath      string
+	checkedInteger  bool
 }
 
 func Generate(program *ir.Program) string {
@@ -87,6 +88,15 @@ func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generat
 	}
 	g.statements(program.Statements)
 	g.integrations(program.Extensions)
+	if g.checkedInteger || strings.Contains(g.b.String(), "__trb_integer_") {
+		body := g.b.String()
+		g.b.Reset()
+		g.checkedIntegerRuntimeSupport()
+		g.b.WriteByte('\n')
+		prefixLength := g.b.Len()
+		g.b.WriteString(body)
+		g.sourceRecorder.ShiftGeneratedOffsets(prefixLength)
+	}
 	if g.modulePath == "trb/std/test/index" {
 		g.testRuntimeSupport()
 	}
@@ -285,8 +295,8 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line(n.Name+" = nil", n.TrailingComment)
 	case *ir.Assignment:
 		target := g.assignmentTarget(n.Target)
-		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
-			g.line(target+" = ("+target+").quo("+g.expr(n.Value)+").truncate", n.TrailingComment)
+		if n.Target.ExprType().Kind == types.Int && isCheckedIntegerAssignment(n.Operator) {
+			g.line(target+" = "+g.checkedIntegerBinary(strings.TrimSuffix(n.Operator, "="), target, g.expr(n.Value)), n.TrailingComment)
 		} else {
 			g.line(target+" "+n.Operator+" "+g.expr(n.Value), n.TrailingComment)
 		}
@@ -685,6 +695,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		if op == "not" || op == "!" {
 			return "!(" + g.expr(n.Operand) + ")"
 		}
+		if op == "-" && n.ExprType().Kind == types.Int {
+			g.checkedInteger = true
+			return "__trb_integer_negate(" + g.expr(n.Operand) + ")"
+		}
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
@@ -713,14 +727,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		} else if op == "or" {
 			op = "||"
 		}
-		if op == "**" && n.ExprType().Kind == types.Int {
-			return "->(base, exponent) { raise RangeError, \"negative Integer exponent\" if exponent < 0; base ** exponent }.call(" + left + ", " + right + ")"
+		if n.ExprType().Kind == types.Int && isCheckedIntegerOperator(op) {
+			return g.checkedIntegerBinary(op, left, right)
 		}
-		if op == "/" && n.ExprType().Kind == types.Int {
-			return "(" + left + ").quo(" + right + ").truncate"
-		}
-		if op == "%" && n.ExprType().Kind == types.Int {
-			return "(" + left + ").remainder(" + right + ")"
+		if op == "**" && n.ExprType().Kind == types.Float {
+			return "->(base, exponent) { value = base ** exponent; value.is_a?(Complex) ? Float::NAN : value }.call(" + left + ", " + right + ")"
 		}
 		return left + " " + op + " " + right
 	case *ir.Range:
@@ -821,6 +832,79 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func isCheckedIntegerAssignment(operator string) bool {
+	switch operator {
+	case "+=", "-=", "*=", "/=":
+		return true
+	}
+	return false
+}
+
+func isCheckedIntegerOperator(operator string) bool {
+	switch operator {
+	case "+", "-", "*", "/", "%", "**":
+		return true
+	}
+	return false
+}
+
+func (g *generator) checkedIntegerBinary(operator, left, right string) string {
+	g.checkedInteger = true
+	name := map[string]string{
+		"+": "add", "-": "subtract", "*": "multiply", "/": "divide", "%": "remainder", "**": "power",
+	}[operator]
+	return "__trb_integer_" + name + "(" + left + ", " + right + ")"
+}
+
+func (g *generator) checkedIntegerRuntimeSupport() {
+	g.line("def __trb_integer_check(value)", "")
+	g.indent++
+	g.line("raise RangeError, \"Integer is outside the portable range\" if value < -9007199254740991 || value > 9007199254740991", "")
+	g.line("value", "")
+	g.indent--
+	g.line("end", "")
+	for _, operation := range [][2]string{{"add", "+"}, {"subtract", "-"}, {"multiply", "*"}} {
+		name, operator := operation[0], operation[1]
+		g.line("def __trb_integer_"+name+"(left, right)", "")
+		g.indent++
+		g.line("__trb_integer_check(left "+operator+" right)", "")
+		g.indent--
+		g.line("end", "")
+	}
+	g.line("def __trb_integer_divide(left, right)", "")
+	g.indent++
+	g.line("raise ZeroDivisionError, \"division by zero\" if right == 0", "")
+	g.line("__trb_integer_check(left.quo(right).truncate)", "")
+	g.indent--
+	g.line("end", "")
+	g.line("def __trb_integer_remainder(left, right)", "")
+	g.indent++
+	g.line("raise ZeroDivisionError, \"division by zero\" if right == 0", "")
+	g.line("__trb_integer_check(left.remainder(right))", "")
+	g.indent--
+	g.line("end", "")
+	g.line("def __trb_integer_power(base, exponent)", "")
+	g.indent++
+	g.line("raise RangeError, \"negative Integer exponent\" if exponent < 0", "")
+	g.line("result = 1", "")
+	g.line("factor = base", "")
+	g.line("while exponent > 0", "")
+	g.indent++
+	g.line("result = __trb_integer_multiply(result, factor) if exponent.odd?", "")
+	g.line("exponent /= 2", "")
+	g.line("factor = __trb_integer_multiply(factor, factor) if exponent > 0", "")
+	g.indent--
+	g.line("end", "")
+	g.line("result", "")
+	g.indent--
+	g.line("end", "")
+	g.line("def __trb_integer_negate(value)", "")
+	g.indent++
+	g.line("__trb_integer_check(-value)", "")
+	g.indent--
+	g.line("end", "")
 }
 
 func rubyTimeRuntimeClass(name string) string {

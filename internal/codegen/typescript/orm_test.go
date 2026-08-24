@@ -37,6 +37,7 @@ func TestORMRuntimeKeepsBunSQLBehindTypeRBOwnedQueryBoundary(t *testing.T) {
 				`import { SQL, type ReservedSQL, type TransactionSQL } from "bun";`, "type TrbOrmQuery =",
 				"function predicateSQL", "function associationQuery", "async function destroyInTransaction",
 				"export async function transaction", `database().begin("immediate", run)`, "result.affectedRows ?? result.count",
+				`Number.isSafeInteger(integer)`, `database Integer is outside the portable range`,
 				`const __trbOrmAdapter: TrbOrmAdapter = "` + adapter + `";`,
 			} {
 				if !strings.Contains(pool, expected) {

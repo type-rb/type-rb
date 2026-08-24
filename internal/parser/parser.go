@@ -15,10 +15,11 @@ import (
 )
 
 type Parser struct {
-	source []byte
-	tokens []token.Token
-	pos    int
-	diags  []diagnostic.Diagnostic
+	source        []byte
+	tokens        []token.Token
+	pos           int
+	diags         []diagnostic.Diagnostic
+	nativeIslands []ast.NativeIsland
 }
 
 func Parse(source []byte) (*ast.Program, []diagnostic.Diagnostic) {
@@ -29,6 +30,7 @@ func Parse(source []byte) (*ast.Program, []diagnostic.Diagnostic) {
 		program.SourceSpan.Start = tokens[0].Span.Start
 	}
 	program.Statements = p.parseStatements(nil)
+	program.NativeIslands = p.nativeIslands
 	if len(tokens) > 0 {
 		program.SourceSpan.End = tokens[len(tokens)-1].Span.End
 	}
@@ -166,7 +168,7 @@ func (p *Parser) parseStatement() ast.Statement {
 	}
 
 	p.pos = next
-	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
+	return p.nativeStatement(base)
 }
 
 func (p *Parser) tryCatchBlockStatement(line []token.Token, next int, base ast.Base) ast.Statement {
@@ -1099,7 +1101,7 @@ func (p *Parser) parseNativeLine() ast.Statement {
 	line := p.codeTokens(start, end)
 	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
 	p.pos = next
-	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
+	return p.nativeStatement(base)
 }
 
 func (p *Parser) parseNativeBlock() ast.Statement {
@@ -1111,6 +1113,7 @@ func (p *Parser) parseNativeBlock() ast.Statement {
 	body := p.parseStatements(map[string]bool{"end": true})
 	closer, closeSpan := p.consumeTerminator("end")
 	base.SourceSpan.End = closeSpan.End
+	p.nativeIslands = append(p.nativeIslands, ast.NativeIsland{Span: base.SourceSpan, WholeStatement: true})
 	return &ast.NativeBlock{Base: base, Header: headerWithoutComment(header), Body: body, Closer: closer}
 }
 
@@ -1848,7 +1851,13 @@ func spanOf(tokens []token.Token) token.Span {
 
 func nativeExpression(tokens []token.Token, p *Parser) ast.Expression {
 	span := spanOf(tokens)
+	p.nativeIslands = append(p.nativeIslands, ast.NativeIsland{Span: span})
 	return &ast.NativeExpression{Base: ast.Base{SourceSpan: span}, Text: strings.TrimSpace(p.sliceSpan(span))}
+}
+
+func (p *Parser) nativeStatement(base ast.Base) ast.Statement {
+	p.nativeIslands = append(p.nativeIslands, ast.NativeIsland{Span: base.SourceSpan, WholeStatement: true})
+	return &ast.NativeStatement{Base: base, Text: strings.TrimSpace(p.sliceSpan(base.SourceSpan))}
 }
 
 func headerWithoutComment(s string) string {

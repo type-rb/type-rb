@@ -49,3 +49,11 @@ func TestRuntimeBindingIdentifierUsesTheCompleteDigest(t *testing.T) {
 		t.Fatalf("runtime identifiers must be deterministic and distinct: %q, %q", first, second)
 	}
 }
+
+func TestPrivateSuffixIsShortDeterministicAndScoped(t *testing.T) {
+	first := PrivateSuffix("integer:models/user")
+	second := PrivateSuffix("integer:models/post")
+	if len(first) != 16 || first == second || first != PrivateSuffix("integer:models/user") {
+		t.Fatalf("private suffixes must be short, deterministic, and distinct: %q, %q", first, second)
+	}
+}

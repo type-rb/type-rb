@@ -90,6 +90,9 @@ func (g *generator) ormAggregateRuntime(adapter ormintegration.Adapter, model or
 	} else {
 		g.line("var value " + g.goType(resultType))
 		g.line("if err := rows.Scan(&value); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("InvalidData")+", \"database aggregate result was invalid\")") + " }")
+		if resultType.Kind == types.Int {
+			g.line("if " + goORMIntegerOutside("value", resultType.Nullable) + " { return " + g.ormResultErr(resultType, g.ormErrorValue("InvalidData", "database Integer is outside the portable range")) + " }")
+		}
 	}
 	g.line("if err := rows.Err(); err != nil { return " + g.ormResultErr(resultType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database aggregate query failed\")") + " }")
 	g.line("return " + g.ormResultOK(resultType, "value"))
