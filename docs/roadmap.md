@@ -48,6 +48,10 @@ than detailed syntax.
 
 - Expand the initial stable diagnostic catalog and source-edit suggestions as
   application and editor usage exposes useful semantic-specific actions.
+- Evolve the initial built-in `trb lint` registry from application evidence.
+  Keep the recommended preset small, document every rule independently, and
+  define a deterministic resource-bounded package protocol before executing
+  third-party rules.
 - Emit target-standard source maps from the shared generated-range-to-`.trb`
   mapping model, then use them for runtime stack traces and coverage.
 - Extend the initial versioned compiler service and dependency-aware

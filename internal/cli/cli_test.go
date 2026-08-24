@@ -317,6 +317,73 @@ func TestCheckEmitsEmptyJSONReportForValidProject(t *testing.T) {
 	}
 }
 
+func TestLintReportsFixesAndVersionsDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.Go.Module = "example.com/type-rb/lint"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "main.trb")
+	source := "def classify(enabled: Boolean): String\n\tif enabled\n\t\treturn \"enabled\"\n\tend\n\treturn \"disabled\"\nend\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"lint", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "warning[trb/prefer-conditional-transfer]") || !strings.Contains(stderr.String(), "help: Rewrite as a conditional transfer.") {
+		t.Fatalf("human lint output=%s", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"lint", "--config", config.Path, "--deny-warnings", "--diagnostic-format", "json"}); status != 1 {
+		t.Fatalf("deny status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	var report diagnostic.JSONReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.ToolVersion != Version || report.Summary.Warnings != 1 || len(report.Diagnostics) != 1 || report.Diagnostics[0].Code != "trb/prefer-conditional-transfer" {
+		t.Fatalf("report=%#v", report)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"lint", "--config", config.Path, "--fix"}); status != 0 {
+		t.Fatalf("fix status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	fixed, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(fixed), "\treturn \"enabled\" if enabled\n") || !strings.Contains(stdout.String(), "fixed 1 issue(s) in 1 file(s)") {
+		t.Fatalf("fixed source=%s\nstdout=%s", fixed, stdout.String())
+	}
+}
+
+func TestLintConfigurationCanDisableRecommendedRules(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.Go.Module = "example.com/type-rb/lint-disabled"
+	config.Lint = &project.LintConfig{Preset: "none"}
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.trb"), []byte("def stop(enabled: Boolean)\n\tif enabled\n\t\treturn\n\tend\n\treturn\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"lint", "--config", config.Path}); status != 0 || !strings.Contains(stdout.String(), "linted 1 file(s)") || stderr.Len() != 0 {
+		t.Fatalf("status output stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
 func TestInteractiveNoArgumentCommandStartsREPL(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var stdout, stderr bytes.Buffer

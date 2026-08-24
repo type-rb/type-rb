@@ -18,6 +18,9 @@ Preserve these invariants:
 - Gate target-specific APIs and native compatibility behind an explicit `trb/platform/<mode>/*` import. Never relax checking merely because a project uses that mode.
 - Carry behavior through syntax AST, checked types, typed IR, and each affected backend; do not bypass the pipeline with source-text rewrites.
 - Keep `trb fmt` deterministic and preserve comments.
+- Keep `trb check` non-suppressible and correctness-only. Built-in `trb lint`
+  rules are optional maintainability policy, use stable rule IDs, and require
+  one dedicated documentation page per rule.
 - Treat compiler-owned package declarations as the source of external types; do not require application authors to maintain signature files.
 - Keep recoverable failure on the compiler-owned `Result<T, E>` model. Prefix
   `try` propagates compatible `Err` values, postfix `catch` handles them

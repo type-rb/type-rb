@@ -59,12 +59,18 @@ type Config struct {
 	TypeScript        *TypeScriptConfig             `json:"typescript,omitempty"`
 	Database          *DatabaseConfig               `json:"db,omitempty"`
 	Jobs              *JobsConfig                   `json:"jobs,omitempty"`
+	Lint              *LintConfig                   `json:"lint,omitempty"`
 	Root              string                        `json:"-"`
 	Path              string                        `json:"-"`
 }
 
 type JobsConfig struct {
 	Configuration string `json:"configuration"`
+}
+
+type LintConfig struct {
+	Preset string            `json:"preset,omitempty"`
+	Rules  map[string]string `json:"rules,omitempty"`
 }
 
 // PackageRequirement identifies one TypeRB package. A package name is an
@@ -368,6 +374,18 @@ func (c *Config) Validate() error {
 			return errors.New("jobs.configuration must stay below sourceDir")
 		}
 		c.Jobs.Configuration = configuration
+	}
+	if c.Lint != nil {
+		if preset := strings.TrimSpace(c.Lint.Preset); preset != "" && preset != "recommended" && preset != "none" {
+			return fmt.Errorf("lint.preset must be recommended or none; got %q", c.Lint.Preset)
+		}
+		for rule, level := range c.Lint.Rules {
+			switch strings.TrimSpace(level) {
+			case "off", "warning", "error":
+			default:
+				return fmt.Errorf("lint rule %s level must be off, warning, or error; got %q", rule, level)
+			}
+		}
 	}
 	if c.Ruby != nil && c.Ruby.Loader != "" && c.Ruby.Loader != "require_relative" && c.Ruby.Loader != "zeitwerk" {
 		return fmt.Errorf("ruby.loader must be require_relative or zeitwerk; got %q", c.Ruby.Loader)

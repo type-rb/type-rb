@@ -36,12 +36,14 @@ Use the formatter before checking so later locations match canonical source:
 ```sh
 trb fmt
 trb check --diagnostic-format json
+trb lint --diagnostic-format json
 ```
 
 The JSON report contains a schema version, stable `TRBxxxx` diagnostic codes,
 source spans, related locations, and atomic fixes when available. Agents should
 consume those fields directly. Diagnostic message wording may improve without
-changing the code.
+changing the code. Lint reports additionally contain `toolVersion`, and use the
+documented rule ID as the diagnostic code.
 
 After the project checks, run the narrowest executable boundary that proves the
 change: a focused command, `trb run`, or `trb build`. Never repair generated Go,

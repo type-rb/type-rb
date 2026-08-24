@@ -131,6 +131,7 @@ Then format and run it:
 
 ```sh
 trb fmt
+trb lint
 trb run
 ```
 

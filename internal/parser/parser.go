@@ -125,6 +125,14 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	}
 	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
+	if word == "return" {
+		if conditional := p.tryConditionalReturn(line, next, base); conditional != nil {
+			return conditional
+		}
+	}
+	if unsupported := p.tryUnsupportedTrailingCondition(line, next, base); unsupported != nil {
+		return unsupported
+	}
 	if catch := p.tryCatchBlockStatement(line, next, base); catch != nil {
 		return catch
 	}
@@ -1582,18 +1590,127 @@ func (p *Parser) parseReturn() ast.Statement {
 	return r
 }
 
+func (p *Parser) tryConditionalReturn(line []token.Token, next int, base ast.Base) ast.Statement {
+	if len(line) < 2 || line[0].Lexeme != "return" {
+		return nil
+	}
+	conditionalAt := topLevelIndex(line[1:], "if")
+	if conditionalAt < 0 {
+		return nil
+	}
+	conditionalAt++
+	valueTokens := line[1:conditionalAt]
+	conditionTokens := line[conditionalAt+1:]
+	var value ast.Expression
+	if len(valueTokens) > 0 {
+		value, _ = p.parseExpression(valueTokens)
+		if value == nil {
+			p.errorAt(spanOf(valueTokens), "return before trailing if requires a valid expression")
+			value = nativeExpression(valueTokens, p)
+		}
+	}
+	condition, ok := p.parseExpression(conditionTokens)
+	if !ok {
+		p.errorAt(spanOf(line[conditionalAt:]), "conditional return requires a valid condition after if")
+		condition = nativeExpression(conditionTokens, p)
+	}
+	transferBase := ast.Base{SourceSpan: line[0].Span}
+	if len(valueTokens) > 0 {
+		transferBase.SourceSpan.End = valueTokens[len(valueTokens)-1].Span.End
+	}
+	p.pos = next
+	return conditionalTransfer(base, condition, &ast.ReturnStatement{Base: transferBase, Value: value})
+}
+
+func (p *Parser) tryUnsupportedTrailingCondition(line []token.Token, next int, base ast.Base) ast.Statement {
+	for _, keyword := range []string{"if", "unless"} {
+		at := topLevelIndex(line[1:], keyword)
+		if at < 0 {
+			continue
+		}
+		at++
+		if line[0].Lexeme == "return" || line[0].Lexeme == "break" || line[0].Lexeme == "next" {
+			if keyword == "unless" {
+				p.errorAt(line[at].Span, "conditional transfers use trailing if; unless is not supported")
+				p.pos = next
+				return p.nativeStatement(base)
+			}
+			continue
+		}
+		if !p.completeStatementBeforeTrailingCondition(line[:at]) {
+			continue
+		}
+		p.errorAt(line[at].Span, "trailing "+keyword+" is only allowed on return, break, or next")
+		p.pos = next
+		return p.nativeStatement(base)
+	}
+	return nil
+}
+
+func (p *Parser) completeStatementBeforeTrailingCondition(tokens []token.Token) bool {
+	if _, complete := p.parseExpression(tokens); complete {
+		return true
+	}
+	if at := topLevelIndex(tokens, ":="); at > 0 && at+1 < len(tokens) {
+		_, complete := p.parseExpression(tokens[at+1:])
+		return complete
+	}
+	for _, operator := range []string{"=", "+=", "-=", "*=", "/=", "||=", "&&="} {
+		at := topLevelIndex(tokens, operator)
+		if at <= 0 || at+1 >= len(tokens) {
+			continue
+		}
+		_, left := p.parseExpression(tokens[:at])
+		_, right := p.parseExpression(tokens[at+1:])
+		if left && right {
+			return true
+		}
+	}
+	return false
+}
+
+func conditionalTransfer(base ast.Base, condition ast.Expression, transfer ast.Statement) ast.Statement {
+	return &ast.IfStatement{
+		Base:                base,
+		Condition:           condition,
+		Then:                []ast.Statement{transfer},
+		ConditionalTransfer: true,
+	}
+}
+
 func (p *Parser) parseLoopControl(keyword string) ast.Statement {
 	start, end, next, comment := p.logicalLine(p.pos)
 	line := p.codeTokens(start, end)
 	base := ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}
+	var transfer ast.Statement
+	if keyword == "break" {
+		transfer = &ast.BreakStatement{Base: ast.Base{SourceSpan: line[0].Span}}
+	} else {
+		transfer = &ast.NextStatement{Base: ast.Base{SourceSpan: line[0].Span}}
+	}
+	conditionalAt := topLevelIndex(line[1:], "if")
+	if conditionalAt >= 0 {
+		conditionalAt++
+		if conditionalAt != 1 {
+			p.errorAt(spanOf(line[1:conditionalAt]), fmt.Sprintf("%s does not take a value", keyword))
+		}
+		condition, ok := p.parseExpression(line[conditionalAt+1:])
+		if !ok {
+			p.errorAt(spanOf(line[conditionalAt:]), fmt.Sprintf("conditional %s requires a valid condition after if", keyword))
+			condition = nativeExpression(line[conditionalAt+1:], p)
+		}
+		p.pos = next
+		return conditionalTransfer(base, condition, transfer)
+	}
 	if len(line) != 1 {
 		p.errorAt(spanOf(line), fmt.Sprintf("%s does not take a value", keyword))
 	}
 	p.pos = next
+	transferBase := ast.Base{SourceSpan: line[0].Span, TrailingComment: comment}
 	if keyword == "break" {
-		return &ast.BreakStatement{Base: base}
+		return &ast.BreakStatement{Base: transferBase}
 	}
-	return &ast.NextStatement{Base: base}
+	return &ast.NextStatement{Base: transferBase}
 }
 
 func (p *Parser) parseImport() ast.Statement {

@@ -409,6 +409,7 @@ func formatTokensAt(tokens []token.Token, baseIndent int, flatJSX bool) string {
 	importLine := lineKind == "import" || importFromLine(tokens)
 	genericDepth := 0
 	classInheritance := false
+	ternaryQuestions, ternaryColons := ternaryTokenIndices(tokens)
 	for i := range tokens {
 		current := tokens[i]
 		if current.Kind == token.Comment {
@@ -445,6 +446,12 @@ func formatTokensAt(tokens []token.Token, baseIndent int, flatJSX bool) string {
 			openingPipe := current.Lexeme == "|" && (previous.Lexeme == "do" || previous.Lexeme == "{" || previous.Lexeme == "catch")
 			closingPipe := current.Lexeme == "|" && inBlockParameters && !openingPipe
 			space := needsSpace(beforePrevious, *previous, current, next)
+			if current.Lexeme == "?" {
+				space = ternaryQuestions[i]
+			}
+			if current.Lexeme == ":" && ternaryColons[i] || previous.Lexeme == ":" && ternaryColons[i-1] {
+				space = true
+			}
 			if (current.Lexeme == "|" || previous.Lexeme == "|") && !openingPipe && !closingPipe && !inBlockParameters {
 				space = true
 			}
@@ -623,7 +630,7 @@ func needsSpace(beforePrevious *token.Token, previous, current token.Token, next
 		return false
 	}
 	if current.Lexeme == "?" {
-		return false
+		return true
 	}
 	if current.Lexeme == ":" {
 		return current.Span.Start.Offset > previous.Span.End.Offset
@@ -737,6 +744,68 @@ func isOperator(s string) bool {
 	return false
 }
 
+func ternaryTokenIndices(tokens []token.Token) (map[int]bool, map[int]bool) {
+	questionIndices := map[int]bool{}
+	colonIndices := map[int]bool{}
+	type question struct {
+		index int
+		depth int
+	}
+	questions := []question{}
+	depth := 0
+	for index, item := range tokens {
+		switch item.Lexeme {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			if depth > 0 {
+				depth--
+			}
+		case "?":
+			if nullableQuestionToken(tokens, index) {
+				continue
+			}
+			questions = append(questions, question{index: index, depth: depth})
+		case ":":
+			if ternaryPrefixColon(tokens, index) {
+				continue
+			}
+			for candidate := len(questions) - 1; candidate >= 0; candidate-- {
+				if questions[candidate].depth != depth {
+					continue
+				}
+				questionIndices[questions[candidate].index] = true
+				colonIndices[index] = true
+				questions = append(questions[:candidate], questions[candidate+1:]...)
+				break
+			}
+		}
+	}
+	return questionIndices, colonIndices
+}
+
+func nullableQuestionToken(tokens []token.Token, index int) bool {
+	if index+1 >= len(tokens) {
+		return true
+	}
+	switch tokens[index+1].Lexeme {
+	case ",", ")", "]", "}", "=", ":=", "|", ">", ">>":
+		return true
+	}
+	return false
+}
+
+func ternaryPrefixColon(tokens []token.Token, index int) bool {
+	if index == 0 {
+		return true
+	}
+	switch tokens[index-1].Lexeme {
+	case "?", "(", "[", "{", ",", "=", ":=", "=>", "return":
+		return true
+	}
+	return isOperator(tokens[index-1].Lexeme)
+}
+
 func isUnary(previous, current string) bool {
 	if current != "!" && current != "~" && current != "+" && current != "-" {
 		return false
@@ -766,8 +835,26 @@ func opensEndBlock(tokens []token.Token, initialDepth int) bool {
 	case "class", "record", "enum", "module", "interface", "def", "if", "unless", "case", "begin", "while", "until", "for":
 		return true
 	}
-	for _, item := range tokens {
-		if item.Lexeme == "case" || item.Lexeme == "if" {
+	conditionalTransferIf := -1
+	if first == "return" || first == "break" || first == "next" {
+		depth := 0
+		for index, item := range tokens {
+			switch item.Lexeme {
+			case "(", "[", "{":
+				depth++
+			case ")", "]", "}":
+				if depth > 0 {
+					depth--
+				}
+			case "if":
+				if depth == 0 {
+					conditionalTransferIf = index
+				}
+			}
+		}
+	}
+	for index, item := range tokens {
+		if item.Lexeme == "case" || item.Lexeme == "if" && index != conditionalTransferIf {
 			return true
 		}
 	}

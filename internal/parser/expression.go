@@ -9,10 +9,12 @@ import (
 )
 
 type exprParser struct {
-	tokens   []token.Token
-	pos      int
-	embedded map[int]ast.Expression
-	report   func(token.Span, string)
+	tokens           []token.Token
+	pos              int
+	embedded         map[int]ast.Expression
+	report           func(token.Span, string)
+	groupDepth       int
+	conditionalDepth map[int]int
 }
 
 func parseExpressionTokensReporting(tokens []token.Token, embedded map[int]ast.Expression, report func(token.Span, string)) (ast.Expression, bool) {
@@ -83,6 +85,47 @@ func (p *exprParser) parse(min int) ast.Expression {
 				return nil
 			}
 			left = &ast.IndexExpression{Base: ast.Base{SourceSpan: token.Span{Start: left.Span().Start, End: p.tokens[p.pos-1].Span.End}}, Receiver: left, Index: index}
+			continue
+		}
+		if tok.Lexeme == "?" {
+			if min != 0 {
+				break
+			}
+			if p.conditionalDepth == nil {
+				p.conditionalDepth = map[int]int{}
+			}
+			if p.conditionalDepth[p.groupDepth] > 0 || isUnparenthesizedConditional(left) {
+				p.reportAt(tok.Span, "nested conditional expressions must be parenthesized")
+			}
+			p.pos++
+			p.conditionalDepth[p.groupDepth]++
+			thenExpression := p.parse(0)
+			if thenExpression == nil || p.pos >= len(p.tokens) || p.tokens[p.pos].Lexeme != ":" {
+				p.conditionalDepth[p.groupDepth]--
+				p.reportAt(tok.Span, "conditional expression requires : and an else expression")
+				return nil
+			}
+			p.pos++
+			elseExpression := p.parse(0)
+			p.conditionalDepth[p.groupDepth]--
+			if elseExpression == nil {
+				p.reportAt(tok.Span, "conditional expression requires an expression after :")
+				return nil
+			}
+			left = &ast.IfStatement{
+				Base:      ast.Base{SourceSpan: token.Span{Start: left.Span().Start, End: elseExpression.Span().End}},
+				Condition: left,
+				Then: []ast.Statement{&ast.ExpressionStatement{
+					Base:       ast.Base{SourceSpan: thenExpression.Span()},
+					Expression: thenExpression,
+				}},
+				Else: []ast.Statement{&ast.ExpressionStatement{
+					Base:       ast.Base{SourceSpan: elseExpression.Span()},
+					Expression: elseExpression,
+				}},
+				HasElse: true,
+				Ternary: true,
+			}
 			continue
 		}
 		prec, ok := precedences[tok.Lexeme]
@@ -192,9 +235,15 @@ func (p *exprParser) parsePrefix() ast.Expression {
 		}
 		return &ast.TryExpression{Base: ast.Base{SourceSpan: token.Span{Start: tok.Span.Start, End: operand.Span().End}}, Value: operand}
 	case "(":
+		p.groupDepth++
 		expr := p.parse(0)
-		if expr == nil || !p.take(")") {
+		closed := expr != nil && p.take(")")
+		p.groupDepth--
+		if !closed {
 			return nil
+		}
+		if conditional, ok := expr.(*ast.IfStatement); ok && conditional.Ternary {
+			conditional.TernaryParenthesized = true
 		}
 		return expr
 	case "[":
@@ -248,6 +297,17 @@ func (p *exprParser) parsePrefix() ast.Expression {
 		return &ast.Identifier{Base: ast.Base{SourceSpan: tok.Span}, Name: tok.Lexeme}
 	}
 	return nil
+}
+
+func isUnparenthesizedConditional(expression ast.Expression) bool {
+	conditional, ok := expression.(*ast.IfStatement)
+	return ok && conditional.Ternary && !conditional.TernaryParenthesized
+}
+
+func (p *exprParser) reportAt(span token.Span, message string) {
+	if p.report != nil {
+		p.report(span, message)
+	}
 }
 
 func (p *exprParser) startsRemovedAttemptOperand() bool {

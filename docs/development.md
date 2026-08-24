@@ -40,6 +40,19 @@ deterministic and idempotent and preserves:
 The canonical indentation is one tab per nesting level. Indentation is not
 configurable in the current alpha.
 
+## Linter boundary
+
+`trb lint` invokes the compiler pipeline before running source-oriented rules
+from `internal/lint`. Correctness diagnostics remain owned by compiler phases
+and cannot be suppressed by lint configuration. Each built-in rule registers
+a stable ID, default level, recommended-preset membership, first release, fix
+capability, and documentation slug. Tests require the shared rule index and a
+dedicated rule page to match that registry metadata.
+
+The initial linter does not load package code or expose compiler AST state to
+third parties. Add an external rule protocol only after deterministic inputs,
+resource limits, version negotiation, and package trust are specified.
+
 ## Development workflow
 
 Keep one grammar and portable semantics across modes. Target-specific APIs and

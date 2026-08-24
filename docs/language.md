@@ -280,6 +280,31 @@ else
 end
 ```
 
+Use a conditional expression for a short two-value choice. Its condition is
+strictly Boolean, only the selected branch is evaluated, and branch types use
+the same safe common-type rule as a value-producing `if`:
+
+```trb
+label := enabled ? "enabled" : "disabled"
+predicate_label := ready?() ? "ready" : "waiting"
+```
+
+Nested conditional expressions require explicit parentheses and are usually
+clearer as a complete `if`. The formatter writes spaces around `?` and `:`.
+
+A simple early exit or loop transfer can use the conditional-transfer form:
+
+```trb
+return cached if cached != nil
+return if finished
+next if item.hidden?()
+break if complete
+```
+
+Only `return`, `next`, and `break` accept trailing `if`. TypeRB does not admit
+a general modifier form such as `notify() if ready`, and it does not add
+`unless`. The transfer value is evaluated only when its condition is true.
+
 Numeric expressions may mix `Integer` and `Float`. The `Integer` operand is
 widened to `Float`, and typed IR retains that conversion for every backend and
 the REPL. The same safe widening is available in typed initialization,
@@ -463,6 +488,8 @@ else
 	"disabled"
 end
 
+short_label := enabled ? "enabled" : "disabled"
+
 description := case token
 when Token::Text(value)
 	"text: " + value
@@ -495,7 +522,8 @@ method, while `break` and `next` require a loop. The internal `Never` type used
 to model these paths is not source syntax. A `return` inside a value-producing
 collection block remains unsupported; use explicit `each` when a transformation
 needs enclosing control flow. The statement forms remain available when no
-value is needed.
+value is needed. Prefer the conditional expression only for a short two-value
+choice; complete branch bodies remain clearer as `if`/`else`.
 
 ## Literal types and discriminated unions
 

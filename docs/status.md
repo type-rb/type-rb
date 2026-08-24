@@ -9,9 +9,24 @@ generated output, and command-line interface may change before beta.
 
 TypeRB uses one portable grammar and typed IR for Go, Ruby, and TypeScript
 output. Projects have deterministic formatting, package configuration,
-project-wide checking, source generation, temporary build-and-run, and Go
-executable compilation. Target-specific behavior remains behind explicit
-`trb/platform/<mode>/*` imports.
+project-wide checking, configurable built-in linting, source generation,
+temporary build-and-run, and Go executable compilation. Target-specific
+behavior remains behind explicit `trb/platform/<mode>/*` imports.
+
+Short two-value choices use the typed conditional expression
+`condition ? value : alternative`. Simple early exits use conditional
+control-transfer statements such as `return value if condition`, `next if
+condition`, and `break if condition`; trailing `if` is not a general statement
+modifier. Both forms normalize into the existing control-flow IR and therefore
+share strict Boolean conditions, narrowing, lazy branches, and backend or REPL
+semantics.
+
+`trb lint` runs project checking before a small configurable built-in ruleset.
+The initial recommended rule, `trb/prefer-conditional-transfer`, reports and
+safely fixes simple one-transfer guard blocks. Built-in rules share the TypeRB
+version, while JSON reports carry independent `schemaVersion` and
+`toolVersion` fields. Third-party rule execution remains deferred until a
+deterministic, resource-bounded extension protocol is designed.
 
 The CLI can also run one self-contained `.trb` file without creating project
 configuration. It defaults to Go, can explicitly select Ruby or TypeScript,

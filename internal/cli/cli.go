@@ -29,6 +29,7 @@ import (
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	"github.com/type-rb/type-rb/internal/languageservice"
 	"github.com/type-rb/type-rb/internal/lexer"
+	"github.com/type-rb/type-rb/internal/lint"
 	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/official"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
@@ -85,6 +86,8 @@ func (c *CLI) Run(args []string) int {
 		err = c.runFmt(args[1:])
 	case "check":
 		err = c.runCheck(args[1:])
+	case "lint":
+		err = c.runLint(args[1:])
 	case "test":
 		err = c.runTest(args[1:])
 	case "build":
@@ -217,6 +220,201 @@ func (c *CLI) runCheck(args []string) error {
 	}
 	_, err = fmt.Fprintf(c.Stdout, "checked %d file(s) for mode %s\n", count, config.Mode)
 	return err
+}
+
+func (c *CLI) runLint(args []string) error {
+	flags := flag.NewFlagSet("lint", flag.ContinueOnError)
+	flags.SetOutput(c.Stderr)
+	configPath := flags.String("config", "", "path to trbconfig.jsonc")
+	format := flags.String("diagnostic-format", "human", "diagnostic output: human or json")
+	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
+	fix := flags.Bool("fix", false, "apply safe lint fixes")
+	denyWarnings := flags.Bool("deny-warnings", false, "treat lint warnings as command failures")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 1 {
+		return errors.New("lint accepts at most one standalone .trb file")
+	}
+	if *format != "human" && *format != "json" {
+		return fmt.Errorf("--diagnostic-format must be human or json; got %q", *format)
+	}
+
+	filename := ""
+	configStart := "."
+	if flags.NArg() == 1 {
+		if filepath.Ext(flags.Arg(0)) != ".trb" {
+			return errors.New("standalone lint source must be a .trb file")
+		}
+		var err error
+		filename, err = filepath.Abs(flags.Arg(0))
+		if err != nil {
+			return err
+		}
+		configStart = filename
+	}
+	config, standalone, err := loadCommandConfig("lint", *configPath, configStart, filename, *mode, "")
+	if err != nil {
+		return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: err.Error()}})
+	}
+	lintConfig := lint.Options{}
+	if config.Lint != nil {
+		lintConfig.Preset = config.Lint.Preset
+		lintConfig.Rules = config.Lint.Rules
+	}
+	resolvedLint, err := lint.Resolve(lintConfig)
+	if err != nil {
+		return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: err.Error()}})
+	}
+
+	var (
+		units   []compiler.SourceUnit
+		options compiler.Options
+		count   int
+	)
+	if standalone {
+		graph, graphErr := loadFileRootSourceGraph(filename, os.ReadFile)
+		if graphErr != nil {
+			return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: graphErr.Error()}})
+		}
+		count = len(graph.Sources)
+		units, options, err = projectCompilationSources(config, graph.Sources)
+	} else {
+		files, collectErr := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+		if collectErr != nil {
+			return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: collectErr.Error()}})
+		}
+		if len(files) == 0 {
+			return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: "no .trb files found"}})
+		}
+		count = len(files)
+		units, options, err = projectCompilation(config, files)
+	}
+	if err != nil {
+		return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: err.Error()}})
+	}
+	snapshot := compilerservice.New(units, options).Analyze()
+	if snapshot.HasErrors() {
+		return c.reportLintFailure(*format, snapshot.Diagnostics)
+	}
+	items, sources, err := analyzeLintArtifacts(snapshot.Artifacts, resolvedLint)
+	if err != nil {
+		return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: err.Error()}})
+	}
+	fixed := 0
+	fixedFiles := 0
+	if *fix && len(items) > 0 {
+		for path, source := range sources {
+			updated, applied, applyErr := lint.ApplyFixes(source, path, items)
+			if applyErr != nil {
+				return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: applyErr.Error()}})
+			}
+			if applied == 0 {
+				continue
+			}
+			info, statErr := os.Stat(path)
+			if statErr != nil {
+				return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: statErr.Error()}})
+			}
+			if writeErr := os.WriteFile(path, updated, info.Mode().Perm()); writeErr != nil {
+				return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: writeErr.Error()}})
+			}
+			fixed += applied
+			fixedFiles++
+		}
+		items, _, err = analyzeLintPaths(sources, resolvedLint)
+		if err != nil {
+			return c.reportLintFailure(*format, []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: err.Error()}})
+		}
+	}
+	if *format == "json" {
+		if err := c.writeLintJSONDiagnostics(items); err != nil {
+			return err
+		}
+	} else {
+		c.writeHumanDiagnostics(items)
+		if fixed > 0 {
+			fmt.Fprintf(c.Stdout, "fixed %d issue(s) in %d file(s)\n", fixed, fixedFiles)
+		} else if len(items) == 0 {
+			fmt.Fprintf(c.Stdout, "linted %d file(s)\n", count)
+		}
+	}
+	if lintDiagnosticsFail(items, *denyWarnings) {
+		return &reportedError{cause: errors.New("project lint failed")}
+	}
+	return nil
+}
+
+func analyzeLintArtifacts(artifacts []*compiler.Artifact, options lint.ResolvedOptions) ([]diagnostic.Diagnostic, map[string][]byte, error) {
+	items := []diagnostic.Diagnostic{}
+	sources := map[string][]byte{}
+	for _, artifact := range artifacts {
+		if artifact.CompilerOwned || artifact.Official || artifact.ExternalPackage {
+			continue
+		}
+		path, err := filepath.Abs(artifact.Filename)
+		if err != nil {
+			return nil, nil, err
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		sources[path] = source
+		items = append(items, lint.Analyze(artifact.AST, source, path, options)...)
+	}
+	lint.SortDiagnostics(items)
+	return items, sources, nil
+}
+
+func analyzeLintPaths(paths map[string][]byte, options lint.ResolvedOptions) ([]diagnostic.Diagnostic, map[string][]byte, error) {
+	items := []diagnostic.Diagnostic{}
+	updated := map[string][]byte{}
+	for path := range paths {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		program, parseDiagnostics := parser.Parse(source)
+		for _, item := range parseDiagnostics {
+			if item.Severity == diagnostic.Error {
+				return nil, nil, fmt.Errorf("safe lint fixes produced invalid source in %s: %s", path, item.Message)
+			}
+		}
+		updated[path] = source
+		items = append(items, lint.Analyze(program, source, path, options)...)
+	}
+	lint.SortDiagnostics(items)
+	return items, updated, nil
+}
+
+func lintDiagnosticsFail(items []diagnostic.Diagnostic, denyWarnings bool) bool {
+	for _, item := range items {
+		if item.Severity == diagnostic.Error || denyWarnings && item.Severity == diagnostic.Warning {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *CLI) reportLintFailure(format string, items []diagnostic.Diagnostic) error {
+	if format == "json" {
+		if err := c.writeLintJSONDiagnostics(items); err != nil {
+			return err
+		}
+	} else {
+		c.writeHumanDiagnostics(items)
+	}
+	return &reportedError{cause: errors.New("project lint failed")}
+}
+
+func (c *CLI) writeLintJSONDiagnostics(items []diagnostic.Diagnostic) error {
+	report := diagnostic.NewJSONReport(items)
+	report.ToolVersion = Version
+	encoder := json.NewEncoder(c.Stdout)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(report)
 }
 
 func (c *CLI) runTest(args []string) (resultErr error) {
@@ -2598,6 +2796,8 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb fmt [--check] [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb check [--diagnostic-format human|json] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb check [--diagnostic-format human|json] [--mode MODE] FILE.trb")
+	fmt.Fprintln(c.Stdout, "  trb lint [--fix] [--deny-warnings] [--diagnostic-format human|json] [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb lint [--fix] [--deny-warnings] [--diagnostic-format human|json] [--mode MODE] FILE.trb")
 	fmt.Fprintln(c.Stdout, "  trb test [--filter TEXT] [--file FILE] [--reporter human|json] [--compile [--debug] [--outfile FILE]] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE]")
