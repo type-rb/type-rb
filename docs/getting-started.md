@@ -18,13 +18,16 @@ brew install type-rb/tap/trb
 trb version
 ```
 
-To build the compiler from source, use Go 1.27:
+To compile the current stable release from source, use Go 1.27:
 
 ```sh
 go install github.com/type-rb/type-rb/cmd/trb@latest
+trb version
 ```
 
 Container builds can copy the compiler from the matching release image:
+
+Replace `X.Y.Z` with the TypeRB release to install:
 
 ```dockerfile
 ARG TYPERB_VERSION=X.Y.Z
@@ -49,10 +52,19 @@ def main()
 end
 ```
 
-Run it in Go mode, or select another target explicitly:
+TypeRB needs only the toolchain for the target you choose. The Go examples in
+the rest of this guide require Go 1.27. Ruby is required only for the Ruby
+command below, and Bun only for the TypeScript command.
+
+Run the program in Go mode to follow the rest of this guide:
 
 ```sh
 trb hello.trb
+```
+
+If you prefer another target, run only the corresponding command:
+
+```sh
 trb run --mode ruby hello.trb
 trb run --mode typescript --runtime bun hello.trb
 ```
