@@ -122,12 +122,14 @@ func Export(options Options) error {
 	if err := os.MkdirAll(filepath.Join(options.OutputDir, "assets"), 0o755); err != nil {
 		return err
 	}
-	stylesheet, err := assets.ReadFile("assets/site.css")
-	if err != nil {
-		return err
-	}
-	if err := writeFile(options.OutputDir, "assets/site.css", stylesheet); err != nil {
-		return err
+	for _, name := range []string{"site.css", "docs.js"} {
+		asset, err := assets.ReadFile("assets/" + name)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(options.OutputDir, "assets/"+name, asset); err != nil {
+			return err
+		}
 	}
 	if err := renderTemplate(options.OutputDir, "index.html", "landing.html", landingData{Version: options.Version}); err != nil {
 		return err

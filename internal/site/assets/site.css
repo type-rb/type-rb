@@ -595,6 +595,53 @@ a {
 	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018);
 }
 
+.markdown-body .code-block {
+	position: relative;
+	margin-bottom: 20px;
+}
+
+.markdown-body .code-block pre {
+	margin-bottom: 0;
+	padding-right: 82px;
+}
+
+.code-copy-button {
+	position: absolute;
+	top: 11px;
+	right: 11px;
+	z-index: 1;
+	min-width: 55px;
+	padding: 6px 9px;
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	border-radius: 7px;
+	background: rgba(19, 24, 32, 0.92);
+	color: #c9d1d9;
+	font: 650 12px/1.2 var(--sans);
+	cursor: pointer;
+	transition: 120ms ease;
+}
+
+.code-copy-button:hover {
+	border-color: rgba(255, 255, 255, 0.3);
+	background: #202732;
+	color: #ffffff;
+}
+
+.code-copy-button:focus-visible {
+	outline: 2px solid #58a6ff;
+	outline-offset: 2px;
+}
+
+.code-copy-button[data-state="copied"] {
+	border-color: rgba(63, 185, 80, 0.44);
+	color: #7ee787;
+}
+
+.code-copy-button[data-state="failed"] {
+	border-color: rgba(248, 81, 73, 0.48);
+	color: #ff7b72;
+}
+
 .markdown-body pre code {
 	padding: 0;
 	border: 0;
