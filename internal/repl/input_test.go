@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
@@ -145,6 +146,49 @@ func TestCompleteInputUsesCheckedReplContextForMembers(t *testing.T) {
 	}
 	if suggestions[0].Replacement != (languageservice.OffsetRange{Start: 5, End: 7}) {
 		t.Fatalf("replacement=%#v", suggestions[0].Replacement)
+	}
+}
+
+func TestAcceptedCompletionSourceAppliesVisibleImportAndPrimaryReplacement(t *testing.T) {
+	source := "note := \"😀\"\nma"
+	start := len("note := \"😀\"\n")
+	item := languageservice.CompletionItem{
+		InsertText:  "math",
+		Replacement: languageservice.OffsetRange{Start: start, End: len(source)},
+		AdditionalEdits: []languageservice.TextEdit{{
+			Range: languageservice.OffsetRange{}, NewText: "import trb/std/math\n",
+		}},
+	}
+	got, cursor, ok := acceptedCompletionSource(source, item)
+	want := "import trb/std/math\nnote := \"😀\"\nmath"
+	if !ok || got != want {
+		t.Fatalf("accepted completion=(%q, %v), want (%q, true)", got, ok, want)
+	}
+	if cursor != len(want) {
+		t.Fatalf("cursor=%d, want %d", cursor, len(want))
+	}
+
+	terminal := readline.NewShell()
+	applyAcceptedCompletion(terminal, source, item)
+	if got := string(*terminal.Line()); got != want {
+		t.Fatalf("terminal line=%q, want %q", got, want)
+	}
+	if got := terminal.Cursor().Pos(); got != len([]rune(want)) {
+		t.Fatalf("terminal cursor=%d, want %d", got, len([]rune(want)))
+	}
+}
+
+func TestAcceptedCompletionSourceRejectsOverlappingEdits(t *testing.T) {
+	source := "math"
+	item := languageservice.CompletionItem{
+		InsertText:  "math",
+		Replacement: languageservice.OffsetRange{Start: 0, End: len(source)},
+		AdditionalEdits: []languageservice.TextEdit{{
+			Range: languageservice.OffsetRange{Start: 1, End: 2}, NewText: "x",
+		}},
+	}
+	if got, _, ok := acceptedCompletionSource(source, item); ok || got != source {
+		t.Fatalf("overlapping edits=(%q, %v), want (%q, false)", got, ok, source)
 	}
 }
 

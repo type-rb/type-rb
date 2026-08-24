@@ -480,8 +480,12 @@ switches.
 - A REPL may add hidden imports for public declarations whose names resolve to
   exactly one project module, and for public types exported by portable
   standard packages. Ambiguous declarations still require an explicit import.
-  This is an interactive convenience only; project source keeps the same
-  explicit-import rule.
+  Completion may present portable standard functions and package namespaces,
+  including every matching origin; accepting one applies its ordinary named or
+  package import visibly to the input buffer. The submitted source and history
+  therefore remain valid ordinary TypeRB source. Hidden imports are an
+  interactive convenience only; project source keeps the same explicit-import
+  rule.
 - Portable packages use `trb/std/*`. Mode-specific APIs use mode-checked
   `trb/platform/<mode>/*` packages.
 - In TypeScript mode, a named import whose path belongs to a configured native

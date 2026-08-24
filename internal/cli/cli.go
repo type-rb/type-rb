@@ -1429,6 +1429,35 @@ func uniqueReplImports(artifacts []*compiler.Artifact, modulePath, mode string) 
 	return result
 }
 
+func standardReplExportNames(definition *stdlib.Package) []string {
+	if definition == nil {
+		return nil
+	}
+	names := map[string]bool{}
+	for name, symbol := range definition.Symbols {
+		if !symbol.CompilerOnly {
+			names[name] = true
+		}
+	}
+	for _, exported := range definition.RuntimeExports {
+		names[exported.Name] = true
+	}
+	if definition.Source != "" {
+		program, diagnostics := parser.Parse([]byte(definition.Source))
+		if !hasDiagnosticErrors(diagnostics) {
+			for name := range resolver.CollectExports(program.Statements) {
+				names[name] = true
+			}
+		}
+	}
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
+
 func replPrelude(imports []replImport, sessionSource string) string {
 	explicit := map[string]bool{}
 	explicitPaths := map[string]bool{}
@@ -1476,12 +1505,13 @@ func replPrelude(imports []replImport, sessionSource string) string {
 }
 
 func replCompletionCandidates(config *project.Config, artifacts []*compiler.Artifact, imports []replImport, sessionModule, sessionPackage string) (languageservice.Context, error) {
-	standard, err := replStandardCandidates(config, imports, sessionPackage)
+	standard, err := replStandardCandidates(config, sessionPackage)
 	if err != nil {
 		return languageservice.Context{}, err
 	}
 	project := replProjectCandidates(artifacts, imports, sessionModule)
-	return languageservice.MergeImportCandidateSets(standard, project), nil
+	standard.Symbols = append(standard.Symbols, project.Symbols...)
+	return standard, nil
 }
 
 func replProjectCandidates(artifacts []*compiler.Artifact, imports []replImport, sessionModule string) languageservice.Context {
@@ -1514,15 +1544,51 @@ func replProjectCandidates(artifacts []*compiler.Artifact, imports []replImport,
 	return filtered
 }
 
-func replStandardCandidates(config *project.Config, imports []replImport, sessionPackage string) (languageservice.Context, error) {
-	const modulePath = "__trb_repl_standard_candidates__"
-	var source strings.Builder
-	for _, imported := range imports {
-		if imported.standard {
-			fmt.Fprintf(&source, "import { %s } from %s\n", strings.Join(imported.symbols, ", "), imported.path)
-		}
+func replStandardCandidates(config *project.Config, sessionPackage string) (languageservice.Context, error) {
+	type packageCandidates struct {
+		path            string
+		modulePath      string
+		alias           string
+		names           []string
+		directModule    string
+		namespaceModule string
 	}
-	if source.Len() == 0 {
+	definitions := stdlib.PublicPortablePackages(config.Mode)
+	units := make([]compiler.SourceUnit, 0, len(definitions)*2)
+	packages := make([]packageCandidates, 0, len(definitions))
+	for index, definition := range definitions {
+		names := standardReplExportNames(definition)
+		if len(names) == 0 {
+			continue
+		}
+		candidate := packageCandidates{
+			path:            definition.Path,
+			modulePath:      definition.ModulePath,
+			alias:           definition.DefaultAlias(),
+			names:           names,
+			directModule:    fmt.Sprintf("__trb_repl_standard_direct_%d__", index),
+			namespaceModule: fmt.Sprintf("__trb_repl_standard_namespace_%d__", index),
+		}
+		if candidate.modulePath == "" {
+			candidate.modulePath = candidate.path
+		}
+		packages = append(packages, candidate)
+		units = append(units,
+			compiler.SourceUnit{
+				Filename:   filepath.Join(config.SourcePath(), fmt.Sprintf(".trb-repl-standard-direct-%d.trb", index)),
+				Source:     []byte(fmt.Sprintf("import { %s } from %s\n", strings.Join(names, ", "), definition.Path)),
+				ModulePath: candidate.directModule,
+				Package:    sessionPackage,
+			},
+			compiler.SourceUnit{
+				Filename:   filepath.Join(config.SourcePath(), fmt.Sprintf(".trb-repl-standard-namespace-%d.trb", index)),
+				Source:     []byte(fmt.Sprintf("import %s\n", definition.Path)),
+				ModulePath: candidate.namespaceModule,
+				Package:    sessionPackage,
+			},
+		)
+	}
+	if len(units) == 0 {
 		return languageservice.Context{}, nil
 	}
 	options, err := compilerOptions(config)
@@ -1530,12 +1596,7 @@ func replStandardCandidates(config *project.Config, imports []replImport, sessio
 		return languageservice.Context{}, err
 	}
 	options.AllowUnusedImports = true
-	artifacts, err := analyzeReplProject([]compiler.SourceUnit{{
-		Filename:   filepath.Join(config.SourcePath(), ".trb-repl-standard-candidates.trb"),
-		Source:     []byte(source.String()),
-		ModulePath: modulePath,
-		Package:    sessionPackage,
-	}}, options)
+	artifacts, err := analyzeReplProject(units, options)
 	if err != nil {
 		return languageservice.Context{}, err
 	}
@@ -1543,7 +1604,53 @@ func replStandardCandidates(config *project.Config, imports []replImport, sessio
 	for _, artifact := range artifacts {
 		programs = append(programs, artifact.IR)
 	}
-	return languageservice.BuildContext(programs, modulePath), nil
+	result := languageservice.Context{}
+	for _, candidate := range packages {
+		direct := languageservice.BuildContext(programs, candidate.directModule)
+		for _, name := range candidate.names {
+			if symbol, ok := replCandidateSymbol(direct.Symbols, name); ok {
+				imported := languageservice.Import{Path: candidate.path, ModulePath: candidate.modulePath, Symbol: name}
+				symbol = withReplCandidateImport(symbol, imported)
+				symbol.Detail = replCandidateDetail(symbol.Detail, candidate.path)
+				result.Symbols = append(result.Symbols, symbol)
+			}
+		}
+
+		namespace := languageservice.BuildContext(programs, candidate.namespaceModule)
+		if symbol, ok := replCandidateSymbol(namespace.Symbols, candidate.alias); ok {
+			imported := languageservice.Import{Path: candidate.path, ModulePath: candidate.modulePath}
+			symbol = withReplCandidateImport(symbol, imported)
+			symbol.Detail = candidate.path
+			result.Symbols = append(result.Symbols, symbol)
+		}
+	}
+	return result, nil
+}
+
+func replCandidateSymbol(symbols []languageservice.Symbol, name string) (languageservice.Symbol, bool) {
+	for _, symbol := range symbols {
+		if symbol.Name == name {
+			return symbol, true
+		}
+	}
+	return languageservice.Symbol{}, false
+}
+
+func withReplCandidateImport(symbol languageservice.Symbol, imported languageservice.Import) languageservice.Symbol {
+	result := symbol
+	result.Import = &imported
+	result.Members = append([]languageservice.Symbol(nil), symbol.Members...)
+	for index := range result.Members {
+		result.Members[index] = withReplCandidateImport(result.Members[index], imported)
+	}
+	return result
+}
+
+func replCandidateDetail(detail, packagePath string) string {
+	if detail == "" {
+		return packagePath
+	}
+	return detail + " — " + packagePath
 }
 
 func hasDiagnosticErrors(diagnostics []diagnostic.Diagnostic) bool {

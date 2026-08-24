@@ -1434,13 +1434,12 @@ func Lookup(packagePath string) (*Package, bool) {
 	return definition, ok
 }
 
-// RuntimeExportPackages returns public portable packages that declare source-
-// visible runtime types. Interactive tooling uses this catalog without
-// exposing internal packages or target-specific APIs.
-func RuntimeExportPackages(mode string) []*Package {
+// PublicPortablePackages returns compiler-owned packages that authored source
+// may import in every backend supported by mode.
+func PublicPortablePackages(mode string) []*Package {
 	paths := make([]string, 0, len(registry))
 	for packagePath, definition := range registry {
-		if definition == nil || definition.Internal || definition.Kind != Portable || !definition.Supports(mode) || len(definition.RuntimeExports) == 0 {
+		if definition == nil || definition.Internal || definition.Kind != Portable || !definition.Supports(mode) {
 			continue
 		}
 		paths = append(paths, packagePath)
@@ -1449,6 +1448,19 @@ func RuntimeExportPackages(mode string) []*Package {
 	result := make([]*Package, 0, len(paths))
 	for _, packagePath := range paths {
 		result = append(result, registry[packagePath])
+	}
+	return result
+}
+
+// RuntimeExportPackages returns public portable packages that declare source-
+// visible runtime types. Interactive tooling uses this catalog without
+// exposing internal packages or target-specific APIs.
+func RuntimeExportPackages(mode string) []*Package {
+	result := []*Package{}
+	for _, definition := range PublicPortablePackages(mode) {
+		if len(definition.RuntimeExports) > 0 {
+			result = append(result, definition)
+		}
 	}
 	return result
 }

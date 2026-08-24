@@ -44,6 +44,13 @@ func TestRangeLiteralCompletionInsertsToArray(t *testing.T) {
 	}
 }
 
+func TestCompletionAppliesVisibleImportEdit(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "math.sq\t(9)\r"), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:import trb/std/math\nmath.sqrt(9)]")) {
+		t.Fatalf("completion import was not preserved in the submitted line: %q", output)
+	}
+}
+
 func TestMultilineInputIsAutomaticallyFormatted(t *testing.T) {
 	input := "class User\r" +
 		"    def value(): Integer\r" +
@@ -151,7 +158,16 @@ func TestCompletionPTYChild(t *testing.T) {
 		t.Skip("PTY helper process")
 	}
 
-	terminal, err := newTerminalReader(Options{Mode: "go", language: languageservice.New("go")}, nil)
+	language := languageservice.New("go")
+	packageImport := &languageservice.Import{Path: "trb/std/math", ModulePath: "trb/std/math"}
+	language.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{{
+		Name: "math", Kind: languageservice.CompletionModule, Detail: "trb/std/math", Import: packageImport,
+		Members: []languageservice.Symbol{{
+			Name: "sqrt", Kind: languageservice.CompletionFunction, Detail: "sqrt(value: Float): Float", Import: packageImport,
+			Call: &languageservice.CallInfo{ParameterCount: 1},
+		}},
+	}}})
+	terminal, err := newTerminalReader(Options{Mode: "go", language: language}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

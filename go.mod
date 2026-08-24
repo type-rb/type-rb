@@ -15,6 +15,9 @@ require (
 	modernc.org/sqlite v1.53.0
 )
 
+// Temporary until reeflective/readline#120 is released.
+replace github.com/reeflective/readline => github.com/hiroki23/readline v1.3.1-0.20260824092528-c86f03b4d5f4
+
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

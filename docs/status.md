@@ -152,9 +152,10 @@ literals remain finite. Formatting preserves opaque native syntax and prevents
 whitespace removal from fusing separate tokens into another operator.
 
 The typed-IR REPL supports persistent state, auto-formatted multiline editing,
-history, completion menus, project declaration auto-import, suggestions,
-syntax highlighting, interrupts, type inspection, and mutable-binding result
-markers.
+history, completion menus, project declaration auto-import, portable-standard
+completion candidates, visible import edits for accepted completion
+candidates, suggestions, syntax highlighting, interrupts, type inspection,
+and mutable-binding result markers.
 The same compiler and evaluator power the local and hosted playground and tour.
 The hosted TypeRB website also renders the maintained user documentation,
 including the language and package guides, references, and one page for every

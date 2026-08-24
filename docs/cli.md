@@ -406,10 +406,11 @@ session.
 Public declarations with a name unique across the project and public types
 from portable standard packages are available without typing an import in the
 REPL. The session adds deterministic hidden imports while ordinary project
-source continues to require explicit imports. Completion therefore offers
-types such as `Date` and `Result` in a scratch session. If more than one module
-exports the same name, import the intended declaration explicitly before using
-it.
+source continues to require explicit imports. Completion offers types such as
+`Date` and `Result`, package namespaces such as `math`, and functions such as
+`md5` in a scratch session. Accepting an import candidate inserts its ordinary
+import visibly into the input. If more than one package exports the same name,
+the menu shows each origin and accepting one inserts the selected import.
 
 Each submission passes through the ordinary parser, resolver, type checker,
 typed IR lowering, and evaluator. Platform packages are accepted or rejected
@@ -426,10 +427,12 @@ REPL commands are:
 Interactive terminals provide multiline input, colors, and a Tab completion
 menu with checked signatures and return types. A single candidate completes
 directly; multiple candidates are shown before Tab or Shift-Tab cycles through
-them. Enter reindents a multiline submission with a visual width of two spaces
-per level and indents the next line while a block or delimiter is open. The
-accepted input retains that visual width on screen, while the value used for
-evaluation and history storage is converted to canonical tab-based
+them. Completion edits, including an inserted import, become part of the
+visible input and saved history, so copied submissions remain ordinary TypeRB
+source. Enter reindents a multiline submission with a visual width of two
+spaces per level and indents the next line while a block or delimiter is open.
+The accepted input retains that visual width on screen, while the value used
+for evaluation and history storage is converted to canonical tab-based
 indentation. Terminals also provide
 cursor editing, Up/Down history, and Ctrl-R
 reverse search. Ctrl-B/F moves by
