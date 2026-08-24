@@ -74,7 +74,7 @@ func newTerminalReader(options Options, history []string) (*readline.Shell, erro
 		return highlightInput(source, options.language.Highlight(source))
 	}
 	terminal.Completer = func(line []rune, cursor int) readline.Completions {
-		return completeInputForTerminal(terminal, options.language, line, cursor)
+		return completeInput(options.language, line, cursor)
 	}
 	if err := terminal.Config.Set("enable-bracketed-paste", true); err != nil {
 		return nil, err
@@ -329,10 +329,6 @@ func completionSuggestions(service *languageservice.Service, input string, curso
 }
 
 func completeInput(service *languageservice.Service, line []rune, cursor int) readline.Completions {
-	return completeInputForTerminal(nil, service, line, cursor)
-}
-
-func completeInputForTerminal(terminal *readline.Shell, service *languageservice.Service, line []rune, cursor int) readline.Completions {
 	if cursor < 0 || cursor > len(line) {
 		return readline.Completions{}
 	}
@@ -352,8 +348,12 @@ func completeInputForTerminal(terminal *readline.Shell, service *languageservice
 			Display:     item.Label,
 			Description: item.Detail,
 			Tag:         string(item.Kind),
-			OnAccept: func() {
-				applyAcceptedCompletion(terminal, source, accepted)
+			OnAccept: func(line []rune, cursor int) ([]rune, int) {
+				updated, byteCursor, ok := acceptedCompletionSource(source, accepted)
+				if !ok {
+					return line, cursor
+				}
+				return []rune(updated), utf8.RuneCountInString(updated[:byteCursor])
 			},
 		})
 	}
@@ -370,20 +370,11 @@ func completeInputForTerminal(terminal *readline.Shell, service *languageservice
 	return result
 }
 
-func applyAcceptedCompletion(terminal *readline.Shell, source string, item languageservice.CompletionItem) {
-	if terminal == nil {
-		return
-	}
-	updated, cursor, ok := acceptedCompletionSource(source, item)
-	if !ok {
-		return
-	}
-	line := []rune(updated)
-	terminal.Line().Set(line...)
-	terminal.Cursor().Set(utf8.RuneCountInString(updated[:cursor]))
-}
-
 func acceptedCompletionSource(source string, item languageservice.CompletionItem) (string, int, bool) {
+	if imported, ok := bareCompletionImport(source, item); ok {
+		return imported, len(imported), true
+	}
+
 	type completionEdit struct {
 		range_  languageservice.OffsetRange
 		text    string
@@ -436,4 +427,19 @@ func acceptedCompletionSource(source string, item languageservice.CompletionItem
 		return source, 0, false
 	}
 	return updated, cursor, true
+}
+
+func bareCompletionImport(source string, item languageservice.CompletionItem) (string, bool) {
+	if item.Replacement.Start != 0 || item.Replacement.End != len(source) || len(item.AdditionalEdits) != 1 {
+		return "", false
+	}
+	edit := item.AdditionalEdits[0]
+	if edit.Range != (languageservice.OffsetRange{}) || !strings.HasPrefix(edit.NewText, "import ") {
+		return "", false
+	}
+	imported := strings.TrimSuffix(edit.NewText, "\n")
+	if imported == edit.NewText || strings.Contains(imported, "\n") {
+		return "", false
+	}
+	return imported, true
 }

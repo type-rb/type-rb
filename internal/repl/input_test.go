@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
@@ -167,14 +166,21 @@ func TestAcceptedCompletionSourceAppliesVisibleImportAndPrimaryReplacement(t *te
 	if cursor != len(want) {
 		t.Fatalf("cursor=%d, want %d", cursor, len(want))
 	}
+}
 
-	terminal := readline.NewShell()
-	applyAcceptedCompletion(terminal, source, item)
-	if got := string(*terminal.Line()); got != want {
-		t.Fatalf("terminal line=%q, want %q", got, want)
+func TestAcceptedCompletionSourceTurnsBareCandidateIntoImportSubmission(t *testing.T) {
+	source := "sha"
+	item := languageservice.CompletionItem{
+		InsertText:  "sha256",
+		Replacement: languageservice.OffsetRange{Start: 0, End: len(source)},
+		AdditionalEdits: []languageservice.TextEdit{{
+			Range: languageservice.OffsetRange{}, NewText: "import { sha256 } from trb/std/hash\n",
+		}},
 	}
-	if got := terminal.Cursor().Pos(); got != len([]rune(want)) {
-		t.Fatalf("terminal cursor=%d, want %d", got, len([]rune(want)))
+	got, cursor, ok := acceptedCompletionSource(source, item)
+	want := "import { sha256 } from trb/std/hash"
+	if !ok || got != want || cursor != len(want) {
+		t.Fatalf("bare completion=(%q, %d, %v), want (%q, %d, true)", got, cursor, ok, want, len(want))
 	}
 }
 
@@ -240,6 +246,36 @@ func TestTerminalReaderUsesMultilineAwareHistoryNavigation(t *testing.T) {
 				t.Errorf("%s binding %q=%q, want trb-accept-line", keymap, sequence, binding.Action)
 			}
 		}
+	}
+}
+
+func TestTerminalAcceptLineCommitsSelectedImportCompletion(t *testing.T) {
+	language := languageservice.New("go")
+	language.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{
+		{
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "hmac",
+			Import: &languageservice.Import{Path: "trb/std/hmac", Symbol: "sha256"},
+			Call:   &languageservice.CallInfo{ParameterCount: 2},
+		},
+		{
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "hash",
+			Import: &languageservice.Import{Path: "trb/std/hash", Symbol: "sha256"},
+			Call:   &languageservice.CallInfo{ParameterCount: 1},
+		},
+	}})
+	terminal, err := newTerminalReader(Options{Mode: "go", language: language}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal.Line().Set([]rune("sha")...)
+	terminal.Cursor().Set(3)
+	complete := terminal.Keymap.Commands()["complete"]
+	complete()
+	complete()
+	terminal.Keymap.Commands()["accept-line"]()
+
+	if got := string(*terminal.Line()); got != "import { sha256 } from trb/std/hash" && got != "import { sha256 } from trb/std/hmac" {
+		t.Fatalf("accepted line=%q, want selected import", got)
 	}
 }
 

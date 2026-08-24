@@ -482,10 +482,12 @@ switches.
   standard packages. Ambiguous declarations still require an explicit import.
   Completion may present portable standard functions and package namespaces,
   including every matching origin; accepting one applies its ordinary named or
-  package import visibly to the input buffer. The submitted source and history
-  therefore remain valid ordinary TypeRB source. Hidden imports are an
-  interactive convenience only; project source keeps the same explicit-import
-  rule.
+  package import visibly to the input buffer. When the current submission is
+  only the unresolved candidate, acceptance turns it into an import-only
+  submission. Completion inside a larger expression preserves that expression
+  and prepends the import. The submitted source and history therefore remain
+  valid ordinary TypeRB source. Hidden imports are an interactive convenience
+  only; project source keeps the same explicit-import rule.
 - Portable packages use `trb/std/*`. Mode-specific APIs use mode-checked
   `trb/platform/<mode>/*` packages.
 - In TypeScript mode, a named import whose path belongs to a configured native

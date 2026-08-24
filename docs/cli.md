@@ -411,6 +411,9 @@ source continues to require explicit imports. Completion offers types such as
 `md5` in a scratch session. Accepting an import candidate inserts its ordinary
 import visibly into the input. If more than one package exports the same name,
 the menu shows each origin and accepting one inserts the selected import.
+When the input consists only of that candidate, acceptance submits only the
+import; complete the function or package member at the next prompt. Completion
+inside a larger expression keeps the expression and prepends its import.
 
 Each submission passes through the ordinary parser, resolver, type checker,
 typed IR lowering, and evaluator. Platform packages are accepted or rejected
