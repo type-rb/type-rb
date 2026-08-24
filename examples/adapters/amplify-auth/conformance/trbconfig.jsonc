@@ -1,0 +1,26 @@
+{
+  "name": "amplify-auth-adapter-conformance",
+  "version": "0.1.0",
+  "mode": "typescript",
+  "sourceDir": "src",
+  "outDir": "build",
+  "copyFiles": true,
+  "packageManagement": "managed",
+  "packages": {
+    "type-rb/amplify-auth": {
+      "path": ".."
+    }
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "^6.0.0"
+  },
+  "typescript": {
+    "packageManager": "bun",
+    "moduleType": "module",
+    "runtime": "browser",
+    "scripts": {
+      "check": "tsc -p tsconfig.json && bun src/native/observe-rich-error.ts && bun src/native/bootstrap.ts"
+    }
+  }
+}

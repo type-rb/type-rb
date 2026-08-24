@@ -1,0 +1,17 @@
+{
+  "name": "amplify-auth-adapter-conformance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun",
+  "scripts": {
+    "check": "tsc -p tsconfig.json && bun src/native/observe-rich-error.ts && bun src/native/bootstrap.ts"
+  },
+  "dependencies": {
+    "aws-amplify": "6.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "^6.0.0"
+  }
+}

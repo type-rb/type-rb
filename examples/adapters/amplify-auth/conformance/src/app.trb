@@ -1,0 +1,11 @@
+import { Result } from trb/std/result
+import { SignInInput, SignInOutput, signIn } from "aws-amplify/auth"
+
+def attempt_sign_in(): Result<SignInOutput, String>
+	input := SignInInput.new(username: "", password: "")
+	return signIn(input)
+end
+
+def signed_in(output: SignInOutput): Boolean
+	return output.isSignedIn
+end

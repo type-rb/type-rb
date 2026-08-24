@@ -208,6 +208,33 @@ func auth0ReactAdapterCatalog(t *testing.T) *nativepackage.Catalog {
 	return catalog
 }
 
+func amplifyAuthAdapterExampleRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "examples", "adapters", "amplify-auth"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func amplifyAuthAdapterCatalog(t *testing.T) *nativepackage.Catalog {
+	t.Helper()
+	root := amplifyAuthAdapterExampleRoot(t)
+	manifest, err := packageManager.ReadTypeRBManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependencies := manifest.NativeDependenciesFor("typescript")
+	catalog := nativepackage.Empty(dependencies)
+	if err := nativepackage.ApplyDeclarationAdapterFiles(catalog, []declarationadapterhost.Source{{
+		Package: manifest.Name, Mode: "typescript",
+		Path: filepath.Join(root, manifest.DeclarationAdapterFor("typescript")), Dependencies: dependencies,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}
+
 func nativeGenericQueryCatalog(t *testing.T) *nativepackage.Catalog {
 	t.Helper()
 	catalog := tanStackQueryAdapterCatalog(t)
@@ -616,6 +643,46 @@ func TestCompileTypeScriptAuth0ReactAdapterExample(t *testing.T) {
 	_, err = CompileWithOptions("invalid.trb", invalid, Options{Mode: "typescript", NativePackages: auth0ReactAdapterCatalog(t)})
 	if err == nil || !strings.Contains(err.Error(), "the complete Auth0 User shape is outside this adapter's state-only projection") {
 		t.Fatalf("expected unsupported Auth0 user diagnostic, got %v", err)
+	}
+}
+
+func TestCompileTypeScriptAmplifyAuthAdapterExample(t *testing.T) {
+	root := amplifyAuthAdapterExampleRoot(t)
+	source, err := os.ReadFile(filepath.Join(root, "conformance", "src", "app.trb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "app.trb", ModulePath: "app", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: amplifyAuthAdapterCatalog(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.Filename == "app.trb" {
+			output = string(artifact.Output)
+		}
+	}
+	for _, expected := range []string{
+		`import { Result } from "./trb/std/result/index.ts";`,
+		`import { signIn } from "aws-amplify/auth";`,
+		`import type { SignInInput, SignInOutput } from "aws-amplify/auth";`,
+		`export async function attempt_sign_in(): Promise<Result<SignInOutput, string>>`,
+		`const input: SignInInput = ({username: "", password: ""} satisfies SignInInput);`,
+		`const __trbPromise: Promise<SignInOutput> = signIn(input); const __trbValue: SignInOutput = await __trbPromise`,
+		`__trbError instanceof Error ? __trbError.message : String(__trbError)`,
+		`return output.isSignedIn;`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated Amplify Auth adapter output is missing %q:\n%s", expected, output)
+		}
+	}
+
+	invalid := []byte("import { SignInOutput } from \"aws-amplify/auth\"\ndef inspect(output: SignInOutput)\n\tputs(output.nextStep)\nend\n")
+	_, err = CompileWithOptions("invalid.trb", invalid, Options{Mode: "typescript", NativePackages: amplifyAuthAdapterCatalog(t)})
+	if err == nil || !strings.Contains(err.Error(), "the complete Amplify multi-step sign-in union is outside this adapter's completed-state projection") {
+		t.Fatalf("expected unsupported Amplify nextStep diagnostic, got %v", err)
 	}
 }
 

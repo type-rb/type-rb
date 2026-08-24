@@ -520,6 +520,12 @@ The `examples/adapters/auth0-react` fixture verifies readonly properties on a
 non-constructible interface, a React provider projection, and native Promise
 calls exposed as checked Results. Its token, login, and logout methods use the
 `promise_rejection_to_result` call bridge described above.
+The `examples/adapters/amplify-auth` fixture applies the same String bridge to
+Amplify Auth 6.20.0 and separately observes the native error name, message, and
+recovery suggestion that a future package-owned rich rejection mapper would
+need to preserve. Its application-owned TypeScript bootstrap imports
+`amplify_outputs.json` and calls `Amplify.configure`; project-specific generated
+configuration does not require adapter code or a compiler provider.
 
 An adapter package may connect one conformance project to each adapter mode:
 

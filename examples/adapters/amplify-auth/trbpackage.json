@@ -1,0 +1,21 @@
+{
+  "formatVersion": 1,
+  "name": "github.com/type-rb/amplify-auth-adapter-example",
+  "version": "0.1.0",
+  "sourceDir": "src",
+  "modes": ["typescript"],
+  "nativeDependencies": {
+    "typescript": {
+      "aws-amplify": "6.20.0"
+    }
+  },
+  "declarationAdapters": {
+    "typescript": "declarations/typescript.json"
+  },
+  "adapterTests": {
+    "typescript": {
+      "config": "conformance/trbconfig.jsonc",
+      "command": ["bun", "run", "check"]
+    }
+  }
+}

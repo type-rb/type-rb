@@ -80,6 +80,7 @@ func TestSyncAddsImportedTypeRBPackageDependencies(t *testing.T) {
 func TestSyncNpmPackage(t *testing.T) {
 	config := project.New(t.TempDir(), "typescript")
 	config.Dependencies["zod"] = "^4.0.0"
+	config.TypeScript.Scripts["check"] = "tsc && bun test < fixtures/input.ts"
 	path, err := Sync(config)
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +94,7 @@ func TestSyncNpmPackage(t *testing.T) {
 	}
 	var manifest struct {
 		Type            string            `json:"type"`
+		Scripts         map[string]string `json:"scripts"`
 		Dependencies    map[string]string `json:"dependencies"`
 		DevDependencies map[string]string `json:"devDependencies"`
 	}
@@ -101,6 +103,12 @@ func TestSyncNpmPackage(t *testing.T) {
 	}
 	if manifest.Type != "module" || manifest.Dependencies["zod"] != "^4.0.0" || manifest.DevDependencies["typescript"] != project.DefaultTypeScriptVersion {
 		t.Fatalf("unexpected package.json: %s", data)
+	}
+	if manifest.Scripts["check"] != config.TypeScript.Scripts["check"] {
+		t.Fatalf("unexpected package.json script: %s", data)
+	}
+	if !strings.Contains(string(data), `"check": "tsc && bun test < fixtures/input.ts"`) {
+		t.Fatalf("package.json HTML-escapes its shell script:\n%s", data)
 	}
 }
 

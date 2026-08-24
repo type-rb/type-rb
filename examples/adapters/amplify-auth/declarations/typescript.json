@@ -1,0 +1,83 @@
+{
+  "protocolVersion": 2,
+  "modules": {
+    "aws-amplify/auth": {
+      "exports": {
+        "SignInInput": {
+          "kind": "record",
+          "type": {
+            "kind": "named",
+            "name": "SignInInput"
+          },
+          "fields": [
+            {
+              "name": "username",
+              "type": {
+                "kind": "string",
+                "name": "String"
+              }
+            },
+            {
+              "name": "password",
+              "type": {
+                "kind": "string",
+                "name": "String"
+              },
+              "optional": true
+            }
+          ]
+        },
+        "SignInOutput": {
+          "kind": "interface",
+          "type": {
+            "kind": "named",
+            "name": "SignInOutput"
+          },
+          "fields": [
+            {
+              "name": "isSignedIn",
+              "type": {
+                "kind": "bool",
+                "name": "Boolean"
+              }
+            }
+          ],
+          "unsupportedFields": {
+            "nextStep": "the complete Amplify multi-step sign-in union is outside this adapter's completed-state projection"
+          }
+        },
+        "signIn": {
+          "kind": "function",
+          "type": {
+            "kind": "named",
+            "name": "Result",
+            "arguments": [
+              {
+                "kind": "named",
+                "name": "SignInOutput"
+              },
+              {
+                "kind": "string",
+                "name": "String"
+              }
+            ]
+          },
+          "parameters": [
+            {
+              "kind": "named",
+              "name": "SignInInput"
+            }
+          ],
+          "required": 1,
+          "resultBridge": {
+            "kind": "promise_rejection_to_result",
+            "error": {
+              "kind": "string",
+              "name": "String"
+            }
+          }
+        }
+      }
+    }
+  }
+}
