@@ -46,7 +46,9 @@ import (
 )
 
 // Version is a variable so release builds can inject the tag with Go's -X
-// linker flag while local source builds retain a useful development version.
+// linker flag while local and branch source builds retain a useful development
+// version. A tagged module installation resolves its version from Go build
+// information in version.go.
 var Version = "0.3.26-dev"
 
 type buildArtifactKind string

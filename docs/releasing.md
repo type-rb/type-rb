@@ -7,9 +7,11 @@ binary in a public multi-platform OCI image at `ghcr.io/type-rb/trb`.
 
 ## Version convention
 
-The version embedded in source builds is the next planned release followed by
-`-dev`, written as `X.Y.Z-dev`. A release tag uses the corresponding stable
-version `vX.Y.Z`; release packaging embeds `X.Y.Z` in every binary.
+The checked-in version is the next planned release followed by `-dev`, written
+as `X.Y.Z-dev`. Local builds and branch-based module installations retain that
+development version. An installation from a tagged Go module reports the
+module tag, and release packaging embeds the same stable `X.Y.Z` in every
+published binary.
 
 After publishing a release, the Release workflow advances the source version
 to the next planned patch release through an automatically merged pull request

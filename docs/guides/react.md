@@ -3,11 +3,20 @@
 TypeRB can emit ordinary TSX for existing React tools. This browser integration
 is an initial alpha feature and may evolve before TypeRB reaches 1.0.
 
-Import the explicit React platform package and use a record for component
-props:
+## Run a first component
+
+Create a browser TypeScript project:
+
+```sh
+trb init --mode typescript --runtime browser react-app
+cd react-app
+```
+
+Create `main.trb`. Import the explicit React platform package and use a record
+for component props:
 
 ```trb
-import { ReactNode } from trb/platform/typescript/react
+import { ReactNode, mount } from trb/platform/typescript/react
 
 record GreetingProps
 	name: String
@@ -16,15 +25,9 @@ end
 def Greeting(props: GreetingProps): ReactNode
 	return <p>Hello, {props.name}</p>
 end
-```
-
-Mount a component with no props at the browser entry point:
-
-```trb
-import { ReactNode, mount } from trb/platform/typescript/react
 
 def App(): ReactNode
-	return <main>TypeRB</main>
+	return <main><Greeting name="TypeRB" /></main>
 end
 
 def main()
@@ -32,6 +35,39 @@ def main()
 	return
 end
 ```
+
+Create `index.html` for Vite:
+
+```html
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>TypeRB React</title>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="/build/main.tsx"></script>
+	</body>
+</html>
+```
+
+Add Vite, install the generated React dependencies, and build the TypeRB
+source:
+
+```sh
+trb add --native --dev vite
+trb install
+trb fmt
+trb check
+trb build
+npm exec vite
+```
+
+Open the URL printed by Vite, then press `Ctrl-C` to stop it. The default
+TypeScript browser project uses npm and therefore requires Node.js. Set
+`typescript.packageManager` to `"bun"` if the project uses Bun instead.
 
 The compiler checks required, unknown, and mistyped props, including components
 imported from another TypeRB module. Files containing JSX are generated as

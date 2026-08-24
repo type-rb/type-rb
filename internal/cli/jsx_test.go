@@ -62,7 +62,8 @@ func TestReactImportContributesManagedNativeDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dependencies["react"] != "latest" || dependencies["react-dom"] != "latest" {
+	if dependencies["react"] != "latest" || dependencies["react-dom"] != "latest" ||
+		dependencies["@types/react"] != "latest" || dependencies["@types/react-dom"] != "latest" {
 		t.Fatalf("unexpected managed React dependencies: %#v", dependencies)
 	}
 }

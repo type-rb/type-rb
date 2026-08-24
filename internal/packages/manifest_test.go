@@ -112,6 +112,39 @@ func TestSyncNpmPackage(t *testing.T) {
 	}
 }
 
+func TestSyncNpmPackageAddsRequiredTypeDeclarationsAsDevelopmentDependencies(t *testing.T) {
+	config := project.New(t.TempDir(), "typescript")
+	path, err := SyncWithDependencies(config, map[string]string{
+		"@types/react": "latest",
+		"react":        "latest",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Dependencies["react"] != "latest" || manifest.DevDependencies["@types/react"] != "latest" {
+		t.Fatalf("unexpected package.json: %s", data)
+	}
+	if _, exists := manifest.Dependencies["@types/react"]; exists {
+		t.Fatalf("type declarations were emitted as a runtime dependency: %s", data)
+	}
+
+	config.DevDependencies["@types/react"] = "^18.0.0"
+	if _, err := SyncWithDependencies(config, map[string]string{"@types/react": "latest"}); err == nil || !strings.Contains(err.Error(), "requires latest") {
+		t.Fatalf("expected package-owned type dependency conflict, got %v", err)
+	}
+}
+
 func TestSyncBunPackage(t *testing.T) {
 	config := project.New(t.TempDir(), "typescript")
 	config.TypeScript.Runtime = project.TypeScriptRuntimeBun

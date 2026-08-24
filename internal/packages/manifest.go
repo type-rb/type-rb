@@ -183,7 +183,7 @@ func goManifest(config *project.Config, packageDependencies map[string]string) (
 }
 
 func npmManifest(config *project.Config, packageDependencies map[string]string) ([]byte, error) {
-	dependencies, err := mergeDependencies(config.Dependencies, packageDependencies)
+	dependencies, devDependencies, err := mergeNPMDependencies(config, packageDependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func npmManifest(config *project.Config, packageDependencies map[string]string) 
 		PackageManager:  config.TypeScript.PackageManager,
 		Scripts:         config.TypeScript.Scripts,
 		Dependencies:    dependencies,
-		DevDependencies: config.DevDependencies,
+		DevDependencies: devDependencies,
 	}
 	var data bytes.Buffer
 	encoder := json.NewEncoder(&data)
@@ -216,6 +216,43 @@ func npmManifest(config *project.Config, packageDependencies map[string]string) 
 	return data.Bytes(), nil
 }
 
+func mergeNPMDependencies(config *project.Config, required map[string]string) (map[string]string, map[string]string, error) {
+	dependencies := cloneDependencies(config.Dependencies)
+	devDependencies := cloneDependencies(config.DevDependencies)
+	for name, version := range required {
+		if configuredVersion, exists := dependencies[name]; exists {
+			if configuredVersion != version {
+				return nil, nil, dependencyConflict(name, configuredVersion, version)
+			}
+			continue
+		}
+		if configuredVersion, exists := devDependencies[name]; exists {
+			if configuredVersion != version {
+				return nil, nil, dependencyConflict(name, configuredVersion, version)
+			}
+			continue
+		}
+		if strings.HasPrefix(name, "@types/") {
+			devDependencies[name] = version
+		} else {
+			dependencies[name] = version
+		}
+	}
+	return dependencies, devDependencies, nil
+}
+
+func cloneDependencies(source map[string]string) map[string]string {
+	result := make(map[string]string, len(source))
+	for name, version := range source {
+		result[name] = version
+	}
+	return result
+}
+
+func dependencyConflict(name, configured, required string) error {
+	return fmt.Errorf("dependency %s is configured as %s but an imported TypeRB package requires %s", name, configured, required)
+}
+
 func mergeDependencies(configured, required map[string]string) (map[string]string, error) {
 	result := make(map[string]string, len(configured)+len(required))
 	for name, version := range configured {
@@ -223,7 +260,7 @@ func mergeDependencies(configured, required map[string]string) (map[string]strin
 	}
 	for name, version := range required {
 		if configuredVersion, exists := result[name]; exists && configuredVersion != version {
-			return nil, fmt.Errorf("dependency %s is configured as %s but an imported TypeRB package requires %s", name, configuredVersion, version)
+			return nil, dependencyConflict(name, configuredVersion, version)
 		}
 		result[name] = version
 	}

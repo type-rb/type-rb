@@ -64,8 +64,10 @@ Continue with one small vertical slice:
   [browser HTTP guide](guides/browser-http.md)
 - Reusable dependency: [package guide](guides/packages.md)
 
-Each guide describes the current public API and its intentional limitations.
-Combine them only after each individual slice builds and runs.
+Each guide describes the current public API and its intentional limitations,
+but not every guide is a standalone end-to-end tutorial. Work on each slice in
+a separate project, follow its setup prerequisites, and use the applicable
+check, build, test, or run command before combining slices.
 
 ## 4. Look up details
 
