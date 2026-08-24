@@ -2,6 +2,50 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.25 - 2026-08-24
+
+### Breaking changes
+
+- `return if condition` is now the bare conditional-return statement. Source
+  that directly returned a complete value-producing `if` block must assign the
+  complete expression before returning it or replace it with the new
+  conditional expression. ([#489](https://github.com/type-rb/type-rb/pull/489))
+
+### Language and compiler
+
+- `condition ? value : alternative` provides a lazy, strictly Boolean
+  conditional expression, while `return`, `next`, and `break` accept a trailing
+  `if` for concise control transfer. Both forms share narrowing, typed IR, and
+  portable behavior across Go, Ruby, TypeScript, and the REPL.
+  ([#489](https://github.com/type-rb/type-rb/pull/489))
+- Formatting preserves native syntax and token boundaries, and portable
+  Integer range checks and Float edge behavior are consistent across every
+  backend and the REPL.
+  ([#486](https://github.com/type-rb/type-rb/pull/486))
+
+### Tooling
+
+- `trb lint` runs correctness checking before a configurable built-in ruleset,
+  supports human or versioned JSON diagnostics, and applies explicitly safe
+  fixes. The initial recommended rule converts simple single-transfer guard
+  blocks into conditional transfers without discarding comments or producing
+  lines over 120 rendered columns.
+  ([#489](https://github.com/type-rb/type-rb/pull/489))
+- REPL compile-time and runtime diagnostics report stable source locations,
+  label the interactive session as `(trb)`, and use project-relative paths for
+  project source.
+  ([#487](https://github.com/type-rb/type-rb/pull/487))
+
+### Packages
+
+- `trb update PACKAGE...` selectively re-resolves the requested direct package
+  graphs while keeping other direct dependency graphs pinned.
+  ([#488](https://github.com/type-rb/type-rb/pull/488))
+- The adapter conformance examples now include Amplify Auth sign-in with
+  checked failures and application-owned runtime configuration. Managed
+  TypeScript package manifests also keep shell operators readable.
+  ([#485](https://github.com/type-rb/type-rb/pull/485))
+
 ## 0.3.24 - 2026-08-24
 
 ### Breaking changes
