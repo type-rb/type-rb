@@ -24,6 +24,7 @@ trb add --source gitlab.com/company/auth company/auth v2.0.0
 trb add --path ../contracts local/contracts
 trb remove acme/contracts
 trb update
+trb update acme/contracts
 
 # Manage a Go module, gem, or npm/Bun package in the target manifest.
 trb add --native PACKAGE VERSION
@@ -53,6 +54,15 @@ drift, while `--offline` uses only local packages and the existing project
 cache. `--config` selects an explicit project configuration, including when a
 single source tree has separate target configurations. See the
 [package guide](guides/packages.md).
+
+`trb update` re-resolves the complete TypeRB package graph. Passing one or more
+direct project aliases re-resolves only those packages and the dependencies
+reached from their new manifests. Other direct package graphs remain pinned.
+A selective update requires a current `trb.lock`; run `trb install` first after
+editing project package requirements. If a selected graph requests a different
+version of a canonical package still pinned by an unselected graph, resolution
+reports the existing incompatible-requirements error instead of choosing a
+version implicitly.
 
 `trb adapter check` runs from a TypeRB package root by default, or accepts one
 explicit package-root directory. It validates `trbpackage.json`, every

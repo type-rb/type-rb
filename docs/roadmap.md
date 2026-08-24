@@ -88,9 +88,12 @@ than detailed syntax.
   Evaluate equivalent package-owned type discovery for Go modules and gems
   only where the initial package-owned string-wire runtime adapter is
   insufficient; do not make application authors duplicate native signatures.
-- Evolve the initial distributed Git package system with semantic version
-  constraints, selective updates, publishing conventions, shared caches,
-  vulnerability/audit integration, and namespace-stable type identities.
+- Make public type identities namespace-stable across independent packages,
+  then add semantic-version constraints with an explicit version-selection
+  policy. Complete production distribution with publishing validation,
+  provenance and vulnerability/audit integration. Add a shared cache only
+  after its concurrency, permission, and garbage-collection rules are defined;
+  the project-local content-addressed cache remains the portable baseline.
 - Evolve the experimental bundled-package call-specialization data contract and
   the initial mode-independent Declaration/Adapter Protocol into a stable,
   sandboxed extension protocol

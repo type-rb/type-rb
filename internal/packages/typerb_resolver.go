@@ -16,9 +16,10 @@ import (
 )
 
 type TypeRBResolveOptions struct {
-	Frozen  bool
-	Offline bool
-	Update  bool
+	Frozen         bool
+	Offline        bool
+	Update         bool
+	UpdatePackages []string
 }
 
 type TypeRBResolvedPackage struct {
@@ -63,7 +64,11 @@ var errLocalTypeRBManifestChanged = errors.New("local TypeRB package manifest ch
 // ResolveTypeRBPackages creates or reuses the deterministic project lock and
 // ensures every remote package is present in the content-addressed cache.
 func ResolveTypeRBPackages(config *project.Config, options TypeRBResolveOptions) (*TypeRBPackages, error) {
-	if len(config.Packages) == 0 && !options.Update {
+	selectiveUpdate := len(options.UpdatePackages) > 0
+	if options.Update && selectiveUpdate {
+		return nil, errors.New("cannot combine a full TypeRB package update with selected packages")
+	}
+	if len(config.Packages) == 0 && !options.Update && !selectiveUpdate {
 		return emptyTypeRBPackages(), nil
 	}
 	checksum, err := typeRBConfigChecksum(config)
@@ -73,13 +78,24 @@ func ResolveTypeRBPackages(config *project.Config, options TypeRBResolveOptions)
 	lockPath := TypeRBLockPath(config)
 	locked, lockErr := ReadTypeRBLock(lockPath)
 	current := lockErr == nil && locked.ConfigChecksum == checksum
+	if selectiveUpdate {
+		if !current {
+			if lockErr != nil && !errors.Is(lockErr, os.ErrNotExist) {
+				return nil, lockErr
+			}
+			return nil, errors.New("cannot selectively update TypeRB packages because trb.lock is missing or stale; run trb install first")
+		}
+		if options.Frozen || options.Offline {
+			return nil, errors.New("a selective TypeRB package update cannot be frozen or offline")
+		}
+	}
 	if options.Frozen && !current {
 		if lockErr != nil && !errors.Is(lockErr, os.ErrNotExist) {
 			return nil, lockErr
 		}
 		return nil, errors.New("trb.lock does not match trbconfig.jsonc; run trb install without --frozen")
 	}
-	if current && !options.Update {
+	if current && !options.Update && !selectiveUpdate {
 		if err := ensureTypeRBPackageCache(config, locked, options.Offline); err != nil {
 			return nil, err
 		}
@@ -101,17 +117,59 @@ func ResolveTypeRBPackages(config *project.Config, options TypeRBResolveOptions)
 		loading: map[string]bool{},
 	}
 	aliases := sortedRequirements(config.Packages)
+	selected, err := selectedPackageAliases(options.UpdatePackages, config.Packages)
+	if err != nil {
+		return nil, err
+	}
+	if selectiveUpdate {
+		for _, alias := range aliases {
+			if selected[alias] {
+				continue
+			}
+			canonical := locked.Imports[alias]
+			if canonical == "" {
+				return nil, fmt.Errorf("trb.lock has no import mapping for TypeRB package %s; run trb install", alias)
+			}
+			if err := resolver.pin(canonical, locked); err != nil {
+				return nil, fmt.Errorf("pin TypeRB package %s: %w", alias, err)
+			}
+			resolver.lock.Imports[alias] = canonical
+		}
+	}
 	for _, alias := range aliases {
+		if selectiveUpdate && !selected[alias] {
+			continue
+		}
 		canonical, err := resolver.resolve(alias, config.Packages[alias], config.Root)
 		if err != nil {
 			return nil, fmt.Errorf("resolve TypeRB package %s: %w", alias, err)
 		}
 		resolver.lock.Imports[alias] = canonical
 	}
+	if selectiveUpdate {
+		if err := ensureTypeRBPackageCache(config, resolver.lock, false); err != nil {
+			return nil, err
+		}
+	}
+	resolved, err := loadResolvedTypeRBPackages(config, resolver.lock)
+	if err != nil {
+		return nil, err
+	}
 	if err := WriteTypeRBLock(lockPath, resolver.lock); err != nil {
 		return nil, err
 	}
-	return loadResolvedTypeRBPackages(config, resolver.lock)
+	return resolved, nil
+}
+
+func selectedPackageAliases(aliases []string, requirements map[string]project.PackageRequirement) (map[string]bool, error) {
+	selected := make(map[string]bool, len(aliases))
+	for _, alias := range aliases {
+		if _, exists := requirements[alias]; !exists {
+			return nil, fmt.Errorf("TypeRB package %s is not a direct project dependency", alias)
+		}
+		selected[alias] = true
+	}
+	return selected, nil
 }
 
 func hasRemoteTypeRBRequirement(requirements map[string]project.PackageRequirement) bool {
@@ -155,6 +213,54 @@ type typeRBResolver struct {
 	lock    *TypeRBLock
 	roots   map[string]string
 	loading map[string]bool
+}
+
+func (r *typeRBResolver) pin(canonical string, source *TypeRBLock) error {
+	if _, exists := r.lock.Packages[canonical]; exists {
+		if r.loading[canonical] {
+			return fmt.Errorf("package dependency cycle involving %s", canonical)
+		}
+		return nil
+	}
+	locked, exists := source.Packages[canonical]
+	if !exists {
+		return fmt.Errorf("locked package %s is missing", canonical)
+	}
+	root := locked.Path
+	if root == "" {
+		root = locked.Source + "@" + locked.Revision
+	}
+	r.roots[canonical] = root
+	r.loading[canonical] = true
+	locked.Dependencies = clonePackageDependencies(locked.Dependencies)
+	r.lock.Packages[canonical] = locked
+	for _, alias := range sortedLockedDependencies(locked.Dependencies) {
+		if err := r.pin(locked.Dependencies[alias], source); err != nil {
+			return fmt.Errorf("%s dependency %s: %w", canonical, alias, err)
+		}
+	}
+	delete(r.loading, canonical)
+	return nil
+}
+
+func clonePackageDependencies(dependencies map[string]string) map[string]string {
+	if dependencies == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(dependencies))
+	for alias, canonical := range dependencies {
+		cloned[alias] = canonical
+	}
+	return cloned
+}
+
+func sortedLockedDependencies(dependencies map[string]string) []string {
+	aliases := make([]string, 0, len(dependencies))
+	for alias := range dependencies {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	return aliases
 }
 
 func (r *typeRBResolver) resolve(alias string, requirement project.PackageRequirement, baseRoot string) (string, error) {

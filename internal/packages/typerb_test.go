@@ -403,6 +403,74 @@ func TestResolveGitTypeRBPackagesLocksTransitiveContentAndSupportsOfflineUse(t *
 	}
 }
 
+func TestResolveSelectivelyUpdatesDirectPackageAndItsDependencies(t *testing.T) {
+	workspace := t.TempDir()
+	baseRepository := filepath.Join(workspace, "base-repository")
+	writeTestPackage(t, baseRepository, TypeRBManifest{
+		Name: "github.com/acme/base", Version: "1.0.0", SourceDir: "src",
+	}, "record BaseVersionOne\nend\n")
+	commitAndTag(t, baseRepository, "v1.0.0")
+
+	contractsRepository := filepath.Join(workspace, "contracts-repository")
+	writeTestPackage(t, contractsRepository, TypeRBManifest{
+		Name: "github.com/acme/contracts", Version: "1.0.0", SourceDir: "src",
+		Packages: map[string]project.PackageRequirement{
+			"acme/base": {Source: "file://" + baseRepository, Version: "latest"},
+		},
+	}, "import acme/base\n\nrecord ContractVersionOne\nend\n")
+	commitAndTag(t, contractsRepository, "v1.0.0")
+
+	otherRepository := filepath.Join(workspace, "other-repository")
+	writeTestPackage(t, otherRepository, TypeRBManifest{
+		Name: "github.com/acme/other", Version: "1.0.0", SourceDir: "src",
+	}, "record OtherVersionOne\nend\n")
+	commitAndTag(t, otherRepository, "v1.0.0")
+
+	config := project.New(filepath.Join(workspace, "app"), "ruby")
+	config.Packages["acme/contracts"] = project.PackageRequirement{Source: "file://" + contractsRepository, Version: "latest"}
+	config.Packages["acme/other"] = project.PackageRequirement{Source: "file://" + otherRepository, Version: "latest"}
+	initial, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := initial.Lock.Packages["github.com/acme/base"].Version; got != "1.0.0" {
+		t.Fatalf("initial base version=%q", got)
+	}
+
+	writeTestPackage(t, baseRepository, TypeRBManifest{
+		Name: "github.com/acme/base", Version: "2.0.0", SourceDir: "src",
+	}, "record BaseVersionTwo\nend\n")
+	commitAndTagUpdate(t, baseRepository, "v2.0.0")
+	writeTestPackage(t, contractsRepository, TypeRBManifest{
+		Name: "github.com/acme/contracts", Version: "2.0.0", SourceDir: "src",
+		Packages: map[string]project.PackageRequirement{
+			"acme/base": {Source: "file://" + baseRepository, Version: "latest"},
+		},
+	}, "import acme/base\n\nrecord ContractVersionTwo\nend\n")
+	commitAndTagUpdate(t, contractsRepository, "v2.0.0")
+	writeTestPackage(t, otherRepository, TypeRBManifest{
+		Name: "github.com/acme/other", Version: "2.0.0", SourceDir: "src",
+	}, "record OtherVersionTwo\nend\n")
+	commitAndTagUpdate(t, otherRepository, "v2.0.0")
+
+	updated, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{UpdatePackages: []string{"acme/contracts"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"github.com/acme/contracts": "2.0.0",
+		"github.com/acme/base":      "2.0.0",
+		"github.com/acme/other":     "1.0.0",
+	} {
+		if got := updated.Lock.Packages[name].Version; got != want {
+			t.Fatalf("%s version=%q, want %q", name, got, want)
+		}
+	}
+	if _, err := ResolveTypeRBPackages(config, TypeRBResolveOptions{UpdatePackages: []string{"acme/missing"}}); err == nil || !strings.Contains(err.Error(), "not a direct project dependency") {
+		t.Fatalf("unknown selective update was accepted: %v", err)
+	}
+}
+
 func TestFrozenTypeRBInstallRejectsConfigurationDrift(t *testing.T) {
 	workspace := t.TempDir()
 	packageRoot := filepath.Join(workspace, "package")
@@ -500,6 +568,21 @@ func commitAndTag(t *testing.T, root, tag string) {
 		{"config", "user.name", "TypeRB package test"},
 		{"add", "."},
 		{"commit", "--quiet", "-m", "Initial package"},
+		{"tag", tag},
+	} {
+		command := exec.Command("git", arguments...)
+		command.Dir = root
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(arguments, " "), err, output)
+		}
+	}
+}
+
+func commitAndTagUpdate(t *testing.T, root, tag string) {
+	t.Helper()
+	for _, arguments := range [][]string{
+		{"add", "."},
+		{"commit", "--quiet", "-m", "Update package"},
 		{"tag", tag},
 	} {
 		command := exec.Command("git", arguments...)

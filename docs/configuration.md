@@ -133,6 +133,11 @@ packages accept an exact semantic-version tag, `latest`, or a Git revision.
 `latest` is pinned until `trb update` is run. Local paths are development
 inputs and are intentionally not content locked.
 
+`trb update PACKAGE...` accepts direct keys from this `packages` map. It
+re-resolves each selected package and its transitive graph while preserving the
+locked graphs of unselected direct packages. The complete graph is re-resolved
+when no package is named.
+
 `trb.lock` records canonical package names, transitive dependencies, Git commit
 IDs, and SHA-256 content checksums. Commit it to version control. Resolved
 content lives below the ignored `.trb/packages` directory. Builds and the REPL

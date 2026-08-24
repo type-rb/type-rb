@@ -425,6 +425,56 @@ func TestAddAndRemoveLocalTypeRBPackage(t *testing.T) {
 	}
 }
 
+func TestUpdateSelectsDirectTypeRBPackage(t *testing.T) {
+	workspace := t.TempDir()
+	contractsRoot := filepath.Join(workspace, "contracts")
+	writeCLIPackageFixture(t, contractsRoot, nil)
+	otherRoot := filepath.Join(workspace, "other")
+	writeCLIRemotePackageFixture(t, otherRoot, packageManager.TypeRBManifest{
+		FormatVersion: 1, Name: "github.com/acme/other", Version: "0.1.0", SourceDir: "src",
+	}, "record Other\nend\n")
+	appRoot := filepath.Join(workspace, "app")
+	config := project.New(appRoot, "ruby")
+	config.Packages["acme/contracts"] = project.PackageRequirement{Path: "../contracts"}
+	config.Packages["acme/other"] = project.PackageRequirement{Path: "../other"}
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	writeCLIPackageManifest(t, contractsRoot, packageManager.TypeRBManifest{
+		FormatVersion: 1, Name: "github.com/acme/contracts", Version: "0.2.0", SourceDir: "src",
+		Packages: map[string]project.PackageRequirement{"acme/shared": {Path: "shared"}},
+	})
+	t.Chdir(appRoot)
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"update", "acme/contracts"}); status != 0 {
+		t.Fatalf("update status=%d stderr=%s", status, stderr.String())
+	}
+	lock, err := packageManager.ReadTypeRBLock(packageManager.TypeRBLockPath(config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lock.Packages["github.com/acme/contracts"].Version; got != "0.2.0" {
+		t.Fatalf("selected package version=%q", got)
+	}
+	if got := lock.Packages["github.com/acme/other"].Version; got != "0.1.0" {
+		t.Fatalf("unselected package version=%q", got)
+	}
+	if !strings.Contains(stdout.String(), "updated selected package graph(s): acme/contracts") {
+		t.Fatalf("unexpected update output: %q", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"update", "acme/missing"}); status == 0 || !strings.Contains(stderr.String(), "not a direct project dependency") {
+		t.Fatalf("missing update status=%d stderr=%s", status, stderr.String())
+	}
+}
+
 func TestInstallLoadsExplicitConfig(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "ruby")
