@@ -1,0 +1,14 @@
+{
+  "formatVersion": 1,
+  "configChecksum": "sha256:3c33b15dc65f84b25ff31af8cac18e5ab2302a64d03111cb9fb41894fc8f8c93",
+  "imports": {
+    "type-rb/amplify-auth": "github.com/type-rb/amplify-auth-adapter-example"
+  },
+  "packages": {
+    "github.com/type-rb/amplify-auth-adapter-example": {
+      "version": "0.1.0",
+      "path": "..",
+      "manifestChecksum": "sha256:11e422ec44cd4037a689c6d2d73d4a9b49bdec74850ea0819cde3802f1460c77"
+    }
+  }
+}

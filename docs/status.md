@@ -66,6 +66,10 @@ Packages can also declare a mode-specific conformance project for explicit
 installed self-referencing fixture, and invokes its structured native check;
 its versioned JSON report exposes stable phase states without implicitly
 installing dependencies or running package code during ordinary builds.
+The Amplify Auth dogfood fixture additionally verifies that generated native
+configuration can remain in an application-owned TypeScript bootstrap while
+TypeRB uses the existing String rejection bridge. Rich native error records
+remain an explicit future mapper capability rather than falling back to `Any`.
 
 The experimental TypeScript browser path accepts structured JSX in TypeRB
 source and emits ordinary TSX for React tooling. Function components use typed

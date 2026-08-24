@@ -206,11 +206,14 @@ func npmManifest(config *project.Config, packageDependencies map[string]string) 
 		Dependencies:    dependencies,
 		DevDependencies: config.DevDependencies,
 	}
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
+	var data bytes.Buffer
+	encoder := json.NewEncoder(&data)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(manifest); err != nil {
 		return nil, err
 	}
-	return append(data, '\n'), nil
+	return data.Bytes(), nil
 }
 
 func mergeDependencies(configured, required map[string]string) (map[string]string, error) {
