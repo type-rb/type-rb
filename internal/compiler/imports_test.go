@@ -3022,6 +3022,14 @@ end
 def optional_member_error(): MemberResult?
 	return MemberResult::Err("missing")
 end
+
+def optional_member_error_from_helper(): MemberResult?
+	return _member_error()
+end
+
+def _member_error(): MemberResult
+	return MemberResult::Err("missing")
+end
 `),
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
