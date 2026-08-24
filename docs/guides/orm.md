@@ -46,14 +46,9 @@ The compiler looks for `db/schema.lock.json` by default. Set the optional
 configured lock is missing or invalid, compilation fails instead of silently
 using the live database.
 
-## Integer columns
-
-PostgreSQL `bigint`, MySQL signed `BIGINT`, and SQLite `INTEGER` columns can map
-to TypeRB `Integer`, but TypeRB accepts only the portable exact subset
-`-9007199254740991..9007199254740991`. In particular, a MySQL `BIGINT` column
-has a wider database range; generated Go, Ruby, and TypeScript adapters reject
-an out-of-range row, projection, aggregate, count, or generated identifier as
-invalid database data instead of exposing a backend-dependent Integer.
+Any database column mapped to TypeRB `Integer` uses TypeRB's portable exact
+range `-9007199254740991..9007199254740991`; generated adapters report an
+out-of-range column value as invalid database data.
 
 ## Date and time columns
 
