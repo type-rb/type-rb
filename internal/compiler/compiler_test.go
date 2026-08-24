@@ -2999,11 +2999,12 @@ func TestIfExpressionAcrossModes(t *testing.T) {
 end
 
 def direct(enabled: Boolean): String
-	return if enabled
+	result := if enabled
 		"on"
 	else
 		"off"
 	end
+	return result
 end
 
 def assign(enabled: Boolean): String
@@ -3048,9 +3049,9 @@ end
 	}
 
 	for mode, wants := range map[string][]string{
-		"go":         {"result := func() string {", "return value", "return func() string {"},
-		"ruby":       {"result = begin", "return begin", "elsif secondary"},
-		"typescript": {"const result: string = ((): string => {", "return value;", "return (()"},
+		"go":         {"result := func() string {", "return value"},
+		"ruby":       {"result = begin", "elsif secondary"},
+		"typescript": {"const result: string = ((): string => {", "return value;"},
 	} {
 		output := string(artifacts[mode].Output)
 		for _, want := range wants {
@@ -3082,6 +3083,68 @@ end
 	}
 }
 
+func TestConditionalExpressionAndTransfersAcrossModes(t *testing.T) {
+	source := []byte(`def choose(enabled: Boolean): String
+	return enabled ? "enabled" : "disabled"
+end
+
+def guard(enabled: Boolean): String
+	return "early" if enabled
+	return "late"
+end
+
+def count_until(limit: Integer): Integer
+	mut count := 0
+	while count < limit
+		count += 1
+		next if count < 2
+		break if count == 3
+	end
+	return count
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("conditional_syntax.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected conditional syntax: %v", mode, err)
+		}
+		choose := artifact.IR.Statements[0].(*ir.Method)
+		conditional, ok := choose.Body[0].(*ir.Return).Value.(*ir.If)
+		if !ok || conditional.ExprType().String() != "String" || conditional.ThenResult == nil || conditional.ElseResult == nil {
+			t.Fatalf("%s conditional expression IR=%#v", mode, choose.Body[0])
+		}
+		guard := artifact.IR.Statements[1].(*ir.Method)
+		ifStatement, ok := guard.Body[0].(*ir.If)
+		if !ok || len(ifStatement.Then) != 1 {
+			t.Fatalf("%s conditional return IR=%#v", mode, guard.Body[0])
+		}
+		if _, ok := ifStatement.Then[0].(*ir.Return); !ok {
+			t.Fatalf("%s conditional return body=%T", mode, ifStatement.Then[0])
+		}
+	}
+}
+
+func TestConditionalSyntaxDiagnosticsAreModeIndependent(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "conditional expression condition", source: "def value(): String\n\treturn 1 ? \"yes\" : \"no\"\nend\n", want: "if condition must be Boolean, got Integer"},
+		{name: "conditional expression branches", source: "def value(flag: Boolean): String\n\treturn flag ? \"yes\" : 1\nend\n", want: "if expression branches have incompatible types String and Integer"},
+		{name: "conditional return condition", source: "def value(): String\n\treturn \"yes\" if 1\n\treturn \"no\"\nend\n", want: "if condition must be Boolean, got Integer"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				if _, err := Compile("bad_conditional_syntax.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("%s: expected %q diagnostic, got %v", mode, test.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestIfExpressionDiagnosticsAreModeIndependent(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -3090,17 +3153,17 @@ func TestIfExpressionDiagnosticsAreModeIndependent(t *testing.T) {
 	}{
 		{
 			name:   "missing else",
-			source: "def value(enabled: Boolean): String\n\treturn if enabled\n\t\t\"on\"\n\tend\nend\n",
+			source: "def value(enabled: Boolean): String\n\tresult := if enabled\n\t\t\"on\"\n\tend\n\treturn result\nend\n",
 			want:   "if expression requires an else branch",
 		},
 		{
 			name:   "incompatible branches",
-			source: "def value(enabled: Boolean): String\n\treturn if enabled\n\t\t\"on\"\n\telse\n\t\t1\n\tend\nend\n",
+			source: "def value(enabled: Boolean): String\n\tresult := if enabled\n\t\t\"on\"\n\telse\n\t\t1\n\tend\n\treturn result\nend\n",
 			want:   "if expression branches have incompatible types String and Integer",
 		},
 		{
 			name:   "missing branch value",
-			source: "def value(enabled: Boolean): String\n\treturn if enabled\n\t\t# no value\n\telse\n\t\t\"off\"\n\tend\nend\n",
+			source: "def value(enabled: Boolean): String\n\tresult := if enabled\n\t\t# no value\n\telse\n\t\t\"off\"\n\tend\n\treturn result\nend\n",
 			want:   "if expression branch must end with an expression",
 		},
 	}
@@ -3117,11 +3180,12 @@ func TestIfExpressionDiagnosticsAreModeIndependent(t *testing.T) {
 
 func TestIfExpressionUsesSafeCommonBranchType(t *testing.T) {
 	source := []byte(`def number(whole: Boolean): Float
-	return if whole
+	result := if whole
 		1
 	else
 		2.5
 	end
+	return result
 end
 `)
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -3130,7 +3194,7 @@ end
 			t.Fatalf("%s rejected compatible numeric branches: %v", mode, err)
 		}
 		method := artifact.IR.Statements[0].(*ir.Method)
-		ifExpression := method.Body[0].(*ir.Return).Value.(*ir.If)
+		ifExpression := method.Body[0].(*ir.Variable).Value.(*ir.If)
 		if ifExpression.ExprType().String() != "Float" || ifExpression.ThenResult.ExprType().String() != "Float" {
 			t.Fatalf("%s did not retain Float branch widening in IR: %#v", mode, ifExpression)
 		}
@@ -3163,7 +3227,7 @@ def choose(enabled: Boolean): String
 end
 
 def choose_directly(enabled: Boolean): String
-	return if enabled
+	_choice := if enabled
 		return "left"
 	else
 		return "right"
@@ -3222,7 +3286,7 @@ end
 	if !caseExpression.Branches[1].Diverges || caseExpression.Branches[1].Result != nil || caseExpression.ExprType().String() != "String" {
 		t.Fatalf("typed IR did not retain the diverging case branch: %#v", caseExpression.Branches[1])
 	}
-	allDiverge := artifacts["go"].IR.Statements[3].(*ir.Method).Body[0].(*ir.Return).Value.(*ir.If)
+	allDiverge := artifacts["go"].IR.Statements[3].(*ir.Method).Body[0].(*ir.Variable).Value.(*ir.If)
 	if allDiverge.ExprType().Kind != types.Never || !allDiverge.ThenDiverges || !allDiverge.ElseDiverges {
 		t.Fatalf("all-diverging if expression was not typed as Never: %#v", allDiverge)
 	}

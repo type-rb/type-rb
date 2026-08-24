@@ -38,6 +38,9 @@ Keep these application invariants:
   inspect. Do not discard a standard Result value.
 - Keep `case`/`when` for the current value and enum-payload matching surface.
   Do not invent `case`/`in`, `match`, or implicit payload accessors.
+- Use `condition ? value : alternative` only for a short two-value choice.
+  Use `return`, `next`, or `break` with trailing `if` for a simple conditional
+  transfer; do not invent a general modifier `if` or `unless`.
 - Edit `.trb` source and `trbconfig.jsonc`, not generated target files or a
   managed native manifest.
 
@@ -48,7 +51,10 @@ After each coherent edit:
 1. Run `trb fmt` on the affected source.
 2. Run `trb check --diagnostic-format json` and use diagnostic codes, spans,
    related locations, and fixes rather than parsing message text alone.
-3. Run the narrowest relevant application command, then `trb run` or
+3. Run `trb lint --diagnostic-format json` and apply only fixes declared safe
+   by the rule. Use `--deny-warnings` when the project treats warnings as CI
+   failures.
+4. Run the narrowest relevant application command, then `trb run` or
    `trb build` when the project has an executable boundary.
 
 Inside a TypeRB compiler checkout, use `./trb` so the source compiler validates

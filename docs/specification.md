@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.3
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 
 ## 1. Language Goals
 
@@ -619,8 +619,9 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
 
 ### 3.9 Boolean Conditions
 
-- Conditions in `if`, `elsif`, and `while` must have the non-nullable
-  `Boolean` type.
+- Conditions in `if`, `elsif`, `while`, a conditional expression, and a
+  conditional control-transfer statement must have the non-nullable `Boolean`
+  type.
 - TypeRB does not apply Ruby, JavaScript, or target-specific truthiness to
   portable conditions. Values such as `0`, `""`, `nil`, collections,
   `Boolean?`, and `Any` are rejected as conditions.
@@ -661,6 +662,23 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
   `<=>`, `~`, `|`, `&`, `^`, `<<`, and `>>`) require an explicit Ruby-native
   import until portable semantics are defined.
 
+#### Conditional expression
+
+- `condition ? then_expression : else_expression` is the conditional
+  expression. It is the only ternary operator and has lower precedence than
+  every binary operator.
+- The condition is evaluated once. Exactly one branch is then evaluated, so
+  side effects and failing operations in the unselected branch do not run.
+- Its branch types use the same safe common-type rule as a value-producing
+  `if`. The compiler does not choose `Any` or synthesize a union merely to
+  combine incompatible alternatives.
+- An unparenthesized conditional expression cannot contain another conditional
+  expression. Parentheses make the intended grouping explicit; the official
+  linter may still discourage nesting when a complete `if` is clearer.
+- The canonical formatter writes one space on each side of `?` and `:`. A
+  callable suffix remains part of its identifier, so
+  `ready?() ? "ready" : "waiting"` is unambiguous.
+
 ### 3.11 Loop Control
 
 - `break` exits the innermost enclosing `while`, `each`, `each_slice`, or
@@ -670,6 +688,17 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
   loop and have identical semantics in every mode.
 - `return` remains distinct: it exits the enclosing method, including when it
   appears inside an iteration block.
+- A simple transfer may add a trailing `if` condition:
+  `return value if condition`, `return if condition`, `break if condition`, or
+  `next if condition`. The formal construct is a conditional control-transfer
+  statement, shortened to conditional transfer. Its value, when present, is
+  evaluated only when the condition is true.
+- Trailing `if` is not a general statement modifier. Calls, assignments, and
+  other statements such as `notify() if condition` are syntax errors.
+  `unless` is not part of the portable grammar.
+- Because `return if condition` is the bare conditional-return form, a complete
+  value-producing `if` should be assigned and returned separately or replaced
+  by a conditional expression.
 
 Compiler-owned package declarations may mark a block operation as structured.
 Unlike a target-language callback, a structured block remains in typed IR and
@@ -866,6 +895,10 @@ end
 
 - `if` and `case` retain their statement forms and may also appear wherever an
   expression is accepted.
+- A conditional expression is the compact two-value form of an `if`
+  expression. It shares Boolean checking, branch narrowing, lazy evaluation,
+  common-type selection, typed IR, and backend behavior with the complete
+  form.
 - An `if` expression must contain an `else`, even when it has one or more
   `elsif` branches. A `case` expression must be exhaustive under the ordinary
   enum or union rules; an `else` may cover the remaining alternatives.
@@ -901,6 +934,8 @@ label := if ready
 else
 	"waiting"
 end
+
+short_label := ready ? "ready" : "waiting"
 
 text := case result
 when Result::Ok(value)

@@ -144,6 +144,32 @@ content lives below the ignored `.trb/packages` directory. Builds and the REPL
 never contact a package source; run `trb install` after changing `packages`.
 See the [package guide](guides/packages.md).
 
+## Lint configuration
+
+The optional `lint` section selects the small built-in ruleset and overrides
+individual rule levels:
+
+```jsonc
+{
+  "lint": {
+    "preset": "recommended",
+    "rules": {
+      "trb/prefer-conditional-transfer": "warning"
+    }
+  }
+}
+```
+
+`preset` is `recommended` by default. Set it to `none` to start with every
+built-in rule disabled, then enable selected rules explicitly. A rule level is
+`off`, `warning`, or `error`. Unknown rule IDs and invalid levels are
+configuration errors rather than silently ignored options.
+
+Built-in lint behavior ships with the `trb` binary and uses the TypeRB release
+version; there is no separate linter version. Machine-readable lint output has
+its own numeric diagnostic schema version so report consumers can negotiate
+shape independently from rule behavior. See the [linting guide](guides/linting.md).
+
 ## Native package management
 
 The default `"packageManagement": "managed"` lets TypeRB generate and use the

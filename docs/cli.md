@@ -118,7 +118,42 @@ module. It retains `/index` when a direct file would otherwise win or when the
 import cannot be resolved. Stdin formatting has no project snapshot and
 therefore does not remove `/index`.
 
-## Build and run
+## Lint
+
+```sh
+# Run project checking followed by the recommended lint rules.
+trb lint
+
+# Apply fixes that a rule marks safe.
+trb lint --fix
+
+# Make remaining warnings fail CI.
+trb lint --deny-warnings
+
+# Emit a versioned machine-readable report.
+trb lint --diagnostic-format json
+
+# Lint a config-free file and its explicit imports.
+trb lint report.trb
+trb lint --mode ruby report.trb
+```
+
+`trb lint` is a style and maintainability layer over `trb check`: it first
+requires the same project to parse, resolve, and type check, then runs the
+configured lint rules on authored application source. Compiler-owned modules,
+official packages, and external packages are not linted. `trb check` remains
+the correctness-only command and its errors cannot be disabled by lint
+configuration.
+
+Warnings are reported without failing the command. A rule configured as
+`error`, or any warning under `--deny-warnings`, returns a nonzero status.
+`--fix` applies only source edits declared safe by the rule and reruns linting
+on the changed files. JSON output uses the shared diagnostic schema, adds the
+running `toolVersion`, and uses each lint rule ID as its stable diagnostic
+code. See the [linting guide](guides/linting.md) and
+[rule index](lint-rules/index.md).
+
+## Check, build, and run
 
 ```sh
 # Check the configured project without writing generated source.

@@ -259,11 +259,14 @@ type IfBranch struct {
 
 type IfStatement struct {
 	Base
-	Condition Expression
-	Then      []Statement
-	ElseIf    []IfBranch
-	Else      []Statement
-	HasElse   bool
+	Condition            Expression
+	Then                 []Statement
+	ElseIf               []IfBranch
+	Else                 []Statement
+	HasElse              bool
+	Ternary              bool
+	TernaryParenthesized bool
+	ConditionalTransfer  bool
 }
 
 func (*IfStatement) statementNode()  {}

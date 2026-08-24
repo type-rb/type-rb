@@ -8,6 +8,7 @@ require (
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/reeflective/readline v1.3.1-0.20260802023205-4d8e27a037bd
+	github.com/rivo/uniseg v0.4.7
 	golang.org/x/mod v0.36.0
 	golang.org/x/sys v0.45.0
 	modernc.org/sqlite v1.53.0
@@ -23,7 +24,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 	modernc.org/libc v1.73.4 // indirect

@@ -6,6 +6,7 @@ const JSONSchemaVersion = 1
 
 type JSONReport struct {
 	SchemaVersion int              `json:"schemaVersion"`
+	ToolVersion   string           `json:"toolVersion,omitempty"`
 	Diagnostics   []JSONDiagnostic `json:"diagnostics"`
 	Summary       JSONSummary      `json:"summary"`
 }

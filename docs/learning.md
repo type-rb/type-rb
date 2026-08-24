@@ -34,12 +34,14 @@ short:
 ```sh
 trb fmt
 trb check
+trb lint
 trb run
 ```
 
 `trb check` validates the complete configured project without generating
 target source or starting a target toolchain. That makes it the normal command
-to run while editing.
+to run while editing. `trb lint` repeats that correctness check and then adds
+the project's optional maintainability rules.
 
 Read the [language guide](language.md) alongside the first program. Focus on:
 
