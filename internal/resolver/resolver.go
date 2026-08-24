@@ -549,8 +549,8 @@ func (r Result) Member(alias, name string) (Binding, bool) {
 }
 
 // ReceiverMethod returns an implicit portable method binding. The binding is
-// deliberately backed by the same standard package definition as its
-// function form, even though TypeRB source does not need to import the method.
+// backed by the compiler-owned contract catalog even when that contract has no
+// public package form.
 func (r Result) ReceiverMethod(receiver types.Type, name string) (Binding, bool) {
 	imports := make([]*Import, 0, len(r.Imports))
 	seen := map[*Import]bool{}

@@ -298,17 +298,15 @@ classification. `unicode.version()` reports the pinned data version.
 ## Arrays and hashes
 
 Collection contracts infer their type parameters from the receiver or
-arguments:
+arguments. Array and Hash operations use receiver methods; there are no public
+`trb/std/arrays` or `trb/std/hashes` packages:
 
 ```trb
-import trb/std/arrays
-import trb/std/hashes
-
 mut values := [1, 2]
 values.push(3)
 first := values.shift()
 values.unshift(0)
-reversed := arrays.reverse(values)
+reversed := values.reverse()
 ascending := values.sort()
 descending := values.sort_descending()
 ranked := ["second", "first"].sort_by do |label|
@@ -318,7 +316,7 @@ deduplicated := [3, 1, 3, 2].uniq()
 combined_values := values.concat([4, 5])
 known := values.include?(2)
 position := values.index(2)
-occurrences := arrays.count(values, 2)
+occurrences := values.count(2)
 has_even := values.any? do |value|
 	value % 2 == 0
 end
@@ -340,13 +338,13 @@ exclusive_values := (1...3).to_a()
 mut labels: Hash<Integer, String> := {1 => "one"}
 known_label := labels.key?(1)
 label := labels.try_fetch(1)
-keys := hashes.keys(labels)
+keys := labels.keys()
 combined := labels.merge({2 => "two"})
 labels.update({2 => "two"})
 labels.each do |key, value|
 	puts(key.to_s() + ": " + value)
 end
-removed := hashes.delete(labels, 1)
+removed := labels.delete(1)
 ```
 
 Arrays provide size, emptiness, strict `[]`, safe `try_fetch`, `slice`,
@@ -384,12 +382,11 @@ its position as `Integer?`. Both short-circuit and return `nil` when no element
 matches. A nullable element type remains nullable, so finding a stored `nil`
 and finding no element intentionally have the same result.
 
-Value membership is `include?` on a receiver and `arrays.contains` in package
-form. `index(value)` returns the first matching position as `Integer?`, and
-`count(value)` counts all matches. These operations use portable `==` semantics
-and are available when the element type is numeric, Boolean, String, or a
-payloadless enum. They do not inherit target-native structural equality for
-Arrays, Hashes, records, or payload-bearing enums.
+Value membership uses `include?`. `index(value)` returns the first matching
+position as `Integer?`, and `count(value)` counts all matches. These operations
+use portable `==` semantics and are available when the element type is numeric,
+Boolean, String, or a payloadless enum. They do not inherit target-native
+structural equality for Arrays, Hashes, records, or payload-bearing enums.
 
 Hashes provide size, emptiness, strict `fetch`/`delete`, safe `try_fetch`, key
 checks, keys, values, shallow `dup`/`merge`, and mutable `update`. `merge`
@@ -638,9 +635,7 @@ The current portable standard library includes:
 - `trb/std/secure_compare`
 - `trb/std/string_builder`
 - `trb/std/unicode`
-- `trb/std/arrays`
 - `trb/std/ranges`
-- `trb/std/hashes`
 - `trb/std/path`
 - `trb/std/url`
 - `trb/std/filesystem`

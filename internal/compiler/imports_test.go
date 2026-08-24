@@ -1384,17 +1384,14 @@ func TestPortableStringBuilderMutabilityAndTypesAreModeIndependent(t *testing.T)
 }
 
 func TestPortableArrayAndHashOperationsLowerAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/arrays
-import trb/std/hashes
-
-enum QueryState
+	source := []byte(`enum QueryState
 	Ready
 	Done
 end
 
 def array_value(): Integer
 	values := [1, 2, 3]
-	return arrays.copy(values)[1] + values.first() + values.last()
+	return values.dup()[1] + values.first() + values.last()
 end
 
 def array_state(): Boolean
@@ -1404,35 +1401,35 @@ end
 
 def grow()
 	mut values := [1]
-	arrays.push(values, 2)
+	values.push(2)
 	values.push(3)
 	return
 end
 
 def edge_values(): Integer
 	mut values := [2, 3]
-	first := arrays.shift(values)
+	first := values.shift()
 	values.unshift(1)
-	arrays.unshift(values, 0)
-	reversed := arrays.reverse(values)
+	values.unshift(0)
+	reversed := values.reverse()
 	return first + reversed.first() + values.reverse().last()
 end
 
 def query_values(): Integer
 	values := [1, 2, 1]
-	if values.include?(2) and arrays.contains(values, 1)
-		return values.count(1) + arrays.count(values, 2)
+	if values.include?(2) and values.include?(1)
+		return values.count(1) + values.count(2)
 	end
 	return 0
 end
 
 def unique_values(): Array<Integer>
 	values := [3, 1, 3, 2, 1]
-	return values.uniq().concat(arrays.uniq([2, 2, 4]))
+	return values.uniq().concat([2, 2, 4].uniq())
 end
 
 def concatenated_values(): Array<Integer>
-	return arrays.concat([1, 2], [3, 4])
+	return [1, 2].concat([3, 4])
 end
 
 def enum_query(state: QueryState): Boolean
@@ -1446,7 +1443,7 @@ end
 
 def hash_value(): String
 	labels: Hash<Integer, String> := {1 => "one", 2 => "two"}
-	return labels.fetch(1) + hashes.fetch(labels, 2)
+	return labels.fetch(1) + labels.fetch(2)
 end
 
 def hash_key(): Integer
@@ -1456,21 +1453,21 @@ end
 
 def copied_hash_value(): String
 	labels: Hash<Integer, String> := {1 => "one"}
-	return hashes.copy(labels).values().first()
+	return labels.dup().values().first()
 end
 
 def merged_hash_value(): Integer
 	values: Hash<String, Integer> := {"one" => 1, "two" => 2}
 	merged := values.merge({"two" => 20, "three" => 3})
-	return merged.fetch("two") + hashes.merge(values, {"four" => 4}).fetch("four") + values.fetch("two")
+	return merged.fetch("two") + values.merge({"four" => 4}).fetch("four") + values.fetch("two")
 end
 
 def updated_hash_value(): String
 	mut labels: Hash<Integer, String> := {1 => "one", 2 => "two"}
 	labels.update({2 => "TWO", 3 => "three"})
-	hashes.update(labels, {4 => "four"})
+	labels.update({4 => "four"})
 	first := labels.delete(1)
-	second := hashes.delete(labels, 2)
+	second := labels.delete(2)
 	return first + second + labels.fetch(3) + labels.fetch(4)
 end
 
@@ -1604,9 +1601,9 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 			want:   "argument 1 to push() has type String, expected Integer",
 		},
 		{
-			name:   "package push type",
-			source: "import trb/std/arrays\ndef bad()\n\tmut values := [1]\n\tarrays.push(values, \"two\")\n\treturn\nend\n",
-			want:   "argument 2 to push() has type String, expected Integer",
+			name:   "arrays package is not public",
+			source: "import trb/std/arrays\n",
+			want:   "unknown TypeRB package trb/std/arrays",
 		},
 		{
 			name:   "receiver push requires mut",
@@ -1619,19 +1616,14 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 			want:   "argument 1 to fetch() has type String, expected Integer",
 		},
 		{
-			name:   "hash package key type",
-			source: "import trb/std/hashes\ndef bad(): String\n\tlabels: Hash<Integer, String> := {1 => \"one\"}\n\treturn hashes.fetch(labels, \"1\")\nend\n",
-			want:   "argument 2 to fetch() has type String, expected Integer",
+			name:   "hashes package is not public",
+			source: "import trb/std/hashes\n",
+			want:   "unknown TypeRB package trb/std/hashes",
 		},
 		{
 			name:   "hash delete requires mut",
 			source: "def bad(): String\n\tlabels: Hash<Integer, String> := {1 => \"one\"}\n\treturn labels.delete(1)\nend\n",
 			want:   "labels is immutable; declare it with mut to use delete()",
-		},
-		{
-			name:   "hash package update requires mut",
-			source: "import trb/std/hashes\ndef bad()\n\tlabels: Hash<Integer, String> := {1 => \"one\"}\n\thashes.update(labels, {2 => \"two\"})\n\treturn\nend\n",
-			want:   "labels is immutable; declare it with mut to use update()",
 		},
 		{
 			name:   "hash merge keeps value type exact",
@@ -1654,11 +1646,6 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 			want:   "type Array<Integer> has no member join",
 		},
 		{
-			name:   "join package element type",
-			source: "import trb/std/arrays\ndef bad(): String\n\treturn arrays.join([1, 2], \",\")\nend\n",
-			want:   "argument 1 to join() has type Array<Integer>, expected Array<String>",
-		},
-		{
 			name:   "pop requires mut",
 			source: "def bad(): Integer\n\tvalues := [1]\n\treturn values.pop()\nend\n",
 			want:   "values is immutable; declare it with mut to use pop()",
@@ -1667,11 +1654,6 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 			name:   "shift requires mut",
 			source: "def bad(): Integer\n\tvalues := [1]\n\treturn values.shift()\nend\n",
 			want:   "values is immutable; declare it with mut to use shift()",
-		},
-		{
-			name:   "package unshift requires mut",
-			source: "import trb/std/arrays\ndef bad()\n\tvalues := [1]\n\tarrays.unshift(values, 0)\n\treturn\nend\n",
-			want:   "values is immutable; declare it with mut to use unshift()",
 		},
 		{
 			name:   "unshift value type",
@@ -1687,11 +1669,6 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 			name:   "receiver equality requirement",
 			source: "def bad(): Boolean\n\treturn [[1]].include?([1])\nend\n",
 			want:   "portable equality is not defined for Array<Integer>, required by include?()",
-		},
-		{
-			name:   "package equality requirement",
-			source: "import trb/std/arrays\ndef bad(): Integer\n\treturn arrays.count([[1]], [1])\nend\n",
-			want:   "portable equality is not defined for Array<Integer>, required by count()",
 		},
 		{
 			name:   "payload enum equality requirement",
@@ -2231,8 +2208,6 @@ func TestSafePortableConversionAndLookupLowerAcrossBackends(t *testing.T) {
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
 import { IndexLookupError, KeyLookupError, NumberParseError } from trb/std/errors
-import trb/std/arrays
-import trb/std/hashes
 import trb/std/numbers
 import trb/std/strings
 
@@ -2285,11 +2260,11 @@ def package_reversed(value: String): String
 end
 
 def array_value(values: Array<Integer>, index: Integer): Result<Integer, IndexLookupError>
-	return arrays.try_fetch(values, index)
+	return values.try_fetch(index)
 end
 
 def hash_value(values: Hash<String, Integer>, key: String): Result<Integer, KeyLookupError>
-	return hashes.try_fetch(values, key)
+	return values.try_fetch(key)
 end
 `),
 	}

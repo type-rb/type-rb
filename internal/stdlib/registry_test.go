@@ -6,10 +6,10 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-func TestGenericPackageContractsInferFromEarlierArguments(t *testing.T) {
-	definition, ok := Lookup("trb/std/arrays")
+func TestGenericCollectionContractsInferFromEarlierArguments(t *testing.T) {
+	definition, ok := Lookup("trb/internal/arrays")
 	if !ok {
-		t.Fatal("arrays package is missing")
+		t.Fatal("internal arrays contract is missing")
 	}
 	values := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Integer")}}
 	symbol := Instantiate(definition.Symbols["push"], []types.Type{values, types.FromName("String")})
@@ -18,6 +18,20 @@ func TestGenericPackageContractsInferFromEarlierArguments(t *testing.T) {
 	}
 	if got := symbol.Parameters[1].Type.String(); got != "Integer" {
 		t.Fatalf("later use did not retain the first T binding: %s", got)
+	}
+}
+
+func TestCollectionContractsAreNotPublicPackages(t *testing.T) {
+	for _, packagePath := range []string{"trb/std/arrays", "trb/std/hashes"} {
+		if _, ok := Lookup(packagePath); ok {
+			t.Fatalf("%s remains available as a public package", packagePath)
+		}
+	}
+	for _, packagePath := range []string{"trb/internal/arrays", "trb/internal/hashes"} {
+		definition, ok := Lookup(packagePath)
+		if !ok || !definition.Internal {
+			t.Fatalf("%s is not an internal collection contract: %#v", packagePath, definition)
+		}
 	}
 }
 

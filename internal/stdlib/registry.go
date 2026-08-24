@@ -862,9 +862,10 @@ end
 			},
 		},
 	},
-	"trb/std/arrays": {
-		Path: "trb/std/arrays",
-		Kind: Portable,
+	"trb/internal/arrays": {
+		Path:     "trb/internal/arrays",
+		Kind:     Portable,
+		Internal: true,
 		Symbols: map[string]Symbol{
 			"length": genericUnary("length", "trb.std.arrays.length", []string{"T"}, arrayOf(typeT), integerType),
 			"empty":  genericUnary("empty", "trb.std.arrays.empty", []string{"T"}, arrayOf(typeT), booleanType),
@@ -1018,9 +1019,10 @@ end
 			"to_array": unary("to_array", "trb.std.ranges.to_array", rangeOf(integerType), arrayOf(integerType)),
 		},
 	},
-	"trb/std/hashes": {
-		Path: "trb/std/hashes",
-		Kind: Portable,
+	"trb/internal/hashes": {
+		Path:     "trb/internal/hashes",
+		Kind:     Portable,
+		Internal: true,
 		Symbols: map[string]Symbol{
 			"length": genericUnary("length", "trb.std.hashes.length", []string{"K", "V"}, hashOf(typeK, typeV), integerType),
 			"empty":  genericUnary("empty", "trb.std.hashes.empty", []string{"K", "V"}, hashOf(typeK, typeV), booleanType),
@@ -1215,10 +1217,9 @@ end
 	},
 }
 
-// receiverMethods maps receiver method syntax to the same compiler-owned
-// contract used by the corresponding portable package function. A backend
-// therefore lowers 123.to_s() and numbers.to_string(123) through one
-// intrinsic instead of maintaining a second, target-specific method table.
+// receiverMethods maps receiver method syntax to compiler-owned contracts. A
+// backend therefore lowers every receiver spelling through the same intrinsic
+// catalog instead of maintaining a second, target-specific method table.
 var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 	types.Int: {
 		"to_s":      {PackagePath: "trb/std/numbers", Symbol: "to_string"},
@@ -1291,43 +1292,43 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"clear":            {PackagePath: "trb/std/string_builder", Symbol: "clear"},
 	},
 	types.Array: {
-		"size":            {PackagePath: "trb/std/arrays", Symbol: "length"},
-		"empty?":          {PackagePath: "trb/std/arrays", Symbol: "empty"},
-		"try_fetch":       {PackagePath: "trb/std/arrays", Symbol: "try_fetch"},
-		"slice":           {PackagePath: "trb/std/arrays", Symbol: "slice"},
-		"try_slice":       {PackagePath: "trb/std/arrays", Symbol: "try_slice"},
-		"first":           {PackagePath: "trb/std/arrays", Symbol: "first"},
-		"last":            {PackagePath: "trb/std/arrays", Symbol: "last"},
-		"dup":             {PackagePath: "trb/std/arrays", Symbol: "copy"},
-		"include?":        {PackagePath: "trb/std/arrays", Symbol: "contains"},
-		"index":           {PackagePath: "trb/std/arrays", Symbol: "index"},
-		"count":           {PackagePath: "trb/std/arrays", Symbol: "count"},
-		"uniq":            {PackagePath: "trb/std/arrays", Symbol: "uniq"},
-		"concat":          {PackagePath: "trb/std/arrays", Symbol: "concat"},
-		"join":            {PackagePath: "trb/std/arrays", Symbol: "join"},
-		"pop":             {PackagePath: "trb/std/arrays", Symbol: "pop"},
-		"shift":           {PackagePath: "trb/std/arrays", Symbol: "shift"},
-		"push":            {PackagePath: "trb/std/arrays", Symbol: "push"},
-		"unshift":         {PackagePath: "trb/std/arrays", Symbol: "unshift"},
-		"reverse":         {PackagePath: "trb/std/arrays", Symbol: "reverse"},
-		"sort":            {PackagePath: "trb/std/arrays", Symbol: "sort"},
-		"sort_descending": {PackagePath: "trb/std/arrays", Symbol: "sort_descending"},
+		"size":            {PackagePath: "trb/internal/arrays", Symbol: "length"},
+		"empty?":          {PackagePath: "trb/internal/arrays", Symbol: "empty"},
+		"try_fetch":       {PackagePath: "trb/internal/arrays", Symbol: "try_fetch"},
+		"slice":           {PackagePath: "trb/internal/arrays", Symbol: "slice"},
+		"try_slice":       {PackagePath: "trb/internal/arrays", Symbol: "try_slice"},
+		"first":           {PackagePath: "trb/internal/arrays", Symbol: "first"},
+		"last":            {PackagePath: "trb/internal/arrays", Symbol: "last"},
+		"dup":             {PackagePath: "trb/internal/arrays", Symbol: "copy"},
+		"include?":        {PackagePath: "trb/internal/arrays", Symbol: "contains"},
+		"index":           {PackagePath: "trb/internal/arrays", Symbol: "index"},
+		"count":           {PackagePath: "trb/internal/arrays", Symbol: "count"},
+		"uniq":            {PackagePath: "trb/internal/arrays", Symbol: "uniq"},
+		"concat":          {PackagePath: "trb/internal/arrays", Symbol: "concat"},
+		"join":            {PackagePath: "trb/internal/arrays", Symbol: "join"},
+		"pop":             {PackagePath: "trb/internal/arrays", Symbol: "pop"},
+		"shift":           {PackagePath: "trb/internal/arrays", Symbol: "shift"},
+		"push":            {PackagePath: "trb/internal/arrays", Symbol: "push"},
+		"unshift":         {PackagePath: "trb/internal/arrays", Symbol: "unshift"},
+		"reverse":         {PackagePath: "trb/internal/arrays", Symbol: "reverse"},
+		"sort":            {PackagePath: "trb/internal/arrays", Symbol: "sort"},
+		"sort_descending": {PackagePath: "trb/internal/arrays", Symbol: "sort_descending"},
 	},
 	types.Range: {
 		"to_a": {PackagePath: "trb/std/ranges", Symbol: "to_array"},
 	},
 	types.Hash: {
-		"size":      {PackagePath: "trb/std/hashes", Symbol: "length"},
-		"empty?":    {PackagePath: "trb/std/hashes", Symbol: "empty"},
-		"fetch":     {PackagePath: "trb/std/hashes", Symbol: "fetch"},
-		"try_fetch": {PackagePath: "trb/std/hashes", Symbol: "try_fetch"},
-		"key?":      {PackagePath: "trb/std/hashes", Symbol: "contains_key"},
-		"keys":      {PackagePath: "trb/std/hashes", Symbol: "keys"},
-		"values":    {PackagePath: "trb/std/hashes", Symbol: "values"},
-		"dup":       {PackagePath: "trb/std/hashes", Symbol: "copy"},
-		"delete":    {PackagePath: "trb/std/hashes", Symbol: "delete"},
-		"merge":     {PackagePath: "trb/std/hashes", Symbol: "merge"},
-		"update":    {PackagePath: "trb/std/hashes", Symbol: "update"},
+		"size":      {PackagePath: "trb/internal/hashes", Symbol: "length"},
+		"empty?":    {PackagePath: "trb/internal/hashes", Symbol: "empty"},
+		"fetch":     {PackagePath: "trb/internal/hashes", Symbol: "fetch"},
+		"try_fetch": {PackagePath: "trb/internal/hashes", Symbol: "try_fetch"},
+		"key?":      {PackagePath: "trb/internal/hashes", Symbol: "contains_key"},
+		"keys":      {PackagePath: "trb/internal/hashes", Symbol: "keys"},
+		"values":    {PackagePath: "trb/internal/hashes", Symbol: "values"},
+		"dup":       {PackagePath: "trb/internal/hashes", Symbol: "copy"},
+		"delete":    {PackagePath: "trb/internal/hashes", Symbol: "delete"},
+		"merge":     {PackagePath: "trb/internal/hashes", Symbol: "merge"},
+		"update":    {PackagePath: "trb/internal/hashes", Symbol: "update"},
 	},
 }
 
