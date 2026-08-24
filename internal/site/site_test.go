@@ -68,6 +68,9 @@ Use conditional transfer for a short guard.
 	if !strings.Contains(landing, `<h1>TypeRB</h1>`) || !strings.Contains(landing, `class="hero-statement">One portable language.`) {
 		t.Fatalf("landing page is missing the product-first hero hierarchy:\n%s", landing)
 	}
+	if !strings.Contains(landing, `<span class="code-keyword">def</span> main()`) {
+		t.Fatalf("landing example is missing the required runnable entrypoint:\n%s", landing)
+	}
 	if !strings.Contains(landing, `class="entry-kicker">Start here</span>`) {
 		t.Fatalf("landing page does not identify the primary documentation entry:\n%s", landing)
 	}

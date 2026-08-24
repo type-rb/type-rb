@@ -37,5 +37,5 @@ TypeRB source uses canonical, case-sensitive type names and explicit imports. Ta
 ## Optional
 
 - [Roadmap](https://type-rb.github.io/docs/roadmap/): Direction beyond the current alpha.
-- [Playground](https://type-rb.github.io/play/): Run TypeRB in a browser.
+- [Playground](https://type-rb.github.io/play/): Evaluate isolated TypeRB scratch source in a browser.
 - [Source repository](https://github.com/type-rb/type-rb): Compiler, packages, editor support, and documentation.

@@ -19,8 +19,8 @@ type Lesson struct {
 var tourLessons = []Lesson{
 	{
 		ID: "hello", Chapter: "Start", Title: "First TypeRB", Eyebrow: "01 · Start",
-		Description: "A TypeRB program can start with ordinary expressions. Comments begin with #, and the portable puts function writes values to standard output.",
-		Source:      "# Change either value and run the program again.\nputs(\"Hello, TypeRB!\")\nputs(1 + 2)\n",
+		Description: "The browser scratch runner evaluates ordinary expressions directly. Comments begin with #, and the portable puts function writes values to standard output.",
+		Source:      "# Change either value and evaluate the scratch source again.\nputs(\"Hello, TypeRB!\")\nputs(1 + 2)\n",
 		Expected:    "Hello, TypeRB!\n3\n",
 		Hint:        "Change the message or arithmetic expression, then press Run or Cmd/Ctrl-Enter.",
 	},

@@ -656,7 +656,7 @@ h1 {
 
 .terminal-output::before {
 	color: var(--green);
-	content: "$ trb run\A";
+	content: "Scratch result\A";
 	white-space: pre;
 }
 

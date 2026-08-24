@@ -7,7 +7,7 @@ same portable source to Go, Ruby, and TypeScript.
 
 Use [A Tour of TypeRB](https://type-rb.github.io/tour/) for guided executable
 lessons, or open the [TypeRB Playground](https://type-rb.github.io/play/) to
-write, run, format, and transpile a standalone program.
+evaluate, format, and transpile isolated scratch source in the browser.
 
 ## Install the compiler
 
@@ -42,8 +42,11 @@ layouts for each target.
 Create `hello.trb`:
 
 ```trb
-name := "TypeRB"
-puts("Hello, " + name + "!")
+def main()
+	name := "TypeRB"
+	puts("Hello, " + name + "!")
+	return
+end
 ```
 
 Run it in Go mode, or select another target explicitly:
@@ -81,12 +84,11 @@ def main()
 end
 ```
 
-Then format, lint, test, and run the project:
+Then format, lint, and run the project:
 
 ```sh
 trb fmt
 trb lint
-trb test
 trb run
 ```
 
