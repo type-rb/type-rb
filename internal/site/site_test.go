@@ -44,6 +44,7 @@ Use conditional transfer for a short guard.
 	for _, name := range []string{
 		"index.html",
 		"assets/site.css",
+		"assets/docs.js",
 		"docs/index.html",
 		"docs/lint-rules/index.html",
 		"docs/lint-rules/prefer-conditional-transfer/index.html",
@@ -78,6 +79,9 @@ Use conditional transfer for a short guard.
 	index := readTestFile(t, output, "docs/index.html")
 	if !strings.Contains(index, `name="color-scheme" content="light"`) {
 		t.Fatalf("documentation does not declare its light color scheme:\n%s", index)
+	}
+	if !strings.Contains(index, `<script defer src="/assets/docs.js"></script>`) {
+		t.Fatalf("documentation does not load the code-copy enhancement:\n%s", index)
 	}
 	if !strings.Contains(index, `href="/docs/lint-rules/"`) {
 		t.Fatalf("public Markdown link was not rewritten:\n%s", index)
