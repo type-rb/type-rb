@@ -94,7 +94,7 @@ end
 		"type __TrbReactState<T> = Readonly<{ value: T; set: (value: T) => void }>;",
 		"function useTrbState<T>(initial: T): __TrbReactState<T>",
 		"const count: __TrbReactState<number> = useTrbState(0);",
-		"count.set(count.value + 1);",
+		"count.set(__trbIntegerAdd(count.value, 1));",
 		"<button onClick={increment}>Count: {count.value}</button>",
 	} {
 		if !strings.Contains(output, expected) {

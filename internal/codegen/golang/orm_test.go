@@ -67,6 +67,9 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 					t.Fatalf("generated %s ORM runtime is missing %q:\n%s", test.adapter, want, output)
 				}
 			}
+			if !strings.Contains(output, `database Integer is outside the portable range`) {
+				t.Fatalf("generated %s ORM runtime does not validate portable Integer ingress:\n%s", test.adapter, output)
+			}
 			if !strings.Contains(output, `statement += " FOR UPDATE"`) {
 				t.Fatalf("generated %s ORM runtime does not append the row lock clause:\n%s", test.adapter, output)
 			}

@@ -31,3 +31,10 @@ func RuntimeBindingIdentifier(identity string) string {
 	sum := sha256.Sum256([]byte(identity))
 	return "__trb_runtime_" + hex.EncodeToString(sum[:])
 }
+
+// PrivateSuffix returns a short deterministic suffix for generated identifiers
+// whose declarations share a target-language package across source modules.
+func PrivateSuffix(identity string) string {
+	sum := sha256.Sum256([]byte(identity))
+	return hex.EncodeToString(sum[:8])
+}

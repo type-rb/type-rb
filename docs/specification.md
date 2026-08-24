@@ -164,6 +164,19 @@ and typed IR signatures, and must not create mode-dependent source semantics.
 - Integer literals use the portable exact range
   `-9007199254740991..9007199254740991`. A literal outside that range is a
   compile error in every mode rather than a target-dependent rounded value.
+- Every runtime `Integer` uses that same range. Checked arithmetic and
+  compiler-owned ingress adapters reject an out-of-range result or value with
+  the runtime failure `Integer is outside the portable range`. This includes
+  String and JSON conversion and ORM reads. Handwritten native code is
+  responsible for honoring the same contract when it constructs a typed
+  `Integer`. A generated native adapter
+  that exposes Integer values must apply the same boundary check; the current
+  String-envelope runtime adapter does not expose Integer directly.
+- `Float` is IEEE 754 binary64. A source Float literal must be finite and fit
+  binary64; overflow is a compile error, while underflow rounds to signed zero.
+  Runtime arithmetic may produce positive or negative infinity and NaN. These
+  values are ordinary `Float` values, not `Integer` values, and have no source
+  literal spelling in the current grammar.
 
 #### Aliases and nominal newtypes
 
@@ -539,6 +552,15 @@ switches.
   import never execute adapter tests, and the test command does not install
   dependencies implicitly.
 - Official formatter command: `trb fmt`.
+- Formatting must preserve program meaning. Before removing whitespace between
+  ordinary TypeRB tokens, the formatter verifies that re-lexing does not fuse
+  them into a different token or operator. It retains a separating space when
+  the boundary would change.
+- `NativeStatement`, `NativeExpression`, and `NativeBlock` are opaque
+  formatting islands. Their internal bytes, including whitespace, newlines,
+  and comments, are preserved. Only their shared leading indentation is moved
+  to match the surrounding TypeRB block. Ordinary TypeRB outside an island is
+  still formatted canonically.
 - Canonical TypeRB indentation is one tab per nesting level. Formatter
   configuration is not part of the current language; a future configuration
   surface may select a different indentation style without changing language
@@ -619,6 +641,15 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
 - Integer `/` truncates toward zero, `%` is its corresponding remainder, and a
   negative exponent is invalid for Integer `**`. Backends and the REPL preserve
   these semantics instead of inheriting different target-language behavior.
+- Integer `+`, `-`, `*`, `/`, `%`, `**`, unary `-`, and their supported
+  compound assignments are checked against the portable Integer range. An
+  out-of-range result is a runtime failure rather than wraparound, rounding, or
+  a recoverable `Result`.
+- Float arithmetic follows binary64 edge behavior in every backend and the
+  REPL. Division by positive or negative zero produces the corresponding
+  infinity, `0.0 / 0.0` produces NaN, overflow produces infinity, and a
+  negative base raised to a non-integral Float exponent produces NaN rather
+  than a target-specific complex value.
 - Parenthesized TypeRB expressions retain their AST precedence in generated
   code. Ruby-specific matching, comparison, and bitwise operators (`=~`, `!~`,
   `<=>`, `~`, `|`, `&`, `^`, `<<`, and `>>`) require an explicit Ruby-native

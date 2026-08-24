@@ -4,6 +4,7 @@
 package formatter
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -31,8 +32,62 @@ func FormatWithOptions(source []byte, options Options) ([]byte, []diagnostic.Dia
 	if hasErrors(diagnostics) {
 		return nil, diagnostics
 	}
-	tokens := canonicalImportTokens(program, options.CanonicalImportPath)
+	tokens := opaqueNativeTokens(source, canonicalImportTokens(program, options.CanonicalImportPath), program.NativeIslands)
 	return formatTokens(tokens), nil
+}
+
+func opaqueNativeTokens(source []byte, tokens []token.Token, islands []ast.NativeIsland) []token.Token {
+	if len(islands) == 0 {
+		return tokens
+	}
+	sorted := append([]ast.NativeIsland(nil), islands...)
+	sort.SliceStable(sorted, func(left, right int) bool {
+		if sorted[left].Span.Start.Offset != sorted[right].Span.Start.Offset {
+			return sorted[left].Span.Start.Offset < sorted[right].Span.Start.Offset
+		}
+		return sorted[left].Span.End.Offset > sorted[right].Span.End.Offset
+	})
+	outer := sorted[:0]
+	for _, island := range sorted {
+		if len(outer) > 0 && island.Span.Start.Offset < outer[len(outer)-1].Span.End.Offset {
+			continue
+		}
+		outer = append(outer, island)
+	}
+
+	result := make([]token.Token, 0, len(tokens))
+	tokenIndex := 0
+	for _, island := range outer {
+		start := island.Span.Start.Offset
+		end := island.Span.End.Offset
+		endPosition := island.Span.End
+		if island.WholeStatement {
+			for _, item := range tokens {
+				if item.Kind == token.Comment && item.Span.Start.Line == endPosition.Line && item.Span.Start.Offset >= end {
+					end = item.Span.End.Offset
+					endPosition = item.Span.End
+					break
+				}
+			}
+		}
+		if start < 0 || end < start || end > len(source) {
+			continue
+		}
+		for tokenIndex < len(tokens) && tokens[tokenIndex].Span.End.Offset <= start {
+			result = append(result, tokens[tokenIndex])
+			tokenIndex++
+		}
+		result = append(result, token.Token{
+			Kind:   token.NativeIsland,
+			Lexeme: string(source[start:end]),
+			Span:   token.Span{Start: island.Span.Start, End: endPosition},
+		})
+		for tokenIndex < len(tokens) && tokens[tokenIndex].Span.Start.Offset < end {
+			tokenIndex++
+		}
+	}
+	result = append(result, tokens[tokenIndex:]...)
+	return result
 }
 
 func formatTokens(tokens []token.Token) []byte {
@@ -411,6 +466,9 @@ func formatTokensAt(tokens []token.Token, baseIndent int, flatJSX bool) string {
 			if genericOpen || genericClosers > 0 || (genericDepth > 0 && previous.Lexeme == "<") {
 				space = false
 			}
+			if !space && !importLine && tokenBoundaryChanges(*previous, current) {
+				space = true
+			}
 			if space {
 				out.WriteByte(' ')
 			}
@@ -427,12 +485,52 @@ func formatTokensAt(tokens []token.Token, baseIndent int, flatJSX bool) string {
 		lexeme := current.Lexeme
 		if current.Kind == token.JSXLiteral {
 			lexeme = formatJSXToken(current, baseIndent, flatJSX)
+		} else if current.Kind == token.NativeIsland {
+			lexeme = formatNativeToken(current, baseIndent)
 		}
 		out.WriteString(lexeme)
 		beforePrevious = previous
 		previous = &current
 	}
 	return strings.TrimSpace(out.String())
+}
+
+func tokenBoundaryChanges(previous, current token.Token) bool {
+	if previous.Span.End.Offset == current.Span.Start.Offset {
+		return false
+	}
+	if previous.Kind == token.NativeIsland || previous.Kind == token.JSXLiteral || current.Kind == token.NativeIsland || current.Kind == token.JSXLiteral {
+		return false
+	}
+	combined, diagnostics := lexer.Lex([]byte("value " + previous.Lexeme + current.Lexeme + "\n"))
+	if hasErrors(diagnostics) {
+		return true
+	}
+	code := make([]token.Token, 0, 2)
+	for _, item := range combined {
+		if item.Kind != token.EOF && item.Kind != token.Newline && item.Kind != token.Comment {
+			code = append(code, item)
+		}
+	}
+	return len(code) != 3 || code[1].Kind != previous.Kind || code[1].Lexeme != previous.Lexeme || code[2].Kind != current.Kind || code[2].Lexeme != current.Lexeme
+}
+
+func formatNativeToken(item token.Token, baseIndent int) string {
+	if !strings.Contains(item.Lexeme, "\n") {
+		return item.Lexeme
+	}
+	lines := strings.Split(item.Lexeme, "\n")
+	originalIndent := item.Span.Start.Column - 1
+	prefix := strings.Repeat(indentation, baseIndent)
+	for index := 1; index < len(lines); index++ {
+		line := lines[index]
+		removed := 0
+		for removed < len(line) && removed < originalIndent && (line[removed] == ' ' || line[removed] == '\t') {
+			removed++
+		}
+		lines[index] = prefix + line[removed:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func importFromLine(tokens []token.Token) bool {

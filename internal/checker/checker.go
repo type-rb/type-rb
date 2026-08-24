@@ -5078,6 +5078,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			typ = types.FromName("Integer")
 		case ast.FloatLiteral:
+			if _, ok := types.ParsePortableFloatLiteral(n.Raw); !ok {
+				c.error(n.Span(), portableFloatLiteralRangeMessage)
+			}
 			typ = types.FromName("Float")
 		case ast.BooleanLiteral:
 			typ = types.FromName("Boolean")
@@ -7479,6 +7482,7 @@ func integerLiteral(raw string) (int, bool) {
 }
 
 const portableIntegerLiteralRangeMessage = "Integer literal is outside the portable range -9007199254740991..9007199254740991"
+const portableFloatLiteralRangeMessage = "Float literal is outside the finite binary64 range"
 
 func (c *Checker) rawEnumLiteral(expression ast.Expression, sc *scope) (RawEnumValue, string, bool) {
 	typ := c.checkExpression(expression, sc)

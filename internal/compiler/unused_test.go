@@ -161,7 +161,7 @@ end
 			if count := strings.Count(output, "_ = __trb_unused_"); count < 8 {
 				t.Fatalf("Go output contains %d named-unused no-op references, expected at least 8:\n%s", count, output)
 			}
-			if !strings.Contains(output, "return value + __trb_unused_") {
+			if !strings.Contains(output, "return trbIntegerAdd_") || !strings.Contains(output, "(value, __trb_unused_") {
 				t.Fatalf("Go output did not keep value and _value distinct:\n%s", output)
 			}
 			fileSet := token.NewFileSet()

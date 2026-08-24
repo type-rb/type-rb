@@ -46,6 +46,10 @@ The compiler looks for `db/schema.lock.json` by default. Set the optional
 configured lock is missing or invalid, compilation fails instead of silently
 using the live database.
 
+Any database column mapped to TypeRB `Integer` uses TypeRB's portable exact
+range `-9007199254740991..9007199254740991`; generated adapters report an
+out-of-range column value as invalid database data.
+
 ## Date and time columns
 
 Schema introspection and schema locks expose portable time types without model

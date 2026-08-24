@@ -53,6 +53,7 @@ type generator struct {
 	enumReceiver     string
 	sourceRecorder   *sourcemap.Recorder
 	sourcePath       string
+	checkedInteger   bool
 }
 
 func Generate(program *ir.Program) string {
@@ -176,6 +177,9 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	}
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
+	}
+	if g.checkedInteger || strings.Contains(g.b.String(), "__trbInteger") {
+		g.checkedIntegerRuntimeSupport()
 	}
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
@@ -572,8 +576,8 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("let " + n.Name + ": " + g.tsType(n.Type) + ";")
 	case *ir.Assignment:
 		target := g.assignmentTarget(n.Target)
-		if n.Operator == "/=" && n.Target.ExprType().Kind == types.Int {
-			g.line(target + " = Math.trunc(" + target + " / " + g.expr(n.Value) + ");")
+		if n.Target.ExprType().Kind == types.Int && isCheckedIntegerAssignment(n.Operator) {
+			g.line(target + " = " + g.checkedIntegerBinary(strings.TrimSuffix(n.Operator, "="), target, g.expr(n.Value)) + ";")
 		} else {
 			g.line(target + " " + n.Operator + " " + g.expr(n.Value) + ";")
 		}
@@ -1252,6 +1256,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		if op == "not" || op == "!" {
 			return "!(" + g.expr(n.Operand) + ")"
 		}
+		if op == "-" && n.ExprType().Kind == types.Int {
+			g.checkedInteger = true
+			return "__trbIntegerNegate(" + g.expr(n.Operand) + ")"
+		}
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
@@ -1284,11 +1292,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		left := g.binaryOperand(n.Left)
 		right := g.binaryOperand(n.Right)
-		if op == "**" && n.ExprType().Kind == types.Int {
-			return "((base: number, exponent: number): number => { if (exponent < 0) { throw new RangeError(\"negative Integer exponent\"); } return Math.trunc(base ** exponent); })(" + left + ", " + right + ")"
-		}
-		if op == "/" && n.ExprType().Kind == types.Int {
-			return "Math.trunc(" + left + " / " + right + ")"
+		if n.ExprType().Kind == types.Int && isCheckedIntegerOperator(op) {
+			return g.checkedIntegerBinary(op, left, right)
 		}
 		return left + " " + op + " " + right
 	case *ir.Range:
@@ -1434,6 +1439,41 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) checkedIntegerBinary(operator, left, right string) string {
+	g.checkedInteger = true
+	name := map[string]string{
+		"+": "Add", "-": "Subtract", "*": "Multiply", "/": "Divide", "%": "Remainder", "**": "Power",
+	}[operator]
+	return "__trbInteger" + name + "(" + left + ", " + right + ")"
+}
+
+func (g *generator) checkedIntegerRuntimeSupport() {
+	g.line(`function __trbIntegerCheck(value: number): number { if (!Number.isSafeInteger(value)) { throw new RangeError("Integer is outside the portable range"); } return value; }`)
+	g.line(`function __trbIntegerAdd(left: number, right: number): number { return __trbIntegerCheck(left + right); }`)
+	g.line(`function __trbIntegerSubtract(left: number, right: number): number { return __trbIntegerCheck(left - right); }`)
+	g.line(`function __trbIntegerMultiply(left: number, right: number): number { return __trbIntegerCheck(left * right); }`)
+	g.line(`function __trbIntegerDivide(left: number, right: number): number { if (right === 0) { throw new RangeError("division by zero"); } return __trbIntegerCheck(Math.trunc(left / right)); }`)
+	g.line(`function __trbIntegerRemainder(left: number, right: number): number { if (right === 0) { throw new RangeError("division by zero"); } return __trbIntegerCheck(left % right); }`)
+	g.line(`function __trbIntegerPower(left: number, right: number): number { if (right < 0) { throw new RangeError("negative Integer exponent"); } return __trbIntegerCheck(left ** right); }`)
+	g.line(`function __trbIntegerNegate(value: number): number { return __trbIntegerCheck(-value); }`)
+}
+
+func isCheckedIntegerAssignment(operator string) bool {
+	switch operator {
+	case "+=", "-=", "*=", "/=":
+		return true
+	}
+	return false
+}
+
+func isCheckedIntegerOperator(operator string) bool {
+	switch operator {
+	case "+", "-", "*", "/", "%", "**":
+		return true
+	}
+	return false
 }
 
 func (g *generator) resultFunctionToPromiseRejection(conversion *ir.Conversion) string {

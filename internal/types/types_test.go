@@ -1,6 +1,25 @@
 package types
 
-import "testing"
+import (
+	"math"
+	"strings"
+	"testing"
+)
+
+func TestPortableFloatLiteralsAreFiniteBinary64Values(t *testing.T) {
+	if value, ok := ParsePortableFloatLiteral("1.7976931348623157"); !ok || value != 1.7976931348623157 {
+		t.Fatalf("ordinary Float literal=%v, accepted=%t", value, ok)
+	}
+	if value, ok := ParsePortableFloatLiteral("0." + strings.Repeat("0", 400) + "1"); !ok || value != 0 {
+		t.Fatalf("underflowing Float literal=%v, accepted=%t", value, ok)
+	}
+	if value, ok := ParsePortableFloatLiteral(strings.Repeat("9", 400) + ".0"); ok || !math.IsInf(value, 1) {
+		t.Fatalf("overflowing Float literal=%v, accepted=%t", value, ok)
+	}
+	if value, ok := ParsePortableFloatLiteral("not-a-float"); ok || value != 0 {
+		t.Fatalf("invalid Float literal=%v, accepted=%t", value, ok)
+	}
+}
 
 func TestHashAssignabilityIsInvariantButIgnoresBindingReadonly(t *testing.T) {
 	stringType := FromName("String")

@@ -87,6 +87,18 @@ func (r *Recorder) Record(start, end int, source token.Span) {
 	r.mappings = append(r.mappings, offsetMapping{start: start, end: end, source: Location{Path: r.path, Span: source}})
 }
 
+// ShiftGeneratedOffsets moves previously recorded mappings after generated
+// runtime support is prepended to an output buffer.
+func (r *Recorder) ShiftGeneratedOffsets(delta int) {
+	if r == nil || delta == 0 {
+		return
+	}
+	for index := range r.mappings {
+		r.mappings[index].start += delta
+		r.mappings[index].end += delta
+	}
+}
+
 func (r *Recorder) Build(output string) Map {
 	if r == nil || len(r.mappings) == 0 {
 		return Map{Version: Version}

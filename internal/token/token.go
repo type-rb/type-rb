@@ -26,6 +26,7 @@ const (
 	String        Kind = "string"
 	JSXLiteral    Kind = "jsx_literal"
 	NativeLiteral Kind = "native_literal"
+	NativeIsland  Kind = "native_island"
 	Comment       Kind = "comment"
 	Newline       Kind = "newline"
 	Operator      Kind = "operator"

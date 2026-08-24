@@ -798,7 +798,7 @@ function normalizeColumn(column: TrbOrmColumn, value: unknown): unknown {
     return mapped[0];
   }
   if (column.kind === "boolean") return value === true || value === 1 || value === "1";
-  if (column.kind === "integer") return Number(value);
+  if (column.kind === "integer") return portableInteger(value, "database Integer is outside the portable range");
   if (column.kind === "float") return Number(value);
   if (column.kind === "bytes" && !(value instanceof Uint8Array)) return new Uint8Array(value as ArrayLike<number>);
 	if (column.kind === "date" || column.kind === "timeofday" || column.kind === "datetime" || column.kind === "instant") {
@@ -825,6 +825,7 @@ function normalizeColumn(column: TrbOrmColumn, value: unknown): unknown {
 	}
   return value;
 }
+function portableInteger(value: unknown, message: string): number { const integer = Number(value); if (!Number.isSafeInteger(integer)) throw new TrbOrmExecutionError(DbErrorKind.InvalidData, message); return integer; }
 function databaseValue(owner: TrbOrmModel, columnName: string, value: unknown): unknown {
   if (value === null || value === undefined) return null;
   const column = owner.columns.find(item => item.name === columnName);
@@ -874,7 +875,7 @@ async function unsafe(source: TrbOrmQuery, sql: string, args: unknown[]): Promis
   catch (error) { if (signal?.aborted) throw new TrbOrmExecutionError(DbErrorKind.Timeout, "database operation was cancelled"); throw error; }
   finally { signal?.removeEventListener("abort", cancel); reserved?.release(); }
 }
-function affectedRows(result: any): number { return Number(result.affectedRows ?? result.count ?? result.changes ?? result.length ?? 0); }
+function affectedRows(result: any): number { return portableInteger(result.affectedRows ?? result.count ?? result.changes ?? result.length ?? 0, "database Integer is outside the portable range"); }
 
 export function toSQL(source: TrbOrmQuery): string { const args: unknown[] = []; return statement(source, projection(model(source.model)), args); }
 export async function all(source: TrbOrmQuery): Promise<DbResult<any[]>> {
@@ -890,7 +891,7 @@ export async function first(source: TrbOrmQuery): Promise<DbResult<any | null>> 
   return loaded.kind === "Err" ? loaded : resultOk(loaded.value[0] ?? null);
 }
 export async function count(source: TrbOrmQuery): Promise<DbResult<number>> {
-  try { const args: unknown[] = []; const rows = await unsafe(source, statement(source, "COUNT(*) AS trb_count", args), args); return resultOk(Number(rows[0]?.trb_count ?? 0)); }
+  try { const args: unknown[] = []; const rows = await unsafe(source, statement(source, "COUNT(*) AS trb_count", args), args); return resultOk(portableInteger(rows[0]?.trb_count ?? 0, "database Integer is outside the portable range")); }
   catch (error) { return databaseError<number>(error, "database count failed"); }
 }
 export async function exists(source: TrbOrmQuery): Promise<DbResult<boolean>> {
@@ -923,7 +924,7 @@ export async function groupedAggregate(source: TrbOrmGroupedQuery, operation: st
     const args: unknown[] = []; let sql = statement(source.query, quote(source.column) + " AS trb_group, " + expression + " AS trb_value", args, undefined, false) + " GROUP BY " + quote(source.column);
     if (source.having !== null) { args.push(source.having.value); const havingExpression = source.having.expression === "count" ? "COUNT(*)" : source.having.expression; sql += " HAVING " + havingExpression + " " + source.having.operator + " " + placeholder(args.length); }
     if (source.query.orders.length > 0) sql += " ORDER BY " + source.query.orders.map(([column, direction]) => quote(column) + " " + direction.toUpperCase()).join(", ");
-    const rows = await unsafe(source.query, sql, args); const result: Record<string, any> = {}; const targetColumn = target === undefined ? undefined : owner.columns.find(column => column.name === target); const groupColumn = owner.columns.find(column => column.name === source.column)!; for (const row of rows) { let value = row.trb_value; if (operation === "count" || operation === "average" || targetColumn?.kind === "integer" || targetColumn?.kind === "float") value = Number(value); else if (targetColumn !== undefined) value = normalizeColumn(targetColumn, value); result[String(normalizeColumn(groupColumn, row.trb_group))] = value; } return resultOk(result);
+    const rows = await unsafe(source.query, sql, args); const result: Record<string, any> = {}; const targetColumn = target === undefined ? undefined : owner.columns.find(column => column.name === target); const groupColumn = owner.columns.find(column => column.name === source.column)!; for (const row of rows) { let value = row.trb_value; if (operation === "count") value = portableInteger(value, "database Integer is outside the portable range"); else if (operation === "average" || targetColumn?.kind === "float") value = Number(value); else if (targetColumn !== undefined) value = normalizeColumn(targetColumn, value); result[String(normalizeColumn(groupColumn, row.trb_group))] = value; } return resultOk(result);
   } catch (error) { return databaseError<Record<string, any>>(error, "database grouped aggregate failed"); }
 }
 
@@ -939,7 +940,7 @@ async function inserted(source: TrbOrmQuery, owner: TrbOrmModel, columns: string
     if (__trbOrmAdapter !== "mysql") sql += " RETURNING " + projection(owner).replaceAll(quote(owner.table) + ".", "");
     const rows = await unsafe(source, sql, args);
     if (__trbOrmAdapter !== "mysql") return resultOk(instantiate(owner, rows[0]!, source));
-    const insertId = Number((rows as any).lastInsertRowid ?? (rows as any).insertId ?? 0);
+    const insertId = portableInteger((rows as any).lastInsertRowid ?? (rows as any).insertId ?? 0, "database Integer is outside the portable range");
     if (primary !== undefined && insertId > 0) return await first(where(source, [primary.name], ["="], [insertId]));
     const predicateColumns = columns.filter((column, index) => values[index] !== null);
     const predicateValues = predicateColumns.map(column => values[columns.indexOf(column)]);

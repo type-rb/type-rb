@@ -877,7 +877,11 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		case "-":
 			switch number := value.Data.(type) {
 			case int64:
-				return Value{Type: node.ExprType(), Data: -number}, nil
+				result := -number
+				if result < types.MinPortableInteger || result > types.MaxPortableInteger {
+					return Value{}, errors.New("Integer is outside the portable range")
+				}
+				return Value{Type: node.ExprType(), Data: result}, nil
 			case float64:
 				return Value{Type: node.ExprType(), Data: -number}, nil
 			}
@@ -1814,6 +1818,11 @@ func (e *Evaluator) binary(left Value, operator string, right Value, typ types.T
 			return comparison(strings.Compare(leftString, rightString), operator, typ)
 		}
 	}
+	if leftInteger, leftOK := left.Data.(int64); leftOK {
+		if rightInteger, rightOK := right.Data.(int64); rightOK {
+			return checkedIntegerBinary(leftInteger, operator, rightInteger, typ)
+		}
+	}
 	leftNumber, leftFloat, leftOK := number(left)
 	rightNumber, rightFloat, rightOK := number(right)
 	if !leftOK || !rightOK {
@@ -1828,17 +1837,10 @@ func (e *Evaluator) binary(left Value, operator string, right Value, typ types.T
 	case "*":
 		return numericValue(leftNumber*rightNumber, useFloat, typ), nil
 	case "/":
-		if rightNumber == 0 {
-			return Value{}, errors.New("division by zero")
-		}
 		if useFloat {
 			return numericValue(leftNumber/rightNumber, true, typ), nil
 		}
-		return numericValue(math.Trunc(leftNumber/rightNumber), false, typ), nil
 	case "%":
-		if rightNumber == 0 {
-			return Value{}, errors.New("division by zero")
-		}
 		return numericValue(math.Mod(leftNumber, rightNumber), useFloat, typ), nil
 	case "**":
 		if typ.Kind == types.Int && rightNumber < 0 {
@@ -1855,6 +1857,92 @@ func (e *Evaluator) binary(left Value, operator string, right Value, typ types.T
 		return Value{Type: typ, Data: leftNumber >= rightNumber}, nil
 	}
 	return Value{}, fmt.Errorf("unsupported operator %s", operator)
+}
+
+func checkedIntegerBinary(left int64, operator string, right int64, typ types.Type) (Value, error) {
+	failure := func() (Value, error) {
+		return Value{}, errors.New("Integer is outside the portable range")
+	}
+	checked := func(value int64) (Value, error) {
+		if value < types.MinPortableInteger || value > types.MaxPortableInteger {
+			return failure()
+		}
+		return Value{Type: typ, Data: value}, nil
+	}
+	switch operator {
+	case "+":
+		if right > 0 && left > types.MaxPortableInteger-right || right < 0 && left < types.MinPortableInteger-right {
+			return failure()
+		}
+		return checked(left + right)
+	case "-":
+		if right < 0 && left > types.MaxPortableInteger+right || right > 0 && left < types.MinPortableInteger+right {
+			return failure()
+		}
+		return checked(left - right)
+	case "*":
+		value, ok := checkedIntegerMultiply(left, right)
+		if !ok {
+			return failure()
+		}
+		return checked(value)
+	case "/":
+		if right == 0 {
+			return Value{}, errors.New("division by zero")
+		}
+		return checked(left / right)
+	case "%":
+		if right == 0 {
+			return Value{}, errors.New("division by zero")
+		}
+		return checked(left % right)
+	case "**":
+		if right < 0 {
+			return Value{}, errors.New("negative Integer exponent")
+		}
+		result := int64(1)
+		factor := left
+		for right > 0 {
+			if right%2 == 1 {
+				var ok bool
+				result, ok = checkedIntegerMultiply(result, factor)
+				if !ok {
+					return failure()
+				}
+			}
+			right /= 2
+			if right > 0 {
+				var ok bool
+				factor, ok = checkedIntegerMultiply(factor, factor)
+				if !ok {
+					return failure()
+				}
+			}
+		}
+		return checked(result)
+	case "<":
+		return Value{Type: typ, Data: left < right}, nil
+	case "<=":
+		return Value{Type: typ, Data: left <= right}, nil
+	case ">":
+		return Value{Type: typ, Data: left > right}, nil
+	case ">=":
+		return Value{Type: typ, Data: left >= right}, nil
+	}
+	return Value{}, fmt.Errorf("unsupported operator %s", operator)
+}
+
+func checkedIntegerMultiply(left, right int64) (int64, bool) {
+	if left > 0 {
+		if right > 0 && left > types.MaxPortableInteger/right || right < 0 && right < types.MinPortableInteger/left {
+			return 0, false
+		}
+	} else if left < 0 {
+		if right > 0 && left < types.MinPortableInteger/right || right < 0 && left < types.MaxPortableInteger/right {
+			return 0, false
+		}
+	}
+	return left * right, true
 }
 
 func comparison(value int, operator string, typ types.Type) (Value, error) {
@@ -2881,9 +2969,9 @@ func literal(node *ir.Literal) (Value, error) {
 		}
 		value.Data = parsed
 	case "float":
-		parsed, err := strconv.ParseFloat(strings.ReplaceAll(node.Raw, "_", ""), 64)
-		if err != nil {
-			return Value{}, err
+		parsed, ok := types.ParsePortableFloatLiteral(node.Raw)
+		if !ok {
+			return Value{}, errors.New("Float literal is outside the finite binary64 range")
 		}
 		value.Data = parsed
 	case "boolean":

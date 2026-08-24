@@ -341,7 +341,7 @@ end
 		t.Fatal(err)
 	}
 	output := string(artifact.Output)
-	for _, expected := range []string{"probe.TrbFieldCount += 1", "fmt.Println(probe.TrbFieldLabel)", "fmt.Println(probe.TrbFieldCount)", "fmt.Println(probe.Increment())"} {
+	for _, expected := range []string{"probe.TrbFieldCount = trbIntegerAdd_", "fmt.Println(probe.TrbFieldLabel)", "fmt.Println(probe.TrbFieldCount)", "fmt.Println(probe.Increment())"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated Go is missing %q:\n%s", expected, output)
 		}
@@ -363,7 +363,7 @@ end
 	for _, expected := range []string{
 		"def __trb_field_label; @label; end",
 		"def __trb_field_count=(value); @count = value; end",
-		"probe.__trb_field_count += 1",
+		"probe.__trb_field_count = __trb_integer_add(probe.__trb_field_count, 1)",
 		"$stdout.puts(probe.__trb_field_label)",
 		"$stdout.puts(probe.increment())",
 	} {
@@ -381,7 +381,7 @@ end
 	}
 	typeScriptOutput := string(typeScript.Output)
 	for _, expected := range []string{
-		"probe.__trb_count += 1;",
+		"probe.__trb_count = __trbIntegerAdd(probe.__trb_count, 1);",
 		"console.log(probe.__trb_label);",
 		"console.log(probe.__trb_count);",
 		"console.log(probe.increment());",
@@ -807,7 +807,7 @@ end
 		t.Fatalf("generated Go does not type-check: %v\n%s", err, artifact.Output)
 	}
 	output := string(artifact.Output)
-	for _, expected := range []string{"type Counter interface", "Value() int", "for count < 2 {", "count += 1"} {
+	for _, expected := range []string{"type Counter interface", "Value() int", "for count < 2 {", "count = trbIntegerAdd_"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("missing %q:\n%s", expected, output)
 		}
@@ -1127,7 +1127,7 @@ end
 	}
 
 	goOutput := string(artifacts["go"].Output)
-	for _, want := range []string{`import "math"`, `(1 + 2) * 3`, `panic("negative Integer exponent")`, `math.Pow(2.0, 3.0)`, `0.25 * float64(100)`, `float64(grouped)`, `accumulated += float64(2)`, `float64(1) == 1.0`} {
+	for _, want := range []string{`import "math"`, `trbIntegerMultiply_`, `trbIntegerAdd_`, `panic("negative Integer exponent")`, `math.Pow(2.0, 3.0)`, `}(0.25, float64(100))`, `float64(grouped)`, `accumulated += float64(2)`, `float64(1) == 1.0`} {
 		if !strings.Contains(goOutput, want) {
 			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
 		}
@@ -1142,13 +1142,13 @@ end
 	}
 
 	rubyOutput := string(artifacts["ruby"].Output)
-	for _, want := range []string{".quo(2).truncate", ".remainder(2)", "updated = (updated).quo(3).truncate", "0.25 * (100).to_f", "widened = (grouped).to_f", "accumulated += (2).to_f", "words = true && false"} {
+	for _, want := range []string{"__trb_integer_divide((__trb_integer_negate(5)), 2)", "__trb_integer_remainder((__trb_integer_negate(5)), 2)", "updated = __trb_integer_divide(updated, 3)", "0.25 * (100).to_f", "widened = (grouped).to_f", "accumulated += (2).to_f", "words = true && false"} {
 		if !strings.Contains(rubyOutput, want) {
 			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
 		}
 	}
 	typescriptOutput := string(artifacts["typescript"].Output)
-	for _, want := range []string{"Math.trunc((-5) / 2)", "updated = Math.trunc(updated / 3)", "0.25 * Number(100)", "Number(grouped)", "accumulated += Number(2)"} {
+	for _, want := range []string{"__trbIntegerDivide((__trbIntegerNegate(5)), 2)", "updated = __trbIntegerDivide(updated, 3)", "0.25 * Number(100)", "Number(grouped)", "accumulated += Number(2)"} {
 		if !strings.Contains(typescriptOutput, want) {
 			t.Fatalf("generated TypeScript is missing %q:\n%s", want, typescriptOutput)
 		}
@@ -1171,7 +1171,7 @@ end
 `)
 
 	wants := map[string][]string{
-		"go":         {"return float64(value)", "Accept(float64(value))", "result + float64(value)"},
+		"go":         {"return float64(value)", "Accept(float64(value))", "}(result, float64(value))"},
 		"ruby":       {"return (value).to_f", "accept((value).to_f)", "result + (value).to_f"},
 		"typescript": {"return Number(value)", "accept(Number(value))", "result + Number(value)"},
 	}
@@ -2025,7 +2025,7 @@ end
 		"go": {
 			`make([]string, 0, len(`,
 			`append(__trbResult`,
-			`if (value % 2) == 0`,
+			`if (trbIntegerRemainder_`,
 			`sum := __trbResult`,
 			`if value > 2 {`,
 			`if !(value > 0) {`,
@@ -2035,29 +2035,29 @@ end
 		},
 		"ruby": {
 			`.map { |value| value.to_s }`,
-			`.map.with_index { |value, index| value + index }`,
-			`.select { |value| ((value).remainder(2)) == 0 }`,
-			`.reduce(0) { |sum, value| sum + value }`,
+			`.map.with_index { |value, index| __trb_integer_add(value, index) }`,
+			`.select { |value| (__trb_integer_remainder(value, 2)) == 0 }`,
+			`.reduce(0) { |sum, value| __trb_integer_add(sum, value) }`,
 			`.any? { |value| value > 2 }`,
 			`.all? { |value| value > 0 }`,
 			`.none? { |value| value < 0 }`,
-			`.find { |value| ((value).remainder(2)) == 0 }`,
+			`.find { |value| (__trb_integer_remainder(value, 2)) == 0 }`,
 			`.find_index { |value| value > 2 }`,
 		},
 		"typescript": {
 			`.map((value) => String(value))`,
-			`.map((value, index) => value + index)`,
+			`.map((value, index) => __trbIntegerAdd(value, index))`,
 			`.select`,
-			`.reduce((sum, value) => sum + value, 0)`,
+			`.reduce((sum, value) => __trbIntegerAdd(sum, value), 0)`,
 			`.some((value) => value > 2)`,
 			`.every((value) => value > 0)`,
 			`!([1, 2, 3].some((value) => value < 0))`,
-			`.find((value) => (value % 2) == 0) ?? null`,
+			`.find((value) => (__trbIntegerRemainder(value, 2)) == 0) ?? null`,
 			`.findIndex((value) => value > 2)`,
 		},
 	}
 	// TypeScript calls the portable select operation through Array#filter.
-	wants["typescript"][2] = `.filter((value) => (value % 2) == 0)`
+	wants["typescript"][2] = `.filter((value) => (__trbIntegerRemainder(value, 2)) == 0)`
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		artifact, err := CompileWithOptions("transforms.trb", source, Options{Mode: mode, Package: "transforms", RubyLoader: "require_relative"})
 		if err != nil {
@@ -2967,6 +2967,11 @@ func TestLiteralAndDiscriminatedUnionDiagnosticsAreModeIndependent(t *testing.T)
 			name:   "Integer literal type outside portable range",
 			source: "def value(): 9007199254740992\n\treturn 1\nend\n",
 			want:   "Integer literal is outside the portable range -9007199254740991..9007199254740991",
+		},
+		{
+			name:   "Float literal outside finite binary64 range",
+			source: "def value(): Float\n\treturn " + strings.Repeat("9", 400) + ".0\nend\n",
+			want:   "Float literal is outside the finite binary64 range",
 		},
 	}
 	for _, test := range tests {
