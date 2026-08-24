@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -42,6 +43,30 @@ type Result struct {
 	Value          Value
 	Display        bool
 	MutableBinding bool
+}
+
+type evaluationError struct {
+	Module string
+	Span   token.Span
+	Err    error
+}
+
+func (e *evaluationError) Error() string { return e.Err.Error() }
+func (e *evaluationError) Unwrap() error { return e.Err }
+
+func locateEvaluationError(err error, module string, span token.Span) error {
+	if err == nil || span.Start.Line <= 0 || errors.Is(err, context.Canceled) {
+		return err
+	}
+	var located *evaluationError
+	if errors.As(err, &located) {
+		return err
+	}
+	var transfer *controlTransfer
+	if errors.As(err, &transfer) {
+		return err
+	}
+	return &evaluationError{Module: module, Span: span, Err: err}
 }
 
 type arrayValue struct{ Items []Value }
@@ -453,10 +478,13 @@ func (e *Evaluator) evaluate(statements []ir.Statement, module string, sc *scope
 	return last, nil
 }
 
-func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) (flowResult, error) {
+func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) (result flowResult, err error) {
 	if err := e.checkContext(); err != nil {
 		return flowResult{}, err
 	}
+	defer func() {
+		err = locateEvaluationError(err, module, statement.SourceSpan())
+	}()
 	switch node := statement.(type) {
 	case *ir.Comment, *ir.Import, *ir.Record, *ir.Enum, *ir.EnumMember, *ir.TypeAlias, *ir.Newtype, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
 		return flowResult{}, nil
@@ -751,13 +779,16 @@ func matchesTypePattern(value Value, typ types.Type) bool {
 	}
 }
 
-func (e *Evaluator) expression(expression ir.Expression, module string, sc *scope) (Value, error) {
+func (e *Evaluator) expression(expression ir.Expression, module string, sc *scope) (value Value, err error) {
 	if err := e.checkContext(); err != nil {
 		return Value{}, err
 	}
 	if expression == nil {
 		return Value{Type: types.FromName("Void")}, nil
 	}
+	defer func() {
+		err = locateEvaluationError(err, module, expression.SourceSpan())
+	}()
 	switch node := expression.(type) {
 	case *ir.Lambda:
 		return Value{Type: node.ExprType(), Data: &callable{Lambda: &lambdaClosure{Node: node, Module: module, Scope: sc}}}, nil

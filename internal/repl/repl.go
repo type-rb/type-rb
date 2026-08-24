@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/compiler"
@@ -21,9 +22,10 @@ import (
 )
 
 type Compilation struct {
-	Session   *compiler.Artifact
-	Artifacts []*compiler.Artifact
-	Programs  []*ir.Program
+	Session            *compiler.Artifact
+	Artifacts          []*compiler.Artifact
+	Programs           []*ir.Program
+	HiddenPreludeLines int
 }
 
 type CompileFunc func(source string) (*Compilation, error)
@@ -37,6 +39,7 @@ type Options struct {
 	Stderr      io.Writer
 	Interactive bool
 	HistoryFile string
+	ProjectRoot string
 	Compile     CompileFunc
 	Initial     *Compilation
 	Candidates  languageservice.Context
@@ -55,6 +58,7 @@ func Run(options Options) error {
 			return err
 		}
 	}
+	options.Initial = compilation
 	evaluator := NewEvaluator(options.Stdout, options.Mode)
 	defer func() { _ = evaluator.Close() }()
 	if err := evaluator.LoadProject(compilation.Programs, compilation.Session.IR.ModulePath); err != nil {
@@ -108,7 +112,7 @@ func Run(options Options) error {
 				nextEvaluator := NewEvaluator(options.Stdout, options.Mode)
 				if err := nextEvaluator.LoadProject(nextCompilation.Programs, nextCompilation.Session.IR.ModulePath); err != nil {
 					_ = nextEvaluator.Close()
-					printReplError(options.Stderr, options.Interactive, err.Error())
+					printEvaluationError(options.Stderr, err, options.Interactive, options.ProjectRoot, nextCompilation)
 					continue
 				}
 				nextEvaluator.LoadDefinitions(nextCompilation.Session.IR)
@@ -134,7 +138,7 @@ func Run(options Options) error {
 		candidate := appendSource(source, snippet)
 		next, compileErr := options.Compile(candidate)
 		if compileErr != nil {
-			printCompileError(options.Stderr, compileErr, options.Interactive)
+			printCompileError(options.Stderr, compileErr, options.Interactive, options.ProjectRoot, sessionFilename(options.Initial))
 			continue
 		}
 		if next.Session == nil || len(authoredStatements(next.Session)) < statementCount {
@@ -155,7 +159,7 @@ func Run(options Options) error {
 				printEvaluationInterrupted(options.Stdout, options.Interactive)
 				continue
 			}
-			printReplError(options.Stderr, options.Interactive, runtimeErr.Error())
+			printEvaluationError(options.Stderr, runtimeErr, options.Interactive, options.ProjectRoot, next)
 			continue
 		}
 		source = candidate
@@ -223,7 +227,7 @@ func handleCommand(command, source string, options Options) (bool, string, *Comp
 		candidate := appendSource(source, argument)
 		compilation, err := options.Compile(candidate)
 		if err != nil {
-			printCompileError(options.Stderr, err, options.Interactive)
+			printCompileError(options.Stderr, err, options.Interactive, options.ProjectRoot, sessionFilename(options.Initial))
 			break
 		}
 		statements := authoredStatements(compilation.Session)
@@ -253,14 +257,14 @@ func handleCommand(command, source string, options Options) (bool, string, *Comp
 		candidate := appendSource(source, string(data))
 		compilation, err := options.Compile(candidate)
 		if err != nil {
-			printCompileError(options.Stderr, err, options.Interactive)
+			printCompileError(options.Stderr, err, options.Interactive, options.ProjectRoot, sessionFilename(options.Initial))
 			break
 		}
 		return false, candidate, compilation
 	case ":reload":
 		compilation, err := options.Compile(source)
 		if err != nil {
-			printCompileError(options.Stderr, err, options.Interactive)
+			printCompileError(options.Stderr, err, options.Interactive, options.ProjectRoot, sessionFilename(options.Initial))
 			break
 		}
 		fmt.Fprintln(options.Stdout, colorize(options.Interactive, colorSuccess, "reloaded"))
@@ -278,7 +282,7 @@ func appendSource(source, snippet string) string {
 	return strings.TrimRight(source, "\n") + "\n" + strings.TrimRight(snippet, "\n") + "\n"
 }
 
-func printCompileError(output io.Writer, err error, colored bool) {
+func printCompileError(output io.Writer, err error, colored bool, projectRoot, sessionPath string) {
 	var compilation *compiler.CompileError
 	if !errors.As(err, &compilation) {
 		printReplError(output, colored, err.Error())
@@ -293,11 +297,14 @@ func printCompileError(output io.Writer, err error, colored bool) {
 		if path == "" {
 			path = compilation.Filename
 		}
+		path = displayReplPath(path, projectRoot, sessionPath)
 		fmt.Fprintf(output, "%s:%d:%d: %s[%s]: %s\n", path, item.Span.Start.Line, item.Span.Start.Column, severity, item.Code, item.Message)
 		for _, related := range item.Related {
 			relatedPath := related.Location.Path
 			if relatedPath == "" {
 				relatedPath = path
+			} else {
+				relatedPath = displayReplPath(relatedPath, projectRoot, sessionPath)
 			}
 			fmt.Fprintf(output, "  %s:%d:%d: note: %s\n", relatedPath, related.Location.Span.Start.Line, related.Location.Span.Start.Column, related.Message)
 		}
@@ -305,6 +312,59 @@ func printCompileError(output io.Writer, err error, colored bool) {
 			fmt.Fprintf(output, "  help: %s\n", fix.Message)
 		}
 	}
+}
+
+func printEvaluationError(output io.Writer, err error, colored bool, projectRoot string, compilation *Compilation) {
+	var located *evaluationError
+	if !errors.As(err, &located) {
+		printReplError(output, colored, err.Error())
+		return
+	}
+	path := ""
+	for _, program := range compilation.Programs {
+		if program.ModulePath == located.Module {
+			path = program.SourcePath
+			break
+		}
+	}
+	path = displayReplPath(path, projectRoot, sessionFilename(compilation))
+	if path == "" {
+		printReplError(output, colored, err.Error())
+		return
+	}
+	severity := "error"
+	if colored {
+		severity = colorize(true, colorError, severity)
+	}
+	line := located.Span.Start.Line
+	if compilation.Session != nil && located.Module == compilation.Session.IR.ModulePath && line > compilation.HiddenPreludeLines {
+		line -= compilation.HiddenPreludeLines
+	}
+	fmt.Fprintf(output, "%s:%d:%d: %s: %s\n", path, line, located.Span.Start.Column, severity, err)
+}
+
+func sessionFilename(compilation *Compilation) string {
+	if compilation == nil || compilation.Session == nil {
+		return ""
+	}
+	return compilation.Session.Filename
+}
+
+func displayReplPath(path, projectRoot, sessionPath string) string {
+	if path == "" {
+		return ""
+	}
+	if sessionPath != "" && filepath.Clean(path) == filepath.Clean(sessionPath) {
+		return "(trb)"
+	}
+	if projectRoot == "" || !filepath.IsAbs(path) {
+		return path
+	}
+	relative, err := filepath.Rel(projectRoot, path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return path
+	}
+	return relative
 }
 
 func printReplError(output io.Writer, colored bool, message string) {
