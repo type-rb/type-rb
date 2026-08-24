@@ -799,7 +799,7 @@ Tuple retains the type of each array-like position and a `record` retains the
 type of each named field. `Array<Integer | String>[0]` therefore remains
 `Integer | String`; exact constant-index inference belongs to Tuple.
 
-The complete collection receiver and package API belongs to the
+The complete public collection receiver API belongs to the
 [standard-library reference](standard-library.md).
 
 ### 3.13 Enums, raw values, and sum types

@@ -2072,9 +2072,7 @@ end
 }
 
 func TestPortableArraySortingAcrossModes(t *testing.T) {
-	source := []byte(`import trb/std/arrays
-
-record Item
+	source := []byte(`record Item
 	name: String
 	rank: Integer
 end
@@ -2087,8 +2085,8 @@ def descending_numbers(): Array<Integer>
 	return [3, 1, 2].sort_descending()
 end
 
-def package_sorted_numbers(): Array<Integer>
-	return arrays.sort([3, 1, 2])
+def separately_sorted_numbers(): Array<Integer>
+	return [3, 1, 2].sort()
 end
 
 def sorted_items(items: Array<Item>): Array<Item>
@@ -4118,11 +4116,6 @@ func TestImmutableBindingsRequireMutForReassignmentAndArrayUpdates(t *testing.T)
 			name:   "reassignment",
 			source: "def example()\n  value := 1\n  value = 2\n  return\nend\n",
 			want:   "value is immutable; declare it with mut to use assignment",
-		},
-		{
-			name:   "portable push",
-			source: "import trb/std/arrays\n\ndef example()\n  values := [1]\n  arrays.push(values, 2)\n  return\nend\n",
-			want:   "values is immutable; declare it with mut to use push()",
 		},
 		{
 			name:   "member push",
