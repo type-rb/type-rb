@@ -79,6 +79,12 @@ npm ci --prefix tools/site
 ./scripts/build-site.sh dist/site
 ```
 
+Pages always runs focused website, playground, grammar, and static-build
+checks. Changes limited to documentation and website-owned files skip the
+unrelated full compiler suite; `scripts/pages-full-tests-required.sh` owns that
+conservative allowlist. Any unrecognized path, an Actions workflow change, or
+a manually dispatched run keeps `go test ./...` mandatory.
+
 ## Development workflow
 
 Keep one grammar and portable semantics across modes. Target-specific APIs and

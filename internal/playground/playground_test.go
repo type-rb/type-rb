@@ -23,6 +23,9 @@ func TestHandlerServesPlaygroundAndConfiguration(t *testing.T) {
 	if !strings.Contains(page.Body.String(), `data-page-link="play">Playground</a>`) || !strings.Contains(page.Body.String(), `id="editor"`) {
 		t.Fatalf("playground markup is incomplete:\n%s", page.Body.String())
 	}
+	if !strings.Contains(page.Body.String(), "scratch.trb") || strings.Contains(page.Body.String(), ">main.trb<") {
+		t.Fatalf("playground should identify browser input as scratch source:\n%s", page.Body.String())
+	}
 	if !strings.Contains(page.Body.String(), `href="../" aria-label="TypeRB home"`) {
 		t.Fatalf("playground logo does not link to the site homepage:\n%s", page.Body.String())
 	}
@@ -34,6 +37,15 @@ func TestHandlerServesPlaygroundAndConfiguration(t *testing.T) {
 	}
 	if policy := page.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "connect-src 'self'") {
 		t.Fatalf("missing local-only content security policy: %q", policy)
+	}
+
+	script := httptest.NewRecorder()
+	handler.ServeHTTP(script, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+	if script.Code != http.StatusOK || !strings.Contains(script.Body.String(), "scratch.trb") {
+		t.Fatalf("playground diagnostics do not use the scratch filename: status=%d\n%s", script.Code, script.Body.String())
+	}
+	if strings.Contains(script.Body.String(), `replaceAll("\t", "    ")`) {
+		t.Fatalf("playground diagnostics still render tabs at width four:\n%s", script.Body.String())
 	}
 
 	config := httptest.NewRecorder()

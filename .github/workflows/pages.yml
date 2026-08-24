@@ -31,6 +31,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Classify test scope
+        id: test-scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_dispatch ] || ! git rev-parse HEAD^ >/dev/null 2>&1; then
+            full_tests=true
+          else
+            full_tests="$(git diff --name-only HEAD^ HEAD | ./scripts/pages-full-tests-required.sh)"
+          fi
+          echo "full-tests=$full_tests" >> "$GITHUB_OUTPUT"
+          echo "Full compiler tests required: $full_tests"
 
       - uses: actions/setup-go@v6
         with:
@@ -38,6 +55,7 @@ jobs:
           cache: true
 
       - uses: ruby/setup-ruby@v1
+        if: steps.test-scope.outputs.full-tests == 'true'
 
       - uses: actions/setup-node@v6
         with:
@@ -48,10 +66,16 @@ jobs:
             tools/site/package-lock.json
 
       - name: Verify compiler and tour
+        if: steps.test-scope.outputs.full-tests == 'true'
         run: go test ./...
 
-      - name: Verify release tooling
-        run: ./scripts/extract-release-notes_test.sh
+      - name: Verify workflow tooling
+        run: |
+          ./scripts/extract-release-notes_test.sh
+          ./scripts/pages-full-tests-required_test.sh
+
+      - name: Verify website Go packages
+        run: go test ./internal/site ./internal/playground ./cmd/trb-site
 
       - name: Verify TextMate grammar
         run: |

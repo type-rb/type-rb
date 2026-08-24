@@ -20,8 +20,8 @@ Learn the language through guided, executable lessons.
 
 [TypeRB Playground](https://type-rb.github.io/play/)
 
-Write, run, format, and transpile TypeRB while switching between Go, Ruby, and
-TypeScript output.
+Write, evaluate, format, and transpile TypeRB scratch source while switching
+between Go, Ruby, and TypeScript output.
 
 [Docker quickstart](examples/docker/README.md)
 
@@ -94,6 +94,13 @@ trb repl --mode typescript
 
 Run a single file without creating `trbconfig.jsonc`. Standalone execution uses
 Go by default; select Ruby or TypeScript explicitly when needed:
+
+```trb
+def main()
+	puts("Hello from TypeRB")
+	return
+end
+```
 
 ```sh
 trb hello.trb
