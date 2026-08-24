@@ -2,12 +2,19 @@
 
 `trb/web` provides compile-time file-based routing and the same request,
 response, middleware, and server behavior in Go, Ruby, and TypeScript modes.
-Create a project with:
+Create a Go project with:
 
 ```sh
-trb init --template web
+trb init --mode go --module example.com/api --template web api
+cd api
 trb run
 ```
+
+The generated server listens on `http://localhost:3000`. Open that URL to see
+`{"message":"Hello, TypeRB!"}`, then press Ctrl-C to stop the server. The same
+template supports Ruby and TypeScript when their corresponding mode and
+toolchain are selected instead; one project needs only its selected target
+toolchain.
 
 Route files live below `src/routes`. File names determine paths, and exported
 functions determine HTTP methods. For example,
@@ -60,6 +67,9 @@ Path and query values can be bound to records without giving the target
 runtime permission to reflect over application types:
 
 ```trb
+import { Context, Response, text } from trb/web
+import { Result } from trb/std/result
+
 record TodoParams
 	id: Integer
 end

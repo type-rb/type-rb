@@ -3,12 +3,20 @@
 TypeRB provides a portable test API in `trb/std/test`. The same test source
 runs through the Go, Ruby, and TypeScript backends.
 
-Place tests beside the source they exercise and name them `*_test.trb`:
+Place tests beside the source they exercise below the configured `sourceDir`
+and name them `*_test.trb`:
 
 ```text
-src/
-  calculator.trb
-  calculator_test.trb
+calculator.trb
+calculator_test.trb
+```
+
+For example, `calculator.trb` can define the function under test:
+
+```trb
+def add(left: Integer, right: Integer): Integer
+	return left + right
+end
 ```
 
 A test file uses named imports for the explicit suite, case, and assertion
@@ -43,7 +51,7 @@ Select a suite or case by its full display name:
 trb test --filter "Calculator / negative values"
 ```
 
-Use `--file src/calculator_test.trb` to select declarations from one file.
+Use `--file calculator_test.trb` to select declarations from one file.
 Editors combine the file and full name so identically named suites in different
 modules remain independent.
 

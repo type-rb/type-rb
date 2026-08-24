@@ -21,6 +21,8 @@ end
 </code></pre>
 <pre><code class="language-sh">trb check
 </code></pre>
+<pre><code class="language-html">&lt;div id=&quot;root&quot;&gt;&lt;/div&gt;
+</code></pre>
 <pre><code>leave this block unchanged</code></pre>
 `);
 
@@ -31,7 +33,8 @@ end
   assert.match(highlighted, /<span style="color:/);
   assert.match(highlighted, />def<\/span>/);
   assert.match(highlighted, />trb<\/span>/);
-  assert.doesNotMatch(highlighted, /language-(?:trb|sh)/);
+  assert.match(highlighted, /id/);
+  assert.doesNotMatch(highlighted, /language-(?:html|trb|sh)/);
   assert.match(highlighted, /<pre><code>leave this block unchanged<\/code><\/pre>/);
 });
 

@@ -194,9 +194,9 @@ The early official `trb/web` package discovers file-based routes at compile
 time and runs typed request, path-parameter, JSON decode, and JSON response
 handlers through the same dispatcher in all three backends. Applications can
 start a generated Go, Ruby, or TypeScript HTTP server with `serve()`. The
-`trb init --template web` command creates a buildable portable API project with
-file-based routing and an explicit editable middleware stack. The
-optional `configure_server` value sets host, port, request-body limit, and
+`trb init --mode <target> --template web` command creates a buildable portable
+API project with file-based routing and an explicit editable middleware stack.
+The optional `configure_server` value sets host, port, request-body limit, and
 graceful-shutdown timeout through typed keyword arguments. Every adapter
 validates that configuration before binding, handles SIGINT and SIGTERM, stops
 accepting new work, and gives active requests the configured time to finish.

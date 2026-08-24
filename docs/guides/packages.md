@@ -41,6 +41,9 @@ package maintained by TypeRB or the community.
 
 ## Install a package
 
+The `acme` names and versions below are illustrative placeholders rather than
+packages expected to resolve as written.
+
 The short name `acme/contracts` defaults to
 `github.com/acme/contracts`:
 
@@ -905,6 +908,11 @@ trb add --native --dev PACKAGE VERSION
 trb remove --native PACKAGE
 trb sync
 ```
+
+Package-owned TypeScript dependencies below `@types/` are generated as
+development dependencies unless the project already classifies them
+explicitly. Other package-owned native dependencies are generated as runtime
+dependencies.
 
 Projects with `"packageManagement": "external"` may still resolve TypeRB
 packages, but the host project remains responsible for installing all merged

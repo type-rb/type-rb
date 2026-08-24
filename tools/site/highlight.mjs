@@ -7,6 +7,7 @@ const codeBlockPattern = /<pre><code class="language-([a-z0-9_-]+)">([\s\S]*?)<\
 const languageMap = new Map([
   ["console", "shellscript"],
   ["dockerfile", "dockerfile"],
+  ["html", "html"],
   ["json", "json"],
   ["jsonc", "jsonc"],
   ["sh", "shellscript"],
@@ -39,7 +40,7 @@ async function createSiteHighlighter(grammarPath) {
     aliases: ["typerb"]
   };
   return createHighlighter({
-    langs: [typerb, "dockerfile", "json", "jsonc", "shellscript"],
+    langs: [typerb, "dockerfile", "html", "json", "jsonc", "shellscript"],
     themes: ["github-dark-default"]
   });
 }

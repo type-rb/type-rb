@@ -235,6 +235,7 @@ import { Duration } from trb/std/time
 
 JOBS_ADAPTER: JobAdapter := SQLAdapter.new(
 	dialect: SQLDialect::PostgreSQL,
+	source: "postgres://localhost/jobs",
 	source_environment: "JOBS_DATABASE_URL",
 	poll_interval: Duration.seconds(1),
 )

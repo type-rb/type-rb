@@ -5,7 +5,9 @@ OpenID Connect bearer tokens in Go, Ruby, and TypeScript server applications.
 The public contract is portable; backend-specific networking and cryptography
 remain behind the package boundary.
 
-Create a configuration from the provider issuer and API audience:
+Create `src/auth/config.trb` from the provider issuer and API audience. Keeping
+configuration in its own module lets nested route packages import it without a
+generated Go `main` package cycle:
 
 ```trb
 import { bearer_options } from trb/auth/oidc
@@ -26,7 +28,7 @@ Protect a file-route subtree with `_middleware.trb`:
 ```trb
 import { Context, Next, Response } from trb/web
 import trb/web/auth/bearer
-import { OIDC } from auth_config
+import { OIDC } from auth/config
 
 def call(context: Context, next_handler: Next): Response
 	return bearer.authenticate(context, next_handler, OIDC)
