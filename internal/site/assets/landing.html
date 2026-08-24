@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="color-scheme" content="light">
+		<meta name="theme-color" content="#ffffff">
+		<meta name="description" content="TypeRB is a statically typed programming language that compiles to Go, Ruby, and TypeScript.">
+		<link rel="icon" href="data:,">
+		<link rel="stylesheet" href="assets/site.css">
+		<title>TypeRB — typed code, three targets</title>
+	</head>
+	<body>
+		<header class="site-header">
+			<a class="site-brand" href="/" aria-label="TypeRB home">
+				<span class="brand-mark" aria-hidden="true">trb</span>
+				<span class="brand-name">TypeRB</span>
+				<span class="alpha-pill">alpha</span>
+			</a>
+			<nav class="site-nav" aria-label="Primary navigation">
+				<a href="/docs/">Docs</a>
+				<a href="/tour/">Learn</a>
+				<a href="/play/">Playground</a>
+				<a href="https://github.com/type-rb/type-rb">GitHub</a>
+			</nav>
+		</header>
+
+		<main>
+			<section class="hero">
+				<div class="hero-copy">
+					<p class="eyebrow">Typed code, three targets</p>
+					<h1>TypeRB</h1>
+					<p class="hero-statement">One portable language.<br>Go, Ruby, and TypeScript.</p>
+					<p class="hero-lede">TypeRB combines static types with concise syntax, portable semantics, and explicit target boundaries.</p>
+					<div class="hero-actions">
+						<a class="button primary" href="/docs/getting-started/">Get started</a>
+						<a class="button secondary" href="/docs/">Read the docs</a>
+					</div>
+				</div>
+				<div class="code-card" aria-label="TypeRB example">
+					<div class="code-card-header">
+						<span class="file-dot"></span>
+						<span>hello.trb</span>
+						<span class="version">v{{.Version}}</span>
+					</div>
+					<pre><code><span class="code-keyword">def</span> greeting(name: <span class="code-type">String</span>): <span class="code-type">String</span>
+	<span class="code-keyword">return</span> <span class="code-string">"Hello, TypeRB!"</span> <span class="code-keyword">if</span> name.empty?()
+	<span class="code-keyword">return</span> <span class="code-string">"Hello, "</span> + name + <span class="code-string">"!"</span>
+<span class="code-keyword">end</span>
+
+puts(greeting(<span class="code-string">"Ada"</span>))</code></pre>
+					<div class="code-output"><span>$</span> Hello, Ada!</div>
+				</div>
+			</section>
+
+			<section class="entry-grid" aria-label="Explore TypeRB">
+				<a class="entry-card primary" href="/docs/">
+					<span class="entry-kicker">Start here</span>
+					<strong>Documentation</strong>
+					<span>Language guides, application packages, tooling, lint rules, and reference material.</span>
+					<span class="entry-arrow" aria-hidden="true">→</span>
+				</a>
+				<a class="entry-card" href="/tour/">
+					<span class="entry-kicker">Learn</span>
+					<strong>A Tour of TypeRB</strong>
+					<span>Work through guided lessons that compile and run directly in the browser.</span>
+					<span class="entry-arrow" aria-hidden="true">→</span>
+				</a>
+				<a class="entry-card" href="/play/">
+					<span class="entry-kicker">Experiment</span>
+					<strong>Playground</strong>
+					<span>Write, run, format, and inspect generated Go, Ruby, or TypeScript.</span>
+					<span class="entry-arrow" aria-hidden="true">→</span>
+				</a>
+			</section>
+
+			<section class="target-section">
+				<div>
+					<p class="eyebrow">Portable by design</p>
+					<h2>Choose a target without changing the language.</h2>
+				</div>
+				<div class="target-grid">
+					<div><strong>Go</strong><span>Native binaries and services</span></div>
+					<div><strong>Ruby</strong><span>Server and application development</span></div>
+					<div><strong>TypeScript</strong><span>Browser and server applications</span></div>
+				</div>
+			</section>
+		</main>
+		<footer class="site-footer"><span>TypeRB is alpha software.</span><a href="https://github.com/type-rb/type-rb">Source and license</a></footer>
+	</body>
+</html>

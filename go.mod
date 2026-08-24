@@ -9,6 +9,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/reeflective/readline v1.3.1-0.20260802023205-4d8e27a037bd
 	github.com/rivo/uniseg v0.4.7
+	github.com/yuin/goldmark v1.8.5
 	golang.org/x/mod v0.36.0
 	golang.org/x/sys v0.45.0
 	modernc.org/sqlite v1.53.0

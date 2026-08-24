@@ -156,6 +156,10 @@ history, completion menus, project declaration auto-import, suggestions,
 syntax highlighting, interrupts, type inspection, and mutable-binding result
 markers.
 The same compiler and evaluator power the local and hosted playground and tour.
+The hosted TypeRB website also renders the maintained user documentation,
+including the language and package guides, references, and one page for every
+built-in lint rule. Maintainer-only development and release material remains
+in the source repository.
 The repository also publishes a reusable TextMate grammar for lexical editor
 highlighting. Its thin Visual Studio Code client packages that grammar and
 snippets, starts `trb lsp`, and exposes compiler-backed diagnostics, completion,

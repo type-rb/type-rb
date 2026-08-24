@@ -53,6 +53,32 @@ The initial linter does not load package code or expose compiler AST state to
 third parties. Add an external rule protocol only after deterministic inputs,
 resource limits, version negotiation, and package trust are specified.
 
+## Website boundary
+
+The Pages build publishes the product landing page, user documentation, tour,
+and playground as one static site. `docs/site.json` owns documentation
+navigation and the explicit maintainer-only exclusions. All other Markdown
+under `docs/` is rendered, so a lint rule page becomes public without adding a
+second website-specific registry. The build rewrites links between published
+Markdown pages to stable directory URLs and sends links to excluded or
+repository-owned Markdown back to GitHub.
+
+Keep website generation host-only and separate from the browser compiler.
+`internal/site` owns the landing page and documentation rendering;
+`internal/playground` continues to own only the executable tour and playground
+assets. The host-only website build applies Shiki to fenced documentation code
+before publication. TypeRB fences load the canonical grammar from `syntaxes/`,
+while standard fences use Shiki's bundled grammars; published pages do not run
+a syntax-highlighting script.
+
+Install the two website tool dependencies and build the complete site with:
+
+```sh
+npm ci --prefix tools/textmate
+npm ci --prefix tools/site
+./scripts/build-site.sh dist/site
+```
+
 ## Development workflow
 
 Keep one grammar and portable semantics across modes. Target-specific APIs and
@@ -74,3 +100,17 @@ suite and any relevant target-toolchain checks before merging.
 For current gaps, see [status](status.md) and the [roadmap](roadmap.md).
 
 Releases are described in [releasing.md](releasing.md).
+
+## Documentation ownership
+
+- `language.md` teaches implemented syntax; `specification.md` defines its
+  normative semantics.
+- `learning.md` orders existing material; it does not redefine syntax or APIs.
+- `standard-library.md`, `cli.md`, and `configuration.md` are the references for
+  those public surfaces.
+- `migrations/` records release-specific source and package upgrade steps; it
+  does not redefine the current language contract.
+- `status.md` records current capability and limitations; `roadmap.md` contains
+  future outcomes only.
+- Decision records preserve durable rationale. Scoped implementation work
+  belongs in GitHub issues rather than progress logs in this directory.

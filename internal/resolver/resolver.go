@@ -517,7 +517,7 @@ func (r Result) contractTypeReferencesAlias(imported *Import, typ types.Type, na
 	return result
 }
 
-// addPrelude exposes the small set of Ruby-like, target-independent helpers
+// addPrelude exposes the small set of receiver-style, target-independent helpers
 // that TypeRB programs can use without an import. The binding still points at
 // a standard package so lowering produces the same intrinsic as io.puts().
 func addPrelude(result *Result) {

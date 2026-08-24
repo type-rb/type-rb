@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="color-scheme" content="light">
+		<meta name="theme-color" content="#ffffff">
+		<meta name="description" content="{{.Title}} — TypeRB documentation">
+		<link rel="icon" href="data:,">
+		<link rel="stylesheet" href="/assets/site.css">
+		<link rel="canonical" href="https://type-rb.github.io{{.URL}}">
+		<title>{{.Title}} — TypeRB</title>
+	</head>
+	<body class="docs-page">
+		<header class="site-header">
+			<a class="site-brand" href="/" aria-label="TypeRB home">
+				<span class="brand-mark" aria-hidden="true">trb</span>
+				<span class="brand-name">TypeRB</span>
+				<span class="alpha-pill">alpha</span>
+			</a>
+			<nav class="site-nav" aria-label="Primary navigation">
+				<a class="active" href="/docs/">Docs</a>
+				<a href="/tour/">Learn</a>
+				<a href="/play/">Playground</a>
+				<a href="https://github.com/type-rb/type-rb">GitHub</a>
+			</nav>
+		</header>
+		<div class="docs-layout">
+			<aside class="docs-sidebar">
+				<nav class="docs-navigation" aria-label="Documentation navigation">
+					{{range .Sections}}
+					<section>
+						<h2>{{.Title}}</h2>
+						{{range .Pages}}<a{{if .Active}} class="active" aria-current="page"{{end}} href="{{.URL}}">{{.Label}}</a>{{end}}
+					</section>
+					{{end}}
+				</nav>
+				<details class="docs-menu">
+					<summary>Documentation menu</summary>
+					<nav aria-label="Documentation navigation">
+						{{range .Sections}}
+						<section>
+							<h2>{{.Title}}</h2>
+							{{range .Pages}}<a{{if .Active}} class="active" aria-current="page"{{end}} href="{{.URL}}">{{.Label}}</a>{{end}}
+						</section>
+						{{end}}
+					</nav>
+				</details>
+			</aside>
+			<main class="docs-main">
+				<article class="markdown-body">{{.Body}}</article>
+				<footer class="docs-footer">
+					<span>TypeRB {{.Version}}</span>
+					<a href="{{.SourceURL}}">Edit this page on GitHub</a>
+				</footer>
+			</main>
+		</div>
+	</body>
+</html>

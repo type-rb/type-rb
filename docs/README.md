@@ -5,7 +5,7 @@ larger applications.
 
 ## Learn
 
-- [Install and try TypeRB](../README.md#install)
+- [Getting started](getting-started.md)
 - [Learning path](learning.md)
 - [A Tour of TypeRB](https://type-rb.github.io/tour/)
 - [Language guide](language.md)
@@ -26,10 +26,17 @@ larger applications.
 - [Experimental React and JSX](guides/react.md)
 - [Testing TypeRB applications](guides/testing.md)
 
+## Tooling
+
+- [Editor support](editor-support.md)
+- [Linting TypeRB projects](guides/linting.md)
+- [Built-in lint rules](lint-rules/index.md)
+- [Compiler tooling protocol](guides/compiler-tooling.md)
+- [AI-assisted TypeRB development](ai-assisted-development.md)
+
 ## Reference
 
 - [Command-line reference](cli.md)
-- [Compiler tooling protocol](guides/compiler-tooling.md)
 - [Project configuration](configuration.md)
 - [Language specification](specification.md)
 - [Standard library](standard-library.md)
@@ -40,20 +47,3 @@ larger applications.
 
 - [Current status](status.md)
 - [Roadmap](roadmap.md)
-- [Development and compiler architecture](development.md)
-- [Release process](releasing.md)
-- [Architecture decisions](decisions/)
-
-## Document ownership
-
-- `language.md` teaches implemented syntax; `specification.md` defines its
-  normative semantics.
-- `learning.md` orders existing material; it does not redefine syntax or APIs.
-- `standard-library.md`, `cli.md`, and `configuration.md` are the references for
-  those public surfaces.
-- `migrations/` records release-specific source and package upgrade steps; it
-  does not redefine the current language contract.
-- `status.md` records current capability and limitations; `roadmap.md` contains
-  future outcomes only.
-- Decision records preserve durable rationale. Scoped implementation work
-  belongs in GitHub issues rather than progress logs in this directory.

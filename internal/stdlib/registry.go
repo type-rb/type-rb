@@ -1215,7 +1215,7 @@ end
 	},
 }
 
-// receiverMethods maps Ruby-like method syntax to the same compiler-owned
+// receiverMethods maps receiver method syntax to the same compiler-owned
 // contract used by the corresponding portable package function. A backend
 // therefore lowers 123.to_s() and numbers.to_string(123) through one
 // intrinsic instead of maintaining a second, target-specific method table.

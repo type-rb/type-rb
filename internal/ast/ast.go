@@ -307,7 +307,7 @@ type WhileStatement struct {
 
 func (*WhileStatement) statementNode() {}
 
-// IterationExpression is the portable, Ruby-shaped collection iteration
+// IterationExpression is the portable collection iteration
 // syntax. It remains an expression in the syntax tree so the original block
 // delimiters can be retained, then lowers to structured iteration IR instead
 // of a target-language callback.

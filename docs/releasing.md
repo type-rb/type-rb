@@ -13,7 +13,8 @@ version `vX.Y.Z`; release packaging embeds `X.Y.Z` in every binary.
 
 After publishing a release, the Release workflow advances the source version
 to the next planned patch release through an automatically merged pull request
-and refreshes Pages. No human review is required for this mechanical change,
+and refreshes the Pages website and hosted compiler. No human review is
+required for this mechanical change,
 while the main branch retains its pull-request requirement. Homebrew publishes
 only stable tagged releases and never consumes a `-dev` version.
 
