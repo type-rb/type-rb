@@ -72,7 +72,30 @@ func TestTestRunsPortableSuiteAcrossBackends(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(config.SourcePath(), "calculator.trb"), []byte(applicationSource), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			testSource := `import { add } from calculator
+			failureSource := func(resultName, errorName, functionName, message string) string {
+				return "import { Result } from trb/std/result\n\n" +
+					"enum " + errorName + "\n" +
+					"\tInvalid(message: String)\n" +
+					"end\n\n" +
+					"alias " + resultName + " = Result<Integer, " + errorName + ">\n\n" +
+					"def " + functionName + "(): " + resultName + "\n" +
+					"\treturn _invalid(\"" + message + "\")\n" +
+					"end\n\n" +
+					"def _invalid(message: String): " + resultName + "\n" +
+					"\treturn " + resultName + "::Err(" + errorName + "::Invalid(message))\n" +
+					"end\n"
+			}
+			for name, source := range map[string]string{
+				"alpha.trb": failureSource("AlphaResult", "AlphaError", "alpha_failure", "alpha"),
+				"beta.trb":  failureSource("BetaResult", "BetaError", "beta_failure", "beta"),
+			} {
+				if err := os.WriteFile(filepath.Join(config.SourcePath(), name), []byte(source), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			testSource := `import { AlphaError, AlphaResult, alpha_failure } from alpha
+import { BetaError, BetaResult, beta_failure } from beta
+import { add } from calculator
 import { describe, expect, test } from trb/std/test
 
 record Point
@@ -106,6 +129,31 @@ describe("Calculator") do
 		expect(total).to_equal(3)
 		expect(callback()).to_equal(4)
 	end
+
+	test("keeps private helpers isolated by source module") do
+		case alpha_failure()
+		when AlphaResult::Err(error)
+			case error
+			when AlphaError::Invalid(message)
+				expect(message).to_equal("alpha")
+			else
+				expect(false).to_be_true()
+			end
+		when AlphaResult::Ok(_value)
+			expect(false).to_be_true()
+		end
+		case beta_failure()
+		when BetaResult::Err(error)
+			case error
+			when BetaError::Invalid(message)
+				expect(message).to_equal("beta")
+			else
+				expect(false).to_be_true()
+			end
+		when BetaResult::Ok(_value)
+			expect(false).to_be_true()
+		end
+	end
 end
 `
 			if err := os.WriteFile(filepath.Join(config.SourcePath(), "calculator_test.trb"), []byte(testSource), 0o644); err != nil {
@@ -116,7 +164,7 @@ end
 			if status := command.Run([]string{"test", "--config", config.Path}); status != 0 {
 				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 			}
-			if !strings.Contains(stdout.String(), "PASS Calculator / adds numbers") || !strings.Contains(stdout.String(), "1 test(s), 0 failure(s)") {
+			if !strings.Contains(stdout.String(), "PASS Calculator / adds numbers") || !strings.Contains(stdout.String(), "PASS Calculator / keeps private helpers isolated by source module") || !strings.Contains(stdout.String(), "2 test(s), 0 failure(s)") {
 				t.Fatalf("unexpected test output:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 			}
 			if strings.Contains(stdout.String(), "APPLICATION MAIN RAN") {

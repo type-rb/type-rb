@@ -1899,7 +1899,7 @@ end
 		},
 		"ruby": {
 			`QueryParameter = Data.define(:name, :value)`,
-			`def _parse_query_parameter(value)`,
+			`def __trb_private_`,
 			`def parse_query(value)`,
 			`def build_query(parameters)`,
 			`case (__trb_case1 = decode_component(`,
@@ -2018,7 +2018,7 @@ end
 		}
 		runtimeWants := map[string][]string{
 			"go":         {`var UnicodeDataVersion string = "17.0.0"`, `func UnicodeLetter(value int) bool`, `func inRanges(value int, ranges [][]int) bool`},
-			"ruby":       {`class Unicode`, `UNICODE_DATA_VERSION = "17.0.0"`, `def self.letter(value)`, `def _in_ranges(value, ranges)`},
+			"ruby":       {`class Unicode`, `UNICODE_DATA_VERSION = "17.0.0"`, `def self.letter(value)`, `def __trb_private_`},
 			"typescript": {`export class Unicode`, `export const UNICODE_DATA_VERSION: string = "17.0.0";`, `static letter(value: number): boolean`, `export function _in_ranges(value: number, ranges: Array<Array<number>>): boolean`},
 		}[mode]
 		for _, want := range runtimeWants {
