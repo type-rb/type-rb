@@ -2,6 +2,38 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.34 - 2026-08-26
+
+### Breaking changes
+
+- Fixed Ruby declaration catalogs must set `protocolVersion` to `3`. Their
+  catalog fields are otherwise unchanged, and project-aware class-body rules
+  remain available only to bundled providers.
+  ([#528](https://github.com/type-rb/type-rb/pull/528))
+
+### Web
+
+- `trb/web` file routes can publish optional typed `Endpoint` contracts that
+  connect a checked handler to one input type and status-specific response
+  types. The `handles`, `input`, and `response` declarations are omitted from
+  Go, Ruby, and TypeScript runtime output and retained in a versioned catalog
+  for downstream tooling; routes without contracts continue to work.
+  ([#530](https://github.com/type-rb/type-rb/pull/530))
+
+### Packages
+
+- Bundled package providers can designate exact direct class-body calls as
+  checked declaration metadata. The ordinary call signature is still
+  validated, while every backend omits the declaration-only call from runtime
+  output. ([#528](https://github.com/type-rb/type-rb/pull/528))
+
+### Language and compiler
+
+- Values returned through imported project functions now retain member types
+  from transitively exposed record contracts. Portable receiver methods such
+  as `Array#size` compile correctly without a redundant direct import of the
+  record type. ([#531](https://github.com/type-rb/type-rb/pull/531))
+
 ## 0.3.33 - 2026-08-26
 
 ### Web
