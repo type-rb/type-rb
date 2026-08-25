@@ -264,6 +264,12 @@ A runnable project defines exactly one top-level `def main()`. `main` is a
 language convention rather than a configurable entrypoint, so the config has no
 entrypoint field. A library project may omit `main`.
 
+In Go mode, source modules generated in another directory cannot import the
+module that owns `main()`. The runnable module becomes the generated program
+package, which Go does not allow another package to import. `trb check` and
+`trb build` report this at the authored import. Move declarations shared with a
+nested package into a separate module without `main()`.
+
 ## Local packages
 
 Map a portable source directory into the project import graph with
