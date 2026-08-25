@@ -3,6 +3,7 @@
 `trb/http` provides portable values shared by server and client packages. It
 does not start a server or send a request.
 
+<!-- trb-doc-test: shared-http-values -->
 ```trb
 import { Body, Header, Headers, HttpMethod } from trb/http
 

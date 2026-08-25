@@ -21,6 +21,8 @@ func TestExportBuildsLandingAndPublicDocumentation(t *testing.T) {
 	}`)
 	writeTestFile(t, docsDir, "README.md", `# Documentation
 
+<!-- trb-doc-test: rendered-example -->
+
 [Lint rules](lint-rules/index.md)
 [Maintainer documentation](development.md)
 `)
@@ -79,6 +81,9 @@ Use conditional transfer for a short guard.
 	index := readTestFile(t, output, "docs/index.html")
 	if !strings.Contains(index, `name="color-scheme" content="light"`) {
 		t.Fatalf("documentation does not declare its light color scheme:\n%s", index)
+	}
+	if strings.Contains(index, "trb-doc-test") {
+		t.Fatalf("documentation example annotations must not appear in published HTML:\n%s", index)
 	}
 	if !strings.Contains(index, `<script defer src="/assets/docs.js"></script>`) {
 		t.Fatalf("documentation does not load the code-copy enhancement:\n%s", index)

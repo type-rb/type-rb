@@ -20,6 +20,7 @@ Route files live below `src/routes`. File names determine paths, and exported
 functions determine HTTP methods. For example,
 `src/routes/todos/[id].trb` can contain:
 
+<!-- trb-doc-test: web-update-todo -->
 ```trb
 import { Context, Response, json } from trb/web
 import { Result } from trb/std/result

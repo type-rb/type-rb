@@ -1097,6 +1097,7 @@ pair := Box<Integer>.new(1).pair<String>("one")
   keeps both control-flow paths visible with explicit constructors and
   exhaustive pattern matching:
 
+<!-- trb-doc-test: specification-result-baseline -->
 ```trb
 import { Result } from trb/std/result
 
@@ -1104,7 +1105,7 @@ def unwrap(result: Result<Integer, String>): Integer
 	case result
 	when Result::Ok(value)
 		return value
-	when Result::Err(error)
+	when Result::Err(_error)
 		return 0
 	end
 end
