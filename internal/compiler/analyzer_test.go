@@ -372,6 +372,38 @@ func TestAnalyzerRechecksChangedProjectDependencies(t *testing.T) {
 	}
 }
 
+func TestAnalyzerRevalidatesGoRunnableEntrypointImportsAfterAnEdit(t *testing.T) {
+	analyzer := NewAnalyzer()
+	sources := []SourceUnit{
+		{
+			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
+			Source: []byte("OIDC_ISSUER := \"https://identity.example.com/\"\n\ndef main()\n\treturn\nend\n"),
+		},
+		{
+			Filename: "/project/src/routes/admin.trb", ModulePath: "routes/admin", Package: "routes",
+			Source: []byte("def issuer(): String\n\treturn \"local\"\nend\n"),
+		},
+	}
+	options := Options{Mode: "go", GoModule: "example.com/analyzer", SourceRoot: "/project/src", ProjectRoot: "/project"}
+
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatal(err)
+	}
+	sources[1].Source = []byte("import { OIDC_ISSUER } from main\n\ndef issuer(): String\n\treturn OIDC_ISSUER\nend\n")
+	diagnostics := compileErrorDiagnostics(t, func() error {
+		_, err := analyzer.AnalyzeProject(sources, options)
+		return err
+	})
+	if len(diagnostics) != 1 || diagnostics[0].Code != diagnostic.BackendError {
+		t.Fatalf("incremental runnable import diagnostics=%#v", diagnostics)
+	}
+
+	sources[1].Source = []byte("def issuer(): String\n\treturn \"restored\"\nend\n")
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatalf("corrected runnable import remained invalid: %v", err)
+	}
+}
+
 func TestAnalyzerFallsBackWhenInteractiveCompilerDependenciesChange(t *testing.T) {
 	analyzer := NewAnalyzer()
 	checkCalls := 0

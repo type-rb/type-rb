@@ -435,6 +435,9 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	if generated {
 		return analyzeProjectFull(analyzer, generatedUnits, options, validateBackend, requestedUnits)
 	}
+	if err := validateGoRunnableEntrypointImports(units, programs, resolutions, ownerModule, options); err != nil {
+		return nil, err
+	}
 
 	loweredPrograms := make([]*ir.Program, 0, len(units))
 	for _, source := range units {

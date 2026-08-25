@@ -204,6 +204,9 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		// until fragment-level incremental invalidation is characterized.
 		return nil, false, nil
 	}
+	if err := validateGoRunnableEntrypointImports(units, programs, resolutions, ownerModule, options); err != nil {
+		return nil, true, err
+	}
 
 	reuseLoweredPrograms := ownerModule == previous.entrypointModule && integrations.CanReuseLoweredPrograms(previous.integrations, affected)
 	loweringIntegrations := integrations

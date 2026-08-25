@@ -645,6 +645,11 @@ switches.
 - Project and standalone entrypoints have the same signature and
   startup rules. Selecting a file never turns top-level statements into a
   second script execution model or makes a function named `main` ordinary.
+- In Go mode, a module generated in another source directory cannot import the
+  runnable entrypoint module. The entrypoint becomes the generated program
+  package and is not importable from another Go package. Modules in the same
+  source directory continue to share one generated package. Declarations
+  needed by nested packages belong in a separate non-entrypoint module.
 - `main` is a language convention and is not configurable in
   `trbconfig.jsonc`.
 - Projects intended only as libraries may omit `main`.
