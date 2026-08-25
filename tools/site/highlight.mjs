@@ -11,6 +11,7 @@ const languageMap = new Map([
   ["json", "json"],
   ["jsonc", "jsonc"],
   ["sh", "shellscript"],
+  ["sql", "sql"],
   ["text", "text"],
   ["trb", "trb"],
   ["typerb", "trb"]
@@ -40,7 +41,7 @@ async function createSiteHighlighter(grammarPath) {
     aliases: ["typerb"]
   };
   return createHighlighter({
-    langs: [typerb, "dockerfile", "html", "json", "jsonc", "shellscript"],
+    langs: [typerb, "dockerfile", "html", "json", "jsonc", "shellscript", "sql"],
     themes: ["github-dark-default"]
   });
 }
