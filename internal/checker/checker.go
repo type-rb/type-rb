@@ -4006,6 +4006,12 @@ func (c *Checker) isInterface(name string) bool {
 		return true
 	}
 	binding, ok := c.resolution.ImportedType(name)
+	if !ok {
+		binding, ok = c.resolution.InferredType(name)
+	}
+	if !ok {
+		binding, ok = c.resolution.ContractType(name)
+	}
 	return ok && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport
 }
 
@@ -4025,6 +4031,12 @@ func (c *Checker) classImplements(classType, interfaceType types.Type, seen map[
 		return c.classImplements(types.FromName(info.superclass), interfaceType, seen)
 	}
 	binding, ok := c.resolution.ImportedType(className)
+	if !ok {
+		binding, ok = c.resolution.InferredType(className)
+	}
+	if !ok {
+		binding, ok = c.resolution.ContractType(className)
+	}
 	if !ok || binding.Export == nil || binding.Export.Kind != resolver.ClassExport {
 		return false
 	}
