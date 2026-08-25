@@ -1196,7 +1196,7 @@ func (e *Evaluator) ormPredicateSQL(predicate *ormPredicate, arguments *[]any) (
 				upperOperator = "<"
 			}
 			return "(" + column + " >= " + lower + " AND " + column + " " + upperOperator + " " + upper + ")", nil
-		case "=", "!=", "<", "<=", ">", ">=":
+		case "=", "!=", "<", "<=", ">", ">=", "LIKE":
 		default:
 			return "", errors.New("unsupported ORM comparison operator")
 		}

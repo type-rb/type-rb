@@ -1801,7 +1801,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("case \"atom\":")
 	g.indent++
 	g.line("condition := predicate.condition")
-	g.line("switch condition.operator { case \"=\", \"!=\", \"<\", \"<=\", \">\", \">=\", \"IN\", \"NOT_IN\", \"RANGE_INCLUSIVE\", \"RANGE_EXCLUSIVE\": default: panic(\"unsupported ORM comparison operator\") }")
+	g.line("switch condition.operator { case \"=\", \"!=\", \"<\", \"<=\", \">\", \">=\", \"LIKE\", \"IN\", \"NOT_IN\", \"RANGE_INCLUSIVE\", \"RANGE_EXCLUSIVE\": default: panic(\"unsupported ORM comparison operator\") }")
 	g.line("column := trbOrmQuoteIdentifier(condition.column)")
 	g.line("if condition.operator == \"IN\" || condition.operator == \"NOT_IN\" {")
 	g.indent++
