@@ -116,3 +116,12 @@ func Extension(mode string) string {
 		return ""
 	}
 }
+
+// GeneratedSourceDirectory returns the backend directory that owns generated
+// files for a TypeRB source directory.
+func GeneratedSourceDirectory(mode, directory string) string {
+	if mode == "go" {
+		return golang.GeneratedSourceDirectory(directory)
+	}
+	return directory
+}

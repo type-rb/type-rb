@@ -2684,9 +2684,10 @@ func (g *generator) ormModelQualifier(model ormintegration.Model) string {
 	if directory == g.currentDirectory() {
 		return ""
 	}
-	importPath := directory
+	generatedDirectory := GeneratedSourceDirectory(directory)
+	importPath := generatedDirectory
 	if g.goModule != "" {
-		importPath = pathpkg.Join(g.goModule, directory)
+		importPath = pathpkg.Join(g.goModule, generatedDirectory)
 	}
 	if importPath == "" {
 		return ""
