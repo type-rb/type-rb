@@ -2,6 +2,23 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.31 - 2026-08-26
+
+### Language and compiler
+
+- JSON codecs now follow project record, raw-enum, alias, and newtype contracts
+  returned through imported functions. Go, Ruby, and TypeScript builds no
+  longer require redundant type imports or annotations at the call site.
+  ([#518](https://github.com/type-rb/type-rb/pull/518))
+
+### Tooling
+
+- TypeScript native declaration indexes now pool repeated types, fields, and
+  diagnostics, substantially reducing generated `.trb/native-types.json` size
+  for component libraries with inherited props. Run `trb install` after
+  upgrading when an older generated cache must be refreshed.
+  ([#515](https://github.com/type-rb/type-rb/pull/515))
+
 ## 0.3.30 - 2026-08-25
 
 ### Language and compiler
