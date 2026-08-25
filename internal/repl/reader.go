@@ -343,11 +343,13 @@ func completeInput(service *languageservice.Service, line []rune, cursor int) re
 		}
 		accepted := item
 		accepted.InsertText = value
+		_, requireConfirmation := bareCompletionImport(source, accepted)
 		values = append(values, readline.Completion{
-			Value:       value,
-			Display:     item.Label,
-			Description: item.Detail,
-			Tag:         string(item.Kind),
+			Value:               value,
+			Display:             item.Label,
+			Description:         item.Detail,
+			Tag:                 string(item.Kind),
+			RequireConfirmation: requireConfirmation,
 			OnAccept: func(line []rune, cursor int) ([]rune, int) {
 				updated, byteCursor, ok := acceptedCompletionSource(source, accepted)
 				if !ok {

@@ -249,7 +249,7 @@ func TestTerminalReaderUsesMultilineAwareHistoryNavigation(t *testing.T) {
 	}
 }
 
-func TestTerminalAcceptLineCommitsSelectedImportCompletion(t *testing.T) {
+func TestTerminalAcceptLineCommitsSelectedImportCompletionWithoutSubmitting(t *testing.T) {
 	language := languageservice.New("go")
 	language.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{
 		{
@@ -267,15 +267,17 @@ func TestTerminalAcceptLineCommitsSelectedImportCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal.Line().Set([]rune("sha")...)
-	terminal.Cursor().Set(3)
+	terminal.Line().Set([]rune("sha256")...)
+	terminal.Cursor().Set(6)
 	complete := terminal.Keymap.Commands()["complete"]
-	complete()
 	complete()
 	terminal.Keymap.Commands()["accept-line"]()
 
 	if got := string(*terminal.Line()); got != "import { sha256 } from trb/std/hash" && got != "import { sha256 } from trb/std/hmac" {
 		t.Fatalf("accepted line=%q, want selected import", got)
+	}
+	if accepted, _, _ := terminal.History.LineAccepted(); accepted {
+		t.Fatal("completion confirmation submitted the import")
 	}
 }
 

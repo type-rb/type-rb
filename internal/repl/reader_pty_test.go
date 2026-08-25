@@ -51,17 +51,28 @@ func TestCompletionAppliesVisibleImportEdit(t *testing.T) {
 	}
 }
 
-func TestBareUniqueCompletionSubmitsOnlyItsImport(t *testing.T) {
-	output := bytes.ReplaceAll(runCompletionPTY(t, "ma\t\r"), []byte("\r"), nil)
+func TestBareUniqueCompletionConfirmsThenSubmitsItsImport(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "mat\t\r\r"), []byte("\r"), nil)
 	if !bytes.Contains(output, []byte("[LINE:import trb/std/math]")) {
-		t.Fatalf("bare package completion did not submit its import: %q", output)
+		t.Fatalf("bare package completion did not confirm then submit its import: %q", output)
 	}
 }
 
-func TestBareSelectedCompletionSubmitsOnlySelectedImport(t *testing.T) {
-	output := bytes.ReplaceAll(runCompletionPTY(t, "sha\t\t\r"), []byte("\r"), nil)
-	if !bytes.Contains(output, []byte("[LINE:import { sha256 } from trb/std/hmac]")) {
-		t.Fatalf("selected function completion did not submit its import: %q", output)
+func TestBareUniqueCompletionCanBeCancelled(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTYSteps(t,
+		ptyInputStep{input: "mat\t"},
+		ptyInputStep{input: "\x1b", waitAfter: 600 * time.Millisecond},
+		ptyInputStep{input: "\r"},
+	), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:mat]")) {
+		t.Fatalf("cancelled package completion did not restore its original input: %q", output)
+	}
+}
+
+func TestBareSelectedCompletionConfirmsThenSubmitsSelectedImport(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "sha256\t\r\r"), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:import { sha256 } from trb/std/")) {
+		t.Fatalf("selected function completion did not confirm then submit its import: %q", output)
 	}
 }
 
@@ -116,7 +127,20 @@ func runCompletionPTY(t *testing.T, input string) []byte {
 	return runPTY(t, input, false)
 }
 
+type ptyInputStep struct {
+	input     string
+	waitAfter time.Duration
+}
+
+func runCompletionPTYSteps(t *testing.T, steps ...ptyInputStep) []byte {
+	return runPTYSteps(t, false, steps...)
+}
+
 func runPTY(t *testing.T, input string, screenOnly bool) []byte {
+	return runPTYSteps(t, screenOnly, ptyInputStep{input: input})
+}
+
+func runPTYSteps(t *testing.T, screenOnly bool, steps ...ptyInputStep) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -136,8 +160,13 @@ func runPTY(t *testing.T, input string, screenOnly bool) []byte {
 	if screenOnly {
 		output = readPTYUntil(t, terminal, []byte("trb:go> "))
 	}
-	if _, err := terminal.Write([]byte(input)); err != nil {
-		t.Fatal(err)
+	for _, step := range steps {
+		if _, err := terminal.Write([]byte(step.input)); err != nil {
+			t.Fatal(err)
+		}
+		if step.waitAfter > 0 {
+			time.Sleep(step.waitAfter)
+		}
 	}
 	rest, err := io.ReadAll(terminal)
 	output = append(output, rest...)

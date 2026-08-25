@@ -16,7 +16,7 @@ require (
 )
 
 // Temporary until reeflective/readline#120 is released.
-replace github.com/reeflective/readline => github.com/hiroki23/readline v1.3.1-0.20260824104214-1608fe860d1f
+replace github.com/reeflective/readline => github.com/hiroki23/readline v1.3.1-0.20260825015538-5a6f0637e0b4
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
