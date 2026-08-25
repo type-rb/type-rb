@@ -1,6 +1,7 @@
 package nativepackage
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -82,7 +83,7 @@ func TestWriteAndLoadNativePackageIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), `"formatVersion": 5`) || strings.Contains(string(written), `"fails"`) || strings.Contains(string(written), `"effectBridge"`) {
+	if !strings.Contains(string(written), fmt.Sprintf(`"formatVersion":%d`, FormatVersion)) || !strings.Contains(string(written), `"types"`) || strings.Contains(string(written), `"fails"`) || strings.Contains(string(written), `"effectBridge"`) {
 		t.Fatalf("native cache did not use the current schema:\n%s", written)
 	}
 	loaded, err := Load(root, map[string]string{"@scope/ui": "1.2.3"})
@@ -151,7 +152,7 @@ func TestLoadRejectsOlderNativeIndexBeforeLegacyFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := Load(root, map[string]string{"ui": "1"})
-	if err == nil || !strings.Contains(err.Error(), "formatVersion 3") || !strings.Contains(err.Error(), "expected 5") || !strings.Contains(err.Error(), "run trb install") {
+	if err == nil || !strings.Contains(err.Error(), "formatVersion 3") || !strings.Contains(err.Error(), fmt.Sprintf("expected %d", FormatVersion)) || !strings.Contains(err.Error(), "run trb install") {
 		t.Fatalf("expected native cache migration diagnostic, got %v", err)
 	}
 	if strings.Contains(err.Error(), "unknown field") {
@@ -164,12 +165,165 @@ func TestLoadStrictlyRejectsLegacyFieldsInCurrentIndex(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(IndexPath(root)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"modules":{"ui":{"exports":{"run":{"kind":"function","type":{"kind":"function","name":"Function","args":[{"kind":"int","name":"Integer"}],"fails":{"kind":"string","name":"String"}}}}}}}`, FormatVersion)
+	data := fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"types":[{"kind":"function","fails":1}],"modules":{}}`, FormatVersion)
 	if err := os.WriteFile(IndexPath(root), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(root, map[string]string{"ui": "1"}); err == nil || !strings.Contains(err.Error(), `unknown field "fails"`) {
 		t.Fatalf("expected strict legacy field diagnostic, got %v", err)
+	}
+}
+
+func TestWritePoolsRepeatedNativeComponentMetadata(t *testing.T) {
+	const componentCount = 32
+	const fieldCount = 180
+	const diagnosticCount = 120
+
+	fields := make([]Field, 0, fieldCount)
+	for index := 0; index < fieldCount; index++ {
+		kind, name := "string", "String"
+		if index%2 == 0 {
+			kind, name = "bool", "Boolean"
+		}
+		fields = append(fields, Field{
+			Name:     fmt.Sprintf("inheritedProp%03d", index),
+			Type:     Type{Kind: kind, Name: name, Nullable: true},
+			Optional: true,
+		})
+	}
+	unsupported := map[string]string{}
+	for index := 0; index < diagnosticCount; index++ {
+		unsupported[fmt.Sprintf("unsupportedProp%03d", index)] = "uses unsupported TypeScript type DOMAttribute"
+	}
+	module := Module{Exports: map[string]Export{}, Records: map[string]Export{}}
+	for index := 0; index < componentCount; index++ {
+		componentName := fmt.Sprintf("Spinner%02d", index)
+		recordName := "Native_react_spinners_" + componentName + "Props"
+		module.Exports[componentName] = Export{
+			Kind:              "component",
+			Type:              Type{Kind: "named", Name: "ReactNode"},
+			Parameters:        []Type{{Kind: "named", Name: recordName}},
+			Required:          1,
+			UnsupportedFields: unsupported,
+		}
+		module.Records[recordName] = Export{
+			Kind:              "record",
+			Type:              Type{Kind: "named", Name: recordName},
+			Fields:            fields,
+			UnsupportedFields: unsupported,
+		}
+	}
+	catalog := &Catalog{
+		Dependencies: map[string]string{"react-spinners": "^0.17.0"},
+		Modules:      map[string]Module{"react-spinners": module},
+	}
+	expanded, err := json.MarshalIndent(catalog, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := Write(root, catalog); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(IndexPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("pooled %d-byte expanded catalog into %d bytes", len(expanded), len(written))
+	if len(written) >= len(expanded)/5 {
+		t.Fatalf("pooled cache is %d bytes; expected less than one fifth of the %d-byte expanded catalog", len(written), len(expanded))
+	}
+	var cached cacheCatalog
+	if err := json.Unmarshal(written, &cached); err != nil {
+		t.Fatal(err)
+	}
+	if len(cached.Fields) != fieldCount || len(cached.Diagnostics) != diagnosticCount {
+		t.Fatalf("repeated metadata was not pooled: %d fields, %d diagnostics", len(cached.Fields), len(cached.Diagnostics))
+	}
+	if count := strings.Count(string(written), `"name":"inheritedProp000"`); count != 1 {
+		t.Fatalf("pooled field was written %d times", count)
+	}
+	loaded, err := Load(root, catalog.Dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := loaded.Modules["react-spinners"].Records["Native_react_spinners_Spinner00Props"]
+	if len(record.Fields) != fieldCount || len(record.UnsupportedFields) != diagnosticCount || record.Fields[0].Type.Name != "Boolean" {
+		t.Fatalf("pooled component metadata did not round trip: %#v", record)
+	}
+}
+
+func TestNativeCacheEncodingIsDeterministic(t *testing.T) {
+	catalog := &Catalog{
+		Dependencies: map[string]string{"zeta": "2.0.0", "alpha": "1.0.0"},
+		Modules: map[string]Module{
+			"zeta": {
+				Exports: map[string]Export{
+					"write": {Kind: "function", Type: Type{Kind: "void", Name: "Void"}, Parameters: []Type{{Kind: "string", Name: "String"}}},
+					"read":  {Kind: "function", Type: Type{Kind: "string", Name: "String"}},
+				},
+			},
+			"alpha": {Exports: map[string]Export{
+				"ready": {Kind: "function", Type: Type{Kind: "bool", Name: "Boolean"}},
+			}},
+		},
+	}
+	var first string
+	for attempt := 0; attempt < 20; attempt++ {
+		encoded, err := encodeCatalog(catalog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attempt == 0 {
+			first = string(encoded)
+			continue
+		}
+		if string(encoded) != first {
+			t.Fatalf("native cache encoding changed between attempts:\n%s\n%s", first, encoded)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidAndCyclicNativeCacheReferences(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{
+			name: "unknown type",
+			data: fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"types":[{"kind":"array","args":[2]}],"modules":{}}`, FormatVersion),
+			want: "references unknown type 2",
+		},
+		{
+			name: "cyclic type",
+			data: fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"types":[{"kind":"array","args":[1]}],"modules":{}}`, FormatVersion),
+			want: "cyclic type reference",
+		},
+		{
+			name: "unknown field",
+			data: fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"types":[{"kind":"named","name":"Props"}],"modules":{"ui":{"exports":{},"records":{"Props":{"kind":"record","type":1,"fields":[1]}}}}}`, FormatVersion),
+			want: "references unknown field 1",
+		},
+		{
+			name: "unknown diagnostic",
+			data: fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"types":[],"modules":{"ui":{"exports":{},"unsupported":[1]}}}`, FormatVersion),
+			want: "references unknown diagnostic 1",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Dir(IndexPath(root)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(IndexPath(root), []byte(test.data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(root, map[string]string{"ui": "1"}); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q diagnostic, got %v", test.want, err)
+			}
+		})
 	}
 }
 
