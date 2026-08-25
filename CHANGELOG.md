@@ -2,6 +2,24 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.29 - 2026-08-25
+
+### Language and compiler
+
+- Go generation gives array-index helpers source-module-specific names and
+  reserves internal standard-library import aliases. Valid applications with
+  multiple generated files in one Go package no longer fail with duplicate
+  helper declarations or import-name collisions.
+  ([#508](https://github.com/type-rb/type-rb/pull/508))
+- TypeScript generation now imports project types introduced by inferred local
+  variable annotations, so cross-module return values no longer produce
+  generated code with missing type names.
+  ([#509](https://github.com/type-rb/type-rb/pull/509))
+- `trb check` and `trb build` now diagnose a nested Go package importing the
+  runnable root module at the TypeRB source location instead of deferring the
+  failure to the Go toolchain.
+  ([#507](https://github.com/type-rb/type-rb/pull/507))
+
 ## 0.3.28 - 2026-08-25
 
 ### Breaking changes
