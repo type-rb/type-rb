@@ -2,6 +2,27 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.35 - 2026-08-26
+
+### Web
+
+- `trb web openapi` now generates deterministic OpenAPI 3.1 JSON from typed
+  `trb/web` endpoint contracts. Path and query parameters, JSON request bodies,
+  status-specific responses, shared records, raw enums, aliases, newtypes,
+  nullable values, collections, and portable time types retain their checked
+  TypeRB contracts without starting a target toolchain.
+  ([#534](https://github.com/type-rb/type-rb/pull/534))
+
+### Language and compiler
+
+- Ruby output now keeps same-named top-level functions from different TypeRB
+  modules isolated. Local calls and named or namespace imports resolve to the
+  correct declaration instead of whichever Ruby method was loaded last.
+  ([#535](https://github.com/type-rb/type-rb/pull/535))
+- Legacy syntax diagnostics now link to the current language guide instead of
+  unpublished pre-release migration pages.
+  ([#529](https://github.com/type-rb/type-rb/pull/529))
+
 ## 0.3.34 - 2026-08-26
 
 ### Breaking changes
