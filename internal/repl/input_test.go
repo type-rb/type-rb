@@ -168,7 +168,7 @@ func TestAcceptedCompletionSourceAppliesVisibleImportAndPrimaryReplacement(t *te
 	}
 }
 
-func TestAcceptedCompletionSourceTurnsBareCandidateIntoImportSubmission(t *testing.T) {
+func TestAcceptedImportConfirmationSourceTurnsBareCandidateIntoImportSubmission(t *testing.T) {
 	source := "sha"
 	item := languageservice.CompletionItem{
 		InsertText:  "sha256",
@@ -177,10 +177,65 @@ func TestAcceptedCompletionSourceTurnsBareCandidateIntoImportSubmission(t *testi
 			Range: languageservice.OffsetRange{}, NewText: "import { sha256 } from trb/std/hash\n",
 		}},
 	}
-	got, cursor, ok := acceptedCompletionSource(source, item)
+	got, cursor, ok := acceptedImportConfirmationSource(source, item)
 	want := "import { sha256 } from trb/std/hash"
 	if !ok || got != want || cursor != len(want) {
 		t.Fatalf("bare completion=(%q, %d, %v), want (%q, %d, true)", got, cursor, ok, want, len(want))
+	}
+}
+
+func TestAcceptedCompletionSourceKeepsBareCandidateAfterImport(t *testing.T) {
+	source := "math"
+	item := languageservice.CompletionItem{
+		Kind:        languageservice.CompletionModule,
+		InsertText:  "math",
+		Replacement: languageservice.OffsetRange{Start: 0, End: len(source)},
+		AdditionalEdits: []languageservice.TextEdit{{
+			Range: languageservice.OffsetRange{}, NewText: "import trb/std/math\n",
+		}},
+	}
+	got, cursor, ok := acceptedCompletionSource(source, item)
+	want := "import trb/std/math\nmath"
+	if !ok || got != want || cursor != len(want) {
+		t.Fatalf("expression completion=(%q, %d, %v), want (%q, %d, true)", got, cursor, ok, want, len(want))
+	}
+}
+
+func TestCompletionCommitCharactersAreLimitedToExpressionContinuations(t *testing.T) {
+	tests := []struct {
+		name                 string
+		item                 languageservice.CompletionItem
+		requireConfirmation  bool
+		wantCommitCharacters string
+	}{
+		{
+			name:                 "package namespace",
+			item:                 languageservice.CompletionItem{Kind: languageservice.CompletionModule, InsertText: "math"},
+			requireConfirmation:  true,
+			wantCommitCharacters: ".",
+		},
+		{
+			name:                 "parameterized function",
+			item:                 languageservice.CompletionItem{Kind: languageservice.CompletionFunction, InsertText: "sha256"},
+			requireConfirmation:  true,
+			wantCommitCharacters: "(",
+		},
+		{
+			name:                "zero-argument function",
+			item:                languageservice.CompletionItem{Kind: languageservice.CompletionFunction, InsertText: "now()"},
+			requireConfirmation: true,
+		},
+		{
+			name: "ordinary completion",
+			item: languageservice.CompletionItem{Kind: languageservice.CompletionModule, InsertText: "math"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := completionCommitCharacters(test.item, test.requireConfirmation); got != test.wantCommitCharacters {
+				t.Fatalf("commit characters=%q, want %q", got, test.wantCommitCharacters)
+			}
+		})
 	}
 }
 

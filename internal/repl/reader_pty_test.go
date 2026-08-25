@@ -79,6 +79,13 @@ func TestBareUniqueCompletionBackspaceCancels(t *testing.T) {
 	}
 }
 
+func TestBareModuleCompletionDotContinuesImportedExpression(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "mat\t.sqrt(9)\r"), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:import trb/std/math\nmath.sqrt(9)]")) {
+		t.Fatalf("module completion did not commit before dot: %q", output)
+	}
+}
+
 func TestBareSelectedCompletionConfirmsThenSubmitsSelectedImport(t *testing.T) {
 	output := bytes.ReplaceAll(runCompletionPTYSteps(t,
 		ptyInputStep{input: "sha256\t\r", waitAfter: 100 * time.Millisecond},
@@ -86,6 +93,14 @@ func TestBareSelectedCompletionConfirmsThenSubmitsSelectedImport(t *testing.T) {
 	), []byte("\r"), nil)
 	if !bytes.Contains(output, []byte("[LINE:import { sha256 } from trb/std/")) {
 		t.Fatalf("selected function completion did not confirm then submit its import: %q", output)
+	}
+}
+
+func TestBareFunctionCompletionOpeningParenthesisContinuesImportedCall(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "sha256\t(\"value\")\r"), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:import { sha256 } from trb/std/")) ||
+		!bytes.Contains(output, []byte("\nsha256(\"value\")]")) {
+		t.Fatalf("function completion did not commit before opening parenthesis: %q", output)
 	}
 }
 

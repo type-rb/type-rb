@@ -1434,8 +1434,8 @@ func Lookup(packagePath string) (*Package, bool) {
 	return definition, ok
 }
 
-// PublicPortablePackages returns compiler-owned packages that authored source
-// may import in every backend supported by mode.
+// PublicPortablePackages returns public compiler-owned packages that authored
+// source may import in the selected backend mode.
 func PublicPortablePackages(mode string) []*Package {
 	paths := make([]string, 0, len(registry))
 	for packagePath, definition := range registry {

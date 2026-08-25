@@ -415,8 +415,12 @@ When the input consists only of that candidate, Tab keeps even a unique match
 as a cancellable selection. Escape, Backspace, or Delete restores the original
 input without confirming the candidate. Enter confirms the selection by
 replacing the editable input with only the import; a later Enter submits that
-import. Completion inside a larger expression keeps the expression and
-prepends its import.
+import. Typing `.` for a selected package namespace or `(` for a selected
+parameterized function instead confirms the candidate as an expression: the
+visible import is prepended, the character is inserted after the candidate,
+and editing continues. Other ordinary characters cancel the selection and edit
+the original input. Completion inside a larger expression keeps the expression
+and prepends its import.
 
 Each submission passes through the ordinary parser, resolver, type checker,
 typed IR lowering, and evaluator. Platform packages are accepted or rejected

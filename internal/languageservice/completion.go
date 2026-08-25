@@ -1228,6 +1228,8 @@ func filterCompletions(items []CompletionItem, prefix string) []CompletionItem {
 
 func completionItemKey(item CompletionItem) string {
 	var result strings.Builder
+	result.WriteString(string(item.Kind))
+	result.WriteByte(0)
 	result.WriteString(item.Label)
 	result.WriteByte(0)
 	result.WriteString(item.InsertText)

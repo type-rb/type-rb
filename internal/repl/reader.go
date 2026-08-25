@@ -344,20 +344,31 @@ func completeInput(service *languageservice.Service, line []rune, cursor int) re
 		accepted := item
 		accepted.InsertText = value
 		_, requireConfirmation := bareCompletionImport(source, accepted)
-		values = append(values, readline.Completion{
+		completion := readline.Completion{
 			Value:               value,
 			Display:             item.Label,
 			Description:         item.Detail,
 			Tag:                 string(item.Kind),
 			RequireConfirmation: requireConfirmation,
 			OnAccept: func(line []rune, cursor int) ([]rune, int) {
-				updated, byteCursor, ok := acceptedCompletionSource(source, accepted)
+				updated, byteCursor, ok := acceptedImportConfirmationSource(source, accepted)
 				if !ok {
 					return line, cursor
 				}
 				return []rune(updated), utf8.RuneCountInString(updated[:byteCursor])
 			},
-		})
+		}
+		if characters := completionCommitCharacters(accepted, requireConfirmation); characters != "" {
+			completion.CommitCharacters = characters
+			completion.OnCommit = func(line []rune, cursor int, _ rune) ([]rune, int) {
+				updated, byteCursor, ok := acceptedCompletionSource(source, accepted)
+				if !ok {
+					return line, cursor
+				}
+				return []rune(updated), utf8.RuneCountInString(updated[:byteCursor])
+			}
+		}
+		values = append(values, completion)
 	}
 	if len(values) == 0 {
 		return readline.Completions{}
@@ -372,11 +383,14 @@ func completeInput(service *languageservice.Service, line []rune, cursor int) re
 	return result
 }
 
-func acceptedCompletionSource(source string, item languageservice.CompletionItem) (string, int, bool) {
+func acceptedImportConfirmationSource(source string, item languageservice.CompletionItem) (string, int, bool) {
 	if imported, ok := bareCompletionImport(source, item); ok {
 		return imported, len(imported), true
 	}
+	return acceptedCompletionSource(source, item)
+}
 
+func acceptedCompletionSource(source string, item languageservice.CompletionItem) (string, int, bool) {
 	type completionEdit struct {
 		range_  languageservice.OffsetRange
 		text    string
@@ -429,6 +443,21 @@ func acceptedCompletionSource(source string, item languageservice.CompletionItem
 		return source, 0, false
 	}
 	return updated, cursor, true
+}
+
+func completionCommitCharacters(item languageservice.CompletionItem, requireConfirmation bool) string {
+	if !requireConfirmation {
+		return ""
+	}
+	switch item.Kind {
+	case languageservice.CompletionModule:
+		return "."
+	case languageservice.CompletionFunction:
+		if !strings.HasSuffix(item.InsertText, "()") {
+			return "("
+		}
+	}
+	return ""
 }
 
 func bareCompletionImport(source string, item languageservice.CompletionItem) (string, bool) {
