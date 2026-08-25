@@ -607,6 +607,10 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return method
 	case *ast.VariableStatement:
 		typ := l.checked.Variables[n]
+		// Backends annotate local variables with their inferred types. A value
+		// returned by an imported function can therefore introduce a project type
+		// whose owner was not named by the source import itself.
+		l.requireGeneratedType(typ)
 		if block, ok := l.structuredBlock(n.Value); ok {
 			block.Result = &ir.StructuredBlockResult{
 				Variable: &ir.Variable{Base: base(n.Base), Name: n.Name, Type: typ, Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]},
