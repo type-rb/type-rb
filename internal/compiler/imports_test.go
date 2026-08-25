@@ -3157,6 +3157,88 @@ end
 	}
 }
 
+func TestTypedJSONInfersTransitiveProjectRecordContractsAcrossBackends(t *testing.T) {
+	contracts := SourceUnit{
+		Filename:   "/project/contracts/payload.trb",
+		ModulePath: "contracts/payload",
+		Package:    "contracts",
+		Source: []byte(`newtype PayloadId = Integer
+
+enum Status
+	Ready = "ready"
+end
+
+record Metadata
+	source: String
+end
+
+record Payload
+	id: PayloadId
+	status: Status
+	metadata: Metadata
+end
+`),
+	}
+	mapper := SourceUnit{
+		Filename:   "/project/app/mapper.trb",
+		ModulePath: "app/mapper",
+		Package:    "mapper",
+		Source: []byte(`import { Metadata, Payload, PayloadId, Status } from contracts/payload
+
+def payload(): Payload
+	return Payload.new(
+		id: PayloadId.new(7),
+		status: Status::Ready,
+		metadata: Metadata.new(source: "fixture"),
+	)
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/routes/index.trb",
+		ModulePath: "routes/index",
+		Package:    "routes",
+		Source: []byte(`import { payload } from app/mapper
+import { Response, json } from trb/web
+
+def get(): Response
+	return json(payload())
+end
+`),
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifacts, err := CompileProject([]SourceUnit{contracts, mapper, consumer}, Options{
+				Mode: mode, GoModule: "example.com/transitive-json", RubyLoader: "require_relative", ProjectRoot: "/project",
+			})
+			if err != nil {
+				t.Fatalf("%s rejected a transitive JSON record contract: %v", mode, err)
+			}
+			artifact := artifactForModule(artifacts, "routes/index")
+			if artifact == nil {
+				t.Fatal("consumer artifact was not generated")
+			}
+			var generated *ir.Import
+			for _, statement := range artifact.IR.Statements {
+				imported, ok := statement.(*ir.Import)
+				if ok && imported.Path == "contracts/payload" {
+					generated = imported
+					break
+				}
+			}
+			if generated == nil || len(generated.Symbols) != 0 {
+				t.Fatalf("%s did not retain a generated-only contracts import: %#v", mode, generated)
+			}
+			for _, name := range []string{"Metadata", "Payload", "Status"} {
+				if !slices.Contains(generated.GeneratedTypeSymbols, name) {
+					t.Fatalf("%s generated contracts import is missing %s: %#v", mode, name, generated.GeneratedTypeSymbols)
+				}
+			}
+		})
+	}
+}
+
 func TestImportedTransparentAliasesUseUnderlyingReceiverMethods(t *testing.T) {
 	contracts := SourceUnit{
 		Filename:   "/project/contracts/ids.trb",

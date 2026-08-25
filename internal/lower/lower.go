@@ -756,7 +756,7 @@ func (l *lowerer) structuredBlock(expression ast.Expression) (*ir.StructuredBloc
 		Callee:   l.expression(call.Callee),
 	}
 	if codec, ok := l.checked.CodecApplications[call]; ok {
-		loweredCall.Codec = lowerCodecSchema(codec.Schema)
+		loweredCall.Codec = l.lowerCodecSchema(codec.Schema)
 	}
 	for _, argument := range call.Arguments {
 		loweredCall.Arguments = append(loweredCall.Arguments, ir.CallArgument{
@@ -1047,7 +1047,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee), CallSignature: append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...)}
 		if codec, ok := l.checked.CodecApplications[n]; ok {
-			result.Codec = lowerCodecSchema(codec.Schema)
+			result.Codec = l.lowerCodecSchema(codec.Schema)
 		}
 		for _, argument := range n.Arguments {
 			result.Arguments = append(result.Arguments, ir.CallArgument{Name: argument.Name, Value: l.expression(argument.Value), Splat: argument.Splat})
@@ -1213,7 +1213,8 @@ func lowerControlFlowBranchExpression(body []ast.Statement) (int, ast.Expression
 	return -1, nil
 }
 
-func lowerCodecSchema(schema checker.CodecSchema) *ir.CodecSchema {
+func (l *lowerer) lowerCodecSchema(schema checker.CodecSchema) *ir.CodecSchema {
+	l.requireGeneratedType(schema.Type)
 	result := &ir.CodecSchema{Type: schema.Type, Kind: schema.Kind, Module: schema.Module, RawType: schema.RawType}
 	for _, value := range schema.RawValues {
 		result.RawValues = append(result.RawValues, ir.EnumRawValue{Member: value.Member, Raw: value.Raw})
@@ -1222,10 +1223,10 @@ func lowerCodecSchema(schema checker.CodecSchema) *ir.CodecSchema {
 		result.Reference = &ir.Reference{Package: schema.Reference.Import.RuntimePath(), Alias: schema.Reference.Import.Alias, Symbol: schema.Reference.Name, ExportKind: string(schema.Reference.Export.Kind)}
 	}
 	if schema.Element != nil {
-		result.Element = lowerCodecSchema(*schema.Element)
+		result.Element = l.lowerCodecSchema(*schema.Element)
 	}
 	for _, field := range schema.Fields {
-		result.Fields = append(result.Fields, ir.CodecField{Name: field.Name, WireName: field.WireName, Schema: lowerCodecSchema(*field.Schema)})
+		result.Fields = append(result.Fields, ir.CodecField{Name: field.Name, WireName: field.WireName, Schema: l.lowerCodecSchema(*field.Schema)})
 	}
 	return result
 }

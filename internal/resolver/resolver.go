@@ -436,6 +436,88 @@ func (r Result) CatalogTypeAlias(name string) (Export, bool) {
 	return Export{}, false
 }
 
+// CatalogType resolves a type declaration and its owner from the complete
+// project catalog. NewCatalog rejects duplicate exported type names, so the
+// result is unambiguous. This lookup is for compiler-generated references;
+// source annotations must continue to use ImportedType.
+func (r Result) CatalogType(name string) (Binding, bool) {
+	if r.Catalog == nil {
+		return Binding{}, false
+	}
+	modulePaths := make([]string, 0, len(r.Catalog.Modules))
+	for modulePath := range r.Catalog.Modules {
+		modulePaths = append(modulePaths, modulePath)
+	}
+	sort.Strings(modulePaths)
+	for _, modulePath := range modulePaths {
+		module := r.Catalog.Modules[modulePath]
+		if module == nil {
+			continue
+		}
+		exported, exists := module.Exports[name]
+		if !exists || !typeExport(exported.Kind) {
+			continue
+		}
+		kind := ProjectImport
+		if module.Official {
+			kind = OfficialImport
+		} else if module.CompilerOwned {
+			kind = StandardImport
+		}
+		imported := &Import{
+			Kind:                kind,
+			Path:                modulePath,
+			ModulePath:          modulePath,
+			Symbols:             []string{name},
+			Exports:             module.Exports,
+			Filename:            module.Filename,
+			DeclarationProvider: module.DeclarationProvider,
+		}
+		copy := exported
+		return Binding{Import: imported, Name: name, Export: &copy}, true
+	}
+	return Binding{}, false
+}
+
+// ContractType resolves a catalog-owned type only when it is reachable from a
+// source-selected import contract. This is narrower than source visibility:
+// it lets the checker interpret returned values while preventing an unrelated
+// project type from replacing an opaque type with the same name.
+func (r Result) ContractType(name string) (Binding, bool) {
+	target, exists := r.CatalogType(name)
+	if !exists || target.Import == nil || target.Import.Kind != ProjectImport {
+		return Binding{}, false
+	}
+	imports := make([]*Import, 0, len(r.Imports))
+	seen := map[*Import]bool{}
+	for _, imported := range r.Imports {
+		if imported == nil || imported.Kind != ProjectImport || seen[imported] {
+			continue
+		}
+		seen[imported] = true
+		imports = append(imports, imported)
+	}
+	sort.Slice(imports, func(i, j int) bool { return imports[i].RuntimePath() < imports[j].RuntimePath() })
+	for _, imported := range imports {
+		names := imported.Symbols
+		if len(names) == 0 {
+			names = make([]string, 0, len(imported.Exports))
+			for exportedName := range imported.Exports {
+				names = append(names, exportedName)
+			}
+			sort.Strings(names)
+		}
+		visited := map[string]bool{}
+		for _, exportedName := range names {
+			exported, selected := imported.Exports[exportedName]
+			if selected && r.exportContractReferencesType(imported, exported, target, visited) {
+				return target, true
+			}
+		}
+	}
+	return Binding{}, false
+}
+
 // ContractTypeAlias resolves a catalog-owned transparent alias only when it
 // is reachable from a source-selected import contract. This is narrower than
 // source visibility: it lets the checker interpret a returned value while
@@ -519,6 +601,79 @@ func (r Result) contractTypeReferencesAlias(imported *Import, typ types.Type, na
 	result := r.contractTypeReferencesAlias(imported, exported.AliasTarget, name, visiting)
 	delete(visiting, typ.Name)
 	return result
+}
+
+func (r Result) exportContractReferencesType(imported *Import, exported Export, target Binding, visited map[string]bool) bool {
+	typesToVisit := []types.Type{exported.Type, exported.AliasTarget, exported.NewtypeTarget, exported.EnumRawType}
+	typesToVisit = append(typesToVisit, exported.Interfaces...)
+	for _, parameter := range exported.Parameters {
+		typesToVisit = append(typesToVisit, parameter.Type)
+	}
+	for _, field := range exported.Fields {
+		typesToVisit = append(typesToVisit, field.Type)
+	}
+	for _, variant := range exported.EnumVariants {
+		for _, field := range variant.Fields {
+			typesToVisit = append(typesToVisit, field.Type)
+		}
+	}
+	for _, member := range exported.Members {
+		typesToVisit = append(typesToVisit, member.Type)
+		for _, parameter := range member.Parameters {
+			typesToVisit = append(typesToVisit, parameter.Type)
+		}
+	}
+	for _, typ := range typesToVisit {
+		if r.contractTypeReferencesType(imported, typ, target, visited) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r Result) contractTypeReferencesType(imported *Import, typ types.Type, target Binding, visited map[string]bool) bool {
+	for _, argument := range typ.Args {
+		if r.contractTypeReferencesType(imported, argument, target, visited) {
+			return true
+		}
+	}
+	if typ.Kind != types.Named || typ.Name == "" {
+		return false
+	}
+	var binding Binding
+	if exported, directlyOwned := imported.Exports[typ.Name]; directlyOwned && typeExport(exported.Kind) {
+		copy := exported
+		binding = Binding{Import: imported, Name: typ.Name, Export: &copy}
+	} else {
+		var exists bool
+		binding, exists = r.CatalogType(typ.Name)
+		if !exists {
+			return false
+		}
+	}
+	if sameTypeBinding(binding, target) {
+		return true
+	}
+	key := binding.Import.RuntimePath() + "#" + binding.Name
+	if visited[key] || binding.Export == nil {
+		return false
+	}
+	visited[key] = true
+	return r.exportContractReferencesType(binding.Import, *binding.Export, target, visited)
+}
+
+func sameTypeBinding(left, right Binding) bool {
+	return left.Import != nil && right.Import != nil && left.Export != nil && right.Export != nil &&
+		left.Import.RuntimePath() == right.Import.RuntimePath() && left.Name == right.Name && left.Export.Kind == right.Export.Kind
+}
+
+func typeExport(kind ExportKind) bool {
+	switch kind {
+	case ClassExport, RecordExport, EnumExport, TypeAliasExport, NewtypeExport, InterfaceExport:
+		return true
+	default:
+		return false
+	}
 }
 
 // addPrelude exposes the small set of receiver-style, target-independent helpers
@@ -652,7 +807,7 @@ func (r Result) InferredType(typeName string) (Binding, bool) {
 	sort.Slice(imports, func(i, j int) bool { return imports[i].Path < imports[j].Path })
 	for _, imported := range imports {
 		exported, exists := imported.Exports[typeName]
-		if !exists || exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != NewtypeExport && exported.Kind != InterfaceExport {
+		if !exists || !typeExport(exported.Kind) {
 			continue
 		}
 		copy := exported

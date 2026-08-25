@@ -3349,7 +3349,7 @@ func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[stri
 	// Codecs use the expanded representation of transparent aliases and nominal
 	// newtypes. Generated helpers can then cross package boundaries without
 	// exposing a source-only representation wrapper.
-	base := c.expandRepresentation(typ, map[string]bool{})
+	base := c.expandCodecRepresentation(typ, map[string]bool{})
 	schema := CodecSchema{Type: base}
 	base.Nullable = false
 	switch base.Kind {
@@ -3455,6 +3455,32 @@ func (c *Checker) codecSchema(span token.Span, typ types.Type, visiting map[stri
 	return schema, true
 }
 
+func (c *Checker) expandCodecRepresentation(typ types.Type, visiting map[string]bool) types.Type {
+	expanded := c.expandRepresentation(typ, map[string]bool{})
+	if expanded.Kind != types.Named || expanded.Name == "" || visiting[expanded.Name] {
+		return expanded
+	}
+	catalogBinding, exists := c.resolution.CatalogType(expanded.Name)
+	if !exists || catalogBinding.Export == nil || catalogBinding.Export.Kind != resolver.TypeAliasExport && catalogBinding.Export.Kind != resolver.NewtypeExport {
+		return expanded
+	}
+	binding, exists := c.resolution.ContractType(expanded.Name)
+	if !exists || binding.Export == nil || binding.Export.Kind != resolver.TypeAliasExport && binding.Export.Kind != resolver.NewtypeExport {
+		return expanded
+	}
+	visiting[expanded.Name] = true
+	target := binding.Export.AliasTarget
+	if binding.Export.Kind == resolver.NewtypeExport {
+		target = binding.Export.NewtypeTarget
+	}
+	target = substituteType(target, typeSubstitutions(binding.Export.TypeParameters, expanded.Args))
+	result := c.expandCodecRepresentation(target, visiting)
+	delete(visiting, expanded.Name)
+	result.Nullable = result.Nullable || expanded.Nullable
+	result.Readonly = result.Readonly || expanded.Readonly
+	return result
+}
+
 func (c *Checker) codecTimeScalar(name string) (string, string, resolver.Binding, bool) {
 	kinds := map[string]string{
 		"Date":      "time_date",
@@ -3483,17 +3509,13 @@ func (c *Checker) codecRawEnum(name string) (RawEnum, string, *resolver.Binding,
 		copy := binding
 		return rawEnumFromExport(binding.Export), binding.Import.RuntimePath(), &copy, true
 	}
-	for _, binding := range c.resolution.Symbols {
-		if binding.Import == nil {
-			continue
-		}
-		exported, ok := binding.Import.Exports[name]
-		if !ok || exported.Kind != resolver.EnumExport || exported.EnumRawType.Kind == "" {
-			continue
-		}
-		copyExport := exported
-		copy := resolver.Binding{Import: binding.Import, Name: name, Export: &copyExport}
-		return rawEnumFromExport(&copyExport), binding.Import.RuntimePath(), &copy, true
+	if binding, ok := c.resolution.InferredType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.EnumExport && binding.Export.EnumRawType.Kind != "" {
+		copy := binding
+		return rawEnumFromExport(binding.Export), binding.Import.RuntimePath(), &copy, true
+	}
+	if binding, ok := c.resolution.ContractType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.EnumExport && binding.Export.EnumRawType.Kind != "" {
+		copy := binding
+		return rawEnumFromExport(binding.Export), binding.Import.RuntimePath(), &copy, true
 	}
 	return RawEnum{}, "", nil, false
 }
@@ -3510,17 +3532,13 @@ func (c *Checker) codecRecord(name string) ([]resolver.RecordField, string, *res
 		copy := binding
 		return append([]resolver.RecordField(nil), binding.Export.Fields...), binding.Import.RuntimePath(), &copy, true
 	}
-	for _, binding := range c.resolution.Symbols {
-		if binding.Import == nil {
-			continue
-		}
-		exported, ok := binding.Import.Exports[name]
-		if !ok || exported.Kind != resolver.RecordExport {
-			continue
-		}
-		copyExport := exported
-		copy := resolver.Binding{Import: binding.Import, Name: name, Export: &copyExport}
-		return append([]resolver.RecordField(nil), exported.Fields...), binding.Import.RuntimePath(), &copy, true
+	if binding, ok := c.resolution.InferredType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
+		copy := binding
+		return append([]resolver.RecordField(nil), binding.Export.Fields...), binding.Import.RuntimePath(), &copy, true
+	}
+	if binding, ok := c.resolution.ContractType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
+		copy := binding
+		return append([]resolver.RecordField(nil), binding.Export.Fields...), binding.Import.RuntimePath(), &copy, true
 	}
 	return nil, "", nil, false
 }
