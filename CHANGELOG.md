@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.27 - 2026-08-25
+
+### Language and compiler
+
+- Ruby generation gives private top-level functions source-module-specific
+  runtime names, preventing same-named helpers from overwriting one another
+  when an application loads multiple generated files.
+  ([#501](https://github.com/type-rb/type-rb/pull/501))
+
 ## 0.3.26 - 2026-08-25
 
 ### Breaking changes
