@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.33 - 2026-08-26
+
+### Web
+
+- Go projects now generate valid package paths for routes nested below dynamic
+  and catch-all segments, so paths such as `routes/accounts/[id]/preferences`
+  build and run in application and test targets. TypeRB route identities and
+  non-Go backends remain unchanged.
+  ([#525](https://github.com/type-rb/type-rb/pull/525))
+
 ## 0.3.32 - 2026-08-26
 
 ### Packages
