@@ -902,6 +902,66 @@ end
 	}
 }
 
+func TestRubyNamespaceImportedFunctionThatCollidesWithKernelStaysCallable(t *testing.T) {
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import trb/std/hash
+
+def digest(value: Bytes): Bytes
+	return hash.sha512(value)
+end
+`),
+	}}, Options{Mode: "ruby", RubyLoader: "require_relative"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := findArtifactByModule(artifacts, "main")
+	if consumer == nil {
+		t.Fatalf("Ruby namespace-import consumer is missing: %#v", artifacts)
+	}
+	output := string(consumer.Output)
+	if !strings.Contains(output, "return sha512(value)") || strings.Contains(output, "hash.sha512(value)") {
+		t.Fatalf("generated Ruby did not resolve the namespace function to its loaded top-level definition:\n%s", output)
+	}
+}
+
+func TestRubyPrivateTopLevelFunctionCallsInsideCatchUseModuleScopedNames(t *testing.T) {
+	const modulePath = "helpers"
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename:   "/project/helpers.trb",
+		ModulePath: modulePath,
+		Package:    "helpers",
+		Source: []byte(`import { Result } from trb/std/result
+
+def required(value: String?): Result<String, String>
+	text := _required(value) catch |error|
+		return Result<String, String>::Err(error)
+	end
+	return Result<String, String>::Ok(text)
+end
+
+def _required(value: String?): Result<String, String>
+	return Result<String, String>::Err("missing") if value == nil
+	return Result<String, String>::Ok(value)
+end
+`),
+	}}, Options{Mode: "ruby", RubyLoader: "require_relative"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := findArtifactByModule(artifacts, modulePath)
+	if consumer == nil {
+		t.Fatalf("Ruby private-function consumer is missing: %#v", artifacts)
+	}
+	output := string(consumer.Output)
+	target := "__trb_private_" + naming.PrivateSuffix(modulePath+"\x00_required")
+	if strings.Count(output, target) != 2 || strings.Contains(output, "_required(value)") {
+		t.Fatalf("generated Ruby did not use the module-scoped private target for both definition and catch call:\n%s", output)
+	}
+}
+
 func findArtifactByModule(artifacts []*Artifact, modulePath string) *Artifact {
 	for _, artifact := range artifacts {
 		if artifact.IR.ModulePath == modulePath {
@@ -2524,7 +2584,7 @@ end
 		},
 		"typescript": {
 			`bounds: [number, number, boolean]`,
-			`{ start: start, finish: end, exclusive: exclusive`,
+			`{ start: __trbStart, finish: __trbEnd, exclusive: __trbExclusive`,
 			`const needle = Array.from(substring)`,
 			`const characters = Array.from(value)`,
 		},

@@ -273,13 +273,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		safe := name == "trb.std.strings.try_slice"
 		returnType := "string"
 		invalid := "throw new RangeError(\"String slice range is out of bounds\");"
-		success := "return characters.slice(start, stop).join(\"\");"
+		success := "return __trbCharacters.slice(__trbStart, __trbStop).join(\"\");"
 		if safe {
 			returnType, _, _ = filesystemResultType()
-			invalid = "return " + sliceRangeError("start", "end", "exclusive", "characters.length", "String slice range is out of bounds") + ";"
-			success = "return " + filesystemOK("characters.slice(start, stop).join(\"\")") + ";"
+			invalid = "return " + sliceRangeError("__trbStart", "__trbEnd", "__trbExclusive", "__trbCharacters.length", "String slice range is out of bounds") + ";"
+			success = "return " + filesystemOK("__trbCharacters.slice(__trbStart, __trbStop).join(\"\")") + ";"
 		}
-		return "((): " + returnType + " => { const characters = Array.from(" + arguments[0] + "); const [start, end, exclusive] = " + arguments[1] + "; const valid = start >= 0 && end >= 0 && start <= end && (exclusive ? end <= characters.length : end < characters.length); if (!valid) { " + invalid + " } const stop = exclusive ? end : end + 1; " + success + " })()"
+		return "((): " + returnType + " => { const __trbCharacters = Array.from(" + arguments[0] + "); const [__trbStart, __trbEnd, __trbExclusive] = " + arguments[1] + "; const __trbValid = __trbStart >= 0 && __trbEnd >= 0 && __trbStart <= __trbEnd && (__trbExclusive ? __trbEnd <= __trbCharacters.length : __trbEnd < __trbCharacters.length); if (!__trbValid) { " + invalid + " } const __trbStop = __trbExclusive ? __trbEnd : __trbEnd + 1; " + success + " })()"
 	case "trb.std.strings.index", "trb.std.strings.rindex":
 		reverse := name == "trb.std.strings.rindex"
 		return "((value: string, substring: string): number | null => { const characters = Array.from(value); const needle = Array.from(substring); if (needle.length === 0) return " + map[bool]string{false: "0", true: "characters.length"}[reverse] + "; if (needle.length > characters.length) return null; let index = " + map[bool]string{false: "0", true: "characters.length - needle.length"}[reverse] + "; const stop = " + map[bool]string{false: "characters.length - needle.length", true: "0"}[reverse] + "; const step = " + map[bool]string{false: "1", true: "-1"}[reverse] + "; for (;; index += step) { if (needle.every((character, offset) => characters[index + offset] === character)) return index; if (index === stop) break; } return null; })(" + arguments[0] + ", " + arguments[1] + ")"
@@ -387,13 +387,13 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		safe := name == "trb.std.arrays.try_slice"
 		returnType := g.tsType(call.ExprType())
 		invalid := "throw new RangeError(\"Array slice range is out of bounds\");"
-		success := "return values.slice(start, stop);"
+		success := "return __trbValues.slice(__trbStart, __trbStop);"
 		if safe {
 			returnType, _, _ = filesystemResultType()
-			invalid = "return " + sliceRangeError("start", "end", "exclusive", "values.length", "Array slice range is out of bounds") + ";"
-			success = "return " + filesystemOK("values.slice(start, stop)") + ";"
+			invalid = "return " + sliceRangeError("__trbStart", "__trbEnd", "__trbExclusive", "__trbValues.length", "Array slice range is out of bounds") + ";"
+			success = "return " + filesystemOK("__trbValues.slice(__trbStart, __trbStop)") + ";"
 		}
-		return "((): " + returnType + " => { const values = " + arguments[0] + "; const [start, end, exclusive] = " + arguments[1] + "; const valid = start >= 0 && end >= 0 && start <= end && (exclusive ? end <= values.length : end < values.length); if (!valid) { " + invalid + " } const stop = exclusive ? end : end + 1; " + success + " })()"
+		return "((): " + returnType + " => { const __trbValues = " + arguments[0] + "; const [__trbStart, __trbEnd, __trbExclusive] = " + arguments[1] + "; const __trbValid = __trbStart >= 0 && __trbEnd >= 0 && __trbStart <= __trbEnd && (__trbExclusive ? __trbEnd <= __trbValues.length : __trbEnd < __trbValues.length); if (!__trbValid) { " + invalid + " } const __trbStop = __trbExclusive ? __trbEnd : __trbEnd + 1; " + success + " })()"
 	case "trb.std.arrays.first":
 		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[0]!; })()"
 	case "trb.std.arrays.last":

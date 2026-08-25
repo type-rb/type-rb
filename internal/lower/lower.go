@@ -1251,6 +1251,9 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 	if binding.Library != nil {
 		result.Intrinsic = binding.Library.Intrinsic
 		result.ReceiverMethod = binding.Library.HasReceiver()
+		if !result.ReceiverMethod {
+			result.ExportKind = string(resolver.FunctionExport)
+		}
 	}
 	if binding.Export != nil {
 		result.ExportKind = string(binding.Export.Kind)
@@ -1267,6 +1270,13 @@ func referenceFromBinding(binding *resolver.Binding) *ir.Reference {
 		return nil
 	}
 	result := &ir.Reference{Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name}
+	if binding.Library != nil {
+		result.Intrinsic = binding.Library.Intrinsic
+		result.ReceiverMethod = binding.Library.HasReceiver()
+		if !result.ReceiverMethod {
+			result.ExportKind = string(resolver.FunctionExport)
+		}
+	}
 	if binding.Export != nil {
 		result.ExportKind = string(binding.Export.Kind)
 		result.Runtime = lowerRuntimeBinding(binding.Export.Runtime)

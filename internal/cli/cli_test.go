@@ -4867,7 +4867,7 @@ func TestRunPortableHashAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `import { md5, sha1, sha256, sha512 } from trb/std/hash
+		source := `import trb/std/hash
 import { decode, encode } from trb/std/encoding/hex
 
 def main()
@@ -4880,18 +4880,18 @@ def main()
 	if decoded.size() != 1
 		return
 	end
-	puts(encode(md5("".to_bytes())))
-	puts(encode(md5("abc".to_bytes())))
-	puts(encode(md5(a56.to_bytes())))
-	puts(encode(sha1("".to_bytes())))
-	puts(encode(sha1("abc".to_bytes())))
-	puts(encode(sha1(a56.to_bytes())))
-	puts(encode(sha256("".to_bytes())))
-	puts(encode(sha256("abc".to_bytes())))
-	puts(encode(sha256(a56.to_bytes())))
-	puts(encode(sha512("".to_bytes())))
-	puts(encode(sha512("abc".to_bytes())))
-	puts(encode(sha512(a112.to_bytes())))
+	puts(encode(hash.md5("".to_bytes())))
+	puts(encode(hash.md5("abc".to_bytes())))
+	puts(encode(hash.md5(a56.to_bytes())))
+	puts(encode(hash.sha1("".to_bytes())))
+	puts(encode(hash.sha1("abc".to_bytes())))
+	puts(encode(hash.sha1(a56.to_bytes())))
+	puts(encode(hash.sha256("".to_bytes())))
+	puts(encode(hash.sha256("abc".to_bytes())))
+	puts(encode(hash.sha256(a56.to_bytes())))
+	puts(encode(hash.sha512("".to_bytes())))
+	puts(encode(hash.sha512("abc".to_bytes())))
+	puts(encode(hash.sha512(a112.to_bytes())))
 	return
 end
 `
@@ -4918,6 +4918,47 @@ end
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s portable hash output: want %q, got %q", mode, want, stdout.String())
 		}
+	}
+}
+
+func TestRunRubyResolvesPrivateTopLevelFunctionInsideCatch(t *testing.T) {
+	if _, err := exec.LookPath("ruby"); err != nil {
+		t.Skipf("ruby is unavailable: %v", err)
+	}
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.SourceDir = "src"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { Result } from trb/std/result
+
+def main()
+	value := _required("resolved") catch |_error|
+		return
+	end
+	puts(value)
+	return
+end
+
+def _required(value: String?): Result<String, String>
+	return Result<String, String>::Err("missing") if value == nil
+	return Result<String, String>::Ok(value)
+end
+`
+	if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if stdout.String() != "resolved\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected Ruby private catch output: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 
@@ -5599,7 +5640,9 @@ end
 
 def main()
 	bounds := 1...3
+	start := 1
 	puts(numbers_text([10, 20, 30, 40].slice(bounds)))
+	puts(numbers_text([10, 20, 30, 40].slice(start...3)))
 	puts(numbers_text([10, 20, 30, 40].slice(1..2)))
 	puts([10, 20, 30, 40].slice(4...4).size())
 	puts(array_slice([10, 20].try_slice(1...3)))
@@ -5624,7 +5667,7 @@ end
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "20,30\n20,30\n0\nerror:1:3:2\n😀\n😀B\n😀B\n0\nerror:String slice range is out of bounds\n1\n3\ntrue\n0\n4\n"
+		want := "20,30\n20,30\n20,30\n0\nerror:1:3:2\n😀\n😀B\n😀B\n0\nerror:String slice range is out of bounds\n1\n3\ntrue\n0\n4\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s slice output: want %q, got %q", mode, want, stdout.String())
 		}

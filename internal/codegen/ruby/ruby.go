@@ -945,20 +945,22 @@ func (g *generator) rubyClassName(name string, reference *ir.Reference) string {
 	return name
 }
 
+func (g *generator) expressionChild() *generator {
+	child := *g
+	child.b = strings.Builder{}
+	child.indent = 0
+	child.sourceRecorder = nil
+	return &child
+}
+
+func (g *generator) mergeExpressionChild(child *generator) {
+	g.temporary = child.temporary
+	g.checkedInteger = g.checkedInteger || child.checkedInteger
+	g.oidcRuntime = g.oidcRuntime || child.oidcRuntime
+}
+
 func (g *generator) ifExpression(node *ir.If) string {
-	child := &generator{
-		loader:          g.loader,
-		modulePath:      g.modulePath,
-		topFunctions:    g.topFunctions,
-		nativeSyntax:    g.nativeSyntax,
-		temporary:       g.temporary,
-		jobs:            g.jobs,
-		jobsSQL:         g.jobsSQL,
-		orm:             g.orm,
-		breakTarget:     g.breakTarget,
-		execution:       g.execution,
-		executionActive: g.executionActive,
-	}
+	child := g.expressionChild()
 	child.line("begin", "")
 	child.indent++
 	child.line("if "+child.expr(node.Condition), node.TrailingComment)
@@ -987,24 +989,12 @@ func (g *generator) ifExpression(node *ir.If) string {
 	child.line("end", "")
 	child.indent--
 	child.line("end", "")
-	g.temporary = child.temporary
+	g.mergeExpressionChild(child)
 	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) caseExpression(node *ir.Case) string {
-	child := &generator{
-		loader:          g.loader,
-		modulePath:      g.modulePath,
-		topFunctions:    g.topFunctions,
-		nativeSyntax:    g.nativeSyntax,
-		temporary:       g.temporary,
-		jobs:            g.jobs,
-		jobsSQL:         g.jobsSQL,
-		orm:             g.orm,
-		breakTarget:     g.breakTarget,
-		execution:       g.execution,
-		executionActive: g.executionActive,
-	}
+	child := g.expressionChild()
 	child.line("begin", "")
 	child.indent++
 	child.statements(node.Leading)
@@ -1063,7 +1053,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	child.line("end", "")
 	child.indent--
 	child.line("end", "")
-	g.temporary = child.temporary
+	g.mergeExpressionChild(child)
 	return strings.TrimSpace(child.b.String())
 }
 
