@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
 )
 
@@ -522,7 +523,7 @@ def receiver_rstrip(value: String): String
 end
 `)
 	wants := map[string][]string{
-		"go":         {"strings.TrimFunc(value, unicode.IsSpace)", "strings.TrimLeftFunc(value, unicode.IsSpace)", "strings.TrimRightFunc(value, unicode.IsSpace)"},
+		"go":         {"strings.TrimFunc(value, stdunicode.IsSpace)", "strings.TrimLeftFunc(value, stdunicode.IsSpace)", "strings.TrimRightFunc(value, stdunicode.IsSpace)"},
 		"ruby":       {`\u{0009}-\u{000D}`, `\u{3000}`},
 		"typescript": {`\u0009-\u000d`, `\u3000`},
 	}
@@ -1489,7 +1490,7 @@ end
 	wants := map[string][]string{
 		"go": {
 			`slices.Clone(values)`,
-			`trbArrayIndex(slices.Clone(values), 1)`,
+			`trbArrayIndex_` + naming.PrivateSuffix("array-index:") + `(slices.Clone(values), 1)`,
 			`values = append(values, 2)`,
 			`values = values[1:]`,
 			`copy(values[1:], values[:len(values)-1])`,
@@ -1575,6 +1576,81 @@ end
 			if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("collectionsexample", fileSet, []*goast.File{parsed}, nil); checkErr != nil {
 				t.Fatalf("generated Go Array/Hash output does not type-check: %v\n%s", checkErr, output)
 			}
+		}
+	}
+}
+
+func TestGoArrayIndexRuntimesArePrivateToGeneratedModules(t *testing.T) {
+	root := t.TempDir()
+	artifacts, err := CompileProject([]SourceUnit{
+		{
+			Filename:   filepath.Join(root, "domain", "first.trb"),
+			ModulePath: "domain/first",
+			Package:    "domain",
+			Source:     []byte("def first(values: Array<Integer>): Integer\n\treturn values[0]\nend\n"),
+		},
+		{
+			Filename:   filepath.Join(root, "domain", "second.trb"),
+			ModulePath: "domain/second",
+			Package:    "domain",
+			Source:     []byte("def second(values: Array<Integer>): Integer\n\tmut copied := values.dup()\n\tcopied[0] = 2\n\treturn copied[0]\nend\n"),
+		},
+	}, Options{Mode: "go", GoModule: "example.com/private-runtime"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	files := make([]*goast.File, 0, len(artifacts))
+	helperNames := map[string]bool{}
+	for _, artifact := range artifacts {
+		parsed, parseErr := parser.ParseFile(fileSet, artifact.Filename, artifact.Output, parser.AllErrors)
+		if parseErr != nil {
+			t.Fatalf("generated Go does not parse: %v\n%s", parseErr, artifact.Output)
+		}
+		files = append(files, parsed)
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*goast.FuncDecl)
+			if ok && strings.HasPrefix(function.Name.Name, "trbArrayIndex_") {
+				helperNames[function.Name.Name] = true
+			}
+		}
+	}
+	if len(helperNames) != 2 {
+		t.Fatalf("array index helpers must be module-private, got %#v", helperNames)
+	}
+	if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("example.com/private-runtime/domain", fileSet, files, nil); checkErr != nil {
+		t.Fatalf("generated package does not type-check: %v", checkErr)
+	}
+}
+
+func TestGoStringWhitespaceImportDoesNotConflictWithUnicodePackage(t *testing.T) {
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename:   "text.trb",
+		ModulePath: "text",
+		Package:    "text",
+		Source: []byte(`import trb/std/unicode
+
+def blank?(value: String): Boolean
+	return value.strip().empty?() || unicode.whitespace(32)
+end
+`),
+	}}, Options{Mode: "go", GoModule: "example.com/unicode-import"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, artifact := range artifacts {
+		if artifact.IR.ModulePath == "text" {
+			output = string(artifact.Output)
+			break
+		}
+	}
+	if output == "" {
+		t.Fatal("consumer artifact is missing")
+	}
+	for _, want := range []string{`stdunicode "unicode"`, `stdunicode.IsSpace`, `"example.com/unicode-import/trb/std/unicode"`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("generated Go is missing %q:\n%s", want, output)
 		}
 	}
 }
