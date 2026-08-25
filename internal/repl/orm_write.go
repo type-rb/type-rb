@@ -410,7 +410,7 @@ func (e *Evaluator) ormBuildDraft(typ types.Type, query *ormQueryValue, argument
 	}
 	for _, argument := range arguments {
 		if argument.Name == "" {
-			return Value{}, errors.New("ORM build attributes must be keyword arguments")
+			return Value{}, errors.New("ORM build attributes must be named arguments")
 		}
 		fields["@"+argument.Name] = argument.Value
 	}
@@ -429,7 +429,7 @@ func (e *Evaluator) ormBuildChanges(typ types.Type, source Value, arguments []ev
 	fields := map[string]Value{"@__trb_orm_source": source}
 	for _, argument := range arguments {
 		if argument.Name == "" {
-			return Value{}, errors.New("ORM changes must be keyword arguments")
+			return Value{}, errors.New("ORM changes must be named arguments")
 		}
 		fields["@"+argument.Name] = argument.Value
 	}
@@ -598,7 +598,7 @@ func (e *Evaluator) ormUpdateAll(resultType types.Type, query *ormQueryValue, va
 	arguments := make([]any, 0, len(values))
 	for index, value := range values {
 		if value.Name == "" {
-			return Value{}, errors.New("ORM update_all attributes must be keyword arguments")
+			return Value{}, errors.New("ORM update_all attributes must be named arguments")
 		}
 		assignments[index] = adapter.QuoteIdentifier(value.Name) + " = " + adapter.Placeholder(index+1)
 		arguments = append(arguments, ormDatabaseValue(value.Value))

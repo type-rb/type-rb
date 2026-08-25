@@ -731,5 +731,5 @@ func (g *generator) tsWebJSON(call *ir.Call, arguments []string) string {
 	encodeCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), types.FromName("JsonError")}}
 	encoded := g.tsJSONEncode(&encodeCall, arguments[0])
 	headers := `new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }])`
-	return "(() => { const encoded = " + encoded + "; if (encoded.kind === \"Err\") { return new __trb_web.Response(500, " + headers + ", new __trb_http.Body(new TextEncoder().encode(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))); } return new __trb_web.Response(" + status + ", " + headers + ", new __trb_http.Body(new TextEncoder().encode(encoded.value))); })()"
+	return "(() => { const encoded = " + encoded + "; if (encoded.kind === \"Err\") { return new __trb_web.Response({ status: 500, headers: " + headers + ", body: new __trb_http.Body(new TextEncoder().encode(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")) }); } return new __trb_web.Response({ status: " + status + ", headers: " + headers + ", body: new __trb_http.Body(new TextEncoder().encode(encoded.value)) }); })()"
 }

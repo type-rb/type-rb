@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
@@ -1009,6 +1010,7 @@ func (g *generator) class(class *ir.Class) {
 	if class.Superclass != nil {
 		superclass := g.expr(class.Superclass)
 		if identifier, ok := class.Superclass.(*ir.Identifier); ok {
+			superclass = goIdentifier(identifier.Name, true)
 			if alias := g.typeAliases[identifier.Name]; alias != "" {
 				superclass = alias + "." + goIdentifier(identifier.Name, true)
 			}
@@ -1167,6 +1169,25 @@ func (g *generator) nativeRuntimeCall(binding *ir.RuntimeBinding, arguments []st
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
+	if hasNamedOnlyParameters(parameters) {
+		parts := []string{}
+		optionalPositional := false
+		for _, parameter := range parameters {
+			if parameter.NamedOnly {
+				continue
+			}
+			if parameter.Default != nil {
+				optionalPositional = true
+				continue
+			}
+			parts = append(parts, g.bindingIdentifier(parameter.Name)+" "+g.goType(parameter.Type))
+		}
+		if optionalPositional {
+			parts = append(parts, "__trbOptional []any")
+		}
+		parts = append(parts, "__trbNamed map[string]any")
+		return strings.Join(parts, ", ")
+	}
 	optionalStart := optionalParameterStart(parameters)
 	if optionalStart < 0 {
 		optionalStart = len(parameters)
@@ -1186,6 +1207,15 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 	return strings.Join(parts, ", ")
 }
 
+func hasNamedOnlyParameters(parameters []ir.Parameter) bool {
+	for _, parameter := range parameters {
+		if parameter.NamedOnly {
+			return true
+		}
+	}
+	return false
+}
+
 func optionalParameterStart(parameters []ir.Parameter) int {
 	start := -1
 	for index, parameter := range parameters {
@@ -1203,6 +1233,10 @@ func optionalParameterStart(parameters []ir.Parameter) int {
 }
 
 func (g *generator) parameterDefaults(parameters []ir.Parameter) {
+	if hasNamedOnlyParameters(parameters) {
+		g.namedParameterDefaults(parameters)
+		return
+	}
 	start := optionalParameterStart(parameters)
 	if start < 0 {
 		return
@@ -1210,28 +1244,78 @@ func (g *generator) parameterDefaults(parameters []ir.Parameter) {
 	for index, parameter := range parameters[start:] {
 		name := g.bindingIdentifier(parameter.Name)
 		typ := g.goType(parameter.Type)
-		g.line("var " + name + " " + typ + " = " + g.expr(parameter.Default))
+		g.line("var " + name + " " + typ)
 		g.line("if len(__trbOptional) > " + strconv.Itoa(index) + " {")
 		g.indent++
-		switch {
-		case parameter.Type.Kind == types.Any:
-			g.line(name + " = __trbOptional[" + strconv.Itoa(index) + "]")
-		case parameter.Type.Nullable:
-			g.line("if __trbOptional[" + strconv.Itoa(index) + "] == nil {")
-			g.indent++
-			g.line(name + " = nil")
-			g.indent--
-			g.line("} else {")
-			g.indent++
-			g.line(name + " = __trbOptional[" + strconv.Itoa(index) + "].(" + typ + ")")
-			g.indent--
-			g.line("}")
-		default:
-			g.line(name + " = __trbOptional[" + strconv.Itoa(index) + "].(" + typ + ")")
-		}
+		g.assignDynamicValue(name, "__trbOptional["+strconv.Itoa(index)+"]", parameter.Type)
+		g.indent--
+		g.line("} else {")
+		g.indent++
+		g.line(name + " = " + g.expr(parameter.Default))
 		g.indent--
 		g.line("}")
 		g.line("_ = " + name)
+	}
+}
+
+func (g *generator) namedParameterDefaults(parameters []ir.Parameter) {
+	optionalIndex := 0
+	for _, parameter := range parameters {
+		name := g.bindingIdentifier(parameter.Name)
+		typ := g.goType(parameter.Type)
+		switch {
+		case !parameter.NamedOnly && parameter.Default != nil:
+			g.line("var " + name + " " + typ)
+			g.line("if len(__trbOptional) > " + strconv.Itoa(optionalIndex) + " {")
+			g.indent++
+			g.assignDynamicValue(name, "__trbOptional["+strconv.Itoa(optionalIndex)+"]", parameter.Type)
+			g.indent--
+			g.line("} else {")
+			g.indent++
+			g.line(name + " = " + g.expr(parameter.Default))
+			g.indent--
+			g.line("}")
+			g.line("_ = " + name)
+			optionalIndex++
+		case parameter.NamedOnly:
+			g.line("var " + name + " " + typ)
+			g.line("if __trbNamedValue, ok := __trbNamed[" + strconv.Quote(parameter.Name) + "]; ok {")
+			g.indent++
+			g.assignDynamicValue(name, "__trbNamedValue", parameter.Type)
+			g.indent--
+			if parameter.Default == nil {
+				g.line("} else {")
+				g.indent++
+				g.line("panic(" + strconv.Quote("missing named argument "+parameter.Name) + ")")
+				g.indent--
+			} else {
+				g.line("} else {")
+				g.indent++
+				g.line(name + " = " + g.expr(parameter.Default))
+				g.indent--
+			}
+			g.line("}")
+			g.line("_ = " + name)
+		}
+	}
+}
+
+func (g *generator) assignDynamicValue(target, value string, typ types.Type) {
+	switch {
+	case typ.Kind == types.Any:
+		g.line(target + " = " + value)
+	case typ.Nullable:
+		g.line("if " + value + " == nil {")
+		g.indent++
+		g.line(target + " = nil")
+		g.indent--
+		g.line("} else {")
+		g.indent++
+		g.line(target + " = " + value + ".(" + g.goType(typ) + ")")
+		g.indent--
+		g.line("}")
+	default:
+		g.line(target + " = " + value + ".(" + g.goType(typ) + ")")
 	}
 }
 
@@ -1433,6 +1517,7 @@ func (g *generator) expr(expression ir.Expression) string {
 					}
 					name += "[" + strings.Join(items, ", ") + "]"
 				}
+				parts = g.sourceCallArguments(n, parts)
 				values := append([]string{g.expr(member.Receiver)}, g.executionArguments(n, parts)...)
 				return name + "(" + strings.Join(values, ", ") + ")"
 			}
@@ -1449,6 +1534,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
+		parts = g.sourceCallArguments(n, parts)
 		parts = g.executionArguments(n, parts)
 		args = strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
@@ -1570,6 +1656,56 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) sourceCallArguments(call *ir.Call, authored []string) []string {
+	if call == nil || !callsignature.HasNamedOnly(call.CallSignature) {
+		return authored
+	}
+	positional := []string{}
+	named := []string{}
+	for index, argument := range call.Arguments {
+		if argument.Name == "" {
+			positional = append(positional, authored[index])
+		} else {
+			named = append(named, strconv.Quote(argument.Name)+": "+authored[index])
+		}
+	}
+	requiredPositional := 0
+	hasOptionalPositional := false
+	for _, parameter := range call.CallSignature {
+		if parameter.Kind != callsignature.Positional {
+			continue
+		}
+		if parameter.Presence == callsignature.Required {
+			requiredPositional++
+		} else {
+			hasOptionalPositional = true
+		}
+	}
+	positionalEnd := requiredPositional
+	if positionalEnd > len(positional) {
+		positionalEnd = len(positional)
+	}
+	result := append([]string(nil), positional[:positionalEnd]...)
+	if hasOptionalPositional {
+		optional := []string{}
+		if len(positional) > requiredPositional {
+			optional = positional[requiredPositional:]
+		}
+		result = append(result, "[]any{"+strings.Join(optional, ", ")+"}")
+	}
+	namedExpression := "map[string]any{}"
+	if len(named) > 0 {
+		assignments := make([]string, len(named))
+		for index, entry := range named {
+			parts := strings.SplitN(entry, ": ", 2)
+			assignments[index] = "__trbValues[" + parts[0] + "] = " + parts[1]
+		}
+		namedExpression = "func() map[string]any { __trbValues := map[string]any{}; " + strings.Join(assignments, "; ") + "; return __trbValues }()"
+	}
+	result = append(result, namedExpression)
+	return result
 }
 
 func (g *generator) checkedIntegerBinary(operator, left, right string) string {

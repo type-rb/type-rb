@@ -295,7 +295,7 @@ func discoverJob(program *ast.Program, class *ast.ClassStatement, aliases aliasR
 		return Job{}, err
 	}
 	for _, parameter := range perform.Parameters {
-		if parameter.Keyword || parameter.Rest || parameter.KeywordRest || parameter.Default != nil {
+		if parameter.NamedOnly || parameter.Keyword || parameter.Rest || parameter.KeywordRest || parameter.Default != nil {
 			return Job{}, fmt.Errorf("trb/jobs Job %s perform initially accepts required positional parameters only", class.Name)
 		}
 		typ := typeRef(parameter.Type)

@@ -26,8 +26,9 @@ record OidcBearerOptions
 end
 
 def bearer_options(
-		issuer:: String,
-		audience:: String,
+		*,
+		issuer: String,
+		audience: String,
 	): OidcBearerOptions
 	return OidcBearerOptions.new(
 		issuer: issuer,

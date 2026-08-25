@@ -212,7 +212,7 @@ func validHandler(method *ast.MethodStatement, resolved resolver.Result) bool {
 		return false
 	}
 	parameter := method.Parameters[0]
-	if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest || !officialType(parameter.Type, "Context", resolved) {
+	if parameter.Default != nil || parameter.NamedOnly || parameter.Keyword || parameter.Rest || parameter.KeywordRest || !officialType(parameter.Type, "Context", resolved) {
 		return false
 	}
 	return officialType(method.ReturnType, "Response", resolved)
@@ -224,7 +224,7 @@ func validMiddleware(method *ast.MethodStatement, resolved resolver.Result) bool
 	}
 	for index, expected := range []string{"Context", "Next"} {
 		parameter := method.Parameters[index]
-		if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest || !officialType(parameter.Type, expected, resolved) {
+		if parameter.Default != nil || parameter.NamedOnly || parameter.Keyword || parameter.Rest || parameter.KeywordRest || !officialType(parameter.Type, expected, resolved) {
 			return false
 		}
 	}

@@ -244,14 +244,14 @@ func TestFormatKeepsSymbolColonAfterOperatorIdempotent(t *testing.T) {
 	}
 }
 
-func TestFormatDistinguishesNamespaceAndTypedKeyword(t *testing.T) {
-	source := []byte("class Admin::Post<ActiveRecord::Base\ndef configure(cache::Boolean=false)\nreturn cache\nend\nend\n")
+func TestFormatDistinguishesNamespaceAndNamedOnlySeparator(t *testing.T) {
+	source := []byte("class Admin::Post<ActiveRecord::Base\ndef configure(*,cache:Boolean=false)\nreturn cache\nend\nend\n")
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
 	}
 	text := string(formatted)
-	if !strings.Contains(text, "class Admin::Post < ActiveRecord::Base") || !strings.Contains(text, "cache:: Boolean = false") {
+	if !strings.Contains(text, "class Admin::Post < ActiveRecord::Base") || !strings.Contains(text, "*, cache: Boolean = false") {
 		t.Fatalf("namespace/keyword formatting is ambiguous:\n%s", text)
 	}
 }

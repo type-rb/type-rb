@@ -98,6 +98,7 @@ type Declaration struct {
 type Parameter struct {
 	Name        string `json:"name"`
 	Type        Type   `json:"type"`
+	NamedOnly   bool   `json:"namedOnly,omitempty"`
 	Keyword     bool   `json:"keyword,omitempty"`
 	Optional    bool   `json:"optional,omitempty"`
 	Rest        bool   `json:"rest,omitempty"`
@@ -364,7 +365,7 @@ func parameters(input []ir.Parameter) []Parameter {
 	result := make([]Parameter, len(input))
 	for index, parameter := range input {
 		result[index] = Parameter{
-			Name: parameter.Name, Type: protocolType(parameter.Type), Keyword: parameter.Keyword,
+			Name: parameter.Name, Type: protocolType(parameter.Type), NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword,
 			Optional: parameter.Default != nil, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
 		}
 	}

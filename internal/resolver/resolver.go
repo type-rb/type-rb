@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/nativepackage"
@@ -49,11 +50,11 @@ const (
 type Export struct {
 	Name                   string
 	Kind                   ExportKind
+	Source                 bool
 	Type                   types.Type
-	Parameters             []types.Type
+	Parameters             []callsignature.Parameter
 	ParameterResultBridges []NativeResultBridge
 	CallResultBridge       NativeCallResultBridge
-	Required               int
 	Variadic               bool
 	Members                map[string]Member
 	Fields                 []RecordField
@@ -120,8 +121,7 @@ type Member struct {
 	Kind              ExportKind
 	Type              types.Type
 	TypeParameters    []string
-	Parameters        []types.Type
-	Required          int
+	Parameters        []callsignature.Parameter
 	Variadic          bool
 	Class             bool
 	Readonly          bool
@@ -472,13 +472,17 @@ func (r Result) ContractTypeAlias(name string) (Export, bool) {
 
 func (r Result) exportContractReferencesAlias(imported *Import, exported Export, name string, visiting map[string]bool) bool {
 	typesToVisit := []types.Type{exported.Type, exported.AliasTarget}
-	typesToVisit = append(typesToVisit, exported.Parameters...)
+	for _, parameter := range exported.Parameters {
+		typesToVisit = append(typesToVisit, parameter.Type)
+	}
 	for _, field := range exported.Fields {
 		typesToVisit = append(typesToVisit, field.Type)
 	}
 	for _, member := range exported.Members {
 		typesToVisit = append(typesToVisit, member.Type)
-		typesToVisit = append(typesToVisit, member.Parameters...)
+		for _, parameter := range member.Parameters {
+			typesToVisit = append(typesToVisit, parameter.Type)
+		}
 	}
 	for _, typ := range typesToVisit {
 		if r.contractTypeReferencesAlias(imported, typ, name, visiting) {
@@ -811,7 +815,6 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 		Name:              name,
 		Kind:              kind,
 		Type:              exported.Type.Semantic(),
-		Required:          exported.Required,
 		Variadic:          exported.Variadic,
 		TypeParameters:    append([]string(nil), exported.TypeParameters...),
 		Members:           map[string]Member{},
@@ -833,7 +836,11 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 	}
 	for _, parameter := range exported.Parameters {
 		parameterType, resultBridge := nativeResultCallbackType(parameter)
-		result.Parameters = append(result.Parameters, parameterType)
+		presence := callsignature.Omittable
+		if len(result.Parameters) < exported.Required {
+			presence = callsignature.Required
+		}
+		result.Parameters = append(result.Parameters, callsignature.Parameter{Kind: callsignature.Positional, Type: parameterType, Presence: presence})
 		result.ParameterResultBridges = append(result.ParameterResultBridges, resultBridge)
 	}
 	for _, field := range exported.Fields {
@@ -849,8 +856,7 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 				Kind:              memberExport.Kind,
 				Type:              memberExport.Type,
 				TypeParameters:    append([]string(nil), memberExport.TypeParameters...),
-				Parameters:        append([]types.Type(nil), memberExport.Parameters...),
-				Required:          memberExport.Required,
+				Parameters:        append([]callsignature.Parameter(nil), memberExport.Parameters...),
 				Variadic:          memberExport.Variadic,
 				Class:             class,
 				CallResultBridge:  memberExport.CallResultBridge,
@@ -1168,13 +1174,13 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 				for _, member := range node.Body {
 					switch item := member.(type) {
 					case *ast.MethodStatement:
-						parameterTypes, required, variadic := parameters(item.Parameters)
+						parameterTypes, variadic := parameters(item.Parameters)
 						if item.Name == "initialize" {
-							exported.Parameters, exported.Required, exported.Variadic = parameterTypes, required, variadic
+							exported.Parameters, exported.Variadic = parameterTypes, variadic
 							continue
 						}
 						if public(item.Name) {
-							method := Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Class: item.Class}
+							method := Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Parameters: parameterTypes, Variadic: variadic, Class: item.Class}
 							for _, parameter := range item.TypeParameters {
 								method.TypeParameters = append(method.TypeParameters, parameter.Name)
 							}
@@ -1243,18 +1249,18 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 						if len(parameterTypes) > 0 {
 							kind = FunctionExport
 						}
-						exported.Members[member.Name] = Member{Name: member.Name, Kind: kind, Type: typ, Parameters: parameterTypes, Required: len(parameterTypes), Class: true}
+						exported.Members[member.Name] = Member{Name: member.Name, Kind: kind, Type: typ, Parameters: callsignature.FromPositionalTypes(parameterTypes, len(parameterTypes)), Class: true}
 					case *ast.MethodStatement:
 						if public(member.Name) {
-							parameterTypes, required, variadic := parameters(member.Parameters)
-							exported.Members[member.Name] = Member{Name: member.Name, Kind: FunctionExport, Type: returnTypeRef(member.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, EnumOwner: node.Name}
+							parameterTypes, variadic := parameters(member.Parameters)
+							exported.Members[member.Name] = Member{Name: member.Name, Kind: FunctionExport, Type: returnTypeRef(member.ReturnType), Parameters: parameterTypes, Variadic: variadic, EnumOwner: node.Name}
 						}
 					}
 				}
 				if raw {
 					exported.EnumRawType = enumRawType(node)
 					exported.Members["raw_value"] = Member{Name: "raw_value", Kind: FunctionExport, Type: exported.EnumRawType, EnumOwner: node.Name, Generated: "raw_value"}
-					exported.Members["from_raw"] = Member{Name: "from_raw", Kind: FunctionExport, Type: types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typ, types.FromName("EnumValueError")}}, Parameters: []types.Type{exported.EnumRawType}, Required: 1, Class: true, EnumOwner: node.Name, Generated: "from_raw"}
+					exported.Members["from_raw"] = Member{Name: "from_raw", Kind: FunctionExport, Type: types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typ, types.FromName("EnumValueError")}}, Parameters: callsignature.FromPositionalTypes([]types.Type{exported.EnumRawType}, 1), Class: true, EnumOwner: node.Name, Generated: "from_raw"}
 				}
 				result[node.Name] = exported
 			}
@@ -1273,7 +1279,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 				result[node.Name] = Export{
 					Name: node.Name, Kind: NewtypeExport, Type: typ, NewtypeTarget: target,
 					Members: map[string]Member{
-						"new":   {Name: "new", Kind: FunctionExport, Type: typ, Parameters: []types.Type{target}, Required: 1, Class: true, Generated: "newtype_new"},
+						"new":   {Name: "new", Kind: FunctionExport, Type: typ, Parameters: callsignature.FromPositionalTypes([]types.Type{target}, 1), Class: true, Generated: "newtype_new"},
 						"value": {Name: "value", Kind: FunctionExport, Type: target, Generated: "newtype_value"},
 					},
 					Span: node.Span(),
@@ -1296,15 +1302,15 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
 				}
 				for _, method := range node.Methods {
-					parameterTypes, required, variadic := parameters(method.Parameters)
-					exported.Members[method.Name] = Member{Name: method.Name, Kind: FunctionExport, Type: returnTypeRef(method.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic}
+					parameterTypes, variadic := parameters(method.Parameters)
+					exported.Members[method.Name] = Member{Name: method.Name, Kind: FunctionExport, Type: returnTypeRef(method.ReturnType), Parameters: parameterTypes, Variadic: variadic}
 				}
 				result[node.Name] = exported
 			}
 		case *ast.MethodStatement:
 			if public(node.Name) {
-				parameterTypes, required, variadic := parameters(node.Parameters)
-				exported := Export{Name: node.Name, Kind: FunctionExport, Type: returnTypeRef(node.ReturnType), Parameters: parameterTypes, Required: required, Variadic: variadic, Span: node.Span()}
+				parameterTypes, variadic := parameters(node.Parameters)
+				exported := Export{Name: node.Name, Kind: FunctionExport, Type: returnTypeRef(node.ReturnType), Parameters: parameterTypes, Variadic: variadic, Span: node.Span()}
 				for _, parameter := range node.TypeParameters {
 					exported.TypeParameters = append(exported.TypeParameters, parameter.Name)
 				}
@@ -1315,6 +1321,10 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 				result[node.Name] = Export{Name: node.Name, Kind: ValueExport, Type: variableType(node), Span: node.Span()}
 			}
 		}
+	}
+	for name, exported := range result {
+		exported.Source = true
+		result[name] = exported
 	}
 	return result
 }
@@ -1405,18 +1415,24 @@ func expressionLiteralType(expression ast.Expression) types.Type {
 	return variableType(node)
 }
 
-func parameters(nodes []ast.Parameter) ([]types.Type, int, bool) {
-	result := make([]types.Type, len(nodes))
-	required := 0
+func parameters(nodes []ast.Parameter) ([]callsignature.Parameter, bool) {
+	result := make([]callsignature.Parameter, len(nodes))
 	variadic := false
 	for i, parameter := range nodes {
-		result[i] = typeRef(parameter.Type)
-		variadic = variadic || parameter.Rest || parameter.KeywordRest
-		if parameter.Default == nil && !parameter.Rest && !parameter.KeywordRest {
-			required++
+		kind := callsignature.Positional
+		label := ""
+		if parameter.NamedOnly || parameter.Keyword {
+			kind = callsignature.NamedOnly
+			label = parameter.Name
 		}
+		presence := callsignature.Omittable
+		if parameter.Default == nil {
+			presence = callsignature.Required
+		}
+		result[i] = callsignature.Parameter{Kind: kind, Label: label, Type: typeRef(parameter.Type), Presence: presence}
+		variadic = variadic || parameter.Rest || parameter.KeywordRest
 	}
-	return result, required, variadic
+	return result, variadic
 }
 
 func expressionName(expression ast.Expression) string {
@@ -1503,9 +1519,10 @@ func substituteMembers(input map[string]Member, substitutions map[string]types.T
 	for name, member := range input {
 		copy := member
 		copy.Type = substituteType(member.Type, substitutions)
-		copy.Parameters = make([]types.Type, len(member.Parameters))
+		copy.Parameters = make([]callsignature.Parameter, len(member.Parameters))
 		for index, parameter := range member.Parameters {
-			copy.Parameters[index] = substituteType(parameter, substitutions)
+			copy.Parameters[index] = parameter
+			copy.Parameters[index].Type = substituteType(parameter.Type, substitutions)
 		}
 		result[name] = copy
 	}

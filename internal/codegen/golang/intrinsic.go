@@ -1153,5 +1153,5 @@ func (g *generator) webJSON(call *ir.Call, arguments []string) string {
 	encoded := jsonAlias + ".Stringify(" + encoder + "(" + arguments[0] + "))"
 	responseType := "*" + webAlias + ".Response"
 	headers := "__trb_http.NewHeaders([]__trb_http.Header{{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}})"
-	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + webAlias + ".NewResponse(500, " + headers + ", __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))) }; return " + webAlias + ".NewResponse(" + status + ", " + headers + ", __trb_http.NewBody([]byte(encoded.OkValue))) }()"
+	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + webAlias + ".NewResponse(map[string]any{\"status\": 500, \"headers\": " + headers + ", \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))}) }; return " + webAlias + ".NewResponse(map[string]any{\"status\": " + status + ", \"headers\": " + headers + ", \"body\": __trb_http.NewBody([]byte(encoded.OkValue))}) }()"
 }

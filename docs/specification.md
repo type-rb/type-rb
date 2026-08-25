@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.3
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 ## 1. Language Goals
 
@@ -64,10 +64,30 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   import.
 - No explicit `void` type notation (Go-like). Methods with no return value omit
   the return type and may fall through or use a bare `return`.
-- A trailing positional parameter may declare a default with
-  `name: Type = expression`. All following positional parameters must also
-  have defaults. Defaults are evaluated when the function or method is called,
-  may reference earlier parameters, and are used only for omitted arguments.
+- Parameters have the two regions `positional-only | * | named-only`. A bare
+  `*` begins the named-only region. Named argument syntax binds only that
+  region; it cannot name an ordinary positional parameter.
+- Parameters use the canonical declaration order: required positional,
+  positional with defaults, bare `*`, required named-only, then named-only
+  with defaults. Named arguments may be written in any order, after every
+  positional argument.
+- A default is evaluated only when its argument is omitted. Explicit argument
+  expressions are evaluated left to right at the call site; the selected
+  callee then evaluates omitted defaults in declaration order at entry. A
+  default may reference only earlier parameters. An overriding implementation
+  owns its own defaults.
+- Unknown or duplicate labels, a missing required argument, a named use of a
+  positional-only parameter, and a positional argument after a named argument
+  are compile-time errors.
+- Interface parameters cannot have defaults. Interface implementation and
+  inherited instance-method override require equivalent call signatures:
+  positional order/type/presence and the unordered named-only
+  label/type/presence set must match. Positional source names, named-only
+  declaration order, and default expressions do not participate.
+- Portable parameter rest forms and call splats are not supported. `fn`
+  values and first-class function types remain required-positional only.
+- Record construction labels are field labels and remain separate from method
+  parameters.
 - Outside `()`, `[]`, and `{}`, `;` is equivalent to a newline between
   complete statements. This is common syntax in every mode, so compact input
   such as `class Empty; end` has the same meaning as its multiline form.
@@ -107,7 +127,7 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   lexical bindings, while ordinary immutability and `mut` assignment rules
   continue to apply to captured values.
 - Function values take required positional parameters in the initial syntax;
-  defaults, keyword parameters, rest parameters, call blocks, and generic
+  defaults, named-only parameters, rest parameters, call blocks, and generic
   lambda parameters are not accepted.
 - The compact spelling uses the ordinary statement separator rather than a
   second lambda syntax: `double := fn(value: Integer): Integer; return value *
@@ -994,7 +1014,8 @@ inferred from Go, Ruby, or TypeScript:
 - method mutation effects and whether calling a mutating method requires a
   mutable receiver binding;
 - variance and generic class methods;
-- override compatibility and whether an explicit `override` marker is useful;
+- whether an explicit `override` marker is useful, and whether exact
+  required/omittable presence can be relaxed safely;
 - whether a field and method may share one source-level member name. Until a
   common backend-safe rule is chosen, portable code should use a private
   backing field such as `@_name` for a public `name()` accessor;

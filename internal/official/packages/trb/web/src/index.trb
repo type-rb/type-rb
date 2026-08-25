@@ -66,7 +66,7 @@ class Request
 	readonly @headers: Headers
 	readonly @body: Body
 
-	def initialize(method:: HttpMethod, path:: String, query_string:: String, headers:: Headers, body:: Body)
+	def initialize(*, method: HttpMethod, path: String, query_string: String, headers: Headers, body: Body)
 		@method = method
 		@path = path
 		@query_string = query_string
@@ -196,10 +196,11 @@ record ServerConfig
 end
 
 def configure_server(
-		host:: String = "0.0.0.0",
-		port:: Integer = 3000,
-		body_limit_bytes:: Integer = 1048576,
-		shutdown_timeout_milliseconds:: Integer = 10000,
+		*,
+		host: String = "0.0.0.0",
+		port: Integer = 3000,
+		body_limit_bytes: Integer = 1048576,
+		shutdown_timeout_milliseconds: Integer = 10000,
 	): ServerConfig
 	return ServerConfig.new(
 		host: host,
@@ -235,7 +236,7 @@ class Context
 	readonly @_path_parameters: Hash<String, String>
 	readonly @_trb_context_state: Any? := nil
 
-	def initialize(request:: Request, path_parameters:: Hash<String, String>)
+	def initialize(*, request: Request, path_parameters: Hash<String, String>)
 		@request = request
 		@_path_parameters = path_parameters
 		return
@@ -255,7 +256,7 @@ class Response
 	readonly @headers: Headers
 	readonly @body: Body
 
-	def initialize(status:: Integer, headers:: Headers, body:: Body)
+	def initialize(*, status: Integer, headers: Headers, body: Body)
 		@status = status
 		@headers = headers
 		@body = body

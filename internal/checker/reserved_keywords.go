@@ -70,7 +70,7 @@ func (c *Checker) validateReservedKeywordStatement(statement ast.Statement) {
 		c.validateReservedKeywordType(node.Type)
 		for _, attribute := range node.Attributes {
 			for _, argument := range attribute.Arguments {
-				c.validateReservedKeywordName(argument.Name, "a keyword argument", attribute.Span())
+				c.validateReservedKeywordName(argument.Name, "a named argument", attribute.Span())
 				c.validateReservedKeywordExpression(argument.Value)
 			}
 		}
@@ -189,7 +189,7 @@ func (c *Checker) validateReservedKeywordExpression(expression ast.Expression) {
 	case *ast.CallExpression:
 		c.validateReservedKeywordExpression(node.Callee)
 		for _, argument := range node.Arguments {
-			c.validateReservedKeywordName(argument.Name, "a keyword argument", node.Span())
+			c.validateReservedKeywordName(argument.Name, "a named argument", node.Span())
 			c.validateReservedKeywordExpression(argument.Value)
 		}
 		if node.Block != nil {

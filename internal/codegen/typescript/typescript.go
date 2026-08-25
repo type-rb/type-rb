@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
@@ -992,6 +993,7 @@ func (g *generator) method(method *ir.Method) {
 	g.functionDepth++
 	previousExecution := g.executionActive
 	g.executionActive = g.methodUsesExecutionScope(method)
+	g.parameterDefaults(method.Parameters)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
@@ -1027,6 +1029,7 @@ func (g *generator) function(method *ir.Method) {
 	if component && g.executionActive {
 		g.line("let __trbScope: AbortSignal | undefined;")
 	}
+	g.parameterDefaults(method.Parameters)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
@@ -1039,6 +1042,31 @@ func isReactComponent(method *ir.Method) bool {
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
+	if hasNamedOnlyParameters(parameters) {
+		parts := []string{}
+		optionalPositional := false
+		named := []string{}
+		for _, parameter := range parameters {
+			if parameter.NamedOnly {
+				optional := ""
+				if parameter.Default != nil {
+					optional = "?"
+				}
+				named = append(named, parameter.Name+optional+": "+g.tsType(parameter.Type))
+				continue
+			}
+			if parameter.Default != nil {
+				optionalPositional = true
+				continue
+			}
+			parts = append(parts, parameter.Name+": "+g.tsType(parameter.Type))
+		}
+		if optionalPositional {
+			parts = append(parts, "__trbOptional: unknown[]")
+		}
+		parts = append(parts, "__trbNamed: { "+strings.Join(named, "; ")+" }")
+		return strings.Join(parts, ", ")
+	}
 	parts := make([]string, len(parameters))
 	for i, parameter := range parameters {
 		name := parameter.Name
@@ -1052,6 +1080,53 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 		parts[i] = part
 	}
 	return strings.Join(parts, ", ")
+}
+
+func hasNamedOnlyParameters(parameters []ir.Parameter) bool {
+	for _, parameter := range parameters {
+		if parameter.NamedOnly {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *generator) parameterDefaults(parameters []ir.Parameter) {
+	if !hasNamedOnlyParameters(parameters) {
+		return
+	}
+	optionalIndex := 0
+	for _, parameter := range parameters {
+		name := parameter.Name
+		typ := g.tsType(parameter.Type)
+		switch {
+		case !parameter.NamedOnly && parameter.Default != nil:
+			g.line("let " + name + ": " + typ + ";")
+			g.line("if (__trbOptional.length > " + strconv.Itoa(optionalIndex) + ") {")
+			g.indent++
+			g.line(name + " = __trbOptional[" + strconv.Itoa(optionalIndex) + "] as " + typ + ";")
+			g.indent--
+			g.line("} else {")
+			g.indent++
+			g.line(name + " = " + g.expr(parameter.Default) + ";")
+			g.indent--
+			g.line("}")
+			optionalIndex++
+		case parameter.NamedOnly && parameter.Default == nil:
+			g.line("let " + name + ": " + typ + " = __trbNamed." + parameter.Name + ";")
+		case parameter.NamedOnly:
+			g.line("let " + name + ": " + typ + ";")
+			g.line("if (Object.prototype.hasOwnProperty.call(__trbNamed, " + strconv.Quote(parameter.Name) + ")) {")
+			g.indent++
+			g.line(name + " = __trbNamed." + parameter.Name + "!;")
+			g.indent--
+			g.line("} else {")
+			g.indent++
+			g.line(name + " = " + g.expr(parameter.Default) + ";")
+			g.indent--
+			g.line("}")
+		}
+	}
 }
 
 func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
@@ -1326,7 +1401,6 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			parts[i] = value
 		}
-		args := strings.Join(parts, ", ")
 		if reference := expressionReference(n.Callee); reference != nil && reference.Runtime != nil {
 			parts = g.executionArguments(n, parts)
 			local := naming.RuntimeBindingIdentifier(reference.Runtime.Identity)
@@ -1344,8 +1418,6 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.awaitCall(n, generated)
 		}
-		parts = g.executionArguments(n, parts)
-		args = strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "record" {
 				if identifier, named := application.Receiver.(*ir.Identifier); named {
@@ -1355,6 +1427,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok && (g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record") {
 				return g.awaitCall(n, g.recordLiteral(identifier, n.Arguments))
 			}
+		}
+		parts = g.sourceCallArguments(n, parts)
+		parts = g.executionArguments(n, parts)
+		args := strings.Join(parts, ", ")
+		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			return g.awaitCall(n, "new "+g.expr(member.Receiver)+"("+args+")")
 		}
 		if identifier, ok := n.Callee.(*ir.Identifier); ok {
@@ -1439,6 +1516,43 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) sourceCallArguments(call *ir.Call, authored []string) []string {
+	if call == nil || !callsignature.HasNamedOnly(call.CallSignature) {
+		return authored
+	}
+	positional := []string{}
+	named := []string{}
+	for index, argument := range call.Arguments {
+		if argument.Name == "" {
+			positional = append(positional, authored[index])
+		} else {
+			named = append(named, argument.Name+": "+authored[index])
+		}
+	}
+	requiredPositional := 0
+	hasOptionalPositional := false
+	for _, parameter := range call.CallSignature {
+		if parameter.Kind != callsignature.Positional {
+			continue
+		}
+		if parameter.Presence == callsignature.Required {
+			requiredPositional++
+		} else {
+			hasOptionalPositional = true
+		}
+	}
+	result := append([]string(nil), positional[:min(requiredPositional, len(positional))]...)
+	if hasOptionalPositional {
+		optional := []string{}
+		if len(positional) > requiredPositional {
+			optional = positional[requiredPositional:]
+		}
+		result = append(result, "["+strings.Join(optional, ", ")+"]")
+	}
+	result = append(result, "{ "+strings.Join(named, ", ")+" }")
+	return result
 }
 
 func (g *generator) checkedIntegerBinary(operator, left, right string) string {

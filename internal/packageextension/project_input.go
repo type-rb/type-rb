@@ -81,6 +81,7 @@ type ProjectMethod struct {
 type ProjectParameter struct {
 	Name        string         `json:"name"`
 	Type        ProjectTypeUse `json:"type"`
+	NamedOnly   bool           `json:"namedOnly,omitempty"`
 	Keyword     bool           `json:"keyword,omitempty"`
 	Rest        bool           `json:"rest,omitempty"`
 	KeywordRest bool           `json:"keywordRest,omitempty"`

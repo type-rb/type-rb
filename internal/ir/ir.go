@@ -4,6 +4,7 @@
 package ir
 
 import (
+	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
@@ -89,7 +90,7 @@ type Import struct {
 	// declaration contracts for editor tooling even when the imported module has
 	// no generated TypeRB IR.
 	SymbolTypes          map[string]types.Type
-	SymbolParameters     map[string][]types.Type
+	SymbolParameters     map[string][]callsignature.Parameter
 	SymbolTypeParameters map[string][]string
 	// TypeContracts retain the structural declarations referenced by native
 	// package signatures so editor tooling can instantiate their members.
@@ -116,8 +117,7 @@ type MemberContract struct {
 	Kind           string
 	Type           types.Type
 	TypeParameters []string
-	Parameters     []types.Type
-	Required       int
+	Parameters     []callsignature.Parameter
 	Variadic       bool
 	Class          bool
 	Readonly       bool
@@ -236,6 +236,7 @@ type Parameter struct {
 	Name                 string
 	Type                 types.Type
 	Default              Expression
+	NamedOnly            bool
 	Keyword              bool
 	Rest                 bool
 	KeywordRest          bool
@@ -641,10 +642,11 @@ type CallArgument struct {
 }
 type Call struct {
 	ExprBase
-	Callee    Expression
-	Arguments []CallArgument
-	Block     *Block
-	Codec     *CodecSchema
+	Callee        Expression
+	Arguments     []CallArgument
+	CallSignature []callsignature.Parameter
+	Block         *Block
+	Codec         *CodecSchema
 }
 
 func (*Call) irExpression() {}

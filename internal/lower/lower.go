@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/resolver"
@@ -109,7 +110,7 @@ func (l *lowerer) generatedTypeImports(statements []ir.Statement) []ir.Statement
 				RuntimeSymbols:            map[string]ir.RuntimeBinding{},
 				SymbolKinds:               map[string]string{},
 				SymbolTypes:               map[string]types.Type{},
-				SymbolParameters:          map[string][]types.Type{},
+				SymbolParameters:          map[string][]callsignature.Parameter{},
 				SymbolTypeParameters:      map[string][]string{},
 			}
 			generated = append(generated, imported)
@@ -162,7 +163,7 @@ func contractTypeSymbols(imported *resolver.Import, native bool) []string {
 		visitType(exported.AliasTarget)
 		visitType(exported.NewtypeTarget)
 		for _, parameter := range exported.Parameters {
-			visitType(parameter)
+			visitType(parameter.Type)
 		}
 		for _, field := range exported.Fields {
 			visitType(field.Type)
@@ -231,8 +232,7 @@ func typeContracts(imported *resolver.Import, generated []string) map[string]ir.
 				Kind:           string(member.Kind),
 				Type:           member.Type,
 				TypeParameters: append([]string(nil), member.TypeParameters...),
-				Parameters:     append([]types.Type(nil), member.Parameters...),
-				Required:       member.Required,
+				Parameters:     append([]callsignature.Parameter(nil), member.Parameters...),
 				Variadic:       member.Variadic,
 				Class:          member.Class,
 				Readonly:       member.Readonly,
@@ -287,7 +287,7 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 			RuntimeSymbols:            map[string]ir.RuntimeBinding{},
 			SymbolKinds:               map[string]string{},
 			SymbolTypes:               map[string]types.Type{},
-			SymbolParameters:          map[string][]types.Type{},
+			SymbolParameters:          map[string][]callsignature.Parameter{},
 			SymbolTypeParameters:      map[string][]string{},
 		}
 		for _, exported := range definition.RuntimeExports {
@@ -432,7 +432,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			Alias:                     n.Alias,
 			SymbolKinds:               map[string]string{},
 			SymbolTypes:               map[string]types.Type{},
-			SymbolParameters:          map[string][]types.Type{},
+			SymbolParameters:          map[string][]callsignature.Parameter{},
 			SymbolTypeParameters:      map[string][]string{},
 			IntrinsicSymbols:          map[string]bool{},
 			RuntimeIndependentSymbols: map[string]bool{},
@@ -467,7 +467,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 				}
 				result.SymbolKinds[name] = kind
 				result.SymbolTypes[name] = exported.Type
-				result.SymbolParameters[name] = append([]types.Type(nil), exported.Parameters...)
+				result.SymbolParameters[name] = append([]callsignature.Parameter(nil), exported.Parameters...)
 				result.SymbolTypeParameters[name] = append([]string(nil), exported.TypeParameters...)
 				if exported.Runtime != nil && selectedRuntimeSymbols[name] {
 					result.RuntimeSymbols[name] = *lowerRuntimeBinding(exported.Runtime)
@@ -480,9 +480,19 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 					if result.SymbolTypes[name].Kind == "" {
 						result.SymbolKinds[name] = "function"
 						result.SymbolTypes[name] = symbol.Return
-						parameters := make([]types.Type, len(symbol.Parameters))
+						parameters := make([]callsignature.Parameter, len(symbol.Parameters))
 						for index, parameter := range symbol.Parameters {
-							parameters[index] = parameter.Type
+							kind := callsignature.Positional
+							label := ""
+							if parameter.Keyword {
+								kind = callsignature.NamedOnly
+								label = parameter.Name
+							}
+							presence := callsignature.Required
+							if parameter.Optional {
+								presence = callsignature.Omittable
+							}
+							parameters[index] = callsignature.Parameter{Kind: kind, Label: label, Type: parameter.Type, Presence: presence}
 						}
 						result.SymbolParameters[name] = parameters
 						result.SymbolTypeParameters[name] = append([]string(nil), symbol.TypeParameters...)
@@ -592,7 +602,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			if parameter.Type.Empty() {
 				typ = types.Type{Kind: types.Any, Name: "Any"}
 			}
-			method.Parameters = append(method.Parameters, ir.Parameter{Name: parameter.Name, Type: typ, Default: l.expression(parameter.Default), Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest})
+			method.Parameters = append(method.Parameters, ir.Parameter{Name: parameter.Name, Type: typ, Default: l.expression(parameter.Default), NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest})
 		}
 		return method
 	case *ast.VariableStatement:
@@ -1025,7 +1035,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				Arguments: arguments,
 			}
 		}
-		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee)}
+		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee), CallSignature: append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...)}
 		if codec, ok := l.checked.CodecApplications[n]; ok {
 			result.Codec = lowerCodecSchema(codec.Schema)
 		}

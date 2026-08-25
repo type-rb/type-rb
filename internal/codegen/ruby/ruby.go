@@ -644,11 +644,11 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 		} else if parameter.Rest {
 			name = "*" + name
 		}
-		if parameter.Keyword {
+		if parameter.Keyword || parameter.NamedOnly {
 			name += ":"
 		}
 		if parameter.Default != nil {
-			if parameter.Keyword {
+			if parameter.Keyword || parameter.NamedOnly {
 				name += " " + g.expr(parameter.Default)
 			} else {
 				name += " = " + g.expr(parameter.Default)
