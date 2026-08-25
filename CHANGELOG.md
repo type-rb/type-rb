@@ -2,6 +2,43 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.26 - 2026-08-25
+
+### Breaking changes
+
+- `trb/std/arrays` and `trb/std/hashes` are no longer public packages. Remove
+  those imports and use the corresponding `Array` and `Hash` receiver methods,
+  such as `values.reverse()`, `values.count(item)`, `labels.keys()`, and
+  `labels.delete(key)`. ([#495](https://github.com/type-rb/type-rb/pull/495))
+
+### Language and compiler
+
+- Go generation preserves imported transparent aliases when a local helper
+  result is lifted into a nullable return, preventing unqualified underlying
+  type names in the generated source.
+  ([#496](https://github.com/type-rb/type-rb/pull/496))
+
+### REPL
+
+- Completion offers portable standard packages and functions, keeps ambiguous
+  origins available for explicit selection, inserts selected imports visibly,
+  and supports cancellable and expression-continuation workflows.
+  ([#498](https://github.com/type-rb/type-rb/pull/498))
+
+### Tooling and documentation
+
+- TypeRB now publishes one documentation website for installation, guides,
+  lint rules, the language reference, Tour, and Playground. Code examples use
+  build-time highlighting, provide accessible copy buttons, and distinguish
+  runnable programs from browser scratch evaluation.
+  ([#492](https://github.com/type-rb/type-rb/pull/492),
+  [#493](https://github.com/type-rb/type-rb/pull/493),
+  [#494](https://github.com/type-rb/type-rb/pull/494))
+- Tagged `go install` builds report their release version. Getting Started and
+  application guides provide executable target-specific workflows, and
+  managed React projects install the TypeScript declarations they require.
+  ([#497](https://github.com/type-rb/type-rb/pull/497))
+
 ## 0.3.25 - 2026-08-24
 
 ### Breaking changes
