@@ -597,15 +597,11 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Next:
 		g.line("continue;")
 	case *ir.ExpressionStatement:
-		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil && g.testCallBlock(call) {
+		if call, ok := n.Expression.(*ir.Call); ok && call.DeclarationOnly {
 			return
 		}
-		if g.inClass > 0 {
-			if call, ok := n.Expression.(*ir.Call); ok {
-				if identifier, identifierOK := call.Callee.(*ir.Identifier); identifierOK && (identifier.Name == "belongs_to" || identifier.Name == "has_many" || identifier.Name == "has_one" || identifier.Name == "enum_column") || g.jobsDeclaration(call) {
-					return
-				}
-			}
+		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil && g.testCallBlock(call) {
+			return
 		}
 		g.line(g.expr(n.Expression) + ";")
 	case *ir.If:

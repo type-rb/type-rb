@@ -33,6 +33,14 @@ end
 	if len(performLater.Parameters) != 2 || performLater.Parameters[0].Name != "order_id" || performLater.Parameters[0].Type.String() != "Integer" || performLater.Parameters[1].Type.String() != "String" {
 		t.Fatalf("unexpected perform_later parameters: %#v", performLater.Parameters)
 	}
+	if len(catalog.ClassBodyDeclarationRules) != 3 {
+		t.Fatalf("class-body declaration rules=%#v, want three Job directives", catalog.ClassBodyDeclarationRules)
+	}
+	for _, rule := range catalog.ClassBodyDeclarationRules {
+		if rule.Package != PackageName || rule.Owner.ModulePath != program.ModulePath || rule.Owner.Name != "SendReceiptJob" {
+			t.Fatalf("unexpected class-body declaration rule: %#v", rule)
+		}
+	}
 	performIn := job.ClassMembers["perform_in"]
 	if performIn.Intrinsic != "trb.jobs.perform_in" || len(performIn.Parameters) != 3 || performIn.Parameters[0].Type.String() != "Duration" {
 		t.Fatalf("unexpected perform_in declaration: %#v", performIn)

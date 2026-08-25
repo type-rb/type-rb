@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const DeclarationProtocolVersion = 2
+const DeclarationProtocolVersion = 3
 
 // DeclarationCatalog is the versioned, mode-independent output of a package
 // declaration provider. It contains semantic data only: the compiler host
@@ -17,6 +17,7 @@ type DeclarationCatalog struct {
 	Modules                        []DeclaredModule                        `json:"modules,omitempty"`
 	FunctionBlockRules             []DeclaredFunctionBlockRule             `json:"functionBlockRules,omitempty"`
 	FunctionArgumentReferenceRules []DeclaredFunctionArgumentReferenceRule `json:"functionArgumentReferenceRules,omitempty"`
+	ClassBodyDeclarationRules      []DeclaredClassBodyDeclarationRule      `json:"classBodyDeclarationRules,omitempty"`
 	RuntimeTypes                   []DeclaredModuleRuntimeTypes            `json:"runtimeTypes,omitempty"`
 }
 
@@ -95,6 +96,12 @@ type DeclaredFunctionArgumentReferenceRule struct {
 	Targets  []DeclaredReference `json:"targets,omitempty"`
 }
 
+type DeclaredClassBodyDeclarationRule struct {
+	Package  string            `json:"package"`
+	Function string            `json:"function"`
+	Owner    DeclaredReference `json:"owner"`
+}
+
 type DeclaredModuleRuntimeTypes struct {
 	ModulePath string `json:"modulePath"`
 	Types      []Type `json:"types"`
@@ -158,6 +165,17 @@ func ValidateDeclarationCatalog(catalog DeclarationCatalog) error {
 			if !validDeclaredReference(target) {
 				return fmt.Errorf("declaration catalog reference rule %s.%s has an invalid target", rule.Package, rule.Function)
 			}
+		}
+	}
+	for _, rule := range catalog.ClassBodyDeclarationRules {
+		if strings.TrimSpace(rule.Package) == "" || strings.TrimSpace(rule.Function) == "" {
+			return fmt.Errorf("declaration catalog contains a class-body declaration rule without a package or function")
+		}
+		if rule.Package != catalog.Provider {
+			return fmt.Errorf("declaration catalog class-body declaration rule %s.%s does not belong to provider %s", rule.Package, rule.Function, catalog.Provider)
+		}
+		if !validDeclaredReference(rule.Owner) {
+			return fmt.Errorf("declaration catalog class-body declaration rule %s.%s has an invalid owner", rule.Package, rule.Function)
 		}
 	}
 	seenRuntimeModules := map[string]bool{}

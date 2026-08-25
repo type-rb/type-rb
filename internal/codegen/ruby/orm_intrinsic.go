@@ -9,22 +9,6 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-func (g *generator) ormAssociationDeclaration(call *ir.Call) bool {
-	if g.orm == nil || call == nil {
-		return false
-	}
-	identifier, ok := call.Callee.(*ir.Identifier)
-	if !ok || identifier.Reference == nil || identifier.Reference.Package != "trb/orm/index" {
-		return false
-	}
-	switch identifier.Name {
-	case "belongs_to", "has_many", "has_one", "enum_column":
-		return true
-	default:
-		return false
-	}
-}
-
 // ormIntrinsic only selects operations from typed ORM IR. Query construction,
 // lifecycle behavior, and database error semantics remain in the generated
 // TypeRB-owned runtime; the private Sequel dependency is only an execution

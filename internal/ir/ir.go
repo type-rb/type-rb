@@ -642,11 +642,12 @@ type CallArgument struct {
 }
 type Call struct {
 	ExprBase
-	Callee        Expression
-	Arguments     []CallArgument
-	CallSignature []callsignature.Parameter
-	Block         *Block
-	Codec         *CodecSchema
+	Callee          Expression
+	Arguments       []CallArgument
+	CallSignature   []callsignature.Parameter
+	Block           *Block
+	Codec           *CodecSchema
+	DeclarationOnly bool
 }
 
 func (*Call) irExpression() {}

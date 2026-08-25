@@ -73,6 +73,9 @@ end
 	if decoded.Provider != jobsintegration.PackageName {
 		t.Fatalf("provider=%q, want %q", decoded.Provider, jobsintegration.PackageName)
 	}
+	if len(decoded.ClassBodyDeclarationRules) != 3 || decoded.ClassBodyDeclarationRules[0].Owner.Name != "SendReceiptJob" {
+		t.Fatalf("Job class-body declaration rules did not cross the protocol: %#v", decoded.ClassBodyDeclarationRules)
+	}
 
 	job := declaredProtocolType(t, decoded, "SendReceiptJob")
 	if job.Superclass != "Job" || len(job.ClassMembers) != 3 {

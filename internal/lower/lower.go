@@ -1034,7 +1034,8 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				arguments = append(arguments, ir.CallArgument{Value: value})
 			}
 			return &ir.Call{
-				ExprBase: base,
+				ExprBase:        base,
+				DeclarationOnly: l.checked.DeclarationOnlyCalls[n],
 				Callee: &ir.Identifier{
 					// Source-level named calls carry the declared return type on
 					// their callee identifier. Keep the same representation so Ruby
@@ -1045,7 +1046,11 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				Arguments: arguments,
 			}
 		}
-		result := &ir.Call{ExprBase: base, Callee: l.expression(n.Callee), CallSignature: append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...)}
+		result := &ir.Call{
+			ExprBase: base, Callee: l.expression(n.Callee),
+			CallSignature:   append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
+			DeclarationOnly: l.checked.DeclarationOnlyCalls[n],
+		}
 		if codec, ok := l.checked.CodecApplications[n]; ok {
 			result.Codec = l.lowerCodecSchema(codec.Schema)
 		}

@@ -62,17 +62,6 @@ func (g *generator) jobsAdapterEnqueue(name string, call *ir.Call, arguments []s
 	return "(async (" + strings.Join(parameters, ", ") + "): Promise<" + resultType + "> => { const maximumAttempts = requestValue.maximum_attempts ?? 0; try { const reference = await trbJobsEnqueue(__trbScope, requestValue.job_name, requestValue.payload, requestValue.payload_version, requestValue.queue_name, requestValue.priority, " + waitMilliseconds + ", maximumAttempts); return " + result + ".Ok<" + successType + ", " + errorType + ">(reference); } catch (error) { return " + result + ".Err<" + successType + ", " + errorType + ">({ kind: __trbScope?.aborted ? " + errorKind + ".Cancelled : " + errorKind + ".Adapter, message: error instanceof Error ? error.message : String(error) }); } })(" + strings.Join(values, ", ") + ")"
 }
 
-func (g *generator) jobsDeclaration(call *ir.Call) bool {
-	if g.jobs == nil || call == nil {
-		return false
-	}
-	identifier, ok := call.Callee.(*ir.Identifier)
-	if !ok || identifier.Reference == nil || identifier.Reference.Package != "trb/jobs/index" {
-		return false
-	}
-	return identifier.Name == "queue" || identifier.Name == "priority" || identifier.Name == "maximum_attempts"
-}
-
 func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	if manifest == nil || g.jobsSQL == nil {
 		return

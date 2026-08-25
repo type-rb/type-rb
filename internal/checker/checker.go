@@ -44,6 +44,7 @@ type Result struct {
 	CallSpecializationRequests map[*ast.CallExpression]CallSpecializationRequest
 	CallSpecializations        map[*ast.CallExpression]CallSpecialization
 	CallSignatures             map[*ast.CallExpression][]callsignature.Parameter
+	DeclarationOnlyCalls       map[*ast.CallExpression]bool
 	RawEnums                   map[*ast.EnumStatement]RawEnum
 	EnumCalls                  map[*ast.CallExpression]EnumCall
 	TypeAliases                map[*ast.TypeAliasStatement]TypeAlias
@@ -746,6 +747,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			CallSpecializationRequests: map[*ast.CallExpression]CallSpecializationRequest{},
 			CallSpecializations:        map[*ast.CallExpression]CallSpecialization{},
 			CallSignatures:             map[*ast.CallExpression][]callsignature.Parameter{},
+			DeclarationOnlyCalls:       map[*ast.CallExpression]bool{},
 			RawEnums:                   map[*ast.EnumStatement]RawEnum{},
 			EnumCalls:                  map[*ast.CallExpression]EnumCall{},
 			TypeAliases:                map[*ast.TypeAliasStatement]TypeAlias{},
@@ -4974,6 +4976,32 @@ func (c *Checker) declarationFunctionArgumentReference(call *ast.CallExpression,
 	return false
 }
 
+func (c *Checker) declarationOnlyClassBodyCall(call *ast.CallExpression) bool {
+	if call == nil || c.result.Program == nil {
+		return false
+	}
+	owner := c.declarationCalls[call]
+	if owner == "" {
+		return false
+	}
+	callee := call.Callee
+	if generic, ok := callee.(*ast.GenericExpression); ok {
+		callee = generic.Receiver
+	}
+	binding, referenced := c.result.References[callee]
+	if !referenced || binding.Import == nil {
+		return false
+	}
+	packagePath := strings.TrimSuffix(binding.Import.RuntimePath(), "/index")
+	for _, rule := range c.declarations().ClassBodyDeclarationRules {
+		if rule.Package == packagePath && rule.Function == binding.Name &&
+			rule.Owner.ModulePath == c.result.Program.ModulePath && rule.Owner.Name == owner {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Checker) declarationMember(className, memberName string, class bool, seen map[string]bool) (declaration.Member, bool) {
 	if className == "" || seen[className] {
 		return declaration.Member{}, false
@@ -5794,6 +5822,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		calleeType := c.checkExpression(n.Callee, sc)
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee--
+		}
+		if c.declarationOnlyClassBodyCall(n) {
+			c.result.DeclarationOnlyCalls[n] = true
 		}
 		argumentTypes := make([]types.Type, 0, len(n.Arguments))
 		for index, arg := range n.Arguments {

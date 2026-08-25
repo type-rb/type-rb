@@ -26,6 +26,10 @@ func TestDeclarationCatalogRoundTripPreservesCompilerSemantics(t *testing.T) {
 		Return: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{{Kind: types.Named, Name: "Product"}}},
 	}
 	original.Types[product.Name] = product
+	original.ClassBodyDeclarationRules = []declaration.ClassBodyDeclarationRule{{
+		Package: "test/provider", Function: "response",
+		Owner: declaration.DeclarationReference{ModulePath: "endpoints/create", Name: "CreateEndpoint"},
+	}}
 
 	wire, err := ExportDeclarationCatalog("test/provider", original)
 	if err != nil {

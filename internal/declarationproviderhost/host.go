@@ -44,6 +44,9 @@ func Read(source Source) (*declaration.Catalog, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("trailing JSON content")
 	}
+	if provided.ProtocolVersion == 2 {
+		return nil, fmt.Errorf("declaration protocolVersion 2 is no longer supported; set protocolVersion to 3 (the fixed-provider catalog shape is otherwise unchanged)")
+	}
 	if err := packageextension.ValidateDeclarationCatalog(provided); err != nil {
 		return nil, err
 	}
@@ -57,7 +60,7 @@ func Read(source Source) (*declaration.Catalog, error) {
 }
 
 func validateFixedCatalog(catalog packageextension.DeclarationCatalog) error {
-	if len(catalog.FunctionBlockRules) > 0 || len(catalog.FunctionArgumentReferenceRules) > 0 || len(catalog.RuntimeTypes) > 0 {
+	if len(catalog.FunctionBlockRules) > 0 || len(catalog.FunctionArgumentReferenceRules) > 0 || len(catalog.ClassBodyDeclarationRules) > 0 || len(catalog.RuntimeTypes) > 0 {
 		return fmt.Errorf("fixed declaration provider %s cannot declare project rules or compiler runtime types", catalog.Provider)
 	}
 	if len(catalog.Types) == 0 && len(catalog.Modules) == 0 {

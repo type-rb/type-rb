@@ -321,14 +321,11 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Next:
 		g.line("next", n.TrailingComment)
 	case *ir.ExpressionStatement:
-		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil {
-			if g.ormAssociationDeclaration(call) || g.jobsDeclaration(call) {
-				break
-			}
-			g.callBlock(call, n.TrailingComment)
+		if call, ok := n.Expression.(*ir.Call); ok && call.DeclarationOnly {
 			break
 		}
-		if call, ok := n.Expression.(*ir.Call); ok && (g.ormAssociationDeclaration(call) || g.jobsDeclaration(call)) {
+		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil {
+			g.callBlock(call, n.TrailingComment)
 			break
 		}
 		g.line(g.expr(n.Expression), n.TrailingComment)

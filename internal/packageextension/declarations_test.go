@@ -10,6 +10,10 @@ func TestDeclarationCatalogRoundTripsAsVersionedData(t *testing.T) {
 	catalog := DeclarationCatalog{
 		ProtocolVersion: DeclarationProtocolVersion,
 		Provider:        "test.provider",
+		ClassBodyDeclarationRules: []DeclaredClassBodyDeclarationRule{{
+			Package: "test.provider", Function: "response",
+			Owner: DeclaredReference{ModulePath: "endpoints/create", Name: "CreateEndpoint"},
+		}},
 		Types: []DeclaredType{{
 			Name: "Product",
 			InstanceMembers: []DeclaredMember{{
@@ -43,6 +47,9 @@ func TestDeclarationCatalogRoundTripsAsVersionedData(t *testing.T) {
 	}
 	if !decoded.Types[0].ClassMembers[0].Parameters[0].RepresentationBoundary {
 		t.Fatalf("representation boundary changed during JSON round trip: %#v", decoded)
+	}
+	if len(decoded.ClassBodyDeclarationRules) != 1 || decoded.ClassBodyDeclarationRules[0].Owner.Name != "CreateEndpoint" {
+		t.Fatalf("class-body declaration rule changed during JSON round trip: %#v", decoded.ClassBodyDeclarationRules)
 	}
 }
 
@@ -92,6 +99,16 @@ func TestDeclarationCatalogRejectsInvalidVersionAndDuplicateMembers(t *testing.T
 	}
 	if err := ValidateDeclarationCatalog(invalidRule); err == nil || !strings.Contains(err.Error(), "invalid owner") {
 		t.Fatalf("unexpected reference rule error: %v", err)
+	}
+	invalidClassBodyRule := DeclarationCatalog{
+		ProtocolVersion: DeclarationProtocolVersion,
+		Provider:        "test.provider",
+		ClassBodyDeclarationRules: []DeclaredClassBodyDeclarationRule{{
+			Package: "test.provider", Function: "response",
+		}},
+	}
+	if err := ValidateDeclarationCatalog(invalidClassBodyRule); err == nil || !strings.Contains(err.Error(), "invalid owner") {
+		t.Fatalf("unexpected class-body declaration rule error: %v", err)
 	}
 	foreignRule := DeclarationCatalog{
 		ProtocolVersion: DeclarationProtocolVersion,

@@ -761,6 +761,15 @@ func TestSQLiteAssociationsUseDeclaredForeignKeys(t *testing.T) {
 			t.Fatalf("unexpected association reference rule: %#v", rule)
 		}
 	}
+	if len(catalog.ClassBodyDeclarationRules) != 8 {
+		t.Fatalf("class-body declaration rules=%#v, want two owners by four functions", catalog.ClassBodyDeclarationRules)
+	}
+	for _, rule := range catalog.ClassBodyDeclarationRules {
+		if rule.Package != PackageName || rule.Owner.ModulePath != program.ModulePath ||
+			rule.Owner.Name != "Category" && rule.Owner.Name != "Product" {
+			t.Fatalf("unexpected class-body declaration rule: %#v", rule)
+		}
+	}
 	if product.InstanceMembers["category"].Return.String() != "DbResult<Category?>" {
 		t.Fatalf("unexpected belongs_to declaration: %#v", product.InstanceMembers["category"])
 	}
