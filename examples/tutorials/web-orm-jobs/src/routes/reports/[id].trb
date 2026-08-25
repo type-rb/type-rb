@@ -1,0 +1,27 @@
+import { database_error_response, endpoint_input_error_response } from http/errors
+import { Report } from models/report
+import { Context, Response, json } from trb/web
+
+record ReportParams
+	id: Integer
+end
+
+record ShowReportEndpointInput
+	params: ReportParams
+end
+
+record ReportResponse
+	id: Integer
+	status: String
+	title: String
+end
+
+def get(context: Context): Response
+	input := context.bind<ShowReportEndpointInput>() catch |error|
+		return endpoint_input_error_response(error)
+	end
+	report := Report.find(input.params.id) catch |error|
+		return database_error_response(error)
+	end
+	return json(ReportResponse.new(id: report.id, status: report.status, title: report.title))
+end

@@ -100,6 +100,12 @@ Run the focused check with:
 go test ./internal/site -run TestPublishedDocumentationExamplesCompile
 ```
 
+For a multi-file tutorial backed by a repository fixture, place
+`<!-- trb-doc-file: examples/path/to/file.trb -->` immediately before the
+typed fence that reproduces the complete file. The focused site tests compare
+the fence byte-for-byte with that fixture, while a purpose-built integration
+test compiles and executes the complete project.
+
 ## Development workflow
 
 Keep one grammar and portable semantics across modes. Target-specific APIs and

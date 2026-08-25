@@ -1,0 +1,33 @@
+{
+  "formatVersion": 1,
+  "adapter": "sqlite",
+  "tables": {
+    "reports": {
+      "columns": {
+        "id": {
+          "type": "Integer",
+          "nullable": false,
+          "primaryKey": true,
+          "hasDefault": true,
+          "generated": true
+        },
+        "status": {
+          "type": "String",
+          "nullable": false
+        },
+        "title": {
+          "type": "String",
+          "nullable": false
+        }
+      },
+      "uniqueConstraints": {
+        "primary:id": {
+          "columns": [
+            "id"
+          ],
+          "primary": true
+        }
+      }
+    }
+  }
+}

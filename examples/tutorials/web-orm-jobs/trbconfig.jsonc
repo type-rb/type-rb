@@ -1,0 +1,27 @@
+{
+  "name": "report-api",
+  "mode": "go",
+  "sourceDir": "src",
+  "packageOptions": {
+    "trb/orm": {
+      "adapter": "sqlite",
+      "database": {
+        "environment": "DATABASE_URL"
+      }
+    }
+  },
+  "db": {
+    "adapter": "sqlite",
+    "database": {
+      "environment": "DATABASE_URL"
+    },
+    "schema": "db/schema.sql",
+    "lock": "db/schema.lock.json"
+  },
+  "jobs": {
+    "configuration": "config/jobs"
+  },
+  "go": {
+    "module": "example.com/report-api"
+  }
+}

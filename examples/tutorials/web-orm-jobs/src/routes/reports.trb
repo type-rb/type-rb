@@ -1,0 +1,21 @@
+import { create_report_error_response, endpoint_input_error_response } from http/errors
+import { create_report } from services/create_report
+import { Context, Response, json } from trb/web
+
+record CreateReportBody
+	title: String
+end
+
+record CreateReportEndpointInput
+	body: CreateReportBody
+end
+
+def post(context: Context): Response
+	input := context.bind<CreateReportEndpointInput>() catch |error|
+		return endpoint_input_error_response(error)
+	end
+	accepted := create_report(input.body.title) catch |error|
+		return create_report_error_response(error)
+	end
+	return json(accepted, 202)
+end

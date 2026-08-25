@@ -1,0 +1,33 @@
+import { GenerateReportJob } from jobs/generate_report_job
+import { Report } from models/report
+import { EnqueueError } from trb/jobs
+import { Database, DbError } from trb/orm
+import { Result } from trb/std/result
+
+enum CreateReportError
+	Database(error: DbError)
+	Queue(error: EnqueueError)
+end
+
+record AcceptedReport
+	id: Integer
+	job_id: String
+	status: String
+end
+
+def create_report(title: String): Result<AcceptedReport, CreateReportError>
+	report := Database.transaction() do |transaction|
+		reports := Report.using(transaction)
+		created := try reports.create(title: title, status: "pending")
+		created
+	end catch |error|
+		return Result<AcceptedReport, CreateReportError>::Err(CreateReportError::Database(error))
+	end
+
+	reference := GenerateReportJob.perform_later(report.id) catch |error|
+		return Result<AcceptedReport, CreateReportError>::Err(CreateReportError::Queue(error))
+	end
+	return Result<AcceptedReport, CreateReportError>::Ok(
+		AcceptedReport.new(id: report.id, job_id: reference.id, status: report.status),
+	)
+end

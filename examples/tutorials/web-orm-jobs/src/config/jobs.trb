@@ -1,0 +1,7 @@
+import { JobAdapter } from trb/jobs
+import { SQLAdapter, SQLDialect } from trb/jobs/sql
+
+JOBS_ADAPTER: JobAdapter := SQLAdapter.new(
+	dialect: SQLDialect::SQLite,
+	source_environment: "JOBS_DATABASE_URL",
+)
