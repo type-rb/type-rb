@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
+	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
@@ -17,24 +18,25 @@ import (
 )
 
 type generator struct {
-	b               strings.Builder
-	indent          int
-	loader          string
-	modulePath      string
-	topFunctions    map[string]bool
-	topTargets      map[string]string
-	nativeSyntax    bool
-	temporary       int
-	jobs            *jobsintegration.Manifest
-	jobsSQL         *jobssql.Manifest
-	orm             *ormintegration.Manifest
-	breakTarget     string
-	execution       *effectplan.Plan
-	executionActive bool
-	oidcRuntime     bool
-	sourceRecorder  *sourcemap.Recorder
-	sourcePath      string
-	checkedInteger  bool
+	b                strings.Builder
+	indent           int
+	loader           string
+	modulePath       string
+	topFunctions     map[string]bool
+	topTargets       map[string]string
+	topMethodTargets map[*ir.Method]string
+	nativeSyntax     bool
+	temporary        int
+	jobs             *jobsintegration.Manifest
+	jobsSQL          *jobssql.Manifest
+	orm              *ormintegration.Manifest
+	breakTarget      string
+	execution        *effectplan.Plan
+	executionActive  bool
+	oidcRuntime      bool
+	sourceRecorder   *sourcemap.Recorder
+	sourcePath       string
+	checkedInteger   bool
 }
 
 func Generate(program *ir.Program) string {
@@ -66,7 +68,7 @@ func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
 func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generated {
 	g := &generator{
 		loader: program.RubyLoader, modulePath: program.ModulePath,
-		topFunctions: map[string]bool{}, topTargets: map[string]string{},
+		topFunctions: map[string]bool{}, topTargets: map[string]string{}, topMethodTargets: map[*ir.Method]string{},
 		jobs:    jobsintegration.ManifestFrom(program.Extensions),
 		jobsSQL: jobssql.ManifestFrom(program.Extensions),
 		orm:     ormintegration.ManifestFrom(program.Extensions), execution: execution,
@@ -75,7 +77,11 @@ func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generat
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
-			if method.TargetName != "" {
+			if rubyPrivateFunction(method.Name) && method.TargetName == "" {
+				target := rubyPrivateFunctionName(program.ModulePath, method.Name)
+				g.topTargets[method.Name] = target
+				g.topMethodTargets[method] = target
+			} else if method.TargetName != "" {
 				g.topTargets[method.Name] = method.TargetName
 			}
 		}
@@ -565,8 +571,12 @@ func enumMethods(enum *ir.Enum) []*ir.Method {
 
 func (g *generator) method(method *ir.Method, fields []*ir.Field) {
 	name := method.Name
-	if !method.Class && method.TargetName != "" {
-		name = method.TargetName
+	if !method.Class {
+		if target := g.topMethodTargets[method]; target != "" {
+			name = target
+		} else if method.TargetName != "" {
+			name = method.TargetName
+		}
 	}
 	if method.Class {
 		name = "self." + name
@@ -582,6 +592,14 @@ func (g *generator) method(method *ir.Method, fields []*ir.Field) {
 	g.executionActive = previousExecution
 	g.indent--
 	g.line("end", "")
+}
+
+func rubyPrivateFunctionName(modulePath, name string) string {
+	return "__trb_private_" + naming.PrivateSuffix(modulePath+"\x00"+name)
+}
+
+func rubyPrivateFunction(name string) bool {
+	return strings.HasPrefix(name, "_") && !strings.HasPrefix(name, "__trb")
 }
 
 func topLevelRubyMethod(statements []ir.Statement, name string) *ir.Method {
