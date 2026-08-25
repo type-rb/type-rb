@@ -108,11 +108,11 @@ func (c *CLI) runDatabaseExport(args []string) error {
 		_, err = c.Stdout.Write(exported)
 		return err
 	}
-	path, err := databaseProjectPath(config.Root, *output)
+	path, err := projectOutputPath(config.Root, *output)
 	if err != nil {
 		return fmt.Errorf("db export --output: %w", err)
 	}
-	if err := atomicDatabaseWrite(path, exported, 0o644); err != nil {
+	if err := atomicOutputWrite(path, exported, 0o644); err != nil {
 		return err
 	}
 	fmt.Fprintln(c.Stdout, path)
@@ -293,39 +293,4 @@ func writeDatabaseLock(config *project.Config, lock *schemalock.Lock) error {
 		return fmt.Errorf("schema lock adapter is %s, expected %s", lock.Adapter, config.Database.Adapter)
 	}
 	return lock.Write(filepath.Join(config.Root, config.Database.Lock))
-}
-
-func databaseProjectPath(root, relative string) (string, error) {
-	if filepath.IsAbs(relative) {
-		return "", errors.New("path must be relative to the project root")
-	}
-	clean := filepath.Clean(relative)
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", errors.New("path cannot escape the project root")
-	}
-	return filepath.Join(root, clean), nil
-}
-
-func atomicDatabaseWrite(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".trb-db-*")
-	if err != nil {
-		return err
-	}
-	name := temporary.Name()
-	defer os.Remove(name)
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(name, path)
 }

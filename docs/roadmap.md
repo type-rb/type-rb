@@ -121,9 +121,10 @@ than detailed syntax.
   compile-time file-based routes, typed JSON requests and responses,
   middleware, initial versioned endpoint catalog, and consistent HTTP behavior
   across Go, Ruby, and TypeScript runtimes.
-- Extend the endpoint catalog and generated JSON codecs from shared records
-  with validation policy, OpenAPI/schema export, generated clients, versioned
-  wire fields, and compatibility checking.
+- Evolve the initial endpoint catalog and OpenAPI 3.1 schema export from shared
+  records with validation policy, generated clients, versioned wire fields,
+  authentication and endpoint metadata, generic schema naming, catch-all
+  representation, and compatibility checking.
 - Harden the experimental `trb/orm` package with schema caching, compatibility
   policy, production diagnostics, and larger end-to-end `trb/web` applications.
 - Harden the experimental `trb/jobs` contract with structured payload codecs,
