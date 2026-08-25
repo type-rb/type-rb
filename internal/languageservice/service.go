@@ -85,7 +85,9 @@ type CallInfo struct {
 type CallParameter struct {
 	Name                 string
 	Label                string
+	NamedOnly            bool
 	Keyword              bool
+	Optional             bool
 	Definition           *DefinitionLocation
 	ReferenceScopes      []ReferenceScope
 	LiteralValues        []string

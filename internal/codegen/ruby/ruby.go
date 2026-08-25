@@ -644,11 +644,11 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 		} else if parameter.Rest {
 			name = "*" + name
 		}
-		if parameter.Keyword {
+		if parameter.Keyword || parameter.NamedOnly {
 			name += ":"
 		}
 		if parameter.Default != nil {
-			if parameter.Keyword {
+			if parameter.Keyword || parameter.NamedOnly {
 				name += " " + g.expr(parameter.Default)
 			} else {
 				name += " = " + g.expr(parameter.Default)
@@ -808,7 +808,11 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.EnumCall:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
-			parts[index] = g.expr(argument.Value)
+			value := g.expr(argument.Value)
+			if argument.Name != "" {
+				value = argument.Name + ": " + value
+			}
+			parts[index] = value
 		}
 		switch n.Method {
 		case "raw_value":

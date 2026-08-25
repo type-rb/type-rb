@@ -108,7 +108,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("}")
 	g.line("if headRequest {")
 	g.indent++
-	g.line("response = web.NewResponse(response.TrbFieldStatus, response.TrbFieldHeaders, __trb_http.BodyEmpty())")
+	g.line("response = web.NewResponse(map[string]any{\"status\": response.TrbFieldStatus, \"headers\": response.TrbFieldHeaders, \"body\": __trb_http.BodyEmpty()})")
 	g.indent--
 	g.line("}")
 	g.indent--
@@ -119,8 +119,8 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("return trbWebDispatchProtocolResponse(scope, request, trbWebBadRequest())")
 	g.indent--
 	g.line("}")
-	g.line("request = web.NewRequest(request.TrbFieldMethod, normalizedPath, request.TrbFieldQueryString, request.TrbFieldHeaders, request.TrbFieldBody)")
-	g.line("context := web.NewContext(request, map[string]string{})")
+	g.line("request = web.NewRequest(map[string]any{\"method\": request.TrbFieldMethod, \"path\": normalizedPath, \"query_string\": request.TrbFieldQueryString, \"headers\": request.TrbFieldHeaders, \"body\": request.TrbFieldBody})")
+	g.line("context := web.NewContext(map[string]any{\"request\": request, \"path_parameters\": map[string]string{}})")
 	g.line("handler := func(scope trbcontext.Context, context *web.Context) *web.Response {")
 	g.indent++
 	g.line("return trbWebDispatchCore(scope, context.TrbFieldRequest, maxBodyBytes)")
@@ -136,7 +136,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("request = trbWebNormalizeRequest(request)")
 	g.line("if normalizedPath, validPath := trbWebNormalizePath(request.TrbFieldPath); validPath {")
 	g.indent++
-	g.line("request = web.NewRequest(request.TrbFieldMethod, normalizedPath, request.TrbFieldQueryString, request.TrbFieldHeaders, request.TrbFieldBody)")
+	g.line("request = web.NewRequest(map[string]any{\"method\": request.TrbFieldMethod, \"path\": normalizedPath, \"query_string\": request.TrbFieldQueryString, \"headers\": request.TrbFieldHeaders, \"body\": request.TrbFieldBody})")
 	g.indent--
 	g.line("}")
 	g.line("headRequest := request.TrbFieldMethod.ToS() == \"HEAD\"")
@@ -154,12 +154,12 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("}")
 	g.line("if headRequest {")
 	g.indent++
-	g.line("response = web.NewResponse(response.TrbFieldStatus, response.TrbFieldHeaders, __trb_http.BodyEmpty())")
+	g.line("response = web.NewResponse(map[string]any{\"status\": response.TrbFieldStatus, \"headers\": response.TrbFieldHeaders, \"body\": __trb_http.BodyEmpty()})")
 	g.indent--
 	g.line("}")
 	g.indent--
 	g.line("}()")
-	g.line("context := web.NewContext(request, map[string]string{})")
+	g.line("context := web.NewContext(map[string]any{\"request\": request, \"path_parameters\": map[string]string{}})")
 	g.line("handler := func(_ trbcontext.Context, _ *web.Context) *web.Response { return protocolResponse }")
 	g.webMiddlewareChain(rootMiddlewares, "handler", "protocolNextHandler", directories)
 	g.line("return handler(scope, context)")
@@ -188,7 +188,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.indent--
 	g.line("}")
 	if len(routes) == 0 {
-		g.line("return web.NewResponse(404, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"not_found\\\"}\")))")
+		g.line("return web.NewResponse(map[string]any{\"status\": 404, \"headers\": trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"not_found\\\"}\"))})")
 		g.indent--
 		g.line("}")
 		g.b.WriteByte('\n')
@@ -254,7 +254,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		}
 		contextName := "routeContext" + strconv.Itoa(routeIndex)
 		handlerName := "routeHandler" + strconv.Itoa(routeIndex)
-		g.line(contextName + " := web.NewContext(request, pathParameters)")
+		g.line(contextName + " := web.NewContext(map[string]any{\"request\": request, \"path_parameters\": pathParameters})")
 		g.line(handlerName + " := func(scope trbcontext.Context, context *web.Context) *web.Response {")
 		g.indent++
 		g.line("return " + g.webCallee(route.ModulePath, route.TargetHandler, directories) + "(scope, context)")
@@ -280,10 +280,10 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		}
 		contextName := "optionsContext" + strconv.Itoa(routeIndex)
 		handlerName := "optionsHandler" + strconv.Itoa(routeIndex)
-		g.line(contextName + " := web.NewContext(request, pathParameters)")
+		g.line(contextName + " := web.NewContext(map[string]any{\"request\": request, \"path_parameters\": pathParameters})")
 		g.line(handlerName + " := func(_ trbcontext.Context, context *web.Context) *web.Response {")
 		g.indent++
-		g.line("return web.NewResponse(204, trbWebHeaders(__trb_http.Header{Name: \"allow\", Value: strings.Join(allowedMethods, \", \")}), __trb_http.BodyEmpty())")
+		g.line("return web.NewResponse(map[string]any{\"status\": 204, \"headers\": trbWebHeaders(__trb_http.Header{Name: \"allow\", Value: strings.Join(allowedMethods, \", \")}), \"body\": __trb_http.BodyEmpty()})")
 		g.indent--
 		g.line("}")
 		g.webMiddlewareChain(webintegration.NestedMiddlewares(route.Middlewares), handlerName, "optionsNextHandler"+strconv.Itoa(routeIndex)+"_", directories)
@@ -293,10 +293,10 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	g.line("if len(allowedMethods) > 0 {")
 	g.indent++
-	g.line("return web.NewResponse(405, trbWebHeaders(__trb_http.Header{Name: \"allow\", Value: strings.Join(allowedMethods, \", \")}, __trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"method_not_allowed\\\"}\")))")
+	g.line("return web.NewResponse(map[string]any{\"status\": 405, \"headers\": trbWebHeaders(__trb_http.Header{Name: \"allow\", Value: strings.Join(allowedMethods, \", \")}, __trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"method_not_allowed\\\"}\"))})")
 	g.indent--
 	g.line("}")
-	g.line("return web.NewResponse(404, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"not_found\\\"}\")))")
+	g.line("return web.NewResponse(map[string]any{\"status\": 404, \"headers\": trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"not_found\\\"}\"))})")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -348,7 +348,7 @@ func (g *generator) webProtocolResponses() {
 	g.line("headers = append(headers, __trb_http.Header{Name: strings.ToLower(header.Name), Value: header.Value})")
 	g.indent--
 	g.line("}")
-	g.line("return web.NewRequest(__trb_http.NewHttpMethod(strings.ToUpper(request.TrbFieldMethod.ToS())), request.TrbFieldPath, request.TrbFieldQueryString, __trb_http.NewHeaders(headers), request.TrbFieldBody)")
+	g.line("return web.NewRequest(map[string]any{\"method\": __trb_http.NewHttpMethod(strings.ToUpper(request.TrbFieldMethod.ToS())), \"path\": request.TrbFieldPath, \"query_string\": request.TrbFieldQueryString, \"headers\": __trb_http.NewHeaders(headers), \"body\": request.TrbFieldBody})")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -377,19 +377,19 @@ func (g *generator) webProtocolResponses() {
 	g.b.WriteByte('\n')
 	g.line("func trbWebInternalServerError() *web.Response {")
 	g.indent++
-	g.line("return web.NewResponse(500, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")))")
+	g.line("return web.NewResponse(map[string]any{\"status\": 500, \"headers\": trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))})")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.line("func trbWebBadRequest() *web.Response {")
 	g.indent++
-	g.line("return web.NewResponse(400, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"bad_request\\\"}\")))")
+	g.line("return web.NewResponse(map[string]any{\"status\": 400, \"headers\": trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"bad_request\\\"}\"))})")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.line("func trbWebPayloadTooLarge() *web.Response {")
 	g.indent++
-	g.line("return web.NewResponse(413, trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"payload_too_large\\\"}\")))")
+	g.line("return web.NewResponse(map[string]any{\"status\": 413, \"headers\": trbWebHeaders(__trb_http.Header{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}), \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"payload_too_large\\\"}\"))})")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -509,7 +509,7 @@ func (g *generator) webServer() {
 	g.line("handler := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {")
 	g.indent++
 	g.line("body, err := io.ReadAll(nethttp.MaxBytesReader(writer, request.Body, int64(config.BodyLimitBytes)))")
-	g.line("webRequest := web.NewRequest(__trb_http.NewHttpMethod(request.Method), request.URL.EscapedPath(), request.URL.RawQuery, trbWebHeadersFromMap(map[string][]string(request.Header.Clone())), __trb_http.NewBody(body))")
+	g.line("webRequest := web.NewRequest(map[string]any{\"method\": __trb_http.NewHttpMethod(request.Method), \"path\": request.URL.EscapedPath(), \"query_string\": request.URL.RawQuery, \"headers\": trbWebHeadersFromMap(map[string][]string(request.Header.Clone())), \"body\": __trb_http.NewBody(body)})")
 	g.line("var response *web.Response")
 	g.line("if err != nil {")
 	g.indent++

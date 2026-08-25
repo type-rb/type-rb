@@ -57,7 +57,7 @@ func TestRailsProviderChecksSchemaDerivedFinderArguments(t *testing.T) {
 		t.Fatalf("expected schema-derived column diagnostic, got %v", err)
 	}
 	unknownColumn := strings.Replace(railsInsurersController, "code: params[:code]", "missing: params[:code]", 1)
-	if _, err := CompileWithOptions("insurers_controller.trb", []byte(unknownColumn), Options{Mode: "ruby", ProjectRoot: root}); err == nil || !strings.Contains(err.Error(), "has no keyword argument missing") {
+	if _, err := CompileWithOptions("insurers_controller.trb", []byte(unknownColumn), Options{Mode: "ruby", ProjectRoot: root}); err == nil || !strings.Contains(err.Error(), "has no named argument missing") {
 		t.Fatalf("expected unknown finder column diagnostic, got %v", err)
 	}
 	unknownMember := strings.Replace(railsInsurersController, "insurer.as_json()", "insurer.not_a_method()", 1)

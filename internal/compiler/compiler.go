@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
@@ -138,6 +139,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 func compileSourceUnit(unit SourceUnit, options Options) (*Artifact, error) {
 	program, parseDiagnostics := parser.Parse(sourceUnitContents(unit))
 	configureProgram(program, options, options.ModulePath, options.Package)
+	normalizeRubyNativeParameterSyntax(program, options.Mode, packageAliasesForSource(unit, options.PackageAliases))
 	if options.Mode == "" {
 		parseDiagnostics = append(parseDiagnostics, diagnostic.Diagnostic{
 			Code:     diagnostic.ProjectError,
@@ -502,6 +504,44 @@ func sourcePackageAliases(units []SourceUnit, defaults map[string]string) map[st
 		aliases[source.ModulePath] = moduleAliases
 	}
 	return aliases
+}
+
+func packageAliasesForSource(source SourceUnit, defaults map[string]string) map[string]string {
+	if source.PackageAliases != nil {
+		return source.PackageAliases
+	}
+	return defaults
+}
+
+func packageAliasFingerprint(aliases map[string]string) string {
+	keys := make([]string, 0, len(aliases))
+	for key := range aliases {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"\x00"+aliases[key])
+	}
+	return strings.Join(parts, "\x00")
+}
+
+func normalizeRubyNativeParameterSyntax(program *ast.Program, mode string, aliases map[string]string) {
+	if program == nil || mode != "ruby" {
+		return
+	}
+	for _, statement := range program.Statements {
+		imported, ok := statement.(*ast.ImportStatement)
+		if !ok {
+			continue
+		}
+		path := resolver.CanonicalPackageImport(imported.Path, aliases)
+		definition, exists := stdlib.Lookup(path)
+		if exists && definition.NativeSyntax && definition.Supports(mode) {
+			parser.NormalizeRubyNativeParameters(program.Statements)
+			return
+		}
+	}
 }
 
 func dependencySourceUnits(programs map[string]*ast.Program, options Options) []SourceUnit {

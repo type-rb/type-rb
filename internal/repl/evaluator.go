@@ -1667,7 +1667,7 @@ func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evalu
 	used := map[int]bool{}
 	for _, parameter := range parameters {
 		found := -1
-		if parameter.Keyword {
+		if parameter.Keyword || parameter.NamedOnly {
 			for index, argument := range arguments {
 				if argument.Name == parameter.Name {
 					found = index

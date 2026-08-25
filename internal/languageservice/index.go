@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/parser"
@@ -619,11 +620,17 @@ func declarationSymbol(member declaration.Member) Symbol {
 	if member.Kind == declaration.Property {
 		return Symbol{Name: member.Name, Kind: CompletionField, Detail: displayType(valueType), Type: valueType}
 	}
-	parameters := make([]string, len(member.Parameters))
+	parameters := make([]string, 0, len(member.Parameters)+1)
 	callParameters := make([]CallParameter, len(member.Parameters))
+	namedBoundary := false
 	for index, parameter := range member.Parameters {
-		parameters[index] = parameter.Name + ": " + displayType(parameter.Type)
-		callParameters[index] = CallParameter{Name: parameter.Name, Label: parameters[index], Keyword: parameter.Keyword}
+		if parameter.Keyword && !namedBoundary {
+			parameters = append(parameters, "*")
+			namedBoundary = true
+		}
+		label := parameter.Name + ": " + displayType(parameter.Type)
+		parameters = append(parameters, label)
+		callParameters[index] = CallParameter{Name: parameter.Name, Label: label, NamedOnly: parameter.Keyword, Keyword: parameter.Keyword, Optional: parameter.Optional}
 	}
 	detail := member.Name + "(" + strings.Join(parameters, ", ") + "): " + displayType(valueType)
 	return Symbol{
@@ -657,11 +664,23 @@ func contractMemberSymbol(name string, member ir.MemberContract) Symbol {
 	if member.Kind == string(resolver.ValueExport) {
 		kind = CompletionField
 	}
-	parameters := make([]string, len(member.Parameters))
+	parameters := make([]string, 0, len(member.Parameters)+1)
 	callParameters := make([]CallParameter, len(member.Parameters))
+	namedBoundary := false
 	for index, parameter := range member.Parameters {
-		parameters[index] = displayType(parameter)
-		callParameters[index] = CallParameter{Name: "arg" + strconv.Itoa(index), Label: parameters[index]}
+		parameterName := "arg" + strconv.Itoa(index)
+		parameterLabel := displayType(parameter.Type)
+		keyword := parameter.Kind == callsignature.NamedOnly
+		if keyword {
+			if !namedBoundary {
+				parameters = append(parameters, "*")
+				namedBoundary = true
+			}
+			parameterName = parameter.Label
+			parameterLabel = parameter.Label + ": " + parameterLabel
+		}
+		parameters = append(parameters, parameterLabel)
+		callParameters[index] = CallParameter{Name: parameterName, Label: parameterLabel, NamedOnly: keyword, Keyword: keyword, Optional: parameter.Presence == callsignature.Omittable}
 	}
 	detail := displayType(valueType)
 	var call *CallInfo
@@ -733,11 +752,23 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 		var call *CallInfo
 		if kind == CompletionFunction {
 			parameters := imported.SymbolParameters[name]
-			parts := make([]string, len(parameters))
+			parts := make([]string, 0, len(parameters)+1)
 			callParameters := make([]CallParameter, len(parameters))
+			namedBoundary := false
 			for index, parameter := range parameters {
-				parts[index] = displayType(parameter)
-				callParameters[index] = CallParameter{Name: "arg" + strconv.Itoa(index), Label: parts[index]}
+				parameterName := "arg" + strconv.Itoa(index)
+				parameterLabel := displayType(parameter.Type)
+				keyword := parameter.Kind == callsignature.NamedOnly
+				if keyword {
+					if !namedBoundary {
+						parts = append(parts, "*")
+						namedBoundary = true
+					}
+					parameterName = parameter.Label
+					parameterLabel = parameter.Label + ": " + parameterLabel
+				}
+				parts = append(parts, parameterLabel)
+				callParameters[index] = CallParameter{Name: parameterName, Label: parameterLabel, NamedOnly: keyword, Keyword: keyword, Optional: parameter.Presence == callsignature.Omittable}
 			}
 			detail = name + genericSuffix + "(" + strings.Join(parts, ", ") + "): " + displayType(typ)
 			call = &CallInfo{
@@ -801,7 +832,10 @@ func standardSymbols(definition *stdlib.Package) []Symbol {
 		}
 		parameters := make([]CallParameter, len(library.Parameters))
 		for index, parameter := range library.Parameters {
-			parameters[index] = CallParameter{Name: parameter.Name, Label: parameter.Name + ": " + displayType(parameter.Type)}
+			parameters[index] = CallParameter{
+				Name: parameter.Name, Label: parameter.Name + ": " + displayType(parameter.Type),
+				NamedOnly: parameter.Keyword, Keyword: parameter.Keyword, Optional: parameter.Optional,
+			}
 		}
 		result = append(result, Symbol{
 			Name:   library.Name,
@@ -1050,8 +1084,13 @@ func enumMembers(enum *ir.Enum, owner, sourcePath string, ownerDefinition *Defin
 }
 
 func methodSignature(method *ir.Method) string {
-	parameters := make([]string, 0, len(method.Parameters))
+	parameters := make([]string, 0, len(method.Parameters)+1)
+	namedBoundary := false
 	for _, parameter := range method.Parameters {
+		if parameter.NamedOnly && !namedBoundary {
+			parameters = append(parameters, "*")
+			namedBoundary = true
+		}
 		text := parameter.Name + ": " + displayType(parameter.Type)
 		if parameter.Rest {
 			text = "*" + text
@@ -1102,7 +1141,8 @@ func callParameter(parameter ir.Parameter) CallParameter {
 		label = "**" + label
 	}
 	return CallParameter{
-		Name: parameter.Name, Label: label, Keyword: parameter.Keyword,
+		Name: parameter.Name, Label: label, NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword || parameter.NamedOnly,
+		Optional:             parameter.Default != nil,
 		LiteralValues:        append([]string(nil), parameter.LiteralValues...),
 		LiteralArrays:        copyLiteralArrays(parameter.LiteralArrays),
 		LiteralArrayElements: append([]string(nil), parameter.LiteralArrayElements...),
@@ -1118,16 +1158,26 @@ func copyLiteralArrays(values [][]string) [][]string {
 }
 
 func constructorSignature(method *ir.Method, owner string) string {
-	parameters := make([]string, 0, len(method.Parameters))
+	parameters := make([]string, 0, len(method.Parameters)+1)
+	namedBoundary := false
 	for _, parameter := range method.Parameters {
+		if parameter.NamedOnly && !namedBoundary {
+			parameters = append(parameters, "*")
+			namedBoundary = true
+		}
 		parameters = append(parameters, parameter.Name+": "+displayType(parameter.Type))
 	}
 	return "new(" + strings.Join(parameters, ", ") + "): " + owner
 }
 
 func librarySignature(symbol stdlib.Symbol) string {
-	parameters := make([]string, 0, len(symbol.Parameters))
+	parameters := make([]string, 0, len(symbol.Parameters)+1)
+	namedBoundary := false
 	for _, parameter := range symbol.Parameters {
+		if parameter.Keyword && !namedBoundary {
+			parameters = append(parameters, "*")
+			namedBoundary = true
+		}
 		parameters = append(parameters, parameter.Name+": "+displayType(parameter.Type))
 	}
 	result := symbol.Name + "(" + strings.Join(parameters, ", ") + ")"

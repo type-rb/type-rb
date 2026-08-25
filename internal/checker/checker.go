@@ -10,9 +10,11 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
+	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
@@ -41,6 +43,7 @@ type Result struct {
 	CodecApplications          map[*ast.CallExpression]CodecApplication
 	CallSpecializationRequests map[*ast.CallExpression]CallSpecializationRequest
 	CallSpecializations        map[*ast.CallExpression]CallSpecialization
+	CallSignatures             map[*ast.CallExpression][]callsignature.Parameter
 	RawEnums                   map[*ast.EnumStatement]RawEnum
 	EnumCalls                  map[*ast.CallExpression]EnumCall
 	TypeAliases                map[*ast.TypeAliasStatement]TypeAlias
@@ -187,13 +190,13 @@ type GenericApplication struct {
 	TypeParameters         []string
 	TypeArguments          []types.Type
 	OwnerArguments         []types.Type
-	Parameters             []types.Type
+	Parameters             []callsignature.Parameter
 	ParameterResultBridges []resolver.NativeResultBridge
 	CallResultBridge       resolver.NativeCallResultBridge
 	ReturnType             types.Type
-	Required               int
 	Variadic               bool
 	Specializer            string
+	Source                 bool
 }
 
 type CaseBinding struct {
@@ -742,6 +745,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			CodecApplications:          map[*ast.CallExpression]CodecApplication{},
 			CallSpecializationRequests: map[*ast.CallExpression]CallSpecializationRequest{},
 			CallSpecializations:        map[*ast.CallExpression]CallSpecialization{},
+			CallSignatures:             map[*ast.CallExpression][]callsignature.Parameter{},
 			RawEnums:                   map[*ast.EnumStatement]RawEnum{},
 			EnumCalls:                  map[*ast.CallExpression]EnumCall{},
 			TypeAliases:                map[*ast.TypeAliasStatement]TypeAlias{},
@@ -778,6 +782,9 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 }
 
 func (c *Checker) checkProgram(program *ast.Program, checkUnusedImports bool) {
+	if c.rubyNativeSyntax() {
+		parser.NormalizeRubyNativeParameters(program.Statements)
+	}
 	if !c.inferenceOnly && c.resolution.Declarations != nil {
 		for _, runtimeType := range c.resolution.Declarations.RuntimeTypesByModule[program.ModulePath] {
 			c.requireRuntimeType(runtimeType)
@@ -1302,6 +1309,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.checkStatements(n.Body, classScope)
 			c.checkFieldInitialization(n)
 			c.checkInterfaces(n)
+			c.checkOverrides(n)
 			c.current = previous
 		case *ast.RecordStatement:
 			c.checkTypeParameters(n.TypeParameters)
@@ -1386,7 +1394,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					if parameter.Name == "" || parameter.Type.Empty() {
 						c.error(parameter.Span(), fmt.Sprintf("enum payload %s requires a name and type", parameter.Name))
 					}
-					if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest {
+					if parameter.Default != nil || parameter.NamedOnly || parameter.Keyword || parameter.Rest || parameter.KeywordRest {
 						c.error(parameter.Span(), "enum payload fields must be required positional values")
 					}
 					if seenFields[parameter.Name] {
@@ -2937,10 +2945,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.OwnerArguments = append([]types.Type(nil), receiver.Args...)
 			application.TypeParameters = append([]string(nil), binding.Library.TypeParameters...)
 			for _, parameter := range binding.Library.Parameters {
-				application.Parameters = append(application.Parameters, parameter.Type)
-				if !parameter.Optional {
-					application.Required++
-				}
+				application.Parameters = append(application.Parameters, declaredCallParameter(parameter.Name, parameter.Type, parameter.Keyword, parameter.Optional))
 			}
 			application.Variadic = binding.Library.Variadic
 			application.ReturnType = binding.Library.Return
@@ -2948,35 +2953,35 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			local = c.specializeLocalClassMember(receiver, local)
 			if len(local.method.TypeParameters) > 0 {
 				application.Kind = "method"
+				application.Source = true
 				application.Owner = receiver.Name
 				application.OwnerArguments = append([]types.Type(nil), receiver.Args...)
 				for _, parameter := range local.method.TypeParameters {
 					application.TypeParameters = append(application.TypeParameters, parameter.Name)
 				}
-				application.Parameters = append([]types.Type(nil), local.sig.parameters...)
-				application.Required = local.sig.required
+				application.Parameters = append([]callsignature.Parameter(nil), local.sig.parameters...)
 				application.Variadic = local.sig.variadic
 				application.ReturnType = local.sig.returnType
 			}
 		} else if binding, found := c.importedAncestorMember(receiver.Name, member.Name, classAccess, map[string]bool{}); found && binding.Member != nil && len(binding.Member.TypeParameters) > 0 {
 			binding = specializeResolvedClassMember(receiver, binding)
 			application.Kind = "method"
+			application.Source = sourceBinding(binding)
 			application.Owner = receiver.Name
 			application.OwnerArguments = append([]types.Type(nil), receiver.Args...)
 			application.TypeParameters = append([]string(nil), binding.Member.TypeParameters...)
-			application.Parameters = append([]types.Type(nil), binding.Member.Parameters...)
-			application.Required = binding.Member.Required
+			application.Parameters = append([]callsignature.Parameter(nil), binding.Member.Parameters...)
 			application.Variadic = binding.Member.Variadic
 			application.ReturnType = binding.Member.Type
 			application.CallResultBridge = binding.Member.CallResultBridge
 		} else if binding, found := c.resolution.InferredTypeMember(receiver.Name, member.Name); found && binding.Member != nil && len(binding.Member.TypeParameters) > 0 {
 			binding = specializeResolvedClassMember(receiver, binding)
 			application.Kind = "method"
+			application.Source = sourceBinding(binding)
 			application.Owner = receiver.Name
 			application.OwnerArguments = append([]types.Type(nil), receiver.Args...)
 			application.TypeParameters = append([]string(nil), binding.Member.TypeParameters...)
-			application.Parameters = append([]types.Type(nil), binding.Member.Parameters...)
-			application.Required = binding.Member.Required
+			application.Parameters = append([]callsignature.Parameter(nil), binding.Member.Parameters...)
 			application.Variadic = binding.Member.Variadic
 			application.ReturnType = binding.Member.Type
 			application.CallResultBridge = binding.Member.CallResultBridge
@@ -2988,10 +2993,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.OwnerArguments = append([]types.Type(nil), receiver.Args...)
 			application.TypeParameters = append([]string(nil), declared.TypeParameters...)
 			for _, parameter := range declared.Parameters {
-				application.Parameters = append(application.Parameters, parameter.Type)
-				if !parameter.Optional {
-					application.Required++
-				}
+				application.Parameters = append(application.Parameters, declaredCallParameter(parameter.Name, parameter.Type, parameter.Keyword, parameter.Optional))
 			}
 			application.Variadic = declared.Variadic
 			application.ReturnType = declared.Return
@@ -3014,16 +3016,13 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 		application.TypeParameters = append([]string(nil), info.typeParameters...)
 	} else if method := c.functions[name]; method != nil {
 		application.Kind = "function"
+		application.Source = true
 		for _, parameter := range method.TypeParameters {
 			application.TypeParameters = append(application.TypeParameters, parameter.Name)
 		}
-		for _, parameter := range method.Parameters {
-			application.Parameters = append(application.Parameters, c.typeFromRef(parameter.Type))
-			if parameter.Default == nil && !parameter.Rest && !parameter.KeywordRest {
-				application.Required++
-			}
-			application.Variadic = application.Variadic || parameter.Rest || parameter.KeywordRest
-		}
+		signature := c.signatureFromMethod(method)
+		application.Parameters = append(application.Parameters, signature.parameters...)
+		application.Variadic = signature.variadic
 		application.ReturnType = c.methodReturnType(method)
 	} else if binding, ok := c.result.References[node.Receiver]; ok {
 		if binding.Export != nil {
@@ -3039,10 +3038,10 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 				application.Kind = "type_alias"
 			case resolver.FunctionExport:
 				application.Kind = "function"
-				application.Parameters = append([]types.Type(nil), binding.Export.Parameters...)
+				application.Source = sourceBinding(binding)
+				application.Parameters = append([]callsignature.Parameter(nil), binding.Export.Parameters...)
 				application.ParameterResultBridges = append([]resolver.NativeResultBridge(nil), binding.Export.ParameterResultBridges...)
 				application.CallResultBridge = binding.Export.CallResultBridge
-				application.Required = binding.Export.Required
 				application.Variadic = binding.Export.Variadic
 				application.ReturnType = binding.Export.Type
 			}
@@ -3050,10 +3049,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.Kind = "function"
 			application.TypeParameters = append([]string(nil), binding.Library.TypeParameters...)
 			for _, parameter := range binding.Library.Parameters {
-				application.Parameters = append(application.Parameters, parameter.Type)
-				if !parameter.Optional {
-					application.Required++
-				}
+				application.Parameters = append(application.Parameters, declaredCallParameter(parameter.Name, parameter.Type, parameter.Keyword, parameter.Optional))
 			}
 			application.Variadic = binding.Library.Variadic
 			application.ReturnType = binding.Library.Return
@@ -3073,7 +3069,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 		application.ReturnType = types.Type{Kind: types.Named, Name: name, Args: append([]types.Type(nil), application.TypeArguments...)}
 	} else {
 		for index := range application.Parameters {
-			application.Parameters[index] = substituteType(application.Parameters[index], substitutions)
+			application.Parameters[index].Type = substituteType(application.Parameters[index].Type, substitutions)
 		}
 		for index := range application.ParameterResultBridges {
 			application.ParameterResultBridges[index] = substituteNativeResultBridge(application.ParameterResultBridges[index], substitutions)
@@ -3082,6 +3078,30 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 		application.ReturnType = substituteType(application.ReturnType, substitutions)
 	}
 	return application, true
+}
+
+func declaredCallParameter(name string, typ types.Type, keyword, optional bool) callsignature.Parameter {
+	kind := callsignature.Positional
+	label := ""
+	if keyword {
+		kind = callsignature.NamedOnly
+		label = name
+	}
+	presence := callsignature.Required
+	if optional {
+		presence = callsignature.Omittable
+	}
+	return callsignature.Parameter{Kind: kind, Label: label, Type: typ, Presence: presence}
+}
+
+func sourceBinding(binding resolver.Binding) bool {
+	if binding.Export != nil && binding.Export.Source {
+		return true
+	}
+	if binding.Import == nil {
+		return false
+	}
+	return binding.Import.Kind == resolver.ProjectImport || binding.Import.Definition != nil && binding.Import.Definition.Source != ""
 }
 
 func substituteNativeResultBridge(bridge resolver.NativeResultBridge, substitutions map[string]types.Type) resolver.NativeResultBridge {
@@ -3523,7 +3543,7 @@ func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type
 			c.error(element.Component.Span(), fmt.Sprintf("JSX component %s must accept no parameters or one record parameter", element.Name))
 			return nil, nil, false
 		}
-		fields, _, _, found := c.codecRecord(binding.Member.Parameters[0].Name)
+		fields, _, _, found := c.codecRecord(binding.Member.Parameters[0].Type.Name)
 		if !found {
 			c.error(element.Component.Span(), fmt.Sprintf("JSX component %s props must be a record", element.Name))
 			return nil, nil, false
@@ -3564,7 +3584,7 @@ func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type
 		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept no parameters or one record parameter", identifier.Name))
 		return nil, nil, false
 	}
-	fields, _, _, found := c.codecRecord(binding.Export.Parameters[0].Name)
+	fields, _, _, found := c.codecRecord(binding.Export.Parameters[0].Type.Name)
 	if !found {
 		c.error(identifier.Span(), fmt.Sprintf("JSX component %s props must be a record", identifier.Name))
 		return nil, nil, false
@@ -4129,6 +4149,8 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	c.classMethod = method.Class
 	methodScope := &scope{parent: parent, values: map[string]symbol{}}
 	seenPositionalDefault := false
+	seenNamedOnly := false
+	seenNamedDefault := false
 	for _, parameter := range method.Parameters {
 		typ := c.typeFromRef(parameter.Type)
 		if parameter.Type.Empty() {
@@ -4137,12 +4159,34 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		if _, exists := methodScope.values[parameter.Name]; exists {
 			c.error(parameter.Span(), fmt.Sprintf("parameter %s is duplicated", parameter.Name))
 		}
-		if !c.rubyNativeSyntax() && !parameter.Keyword && !parameter.Rest && !parameter.KeywordRest {
-			if parameter.Default != nil {
-				seenPositionalDefault = true
-			} else if seenPositionalDefault {
-				c.error(parameter.Span(), "required positional parameter cannot follow a default parameter")
+		if !c.rubyNativeSyntax() {
+			if parameter.Rest || parameter.KeywordRest {
+				c.error(parameter.Span(), "rest parameters are not supported in portable TypeRB")
 			}
+			_, literalType := types.LiteralFromSource(parameter.Type.Name)
+			if parameter.Keyword || parameter.NativeKeyword && !literalType {
+				c.error(parameter.Span(), "Ruby keyword parameter syntax requires an explicit Ruby-native import; use bare * for a named-only TypeRB parameter")
+			}
+			if parameter.NamedOnly {
+				seenNamedOnly = true
+				if parameter.Default != nil {
+					seenNamedDefault = true
+				} else if seenNamedDefault {
+					c.error(parameter.Span(), "required named-only parameter cannot follow a default parameter")
+				}
+			} else {
+				if seenNamedOnly {
+					c.error(parameter.Span(), "positional parameter cannot follow the named-only parameter separator")
+				}
+				if parameter.Default != nil {
+					seenPositionalDefault = true
+				} else if seenPositionalDefault {
+					c.error(parameter.Span(), "required positional parameter cannot follow a default parameter")
+				}
+			}
+		}
+		if c.interfaceDepth > 0 && parameter.Default != nil {
+			c.error(parameter.Span(), "interface parameters cannot have defaults")
 		}
 		if parameter.Default != nil {
 			actual := c.checkExpression(parameter.Default, methodScope)
@@ -4374,8 +4418,7 @@ func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
 
 type methodSignature struct {
 	returnType types.Type
-	parameters []types.Type
-	required   int
+	parameters []callsignature.Parameter
 	variadic   bool
 }
 
@@ -4416,6 +4459,29 @@ func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
 	}
 }
 
+func (c *Checker) checkOverrides(class *ast.ClassStatement) {
+	if class == nil {
+		return
+	}
+	superclass := expressionTypeName(class.Superclass)
+	if superclass == "" {
+		return
+	}
+	for _, statement := range class.Body {
+		method, ok := statement.(*ast.MethodStatement)
+		if !ok || method.Class || method.Name == "initialize" {
+			continue
+		}
+		inherited, exists := c.classMethodSignature(superclass, method.Name, map[string]bool{})
+		if !exists {
+			continue
+		}
+		if !c.sameSignature(inherited, c.signatureFromMethod(method)) {
+			c.error(method.Span(), fmt.Sprintf("method %s.%s does not match inherited method %s.%s", class.Name, method.Name, superclass, method.Name))
+		}
+	}
+}
+
 func typeParameterNames(parameters []ast.TypeParameter) []string {
 	names := make([]string, len(parameters))
 	for index, parameter := range parameters {
@@ -4426,9 +4492,9 @@ func typeParameterNames(parameters []ast.TypeParameter) []string {
 
 func substituteMethodSignature(signature methodSignature, substitutions map[string]types.Type) methodSignature {
 	signature.returnType = substituteType(signature.returnType, substitutions)
-	signature.parameters = append([]types.Type(nil), signature.parameters...)
+	signature.parameters = append([]callsignature.Parameter(nil), signature.parameters...)
 	for index := range signature.parameters {
-		signature.parameters[index] = substituteType(signature.parameters[index], substitutions)
+		signature.parameters[index].Type = substituteType(signature.parameters[index].Type, substitutions)
 	}
 	return signature
 }
@@ -4449,27 +4515,45 @@ func (c *Checker) classMethodSignature(className, memberName string, seen map[st
 	if binding, ok := c.resolution.TypeMember(className, memberName); ok && binding.Member != nil && binding.Member.Kind == resolver.FunctionExport && !binding.Member.Class {
 		return signatureFromResolvedMember(*binding.Member), true
 	}
+	if member, ok := c.declarationMember(className, memberName, false, map[string]bool{}); ok {
+		return signatureFromDeclarationMember(member), true
+	}
 	return methodSignature{}, false
 }
 
 func (c *Checker) signatureFromMethod(method *ast.MethodStatement) methodSignature {
 	result := methodSignature{returnType: c.methodReturnType(method)}
 	for _, parameter := range method.Parameters {
-		result.parameters = append(result.parameters, c.typeFromRef(parameter.Type))
-		if parameter.Default == nil && !parameter.Rest && !parameter.KeywordRest {
-			result.required++
+		kind := callsignature.Positional
+		label := ""
+		if parameter.NamedOnly || parameter.Keyword {
+			kind = callsignature.NamedOnly
+			label = parameter.Name
 		}
+		presence := callsignature.Omittable
+		if parameter.Default == nil {
+			presence = callsignature.Required
+		}
+		result.parameters = append(result.parameters, callsignature.Parameter{Kind: kind, Label: label, Type: c.typeFromRef(parameter.Type), Presence: presence})
 		result.variadic = result.variadic || parameter.Rest || parameter.KeywordRest
 	}
 	return result
 }
 
 func signatureFromResolvedMember(member resolver.Member) methodSignature {
-	return methodSignature{returnType: member.Type, parameters: append([]types.Type(nil), member.Parameters...), required: member.Required, variadic: member.Variadic}
+	return methodSignature{returnType: member.Type, parameters: append([]callsignature.Parameter(nil), member.Parameters...), variadic: member.Variadic}
+}
+
+func signatureFromDeclarationMember(member declaration.Member) methodSignature {
+	result := methodSignature{returnType: member.Return, variadic: member.Variadic}
+	for _, parameter := range member.Parameters {
+		result.parameters = append(result.parameters, declaredCallParameter(parameter.Name, parameter.Type, parameter.Keyword, parameter.Optional))
+	}
+	return result
 }
 
 func (c *Checker) sameSignature(left, right methodSignature) bool {
-	if left.required != right.required || left.variadic != right.variadic || len(left.parameters) != len(right.parameters) {
+	if left.variadic != right.variadic || len(left.parameters) != len(right.parameters) {
 		return false
 	}
 	left.returnType = c.expandAlias(left.returnType, map[string]bool{})
@@ -4477,14 +4561,57 @@ func (c *Checker) sameSignature(left, right methodSignature) bool {
 	if !types.Assignable(left.returnType, right.returnType) || !types.Assignable(right.returnType, left.returnType) {
 		return false
 	}
-	for i := range left.parameters {
-		left.parameters[i] = c.expandAlias(left.parameters[i], map[string]bool{})
-		right.parameters[i] = c.expandAlias(right.parameters[i], map[string]bool{})
-		if !types.Assignable(left.parameters[i], right.parameters[i]) || !types.Assignable(right.parameters[i], left.parameters[i]) {
+	leftPositional := positionalSignatureParameters(left.parameters)
+	rightPositional := positionalSignatureParameters(right.parameters)
+	if len(leftPositional) != len(rightPositional) {
+		return false
+	}
+	for index := range leftPositional {
+		if !c.sameSignatureParameter(leftPositional[index], rightPositional[index]) {
+			return false
+		}
+	}
+	leftNamed := namedSignatureParameters(left.parameters)
+	rightNamed := namedSignatureParameters(right.parameters)
+	if len(leftNamed) != len(rightNamed) {
+		return false
+	}
+	for label, leftParameter := range leftNamed {
+		rightParameter, exists := rightNamed[label]
+		if !exists || !c.sameSignatureParameter(leftParameter, rightParameter) {
 			return false
 		}
 	}
 	return true
+}
+
+func positionalSignatureParameters(parameters []callsignature.Parameter) []callsignature.Parameter {
+	result := []callsignature.Parameter{}
+	for _, parameter := range parameters {
+		if parameter.Kind == callsignature.Positional {
+			result = append(result, parameter)
+		}
+	}
+	return result
+}
+
+func namedSignatureParameters(parameters []callsignature.Parameter) map[string]callsignature.Parameter {
+	result := map[string]callsignature.Parameter{}
+	for _, parameter := range parameters {
+		if parameter.Kind == callsignature.NamedOnly {
+			result[parameter.Label] = parameter
+		}
+	}
+	return result
+}
+
+func (c *Checker) sameSignatureParameter(left, right callsignature.Parameter) bool {
+	if left.Kind != right.Kind || left.Presence != right.Presence || left.Label != right.Label {
+		return false
+	}
+	left.Type = c.expandAlias(left.Type, map[string]bool{})
+	right.Type = c.expandAlias(right.Type, map[string]bool{})
+	return types.Assignable(left.Type, right.Type) && types.Assignable(right.Type, left.Type)
 }
 
 func (c *Checker) localMember(className, memberName string, class bool, seen map[string]bool) (classMember, bool) {
@@ -4513,7 +4640,7 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 				return classMember{typ: signature.returnType, sig: &signature}, true
 			case memberName == "from_raw" && class:
 				resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName(className), types.FromName("EnumValueError")}}
-				signature := methodSignature{returnType: resultType, parameters: []types.Type{info.raw.Type}, required: 1}
+				signature := methodSignature{returnType: resultType, parameters: callsignature.FromPositionalTypes([]types.Type{info.raw.Type}, 1)}
 				return classMember{typ: resultType, sig: &signature}, true
 			}
 		}
@@ -4552,9 +4679,9 @@ func (c *Checker) specializeLocalClassMember(receiver types.Type, member classMe
 	if member.sig != nil {
 		copy := *member.sig
 		copy.returnType = substituteType(copy.returnType, substitutions)
-		copy.parameters = append([]types.Type(nil), copy.parameters...)
+		copy.parameters = append([]callsignature.Parameter(nil), copy.parameters...)
 		for index := range copy.parameters {
-			copy.parameters[index] = substituteType(copy.parameters[index], substitutions)
+			copy.parameters[index].Type = substituteType(copy.parameters[index].Type, substitutions)
 		}
 		member.typ = copy.returnType
 		member.sig = &copy
@@ -4643,9 +4770,9 @@ func (c *Checker) specializeLocalEnumMember(receiver types.Type, member classMem
 	substitutions := typeSubstitutions(info.typeParameters, receiver.Args)
 	copy := *member.sig
 	copy.returnType = substituteType(copy.returnType, substitutions)
-	copy.parameters = append([]types.Type(nil), copy.parameters...)
+	copy.parameters = append([]callsignature.Parameter(nil), copy.parameters...)
 	for index := range copy.parameters {
-		copy.parameters[index] = substituteType(copy.parameters[index], substitutions)
+		copy.parameters[index].Type = substituteType(copy.parameters[index].Type, substitutions)
 	}
 	member.typ = copy.returnType
 	member.sig = &copy
@@ -4659,9 +4786,9 @@ func specializeResolvedEnumMember(receiver types.Type, binding resolver.Binding)
 	substitutions := typeSubstitutions(binding.Export.TypeParameters, receiver.Args)
 	copy := *binding.Member
 	copy.Type = substituteType(copy.Type, substitutions)
-	copy.Parameters = append([]types.Type(nil), copy.Parameters...)
+	copy.Parameters = append([]callsignature.Parameter(nil), copy.Parameters...)
 	for index := range copy.Parameters {
-		copy.Parameters[index] = substituteType(copy.Parameters[index], substitutions)
+		copy.Parameters[index].Type = substituteType(copy.Parameters[index].Type, substitutions)
 	}
 	copy.CallResultBridge = substituteNativeCallResultBridge(copy.CallResultBridge, substitutions)
 	binding.Member = &copy
@@ -4675,9 +4802,9 @@ func specializeResolvedClassMember(receiver types.Type, binding resolver.Binding
 	substitutions := typeSubstitutions(binding.Export.TypeParameters, receiver.Args)
 	copy := *binding.Member
 	copy.Type = substituteType(copy.Type, substitutions)
-	copy.Parameters = append([]types.Type(nil), copy.Parameters...)
+	copy.Parameters = append([]callsignature.Parameter(nil), copy.Parameters...)
 	for index := range copy.Parameters {
-		copy.Parameters[index] = substituteType(copy.Parameters[index], substitutions)
+		copy.Parameters[index].Type = substituteType(copy.Parameters[index].Type, substitutions)
 	}
 	copy.CallResultBridge = substituteNativeCallResultBridge(copy.CallResultBridge, substitutions)
 	binding.Member = &copy
@@ -4973,7 +5100,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if parameter.Type.Empty() {
 				c.error(parameter.Span(), fmt.Sprintf("fn parameter %s requires a type", parameter.Name))
 			}
-			if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest {
+			if parameter.Default != nil || parameter.NamedOnly || parameter.Keyword || parameter.Rest || parameter.KeywordRest {
 				c.error(parameter.Span(), "fn parameters must be required positional parameters")
 			}
 			parameterType := c.typeFromRef(parameter.Type)
@@ -5630,6 +5757,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 	case *ast.CallExpression:
 		libraryBlockChecked := false
+		if !c.rubyNativeSyntax() {
+			seenNamed := false
+			for _, argument := range n.Arguments {
+				if argument.Splat != "" {
+					c.error(argument.Value.Span(), "argument splats are not supported in portable TypeRB")
+				}
+				if argument.Name != "" {
+					seenNamed = true
+				} else if seenNamed {
+					c.error(argument.Value.Span(), "positional argument cannot follow a named argument")
+				}
+			}
+		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee++
 		}
@@ -5655,6 +5795,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if target, _, newtype := c.newtypeDefinition(receiverType.Name); newtype {
 				switch member.Name {
 				case "new":
+					for _, argument := range n.Arguments {
+						if argument.Name != "" {
+							c.error(argument.Value.Span(), fmt.Sprintf("%s.new() has no named argument %s", receiverType.Name, argument.Name))
+						}
+					}
 					c.checkTypedArguments(n.Span(), receiverType.Name+".new", []types.Type{target}, 1, false, n.Arguments, argumentTypes)
 					if n.Block != nil {
 						c.error(n.Block.Span(), receiverType.Name+".new() does not accept a block")
@@ -5691,7 +5836,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Span(), fmt.Sprintf("generic %s %s is not callable", application.Kind, application.Name))
 				break
 			}
-			c.checkTypedArgumentsWithNativeResultBridges(n.Span(), application.Name, application.Parameters, application.ParameterResultBridges, application.Required, application.Variadic, n.Arguments, argumentTypes)
+			c.checkCallSignature(n.Span(), application.Name, application.Parameters, application.Variadic, n.Arguments, argumentTypes, nil, application.ParameterResultBridges)
+			if application.Source {
+				c.result.CallSignatures[n] = append([]callsignature.Parameter(nil), application.Parameters...)
+			}
 			typ = application.ReturnType
 			c.checkNativeCallResultBridge(n, typ, application.CallResultBridge)
 			if len(application.TypeArguments) == 1 {
@@ -5730,7 +5878,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				break
 			}
 			typ = binding.Type()
-			library := c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
+			library := c.checkImportedArguments(n, binding, argumentTypes, sc)
 			if binding.Member != nil {
 				c.checkNativeCallResultBridge(n, typ, binding.Member.CallResultBridge)
 			} else if binding.Export != nil {
@@ -5801,12 +5949,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					if binding.Export.Kind == resolver.RecordExport {
 						c.checkImportedRecordArguments(n, binding.Export)
 					} else {
-						c.checkImportedArguments(n.Span(), binding, n.Arguments, argumentTypes, sc)
+						c.checkImportedArguments(n, binding, argumentTypes, sc)
 					}
 				} else if record := c.records[identifier.Name]; record != nil {
 					c.checkLocalRecordArguments(n, record)
 				} else if info := c.classes[identifier.Name]; info != nil {
-					c.checkArguments(n.Span(), info.methods["initialize"], n.Arguments, argumentTypes)
+					c.checkArguments(n, info.methods["initialize"], argumentTypes)
 				}
 			case *ast.GenericExpression:
 				application := c.result.GenericApplications[receiver]
@@ -5822,9 +5970,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					if initialize := info.methods["initialize"]; initialize != nil {
 						signature := c.signatureFromMethod(initialize)
 						for index := range signature.parameters {
-							signature.parameters[index] = substituteType(signature.parameters[index], substitutions)
+							signature.parameters[index].Type = substituteType(signature.parameters[index].Type, substitutions)
 						}
-						c.checkTypedArguments(n.Span(), application.Name+".new", signature.parameters, signature.required, signature.variadic, n.Arguments, argumentTypes)
+						names := make([]string, len(initialize.Parameters))
+						for index, parameter := range initialize.Parameters {
+							names[index] = parameter.Name
+						}
+						c.checkCallSignature(n.Span(), application.Name+".new", signature.parameters, signature.variadic, n.Arguments, argumentTypes, names, nil)
+						c.result.CallSignatures[n] = append([]callsignature.Parameter(nil), signature.parameters...)
 					}
 				} else if binding, imported := c.result.References[receiver.Receiver]; imported && binding.Export != nil {
 					exported := *binding.Export
@@ -5836,11 +5989,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 						}
 						c.checkRecordArguments(n, exported.Name, fields)
 					} else {
-						parameters := append([]types.Type(nil), exported.Parameters...)
+						parameters := append([]callsignature.Parameter(nil), exported.Parameters...)
 						for index := range parameters {
-							parameters[index] = substituteType(parameters[index], substitutions)
+							parameters[index].Type = substituteType(parameters[index].Type, substitutions)
 						}
-						c.checkTypedArguments(n.Span(), exported.Name+".new", parameters, exported.Required, exported.Variadic, n.Arguments, argumentTypes)
+						c.checkCallSignature(n.Span(), exported.Name+".new", parameters, exported.Variadic, n.Arguments, argumentTypes, nil, exported.ParameterResultBridges)
+						if sourceBinding(binding) {
+							c.result.CallSignatures[n] = append([]callsignature.Parameter(nil), parameters...)
+						}
 					}
 				}
 			}
@@ -5854,15 +6010,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.error(n.Callee.Span(), fmt.Sprintf("generic method %s requires explicit type arguments", member.Name))
 					break
 				}
-				if c.enums[receiverType.Name] != nil && local.sig != nil {
+				if local.sig != nil {
 					typ = local.sig.returnType
-					c.checkTypedArguments(n.Span(), member.Name, local.sig.parameters, local.sig.required, local.sig.variadic, n.Arguments, argumentTypes)
-				} else if local.method != nil && local.sig != nil {
-					typ = local.sig.returnType
-					c.checkTypedArguments(n.Span(), member.Name, local.sig.parameters, local.sig.required, local.sig.variadic, n.Arguments, argumentTypes)
-				} else if local.sig != nil {
-					typ = local.sig.returnType
-					c.checkTypedArguments(n.Span(), member.Name, local.sig.parameters, local.sig.required, local.sig.variadic, n.Arguments, argumentTypes)
+					names := []string(nil)
+					if local.method != nil {
+						names = make([]string, len(local.method.Parameters))
+						for index, parameter := range local.method.Parameters {
+							names[index] = parameter.Name
+						}
+					}
+					c.checkCallSignature(n.Span(), member.Name, local.sig.parameters, local.sig.variadic, n.Arguments, argumentTypes, names, nil)
+					if local.method != nil {
+						c.result.CallSignatures[n] = append([]callsignature.Parameter(nil), local.sig.parameters...)
+					}
 				}
 				if info := c.enums[receiverType.Name]; info != nil && (local.method != nil || info.raw != nil && (member.Name == "raw_value" || member.Name == "from_raw")) {
 					call := EnumCall{EnumName: receiverType.Name, Method: member.Name, Receiver: member.Receiver}
@@ -5887,7 +6047,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.memberKindMismatch(identifier.Span(), c.current.name, identifier.Name, c.classMethod)
 				} else {
 					typ = c.methodReturnType(method)
-					c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
+					c.checkArguments(n, method, argumentTypes)
 					if c.currentEnum != nil {
 						c.result.EnumCalls[n] = EnumCall{EnumName: c.currentEnum.name, Method: identifier.Name}
 					}
@@ -5897,7 +6057,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.error(identifier.Span(), fmt.Sprintf("generic function %s requires explicit type arguments", identifier.Name))
 				} else {
 					typ = c.methodReturnType(method)
-					c.checkArguments(n.Span(), method, n.Arguments, argumentTypes)
+					c.checkArguments(n, method, argumentTypes)
 				}
 			} else if c.mode != "ruby" {
 				c.error(identifier.Span(), fmt.Sprintf("function %s is not declared or imported", identifier.Name))
@@ -6528,11 +6688,14 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 	}
 }
 
-func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Binding, arguments []ast.CallArgument, actual []types.Type, sc *scope) *stdlib.Symbol {
+func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resolver.Binding, actual []types.Type, sc *scope) *stdlib.Symbol {
+	span := call.Span()
+	arguments := call.Arguments
 	var parameters []types.Type
 	var parameterIndexes []int
 	required := 0
 	variadic := false
+	signatureChecked := false
 	name := binding.Name
 	var library *stdlib.Symbol
 	if binding.Library != nil {
@@ -6565,7 +6728,7 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 						}
 					}
 					if parameterIndex < 0 {
-						c.error(argument.Value.Span(), fmt.Sprintf("%s() has no keyword argument %s", name, argument.Name))
+						c.error(argument.Value.Span(), fmt.Sprintf("%s() has no named argument %s", name, argument.Name))
 					}
 				} else {
 					for position < len(specialized.Parameters) && specialized.Parameters[position].Keyword {
@@ -6593,15 +6756,32 @@ func (c *Checker) checkImportedArguments(span token.Span, binding resolver.Bindi
 			}
 		}
 	} else if binding.Member != nil {
-		parameters = append(parameters, binding.Member.Parameters...)
-		required = binding.Member.Required
+		signature := binding.Member.Parameters
+		parameters = callsignature.Types(signature)
 		variadic = binding.Member.Variadic
+		bridges := []resolver.NativeResultBridge(nil)
+		if binding.Export != nil {
+			bridges = binding.Export.ParameterResultBridges
+		}
+		parameterIndexes = c.checkCallSignature(span, name, signature, variadic, arguments, actual, nil, bridges)
+		signatureChecked = true
+		if sourceBinding(binding) {
+			c.result.CallSignatures[call] = append([]callsignature.Parameter(nil), signature...)
+		}
 	} else if binding.Export != nil {
-		parameters = append(parameters, binding.Export.Parameters...)
-		required = binding.Export.Required
+		signature := binding.Export.Parameters
+		parameters = callsignature.Types(signature)
 		variadic = binding.Export.Variadic
+		parameterIndexes = c.checkCallSignature(span, name, signature, variadic, arguments, actual, nil, binding.Export.ParameterResultBridges)
+		signatureChecked = true
+		if sourceBinding(binding) {
+			c.result.CallSignatures[call] = append([]callsignature.Parameter(nil), signature...)
+		}
 	}
-	if len(parameterIndexes) == 0 && (len(arguments) < required || (!variadic && len(arguments) > len(parameters))) {
+	if signatureChecked {
+		return library
+	}
+	if !signatureChecked && len(parameterIndexes) == 0 && (len(arguments) < required || (!variadic && len(arguments) > len(parameters))) {
 		if variadic {
 			c.error(span, fmt.Sprintf("%s() expects at least %d arguments, got %d", name, required, len(arguments)))
 		} else {
@@ -6934,12 +7114,25 @@ func (c *Checker) checkDeclarationArgumentsWithBindings(span token.Span, member 
 		typeParameters[name] = true
 	}
 	byName := map[string]declaration.Parameter{}
+	positionalNames := map[string]bool{}
 	for _, parameter := range member.Parameters {
-		byName[parameter.Name] = parameter
+		if parameter.Keyword {
+			byName[parameter.Name] = parameter
+		} else {
+			positionalNames[parameter.Name] = true
+		}
 	}
 	used := map[string]bool{}
+	usedNamed := map[string]bool{}
 	position := 0
 	for index, argument := range arguments {
+		if argument.Name != "" {
+			if usedNamed[argument.Name] {
+				c.error(argument.Value.Span(), fmt.Sprintf("%s() receives argument %s more than once", member.Name, argument.Name))
+				continue
+			}
+			usedNamed[argument.Name] = true
+		}
 		var parameter declaration.Parameter
 		found := false
 		if argument.Name != "" {
@@ -6962,7 +7155,11 @@ func (c *Checker) checkDeclarationArgumentsWithBindings(span token.Span, member 
 		}
 		if !found {
 			if argument.Name != "" {
-				c.error(argument.Value.Span(), fmt.Sprintf("%s() has no keyword argument %s", member.Name, argument.Name))
+				if positionalNames[argument.Name] {
+					c.error(argument.Value.Span(), fmt.Sprintf("%s is a positional-only parameter of %s()", argument.Name, member.Name))
+				} else {
+					c.error(argument.Value.Span(), fmt.Sprintf("%s() has no named argument %s", member.Name, argument.Name))
+				}
 			} else {
 				c.error(span, fmt.Sprintf("%s() expects at most %d arguments, got %d", member.Name, len(member.Parameters), len(arguments)))
 			}
@@ -7570,47 +7767,120 @@ func (c *Checker) methodReturnType(method *ast.MethodStatement) types.Type {
 	return c.typeFromRef(method.ReturnType)
 }
 
-func (c *Checker) checkArguments(span token.Span, method *ast.MethodStatement, arguments []ast.CallArgument, actual []types.Type) {
+func (c *Checker) checkArguments(call *ast.CallExpression, method *ast.MethodStatement, actual []types.Type) {
 	if method == nil {
-		if len(arguments) > 0 {
-			c.error(span, "constructor takes no arguments")
+		if len(call.Arguments) > 0 {
+			c.error(call.Span(), "constructor takes no arguments")
 		}
 		return
 	}
-	required := 0
-	variadic := false
-	for _, parameter := range method.Parameters {
-		if parameter.Rest || parameter.KeywordRest {
-			variadic = true
+	signature := c.signatureFromMethod(method)
+	names := make([]string, len(method.Parameters))
+	for index, parameter := range method.Parameters {
+		names[index] = parameter.Name
+	}
+	c.checkCallSignature(call.Span(), method.Name, signature.parameters, signature.variadic, call.Arguments, actual, names, nil)
+	c.result.CallSignatures[call] = append([]callsignature.Parameter(nil), signature.parameters...)
+}
+
+func (c *Checker) checkCallSignature(span token.Span, name string, parameters []callsignature.Parameter, variadic bool, arguments []ast.CallArgument, actual []types.Type, sourceNames []string, resultBridges []resolver.NativeResultBridge) []int {
+	indexes := make([]int, len(arguments))
+	for index := range indexes {
+		indexes[index] = -1
+	}
+	used := make([]bool, len(parameters))
+	position := 0
+	for index, argument := range arguments {
+		parameterIndex := -1
+		if argument.Name != "" {
+			for candidate, parameter := range parameters {
+				if parameter.Kind == callsignature.NamedOnly && parameter.Label == argument.Name {
+					parameterIndex = candidate
+					break
+				}
+			}
+			if parameterIndex < 0 {
+				positionalOnly := false
+				for candidate, sourceName := range sourceNames {
+					if candidate < len(parameters) && parameters[candidate].Kind == callsignature.Positional && sourceName == argument.Name {
+						positionalOnly = true
+						break
+					}
+				}
+				if positionalOnly {
+					c.error(argument.Value.Span(), fmt.Sprintf("%s is a positional-only parameter of %s()", argument.Name, name))
+				} else {
+					c.error(argument.Value.Span(), fmt.Sprintf("%s() has no named argument %s", name, argument.Name))
+				}
+			}
+		} else {
+			for position < len(parameters) && parameters[position].Kind != callsignature.Positional {
+				position++
+			}
+			if position < len(parameters) {
+				parameterIndex = position
+				position++
+			} else if variadic && len(parameters) > 0 {
+				parameterIndex = len(parameters) - 1
+			} else {
+				c.error(argument.Value.Span(), fmt.Sprintf("%s() does not accept this positional argument", name))
+			}
+		}
+		indexes[index] = parameterIndex
+		if parameterIndex < 0 {
 			continue
 		}
-		if parameter.Default == nil && !parameter.Keyword {
-			required++
+		if used[parameterIndex] && !(variadic && parameterIndex == len(parameters)-1) {
+			label := parameters[parameterIndex].Label
+			if label == "" && parameterIndex < len(sourceNames) {
+				label = sourceNames[parameterIndex]
+			}
+			c.error(argument.Value.Span(), fmt.Sprintf("%s() receives argument %s more than once", name, label))
+			continue
 		}
+		used[parameterIndex] = true
 	}
-	if len(arguments) < required || (!variadic && len(arguments) > len(method.Parameters)) {
-		c.error(span, fmt.Sprintf("%s() expects %d..%d arguments, got %d", method.Name, required, len(method.Parameters), len(arguments)))
-		return
-	}
-	for i, argumentType := range actual {
-		if i >= len(method.Parameters) {
-			break
+	for index, parameter := range parameters {
+		if parameter.Presence != callsignature.Required || used[index] || variadic && index == len(parameters)-1 {
+			continue
 		}
-		expected := c.typeFromRef(method.Parameters[i].Type)
-		if method.Parameters[i].Type.Empty() || method.Parameters[i].Rest || method.Parameters[i].KeywordRest {
+		label := parameter.Label
+		if label == "" {
+			label = strconv.Itoa(index + 1)
+		}
+		c.error(span, fmt.Sprintf("%s() is missing required argument %s", name, label))
+	}
+	for argumentIndex, parameterIndex := range indexes {
+		if parameterIndex < 0 || parameterIndex >= len(parameters) {
+			continue
+		}
+		expected := parameters[parameterIndex].Type
+		argumentType := actual[argumentIndex]
+		if expected.Kind == types.Any || expected.Kind == types.Invalid {
 			if c.inferenceOnly {
-				if pending := c.pendingEmptyCollection(arguments[i].Value); pending != nil {
-					c.markEmptyCollectionEscape(pending, arguments[i].Value.Span())
+				if pending := c.pendingEmptyCollection(arguments[argumentIndex].Value); pending != nil {
+					c.markEmptyCollectionEscape(pending, arguments[argumentIndex].Value.Span())
 				}
 			}
 			continue
 		}
-		argumentType = c.contextualizeCollectionLiteral(arguments[i].Value, expected, argumentType)
-		actual[i] = argumentType
-		if !c.assignable(arguments[i].Value, expected, argumentType) {
-			c.error(arguments[i].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", i+1, method.Name, argumentType, expected))
+		argumentType = c.contextualizeCollectionLiteral(arguments[argumentIndex].Value, expected, argumentType)
+		actual[argumentIndex] = argumentType
+		bridge := resolver.NativeResultBridge{}
+		if parameterIndex < len(resultBridges) {
+			bridge = resultBridges[parameterIndex]
+		}
+		assignable := false
+		if bridge.Kind != "" {
+			assignable = c.checkNativeResultBridge(arguments[argumentIndex].Value, expected, argumentType, bridge)
+		} else {
+			assignable = c.assignable(arguments[argumentIndex].Value, expected, argumentType)
+		}
+		if !assignable {
+			c.error(arguments[argumentIndex].Value.Span(), fmt.Sprintf("argument %d to %s() has type %s, expected %s", argumentIndex+1, name, argumentType, expected))
 		}
 	}
+	return indexes
 }
 
 func fromTypeRef(ref ast.TypeRef) types.Type {

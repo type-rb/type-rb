@@ -40,7 +40,7 @@ class SendReceiptJob < Job
 		scope
 	end
 
-	def helper(value: ReceiptID?): ReceiptID?
+	def helper(value: ReceiptID?, *, trace: Boolean = false): ReceiptID?
 		return value
 	end
 
@@ -75,7 +75,11 @@ end
 	if len(class.Methods) != 2 || len(class.Directives) != 3 {
 		t.Fatalf("class signature facts are incomplete: %#v", class)
 	}
-	helperParameter := class.Methods[0].Parameters[0].Type
+	helper := class.Methods[0]
+	if len(helper.Parameters) != 2 || !helper.Parameters[1].NamedOnly || !helper.Parameters[1].Optional {
+		t.Fatalf("named-only parameter facts are incomplete: %#v", helper.Parameters)
+	}
+	helperParameter := helper.Parameters[0].Type
 	if helperParameter.Representation == nil || helperParameter.Representation.Kind != "int" || !helperParameter.Representation.Nullable {
 		t.Fatalf("nullable newtype representation is missing: %#v", helperParameter)
 	}

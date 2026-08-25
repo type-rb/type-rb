@@ -697,7 +697,7 @@ func TestRubyCompatibilityForNamespacesKeywordsSettersAndSingletonClass(t *testi
 	source := []byte(`import trb/platform/ruby/native
 
 class Admin::Post < ActiveRecord::Base
-  def configure(cache:: Boolean = false, required:, raw: nil): Boolean
+  def configure(*, cache: Boolean = false, required:, raw: nil): Boolean
     return cache
   end
 

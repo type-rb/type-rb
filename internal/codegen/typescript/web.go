@@ -81,9 +81,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	g.line("type TrbWebContext = __trb_web.Context;")
 	g.line("type TrbWebResponse = __trb_web.Response;")
 	g.line("type TrbWebServerConfig = { host: string; port: number; body_limit_bytes: number; shutdown_timeout_milliseconds: number };")
-	g.line("function trb_web_request(method: string, path: string, query_string: string, headers: __trb_http.Headers, body: __trb_http.Body): TrbWebRequest { return new __trb_web.Request(new __trb_http.HttpMethod(method), path, query_string, headers, body); }")
-	g.line("function trb_web_context(request: TrbWebRequest, path_parameters: Record<string, string>): TrbWebContext { return new __trb_web.Context(request, path_parameters); }")
-	g.line("function trb_web_response(status: number, headers: __trb_http.Headers, body: __trb_http.Body): TrbWebResponse { return new __trb_web.Response(status, headers, body); }")
+	g.line("function trb_web_request(method: string, path: string, query_string: string, headers: __trb_http.Headers, body: __trb_http.Body): TrbWebRequest { return new __trb_web.Request({ method: new __trb_http.HttpMethod(method), path, query_string, headers, body }); }")
+	g.line("function trb_web_context(request: TrbWebRequest, path_parameters: Record<string, string>): TrbWebContext { return new __trb_web.Context({ request, path_parameters }); }")
+	g.line("function trb_web_response(status: number, headers: __trb_http.Headers, body: __trb_http.Body): TrbWebResponse { return new __trb_web.Response({ status, headers, body }); }")
 	g.webProtocolResponses()
 	if len(manifest.Middlewares) > 0 {
 		g.webNext()

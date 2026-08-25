@@ -176,7 +176,7 @@ func ParseConfiguration(program *ast.Program) (Config, error) {
 	seen := map[string]bool{}
 	for _, argument := range call.Arguments {
 		if argument.Name == "" {
-			return Config{}, fmt.Errorf("SQLAdapter.new accepts keyword arguments only")
+			return Config{}, fmt.Errorf("SQLAdapter.new accepts named arguments only")
 		}
 		if seen[argument.Name] {
 			return Config{}, fmt.Errorf("SQLAdapter.new receives %s more than once", argument.Name)

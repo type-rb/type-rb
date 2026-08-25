@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -98,7 +98,8 @@ purpose-specific mouse, change, form, and keyboard event types. Its typed
 and `set(value)` members while generated TSX uses React `useState`.
 
 The implemented language includes functions, typed first-class function values
-with lexical capture and checked Result control flow, and classes, modules and
+with lexical capture and checked Result control flow, positional-only and
+bare-`*` named-only parameters with callee-owned defaults, and classes, modules and
 generic interfaces, records, ordinary and raw-value enums, payload enums as sum
 types, enum instance methods, transparent `alias` declarations, nominal
 `newtype` declarations over concrete non-nullable representations, explicit
@@ -198,7 +199,7 @@ start a generated Go, Ruby, or TypeScript HTTP server with `serve()`. The
 `trb init --mode <target> --template web` command creates a buildable portable
 API project with file-based routing and an explicit editable middleware stack.
 The optional `configure_server` value sets host, port, request-body limit, and
-graceful-shutdown timeout through typed keyword arguments. Every adapter
+graceful-shutdown timeout through typed named arguments. Every adapter
 validates that configuration before binding, handles SIGINT and SIGTERM, stops
 accepting new work, and gives active requests the configured time to finish.
 Unhandled handler failures become a portable JSON 500 response. Before

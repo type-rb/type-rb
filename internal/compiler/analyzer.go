@@ -46,6 +46,7 @@ type parseOptions struct {
 	goModule          string
 	rubyLoader        string
 	typeScriptRuntime string
+	packageAliases    string
 }
 
 func NewAnalyzer() *Analyzer {
@@ -89,8 +90,10 @@ func (a *Analyzer) checkProgram(program *ast.Program, resolution resolver.Result
 
 func (a *Analyzer) parseUnit(unit SourceUnit, options Options, initial bool) (*ast.Program, []diagnostic.Diagnostic) {
 	identity := parseCacheIdentity{filename: unit.Filename, modulePath: unit.ModulePath, initial: initial}
+	aliases := packageAliasesForSource(unit, options.PackageAliases)
 	configured := parseOptions{
 		mode: options.Mode, goModule: options.GoModule, rubyLoader: options.RubyLoader, typeScriptRuntime: options.TypeScriptRuntime,
+		packageAliases: packageAliasFingerprint(aliases),
 	}
 
 	a.mu.Lock()
@@ -112,6 +115,7 @@ func (a *Analyzer) parseUnit(unit SourceUnit, options Options, initial bool) (*a
 
 	program, diagnostics := parse(sourceUnitContents(unit))
 	configureProgram(program, options, unit.ModulePath, unit.Package)
+	normalizeRubyNativeParameterSyntax(program, options.Mode, aliases)
 	if initial {
 		if unit.MainReplacement != "" {
 			renameTopLevelMethod(program, MainFunction, unit.MainReplacement)

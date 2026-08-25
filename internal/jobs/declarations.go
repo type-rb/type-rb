@@ -114,7 +114,7 @@ func discoverDeclarationJob(modulePath string, class packageextension.ProjectCla
 		return Job{}, err
 	}
 	for _, parameter := range perform.Parameters {
-		if parameter.Keyword || parameter.Rest || parameter.KeywordRest || parameter.Optional {
+		if parameter.NamedOnly || parameter.Keyword || parameter.Rest || parameter.KeywordRest || parameter.Optional {
 			return Job{}, fmt.Errorf("trb/jobs Job %s perform initially accepts required positional parameters only", class.Name)
 		}
 		typ := importProjectType(parameter.Type.Authored)

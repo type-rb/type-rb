@@ -182,12 +182,15 @@ func (*FieldStatement) statementNode() {}
 
 type Parameter struct {
 	Base
-	Name        string
-	Type        TypeRef
-	Default     Expression
-	Keyword     bool
-	Rest        bool
-	KeywordRest bool
+	Name                 string
+	Type                 TypeRef
+	Default              Expression
+	NamedOnly            bool
+	Keyword              bool
+	Rest                 bool
+	KeywordRest          bool
+	NativeKeyword        bool
+	NativeKeywordDefault Expression
 }
 
 type TypeParameter struct {

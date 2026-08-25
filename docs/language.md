@@ -44,6 +44,38 @@ def label(ready: Boolean): String
 end
 ```
 
+A bare `*` separates positional-only parameters from named-only parameters:
+
+```trb
+def request(
+	url: String,
+	*,
+	timeout: Integer = 30,
+	retry_count: Integer = 2,
+): String
+	return url
+end
+
+request("https://example.com", retry_count: 4)
+```
+
+Named-only parameters can be required, and named arguments may be reordered:
+
+```trb
+def connect(*, host: String, port: Integer = 443): String
+	return host + ":" + port.to_s()
+end
+
+connect(port: 8443, host: "example.com")
+```
+
+Parameters before `*` cannot be supplied by name, and positional arguments
+cannot follow a named argument. Positional defaults remain available for
+naturally ordered APIs. Explicit argument expressions run left to right;
+omitted defaults run at the selected callee's entry in declaration order.
+Record construction labels are field labels and follow their existing record
+rules.
+
 Writing `: Void` on a `def` or `fn` declaration is an error; omit the return
 annotation instead. `Void` appears in function types when a stored callable
 has no result, for example `(String) -> Void`.

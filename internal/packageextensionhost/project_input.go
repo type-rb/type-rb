@@ -141,7 +141,7 @@ func (r projectInputResolver) exportEnum(modulePath string, enum *ast.EnumStatem
 		for _, parameter := range member.Parameters {
 			converted.Parameters = append(converted.Parameters, packageextension.ProjectParameter{
 				Name: parameter.Name, Type: r.typeUse(modulePath, parameter.Type, typeParameters),
-				Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
+				NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
 				Optional: parameter.Default != nil, Span: exportSourceSpan(parameter.Span()),
 			})
 		}
@@ -177,7 +177,7 @@ func (r projectInputResolver) exportClass(modulePath string, class *ast.ClassSta
 			for _, parameter := range node.Parameters {
 				method.Parameters = append(method.Parameters, packageextension.ProjectParameter{
 					Name: parameter.Name, Type: r.typeUse(modulePath, parameter.Type, methodTypeParameters),
-					Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
+					NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
 					Optional: parameter.Default != nil, Span: exportSourceSpan(parameter.Span()),
 				})
 			}

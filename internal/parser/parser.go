@@ -1362,11 +1362,27 @@ func (p *Parser) parseReturnType(tokens []token.Token) ast.TypeRef {
 
 func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 	var params []ast.Parameter
+	namedOnly := false
+	namedOnlyParameter := false
+	var separatorSpan token.Span
 	for _, part := range splitTopLevel(tokens, ",") {
 		if len(part) == 0 {
 			continue
 		}
-		param := ast.Parameter{Base: ast.Base{SourceSpan: spanOf(part)}}
+		if len(part) == 1 && part[0].Lexeme == "*" {
+			if namedOnly {
+				p.errorAt(part[0].Span, "named-only parameter separator * may appear only once")
+			} else {
+				namedOnly = true
+				separatorSpan = part[0].Span
+			}
+			continue
+		}
+		if len(part) == 1 && part[0].Lexeme == "**" {
+			p.errorAt(part[0].Span, "bare ** is not supported; only bare * may separate named-only parameters")
+			continue
+		}
+		param := ast.Parameter{Base: ast.Base{SourceSpan: spanOf(part)}, NamedOnly: namedOnly}
 		i := 0
 		if part[i].Lexeme == "*" || part[i].Lexeme == "**" {
 			param.Rest = part[i].Lexeme == "*"
@@ -1379,7 +1395,8 @@ func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 		param.Name = part[i].Lexeme
 		i++
 		if i < len(part) && part[i].Lexeme == "::" {
-			param.Keyword = true
+			p.migrationErrorAt(part[i].Span, "typed keyword parameter syntax name:: Type was removed; add bare * and write name: Type")
+			param.NamedOnly = true
 			i++
 			equal := topLevelIndex(part[i:], "=")
 			typeEnd := len(part)
@@ -1392,6 +1409,7 @@ func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 				param.Default, _ = p.parseExpression(part[equal+1:])
 			}
 			params = append(params, param)
+			namedOnlyParameter = namedOnlyParameter || namedOnly
 			continue
 		}
 		colon := topLevelIndex(part[i:], ":")
@@ -1399,14 +1417,9 @@ func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 		if colon >= 0 {
 			colon += i
 			if colon+1 >= len(part) {
-				param.Keyword = true
+				param.NativeKeyword = true
 				params = append(params, param)
-				continue
-			}
-			if !looksLikeType(part[colon+1]) {
-				param.Keyword = true
-				param.Default, _ = p.parseExpression(part[colon+1:])
-				params = append(params, param)
+				namedOnlyParameter = namedOnlyParameter || namedOnly
 				continue
 			}
 			typeEnd := len(part)
@@ -1417,28 +1430,40 @@ func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 			param.Type = p.parseTypeRef(part[colon+1 : typeEnd])
 			if equal >= 0 {
 				param.Default, _ = p.parseExpression(part[equal+1:])
+			} else if rubyNativeKeywordCandidate(part[colon+1]) {
+				// Keep the deterministic TypeRB type parse above authoritative.
+				// Explicit Ruby-native source may reinterpret this separately stored
+				// candidate after imports and compilation mode are known.
+				param.NativeKeyword = true
+				param.NativeKeywordDefault, _ = p.parseExpression(part[colon+1:])
 			}
 		} else if equal >= 0 {
 			equal += i
 			param.Default, _ = p.parseExpression(part[equal+1:])
 		}
 		params = append(params, param)
+		namedOnlyParameter = namedOnlyParameter || namedOnly
+	}
+	if namedOnly && !namedOnlyParameter {
+		p.errorAt(separatorSpan, "named-only parameter separator * must be followed by a parameter")
 	}
 	return params
 }
 
-func looksLikeType(tok token.Token) bool {
+// rubyNativeKeywordCandidate is metadata for the opt-in Ruby-native checker;
+// it never decides how portable TypeRB parameter syntax is parsed.
+func rubyNativeKeywordCandidate(tok token.Token) bool {
 	if tok.Lexeme == "" {
-		return false
+		return true
 	}
 	if tok.Lexeme == "(" || tok.Lexeme[0] >= 'A' && tok.Lexeme[0] <= 'Z' {
-		return true
+		return false
 	}
 	switch strings.ToLower(tok.Lexeme) {
 	case "string", "int", "integer", "float", "float64", "bool", "boolean", "any", "void", "array", "hash", "map":
-		return true
+		return false
 	}
-	return false
+	return true
 }
 
 func (p *Parser) parseIf() ast.Statement {

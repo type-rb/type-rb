@@ -21,13 +21,13 @@ nonzero status when the report contains errors, while still returning the
 available sources, modules, and diagnostics. Command-line usage errors remain
 ordinary CLI errors on standard error.
 
-## Version 2 snapshot
+## Version 3 snapshot
 
 Every report contains these top-level fields:
 
 | Field | Meaning |
 | --- | --- |
-| `protocolVersion` | Integer version of this JSON contract. Version 2 adds authored `newtype` declarations. |
+| `protocolVersion` | Integer version of this JSON contract. Version 3 adds named-only parameter metadata. |
 | `compilerVersion` | Exact TypeRB compiler build that produced the snapshot. |
 | `mode` | The configured or standalone `go`, `ruby`, or `typescript` mode. |
 | `sources` | Exact source paths and contents analyzed by the compiler service. `encoding` is `utf-8` or `base64`; `content` uses that encoding. |
@@ -47,7 +47,9 @@ class method from an instance method. Semantic types use a recursive
 `kind`/`name`/`arguments` representation and retain nullability and readonly
 facts. A `newtype` declaration has declaration kind `newtype` and exposes its
 concrete representation through `type`; a transparent alias remains
-`type_alias`. Declaration IDs are compiler-owned opaque identifiers within the
+`type_alias`. A parameter sets `namedOnly` when its label participates in
+source call binding; consumers must not interpret such a parameter as
+positional. Declaration IDs are compiler-owned opaque identifiers within the
 protocol: consumers should store and compare them, not parse their spelling.
 
 Compiler-generated TypeRB helpers and implicit runtime imports are omitted.
@@ -63,7 +65,7 @@ shape receives a new protocol version. TypeRB is currently alpha, so tooling
 that requires reproducible output should pin the TypeRB compiler version even
 when the protocol version is unchanged.
 
-Version 2 remains a one-shot, read-only CLI boundary. It does not
+Version 3 remains a one-shot, read-only CLI boundary. It does not
 expose mutable syntax trees, typed IR objects, backend hooks, target source,
 an embedded Go SDK, or a long-lived JSON-RPC server. It is also separate from
 the package extension protocol: importing a package never runs a compiler

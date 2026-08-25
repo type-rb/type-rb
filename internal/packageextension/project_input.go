@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const ProjectDeclarationInputProtocolVersion = 3
+const ProjectDeclarationInputProtocolVersion = 4
 
 // ProjectDeclarationInput is a versioned, read-only snapshot of source
 // declarations that a declaration provider may inspect. It intentionally
@@ -81,6 +81,7 @@ type ProjectMethod struct {
 type ProjectParameter struct {
 	Name        string         `json:"name"`
 	Type        ProjectTypeUse `json:"type"`
+	NamedOnly   bool           `json:"namedOnly,omitempty"`
 	Keyword     bool           `json:"keyword,omitempty"`
 	Rest        bool           `json:"rest,omitempty"`
 	KeywordRest bool           `json:"keywordRest,omitempty"`
