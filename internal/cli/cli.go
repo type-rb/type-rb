@@ -49,7 +49,7 @@ import (
 // linker flag while local and branch source builds retain a useful development
 // version. A tagged module installation resolves its version from Go build
 // information in version.go.
-var Version = "0.3.28-dev"
+var Version = "0.3.29-dev"
 
 type buildArtifactKind string
 
