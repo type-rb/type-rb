@@ -12,7 +12,7 @@ import (
 
 func TestBuildExposesAuthoredSourcesModulesAndTypedDeclarations(t *testing.T) {
 	root := t.TempDir()
-	modelsSource := "record User\n\tname: String\nend\n\nenum Status\n\tReady = \"ready\"\n\tFailed = \"failed\"\nend\n\ninterface Loader<T>\n\tload(id: Integer): T\nend\n\nclass Service\n\t@_name: String\n\n\tdef initialize(name: String)\n\t\t@_name = name\n\t\treturn\n\tend\n\n\tdef name(): String\n\t\treturn @_name\n\tend\n\n\tdef self.kind(): String\n\t\treturn \"service\"\n\tend\nend\n\nalias UserList = Array<User>\nnewtype UserID = Integer\n\nDEFAULT_NAME := \"guest\"\n\ndef make_user(name: String = DEFAULT_NAME): User\n\treturn User.new(name: name)\nend\n"
+	modelsSource := "record User\n\tname: String\nend\n\nenum Status\n\tReady = \"ready\"\n\tFailed = \"failed\"\nend\n\ninterface Loader<T>\n\tload(id: Integer): T\nend\n\nclass Service\n\t@_name: String\n\n\tdef initialize(name: String)\n\t\t@_name = name\n\t\treturn\n\tend\n\n\tdef name(): String\n\t\treturn @_name\n\tend\n\n\tdef self.kind(): String\n\t\treturn \"service\"\n\tend\nend\n\nalias UserList = Array<User>\nnewtype UserID = Integer\n\nDEFAULT_NAME := \"guest\"\n\ndef make_user(name: String = DEFAULT_NAME, *, notify: Boolean = false): User\n\treturn User.new(name: name)\nend\n"
 	units := []compiler.SourceUnit{
 		{
 			Filename: filepath.Join(root, "main.trb"), ModulePath: "main", Package: "main",
@@ -49,7 +49,7 @@ func TestBuildExposesAuthoredSourcesModulesAndTypedDeclarations(t *testing.T) {
 	}
 
 	makeUser := requireDeclaration(t, report, DeclarationFunction, "make_user")
-	if makeUser.ReturnType == nil || makeUser.ReturnType.Kind != "named" || makeUser.ReturnType.Name != "User" || len(makeUser.Parameters) != 1 || !makeUser.Parameters[0].Optional {
+	if makeUser.ReturnType == nil || makeUser.ReturnType.Kind != "named" || makeUser.ReturnType.Name != "User" || len(makeUser.Parameters) != 2 || !makeUser.Parameters[0].Optional || !makeUser.Parameters[1].NamedOnly || !makeUser.Parameters[1].Optional {
 		t.Fatalf("unexpected function declaration: %#v", makeUser)
 	}
 	service := requireDeclaration(t, report, DeclarationClass, "Service")

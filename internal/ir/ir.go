@@ -701,13 +701,14 @@ func (*EnumConstruct) irExpression() {}
 // node so every backend and the REPL share one checked semantic boundary.
 type EnumCall struct {
 	ExprBase
-	EnumName  string
-	Method    string
-	Receiver  Expression
-	Arguments []CallArgument
-	Reference *Reference
-	RawType   types.Type
-	RawValues []EnumRawValue
+	EnumName      string
+	Method        string
+	Receiver      Expression
+	Arguments     []CallArgument
+	CallSignature []callsignature.Parameter
+	Reference     *Reference
+	RawType       types.Type
+	RawValues     []EnumRawValue
 }
 
 type EnumRawValue struct {

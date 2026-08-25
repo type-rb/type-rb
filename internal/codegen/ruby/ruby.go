@@ -808,7 +808,11 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.EnumCall:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
-			parts[index] = g.expr(argument.Value)
+			value := g.expr(argument.Value)
+			if argument.Name != "" {
+				value = argument.Name + ": " + value
+			}
+			parts[index] = value
 		}
 		switch n.Method {
 		case "raw_value":

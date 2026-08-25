@@ -18,7 +18,7 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-const ProtocolVersion = 2
+const ProtocolVersion = 3
 
 type Report struct {
 	ProtocolVersion int                         `json:"protocolVersion"`

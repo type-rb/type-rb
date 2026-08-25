@@ -988,7 +988,13 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			return &ir.Conversion{ExprBase: base, Kind: kind, Value: value}
 		}
 		if semantic, ok := l.checked.EnumCalls[n]; ok {
-			result := &ir.EnumCall{ExprBase: base, EnumName: semantic.EnumName, Method: semantic.Method, Reference: l.reference(n.Callee)}
+			result := &ir.EnumCall{
+				ExprBase:      base,
+				EnumName:      semantic.EnumName,
+				Method:        semantic.Method,
+				CallSignature: append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
+				Reference:     l.reference(n.Callee),
+			}
 			if semantic.Receiver != nil {
 				result.Receiver = l.expression(semantic.Receiver)
 			} else {

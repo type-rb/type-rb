@@ -680,7 +680,8 @@ boundary for nominal source newtypes. The compiler host
 validates and copies that data into its private semantic representation.
 
 The Jobs and ORM declaration providers also receive versioned, validated
-Project Declaration Input snapshots. Version 3 contains canonical module and
+Project Declaration Input snapshots. Version 4 adds named-only parameter
+identity to the version 3 snapshot. It otherwise contains canonical module and
 import identity, transparent type aliases, nominal newtypes with concrete
 representations, enum and class declarations, method signatures, authored,
 resolved, and boundary representation types, declarative class-body call

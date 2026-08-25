@@ -1517,7 +1517,7 @@ func (g *generator) expr(expression ir.Expression) string {
 					}
 					name += "[" + strings.Join(items, ", ") + "]"
 				}
-				parts = g.sourceCallArguments(n, parts)
+				parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
 				values := append([]string{g.expr(member.Receiver)}, g.executionArguments(n, parts)...)
 				return name + "(" + strings.Join(values, ", ") + ")"
 			}
@@ -1534,7 +1534,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
-		parts = g.sourceCallArguments(n, parts)
+		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
 		parts = g.executionArguments(n, parts)
 		args = strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
@@ -1601,6 +1601,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		case "from_raw":
 			return g.rawEnumFromValue(n, parts[0])
 		default:
+			parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
 			parts = append([]string{g.expr(n.Receiver)}, parts...)
 			if g.execution != nil && g.execution.EnumCalls[n] {
 				parts = append(parts[:1], append([]string{"__trbScope"}, parts[1:]...)...)
@@ -1658,13 +1659,13 @@ func (g *generator) expr(expression ir.Expression) string {
 	}
 }
 
-func (g *generator) sourceCallArguments(call *ir.Call, authored []string) []string {
-	if call == nil || !callsignature.HasNamedOnly(call.CallSignature) {
+func (g *generator) sourceCallArguments(arguments []ir.CallArgument, signature []callsignature.Parameter, authored []string) []string {
+	if !callsignature.HasNamedOnly(signature) {
 		return authored
 	}
 	positional := []string{}
 	named := []string{}
-	for index, argument := range call.Arguments {
+	for index, argument := range arguments {
 		if argument.Name == "" {
 			positional = append(positional, authored[index])
 		} else {
@@ -1673,7 +1674,7 @@ func (g *generator) sourceCallArguments(call *ir.Call, authored []string) []stri
 	}
 	requiredPositional := 0
 	hasOptionalPositional := false
-	for _, parameter := range call.CallSignature {
+	for _, parameter := range signature {
 		if parameter.Kind != callsignature.Positional {
 			continue
 		}
