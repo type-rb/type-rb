@@ -764,6 +764,11 @@ func comparisonSignatures(column Column, queryType string) []declaration.Signatu
 	result := []declaration.Signature{
 		signature([]string{"=", "!="}, types.UnionOf(column.Type, subqueryOf(column.Type))),
 	}
+	if column.Type.Kind == types.String {
+		likeType := column.Type
+		likeType.Nullable = false
+		result = append(result, signature([]string{"LIKE"}, likeType))
+	}
 	switch column.Type.Kind {
 	case types.Int, types.Float, types.String:
 		orderedType := column.Type

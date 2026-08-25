@@ -187,6 +187,15 @@ def recent_posts(): DbResult<Array<Post>>
 end
 ```
 
+The three-argument form supports typed comparison operators. String columns
+also accept `LIKE`; `%` matches any sequence and `_` matches one character.
+The pattern is passed as a bound value, while matching and case sensitivity
+follow the database and its collation.
+
+```trb
+matching := Post.where("title", "LIKE", "%TypeRB%")
+```
+
 Use prefix `try` when a function performs more work after a successful
 database operation. Use `catch` when the caller resolves the database error
 locally:

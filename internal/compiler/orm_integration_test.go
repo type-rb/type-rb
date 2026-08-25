@@ -584,6 +584,7 @@ func assertORMLiteralCompletions(t *testing.T, context languageservice.Context) 
 	}{
 		{source: `Product.where("pr`, label: "price", insert: `price"`},
 		{source: `Product.where("price", ">`, label: ">=", insert: `>="`},
+		{source: `Product.where("name", "L`, label: "LIKE", insert: `LIKE"`},
 		{source: `Product.where().order(price: :d`, label: "desc", insert: "desc"},
 		{source: `Product.sum(:pr`, label: "price", insert: "price"},
 		{source: `Product.minimum(:na`, label: "name", insert: "name"},
@@ -606,10 +607,14 @@ func assertORMLiteralCompletions(t *testing.T, context languageservice.Context) 
 			t.Fatalf("Boolean comparison completion is missing %q: %#v", label, active)
 		}
 	}
-	for _, label := range []string{"<", "<=", ">", ">="} {
+	for _, label := range []string{"<", "<=", ">", ">=", "LIKE"} {
 		if _, ok := find(active, label); ok {
 			t.Fatalf("Boolean comparison completion unexpectedly includes %q: %#v", label, active)
 		}
+	}
+	price := complete(`Product.where("price", "`)
+	if _, ok := find(price, "LIKE"); ok {
+		t.Fatalf("numeric comparison completion unexpectedly includes LIKE: %#v", price)
 	}
 	uniqueBy := complete(`Product.insert_if_absent(Product.build(name: "Widget", active: true), unique_by: `)
 	for _, label := range []string{"[:id]", "[:name]"} {
@@ -776,7 +781,7 @@ end
 def main()
 	ids := [1, 2, 3]
 	bounds := 6...8
-	puts(Product.where("price", ">=", 10).where(id: ids).not(id: 3...5).not(id: bounds).where(discount: nil).not(discount: nil).all())
+	puts(Product.where("price", ">=", 10).where("name", "LIKE", "Wid%").where(id: ids).not(id: 3...5).not(id: bounds).where(discount: nil).not(discount: nil).all())
 end
 `
 	artifacts, err := compile(valid)
@@ -785,7 +790,7 @@ end
 	}
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
-		`[]string{"price"}`, `[]string{">="}`, `[]string{"id"}`, `[]string{"IN"}`,
+		`[]string{"price"}`, `[]string{">="}`, `[]string{"name"}`, `[]string{"LIKE"}`, `[]string{"id"}`, `[]string{"IN"}`,
 		`[]string{"RANGE_EXCLUSIVE"}`, `trbOrmRange{start: 3, end: 5, exclusive: true}`,
 		`return trbOrmRange{start: bounds[0], end: bounds[1], exclusive: bounds[2] != 0}`,
 		`if values.Len() == 0 {`, `return "1 = 0"`,
@@ -800,6 +805,7 @@ end
 	}{
 		{source: "Product.where(\"missing\", \"=\", 1)", want: `argument 1 to where() must be one of`},
 		{source: "Product.where(\"price\", \"contains\", 1.0)", want: `argument 2 to where() must be one of`},
+		{source: `Product.where("price", "LIKE", "1%")`, want: `argument 2 to where() must be one of`},
 		{source: "Product.where(\"price\", \">=\", \"ten\")", want: `has type String, expected Float`},
 		{source: "Product.where(\"discount\", \">=\", nil)", want: `expected Float`},
 		{source: `Product.where(id: ["one", "two"])`, want: `expected Array<Integer>`},

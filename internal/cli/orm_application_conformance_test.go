@@ -310,6 +310,7 @@ def exercise(): DbResult<Integer>
 	puts(try TrbConformanceProduct.distinct().count())
 	puts(try TrbConformanceProduct.join(:category).left_join(:category).count())
 	puts(try TrbConformanceProduct.where(id: 1..1000000).count())
+	puts(try TrbConformanceProduct.where("name", "LIKE", "%irs%").count())
 	paged_products := try TrbConformanceProduct.order(id: :asc).limit(1).offset(1).all()
 	puts(paged_products.size())
 
@@ -432,6 +433,7 @@ true
 2
 2
 2
+1
 1
 1
 1
