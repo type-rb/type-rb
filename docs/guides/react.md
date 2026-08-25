@@ -15,6 +15,7 @@ cd react-app
 Create `main.trb`. Import the explicit React platform package and use a record
 for component props:
 
+<!-- trb-doc-test: react-first-component kind=program modes=typescript -->
 ```trb
 import { ReactNode, mount } from trb/platform/typescript/react
 

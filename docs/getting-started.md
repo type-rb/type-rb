@@ -44,6 +44,7 @@ layouts for each target.
 
 Create `hello.trb`:
 
+<!-- trb-doc-test: getting-started-standalone kind=program -->
 ```trb
 def main()
 	name := "TypeRB"
@@ -89,6 +90,7 @@ cd hello
 
 Create `main.trb`:
 
+<!-- trb-doc-test: getting-started-project kind=program -->
 ```trb
 def main()
 	puts("Hello from TypeRB")

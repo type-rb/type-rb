@@ -31,6 +31,7 @@ io.puts("Hello, TypeRB!")
 Portable built-in types expose receiver methods backed by the same contracts
 as `trb/std/numbers`, `trb/std/booleans`, and `trb/std/strings`:
 
+<!-- trb-doc-test: stdlib-scalars -->
 ```trb
 import trb/std/math
 import trb/std/strings

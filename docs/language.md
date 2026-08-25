@@ -46,6 +46,7 @@ end
 
 A bare `*` separates positional-only parameters from named-only parameters:
 
+<!-- trb-doc-test: language-named-only -->
 ```trb
 def request(
 	url: String,
@@ -266,6 +267,7 @@ alias LoadResult<T> = Result<T, LoadError>
 Use `newtype` when a domain value must remain distinct even if it has the same
 representation as another value:
 
+<!-- trb-doc-test: language-newtypes -->
 ```trb
 newtype UserId = Integer
 newtype ProductId = Integer
@@ -448,6 +450,7 @@ raw-value enum must declare a distinct raw value of the same type.
 A payload enum is TypeRB's closed sum-type model. Its alternatives may carry
 different typed data, and it may mix payload-bearing and payloadless variants:
 
+<!-- trb-doc-test: language-payload-enum -->
 ```trb
 enum Token
 	Text(value: String)
@@ -480,6 +483,7 @@ User-defined generics support payload enums, transparent aliases, records,
 classes, top-level functions, and instance methods with explicit type
 arguments:
 
+<!-- trb-doc-test: language-generic-types -->
 ```trb
 def identity<T>(value: T): T
 	return value
@@ -562,6 +566,7 @@ choice; complete branch bodies remain clearer as `if`/`else`.
 Integer and String literals can constrain data fields. An exhaustive `case`
 on a readonly literal field narrows the complete union value:
 
+<!-- trb-doc-test: language-discriminated-union -->
 ```trb
 record Created
 	status: 201
@@ -805,6 +810,7 @@ unmatched Array returns `nil`.
 
 `trb/std/result` provides `Result<T, E>` with `Ok` and `Err` variants:
 
+<!-- trb-doc-test: language-result-case -->
 ```trb
 import { Result } from trb/std/result
 
@@ -812,7 +818,7 @@ def unwrap(result: Result<Integer, String>): Integer
 	case result
 	when Result::Ok(value)
 		return value
-	when Result::Err(error)
+	when Result::Err(_error)
 		return 0
 	end
 end

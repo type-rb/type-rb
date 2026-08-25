@@ -85,6 +85,21 @@ unrelated full compiler suite; `scripts/pages-full-tests-required.sh` owns that
 conservative allowlist. Any unrecognized path, an Actions workflow change, or
 a manually dispatched run keeps `go test ./...` mandatory.
 
+Selected self-contained TypeRB examples are compiled directly from their
+Markdown fences during the focused website tests. Place the HTML comment
+`<!-- trb-doc-test: stable-example-id -->` immediately before a `trb` fence to
+check it in Go, Ruby, and TypeScript modes. A target-specific example may use a
+comment such as `<!-- trb-doc-test: browser-example modes=typescript -->`.
+Add `kind=program` before `modes` when the example represents a runnable file;
+the check then also requires a top-level `def main()`.
+Keep fragments, intentionally invalid examples, and examples that depend on
+other files unmarked; those belong in a purpose-built integration fixture.
+Run the focused check with:
+
+```sh
+go test ./internal/site -run TestPublishedDocumentationExamplesCompile
+```
+
 ## Development workflow
 
 Keep one grammar and portable semantics across modes. Target-specific APIs and
