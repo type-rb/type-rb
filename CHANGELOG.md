@@ -2,6 +2,20 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.30 - 2026-08-25
+
+### Language and compiler
+
+- Ruby generation now resolves namespace-imported portable functions to their
+  loaded definitions and preserves module-scoped private helper names inside
+  conditional and `Result` control flow. Valid calls no longer dispatch to
+  unrelated Ruby methods or fail because a private helper is undefined.
+  ([#513](https://github.com/type-rb/type-rb/pull/513))
+- TypeScript generation reserves its internal slice-operation variables, so
+  source variables such as `start` no longer trigger temporal-dead-zone errors
+  at runtime.
+  ([#513](https://github.com/type-rb/type-rb/pull/513))
+
 ## 0.3.29 - 2026-08-25
 
 ### Language and compiler
