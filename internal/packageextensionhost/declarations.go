@@ -73,6 +73,11 @@ func ExportDeclarationCatalog(provider string, catalog *declaration.Catalog) (pa
 		}
 		result.FunctionArgumentReferenceRules = append(result.FunctionArgumentReferenceRules, converted)
 	}
+	for _, rule := range catalog.ClassBodyDeclarationRules {
+		result.ClassBodyDeclarationRules = append(result.ClassBodyDeclarationRules, packageextension.DeclaredClassBodyDeclarationRule{
+			Package: rule.Package, Function: rule.Function, Owner: exportReference(rule.Owner),
+		})
+	}
 	for _, module := range sortedKeys(catalog.RuntimeTypesByModule) {
 		converted := packageextension.DeclaredModuleRuntimeTypes{ModulePath: module}
 		for _, typ := range catalog.RuntimeTypesByModule[module] {
@@ -125,6 +130,11 @@ func ImportDeclarationCatalog(source packageextension.DeclarationCatalog) (*decl
 			converted.Targets = append(converted.Targets, importReference(target))
 		}
 		result.FunctionArgumentReferenceRules = append(result.FunctionArgumentReferenceRules, converted)
+	}
+	for _, rule := range source.ClassBodyDeclarationRules {
+		result.ClassBodyDeclarationRules = append(result.ClassBodyDeclarationRules, declaration.ClassBodyDeclarationRule{
+			Package: rule.Package, Function: rule.Function, Owner: importReference(rule.Owner),
+		})
 	}
 	for _, runtime := range source.RuntimeTypes {
 		for _, typ := range runtime.Types {

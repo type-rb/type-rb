@@ -62,6 +62,12 @@ func TestReadRejectsPrivilegedOrMisownedDeclarations(t *testing.T) {
 		{name: "project rule", mutate: func(c *packageextension.DeclarationCatalog) {
 			c.FunctionBlockRules = []packageextension.DeclaredFunctionBlockRule{{Package: c.Provider, Function: "run", TypeArgument: 0}}
 		}, want: "project rules"},
+		{name: "class-body declaration rule", mutate: func(c *packageextension.DeclarationCatalog) {
+			c.ClassBodyDeclarationRules = []packageextension.DeclaredClassBodyDeclarationRule{{
+				Package: c.Provider, Function: "run",
+				Owner: packageextension.DeclaredReference{ModulePath: "app/job", Name: "ExampleJob"},
+			}}
+		}, want: "project rules"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -93,6 +99,17 @@ func TestReadRejectsAnEmptyFixedCatalog(t *testing.T) {
 	}
 }
 
+func TestReadExplainsDeclarationProtocolVersionTwoMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "declarations.json")
+	if err := os.WriteFile(path, []byte(`{"protocolVersion":2,"provider":"github.com/acme/pagy"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Read(Source{Package: "github.com/acme/pagy", Mode: "ruby", Module: "github.com/acme/pagy", Path: path})
+	if err == nil || !strings.Contains(err.Error(), "set protocolVersion to 3") || !strings.Contains(err.Error(), "otherwise unchanged") {
+		t.Fatalf("unexpected protocol migration error: %v", err)
+	}
+}
+
 func TestReadRequiresThePackageRootModule(t *testing.T) {
 	path := writeCatalog(t, packageextension.DeclarationCatalog{
 		ProtocolVersion: packageextension.DeclarationProtocolVersion,
@@ -108,8 +125,8 @@ func TestReadRequiresThePackageRootModule(t *testing.T) {
 
 func TestReadRejectsUnknownAndTrailingJSON(t *testing.T) {
 	for name, source := range map[string]string{
-		"unknown":  `{"protocolVersion":2,"provider":"github.com/acme/pagy","unknown":true}`,
-		"trailing": `{"protocolVersion":2,"provider":"github.com/acme/pagy"} {}`,
+		"unknown":  `{"protocolVersion":3,"provider":"github.com/acme/pagy","unknown":true}`,
+		"trailing": `{"protocolVersion":3,"provider":"github.com/acme/pagy"} {}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "declarations.json")

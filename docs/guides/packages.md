@@ -158,7 +158,7 @@ class ProductsController
 end
 ```
 
-The JSON file uses Declaration Protocol version 2, including its generic,
+The JSON file uses Declaration Protocol version 3, including its generic,
 literal-dependent, instance-member, and class-member type shapes. Its
 `provider` must exactly equal the canonical package name. For example, a
 catalog may declare `Pagy::Offset#page` and the `Pagy::Method#pagy` mixin
@@ -166,7 +166,7 @@ method:
 
 ```json
 {
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "provider": "github.com/acme/pagy",
   "types": [
     {
@@ -239,6 +239,10 @@ ordinary TypeRB package source. A declaration adapter instead projects
 target-native module exports and may require the separate runtime mapping
 below. Project-aware discovery remains limited to bundled compiler-integrated
 providers.
+
+Declaration Protocol version 3 adds a project-aware class-body declaration
+rule for bundled providers. Fixed providers cannot use project rules, so a
+fixed version 2 catalog migrates by changing only `protocolVersion` to `3`.
 
 ### Declaration adapters
 
@@ -675,9 +679,12 @@ the first consumers. The ORM provider discovers project models and schema
 metadata, while the Jobs provider derives typed enqueue methods from Job
 classes. Their resulting catalogs cross a versioned, JSON-serializable
 Declaration Protocol before resolution and checking. The current Declaration
-Protocol is version 2; parameters may explicitly identify a representation
-boundary for nominal source newtypes. The compiler host
-validates and copies that data into its private semantic representation.
+Protocol is version 3. It can identify a direct package-function call in one
+exact project class as declarative metadata: the checker still validates the
+ordinary call signature, while every backend omits the call from runtime
+output. Parameters may also explicitly identify a representation boundary for
+nominal source newtypes. The compiler host validates and copies that data into
+its private semantic representation.
 
 The Jobs and ORM declaration providers also receive versioned, validated
 Project Declaration Input snapshots. Version 5 adds record declarations and
@@ -709,6 +716,8 @@ The initial declaration catalog can describe:
 - generic and literal-dependent call signatures such as typed ORM projections;
 - parameters that explicitly accept a nominal source type through its concrete
   serialization or persistence representation;
+- exact direct class-body calls that are checked as ordinary package calls but
+  retained only as declaration metadata;
 - structured block contracts, including portable control and `Result`
   boundaries; and
 - located project-declaration references and runtime value types needed by the

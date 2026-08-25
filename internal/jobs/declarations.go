@@ -26,6 +26,12 @@ func Declarations(input packageextension.ProjectDeclarationInput) (*declaration.
 	}
 	catalog := declaration.NewCatalog()
 	for _, job := range jobs {
+		for _, function := range []string{"queue", "priority", "maximum_attempts"} {
+			catalog.ClassBodyDeclarationRules = append(catalog.ClassBodyDeclarationRules, declaration.ClassBodyDeclarationRule{
+				Package: PackageName, Function: function,
+				Owner: declaration.DeclarationReference{ModulePath: job.ModulePath, Name: job.Name},
+			})
+		}
 		declared := declaration.NewType(job.Name, "Job")
 		parameters := make([]declaration.Parameter, len(job.Parameters))
 		for index, parameter := range job.Parameters {

@@ -59,6 +59,12 @@ func declarationsForModels(models []Model, adapter string) *declaration.Catalog 
 				Targets: append([]declaration.DeclarationReference(nil), targets...),
 			})
 		}
+		for _, function := range []string{string(BelongsTo), string(HasMany), string(HasOne), "enum_column"} {
+			catalog.ClassBodyDeclarationRules = append(catalog.ClassBodyDeclarationRules, declaration.ClassBodyDeclarationRule{
+				Package: PackageName, Function: function,
+				Owner: declaration.DeclarationReference{ModulePath: model.ModulePath, Name: model.Name},
+			})
+		}
 	}
 	database := declaration.NewType("Database", "")
 	database.ClassMembers["transaction"] = transactionDeclaration(true)

@@ -549,7 +549,7 @@ switches.
   from an installed native declaration system is currently available only for
   TypeScript. A declaration adapter cannot execute compiler code, access
   compiler AST or typed IR, or emit target source.
-- A Ruby TypeRB package may select a fixed Declaration Protocol version 2
+- A Ruby TypeRB package may select a fixed Declaration Protocol version 3
   catalog with `declarationProviders.ruby`. The package must declare at least
   one Ruby native dependency and provide a root `index.trb`; importing that
   root activates the catalog and retains the root module's ordinary runtime
@@ -563,6 +563,9 @@ switches.
   data, empty catalogs, symlinked catalogs, unsafe `Any` or invalid signature
   types, and compiler-derived representation metadata. A declaration name that
   conflicts with another active provider or a project declaration is an error.
+  Version 3 adds class-body declaration rules only to the bundled
+  project-aware subset; a fixed version 2 catalog migrates by changing its
+  protocol version and no other fields.
   Other modes and project-aware external providers are not supported by this
   capability.
 - A package may pair `declarationAdapters.<mode>` with

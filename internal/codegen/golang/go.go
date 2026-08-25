@@ -421,6 +421,9 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Next:
 		g.line("continue")
 	case *ir.ExpressionStatement:
+		if call, ok := n.Expression.(*ir.Call); ok && call.DeclarationOnly {
+			break
+		}
 		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil && g.testCallBlock(call) {
 			break
 		}

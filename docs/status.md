@@ -411,6 +411,12 @@ method, and block bodies, default expressions, resolver/checker state,
 filesystem access, and backend objects do
 not cross the declaration-provider input boundary. The ORM runtime manifest
 remains a separate bundled integration boundary.
+Their direct class-body DSL calls now cross one generic Declaration Protocol
+version 3 rule. The rule matches an exact provider package function and exact
+project class, preserves ordinary signature checking, and marks the typed-IR
+call as declaration-only so Go, Ruby, and TypeScript omit it from runtime
+output. ORM and Jobs backend generators no longer identify those directives by
+package-specific function-name checks.
 Workers support queues, priorities, retry and failed state, heartbeats, stale
 claim recovery, graceful stop, listing, manual retry, and discard. PostgreSQL
 and MySQL use short locking claims for multiple workers. SQLite is deliberately

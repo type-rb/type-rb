@@ -43,17 +43,6 @@ func (g *generator) jobsAdapterEnqueue(name string, call *ir.Call, arguments []s
 	return "->(" + strings.Join(parameters, ", ") + ") { begin; maximum_attempts = request_value.maximum_attempts || 0; reference = TrbJobsRuntime.enqueue(__trb_scope, request_value.job_name, request_value.payload, request_value.payload_version, request_value.queue_name, request_value.priority, " + waitMilliseconds + ", maximum_attempts); Result::Ok.new(reference); rescue TrbExecutionCancelled => error; Result::Err.new(EnqueueError.new(kind: EnqueueErrorKind::Cancelled, message: error.message)); rescue StandardError => error; Result::Err.new(EnqueueError.new(kind: EnqueueErrorKind::Adapter, message: error.message)); end }.call(" + strings.Join(values, ", ") + ")"
 }
 
-func (g *generator) jobsDeclaration(call *ir.Call) bool {
-	if g.jobs == nil || call == nil {
-		return false
-	}
-	identifier, ok := call.Callee.(*ir.Identifier)
-	if !ok || identifier.Reference == nil || identifier.Reference.Package != "trb/jobs/index" {
-		return false
-	}
-	return identifier.Name == "queue" || identifier.Name == "priority" || identifier.Name == "maximum_attempts"
-}
-
 func (g *generator) jobsRuntime(manifest *jobs.Manifest) {
 	if manifest == nil || g.jobsSQL == nil {
 		return

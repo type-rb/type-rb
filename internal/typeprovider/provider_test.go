@@ -112,6 +112,9 @@ end
 	if err := packageextension.ValidateDeclarationCatalog(decoded); err != nil {
 		t.Fatal(err)
 	}
+	if len(decoded.ClassBodyDeclarationRules) != 8 {
+		t.Fatalf("ORM class-body declaration rules did not cross the protocol: %#v", decoded.ClassBodyDeclarationRules)
+	}
 
 	product := declaredProtocolType(t, decoded, "Product")
 	category := declaredProtocolMember(t, product.InstanceMembers, "category")

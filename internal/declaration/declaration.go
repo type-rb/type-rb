@@ -125,11 +125,23 @@ type FunctionArgumentReferenceRule struct {
 	Targets  []DeclarationReference
 }
 
+// ClassBodyDeclarationRule marks a package function call directly inside one
+// project class as declarative metadata. The checker still validates the
+// ordinary call signature, but backends do not execute the call at runtime.
+// Exact owner identity keeps this capability scoped to declarations already
+// discovered by a bundled project-aware provider.
+type ClassBodyDeclarationRule struct {
+	Package  string
+	Function string
+	Owner    DeclarationReference
+}
+
 type Catalog struct {
 	Types                          map[string]*Type
 	Modules                        map[string]*Module
 	FunctionBlockRules             []FunctionBlockRule
 	FunctionArgumentReferenceRules []FunctionArgumentReferenceRule
+	ClassBodyDeclarationRules      []ClassBodyDeclarationRule
 	// RuntimeTypesByModule names compiler-owned value representations required
 	// by generated declarations in a particular application module.
 	RuntimeTypesByModule map[string][]types.Type
@@ -151,6 +163,7 @@ func (c *Catalog) Merge(other *Catalog) {
 	}
 	c.FunctionBlockRules = append(c.FunctionBlockRules, other.FunctionBlockRules...)
 	c.FunctionArgumentReferenceRules = append(c.FunctionArgumentReferenceRules, other.FunctionArgumentReferenceRules...)
+	c.ClassBodyDeclarationRules = append(c.ClassBodyDeclarationRules, other.ClassBodyDeclarationRules...)
 	for module, runtimeTypes := range other.RuntimeTypesByModule {
 		c.RuntimeTypesByModule[module] = append(c.RuntimeTypesByModule[module], runtimeTypes...)
 	}
