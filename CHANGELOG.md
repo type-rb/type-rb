@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.36 - 2026-08-26
+
+### Language and compiler
+
+- Imported class values now satisfy interface parameters when the interface is
+  exposed transitively through another imported function. Valid programs no
+  longer need a redundant direct import of that interface solely for
+  assignability checking. ([#538](https://github.com/type-rb/type-rb/pull/538))
+
 ## 0.3.35 - 2026-08-26
 
 ### Web
