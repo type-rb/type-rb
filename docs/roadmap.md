@@ -154,8 +154,9 @@ than detailed syntax.
   add shareable source links to their sandboxed browser runtime.
 - Test supported OS/architecture and current target-toolchain combinations in
   CI.
-- Publish a searchable language/standard-library reference, tutorials, and a
-  migration guide for every breaking release.
+- Publish a searchable language/standard-library reference and tutorials.
+  Document upgrade paths for breaking releases after external compatibility
+  commitments begin.
 - Add performance benchmarks, crash reporting guidance, security policy, and a
   predictable release cadence.
 

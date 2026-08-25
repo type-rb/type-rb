@@ -288,12 +288,12 @@ func TestCompileProjectRejectsUnsupportedJobPerformContracts(t *testing.T) {
 		{
 			name:    "legacy effect",
 			source:  "import { Job } from trb/jobs\nrecord AppError\nend\n\nclass InvalidJob < Job\n\tdef perform() fails AppError\n\t\treturn\n\tend\nend\n",
-			message: "fails was removed in TypeRB 0.3",
+			message: "fails is not valid TypeRB syntax",
 		},
 		{
 			name:    "mixed result and effect",
 			source:  "import { Job, JobResult } from trb/jobs\nrecord AppError\nend\n\nclass InvalidJob < Job\n\tdef perform(): JobResult fails AppError\n\t\treturn\n\tend\nend\n",
-			message: "fails was removed in TypeRB 0.3",
+			message: "fails is not valid TypeRB syntax",
 		},
 	}
 	for _, test := range tests {

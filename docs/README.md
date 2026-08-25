@@ -41,8 +41,6 @@ larger applications.
 - [Project configuration](configuration.md)
 - [Language specification](specification.md)
 - [Standard library](standard-library.md)
-- [Migrate to Result control flow in TypeRB 0.3](migrations/0.3-result-control.md)
-- [Migrate aliases and adopt newtypes in TypeRB 0.3](migrations/0.3-alias-newtype.md)
 
 ## Project
 

@@ -147,7 +147,7 @@ func TestLegacyPerformEffectsAreRejectedByParserMigration(t *testing.T) {
 		"import { Job, JobResult } from trb/jobs\nrecord AppError\nend\nclass InvalidJob < Job\n\tdef perform(): JobResult fails AppError\n\t\treturn\n\tend\nend\n",
 	} {
 		_, diagnostics := parser.Parse([]byte(source))
-		if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "fails was removed in TypeRB 0.3") {
+		if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "fails is not valid TypeRB syntax") {
 			t.Fatalf("expected the parser migration diagnostic, got %v", diagnostics)
 		}
 	}

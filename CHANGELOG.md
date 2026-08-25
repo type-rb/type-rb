@@ -324,7 +324,7 @@ This file records user-visible changes in stable TypeRB releases.
 - Transparent type aliases now use `alias Name = Target`. The former
   `type Name = Target` spelling reports a migration diagnostic so each
   declaration can be classified as a transparent `alias` or a nominal
-  `newtype`. The migration guide documents the semantic conversion.
+  `newtype`.
   ([#460](https://github.com/type-rb/type-rb/pull/460))
 - The bundled Declaration Protocol advances to version 2, call-specialization
   protocol to version 2, and Project Declaration Input Protocol to version 3
@@ -741,15 +741,11 @@ This file records user-visible changes in stable TypeRB releases.
 - The affected bundled packages `trb/orm`, `trb/jobs`, `trb/jobs/sql`, and
   `trb/platform/typescript/browser` are version 0.2.0.
 
-### Tooling and migration
+### Tooling
 
 - Visual Studio Code extension 0.3.0 understands `try` and `catch`, removes the
   retired failure syntax from language features, and requires a TypeRB 0.3
   compiler.
-- The [TypeRB 0.3 Result-control migration guide](docs/migrations/0.3-result-control.md)
-  explains function signatures, call-site rewrites, structured blocks, jobs,
-  browser APIs, native providers, and intentional uses of `case/when`.
-  ([#347](https://github.com/type-rb/type-rb/pull/347))
 
 ## 0.2.31 - 2026-08-18
 
