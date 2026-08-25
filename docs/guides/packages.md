@@ -680,15 +680,20 @@ boundary for nominal source newtypes. The compiler host
 validates and copies that data into its private semantic representation.
 
 The Jobs and ORM declaration providers also receive versioned, validated
-Project Declaration Input snapshots. Version 4 adds named-only parameter
-identity to the version 3 snapshot. It otherwise contains canonical module and
-import identity, transparent type aliases, nominal newtypes with concrete
+Project Declaration Input snapshots. Version 5 adds record declarations and
+their declarative field attributes, top-level function signatures, and
+resolved type arguments on direct class-body calls. Version 4 added named-only
+parameter identity. The snapshot also contains canonical module and import
+identity, transparent type aliases, nominal newtypes with concrete
 representations, enum and class declarations, method signatures, authored,
 resolved, and boundary representation types, declarative class-body call
-values, structural block summaries, and source spans. It does not contain
-parser nodes, method or block bodies, resolver or checker state, filesystem
-handles, or backend objects. These two consumers characterize a small reusable read-only
-project view; it is not yet a general external provider API.
+values, structural block summaries, and source spans. A record declaration in
+this snapshot is an authored project declaration; it does not expose the
+call-site-only record-inspection metadata used by call specialization. The
+snapshot does not contain parser nodes, function, method, or block bodies,
+default expressions, resolver or checker state, filesystem handles, or backend
+objects. These two consumers characterize a small reusable read-only project
+view; it is not yet a general external provider API.
 
 ORM declaration discovery composes that generic project snapshot with a
 separate versioned ORM Declaration Input. Its schema section contains only the

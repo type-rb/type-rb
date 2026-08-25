@@ -62,10 +62,14 @@ func ExportProjectDeclarationInput(provider string, programs []*ast.Program, opt
 				module.Newtypes = append(module.Newtypes, packageextension.ProjectNewtype{
 					Name: node.Name, Target: resolver.typeUse(program.ModulePath, node.Target, nil), Span: exportSourceSpan(node.Span()),
 				})
+			case *ast.RecordStatement:
+				module.Records = append(module.Records, resolver.exportRecord(program.ModulePath, node))
 			case *ast.ClassStatement:
 				module.Classes = append(module.Classes, resolver.exportClass(program.ModulePath, node))
 			case *ast.EnumStatement:
 				module.Enums = append(module.Enums, resolver.exportEnum(program.ModulePath, node))
+			case *ast.MethodStatement:
+				module.Functions = append(module.Functions, resolver.exportMethod(program.ModulePath, node, nil))
 			}
 		}
 		result.Modules = append(result.Modules, module)
@@ -127,6 +131,31 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 	return result, nil
 }
 
+func (r projectInputResolver) exportRecord(modulePath string, record *ast.RecordStatement) packageextension.ProjectRecord {
+	result := packageextension.ProjectRecord{
+		Name: record.Name, TypeParameters: projectTypeParameterNames(record.TypeParameters), Span: exportSourceSpan(record.Span()),
+	}
+	typeParameters := projectTypeParameterSet(record.TypeParameters)
+	for _, statement := range record.Body {
+		field, ok := statement.(*ast.RecordFieldStatement)
+		if !ok {
+			continue
+		}
+		converted := packageextension.ProjectRecordField{
+			Name: field.Name, Type: r.typeUse(modulePath, field.Type, typeParameters), Span: exportSourceSpan(field.Span()),
+		}
+		for _, attribute := range field.Attributes {
+			projectAttribute := packageextension.ProjectAttribute{Name: attribute.Name, Span: exportSourceSpan(attribute.Span())}
+			for _, argument := range attribute.Arguments {
+				projectAttribute.Arguments = append(projectAttribute.Arguments, r.exportProjectArgument(modulePath, argument))
+			}
+			converted.Attributes = append(converted.Attributes, projectAttribute)
+		}
+		result.Fields = append(result.Fields, converted)
+	}
+	return result
+}
+
 func (r projectInputResolver) exportEnum(modulePath string, enum *ast.EnumStatement) packageextension.ProjectEnum {
 	result := packageextension.ProjectEnum{
 		Name: enum.Name, TypeParameters: projectTypeParameterNames(enum.TypeParameters), Span: exportSourceSpan(enum.Span()),
@@ -167,27 +196,9 @@ func (r projectInputResolver) exportClass(modulePath string, class *ast.ClassSta
 	for _, statement := range class.Body {
 		switch node := statement.(type) {
 		case *ast.MethodStatement:
-			methodTypeParameters := cloneStringSet(classTypeParameters)
-			for _, parameter := range node.TypeParameters {
-				methodTypeParameters[parameter.Name] = true
-			}
-			method := packageextension.ProjectMethod{
-				Name: node.Name, Class: node.Class, TypeParameters: projectTypeParameterNames(node.TypeParameters), Span: exportSourceSpan(node.Span()),
-			}
-			for _, parameter := range node.Parameters {
-				method.Parameters = append(method.Parameters, packageextension.ProjectParameter{
-					Name: parameter.Name, Type: r.typeUse(modulePath, parameter.Type, methodTypeParameters),
-					NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
-					Optional: parameter.Default != nil, Span: exportSourceSpan(parameter.Span()),
-				})
-			}
-			if !node.ReturnType.Empty() {
-				converted := r.typeUse(modulePath, node.ReturnType, methodTypeParameters)
-				method.Return = &converted
-			}
-			result.Methods = append(result.Methods, method)
+			result.Methods = append(result.Methods, r.exportMethod(modulePath, node, classTypeParameters))
 		case *ast.ExpressionStatement:
-			if directive, ok := r.exportProjectDirective(modulePath, node); ok {
+			if directive, ok := r.exportProjectDirective(modulePath, node, classTypeParameters); ok {
 				result.Directives = append(result.Directives, directive)
 			}
 		}
@@ -195,22 +206,49 @@ func (r projectInputResolver) exportClass(modulePath string, class *ast.ClassSta
 	return result
 }
 
-func (r projectInputResolver) exportProjectDirective(modulePath string, statement *ast.ExpressionStatement) (packageextension.ProjectDirective, bool) {
+func (r projectInputResolver) exportMethod(modulePath string, node *ast.MethodStatement, ownerTypeParameters map[string]bool) packageextension.ProjectMethod {
+	methodTypeParameters := cloneStringSet(ownerTypeParameters)
+	for _, parameter := range node.TypeParameters {
+		methodTypeParameters[parameter.Name] = true
+	}
+	result := packageextension.ProjectMethod{
+		Name: node.Name, Class: node.Class, TypeParameters: projectTypeParameterNames(node.TypeParameters), Span: exportSourceSpan(node.Span()),
+	}
+	for _, parameter := range node.Parameters {
+		result.Parameters = append(result.Parameters, packageextension.ProjectParameter{
+			Name: parameter.Name, Type: r.typeUse(modulePath, parameter.Type, methodTypeParameters),
+			NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
+			Optional: parameter.Default != nil, Span: exportSourceSpan(parameter.Span()),
+		})
+	}
+	if !node.ReturnType.Empty() {
+		converted := r.typeUse(modulePath, node.ReturnType, methodTypeParameters)
+		result.Return = &converted
+	}
+	return result
+}
+
+func (r projectInputResolver) exportProjectDirective(modulePath string, statement *ast.ExpressionStatement, typeParameters map[string]bool) (packageextension.ProjectDirective, bool) {
 	call, ok := statement.Expression.(*ast.CallExpression)
 	if !ok {
 		return packageextension.ProjectDirective{}, false
 	}
-	callee, ok := call.Callee.(*ast.Identifier)
+	callee := call.Callee
+	var typeArguments []ast.TypeRef
+	if generic, genericCall := callee.(*ast.GenericExpression); genericCall {
+		callee = generic.Receiver
+		typeArguments = generic.Arguments
+	}
+	identifier, ok := callee.(*ast.Identifier)
 	if !ok {
 		return packageextension.ProjectDirective{}, false
 	}
-	result := packageextension.ProjectDirective{Name: callee.Name, Span: exportSourceSpan(call.Span())}
+	result := packageextension.ProjectDirective{Name: identifier.Name, Span: exportSourceSpan(call.Span())}
+	for _, argument := range typeArguments {
+		result.TypeArguments = append(result.TypeArguments, r.typeUse(modulePath, argument, typeParameters))
+	}
 	for _, argument := range call.Arguments {
-		converted := packageextension.ProjectDirectiveArgument{
-			Name: argument.Name, Splat: argument.Splat,
-			Value: r.exportProjectValue(modulePath, argument.Value, false), Span: exportSourceSpan(argument.Value.Span()),
-		}
-		result.Arguments = append(result.Arguments, converted)
+		result.Arguments = append(result.Arguments, r.exportProjectArgument(modulePath, argument))
 	}
 	if call.Block != nil {
 		result.Block = &packageextension.ProjectDirectiveBlock{
@@ -222,6 +260,13 @@ func (r projectInputResolver) exportProjectDirective(modulePath string, statemen
 		}
 	}
 	return result, true
+}
+
+func (r projectInputResolver) exportProjectArgument(modulePath string, argument ast.CallArgument) packageextension.ProjectDirectiveArgument {
+	return packageextension.ProjectDirectiveArgument{
+		Name: argument.Name, Splat: argument.Splat,
+		Value: r.exportProjectValue(modulePath, argument.Value, false), Span: exportSourceSpan(argument.Value.Span()),
+	}
 }
 
 func (r projectInputResolver) exportProjectValue(modulePath string, expression ast.Expression, negativeInteger bool) packageextension.ProjectValue {
