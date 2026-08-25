@@ -450,6 +450,55 @@ func TestCompletionMergesAnExistingNamedImport(t *testing.T) {
 	}
 }
 
+func TestCompletionKeepsAmbiguousImportOriginsDistinct(t *testing.T) {
+	service := languageservice.New("go")
+	service.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{
+		{
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "sha256(value: Bytes): Bytes — trb/std/hash",
+			Import: &languageservice.Import{Path: "trb/std/hash", Symbol: "sha256"},
+		},
+		{
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "sha256(key: Bytes, value: Bytes): Bytes — trb/std/hmac",
+			Import: &languageservice.Import{Path: "trb/std/hmac", Symbol: "sha256"},
+		},
+	}})
+	items := service.Complete("sha", len("sha"))
+	matched := []languageservice.CompletionItem{}
+	for _, item := range items {
+		if item.Label == "sha256" {
+			matched = append(matched, item)
+		}
+	}
+	if len(matched) != 2 {
+		t.Fatalf("sha256 candidates=%#v, want two origins", matched)
+	}
+	byImport := map[string]languageservice.CompletionItem{}
+	for _, item := range matched {
+		if item.InsertText != "sha256" || len(item.AdditionalEdits) != 1 {
+			t.Fatalf("ambiguous completion=%#v", item)
+		}
+		byImport[item.AdditionalEdits[0].NewText] = item
+	}
+	if _, ok := byImport["import { sha256 } from trb/std/hash\n"]; !ok {
+		t.Fatalf("hash candidate missing: %#v", matched)
+	}
+	if _, ok := byImport["import { sha256 } from trb/std/hmac\n"]; !ok {
+		t.Fatalf("hmac candidate missing: %#v", matched)
+	}
+}
+
+func TestCompletionAddsPackageImport(t *testing.T) {
+	service := languageservice.New("go")
+	service.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{{
+		Name: "math", Kind: languageservice.CompletionModule, Detail: "trb/std/math",
+		Import: &languageservice.Import{Path: "trb/std/math"},
+	}}})
+	item, ok := findCompletion(service.Complete("ma", len("ma")), "math")
+	if !ok || item.InsertText != "math" || len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0].NewText != "import trb/std/math\n" {
+		t.Fatalf("package completion=%#v, ok=%v", item, ok)
+	}
+}
+
 func TestCompletionCandidateRepairsAStaleCheckedImport(t *testing.T) {
 	checked := languageservice.Context{Symbols: []languageservice.Symbol{{
 		Name: "Result", Kind: languageservice.CompletionType, Detail: "stale checked import",

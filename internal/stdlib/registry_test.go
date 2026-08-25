@@ -57,6 +57,28 @@ func TestRuntimeExportPackagesArePublicPortableAndSorted(t *testing.T) {
 	}
 }
 
+func TestPublicPortablePackagesExcludeInternalContracts(t *testing.T) {
+	packages := PublicPortablePackages("go")
+	paths := map[string]bool{}
+	previous := ""
+	for _, definition := range packages {
+		if definition.Internal || definition.Kind != Portable {
+			t.Fatalf("unexpected public package: %#v", definition)
+		}
+		if definition.Path < previous {
+			t.Fatalf("public packages are not sorted: %q before %q", previous, definition.Path)
+		}
+		previous = definition.Path
+		paths[definition.Path] = true
+	}
+	if !paths["trb/std/math"] || !paths["trb/std/random"] || !paths["trb/std/hash"] {
+		t.Fatalf("public package catalog is missing REPL candidates: %#v", paths)
+	}
+	if paths["trb/internal/arrays"] || paths["trb/internal/hashes"] {
+		t.Fatalf("internal collection contracts are public: %#v", paths)
+	}
+}
+
 func TestGenericReceiverContractsSpecializeReturnTypes(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
 	_, slice, ok := LookupReceiverMethod(arrayType, "slice")

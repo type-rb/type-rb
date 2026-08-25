@@ -79,6 +79,7 @@ func Complete(request CompletionRequest) []CompletionItem {
 	}
 
 	byName := map[string]Symbol{}
+	candidateSymbols := []Symbol{}
 	lexical, localNames := lexicalSymbolsWithLocals(request.Source, request.Cursor, request.Context)
 	for _, symbol := range lexical {
 		byName[symbol.Name] = symbol
@@ -95,7 +96,10 @@ func Complete(request CompletionRequest) []CompletionItem {
 			// A current-source import or declaration keeps its checked symbol.
 			// Otherwise the candidate replaces a stale checked symbol so accepting
 			// completion restores the missing import.
-			byName[symbol.Name] = symbol
+			if request.RepairImports {
+				delete(byName, symbol.Name)
+			}
+			candidateSymbols = append(candidateSymbols, symbol)
 		}
 	}
 	for _, name := range builtInTypes {
@@ -117,6 +121,12 @@ func Complete(request CompletionRequest) []CompletionItem {
 	items := make([]CompletionItem, 0, capacity)
 	for _, symbol := range byName {
 		if !strings.HasPrefix(symbol.Name, prefix) || typePosition && symbol.Kind != CompletionType {
+			continue
+		}
+		items = append(items, completionFromSymbol(symbol, replacement, request.Source))
+	}
+	for _, symbol := range candidateSymbols {
+		if _, shadowed := byName[symbol.Name]; shadowed || !strings.HasPrefix(symbol.Name, prefix) || typePosition && symbol.Kind != CompletionType {
 			continue
 		}
 		items = append(items, completionFromSymbol(symbol, replacement, request.Source))
@@ -1139,6 +1149,9 @@ func autoImportEdit(source string, required Import) (TextEdit, bool) {
 		if !ok {
 			continue
 		}
+		if required.Symbol == "" && len(imported.Symbols) == 0 && imported.Path == required.Path && imported.Alias == "" {
+			return TextEdit{}, false
+		}
 		for _, name := range imported.Symbols {
 			if imported.Path == required.Path && name == required.Symbol {
 				return TextEdit{}, false
@@ -1146,7 +1159,7 @@ func autoImportEdit(source string, required Import) (TextEdit, bool) {
 		}
 		span := imported.Span()
 		lastImportEnd = lineEnd(source, span.End.Offset)
-		if imported.Path == required.Path && len(imported.Symbols) > 0 {
+		if required.Symbol != "" && imported.Path == required.Path && len(imported.Symbols) > 0 {
 			line := source[span.Start.Offset:span.End.Offset]
 			if close := strings.LastIndex(line, "}"); close >= 0 {
 				offset := span.Start.Offset + close
@@ -1154,7 +1167,10 @@ func autoImportEdit(source string, required Import) (TextEdit, bool) {
 			}
 		}
 	}
-	text := "import { " + required.Symbol + " } from " + required.Path + "\n"
+	text := "import " + required.Path + "\n"
+	if required.Symbol != "" {
+		text = "import { " + required.Symbol + " } from " + required.Path + "\n"
+	}
 	if lastImportEnd >= 0 {
 		return TextEdit{Range: OffsetRange{Start: lastImportEnd, End: lastImportEnd}, NewText: text}, true
 	}
@@ -1188,19 +1204,46 @@ func filterCompletions(items []CompletionItem, prefix string) []CompletionItem {
 	filtered := items[:0]
 	seen := map[string]bool{}
 	for _, item := range items {
-		if !strings.HasPrefix(item.Label, prefix) || seen[item.Label] {
+		key := completionItemKey(item)
+		if !strings.HasPrefix(item.Label, prefix) || seen[key] {
 			continue
 		}
-		seen[item.Label] = true
+		seen[key] = true
 		filtered = append(filtered, item)
 	}
 	sort.SliceStable(filtered, func(left, right int) bool {
 		if filtered[left].Kind != filtered[right].Kind {
 			return completionPriority(filtered[left].Kind) < completionPriority(filtered[right].Kind)
 		}
-		return filtered[left].Label < filtered[right].Label
+		if filtered[left].Label != filtered[right].Label {
+			return filtered[left].Label < filtered[right].Label
+		}
+		if filtered[left].Detail != filtered[right].Detail {
+			return filtered[left].Detail < filtered[right].Detail
+		}
+		return filtered[left].InsertText < filtered[right].InsertText
 	})
 	return filtered
+}
+
+func completionItemKey(item CompletionItem) string {
+	var result strings.Builder
+	result.WriteString(string(item.Kind))
+	result.WriteByte(0)
+	result.WriteString(item.Label)
+	result.WriteByte(0)
+	result.WriteString(item.InsertText)
+	result.WriteByte(0)
+	result.WriteString(item.Detail)
+	for _, edit := range item.AdditionalEdits {
+		result.WriteByte(0)
+		result.WriteString(strconv.Itoa(edit.Range.Start))
+		result.WriteByte(':')
+		result.WriteString(strconv.Itoa(edit.Range.End))
+		result.WriteByte(':')
+		result.WriteString(edit.NewText)
+	}
+	return result.String()
 }
 
 func completionRange(source string, cursor int) OffsetRange {

@@ -44,6 +44,66 @@ func TestRangeLiteralCompletionInsertsToArray(t *testing.T) {
 	}
 }
 
+func TestCompletionAppliesVisibleImportEdit(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "math.sq\t(9)\r"), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:import trb/std/math\nmath.sqrt(9)]")) {
+		t.Fatalf("completion import was not preserved in the submitted line: %q", output)
+	}
+}
+
+func TestBareUniqueCompletionConfirmsThenSubmitsItsImport(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTYSteps(t,
+		ptyInputStep{input: "mat\t\r", waitAfter: 100 * time.Millisecond},
+		ptyInputStep{input: "\r"},
+	), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:import trb/std/math]")) {
+		t.Fatalf("bare package completion did not confirm then submit its import: %q", output)
+	}
+}
+
+func TestBareUniqueCompletionCanBeCancelled(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTYSteps(t,
+		ptyInputStep{input: "mat\t"},
+		ptyInputStep{input: "\x1b", waitAfter: 600 * time.Millisecond},
+		ptyInputStep{input: "\r"},
+	), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:mat]")) {
+		t.Fatalf("cancelled package completion did not restore its original input: %q", output)
+	}
+}
+
+func TestBareUniqueCompletionBackspaceCancels(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "mat\t\x7f\r"), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:mat]")) {
+		t.Fatalf("Backspace did not cancel the package completion: %q", output)
+	}
+}
+
+func TestBareModuleCompletionDotContinuesImportedExpression(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "mat\t.sqrt(9)\r"), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:import trb/std/math\nmath.sqrt(9)]")) {
+		t.Fatalf("module completion did not commit before dot: %q", output)
+	}
+}
+
+func TestBareSelectedCompletionConfirmsThenSubmitsSelectedImport(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTYSteps(t,
+		ptyInputStep{input: "sha256\t\r", waitAfter: 100 * time.Millisecond},
+		ptyInputStep{input: "\r"},
+	), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:import { sha256 } from trb/std/")) {
+		t.Fatalf("selected function completion did not confirm then submit its import: %q", output)
+	}
+}
+
+func TestBareFunctionCompletionOpeningParenthesisContinuesImportedCall(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "sha256\t(\"value\")\r"), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:import { sha256 } from trb/std/")) ||
+		!bytes.Contains(output, []byte("\nsha256(\"value\")]")) {
+		t.Fatalf("function completion did not commit before opening parenthesis: %q", output)
+	}
+}
+
 func TestMultilineInputIsAutomaticallyFormatted(t *testing.T) {
 	input := "class User\r" +
 		"    def value(): Integer\r" +
@@ -95,7 +155,20 @@ func runCompletionPTY(t *testing.T, input string) []byte {
 	return runPTY(t, input, false)
 }
 
+type ptyInputStep struct {
+	input     string
+	waitAfter time.Duration
+}
+
+func runCompletionPTYSteps(t *testing.T, steps ...ptyInputStep) []byte {
+	return runPTYSteps(t, false, steps...)
+}
+
 func runPTY(t *testing.T, input string, screenOnly bool) []byte {
+	return runPTYSteps(t, screenOnly, ptyInputStep{input: input})
+}
+
+func runPTYSteps(t *testing.T, screenOnly bool, steps ...ptyInputStep) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -115,8 +188,13 @@ func runPTY(t *testing.T, input string, screenOnly bool) []byte {
 	if screenOnly {
 		output = readPTYUntil(t, terminal, []byte("trb:go> "))
 	}
-	if _, err := terminal.Write([]byte(input)); err != nil {
-		t.Fatal(err)
+	for _, step := range steps {
+		if _, err := terminal.Write([]byte(step.input)); err != nil {
+			t.Fatal(err)
+		}
+		if step.waitAfter > 0 {
+			time.Sleep(step.waitAfter)
+		}
 	}
 	rest, err := io.ReadAll(terminal)
 	output = append(output, rest...)
@@ -151,7 +229,28 @@ func TestCompletionPTYChild(t *testing.T) {
 		t.Skip("PTY helper process")
 	}
 
-	terminal, err := newTerminalReader(Options{Mode: "go", language: languageservice.New("go")}, nil)
+	language := languageservice.New("go")
+	packageImport := &languageservice.Import{Path: "trb/std/math", ModulePath: "trb/std/math"}
+	language.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{
+		{
+			Name: "math", Kind: languageservice.CompletionModule, Detail: "trb/std/math", Import: packageImport,
+			Members: []languageservice.Symbol{{
+				Name: "sqrt", Kind: languageservice.CompletionFunction, Detail: "sqrt(value: Float): Float", Import: packageImport,
+				Call: &languageservice.CallInfo{ParameterCount: 1},
+			}},
+		},
+		{
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "sha256(value: Bytes): Bytes — trb/std/hash",
+			Import: &languageservice.Import{Path: "trb/std/hash", ModulePath: "trb/std/hash/index", Symbol: "sha256"},
+			Call:   &languageservice.CallInfo{ParameterCount: 1},
+		},
+		{
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "sha256(key: Bytes, value: Bytes): Bytes — trb/std/hmac",
+			Import: &languageservice.Import{Path: "trb/std/hmac", ModulePath: "trb/std/hmac/index", Symbol: "sha256"},
+			Call:   &languageservice.CallInfo{ParameterCount: 2},
+		},
+	}})
+	terminal, err := newTerminalReader(Options{Mode: "go", language: language}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

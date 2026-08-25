@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -340,12 +341,34 @@ func completeInput(service *languageservice.Service, line []rune, cursor int) re
 		if value == "" {
 			value = item.Label
 		}
-		values = append(values, readline.Completion{
-			Value:       value,
-			Display:     item.Label,
-			Description: item.Detail,
-			Tag:         string(item.Kind),
-		})
+		accepted := item
+		accepted.InsertText = value
+		_, requireConfirmation := bareCompletionImport(source, accepted)
+		completion := readline.Completion{
+			Value:               value,
+			Display:             item.Label,
+			Description:         item.Detail,
+			Tag:                 string(item.Kind),
+			RequireConfirmation: requireConfirmation,
+			OnAccept: func(line []rune, cursor int) ([]rune, int) {
+				updated, byteCursor, ok := acceptedImportConfirmationSource(source, accepted)
+				if !ok {
+					return line, cursor
+				}
+				return []rune(updated), utf8.RuneCountInString(updated[:byteCursor])
+			},
+		}
+		if characters := completionCommitCharacters(accepted, requireConfirmation); characters != "" {
+			completion.CommitCharacters = characters
+			completion.OnCommit = func(line []rune, cursor int, _ rune) ([]rune, int) {
+				updated, byteCursor, ok := acceptedCompletionSource(source, accepted)
+				if !ok {
+					return line, cursor
+				}
+				return []rune(updated), utf8.RuneCountInString(updated[:byteCursor])
+			}
+		}
+		values = append(values, completion)
 	}
 	if len(values) == 0 {
 		return readline.Completions{}
@@ -358,4 +381,96 @@ func completeInput(service *languageservice.Service, line []rune, cursor int) re
 	result.PREFIX = source[replacement.Start:byteCursor]
 	result.SUFFIX = source[byteCursor:replacement.End]
 	return result
+}
+
+func acceptedImportConfirmationSource(source string, item languageservice.CompletionItem) (string, int, bool) {
+	if imported, ok := bareCompletionImport(source, item); ok {
+		return imported, len(imported), true
+	}
+	return acceptedCompletionSource(source, item)
+}
+
+func acceptedCompletionSource(source string, item languageservice.CompletionItem) (string, int, bool) {
+	type completionEdit struct {
+		range_  languageservice.OffsetRange
+		text    string
+		primary bool
+	}
+	edits := make([]completionEdit, 0, len(item.AdditionalEdits)+1)
+	for _, edit := range item.AdditionalEdits {
+		edits = append(edits, completionEdit{range_: edit.Range, text: edit.NewText})
+	}
+	edits = append(edits, completionEdit{range_: item.Replacement, text: item.InsertText, primary: true})
+	for _, edit := range edits {
+		if edit.range_.Start < 0 || edit.range_.Start > edit.range_.End || edit.range_.End > len(source) ||
+			!utf8.ValidString(source[:edit.range_.Start]) || !utf8.ValidString(source[:edit.range_.End]) {
+			return source, 0, false
+		}
+	}
+	ascending := append([]completionEdit(nil), edits...)
+	sort.SliceStable(ascending, func(left, right int) bool {
+		if ascending[left].range_.Start != ascending[right].range_.Start {
+			return ascending[left].range_.Start < ascending[right].range_.Start
+		}
+		return ascending[left].range_.End < ascending[right].range_.End
+	})
+	for index := 1; index < len(ascending); index++ {
+		if ascending[index-1].range_.End > ascending[index].range_.Start {
+			return source, 0, false
+		}
+	}
+
+	cursor := item.Replacement.Start + len(item.InsertText)
+	for _, edit := range item.AdditionalEdits {
+		if edit.Range.End <= item.Replacement.Start {
+			cursor += len(edit.NewText) - (edit.Range.End - edit.Range.Start)
+		}
+	}
+	sort.SliceStable(edits, func(left, right int) bool {
+		if edits[left].range_.Start != edits[right].range_.Start {
+			return edits[left].range_.Start > edits[right].range_.Start
+		}
+		if edits[left].primary != edits[right].primary {
+			return edits[left].primary
+		}
+		return edits[left].range_.End > edits[right].range_.End
+	})
+	updated := source
+	for _, edit := range edits {
+		updated = updated[:edit.range_.Start] + edit.text + updated[edit.range_.End:]
+	}
+	if cursor < 0 || cursor > len(updated) || !utf8.ValidString(updated[:cursor]) {
+		return source, 0, false
+	}
+	return updated, cursor, true
+}
+
+func completionCommitCharacters(item languageservice.CompletionItem, requireConfirmation bool) string {
+	if !requireConfirmation {
+		return ""
+	}
+	switch item.Kind {
+	case languageservice.CompletionModule:
+		return "."
+	case languageservice.CompletionFunction:
+		if !strings.HasSuffix(item.InsertText, "()") {
+			return "("
+		}
+	}
+	return ""
+}
+
+func bareCompletionImport(source string, item languageservice.CompletionItem) (string, bool) {
+	if item.Replacement.Start != 0 || item.Replacement.End != len(source) || len(item.AdditionalEdits) != 1 {
+		return "", false
+	}
+	edit := item.AdditionalEdits[0]
+	if edit.Range != (languageservice.OffsetRange{}) || !strings.HasPrefix(edit.NewText, "import ") {
+		return "", false
+	}
+	imported := strings.TrimSuffix(edit.NewText, "\n")
+	if imported == edit.NewText || strings.Contains(imported, "\n") {
+		return "", false
+	}
+	return imported, true
 }

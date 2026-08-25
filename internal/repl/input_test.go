@@ -148,6 +148,111 @@ func TestCompleteInputUsesCheckedReplContextForMembers(t *testing.T) {
 	}
 }
 
+func TestAcceptedCompletionSourceAppliesVisibleImportAndPrimaryReplacement(t *testing.T) {
+	source := "note := \"😀\"\nma"
+	start := len("note := \"😀\"\n")
+	item := languageservice.CompletionItem{
+		InsertText:  "math",
+		Replacement: languageservice.OffsetRange{Start: start, End: len(source)},
+		AdditionalEdits: []languageservice.TextEdit{{
+			Range: languageservice.OffsetRange{}, NewText: "import trb/std/math\n",
+		}},
+	}
+	got, cursor, ok := acceptedCompletionSource(source, item)
+	want := "import trb/std/math\nnote := \"😀\"\nmath"
+	if !ok || got != want {
+		t.Fatalf("accepted completion=(%q, %v), want (%q, true)", got, ok, want)
+	}
+	if cursor != len(want) {
+		t.Fatalf("cursor=%d, want %d", cursor, len(want))
+	}
+}
+
+func TestAcceptedImportConfirmationSourceTurnsBareCandidateIntoImportSubmission(t *testing.T) {
+	source := "sha"
+	item := languageservice.CompletionItem{
+		InsertText:  "sha256",
+		Replacement: languageservice.OffsetRange{Start: 0, End: len(source)},
+		AdditionalEdits: []languageservice.TextEdit{{
+			Range: languageservice.OffsetRange{}, NewText: "import { sha256 } from trb/std/hash\n",
+		}},
+	}
+	got, cursor, ok := acceptedImportConfirmationSource(source, item)
+	want := "import { sha256 } from trb/std/hash"
+	if !ok || got != want || cursor != len(want) {
+		t.Fatalf("bare completion=(%q, %d, %v), want (%q, %d, true)", got, cursor, ok, want, len(want))
+	}
+}
+
+func TestAcceptedCompletionSourceKeepsBareCandidateAfterImport(t *testing.T) {
+	source := "math"
+	item := languageservice.CompletionItem{
+		Kind:        languageservice.CompletionModule,
+		InsertText:  "math",
+		Replacement: languageservice.OffsetRange{Start: 0, End: len(source)},
+		AdditionalEdits: []languageservice.TextEdit{{
+			Range: languageservice.OffsetRange{}, NewText: "import trb/std/math\n",
+		}},
+	}
+	got, cursor, ok := acceptedCompletionSource(source, item)
+	want := "import trb/std/math\nmath"
+	if !ok || got != want || cursor != len(want) {
+		t.Fatalf("expression completion=(%q, %d, %v), want (%q, %d, true)", got, cursor, ok, want, len(want))
+	}
+}
+
+func TestCompletionCommitCharactersAreLimitedToExpressionContinuations(t *testing.T) {
+	tests := []struct {
+		name                 string
+		item                 languageservice.CompletionItem
+		requireConfirmation  bool
+		wantCommitCharacters string
+	}{
+		{
+			name:                 "package namespace",
+			item:                 languageservice.CompletionItem{Kind: languageservice.CompletionModule, InsertText: "math"},
+			requireConfirmation:  true,
+			wantCommitCharacters: ".",
+		},
+		{
+			name:                 "parameterized function",
+			item:                 languageservice.CompletionItem{Kind: languageservice.CompletionFunction, InsertText: "sha256"},
+			requireConfirmation:  true,
+			wantCommitCharacters: "(",
+		},
+		{
+			name:                "zero-argument function",
+			item:                languageservice.CompletionItem{Kind: languageservice.CompletionFunction, InsertText: "now()"},
+			requireConfirmation: true,
+		},
+		{
+			name: "ordinary completion",
+			item: languageservice.CompletionItem{Kind: languageservice.CompletionModule, InsertText: "math"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := completionCommitCharacters(test.item, test.requireConfirmation); got != test.wantCommitCharacters {
+				t.Fatalf("commit characters=%q, want %q", got, test.wantCommitCharacters)
+			}
+		})
+	}
+}
+
+func TestAcceptedCompletionSourceRejectsOverlappingEdits(t *testing.T) {
+	source := "math"
+	item := languageservice.CompletionItem{
+		InsertText:  "math",
+		Replacement: languageservice.OffsetRange{Start: 0, End: len(source)},
+		AdditionalEdits: []languageservice.TextEdit{{
+			Range: languageservice.OffsetRange{Start: 1, End: 2}, NewText: "x",
+		}},
+	}
+	if got, _, ok := acceptedCompletionSource(source, item); ok || got != source {
+		t.Fatalf("overlapping edits=(%q, %v), want (%q, false)", got, ok, source)
+	}
+}
+
 func TestHighlightInputRendersANSIWithoutChangingSource(t *testing.T) {
 	service := languageservice.New("go")
 	service.Update([]*ir.Program{{Mode: "go", ModulePath: "repl"}}, "repl")
@@ -196,6 +301,38 @@ func TestTerminalReaderUsesMultilineAwareHistoryNavigation(t *testing.T) {
 				t.Errorf("%s binding %q=%q, want trb-accept-line", keymap, sequence, binding.Action)
 			}
 		}
+	}
+}
+
+func TestTerminalAcceptLineCommitsSelectedImportCompletionWithoutSubmitting(t *testing.T) {
+	language := languageservice.New("go")
+	language.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{
+		{
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "hmac",
+			Import: &languageservice.Import{Path: "trb/std/hmac", Symbol: "sha256"},
+			Call:   &languageservice.CallInfo{ParameterCount: 2},
+		},
+		{
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "hash",
+			Import: &languageservice.Import{Path: "trb/std/hash", Symbol: "sha256"},
+			Call:   &languageservice.CallInfo{ParameterCount: 1},
+		},
+	}})
+	terminal, err := newTerminalReader(Options{Mode: "go", language: language}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal.Line().Set([]rune("sha256")...)
+	terminal.Cursor().Set(6)
+	complete := terminal.Keymap.Commands()["complete"]
+	complete()
+	terminal.Keymap.Commands()["accept-line"]()
+
+	if got := string(*terminal.Line()); got != "import { sha256 } from trb/std/hash" && got != "import { sha256 } from trb/std/hmac" {
+		t.Fatalf("accepted line=%q, want selected import", got)
+	}
+	if accepted, _, _ := terminal.History.LineAccepted(); accepted {
+		t.Fatal("completion confirmation submitted the import")
 	}
 }
 

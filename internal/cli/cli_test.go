@@ -929,8 +929,7 @@ func TestReplStandardCandidatesIncludeDateAndClassMembers(t *testing.T) {
 	config := project.New(root, "go")
 	config.SourceDir = "src"
 	config.Go.Module = "example.com/type-rb/repl-standard-candidates"
-	imports := uniqueReplImports(nil, "__trb_repl__", "go")
-	candidates, err := replStandardCandidates(config, imports, config.Go.RootPackage)
+	candidates, err := replStandardCandidates(config, config.Go.RootPackage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -946,6 +945,59 @@ func TestReplStandardCandidatesIncludeDateAndClassMembers(t *testing.T) {
 		t.Fatal("Date completion candidate is missing parse()")
 	}
 	t.Fatal("Date completion candidate is missing")
+}
+
+func TestReplStandardCandidatesIncludePackageAndAmbiguousFunctionImports(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			sessionPackage := ""
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/repl-standard-import-candidates"
+				sessionPackage = config.Go.RootPackage
+			}
+			candidates, err := replStandardCandidates(config, sessionPackage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := languageservice.New(mode)
+			service.SetCandidates(candidates)
+
+			math, ok := completionWithImport(service.Complete("ma", len("ma")), "math", "import trb/std/math\n")
+			if !ok {
+				t.Fatalf("math package completion is missing: %#v", math)
+			}
+			if !hasCompletionLabel(service.Complete("math.sq", len("math.sq")), "sqrt") {
+				t.Fatal("math package completion is missing sqrt()")
+			}
+			if _, ok := completionWithImport(service.Complete("md", len("md")), "md5", "import { md5 } from trb/std/hash\n"); !ok {
+				t.Fatal("md5 named-import completion is missing")
+			}
+			sha256 := 0
+			for _, item := range service.Complete("sha", len("sha")) {
+				if item.Label == "sha256" && len(item.AdditionalEdits) == 1 {
+					switch item.AdditionalEdits[0].NewText {
+					case "import { sha256 } from trb/std/hash\n", "import { sha256 } from trb/std/hmac\n":
+						sha256++
+					}
+				}
+			}
+			if sha256 != 2 {
+				t.Fatalf("sha256 origin count=%d, want 2", sha256)
+			}
+		})
+	}
+}
+
+func completionWithImport(items []languageservice.CompletionItem, label, importText string) (languageservice.CompletionItem, bool) {
+	for _, item := range items {
+		if item.Label == label && len(item.AdditionalEdits) == 1 && item.AdditionalEdits[0].NewText == importText {
+			return item, true
+		}
+	}
+	return languageservice.CompletionItem{}, false
 }
 
 func TestReplCompletionCandidatesIncludeProjectDeclarationsAtStartup(t *testing.T) {
