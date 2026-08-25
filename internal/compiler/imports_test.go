@@ -9,6 +9,7 @@ import (
 	gotypes "go/types"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -908,6 +909,64 @@ func findArtifactByModule(artifacts []*Artifact, modulePath string) *Artifact {
 		}
 	}
 	return nil
+}
+
+func TestTypeScriptImportsProjectTypesIntroducedByInferredLocals(t *testing.T) {
+	artifacts, err := CompileProject([]SourceUnit{
+		{
+			Filename:   "/project/contracts/types.trb",
+			ModulePath: "contracts/types",
+			Package:    "contracts",
+			Source: []byte(`record Envelope
+	label: String
+end
+`),
+		},
+		{
+			Filename:   "/project/service/client.trb",
+			ModulePath: "service/client",
+			Package:    "service",
+			Source: []byte(`import { Envelope } from contracts/types
+
+def load(): Envelope
+	return Envelope.new(label: "loaded")
+end
+`),
+		},
+		{
+			Filename:   "/project/main.trb",
+			ModulePath: "main",
+			Package:    "main",
+			Source: []byte(`import { load } from service/client
+
+def consume()
+	envelope := load()
+	puts(envelope)
+	return
+end
+`),
+		},
+	}, Options{Mode: "typescript"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := findArtifactByModule(artifacts, "main")
+	if consumer == nil {
+		t.Fatal("consumer artifact is missing")
+	}
+	if output := string(consumer.Output); !strings.Contains(output, `import type { Envelope } from "./contracts/types.ts";`) {
+		t.Fatalf("generated TypeScript is missing inferred local type imports:\n%s", output)
+	}
+	found := false
+	for _, statement := range consumer.IR.Statements {
+		imported, ok := statement.(*ir.Import)
+		if ok && imported.Implicit && imported.Path == "contracts/types" && slices.Contains(imported.GeneratedTypeSymbols, "Envelope") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("lowered consumer is missing hidden generated type imports: %#v", consumer.IR.Statements)
+	}
 }
 
 func TestPortableBase64PackageLowersAcrossBackends(t *testing.T) {
