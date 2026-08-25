@@ -412,10 +412,11 @@ source continues to require explicit imports. Completion offers types such as
 import visibly into the input. If more than one package exports the same name,
 the menu shows each origin and accepting one inserts the selected import.
 When the input consists only of that candidate, Tab keeps even a unique match
-as a cancellable selection. Escape restores the original input. Enter confirms
-the selection by replacing the editable input with only the import; a later
-Enter submits that import. Completion inside a larger expression keeps the
-expression and prepends its import.
+as a cancellable selection. Escape, Backspace, or Delete restores the original
+input without confirming the candidate. Enter confirms the selection by
+replacing the editable input with only the import; a later Enter submits that
+import. Completion inside a larger expression keeps the expression and
+prepends its import.
 
 Each submission passes through the ordinary parser, resolver, type checker,
 typed IR lowering, and evaluator. Platform packages are accepted or rejected

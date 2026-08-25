@@ -17,8 +17,8 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02 h1:AgcIVYPa6XJnU3phs104wLj8l5GEththEw6+F79YsIY=
 github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02/go.mod h1:Q48J4R4DvxnHolD5P8pOtXigYlRuPLGl6moFx3ulM68=
-github.com/hiroki23/readline v1.3.1-0.20260825015538-5a6f0637e0b4 h1:npvPKiCp5zqhAk+lmBNnBtR5MPptp+W1Z/Ur210j7iY=
-github.com/hiroki23/readline v1.3.1-0.20260825015538-5a6f0637e0b4/go.mod h1:bOpqx2/VqGlIoobyWR1Vgt/p5FiMfIHj4OicPuw6RfU=
+github.com/hiroki23/readline v1.3.1-0.20260825021210-9d41c4c90b9e h1:2MMoPpGoLa58oAExQIY7dwWY40HiNDNy5zTZJVzqV4E=
+github.com/hiroki23/readline v1.3.1-0.20260825021210-9d41c4c90b9e/go.mod h1:bOpqx2/VqGlIoobyWR1Vgt/p5FiMfIHj4OicPuw6RfU=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=

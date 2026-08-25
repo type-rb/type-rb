@@ -52,7 +52,10 @@ func TestCompletionAppliesVisibleImportEdit(t *testing.T) {
 }
 
 func TestBareUniqueCompletionConfirmsThenSubmitsItsImport(t *testing.T) {
-	output := bytes.ReplaceAll(runCompletionPTY(t, "mat\t\r\r"), []byte("\r"), nil)
+	output := bytes.ReplaceAll(runCompletionPTYSteps(t,
+		ptyInputStep{input: "mat\t\r", waitAfter: 100 * time.Millisecond},
+		ptyInputStep{input: "\r"},
+	), []byte("\r"), nil)
 	if !bytes.Contains(output, []byte("[LINE:import trb/std/math]")) {
 		t.Fatalf("bare package completion did not confirm then submit its import: %q", output)
 	}
@@ -69,8 +72,18 @@ func TestBareUniqueCompletionCanBeCancelled(t *testing.T) {
 	}
 }
 
+func TestBareUniqueCompletionBackspaceCancels(t *testing.T) {
+	output := bytes.ReplaceAll(runCompletionPTY(t, "mat\t\x7f\r"), []byte("\r"), nil)
+	if !bytes.Contains(output, []byte("[LINE:mat]")) {
+		t.Fatalf("Backspace did not cancel the package completion: %q", output)
+	}
+}
+
 func TestBareSelectedCompletionConfirmsThenSubmitsSelectedImport(t *testing.T) {
-	output := bytes.ReplaceAll(runCompletionPTY(t, "sha256\t\r\r"), []byte("\r"), nil)
+	output := bytes.ReplaceAll(runCompletionPTYSteps(t,
+		ptyInputStep{input: "sha256\t\r", waitAfter: 100 * time.Millisecond},
+		ptyInputStep{input: "\r"},
+	), []byte("\r"), nil)
 	if !bytes.Contains(output, []byte("[LINE:import { sha256 } from trb/std/")) {
 		t.Fatalf("selected function completion did not confirm then submit its import: %q", output)
 	}
