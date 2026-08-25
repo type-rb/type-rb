@@ -204,9 +204,6 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   uses `alias Name<T> = Target<T>`. Assignment and member checking expand the
   alias while diagnostics, completion, imports, and generated signatures may
   retain its authored name.
-- The former `type Name = Target` spelling is not accepted as current syntax.
-  It produces a migration diagnostic because an existing declaration must be
-  classified as either a transparent `alias` or a nominal `newtype`.
 - `newtype Name = Representation` declares a nominal type. Its representation
   may be any concrete, fully instantiated type, including
   `Array<ProductId>`, but the representation must not itself be nullable.
@@ -563,9 +560,8 @@ switches.
   data, empty catalogs, symlinked catalogs, unsafe `Any` or invalid signature
   types, and compiler-derived representation metadata. A declaration name that
   conflicts with another active provider or a project declaration is an error.
-  Version 3 adds class-body declaration rules only to the bundled
-  project-aware subset; a fixed version 2 catalog migrates by changing its
-  protocol version and no other fields.
+  Class-body declaration rules are available only to the bundled
+  project-aware subset and are rejected in fixed catalogs.
   Other modes and project-aware external providers are not supported by this
   capability.
 - A package may pair `declarationAdapters.<mode>` with

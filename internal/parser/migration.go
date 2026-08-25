@@ -6,9 +6,9 @@ import (
 )
 
 const (
-	failsRemovedMessage   = "fails was removed in TypeRB 0.3; return Result<T, E> instead (see docs/migrations/0.3-result-control.md)"
-	attemptRemovedMessage = "attempt was removed in TypeRB 0.3; the operation already returns Result (see docs/migrations/0.3-result-control.md)"
-	typeAliasMovedMessage = "transparent aliases now use alias Name = Target; use newtype Name = Target for a distinct nominal type (see docs/migrations/0.3-alias-newtype.md)"
+	failsRemovedMessage   = "fails is not valid TypeRB syntax; return Result<T, E> (see docs/language.md#result-control-flow)"
+	attemptRemovedMessage = "attempt is not valid TypeRB syntax; handle the Result directly (see docs/language.md#result-control-flow)"
+	typeAliasMovedMessage = "use alias Name = Target for a transparent alias or newtype Name = Target for a distinct nominal type (see docs/language.md#aliases-and-newtypes)"
 )
 
 func (p *Parser) parseExpression(tokens []token.Token) (ast.Expression, bool) {

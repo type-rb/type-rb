@@ -339,9 +339,9 @@ Database terminals, lazy association access, transactions, and streaming
 return `DbResult<T>`. Applications propagate compatible errors with `try`,
 recover with `catch`, or inspect the Result with exhaustive `case`. The REPL
 uses the same schema-backed read and write API. A deterministic portable schema
-lock now removes the live database requirement from compiler checks and builds.
-ORM declaration output now dogfoods the experimental bundled Declaration
-Protocol. Schema-derived properties, literal-dependent terminals, and
+lock removes the live database requirement from compiler checks and builds.
+ORM declaration output uses the experimental bundled Declaration Protocol.
+Schema-derived properties, literal-dependent terminals, and
 structured transaction and streaming contracts cross a validated,
 mode-independent data boundary before the compiler resolves them. Project model
 discovery and backend runtime operations remain bundled while the protocol is
@@ -377,11 +377,11 @@ than a string adapter name in `packageOptions`; Job definitions remain
 independent from storage. The module exposes one explicitly typed
 `JOBS_ADAPTER` constant, initialized once and reused by every enqueue wrapper,
 so adapter lifetime is application-scoped rather than per-enqueue.
-Jobs-derived `perform_later`, `perform_in`, and `perform_at` declarations now
-cross the same validated, mode-independent Declaration Protocol as ORM. Their
-typed arguments, scheduling parameters, enqueue Results, and runtime operation
-names required no Jobs-specific protocol fields. Worker dispatch now crosses
-the versioned Project Generated Source Protocol as an ordinary TypeRB fragment:
+Jobs-derived `perform_later`, `perform_in`, and `perform_at` declarations cross
+the same validated, mode-independent Declaration Protocol as ORM. Their typed
+arguments, scheduling parameters, enqueue Results, and runtime operation names
+use the generic protocol fields. Worker dispatch crosses the versioned Project
+Generated Source Protocol as an ordinary TypeRB fragment:
 one portable dispatcher validates payload versions, decodes scalar arguments,
 calls the typed Job, and returns `JobResult` before all three backends lower it.
 The same protocol emits a stable fragment per Job for payload serialization,
@@ -411,12 +411,12 @@ method, and block bodies, default expressions, resolver/checker state,
 filesystem access, and backend objects do
 not cross the declaration-provider input boundary. The ORM runtime manifest
 remains a separate bundled integration boundary.
-Their direct class-body DSL calls now cross one generic Declaration Protocol
+Their direct class-body DSL calls cross one generic Declaration Protocol
 version 3 rule. The rule matches an exact provider package function and exact
 project class, preserves ordinary signature checking, and marks the typed-IR
 call as declaration-only so Go, Ruby, and TypeScript omit it from runtime
-output. ORM and Jobs backend generators no longer identify those directives by
-package-specific function-name checks.
+output. The generic rule keeps package-specific function-name checks out of
+the ORM and Jobs backend generators.
 Workers support queues, priorities, retry and failed state, heartbeats, stale
 claim recovery, graceful stop, listing, manual retry, and discard. PostgreSQL
 and MySQL use short locking claims for multiple workers. SQLite is deliberately

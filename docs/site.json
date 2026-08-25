@@ -43,8 +43,6 @@
       "pages": [
         { "source": "specification.md", "label": "Language specification" },
         { "source": "standard-library.md", "label": "Standard library" },
-        { "source": "migrations/0.3-result-control.md", "label": "Result migration" },
-        { "source": "migrations/0.3-alias-newtype.md", "label": "Alias and newtype migration" },
         { "source": "status.md", "label": "Current status" },
         { "source": "roadmap.md", "label": "Roadmap" }
       ]

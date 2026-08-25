@@ -70,7 +70,7 @@ func TestParseLegacyTypeAliasReportsMigration(t *testing.T) {
 	if _, ok := program.Statements[0].(*ast.TypeAliasStatement); !ok {
 		t.Fatalf("recovered statement=%#v", program.Statements[0])
 	}
-	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "transparent aliases now use alias") || !strings.Contains(diagnostics[0].Message, "use newtype") {
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0].Message, "use alias") || !strings.Contains(diagnostics[0].Message, "or newtype") {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}
 }

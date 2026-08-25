@@ -86,11 +86,10 @@ index and generated TypeScript keeps the original package specifier. Native
 declaration indexing requires TypeScript 6.x and reports the installed version
 when another major version is detected.
 
-`typescript.runtime` selects `browser`, `bun`, or `node`. Existing projects
-that omit it retain the previous Node execution behavior. `browser` projects
-compile source for a browser application or bundler and cannot use `trb run`
-as a process entrypoint. Bun server projects can select both runtime and
-package manager without additional manifest files:
+`typescript.runtime` selects `browser`, `bun`, or `node` and defaults to
+`node`. `browser` projects compile source for a browser application or bundler
+and cannot use `trb run` as a process entrypoint. Bun server projects can
+select both runtime and package manager without additional manifest files:
 
 ```jsonc
 {
@@ -272,8 +271,8 @@ nested package into a separate module without `main()`.
 
 ## Local packages
 
-Map a portable source directory into the project import graph with
-`localPackages` when maintaining an older source-only workspace:
+Map a portable source-only directory into the project import graph with
+`localPackages`:
 
 ```jsonc
 {
