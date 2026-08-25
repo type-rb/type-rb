@@ -88,6 +88,82 @@ func TestContractTypeAliasDoesNotReplaceDirectOpaqueType(t *testing.T) {
 	}
 }
 
+func TestContractTypeFollowsSelectedImportedValueContract(t *testing.T) {
+	imported := &Import{
+		Kind:    ProjectImport,
+		Path:    "app/mapper",
+		Symbols: []string{"load_payload"},
+		Exports: map[string]Export{
+			"load_payload": {Name: "load_payload", Kind: FunctionExport, Type: types.FromName("Payload")},
+			"unselected":   {Name: "unselected", Kind: FunctionExport, Type: types.FromName("OtherPayload")},
+		},
+	}
+	node := &ast.ImportStatement{}
+	result := Result{
+		Imports: map[*ast.ImportStatement]*Import{node: imported},
+		Catalog: &Catalog{Modules: map[string]*Module{
+			"contracts/payload": {
+				Path: "contracts/payload",
+				Exports: map[string]Export{
+					"Payload": {
+						Name: "Payload", Kind: RecordExport, Type: types.FromName("Payload"),
+						Fields: []RecordField{{Name: "metadata", Type: types.FromName("Metadata")}},
+					},
+					"Metadata": {Name: "Metadata", Kind: RecordExport, Type: types.FromName("Metadata")},
+				},
+			},
+			"contracts/other": {
+				Path: "contracts/other",
+				Exports: map[string]Export{
+					"OtherPayload": {Name: "OtherPayload", Kind: RecordExport, Type: types.FromName("OtherPayload")},
+				},
+			},
+		}},
+	}
+
+	for _, name := range []string{"Payload", "Metadata"} {
+		resolved, ok := result.ContractType(name)
+		if !ok || resolved.Import == nil || resolved.Import.RuntimePath() != "contracts/payload" || resolved.Export == nil || resolved.Export.Name != name {
+			t.Fatalf("ContractType(%s)=(%#v, %t), want the selected contract type", name, resolved, ok)
+		}
+	}
+	if _, ok := result.ContractType("OtherPayload"); ok {
+		t.Fatal("ContractType resolved a type referenced only by an unselected export")
+	}
+}
+
+func TestContractTypeDoesNotReplaceDirectOpaqueType(t *testing.T) {
+	imported := &Import{
+		Kind:    NativeImport,
+		Path:    "native/http",
+		Symbols: []string{"load_response"},
+		Exports: map[string]Export{
+			"load_response": {Name: "load_response", Kind: FunctionExport, Type: types.FromName("Response")},
+			"Response":      {Name: "Response", Kind: ClassExport, Type: types.FromName("Response")},
+		},
+	}
+	node := &ast.ImportStatement{}
+	result := Result{
+		Imports: map[*ast.ImportStatement]*Import{node: imported},
+		Catalog: &Catalog{Modules: map[string]*Module{
+			"project/response": {
+				Path: "project/response",
+				Exports: map[string]Export{
+					"Response": {Name: "Response", Kind: RecordExport, Type: types.FromName("Response")},
+				},
+			},
+		}},
+	}
+
+	if resolved, ok := result.ContractType("Response"); ok {
+		t.Fatalf("ContractType replaced a directly owned opaque type with %#v", resolved)
+	}
+	resolved, ok := result.InferredType("Response")
+	if !ok || resolved.Import != imported || resolved.Export == nil || resolved.Export.Kind != ClassExport {
+		t.Fatalf("InferredType(Response)=(%#v, %t), want the directly owned opaque type", resolved, ok)
+	}
+}
+
 func BenchmarkCatalogTypeAlias(b *testing.B) {
 	const modules = 512
 	units := make([]Module, 0, modules)
