@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const ProjectDeclarationInputProtocolVersion = 4
+const ProjectDeclarationInputProtocolVersion = 5
 
 // ProjectDeclarationInput is a versioned, read-only snapshot of source
 // declarations that a declaration provider may inspect. It intentionally
@@ -21,8 +21,11 @@ type ProjectModule struct {
 	Imports     []ProjectImport    `json:"imports,omitempty"`
 	TypeAliases []ProjectTypeAlias `json:"typeAliases,omitempty"`
 	Newtypes    []ProjectNewtype   `json:"newtypes,omitempty"`
+	Records     []ProjectRecord    `json:"records,omitempty"`
 	Enums       []ProjectEnum      `json:"enums,omitempty"`
 	Classes     []ProjectClass     `json:"classes,omitempty"`
+	// Functions reuse the method-signature DTO, with Class always false.
+	Functions []ProjectMethod `json:"functions,omitempty"`
 }
 
 type ProjectImport struct {
@@ -44,6 +47,26 @@ type ProjectNewtype struct {
 	Name   string         `json:"name"`
 	Target ProjectTypeUse `json:"target"`
 	Span   SourceSpan     `json:"span"`
+}
+
+type ProjectRecord struct {
+	Name           string               `json:"name"`
+	TypeParameters []string             `json:"typeParameters,omitempty"`
+	Fields         []ProjectRecordField `json:"fields,omitempty"`
+	Span           SourceSpan           `json:"span"`
+}
+
+type ProjectRecordField struct {
+	Name       string             `json:"name"`
+	Type       ProjectTypeUse     `json:"type"`
+	Attributes []ProjectAttribute `json:"attributes,omitempty"`
+	Span       SourceSpan         `json:"span"`
+}
+
+type ProjectAttribute struct {
+	Name      string                     `json:"name"`
+	Arguments []ProjectDirectiveArgument `json:"arguments,omitempty"`
+	Span      SourceSpan                 `json:"span"`
 }
 
 type ProjectClass struct {
@@ -93,10 +116,11 @@ type ProjectParameter struct {
 // argument values and a structural block summary, never executable block
 // statements.
 type ProjectDirective struct {
-	Name      string                     `json:"name"`
-	Arguments []ProjectDirectiveArgument `json:"arguments,omitempty"`
-	Block     *ProjectDirectiveBlock     `json:"block,omitempty"`
-	Span      SourceSpan                 `json:"span"`
+	Name          string                     `json:"name"`
+	TypeArguments []ProjectTypeUse           `json:"typeArguments,omitempty"`
+	Arguments     []ProjectDirectiveArgument `json:"arguments,omitempty"`
+	Block         *ProjectDirectiveBlock     `json:"block,omitempty"`
+	Span          SourceSpan                 `json:"span"`
 }
 
 type ProjectDirectiveArgument struct {
@@ -204,6 +228,11 @@ func ValidateProjectDeclarationInput(input ProjectDeclarationInput) error {
 				return fmt.Errorf("project declaration input newtype %s.%s: %w", module.ModulePath, newtype.Name, err)
 			}
 		}
+		for _, record := range module.Records {
+			if err := validateProjectRecord(module.ModulePath, record); err != nil {
+				return err
+			}
+		}
 		for _, enum := range module.Enums {
 			if err := validateProjectEnum(module.ModulePath, enum); err != nil {
 				return err
@@ -213,6 +242,51 @@ func ValidateProjectDeclarationInput(input ProjectDeclarationInput) error {
 			if err := validateProjectClass(module.ModulePath, class); err != nil {
 				return err
 			}
+		}
+		for _, function := range module.Functions {
+			if err := validateProjectMethod(module.ModulePath, "function", "", function); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateProjectRecord(modulePath string, record ProjectRecord) error {
+	if strings.TrimSpace(record.Name) == "" {
+		return fmt.Errorf("project declaration input module %s contains an unnamed record", modulePath)
+	}
+	if err := validateProjectTypeParameters(record.TypeParameters); err != nil {
+		return fmt.Errorf("project declaration input record %s.%s: %w", modulePath, record.Name, err)
+	}
+	if err := validateSourceSpan(record.Span); err != nil {
+		return fmt.Errorf("project declaration input record %s.%s: %w", modulePath, record.Name, err)
+	}
+	for _, field := range record.Fields {
+		if strings.TrimSpace(field.Name) == "" {
+			return fmt.Errorf("project declaration input record %s.%s contains an unnamed field", modulePath, record.Name)
+		}
+		if err := validateProjectTypeUse(field.Type); err != nil {
+			return fmt.Errorf("project declaration input record %s.%s field %s: %w", modulePath, record.Name, field.Name, err)
+		}
+		for _, attribute := range field.Attributes {
+			if strings.TrimSpace(attribute.Name) == "" {
+				return fmt.Errorf("project declaration input record %s.%s field %s contains an unnamed attribute", modulePath, record.Name, field.Name)
+			}
+			for _, argument := range attribute.Arguments {
+				if err := validateProjectValue(argument.Value); err != nil {
+					return fmt.Errorf("project declaration input record %s.%s field %s attribute %s argument: %w", modulePath, record.Name, field.Name, attribute.Name, err)
+				}
+				if err := validateSourceSpan(argument.Span); err != nil {
+					return fmt.Errorf("project declaration input record %s.%s field %s attribute %s argument: %w", modulePath, record.Name, field.Name, attribute.Name, err)
+				}
+			}
+			if err := validateSourceSpan(attribute.Span); err != nil {
+				return fmt.Errorf("project declaration input record %s.%s field %s attribute %s: %w", modulePath, record.Name, field.Name, attribute.Name, err)
+			}
+		}
+		if err := validateSourceSpan(field.Span); err != nil {
+			return fmt.Errorf("project declaration input record %s.%s field %s: %w", modulePath, record.Name, field.Name, err)
 		}
 	}
 	return nil
@@ -271,35 +345,18 @@ func validateProjectClass(modulePath string, class ProjectClass) error {
 		return fmt.Errorf("project declaration input class %s.%s: %w", modulePath, class.Name, err)
 	}
 	for _, method := range class.Methods {
-		if strings.TrimSpace(method.Name) == "" {
-			return fmt.Errorf("project declaration input class %s.%s contains an unnamed method", modulePath, class.Name)
-		}
-		if err := validateProjectTypeParameters(method.TypeParameters); err != nil {
-			return fmt.Errorf("project declaration input method %s.%s#%s: %w", modulePath, class.Name, method.Name, err)
-		}
-		for _, parameter := range method.Parameters {
-			if strings.TrimSpace(parameter.Name) == "" {
-				return fmt.Errorf("project declaration input method %s.%s#%s contains an unnamed parameter", modulePath, class.Name, method.Name)
-			}
-			if err := validateProjectTypeUse(parameter.Type); err != nil {
-				return fmt.Errorf("project declaration input method %s.%s#%s parameter %s: %w", modulePath, class.Name, method.Name, parameter.Name, err)
-			}
-			if err := validateSourceSpan(parameter.Span); err != nil {
-				return fmt.Errorf("project declaration input method %s.%s#%s parameter %s: %w", modulePath, class.Name, method.Name, parameter.Name, err)
-			}
-		}
-		if method.Return != nil {
-			if err := validateProjectTypeUse(*method.Return); err != nil {
-				return fmt.Errorf("project declaration input method %s.%s#%s return: %w", modulePath, class.Name, method.Name, err)
-			}
-		}
-		if err := validateSourceSpan(method.Span); err != nil {
-			return fmt.Errorf("project declaration input method %s.%s#%s: %w", modulePath, class.Name, method.Name, err)
+		if err := validateProjectMethod(modulePath, "method", class.Name, method); err != nil {
+			return err
 		}
 	}
 	for _, directive := range class.Directives {
 		if strings.TrimSpace(directive.Name) == "" {
 			return fmt.Errorf("project declaration input class %s.%s contains an unnamed directive", modulePath, class.Name)
+		}
+		for _, argument := range directive.TypeArguments {
+			if err := validateProjectTypeUse(argument); err != nil {
+				return fmt.Errorf("project declaration input directive %s.%s.%s type argument: %w", modulePath, class.Name, directive.Name, err)
+			}
 		}
 		for _, argument := range directive.Arguments {
 			if err := validateProjectValue(argument.Value); err != nil {
@@ -328,6 +385,45 @@ func validateProjectClass(modulePath string, class ProjectClass) error {
 		if err := validateSourceSpan(directive.Span); err != nil {
 			return fmt.Errorf("project declaration input directive %s.%s.%s: %w", modulePath, class.Name, directive.Name, err)
 		}
+	}
+	return nil
+}
+
+func validateProjectMethod(modulePath, kind, owner string, method ProjectMethod) error {
+	location := modulePath + "." + method.Name
+	if owner != "" {
+		location = modulePath + "." + owner + "#" + method.Name
+	}
+	if strings.TrimSpace(method.Name) == "" {
+		if owner == "" {
+			return fmt.Errorf("project declaration input module %s contains an unnamed %s", modulePath, kind)
+		}
+		return fmt.Errorf("project declaration input class %s.%s contains an unnamed %s", modulePath, owner, kind)
+	}
+	if owner == "" && method.Class {
+		return fmt.Errorf("project declaration input function %s cannot be a class method", location)
+	}
+	if err := validateProjectTypeParameters(method.TypeParameters); err != nil {
+		return fmt.Errorf("project declaration input %s %s: %w", kind, location, err)
+	}
+	for _, parameter := range method.Parameters {
+		if strings.TrimSpace(parameter.Name) == "" {
+			return fmt.Errorf("project declaration input %s %s contains an unnamed parameter", kind, location)
+		}
+		if err := validateProjectTypeUse(parameter.Type); err != nil {
+			return fmt.Errorf("project declaration input %s %s parameter %s: %w", kind, location, parameter.Name, err)
+		}
+		if err := validateSourceSpan(parameter.Span); err != nil {
+			return fmt.Errorf("project declaration input %s %s parameter %s: %w", kind, location, parameter.Name, err)
+		}
+	}
+	if method.Return != nil {
+		if err := validateProjectTypeUse(*method.Return); err != nil {
+			return fmt.Errorf("project declaration input %s %s return: %w", kind, location, err)
+		}
+	}
+	if err := validateSourceSpan(method.Span); err != nil {
+		return fmt.Errorf("project declaration input %s %s: %w", kind, location, err)
 	}
 	return nil
 }

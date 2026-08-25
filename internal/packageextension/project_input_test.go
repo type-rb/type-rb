@@ -21,6 +21,18 @@ func TestProjectDeclarationInputIsVersionedAndSerializable(t *testing.T) {
 				Target: ProjectTypeUse{Authored: Type{Kind: "int", Name: "Integer"}, Resolved: Type{Kind: "int", Name: "Integer"}, Span: span},
 				Span:   span,
 			}},
+			Records: []ProjectRecord{{
+				Name: "JobPayload",
+				Fields: []ProjectRecordField{{
+					Name: "id",
+					Type: ProjectTypeUse{Authored: Type{Kind: "int", Name: "Integer"}, Resolved: Type{Kind: "int", Name: "Integer"}, Span: span},
+					Attributes: []ProjectAttribute{{
+						Name: "json", Arguments: []ProjectDirectiveArgument{{Value: ProjectValue{Kind: "string", Raw: `"job_id"`}, Span: span}}, Span: span,
+					}},
+					Span: span,
+				}},
+				Span: span,
+			}},
 			Classes: []ProjectClass{{
 				Name: "ExampleJob",
 				Superclass: &ProjectTypeUse{
@@ -30,8 +42,12 @@ func TestProjectDeclarationInputIsVersionedAndSerializable(t *testing.T) {
 					Span:           span,
 				},
 				Methods: []ProjectMethod{{Name: "perform", Span: span}},
-				Span:    span,
+				Directives: []ProjectDirective{{
+					Name: "payload", TypeArguments: []ProjectTypeUse{{Authored: Type{Kind: "named", Name: "JobPayload"}, Resolved: Type{Kind: "named", Name: "JobPayload"}, Span: span}}, Span: span,
+				}},
+				Span: span,
 			}},
+			Functions: []ProjectMethod{{Name: "build_payload", Return: &ProjectTypeUse{Authored: Type{Kind: "named", Name: "JobPayload"}, Resolved: Type{Kind: "named", Name: "JobPayload"}, Span: span}, Span: span}},
 		}},
 	}
 	if err := ValidateProjectDeclarationInput(input); err != nil {
@@ -82,6 +98,24 @@ func TestProjectDeclarationInputRejectsInvalidBoundaryData(t *testing.T) {
 				Name: "has_many", Block: &ProjectDirectiveBlock{StatementCount: 2, ResultExpression: true},
 			}}}}
 		}, message: "result expression requires one statement"},
+		{name: "directive type argument", mutate: func(input *ProjectDeclarationInput) {
+			input.Modules[0].Classes = []ProjectClass{{Name: "Model", Directives: []ProjectDirective{{
+				Name: "payload", TypeArguments: []ProjectTypeUse{{Authored: Type{Kind: ""}, Resolved: Type{Kind: "int", Name: "Integer"}}},
+			}}}}
+		}, message: "type argument"},
+		{name: "record attribute", mutate: func(input *ProjectDeclarationInput) {
+			input.Modules[0].Records = []ProjectRecord{{Name: "Payload", Fields: []ProjectRecordField{{
+				Name:       "id",
+				Type:       ProjectTypeUse{Authored: Type{Kind: "int", Name: "Integer"}, Resolved: Type{Kind: "int", Name: "Integer"}},
+				Attributes: []ProjectAttribute{{Name: "json", Arguments: []ProjectDirectiveArgument{{Value: ProjectValue{Kind: "array"}}}}},
+			}}}}
+		}, message: "unsupported value kind"},
+		{name: "function parameter", mutate: func(input *ProjectDeclarationInput) {
+			input.Modules[0].Functions = []ProjectMethod{{Name: "handle", Parameters: []ProjectParameter{{Type: ProjectTypeUse{Authored: Type{Kind: "int", Name: "Integer"}, Resolved: Type{Kind: "int", Name: "Integer"}}}}}}
+		}, message: "unnamed parameter"},
+		{name: "class function", mutate: func(input *ProjectDeclarationInput) {
+			input.Modules[0].Functions = []ProjectMethod{{Name: "handle", Class: true}}
+		}, message: "cannot be a class method"},
 		{name: "definition module", mutate: func(input *ProjectDeclarationInput) {
 			input.Modules[0].TypeAliases = []ProjectTypeAlias{{
 				Name: "ID",

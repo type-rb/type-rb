@@ -27,15 +27,24 @@ func TestExportProjectDeclarationInputCopiesDeclarationFacts(t *testing.T) {
 enum DeliveryState
 	Pending = "pending"
 end
+
+record Envelope<T>
+	payload: T @json("data")
+end
 `)
 	job := parseProjectInputTest(t, "jobs/send_receipt", `import { Job, JobResult } from trb/jobs
 import { DeliveryState, ReceiptID } from app/contracts/ids
 
 alias DeliveryResult = JobResult
 
+def endpoint<T>(value: T, *, trace: Boolean = false): T
+	return value
+end
+
 class SendReceiptJob < Job
 	queue("mail")
 	priority(PRIORITY)
+	serialize<DeliveryState>("json")
 	configure(:mail, DeliveryState) do |scope|
 		scope
 	end
@@ -65,14 +74,24 @@ end
 	if len(input.Modules[0].Enums) != 1 || input.Modules[0].Enums[0].Members[0].RawValue == nil || input.Modules[0].Enums[0].Members[0].RawValue.Raw != `"pending"` {
 		t.Fatalf("enum declaration facts are incomplete: %#v", input.Modules[0].Enums)
 	}
+	if len(input.Modules[0].Records) != 1 || len(input.Modules[0].Records[0].Fields) != 1 {
+		t.Fatalf("record declaration facts are incomplete: %#v", input.Modules[0].Records)
+	}
+	record := input.Modules[0].Records[0]
+	if len(record.TypeParameters) != 1 || record.Fields[0].Type.Authored.Name != "T" || len(record.Fields[0].Attributes) != 1 || record.Fields[0].Attributes[0].Arguments[0].Value.Raw != `"data"` {
+		t.Fatalf("generic record field facts are incomplete: %#v", record)
+	}
 	if len(module.Imports) != 2 || module.Imports[1].ModulePath != "contracts/ids" || len(module.TypeAliases) != 1 || len(module.Classes) != 1 {
 		t.Fatalf("declaration facts are incomplete: %#v", module)
+	}
+	if len(module.Functions) != 1 || len(module.Functions[0].TypeParameters) != 1 || len(module.Functions[0].Parameters) != 2 || !module.Functions[0].Parameters[1].NamedOnly || !module.Functions[0].Parameters[1].Optional || module.Functions[0].Return == nil || module.Functions[0].Return.Authored.Name != "T" {
+		t.Fatalf("top-level function signature facts are incomplete: %#v", module.Functions)
 	}
 	class := module.Classes[0]
 	if class.Superclass == nil || class.Superclass.Authored.Name != "Job" || class.Superclass.Authored.Definition == nil || class.Superclass.Authored.Definition.ImportPath != "trb/jobs" {
 		t.Fatalf("superclass identity is missing: %#v", class.Superclass)
 	}
-	if len(class.Methods) != 2 || len(class.Directives) != 3 {
+	if len(class.Methods) != 2 || len(class.Directives) != 4 {
 		t.Fatalf("class signature facts are incomplete: %#v", class)
 	}
 	helper := class.Methods[0]
@@ -89,7 +108,11 @@ end
 	if class.Directives[1].Arguments[0].Value.Kind != "reference" {
 		t.Fatalf("reference directive argument was not copied: %#v", class.Directives[1])
 	}
-	configured := class.Directives[2]
+	serialized := class.Directives[2]
+	if len(serialized.TypeArguments) != 1 || serialized.TypeArguments[0].Authored.Name != "DeliveryState" || serialized.TypeArguments[0].Authored.Definition == nil || serialized.TypeArguments[0].Authored.Definition.ModulePath != "contracts/ids" {
+		t.Fatalf("generic directive type arguments are incomplete: %#v", serialized)
+	}
+	configured := class.Directives[3]
 	if configured.Arguments[0].Value.Kind != "symbol" || configured.Arguments[0].Value.Name != "mail" || configured.Arguments[1].Value.Reference == nil || configured.Arguments[1].Value.Reference.ModulePath != "contracts/ids" {
 		t.Fatalf("declarative directive values are incomplete: %#v", configured)
 	}
