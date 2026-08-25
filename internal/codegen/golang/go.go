@@ -257,9 +257,10 @@ func (g *generator) importStatement(imported *ir.Import) {
 	if directory == g.currentDirectory() {
 		return
 	}
-	importPath := directory
+	generatedDirectory := GeneratedSourceDirectory(directory)
+	importPath := generatedDirectory
 	if g.goModule != "" {
-		importPath = pathpkg.Join(g.goModule, directory)
+		importPath = pathpkg.Join(g.goModule, generatedDirectory)
 	}
 	if importPath == "" {
 		return
@@ -2686,9 +2687,10 @@ func (g *generator) referenceAlias(reference *ir.Reference) string {
 	if directory == g.currentDirectory() {
 		return ""
 	}
-	importPath := directory
+	generatedDirectory := GeneratedSourceDirectory(directory)
+	importPath := generatedDirectory
 	if g.goModule != "" {
-		importPath = pathpkg.Join(g.goModule, directory)
+		importPath = pathpkg.Join(g.goModule, generatedDirectory)
 	}
 	if alias, exists := g.imports[importPath]; exists {
 		if alias == "" {

@@ -2553,6 +2553,7 @@ func generatedSourceRelative(config *project.Config, relative string) string {
 
 func goGeneratedSourceRelative(relative string) string {
 	directory := filepath.Dir(relative)
+	directory = filepath.FromSlash(codegen.GeneratedSourceDirectory("go", filepath.ToSlash(directory)))
 	base := strings.TrimSuffix(filepath.Base(relative), ".go")
 	if strings.HasPrefix(base, "[") && strings.HasSuffix(base, "]") {
 		parameter := strings.TrimSuffix(strings.TrimPrefix(base, "["), "]")
