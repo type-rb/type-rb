@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/languageservice"
@@ -1313,7 +1314,7 @@ end
 		`TrbOrmMembershipAssociationPredicate(TrbOrmMembershipQueryWhere(TrbOrmMembershipUsing(`,
 		`orm.TrbOrmJoin{Kind: "INNER JOIN", Table: "memberships", SourceColumn: "id", TargetColumn: "project_id"`,
 		`TrbOrmProjectJoin(TrbOrmProjectUsing(`,
-		`trbArrayIndex(users, 0).TrbOrmTransaction())`,
+		`trbArrayIndex_` + naming.PrivateSuffix("array-index:main") + `(users, 0).TrbOrmTransaction())`,
 		`Build: func(arguments *[]any) string`,
 		`trbOrmQuoteIdentifier("memberships")`,
 		`func(projects TrbOrmProjectQuery) TrbOrmProjectQuery`,

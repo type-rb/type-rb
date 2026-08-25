@@ -1564,7 +1564,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if n.Receiver.ExprType().Kind == types.Array {
 			g.arrayIndexRuntime = true
-			return "trbArrayIndex(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+			return g.arrayIndexName() + "(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
@@ -1996,7 +1996,7 @@ func (g *generator) assignmentTarget(expression ir.Expression) string {
 		if index.Receiver.ExprType().Kind == types.Array {
 			g.arrayIndexRuntime = true
 			receiver := g.expr(index.Receiver)
-			position := "trbArrayIndexPosition(" + g.expr(index.Index) + ", len(" + receiver + "))"
+			position := g.arrayIndexPositionName() + "(" + g.expr(index.Index) + ", len(" + receiver + "))"
 			return receiver + "[" + position + "]"
 		}
 		return g.expr(index.Receiver) + "[" + g.expr(index.Index) + "]"
@@ -2005,8 +2005,16 @@ func (g *generator) assignmentTarget(expression ir.Expression) string {
 }
 
 func (g *generator) arrayIndexRuntimeSupport() {
-	g.line(`func trbArrayIndexPosition(index int, size int) int { if index < 0 { index += size }; if index < 0 || index >= size { panic("Array index is out of bounds") }; return index }`)
-	g.line(`func trbArrayIndex[T any](values []T, index int) T { return values[trbArrayIndexPosition(index, len(values))] }`)
+	g.line("func " + g.arrayIndexPositionName() + `(index int, size int) int { if index < 0 { index += size }; if index < 0 || index >= size { panic("Array index is out of bounds") }; return index }`)
+	g.line("func " + g.arrayIndexName() + "[T any](values []T, index int) T { return values[" + g.arrayIndexPositionName() + "(index, len(values))] }")
+}
+
+func (g *generator) arrayIndexPositionName() string {
+	return "trbArrayIndexPosition_" + naming.PrivateSuffix("array-index:"+g.modulePath)
+}
+
+func (g *generator) arrayIndexName() string {
+	return "trbArrayIndex_" + naming.PrivateSuffix("array-index:"+g.modulePath)
 }
 
 func (g *generator) binaryOperand(expression ir.Expression) string {
