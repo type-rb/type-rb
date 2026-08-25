@@ -1742,6 +1742,54 @@ func TestGoArrayIndexRuntimesArePrivateToGeneratedModules(t *testing.T) {
 	}
 }
 
+func TestGoReceiverIntrinsicsSurviveImportsWithinOnePackage(t *testing.T) {
+	root := t.TempDir()
+	artifacts, err := CompileProject([]SourceUnit{
+		{
+			Filename:   filepath.Join(root, "domain", "result.trb"),
+			ModulePath: "domain/result",
+			Package:    "domain",
+			Source:     []byte("record Parsed\n\tvalues: Array<String>\nend\n"),
+		},
+		{
+			Filename:   filepath.Join(root, "domain", "parser.trb"),
+			ModulePath: "domain/parser",
+			Package:    "domain",
+			Source:     []byte("import { Parsed } from domain/result\n\ndef parse_values(): Parsed\n\treturn Parsed.new(values: [\"one\", \"two\"])\nend\n"),
+		},
+		{
+			Filename:   filepath.Join(root, "domain", "consumer.trb"),
+			ModulePath: "domain/consumer",
+			Package:    "domain",
+			Source:     []byte("import { parse_values } from domain/parser\n\ndef value_count(): Integer\n\tparsed := parse_values()\n\treturn parsed.values.size()\nend\n"),
+		},
+	}, Options{Mode: "go", GoModule: "example.com/package-receiver"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileSet := token.NewFileSet()
+	files := make([]*goast.File, 0, len(artifacts))
+	foundLength := false
+	consumerOutput := ""
+	for _, artifact := range artifacts {
+		if artifact.IR.ModulePath == "domain/consumer" {
+			consumerOutput = string(artifact.Output)
+			foundLength = strings.Contains(consumerOutput, "len(parsed.Values)")
+		}
+		parsed, parseErr := parser.ParseFile(fileSet, artifact.Filename, artifact.Output, parser.AllErrors)
+		if parseErr != nil {
+			t.Fatalf("generated Go does not parse: %v\n%s", parseErr, artifact.Output)
+		}
+		files = append(files, parsed)
+	}
+	if !foundLength {
+		t.Fatalf("same-package import lost the Array#size intrinsic:\n%s", consumerOutput)
+	}
+	if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("example.com/package-receiver/domain", fileSet, files, nil); checkErr != nil {
+		t.Fatalf("generated package does not type-check: %v", checkErr)
+	}
+}
+
 func TestGoStringWhitespaceImportDoesNotConflictWithUnicodePackage(t *testing.T) {
 	artifacts, err := CompileProject([]SourceUnit{{
 		Filename:   "text.trb",

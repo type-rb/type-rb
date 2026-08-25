@@ -817,9 +817,9 @@ func (r Result) InferredType(typeName string) (Binding, bool) {
 }
 
 // InferredTypeMember resolves a member on a type produced by an explicitly
-// imported package even when the source did not import that type by name. This
-// keeps inferred library values usable without weakening named-import rules
-// for source annotations.
+// imported package or exposed through one of its selected value contracts,
+// even when the source did not import that type by name. This keeps inferred
+// values usable without weakening named-import rules for source annotations.
 func (r Result) InferredTypeMember(typeName, memberName string) (Binding, bool) {
 	imports := make([]*Import, 0, len(r.Imports))
 	seen := map[*Import]bool{}
@@ -844,7 +844,18 @@ func (r Result) InferredTypeMember(typeName, memberName string) (Binding, bool) 
 		memberCopy := member
 		return Binding{Import: imported, Name: memberName, Export: &exportCopy, Member: &memberCopy}, true
 	}
-	return Binding{}, false
+	contract, exists := r.ContractType(typeName)
+	if !exists || contract.Export == nil {
+		return Binding{}, false
+	}
+	member, exists := contract.Export.Members[memberName]
+	if !exists {
+		return Binding{}, false
+	}
+	memberCopy := member
+	contract.Name = memberName
+	contract.Member = &memberCopy
+	return contract, true
 }
 
 // ValidateImportGraph rejects project import cycles with a deterministic path.
