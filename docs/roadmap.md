@@ -119,11 +119,11 @@ than detailed syntax.
 
 - Harden the official portable `trb/web` package around its existing
   compile-time file-based routes, typed JSON requests and responses,
-  middleware, and consistent HTTP behavior across Go, Ruby, and TypeScript
-  runtimes.
-- Extend the generated JSON codecs and client/server contracts from shared
-  records with versioned wire fields, validation policy, schema export, and
-  compatibility checking.
+  middleware, initial versioned endpoint catalog, and consistent HTTP behavior
+  across Go, Ruby, and TypeScript runtimes.
+- Extend the endpoint catalog and generated JSON codecs from shared records
+  with validation policy, OpenAPI/schema export, generated clients, versioned
+  wire fields, and compatibility checking.
 - Harden the experimental `trb/orm` package with schema caching, compatibility
   policy, production diagnostics, and larger end-to-end `trb/web` applications.
 - Harden the experimental `trb/jobs` contract with structured payload codecs,

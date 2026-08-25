@@ -324,6 +324,21 @@ class Response
 	end
 end
 
+class Endpoint
+end
+
+def handles(handler: (Context) -> Response)
+	return
+end
+
+def input<T>()
+	return
+end
+
+def response<T>(*, status: Integer)
+	return
+end
+
 def text(value: String, status: Integer = 200): Response
 	return Response.new(
 		status: status,

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/ir"
 	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
@@ -100,6 +101,201 @@ end
 				}
 			}
 			assertWebServerTarget(t, mode, main)
+		})
+	}
+}
+
+func TestCompileProjectAttachesTypedWebEndpointCatalogAcrossModes(t *testing.T) {
+	sources := []SourceUnit{
+		{
+			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
+			Source: []byte("import { serve } from trb/web\n\ndef main()\n\tserve()\n\treturn\nend\n"),
+		},
+		{
+			Filename: "/project/src/contracts/reports.trb", ModulePath: "contracts/reports", Package: "contracts",
+			Source: []byte(`record CreateReportBody
+	title: String
+end
+
+record CreateReportInput
+	body: CreateReportBody
+end
+
+record CreateReportResponse
+	id: Integer
+end
+
+record ErrorResponse
+	message: String
+end
+`),
+		},
+		{
+			Filename: "/project/src/routes/reports.trb", ModulePath: "routes/reports", Package: "routes",
+			Source: []byte(`import { Context, Endpoint, Response, handles, input, json, response } from trb/web
+import { CreateReportInput, CreateReportResponse, ErrorResponse } from contracts/reports
+
+def post(_context: Context): Response
+	return json(CreateReportResponse.new(id: 42), 202)
+end
+
+class CreateReportEndpoint < Endpoint
+	handles(post)
+	input<CreateReportInput>()
+	response<CreateReportResponse>(status: 202)
+	response<ErrorResponse>(status: 400)
+end
+`),
+		},
+	}
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifacts, err := CompileProject(sources, Options{
+				Mode: mode, GoModule: "example.com/web-contract", RubyLoader: "require_relative",
+				SourceRoot: "/project/src", ProjectRoot: "/project",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest := webintegration.ManifestFrom(artifactForModule(artifacts, "main").IR.Extensions)
+			if manifest == nil || manifest.EndpointCatalog.ProtocolVersion != webintegration.EndpointCatalogProtocolVersion || len(manifest.EndpointCatalog.Endpoints) != 1 {
+				t.Fatalf("unexpected endpoint catalog: %#v", manifest)
+			}
+			endpoint := manifest.EndpointCatalog.Endpoints[0]
+			if endpoint.Name != "CreateReportEndpoint" || endpoint.ModulePath != "routes/reports" || endpoint.Handler != "post" || endpoint.Method != "POST" || endpoint.Path != "/reports" {
+				t.Fatalf("unexpected endpoint: %#v", endpoint)
+			}
+			if endpoint.Input == nil || endpoint.Input.Authored.Name != "CreateReportInput" || endpoint.Input.Authored.Definition == nil || endpoint.Input.Authored.Definition.ModulePath != "contracts/reports" {
+				t.Fatalf("unexpected endpoint input: %#v", endpoint.Input)
+			}
+			if len(endpoint.Responses) != 2 || endpoint.Responses[0].Status != 202 || endpoint.Responses[0].Type.Authored.Name != "CreateReportResponse" || endpoint.Responses[0].Type.Authored.Definition == nil || endpoint.Responses[0].Type.Authored.Definition.ModulePath != "contracts/reports" || endpoint.Responses[1].Status != 400 || endpoint.Responses[1].Type.Authored.Name != "ErrorResponse" {
+				t.Fatalf("unexpected endpoint responses: %#v", endpoint.Responses)
+			}
+			route := artifactForModule(artifacts, "routes/reports")
+			if route == nil {
+				t.Fatal("route artifact was not generated")
+			}
+			assertEndpointCallsAreDeclarationOnly(t, route)
+			output := string(route.Output)
+			if strings.Contains(output, "handles(post") || strings.Contains(output, "response<CreateReportResponse") || strings.Contains(output, "input<CreateReportInput") {
+				t.Fatalf("declaration-only endpoint calls reached %s output:\n%s", mode, output)
+			}
+		})
+	}
+}
+
+func assertEndpointCallsAreDeclarationOnly(t *testing.T, artifact *Artifact) {
+	t.Helper()
+	for _, statement := range artifact.IR.Statements {
+		class, ok := statement.(*ir.Class)
+		if !ok || class.Name != "CreateReportEndpoint" {
+			continue
+		}
+		if len(class.Body) != 4 {
+			t.Fatalf("endpoint class body=%#v, want four declarations", class.Body)
+		}
+		for _, bodyStatement := range class.Body {
+			expression, ok := bodyStatement.(*ir.ExpressionStatement)
+			if !ok {
+				t.Fatalf("endpoint declaration is %T", bodyStatement)
+			}
+			call, ok := expression.Expression.(*ir.Call)
+			if !ok || !call.DeclarationOnly {
+				t.Fatalf("endpoint declaration call=%#v", expression.Expression)
+			}
+		}
+		return
+	}
+	t.Fatal("endpoint contract class was not lowered")
+}
+
+func TestCompileProjectRejectsInvalidWebEndpointContracts(t *testing.T) {
+	main := SourceUnit{
+		Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
+		Source: []byte("import { serve } from trb/web\n\ndef main()\n\tserve()\n\treturn\nend\n"),
+	}
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "missing handler",
+			source: `import { Context, Endpoint, Response, empty, response } from trb/web
+
+record Payload
+	value: String
+end
+
+def post(_context: Context): Response
+	return empty()
+end
+
+class Contract < Endpoint
+	response<Payload>(status: 200)
+end
+`,
+			want: "trb/web endpoint contract Contract must declare handles(handler)",
+		},
+		{
+			name: "duplicate status",
+			source: `import { Body, Headers } from trb/http
+import { Context, Endpoint, Response, handles, response } from trb/web
+
+record Payload
+	value: String
+end
+
+def post(_context: Context): Response
+	return Response.new(status: 204, headers: Headers.new(), body: Body.empty())
+end
+
+class Contract < Endpoint
+	handles(post)
+	response<Payload>(status: 200)
+	response<Payload>(status: 200)
+end
+`,
+			want: "trb/web endpoint contract Contract declares response status 200 more than once",
+		},
+		{
+			name: "non route handler",
+			source: `import { Body, Headers } from trb/http
+import { Context, Endpoint, Response, handles, response } from trb/web
+
+record Payload
+	value: String
+end
+
+def helper(_context: Context): Response
+	return Response.new(status: 204, headers: Headers.new(), body: Body.empty())
+end
+
+def post(_context: Context): Response
+	return Response.new(status: 204, headers: Headers.new(), body: Body.empty())
+end
+
+class Contract < Endpoint
+	handles(helper)
+	response<Payload>(status: 200)
+end
+`,
+			want: "handles helper, which is not a file-route handler in the same module",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			route := SourceUnit{
+				Filename: "/project/src/routes/reports.trb", ModulePath: "routes/reports", Package: "routes", Source: []byte(test.source),
+			}
+			_, err := CompileProject([]SourceUnit{main, route}, Options{
+				Mode: "go", GoModule: "example.com/web-contract", SourceRoot: "/project/src", ProjectRoot: "/project",
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("unexpected error: %v", err)
+			}
 		})
 	}
 }

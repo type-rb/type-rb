@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	PackageName     = "trb/web"
 	ModulePath      = "trb/web/index"
 	ProjectProvider = "trb.web.routes"
 )
@@ -63,8 +64,9 @@ type Issue struct {
 }
 
 type Manifest struct {
-	Routes      []Route
-	Middlewares []Middleware
+	Routes          []Route
+	Middlewares     []Middleware
+	EndpointCatalog EndpointCatalog
 }
 
 func (*Manifest) ExtensionName() string { return ProjectProvider }

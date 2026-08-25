@@ -3,16 +3,33 @@ package typeprovider
 import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
+	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/packageextensionhost"
 	"github.com/type-rb/type-rb/internal/types"
+	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
 const webTypeProvider = "trb.web"
 
 func init() {
-	register(webTypeProvider, loadWeb, staticProviderInputs)
+	register(webTypeProvider, loadWeb, webProviderInputs)
 }
 
-func loadWeb(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {
+func loadWeb(programs []*ast.Program, context Context) (*declaration.Catalog, error) {
+	catalog := webBaseDeclarations()
+	provided, err := loadWebContractDeclarations(programs, context)
+	if err != nil {
+		return nil, err
+	}
+	contracts, err := packageextensionhost.ImportDeclarationCatalog(provided)
+	if err != nil {
+		return nil, err
+	}
+	catalog.Merge(contracts)
+	return catalog, nil
+}
+
+func webBaseDeclarations() *declaration.Catalog {
 	typeT := types.FromName("T")
 	parameterResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, types.FromName("ParameterError")}}
 	request := declaration.NewType("Request", "")
@@ -53,5 +70,42 @@ func loadWeb(_ []*ast.Program, _ Context) (*declaration.Catalog, error) {
 	catalog := declaration.NewCatalog()
 	catalog.Types[request.Name] = request
 	catalog.Types[context.Name] = context
-	return catalog, nil
+	return catalog
+}
+
+func loadWebContractDeclarations(programs []*ast.Program, context Context) (packageextension.DeclarationCatalog, error) {
+	input, err := webDeclarationInput(programs, context)
+	if err != nil {
+		return packageextension.DeclarationCatalog{}, err
+	}
+	catalog, err := webintegration.Declarations(input)
+	if err != nil {
+		return packageextension.DeclarationCatalog{}, err
+	}
+	return packageextensionhost.ExportDeclarationCatalog(webintegration.PackageName, catalog)
+}
+
+func webDeclarationInput(programs []*ast.Program, context Context) (packageextension.ProjectDeclarationInput, error) {
+	relevant := providerPrograms(programs, webProviderProgram)
+	return packageextensionhost.ExportProjectDeclarationInput(webintegration.PackageName, relevant, packageextensionhost.ProjectDeclarationInputOptions{
+		PackageAliasesByModule: context.PackageAliasesByModule,
+	})
+}
+
+func webProviderInputs(programs []*ast.Program, _ Context) providerInputSnapshot {
+	return providerInputSnapshot{programs: providerPrograms(programs, webProviderProgram), reusable: true}
+}
+
+func webProviderProgram(program *ast.Program) bool {
+	for _, statement := range program.Statements {
+		switch statement.(type) {
+		case *ast.TypeAliasStatement, *ast.NewtypeStatement, *ast.RecordStatement, *ast.EnumStatement:
+			return true
+		case *ast.ClassStatement:
+			// Include every class module so an Endpoint alias imported from a
+			// declaration-only module can still be resolved canonically.
+			return true
+		}
+	}
+	return false
 }

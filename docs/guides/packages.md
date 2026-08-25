@@ -674,10 +674,11 @@ future compiler provider for cases that genuinely need project-aware discovery.
 ### Experimental bundled declaration providers
 
 TypeRB 0.x has experimental data boundaries for declaration discovery and
-output from bundled, compiler-integrated packages. `trb/orm` and `trb/jobs` are
-the first consumers. The ORM provider discovers project models and schema
-metadata, while the Jobs provider derives typed enqueue methods from Job
-classes. Their resulting catalogs cross a versioned, JSON-serializable
+output from bundled, compiler-integrated packages. `trb/orm`, `trb/jobs`, and
+`trb/web` are the first consumers. The ORM provider discovers project models
+and schema metadata, the Jobs provider derives typed enqueue methods from Job
+classes, and the Web provider identifies exact endpoint contract classes.
+Their resulting catalogs cross a versioned, JSON-serializable
 Declaration Protocol before resolution and checking. The current Declaration
 Protocol is version 3. It can identify a direct package-function call in one
 exact project class as declarative metadata: the checker still validates the
@@ -686,7 +687,7 @@ output. Parameters may also explicitly identify a representation boundary for
 nominal source newtypes. The compiler host validates and copies that data into
 its private semantic representation.
 
-The Jobs and ORM declaration providers also receive versioned, validated
+The Jobs, ORM, and Web declaration providers also receive versioned, validated
 Project Declaration Input snapshots. Version 5 adds record declarations and
 their declarative field attributes, top-level function signatures, and
 resolved type arguments on direct class-body calls. Version 4 added named-only
@@ -699,8 +700,15 @@ this snapshot is an authored project declaration; it does not expose the
 call-site-only record-inspection metadata used by call specialization. The
 snapshot does not contain parser nodes, function, method, or block bodies,
 default expressions, resolver or checker state, filesystem handles, or backend
-objects. These two consumers characterize a small reusable read-only project
+objects. These three consumers characterize a small reusable read-only project
 view; it is not yet a general external provider API.
+
+The Web provider uses the generic declaration catalog only to mark `handles`,
+`input`, and `response` calls in exact `Endpoint` classes as declaration-only.
+Its project integration then binds those declarations to file routes and owns
+a separate endpoint catalog protocol. HTTP methods, paths, status codes, and
+future OpenAPI fields do not enter the generic Project Declaration Input,
+Declaration Protocol, or compiler IR schema.
 
 ORM declaration discovery composes that generic project snapshot with a
 separate versioned ORM Declaration Input. Its schema section contains only the
