@@ -25,6 +25,7 @@ type generator struct {
 	topFunctions     map[string]bool
 	topTargets       map[string]string
 	topMethodTargets map[*ir.Method]string
+	projectNames     *rubyProjectNames
 	nativeSyntax     bool
 	temporary        int
 	jobs             *jobsintegration.Manifest
@@ -57,32 +58,31 @@ func GenerateMapped(program *ir.Program) sourcemap.Generated {
 }
 
 func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
+	projectNames := analyzeRubyProjectNames(programs)
 	execution := effectplan.ExecutionScope(programs)
 	result := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
-		result[index] = generate(program, execution)
+		result[index] = generate(program, projectNames, execution)
 	}
 	return result
 }
 
-func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generated {
+func generate(program *ir.Program, projectNames *rubyProjectNames, execution *effectplan.Plan) sourcemap.Generated {
 	g := &generator{
 		loader: program.RubyLoader, modulePath: program.ModulePath,
 		topFunctions: map[string]bool{}, topTargets: map[string]string{}, topMethodTargets: map[*ir.Method]string{},
-		jobs:    jobsintegration.ManifestFrom(program.Extensions),
-		jobsSQL: jobssql.ManifestFrom(program.Extensions),
-		orm:     ormintegration.ManifestFrom(program.Extensions), execution: execution,
+		projectNames: projectNames,
+		jobs:         jobsintegration.ManifestFrom(program.Extensions),
+		jobsSQL:      jobssql.ManifestFrom(program.Extensions),
+		orm:          ormintegration.ManifestFrom(program.Extensions), execution: execution,
 		sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath,
 	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
-			if rubyPrivateFunction(method.Name) && method.TargetName == "" {
-				target := rubyPrivateFunctionName(program.ModulePath, method.Name)
+			if target := g.projectFunctionName(program.ModulePath, method.Name); target != method.Name {
 				g.topTargets[method.Name] = target
 				g.topMethodTargets[method] = target
-			} else if method.TargetName != "" {
-				g.topTargets[method.Name] = method.TargetName
 			}
 		}
 		if imported, ok := statement.(*ir.Import); ok && (imported.Path == "trb/platform/ruby/native" || imported.Path == "trb/platform/ruby/rails") {
@@ -114,9 +114,10 @@ func generate(program *ir.Program, execution *effectplan.Plan) sourcemap.Generat
 			g.b.WriteByte('\n')
 		}
 		main := topLevelRubyMethod(program.Statements, "main")
-		call := "main()"
+		mainName := g.projectFunctionName(g.modulePath, "main")
+		call := mainName + "()"
 		if g.methodUsesExecutionScope(main) {
-			call = "main(TrbExecutionScope.root)"
+			call = mainName + "(TrbExecutionScope.root)"
 		}
 		if g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
 			g.line(call+" unless trb_jobs_run_worker_or_command", "")
@@ -599,6 +600,20 @@ func rubyPrivateFunction(name string) bool {
 	return strings.HasPrefix(name, "_") && !strings.HasPrefix(name, "__trb")
 }
 
+func (g *generator) projectFunctionName(modulePath, sourceName string) string {
+	if g.projectNames != nil {
+		if names := g.projectNames.functions[modulePath]; names != nil {
+			if name := names[sourceName]; name != "" {
+				return name
+			}
+		}
+	}
+	if rubyPrivateFunction(sourceName) {
+		return rubyPrivateFunctionName(modulePath, sourceName)
+	}
+	return sourceName
+}
+
 func topLevelRubyMethod(statements []ir.Statement, name string) *ir.Method {
 	for _, statement := range statements {
 		if method, ok := statement.(*ir.Method); ok && method.Name == name {
@@ -680,6 +695,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		if !n.Lexical && g.topTargets[n.Name] != "" {
 			return g.topTargets[n.Name]
 		}
+		if !n.Lexical && n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.Package != "" && n.Reference.ExportKind == "function" {
+			return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
+		}
 		return g.rubyClassName(n.Name, n.Reference)
 	case *ir.Literal:
 		return n.Raw
@@ -759,7 +777,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.transform(n)
 	case *ir.Member:
 		if receiver, ok := n.Receiver.(*ir.Identifier); ok && n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.Package != "" && n.Reference.Alias != "" && receiver.Name == n.Reference.Alias && n.Reference.ExportKind == "function" {
-			return n.Name
+			return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
 		}
 		op := "."
 		if n.Namespace {

@@ -4962,6 +4962,57 @@ end
 	}
 }
 
+func TestRunRubyKeepsCollidingTopLevelFunctionsModuleScoped(t *testing.T) {
+	if _, err := exec.LookPath("ruby"); err != nil {
+		t.Skipf("ruby is unavailable: %v", err)
+	}
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.SourceDir = "src"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]string{
+		"alpha.trb": `def render(value: String): String
+	return "alpha:" + value
+end
+`,
+		"beta.trb": `def render(value: String): String
+	return "beta:" + value
+end
+
+def render_beta(): String
+	return render("b")
+end
+`,
+		"main.trb": `import { render } from alpha
+import { render_beta } from beta
+
+def main()
+	puts(render("a"))
+	puts(render_beta())
+	return
+end
+`,
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(root, "src", name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	if stdout.String() != "alpha:a\nbeta:b\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected Ruby module-scoped function output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestRunPortableHMACAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
