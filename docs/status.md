@@ -230,13 +230,22 @@ own validation response policy.
 `Context#bind<T>()` optionally combines path, query, and JSON body binding into
 one ordinary endpoint input record. The reserved record fields `params`,
 `query`, and `body` reuse the individual checked codecs, and failures retain
-their original typed error inside `EndpointInputError`. Contracts remain
-optional, route parameter compatibility is still verified at build time, and
-applications keep control of the corresponding HTTP error response. The
-implementation is the first consumer of the experimental bundled-package call
-specialization boundary: `trb/web` returns target-independent TypeRB helper
-source, and the compiler re-parses, resolves, checks, and lowers that source
-instead of carrying a Web-specific bind intrinsic through each backend.
+their original typed error inside `EndpointInputError`. Combined binding
+remains optional, route parameter compatibility is still verified at build
+time, and applications keep control of the corresponding HTTP error response.
+The implementation is the first consumer of the experimental bundled-package
+call specialization boundary: `trb/web` returns target-independent TypeRB
+helper source, and the compiler re-parses, resolves, checks, and lowers that
+source instead of carrying a Web-specific bind intrinsic through each backend.
+Route modules may separately declare optional `Endpoint` subclasses that bind
+an actual handler function, an optional input type, and response types keyed by
+literal HTTP status. The handler reference is checked as `(Context) ->
+Response`, the class must map to a file-route handler in the same module, and
+the declaration calls are omitted from all three runtime outputs. `trb/web`
+owns the resulting version 1 endpoint catalog; the generic compiler IR only
+transports it as package extension data. The catalog does not infer handler
+bodies or perform validation. OpenAPI export, generated clients, and contract
+validation policy remain subsequent package work.
 Typed `ContextKey<T>` values let middleware pass authentication principals,
 request identifiers, and other request-scoped state to handlers without casts
 or string-key collisions. `Context#with` returns a new context and

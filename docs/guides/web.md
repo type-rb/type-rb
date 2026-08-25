@@ -104,8 +104,8 @@ use their portable parsers. Malformed encoding, missing or duplicate scalar
 values, and invalid conversions return `ParameterError`; applications retain
 control over the corresponding error response.
 
-An endpoint can combine those explicit bindings into one optional input
-contract. The contract is an ordinary record whose supported fields are
+An endpoint can combine those explicit bindings into one optional endpoint
+input record. The record's supported fields are
 `params`, `query`, and `body`; each field may be omitted when the endpoint does
 not use that input source. `params` and `query` name binding records, while
 `body` names the typed JSON value:
@@ -144,12 +144,68 @@ Each variant preserves the original `ParameterError` or `RequestError`, so the
 application still chooses its validation response and logging policy through
 an ordinary mapper function; `trb/web` does not install a global error mapper
 or choose an application response body. The
-compiler validates a contract's `params` record against the file-based route
-in the same way as a direct `params<T>()` call. Contracts are optional;
-handlers may continue to use the individual request methods. `bind<T>()` is
-most useful when one handler consumes more than one input source, or when the
-application wants a named endpoint contract. A handler that reads only path,
-query, or body input does not need a wrapper record merely for uniformity.
+compiler validates an endpoint input record's `params` field against the
+file-based route in the same way as a direct `params<T>()` call. Combined
+input records are optional; handlers may continue to use the individual
+request methods. `bind<T>()` is most useful when one handler consumes more than
+one input source, or when the application wants a named endpoint input. A
+handler that reads only path, query, or body input does not need a wrapper
+record merely for uniformity.
+
+File routes may also publish an optional typed endpoint contract for tooling.
+The route file remains the source of the HTTP method and path. A contract class
+in that same module connects the route handler to its input and status-specific
+response types:
+
+```trb
+import { Context, Endpoint, Response, handles, input, json, response } from trb/web
+
+record CreateTodoBody
+	title: String
+end
+
+record CreateTodoInput
+	body: CreateTodoBody
+end
+
+record CreateTodoResponse
+	id: Integer
+	title: String
+end
+
+record ErrorResponse
+	message: String
+end
+
+def post(context: Context): Response
+	request := context.bind<CreateTodoInput>() catch |_error|
+		return json(ErrorResponse.new(message: "invalid request"), 400)
+	end
+	return json(CreateTodoResponse.new(id: 42, title: request.body.title), 202)
+end
+
+class CreateTodoEndpoint < Endpoint
+	handles(post)
+	input<CreateTodoInput>()
+	response<CreateTodoResponse>(status: 202)
+	response<ErrorResponse>(status: 400)
+end
+```
+
+`handles` accepts the actual top-level function rather than its name as a
+string, so the ordinary `(Context) -> Response` signature is checked. A
+contract directly inherits `Endpoint`, declares exactly one local file-route
+handler, may declare one `input<T>()`, and declares one or more unique literal
+HTTP statuses from 100 through 599. These calls are compile-time declarations:
+Go, Ruby, and TypeScript output does not execute them. The resulting versioned
+endpoint catalog retains portable type identities for downstream tooling.
+
+The contract does not call `bind<T>()`, validate request data, infer schemas
+from the handler body, or prove that every runtime response has the documented
+status and payload. Those remain explicit application behavior. Routes and
+handlers without a contract continue to compile; contracts are useful when an
+application wants generated descriptions or clients without making that
+tooling mandatory for every route.
 
 Middleware can attach request-scoped values without a string-keyed cast at
 the handler boundary. Create one `ContextKey<T>` and share that key between
