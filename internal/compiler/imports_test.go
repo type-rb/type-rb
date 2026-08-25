@@ -4158,6 +4158,76 @@ end
 	}
 }
 
+func TestProjectCompilerAssignsImportedClassToTransitiveInterfaceParameter(t *testing.T) {
+	contract := SourceUnit{
+		Filename:   "/project/contracts/named.trb",
+		ModulePath: "contracts/named",
+		Source:     []byte("interface Named\n  name(): String\nend\n"),
+	}
+	implementation := SourceUnit{
+		Filename:   "/project/models/user.trb",
+		ModulePath: "models/user",
+		Source: []byte(`import { Named } from contracts/named
+
+class User implements Named
+	def name(): String
+		return "Alice"
+	end
+end
+`),
+	}
+	service := SourceUnit{
+		Filename:   "/project/services/display.trb",
+		ModulePath: "services/display",
+		Source: []byte(`import { Named } from contracts/named
+
+def display(value: Named): String
+	return value.name()
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Source: []byte(`import { User } from models/user
+import { display } from services/display
+
+def label(): String
+	return display(User.new())
+end
+`),
+	}
+	factory := SourceUnit{
+		Filename:   "/project/services/users.trb",
+		ModulePath: "services/users",
+		Source: []byte(`import { User } from models/user
+
+def build_user(): User
+	return User.new()
+end
+`),
+	}
+	transitiveConsumer := SourceUnit{
+		Filename:   "/project/transitive_main.trb",
+		ModulePath: "transitive_main",
+		Source: []byte(`import { display } from services/display
+import { build_user } from services/users
+
+def transitive_label(): String
+	return display(build_user())
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := CompileProject([]SourceUnit{contract, implementation, service, consumer}, Options{Mode: mode, GoModule: "example.com/transitive-interface", RubyLoader: "require_relative"}); err != nil {
+			t.Fatalf("%s rejected an imported class for a transitive interface parameter: %v", mode, err)
+		}
+		if _, err := CompileProject([]SourceUnit{contract, implementation, service, factory, transitiveConsumer}, Options{Mode: mode, GoModule: "example.com/transitive-interface", RubyLoader: "require_relative"}); err != nil {
+			t.Fatalf("%s rejected a transitive class for a transitive interface parameter: %v", mode, err)
+		}
+	}
+}
+
 func TestProjectCompilerExpandsImportedAliasesInInterfaceSignatures(t *testing.T) {
 	contract := SourceUnit{
 		Filename:   "/project/contracts/repository.trb",
