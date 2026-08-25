@@ -2,6 +2,22 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.32 - 2026-08-26
+
+### Packages
+
+- Bundled project-aware package providers can now inspect record declarations,
+  top-level function signatures, and generic declarative calls through Project
+  Declaration Input v5 without receiving executable source bodies or compiler
+  internals. ([#521](https://github.com/type-rb/type-rb/pull/521))
+
+### ORM
+
+- The typed three-argument `where(column, operator, value)` form now accepts
+  `LIKE` for String columns across Go, Ruby, TypeScript, and the REPL. Patterns
+  remain bound query values, and non-String columns reject the operator during
+  type checking. ([#522](https://github.com/type-rb/type-rb/pull/522))
+
 ## 0.3.31 - 2026-08-26
 
 ### Language and compiler
