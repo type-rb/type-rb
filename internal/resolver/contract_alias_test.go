@@ -107,7 +107,8 @@ func TestContractTypeFollowsSelectedImportedValueContract(t *testing.T) {
 				Exports: map[string]Export{
 					"Payload": {
 						Name: "Payload", Kind: RecordExport, Type: types.FromName("Payload"),
-						Fields: []RecordField{{Name: "metadata", Type: types.FromName("Metadata")}},
+						Fields:  []RecordField{{Name: "metadata", Type: types.FromName("Metadata")}},
+						Members: map[string]Member{"metadata": {Name: "metadata", Kind: ValueExport, Type: types.FromName("Metadata")}},
 					},
 					"Metadata": {Name: "Metadata", Kind: RecordExport, Type: types.FromName("Metadata")},
 				},
@@ -129,6 +130,10 @@ func TestContractTypeFollowsSelectedImportedValueContract(t *testing.T) {
 	}
 	if _, ok := result.ContractType("OtherPayload"); ok {
 		t.Fatal("ContractType resolved a type referenced only by an unselected export")
+	}
+	member, ok := result.InferredTypeMember("Payload", "metadata")
+	if !ok || member.Import == nil || member.Import.RuntimePath() != "contracts/payload" || member.Member == nil || member.Member.Type.Name != "Metadata" {
+		t.Fatalf("InferredTypeMember(Payload, metadata)=(%#v, %t), want the selected contract member", member, ok)
 	}
 }
 
