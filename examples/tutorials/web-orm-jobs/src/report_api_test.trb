@@ -1,0 +1,28 @@
+import { Body, Header, Headers, HttpMethod } from trb/http
+import { Request } from trb/web
+import { dispatch } from trb/web/testing
+import { describe, expect, test } from trb/std/test
+
+describe("Report API") do
+	test("accepts a report for background processing") do
+		request := Request.new(
+			method: HttpMethod.post(),
+			path: "/reports",
+			query_string: "",
+			headers: Headers.new([Header.new(name: "content-type", value: "application/json")]),
+			body: Body.new("{\"title\":\"August report\"}".to_bytes()),
+		)
+		response := dispatch(request)
+		expect(response.status).to_equal(202)
+
+		show_request := Request.new(
+			method: HttpMethod.get(),
+			path: "/reports/1",
+			query_string: "",
+			headers: Headers.new([]),
+			body: Body.empty(),
+		)
+		show_response := dispatch(show_request)
+		expect(show_response.status).to_equal(200)
+	end
+end

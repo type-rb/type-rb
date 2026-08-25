@@ -1,0 +1,32 @@
+import { CreateReportError } from services/create_report
+import { DbError } from trb/orm
+import { EndpointInputError, Response, json } from trb/web
+
+record ErrorResponse
+	code: String
+	message: String
+end
+
+def endpoint_input_error_response(error: EndpointInputError): Response
+	case error
+	when EndpointInputError::Params(_error)
+		return json(ErrorResponse.new(code: "invalid_path", message: "path parameters are invalid"), 400)
+	when EndpointInputError::Query(_error)
+		return json(ErrorResponse.new(code: "invalid_query", message: "query parameters are invalid"), 400)
+	when EndpointInputError::Body(_error)
+		return json(ErrorResponse.new(code: "invalid_body", message: "request body is invalid"), 400)
+	end
+end
+
+def create_report_error_response(error: CreateReportError): Response
+	case error
+	when CreateReportError::Database(database_error)
+		return database_error_response(database_error)
+	when CreateReportError::Queue(queue_error)
+		return json(ErrorResponse.new(code: "queue_unavailable", message: queue_error.message), 503)
+	end
+end
+
+def database_error_response(error: DbError): Response
+	return json(ErrorResponse.new(code: "database_error", message: error.message), 500)
+end

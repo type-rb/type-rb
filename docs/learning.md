@@ -57,6 +57,7 @@ rule or are evaluating an edge case.
 
 Continue with one small vertical slice:
 
+- Complete backend: [Web, ORM, and Jobs tutorial](tutorials/web-orm-jobs.md)
 - JSON API: [portable Web guide](guides/web.md)
 - Database application: [`trb/orm` guide](guides/orm.md)
 - Background worker: [Jobs guide](guides/jobs.md)
@@ -64,10 +65,10 @@ Continue with one small vertical slice:
   [browser HTTP guide](guides/browser-http.md)
 - Reusable dependency: [package guide](guides/packages.md)
 
-Each guide describes the current public API and its intentional limitations,
-but not every guide is a standalone end-to-end tutorial. Work on each slice in
-a separate project, follow its setup prerequisites, and use the applicable
-check, build, test, or run command before combining slices.
+The complete backend tutorial connects request binding, an application
+transaction, durable enqueueing, and worker execution in one runnable project.
+The focused guides describe each public API and its intentional limitations;
+use them when extending that slice or building one of the other paths.
 
 ## 4. Look up details
 

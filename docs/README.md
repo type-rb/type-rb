@@ -13,6 +13,7 @@ larger applications.
 
 ## Build applications
 
+- [Web, ORM, and Jobs tutorial](tutorials/web-orm-jobs.md)
 - [TypeRB in containers](containers.md)
 - [Package system](guides/packages.md)
 - [Shared HTTP values](guides/http.md)

@@ -1,0 +1,18 @@
+import { Report } from models/report
+import { Job, JobError, JobResult, maximum_attempts, queue } from trb/jobs
+import { Unit } from trb/std/unit
+
+class GenerateReportJob < Job
+	queue("reports")
+	maximum_attempts(3)
+
+	def perform(report_id: Integer): JobResult
+		report := Report.find(report_id) catch |error|
+			return JobResult::Err(JobError.new(message: "report lookup failed: " + error.message))
+		end
+		_saved := report.with(status: "ready").save() catch |error|
+			return JobResult::Err(JobError.new(message: "report update failed: " + error.message))
+		end
+		return JobResult::Ok(Unit.new())
+	end
+end

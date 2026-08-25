@@ -12,6 +12,7 @@
     {
       "title": "Build applications",
       "pages": [
+        { "source": "tutorials/web-orm-jobs.md", "label": "Web + ORM + Jobs tutorial" },
         { "source": "containers.md", "label": "Containers" },
         { "source": "guides/packages.md", "label": "Packages" },
         { "source": "guides/web.md", "label": "Web" },

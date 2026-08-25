@@ -23,6 +23,8 @@ end
 </code></pre>
 <pre><code class="language-html">&lt;div id=&quot;root&quot;&gt;&lt;/div&gt;
 </code></pre>
+<pre><code class="language-sql">SELECT id FROM reports;
+</code></pre>
 <pre><code>leave this block unchanged</code></pre>
 `);
 
@@ -34,7 +36,8 @@ end
   assert.match(highlighted, />def<\/span>/);
   assert.match(highlighted, />trb<\/span>/);
   assert.match(highlighted, /id/);
-  assert.doesNotMatch(highlighted, /language-(?:html|trb|sh)/);
+  assert.match(highlighted, />SELECT<\/span>/);
+  assert.doesNotMatch(highlighted, /language-(?:html|sql|trb|sh)/);
   assert.match(highlighted, /<pre><code>leave this block unchanged<\/code><\/pre>/);
 });
 
