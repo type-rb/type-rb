@@ -2,6 +2,32 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.28 - 2026-08-25
+
+### Breaking changes
+
+- Typed keyword parameter declarations written as `name:: Type` have been
+  removed. Place a bare `*` after positional-only parameters and declare
+  named-only parameters after it with `name: Type`. Parameters before `*`
+  cannot be supplied by name. TypeRB source and affected official package APIs
+  must use the new declaration form.
+  ([#504](https://github.com/type-rb/type-rb/pull/504))
+- Tooling Protocol advances to version 3 and Project Declaration Input
+  Protocol advances to version 4 so exported signatures can identify
+  named-only parameters. Strict protocol consumers must accept the new
+  versions and honor the `namedOnly` field.
+  ([#504](https://github.com/type-rb/type-rb/pull/504))
+
+### Language and compiler
+
+- A bare `*` now separates positional-only parameters from named-only
+  parameters. Named-only parameters may be required or have defaults, and
+  callers may reorder or omit them by label. Binding diagnostics, left-to-right
+  argument evaluation, and callee-owned default evaluation are consistent
+  across Ruby, Go, TypeScript, and the REPL. Interfaces, overrides, imports,
+  and native declarations preserve the same call signature.
+  ([#504](https://github.com/type-rb/type-rb/pull/504))
+
 ## 0.3.27 - 2026-08-25
 
 ### Language and compiler
