@@ -289,6 +289,39 @@ Output names follow the project mode:
 - `main.go.trb` becomes `main.go`, without duplicating an existing target
   suffix.
 
+## Web API descriptions
+
+```sh
+# Generate OpenAPI 3.1 JSON from typed trb/web endpoint contracts.
+trb web openapi
+
+# Select another project configuration.
+trb web openapi --config trbconfig.ruby.jsonc
+
+# Write below the project root instead of standard output.
+trb web openapi --output api/openapi.json
+
+# Override the trbconfig.jsonc name and version used as document metadata.
+trb web openapi --title "Public API" --api-version 2026-08
+```
+
+`trb web openapi` checks the complete configured file-routing project and emits
+only routes with an explicit `Endpoint` contract. It does not accept a
+standalone file. The default output is deterministic indented JSON on standard
+output; `--output` must be relative and cannot escape the project root. A file
+write is atomic and the written path is printed on success.
+
+The command maps the optional `input<T>()` bind envelope to path parameters,
+query parameters, and an `application/json` request body, then maps each
+`response<T>(status: code)` declaration to one response. Supported shared
+records, raw-value enums, aliases, newtypes, nullable values, collections, and
+portable time values become reusable OpenAPI schemas. `Unit` represents no
+response content. Generation-only contract limitations, including recursive
+or generic schemas and catch-all routes, are reported as source-located
+`TRB4001` diagnostics without changing `trb check` behavior. See the
+[portable Web guide](guides/web.md) for the endpoint syntax and complete initial
+schema boundary.
+
 ## Compiler tooling
 
 ```sh
@@ -311,7 +344,7 @@ The command always writes the JSON snapshot to standard output after project
 inputs have been loaded. A snapshot containing errors still includes source,
 module, and diagnostic data and returns a nonzero status; checked declarations
 are empty when semantic artifacts are unavailable. See the
-[compiler tooling protocol guide](guides/compiler-tooling.md) for the version 2
+[compiler tooling protocol guide](guides/compiler-tooling.md) for the version 3
 schema, compatibility policy, and security considerations.
 
 ## Clean

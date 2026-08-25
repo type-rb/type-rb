@@ -114,6 +114,8 @@ func (c *CLI) Run(args []string) int {
 		err = c.runDatabase(args[1:])
 	case "jobs":
 		err = c.runJobs(args[1:])
+	case "web":
+		err = c.runWeb(args[1:])
 	case "init":
 		err = c.runInit(args[1:])
 	case "sync":
@@ -2927,6 +2929,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb jobs start [--once] [--queue NAME] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb jobs list [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb jobs retry|discard JOB_ID [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb web openapi [--output FILE] [--title TITLE] [--api-version VERSION] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--source GIT | --path DIRECTORY] PACKAGE [VERSION]")
 	fmt.Fprintln(c.Stdout, "  trb add --native [--dev] PACKAGE [VERSION]")

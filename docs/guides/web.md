@@ -207,6 +207,48 @@ handlers without a contract continue to compile; contracts are useful when an
 application wants generated descriptions or clients without making that
 tooling mandatory for every route.
 
+Generate an OpenAPI 3.1 JSON document from the contracts in the configured
+project with:
+
+```sh
+# Write deterministic JSON to standard output.
+trb web openapi
+
+# Write below the project root and override document metadata.
+trb web openapi \
+  --output api/openapi.json \
+  --title "Todo API" \
+  --api-version 2026-08
+```
+
+The project `name` and `version` are the default OpenAPI title and API version.
+Generation compiles and checks the project but does not start or invoke the
+selected Go, Ruby, or TypeScript toolchain. The same endpoint contracts
+therefore produce the same document in every mode.
+
+An endpoint input remains the `Context#bind<T>()` envelope rather than a wire
+object. Its `params` fields become required OpenAPI path parameters, `query`
+fields become query parameters, and `body` becomes a required
+`application/json` request body. Path fields must match the dynamic file-route
+segments exactly. A non-nullable query scalar is required; a nullable scalar
+is optional; and an Array is a repeated optional query parameter because a
+missing value binds to an empty Array. JSON `@json` names apply to body and
+response records, not URL parameters.
+
+The initial schema generator supports Boolean, portable Integer, Float,
+String, Array, `Hash<String, V>`, records, String- or Integer-backed raw enums,
+transparent aliases, nominal newtypes, nullable values, and the portable time
+types. It rejects unsupported JSON shapes, generic schemas, recursive records,
+and catch-all routes with source-located diagnostics when this command is
+invoked. Those OpenAPI-only restrictions do not make `trb check` fail.
+`Unit` declares a response without content and is required for 1xx, 204, 205,
+and 304 statuses.
+
+The generator deliberately does not inspect handler bodies, infer undocumented
+responses, run validation, or invent summaries, tags, authentication, or
+application error schemas. Only routes with an explicit endpoint contract are
+published.
+
 Middleware can attach request-scoped values without a string-keyed cast at
 the handler boundary. Create one `ContextKey<T>` and share that key between
 the producer and consumer:

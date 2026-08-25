@@ -184,7 +184,7 @@ artifact creation and cleanup. Command details belong in the
 [CLI reference](cli.md).
 
 Explicit tooling can consume the same compiler service through
-`trb compiler inspect`. Its experimental version 2 JSON snapshot contains exact
+`trb compiler inspect`. Its experimental version 3 JSON snapshot contains exact
 source inputs, modules and authored imports, flattened checked declarations and
 semantic types including nominal newtypes, and diagnostics without generating
 target source. The command
@@ -244,8 +244,18 @@ Response`, the class must map to a file-route handler in the same module, and
 the declaration calls are omitted from all three runtime outputs. `trb/web`
 owns the resulting version 1 endpoint catalog; the generic compiler IR only
 transports it as package extension data. The catalog does not infer handler
-bodies or perform validation. OpenAPI export, generated clients, and contract
-validation policy remain subsequent package work.
+bodies or perform validation. `trb web openapi` combines that package-owned
+catalog with the read-only Project Declaration Input and emits deterministic
+OpenAPI 3.1 JSON without invoking a target toolchain. It maps the existing
+`Context#bind<T>()` envelope to path, query, and JSON request inputs and emits
+status-specific JSON or `Unit` responses. Its initial shared-schema boundary
+covers portable scalars and time values, Arrays, `Hash<String, V>`, records,
+raw-value enums, transparent aliases, nominal newtypes, nullable values, and
+`@json` wire names. Unsupported JSON shapes, generic schemas, recursive
+records, and catch-all routes are generation-time diagnostics rather than new
+language or `trb check` restrictions. Generated clients, runtime validation,
+contract compatibility policy, authentication descriptions, and richer
+endpoint metadata remain subsequent package work.
 Typed `ContextKey<T>` values let middleware pass authentication principals,
 request identifiers, and other request-scoped state to handlers without casts
 or string-key collisions. `Context#with` returns a new context and

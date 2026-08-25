@@ -707,7 +707,7 @@ The Web provider uses the generic declaration catalog only to mark `handles`,
 `input`, and `response` calls in exact `Endpoint` classes as declaration-only.
 Its project integration then binds those declarations to file routes and owns
 a separate endpoint catalog protocol. HTTP methods, paths, status codes, and
-future OpenAPI fields do not enter the generic Project Declaration Input,
+OpenAPI document fields do not enter the generic Project Declaration Input,
 Declaration Protocol, or compiler IR schema.
 
 ORM declaration discovery composes that generic project snapshot with a
