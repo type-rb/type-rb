@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,7 +20,7 @@ import (
 const (
 	// FormatVersion belongs only to the generated TypeScript native type cache.
 	// Package-owned declaration adapters use their independent protocol version.
-	FormatVersion     = 5
+	FormatVersion     = 6
 	indexRelativePath = ".trb/native-types.json"
 )
 
@@ -77,7 +76,8 @@ type Field struct {
 	Optional bool   `json:"optional,omitempty"`
 }
 
-// Type is the stable on-disk form of a target-independent semantic type.
+// Type is the target-independent semantic type stored in a native package
+// catalog. The generated cache encodes repeated types through a shared pool.
 type Type struct {
 	Kind         string        `json:"kind"`
 	Name         string        `json:"name,omitempty"`
@@ -155,14 +155,9 @@ func load(root string, dependencies, adapters map[string]string, checkAdapters b
 	if formatVersion != FormatVersion {
 		return nil, fmt.Errorf("%s uses unsupported native type cache formatVersion %d; expected %d; run trb install to regenerate it", IndexPath(root), formatVersion, FormatVersion)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var catalog Catalog
-	if err := decoder.Decode(&catalog); err != nil {
+	catalog, err := decodeCatalog(data)
+	if err != nil {
 		return nil, fmt.Errorf("decode %s: %w", IndexPath(root), err)
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("decode %s: trailing JSON content", IndexPath(root))
 	}
 	if catalog.Modules == nil {
 		catalog.Modules = map[string]Module{}
@@ -177,7 +172,7 @@ func load(root string, dependencies, adapters map[string]string, checkAdapters b
 		catalog.Modules = map[string]Module{}
 		catalog.UnavailableReason = "native TypeScript package declaration adapters are stale; run trb install"
 	}
-	return &catalog, nil
+	return catalog, nil
 }
 
 func Write(root string, catalog *Catalog) error {
@@ -194,7 +189,7 @@ func Write(root string, catalog *Catalog) error {
 	if catalog.Modules == nil {
 		catalog.Modules = map[string]Module{}
 	}
-	data, err := json.MarshalIndent(catalog, "", "  ")
+	data, err := encodeCatalog(catalog)
 	if err != nil {
 		return fmt.Errorf("encode native TypeScript package index: %w", err)
 	}

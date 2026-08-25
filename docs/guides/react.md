@@ -120,7 +120,10 @@ dependency subpaths imported by project source, and writes an ignored
 `.trb/native-types.json` index. Builds and editor completion read that index
 without starting TypeScript. Index generation currently requires the supported
 TypeScript 6.x toolchain. Runtime output imports the original npm package
-unchanged.
+unchanged. The compiler-owned cache pools repeated types, fields, and
+diagnostics, so component suites with shared or inherited DOM props store that
+metadata once instead of once per component. Run `trb install` to regenerate
+the cache after a TypeRB upgrade changes its internal format.
 
 Automatic `.d.ts` indexing supports ordinary functions and React components
 whose signatures can be represented safely by TypeRB types. Unsupported
