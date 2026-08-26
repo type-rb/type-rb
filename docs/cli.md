@@ -289,14 +289,23 @@ Output names follow the project mode:
 - `main.go.trb` becomes `main.go`, without duplicating an existing target
   suffix.
 
-## Web API descriptions
+## Web contract artifacts
 
 ```sh
 # Generate OpenAPI 3.1 JSON from typed trb/web endpoint contracts.
 trb web openapi
 
+# Generate a typed TypeRB client for a TypeScript browser application.
+trb web client
+
+# Choose the generated client class name.
+trb web client --name PublicApiClient
+
 # Select another project configuration.
 trb web openapi --config trbconfig.ruby.jsonc
+
+# Write generated TypeRB source below the project root.
+trb web client --output generated/api_client.trb
 
 # Write below the project root instead of standard output.
 trb web openapi --output api/openapi.json
@@ -321,6 +330,24 @@ or generic schemas and catch-all routes, are reported as source-located
 `TRB4001` diagnostics without changing `trb check` behavior. See the
 [portable Web guide](guides/web.md) for the endpoint syntax and complete initial
 schema boundary.
+
+`trb web client` analyzes the same checked endpoint catalog and JSON wire
+subset, then emits deterministic formatted TypeRB source. The generated class
+wraps the existing `trb/platform/typescript/browser` `HttpClient`: each
+endpoint becomes one checked method, known HTTP statuses become variants of an
+endpoint-specific result enum, and transport, timeout, JSON, no-body, or
+unexpected-status failures remain `RequestError` values. The command reads a
+backend project in Go, Ruby, or TypeScript mode without running that target
+toolchain, but the generated source intentionally targets a TypeScript browser
+application.
+
+Client-visible user-defined input and response types must be imported by each
+route from a shared module. The generator imports those authored types instead
+of copying their definitions. This keeps server and browser code on one type
+identity and makes route-local contract records a source-located generation
+error. The default output is standard output. `--output` follows the same
+project-relative, non-escaping, atomic-write rule as `web openapi`; use standard
+output when the browser project lives outside the backend project root.
 
 ## Compiler tooling
 
