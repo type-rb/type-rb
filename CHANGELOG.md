@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.38 - 2026-08-26
+
+### Language and compiler
+
+- JSX component props now contextually type fresh `Array` and `Hash` literals
+  against their declared collection types. Native props such as
+  `Array<"compact" | "expanded">` accept supported literal values without
+  weakening collection invariance, while unsupported values remain compile-time
+  errors. ([#547](https://github.com/type-rb/type-rb/pull/547))
+
 ## 0.3.37 - 2026-08-26
 
 ### ORM
