@@ -2,6 +2,21 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.37 - 2026-08-26
+
+### ORM
+
+- Live MySQL schema introspection now accepts the documented portable
+  `mysql://` URL, including `allowPublicKeyRetrieval`. Commands such as
+  `trb db apply` and `trb db check --from-db` can use the same database source
+  as generated runtimes. ([#542](https://github.com/type-rb/type-rb/pull/542))
+
+### Language and compiler
+
+- Go output now imports project types inferred for `Array` and `Hash` literals,
+  preventing valid cross-package collection code from generating undefined
+  type references. ([#541](https://github.com/type-rb/type-rb/pull/541))
+
 ## 0.3.36 - 2026-08-26
 
 ### Language and compiler
