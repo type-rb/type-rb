@@ -127,6 +127,61 @@ end
 	}
 }
 
+func TestCompileTypeScriptContextuallyTypesNativeJSXCollectionProps(t *testing.T) {
+	const propsName = "Native_ui_ViewPickerProps"
+	catalog := nativeComponentCatalog()
+	module := catalog.Modules["ui"]
+	module.Exports["ViewPicker"] = nativepackage.Export{
+		Kind:       "component",
+		Type:       nativepackage.Type{Kind: "named", Name: "ReactNode"},
+		Parameters: []nativepackage.Type{{Kind: "named", Name: propsName}},
+		Required:   1,
+	}
+	module.Records[propsName] = nativepackage.Export{
+		Kind: "record",
+		Type: nativepackage.Type{Kind: "named", Name: propsName},
+		Fields: []nativepackage.Field{{
+			Name: "modes",
+			Type: nativepackage.Type{
+				Kind: "array", Name: "Array", Nullable: true,
+				Args: []nativepackage.Type{{
+					Kind: "union", Name: "Union", Args: []nativepackage.Type{
+						{Kind: "string_literal", Name: `"compact"`},
+						{Kind: "string_literal", Name: `"expanded"`},
+					},
+				}},
+			},
+			Optional: true,
+		}},
+	}
+	catalog.Modules["ui"] = module
+
+	source := []byte(`import { ReactNode } from trb/platform/typescript/react
+import { ViewPicker } from ui
+
+def Page(): ReactNode
+	return <ViewPicker modes={["compact", "expanded"]} />
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "page.trb", ModulePath: "app/page", Source: source}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: catalog,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output := string(artifacts[0].Output); !strings.Contains(output, `<ViewPicker modes={["compact", "expanded"]} />`) {
+		t.Fatalf("generated native component TSX is missing the collection prop:\n%s", output)
+	}
+
+	invalid := strings.ReplaceAll(string(source), `"expanded"`, `"unsupported"`)
+	_, err = CompileProject([]SourceUnit{{Filename: "page.trb", ModulePath: "app/page", Source: []byte(invalid)}}, Options{
+		Mode: "typescript", TypeScriptRuntime: "browser", NativePackages: catalog,
+	})
+	if err == nil || !strings.Contains(err.Error(), `JSX prop modes expects Array<"compact" | "expanded">?, got Array<String>`) {
+		t.Fatalf("expected unsupported collection element diagnostic, got %v", err)
+	}
+}
+
 func tanStackQueryAdapterExampleRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "examples", "adapters", "tanstack-query"))
