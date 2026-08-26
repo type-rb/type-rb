@@ -824,6 +824,12 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 			if len(node.Arguments) != 0 {
 				p.errorAt(node.Span(), member.Name+" does not take arguments")
 			}
+		} else if member.Name == "concurrent_map" {
+			if len(node.Arguments) != 0 && (len(node.Arguments) != 1 || node.Arguments[0].Name != "limit" || node.Arguments[0].Splat != "") {
+				p.errorAt(node.Span(), "concurrent_map accepts only the named argument limit")
+			} else if len(node.Arguments) == 1 {
+				iteration.Limit = node.Arguments[0].Value
+			}
 		} else if member.Name == "reduce" {
 			if len(node.Arguments) != 1 || node.Arguments[0].Name != "" || node.Arguments[0].Splat != "" {
 				p.errorAt(node.Span(), "reduce expects exactly one positional initial value")
@@ -843,7 +849,7 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 
 func portableIterationOperation(name string) bool {
 	switch name {
-	case "each", "each_slice", "map", "select", "reduce", "any?", "all?", "none?", "find", "find_index", "sort_by", "sort_by_descending":
+	case "each", "each_slice", "map", "concurrent_map", "select", "reduce", "any?", "all?", "none?", "find", "find_index", "sort_by", "sort_by_descending":
 		return true
 	default:
 		return false

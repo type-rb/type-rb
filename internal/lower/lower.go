@@ -939,11 +939,13 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	case *ast.IterationExpression:
 		source := l.expression(n.Source)
 		initial := l.expression(n.Initial)
+		limit := l.expression(n.Limit)
 		result := &ir.Transform{
 			ExprBase:  base,
 			Source:    source,
 			Operation: n.Operation,
 			Initial:   initial,
+			Limit:     limit,
 			WithIndex: n.WithIndex,
 			ItemType:  l.checked.Iterations[n],
 		}

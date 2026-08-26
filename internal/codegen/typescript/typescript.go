@@ -1829,6 +1829,9 @@ func namedUnusedBinding(name string) bool {
 }
 
 func (g *generator) transform(transform *ir.Transform) string {
+	if transform.Operation == "concurrent_map" {
+		return g.concurrentMap(transform)
+	}
 	if g.suspension != nil && g.suspension.Expressions[transform] {
 		return g.suspendingTransform(transform)
 	}
@@ -1869,6 +1872,134 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "undefined"
 	}
+}
+
+func (g *generator) concurrentMap(transform *ir.Transform) string {
+	child := *g
+	child.b = strings.Builder{}
+	child.sourceRecorder = nil
+	child.indent = 0
+	child.temporary++
+	suffix := strconv.Itoa(child.temporary)
+	items := "__trbItems" + suffix
+	result := "__trbResult" + suffix
+	requested := "__trbRequested" + suffix
+	parentScope := "__trbParentScope" + suffix
+	controller := "__trbController" + suffix
+	abort := "__trbAbort" + suffix
+	group := "__trbGroup" + suffix
+	localLimit := "__trbLocalLimit" + suffix
+	released := "__trbReleased" + suffix
+	nextIndex := "__trbNextIndex" + suffix
+	firstError := "__trbFirstError" + suffix
+	hasError := "__trbHasError" + suffix
+	workerCount := "__trbWorkerCount" + suffix
+	workers := "__trbWorkers" + suffix
+	workerController := "__trbWorkerController" + suffix
+	workerAbort := "__trbWorkerAbort" + suffix
+	taskScope := "__trbTaskScope" + suffix
+	index := "__trbIndex" + suffix
+	item := transform.Item
+	if item == "" || item == "_" {
+		item = "__trbItem" + suffix
+	}
+	limit := "8"
+	if transform.Limit != nil {
+		limit = child.expr(transform.Limit)
+	}
+	itemResultType := "unknown"
+	if transform.Result != nil {
+		itemResultType = child.tsType(transform.Result.ExprType())
+	}
+	child.line("(async (): Promise<" + child.tsType(transform.ExprType()) + "> => {")
+	child.indent++
+	child.line("const " + items + " = " + child.iterableExpr(transform.Source) + ";")
+	child.line("const " + requested + " = " + limit + ";")
+	child.line("if (" + requested + " <= 0) throw new RangeError(\"concurrent_map limit must be greater than zero\");")
+	child.line("const " + parentScope + " = __trbScope as (AbortSignal & { __trbConcurrencyGroup?: any; __trbConcurrencyHeld?: boolean }) | undefined;")
+	child.line("const " + controller + " = new AbortController();")
+	child.line("const " + abort + " = () => " + controller + ".abort();")
+	child.line("if (" + parentScope + "?.aborted) " + abort + "(); else " + parentScope + "?.addEventListener(\"abort\", " + abort + ", { once: true });")
+	child.line("let " + group + ": any = " + parentScope + "?.__trbConcurrencyGroup;")
+	child.line("if (" + group + " === undefined) {")
+	child.indent++
+	child.line(group + " = { capacity: " + requested + ", available: " + requested + ", waiters: [] as Array<() => boolean>, acquire(signal: AbortSignal | undefined): Promise<void> { if (signal?.aborted) return Promise.reject(new DOMException(\"TypeRB execution was cancelled\", \"AbortError\")); if (this.available > 0) { this.available -= 1; return Promise.resolve(); } return new Promise<void>((resolve, reject) => { let active = true; const onAbort = () => { if (!active) return; active = false; reject(new DOMException(\"TypeRB execution was cancelled\", \"AbortError\")); }; signal?.addEventListener(\"abort\", onAbort, { once: true }); this.waiters.push((): boolean => { if (!active) return false; active = false; signal?.removeEventListener(\"abort\", onAbort); resolve(); return true; }); }); }, release(): void { while (this.waiters.length > 0) { const waiter = this.waiters.shift()!; if (waiter()) return; } this.available += 1; } };")
+	child.indent--
+	child.line("}")
+	child.line("Object.defineProperty(" + controller + ".signal, \"__trbConcurrencyGroup\", { value: " + group + " });")
+	child.line("let " + localLimit + ": number = " + group + ".capacity;")
+	if transform.Limit != nil {
+		child.line(localLimit + " = Math.min(" + localLimit + ", " + requested + ");")
+	}
+	child.line("const " + released + " = " + parentScope + "?.__trbConcurrencyHeld === true;")
+	child.line("if (" + released + ") " + group + ".release();")
+	child.line("try {")
+	child.indent++
+	child.line("const " + result + " = new Array<" + itemResultType + ">(" + items + ".length);")
+	child.line("let " + nextIndex + " = 0;")
+	child.line("let " + firstError + ": unknown;")
+	child.line("let " + hasError + " = false;")
+	child.line("const " + workerCount + " = Math.min(" + localLimit + ", " + items + ".length);")
+	child.line("const " + workers + " = Array.from({ length: " + workerCount + " }, async (): Promise<void> => {")
+	child.indent++
+	child.line("const " + workerController + " = new AbortController();")
+	child.line("const " + workerAbort + " = () => " + workerController + ".abort();")
+	child.line("if (" + controller + ".signal.aborted) " + workerAbort + "(); else " + controller + ".signal.addEventListener(\"abort\", " + workerAbort + ", { once: true });")
+	child.line("const " + taskScope + " = " + workerController + ".signal as AbortSignal & { __trbConcurrencyGroup?: any; __trbConcurrencyHeld?: boolean };")
+	child.line("Object.defineProperties(" + taskScope + ", { __trbConcurrencyGroup: { value: " + group + " }, __trbConcurrencyHeld: { value: true } });")
+	child.line("try {")
+	child.indent++
+	child.line("while (!" + controller + ".signal.aborted) {")
+	child.indent++
+	child.line("const " + index + " = " + nextIndex + ";")
+	child.line("if (" + index + " >= " + items + ".length) break;")
+	child.line(nextIndex + " += 1;")
+	child.line("await " + group + ".acquire(" + controller + ".signal);")
+	child.line("try {")
+	child.indent++
+	child.line(result + "[" + index + "] = await (async (__trbScope: AbortSignal | undefined): Promise<" + itemResultType + "> => {")
+	child.indent++
+	child.line("let " + item + " = " + items + "[" + index + "]!;")
+	child.statements(transform.Body)
+	child.line("return " + child.expr(transform.Result) + ";")
+	child.indent--
+	child.line("})(" + taskScope + ");")
+	child.indent--
+	child.line("} finally {")
+	child.indent++
+	child.line(group + ".release();")
+	child.indent--
+	child.line("}")
+	child.indent--
+	child.line("}")
+	child.indent--
+	child.line("} catch (error) {")
+	child.indent++
+	child.line("if (!" + hasError + ") { " + hasError + " = true; " + firstError + " = error; }")
+	child.line(abort + "();")
+	child.indent--
+	child.line("} finally {")
+	child.indent++
+	child.line(controller + ".signal.removeEventListener(\"abort\", " + workerAbort + ");")
+	child.indent--
+	child.line("}")
+	child.indent--
+	child.line("});")
+	child.line("await Promise.all(" + workers + ");")
+	child.line("if (" + hasError + ") throw " + firstError + ";")
+	child.line("if (" + parentScope + "?.aborted) throw new DOMException(\"TypeRB execution was cancelled\", \"AbortError\");")
+	child.line("return " + result + ";")
+	child.indent--
+	child.line("} finally {")
+	child.indent++
+	child.line("if (" + released + ") await " + group + ".acquire(undefined);")
+	child.line(parentScope + "?.removeEventListener(\"abort\", " + abort + ");")
+	child.indent--
+	child.line("}")
+	child.indent--
+	child.line("})()")
+	g.temporary = child.temporary
+	return "(await " + strings.TrimSpace(child.b.String()) + ")"
 }
 
 func (g *generator) transformResult(transform *ir.Transform) string {

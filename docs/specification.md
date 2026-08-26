@@ -1,6 +1,6 @@
 # TypeRB Specification Draft v0.3
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## 1. Language Goals
 
@@ -775,6 +775,63 @@ Empty Arrays produce `false`, `true`, and `true` for the predicates;
 value-producing transformation block; use `each` when control must leave or
 skip the enclosing iteration. Indexed predicate blocks are not currently
 enabled.
+
+`Array#concurrent_map` is the import-free bounded concurrent transformation:
+
+```trb
+pages := urls.concurrent_map do |url|
+	fetch_page(url)
+end
+
+pages := urls.concurrent_map(limit: 4) do |url|
+	fetch_page(url)
+end
+```
+
+Its block maps `T` to `U` and the result is `Array<U>` in input order. A
+`Result` block value is an ordinary `U`, so the operation returns an
+`Array<Result<U, E>>`; there is no implicit aggregation or propagation. Empty
+input returns an empty Array. Element start and completion order are
+unspecified, and CPU parallelism is not guaranteed.
+
+The optional named `limit` is a positive `Integer` bounding active element
+blocks. Its portable default is 8. A non-positive literal is a compile-time
+error and a non-positive dynamic value is a runtime contract failure. Lowering
+uses a bounded worker set rather than one eagerly created task per element.
+
+An outermost call owns a structured task group whose capacity is its explicit
+limit or the default 8. A nested `concurrent_map` joins the current group and
+cannot expand that capacity; its own explicit limit may reduce its local
+admission. A parent element temporarily returns its permit while joining a
+nested map, then reacquires it before continuing. A completed outermost call
+does not leave its group attached to later independent calls.
+
+The call returns only after all admitted child work has been collected. Parent
+cancellation stops admission, propagates cooperatively through the hidden
+execution scope to active work, and collects that work before leaving the
+call. The operation is available only inside a function or method, except at
+the interactive REPL top level.
+
+The block follows the other value-producing transformation rules and rejects
+`return`, `break`, `next`, and prefix `try`. Assignment to an outer binding is
+also rejected. Captured lexical values are initially limited to
+concurrency-safe scalars, Bytes, Ranges, and recursively safe records, enums,
+newtypes, nullable values, and unions. Arrays, Hashes, StringBuilder, function
+values, `Any`, classes, and interfaces are not concurrency-safe captures.
+Each element binding is local to one block evaluation, but an element value is
+not uniquely owned: an Array may contain the same reference more than once.
+Values created inside one element evaluation are task-owned. Calls to
+same-module authored top-level functions, module or class methods, instance
+methods, and constructors are followed transitively and checked for shared
+lexical mutation. Constructor auditing includes parameter defaults and class
+field defaults, including classes with no explicit `initialize`. Direct field
+initialization on a fresh constructor receiver is allowed. Other instance field
+mutation is rejected without an ownership contract because the checker cannot
+prove that the receiver is unaliased. Calls through interface-typed receivers
+or function values require an explicit concurrency-safety contract; no authored
+contract syntax exists yet, so those calls are rejected. Native calls from the
+block must propagate the compiler-owned execution scope. Explicit safety
+contracts for captured package-owned handles remain deferred.
 
 Array sorting is stable and non-destructive. `sort()` and
 `sort_descending()` use the element's portable natural order. `sort_by` and

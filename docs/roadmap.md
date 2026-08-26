@@ -12,9 +12,11 @@ than detailed syntax.
 ## 1. Complete the portable language core
 
 - Extend Result-returning higher-order functions across third-party package
-  declarations, native callback boundaries, and concurrent composition. Keep
+  declarations and native callback boundaries. Evaluate a Result-aggregating
+  concurrent collection convenience only if application use demonstrates that
+  explicit `Array<Result<T, E>>` handling is materially inconvenient. Keep
   prefix `try` and postfix `catch` as the sole propagation and recovery syntax
-  until application usage establishes another distinct need.
+  until that evidence establishes another distinct need.
 - Extend union type-pattern narrowing to nullable, collection, enum, record,
   and class alternatives. Add position-typed Tuples and precise optional-value
   semantics.

@@ -48,8 +48,11 @@ func (g *generator) executionScopeRuntime() {
 	g.line("@mutex = Mutex.new", "")
 	g.line("@cancelled = false", "")
 	g.line("@callbacks = []", "")
+	g.line("@concurrency_group = nil", "")
+	g.line("@concurrency_held = false", "")
 	g.indent--
 	g.line("end", "")
+	g.line("attr_accessor :concurrency_group, :concurrency_held", "")
 	g.line("def cancelled?", "")
 	g.indent++
 	g.line("@mutex.synchronize { @cancelled }", "")
@@ -87,6 +90,7 @@ func (g *generator) executionScopeRuntime() {
 	g.line("def child", "")
 	g.indent++
 	g.line("value = TrbExecutionScope.new", "")
+	g.line("value.concurrency_group = @concurrency_group", "")
 	g.line("on_cancel { value.cancel }", "")
 	g.line("value", "")
 	g.indent--

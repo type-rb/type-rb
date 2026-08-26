@@ -459,12 +459,12 @@ func TestFormatStructuredBlockValues(t *testing.T) {
 }
 
 func TestFormatPortableCollectionTransformations(t *testing.T) {
-	source := []byte("def values():Array<Integer>\nmapped := [1,2].map do |value| # map\nvalue*2 # result\nend\nordered := mapped.sort_by(){|value| -value}\nall_positive := ordered.all?(){|value| value>0}\nfound := ordered.find(){|value| value>1}\nputs(all_positive)\nputs(found)\nreturn ordered.select.with_index{|value,index| value>index}\nend\n")
+	source := []byte("def values():Array<Integer>\nmapped := [1,2].map do |value| # map\nvalue*2 # result\nend\nconcurrent := mapped.concurrent_map do |value|\nvalue+1\nend\nbounded := concurrent.concurrent_map(limit:2) do |value|\nvalue+1\nend\nordered := bounded.sort_by(){|value| -value}\nall_positive := ordered.all?(){|value| value>0}\nfound := ordered.find(){|value| value>1}\nputs(all_positive)\nputs(found)\nreturn ordered.select.with_index{|value,index| value>index}\nend\n")
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
 	}
-	want := "def values(): Array<Integer>\n\tmapped := [1, 2].map do |value| # map\n\t\tvalue * 2 # result\n\tend\n\tordered := mapped.sort_by() { |value| - value }\n\tall_positive := ordered.all?() { |value| value > 0 }\n\tfound := ordered.find() { |value| value > 1 }\n\tputs(all_positive)\n\tputs(found)\n\treturn ordered.select.with_index { |value, index| value > index }\nend\n"
+	want := "def values(): Array<Integer>\n\tmapped := [1, 2].map do |value| # map\n\t\tvalue * 2 # result\n\tend\n\tconcurrent := mapped.concurrent_map do |value|\n\t\tvalue + 1\n\tend\n\tbounded := concurrent.concurrent_map(limit: 2) do |value|\n\t\tvalue + 1\n\tend\n\tordered := bounded.sort_by() { |value| - value }\n\tall_positive := ordered.all?() { |value| value > 0 }\n\tfound := ordered.find() { |value| value > 1 }\n\tputs(all_positive)\n\tputs(found)\n\treturn ordered.select.with_index { |value, index| value > index }\nend\n"
 	if string(formatted) != want {
 		t.Fatalf("unexpected collection-transformation formatting:\n%s", formatted)
 	}
