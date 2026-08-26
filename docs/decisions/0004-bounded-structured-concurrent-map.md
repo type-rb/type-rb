@@ -66,14 +66,16 @@ Bytes, Ranges, and recursively safe records, enums, newtypes, nullable values,
 and unions. Mutable containers, function values, `Any`, StringBuilder, and
 class or interface instances cannot be captured. Calls to same-module authored
 top-level functions, module or class methods, instance methods, and constructors
-are followed transitively and checked for shared lexical mutation. Direct field
-initialization on a fresh constructor receiver is allowed. Other instance field
-mutation is rejected until an ownership contract can prove that its receiver is
-unaliased. Calls through interface-typed receivers or function values are
-rejected until they can carry an explicit concurrency-safety contract. A native
-function used in a concurrent block must participate in the compiler-owned
-execution-scope contract; package-owned native handles need a future explicit
-safety contract before they can be captured.
+are followed transitively and checked for shared lexical mutation. Class field
+defaults and parameter defaults are part of that constructor audit, including
+classes with no explicit `initialize`. Direct field initialization on a fresh
+constructor receiver is allowed. Other instance field mutation is rejected
+until an ownership contract can prove that its receiver is unaliased. Calls
+through interface-typed receivers or function values are rejected until they
+can carry an explicit concurrency-safety contract. A native function used in a
+concurrent block must participate in the compiler-owned execution-scope
+contract; package-owned native handles need a future explicit safety contract
+before they can be captured.
 
 ## Consequences
 

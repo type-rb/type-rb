@@ -477,8 +477,10 @@ type Checker struct {
 	concurrentBlockScopes       []*scope
 	concurrentFunctions         map[*ast.MethodStatement]bool
 	concurrentConstructors      map[*ast.MethodStatement]bool
+	concurrentClasses           map[string]bool
 	currentMethod               *ast.MethodStatement
 	currentMethodScopes         []*scope
+	currentFieldClass           string
 	concurrentMapDepth          int
 	authoredMemberMethods       map[*ast.MemberExpression]*ast.MethodStatement
 	concurrentInterfaceMembers  map[*ast.MemberExpression]bool
@@ -486,9 +488,13 @@ type Checker struct {
 	authoredCalls               map[*ast.MethodStatement]map[*ast.MethodStatement]bool
 	authoredConstructorCalls    map[*ast.MethodStatement]map[*ast.MethodStatement]bool
 	authoredOrdinaryCalls       map[*ast.MethodStatement]map[*ast.MethodStatement]bool
+	authoredMethodConstructors  map[*ast.MethodStatement]map[string]bool
+	authoredClassCalls          map[string]map[*ast.MethodStatement]bool
+	authoredClassConstructors   map[string]map[string]bool
 	concurrentCallRoots         map[*ast.MethodStatement]bool
 	concurrentConstructorRoots  map[*ast.MethodStatement]bool
 	concurrentOrdinaryRoots     map[*ast.MethodStatement]bool
+	concurrentClassRoots        map[string]bool
 	concurrentInitTargets       map[*ast.Identifier]bool
 }
 
@@ -531,11 +537,12 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 	c := newChecker(program, resolution, options)
 	c.emptyCollectionOutcomes = outcomes
 	c.checkProgram(program, true)
-	if concurrentFunctions, concurrentConstructors := c.resolvedConcurrentFunctions(); len(concurrentFunctions) > 0 {
+	if concurrentFunctions, concurrentConstructors, concurrentClasses := c.resolvedConcurrentFunctions(); len(concurrentFunctions) > 0 || len(concurrentClasses) > 0 {
 		audited := newChecker(program, resolution, options)
 		audited.emptyCollectionOutcomes = outcomes
 		audited.concurrentFunctions = concurrentFunctions
 		audited.concurrentConstructors = concurrentConstructors
+		audited.concurrentClasses = concurrentClasses
 		audited.checkProgram(program, true)
 		return audited.result, diagnostic.Normalize(audited.diags, "", diagnostic.TypeError)
 	}
@@ -812,15 +819,20 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		declarationCalls:           map[*ast.CallExpression]string{},
 		concurrentFunctions:        map[*ast.MethodStatement]bool{},
 		concurrentConstructors:     map[*ast.MethodStatement]bool{},
+		concurrentClasses:          map[string]bool{},
 		authoredMemberMethods:      map[*ast.MemberExpression]*ast.MethodStatement{},
 		concurrentInterfaceMembers: map[*ast.MemberExpression]bool{},
 		authoredOwnedMethods:       map[string]*ast.MethodStatement{},
 		authoredCalls:              map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
 		authoredConstructorCalls:   map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
 		authoredOrdinaryCalls:      map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
+		authoredMethodConstructors: map[*ast.MethodStatement]map[string]bool{},
+		authoredClassCalls:         map[string]map[*ast.MethodStatement]bool{},
+		authoredClassConstructors:  map[string]map[string]bool{},
 		concurrentCallRoots:        map[*ast.MethodStatement]bool{},
 		concurrentConstructorRoots: map[*ast.MethodStatement]bool{},
 		concurrentOrdinaryRoots:    map[*ast.MethodStatement]bool{},
+		concurrentClassRoots:       map[string]bool{},
 		concurrentInitTargets:      map[*ast.Identifier]bool{},
 	}
 }
@@ -876,27 +888,51 @@ func authoredOwnedMethodKey(owner, name string) string {
 	return owner + "\x00" + name
 }
 
-func (c *Checker) resolvedConcurrentFunctions() (map[*ast.MethodStatement]bool, map[*ast.MethodStatement]bool) {
+func (c *Checker) resolvedConcurrentFunctions() (map[*ast.MethodStatement]bool, map[*ast.MethodStatement]bool, map[string]bool) {
 	// Constructor reachability stays distinct from ordinary calls so the audit
-	// may initialize fresh receiver storage without treating aliased receivers as owned.
+	// may initialize fresh receiver storage without treating aliased receivers as
+	// owned. Class nodes retain field-default effects even without initialize().
 	type reach struct {
 		method      *ast.MethodStatement
+		class       string
 		constructor bool
 	}
 	reached := map[*ast.MethodStatement]bool{}
+	reachedClasses := map[string]bool{}
 	ordinary := map[*ast.MethodStatement]bool{}
 	constructed := map[*ast.MethodStatement]bool{}
 	expanded := map[*ast.MethodStatement]bool{}
-	queue := make([]reach, 0, len(c.concurrentCallRoots))
+	queue := make([]reach, 0, len(c.concurrentCallRoots)+len(c.concurrentClassRoots))
 	for method := range c.concurrentOrdinaryRoots {
 		queue = append(queue, reach{method: method})
 	}
 	for method := range c.concurrentConstructorRoots {
 		queue = append(queue, reach{method: method, constructor: true})
 	}
+	for class := range c.concurrentClassRoots {
+		queue = append(queue, reach{class: class})
+	}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
+		if current.class != "" {
+			if reachedClasses[current.class] {
+				continue
+			}
+			reachedClasses[current.class] = true
+			if class := c.classes[current.class]; class != nil {
+				if initialize := class.methods["initialize"]; initialize != nil {
+					queue = append(queue, reach{method: initialize, constructor: true})
+				}
+			}
+			for callee := range c.authoredClassCalls[current.class] {
+				queue = append(queue, reach{method: callee})
+			}
+			for constructedClass := range c.authoredClassConstructors[current.class] {
+				queue = append(queue, reach{class: constructedClass})
+			}
+			continue
+		}
 		method := current.method
 		if method == nil {
 			continue
@@ -919,6 +955,9 @@ func (c *Checker) resolvedConcurrentFunctions() (map[*ast.MethodStatement]bool, 
 				queue = append(queue, reach{method: callee, constructor: true})
 			}
 		}
+		for constructedClass := range c.authoredMethodConstructors[method] {
+			queue = append(queue, reach{class: constructedClass})
+		}
 	}
 	constructors := map[*ast.MethodStatement]bool{}
 	for method := range constructed {
@@ -926,15 +965,45 @@ func (c *Checker) resolvedConcurrentFunctions() (map[*ast.MethodStatement]bool, 
 			constructors[method] = true
 		}
 	}
-	return reached, constructors
+	return reached, constructors, reachedClasses
 }
 
 func (c *Checker) recordAuthoredCall(call *ast.CallExpression) {
+	constructorClass := c.authoredConstructorClass(call.Callee)
+	if constructorClass != "" {
+		if c.currentMethod != nil {
+			classes := c.authoredMethodConstructors[c.currentMethod]
+			if classes == nil {
+				classes = map[string]bool{}
+				c.authoredMethodConstructors[c.currentMethod] = classes
+			}
+			classes[constructorClass] = true
+		}
+		if c.currentFieldClass != "" {
+			classes := c.authoredClassConstructors[c.currentFieldClass]
+			if classes == nil {
+				classes = map[string]bool{}
+				c.authoredClassConstructors[c.currentFieldClass] = classes
+			}
+			classes[constructorClass] = true
+		}
+		if c.concurrentMapDepth > 0 {
+			c.concurrentClassRoots[constructorClass] = true
+		}
+	}
 	method := c.authoredCallTarget(call.Callee)
 	if method == nil {
 		return
 	}
-	constructorCall := method.Name == "initialize" && !method.Class && authoredConstructorCall(call.Callee)
+	constructorCall := constructorClass != "" && method.Name == "initialize" && !method.Class
+	if c.currentFieldClass != "" && !constructorCall {
+		calls := c.authoredClassCalls[c.currentFieldClass]
+		if calls == nil {
+			calls = map[*ast.MethodStatement]bool{}
+			c.authoredClassCalls[c.currentFieldClass] = calls
+		}
+		calls[method] = true
+	}
 	if c.currentMethod != nil {
 		calls := c.authoredCalls[c.currentMethod]
 		if calls == nil {
@@ -963,12 +1032,19 @@ func (c *Checker) recordAuthoredCall(call *ast.CallExpression) {
 	}
 }
 
-func authoredConstructorCall(expression ast.Expression) bool {
+func (c *Checker) authoredConstructorClass(expression ast.Expression) string {
 	if generic, ok := expression.(*ast.GenericExpression); ok {
-		return authoredConstructorCall(generic.Receiver)
+		return c.authoredConstructorClass(generic.Receiver)
 	}
 	member, ok := expression.(*ast.MemberExpression)
-	return ok && member.Name == "new"
+	if !ok || member.Name != "new" {
+		return ""
+	}
+	owner := authoredReceiverName(member.Receiver)
+	if c.classes[owner] == nil {
+		return ""
+	}
+	return owner
 }
 
 func (c *Checker) authoredCallTarget(expression ast.Expression) *ast.MethodStatement {
@@ -1685,7 +1761,23 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.interfaceDepth--
 		case *ast.FieldStatement:
 			if n.Value != nil {
-				valueType := c.checkExpression(n.Value, sc)
+				previousFieldClass := c.currentFieldClass
+				if c.current != nil {
+					c.currentFieldClass = c.current.name
+				}
+				valueScope := sc
+				concurrentField := c.concurrentClasses[c.currentFieldClass]
+				if concurrentField {
+					// A field default is a synthetic constructor prologue. Keep class
+					// fields outside its root so aliased reference fields are captures.
+					valueScope = &scope{parent: sc, values: map[string]symbol{}}
+					c.concurrentBlockScopes = append(c.concurrentBlockScopes, valueScope)
+				}
+				valueType := c.checkExpression(n.Value, valueScope)
+				if concurrentField {
+					c.concurrentBlockScopes = c.concurrentBlockScopes[:len(c.concurrentBlockScopes)-1]
+				}
+				c.currentFieldClass = previousFieldClass
 				declared := c.typeFromRef(n.Type)
 				valueType = c.contextualizeCollectionLiteral(n.Value, declared, valueType)
 				if !n.Type.Empty() && !c.assignable(n.Value, declared, valueType) {
@@ -4390,6 +4482,11 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		c.currentMethodScopes = c.currentMethodScopes[:len(c.currentMethodScopes)-1]
 		c.currentMethod = previousMethod
 	}()
+	if c.concurrentFunctions[method] {
+		// Parameter defaults execute as part of the reached call and therefore
+		// share its concurrency boundary with the authored body.
+		c.concurrentBlockScopes = append(c.concurrentBlockScopes, methodScope)
+	}
 	seenPositionalDefault := false
 	seenNamedOnly := false
 	seenNamedDefault := false
@@ -4449,9 +4546,6 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	c.loopDepth = 0
 	if method.Name == "initialize" && c.current != nil {
 		c.initializing++
-	}
-	if c.concurrentFunctions[method] {
-		c.concurrentBlockScopes = append(c.concurrentBlockScopes, methodScope)
 	}
 	c.checkStatements(method.Body, methodScope)
 	if c.concurrentFunctions[method] {

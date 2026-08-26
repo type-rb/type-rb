@@ -537,6 +537,74 @@ end`,
 			message: "concurrent_map cannot assign to outer binding shared",
 		},
 		{
+			name: "class field default reaches shared mutation",
+			source: `mut shared := 0
+
+def bump(): Integer
+	shared += 1
+	return shared
+end
+
+class Counter
+	@value: Integer := bump()
+
+	def initialize()
+		return
+	end
+end
+
+def transform(values: Array<Integer>): Array<Counter>
+	return values.concurrent_map do |_value|
+		Counter.new()
+	end
+end`,
+			message: "concurrent_map cannot assign to outer binding shared",
+		},
+		{
+			name: "constructor parameter default captures unsafe value",
+			source: `mut shared := [1]
+
+class Counter
+	@values: Array<Integer>
+
+	def initialize(values: Array<Integer> = shared)
+		@values = values
+		return
+	end
+end
+
+def transform(values: Array<Integer>): Array<Counter>
+	return values.concurrent_map do |_value|
+		Counter.new()
+	end
+end`,
+			message: "shared because Array<Integer> is not concurrency-safe",
+		},
+		{
+			name: "implicit constructor field default reaches shared mutation through factory",
+			source: `mut shared := 0
+
+def bump(): Integer
+	shared += 1
+	return shared
+end
+
+class Counter
+	@value: Integer := bump()
+end
+
+def build_counter(): Counter
+	return Counter.new()
+end
+
+def transform(values: Array<Integer>): Array<Counter>
+	return values.concurrent_map do |_value|
+		build_counter()
+	end
+end`,
+			message: "concurrent_map cannot assign to outer binding shared",
+		},
+		{
 			name: "transitive class method reaches shared mutation",
 			source: `mut shared := 0
 
@@ -625,6 +693,32 @@ end
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if _, err := Compile("concurrent_constructor.trb", source, mode); err != nil {
 			t.Fatalf("%s rejected constructor field initialization: %v", mode, err)
+		}
+	}
+}
+
+func TestConcurrentMapAllowsSafeClassFieldDefault(t *testing.T) {
+	source := []byte(`def initial_value(): Integer
+	return 1
+end
+
+class Counter
+	@value: Integer := initial_value()
+end
+
+def build_counter(): Counter
+	return Counter.new()
+end
+
+def transform(values: Array<Integer>): Array<Counter>
+	return values.concurrent_map do |_value|
+		build_counter()
+	end
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("safe_concurrent_field_default.trb", source, mode); err != nil {
+			t.Fatalf("%s rejected concurrency-safe class field default: %v", mode, err)
 		}
 	}
 }
