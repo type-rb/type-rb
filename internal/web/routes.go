@@ -10,6 +10,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/testsuite"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
@@ -262,7 +263,7 @@ func Discover(sources []Source, sourceRoot string) ([]Route, []Issue) {
 	var issues []Issue
 	for _, source := range sources {
 		relative, err := filepath.Rel(routeRoot, source.Filename)
-		if err != nil || escapesRoot(relative) || filepath.Ext(relative) != ".trb" {
+		if err != nil || escapesRoot(relative) || filepath.Ext(relative) != ".trb" || testsuite.IsTestFile(relative) {
 			continue
 		}
 		if filepath.Base(relative) == "_middleware.trb" {
