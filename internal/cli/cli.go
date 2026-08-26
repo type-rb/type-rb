@@ -605,6 +605,9 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 		command.Env = append(command.Env, "TRB_DATABASE="+filepath.Join(config.Root, config.Go.Sqldef.Database))
 	}
 	if err := relay.Run(command); err != nil {
+		if command.ProcessState == nil {
+			return fmt.Errorf("start test runtime: %w", err)
+		}
 		return &reportedError{cause: err}
 	}
 	return nil
