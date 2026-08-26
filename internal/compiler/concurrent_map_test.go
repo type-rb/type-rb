@@ -747,3 +747,246 @@ end
 		}
 	}
 }
+
+func TestConcurrentMapRejectsBorrowedContainerMutation(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		message string
+	}{
+		{
+			name: "array through helper",
+			source: `def mutate(items: Array<Integer>): Integer
+	items[0] = items[0] + 1
+	return items[0]
+end
+
+def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mutate(items)
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding items because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "hash directly",
+			source: `def transform(values: Array<Hash<String, Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		items["count"] = 1
+		1
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding items because Hash<String, Integer> is not uniquely owned",
+		},
+		{
+			name: "string builder through helper",
+			source: `import trb/std/string_builder
+
+def mutate(builder: StringBuilder): String
+	builder.append("x")
+	return builder.to_s()
+end
+
+def transform(values: Array<StringBuilder>): Array<String>
+	return values.concurrent_map do |builder|
+		mutate(builder)
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding builder because StringBuilder is not uniquely owned",
+		},
+		{
+			name: "local alias of array element",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut alias_items := items
+		alias_items[0] = alias_items[0] + 1
+		alias_items[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding alias_items because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "nested iteration element",
+			source: `def transform(values: Array<Array<Array<Integer>>>): Array<Integer>
+	return values.concurrent_map do |items|
+		items.each do |entry|
+			entry[0] = entry[0] + 1
+		end
+		0
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding entry because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "borrowed element wrapped in fresh array",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut aliases := [items]
+		aliases[0][0] = aliases[0][0] + 1
+		aliases[0][0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding aliases because Array<Array<Integer>> is not uniquely owned",
+		},
+		{
+			name: "borrowed element selected by conditional",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected := if true
+			items
+		else
+			[0]
+		end
+		selected[0] = selected[0] + 1
+		selected[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "borrowed branch assignment followed by fresh branch assignment",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected := [0]
+
+		if items[0] >= 0
+			selected = items
+		else
+			selected = [0]
+		end
+
+		selected[0] = selected[0] + 1
+		selected[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "fresh reassignment does not clear borrowed binding",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected := items
+		selected = [0]
+		selected[0] = selected[0] + 1
+		selected[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "nullable narrowing does not hide borrowed assignment",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected: Array<Integer>? := [0]
+		if selected != nil
+			selected = items
+		end
+		if selected != nil
+			selected[0] = selected[0] + 1
+		end
+		0
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "case assignment remains borrowed after fresh alternative",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected := [0]
+		case items[0]
+		when 0
+			selected = items
+		else
+			selected = [0]
+		end
+		selected[0] = selected[0] + 1
+		selected[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "loop assignment cannot clear preexisting borrow",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected := items
+		while false
+			selected = [0]
+		end
+		selected[0] = selected[0] + 1
+		selected[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				_, err := Compile("borrowed_concurrent_container.trb", []byte(test.source), mode)
+				if err == nil || !strings.Contains(err.Error(), test.message) {
+					t.Fatalf("%s error = %v, want message containing %q", mode, err, test.message)
+				}
+			}
+		})
+	}
+}
+
+func TestConcurrentMapAllowsBorrowedContainerReadsAndTaskOwnedMutation(t *testing.T) {
+	source := []byte(`def read_first(items: Array<Integer>): Integer
+	return items[0]
+end
+
+def read_rows(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		read_first(items)
+	end
+end
+
+def mutate_fresh(values: Array<Integer>): Array<Integer>
+	return values.concurrent_map do |value|
+		mut items := [value]
+		items[0] = items[0] + 1
+		items[0]
+	end
+end
+
+def mutate_nested_fresh(values: Array<Integer>): Array<Integer>
+	return values.concurrent_map do |value|
+		mut rows := [[value]]
+		rows.each do |items|
+			items[0] = items[0] + 1
+		end
+		rows[0][0]
+	end
+end
+
+def mutate_conditional_fresh(values: Array<Integer>): Array<Integer>
+	return values.concurrent_map do |value|
+		mut items := if value > 0
+			[value]
+		else
+			[0]
+		end
+		items[0] = items[0] + 1
+		items[0]
+	end
+end
+
+def mutate_new_binding_after_borrow(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut borrowed := items
+		mut fresh := [0]
+		fresh[0] = fresh[0] + 1
+		fresh[0] + borrowed[0]
+	end
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("safe_concurrent_containers.trb", source, mode); err != nil {
+			t.Fatalf("%s rejected borrowed reads or task-owned mutation: %v", mode, err)
+		}
+	}
+}
