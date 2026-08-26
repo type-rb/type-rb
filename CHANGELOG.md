@@ -2,6 +2,22 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.42 - 2026-08-26
+
+### Standard library
+
+- `Array#concurrent_map` now rejects mutation of mutable containers borrowed
+  from enclosing scope, including through aliases, nested iteration, derived
+  containers, and control-flow values. Read-only access and task-owned local
+  mutation remain valid. ([#557](https://github.com/type-rb/type-rb/pull/557))
+
+### Web
+
+- File-route discovery now ignores colocated files ending in `_test.trb` under
+  `src/routes`, so project checks and tests no longer require those test files
+  to declare HTTP handlers.
+  ([#561](https://github.com/type-rb/type-rb/pull/561))
+
 ## 0.3.41 - 2026-08-26
 
 ### Tooling
