@@ -1961,9 +1961,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			if identifier, ok := n.Target.(*ast.Identifier); ok {
 				if n.Operator == "=" {
-					if binding, owner, exists := sc.lookupOwner(identifier.Name); exists {
-						binding.concurrentBorrowed = c.concurrentBorrowedType(binding.typ) && c.concurrentBorrowedExpression(n.Value, sc)
-						owner.values[identifier.Name] = binding
+					if binding, _, exists := sc.lookupOwner(identifier.Name); exists &&
+						c.concurrentBorrowedType(binding.typ) && c.concurrentBorrowedExpression(n.Value, sc) {
+						markConcurrentBorrowed(sc, identifier.Name, binding)
 					}
 				}
 				sc.resetNarrowing(identifier.Name)
@@ -7526,6 +7526,24 @@ func concurrentBorrowedRoot(expression ast.Expression, sc *scope) (string, types
 	default:
 		return "", types.Type{}, false
 	}
+}
+
+func markConcurrentBorrowed(sc *scope, name string, binding symbol) {
+	for current := sc; current != nil; current = current.parent {
+		value, exists := current.values[name]
+		if !exists || !sameConcurrentBinding(value, binding) {
+			continue
+		}
+		value.concurrentBorrowed = true
+		current.values[name] = value
+	}
+}
+
+func sameConcurrentBinding(left, right symbol) bool {
+	if left.variable != nil || right.variable != nil {
+		return left.variable != nil && left.variable == right.variable
+	}
+	return left.span == right.span
 }
 
 func (c *Checker) concurrentBorrowedType(typ types.Type) bool {

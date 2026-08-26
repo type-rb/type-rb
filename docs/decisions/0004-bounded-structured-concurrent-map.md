@@ -63,7 +63,9 @@ because an Array may contain duplicate references. Values created inside one
 element evaluation are task-owned. Mutable reference elements and reference
 parameters of transitively reached authored calls are borrowed; they may be
 read but not mutated. Direct aliases and containers derived from borrowed
-references preserve that borrowed status unless independent storage is proven.
+references preserve that borrowed status. Borrowed state is monotonic for one
+binding across reassignment and control-flow joins; independently created
+storage must use a new local binding to regain task-owned mutation.
 Assignment to an outer binding is rejected. Lexical captures are initially
 limited to concurrency-safe values: scalars, Bytes, Ranges, and recursively safe
 records, enums, newtypes, nullable values, and unions. Mutable containers,

@@ -824,8 +824,10 @@ Mutable reference elements and mutable-reference parameters of transitively
 reached authored calls are therefore borrowed: reading is allowed, but mutation
 through Array, Hash, StringBuilder, or other borrowed reference storage is
 rejected. Direct aliases and containers derived from borrowed references remain
-borrowed unless the checker can prove independent storage. Values created inside
-one element evaluation are task-owned and may be mutated directly. Calls to
+borrowed. Borrowed state is monotonic for a binding, so rebinding it to a fresh
+value does not restore unique ownership; use a new local binding for
+independently created storage. Values created inside one element evaluation are
+task-owned and may be mutated directly. Calls to
 same-module authored top-level functions, module or class methods, instance
 methods, and constructors are followed transitively and checked for shared
 lexical mutation.

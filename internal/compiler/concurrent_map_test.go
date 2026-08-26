@@ -843,6 +843,83 @@ end`,
 end`,
 			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
 		},
+		{
+			name: "borrowed branch assignment followed by fresh branch assignment",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected := [0]
+
+		if items[0] >= 0
+			selected = items
+		else
+			selected = [0]
+		end
+
+		selected[0] = selected[0] + 1
+		selected[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "fresh reassignment does not clear borrowed binding",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected := items
+		selected = [0]
+		selected[0] = selected[0] + 1
+		selected[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "nullable narrowing does not hide borrowed assignment",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected: Array<Integer>? := [0]
+		if selected != nil
+			selected = items
+		end
+		if selected != nil
+			selected[0] = selected[0] + 1
+		end
+		0
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "case assignment remains borrowed after fresh alternative",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected := [0]
+		case items[0]
+		when 0
+			selected = items
+		else
+			selected = [0]
+		end
+		selected[0] = selected[0] + 1
+		selected[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
+		{
+			name: "loop assignment cannot clear preexisting borrow",
+			source: `def transform(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut selected := items
+		while false
+			selected = [0]
+		end
+		selected[0] = selected[0] + 1
+		selected[0]
+	end
+end`,
+			message: "concurrent_map cannot mutate borrowed binding selected because Array<Integer> is not uniquely owned",
+		},
 	}
 
 	for _, test := range tests {
@@ -895,6 +972,15 @@ def mutate_conditional_fresh(values: Array<Integer>): Array<Integer>
 		end
 		items[0] = items[0] + 1
 		items[0]
+	end
+end
+
+def mutate_new_binding_after_borrow(values: Array<Array<Integer>>): Array<Integer>
+	return values.concurrent_map do |items|
+		mut borrowed := items
+		mut fresh := [0]
+		fresh[0] = fresh[0] + 1
+		fresh[0] + borrowed[0]
 	end
 end
 `)
