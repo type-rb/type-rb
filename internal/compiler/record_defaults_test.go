@@ -104,6 +104,51 @@ func TestRecordFieldDefaultDiagnostics(t *testing.T) {
 	}
 }
 
+func TestImportedRecordDefaultsStayOwnedByTheDefiningModule(t *testing.T) {
+	model := SourceUnit{
+		Filename: "config.trb", ModulePath: "models/config",
+		Source: []byte(`def default_port(): Integer
+	return 8080
+end
+
+record Config
+	host: String
+	port: Integer = default_port()
+end
+`),
+	}
+	main := SourceUnit{
+		Filename: "main.trb", ModulePath: "main", Package: "main",
+		Source: []byte(`import { Config } from models/config
+
+def sample(): Config
+	return Config.new(host: "localhost")
+end
+`),
+	}
+	expected := map[string][]string{
+		"go":         {"models.TrbRecordNewConfig("},
+		"ruby":       {"Config.__trb_record_new("},
+		"typescript": {`import { __trbRecordNewConfig } from "./models/config.ts";`, `return __trbRecordNewConfig({ host: "localhost" });`},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifacts, err := CompileProject([]SourceUnit{model, main}, Options{
+				Mode: mode, GoModule: "example.com/defaults", RubyLoader: "require_relative", SourceRoot: "/project", ProjectRoot: "/project",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := string(artifactForModule(artifacts, "main").Output)
+			for _, fragment := range expected[mode] {
+				if !strings.Contains(output, fragment) {
+					t.Fatalf("generated %s is missing %q:\n%s", mode, fragment, output)
+				}
+			}
+		})
+	}
+}
+
 func TestEnumMembersPreservePostfixAttributes(t *testing.T) {
 	source := []byte(`enum Command
 	Serve(port: Integer) @cli(about: "Start the server")
