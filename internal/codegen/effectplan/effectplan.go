@@ -64,6 +64,7 @@ type methodContext struct {
 
 type classContext struct {
 	name       string
+	superclass string
 	implements []types.Type
 }
 
@@ -160,7 +161,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 			plan.RecordDefaults[record.record] = true
 			changed = true
 		}
-		if analyzer.propagateInterfaces() {
+		if analyzer.propagateDispatchEffects() {
 			changed = true
 		}
 	}
@@ -190,7 +191,10 @@ func (a *analyzer) collect(module, owner string, statements []ir.Statement, inte
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Class:
-			a.classes = append(a.classes, classContext{name: node.Name, implements: append([]types.Type(nil), node.Implements...)})
+			a.classes = append(a.classes, classContext{
+				name: node.Name, superclass: referencedTypeName(node.Superclass),
+				implements: append([]types.Type(nil), node.Implements...),
+			})
 			a.collect(module, node.Name, node.Body, false)
 		case *ir.Enum:
 			a.collect(module, node.Name, node.Body, false)
@@ -242,6 +246,14 @@ func moduleAliases(module string) []string {
 	return append(result, strings.TrimSuffix(module, "/")+"/index")
 }
 
+func (a *analyzer) propagateDispatchEffects() bool {
+	changed := a.propagateInterfaces()
+	if a.propagateInheritance() {
+		changed = true
+	}
+	return changed
+}
+
 func (a *analyzer) propagateInterfaces() bool {
 	changed := false
 	for _, class := range a.classes {
@@ -253,21 +265,119 @@ func (a *analyzer) propagateInterfaces() bool {
 					continue
 				}
 				name := strings.TrimPrefix(key, prefix)
-				implementations := a.memberMethods[memberKey(class.name, name)]
-				maySuspend := anyReached(a.plan.Methods, declarations) || anyReached(a.plan.Methods, implementations)
-				if !maySuspend {
-					continue
-				}
-				for _, method := range append(append([]*ir.Method(nil), declarations...), implementations...) {
-					if !a.plan.Methods[method] {
-						a.plan.Methods[method] = true
-						changed = true
-					}
+				implementations := a.inheritedMemberMethods(class.name, name)
+				methods := append(append([]*ir.Method(nil), declarations...), implementations...)
+				if a.propagateMethodEffects(methods) {
+					changed = true
 				}
 			}
 		}
 	}
 	return changed
+}
+
+func (a *analyzer) propagateInheritance() bool {
+	changed := false
+	for _, class := range a.classes {
+		lineage := a.classLineage(class.name)
+		methodsByName := map[string][]*ir.Method{}
+		for _, method := range a.methods {
+			// Constructors own their initialization ABI and do not participate in
+			// ordinary inherited method dispatch.
+			if method.owner != "" && method.method.Name != "initialize" && lineage[method.owner] {
+				methodsByName[method.method.Name] = append(methodsByName[method.method.Name], method.method)
+			}
+		}
+		for _, methods := range methodsByName {
+			if a.propagateMethodEffects(methods) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+func (a *analyzer) propagateMethodEffects(methods []*ir.Method) bool {
+	methodReaches := anyReached(a.plan.Methods, methods)
+	defaultsReach := anyReached(a.plan.ParameterDefaults, methods)
+	if !methodReaches && !defaultsReach {
+		return false
+	}
+	changed := false
+	for _, method := range methods {
+		if !a.plan.Methods[method] {
+			a.plan.Methods[method] = true
+			changed = true
+		}
+		if defaultsReach && !a.plan.ParameterDefaults[method] {
+			a.plan.ParameterDefaults[method] = true
+			changed = true
+		}
+	}
+	return changed
+}
+
+func (a *analyzer) classLineage(name string) map[string]bool {
+	result := map[string]bool{}
+	var visit func(string)
+	visit = func(current string) {
+		if current == "" || result[current] {
+			return
+		}
+		result[current] = true
+		for _, class := range a.classes {
+			if class.name == current {
+				visit(class.superclass)
+			}
+		}
+	}
+	visit(name)
+	return result
+}
+
+func (a *analyzer) inheritedMemberMethods(owner, name string) []*ir.Method {
+	var result []*ir.Method
+	seenClasses := map[string]bool{}
+	seenMethods := map[*ir.Method]bool{}
+	var visit func(string)
+	visit = func(current string) {
+		if current == "" || seenClasses[current] {
+			return
+		}
+		seenClasses[current] = true
+		methods := a.memberMethods[memberKey(current, name)]
+		if len(methods) > 0 {
+			for _, method := range methods {
+				if !seenMethods[method] {
+					result = append(result, method)
+					seenMethods[method] = true
+				}
+			}
+			return
+		}
+		for _, class := range a.classes {
+			if class.name == current {
+				visit(class.superclass)
+			}
+		}
+	}
+	visit(owner)
+	return result
+}
+
+func referencedTypeName(expression ir.Expression) string {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		if node.Reference != nil && node.Reference.Symbol != "" {
+			return node.Reference.Symbol
+		}
+		return node.Name
+	case *ir.TypeApply:
+		return referencedTypeName(node.Receiver)
+	case *ir.Member:
+		return node.Name
+	}
+	return ""
 }
 
 func anyReached(methods map[*ir.Method]bool, candidates []*ir.Method) bool {
@@ -543,7 +653,7 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 		if node.Reference != nil && node.Reference.Package != "" {
 			return anyReached(a.plan.Methods, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
-		if context.owner != "" && anyReached(a.plan.Methods, a.memberMethods[memberKey(context.owner, node.Name)]) {
+		if context.owner != "" && anyReached(a.plan.Methods, a.inheritedMemberMethods(context.owner, node.Name)) {
 			return true
 		}
 		return anyReached(a.plan.Methods, a.topMethods[callableKey(context.module, node.Name)])
@@ -552,7 +662,7 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 			return false
 		}
 		owner := node.Receiver.ExprType().Name
-		if candidates := a.memberMethods[memberKey(owner, node.Name)]; len(candidates) > 0 {
+		if candidates := a.inheritedMemberMethods(owner, node.Name); len(candidates) > 0 {
 			return anyReached(a.plan.Methods, candidates)
 		}
 		if node.Reference != nil && node.Reference.Package != "" && node.Reference.ExportKind == "function" {
@@ -564,7 +674,7 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 		if owner == "" {
 			return false
 		}
-		return anyReached(a.plan.Methods, a.memberMethods[memberKey(owner, node.Name)])
+		return anyReached(a.plan.Methods, a.inheritedMemberMethods(owner, node.Name))
 	default:
 		return false
 	}
@@ -578,15 +688,18 @@ func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context met
 		if node.Reference != nil && node.Reference.Package != "" {
 			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
-		if context.owner != "" && anyReached(a.plan.ParameterDefaults, a.memberMethods[memberKey(context.owner, node.Name)]) {
+		if context.owner != "" && anyReached(a.plan.ParameterDefaults, a.inheritedMemberMethods(context.owner, node.Name)) {
 			return true
 		}
 		return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(context.module, node.Name)])
 	case *ir.Member:
+		if candidates := a.inheritedMemberMethods(node.Receiver.ExprType().Name, node.Name); len(candidates) > 0 {
+			return anyReached(a.plan.ParameterDefaults, candidates)
+		}
 		if node.Reference != nil && node.Reference.Package != "" && node.Reference.ExportKind == "function" {
 			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
-		return anyReached(a.plan.ParameterDefaults, a.memberMethods[memberKey(node.Receiver.ExprType().Name, node.Name)])
+		return false
 	}
 	return false
 }

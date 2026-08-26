@@ -1,6 +1,7 @@
 package effectplan
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/callsignature"
@@ -84,5 +85,91 @@ func TestEffectsIncludeParameterDefaultsAndNestedInitializers(t *testing.T) {
 	}
 	if !plan.Calls[loadCall] || !plan.CallParameterDefaults[loadCall] {
 		t.Fatalf("call of method with an effectful default was not recorded")
+	}
+}
+
+func TestInheritedAndOverriddenMethodsShareEffectABIs(t *testing.T) {
+	stringType := types.FromName("String")
+	functionType := types.Type{Kind: types.Function, Args: []types.Type{stringType, stringType}}
+	effectDefault := func() ir.Expression {
+		return &ir.Call{
+			ExprBase: ir.NewExprBase(token.Span{}, stringType),
+			Callee: &ir.Identifier{
+				ExprBase: ir.NewExprBase(token.Span{}, functionType), Name: "load_default",
+				Reference: &ir.Reference{Runtime: &ir.RuntimeBinding{
+					Identity: "example.com/runtime#load", PropagatesExecutionScope: true,
+				}},
+			},
+		}
+	}
+	pureDefault := func() ir.Expression {
+		return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, stringType), Raw: `"pure"`}
+	}
+	method := func(defaultValue ir.Expression) *ir.Method {
+		return &ir.Method{
+			Name: "load", Parameters: []ir.Parameter{{Name: "value", Type: stringType, Default: defaultValue}}, ReturnType: stringType,
+			Body: []ir.Statement{&ir.Return{Value: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, stringType), Name: "value", Lexical: true}}},
+		}
+	}
+	superclass := func(name string) ir.Expression {
+		return &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, types.Type{}), Name: name}
+	}
+	call := func(owner string) *ir.Call {
+		return &ir.Call{
+			ExprBase: ir.NewExprBase(token.Span{}, stringType),
+			Callee: &ir.Member{
+				ExprBase: ir.NewExprBase(token.Span{}, functionType),
+				Receiver: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, types.FromName(owner)), Name: strings.ToLower(owner), Lexical: true},
+				Name:     "load",
+			},
+			CallSignature: []callsignature.Parameter{{Kind: callsignature.Positional, Type: stringType, Presence: callsignature.Omittable}},
+		}
+	}
+
+	inheritedBase := method(effectDefault())
+	inheritedCall := call("InheritedChild")
+	pureBase := method(pureDefault())
+	effectOverride := method(effectDefault())
+	pureBaseCall := call("PureBase")
+	effectChildCall := call("EffectChild")
+	effectBase := method(effectDefault())
+	pureOverride := method(pureDefault())
+	pureChildCall := call("PureChild")
+	program := &ir.Program{ModulePath: "main", Statements: []ir.Statement{
+		&ir.Class{Name: "InheritedBase", Body: []ir.Statement{inheritedBase}},
+		&ir.Class{Name: "InheritedChild", Superclass: superclass("InheritedBase")},
+		&ir.Class{Name: "PureBase", Body: []ir.Statement{pureBase}},
+		&ir.Class{Name: "EffectChild", Superclass: superclass("PureBase"), Body: []ir.Statement{effectOverride}},
+		&ir.Class{Name: "EffectBase", Body: []ir.Statement{effectBase}},
+		&ir.Class{Name: "PureChild", Superclass: superclass("EffectBase"), Body: []ir.Statement{pureOverride}},
+		&ir.ExpressionStatement{Expression: inheritedCall},
+		&ir.ExpressionStatement{Expression: pureBaseCall},
+		&ir.ExpressionStatement{Expression: effectChildCall},
+		&ir.ExpressionStatement{Expression: pureChildCall},
+	}}
+
+	plan := Analyze([]*ir.Program{program}, Options{Runtime: func(binding *ir.RuntimeBinding) bool {
+		return binding.PropagatesExecutionScope
+	}})
+	for name, candidate := range map[string]*ir.Method{
+		"inherited base":  inheritedBase,
+		"pure base":       pureBase,
+		"effect override": effectOverride,
+		"effect base":     effectBase,
+		"pure override":   pureOverride,
+	} {
+		if !plan.Methods[candidate] || !plan.ParameterDefaults[candidate] {
+			t.Errorf("%s did not receive the shared effect ABI", name)
+		}
+	}
+	for name, candidate := range map[string]*ir.Call{
+		"inherited call":     inheritedCall,
+		"pure base call":     pureBaseCall,
+		"effect child call":  effectChildCall,
+		"pure override call": pureChildCall,
+	} {
+		if !plan.Calls[candidate] || !plan.CallParameterDefaults[candidate] {
+			t.Errorf("%s did not use the shared effect ABI", name)
+		}
 	}
 }
