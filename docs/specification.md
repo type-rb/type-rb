@@ -820,18 +820,24 @@ newtypes, nullable values, and unions. Arrays, Hashes, StringBuilder, function
 values, `Any`, classes, and interfaces are not concurrency-safe captures.
 Each element binding is local to one block evaluation, but an element value is
 not uniquely owned: an Array may contain the same reference more than once.
-Values created inside one element evaluation are task-owned. Calls to
+Mutable reference elements and mutable-reference parameters of transitively
+reached authored calls are therefore borrowed: reading is allowed, but mutation
+through Array, Hash, StringBuilder, or other borrowed reference storage is
+rejected. Direct aliases and containers derived from borrowed references remain
+borrowed unless the checker can prove independent storage. Values created inside
+one element evaluation are task-owned and may be mutated directly. Calls to
 same-module authored top-level functions, module or class methods, instance
 methods, and constructors are followed transitively and checked for shared
-lexical mutation. Constructor auditing includes parameter defaults and class
-field defaults, including classes with no explicit `initialize`. Direct field
-initialization on a fresh constructor receiver is allowed. Other instance field
-mutation is rejected without an ownership contract because the checker cannot
-prove that the receiver is unaliased. Calls through interface-typed receivers
-or function values require an explicit concurrency-safety contract; no authored
-contract syntax exists yet, so those calls are rejected. Native calls from the
-block must propagate the compiler-owned execution scope. Explicit safety
-contracts for captured package-owned handles remain deferred.
+lexical mutation.
+Constructor auditing includes parameter defaults and class field defaults,
+including classes with no explicit `initialize`. Direct field initialization on
+a fresh constructor receiver is allowed. Other instance field mutation is
+rejected without an ownership contract because the checker cannot prove that
+the receiver is unaliased. Calls through interface-typed receivers or function
+values require an explicit concurrency-safety contract; no authored contract
+syntax exists yet, so those calls are rejected. Native calls from the block must
+propagate the compiler-owned execution scope. Explicit safety contracts for
+captured package-owned handles remain deferred.
 
 Array sorting is stable and non-destructive. `sort()` and
 `sort_descending()` use the element's portable natural order. `sort_by` and

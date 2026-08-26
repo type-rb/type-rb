@@ -225,17 +225,18 @@ type UnionMemberAccess struct {
 }
 
 type symbol struct {
-	typ           types.Type
-	declared      types.Type
-	mutable       bool
-	constant      bool
-	owner         string
-	span          token.Span
-	variable      *ast.VariableStatement
-	used          *bool
-	useKind       string
-	mustUseResult bool
-	pending       *pendingEmptyCollection
+	typ                types.Type
+	declared           types.Type
+	mutable            bool
+	constant           bool
+	owner              string
+	span               token.Span
+	variable           *ast.VariableStatement
+	used               *bool
+	useKind            string
+	mustUseResult      bool
+	pending            *pendingEmptyCollection
+	concurrentBorrowed bool
 }
 
 // pendingEmptyCollection is shared by every lexical reference found during the
@@ -475,6 +476,7 @@ type Checker struct {
 	callbackScopes              []*scope
 	pendingEmptyCollections     int
 	concurrentBlockScopes       []*scope
+	borrowedExpressions         map[ast.Expression]bool
 	concurrentFunctions         map[*ast.MethodStatement]bool
 	concurrentConstructors      map[*ast.MethodStatement]bool
 	concurrentClasses           map[string]bool
@@ -817,6 +819,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		runnableMain:               options.RunnableMain,
 		aliasCycles:                map[string]bool{},
 		declarationCalls:           map[*ast.CallExpression]string{},
+		borrowedExpressions:        map[ast.Expression]bool{},
 		concurrentFunctions:        map[*ast.MethodStatement]bool{},
 		concurrentConstructors:     map[*ast.MethodStatement]bool{},
 		concurrentClasses:          map[string]bool{},
@@ -1855,6 +1858,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					variableType.Readonly = true
 				}
 				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n, pending: pending}
+				if c.concurrentBorrowedType(variableType) {
+					declared.concurrentBorrowed = c.concurrentBorrowedExpression(n.Value, sc)
+				}
 				mustUseResult := len(c.returns) > 0 && !n.Constant && n.Name != "_" && c.isStandardResult(variableType)
 				if len(c.returns) > 0 && !n.Constant && (tracksUnusedBinding(n.Name) || mustUseResult) {
 					used := false
@@ -1929,7 +1935,11 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			if member, ok := n.Target.(*ast.MemberExpression); ok && c.readonlyClassField(member, sc) {
 				c.error(member.Span(), fmt.Sprintf("field %s is readonly", member.Name))
 			} else {
-				c.requireMutable(n.Target, sc, "assignment")
+				if _, direct := n.Target.(*ast.Identifier); direct {
+					c.requireMutable(n.Target, sc, "assignment")
+				} else {
+					c.requireUnaliasedMutable(n.Target, sc, "assignment")
+				}
 			}
 			assignedType := rightType
 			if n.Operator != "=" {
@@ -1950,6 +1960,12 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", assignedType, leftType))
 			}
 			if identifier, ok := n.Target.(*ast.Identifier); ok {
+				if n.Operator == "=" {
+					if binding, owner, exists := sc.lookupOwner(identifier.Name); exists {
+						binding.concurrentBorrowed = c.concurrentBorrowedType(binding.typ) && c.concurrentBorrowedExpression(n.Value, sc)
+						owner.values[identifier.Name] = binding
+					}
+				}
 				sc.resetNarrowing(identifier.Name)
 				if binding, exists := sc.lookup(identifier.Name); exists {
 					sc.resetNullableMembers(identifier.Name, binding.span.Start.Offset)
@@ -2603,6 +2619,7 @@ func (c *Checker) promoteNullableNarrowings(target, narrowed *scope) {
 
 func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool) types.Type {
 	selectorType := c.checkExpression(node.Value, sc)
+	borrowedSelector := c.concurrentBorrowedExpression(node.Value, sc)
 	if literalCaseSelector(selectorType) {
 		return c.checkLiteralCase(node, sc, selectorType, expression)
 	}
@@ -2661,7 +2678,11 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool)
 					continue
 				}
 				field := variant.Fields[index]
-				declared := symbol{typ: field.Type, span: binding.Span()}
+				declared := symbol{
+					typ:                field.Type,
+					span:               binding.Span(),
+					concurrentBorrowed: borrowedSelector && c.concurrentBorrowedType(field.Type),
+				}
 				if tracksUnusedBinding(binding.Name) {
 					used := false
 					declared.used = &used
@@ -2875,6 +2896,7 @@ func (c *Checker) discriminantNarrowing(expression ast.Expression, sc *scope) (d
 }
 
 func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorType types.Type, expression bool) types.Type {
+	borrowedSelector := c.concurrentBorrowedExpression(node.Value, sc)
 	for _, statement := range node.Leading {
 		if _, comment := statement.(*ast.CommentStatement); !comment {
 			c.error(statement.Span(), "case statements must be inside a when or else branch")
@@ -2919,7 +2941,11 @@ func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorTyp
 			c.error(branch.Value.Span(), fmt.Sprintf("union type pattern %s expects exactly one binding, got %d", matchType, len(branch.Bindings)))
 		} else if matchType.Kind != types.Invalid {
 			binding := branch.Bindings[0]
-			declared := symbol{typ: matchType, span: binding.Span()}
+			declared := symbol{
+				typ:                matchType,
+				span:               binding.Span(),
+				concurrentBorrowed: borrowedSelector && c.concurrentBorrowedType(matchType),
+			}
 			if tracksUnusedBinding(binding.Name) {
 				used := false
 				declared.used = &used
@@ -4534,7 +4560,12 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 				c.error(parameter.Default.Span(), fmt.Sprintf("default value has type %s, expected %s", actual, typ))
 			}
 		}
-		methodScope.values[parameter.Name] = symbol{typ: typ, mutable: true, span: parameter.Span()}
+		methodScope.values[parameter.Name] = symbol{
+			typ:                typ,
+			mutable:            true,
+			span:               parameter.Span(),
+			concurrentBorrowed: c.concurrentFunctions[method] && c.concurrentBorrowedType(typ),
+		}
 	}
 	returnType := c.typeFromRef(method.ReturnType)
 	if method.ReturnType.Empty() {
@@ -5854,6 +5885,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				bindingTypes = []types.Type{itemType, types.FromName("Integer")}
 			}
 			c.result.IterationBindings[n] = append([]types.Type(nil), bindingTypes...)
+			borrowedIterationSource := c.concurrentBorrowedExpression(n.Source, sc)
+			if n.Initial != nil {
+				borrowedIterationSource = borrowedIterationSource || c.concurrentBorrowedExpression(n.Initial, sc)
+			}
 			if len(n.Block.Parameters) != len(bindingTypes) {
 				c.error(n.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", n.Operation, len(bindingTypes), len(n.Block.Parameters)))
 			}
@@ -5866,7 +5901,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.error(n.Block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
 					continue
 				}
-				declared := symbol{typ: parameterType, mutable: true, span: n.Block.Span()}
+				declared := symbol{
+					typ:     parameterType,
+					mutable: true,
+					span:    n.Block.Span(),
+					concurrentBorrowed: c.concurrentBorrowedType(parameterType) &&
+						(n.Operation == "concurrent_map" || borrowedIterationSource),
+				}
 				if tracksUnusedBinding(name) {
 					used := false
 					declared.used = &used
@@ -6333,7 +6374,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				if member, method := n.Callee.(*ast.MemberExpression); method && library.HasReceiver() {
 					receiverType = c.result.Expressions[member.Receiver]
 					if library.ReceiverMutable {
-						c.requireMutable(member.Receiver, sc, binding.Name+"()")
+						c.requireUnaliasedMutable(member.Receiver, sc, binding.Name+"()")
 					}
 				}
 				typ = inferLibraryReturn(*library, receiverType, argumentTypes)
@@ -6559,6 +6600,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 	}
 	c.result.Expressions[expression] = typ
+	if c.currentConcurrentBlockScope() != nil && c.concurrentBorrowedType(typ) {
+		c.borrowedExpressions[expression] = c.computeConcurrentBorrowedExpression(expression, sc)
+	}
 	return typ
 }
 
@@ -6706,7 +6750,11 @@ func (c *Checker) checkResultCatch(node *ast.CatchExpression, sc *scope) types.T
 
 	handlerScope := &scope{parent: sc, values: map[string]symbol{}}
 	if node.Binding.Name != "_" {
-		declared := symbol{typ: failure, span: node.Binding.Span()}
+		declared := symbol{
+			typ:                failure,
+			span:               node.Binding.Span(),
+			concurrentBorrowed: c.concurrentBorrowedExpression(node.Value, sc) && c.concurrentBorrowedType(failure),
+		}
 		if tracksUnusedBinding(node.Binding.Name) {
 			used := false
 			declared.used = &used
@@ -7296,7 +7344,7 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 			c.recordAssignableConversion(arguments[i].Value, expected, actualType)
 		}
 		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Mutable {
-			c.requireMutable(arguments[i].Value, sc, name+"()")
+			c.requireUnaliasedMutable(arguments[i].Value, sc, name+"()")
 		}
 	}
 	return library
@@ -7452,6 +7500,146 @@ func (c *Checker) requireMutable(expression ast.Expression, sc *scope, action st
 	default:
 		c.error(expression.Span(), fmt.Sprintf("%s requires a mutable binding", action))
 	}
+}
+
+func (c *Checker) requireUnaliasedMutable(expression ast.Expression, sc *scope, action string) {
+	if c.currentConcurrentBlockScope() != nil {
+		if name, typ, borrowed := concurrentBorrowedRoot(expression, sc); borrowed {
+			c.error(expression.Span(), fmt.Sprintf("concurrent_map cannot mutate borrowed binding %s because %s is not uniquely owned", name, typ))
+			return
+		}
+	}
+	c.requireMutable(expression, sc, action)
+}
+
+func concurrentBorrowedRoot(expression ast.Expression, sc *scope) (string, types.Type, bool) {
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		value, exists := sc.lookup(node.Name)
+		return node.Name, value.typ, exists && value.concurrentBorrowed
+	case *ast.MemberExpression:
+		return concurrentBorrowedRoot(node.Receiver, sc)
+	case *ast.IndexExpression:
+		return concurrentBorrowedRoot(node.Receiver, sc)
+	case *ast.GenericExpression:
+		return concurrentBorrowedRoot(node.Receiver, sc)
+	default:
+		return "", types.Type{}, false
+	}
+}
+
+func (c *Checker) concurrentBorrowedType(typ types.Type) bool {
+	typ = c.expandAlias(typ, map[string]bool{})
+	if typ.Kind == types.Union {
+		for _, alternative := range typ.Args {
+			if c.concurrentBorrowedType(alternative) {
+				return true
+			}
+		}
+		return false
+	}
+	return isReferenceType(typ) && !c.concurrencySafeType(typ, map[string]bool{})
+}
+
+func (c *Checker) concurrentBorrowedExpression(expression ast.Expression, sc *scope) bool {
+	if expression == nil || c.currentConcurrentBlockScope() == nil {
+		return false
+	}
+	if typ := c.result.Expressions[expression]; !c.concurrentBorrowedType(typ) {
+		return false
+	}
+	if borrowed, known := c.borrowedExpressions[expression]; known {
+		return borrowed
+	}
+	borrowed := c.computeConcurrentBorrowedExpression(expression, sc)
+	c.borrowedExpressions[expression] = borrowed
+	return borrowed
+}
+
+func (c *Checker) computeConcurrentBorrowedExpression(expression ast.Expression, sc *scope) bool {
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		value, exists := sc.lookup(node.Name)
+		return exists && value.concurrentBorrowed
+	case *ast.ArrayLiteral:
+		for _, element := range node.Elements {
+			if c.concurrentBorrowedExpression(element, sc) {
+				return true
+			}
+		}
+	case *ast.HashLiteral:
+		for _, entry := range node.Entries {
+			if c.concurrentBorrowedExpression(entry.Key, sc) || c.concurrentBorrowedExpression(entry.Value, sc) {
+				return true
+			}
+		}
+	case *ast.MemberExpression:
+		return c.concurrentBorrowedExpression(node.Receiver, sc)
+	case *ast.IndexExpression:
+		return c.concurrentBorrowedExpression(node.Receiver, sc)
+	case *ast.GenericExpression:
+		return c.concurrentBorrowedExpression(node.Receiver, sc)
+	case *ast.CallExpression:
+		if member, ok := node.Callee.(*ast.MemberExpression); ok && c.concurrentBorrowedExpression(member.Receiver, sc) {
+			return true
+		}
+		for _, argument := range node.Arguments {
+			if c.concurrentBorrowedExpression(argument.Value, sc) {
+				return true
+			}
+		}
+	case *ast.IterationExpression:
+		if c.concurrentBorrowedExpression(node.Source, sc) || c.concurrentBorrowedExpression(node.Initial, sc) {
+			return true
+		}
+		if node.Block != nil {
+			_, result := controlFlowBranchExpression(node.Block.Body)
+			return c.concurrentBorrowedExpression(result, sc)
+		}
+	case *ast.IfStatement:
+		branches := [][]ast.Statement{node.Then, node.Else}
+		for _, branch := range node.ElseIf {
+			branches = append(branches, branch.Body)
+		}
+		for _, branch := range branches {
+			_, result := controlFlowBranchExpression(branch)
+			if c.concurrentBorrowedExpression(result, sc) {
+				return true
+			}
+		}
+	case *ast.CaseStatement:
+		for _, branch := range node.Branches {
+			_, result := controlFlowBranchExpression(branch.Body)
+			if c.concurrentBorrowedExpression(result, sc) {
+				return true
+			}
+		}
+		_, result := controlFlowBranchExpression(node.Else)
+		return c.concurrentBorrowedExpression(result, sc)
+	case *ast.TryExpression:
+		return c.concurrentBorrowedExpression(node.Value, sc)
+	case *ast.CatchExpression:
+		if c.concurrentBorrowedExpression(node.Value, sc) {
+			return true
+		}
+		_, result := controlFlowBranchExpression(node.Body)
+		return c.concurrentBorrowedExpression(result, sc)
+	case *ast.AttemptExpression:
+		if c.concurrentBorrowedExpression(node.Value, sc) {
+			return true
+		}
+		_, result := controlFlowBranchExpression(node.Body)
+		return c.concurrentBorrowedExpression(result, sc)
+	case *ast.UnaryExpression:
+		return c.concurrentBorrowedExpression(node.Operand, sc)
+	case *ast.BinaryExpression:
+		return c.concurrentBorrowedExpression(node.Left, sc) || c.concurrentBorrowedExpression(node.Right, sc)
+	default:
+		// Future reference-producing syntax stays borrowed until it gains an
+		// explicit provenance rule here.
+		return true
+	}
+	return false
 }
 
 func isReferenceType(typ types.Type) bool {
