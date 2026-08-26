@@ -23,6 +23,7 @@ func (g *generator) integrations(extensions []ir.Extension) {
 		g.webDispatcher(manifest)
 		g.webServer()
 	}
+	g.cliIntegrations()
 }
 
 func (g *generator) webDispatcher(manifest *webintegration.Manifest) {

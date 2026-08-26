@@ -1,0 +1,11 @@
+{
+  "name": "trb/cli",
+  "version": "0.1.0",
+  "module": "trb/cli/index",
+  "source": "src/index.trb",
+  "semanticProvider": "trb.cli",
+  "projectProvider": "trb.cli.schema",
+  "kind": "platform",
+  "targets": ["go"],
+  "nativeDependencies": {}
+}
