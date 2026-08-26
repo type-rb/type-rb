@@ -883,12 +883,14 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	case *ast.SymbolLiteral:
 		return &ir.Symbol{ExprBase: base, Name: n.Name, Raw: n.Raw}
 	case *ast.ArrayLiteral:
+		l.requireGeneratedType(typ)
 		result := &ir.Array{ExprBase: base}
 		for _, element := range n.Elements {
 			result.Elements = append(result.Elements, l.expression(element))
 		}
 		return result
 	case *ast.HashLiteral:
+		l.requireGeneratedType(typ)
 		result := &ir.Hash{ExprBase: base}
 		for _, entry := range n.Entries {
 			result.Entries = append(result.Entries, ir.HashEntry{Key: l.expression(entry.Key), Value: l.expression(entry.Value)})

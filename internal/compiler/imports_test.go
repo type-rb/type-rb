@@ -1029,6 +1029,82 @@ end
 	}
 }
 
+func TestGoImportsProjectTypesUsedByInferredCollectionLiterals(t *testing.T) {
+	artifacts, err := CompileProject([]SourceUnit{
+		{
+			Filename:   "/project/contracts/types.trb",
+			ModulePath: "contracts/types",
+			Package:    "contracts",
+			Source: []byte(`record Item
+	label: String
+end
+
+record Response
+	items: Array<Item>
+end
+`),
+		},
+		{
+			Filename:   "/project/service/response.trb",
+			ModulePath: "service/response",
+			Package:    "service",
+			Source: []byte(`import { Item, Response } from contracts/types
+
+def load(): Response
+	return Response.new(items: [Item.new(label: "loaded")])
+end
+
+def assert_items(_actual: Array<Item>, _expected: Array<Item>)
+	return
+end
+
+def assert_catalog(_actual: Hash<String, Item>)
+	return
+end
+`),
+		},
+		{
+			Filename:   "/project/main.trb",
+			ModulePath: "main",
+			Package:    "main",
+			Source: []byte(`import { assert_catalog, assert_items, load } from service/response
+
+def check()
+	response := load()
+	assert_items(response.items, [])
+	assert_catalog({})
+	return
+end
+`),
+		},
+	}, Options{Mode: "go", GoModule: "example.com/inferred-collections"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := findArtifactByModule(artifacts, "main")
+	if consumer == nil {
+		t.Fatal("consumer artifact is missing")
+	}
+	output := string(consumer.Output)
+	if !strings.Contains(output, `[]contracts.Item{}`) {
+		t.Fatalf("generated Go is missing the transitive type import for an inferred empty array:\n%s", output)
+	}
+	if !strings.Contains(output, `map[string]contracts.Item{}`) {
+		t.Fatalf("generated Go is missing the transitive type import for an inferred empty hash:\n%s", output)
+	}
+	var generated *ir.Import
+	for _, statement := range consumer.IR.Statements {
+		imported, ok := statement.(*ir.Import)
+		if ok && imported.Implicit && imported.Path == "contracts/types" {
+			generated = imported
+			break
+		}
+	}
+	if generated == nil || !slices.Contains(generated.GeneratedTypeSymbols, "Item") {
+		t.Fatalf("lowered consumer is missing the transitive generated type import: %#v", generated)
+	}
+}
+
 func TestPortableBase64PackageLowersAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",
