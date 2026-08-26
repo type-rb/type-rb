@@ -15,6 +15,7 @@
         { "source": "tutorials/web-orm-jobs.md", "label": "Web + ORM + Jobs tutorial" },
         { "source": "containers.md", "label": "Containers" },
         { "source": "guides/packages.md", "label": "Packages" },
+        { "source": "guides/cli-applications.md", "label": "CLI applications" },
         { "source": "guides/web.md", "label": "Web" },
         { "source": "guides/http.md", "label": "HTTP values" },
         { "source": "guides/authentication.md", "label": "Authentication" },

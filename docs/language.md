@@ -400,15 +400,20 @@ invariant and conformance remains explicit.
 record Message
 	id: Integer
 	text: String
-	delivered: Boolean
+	delivered: Boolean = false
+	tags: Array<String> = []
 end
 
-message := Message.new(id: 1, text: "Hello", delivered: false)
+message := Message.new(id: 1, text: "Hello")
 ```
 
-Construction is keyword-only and checks the complete field set. Records cannot
-inherit. Go emits a value struct, Ruby emits `Data`, and TypeScript emits an
-interface.
+Construction is keyword-only. A required field must precede fields with
+defaults. Defaults are checked against their field type, evaluated for each
+construction in declaration order, and may refer to earlier fields. Explicit
+arguments are evaluated in source order; explicit `nil` is different from an
+omitted field. Constructor defaults do not automatically apply to JSON, ORM,
+or web decoding. Records cannot inherit. Go emits a value struct, Ruby emits
+`Data`, and TypeScript emits an interface.
 
 ## Enums, raw values, and sum types
 
@@ -469,6 +474,11 @@ def describe(token: Token): String
 	end
 end
 ```
+
+Enum members may carry postfix attributes after their payload or raw value.
+Attributes are inert language metadata until a compiler-integrated package
+defines their meaning. `trb/cli`, for example, uses them for subcommand names
+and descriptions.
 
 A `case` without `else` must handle every member. Payload patterns introduce
 immutable bindings with types from the variant declaration. A payload enum

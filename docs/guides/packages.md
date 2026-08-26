@@ -661,10 +661,11 @@ future compiler provider for cases that genuinely need project-aware discovery.
 ### Experimental bundled declaration providers
 
 TypeRB 0.x has experimental data boundaries for declaration discovery and
-output from bundled, compiler-integrated packages. `trb/orm`, `trb/jobs`, and
-`trb/web` are the first consumers. The ORM provider discovers project models
-and schema metadata, the Jobs provider derives typed enqueue methods from Job
-classes, and the Web provider identifies exact endpoint contract classes.
+output from bundled, compiler-integrated packages. `trb/orm`, `trb/jobs`,
+`trb/web`, and `trb/cli` are the first consumers. The ORM provider discovers
+project models and schema metadata, the Jobs provider derives typed enqueue
+methods from Job classes, the Web provider identifies exact endpoint contract
+classes, and the CLI provider derives a closed argument schema.
 Their resulting catalogs cross a versioned, JSON-serializable
 Declaration Protocol before resolution and checking. The current Declaration
 Protocol is version 3. It can identify a direct package-function call in one
@@ -674,10 +675,11 @@ output. Parameters may also explicitly identify a representation boundary for
 nominal source newtypes. The compiler host validates and copies that data into
 its private semantic representation.
 
-The Jobs, ORM, and Web declaration providers also receive versioned, validated
-Project Declaration Input snapshots. Version 5 adds record declarations and
-their declarative field attributes, top-level function signatures, and
-resolved type arguments on direct class-body calls. Version 4 added named-only
+These bundled providers also receive versioned, validated Project Declaration
+Input snapshots. Version 6 adds record-default presence and enum-member
+attributes. Version 5 added record declarations and their declarative field
+attributes, top-level function signatures, and resolved type arguments on
+direct class-body calls. Version 4 added named-only
 parameter identity. The snapshot also contains canonical module and import
 identity, transparent type aliases, nominal newtypes with concrete
 representations, enum and class declarations, method signatures, authored,

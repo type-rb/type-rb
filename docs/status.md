@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -33,6 +33,14 @@ configuration. It defaults to Go, can explicitly select Ruby or TypeScript,
 and isolates generated target source in an operating-system temporary
 directory. A discoverable `trbconfig.jsonc` always restores project-wide
 compilation and owns mode and runtime selection.
+
+Go projects can import the initial `trb/cli` platform package to generate a
+typed command-line parser from records and payload enums. Unannotated fields
+are positional, `@cli(:option)` declares options, and
+`@cli(:subcommand)` selects a closed command enum. Generated help, version,
+scalar conversion, usage errors, record defaults, and payload construction use
+only the Go standard library and compile into the same single executable.
+Ruby and TypeScript CLI generation are intentionally outside this package.
 
 The initial distributed package system resolves TypeRB source directly from
 Git repositories or explicit local paths. Short imports default to GitHub but
@@ -100,7 +108,7 @@ and `set(value)` members while generated TSX uses React `useState`.
 The implemented language includes functions, typed first-class function values
 with lexical capture and checked Result control flow, positional-only and
 bare-`*` named-only parameters with callee-owned defaults, and classes, modules and
-generic interfaces, records, ordinary and raw-value enums, payload enums as sum
+generic interfaces, records with per-construction field defaults, ordinary and raw-value enums, payload enums as sum
 types, enum instance methods, transparent `alias` declarations, nominal
 `newtype` declarations over concrete non-nullable representations, explicit
 generics for enums, aliases, records,
@@ -424,9 +432,10 @@ Retry policy, SQL worker lifecycle, and the SQL adapter's final native
 persistence primitives remain a separate bundled runtime boundary. Jobs and
 ORM declaration discovery also
 consume versioned, JSON-serializable Project Declaration Input snapshots.
-Version 5 contains canonical module/import identity, aliases, newtypes and
+Version 6 contains canonical module/import identity, aliases, newtypes and
 their concrete boundary representations, record declarations and field
-attributes, enum and class declarations, top-level function and class method
+attributes, record-default presence, enum declarations and member attributes,
+class declarations, top-level function and class method
 signatures, authored and resolved types, resolved generic directive arguments,
 declarative call values, structural block summaries, and source spans. The ORM
 host combines that project snapshot with a separate versioned ORM schema snapshot containing
