@@ -13,6 +13,9 @@ import (
 
 type ProjectDeclarationInputOptions struct {
 	PackageAliasesByModule map[string]map[string]string
+	// KnownModulePaths resolves imports against modules deliberately excluded
+	// from the exported declaration snapshot, without exposing their contents.
+	KnownModulePaths       []string
 }
 
 type projectImportBinding struct {
@@ -26,6 +29,7 @@ type projectInputResolver struct {
 	newtypes               map[string]map[string]*ast.NewtypeStatement
 	definitions            map[string]map[string]bool
 	imports                map[string]map[string]projectImportBinding
+	knownModules           map[string]bool
 	packageAliasesByModule map[string]map[string]string
 }
 
@@ -87,7 +91,11 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 		newtypes:               map[string]map[string]*ast.NewtypeStatement{},
 		definitions:            map[string]map[string]bool{},
 		imports:                map[string]map[string]projectImportBinding{},
+		knownModules:           map[string]bool{},
 		packageAliasesByModule: options.PackageAliasesByModule,
+	}
+	for _, modulePath := range options.KnownModulePaths {
+		result.knownModules[modulePath] = true
 	}
 	for _, program := range programs {
 		if program == nil {
@@ -97,6 +105,7 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 			return result, fmt.Errorf("project declaration input contains duplicate module %q", program.ModulePath)
 		}
 		result.programs[program.ModulePath] = program
+		result.knownModules[program.ModulePath] = true
 		result.aliases[program.ModulePath] = map[string]*ast.TypeAliasStatement{}
 		result.newtypes[program.ModulePath] = map[string]*ast.NewtypeStatement{}
 		result.definitions[program.ModulePath] = map[string]bool{}
@@ -434,10 +443,10 @@ func projectTypeReference(typ packageextension.Type) (packageextension.ProjectTy
 }
 
 func (r projectInputResolver) modulePath(importPath string) string {
-	if _, exists := r.programs[importPath]; exists {
+	if r.knownModules[importPath] {
 		return importPath
 	}
-	if _, exists := r.programs[importPath+"/index"]; exists {
+	if r.knownModules[importPath+"/index"] {
 		return importPath + "/index"
 	}
 	return importPath
