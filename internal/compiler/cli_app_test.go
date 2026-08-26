@@ -1,13 +1,18 @@
 package compiler
 
 import (
+	goast "go/ast"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	gotypes "go/types"
 	"strings"
 	"testing"
 
 	cliapp "github.com/type-rb/type-rb/internal/cliapp"
 )
 
-const staticCLIAppSource = `import { run } from trb/cli
+const staticCLIAppSource = `import { run } from trb/platform/go/cli
 
 record ServeArgs
 	directory: String
@@ -62,7 +67,7 @@ func TestCompileProjectGeneratesStaticGoCLI(t *testing.T) {
 }
 
 func TestCLIRejectsUnsupportedSchemaShapes(t *testing.T) {
-	source := []byte(`import { run } from trb/cli
+	source := []byte(`import { run } from trb/platform/go/cli
 record Args
 	values: Array<String>
 end
@@ -82,9 +87,74 @@ end
 
 func TestCLIPackageIsGoOnly(t *testing.T) {
 	for _, mode := range []string{"ruby", "typescript"} {
-		_, err := Compile("main.trb", []byte("import { run } from trb/cli\n"), mode)
+		_, err := Compile("main.trb", []byte("import { run } from trb/platform/go/cli\n"), mode)
 		if err == nil || !strings.Contains(err.Error(), "does not support mode") {
 			t.Fatalf("%s Compile() error=%v, want target diagnostic", mode, err)
 		}
+	}
+}
+
+func TestCLIRuntimeIsGeneratedOncePerGoPackage(t *testing.T) {
+	first := SourceUnit{Filename: "first.trb", ModulePath: "app/first", Package: "app", Source: []byte(`import { run } from trb/platform/go/cli
+record FirstArgs
+	value: String
+end
+def parse_first(): FirstArgs
+	return run<FirstArgs>(name: "first")
+end
+`)}
+	second := SourceUnit{Filename: "second.trb", ModulePath: "app/second", Package: "app", Source: []byte(`import { run } from trb/platform/go/cli
+record SecondArgs
+	value: String
+end
+def parse_second(): SecondArgs
+	return run<SecondArgs>(name: "second")
+end
+`)}
+	artifacts, err := CompileProject([]SourceUnit{first, second}, Options{Mode: "go", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	fileSet := token.NewFileSet()
+	files := []*goast.File{}
+	for _, artifact := range artifacts {
+		if strings.HasPrefix(artifact.IR.ModulePath, "app/") {
+			output.Write(artifact.Output)
+			parsed, parseErr := parser.ParseFile(fileSet, artifact.Filename, artifact.Output, parser.AllErrors)
+			if parseErr != nil {
+				t.Fatalf("generated Go does not parse: %v\n%s", parseErr, artifact.Output)
+			}
+			files = append(files, parsed)
+		}
+	}
+	if count := strings.Count(output.String(), "type trbCliField struct"); count != 1 {
+		t.Fatalf("CLI runtime generated %d times in one Go package:\n%s", count, output.String())
+	}
+	if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("app", fileSet, files, nil); typeErr != nil {
+		t.Fatalf("generated Go package does not type-check: %v\n%s", typeErr, output.String())
+	}
+}
+
+func TestCLIRejectsGeneratedOptionCollisions(t *testing.T) {
+	tests := []struct {
+		name      string
+		field     string
+		collision string
+	}{
+		{name: "long help", field: `help: Boolean = false @cli(:option)`, collision: "--help"},
+		{name: "short help", field: `verbose: Boolean = false @cli(:option, short: "h")`, collision: "-h"},
+		{name: "long version", field: `version: String = "" @cli(:option)`, collision: "--version"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := []byte("import { run } from trb/platform/go/cli\nrecord Args\n\t" + test.field + "\nend\ndef parse(): Args\n\treturn run<Args>(name: \"test\")\nend\n")
+			_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+				Mode: "go", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
+			})
+			if err == nil || !strings.Contains(err.Error(), test.collision+" conflicts with a generated option") {
+				t.Fatalf("CompileProject() error=%v, want generated option collision for %s", err, test.collision)
+			}
+		})
 	}
 }

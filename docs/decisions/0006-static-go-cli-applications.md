@@ -15,7 +15,7 @@ single-binary goal without adding capability to that goal.
 
 ## Decision
 
-`trb/cli` is an official platform package available only in `mode: "go"`.
+`trb/platform/go/cli` is an official platform package available only in `mode: "go"`.
 Applications parse one root record with an explicit generic call:
 
 ```trb
@@ -75,5 +75,5 @@ can use a target-specific interoperability boundary instead.
   schema.
 - The initial surface is smaller than Cobra, clap, or Typer, but its omitted
   capabilities can be added without changing the canonical data model.
-- CLI source is portable TypeRB syntax, while importing `trb/cli` intentionally
+- CLI source is portable TypeRB syntax, while importing `trb/platform/go/cli` intentionally
   selects a Go-only application capability.

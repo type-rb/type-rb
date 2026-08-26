@@ -64,7 +64,7 @@ does not serialize executable default expressions.
 ## Consequences
 
 - Records remain ordinary portable product types; CLI metadata does not alter
-  field types or construction outside `trb/cli`.
+  field types or construction outside `trb/platform/go/cli`.
 - Default expressions have one definition-side owner across Go, Ruby,
   TypeScript, imported modules, and the REPL.
 - Package integrations can inspect enum-member metadata without receiving AST,

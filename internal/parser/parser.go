@@ -1098,9 +1098,9 @@ func topLevelAttributeIndex(tokens []token.Token, start int) int {
 	depth := 0
 	for index := start; index < len(tokens); index++ {
 		switch tokens[index].Lexeme {
-		case "(", "[", "{", "<":
+		case "(", "[", "{":
 			depth++
-		case ")", "]", "}", ">":
+		case ")", "]", "}":
 			if depth > 0 {
 				depth--
 			}

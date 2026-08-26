@@ -14,6 +14,7 @@ import (
 // of the backend effects selected by Options.
 type Plan struct {
 	Methods          map[*ir.Method]bool
+	RecordDefaults   map[*ir.Record]bool
 	Lambdas          map[*ir.Lambda]bool
 	Calls            map[*ir.Call]bool
 	EnumCalls        map[*ir.EnumCall]bool
@@ -25,6 +26,7 @@ type Plan struct {
 	// specific suspension rules into shared TypeRB semantics.
 	LambdaModules map[*ir.Lambda]string
 	methodKeys    map[methodKey]bool
+	recordKeys    map[recordKey]bool
 }
 
 type methodKey struct {
@@ -33,11 +35,22 @@ type methodKey struct {
 	name   string
 }
 
+type recordKey struct {
+	module string
+	name   string
+}
+
 // Method reports whether a named project method transitively reaches an
 // effect root. Integrations use this stable identity when dispatch code is
 // generated outside the module that owns the method.
 func (p *Plan) Method(module, owner, name string) bool {
 	return p != nil && p.methodKeys[methodKey{module: module, owner: owner, name: name}]
+}
+
+// RecordDefault reports whether evaluating a record's omitted field defaults
+// transitively reaches an effect root.
+func (p *Plan) RecordDefault(module, name string) bool {
+	return p != nil && p.recordKeys[recordKey{module: module, name: name}]
 }
 
 type methodContext struct {
@@ -51,17 +64,24 @@ type classContext struct {
 	implements []types.Type
 }
 
+type recordContext struct {
+	module string
+	record *ir.Record
+}
+
 type analyzer struct {
-	programs         []*ir.Program
-	plan             *Plan
-	options          Options
-	methods          []methodContext
-	methodInfo       map[*ir.Method]methodContext
-	topMethods       map[string][]*ir.Method
-	memberMethods    map[string][]*ir.Method
-	interfaceMethods map[string][]*ir.Method
-	classes          []classContext
-	lambdaBindings   map[functionBindingKey]*ir.Lambda
+	programs          []*ir.Program
+	plan              *Plan
+	options           Options
+	methods           []methodContext
+	records           []recordContext
+	methodInfo        map[*ir.Method]methodContext
+	topMethods        map[string][]*ir.Method
+	memberMethods     map[string][]*ir.Method
+	recordDefinitions map[string][]*ir.Record
+	interfaceMethods  map[string][]*ir.Method
+	classes           []classContext
+	lambdaBindings    map[functionBindingKey]*ir.Lambda
 }
 
 type functionBindingKey struct {
@@ -83,6 +103,7 @@ type Options struct {
 func Analyze(programs []*ir.Program, options Options) *Plan {
 	plan := &Plan{
 		Methods:          map[*ir.Method]bool{},
+		RecordDefaults:   map[*ir.Record]bool{},
 		Lambdas:          map[*ir.Lambda]bool{},
 		Calls:            map[*ir.Call]bool{},
 		EnumCalls:        map[*ir.EnumCall]bool{},
@@ -91,12 +112,14 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 		StructuredBlocks: map[*ir.StructuredBlock]bool{},
 		LambdaModules:    map[*ir.Lambda]string{},
 		methodKeys:       map[methodKey]bool{},
+		recordKeys:       map[recordKey]bool{},
 	}
 	analyzer := &analyzer{
 		programs: programs, plan: plan, options: options, methodInfo: map[*ir.Method]methodContext{},
 		topMethods: map[string][]*ir.Method{}, memberMethods: map[string][]*ir.Method{},
-		interfaceMethods: map[string][]*ir.Method{},
-		lambdaBindings:   map[functionBindingKey]*ir.Lambda{},
+		recordDefinitions: map[string][]*ir.Record{},
+		interfaceMethods:  map[string][]*ir.Method{},
+		lambdaBindings:    map[functionBindingKey]*ir.Lambda{},
 	}
 	for _, program := range programs {
 		analyzer.collect(program.ModulePath, "", program.Statements, false)
@@ -118,6 +141,13 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 			plan.Methods[method.method] = true
 			changed = true
 		}
+		for _, record := range analyzer.records {
+			if plan.RecordDefaults[record.record] || !analyzer.recordDefaultsReach(record, false) {
+				continue
+			}
+			plan.RecordDefaults[record.record] = true
+			changed = true
+		}
 		if analyzer.propagateInterfaces() {
 			changed = true
 		}
@@ -127,6 +157,14 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 		analyzer.statementsReach(method.method.Body, method, true)
 		if plan.Methods[method.method] {
 			plan.methodKeys[methodKey{module: method.module, owner: method.owner, name: method.method.Name}] = true
+		}
+	}
+	for _, record := range analyzer.records {
+		analyzer.recordDefaultsReach(record, true)
+		if plan.RecordDefaults[record.record] {
+			for _, module := range moduleAliases(record.module) {
+				plan.recordKeys[recordKey{module: module, name: record.record.Name}] = true
+			}
 		}
 	}
 	for _, program := range programs {
@@ -143,6 +181,9 @@ func (a *analyzer) collect(module, owner string, statements []ir.Statement, inte
 			a.collect(module, node.Name, node.Body, false)
 		case *ir.Enum:
 			a.collect(module, node.Name, node.Body, false)
+		case *ir.Record:
+			a.addRecord(recordContext{module: module, record: node})
+			a.collect(module, node.Name, node.Body, false)
 		case *ir.Interface:
 			for _, method := range node.Methods {
 				a.addMethod(methodContext{module: module, owner: node.Name, method: method}, true)
@@ -155,17 +196,19 @@ func (a *analyzer) collect(module, owner string, statements []ir.Statement, inte
 	}
 }
 
+func (a *analyzer) addRecord(record recordContext) {
+	a.records = append(a.records, record)
+	for _, module := range moduleAliases(record.module) {
+		key := callableKey(module, record.record.Name)
+		a.recordDefinitions[key] = append(a.recordDefinitions[key], record.record)
+	}
+}
+
 func (a *analyzer) addMethod(method methodContext, interfaceMethod bool) {
 	a.methods = append(a.methods, method)
 	a.methodInfo[method.method] = method
 	if method.owner == "" {
-		modules := []string{method.module}
-		if strings.HasSuffix(method.module, "/index") {
-			modules = append(modules, strings.TrimSuffix(method.module, "/index"))
-		} else {
-			modules = append(modules, strings.TrimSuffix(method.module, "/")+"/index")
-		}
-		for _, module := range modules {
+		for _, module := range moduleAliases(method.module) {
 			key := callableKey(module, method.method.Name)
 			a.topMethods[key] = append(a.topMethods[key], method.method)
 		}
@@ -176,6 +219,14 @@ func (a *analyzer) addMethod(method methodContext, interfaceMethod bool) {
 	if interfaceMethod {
 		a.interfaceMethods[key] = append(a.interfaceMethods[key], method.method)
 	}
+}
+
+func moduleAliases(module string) []string {
+	result := []string{module}
+	if strings.HasSuffix(module, "/index") {
+		return append(result, strings.TrimSuffix(module, "/index"))
+	}
+	return append(result, strings.TrimSuffix(module, "/")+"/index")
 }
 
 func (a *analyzer) propagateInterfaces() bool {
@@ -215,8 +266,30 @@ func anyReached(methods map[*ir.Method]bool, candidates []*ir.Method) bool {
 	return false
 }
 
+func anyRecordReached(records map[*ir.Record]bool, candidates []*ir.Record) bool {
+	for _, record := range candidates {
+		if records[record] {
+			return true
+		}
+	}
+	return false
+}
+
 func callableKey(module, name string) string { return module + "\x00" + name }
 func memberKey(owner, name string) string    { return owner + "\x00" + name }
+
+func (a *analyzer) recordDefaultsReach(context recordContext, record bool) bool {
+	reaches := false
+	method := methodContext{module: context.module, owner: context.record.Name}
+	for _, statement := range context.record.Body {
+		field, ok := statement.(*ir.RecordField)
+		if !ok {
+			continue
+		}
+		reaches = a.expressionReaches(field.Default, method, record) || reaches
+	}
+	return reaches
+}
 
 func (a *analyzer) statementsReach(statements []ir.Statement, context methodContext, record bool) bool {
 	suspends := false
@@ -401,6 +474,9 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 }
 
 func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext) bool {
+	if key, ok := recordConstructorKey(callee, context.module); ok {
+		return anyRecordReached(a.plan.RecordDefaults, a.recordDefinitions[key])
+	}
 	if a.options.PassToFunctions && callee != nil && callee.ExprType().Kind == types.Function {
 		if lambda, ok := callee.(*ir.Lambda); ok {
 			return a.plan.Lambdas[lambda]
@@ -454,6 +530,30 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 	default:
 		return false
 	}
+}
+
+func recordConstructorKey(callee ir.Expression, currentModule string) (string, bool) {
+	member, ok := callee.(*ir.Member)
+	if !ok || member.Name != "new" {
+		return "", false
+	}
+	receiver := member.Receiver
+	if application, ok := receiver.(*ir.TypeApply); ok {
+		receiver = application.Receiver
+	}
+	identifier, ok := receiver.(*ir.Identifier)
+	if !ok {
+		return "", false
+	}
+	module := currentModule
+	name := identifier.Name
+	if identifier.Reference != nil && identifier.Reference.Package != "" {
+		module = identifier.Reference.Package
+		if identifier.Reference.Symbol != "" {
+			name = identifier.Reference.Symbol
+		}
+	}
+	return callableKey(module, name), true
 }
 
 func referenceIntrinsic(expression ir.Expression) string {

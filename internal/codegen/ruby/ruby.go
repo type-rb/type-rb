@@ -239,7 +239,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if rubyRecordFieldsHaveDefaults(fields) {
 			g.line(n.Name+" = Data.define("+strings.Join(names, ", ")+") do", n.TrailingComment)
 			g.indent++
-			g.recordDefaultConstructor(fields)
+			g.recordDefaultConstructor(n, fields)
 			g.indent--
 			g.line("end", "")
 		} else {
@@ -828,7 +828,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" && rubyRecordContractHasDefaults(n.RecordFields) {
 			if identifier := rubyRecordIdentifier(member.Receiver); identifier != nil {
-				return g.recordDefaultCall(identifier, n.Arguments, n.RecordFields)
+				return g.recordDefaultCall(n, identifier, n.Arguments, n.RecordFields)
 			}
 		}
 		parts = g.executionArguments(n, parts)
@@ -888,8 +888,12 @@ func (g *generator) expr(expression ir.Expression) string {
 	}
 }
 
-func (g *generator) recordDefaultConstructor(fields []*ir.RecordField) {
+func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
 	parameters := make([]string, 0, len(fields)*2)
+	execution := g.execution != nil && g.execution.RecordDefault(g.modulePath, record.Name)
+	if execution {
+		parameters = append(parameters, "__trb_scope")
+	}
 	for _, field := range fields {
 		parameters = append(parameters, field.Name)
 		if field.Default != nil {
@@ -898,11 +902,14 @@ func (g *generator) recordDefaultConstructor(fields []*ir.RecordField) {
 	}
 	g.line("def self.__trb_record_new("+strings.Join(parameters, ", ")+")", "")
 	g.indent++
+	previousExecution := g.executionActive
+	g.executionActive = execution
 	for _, field := range fields {
 		if field.Default != nil {
 			g.line(field.Name+" = "+g.expr(field.Default)+" unless trb_"+field.Name+"_provided", "")
 		}
 	}
+	g.executionActive = previousExecution
 	values := make([]string, len(fields))
 	for index, field := range fields {
 		values[index] = field.Name + ": " + field.Name
@@ -942,7 +949,7 @@ func rubyRecordIdentifier(expression ir.Expression) *ir.Identifier {
 	return nil
 }
 
-func (g *generator) recordDefaultCall(record *ir.Identifier, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
+func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
 	explicit := map[string]string{}
 	statements := make([]string, 0, len(arguments)+1)
 	for _, argument := range arguments {
@@ -955,6 +962,9 @@ func (g *generator) recordDefaultCall(record *ir.Identifier, arguments []ir.Call
 		explicit[argument.Name] = name
 	}
 	values := make([]string, 0, len(fields)*2)
+	if g.execution != nil && g.execution.Calls[call] {
+		values = append(values, "__trb_scope")
+	}
 	for _, field := range fields {
 		value, provided := explicit[field.Name]
 		if !provided {

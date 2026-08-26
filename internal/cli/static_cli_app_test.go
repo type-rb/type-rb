@@ -21,7 +21,7 @@ func TestRunGeneratedStaticCLIApplication(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { run } from trb/cli
+	source := `import { run } from trb/platform/go/cli
 
 record ServeArgs
 	directory: String
@@ -62,6 +62,15 @@ end
 	}
 	if stdout.String() != "public\n9000\ntrue\n" || stderr.Len() != 0 {
 		t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "serve", "public", "-p", "9007199254740992"}); status == 0 {
+		t.Fatalf("out-of-range Integer unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `invalid value "9007199254740992" for port`) {
+		t.Fatalf("unexpected out-of-range Integer error stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()

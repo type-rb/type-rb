@@ -170,3 +170,53 @@ end
 		t.Fatalf("unexpected enum member attributes in IR: %#v", version.Attributes)
 	}
 }
+
+func TestRecordDefaultsPreserveAttributesAfterLessThanExpressions(t *testing.T) {
+	artifact, err := Compile("filter.trb", []byte(`record Filter
+	limit: Integer
+	below_limit: Boolean = limit < 10 @cli(:option)
+end
+`), "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := artifact.AST.Statements[0].(*ast.RecordStatement)
+	field := record.Body[1].(*ast.RecordFieldStatement)
+	if field.Default == nil || len(field.Attributes) != 1 || field.Attributes[0].Name != "cli" {
+		t.Fatalf("unexpected default or attributes: default=%#v attributes=%#v", field.Default, field.Attributes)
+	}
+}
+
+func TestSuspendingTypeScriptRecordDefaultsPropagateThroughConstructors(t *testing.T) {
+	model := SourceUnit{Filename: "request_config.trb", ModulePath: "models/request_config", Source: []byte(`import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { Body } from trb/http
+import { Result } from trb/std/result
+
+record RequestConfig
+	client: HttpClient
+	response: Result<Response<Body>, RequestError> = client.request("/health")
+end
+`)}
+	main := SourceUnit{Filename: "main.trb", ModulePath: "main", Source: []byte(`import { HttpClient } from trb/platform/typescript/browser
+import { RequestConfig } from models/request_config
+
+def build(client: HttpClient): RequestConfig
+	return RequestConfig.new(client: client)
+end
+`)}
+	artifacts, err := CompileProject([]SourceUnit{model, main}, Options{Mode: "typescript", SourceRoot: "/project", ProjectRoot: "/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifactForModule(artifacts, "models/request_config").Output) + string(artifactForModule(artifacts, "main").Output)
+	for _, fragment := range []string{
+		"export async function __trbRecordNewRequestConfig(__trbScope: AbortSignal | undefined, args:",
+		"): Promise<RequestConfig>",
+		"export async function build(__trbScope: AbortSignal | undefined, client:",
+		"return (await __trbRecordNewRequestConfig(__trbScope, { client: client }));",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", fragment, output)
+		}
+	}
+}

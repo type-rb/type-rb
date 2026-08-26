@@ -117,7 +117,7 @@ than detailed syntax.
 
 ## 6. Application-level proof
 
-- Evolve the initial Go-only `trb/cli` static schema from application evidence.
+- Evolve the initial Go-only `trb/platform/go/cli` static schema from application evidence.
   Consider repeated values, environment fallback, validation constraints,
   aliases, completion, and nested subcommands only as extensions to the shared
   record and payload-enum model; keep dynamic plugins and Ruby/TypeScript CLI

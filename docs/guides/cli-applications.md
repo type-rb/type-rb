@@ -1,6 +1,6 @@
 # Build a command-line application
 
-`trb/cli` generates a typed command-line parser for a Go project. The result
+`trb/platform/go/cli` generates a typed command-line parser for a Go project. The result
 can be compiled as one native executable; Ruby and TypeScript CLI backends are
 not provided.
 
@@ -9,7 +9,7 @@ not provided.
 Use records for argument groups and a payload enum for subcommands:
 
 ```trb
-import { run } from trb/cli
+import { run } from trb/platform/go/cli
 
 record ServeArgs
 	directory: String

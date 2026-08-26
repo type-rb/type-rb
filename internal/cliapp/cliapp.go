@@ -1,4 +1,4 @@
-// Package cliapp owns the target-independent schema for trb/cli applications.
+// Package cliapp owns the target-independent schema for trb/platform/go/cli applications.
 package cliapp
 
 import (
@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	PackageName     = "trb/cli"
-	ModulePath      = "trb/cli/index"
+	PackageName     = "trb/platform/go/cli"
+	ModulePath      = "trb/platform/go/cli/index"
 	ProjectProvider = "trb.cli.schema"
 )
 
@@ -174,7 +174,7 @@ func Analyze(input packageextension.ProjectDeclarationInput, requests []Invocati
 func (c catalog) schema(rootReference TypeReference) (Schema, []Issue) {
 	root, ok := c.records[rootReference]
 	if !ok {
-		return Schema{}, []Issue{{Message: fmt.Sprintf("trb/cli run root %s must be a record", rootReference.Name)}}
+		return Schema{}, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli run root %s must be a record", rootReference.Name)}}
 	}
 	schema := Schema{Root: Record{ModulePath: rootReference.ModulePath, Name: root.Name}}
 	var issues []Issue
@@ -183,13 +183,13 @@ func (c catalog) schema(rootReference TypeReference) (Schema, []Issue) {
 		issues = append(issues, metadataIssues...)
 		if metadata.kind == "subcommand" {
 			if schema.SubcommandField != "" {
-				issues = append(issues, Issue{Message: "trb/cli root record may declare only one @cli(:subcommand) field", Span: field.Span})
+				issues = append(issues, Issue{Message: "trb/platform/go/cli root record may declare only one @cli(:subcommand) field", Span: field.Span})
 				continue
 			}
 			reference, found := typeReference(field.Type)
 			enum, enumFound := c.enums[reference]
 			if !found || !enumFound {
-				issues = append(issues, Issue{Message: fmt.Sprintf("trb/cli subcommand field %s must use a payload enum", field.Name), Span: field.Span})
+				issues = append(issues, Issue{Message: fmt.Sprintf("trb/platform/go/cli subcommand field %s must use a payload enum", field.Name), Span: field.Span})
 				continue
 			}
 			schema.SubcommandField = field.Name
@@ -208,7 +208,7 @@ func (c catalog) schema(rootReference TypeReference) (Schema, []Issue) {
 	if schema.SubcommandField != "" {
 		for _, field := range schema.Root.Fields {
 			if field.Positional {
-				issues = append(issues, Issue{Message: "trb/cli root fields used with subcommands must be options", Span: root.Span})
+				issues = append(issues, Issue{Message: "trb/platform/go/cli root fields used with subcommands must be options", Span: root.Span})
 				break
 			}
 		}
@@ -238,7 +238,7 @@ func (c catalog) commands(reference TypeReference, enum packageextension.Project
 		}
 		command := Command{Name: name, About: metadata.about, MemberName: member.Name, Enum: reference}
 		if seen[name] {
-			issues = append(issues, Issue{Message: fmt.Sprintf("duplicate trb/cli subcommand %q", name), Span: member.Span})
+			issues = append(issues, Issue{Message: fmt.Sprintf("duplicate trb/platform/go/cli subcommand %q", name), Span: member.Span})
 		}
 		seen[name] = true
 		switch len(member.Parameters) {
@@ -247,7 +247,7 @@ func (c catalog) commands(reference TypeReference, enum packageextension.Project
 			payloadReference, found := typeReference(member.Parameters[0].Type)
 			record, recordFound := c.records[payloadReference]
 			if !found || !recordFound {
-				issues = append(issues, Issue{Message: fmt.Sprintf("trb/cli subcommand %s payload must be one record", member.Name), Span: member.Span})
+				issues = append(issues, Issue{Message: fmt.Sprintf("trb/platform/go/cli subcommand %s payload must be one record", member.Name), Span: member.Span})
 				break
 			}
 			payload := &Record{ModulePath: payloadReference.ModulePath, Name: record.Name}
@@ -255,7 +255,7 @@ func (c catalog) commands(reference TypeReference, enum packageextension.Project
 				fieldMetadata, fieldMetadataIssues := cliMetadata(field.Attributes, field.Span)
 				issues = append(issues, fieldMetadataIssues...)
 				if fieldMetadata.kind == "subcommand" {
-					issues = append(issues, Issue{Message: "nested trb/cli subcommands are not supported in the initial contract", Span: field.Span})
+					issues = append(issues, Issue{Message: "nested trb/platform/go/cli subcommands are not supported in the initial contract", Span: field.Span})
 					continue
 				}
 				converted, fieldIssues := scalarField(payloadReference.ModulePath, field, fieldMetadata, index)
@@ -266,7 +266,7 @@ func (c catalog) commands(reference TypeReference, enum packageextension.Project
 			issues = append(issues, validateFields(payload.Fields)...)
 			command.Payload = payload
 		default:
-			issues = append(issues, Issue{Message: fmt.Sprintf("trb/cli subcommand %s must be payloadless or contain one record payload", member.Name), Span: member.Span})
+			issues = append(issues, Issue{Message: fmt.Sprintf("trb/platform/go/cli subcommand %s must be payloadless or contain one record payload", member.Name), Span: member.Span})
 		}
 		commands = append(commands, command)
 	}
@@ -357,10 +357,10 @@ func scalarField(modulePath string, field packageextension.ProjectRecordField, m
 	case "bool":
 		result.Kind = BooleanValue
 	default:
-		return result, []Issue{{Message: fmt.Sprintf("trb/cli field %s must use String, Integer, Float, or Boolean in the initial contract", field.Name), Span: field.Span}}
+		return result, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli field %s must use String, Integer, Float, or Boolean in the initial contract", field.Name), Span: field.Span}}
 	}
 	if result.Short != "" && len([]rune(result.Short)) != 1 {
-		return result, []Issue{{Message: fmt.Sprintf("trb/cli short option for %s must contain one character", field.Name), Span: field.Span}}
+		return result, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli short option for %s must contain one character", field.Name), Span: field.Span}}
 	}
 	return result, nil
 }
@@ -369,23 +369,31 @@ func validateFields(fields []Field) []Issue {
 	var issues []Issue
 	seenLong := map[string]bool{}
 	seenShort := map[string]bool{}
+	generatedLong := map[string]bool{"help": true, "version": true}
+	generatedShort := map[string]bool{"h": true}
 	seenOptionalPositional := false
 	for _, field := range fields {
 		if field.Positional {
 			if !field.Required {
 				seenOptionalPositional = true
 			} else if seenOptionalPositional {
-				issues = append(issues, Issue{Message: "required trb/cli positional fields cannot follow optional positional fields"})
+				issues = append(issues, Issue{Message: "required trb/platform/go/cli positional fields cannot follow optional positional fields"})
 			}
 			continue
 		}
 		if seenLong[field.Long] {
-			issues = append(issues, Issue{Message: fmt.Sprintf("duplicate trb/cli option --%s", field.Long)})
+			issues = append(issues, Issue{Message: fmt.Sprintf("duplicate trb/platform/go/cli option --%s", field.Long)})
+		}
+		if generatedLong[field.Long] {
+			issues = append(issues, Issue{Message: fmt.Sprintf("trb/platform/go/cli option --%s conflicts with a generated option", field.Long)})
 		}
 		seenLong[field.Long] = true
 		if field.Short != "" {
 			if seenShort[field.Short] {
-				issues = append(issues, Issue{Message: fmt.Sprintf("duplicate trb/cli option -%s", field.Short)})
+				issues = append(issues, Issue{Message: fmt.Sprintf("duplicate trb/platform/go/cli option -%s", field.Short)})
+			}
+			if generatedShort[field.Short] {
+				issues = append(issues, Issue{Message: fmt.Sprintf("trb/platform/go/cli option -%s conflicts with a generated option", field.Short)})
 			}
 			seenShort[field.Short] = true
 		}

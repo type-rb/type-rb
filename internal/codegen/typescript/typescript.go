@@ -1426,14 +1426,14 @@ func (g *generator) expr(expression ir.Expression) string {
 			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "record" {
 				if identifier, named := application.Receiver.(*ir.Identifier); named {
 					if tsRecordContractHasDefaults(n.RecordFields) {
-						return g.awaitCall(n, g.recordDefaultCall(identifier, application.Arguments, n.Arguments))
+						return g.awaitCall(n, g.recordDefaultCall(n, identifier, application.Arguments, n.Arguments))
 					}
 					return g.awaitCall(n, g.recordLiteralApplied(identifier, application.Arguments, n.Arguments))
 				}
 			}
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok && (g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record") {
 				if tsRecordContractHasDefaults(n.RecordFields) {
-					return g.awaitCall(n, g.recordDefaultCall(identifier, nil, n.Arguments))
+					return g.awaitCall(n, g.recordDefaultCall(n, identifier, nil, n.Arguments))
 				}
 				return g.awaitCall(n, g.recordLiteral(identifier, n.Arguments))
 			}
@@ -2125,8 +2125,22 @@ func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.Rec
 	}
 	parameters := tsTypeParameterDeclarations(record.TypeParameters)
 	result := record.Name + tsTypeParameterArguments(record.TypeParameters)
-	g.line("export function " + tsRecordConstructorName(record.Name) + parameters + "(args: { " + strings.Join(properties, "; ") + " }): " + result + " {")
+	execution := g.execution != nil && g.execution.RecordDefault(g.modulePath, record.Name)
+	suspends := g.suspension != nil && g.suspension.RecordDefault(g.modulePath, record.Name)
+	arguments := "args: { " + strings.Join(properties, "; ") + " }"
+	if execution {
+		arguments = "__trbScope: AbortSignal | undefined, " + arguments
+	}
+	prefix := "export function "
+	returnType := result
+	if suspends {
+		prefix = "export async function "
+		returnType = "Promise<" + result + ">"
+	}
+	g.line(prefix + tsRecordConstructorName(record.Name) + parameters + "(" + arguments + "): " + returnType + " {")
 	g.indent++
+	previousExecution := g.executionActive
+	g.executionActive = execution
 	for _, field := range fields {
 		value := "args." + field.Name
 		if field.Default != nil {
@@ -2134,6 +2148,7 @@ func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.Rec
 		}
 		g.line("const " + field.Name + " = " + value + ";")
 	}
+	g.executionActive = previousExecution
 	values := make([]string, len(fields))
 	for index, field := range fields {
 		values[index] = field.Name
@@ -2175,7 +2190,7 @@ func tsRecordConstructorName(name string) string {
 	return "__trbRecordNew" + name
 }
 
-func (g *generator) recordDefaultCall(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
+func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
 	name := tsRecordConstructorName(record.Name)
 	if alias := g.typeAliases[record.Name]; alias != "" {
 		name = alias + "." + name
@@ -2194,7 +2209,11 @@ func (g *generator) recordDefaultCall(record *ir.Identifier, typeArguments []typ
 		}
 		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
 	}
-	return name + "({ " + strings.Join(fields, ", ") + " })"
+	values := []string{"{ " + strings.Join(fields, ", ") + " }"}
+	if g.execution != nil && g.execution.Calls[call] {
+		values = append([]string{"__trbScope"}, values...)
+	}
+	return name + "(" + strings.Join(values, ", ") + ")"
 }
 
 func portableFloatInteger(value, operation string) string {

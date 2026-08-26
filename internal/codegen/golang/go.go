@@ -768,6 +768,11 @@ func (g *generator) record(record *ir.Record) {
 
 func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
 	parameters := make([]string, 0, len(fields)*2)
+	execution := g.execution != nil && g.execution.RecordDefault(g.modulePath, record.Name)
+	if execution {
+		g.requireImport("context", "trbcontext")
+		parameters = append(parameters, "__trbScope trbcontext.Context")
+	}
 	for _, field := range fields {
 		name := goIdentifier(field.Name, false)
 		parameters = append(parameters, name+" "+g.goType(field.Type))
@@ -779,6 +784,8 @@ func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.Rec
 	result := goIdentifier(record.Name, true) + goTypeParameterArguments(record.TypeParameters)
 	g.line("func " + name + goTypeParameterDeclarations(record.TypeParameters) + "(" + strings.Join(parameters, ", ") + ") " + result + " {")
 	g.indent++
+	previousExecution := g.executionActive
+	g.executionActive = execution
 	for _, field := range fields {
 		if field.Default == nil {
 			continue
@@ -789,6 +796,7 @@ func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.Rec
 		g.indent--
 		g.line("}")
 	}
+	g.executionActive = previousExecution
 	values := make([]string, len(fields))
 	for index, field := range fields {
 		values[index] = goIdentifier(field.Name, true) + ": " + goIdentifier(field.Name, false)
@@ -1625,7 +1633,7 @@ func (g *generator) expr(expression ir.Expression) string {
 				if named {
 					if application.Kind == "record" {
 						if recordContractHasDefaults(n.RecordFields) {
-							return g.recordDefaultCall(identifier, application.Arguments, n.Arguments, n.RecordFields)
+							return g.recordDefaultCall(n, identifier, application.Arguments, n.Arguments, n.RecordFields)
 						}
 						return g.recordLiteralApplied(identifier, application.Arguments, n.Arguments)
 					}
@@ -1643,7 +1651,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok {
 				if g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record" {
 					if recordContractHasDefaults(n.RecordFields) {
-						return g.recordDefaultCall(identifier, nil, n.Arguments, n.RecordFields)
+						return g.recordDefaultCall(n, identifier, nil, n.Arguments, n.RecordFields)
 					}
 					return g.recordLiteral(identifier, n.Arguments)
 				}
@@ -2306,7 +2314,7 @@ func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []
 	return name + "[" + strings.Join(items, ", ") + "]{" + strings.Join(fields, ", ") + "}"
 }
 
-func (g *generator) recordDefaultCall(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
+func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
 	typeName := goIdentifier(record.Name, true)
 	helper := goRecordConstructorName(record.Name)
 	if alias := g.referenceAlias(record.Reference); alias != "" {
@@ -2334,6 +2342,9 @@ func (g *generator) recordDefaultCall(record *ir.Identifier, typeArguments []typ
 		explicit[argument.Name] = name
 	}
 	values := make([]string, 0, len(fields)*2)
+	if g.execution != nil && g.execution.Calls[call] {
+		values = append(values, "__trbScope")
+	}
 	for _, field := range fields {
 		value, provided := explicit[field.Name]
 		if !provided {

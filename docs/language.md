@@ -477,7 +477,7 @@ end
 
 Enum members may carry postfix attributes after their payload or raw value.
 Attributes are inert language metadata until a compiler-integrated package
-defines their meaning. `trb/cli`, for example, uses them for subcommand names
+defines their meaning. `trb/platform/go/cli`, for example, uses them for subcommand names
 and descriptions.
 
 A `case` without `else` must handle every member. Payload patterns introduce

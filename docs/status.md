@@ -34,7 +34,7 @@ and isolates generated target source in an operating-system temporary
 directory. A discoverable `trbconfig.jsonc` always restores project-wide
 compilation and owns mode and runtime selection.
 
-Go projects can import the initial `trb/cli` platform package to generate a
+Go projects can import the initial `trb/platform/go/cli` platform package to generate a
 typed command-line parser from records and payload enums. Unannotated fields
 are positional, `@cli(:option)` declares options, and
 `@cli(:subcommand)` selects a closed command enum. Generated help, version,

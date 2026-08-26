@@ -12,7 +12,7 @@ import (
 func (g *generator) cliRun(call *ir.Call) string {
 	index, _, ok := g.cli.InvocationIndex(g.modulePath, call.SourceSpan().Start.Offset)
 	if !ok {
-		return "func() " + g.goType(call.ExprType()) + " { panic(\"trb/cli schema is unavailable\") }()"
+		return "func() " + g.goType(call.ExprType()) + " { panic(\"trb/platform/go/cli schema is unavailable\") }()"
 	}
 	g.cliInvocations[index] = true
 	arguments := map[string]string{}
@@ -52,7 +52,23 @@ func (g *generator) cliIntegrations() {
 	for _, index := range indexes {
 		g.cliInvocation(index, &g.cli.Invocations[index])
 	}
-	g.cliRuntimeSupport()
+	if g.cliRuntimeOwner() {
+		g.cliRuntimeSupport()
+	}
+}
+
+func (g *generator) cliRuntimeOwner() bool {
+	directory := moduleDirectory(g.modulePath)
+	owner := ""
+	for _, invocation := range g.cli.Invocations {
+		if moduleDirectory(invocation.ModulePath) != directory {
+			continue
+		}
+		if owner == "" || invocation.ModulePath < owner {
+			owner = invocation.ModulePath
+		}
+	}
+	return owner == g.modulePath
 }
 
 func (g *generator) cliInvocation(index int, invocation *cliapp.Invocation) {
@@ -158,8 +174,9 @@ func (g *generator) cliParsedScalar(field cliapp.Field, raw, name string) cliPar
 		return cliParsedScalar{Lines: []string{name + " := " + raw}, Value: name}
 	case cliapp.IntegerValue:
 		return cliParsedScalar{Lines: []string{
-			name + ", " + name + "Err := strconv.Atoi(" + raw + ")",
-			"if " + name + "Err != nil { trbCliInvalidValue(" + strconv.Quote(field.Name) + ", " + raw + ") }",
+			name + "Parsed, " + name + "Err := strconv.ParseInt(" + raw + ", 10, 64)",
+			"if " + name + "Err != nil || " + name + "Parsed < -9007199254740991 || " + name + "Parsed > 9007199254740991 { trbCliInvalidValue(" + strconv.Quote(field.Name) + ", " + raw + ") }",
+			name + " := int(" + name + "Parsed)",
 		}, Value: name}
 	case cliapp.FloatValue:
 		return cliParsedScalar{Lines: []string{
@@ -199,6 +216,10 @@ func (g *generator) cliRecordExpression(record cliapp.Record, fields []cliConstr
 	qualifier := g.cliQualifier(record.ModulePath)
 	if record.Defaults {
 		arguments := make([]string, 0, len(fields)*2)
+		if g.execution != nil && g.execution.RecordDefault(record.ModulePath, record.Name) {
+			g.requireImport("context", "trbcontext")
+			arguments = append(arguments, "trbcontext.Background()")
+		}
 		for _, field := range fields {
 			arguments = append(arguments, field.Value)
 			if field.HasDefault {
