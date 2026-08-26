@@ -93,6 +93,31 @@ produces a JSON request body. Query parameters and headers are ordered arrays,
 so repeated names have an unambiguous representation.
 
 The initial client is buffered and intentionally omits streaming, retry policy,
-progress events, interceptors, and generated endpoint contracts. Contractless
-external APIs and future contract providers use the same transport and
-`Response` model.
+progress events, and interceptors. Contractless external APIs and generated
+endpoint clients use the same transport and `Response` model.
+
+## Generated clients for trb/web
+
+When the server publishes explicit `trb/web` endpoint contracts, generate a
+higher-level client instead of repeating path, query, body, and status handling:
+
+```sh
+trb web client --output generated/api_client.trb --name ApiClient
+```
+
+The generated TypeRB class accepts an ordinary `HttpClient`, so base URL and
+application composition remain explicit:
+
+```trb
+import { ApiClient } from generated/api_client
+import { HttpClient } from trb/platform/typescript/browser
+
+api := ApiClient.new(HttpClient.new("https://api.example.com"))
+```
+
+Each method returns an endpoint-specific status enum inside `Result`, rather
+than treating every non-2xx response as a transport error. Contract types stay
+in an authored shared module imported by both route and browser projects. The
+generator copies no data model, runs no target toolchain, and adds no retry,
+authentication, caching, or global error policy. Those concerns compose around
+the generated class or the underlying `HttpClient`.

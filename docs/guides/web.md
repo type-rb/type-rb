@@ -249,6 +249,36 @@ responses, run validation, or invent summaries, tags, authentication, or
 application error schemas. Only routes with an explicit endpoint contract are
 published.
 
+Generate a checked browser client from the same endpoint catalog with:
+
+```sh
+# Write formatted TypeRB source to standard output.
+trb web client
+
+# Write below the project root and choose the exported class name.
+trb web client \
+  --output generated/todo_api_client.trb \
+  --name TodoApiClient
+```
+
+The generated source targets `trb/platform/typescript/browser` and wraps its
+existing `HttpClient`; it does not introduce another transport abstraction.
+It serializes declared path, query, and JSON body input, decodes every declared
+status into an endpoint-specific enum variant, and returns
+`Result<EndpointResult, RequestError>`. Undeclared statuses are explicit
+`RequestErrorKind::Contract` failures that retain the original response.
+Callers can still supply headers and an optional timeout to every generated
+method.
+
+Client-visible user-defined input and response types must be imported into the
+route from a shared module. The generated source imports those declarations
+rather than copying records, enums, aliases, or newtypes. A route-local contract type
+continues to work for endpoint checking and OpenAPI generation but is rejected
+by `trb web client`, because a separate browser project cannot import that type
+without also importing the route handler. The command produces identical
+source when the server project is configured for Go, Ruby, or TypeScript; the
+resulting client itself is intentionally browser-target-specific.
+
 Middleware can attach request-scoped values without a string-keyed cast at
 the handler boundary. Create one `ContextKey<T>` and share that key between
 the producer and consumer:

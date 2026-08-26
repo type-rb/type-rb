@@ -121,10 +121,10 @@ than detailed syntax.
   compile-time file-based routes, typed JSON requests and responses,
   middleware, initial versioned endpoint catalog, and consistent HTTP behavior
   across Go, Ruby, and TypeScript runtimes.
-- Evolve the initial endpoint catalog and OpenAPI 3.1 schema export from shared
-  records with validation policy, generated clients, versioned wire fields,
-  authentication and endpoint metadata, generic schema naming, catch-all
-  representation, and compatibility checking.
+- Evolve the initial endpoint catalog, OpenAPI 3.1 schema export, and generated
+  TypeScript browser client from shared records with validation policy,
+  versioned wire fields, authentication and endpoint metadata, generic schema
+  naming, catch-all representation, and compatibility checking.
 - Harden the experimental `trb/orm` package with schema caching, compatibility
   policy, production diagnostics, and larger end-to-end `trb/web` applications.
 - Harden the experimental `trb/jobs` contract with structured payload codecs,
@@ -136,10 +136,10 @@ than detailed syntax.
 - Harden the initial portable OIDC bearer profile, then add a separately
   reviewed server-session profile with authorization-code PKCE, cookie-key
   rotation, and pluggable session storage.
-- Evolve the initial buffered TypeScript browser HTTP client with generated
-  endpoint-contract adapters, external contract import, streaming, cancellation
-  handles, and established server-state package interop without introducing a
-  second request model.
+- Evolve the initial buffered TypeScript browser HTTP client and generated
+  endpoint-contract facade with streaming, cancellation handles, external
+  contract formats, and established server-state package interop without
+  introducing a second request model.
 - Separate one-shot `trb run` from framework development servers and add a
   coherent `trb dev` and runtime-adapter model for backend and frontend
   development servers.
