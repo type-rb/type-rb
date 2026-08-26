@@ -42,6 +42,22 @@ func TestDiscoverBuildsDeterministicFileRouteManifest(t *testing.T) {
 	}
 }
 
+func TestDiscoverIgnoresColocatedTestFiles(t *testing.T) {
+	root := t.TempDir()
+	sources := []Source{
+		parsedSource(t, filepath.Join(root, "routes", "health.trb"), "routes/health", "def get(context: Context): Response\n\treturn response\nend\n"),
+		parsedSource(t, filepath.Join(root, "routes", "health_test.trb"), "routes/health_test", "def helper()\n\treturn\nend\n"),
+	}
+
+	routes, issues := Discover(sources, root)
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %#v", issues)
+	}
+	if len(routes) != 1 || routes[0].ModulePath != "routes/health" {
+		t.Fatalf("unexpected routes: %#v", routes)
+	}
+}
+
 func TestUniquePathRoutesKeepsOneRepresentativeInManifestOrder(t *testing.T) {
 	routes := []Route{
 		{Method: "GET", Path: "/todos", ModulePath: "routes/todos"},
