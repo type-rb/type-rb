@@ -82,6 +82,7 @@ type analyzer struct {
 	methodInfo        map[*ir.Method]methodContext
 	topMethods        map[string][]*ir.Method
 	memberMethods     map[string][]*ir.Method
+	classInitializers map[string][]*ir.Method
 	recordDefinitions map[string][]*ir.Record
 	interfaceMethods  map[string][]*ir.Method
 	classes           []classContext
@@ -125,6 +126,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 	analyzer := &analyzer{
 		programs: programs, plan: plan, options: options, methodInfo: map[*ir.Method]methodContext{},
 		topMethods: map[string][]*ir.Method{}, memberMethods: map[string][]*ir.Method{},
+		classInitializers: map[string][]*ir.Method{},
 		recordDefinitions: map[string][]*ir.Record{},
 		interfaceMethods:  map[string][]*ir.Method{},
 		lambdaBindings:    map[functionBindingKey]*ir.Lambda{},
@@ -191,6 +193,7 @@ func (a *analyzer) collect(module, owner string, statements []ir.Statement, inte
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Class:
+			a.addClass(module, node)
 			a.classes = append(a.classes, classContext{
 				name: node.Name, superclass: referencedTypeName(node.Superclass),
 				implements: append([]types.Type(nil), node.Implements...),
@@ -209,6 +212,19 @@ func (a *analyzer) collect(module, owner string, statements []ir.Statement, inte
 			a.collect(module, owner, node.Body, interfaceOwner)
 		case *ir.Method:
 			a.addMethod(methodContext{module: module, owner: owner, method: node}, interfaceOwner)
+		}
+	}
+}
+
+func (a *analyzer) addClass(module string, class *ir.Class) {
+	for _, statement := range class.Body {
+		method, ok := statement.(*ir.Method)
+		if !ok || method.Name != "initialize" || method.Class {
+			continue
+		}
+		for _, alias := range moduleAliases(module) {
+			key := callableKey(alias, class.Name)
+			a.classInitializers[key] = append(a.classInitializers[key], method)
 		}
 	}
 }
@@ -622,7 +638,10 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 }
 
 func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext) bool {
-	if key, ok := recordConstructorKey(callee, context.module); ok {
+	if key, ok := constructorKey(callee, context.module); ok {
+		if initializers := a.classInitializers[key]; len(initializers) > 0 {
+			return anyReached(a.plan.Methods, initializers)
+		}
 		return anyRecordReached(a.plan.RecordDefaults, a.recordDefinitions[key])
 	}
 	if a.options.PassToFunctions && callee != nil && callee.ExprType().Kind == types.Function {
@@ -681,6 +700,9 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 }
 
 func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context methodContext) bool {
+	if key, ok := constructorKey(callee, context.module); ok {
+		return anyReached(a.plan.ParameterDefaults, a.classInitializers[key])
+	}
 	switch node := callee.(type) {
 	case *ir.TypeApply:
 		return a.callTargetParameterDefaults(node.Receiver, context)
@@ -704,7 +726,7 @@ func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context met
 	return false
 }
 
-func recordConstructorKey(callee ir.Expression, currentModule string) (string, bool) {
+func constructorKey(callee ir.Expression, currentModule string) (string, bool) {
 	member, ok := callee.(*ir.Member)
 	if !ok || member.Name != "new" {
 		return "", false

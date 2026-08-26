@@ -173,3 +173,114 @@ func TestInheritedAndOverriddenMethodsShareEffectABIs(t *testing.T) {
 		}
 	}
 }
+
+func TestClassConstructorsUseTheirOwnModuleQualifiedInitializerEffects(t *testing.T) {
+	integerType := types.FromName("Integer")
+	functionType := types.Type{Kind: types.Function, Args: []types.Type{integerType}}
+	effectCall := func() *ir.Call {
+		return &ir.Call{
+			ExprBase: ir.NewExprBase(token.Span{}, integerType),
+			Callee: &ir.Identifier{
+				ExprBase: ir.NewExprBase(token.Span{}, functionType), Name: "load_value",
+				Reference: &ir.Reference{Runtime: &ir.RuntimeBinding{
+					Identity: "example.com/runtime#load", PropagatesExecutionScope: true,
+				}},
+			},
+		}
+	}
+	pureDefault := func() ir.Expression {
+		return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, integerType), Raw: "1"}
+	}
+	initializer := func(defaultValue ir.Expression, body []ir.Statement) *ir.Method {
+		parameters := []ir.Parameter{}
+		if defaultValue != nil {
+			parameters = append(parameters, ir.Parameter{Name: "value", Type: integerType, Default: defaultValue})
+		}
+		return &ir.Method{Name: "initialize", Parameters: parameters, Body: body}
+	}
+	constructorCall := func(module, name string, optional bool) *ir.Call {
+		classType := types.FromName(name)
+		call := &ir.Call{
+			ExprBase: ir.NewExprBase(token.Span{}, classType),
+			Callee: &ir.Member{
+				ExprBase: ir.NewExprBase(token.Span{}, functionType),
+				Receiver: &ir.Identifier{
+					ExprBase: ir.NewExprBase(token.Span{}, classType), Name: name,
+					Reference: &ir.Reference{Package: module, Symbol: name},
+				},
+				Name: "new",
+			},
+		}
+		if optional {
+			call.CallSignature = []callsignature.Parameter{{
+				Kind: callsignature.Positional, Type: integerType, Presence: callsignature.Omittable,
+			}}
+		}
+		return call
+	}
+
+	effectDefaultInitializer := initializer(effectCall(), nil)
+	pureInitializer := initializer(pureDefault(), nil)
+	effectBodyInitializer := initializer(nil, []ir.Statement{
+		&ir.ExpressionStatement{Expression: effectCall()},
+	})
+	effectParentInitializer := initializer(effectCall(), nil)
+	pureChildInitializer := initializer(pureDefault(), nil)
+	effectDefaultCall := constructorCall("models/effect", "Box", true)
+	pureCall := constructorCall("models/pure", "Box", true)
+	effectBodyCall := constructorCall("models/body", "BodyBox", false)
+	pureChildCall := constructorCall("main", "PureChild", true)
+	programs := []*ir.Program{
+		{ModulePath: "models/effect", Statements: []ir.Statement{
+			&ir.Class{Name: "Box", Body: []ir.Statement{effectDefaultInitializer}},
+		}},
+		{ModulePath: "models/pure", Statements: []ir.Statement{
+			&ir.Class{Name: "Box", Body: []ir.Statement{pureInitializer}},
+		}},
+		{ModulePath: "models/body", Statements: []ir.Statement{
+			&ir.Class{Name: "BodyBox", Body: []ir.Statement{effectBodyInitializer}},
+		}},
+		{ModulePath: "main", Statements: []ir.Statement{
+			&ir.Class{Name: "EffectParent", Body: []ir.Statement{effectParentInitializer}},
+			&ir.Class{
+				Name: "PureChild",
+				Superclass: &ir.Identifier{
+					ExprBase: ir.NewExprBase(token.Span{}, types.Type{}), Name: "EffectParent",
+				},
+				Body: []ir.Statement{pureChildInitializer},
+			},
+			&ir.ExpressionStatement{Expression: effectDefaultCall},
+			&ir.ExpressionStatement{Expression: pureCall},
+			&ir.ExpressionStatement{Expression: effectBodyCall},
+			&ir.ExpressionStatement{Expression: pureChildCall},
+		}},
+	}
+
+	plan := Analyze(programs, Options{Runtime: func(binding *ir.RuntimeBinding) bool {
+		return binding.PropagatesExecutionScope
+	}})
+	if !plan.Methods[effectDefaultInitializer] || !plan.ParameterDefaults[effectDefaultInitializer] {
+		t.Fatal("effectful constructor default did not mark its initializer ABI")
+	}
+	if plan.Methods[pureInitializer] || plan.ParameterDefaults[pureInitializer] {
+		t.Fatal("same-named class in another module inherited the effectful constructor ABI")
+	}
+	if !plan.Methods[effectBodyInitializer] || plan.ParameterDefaults[effectBodyInitializer] {
+		t.Fatal("effectful constructor body did not mark only its execution-scope ABI")
+	}
+	if !plan.Calls[effectDefaultCall] || !plan.CallParameterDefaults[effectDefaultCall] {
+		t.Fatal("imported constructor call did not use its effectful default ABI")
+	}
+	if plan.Calls[pureCall] || plan.CallParameterDefaults[pureCall] {
+		t.Fatal("imported pure constructor call used another module's effect ABI")
+	}
+	if !plan.Calls[effectBodyCall] || plan.CallParameterDefaults[effectBodyCall] {
+		t.Fatal("imported constructor call did not use only its effectful body ABI")
+	}
+	if !plan.Methods[effectParentInitializer] || !plan.ParameterDefaults[effectParentInitializer] {
+		t.Fatal("effectful parent initializer was not analyzed")
+	}
+	if plan.Methods[pureChildInitializer] || plan.ParameterDefaults[pureChildInitializer] || plan.Calls[pureChildCall] || plan.CallParameterDefaults[pureChildCall] {
+		t.Fatal("effectful parent initializer propagated into the child's own constructor")
+	}
+}
