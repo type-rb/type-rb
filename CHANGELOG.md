@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.43 - 2026-08-26
+
+### Web
+
+- Go projects can now run `_test.trb` files colocated with web routes when the
+  tests call ordinary functions in the route package. Generated test runners
+  retain the route-package import while also building the project dispatcher.
+  ([#564](https://github.com/type-rb/type-rb/pull/564))
+
 ## 0.3.42 - 2026-08-26
 
 ### Standard library
