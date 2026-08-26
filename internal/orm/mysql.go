@@ -9,13 +9,18 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"github.com/type-rb/type-rb/internal/mysqlsource"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
 type mysqlIntrospector struct{}
 
 func (mysqlIntrospector) Inspect(config Config) (*Schema, error) {
-	database, err := sql.Open("mysql", config.Database)
+	configuration, err := mysqlsource.Parse(config.Database)
+	if err != nil {
+		return nil, err
+	}
+	database, err := sql.Open("mysql", configuration.FormatDSN())
 	if err != nil {
 		return nil, err
 	}
