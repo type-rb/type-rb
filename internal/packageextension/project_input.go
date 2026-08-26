@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const ProjectDeclarationInputProtocolVersion = 5
+const ProjectDeclarationInputProtocolVersion = 6
 
 // ProjectDeclarationInput is a versioned, read-only snapshot of source
 // declarations that a declaration provider may inspect. It intentionally
@@ -59,6 +59,7 @@ type ProjectRecord struct {
 type ProjectRecordField struct {
 	Name       string             `json:"name"`
 	Type       ProjectTypeUse     `json:"type"`
+	HasDefault bool               `json:"hasDefault,omitempty"`
 	Attributes []ProjectAttribute `json:"attributes,omitempty"`
 	Span       SourceSpan         `json:"span"`
 }
@@ -89,6 +90,7 @@ type ProjectEnumMember struct {
 	Name       string             `json:"name"`
 	Parameters []ProjectParameter `json:"parameters,omitempty"`
 	RawValue   *ProjectValue      `json:"rawValue,omitempty"`
+	Attributes []ProjectAttribute `json:"attributes,omitempty"`
 	Span       SourceSpan         `json:"span"`
 }
 

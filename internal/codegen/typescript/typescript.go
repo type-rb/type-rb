@@ -383,6 +383,9 @@ func (g *generator) statement(statement ir.Statement) {
 				switch n.SymbolKinds[symbol] {
 				case "record", "interface", "type_alias", "newtype":
 					types = append(types, symbol)
+					if n.SymbolKinds[symbol] == "record" && n.RecordDefaults[symbol] {
+						values = append(values, tsRecordConstructorName(symbol))
+					}
 				case "function":
 					values = append(values, tsCallableName(symbol))
 				default:
@@ -465,6 +468,10 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.indent--
 		g.line("}")
+		fields := tsRecordFields(n.Body)
+		if tsRecordFieldsHaveDefaults(fields) {
+			g.recordDefaultConstructor(n, fields)
+		}
 	case *ir.Enum:
 		if enumHasPayload(n) {
 			g.payloadEnum(n)
@@ -1418,10 +1425,16 @@ func (g *generator) expr(expression ir.Expression) string {
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "record" {
 				if identifier, named := application.Receiver.(*ir.Identifier); named {
+					if tsRecordContractHasDefaults(n.RecordFields) {
+						return g.awaitCall(n, g.recordDefaultCall(identifier, application.Arguments, n.Arguments))
+					}
 					return g.awaitCall(n, g.recordLiteralApplied(identifier, application.Arguments, n.Arguments))
 				}
 			}
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok && (g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record") {
+				if tsRecordContractHasDefaults(n.RecordFields) {
+					return g.awaitCall(n, g.recordDefaultCall(identifier, nil, n.Arguments))
+				}
 				return g.awaitCall(n, g.recordLiteral(identifier, n.Arguments))
 			}
 		}
@@ -2099,6 +2112,89 @@ func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []
 	}
 	name := g.runtimeName(record.Name) + "<" + strings.Join(items, ", ") + ">"
 	return "({" + strings.Join(fields, ", ") + "} satisfies " + name + ")"
+}
+
+func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
+	properties := make([]string, len(fields))
+	for index, field := range fields {
+		optional := ""
+		if field.Default != nil {
+			optional = "?"
+		}
+		properties[index] = field.Name + optional + ": " + g.tsType(field.Type)
+	}
+	parameters := tsTypeParameterDeclarations(record.TypeParameters)
+	result := record.Name + tsTypeParameterArguments(record.TypeParameters)
+	g.line("export function " + tsRecordConstructorName(record.Name) + parameters + "(args: { " + strings.Join(properties, "; ") + " }): " + result + " {")
+	g.indent++
+	for _, field := range fields {
+		value := "args." + field.Name
+		if field.Default != nil {
+			value = "Object.prototype.hasOwnProperty.call(args, " + strconv.Quote(field.Name) + ") ? args." + field.Name + " as " + g.tsType(field.Type) + " : " + g.expr(field.Default)
+		}
+		g.line("const " + field.Name + " = " + value + ";")
+	}
+	values := make([]string, len(fields))
+	for index, field := range fields {
+		values[index] = field.Name
+	}
+	g.line("return { " + strings.Join(values, ", ") + " };")
+	g.indent--
+	g.line("}")
+}
+
+func tsRecordFields(statements []ir.Statement) []*ir.RecordField {
+	fields := make([]*ir.RecordField, 0, len(statements))
+	for _, statement := range statements {
+		if field, ok := statement.(*ir.RecordField); ok {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+func tsRecordFieldsHaveDefaults(fields []*ir.RecordField) bool {
+	for _, field := range fields {
+		if field.Default != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func tsRecordContractHasDefaults(fields []ir.RecordFieldContract) bool {
+	for _, field := range fields {
+		if field.HasDefault {
+			return true
+		}
+	}
+	return false
+}
+
+func tsRecordConstructorName(name string) string {
+	return "__trbRecordNew" + name
+}
+
+func (g *generator) recordDefaultCall(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
+	name := tsRecordConstructorName(record.Name)
+	if alias := g.typeAliases[record.Name]; alias != "" {
+		name = alias + "." + name
+	}
+	if len(typeArguments) > 0 {
+		items := make([]string, len(typeArguments))
+		for index, argument := range typeArguments {
+			items[index] = g.tsType(argument)
+		}
+		name += "<" + strings.Join(items, ", ") + ">"
+	}
+	fields := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			continue
+		}
+		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
+	}
+	return name + "({ " + strings.Join(fields, ", ") + " })"
 }
 
 func portableFloatInteger(value, operation string) string {

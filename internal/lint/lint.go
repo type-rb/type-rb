@@ -256,6 +256,7 @@ func walkStatements(statements []ast.Statement, visit func(*ast.IfStatement)) {
 		case *ast.RecordStatement:
 			walkStatements(node.Body, visit)
 		case *ast.RecordFieldStatement:
+			walkExpression(node.Default, visit)
 			for _, attribute := range node.Attributes {
 				for _, argument := range attribute.Arguments {
 					walkExpression(argument.Value, visit)
@@ -267,6 +268,11 @@ func walkStatements(statements []ast.Statement, visit func(*ast.IfStatement)) {
 			walkExpression(node.RawValue, visit)
 			for _, parameter := range node.Parameters {
 				walkExpression(parameter.Default, visit)
+			}
+			for _, attribute := range node.Attributes {
+				for _, argument := range attribute.Arguments {
+					walkExpression(argument.Value, visit)
+				}
 			}
 		case *ast.ModuleStatement:
 			walkStatements(node.Body, visit)

@@ -41,6 +41,7 @@ type Result struct {
 	CaseNarrowings             map[*ast.CaseStatement]CaseNarrowing
 	GenericApplications        map[*ast.GenericExpression]GenericApplication
 	CodecApplications          map[*ast.CallExpression]CodecApplication
+	RecordConstructions        map[*ast.CallExpression]RecordConstruction
 	CallSpecializationRequests map[*ast.CallExpression]CallSpecializationRequest
 	CallSpecializations        map[*ast.CallExpression]CallSpecialization
 	CallSignatures             map[*ast.CallExpression][]callsignature.Parameter
@@ -64,6 +65,10 @@ type Result struct {
 type CodecApplication struct {
 	Operation string
 	Schema    CodecSchema
+}
+
+type RecordConstruction struct {
+	Fields []resolver.RecordField
 }
 
 type CallSpecializationRequest struct {
@@ -535,6 +540,24 @@ func statementsHaveFreshEmptyMutableCollection(statements []ast.Statement) bool 
 			if expressionHasFreshEmptyMutableCollection(node.RawValue) {
 				return true
 			}
+			for _, attribute := range node.Attributes {
+				for _, argument := range attribute.Arguments {
+					if expressionHasFreshEmptyMutableCollection(argument.Value) {
+						return true
+					}
+				}
+			}
+		case *ast.RecordFieldStatement:
+			if expressionHasFreshEmptyMutableCollection(node.Default) {
+				return true
+			}
+			for _, attribute := range node.Attributes {
+				for _, argument := range attribute.Arguments {
+					if expressionHasFreshEmptyMutableCollection(argument.Value) {
+						return true
+					}
+				}
+			}
 		case *ast.ModuleStatement:
 			if statementsHaveFreshEmptyMutableCollection(node.Body) {
 				return true
@@ -744,6 +767,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			CaseNarrowings:             map[*ast.CaseStatement]CaseNarrowing{},
 			GenericApplications:        map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:          map[*ast.CallExpression]CodecApplication{},
+			RecordConstructions:        map[*ast.CallExpression]RecordConstruction{},
 			CallSpecializationRequests: map[*ast.CallExpression]CallSpecializationRequest{},
 			CallSpecializations:        map[*ast.CallExpression]CallSpecialization{},
 			CallSignatures:             map[*ast.CallExpression][]callsignature.Parameter{},
@@ -832,8 +856,19 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParamet
 				c.validateTypeReferenceInScope(parameter.Type, typeParameters)
 			}
 			c.validateExpressionTypeReferences(node.RawValue, typeParameters)
+			for _, attribute := range node.Attributes {
+				for _, argument := range attribute.Arguments {
+					c.validateExpressionTypeReferences(argument.Value, typeParameters)
+				}
+			}
 		case *ast.RecordFieldStatement:
 			c.validateTypeReferenceInScope(node.Type, typeParameters)
+			c.validateExpressionTypeReferences(node.Default, typeParameters)
+			for _, attribute := range node.Attributes {
+				for _, argument := range attribute.Arguments {
+					c.validateExpressionTypeReferences(argument.Value, typeParameters)
+				}
+			}
 		case *ast.ModuleStatement:
 			c.validateTypeReferences(node.Body, typeParameters)
 		case *ast.InterfaceStatement:
@@ -1315,6 +1350,8 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.current = previous
 		case *ast.RecordStatement:
 			c.checkTypeParameters(n.TypeParameters)
+			recordScope := &scope{parent: sc, values: map[string]symbol{}}
+			seenDefault := false
 			for _, member := range n.Body {
 				field, ok := member.(*ast.RecordFieldStatement)
 				if !ok {
@@ -1322,6 +1359,17 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				}
 				if field.Type.Empty() {
 					c.error(field.Span(), fmt.Sprintf("record field %s requires a type", field.Name))
+				}
+				fieldType := c.typeFromRef(field.Type)
+				if field.Default != nil {
+					seenDefault = true
+					actual := c.checkExpression(field.Default, recordScope)
+					actual = c.contextualizeCollectionLiteral(field.Default, fieldType, actual)
+					if !c.assignable(field.Default, fieldType, actual) {
+						c.error(field.Default.Span(), fmt.Sprintf("record field default has type %s, expected %s", actual, fieldType))
+					}
+				} else if seenDefault {
+					c.error(field.Span(), "required record field cannot follow a default field")
 				}
 				for _, attribute := range field.Attributes {
 					if attribute.Name == "gorm" && c.mode != "go" {
@@ -1331,6 +1379,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 						c.checkExpression(argument.Value, sc)
 					}
 				}
+				recordScope.values[field.Name] = symbol{typ: fieldType, mutable: false, span: field.Span()}
 			}
 		case *ast.EnumStatement:
 			if !sc.enumsAllowed {
@@ -1403,6 +1452,11 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 						c.error(parameter.Span(), fmt.Sprintf("enum payload field %s is duplicated", parameter.Name))
 					}
 					seenFields[parameter.Name] = true
+				}
+				for _, attribute := range member.Attributes {
+					for _, argument := range attribute.Arguments {
+						c.checkExpression(argument.Value, sc)
+					}
 				}
 			}
 			if raw != nil {
@@ -6035,7 +6089,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				if record := c.records[application.Name]; record != nil {
 					fields := make([]resolver.RecordField, len(record.fields))
 					for index, field := range record.fields {
-						fields[index] = resolver.RecordField{Name: field.Name, Type: substituteType(c.typeFromRef(field.Type), substitutions)}
+						fields[index] = resolver.RecordField{Name: field.Name, Type: substituteType(c.typeFromRef(field.Type), substitutions), HasDefault: field.Default != nil}
 					}
 					c.checkRecordArguments(n, record.name, fields)
 				} else if info := c.classes[application.Name]; info != nil {
@@ -6715,7 +6769,7 @@ func iterableElementType(typ types.Type) (types.Type, bool) {
 func (c *Checker) checkLocalRecordArguments(call *ast.CallExpression, record *recordInfo) {
 	fields := make([]resolver.RecordField, len(record.fields))
 	for index, field := range record.fields {
-		fields[index] = resolver.RecordField{Name: field.Name, Type: c.typeFromRef(field.Type)}
+		fields[index] = resolver.RecordField{Name: field.Name, Type: c.typeFromRef(field.Type), HasDefault: field.Default != nil}
 	}
 	c.checkRecordArguments(call, record.name, fields)
 }
@@ -6725,6 +6779,7 @@ func (c *Checker) checkImportedRecordArguments(call *ast.CallExpression, record 
 }
 
 func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fields []resolver.RecordField) {
+	c.result.RecordConstructions[call] = RecordConstruction{Fields: append([]resolver.RecordField(nil), fields...)}
 	byName := map[string]resolver.RecordField{}
 	for _, field := range fields {
 		byName[field.Name] = field
@@ -6754,7 +6809,7 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 		}
 	}
 	for _, field := range fields {
-		if !used[field.Name] && !field.Optional {
+		if !used[field.Name] && !field.Optional && !field.HasDefault {
 			c.error(call.Span(), fmt.Sprintf("%s.new() is missing record field %s", name, field.Name))
 		}
 	}

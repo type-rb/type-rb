@@ -68,6 +68,7 @@ func (c *Checker) validateReservedKeywordStatement(statement ast.Statement) {
 	case *ast.RecordFieldStatement:
 		c.validateReservedKeywordName(node.Name, "a record field", node.Span())
 		c.validateReservedKeywordType(node.Type)
+		c.validateReservedKeywordExpression(node.Default)
 		for _, attribute := range node.Attributes {
 			for _, argument := range attribute.Arguments {
 				c.validateReservedKeywordName(argument.Name, "a named argument", attribute.Span())
@@ -82,6 +83,12 @@ func (c *Checker) validateReservedKeywordStatement(statement ast.Statement) {
 		c.validateReservedKeywordName(node.Name, "an enum member", node.Span())
 		c.validateReservedKeywordParameters(node.Parameters, "an enum payload field")
 		c.validateReservedKeywordExpression(node.RawValue)
+		for _, attribute := range node.Attributes {
+			for _, argument := range attribute.Arguments {
+				c.validateReservedKeywordName(argument.Name, "a named argument", attribute.Span())
+				c.validateReservedKeywordExpression(argument.Value)
+			}
+		}
 	case *ast.TypeAliasStatement:
 		c.validateReservedKeywordName(node.Name, "a type alias", node.Span())
 		c.validateReservedKeywordTypeParameters(node.TypeParameters)

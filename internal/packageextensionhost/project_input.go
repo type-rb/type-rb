@@ -151,7 +151,7 @@ func (r projectInputResolver) exportRecord(modulePath string, record *ast.Record
 			continue
 		}
 		converted := packageextension.ProjectRecordField{
-			Name: field.Name, Type: r.typeUse(modulePath, field.Type, typeParameters), Span: exportSourceSpan(field.Span()),
+			Name: field.Name, Type: r.typeUse(modulePath, field.Type, typeParameters), HasDefault: field.Default != nil, Span: exportSourceSpan(field.Span()),
 		}
 		for _, attribute := range field.Attributes {
 			projectAttribute := packageextension.ProjectAttribute{Name: attribute.Name, Span: exportSourceSpan(attribute.Span())}
@@ -186,6 +186,13 @@ func (r projectInputResolver) exportEnum(modulePath string, enum *ast.EnumStatem
 		if member.RawValue != nil {
 			value := r.exportProjectValue(modulePath, member.RawValue, true)
 			converted.RawValue = &value
+		}
+		for _, attribute := range member.Attributes {
+			projectAttribute := packageextension.ProjectAttribute{Name: attribute.Name, Span: exportSourceSpan(attribute.Span())}
+			for _, argument := range attribute.Arguments {
+				projectAttribute.Arguments = append(projectAttribute.Arguments, r.exportProjectArgument(modulePath, argument))
+			}
+			converted.Attributes = append(converted.Attributes, projectAttribute)
 		}
 		result.Members = append(result.Members, converted)
 	}

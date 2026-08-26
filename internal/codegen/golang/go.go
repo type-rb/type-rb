@@ -753,7 +753,80 @@ func (g *generator) record(record *ir.Record) {
 	}
 	g.indent--
 	g.line("}")
+	fields := recordFields(record.Body)
+	if recordFieldsHaveDefaults(fields) {
+		g.b.WriteByte('\n')
+		g.recordDefaultConstructor(record, fields)
+	}
 	g.b.WriteByte('\n')
+}
+
+func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
+	parameters := make([]string, 0, len(fields)*2)
+	for _, field := range fields {
+		name := goIdentifier(field.Name, false)
+		parameters = append(parameters, name+" "+g.goType(field.Type))
+		if field.Default != nil {
+			parameters = append(parameters, recordProvidedName(field.Name)+" bool")
+		}
+	}
+	name := goRecordConstructorName(record.Name)
+	result := goIdentifier(record.Name, true) + goTypeParameterArguments(record.TypeParameters)
+	g.line("func " + name + goTypeParameterDeclarations(record.TypeParameters) + "(" + strings.Join(parameters, ", ") + ") " + result + " {")
+	g.indent++
+	for _, field := range fields {
+		if field.Default == nil {
+			continue
+		}
+		g.line("if !" + recordProvidedName(field.Name) + " {")
+		g.indent++
+		g.line(goIdentifier(field.Name, false) + " = " + g.expr(field.Default))
+		g.indent--
+		g.line("}")
+	}
+	values := make([]string, len(fields))
+	for index, field := range fields {
+		values[index] = goIdentifier(field.Name, true) + ": " + goIdentifier(field.Name, false)
+	}
+	g.line("return " + result + "{" + strings.Join(values, ", ") + "}")
+	g.indent--
+	g.line("}")
+}
+
+func recordFields(statements []ir.Statement) []*ir.RecordField {
+	fields := make([]*ir.RecordField, 0, len(statements))
+	for _, statement := range statements {
+		if field, ok := statement.(*ir.RecordField); ok {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+func recordFieldsHaveDefaults(fields []*ir.RecordField) bool {
+	for _, field := range fields {
+		if field.Default != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func recordContractHasDefaults(fields []ir.RecordFieldContract) bool {
+	for _, field := range fields {
+		if field.HasDefault {
+			return true
+		}
+	}
+	return false
+}
+
+func goRecordConstructorName(name string) string {
+	return "TrbRecordNew" + goIdentifier(name, true)
+}
+
+func recordProvidedName(name string) string {
+	return "trb" + goIdentifier(name, true) + "Provided"
 }
 
 func (g *generator) enum(enum *ir.Enum) {
@@ -1546,6 +1619,9 @@ func (g *generator) expr(expression ir.Expression) string {
 				identifier, named := application.Receiver.(*ir.Identifier)
 				if named {
 					if application.Kind == "record" {
+						if recordContractHasDefaults(n.RecordFields) {
+							return g.recordDefaultCall(identifier, application.Arguments, n.Arguments, n.RecordFields)
+						}
 						return g.recordLiteralApplied(identifier, application.Arguments, n.Arguments)
 					}
 					name := "New" + goIdentifier(identifier.Name, true)
@@ -1561,6 +1637,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok {
 				if g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record" {
+					if recordContractHasDefaults(n.RecordFields) {
+						return g.recordDefaultCall(identifier, nil, n.Arguments, n.RecordFields)
+					}
 					return g.recordLiteral(identifier, n.Arguments)
 				}
 				if alias := g.referenceAlias(identifier.Reference); alias != "" {
@@ -2220,6 +2299,48 @@ func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []
 		fields = append(fields, goIdentifier(argument.Name, true)+": "+g.expr(argument.Value))
 	}
 	return name + "[" + strings.Join(items, ", ") + "]{" + strings.Join(fields, ", ") + "}"
+}
+
+func (g *generator) recordDefaultCall(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
+	typeName := goIdentifier(record.Name, true)
+	helper := goRecordConstructorName(record.Name)
+	if alias := g.referenceAlias(record.Reference); alias != "" {
+		typeName = alias + "." + typeName
+		helper = alias + "." + helper
+	}
+	if len(typeArguments) > 0 {
+		items := make([]string, len(typeArguments))
+		for index, argument := range typeArguments {
+			items[index] = g.goType(argument)
+		}
+		applied := "[" + strings.Join(items, ", ") + "]"
+		typeName += applied
+		helper += applied
+	}
+	explicit := map[string]string{}
+	statements := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			continue
+		}
+		g.temporary++
+		name := "trbRecordArg" + strconv.Itoa(g.temporary)
+		statements = append(statements, name+" := "+g.expr(argument.Value))
+		explicit[argument.Name] = name
+	}
+	values := make([]string, 0, len(fields)*2)
+	for _, field := range fields {
+		value, provided := explicit[field.Name]
+		if !provided {
+			value = "*new(" + g.goType(field.Type) + ")"
+		}
+		values = append(values, value)
+		if field.HasDefault {
+			values = append(values, strconv.FormatBool(provided))
+		}
+	}
+	statements = append(statements, "return "+helper+"("+strings.Join(values, ", ")+")")
+	return "func() " + typeName + " { " + strings.Join(statements, "; ") + " }()"
 }
 
 func (g *generator) unionMemberExpression(member *ir.Member) string {

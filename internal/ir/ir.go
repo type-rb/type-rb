@@ -92,6 +92,10 @@ type Import struct {
 	SymbolTypes          map[string]types.Type
 	SymbolParameters     map[string][]callsignature.Parameter
 	SymbolTypeParameters map[string][]string
+	// RecordDefaults identifies imported records whose generated constructor
+	// owns one or more source defaults. TypeScript uses this to retain a value
+	// import for construction while ordinary records remain type-only imports.
+	RecordDefaults map[string]bool
 	// TypeContracts retain the structural declarations referenced by native
 	// package signatures so editor tooling can instantiate their members.
 	TypeContracts map[string]TypeContract
@@ -163,6 +167,7 @@ type RecordField struct {
 	Base
 	Name       string
 	Type       types.Type
+	Default    Expression
 	Attributes []Attribute
 }
 
@@ -180,9 +185,10 @@ func (*Enum) irStatement() {}
 
 type EnumMember struct {
 	Base
-	Name     string
-	Fields   []Parameter
-	RawValue Expression
+	Name       string
+	Fields     []Parameter
+	RawValue   Expression
+	Attributes []Attribute
 }
 
 func (*EnumMember) irStatement() {}
@@ -647,10 +653,17 @@ type Call struct {
 	CallSignature   []callsignature.Parameter
 	Block           *Block
 	Codec           *CodecSchema
+	RecordFields    []RecordFieldContract
 	DeclarationOnly bool
 }
 
 func (*Call) irExpression() {}
+
+type RecordFieldContract struct {
+	Name       string
+	Type       types.Type
+	HasDefault bool
+}
 
 // Lambda is a first-class lexical function. Parameters and result remain
 // target-independent so every backend can emit its native closure form.

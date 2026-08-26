@@ -226,13 +226,25 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("end", "")
 	case *ir.Record:
-		fields := []string{}
+		fields := []*ir.RecordField{}
 		for _, member := range n.Body {
 			if field, ok := member.(*ir.RecordField); ok {
-				fields = append(fields, ":"+field.Name)
+				fields = append(fields, field)
 			}
 		}
-		g.line(n.Name+" = Data.define("+strings.Join(fields, ", ")+")", n.TrailingComment)
+		names := make([]string, len(fields))
+		for index, field := range fields {
+			names[index] = ":" + field.Name
+		}
+		if rubyRecordFieldsHaveDefaults(fields) {
+			g.line(n.Name+" = Data.define("+strings.Join(names, ", ")+") do", n.TrailingComment)
+			g.indent++
+			g.recordDefaultConstructor(fields)
+			g.indent--
+			g.line("end", "")
+		} else {
+			g.line(n.Name+" = Data.define("+strings.Join(names, ", ")+")", n.TrailingComment)
+		}
 	case *ir.Enum:
 		if enumHasPayload(n) {
 			g.payloadEnum(n)
@@ -814,6 +826,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
+		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" && rubyRecordContractHasDefaults(n.RecordFields) {
+			if identifier := rubyRecordIdentifier(member.Receiver); identifier != nil {
+				return g.recordDefaultCall(identifier, n.Arguments, n.RecordFields)
+			}
+		}
 		parts = g.executionArguments(n, parts)
 		callee := g.expr(n.Callee)
 		if n.Callee.ExprType().Kind == types.Function {
@@ -869,6 +886,87 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) recordDefaultConstructor(fields []*ir.RecordField) {
+	parameters := make([]string, 0, len(fields)*2)
+	for _, field := range fields {
+		parameters = append(parameters, field.Name)
+		if field.Default != nil {
+			parameters = append(parameters, "trb_"+field.Name+"_provided")
+		}
+	}
+	g.line("def self.__trb_record_new("+strings.Join(parameters, ", ")+")", "")
+	g.indent++
+	for _, field := range fields {
+		if field.Default != nil {
+			g.line(field.Name+" = "+g.expr(field.Default)+" unless trb_"+field.Name+"_provided", "")
+		}
+	}
+	values := make([]string, len(fields))
+	for index, field := range fields {
+		values[index] = field.Name + ": " + field.Name
+	}
+	g.line("new("+strings.Join(values, ", ")+")", "")
+	g.indent--
+	g.line("end", "")
+}
+
+func rubyRecordFieldsHaveDefaults(fields []*ir.RecordField) bool {
+	for _, field := range fields {
+		if field.Default != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func rubyRecordContractHasDefaults(fields []ir.RecordFieldContract) bool {
+	for _, field := range fields {
+		if field.HasDefault {
+			return true
+		}
+	}
+	return false
+}
+
+func rubyRecordIdentifier(expression ir.Expression) *ir.Identifier {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		return node
+	case *ir.TypeApply:
+		if identifier, ok := node.Receiver.(*ir.Identifier); ok {
+			return identifier
+		}
+	}
+	return nil
+}
+
+func (g *generator) recordDefaultCall(record *ir.Identifier, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
+	explicit := map[string]string{}
+	statements := make([]string, 0, len(arguments)+1)
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			continue
+		}
+		g.temporary++
+		name := "__trb_record_arg_" + strconv.Itoa(g.temporary)
+		statements = append(statements, name+" = "+g.expr(argument.Value))
+		explicit[argument.Name] = name
+	}
+	values := make([]string, 0, len(fields)*2)
+	for _, field := range fields {
+		value, provided := explicit[field.Name]
+		if !provided {
+			value = "nil"
+		}
+		values = append(values, value)
+		if field.HasDefault {
+			values = append(values, strconv.FormatBool(provided))
+		}
+	}
+	statements = append(statements, g.rubyClassName(record.Name, record.Reference)+".__trb_record_new("+strings.Join(values, ", ")+")")
+	return "-> { " + strings.Join(statements, "; ") + " }.call"
 }
 
 func isCheckedIntegerAssignment(operator string) bool {
