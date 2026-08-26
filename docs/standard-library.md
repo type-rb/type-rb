@@ -414,6 +414,14 @@ Array `map`, `select`, and `reduce` are structured language expressions rather
 than target callbacks. See the
 [language guide](language.md#arrays-hashes-and-iteration) for examples.
 
+`Array#concurrent_map` is the import-free bounded I/O-concurrency form. It
+returns block results in input order, uses a portable default limit of 8, and
+accepts an explicit positive named `limit`. Nested calls share the current
+structured task group's capacity. The operation does not imply CPU parallelism
+or special-case `Result`; a Result-returning block produces an Array of Result
+values. See the [language guide](language.md#arrays-hashes-and-iteration) and
+[decision record](decisions/0004-bounded-structured-concurrent-map.md).
+
 ## Logical paths
 
 `trb/std/path` manipulates portable `/`-separated logical paths without

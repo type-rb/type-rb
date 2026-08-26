@@ -302,15 +302,20 @@ type nullableMemberFact struct {
 }
 
 func (s *scope) lookup(name string) (symbol, bool) {
+	value, _, ok := s.lookupOwner(name)
+	return value, ok
+}
+
+func (s *scope) lookupOwner(name string) (symbol, *scope, bool) {
 	for current := s; current != nil; current = current.parent {
 		if value, ok := current.values[name]; ok {
 			if value.pending != nil && value.pending.resolved.Kind != "" {
 				value.typ = value.pending.resolved
 			}
-			return value, true
+			return value, current, true
 		}
 	}
-	return symbol{}, false
+	return symbol{}, nil, false
 }
 
 func (s *scope) markUsed(name string) {
@@ -469,6 +474,8 @@ type Checker struct {
 	pendingExpressions          map[ast.Expression]*pendingEmptyCollection
 	callbackScopes              []*scope
 	pendingEmptyCollections     int
+	concurrentBlockScopes       []*scope
+	concurrentFunctions         map[*ast.MethodStatement]bool
 }
 
 // resultBoundary is the lexical destination for prefix try. A boundary entry
@@ -639,6 +646,7 @@ func expressionHasFreshEmptyMutableCollection(expression ast.Expression) bool {
 		return expressionHasFreshEmptyMutableCollection(node.Source) ||
 			expressionHasFreshEmptyMutableCollection(node.SliceSize) ||
 			expressionHasFreshEmptyMutableCollection(node.Initial) ||
+			expressionHasFreshEmptyMutableCollection(node.Limit) ||
 			node.Block != nil && statementsHaveFreshEmptyMutableCollection(node.Block.Body)
 	case *ast.InterpolatedString:
 		for _, part := range node.Parts {
@@ -780,6 +788,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		runnableMain:           options.RunnableMain,
 		aliasCycles:            map[string]bool{},
 		declarationCalls:       map[*ast.CallExpression]string{},
+		concurrentFunctions:    map[*ast.MethodStatement]bool{},
 	}
 }
 
@@ -800,6 +809,7 @@ func (c *Checker) checkProgram(program *ast.Program, checkUnusedImports bool) {
 			c.functions[method.Name] = method
 		}
 	}
+	c.findConcurrentFunctions(program.Statements)
 	c.collect(program.Statements)
 	if !c.inferenceOnly {
 		c.validateTypeReferences(program.Statements, nil)
@@ -807,6 +817,154 @@ func (c *Checker) checkProgram(program *ast.Program, checkUnusedImports bool) {
 	c.checkStatements(program.Statements, &scope{values: map[string]symbol{}, constantsAllowed: true, enumsAllowed: true})
 	if checkUnusedImports && !c.allowUnusedImports {
 		c.checkUnusedImports(program.Statements)
+	}
+}
+
+func (c *Checker) findConcurrentFunctions(statements []ast.Statement) {
+	reached := map[string]bool{}
+	collectConcurrentCallsFromStatements(statements, false, reached)
+	for changed := true; changed; {
+		changed = false
+		for name := range reached {
+			method := c.functions[name]
+			if method == nil || c.concurrentFunctions[method] {
+				continue
+			}
+			c.concurrentFunctions[method] = true
+			before := len(reached)
+			collectConcurrentCallsFromStatements(method.Body, true, reached)
+			changed = changed || len(reached) != before
+		}
+	}
+}
+
+func collectConcurrentCallsFromStatements(statements []ast.Statement, concurrent bool, calls map[string]bool) {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ast.MethodStatement:
+			collectConcurrentCallsFromStatements(node.Body, false, calls)
+		case *ast.ClassStatement:
+			collectConcurrentCallsFromStatements(node.Body, false, calls)
+		case *ast.ModuleStatement:
+			collectConcurrentCallsFromStatements(node.Body, false, calls)
+		case *ast.NativeBlock:
+			collectConcurrentCallsFromStatements(node.Body, concurrent, calls)
+		case *ast.VariableStatement:
+			collectConcurrentCallsFromExpression(node.Value, concurrent, calls)
+		case *ast.AssignmentStatement:
+			collectConcurrentCallsFromExpression(node.Target, concurrent, calls)
+			collectConcurrentCallsFromExpression(node.Value, concurrent, calls)
+		case *ast.ReturnStatement:
+			collectConcurrentCallsFromExpression(node.Value, concurrent, calls)
+		case *ast.ExpressionStatement:
+			collectConcurrentCallsFromExpression(node.Expression, concurrent, calls)
+		case *ast.IfStatement:
+			collectConcurrentCallsFromExpression(node.Condition, concurrent, calls)
+			collectConcurrentCallsFromStatements(node.Then, concurrent, calls)
+			for _, branch := range node.ElseIf {
+				collectConcurrentCallsFromExpression(branch.Condition, concurrent, calls)
+				collectConcurrentCallsFromStatements(branch.Body, concurrent, calls)
+			}
+			collectConcurrentCallsFromStatements(node.Else, concurrent, calls)
+		case *ast.CaseStatement:
+			collectConcurrentCallsFromStatements(node.Leading, concurrent, calls)
+			collectConcurrentCallsFromExpression(node.Value, concurrent, calls)
+			for _, branch := range node.Branches {
+				collectConcurrentCallsFromExpression(branch.Value, concurrent, calls)
+				for _, alternative := range branch.Alternatives {
+					collectConcurrentCallsFromExpression(alternative, concurrent, calls)
+				}
+				collectConcurrentCallsFromStatements(branch.Body, concurrent, calls)
+			}
+			collectConcurrentCallsFromStatements(node.Else, concurrent, calls)
+		case *ast.WhileStatement:
+			collectConcurrentCallsFromExpression(node.Condition, concurrent, calls)
+			collectConcurrentCallsFromStatements(node.Body, concurrent, calls)
+		}
+	}
+}
+
+func collectConcurrentCallsFromExpression(expression ast.Expression, concurrent bool, calls map[string]bool) {
+	if expression == nil {
+		return
+	}
+	switch node := expression.(type) {
+	case *ast.CallExpression:
+		if concurrent {
+			if name := directFunctionCallName(node.Callee); name != "" {
+				calls[name] = true
+			}
+		}
+		collectConcurrentCallsFromExpression(node.Callee, concurrent, calls)
+		for _, argument := range node.Arguments {
+			collectConcurrentCallsFromExpression(argument.Value, concurrent, calls)
+		}
+		if node.Block != nil {
+			collectConcurrentCallsFromStatements(node.Block.Body, concurrent, calls)
+		}
+	case *ast.IterationExpression:
+		collectConcurrentCallsFromExpression(node.Source, concurrent, calls)
+		collectConcurrentCallsFromExpression(node.SliceSize, concurrent, calls)
+		collectConcurrentCallsFromExpression(node.Initial, concurrent, calls)
+		collectConcurrentCallsFromExpression(node.Limit, concurrent, calls)
+		if node.Block != nil {
+			collectConcurrentCallsFromStatements(node.Block.Body, concurrent || node.Operation == "concurrent_map", calls)
+		}
+	case *ast.IfStatement:
+		collectConcurrentCallsFromStatements([]ast.Statement{node}, concurrent, calls)
+	case *ast.CaseStatement:
+		collectConcurrentCallsFromStatements([]ast.Statement{node}, concurrent, calls)
+	case *ast.LambdaExpression:
+		collectConcurrentCallsFromStatements(node.Body, concurrent, calls)
+	case *ast.ArrayLiteral:
+		for _, element := range node.Elements {
+			collectConcurrentCallsFromExpression(element, concurrent, calls)
+		}
+	case *ast.HashLiteral:
+		for _, entry := range node.Entries {
+			collectConcurrentCallsFromExpression(entry.Key, concurrent, calls)
+			collectConcurrentCallsFromExpression(entry.Value, concurrent, calls)
+		}
+	case *ast.InterpolatedString:
+		for _, part := range node.Parts {
+			collectConcurrentCallsFromExpression(part.Expression, concurrent, calls)
+		}
+	case *ast.UnaryExpression:
+		collectConcurrentCallsFromExpression(node.Operand, concurrent, calls)
+	case *ast.BinaryExpression:
+		collectConcurrentCallsFromExpression(node.Left, concurrent, calls)
+		collectConcurrentCallsFromExpression(node.Right, concurrent, calls)
+	case *ast.RangeExpression:
+		collectConcurrentCallsFromExpression(node.Start, concurrent, calls)
+		collectConcurrentCallsFromExpression(node.End, concurrent, calls)
+	case *ast.TryExpression:
+		collectConcurrentCallsFromExpression(node.Value, concurrent, calls)
+	case *ast.CatchExpression:
+		collectConcurrentCallsFromExpression(node.Value, concurrent, calls)
+		collectConcurrentCallsFromStatements(node.Body, concurrent, calls)
+	case *ast.AttemptExpression:
+		collectConcurrentCallsFromExpression(node.Value, concurrent, calls)
+		collectConcurrentCallsFromStatements(node.Body, concurrent, calls)
+	case *ast.GenericExpression:
+		collectConcurrentCallsFromExpression(node.Receiver, concurrent, calls)
+	case *ast.MemberExpression:
+		collectConcurrentCallsFromExpression(node.Receiver, concurrent, calls)
+	case *ast.IndexExpression:
+		collectConcurrentCallsFromExpression(node.Receiver, concurrent, calls)
+		collectConcurrentCallsFromExpression(node.Index, concurrent, calls)
+	case *ast.BlockExpression:
+		collectConcurrentCallsFromStatements(node.Body, concurrent, calls)
+	}
+}
+
+func directFunctionCallName(expression ast.Expression) string {
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		return node.Name
+	case *ast.GenericExpression:
+		return directFunctionCallName(node.Receiver)
+	default:
+		return ""
 	}
 }
 
@@ -913,6 +1071,7 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression, ty
 		c.validateExpressionTypeReferences(node.Source, typeParameters)
 		c.validateExpressionTypeReferences(node.SliceSize, typeParameters)
 		c.validateExpressionTypeReferences(node.Initial, typeParameters)
+		c.validateExpressionTypeReferences(node.Limit, typeParameters)
 		if node.Block != nil {
 			c.validateTypeReferences(node.Block.Body, typeParameters)
 		}
@@ -1586,6 +1745,11 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			c.result.Variables[n] = variableType
 		case *ast.AssignmentStatement:
+			if root := c.currentConcurrentBlockScope(); root != nil {
+				if name, outer := concurrentAssignmentRoot(n.Target, sc, root); outer {
+					c.error(n.Target.Span(), fmt.Sprintf("concurrent_map cannot assign to outer binding %s", name))
+				}
+			}
 			leftType := c.checkExpression(n.Target, sc)
 			if identifier, ok := n.Target.(*ast.Identifier); ok {
 				if value, exists := sc.lookup(identifier.Name); exists && value.declared.Kind != "" {
@@ -4240,7 +4404,13 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	if method.Name == "initialize" && c.current != nil {
 		c.initializing++
 	}
+	if c.concurrentFunctions[method] {
+		c.concurrentBlockScopes = append(c.concurrentBlockScopes, methodScope)
+	}
 	c.checkStatements(method.Body, methodScope)
+	if c.concurrentFunctions[method] {
+		c.concurrentBlockScopes = c.concurrentBlockScopes[:len(c.concurrentBlockScopes)-1]
+	}
 	if c.interfaceDepth == 0 && returnType.Kind != types.Void && c.statementsFallThrough(method.Body) && !c.hasNativeImplicitReturn(method.Body) {
 		c.error(method.Span(), fmt.Sprintf("%s() must return %s on every path", method.Name, returnType))
 	}
@@ -5215,8 +5385,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = invalidType()
 			break
 		}
-		if value, ok := sc.lookup(n.Name); ok {
+		if value, owner, ok := sc.lookupOwner(n.Name); ok {
 			typ = value.typ
+			if root := c.currentConcurrentBlockScope(); root != nil && !scopeWithin(owner, root) {
+				switch {
+				case !c.concurrencySafeType(value.typ, map[string]bool{}):
+					c.error(n.Span(), fmt.Sprintf("concurrent_map cannot capture %s because %s is not concurrency-safe", n.Name, value.typ))
+				}
+			}
 			if c.inferenceOnly && value.pending != nil && value.pending.resolved.Kind == "" && !value.pending.blocked {
 				c.pendingExpressions[n] = value.pending
 				if c.pendingCollectionIsCaptured(value.pending) {
@@ -5425,7 +5601,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.IterationExpression:
 		predicate := n.Operation == "any?" || n.Operation == "all?" || n.Operation == "none?" || n.Operation == "find" || n.Operation == "find_index"
 		sortBy := n.Operation == "sort_by" || n.Operation == "sort_by_descending"
-		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce" || predicate || sortBy
+		transform := n.Operation == "map" || n.Operation == "concurrent_map" || n.Operation == "select" || n.Operation == "reduce" || predicate || sortBy
 		sourceType := c.checkExpression(n.Source, sc)
 		if sourceType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
@@ -5447,6 +5623,28 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if !iterable {
 			c.error(n.Source.Span(), fmt.Sprintf("%s is not iterable", sourceType))
 			elementType = types.Type{Kind: types.Any, Name: "Any"}
+		}
+		if n.Operation == "concurrent_map" {
+			if len(c.returns) == 0 && !c.interactiveTopLevel {
+				c.error(n.Span(), "concurrent_map is only available inside a function or method")
+			}
+			if sourceType.Kind != types.Array {
+				c.error(n.Source.Span(), fmt.Sprintf("concurrent_map is available only on Array, got %s", sourceType))
+			}
+			if n.WithIndex {
+				c.error(n.Span(), "concurrent_map.with_index is not supported")
+			}
+			if n.Limit != nil {
+				limitType := c.checkExpression(n.Limit, sc)
+				if scalarType(limitType).Kind != types.Int {
+					c.error(n.Limit.Span(), fmt.Sprintf("concurrent_map limit must be Integer, got %s", limitType))
+				}
+				if literal, ok := n.Limit.(*ast.Literal); ok {
+					if limit, valid := integerLiteral(literal.Raw); valid && limit <= 0 {
+						c.error(n.Limit.Span(), "concurrent_map limit must be greater than zero")
+					}
+				}
+			}
 		}
 		hashEach := hashSource && n.Operation == "each"
 		if hashSource && !hashEach {
@@ -5528,6 +5726,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if transform {
 				c.valueTransformDepth++
 			}
+			if n.Operation == "concurrent_map" {
+				c.concurrentBlockScopes = append(c.concurrentBlockScopes, blockScope)
+			}
 			if transform {
 				blockType := types.Type{Kind: types.Any, Name: "Any"}
 				var resultExpression ast.Expression
@@ -5559,7 +5760,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 				c.result.Expressions[n.Block] = blockType
 				switch n.Operation {
-				case "map":
+				case "map", "concurrent_map":
 					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{blockType}}
 				case "select", "any?", "all?", "none?", "find", "find_index":
 					if resultExpression != nil && (blockType.Kind != types.Bool || blockType.Nullable) {
@@ -5595,6 +5796,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			if transform {
 				c.valueTransformDepth--
+			}
+			if n.Operation == "concurrent_map" {
+				c.concurrentBlockScopes = c.concurrentBlockScopes[:len(c.concurrentBlockScopes)-1]
 			}
 		}
 		if !transform {
@@ -5835,6 +6039,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee--
 		}
+		c.checkConcurrentNativeCall(n.Callee)
 		if c.declarationOnlyClassBodyCall(n) {
 			c.result.DeclarationOnlyCalls[n] = true
 		}
@@ -6192,6 +6397,21 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	}
 	c.result.Expressions[expression] = typ
 	return typ
+}
+
+func (c *Checker) checkConcurrentNativeCall(callee ast.Expression) {
+	if c.currentConcurrentBlockScope() == nil {
+		return
+	}
+	reference := callee
+	if generic, ok := callee.(*ast.GenericExpression); ok {
+		reference = generic.Receiver
+	}
+	binding, exists := c.result.References[reference]
+	if !exists || binding.Export == nil || binding.Export.Runtime == nil || binding.Export.Runtime.PropagatesExecutionScope {
+		return
+	}
+	c.error(callee.Span(), fmt.Sprintf("native function %s has no concurrency-safe execution-scope contract", binding.Name))
 }
 
 func jsxRenderableType(typ, nodeType types.Type) bool {
@@ -6577,6 +6797,9 @@ func expressionEscapingTransform(expression ast.Expression, loopDepth int) ast.S
 			return result
 		}
 		if result := expressionEscapingTransform(node.Initial, loopDepth); result != nil {
+			return result
+		}
+		if result := expressionEscapingTransform(node.Limit, loopDepth); result != nil {
 			return result
 		}
 		if node.Block != nil {
@@ -7058,6 +7281,114 @@ func isReferenceType(typ types.Type) bool {
 	default:
 		return false
 	}
+}
+
+func (c *Checker) currentConcurrentBlockScope() *scope {
+	if len(c.concurrentBlockScopes) == 0 {
+		return nil
+	}
+	return c.concurrentBlockScopes[len(c.concurrentBlockScopes)-1]
+}
+
+func scopeWithin(candidate, root *scope) bool {
+	for current := candidate; current != nil; current = current.parent {
+		if current == root {
+			return true
+		}
+	}
+	return false
+}
+
+func concurrentAssignmentRoot(expression ast.Expression, sc, root *scope) (string, bool) {
+	var identifier *ast.Identifier
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		identifier = node
+	case *ast.MemberExpression:
+		return concurrentAssignmentRoot(node.Receiver, sc, root)
+	case *ast.IndexExpression:
+		return concurrentAssignmentRoot(node.Receiver, sc, root)
+	default:
+		return "", false
+	}
+	_, owner, exists := sc.lookupOwner(identifier.Name)
+	return identifier.Name, exists && !scopeWithin(owner, root)
+}
+
+// concurrencySafeType is intentionally conservative. A concurrent block may
+// read scalar/value data from its lexical parent, while outer assignment is
+// rejected separately. Containers, functions, Any, and class/interface
+// instances require an explicit concurrency-safety contract that TypeRB does
+// not expose yet.
+func (c *Checker) concurrencySafeType(typ types.Type, visiting map[string]bool) bool {
+	typ = c.expandAlias(typ, map[string]bool{})
+	if typ.Nullable {
+		typ.Nullable = false
+	}
+	if typ.Kind == types.Union {
+		for _, alternative := range typ.Args {
+			if !c.concurrencySafeType(alternative, visiting) {
+				return false
+			}
+		}
+		return true
+	}
+	switch typ.Kind {
+	case types.Nil, types.Bool, types.Int, types.IntLiteral, types.Float, types.String, types.StringLiteral, types.Bytes, types.Void:
+		return true
+	case types.Range:
+		return len(typ.Args) == 1 && c.concurrencySafeType(typ.Args[0], visiting)
+	case types.Named:
+		if target, binding, newtype := c.newtypeDefinition(typ.Name); newtype {
+			if visiting[typ.Name] {
+				return false
+			}
+			visiting[typ.Name] = true
+			parameters := c.declaredTypes[typ.Name].typeParameters
+			if binding != nil && binding.Export != nil {
+				parameters = binding.Export.TypeParameters
+			}
+			target = substituteType(target, typeSubstitutions(parameters, typ.Args))
+			safe := c.concurrencySafeType(target, visiting)
+			delete(visiting, typ.Name)
+			return safe
+		}
+		if visiting[typ.Name] {
+			return false
+		}
+		if fields, _, binding, record := c.codecRecord(typ.Name); record {
+			visiting[typ.Name] = true
+			parameters := []string{}
+			if local := c.records[typ.Name]; local != nil {
+				parameters = local.typeParameters
+			} else if binding != nil && binding.Export != nil {
+				parameters = binding.Export.TypeParameters
+			}
+			substitutions := typeSubstitutions(parameters, typ.Args)
+			for _, field := range fields {
+				if !c.concurrencySafeType(substituteType(field.Type, substitutions), visiting) {
+					delete(visiting, typ.Name)
+					return false
+				}
+			}
+			delete(visiting, typ.Name)
+			return true
+		}
+		if variants, enum := c.enumVariants(typ); enum {
+			visiting[typ.Name] = true
+			for _, variant := range variants {
+				for _, field := range variant.Fields {
+					if !c.concurrencySafeType(field.Type, visiting) {
+						delete(visiting, typ.Name)
+						return false
+					}
+				}
+			}
+			delete(visiting, typ.Name)
+			return true
+		}
+	}
+	return false
 }
 
 func portableHashKey(typ types.Type) bool {

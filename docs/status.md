@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -120,6 +120,16 @@ expression. Their structured typed IR runs the same block scope in generated
 Go, Ruby, TypeScript, and the REPL. TypeScript lowers a transformation that
 reaches a suspending platform operation to a sequential async loop without
 adding `async` or `await` to TypeRB source.
+
+Arrays also provide import-free `concurrent_map` for bounded I/O fan-out. Its
+fixed portable default is 8, an explicit positive `limit` can replace or
+locally reduce that capacity, nested maps share one structured task group, and
+results retain input order. Lowering uses bounded workers in Go, Ruby,
+TypeScript, and the REPL; cancellation stops admission, reaches supported
+active operations through the hidden execution scope, and all admitted work is
+collected before return. The checker rejects outer assignment and unsafe
+lexical captures. Result aggregation, heterogeneous task APIs, streaming, and
+CPU-parallel guarantees are not included.
 
 Integer and String literal types support status- and kind-indexed data.
 Exhaustive `case` over a readonly literal field narrows the complete record or

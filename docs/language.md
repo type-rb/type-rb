@@ -800,6 +800,33 @@ ordinary statements and must end with the expression that produces its value.
 The block locals are evaluated separately for each element. First-class `fn`
 values are available independently.
 
+Use `concurrent_map` for bounded I/O fan-out without importing a package or
+writing task-management code:
+
+```trb
+pages := urls.concurrent_map do |url|
+	fetch_page(url)
+end
+
+thumbnails := images.concurrent_map(limit: 4) do |image|
+	create_thumbnail(image)
+end
+```
+
+The result keeps input order even when element work finishes in another order.
+At most 8 element blocks are active when `limit` is omitted. An explicit
+positive `limit` changes that bound. Nested calls share the outer task group's
+capacity instead of multiplying it. The call waits for all of its child work,
+and cancellation is propagated cooperatively through supported I/O APIs.
+
+`concurrent_map` returns the block values unchanged. A block returning
+`Result<Page, FetchError>` therefore produces
+`Array<Result<Page, FetchError>>`; it does not aggregate errors. The block
+cannot assign an outer binding or capture mutable containers and class
+instances. Keep per-element mutation in values created inside the block, and
+pass shared service access through package operations that support the hidden
+execution scope. CPU parallelism is not promised.
+
 `any?`, `all?`, and `none?` short-circuit and require a non-nullable Boolean
 result. On an empty Array, they return `false`, `true`, and `true`,
 respectively. `find` and `find_index` use the same predicate and stop at the

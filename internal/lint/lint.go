@@ -393,6 +393,7 @@ func walkExpression(expression ast.Expression, visit func(*ast.IfStatement)) {
 		walkExpression(node.Source, visit)
 		walkExpression(node.SliceSize, visit)
 		walkExpression(node.Initial, visit)
+		walkExpression(node.Limit, visit)
 		if node.Block != nil {
 			walkStatements(node.Block.Body, visit)
 		}

@@ -465,6 +465,7 @@ type Transform struct {
 	Source      Expression
 	Operation   string
 	Initial     Expression
+	Limit       Expression
 	WithIndex   bool
 	Item        string
 	Index       string

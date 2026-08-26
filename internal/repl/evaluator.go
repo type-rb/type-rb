@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -147,6 +148,14 @@ type scope struct {
 	values  map[string]Value
 	mutable map[string]bool
 }
+
+type replConcurrencyGroup struct {
+	permits  chan struct{}
+	capacity int
+}
+
+const replConcurrencyGroupBinding = "\x00trb_concurrency_group"
+const replConcurrencyHeldBinding = "\x00trb_concurrency_held"
 
 func (s *scope) get(name string) (Value, bool) {
 	for current := s; current != nil; current = current.parent {
@@ -1138,6 +1147,9 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 	if err != nil {
 		return Value{}, err
 	}
+	if node.Operation == "concurrent_map" {
+		return e.concurrentMap(node, items, module, sc)
+	}
 	if node.Operation == "reduce" {
 		accumulator, err := e.expression(node.Initial, module, sc)
 		if err != nil {
@@ -1256,6 +1268,108 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 	}
 	if node.Operation == "find" || node.Operation == "find_index" {
 		return Value{Type: node.ExprType(), Data: nil}, nil
+	}
+	return Value{Type: node.ExprType(), Data: result}, nil
+}
+
+func (e *Evaluator) concurrentMap(node *ir.Transform, items []Value, module string, sc *scope) (Value, error) {
+	requested := int64(8)
+	if node.Limit != nil {
+		limit, err := e.expression(node.Limit, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		var ok bool
+		requested, ok = limit.Data.(int64)
+		if !ok {
+			return Value{}, errors.New("concurrent_map limit must be Integer")
+		}
+	}
+	if requested <= 0 {
+		return Value{}, errors.New("concurrent_map limit must be greater than zero")
+	}
+	var group *replConcurrencyGroup
+	if value, exists := sc.get(replConcurrencyGroupBinding); exists {
+		group, _ = value.Data.(*replConcurrencyGroup)
+	}
+	if group == nil {
+		group = &replConcurrencyGroup{permits: make(chan struct{}, int(requested)), capacity: int(requested)}
+		sc = &scope{parent: sc, values: map[string]Value{
+			replConcurrencyGroupBinding: {Data: group},
+		}}
+	}
+	localLimit := group.capacity
+	if node.Limit != nil && int(requested) < localLimit {
+		localLimit = int(requested)
+	}
+	held := false
+	if value, exists := sc.get(replConcurrencyHeldBinding); exists {
+		held, _ = value.Data.(bool)
+	}
+	if held {
+		<-group.permits
+		defer func() { group.permits <- struct{}{} }()
+	}
+	result := &arrayValue{Items: make([]Value, len(items))}
+	workerCount := localLimit
+	if len(items) < workerCount {
+		workerCount = len(items)
+	}
+	var nextMutex sync.Mutex
+	nextIndex := 0
+	var errorMutex sync.Mutex
+	var firstError error
+	cancelled := false
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for worker := 0; worker < workerCount; worker++ {
+		go func() {
+			defer workers.Done()
+			for {
+				if err := e.checkContext(); err != nil {
+					errorMutex.Lock()
+					if firstError == nil {
+						firstError = err
+					}
+					cancelled = true
+					errorMutex.Unlock()
+					return
+				}
+				nextMutex.Lock()
+				errorMutex.Lock()
+				stopped := cancelled
+				errorMutex.Unlock()
+				if stopped || nextIndex >= len(items) {
+					nextMutex.Unlock()
+					return
+				}
+				index := nextIndex
+				nextIndex++
+				nextMutex.Unlock()
+				group.permits <- struct{}{}
+				iterationScope := &scope{parent: sc, values: map[string]Value{
+					node.Item:                   items[index],
+					replConcurrencyGroupBinding: {Data: group},
+					replConcurrencyHeldBinding:  {Data: true},
+				}}
+				value, err := e.transformResult(node, module, iterationScope)
+				<-group.permits
+				if err != nil {
+					errorMutex.Lock()
+					if firstError == nil {
+						firstError = err
+					}
+					cancelled = true
+					errorMutex.Unlock()
+					return
+				}
+				result.Items[index] = value
+			}
+		}()
+	}
+	workers.Wait()
+	if firstError != nil {
+		return Value{}, firstError
 	}
 	return Value{Type: node.ExprType(), Data: result}, nil
 }
