@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.41 - 2026-08-26
+
+### Tooling
+
+- `trb test` now reports failures to start the selected target runtime, such as
+  a missing executable, instead of exiting without an explanation. Test
+  programs that start and report their own failures retain concise output.
+  ([#556](https://github.com/type-rb/type-rb/pull/556))
+
 ## 0.3.40 - 2026-08-26
 
 ### Standard library
