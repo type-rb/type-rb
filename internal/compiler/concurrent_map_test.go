@@ -422,6 +422,30 @@ end`,
 			message: "offsets because Array<Integer> is not concurrency-safe",
 		},
 		{
+			name: "interface dispatch has no safety contract",
+			source: `interface Counter
+	add(): Integer
+end
+
+def transform(values: Array<Counter>): Array<Integer>
+	return values.concurrent_map do |counter|
+		counter.add()
+	end
+end`,
+			message: "concurrent_map cannot call interface method add without an explicit concurrency-safety contract",
+		},
+		{
+			name: "function value has no safety contract",
+			source: `alias Mapper = (Integer) -> Integer
+
+def transform(values: Array<Mapper>): Array<Integer>
+	return values.concurrent_map do |callable|
+		callable(1)
+	end
+end`,
+			message: "concurrent_map cannot call a function value without an explicit concurrency-safety contract",
+		},
+		{
 			name: "helper reaches shared mutation",
 			source: `mut shared := 0
 
@@ -437,6 +461,103 @@ def transform(values: Array<Integer>): Array<Integer>
 end`,
 			message: "concurrent_map cannot assign to outer binding shared",
 		},
+		{
+			name: "class method reaches shared mutation",
+			source: `mut shared := 0
+
+class Counter
+	def self.add(value: Integer): Integer
+		shared += value
+		return shared
+	end
+end
+
+def transform(values: Array<Integer>): Array<Integer>
+	return values.concurrent_map do |value|
+		Counter.add(value)
+	end
+end`,
+			message: "concurrent_map cannot assign to outer binding shared",
+		},
+		{
+			name: "module method reaches shared mutation",
+			source: `mut shared := 0
+
+module Counter
+	def self.add(value: Integer): Integer
+		shared += value
+		return shared
+	end
+end
+
+def transform(values: Array<Integer>): Array<Any>
+	return values.concurrent_map do |value|
+		Counter.add(value)
+	end
+end`,
+			message: "concurrent_map cannot assign to outer binding shared",
+		},
+		{
+			name: "instance method reaches shared mutation",
+			source: `mut shared := 0
+
+class Counter
+	def add(): Integer
+		shared += 1
+		return shared
+	end
+end
+
+def transform(values: Array<Counter>): Array<Integer>
+	return values.concurrent_map do |counter|
+		counter.add()
+	end
+end`,
+			message: "concurrent_map cannot assign to outer binding shared",
+		},
+		{
+			name: "constructor reaches shared mutation",
+			source: `mut shared := 0
+
+class Counter
+	@value: Integer
+
+	def initialize(value: Integer)
+		@value = value
+		shared += value
+		return
+	end
+end
+
+def transform(values: Array<Integer>): Array<Counter>
+	return values.concurrent_map do |value|
+		Counter.new(value)
+	end
+end`,
+			message: "concurrent_map cannot assign to outer binding shared",
+		},
+		{
+			name: "transitive class method reaches shared mutation",
+			source: `mut shared := 0
+
+class Counter
+	def self.add(value: Integer): Integer
+		shared += value
+		return shared
+	end
+end
+
+def relay(value: Integer): Integer
+	return Counter.add(value)
+end
+
+def transform(values: Array<Integer>): Array<Integer>
+	return values.concurrent_map do |value|
+		relay(value)
+	end
+end`,
+			message: "concurrent_map cannot assign to outer binding shared",
+		},
 	}
 
 	for _, test := range tests {
@@ -448,5 +569,33 @@ end`,
 				}
 			}
 		})
+	}
+}
+
+func TestConcurrentMapAllowsTaskOwnedInstanceMutation(t *testing.T) {
+	source := []byte(`class Counter
+	@value: Integer
+
+	def initialize(value: Integer)
+		@value = value
+		return
+	end
+
+	def increment(): Integer
+		@value += 1
+		return @value
+	end
+end
+
+def transform(values: Array<Counter>): Array<Integer>
+	return values.concurrent_map do |counter|
+		counter.increment()
+	end
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("owned_concurrent_counter.trb", source, mode); err != nil {
+			t.Fatalf("%s rejected task-owned instance mutation: %v", mode, err)
+		}
 	}
 }

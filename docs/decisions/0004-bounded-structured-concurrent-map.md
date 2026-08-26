@@ -63,11 +63,14 @@ Assignment to an outer binding is rejected. Lexical captures are initially
 limited to concurrency-safe values: scalars, Bytes, Ranges, and
 recursively safe records, enums, newtypes, nullable values, and unions.
 Mutable containers, function values, `Any`, StringBuilder, and class or
-interface instances cannot be captured. Same-module authored helper calls are
-checked transitively for shared lexical mutation. A native function used in a
-concurrent block must participate in the compiler-owned execution-scope
-contract; package-owned native handles need a future explicit safety contract
-before they can be captured.
+interface instances cannot be captured. Calls to same-module authored
+top-level functions, module or class methods, instance methods, and
+constructors are followed transitively and checked for shared lexical
+mutation. Calls through interface-typed receivers or function values are
+rejected until they can carry an explicit concurrency-safety contract. A native
+function used in a concurrent block must participate in the compiler-owned
+execution-scope contract; package-owned native handles need a future explicit
+safety contract before they can be captured.
 
 ## Consequences
 

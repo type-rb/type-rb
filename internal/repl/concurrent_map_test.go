@@ -13,7 +13,9 @@ func TestEvaluateCompiledConcurrentMapAcrossModes(t *testing.T) {
 		Filename: "/project/.trb-repl.trb", ModulePath: "__trb_repl__", Package: "main",
 		Source: []byte(`result := [1, 2].concurrent_map(limit: 2) do |outer|
 	[1, 2].concurrent_map(limit: 2) do |inner|
-		outer * 10 + inner
+		mut local := outer * 10
+		local += inner
+		local
 	end
 end
 result
@@ -50,6 +52,9 @@ result
 			}
 			if got, want := Inspect(result.Value), `[[11, 12], [21, 22]]`; !result.Display || got != want {
 				t.Fatalf("%s concurrent_map evaluation=%s display=%t, want %s", mode, got, result.Display, want)
+			}
+			if _, leaked := evaluator.moduleValue[symbolKey(source.ModulePath, "local")]; leaked {
+				t.Fatalf("%s concurrent_map leaked a lexical binding into module values", mode)
 			}
 		})
 	}

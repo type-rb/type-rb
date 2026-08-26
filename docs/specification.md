@@ -819,10 +819,13 @@ concurrency-safe scalars, Bytes, Ranges, and recursively safe records, enums,
 newtypes, nullable values, and unions. Arrays, Hashes, StringBuilder, function
 values, `Any`, classes, and interfaces are not concurrency-safe captures.
 Element bindings and values created inside one element evaluation are
-task-owned. Same-module authored helper calls are checked transitively for
-shared lexical mutation. Native calls from the block must propagate the
-compiler-owned execution scope. Explicit safety contracts for captured
-package-owned handles remain deferred.
+task-owned. Calls to same-module authored top-level functions, module or class
+methods, instance methods, and constructors are followed transitively and
+checked for shared lexical mutation. Calls through interface-typed receivers or
+function values require an explicit concurrency-safety contract; no authored
+contract syntax exists yet, so those calls are rejected. Native calls from the
+block must propagate the compiler-owned execution scope. Explicit safety
+contracts for captured package-owned handles remain deferred.
 
 Array sorting is stable and non-destructive. `sort()` and
 `sort_descending()` use the element's portable natural order. `sort_by` and

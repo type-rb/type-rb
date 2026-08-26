@@ -147,6 +147,11 @@ type scope struct {
 	parent  *scope
 	values  map[string]Value
 	mutable map[string]bool
+	// persistent scopes mirror authored bindings into moduleValue so later REPL
+	// submissions and loaded project modules can resolve them. Lexical scopes
+	// must never write that shared session map, especially from concurrent_map
+	// workers.
+	persistent bool
 }
 
 type replConcurrencyGroup struct {
@@ -167,14 +172,14 @@ func (s *scope) get(name string) (Value, bool) {
 	return Value{}, false
 }
 
-func (s *scope) assign(name string, value Value) bool {
+func (s *scope) assign(name string, value Value) *scope {
 	for current := s; current != nil; current = current.parent {
 		if _, ok := current.values[name]; ok {
 			current.values[name] = value
-			return true
+			return current
 		}
 	}
-	return false
+	return nil
 }
 
 func (s *scope) declare(name string, value Value, mutable bool) {
@@ -209,7 +214,7 @@ func NewEvaluator(stdout io.Writer, mode string) *Evaluator {
 		stdout:           stdout,
 		mode:             mode,
 		context:          context.Background(),
-		global:           &scope{values: map[string]Value{}},
+		global:           &scope{values: map[string]Value{}, persistent: true},
 		definitions:      map[string]any{},
 		moduleValue:      map[string]Value{},
 		runtimeProviders: newRuntimeProviders(),
@@ -239,7 +244,7 @@ func (e *Evaluator) LoadProject(programs []*ir.Program, sessionModule string) er
 }
 
 func (e *Evaluator) loadProjectValues(statements []ir.Statement, module string) error {
-	projectScope := &scope{parent: e.global, values: map[string]Value{}}
+	projectScope := &scope{parent: e.global, values: map[string]Value{}, persistent: true}
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Variable:
@@ -511,7 +516,9 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		}
 		value.Type = node.Type
 		sc.declare(node.Name, value, node.Mutable)
-		e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))] = value
+		if sc.persistent {
+			e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))] = value
+		}
 		return flowResult{Result: Result{Value: value, Display: true, MutableBinding: node.Mutable}}, nil
 	case *ir.Temporary:
 		// Compiler-owned temporaries are assigned by a following control-flow
@@ -677,7 +684,9 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 	if node.Result.Variable != nil {
 		variable := node.Result.Variable
 		sc.values[variable.Name] = value
-		e.moduleValue[symbolKey(module, ownedName(variable.Owner, variable.Name))] = value
+		if sc.persistent {
+			e.moduleValue[symbolKey(module, ownedName(variable.Owner, variable.Name))] = value
+		}
 		return flowResult{Result: Result{Value: value, Display: true}}, nil
 	}
 	if node.Result.Target != nil {
@@ -1526,7 +1535,9 @@ func (e *Evaluator) runtimeIterate(node *ir.Iterate, source Value, module string
 	if node.Result.Variable != nil {
 		variable := node.Result.Variable
 		sc.values[variable.Name] = value
-		e.moduleValue[symbolKey(module, ownedName(variable.Owner, variable.Name))] = value
+		if sc.persistent {
+			e.moduleValue[symbolKey(module, ownedName(variable.Owner, variable.Name))] = value
+		}
 		return flowResult{Result: Result{Value: value, Display: true}}, nil
 	}
 	if node.Result.Target != nil {
@@ -1911,10 +1922,14 @@ func (e *Evaluator) assign(target ir.Expression, value Value, module string, sc 
 			object.Fields[node.Name] = value
 			return nil
 		}
-		if !sc.assign(node.Name, value) {
+		owner := sc.assign(node.Name, value)
+		if owner == nil {
 			sc.values[node.Name] = value
+			owner = sc
 		}
-		e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))] = value
+		if owner.persistent {
+			e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))] = value
+		}
 		return nil
 	case *ir.Member:
 		receiver, err := e.expression(node.Receiver, module, sc)
