@@ -2,6 +2,17 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.40 - 2026-08-26
+
+### Standard library
+
+- `Array#concurrent_map` now provides import-free, bounded I/O concurrency with
+  ordered results, a portable default limit of 8, explicit named limits, and
+  shared capacity across nested maps. Go, Ruby, TypeScript, and the REPL use
+  the same structured cancellation and joining contract, while compile-time
+  checks reject unsafe shared captures and mutation across authored calls and
+  constructors. ([#546](https://github.com/type-rb/type-rb/pull/546))
+
 ## 0.3.39 - 2026-08-26
 
 ### Web
