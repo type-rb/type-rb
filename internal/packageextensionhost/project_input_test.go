@@ -147,6 +147,32 @@ end
 	}
 }
 
+func TestExportProjectDeclarationInputResolvesAnExcludedPackageIndex(t *testing.T) {
+	program := parseProjectInputTest(t, "routes/reports", `import { ReportInput } from acme/contracts
+
+record LocalContract
+	input: ReportInput
+end
+`)
+	input, err := ExportProjectDeclarationInput("trb/web", []*ast.Program{program}, ProjectDeclarationInputOptions{
+		PackageAliasesByModule: map[string]map[string]string{
+			"routes/reports": {"acme/contracts": "github.com/acme/contracts"},
+		},
+		KnownModulePaths: []string{"github.com/acme/contracts/index"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := input.Modules[0]
+	if module.Imports[0].ModulePath != "github.com/acme/contracts/index" {
+		t.Fatalf("package index import resolved to %q", module.Imports[0].ModulePath)
+	}
+	field := module.Records[0].Fields[0].Type.Authored
+	if field.Definition == nil || field.Definition.ModulePath != "github.com/acme/contracts/index" || field.Definition.ImportPath != "acme/contracts" {
+		t.Fatalf("package type definition is incomplete: %#v", field.Definition)
+	}
+}
+
 func containsProjectTypeReference(references []packageextension.ProjectTypeReference, name, importPath string) bool {
 	for _, reference := range references {
 		if reference.Name == name && reference.ImportPath == importPath {

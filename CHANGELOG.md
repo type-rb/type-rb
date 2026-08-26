@@ -2,6 +2,29 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.39 - 2026-08-26
+
+### Web
+
+- `trb web client` now generates deterministic typed TypeRB browser clients
+  from explicit endpoint contracts. Generated clients reuse shared contract
+  modules and the browser HTTP transport, serialize path, query, and JSON body
+  input, and expose declared response statuses as endpoint-specific result
+  enums. Contract types imported from TypeRB packages, including package-root
+  imports, are resolved across Go, Ruby, and TypeScript projects.
+  ([#545](https://github.com/type-rb/type-rb/pull/545),
+  [#550](https://github.com/type-rb/type-rb/pull/550))
+
+## 0.3.38 - 2026-08-26
+
+### Language and compiler
+
+- JSX component props now contextually type fresh `Array` and `Hash` literals
+  against their declared collection types. Native props such as
+  `Array<"compact" | "expanded">` accept supported literal values without
+  weakening collection invariance, while unsupported values remain compile-time
+  errors. ([#547](https://github.com/type-rb/type-rb/pull/547))
+
 ## 0.3.37 - 2026-08-26
 
 ### ORM

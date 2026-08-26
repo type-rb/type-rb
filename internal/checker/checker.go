@@ -5564,6 +5564,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				props, unsupportedProps, componentHasTypedProps = c.jsxComponentProps(n, nodeType)
 			}
 		}
+		expectedAttributes := map[string]types.Type{}
+		if componentHasTypedProps {
+			for _, prop := range props {
+				expectedAttributes[prop.Name] = prop.Type
+			}
+		} else if n.Component == nil && provider != nil {
+			expectedAttributes = provider.IntrinsicAttributes
+		}
 		attributeTypes := map[string]types.Type{}
 		for _, attribute := range n.Attributes {
 			if _, duplicate := attributeTypes[attribute.Name]; duplicate {
@@ -5576,6 +5584,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				attributeTypes[attribute.Name] = c.checkExpression(attribute.Value, sc)
 				if literalType, literal := literalExpressionType(attribute.Value); literal {
 					attributeTypes[attribute.Name] = literalType
+				}
+				if expected, found := expectedAttributes[attribute.Name]; found {
+					attributeTypes[attribute.Name] = c.contextualizeCollectionLiteral(attribute.Value, expected, attributeTypes[attribute.Name])
 				}
 			}
 			if n.Component == nil && provider != nil {

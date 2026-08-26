@@ -49,7 +49,7 @@ import (
 // linker flag while local and branch source builds retain a useful development
 // version. A tagged module installation resolves its version from Go build
 // information in version.go.
-var Version = "0.3.38-dev"
+var Version = "0.3.40-dev"
 
 type buildArtifactKind string
 
@@ -2929,6 +2929,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb jobs start [--once] [--queue NAME] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb jobs list [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb jobs retry|discard JOB_ID [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb web client [--output FILE] [--name NAME] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb web openapi [--output FILE] [--title TITLE] [--api-version VERSION] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb sync")
 	fmt.Fprintln(c.Stdout, "  trb add [--source GIT | --path DIRECTORY] PACKAGE [VERSION]")
