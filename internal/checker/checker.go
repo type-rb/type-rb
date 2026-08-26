@@ -476,6 +476,7 @@ type Checker struct {
 	pendingEmptyCollections     int
 	concurrentBlockScopes       []*scope
 	concurrentFunctions         map[*ast.MethodStatement]bool
+	concurrentConstructors      map[*ast.MethodStatement]bool
 	currentMethod               *ast.MethodStatement
 	currentMethodScopes         []*scope
 	concurrentMapDepth          int
@@ -483,7 +484,12 @@ type Checker struct {
 	concurrentInterfaceMembers  map[*ast.MemberExpression]bool
 	authoredOwnedMethods        map[string]*ast.MethodStatement
 	authoredCalls               map[*ast.MethodStatement]map[*ast.MethodStatement]bool
+	authoredConstructorCalls    map[*ast.MethodStatement]map[*ast.MethodStatement]bool
+	authoredOrdinaryCalls       map[*ast.MethodStatement]map[*ast.MethodStatement]bool
 	concurrentCallRoots         map[*ast.MethodStatement]bool
+	concurrentConstructorRoots  map[*ast.MethodStatement]bool
+	concurrentOrdinaryRoots     map[*ast.MethodStatement]bool
+	concurrentInitTargets       map[*ast.Identifier]bool
 }
 
 // resultBoundary is the lexical destination for prefix try. A boundary entry
@@ -525,10 +531,11 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 	c := newChecker(program, resolution, options)
 	c.emptyCollectionOutcomes = outcomes
 	c.checkProgram(program, true)
-	if concurrentFunctions := c.resolvedConcurrentFunctions(); len(concurrentFunctions) > 0 {
+	if concurrentFunctions, concurrentConstructors := c.resolvedConcurrentFunctions(); len(concurrentFunctions) > 0 {
 		audited := newChecker(program, resolution, options)
 		audited.emptyCollectionOutcomes = outcomes
 		audited.concurrentFunctions = concurrentFunctions
+		audited.concurrentConstructors = concurrentConstructors
 		audited.checkProgram(program, true)
 		return audited.result, diagnostic.Normalize(audited.diags, "", diagnostic.TypeError)
 	}
@@ -804,11 +811,17 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		aliasCycles:                map[string]bool{},
 		declarationCalls:           map[*ast.CallExpression]string{},
 		concurrentFunctions:        map[*ast.MethodStatement]bool{},
+		concurrentConstructors:     map[*ast.MethodStatement]bool{},
 		authoredMemberMethods:      map[*ast.MemberExpression]*ast.MethodStatement{},
 		concurrentInterfaceMembers: map[*ast.MemberExpression]bool{},
 		authoredOwnedMethods:       map[string]*ast.MethodStatement{},
 		authoredCalls:              map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
+		authoredConstructorCalls:   map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
+		authoredOrdinaryCalls:      map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
 		concurrentCallRoots:        map[*ast.MethodStatement]bool{},
+		concurrentConstructorRoots: map[*ast.MethodStatement]bool{},
+		concurrentOrdinaryRoots:    map[*ast.MethodStatement]bool{},
+		concurrentInitTargets:      map[*ast.Identifier]bool{},
 	}
 }
 
@@ -863,26 +876,57 @@ func authoredOwnedMethodKey(owner, name string) string {
 	return owner + "\x00" + name
 }
 
-func (c *Checker) resolvedConcurrentFunctions() map[*ast.MethodStatement]bool {
+func (c *Checker) resolvedConcurrentFunctions() (map[*ast.MethodStatement]bool, map[*ast.MethodStatement]bool) {
+	// Constructor reachability stays distinct from ordinary calls so the audit
+	// may initialize fresh receiver storage without treating aliased receivers as owned.
+	type reach struct {
+		method      *ast.MethodStatement
+		constructor bool
+	}
 	reached := map[*ast.MethodStatement]bool{}
-	queue := make([]*ast.MethodStatement, 0, len(c.concurrentCallRoots))
-	for method := range c.concurrentCallRoots {
-		queue = append(queue, method)
+	ordinary := map[*ast.MethodStatement]bool{}
+	constructed := map[*ast.MethodStatement]bool{}
+	expanded := map[*ast.MethodStatement]bool{}
+	queue := make([]reach, 0, len(c.concurrentCallRoots))
+	for method := range c.concurrentOrdinaryRoots {
+		queue = append(queue, reach{method: method})
+	}
+	for method := range c.concurrentConstructorRoots {
+		queue = append(queue, reach{method: method, constructor: true})
 	}
 	for len(queue) > 0 {
-		method := queue[0]
+		current := queue[0]
 		queue = queue[1:]
-		if method == nil || reached[method] {
+		method := current.method
+		if method == nil {
 			continue
 		}
 		reached[method] = true
+		if current.constructor {
+			constructed[method] = true
+		} else {
+			ordinary[method] = true
+		}
+		if expanded[method] {
+			continue
+		}
+		expanded[method] = true
 		for callee := range c.authoredCalls[method] {
-			if !reached[callee] {
-				queue = append(queue, callee)
+			if c.authoredOrdinaryCalls[method][callee] {
+				queue = append(queue, reach{method: callee})
+			}
+			if c.authoredConstructorCalls[method][callee] {
+				queue = append(queue, reach{method: callee, constructor: true})
 			}
 		}
 	}
-	return reached
+	constructors := map[*ast.MethodStatement]bool{}
+	for method := range constructed {
+		if !ordinary[method] {
+			constructors[method] = true
+		}
+	}
+	return reached, constructors
 }
 
 func (c *Checker) recordAuthoredCall(call *ast.CallExpression) {
@@ -890,6 +934,7 @@ func (c *Checker) recordAuthoredCall(call *ast.CallExpression) {
 	if method == nil {
 		return
 	}
+	constructorCall := method.Name == "initialize" && !method.Class && authoredConstructorCall(call.Callee)
 	if c.currentMethod != nil {
 		calls := c.authoredCalls[c.currentMethod]
 		if calls == nil {
@@ -897,10 +942,33 @@ func (c *Checker) recordAuthoredCall(call *ast.CallExpression) {
 			c.authoredCalls[c.currentMethod] = calls
 		}
 		calls[method] = true
+		classified := c.authoredOrdinaryCalls
+		if constructorCall {
+			classified = c.authoredConstructorCalls
+		}
+		classifiedCalls := classified[c.currentMethod]
+		if classifiedCalls == nil {
+			classifiedCalls = map[*ast.MethodStatement]bool{}
+			classified[c.currentMethod] = classifiedCalls
+		}
+		classifiedCalls[method] = true
 	}
 	if c.concurrentMapDepth > 0 {
 		c.concurrentCallRoots[method] = true
+		if constructorCall {
+			c.concurrentConstructorRoots[method] = true
+		} else {
+			c.concurrentOrdinaryRoots[method] = true
+		}
 	}
+}
+
+func authoredConstructorCall(expression ast.Expression) bool {
+	if generic, ok := expression.(*ast.GenericExpression); ok {
+		return authoredConstructorCall(generic.Receiver)
+	}
+	member, ok := expression.(*ast.MemberExpression)
+	return ok && member.Name == "new"
 }
 
 func (c *Checker) authoredCallTarget(expression ast.Expression) *ast.MethodStatement {
@@ -1709,14 +1777,19 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			c.result.Variables[n] = variableType
 		case *ast.AssignmentStatement:
+			var initializationTarget *ast.Identifier
 			if root := c.currentConcurrentBlockScope(); root != nil {
 				if name, outer := concurrentAssignmentRoot(n.Target, sc, root); outer {
-					if !c.concurrentMethodOwnsInstanceBinding(root, name) {
+					if c.concurrentConstructorInitializesField(root, n.Target, name) {
+						initializationTarget, _ = n.Target.(*ast.Identifier)
+						c.concurrentInitTargets[initializationTarget] = true
+					} else {
 						c.error(n.Target.Span(), fmt.Sprintf("concurrent_map cannot assign to outer binding %s", name))
 					}
 				}
 			}
 			leftType := c.checkExpression(n.Target, sc)
+			delete(c.concurrentInitTargets, initializationTarget)
 			if identifier, ok := n.Target.(*ast.Identifier); ok {
 				if value, exists := sc.lookup(identifier.Name); exists && value.declared.Kind != "" {
 					leftType = value.declared
@@ -5360,7 +5433,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if value, owner, ok := sc.lookupOwner(n.Name); ok {
 			typ = value.typ
-			if root := c.currentConcurrentBlockScope(); root != nil && !scopeWithin(owner, root) && !c.concurrentMethodOwnsInstanceBinding(root, n.Name) {
+			if root := c.currentConcurrentBlockScope(); root != nil && !scopeWithin(owner, root) && !c.concurrentInitTargets[n] {
 				switch {
 				case !c.concurrencySafeType(value.typ, map[string]bool{}):
 					c.error(n.Span(), fmt.Sprintf("concurrent_map cannot capture %s because %s is not concurrency-safe", n.Name, value.typ))
@@ -7299,8 +7372,12 @@ func (c *Checker) currentMethodScope() *scope {
 	return c.currentMethodScopes[len(c.currentMethodScopes)-1]
 }
 
-func (c *Checker) concurrentMethodOwnsInstanceBinding(root *scope, name string) bool {
-	return root != nil && root == c.currentMethodScope() && c.currentMethod != nil && !c.currentMethod.Class && strings.HasPrefix(name, "@")
+func (c *Checker) concurrentConstructorInitializesField(root *scope, target ast.Expression, name string) bool {
+	identifier, direct := target.(*ast.Identifier)
+	// Only the constructor's own direct field target is fresh. A nested target
+	// such as @items[0] may still refer to storage shared by Array elements.
+	return direct && identifier.Name == name && strings.HasPrefix(name, "@") &&
+		root == c.currentMethodScope() && c.currentMethod != nil && c.concurrentConstructors[c.currentMethod]
 }
 
 func (c *Checker) concurrencyInterfaceType(typ types.Type) bool {

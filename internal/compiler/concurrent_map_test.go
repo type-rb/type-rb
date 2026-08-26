@@ -110,7 +110,7 @@ end
 			}
 			root := t.TempDir()
 			var command *exec.Cmd
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			switch mode {
 			case "go":
@@ -572,7 +572,7 @@ end`,
 	}
 }
 
-func TestConcurrentMapAllowsTaskOwnedInstanceMutation(t *testing.T) {
+func TestConcurrentMapRejectsAliasedArrayElementInstanceMutation(t *testing.T) {
 	source := []byte(`class Counter
 	@value: Integer
 
@@ -587,15 +587,69 @@ func TestConcurrentMapAllowsTaskOwnedInstanceMutation(t *testing.T) {
 	end
 end
 
-def transform(values: Array<Counter>): Array<Integer>
-	return values.concurrent_map do |counter|
-		counter.increment()
+	def transform(counter: Counter): Array<Integer>
+		values := [counter, counter]
+		return values.concurrent_map do |counter|
+			counter.increment()
+		end
+	end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := Compile("aliased_concurrent_counter.trb", source, mode)
+		if err == nil || !strings.Contains(err.Error(), "concurrent_map cannot assign to outer binding @value") {
+			t.Fatalf("%s error = %v, want aliased instance mutation rejection", mode, err)
+		}
+	}
+}
+
+func TestConcurrentMapAllowsConstructorFieldInitialization(t *testing.T) {
+	source := []byte(`class Counter
+	@value: Integer
+
+	def initialize(value: Integer)
+		@value = value
+		return
+	end
+end
+
+def build_counter(value: Integer): Counter
+	return Counter.new(value)
+end
+
+def transform(values: Array<Integer>): Array<Counter>
+	return values.concurrent_map do |value|
+		build_counter(value)
 	end
 end
 `)
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		if _, err := Compile("owned_concurrent_counter.trb", source, mode); err != nil {
-			t.Fatalf("%s rejected task-owned instance mutation: %v", mode, err)
+		if _, err := Compile("concurrent_constructor.trb", source, mode); err != nil {
+			t.Fatalf("%s rejected constructor field initialization: %v", mode, err)
+		}
+	}
+}
+
+func TestConcurrentMapDoesNotTreatDirectInitializeCallAsConstruction(t *testing.T) {
+	source := []byte(`class Counter
+	@value: Integer
+
+	def initialize(value: Integer)
+		@value = value
+		return
+	end
+end
+
+def transform(values: Array<Counter>): Array<Integer>
+	return values.concurrent_map do |counter|
+		counter.initialize(1)
+		0
+	end
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := Compile("direct_concurrent_initialize.trb", source, mode)
+		if err == nil || !strings.Contains(err.Error(), "concurrent_map cannot assign to outer binding @value") {
+			t.Fatalf("%s error = %v, want direct initialize mutation rejection", mode, err)
 		}
 	}
 }

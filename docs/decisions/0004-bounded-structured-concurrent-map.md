@@ -58,15 +58,18 @@ returns an empty Array. CPU parallel execution is not guaranteed.
 
 The block is a value-producing transformation: it ends in one result
 expression and rejects `return`, `break`, `next`, and prefix `try`. Its element
-binding and values created inside one element evaluation are task-owned.
-Assignment to an outer binding is rejected. Lexical captures are initially
-limited to concurrency-safe values: scalars, Bytes, Ranges, and
-recursively safe records, enums, newtypes, nullable values, and unions.
-Mutable containers, function values, `Any`, StringBuilder, and class or
-interface instances cannot be captured. Calls to same-module authored
-top-level functions, module or class methods, instance methods, and
-constructors are followed transitively and checked for shared lexical
-mutation. Calls through interface-typed receivers or function values are
+binding is local to one evaluation, but the element value is not uniquely owned
+because an Array may contain duplicate references. Values created inside one
+element evaluation are task-owned. Assignment to an outer binding is rejected.
+Lexical captures are initially limited to concurrency-safe values: scalars,
+Bytes, Ranges, and recursively safe records, enums, newtypes, nullable values,
+and unions. Mutable containers, function values, `Any`, StringBuilder, and
+class or interface instances cannot be captured. Calls to same-module authored
+top-level functions, module or class methods, instance methods, and constructors
+are followed transitively and checked for shared lexical mutation. Direct field
+initialization on a fresh constructor receiver is allowed. Other instance field
+mutation is rejected until an ownership contract can prove that its receiver is
+unaliased. Calls through interface-typed receivers or function values are
 rejected until they can carry an explicit concurrency-safety contract. A native
 function used in a concurrent block must participate in the compiler-owned
 execution-scope contract; package-owned native handles need a future explicit
