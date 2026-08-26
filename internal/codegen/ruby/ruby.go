@@ -656,7 +656,14 @@ func (g *generator) executionArguments(call *ir.Call, arguments []string) []stri
 	if g.execution == nil || !g.execution.Calls[call] {
 		return arguments
 	}
-	return append([]string{"__trb_scope"}, arguments...)
+	return append([]string{g.executionScopeArgument()}, arguments...)
+}
+
+func (g *generator) executionScopeArgument() string {
+	if g.executionActive {
+		return "__trb_scope"
+	}
+	return "TrbExecutionScope.root"
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
@@ -963,7 +970,7 @@ func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, argu
 	}
 	values := make([]string, 0, len(fields)*2)
 	if g.execution != nil && g.execution.Calls[call] {
-		values = append(values, "__trb_scope")
+		values = append(values, g.executionScopeArgument())
 	}
 	for _, field := range fields {
 		value, provided := explicit[field.Name]

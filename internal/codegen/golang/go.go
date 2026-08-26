@@ -1250,7 +1250,15 @@ func (g *generator) executionArguments(call *ir.Call, arguments []string) []stri
 	if g.execution == nil || !g.execution.Calls[call] {
 		return arguments
 	}
-	return append([]string{"__trbScope"}, arguments...)
+	return append([]string{g.executionScopeArgument()}, arguments...)
+}
+
+func (g *generator) executionScopeArgument() string {
+	if g.executionActive {
+		return "__trbScope"
+	}
+	g.requireImport("context", "trbcontext")
+	return "trbcontext.Background()"
 }
 
 func (g *generator) nativeRuntimeCall(binding *ir.RuntimeBinding, arguments []string) string {
@@ -2343,7 +2351,7 @@ func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, type
 	}
 	values := make([]string, 0, len(fields)*2)
 	if g.execution != nil && g.execution.Calls[call] {
-		values = append(values, "__trbScope")
+		values = append(values, g.executionScopeArgument())
 	}
 	for _, field := range fields {
 		value, provided := explicit[field.Name]

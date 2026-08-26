@@ -31,7 +31,18 @@ An unannotated field such as `directory` is positional. An option uses its
 kebab-cased field name by default, so `verbose` becomes `--verbose` and
 `output_path` becomes `--output-path`. `name` or `long` overrides the long
 name; `short` must contain one character. Defaults belong to the record and are
-also used by ordinary non-CLI construction.
+also used by ordinary non-CLI construction. Subcommand names cannot begin with
+`-`, long option names cannot contain `=`, and `-` is reserved from use as a
+short option. `trb check` reports these names instead of generating help for an
+option or command that the parser cannot select.
+
+A transparent alias of the root record uses the same schema:
+
+```trb
+alias Arguments = AppArgs
+
+args := run<Arguments>(name: "fileserver")
+```
 
 ## Parse and dispatch
 

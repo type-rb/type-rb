@@ -158,3 +158,102 @@ func TestCLIRejectsGeneratedOptionCollisions(t *testing.T) {
 		})
 	}
 }
+
+func TestCLIRootResolvesTransparentRecordAlias(t *testing.T) {
+	tests := []struct {
+		name    string
+		sources []SourceUnit
+		module  string
+	}{
+		{
+			name: "local alias",
+			sources: []SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: []byte(`import { run } from trb/platform/go/cli
+
+record AppArgs
+	name: String
+end
+
+alias Arguments = AppArgs
+
+args := run<Arguments>(name: "cli-alias")
+			`)}},
+			module: "main",
+		},
+		{
+			name: "imported alias chain",
+			sources: []SourceUnit{
+				{Filename: "arguments.trb", ModulePath: "models/arguments", Source: []byte(`record AppArgs
+	name: String
+end
+
+alias BaseArguments = AppArgs
+alias Arguments = BaseArguments
+				`)},
+				{Filename: "main.trb", ModulePath: "main", Package: "main", Source: []byte(`import { run } from trb/platform/go/cli
+import { Arguments } from models/arguments
+
+args := run<Arguments>(name: "cli-alias")
+				`)},
+			},
+			module: "models/arguments",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			artifacts, err := CompileProject(test.sources, Options{
+				Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest := cliapp.ManifestFrom(artifactForModule(artifacts, "main").IR.Extensions)
+			if manifest == nil || len(manifest.Invocations) != 1 || manifest.Invocations[0].Schema.Root.Name != "AppArgs" || manifest.Invocations[0].Schema.Root.ModulePath != test.module {
+				t.Fatalf("transparent CLI root alias did not resolve to %s::AppArgs: %#v", test.module, manifest)
+			}
+		})
+	}
+}
+
+func TestCLIRejectsNamesReservedByTheParserGrammar(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "subcommand starting with hyphen",
+			source: `enum Command
+	Serve @cli(name: "-serve")
+end
+record Args
+	command: Command @cli(:subcommand)
+end`,
+			want: `subcommand "-serve" must not start with '-'`,
+		},
+		{
+			name: "long option containing equals",
+			source: `record Args
+	value: String = "" @cli(:option, long: "foo=bar")
+end`,
+			want: `long option "foo=bar" for field value must not contain '='`,
+		},
+		{
+			name: "reserved short option",
+			source: `record Args
+	value: String = "" @cli(:option, short: "-")
+end`,
+			want: "short option for value must not be '-'",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := []byte("import { run } from trb/platform/go/cli\n" + test.source + "\ndef parse(): Args\n\treturn run<Args>(name: \"test\")\nend\n")
+			_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+				Mode: "go", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("CompileProject() error=%v, want %q", err, test.want)
+			}
+		})
+	}
+}

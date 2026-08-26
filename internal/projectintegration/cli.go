@@ -77,7 +77,7 @@ func cliRootReference(modulePath string, ref ast.TypeRef, resolution resolver.Re
 		return cliapp.TypeReference{}, false
 	}
 	if binding, ok := resolution.ImportedType(ref.Name); ok && binding.Import != nil && binding.Export != nil {
-		return cliapp.TypeReference{ModulePath: binding.Import.ModulePath, Name: binding.Export.Name}, true
+		return cliapp.TypeReference{ModulePath: binding.Import.RuntimePath(), Name: binding.Export.Name}, true
 	}
 	return cliapp.TypeReference{ModulePath: modulePath, Name: ref.Name}, true
 }

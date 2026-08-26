@@ -33,7 +33,10 @@ The canonical schema model is:
 
 Field metadata initially supports `name` (or `long`), `short`, `about`, and
 `value_name`. Enum-member metadata supports `name` and `about`. Metadata values
-are static string literals. CLI names default to kebab case.
+are static string literals. CLI names default to kebab case. A subcommand name
+cannot begin with `-`, a long option name cannot contain `=`, and `-` cannot be
+used as a short option because those spellings conflict with the parser
+grammar. The schema analyzer rejects these names before generation.
 
 The initial value boundary accepts `String`, `Integer`, `Float`, and `Boolean`.
 Record defaults and nullable fields make a CLI field omittable. The parser
@@ -48,6 +51,9 @@ construction, and record construction using only the Go standard library. It
 does not use runtime reflection, dynamic command registration, or an external
 CLI framework. `trb build --compile` therefore produces the intended single
 binary.
+
+A transparent type alias of the root record resolves to that record before
+schema analysis. Aliases do not create a second CLI schema identity.
 
 The record/payload-enum model is canonical. A later function-based shorthand
 may lower into the same schema, but it must not create a second parser model or

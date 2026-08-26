@@ -133,11 +133,19 @@ type Issue struct {
 type catalog struct {
 	records map[TypeReference]packageextension.ProjectRecord
 	enums   map[TypeReference]packageextension.ProjectEnum
+	aliases map[TypeReference]packageextension.ProjectTypeAlias
 }
 
 func Analyze(input packageextension.ProjectDeclarationInput, requests []InvocationRequest) (*Manifest, []Issue) {
-	catalog := catalog{records: map[TypeReference]packageextension.ProjectRecord{}, enums: map[TypeReference]packageextension.ProjectEnum{}}
+	catalog := catalog{
+		records: map[TypeReference]packageextension.ProjectRecord{},
+		enums:   map[TypeReference]packageextension.ProjectEnum{},
+		aliases: map[TypeReference]packageextension.ProjectTypeAlias{},
+	}
 	for _, module := range input.Modules {
+		for _, alias := range module.TypeAliases {
+			catalog.aliases[TypeReference{ModulePath: module.ModulePath, Name: alias.Name}] = alias
+		}
 		for _, record := range module.Records {
 			catalog.records[TypeReference{ModulePath: module.ModulePath, Name: record.Name}] = record
 		}
@@ -172,11 +180,11 @@ func Analyze(input packageextension.ProjectDeclarationInput, requests []Invocati
 }
 
 func (c catalog) schema(rootReference TypeReference) (Schema, []Issue) {
-	root, ok := c.records[rootReference]
+	resolvedRoot, root, ok := c.resolveRecord(rootReference)
 	if !ok {
 		return Schema{}, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli run root %s must be a record", rootReference.Name)}}
 	}
-	schema := Schema{Root: Record{ModulePath: rootReference.ModulePath, Name: root.Name}}
+	schema := Schema{Root: Record{ModulePath: resolvedRoot.ModulePath, Name: root.Name}}
 	var issues []Issue
 	for index, field := range root.Fields {
 		metadata, metadataIssues := cliMetadata(field.Attributes, field.Span)
@@ -200,7 +208,7 @@ func (c catalog) schema(rootReference TypeReference) (Schema, []Issue) {
 			issues = append(issues, commandIssues...)
 			continue
 		}
-		converted, fieldIssues := scalarField(rootReference.ModulePath, field, metadata, index)
+		converted, fieldIssues := scalarField(resolvedRoot.ModulePath, field, metadata, index)
 		schema.Root.Fields = append(schema.Root.Fields, converted)
 		schema.Root.Defaults = schema.Root.Defaults || field.HasDefault
 		issues = append(issues, fieldIssues...)
@@ -216,10 +224,30 @@ func (c catalog) schema(rootReference TypeReference) (Schema, []Issue) {
 	issues = append(issues, validateFields(schema.Root.Fields)...)
 	for index := range issues {
 		if issues[index].ModulePath == "" {
-			issues[index].ModulePath = rootReference.ModulePath
+			issues[index].ModulePath = resolvedRoot.ModulePath
 		}
 	}
 	return schema, issues
+}
+
+func (c catalog) resolveRecord(reference TypeReference) (TypeReference, packageextension.ProjectRecord, bool) {
+	seen := map[TypeReference]bool{}
+	for !seen[reference] {
+		seen[reference] = true
+		if record, ok := c.records[reference]; ok {
+			return reference, record, true
+		}
+		alias, ok := c.aliases[reference]
+		if !ok || len(alias.TypeParameters) > 0 {
+			break
+		}
+		resolved, ok := typeReference(alias.Target)
+		if !ok {
+			break
+		}
+		reference = resolved
+	}
+	return TypeReference{}, packageextension.ProjectRecord{}, false
 }
 
 func (c catalog) commands(reference TypeReference, enum packageextension.ProjectEnum) ([]Command, []Issue) {
@@ -237,6 +265,9 @@ func (c catalog) commands(reference TypeReference, enum packageextension.Project
 			name = kebab(member.Name)
 		}
 		command := Command{Name: name, About: metadata.about, MemberName: member.Name, Enum: reference}
+		if strings.HasPrefix(name, "-") {
+			issues = append(issues, Issue{Message: fmt.Sprintf("trb/platform/go/cli subcommand %q must not start with '-'", name), Span: member.Span})
+		}
 		if seen[name] {
 			issues = append(issues, Issue{Message: fmt.Sprintf("duplicate trb/platform/go/cli subcommand %q", name), Span: member.Span})
 		}
@@ -345,6 +376,9 @@ func scalarField(modulePath string, field packageextension.ProjectRecordField, m
 	if result.ValueName == "" {
 		result.ValueName = strings.ToUpper(strings.ReplaceAll(field.Name, "-", "_"))
 	}
+	if !result.Positional && strings.Contains(result.Long, "=") {
+		return result, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli long option %q for field %s must not contain '='", result.Long, field.Name), Span: field.Span}}
+	}
 	typ := field.Type.Resolved
 	result.TypeName = typ.Name
 	switch typ.Kind {
@@ -361,6 +395,9 @@ func scalarField(modulePath string, field packageextension.ProjectRecordField, m
 	}
 	if result.Short != "" && len([]rune(result.Short)) != 1 {
 		return result, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli short option for %s must contain one character", field.Name), Span: field.Span}}
+	}
+	if result.Short == "-" {
+		return result, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli short option for %s must not be '-'", field.Name), Span: field.Span}}
 	}
 	return result, nil
 }

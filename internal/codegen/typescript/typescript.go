@@ -1160,7 +1160,14 @@ func (g *generator) executionArguments(call *ir.Call, arguments []string) []stri
 	if g.isReactComponentCall(call) {
 		return arguments
 	}
-	return append([]string{"__trbScope"}, arguments...)
+	return append([]string{g.executionScopeArgument()}, arguments...)
+}
+
+func (g *generator) executionScopeArgument() string {
+	if g.executionActive {
+		return "__trbScope"
+	}
+	return "undefined"
 }
 
 func (g *generator) isReactComponentCall(call *ir.Call) bool {
@@ -2211,7 +2218,7 @@ func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, type
 	}
 	values := []string{"{ " + strings.Join(fields, ", ") + " }"}
 	if g.execution != nil && g.execution.Calls[call] {
-		values = append([]string{"__trbScope"}, values...)
+		values = append([]string{g.executionScopeArgument()}, values...)
 	}
 	return name + "(" + strings.Join(values, ", ") + ")"
 }

@@ -220,3 +220,29 @@ end
 		}
 	}
 }
+
+func TestTopLevelSuspendingTypeScriptRecordDefaultsUseRootExecutionScope(t *testing.T) {
+	artifact, err := Compile("main.trb", []byte(`import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { Body } from trb/http
+import { Result } from trb/std/result
+
+record RequestConfig
+	client: HttpClient
+	response: Result<Response<Body>, RequestError> = client.request("/health")
+end
+
+CLIENT := HttpClient.new("https://example.test")
+CONFIG := RequestConfig.new(client: CLIENT)
+
+def main()
+	return
+end
+`), "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	if !strings.Contains(output, "__trbRecordNewRequestConfig(undefined, { client: CLIENT })") {
+		t.Fatalf("top-level record construction is missing its root execution scope:\n%s", output)
+	}
+}
