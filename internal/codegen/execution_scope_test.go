@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/callsignature"
 	golang "github.com/type-rb/type-rb/internal/codegen/golang"
 	ruby "github.com/type-rb/type-rb/internal/codegen/ruby"
 	typescript "github.com/type-rb/type-rb/internal/codegen/typescript"
@@ -30,6 +31,47 @@ func TestTopLevelEffectfulRecordConstructionUsesRootExecutionScope(t *testing.T)
 			}
 			if test.name == "ruby" && !strings.Contains(output, "class TrbExecutionScope") {
 				t.Fatalf("generated Ruby is missing execution-scope runtime:\n%s", output)
+			}
+		})
+	}
+}
+
+func TestEffectfulParameterDefaultsUseTheCalleeExecutionScope(t *testing.T) {
+	tests := []struct {
+		name     string
+		generate func(*ir.Program) string
+		want     []string
+	}{
+		{name: "go", generate: golang.Generate, want: []string{"func Load(__trbScope trbcontext.Context", "TrbRecordNewConfig(__trbScope", "Load(trbcontext.Background())"}},
+		{name: "ruby", generate: ruby.Generate, want: []string{"def load(__trb_scope", "Config.__trb_record_new(__trb_scope", "load.call(TrbExecutionScope.root)"}},
+		{name: "typescript", generate: typescript.Generate, want: []string{"export async function load(__trbScope: AbortSignal | undefined, __trbOptional: unknown[])", "(await __trbRecordNewConfig(__trbScope", "(await load(undefined, []))"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			output := test.generate(effectfulParameterDefaultProgram(test.name))
+			for _, want := range test.want {
+				if !strings.Contains(output, want) {
+					t.Fatalf("generated %s is missing %q:\n%s", test.name, want, output)
+				}
+			}
+		})
+	}
+}
+
+func TestNestedInitializersUseRootScopeInSynchronousBackends(t *testing.T) {
+	tests := []struct {
+		name     string
+		generate func(*ir.Program) string
+		want     string
+	}{
+		{name: "go", generate: golang.Generate, want: "TrbRecordNewConfig(trbcontext.Background()"},
+		{name: "ruby", generate: ruby.Generate, want: "Config.__trb_record_new(TrbExecutionScope.root"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			output := test.generate(effectfulNestedInitializerProgram(test.name))
+			if count := strings.Count(output, test.want); count != 2 {
+				t.Fatalf("generated %s root-scope initializer count=%d, want 2:\n%s", test.name, count, output)
 			}
 		})
 	}
@@ -70,4 +112,42 @@ func effectfulRecordProgram(mode string) *ir.Program {
 		Mode: mode, ModulePath: "main", Package: "main", GoModule: "example.com/application",
 		Statements: []ir.Statement{record, &ir.Variable{Name: "CONFIG", Type: recordType, Value: constructor, Constant: true}},
 	}
+}
+
+func effectfulParameterDefaultProgram(mode string) *ir.Program {
+	program := effectfulRecordProgram(mode)
+	recordType := types.FromName("Config")
+	constructor := program.Statements[1].(*ir.Variable).Value
+	method := &ir.Method{
+		Name: "load", Parameters: []ir.Parameter{{Name: "config", Type: recordType, Default: constructor}}, ReturnType: recordType,
+		Body: []ir.Statement{&ir.Return{Value: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, recordType), Name: "config", Lexical: true}}},
+	}
+	call := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, recordType),
+		Callee: &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, types.Type{Kind: types.Function, Args: []types.Type{recordType, recordType}}),
+			Name:     "load",
+		},
+		CallSignature: []callsignature.Parameter{{Kind: callsignature.Positional, Type: recordType, Presence: callsignature.Omittable}},
+	}
+	program.Statements = []ir.Statement{
+		program.Statements[0], method, &ir.Variable{Name: "CONFIG", Type: recordType, Value: call, Constant: true},
+	}
+	return program
+}
+
+func effectfulNestedInitializerProgram(mode string) *ir.Program {
+	program := effectfulRecordProgram(mode)
+	recordType := types.FromName("Config")
+	constructor := program.Statements[1].(*ir.Variable).Value
+	program.Statements = []ir.Statement{
+		program.Statements[0],
+		&ir.Module{Name: "Settings", Body: []ir.Statement{
+			&ir.Variable{Name: "CONFIG", Type: recordType, Value: constructor, Constant: true},
+		}},
+		&ir.Class{Name: "Holder", Body: []ir.Statement{
+			&ir.Field{Name: "@config", Type: recordType, Value: constructor},
+		}},
+	}
+	return program
 }

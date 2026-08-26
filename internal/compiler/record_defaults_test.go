@@ -246,3 +246,144 @@ end
 		t.Fatalf("top-level record construction is missing its root execution scope:\n%s", output)
 	}
 }
+
+func TestSuspendingTypeScriptParameterDefaultsLowerIntoTheFunctionBody(t *testing.T) {
+	artifact, err := Compile("main.trb", []byte(`import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { Body } from trb/http
+import { Result } from trb/std/result
+
+record RequestConfig
+	client: HttpClient
+	response: Result<Response<Body>, RequestError> = client.request("/health")
+end
+
+CLIENT := HttpClient.new("https://example.test")
+
+def load(config: RequestConfig = RequestConfig.new(client: CLIENT)): RequestConfig
+	return config
+end
+
+CONFIG := load()
+
+def main()
+	return
+end
+`), "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	for _, fragment := range []string{
+		"export async function load(__trbScope: AbortSignal | undefined, __trbOptional: unknown[]): Promise<RequestConfig>",
+		"config = (await __trbRecordNewRequestConfig(__trbScope, { client: CLIENT }));",
+		"export const CONFIG: RequestConfig = (await load(undefined, []));",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", fragment, output)
+		}
+	}
+}
+
+func TestImportedSuspendingTypeScriptParameterDefaultsUseTheLoweredCallABI(t *testing.T) {
+	model := SourceUnit{Filename: "request_config.trb", ModulePath: "models/request_config", Source: []byte(`import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { Body } from trb/http
+import { Result } from trb/std/result
+
+record RequestConfig
+	client: HttpClient
+	response: Result<Response<Body>, RequestError> = client.request("/health")
+end
+
+CLIENT := HttpClient.new("https://example.test")
+
+def load(config: RequestConfig = RequestConfig.new(client: CLIENT)): RequestConfig
+	return config
+end
+`)}
+	main := SourceUnit{Filename: "main.trb", ModulePath: "main", Source: []byte(`import { load } from models/request_config
+
+CONFIG := load()
+`)}
+	artifacts, err := CompileProject([]SourceUnit{model, main}, Options{
+		Mode: "typescript", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelOutput := string(artifactForModule(artifacts, "models/request_config").Output)
+	mainOutput := string(artifactForModule(artifacts, "main").Output)
+	if !strings.Contains(modelOutput, "export async function load(__trbScope: AbortSignal | undefined, __trbOptional: unknown[])") {
+		t.Fatalf("defining module did not lower the suspending default:\n%s", modelOutput)
+	}
+	if !strings.Contains(mainOutput, "export const CONFIG: RequestConfig = (await load(undefined, []));") {
+		t.Fatalf("importing module did not use the lowered call ABI:\n%s", mainOutput)
+	}
+}
+
+func TestTypeScriptRejectsSuspendingDeclarationInitializersWithoutAsyncBoundaries(t *testing.T) {
+	prelude := `import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { Body } from trb/http
+import { Result } from trb/std/result
+
+record RequestConfig
+	client: HttpClient
+	response: Result<Response<Body>, RequestError> = client.request("/health")
+end
+
+CLIENT := HttpClient.new("https://example.test")
+`
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "module constant",
+			source: `module Settings
+	CONFIG := RequestConfig.new(client: CLIENT)
+end
+`,
+			want: "TypeScript module constant Settings::CONFIG cannot use an operation that may suspend",
+		},
+		{
+			name: "nested module constant",
+			source: `module Outer
+	module Settings
+		CONFIG := RequestConfig.new(client: CLIENT)
+	end
+end
+`,
+			want: "TypeScript module constant Outer::Settings::CONFIG cannot use an operation that may suspend",
+		},
+		{
+			name: "class field",
+			source: `class Holder
+	@config: RequestConfig := RequestConfig.new(client: CLIENT)
+
+	def initialize()
+		return
+	end
+end
+`,
+			want: "TypeScript class field Holder#config cannot use an operation that may suspend",
+		},
+		{
+			name: "class initializer parameter",
+			source: `class Holder
+	def initialize(config: RequestConfig = RequestConfig.new(client: CLIENT))
+		return
+	end
+end
+`,
+			want: "TypeScript class initializer Holder#initialize cannot use an operation that may suspend",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Compile("main.trb", []byte(prelude+test.source), "typescript")
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Compile() error=%v, want %q", err, test.want)
+			}
+		})
+	}
+}

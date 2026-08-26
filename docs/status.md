@@ -129,6 +129,12 @@ Go, Ruby, TypeScript, and the REPL. TypeScript lowers a transformation that
 reaches a suspending platform operation to a sequential async loop without
 adding `async` or `await` to TypeRB source.
 
+TypeScript also lowers suspending parameter defaults into the function body.
+Module constants and class initialization cannot currently suspend because
+JavaScript namespace and constructor initialization have no async evaluation
+boundary; the compiler reports these initializers instead of emitting invalid
+code.
+
 Integer and String literal types support status- and kind-indexed data.
 Exhaustive `case` over a readonly literal field narrows the complete record or
 class union in every backend and in the REPL. Ordinary scalar `case` remains

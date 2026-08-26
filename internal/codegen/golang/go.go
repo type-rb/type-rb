@@ -892,10 +892,10 @@ func (g *generator) enumMethods(enum *ir.Enum, enumName string) {
 		typeParameters := append(append([]string(nil), enum.TypeParameters...), method.TypeParameters...)
 		g.line("func " + enumMethodName(enum.Name, method.Name) + goTypeParameterDeclarations(typeParameters) + "(self " + enumName + goTypeParameterArguments(enum.TypeParameters) + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 		g.indent++
-		g.parameterDefaults(method.Parameters)
-		g.functionDepth++
 		previousExecution := g.executionActive
 		g.executionActive = g.methodUsesExecutionScope(method)
+		g.parameterDefaults(method.Parameters)
+		g.functionDepth++
 		g.statements(method.Body)
 		g.executionActive = previousExecution
 		g.functionDepth--
@@ -1135,6 +1135,8 @@ func (g *generator) class(class *ir.Class) {
 		}
 		g.line("func New" + name + typeDeclarations + "(" + parameters + ") *" + name + typeArguments + " {")
 		g.indent++
+		previousExecution := g.executionActive
+		g.executionActive = g.methodUsesExecutionScope(initialize)
 		if initialize != nil {
 			g.parameterDefaults(initialize.Parameters)
 		}
@@ -1148,12 +1150,10 @@ func (g *generator) class(class *ir.Class) {
 		g.receiver, g.inConstructor = "self", true
 		g.functionDepth++
 		if initialize != nil {
-			previousExecution := g.executionActive
-			g.executionActive = g.methodUsesExecutionScope(initialize)
 			g.statements(initialize.Body)
-			g.executionActive = previousExecution
 		}
 		g.functionDepth--
+		g.executionActive = previousExecution
 		g.receiver, g.inConstructor = previousReceiver, previousConstructor
 		g.line("return self")
 		g.indent--
@@ -1177,14 +1177,14 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 		g.line("func (self *" + className + goTypeParameterArguments(classTypeParameters) + ") " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType) + " {")
 	}
 	g.indent++
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	g.parameterDefaults(method.Parameters)
 	previous := g.receiver
 	g.receiver = "self"
 	previousReturnType := g.returnType
 	g.returnType = method.ReturnType
 	g.functionDepth++
-	previousExecution := g.executionActive
-	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
@@ -1207,6 +1207,8 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 		g.requireImport("context", "trbcontext")
 		g.line("__trbScope := trbcontext.Background()")
 	}
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	g.parameterDefaults(method.Parameters)
 	previousReturnType := g.returnType
 	g.returnType = method.ReturnType
@@ -1217,8 +1219,6 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
 	}
 	g.functionDepth++
-	previousExecution := g.executionActive
-	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--

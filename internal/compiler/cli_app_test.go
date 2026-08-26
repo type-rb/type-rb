@@ -214,7 +214,7 @@ args := run<Arguments>(name: "cli-alias")
 	}
 }
 
-func TestCLIRejectsNamesReservedByTheParserGrammar(t *testing.T) {
+func TestCLIRejectsReservedNames(t *testing.T) {
 	tests := []struct {
 		name   string
 		source string
@@ -244,6 +244,30 @@ end`,
 end`,
 			want: "short option for value must not be '-'",
 		},
+		{
+			name: "NUL subcommand",
+			source: `enum Command
+	Serve @cli(name: "\u0000")
+end
+record Args
+	command: Command @cli(:subcommand)
+end`,
+			want: `subcommand name "\x00" must not contain U+0000`,
+		},
+		{
+			name: "NUL long option",
+			source: `record Args
+	value: String = "" @cli(:option, long: "\u0000")
+end`,
+			want: `long option name "\x00" must not contain U+0000`,
+		},
+		{
+			name: "NUL short option",
+			source: `record Args
+	value: String = "" @cli(:option, short: "\u0000")
+end`,
+			want: `short option name "\x00" must not contain U+0000`,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -255,5 +279,24 @@ end`,
 				t.Fatalf("CompileProject() error=%v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestCLIAllowsUnicodeNamesOtherThanNUL(t *testing.T) {
+	source := []byte(`import { run } from trb/platform/go/cli
+enum Command
+	Serve @cli(name: "配信")
+end
+record Args
+	command: Command @cli(:subcommand)
+	name: String = "" @cli(:option, long: "名前", short: "名")
+end
+args := run<Args>(name: "unicode")
+`)
+	_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+		Mode: "go", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

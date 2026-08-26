@@ -265,6 +265,9 @@ func (c catalog) commands(reference TypeReference, enum packageextension.Project
 			name = kebab(member.Name)
 		}
 		command := Command{Name: name, About: metadata.about, MemberName: member.Name, Enum: reference}
+		if issue, invalid := invalidNULCLIName("subcommand", name, member.Span); invalid {
+			issues = append(issues, issue)
+		}
 		if strings.HasPrefix(name, "-") {
 			issues = append(issues, Issue{Message: fmt.Sprintf("trb/platform/go/cli subcommand %q must not start with '-'", name), Span: member.Span})
 		}
@@ -376,6 +379,11 @@ func scalarField(modulePath string, field packageextension.ProjectRecordField, m
 	if result.ValueName == "" {
 		result.ValueName = strings.ToUpper(strings.ReplaceAll(field.Name, "-", "_"))
 	}
+	if !result.Positional {
+		if issue, invalid := invalidNULCLIName("long option", result.Long, field.Span); invalid {
+			return result, []Issue{issue}
+		}
+	}
 	if !result.Positional && strings.Contains(result.Long, "=") {
 		return result, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli long option %q for field %s must not contain '='", result.Long, field.Name), Span: field.Span}}
 	}
@@ -396,10 +404,22 @@ func scalarField(modulePath string, field packageextension.ProjectRecordField, m
 	if result.Short != "" && len([]rune(result.Short)) != 1 {
 		return result, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli short option for %s must contain one character", field.Name), Span: field.Span}}
 	}
+	if result.Short != "" {
+		if issue, invalid := invalidNULCLIName("short option", result.Short, field.Span); invalid {
+			return result, []Issue{issue}
+		}
+	}
 	if result.Short == "-" {
 		return result, []Issue{{Message: fmt.Sprintf("trb/platform/go/cli short option for %s must not be '-'", field.Name), Span: field.Span}}
 	}
 	return result, nil
+}
+
+func invalidNULCLIName(kind, name string, span packageextension.SourceSpan) (Issue, bool) {
+	if !strings.ContainsRune(name, '\x00') {
+		return Issue{}, false
+	}
+	return Issue{Message: fmt.Sprintf("trb/platform/go/cli %s name %q must not contain U+0000", kind, name), Span: span}, true
 }
 
 func validateFields(fields []Field) []Issue {

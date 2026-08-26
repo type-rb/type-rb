@@ -593,11 +593,11 @@ func (g *generator) method(method *ir.Method, fields []*ir.Field) {
 	}
 	g.line("def "+name+"("+g.methodParameters(method)+")", method.TrailingComment)
 	g.indent++
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	if method.Name == "initialize" {
 		g.fieldDefaults(fields)
 	}
-	previousExecution := g.executionActive
-	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.indent--
@@ -642,7 +642,10 @@ func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
 }
 
 func (g *generator) methodParameters(method *ir.Method) string {
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	parameters := g.parameters(method.Parameters)
+	g.executionActive = previousExecution
 	if !g.methodUsesExecutionScope(method) {
 		return parameters
 	}

@@ -13,14 +13,17 @@ import (
 // Plan records the declarations and expressions that transitively reach one
 // of the backend effects selected by Options.
 type Plan struct {
-	Methods          map[*ir.Method]bool
-	RecordDefaults   map[*ir.Record]bool
-	Lambdas          map[*ir.Lambda]bool
-	Calls            map[*ir.Call]bool
-	EnumCalls        map[*ir.EnumCall]bool
-	Expressions      map[ir.Expression]bool
-	Iterations       map[*ir.Iterate]bool
-	StructuredBlocks map[*ir.StructuredBlock]bool
+	Methods               map[*ir.Method]bool
+	ParameterDefaults     map[*ir.Method]bool
+	RecordDefaults        map[*ir.Record]bool
+	Lambdas               map[*ir.Lambda]bool
+	Calls                 map[*ir.Call]bool
+	CallParameterDefaults map[*ir.Call]bool
+	EnumCalls             map[*ir.EnumCall]bool
+	EnumCallDefaults      map[*ir.EnumCall]bool
+	Expressions           map[ir.Expression]bool
+	Iterations            map[*ir.Iterate]bool
+	StructuredBlocks      map[*ir.StructuredBlock]bool
 	// LambdaModules retains the source module that owns each first-class
 	// function. Backend policy can use that identity without moving target-
 	// specific suspension rules into shared TypeRB semantics.
@@ -102,17 +105,20 @@ type Options struct {
 
 func Analyze(programs []*ir.Program, options Options) *Plan {
 	plan := &Plan{
-		Methods:          map[*ir.Method]bool{},
-		RecordDefaults:   map[*ir.Record]bool{},
-		Lambdas:          map[*ir.Lambda]bool{},
-		Calls:            map[*ir.Call]bool{},
-		EnumCalls:        map[*ir.EnumCall]bool{},
-		Expressions:      map[ir.Expression]bool{},
-		Iterations:       map[*ir.Iterate]bool{},
-		StructuredBlocks: map[*ir.StructuredBlock]bool{},
-		LambdaModules:    map[*ir.Lambda]string{},
-		methodKeys:       map[methodKey]bool{},
-		recordKeys:       map[recordKey]bool{},
+		Methods:               map[*ir.Method]bool{},
+		ParameterDefaults:     map[*ir.Method]bool{},
+		RecordDefaults:        map[*ir.Record]bool{},
+		Lambdas:               map[*ir.Lambda]bool{},
+		Calls:                 map[*ir.Call]bool{},
+		CallParameterDefaults: map[*ir.Call]bool{},
+		EnumCalls:             map[*ir.EnumCall]bool{},
+		EnumCallDefaults:      map[*ir.EnumCall]bool{},
+		Expressions:           map[ir.Expression]bool{},
+		Iterations:            map[*ir.Iterate]bool{},
+		StructuredBlocks:      map[*ir.StructuredBlock]bool{},
+		LambdaModules:         map[*ir.Lambda]string{},
+		methodKeys:            map[methodKey]bool{},
+		recordKeys:            map[recordKey]bool{},
 	}
 	analyzer := &analyzer{
 		programs: programs, plan: plan, options: options, methodInfo: map[*ir.Method]methodContext{},
@@ -135,11 +141,16 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 	for changed := true; changed; {
 		changed = false
 		for _, method := range analyzer.methods {
-			if plan.Methods[method.method] || !analyzer.statementsReach(method.method.Body, method, false) {
-				continue
+			defaultsReach := analyzer.parameterDefaultsReach(method, false)
+			if defaultsReach && !plan.ParameterDefaults[method.method] {
+				plan.ParameterDefaults[method.method] = true
+				changed = true
 			}
-			plan.Methods[method.method] = true
-			changed = true
+			bodyReaches := analyzer.statementsReach(method.method.Body, method, false)
+			if !plan.Methods[method.method] && (defaultsReach || bodyReaches) {
+				plan.Methods[method.method] = true
+				changed = true
+			}
 		}
 		for _, record := range analyzer.records {
 			if plan.RecordDefaults[record.record] || !analyzer.recordDefaultsReach(record, false) {
@@ -154,6 +165,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 	}
 
 	for _, method := range analyzer.methods {
+		analyzer.parameterDefaultsReach(method, true)
 		analyzer.statementsReach(method.method.Body, method, true)
 		if plan.Methods[method.method] {
 			plan.methodKeys[methodKey{module: method.module, owner: method.owner, name: method.method.Name}] = true
@@ -291,10 +303,23 @@ func (a *analyzer) recordDefaultsReach(context recordContext, record bool) bool 
 	return reaches
 }
 
+func (a *analyzer) parameterDefaultsReach(context methodContext, record bool) bool {
+	reaches := false
+	for _, parameter := range context.method.Parameters {
+		reaches = a.expressionReaches(parameter.Default, context, record) || reaches
+	}
+	return reaches
+}
+
 func (a *analyzer) statementsReach(statements []ir.Statement, context methodContext, record bool) bool {
 	suspends := false
 	for _, statement := range statements {
 		switch node := statement.(type) {
+		case *ir.Class:
+			classContext := methodContext{module: context.module, owner: node.Name}
+			suspends = a.statementsReach(node.Body, classContext, record) || suspends
+		case *ir.Module:
+			suspends = a.statementsReach(node.Body, context, record) || suspends
 		case *ir.Field:
 			suspends = a.expressionReaches(node.Value, context, record) || suspends
 		case *ir.Variable:
@@ -434,6 +459,10 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		if node.Block != nil {
 			suspends = a.statementsReach(node.Block.Body, context, record) || suspends
 		}
+		parameterDefaultsReach := a.callTargetParameterDefaults(node.Callee, context)
+		if record && parameterDefaultsReach {
+			a.plan.CallParameterDefaults[node] = true
+		}
 		callSuspends := a.intrinsicReaches(referenceIntrinsic(node.Callee)) || a.runtimeReaches(referenceRuntime(node.Callee)) || a.options.WebNext && isWebNextCall(node.Callee) || a.callTargetReaches(node.Callee, context)
 		if record && callSuspends {
 			a.plan.Calls[node] = true
@@ -448,7 +477,11 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		for _, argument := range node.Arguments {
 			suspends = a.expressionReaches(argument.Value, context, record) || suspends
 		}
-		targetSuspends := anyReached(a.plan.Methods, a.memberMethods[memberKey(node.EnumName, node.Method)])
+		targets := a.memberMethods[memberKey(node.EnumName, node.Method)]
+		if record && anyReached(a.plan.ParameterDefaults, targets) {
+			a.plan.EnumCallDefaults[node] = true
+		}
+		targetSuspends := anyReached(a.plan.Methods, targets)
 		if record && targetSuspends {
 			a.plan.EnumCalls[node] = true
 		}
@@ -530,6 +563,27 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 	default:
 		return false
 	}
+}
+
+func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context methodContext) bool {
+	switch node := callee.(type) {
+	case *ir.TypeApply:
+		return a.callTargetParameterDefaults(node.Receiver, context)
+	case *ir.Identifier:
+		if node.Reference != nil && node.Reference.Package != "" {
+			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
+		}
+		if context.owner != "" && anyReached(a.plan.ParameterDefaults, a.memberMethods[memberKey(context.owner, node.Name)]) {
+			return true
+		}
+		return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(context.module, node.Name)])
+	case *ir.Member:
+		if node.Reference != nil && node.Reference.Package != "" && node.Reference.ExportKind == "function" {
+			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
+		}
+		return anyReached(a.plan.ParameterDefaults, a.memberMethods[memberKey(node.Receiver.ExprType().Name, node.Name)])
+	}
+	return false
 }
 
 func recordConstructorKey(callee ir.Expression, currentModule string) (string, bool) {

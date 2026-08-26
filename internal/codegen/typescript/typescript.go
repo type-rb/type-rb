@@ -949,7 +949,7 @@ func (g *generator) enumMethodProperties(enum *ir.Enum) {
 		g.functionDepth++
 		previousExecution := g.executionActive
 		g.executionActive = g.methodUsesExecutionScope(method)
-		g.parameterDefaults(method.Parameters)
+		g.parameterDefaults(method)
 		g.statements(method.Body)
 		g.executionActive = previousExecution
 		g.functionDepth--
@@ -997,7 +997,7 @@ func (g *generator) method(method *ir.Method) {
 	g.functionDepth++
 	previousExecution := g.executionActive
 	g.executionActive = g.methodUsesExecutionScope(method)
-	g.parameterDefaults(method.Parameters)
+	g.parameterDefaults(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
@@ -1033,7 +1033,7 @@ func (g *generator) function(method *ir.Method) {
 	if component && g.executionActive {
 		g.line("let __trbScope: AbortSignal | undefined;")
 	}
-	g.parameterDefaults(method.Parameters)
+	g.parameterDefaults(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
@@ -1046,7 +1046,11 @@ func isReactComponent(method *ir.Method) bool {
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
-	if hasNamedOnlyParameters(parameters) {
+	return g.parameterList(parameters, false)
+}
+
+func (g *generator) parameterList(parameters []ir.Parameter, lowerDefaults bool) string {
+	if hasNamedOnlyParameters(parameters) || lowerDefaults {
 		parts := []string{}
 		optionalPositional := false
 		named := []string{}
@@ -1068,7 +1072,9 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 		if optionalPositional {
 			parts = append(parts, "__trbOptional: unknown[]")
 		}
-		parts = append(parts, "__trbNamed: { "+strings.Join(named, "; ")+" }")
+		if hasNamedOnlyParameters(parameters) {
+			parts = append(parts, "__trbNamed: { "+strings.Join(named, "; ")+" }")
+		}
 		return strings.Join(parts, ", ")
 	}
 	parts := make([]string, len(parameters))
@@ -1095,8 +1101,9 @@ func hasNamedOnlyParameters(parameters []ir.Parameter) bool {
 	return false
 }
 
-func (g *generator) parameterDefaults(parameters []ir.Parameter) {
-	if !hasNamedOnlyParameters(parameters) {
+func (g *generator) parameterDefaults(method *ir.Method) {
+	parameters := method.Parameters
+	if !hasNamedOnlyParameters(parameters) && (g.suspension == nil || !g.suspension.ParameterDefaults[method]) {
 		return
 	}
 	optionalIndex := 0
@@ -1140,7 +1147,10 @@ func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
 }
 
 func (g *generator) methodParameters(method *ir.Method) string {
-	parameters := g.parameters(method.Parameters)
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
+	parameters := g.parameterList(method.Parameters, g.suspension != nil && g.suspension.ParameterDefaults[method])
+	g.executionActive = previousExecution
 	if !g.methodUsesExecutionScope(method) {
 		return parameters
 	}
@@ -1445,7 +1455,7 @@ func (g *generator) expr(expression ir.Expression) string {
 				return g.awaitCall(n, g.recordLiteral(identifier, n.Arguments))
 			}
 		}
-		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
+		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, g.suspension != nil && g.suspension.CallParameterDefaults[n])
 		parts = g.executionArguments(n, parts)
 		args := strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
@@ -1476,7 +1486,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		case "from_raw":
 			return g.rawEnumFromValue(n, parts[0])
 		default:
-			parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
+			parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, g.suspension != nil && g.suspension.EnumCallDefaults[n])
 			owner := g.runtimeName(n.EnumName)
 			parts = append([]string{g.expr(n.Receiver)}, parts...)
 			if g.execution != nil && g.execution.EnumCalls[n] {
@@ -1536,8 +1546,8 @@ func (g *generator) expr(expression ir.Expression) string {
 	}
 }
 
-func (g *generator) sourceCallArguments(arguments []ir.CallArgument, signature []callsignature.Parameter, authored []string) []string {
-	if !callsignature.HasNamedOnly(signature) {
+func (g *generator) sourceCallArguments(arguments []ir.CallArgument, signature []callsignature.Parameter, authored []string, lowerDefaults bool) []string {
+	if !callsignature.HasNamedOnly(signature) && !lowerDefaults {
 		return authored
 	}
 	positional := []string{}
@@ -1569,7 +1579,9 @@ func (g *generator) sourceCallArguments(arguments []ir.CallArgument, signature [
 		}
 		result = append(result, "["+strings.Join(optional, ", ")+"]")
 	}
-	result = append(result, "{ "+strings.Join(named, ", ")+" }")
+	if callsignature.HasNamedOnly(signature) {
+		result = append(result, "{ "+strings.Join(named, ", ")+" }")
+	}
 	return result
 }
 

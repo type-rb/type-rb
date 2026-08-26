@@ -33,8 +33,10 @@ kebab-cased field name by default, so `verbose` becomes `--verbose` and
 name; `short` must contain one character. Defaults belong to the record and are
 also used by ordinary non-CLI construction. Subcommand names cannot begin with
 `-`, long option names cannot contain `=`, and `-` is reserved from use as a
-short option. `trb check` reports these names instead of generating help for an
-option or command that the parser cannot select.
+short option. U+0000 is also reserved in subcommand and option names because
+it cannot appear in an operating-system argument; other Unicode names are
+supported. `trb check` reports reserved names instead of generating help for
+an option or command that the parser cannot select.
 
 A transparent alias of the root record uses the same schema:
 

@@ -36,7 +36,9 @@ Field metadata initially supports `name` (or `long`), `short`, `about`, and
 are static string literals. CLI names default to kebab case. A subcommand name
 cannot begin with `-`, a long option name cannot contain `=`, and `-` cannot be
 used as a short option because those spellings conflict with the parser
-grammar. The schema analyzer rejects these names before generation.
+grammar. U+0000 is rejected in subcommand and option names because an
+operating-system argument cannot contain NUL. Other Unicode names remain
+valid. The schema analyzer rejects reserved names before generation.
 
 The initial value boundary accepts `String`, `Integer`, `Float`, and `Boolean`.
 Record defaults and nullable fields make a CLI field omittable. The parser
