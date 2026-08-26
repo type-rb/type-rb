@@ -13,6 +13,7 @@ func init() {
 func analyzeWeb(context Context) (Contribution, []Issue) {
 	sources := make([]webintegration.Source, 0, len(context.Sources))
 	programs := make([]*ast.Program, 0, len(context.Sources))
+	modulePaths := make([]string, 0, len(context.Sources))
 	filenames := map[string]string{}
 	for _, source := range context.Sources {
 		sources = append(sources, webintegration.Source{
@@ -21,6 +22,7 @@ func analyzeWeb(context Context) (Contribution, []Issue) {
 			Program:    source.Program,
 		})
 		filenames[source.ModulePath] = source.Filename
+		modulePaths = append(modulePaths, source.ModulePath)
 		if !source.CompilerOwned && !source.Official && !source.ExternalPackage {
 			programs = append(programs, source.Program)
 		}
@@ -33,6 +35,7 @@ func analyzeWeb(context Context) (Contribution, []Issue) {
 	if len(issues) == 0 {
 		input, err := packageextensionhost.ExportProjectDeclarationInput(webintegration.PackageName, programs, packageextensionhost.ProjectDeclarationInputOptions{
 			PackageAliasesByModule: context.PackageAliasesByModule,
+			KnownModulePaths:       modulePaths,
 		})
 		if err != nil {
 			issues = append(issues, Issue{Filename: firstWebSourceFilename(context.Sources), Message: err.Error()})

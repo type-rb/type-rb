@@ -183,11 +183,12 @@ func loadWebContractProject(configPath, subcommand string) (*webContractProject,
 	}
 	packageAliases := map[string]map[string]string{}
 	for _, unit := range units {
-		if len(unit.PackageAliases) == 0 {
-			continue
+		unitAliases := options.PackageAliases
+		if unit.PackageAliases != nil {
+			unitAliases = unit.PackageAliases
 		}
-		aliases := make(map[string]string, len(unit.PackageAliases))
-		for name, canonical := range unit.PackageAliases {
+		aliases := make(map[string]string, len(unitAliases))
+		for name, canonical := range unitAliases {
 			aliases[name] = canonical
 		}
 		packageAliases[unit.ModulePath] = aliases
